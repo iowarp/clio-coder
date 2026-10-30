@@ -2,6 +2,7 @@ import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus, type SafeEventBus } from "../../src/core/event-bus.js";
+import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { suggestedSessionCostCeilingUsd } from "../../src/domains/scheduling/budget.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
@@ -10,6 +11,7 @@ import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { budgetAlertNotice } from "../../src/interactive/bus-notices.js";
+import { readModelOf, telemetryCall } from "../harness/telemetry-view.js";
 
 function fixture(
 	entries: ReadonlyArray<SessionEntry> = [],
@@ -18,6 +20,8 @@ function fixture(
 	saveSettings = false,
 	settlement?: { wait: () => Promise<void>; cancel?: () => void },
 	bus?: SafeEventBus,
+	/** The session's journal as the read model folds it, for a test that reads the usage block (#434 §11.3). */
+	telemetry?: () => readonly TelemetryRecord[],
 ) {
 	const requests = new Map<string, (params: unknown) => unknown>();
 	const updates: Array<Record<string, unknown>> = [];
@@ -121,6 +125,9 @@ function fixture(
 		},
 		...(commands ? { commands } : {}),
 		...(bus ? { bus } : {}),
+		...(telemetry
+			? { usage: { quota: async () => [] }, telemetryReadModel: readModelOf(() => current?.id ?? null, telemetry) }
+			: {}),
 		setSessionRouting: (patch) => {
 			routingChanges.push(patch);
 		},
@@ -381,16 +388,33 @@ test("ACP load streams history beyond the former four MiB byte limit", async () 
 });
 
 test("ACP prompt usage writes cost provenance that the delegation adapter reads", async () => {
-	const peer = fixture([], (emit) => {
-		emit({
-			type: "message_end",
-			message: {
-				role: "assistant",
-				content: [{ type: "text", text: "done" }],
-				usage: { input: 3, output: 2, cost: { total: 0.01 }, costProvenance: "estimated" },
-			},
-		});
+	// The turn's one call, priced from the catalog, as the read model folds it.
+	const records = telemetryCall("acp", {
+		turnId: "turn-1",
+		usage: { input: 3, output: 2 },
+		usd: 0.01,
+		pricedBy: "catalog",
 	});
+	const peer = fixture(
+		[],
+		(emit) => {
+			emit({ type: "agent_start", turnId: "turn-1" });
+			emit({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "done" }],
+					usage: { input: 3, output: 2, cost: { total: 0.01 }, costProvenance: "estimated" },
+				},
+			});
+			emit({ type: "agent_end", turnId: "turn-1", messages: [] });
+		},
+		undefined,
+		false,
+		undefined,
+		undefined,
+		() => records,
+	);
 	try {
 		await peer.call("initialize", { protocolVersion: 1 });
 		const opened = (await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] })) as { sessionId: string };

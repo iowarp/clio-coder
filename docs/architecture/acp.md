@@ -293,7 +293,7 @@ Transcript notices from the engine arrive as `agent_message_chunk` frames marked
 | Provider or engine failure | no stop reason; the request fails `turn_failed` |
 | Permission ceiling won | no stop reason; the request fails `permission_expired` |
 
-ACP has no error stop reason, so a failed turn fails the request instead. The response is `{stopReason, _meta: {"clio-coder/usage": {input, output, cacheRead, cacheWrite, reasoning, totalTokens, costUsd, costProvenance}}}`. `costProvenance` is `known`, `known_free`, `estimated`, or `unknown`, and an unknown price is never reported as zero cost.
+ACP has no error stop reason, so a failed turn fails the request instead. The response is `{stopReason, _meta: {"clio-coder/usage": {input, output, cacheRead, cacheWrite, reasoning, totalTokens, costUsd, costProvenance}}}`. `costProvenance` is `known`, `known_free`, `estimated`, or `unknown`, and an unknown price is never reported as zero cost. The usage is the telemetry read model's sum over the operator turns the prompt ran, the worker runs those turns referenced included, each number its known part, as the footer and the transcript receipt read the same turns. `missingTokenCalls` and the cost provenance name what the numbers leave out. The response waits, for at most 2 seconds, until the read model has folded every call the prompt's runs settled. With no read model, only the five token counts the schema requires are sent, as 0, with `costProvenance` `unknown`.
 
 A prompt Clio cannot start fails `prompt_not_admitted` with no preceding update. A cancelled or failed turn first synthesizes a `failed` `tool_call_update` for every call that received a `tool_call` and no terminal update, so a client that draws a spinner per call never keeps one running.
 

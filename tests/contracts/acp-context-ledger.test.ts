@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { rememberMessageCalls } from "../../src/core/message-accounting.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { ContextLedger } from "../../src/domains/session/context-ledger.js";
 import { projectContextLedger } from "../../src/engine/acp/context-ledger.js";
@@ -187,7 +188,9 @@ test("a long turn streams usage_update per model response with the meter rising 
 		),
 		chat: {
 			submit: async () => {
-				const main = () => land({ usage: { input: 100, output: 20, cacheRead: 50 }, usd: 0.25 });
+				// The turn's own calls journal under its operator turn; the side calls are the session's.
+				const main = () => land({ turnId: "turn-1", usage: { input: 100, output: 20, cacheRead: 50 }, usd: 0.25 });
+				onEvent({ type: "agent_start", turnId: "turn-1" });
 				for (const text of ["one", "two", "three"]) {
 					used += 4000;
 					main();
@@ -204,6 +207,7 @@ test("a long turn streams usage_update per model response with the meter rising 
 				onEvent({ type: "message_end", message: response("four") });
 				main();
 				onEvent({ type: "message_end", message: response("five") });
+				onEvent({ type: "agent_end", turnId: "turn-1", messages: [] });
 			},
 			cancel: () => {},
 			onEvent: (handler) => {
@@ -264,6 +268,98 @@ test("a long turn streams usage_update per model response with the meter rising 
 	});
 	assert.deepEqual(frames[0]?.cost, { amount: 1.25, currency: "USD" });
 	assert.equal(last?.cost, undefined);
+	close();
+	await served;
+});
+
+test("the prompt response waits for the read model to fold the turn's last call, and the last frame matches it", async () => {
+	const handlers = new Map<string, (params: unknown) => unknown>();
+	const updates: Array<Record<string, unknown>> = [];
+	let close: () => void = () => {};
+	let onEvent: (event: unknown) => void = () => {};
+	let folded: () => void = () => {};
+	const records: TelemetryRecord[] = [];
+	let bound: string | null = null;
+	const transport: AcpJsonRpcPeerTransport = {
+		closed: false,
+		request: async () => ({}) as never,
+		notify: (method, params) => {
+			if (method === "session/update") updates.push((params as { update: Record<string, unknown> }).update);
+		},
+		onNotification: () => () => {},
+		onRequest: (method, handler) => {
+			handlers.set(method, handler);
+			return () => handlers.delete(method);
+		},
+		onClose: (handler) => {
+			close = handler;
+			return () => {};
+		},
+		close: () => close(),
+	};
+	const served = serveClioAcpAgent({
+		transport,
+		cwd: process.cwd(),
+		autonomy: () => "default",
+		contextLedger: () => LEDGER,
+		usage: {
+			quota: async () => [],
+			subscribe: (listener) => {
+				folded = listener;
+				return () => {};
+			},
+		},
+		telemetryReadModel: readModelOf(
+			() => bound,
+			() => records,
+		),
+		chat: {
+			submit: async () => {
+				const call = telemetryCall("late", { turnId: "turn-1", usage: { input: 100, output: 20 }, usd: 0.25 });
+				const settled = call.find((record) => record.k === "call.settled");
+				assert.ok(settled?.k === "call.settled");
+				const message = {
+					role: "assistant",
+					content: [{ type: "text", text: "done" }],
+					stopReason: "stop",
+					usage: { input: 100, output: 20, totalTokens: 120, cost: { total: 0.25 }, costProvenance: "known" },
+				};
+				rememberMessageCalls(message, [settled.data]);
+				onEvent({ type: "agent_start", turnId: "turn-1" });
+				onEvent({ type: "message_end", message });
+				onEvent({ type: "agent_end", turnId: "turn-1", messages: [message] });
+				// The writer's batch holding the call is durable only after the run ended.
+				setTimeout(() => {
+					records.push(...call);
+					folded();
+				}, 20);
+			},
+			cancel: () => {},
+			onEvent: (handler) => {
+				onEvent = handler;
+				return () => {
+					onEvent = () => {};
+				};
+			},
+			isStreaming: () => false,
+			getSessionId: () => null,
+		},
+	});
+	const call = async (method: string, params: unknown) => await handlers.get(method)?.(params);
+	await call("initialize", { protocolVersion: 1 });
+	const { sessionId } = (await call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+	bound = sessionId;
+	const result = (await call("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] })) as {
+		_meta: Record<string, Record<string, unknown>>;
+	};
+	const { session: _replySession, ...replyTurn } = result._meta["clio-coder/usage"] ?? {};
+	assert.equal(replyTurn.output, 20);
+	assert.equal(replyTurn.costDisplay, "$0.25");
+	const last = updates.filter((update) => update.sessionUpdate === "usage_update").at(-1) as
+		| { _meta: Record<string, Record<string, unknown>> }
+		| undefined;
+	const { session: _session, ...turn } = last?._meta["clio-coder/usage"] ?? {};
+	assert.deepEqual(turn, replyTurn);
 	close();
 	await served;
 });

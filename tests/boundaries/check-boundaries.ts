@@ -373,11 +373,6 @@ const SURFACE_TOTAL_ROOTS = ["src/interactive/", "src/engine/acp/", "src/cli/"];
 const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonly string[]; reason: string }> = [
 	{
 		file: "src/engine/acp/server.ts",
-		functions: ["mergeUsage", "mergeMessageUsage"],
-		reason: "the v1 usage on an ACP prompt response folds that prompt's own messages; it retires with CostTracker (P5)",
-	},
-	{
-		file: "src/engine/acp/server.ts",
 		functions: ["handleChatEvent"],
 		reason: "an ACP prompt's output tokens over its generation time make its tok/s rate, a division over measured facts",
 	},

@@ -1413,21 +1413,6 @@ export type AcpFleetPreview =
 	  }
 	| { status: "refused"; name: string; diagnostics: string[] };
 
-export interface AcpTurnUsage {
-	costSummary?: AcpCostAggregate;
-	apiCalls?: number;
-	missingTokenCalls?: number;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoning: number;
-	totalTokens: number;
-	costUsd: number;
-	costProvenance: CostProvenance;
-	costProvenanceObserved: boolean;
-}
-
 export interface AcpWorkspaceView {
 	version: 1;
 	cwd: string;

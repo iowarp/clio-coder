@@ -36,6 +36,7 @@ import {
 	runTelemetry,
 	sessionTelemetry,
 	timeline,
+	turnsSum,
 	whyStopped,
 } from "./read-model.js";
 
@@ -100,6 +101,7 @@ export function telemetryView(
 		whyStopped: () => whyStopped(source),
 		explain: (ref) => explain(ref, { session: source }),
 		quantity: (ref) => quantityOf(ref, source),
+		turns: (turnIds, metric) => turnsSum(source, turnIds, metric),
 	};
 }
 

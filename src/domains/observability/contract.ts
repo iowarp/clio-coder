@@ -6,6 +6,7 @@ import type {
 	CallsReportV1,
 	CostReportV1,
 	ExplanationV1,
+	FactMetric,
 	FactRef,
 	HealthV1,
 	Quantity,
@@ -28,6 +29,7 @@ import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { CostAggregate, CostEntry, CostEntryLabel, UsageBreakdown } from "./cost.js";
+import type { TurnsSum } from "./read-model.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "./session-journals.js";
 import type { SessionTurnTrace } from "./trace-store.js";
 import type { WorkerProgressSnapshot } from "./worker-progress.js";
@@ -179,6 +181,8 @@ export interface TelemetryView {
 	explain(ref: FactRef): ExplanationV1 | null;
 	/** Any one number by reference, e.g. a turn's input tokens, without building a whole report for it. */
 	quantity(ref: FactRef): Quantity | null;
+	/** Several operator turns read as one number, such as the turns one ACP prompt ran (#434 §11.3). */
+	turns(turnIds: readonly string[], metric: FactMetric): TurnsSum;
 }
 
 /**

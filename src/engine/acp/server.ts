@@ -6,14 +6,11 @@ import {
 	readContextOperation,
 } from "../../core/context-operation.js";
 import type { JobRecord } from "../../core/job-types.js";
-import { messageCallsForAccounting, messageUsageForAccounting } from "../../core/message-accounting.js";
-import { normalizeTokenUsage } from "../../core/token-split.js";
+import { messageCallsForAccounting } from "../../core/message-accounting.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { TelemetryReadModel, TelemetryView } from "../../domains/observability/contract.js";
-import type { CostAggregate } from "../../domains/observability/cost.js";
-import { accumulateCostAmount, emptyCostAggregate, renderCostAmount } from "../../domains/observability/cost.js";
+import { renderCostAmount } from "../../domains/observability/cost.js";
 import { runTokenCount } from "../../domains/observability/read-model.js";
-import { usageCallsFromAttempts } from "../../domains/session/journal-usage.js";
 import {
 	ACP_DISPATCH_STEER_METHOD,
 	ACP_EGGS_META_KEY,
@@ -86,7 +83,6 @@ import type { ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import { modelIdsForStatus } from "../../domains/providers/model-discovery.js";
 import { resolveRuntimeTarget } from "../../domains/providers/runtime-resolution.js";
-import { type CostProvenance, resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, isAutonomyLevel } from "../../domains/safety/autonomy.js";
 import { describeMainCallConsequences } from "../../domains/safety/call-consequence.js";
 import { describeCallTarget, sanitizeCallTargetText } from "../../domains/safety/call-target.js";
@@ -182,7 +178,13 @@ import {
 	projectFleetPreview,
 } from "./fleet-run.js";
 import type { AcpLiveTelemetry } from "./live-telemetry.js";
-import { ACP_WORKSPACE_META_KEY, createAcpLiveTelemetry, sessionUsageTotals, turnUsageMeta } from "./live-telemetry.js";
+import {
+	ACP_WORKSPACE_META_KEY,
+	type AcpPromptTurn,
+	createAcpLiveTelemetry,
+	sessionUsageTotals,
+	turnUsageMeta,
+} from "./live-telemetry.js";
 import {
 	ACP_SESSION_FORK_METHOD,
 	ACP_SESSION_SWITCH_TURN_METHOD,
@@ -671,8 +673,10 @@ interface ActivePrompt {
 	/** True once the engine reported a turn end (`message_end` or `agent_end`). */
 	sawTurnEnd: boolean;
 	stopReason: string;
-	usage: AcpServerUsage;
-	usageMessages: WeakSet<object>;
+	/** The operator turns and call attempts the usage block reads from the telemetry read model. */
+	turn: AcpPromptTurn;
+	/** The usage block the turn's last meter frame carried, which the prompt response repeats. */
+	settledUsage?: ReturnType<typeof turnUsageMeta> | null;
 	model?: string;
 	generationMs?: number;
 	timedOutputTokens?: number;
@@ -763,21 +767,6 @@ interface AcpAgentAttribution {
 	agentId: string;
 	runId?: string;
 	node?: string;
-}
-
-interface AcpServerUsage {
-	costSummary?: CostAggregate;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoning: number;
-	totalTokens: number;
-	costUsd: number;
-	costProvenance: CostProvenance;
-	costProvenanceObserved: boolean;
-	apiCalls?: number;
-	missingTokenCalls?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1381,20 +1370,6 @@ function utf8Bytes(value: string): number {
 	return Buffer.byteLength(value, "utf8");
 }
 
-export function emptyUsage(): AcpServerUsage {
-	return {
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		reasoning: 0,
-		totalTokens: 0,
-		costUsd: 0,
-		costProvenance: "unknown",
-		costProvenanceObserved: false,
-	};
-}
-
 function createActivePromptState(toolProgress?: { enabled: boolean; now: () => number }): ActivePrompt {
 	return {
 		cancelled: false,
@@ -1406,8 +1381,7 @@ function createActivePromptState(toolProgress?: { enabled: boolean; now: () => n
 		updatesSent: 0,
 		sawTurnEnd: false,
 		stopReason: "end_turn",
-		usage: emptyUsage(),
-		usageMessages: new WeakSet<object>(),
+		turn: { turnIds: new Set<string>(), attemptIds: new Set<string>() },
 		toolCallWireIds: new Map<string, string[]>(),
 		usedWireIds: new Set<string>(),
 		openToolCalls: new Set<string>(),
@@ -1425,85 +1399,9 @@ function createActivePromptState(toolProgress?: { enabled: boolean; now: () => n
 	};
 }
 
-function finite(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
-}
-
-/** Only field `sumRunUsage` (chat-loop-messages.ts) reads for a dollar figure; matched here so ACP never re-derives cost through a separate path. */
-function costTotal(usage: Record<string, unknown>): number {
-	const cost = usage.cost;
-	return isRecord(cost) ? finite(cost.total) : 0;
-}
-
-export function mergeUsage(into: AcpServerUsage, usage: unknown): void {
-	if (!isRecord(usage) || usage.callInvoked === false) return;
-	const { input, output, cacheRead, cacheWrite, reasoning, totalTokens, observed } = normalizeTokenUsage(usage);
-	into.input += input;
-	into.output += output;
-	into.cacheRead += cacheRead;
-	into.cacheWrite += cacheWrite;
-	into.reasoning += reasoning;
-	into.totalTokens += totalTokens;
-	into.apiCalls = (into.apiCalls ?? 0) + 1;
-	if (!observed) into.missingTokenCalls = (into.missingTokenCalls ?? 0) + 1;
-	if (usage.estimated !== true) into.costUsd += costTotal(usage);
-	const provenance = usage.estimated !== true ? resolveCostProvenance(usage.costProvenance, "unknown") : "unknown";
-	into.costSummary = accumulateCostAmount(into.costSummary ?? emptyCostAggregate(), {
-		usd: usage.estimated === true ? 0 : costTotal(usage),
-		provenance,
-		missingTokenCalls: observed ? 0 : 1,
-	});
-	if (!into.costProvenanceObserved) into.costProvenance = provenance;
-	else if (into.costProvenance === "unknown" || provenance === "unknown") into.costProvenance = "unknown";
-	else if (into.costProvenance === "estimated" || provenance === "estimated") into.costProvenance = "estimated";
-	else if (into.costProvenance === "known" || provenance === "known") into.costProvenance = "known";
-	else into.costProvenance = "known_free";
-	into.costProvenanceObserved = true;
-}
-
-function mergeMessageUsage(into: AcpServerUsage, message: unknown, seen?: WeakSet<object>): void {
-	if (!isRecord(message)) return;
-	if (seen) {
-		if (seen.has(message)) return;
-		seen.add(message);
-	}
-	const facts = messageCallsForAccounting(message);
-	if (facts !== undefined) {
-		for (const call of usageCallsFromAttempts(facts.map((settled) => ({ started: settled, settled })))) {
-			into.input += call.input;
-			into.output += call.output;
-			into.cacheRead += call.cacheRead;
-			into.cacheWrite += call.cacheWrite;
-			into.reasoning += call.reasoningTokens;
-			into.totalTokens += call.totalTokens;
-			into.apiCalls = (into.apiCalls ?? 0) + (call.apiCalls ?? 0);
-			into.missingTokenCalls = (into.missingTokenCalls ?? 0) + (call.missingTokenCalls ?? 0);
-			into.costSummary = accumulateCostAmount(into.costSummary ?? emptyCostAggregate(), {
-				usd: call.costUsd,
-				provenance: call.costProvenance ?? "unknown",
-				...(call.costSummary ? { costSummary: call.costSummary } : {}),
-			});
-		}
-		const cost = into.costSummary;
-		if (cost && cost.calls > 0) {
-			into.costUsd = cost.knownUsd;
-			into.costProvenance = cost.hasUnknown
-				? "unknown"
-				: cost.hasEstimated
-					? "estimated"
-					: cost.allKnownFree
-						? "known_free"
-						: "known";
-			into.costProvenanceObserved = true;
-		}
-		return;
-	}
-	mergeUsage(into, messageUsageForAccounting(message));
-}
-
-function mergeMessagesUsage(into: AcpServerUsage, messages: unknown, seen?: WeakSet<object>): void {
-	if (!Array.isArray(messages)) return;
-	for (const message of messages) mergeMessageUsage(into, message, seen);
+/** Notes the call attempts a message settled, which the turn's usage block waits for the read model to fold. */
+function noteSettledCalls(turn: AcpPromptTurn, message: unknown): void {
+	for (const call of messageCallsForAccounting(message) ?? []) turn.attemptIds.add(call.attemptId);
 }
 
 function assistantText(message: unknown): string {
@@ -1997,7 +1895,7 @@ function handleChatEvent(
 			}
 		}
 		active.sawTurnEnd = true;
-		mergeMessageUsage(active.usage, message, active.usageMessages);
+		noteSettledCalls(active.turn, message);
 		applyStopReason(active, message);
 		const thinking = assistantThinking(message);
 		if (thinking.length > active.sentThinkingChars) {
@@ -2013,10 +1911,15 @@ function handleChatEvent(
 		}
 		return;
 	}
+	if (event.type === "agent_start" || event.type === "agent_end") {
+		// A run names the operator turn its calls journal under at both ends; a steer may move it in between (#434 §11.3).
+		const turnId = eventString(event, "turnId");
+		if (turnId) active.turn.turnIds.add(turnId);
+	}
 	if (event.type === "agent_end") {
 		active.sawTurnEnd = true;
-		mergeMessagesUsage(active.usage, event.messages, active.usageMessages);
 		const messages = Array.isArray(event.messages) ? event.messages : [];
+		for (const message of messages) noteSettledCalls(active.turn, message);
 		const last = [...messages].reverse().find((message) => isRecord(message) && message.role === "assistant");
 		if (last !== undefined) applyStopReason(active, last);
 		return;
@@ -7002,7 +6905,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		});
 		promptSettled = settled;
 		options.onActiveSessionAutonomyChange?.(session.autonomy);
-		telemetry.turnStarted(active.usage);
+		telemetry.turnStarted(active.turn);
 		const detach = attachTurnObserver(session.id, active);
 		let released = false;
 		return {
@@ -7111,7 +7014,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				: undefined;
 		const respond = (stopReason: string): AcpPromptResponse =>
 			promptResponse(stopReason, active, options.usage === undefined ? null : liveSessionView(), ceilingEcho);
-		telemetry.turnStarted(active.usage);
+		telemetry.turnStarted(active.turn);
 		const unsubscribe = attachTurnObserver(session.id, active);
 		try {
 			const trimmed = text.trim();
@@ -7209,8 +7112,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			if (promptCeiling !== undefined) applyCeilings([session.ceiling], "prompt");
 			active.acceptsContinuation = false;
 			unsubscribe();
-			// The last meter and plan frames precede the response they total.
-			await telemetry.turnSettled();
+			// The last meter and plan frames precede the response they total, and the response repeats their usage.
+			active.settledUsage = await telemetry.turnSettled();
 			if (session.activePrompt === active) session.activePrompt = null;
 			if (activePromptState === active) activePromptState = null;
 			if (activeSessionId === session.id) {
@@ -7332,7 +7235,7 @@ function promptResponse(
 		_meta: {
 			...ceiling,
 			[ACP_USAGE_META_KEY]: {
-				...turnUsageMeta(active.usage),
+				...(active.settledUsage ?? turnUsageMeta(session, active.turn)),
 				...(session ? { session: sessionUsageTotals(session) } : {}),
 			},
 			[ACP_TURN_META_KEY]: {

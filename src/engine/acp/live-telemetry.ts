@@ -1,7 +1,7 @@
-import { aggregateCostAmounts, costWasMeasured, renderCostAggregate } from "../../domains/observability/cost.js";
-import type { AcpTurnUsage, AcpWorkspaceView } from "./types.js";
+import { costWasMeasured } from "../../domains/observability/cost.js";
+import type { AcpWorkspaceView } from "./types.js";
 
-export type { AcpTurnUsage, AcpWorkspaceView } from "./types.js";
+export type { AcpWorkspaceView } from "./types.js";
 
 import { ACP_PLAN_META_KEY, ACP_WORKSPACE_META_KEY } from "./types.js";
 
@@ -25,6 +25,7 @@ export { ACP_PLAN_META_KEY, ACP_WORKSPACE_META_KEY } from "./types.js";
 
 import type { FactMetric } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
+import type { FactSum } from "../../core/telemetry/fact.js";
 import type { TelemetryView } from "../../domains/observability/contract.js";
 import type { CostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
@@ -39,34 +40,55 @@ const MAX_PLAN_ENTRIES = 100;
 const MAX_TEXT_BYTES = 1024;
 /** A wedged git must not hold a prompt response; the frame still lands when the probe does. */
 const WORKSPACE_SETTLE_BOUND_MS = 2000;
+/** A wedged journal writer must not hold one either; the response then reads what the read model folded. */
+const FOLD_SETTLE_BOUND_MS = 2000;
 
-/** The per-turn accumulator the server keeps, structurally. */
+/** The operator turns one prompt ran and the call attempts its runs settled; the server fills it from their events. */
+export interface AcpPromptTurn {
+	turnIds: Set<string>;
+	attemptIds: Set<string>;
+}
 
-/** `_meta["clio-coder/usage"]` on the prompt response and on in-turn `usage_update` frames: one shape, so the last frame equals the response. */
-export function turnUsageMeta(usage: AcpTurnUsage) {
+type TurnUsage = ReturnType<typeof turnUsageMeta>;
+
+const known = (sum: FactSum) => sum.measured + sum.estimated;
+
+/**
+ * `_meta["clio-coder/usage"]` on the prompt response and on in-turn `usage_update` frames: one shape, so the last frame
+ * equals the response. Every number is the known part of the read model's sum over the prompt's operator turns, their
+ * workers included, as the footer and the transcript receipt read them (#434 §11.3). v1 forces the five token
+ * counts; with no view of the session nothing else is claimed.
+ */
+export function turnUsageMeta(view: TelemetryView | null, turn: AcpPromptTurn) {
+	if (view === null)
+		return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, costProvenance: "unknown" };
+	const turnIds = [...turn.turnIds];
+	const sum = (metric: FactMetric) => view.turns(turnIds, metric);
+	const usd = sum("usd");
+	const calls = sum("calls").fact;
+	const cost: AcpCostAggregate = {
+		knownUsd: known(usd.fact),
+		hasEstimated: usd.fact.coverage.estimated > 0,
+		hasUnknown: usd.fact.unknownCount > 0,
+		allKnownFree: usd.free && usd.fact.unknownCount === 0 && usd.fact.coverage.estimated === 0,
+		calls: known(calls),
+		...(calls.unknownCount > 0 ? { unknownCallCoverageRuns: calls.unknownCount } : {}),
+	};
+	const apiCalls = known(sum("apiCalls").fact);
+	const missingTokenCalls = known(sum("missingTokenCalls").fact);
 	return {
-		input: usage.input,
-		output: usage.output,
-		cacheRead: usage.cacheRead,
-		cacheWrite: usage.cacheWrite,
-		reasoning: usage.reasoning,
-		totalTokens: usage.totalTokens,
-		costUsd: usage.costUsd,
-		costDisplay: renderCostAggregate(
-			aggregateCostAmounts([
-				{
-					usd: usage.costUsd,
-					provenance: usage.costProvenance,
-					...(usage.costSummary ? { costSummary: usage.costSummary } : {}),
-					...(usage.apiCalls !== undefined ? { apiCalls: usage.apiCalls } : {}),
-					...(usage.missingTokenCalls !== undefined ? { missingTokenCalls: usage.missingTokenCalls } : {}),
-				},
-			]),
-		),
-		costProvenance: usage.costProvenance,
-		...(usage.costSummary ? { costSummary: usage.costSummary } : {}),
-		...(usage.apiCalls !== undefined ? { apiCalls: usage.apiCalls } : {}),
-		...(usage.missingTokenCalls ? { missingTokenCalls: usage.missingTokenCalls } : {}),
+		input: known(sum("input").fact),
+		output: known(sum("output").fact),
+		cacheRead: known(sum("cacheRead").fact),
+		cacheWrite: known(sum("cacheWrite").fact),
+		reasoning: known(sum("reasoning").fact),
+		totalTokens: known(sum("total").fact),
+		costUsd: cost.knownUsd,
+		costDisplay: usd.display,
+		costProvenance: provenanceOf(cost),
+		costSummary: cost,
+		...(apiCalls > 0 ? { apiCalls } : {}),
+		...(missingTokenCalls > 0 ? { missingTokenCalls } : {}),
 	};
 }
 
@@ -230,13 +252,17 @@ export interface AcpLiveTelemetryDeps {
 export interface AcpLiveTelemetry {
 	/** A session became the bound one; `replay` re-sends the current meter and plan as a loaded session's state. */
 	bind(replay: boolean): void;
-	turnStarted(usage: AcpTurnUsage): void;
+	turnStarted(turn: AcpPromptTurn): void;
 	/** A model response landed; one `usage_update` follows once the burst settles. */
 	modelResponded(): void;
 	/** A tool call settled; `mayWrite` re-probes the workspace. */
 	toolSettled(mayWrite: boolean): void;
-	/** Flushes the meter and plan before the prompt response and waits (bounded) for a workspace probe in flight. */
-	turnSettled(): Promise<void>;
+	/**
+	 * Waits (bounded) until the read model has folded every call the turn's runs settled, flushes the meter and plan,
+	 * and waits (bounded) for a workspace probe in flight. Returns the turn's usage block as the last frame carried it,
+	 * for the prompt response to repeat; null when no turn was open.
+	 */
+	turnSettled(): Promise<TurnUsage | null>;
 	/** The latest workspace view, probing once if none landed yet; null when unwired or the probe failed. */
 	workspace(): Promise<AcpWorkspaceView | null>;
 	dispose(): void;
@@ -246,7 +272,10 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 	let usageSignature: string | null = null;
 	let accountingSignature: string | null = null;
 	let planSignature: string | null = EMPTY_PLAN_SIGNATURE;
-	let turn: { usage: AcpTurnUsage } | null = null;
+	let turn: AcpPromptTurn | null = null;
+	/** The turn block the newest meter frame computed. */
+	let framedTurn: TurnUsage | null = null;
+	const foldWaiters = new Set<{ check(): void; release(): void }>();
 	let pendingUsage: ReturnType<typeof setImmediate> | null = null;
 	let workspaceView: AcpWorkspaceView | null = null;
 	let workspaceSignature: string | null = null;
@@ -271,6 +300,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		const context = projectContextLedger(ledger);
 		const view = deps.sessionTelemetry?.() ?? null;
 		const session = view === null ? null : sessionUsageTotals(view);
+		framedTurn = turn === null ? null : turnUsageMeta(view, turn);
 		accountingSignature = JSON.stringify(session);
 		// ACP `cost` is a plain amount, so an unknown price stays absent rather than reading as zero.
 		const knownCost = session !== null && session.calls > 0;
@@ -284,7 +314,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 			_meta: {
 				[ACP_CONTEXT_META_KEY]: context,
 				[ACP_USAGE_META_KEY]: {
-					...(turn !== null ? turnUsageMeta(turn.usage) : {}),
+					...framedTurn,
 					session:
 						session === null
 							? null
@@ -337,6 +367,34 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		if (emit) send(frame);
 	};
 
+	/** Whether the read model holds every call attempt the turn's runs settled. */
+	const folded = (settling: AcpPromptTurn): boolean => {
+		if (settling.attemptIds.size === 0) return true;
+		const view = deps.sessionTelemetry?.() ?? null;
+		if (view === null) return false;
+		for (const attemptId of settling.attemptIds)
+			if (view.quantity(factRef({ scope: "own", owner: view.sessionId, attemptId, metric: "calls" })) === null)
+				return false;
+		return true;
+	};
+
+	// A model response lands before the writer's batch holding its call is durable, and the response must total it.
+	const awaitFold = async (settling: AcpPromptTurn): Promise<void> => {
+		if (!deps.sessionTelemetry || !deps.subscribeUsage || folded(settling)) return;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let waiter: { check(): void; release(): void } | undefined;
+		await new Promise<void>((resolve) => {
+			waiter = { check: () => (folded(settling) ? resolve() : undefined), release: resolve };
+			foldWaiters.add(waiter);
+			timer = setTimeout(resolve, FOLD_SETTLE_BOUND_MS);
+			timer.unref?.();
+		});
+		if (waiter) foldWaiters.delete(waiter);
+		if (timer !== undefined) clearTimeout(timer);
+		if (!disposed && !folded(settling))
+			deps.diagnostics?.("prompt response sent before the telemetry read model folded all of its calls");
+	};
+
 	const probeOnce = async (): Promise<void> => {
 		const probe = deps.workspace;
 		if (probe === undefined) return;
@@ -377,6 +435,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 
 	// A model response can land before the writer's batch holding its call is folded, so a folded batch flushes again.
 	const unsubscribeUsage = deps.subscribeUsage?.(() => {
+		for (const waiter of [...foldWaiters]) waiter.check();
 		if (disposed || !deps.sessionTelemetry || deps.sessionId() === null || pendingUsage !== null) return;
 		const view = deps.sessionTelemetry();
 		if (view === null || JSON.stringify(sessionUsageTotals(view)) === accountingSignature) return;
@@ -395,8 +454,8 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 			planSignature = replay ? null : EMPTY_PLAN_SIGNATURE;
 			flushPlan(replay);
 		},
-		turnStarted(usage) {
-			turn = { usage };
+		turnStarted(started) {
+			turn = started;
 		},
 		modelResponded() {
 			if (pendingUsage !== null || deps.contextLedger === undefined) return;
@@ -413,12 +472,15 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 			if (mayWrite) void refreshWorkspace();
 		},
 		async turnSettled() {
+			const settling = turn;
+			if (settling !== null) await awaitFold(settling);
+			framedTurn = null;
 			flushUsage(true);
 			flushPlan(true);
-			// The observability ledger has recorded this run by now; the next read is the new baseline.
+			const usage = settling === null ? null : (framedTurn ?? turnUsageMeta(deps.sessionTelemetry?.() ?? null, settling));
 			turn = null;
 			const inFlight = probing;
-			if (inFlight === null) return;
+			if (inFlight === null) return usage;
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			await Promise.race([
 				inFlight,
@@ -428,6 +490,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 				}),
 			]);
 			if (timer !== undefined) clearTimeout(timer);
+			return usage;
 		},
 		async workspace() {
 			if (deps.workspace === undefined) return null;
@@ -436,6 +499,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		},
 		dispose() {
 			disposed = true;
+			for (const waiter of foldWaiters) waiter.release();
 			unsubscribeUsage?.();
 			if (pendingUsage !== null) clearImmediate(pendingUsage);
 			pendingUsage = null;

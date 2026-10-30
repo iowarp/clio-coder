@@ -1278,18 +1278,47 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 			selection,
 		};
 	}
-	const sums = selection.parts.map((part) =>
-		withGap(
-			part.run
-				? runSum(part.run, ref.metric)
-				: part.selection
-					? selectionSum(part.selection, ref.metric)
-					: attemptsSum(part.attempts ?? [], ref.metric),
-			part.gap,
-		),
-	);
+	const sums = selection.parts.map((part) => partSum(part, ref.metric));
 	const fact = sums.length === 1 && sums[0] ? sums[0] : sumFactSums(sums);
 	return { quantity: { fact, display: display(ref.metric, fact, allFree(selection.parts)), ref: encoded }, selection };
+}
+
+function partSum(part: Part, metric: FactMetric): FactSum {
+	return withGap(
+		part.run
+			? runSum(part.run, metric)
+			: part.selection
+				? selectionSum(part.selection, metric)
+				: attemptsSum(part.attempts ?? [], metric),
+		part.gap,
+	);
+}
+
+/** Several turns read as one; see {@link turnsSum}. */
+export interface TurnsSum {
+	fact: FactSum;
+	display: string;
+	/** Every priced call among the turns was free, which the cost display's free claim rests on. */
+	free: boolean;
+}
+
+/**
+ * Several of a session's operator turns read as one, such as the turns one ACP prompt ran: each turn's own attempts
+ * and the runs it referenced, the session's read gap counted once. One turn sums exactly as its `@turn=` quantity
+ * does. No ref names a set of turns, so the sum carries its fact and display without one (#434 §11.3).
+ */
+export function turnsSum(source: SessionSource, turnIds: readonly string[], metric: FactMetric): TurnsSum {
+	const analysis = analyze(source);
+	const keys = new Set(turnIds);
+	const parts: Part[] = [];
+	for (const key of keys) {
+		const selection = selectionOf(analysis, { by: "turn", key });
+		parts.push({ attempts: selection.members, selection, gap: 0 });
+	}
+	for (const run of analysis.runs.values()) if (keys.has(run.turnId ?? "-")) parts.push({ run, gap: runGap(run) });
+	const fact = withGap(sumFactSums(parts.map((part) => partSum(part, metric))), keys.size > 0 ? analysis.gap : 0);
+	const free = allFree(parts);
+	return { fact, display: display(metric, fact, free), free };
 }
 
 function quantity(view: View, ref: ParsedFactRef): Quantity {
