@@ -10,6 +10,7 @@ export interface RunTelemetryJournal {
 	context: WorkerTelemetryContext;
 	closed: boolean;
 	worker(frame: unknown): boolean;
+	gap(reason: "invalid-record" | "writer-drop", count?: number): void;
 	feed(body: RunEventJournalBody, capBytes: number): void;
 	flush(): Promise<void>;
 	close(): Promise<void>;
@@ -88,6 +89,16 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 		worker(frame) {
 			const record = readWorkerTelemetryFrame(frame, context);
 			return !journal.closed && record !== null && writer.enqueue(record);
+		},
+		gap(reason, count = 1) {
+			if (journal.closed) return;
+			writer.enqueue({
+				kind: "gap",
+				data: { sink: "worker-ndjson", reason, count },
+				ctx: context,
+				wallMs: Date.now(),
+				mono: performance.now(),
+			});
 		},
 		feed(body, capBytes) {
 			if (journal.closed || feedClosed) return;

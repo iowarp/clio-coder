@@ -6,14 +6,20 @@ import { afterEach, beforeEach, it } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
+import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { createRecordingJournal, parseRecordingCast, readRunRecording } from "../../src/domains/dispatch/recording.js";
 import { readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
+import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { buildEvidence } from "../../src/domains/evidence/build.js";
 import { exportEvidenceRecordings } from "../../src/domains/evidence/recordings.js";
 import { inspectEvidence } from "../../src/domains/evidence/store.js";
+import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
+import { readCallJournal } from "../../src/domains/observability/call-journal.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
@@ -195,12 +201,39 @@ it("dispatch preserves the explicit capture option with journal history disabled
 		mkdirSync(bin, { recursive: true });
 		writeFileSync(join(bin, "ssh"), "#!/bin/sh\nprintf 'shared=yes\\n'\n", { mode: 0o755 });
 		if (placed) process.env.PATH = `${bin}:${originalPath ?? ""}`;
-		const spawnWorker = () => ({
+		const spawnWorker = (spec: WorkerSpec) => ({
 			pid: null,
 			heartbeatAt: { current: Date.now(), monotonic: performance.now() },
 			abort() {},
 			promise: Promise.resolve({ exitCode: 0, signal: null, droppedDisplayFrames: placed ? 3 : 0 }),
 			events: (async function* () {
+				ok(spec.telemetryContext);
+				const call: CallStarted = {
+					callId: newCallId(),
+					attemptId: newAttemptId(),
+					attempt: 0,
+					label: "worker",
+					roundKind: "normal",
+					toolChoice: "auto",
+					target: {
+						targetId: "fixture",
+						runtimeId: "fixture",
+						api: "fixture",
+						requestedModel: "fixture",
+						reportedModel: { kind: "unknown", reason: "not-observed" },
+					},
+				};
+				const owner = { ...spec.telemetryContext, callId: call.callId, attemptId: call.attemptId };
+				const origin = {
+					host: placed ? "remote-worker" : "local-worker",
+					pid: 42,
+					birthToken: "fixture",
+					monoEpochWallMs: 0,
+				};
+				yield {
+					type: "clio_coder_telemetry",
+					record: { ...makeTelemetryRecord("call.started", call, owner, { t: new Date().toISOString(), mono: 0 }), origin },
+				};
 				yield { type: "text_delta", delta: "warning: preliminary\ncorrection: inspected original\n" };
 				yield {
 					type: "message_end",
@@ -211,6 +244,22 @@ it("dispatch preserves the explicit capture option with journal history disabled
 					},
 				};
 				yield { type: "agent_end" };
+				yield {
+					type: "clio_coder_telemetry",
+					record: {
+						...makeTelemetryRecord(
+							"call.settled",
+							{
+								...call,
+								stages: { settle: 1 },
+								...callSettlementFromMessage({ stopReason: "stop", usage: { input: 5, output: 1 } }, "unknown"),
+							},
+							owner,
+							{ t: new Date().toISOString(), mono: 1 },
+						),
+						origin,
+					},
+				};
 			})(),
 		});
 		const bundle = makeDispatchBundle(context, {
@@ -230,6 +279,19 @@ it("dispatch preserves the explicit capture option with journal history disabled
 				resultContractOverride: { kind: "provenance-report" },
 			});
 			const receipt = await handle.finalPromise;
+			const journal = await readCallJournal(join(clioStateDir(), "runs", handle.runId), "events.ndjson");
+			equal(journal.damaged, 0);
+			deepStrictEqual(
+				journal.records.map(({ record }) => record.k),
+				["call.started", "call.settled"],
+			);
+			ok(
+				journal.records.every(
+					({ record, origin }) =>
+						record.ctx.sessionId === null && origin.host === (placed ? "remote-worker" : "local-worker"),
+				),
+			);
+			deepStrictEqual(readRunEventJournal(handle.runId).lines, [], "disabled display history never suppresses call facts");
 			const run = bundle.contract.listRuns().find((run) => run.id === handle.runId);
 			ok(run?.recording);
 			const source = readRunRecording(clioStateDir(), handle.runId);

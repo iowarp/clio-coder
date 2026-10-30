@@ -37,7 +37,7 @@ import { readToolRounds } from "./types.js";
 
 import { createHash, randomBytes } from "node:crypto";
 import { type Dirent, readdirSync } from "node:fs";
-import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
+import { isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { bashShellPath } from "../../core/bash-shell.js";
 import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
@@ -394,9 +394,11 @@ import {
 import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
 import { reduceRouteQuality } from "./route-quality.js";
 import { defaultRoutingIntent } from "./routing-intent.js";
-import { defaultRunEventJournal } from "./run-event-journal.js";
+import { defaultRunEventJournal, runEventJournalRoot } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
+import type { RunTelemetryJournal } from "./run-telemetry.js";
+import { openRunTelemetry } from "./run-telemetry.js";
 import { type Ledger, newRunId, openLedger } from "./state.js";
 import { createTargetBreaker, type TargetBreakerBlock } from "./target-breaker.js";
 import {
@@ -7228,8 +7230,19 @@ export function createDispatchBundle(
 		const checkoutBefore =
 			lifecycle.runtimeKind === "subprocess" && req.taskWorktree === undefined ? snapshotCheckout(lifecycle.cwd) : null;
 		let worker: SpawnedWorker;
+		let runJournal: RunTelemetryJournal | undefined;
 		let adoptedHeldWorker = false;
 		try {
+			if (spec.telemetryContext) {
+				try {
+					runJournal = await openRunTelemetry(
+						spec.telemetryContext,
+						join(runEventJournalRoot(), spec.telemetryContext.runId),
+					);
+				} catch (error) {
+					reportDispatchDiagnostic("open run telemetry journal", error);
+				}
+			}
 			preparation?.signal?.throwIfAborted();
 			const spawnOptions = {
 				cwd: lifecycle.cwd,
@@ -7261,6 +7274,7 @@ export function createDispatchBundle(
 			preparation?.signal?.throwIfAborted();
 			worker = adopted ?? (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
 		} catch (error) {
+			await runJournal?.close();
 			leaseSlot.release();
 			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
 			throw error;
@@ -7402,6 +7416,10 @@ export function createDispatchBundle(
 				: {}),
 		});
 		const foldWorkerEvent = (raw: unknown): void => {
+			if (raw !== null && typeof raw === "object" && "type" in raw && raw.type === "clio_coder_telemetry") {
+				if (runJournal && !runJournal.worker(raw)) runJournal.gap("invalid-record");
+				return;
+			}
 			outputCapture.observe(raw);
 			const event = raw as {
 				type?: string;
@@ -7947,6 +7965,7 @@ export function createDispatchBundle(
 			} catch (abortError) {
 				reportDispatchDiagnostic("abort orphaned worker after ledger failure", abortError);
 			}
+			await runJournal?.close();
 			leaseSlot.release();
 			throw error;
 		}
@@ -8323,6 +8342,7 @@ export function createDispatchBundle(
 				// the source stream, whether or not an external consumer ever
 				// subscribed, so a fast worker cannot seal a zero-token receipt.
 				if (!(await awaitEventDrain(eventPump.done))) {
+					runJournal?.gap("writer-drop");
 					recordingJournal.gap(envelope.id, 1);
 					toolTelemetryIngestionErrors += 1;
 					reportDispatchDiagnostic(
@@ -9025,6 +9045,7 @@ export function createDispatchBundle(
 				});
 				throw error;
 			} finally {
+				await runJournal?.close();
 				unsubscribeAgentLedger?.();
 				leaseSlot.release();
 			}
