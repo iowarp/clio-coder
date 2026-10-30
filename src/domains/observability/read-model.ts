@@ -1167,6 +1167,12 @@ export function runsReport(source: SessionSource): RunRowV1[] {
 	return [...analyze(source).runs.values()].map((run) => runRow(view, run));
 }
 
+/** One run as a list row: the row `runTelemetry` reports, without the per-run detail (#434 §11.3). */
+export function runRowTelemetry(runId: string, source: JournalSource): RunRowV1 {
+	const run = analyzeRun(runId, source);
+	return runRow({ run }, run);
+}
+
 export function runTelemetry(runId: string, source: JournalSource, options: ReadOptions = {}): RunTelemetryV1 {
 	const run = analyzeRun(runId, source);
 	const view: View = { run };

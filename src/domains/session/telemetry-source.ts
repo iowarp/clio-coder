@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { access, readdir, readFile } from "node:fs/promises";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { access, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
@@ -29,7 +29,8 @@ type Io =
 	| { op: "journal"; directory: string; file: "calls.jsonl" | "events.ndjson" }
 	| { op: "text"; path: string }
 	| { op: "list"; path: string }
-	| { op: "exists"; path: string };
+	| { op: "exists"; path: string }
+	| { op: "mtime"; path: string };
 type Load<T> = Generator<Io, T, unknown>;
 
 function* journal(directory: string, file: "calls.jsonl" | "events.ndjson"): Load<CallJournalRead> {
@@ -45,6 +46,10 @@ function* list(path: string): Load<string[] | null> {
 }
 function* exists(path: string): Load<boolean> {
 	return (yield { op: "exists", path }) as boolean;
+}
+/** Last write time in epoch ms; null when the file cannot be stat'ed. */
+function* mtime(path: string): Load<number | null> {
+	return (yield { op: "mtime", path }) as number | null;
 }
 
 function performSync(io: Io): unknown {
@@ -67,6 +72,13 @@ function performSync(io: Io): unknown {
 			}
 		case "exists":
 			return existsSync(io.path);
+		case "mtime":
+			try {
+				return statSync(io.path).mtimeMs;
+			} catch {
+				// No file: nothing to order by.
+				return null;
+			}
 	}
 }
 
@@ -82,6 +94,11 @@ async function performAsync(io: Io): Promise<unknown> {
 			return access(io.path).then(
 				() => true,
 				() => false,
+			);
+		case "mtime":
+			return stat(io.path).then(
+				(info) => info.mtimeMs,
+				() => null,
 			);
 	}
 }
@@ -283,4 +300,74 @@ export function loadSessionTelemetrySource(
 
 export function loadSessionTelemetrySourceAsync(stateDir: string, sessionId: string): Promise<SessionSource | null> {
 	return runAsync(loadSession(stateDir, sessionId, undefined, new Set()));
+}
+
+/** The keyset after a page of run journals: the last row's write time and id. */
+export interface RunListCursor {
+	writtenMs: number | null;
+	runId: string;
+}
+export interface RunTelemetryListing {
+	runs: Array<{ runId: string; writtenAt: string | null; source: JournalSource }>;
+	/** Null on the last page. */
+	nextBefore: RunListCursor | null;
+}
+
+const writeKey = (writtenMs: number | null) => writtenMs ?? -1;
+/** Newest write first, then the higher id, so two runs written in the same millisecond page deterministically. */
+function newestFirst(a: { runId: string; writtenMs: number | null }, b: { runId: string; writtenMs: number | null }) {
+	return writeKey(b.writtenMs) - writeKey(a.writtenMs) || (a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0);
+}
+
+/**
+ * Every run journal under `<state>/runs`, newest write first. Dispatch run ids are random, and ordering by a run's
+ * first record would read every journal, so the page key is the journal file's write time: one stat per run, and
+ * only the page's journals are read. A run directory with no journal lists last, as `present: false`, which the
+ * read model reports as unknown coverage rather than leaving the run out (#434 R9).
+ */
+function* listRuns(
+	stateDir: string,
+	page: { limit: number; before?: RunListCursor | null },
+): Load<RunTelemetryListing> {
+	const root = join(stateDir, "runs");
+	const entries: Array<{ runId: string; writtenMs: number | null }> = [];
+	for (const name of (yield* list(root)) ?? []) {
+		try {
+			assertSafeId(name, "run");
+		} catch {
+			// A name that is not a run id cannot be a run directory.
+			continue;
+		}
+		entries.push({ runId: name, writtenMs: yield* mtime(join(root, name, "events.ndjson")) });
+	}
+	entries.sort(newestFirst);
+	const before = page.before;
+	const after = before ? entries.filter((entry) => newestFirst(entry, before) > 0) : entries;
+	const window = after.slice(0, Math.max(1, Math.floor(page.limit)));
+	const runs: RunTelemetryListing["runs"] = [];
+	for (const entry of window)
+		runs.push({
+			runId: entry.runId,
+			writtenAt: entry.writtenMs === null ? null : new Date(entry.writtenMs).toISOString(),
+			source: yield* loadRun(stateDir, entry.runId),
+		});
+	const last = window.at(-1);
+	return {
+		runs,
+		nextBefore: after.length > window.length && last ? { writtenMs: last.writtenMs, runId: last.runId } : null,
+	};
+}
+
+export function listRunTelemetrySources(
+	stateDir: string,
+	page: { limit: number; before?: RunListCursor | null },
+): RunTelemetryListing {
+	return runSync(listRuns(stateDir, page));
+}
+
+export function listRunTelemetrySourcesAsync(
+	stateDir: string,
+	page: { limit: number; before?: RunListCursor | null },
+): Promise<RunTelemetryListing> {
+	return runAsync(listRuns(stateDir, page));
 }
