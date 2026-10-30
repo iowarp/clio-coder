@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import type { CallObservation } from "../../src/core/call-failure.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { telemetryContext } from "../../src/core/telemetry/context.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
@@ -284,6 +285,8 @@ it("a side call times its admission gate as its admission stage and names the ce
 	ok(model);
 	const journals = createSessionJournals(clioStateDir(), () => {});
 	const origin = { id: "side-admission", cwdHash: "sidehash" };
+	// The gate runs inside the attempt's call, so a budget hold it makes is journaled for that call (#424).
+	let heldFor: string | undefined;
 	try {
 		const result = await runOutOfTurnRound({
 			telemetry: {
@@ -300,6 +303,7 @@ it("a side call times its admission gate as its admission stage and names the ce
 			userText: "question",
 			thinkingLevel: "off",
 			beforeRequest: async (hold) => {
+				heldFor = telemetryContext()?.callId;
 				hold.waitedOn = "budget";
 				await new Promise((resolve) => setTimeout(resolve, 5));
 			},
@@ -314,6 +318,7 @@ it("a side call times its admission gate as its admission stage and names the ce
 		strictEqual(admission?.waitedOn, "budget");
 		ok(admission.end > admission.start, "the wait is inside the admission span");
 		ok((settled[0]?.stages.send?.start ?? -1) >= admission.end, "the send follows admission");
+		strictEqual(heldFor, settled[0]?.callId);
 	} finally {
 		await journals.closeAll();
 		faux.unregister();

@@ -80,7 +80,8 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 			const hold: AdmissionHold = {};
 			call?.stage("admission", "start");
 			try {
-				return await gate(hold);
+				// Inside the attempt's context, so a budget hold the gate makes is journaled for this call (#424, #434).
+				return await (call ? call.withContext(() => gate(hold)) : gate(hold));
 			} finally {
 				call?.stage("admission", "end", hold);
 			}

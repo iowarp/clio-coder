@@ -87,6 +87,8 @@ export interface SideQuestionInput extends SideCallAuth {
 	 * Asked before `beforeRequest`, and again for a schema-free retry.
 	 */
 	admitFlow?: () => string | null;
+	/** Host admission per attempt; see {@link OutOfTurnRoundInput.beforeRequest} (#424). */
+	beforeRequest?: NonNullable<OutOfTurnRoundInput["beforeRequest"]>;
 	/**
 	 * A turn was in flight when the round was prepared, so a trailing tool call
 	 * may still be running. Only then does the round close it with a synthetic

@@ -68,6 +68,8 @@ export interface HandoffRoundInput extends SideCallAuth {
 	repair?: HandoffRepairInput;
 	/** Information-flow admission of the send; forwarded to the shared round unchanged. */
 	admitFlow?: () => string | null;
+	/** Host admission per attempt, schema retry included (#424). */
+	beforeRequest?: NonNullable<SideQuestionInput["beforeRequest"]>;
 }
 
 function repairText(goal: string, repair: HandoffRepairInput): string {

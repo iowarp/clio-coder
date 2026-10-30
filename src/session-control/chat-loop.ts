@@ -3,11 +3,11 @@ import type { CallObservation } from "../core/call-failure.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
-import { observedToolCallOrigin } from "../core/telemetry/context.js";
+import { observedToolCallOrigin, telemetryContext } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { recordTelemetry } from "../core/telemetry/producer.js";
 import { turnSettlementFromCalls } from "../domains/observability/call-facts.js";
-import type { CallJournalOptions } from "../domains/observability/call-scope.js";
+import type { AdmissionHold, CallJournalOptions } from "../domains/observability/call-scope.js";
 import type { TelemetrySessionLease } from "../domains/observability/session-journals.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
@@ -1868,6 +1868,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		inFlightRefusal: string | null,
 		signal?: AbortSignal,
 		silent = false,
+		/** The pre-warm admits once here; a side round admits each of its attempts through `sideCallAdmission` (#424). */
+		admitHere = true,
 	): Promise<OutOfTurnPreparation> => {
 		const inFlight = state.streaming || turnActive;
 		if (inFlight && inFlightRefusal !== null) return { ok: false, reason: inFlightRefusal };
@@ -1882,7 +1884,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!agentRuntime) return { ok: false, reason: notConfiguredNotice(deps.getSettings().chat) };
 		const resolution = agentRuntime.runtimeResolution;
 		try {
-			if (resolution.costProvenance === "known" || resolution.costProvenance === "estimated") {
+			if (admitHere && (resolution.costProvenance === "known" || resolution.costProvenance === "estimated")) {
 				await deps.scheduling?.admitPaidRequest?.({
 					waitForRaise: deps.headless !== true,
 					getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
@@ -1903,6 +1905,31 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return { ok: false, reason: err instanceof Error ? err.message : String(err) };
 		}
 	};
+
+	/**
+	 * Budget admission for each attempt of a side round, a schema or auth retry included. It runs inside the attempt's
+	 * call, so a hold at the ceiling reads as its admission stage with `waitedOn: "budget"` and journals the crossing
+	 * and the wait for that call; a session that changed during the wait refuses the request (#424, #434).
+	 */
+	const sideCallAdmission =
+		(runtime: AgentRuntime, origin: ReturnType<SessionContract["current"]>, signal?: AbortSignal) =>
+		async (hold: AdmissionHold): Promise<void> => {
+			const provenance = runtime.runtimeResolution.costProvenance;
+			if (provenance === "known" || provenance === "estimated") {
+				const telemetry = telemetryContext();
+				await deps.scheduling?.admitPaidRequest?.({
+					waitForRaise: deps.headless !== true,
+					getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
+					onBlocked: () => {
+						hold.waitedOn = "budget";
+					},
+					...(telemetry ? { telemetry } : {}),
+					...(signal ? { signal } : {}),
+				});
+			}
+			if ((deps.session?.current()?.id ?? null) !== (origin?.id ?? null))
+				throw new Error("session changed before the request");
+		};
 
 	/**
 	 * Run one out-of-turn round while holding a slot on the endpoint it streams
@@ -3832,7 +3859,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// question exists to be answered now, beside a run the operator is
 			// watching; holding it until the run settles would deliver it after the
 			// moment it was asked in had passed.
-			const prepared = await prepareOutOfTurnRound(null, options.signal);
+			const prepared = await prepareOutOfTurnRound(null, options.signal, false, false);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
 			// A snapshot, taken now: a running turn keeps appending to the live list
 			// while this round awaits admission and streams.
@@ -3842,6 +3869,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				result = await withEndpointSlot(prepared.runtime, () =>
 					sideQuestionRound({
 						...sideCallJournal(prepared.runtime, "btw", prepared.origin),
+						beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, options.signal),
 						onUsage: (usage, observation) =>
 							recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin, observation),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
@@ -3873,7 +3901,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			// Never queued, for the side question's reason, and run beside a turn in
 			// flight the same way (#415): the drafts answer the session as it stands now.
-			const prepared = await prepareOutOfTurnRound(null, options.signal);
+			const prepared = await prepareOutOfTurnRound(null, options.signal, false, false);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
 			const messages = [...prepared.runtime.agent.state.messages];
 			const candidates = await Promise.all(
@@ -3889,6 +3917,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								(sampling) =>
 									draftRound({
 										...sideCallJournal(prepared.runtime, "helper", prepared.origin),
+										beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, options.signal),
 										onUsage: (usage, observation) =>
 											recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin, observation),
 										admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
@@ -3929,6 +3958,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const prepared = await prepareOutOfTurnRound(
 				"a turn is in flight; /handoff cannot summarize a session that is still moving",
 				options.signal,
+				false,
+				false,
 			);
 			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
 			let result: SideQuestionResult;
@@ -3936,6 +3967,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				result = await withEndpointSlot(prepared.runtime, () =>
 					handoffRound({
 						...sideCallJournal(prepared.runtime, "handoff", prepared.origin),
+						beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, options.signal),
 						onUsage: (usage, observation) =>
 							recordOutOfTurnUsage(prepared.runtime, usage, "handoff", prepared.origin, observation),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
