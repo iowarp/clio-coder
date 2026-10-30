@@ -142,6 +142,7 @@ function attemptsOf(records: readonly TelemetryRecord[], attempts: readonly Fold
 }
 
 const unavailable: JournalSource = { present: false, records: [], modes: [], skipped: 0, damaged: 0 };
+const POLICY_GAPS: ReadonlySet<string> = new Set(["mode-filtered", "research-cap"]);
 
 function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryRecord): Run {
 	const fold = foldRunJournal(source.records);
@@ -191,8 +192,9 @@ function analyzeRecords(
 		attempts,
 		byAttempt: new Map(attempts.map((attempt) => [attempt.started.attemptId, attempt])),
 		fold,
-		// A mode-filtered gap is policy: only research or content kinds go uncaptured, never accountability (#434, R10).
-		gap: gap + (records.some((record) => record.k === "gap" && record.data.reason !== "mode-filtered") ? 1 : 0),
+		// A mode-filtered or research-cap gap is policy: only research or content kinds go uncaptured, never
+		// accountability, so neither makes a total partial (#434, R10).
+		gap: gap + (records.some((record) => record.k === "gap" && !POLICY_GAPS.has(record.data.reason)) ? 1 : 0),
 		runs,
 	};
 }
