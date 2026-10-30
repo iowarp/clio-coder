@@ -60,3 +60,18 @@ export function captureAdmits(capture: TelemetryCapture, kind: Kind): boolean {
 	if (capture.mode !== "research") return false;
 	return definition.capture === undefined || capture.capture[definition.capture];
 }
+
+/**
+ * The System One dataset keeps redacted decision state and rendered prompts, so under research mode it is
+ * content: it needs its flag and content capture. `systemOne.record` stays a deprecated alias that records
+ * without either (#434).
+ */
+export function systemOneDatasetRecording(
+	settings: { systemOne: { record: boolean } },
+	capture: TelemetryCapture,
+): boolean {
+	return (
+		settings.systemOne.record ||
+		(capture.mode === "research" && capture.capture.systemOneDataset && capture.capture.content)
+	);
+}

@@ -24,6 +24,7 @@ import { callCoverageForRun, createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
 import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
 import { createObservabilityProjection } from "./projection.js";
+import type { SessionCapture } from "./session-journals.js";
 import { createSessionJournals } from "./session-journals.js";
 import { createDispatchTraceMirror, type DispatchTraceMirror, traceDatabasePath } from "./trace-store.js";
 
@@ -169,30 +170,32 @@ export function createObservabilityBundle(
 	const consent = createConsentView(clioStateDir());
 	const consented = new Map<string, boolean>();
 	const captures = new Map<string, { settings: TelemetrySettings; consent: boolean; capture: TelemetryCapture }>();
+	const preparing = new Set<string>();
+	const sessionCapture: SessionCapture = {
+		async prepare(origin, directory) {
+			const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
+			if (settings?.mode !== "research" || !settings.research.content) {
+				consented.set(origin.id, false);
+				return;
+			}
+			await consent.refresh();
+			consented.set(origin.id, consent.covers(await consent.sessionWorkspace(directory)));
+		},
+		current(origin) {
+			const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
+			if (!settings) return STANDARD_CAPTURE;
+			const granted = consented.get(origin.id) ?? false;
+			const cached = captures.get(origin.id);
+			if (cached?.settings === settings && cached.consent === granted) return cached.capture;
+			const capture = effectiveTelemetryCapture(settings, granted);
+			captures.set(origin.id, { settings, consent: granted, capture });
+			return capture;
+		},
+	};
 	const journals = createSessionJournals(
 		clioStateDir(),
 		() => writeDiagnostic("[clio-coder:telemetry] call journal unavailable; coverage is incomplete\n"),
-		{
-			async prepare(origin, directory) {
-				const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
-				if (settings?.mode !== "research" || !settings.research.content) {
-					consented.set(origin.id, false);
-					return;
-				}
-				await consent.refresh();
-				consented.set(origin.id, consent.covers(await consent.sessionWorkspace(directory)));
-			},
-			current(origin) {
-				const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
-				if (!settings) return STANDARD_CAPTURE;
-				const granted = consented.get(origin.id) ?? false;
-				const cached = captures.get(origin.id);
-				if (cached?.settings === settings && cached.consent === granted) return cached.capture;
-				const capture = effectiveTelemetryCapture(settings, granted);
-				captures.set(origin.id, { settings, consent: granted, capture });
-				return capture;
-			},
-		},
+		sessionCapture,
 	);
 	let sessionId: string | null | undefined;
 	const recordedRuns = new Set<string>();
@@ -302,6 +305,19 @@ export function createObservabilityBundle(
 			projection.refresh();
 		},
 		acquireTelemetrySession: journals.acquire,
+		telemetryCapture(origin) {
+			// Recorders outside a call ask between leases; the first ask starts the consent read (#434).
+			if (!consented.has(origin.id) && !preparing.has(origin.id) && /^[a-zA-Z0-9_-]+$/.test(origin.cwdHash)) {
+				preparing.add(origin.id);
+				void sessionCapture
+					.prepare?.(origin, join(clioStateDir(), "sessions", origin.cwdHash, origin.id))
+					.catch(() => {
+						// No consent is granted by a failed read; the next lease asks again (#434).
+					})
+					.finally(() => preparing.delete(origin.id));
+			}
+			return sessionCapture.current(origin);
+		},
 		sessionCost: () => cost.sessionTotal(),
 		sessionCostSummary: () => cost.sessionCost(),
 		costEntries: () => cost.entries(),

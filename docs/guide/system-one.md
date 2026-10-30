@@ -180,7 +180,7 @@ and provisioning belong to that server.
 | `systemOne.engines` | `{}` | next turn |
 | `systemOne.sites` | `{}` | next turn; `systemOne.sites.consult` on restart |
 | `systemOne.cuts` | `{}` | next turn |
-| `systemOne.record` | `false` | next turn |
+| `systemOne.record` | `false` | next turn; deprecated alias of research capture, user settings only |
 | `systemOne.retentionDays` | `30` | next turn |
 | `systemOne.maxMiB` | `64` | next turn |
 
@@ -198,7 +198,7 @@ and provisioning belong to that server.
 
 `systemOne.cuts` maps an answering build to fitted overrides. See [Calibration and shadow mode](#calibration-and-shadow-mode).
 
-`systemOne.record` turns the local training dataset on. `systemOne.retentionDays` and `systemOne.maxMiB` bound it and must be integers of at least 1. See [The training dataset](#the-training-dataset).
+The local training dataset is kept in research telemetry mode with `telemetry.research.systemOneDataset` and content capture for the session's workspace (`telemetry.research.content` plus `clio-coder telemetry consent`), because it holds redacted prompts and decision state. `systemOne.record: true` is a deprecated alias that keeps it without either, and only user settings can turn it on. `systemOne.retentionDays` and `systemOne.maxMiB` bound it and must be integers of at least 1. See [The training dataset](#the-training-dataset).
 
 The terminal `/settings` overlay lists site bindings and dataset keys under Advanced → Experimental. A site row binds the site to an engine already declared in the settings file and keeps the binding's `timeoutMs` and `tasks`; engines and cuts are edited in the file. `clio-coder configure --settings` and the GUI group System One controls under Fleet → Decision engines (experimental). The GUI shows only the dataset controls, with a line saying where the rest is set. A running session re-reads the block on every call, so an edited engine or binding applies to the next question without a restart. The defaults are in `src/core/defaults.ts`, validation is in `src/core/config.ts`, and effect timing is classified in `src/domains/config/classify.ts`.
 
@@ -271,7 +271,7 @@ Without a `systemOne.sites.relevance` entry, Clio Coder derives the binding from
 
 Long catalogs are ranked by local vocabulary first. This site scores the pruned entries by meaning, and the caller uses the scores only to reorder a skills listing or gateway result, or to add related entries beside a query's own hits. It never removes an entry and never reorders entries a query matched.
 
-A listing never waits for this site. The ranker answers from rankings that have already finished, kept by catalog, question, binding and the session's flow restrictions. On a miss the listing keeps its order, and one detached call fills the ranking for the next listing that asks the same thing. A build without the `relevance.ranked` marker never reorders anything, and once it is known to be unfitted it is asked only when `systemOne.record` is on. One call scores up to 256 entries that fit the engine's window. A larger catalog is asked by its categories, which needs a `clusters` cut that no build has yet and entries that carry described categories, so such a listing keeps its order and leaves no decision row.
+A listing never waits for this site. The ranker answers from rankings that have already finished, kept by catalog, question, binding and the session's flow restrictions. On a miss the listing keeps its order, and one detached call fills the ranking for the next listing that asks the same thing. A build without the `relevance.ranked` marker never reorders anything, and once it is known to be unfitted it is asked only while the dataset is recorded. One call scores up to 256 entries that fit the engine's window. A larger catalog is asked by its categories, which needs a `clusters` cut that no build has yet and entries that carry described categories, so such a listing keeps its order and leaves no decision row.
 
 ### `consult`: the agent asks directly
 
@@ -295,7 +295,7 @@ systemOne:
       turn.direct: 0.80
 ```
 
-- **Shadow mode.** A site whose answering build has no cut for it never hints, ranks or acts, and its answers are recorded, so the ledger and the dataset show what it would have said. The card advisory, `consult` and `/draft` read no cut and show any build's answer, marked with that build. Clio learns a build from its first answer. At the automatic sites no call is waited on, whether its build is known or not. Once a build is known to be unfitted, the `turn`, `toolCall` gate, `toolResult`, `turnEnd`, `steer` and `relevance` sites make no call at all while `systemOne.record` is off, because only the dataset would use the answer, and so leave no ledger row either. The build is rechecked once its last answer is ten minutes old.
+- **Shadow mode.** A site whose answering build has no cut for it never hints, ranks or acts, and its answers are recorded, so the ledger and the dataset show what it would have said. The card advisory, `consult` and `/draft` read no cut and show any build's answer, marked with that build. Clio learns a build from its first answer. At the automatic sites no call is waited on, whether its build is known or not. Once a build is known to be unfitted, the `turn`, `toolCall` gate, `toolResult`, `turnEnd`, `steer` and `relevance` sites make no call at all while the dataset is not recorded, because only the dataset would use the answer, and so leave no ledger row either. The build is rechecked once its last answer is ten minutes old.
 - **Safety sites only record.** The yolo gate and the tool-result classifier add no confirmation and no banner, fitted or not. A cut can never remove friction.
 
 Cuts are measured with `scripts/decision-probe.ts` against a labeled fixture under `tests/fixtures/decision-cases/`. The procedure is in [Validating a Laya build](../architecture/system-one.md#validating-a-laya-build). Both files live in the source repository and are not in the npm package, so fitting runs from a source checkout. Doctor reports the shipped table's cuts as measured and cuts written under `systemOne.cuts` as operator-configured, never as measured.
@@ -312,7 +312,7 @@ The training dataset applies a second pass on its own copy: a key-name pass for 
 
 The session ledger always keeps a compact `systemOne` row per call (site, engine, build, outcome, latency, the answers and policy outcome, a hash of the state, but never the state itself). This is the cheap record that makes a silent site diagnosable.
 
-`systemOne.record: true` additionally keeps a local, opt-in dataset intended for fitting cuts and comparing engine builds. It lives at `<state dir>/systemone/YYYY-MM-DD.jsonl`, one append-only file per UTC day, with the directory mode `0700` and files `0600`. Nothing leaves the machine unless you export it and send the file yourself. Day files older than `systemOne.retentionDays` are deleted, and when the directory exceeds `systemOne.maxMiB` the oldest day files are deleted first. The newest file is never deleted for size. The row kinds (`decision`, `spec`, `outcome`), the outcome sources and the write rules are specified in [Records](../architecture/system-one.md#records).
+Research capture, or the deprecated `systemOne.record: true` alias, additionally keeps a local, opt-in dataset intended for fitting cuts and comparing engine builds. It lives at `<state dir>/systemone/YYYY-MM-DD.jsonl`, one append-only file per UTC day, with the directory mode `0700` and files `0600`. Nothing leaves the machine unless you export it and send the file yourself. Day files older than `systemOne.retentionDays` are deleted, and when the directory exceeds `systemOne.maxMiB` the oldest day files are deleted first. The newest file is never deleted for size. The row kinds (`decision`, `spec`, `outcome`), the outcome sources and the write rules are specified in [Records](../architecture/system-one.md#records).
 
 Inspect and export it:
 

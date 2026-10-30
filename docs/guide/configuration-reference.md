@@ -122,7 +122,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `systemOne.engines` | `{}` | Map of engine name to `{ kind, target, model?, mode?, profile? }`. | next turn |
 | `systemOne.sites` | `{}` | Map of site id to an engine name or `{ engine, timeoutMs?, tasks? }`. A site with no entry is off. | next turn; `systemOne.sites.consult` needs a restart |
 | `systemOne.cuts` | `{}` | Per-build overrides keyed by answering build, then `<site>.<key>`, with values from 0.01 to 0.99. | next turn |
-| `systemOne.record` | `false` | Boolean. Keep every decision and its outcome as a local dataset. | next turn |
+| `systemOne.record` | `false` | Boolean. Deprecated alias that keeps every decision and its outcome as a local dataset without research capture; user settings only. | next turn |
 | `systemOne.retentionDays` | `30` | Integer at least 1. Days of dataset day files kept. | next turn |
 | `systemOne.maxMiB` | `64` | Integer at least 1. Size cap of the dataset directory. | next turn |
 | `safety.autonomy` | `"default"` | `default` or `yolo`. User layer or operator session control. A project layer can only tighten the user level (`default` over `yolo`); a looser value is ignored with a layer issue. | hot reload |

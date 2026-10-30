@@ -8,7 +8,6 @@ import { readClioVersion } from "../../core/package-root.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
 import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
 import { shellQuote } from "../../core/shell-quote.js";
-import { effectiveTelemetryCapture } from "../../core/telemetry/capture.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
 import {
@@ -18,7 +17,7 @@ import {
 	validateHarness,
 } from "../agents/harness-validate.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
-import { consentCovering, readTelemetryConsent, resolveConsentWorkspace } from "../observability/consent.js";
+import { systemOneRecordingLabel, workspaceTelemetryCapture } from "../observability/consent.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../providers/auth/index.js";
 import { credentialsPresent } from "../providers/credentials.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
@@ -701,9 +700,9 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 /** The mode, the capture it yields here, and this workspace's consent, as a session in this directory sees them (#434). */
 function telemetryModeFinding(stateDir: string, cwd: string): DoctorFinding {
 	const name = "telemetry";
-	let telemetry: ReturnType<typeof readSettings>["telemetry"];
+	let settings: ReturnType<typeof readSettings>;
 	try {
-		telemetry = readLayeredSettings(cwd).settings.telemetry;
+		settings = readLayeredSettings(cwd).settings;
 	} catch (err) {
 		return {
 			ok: true,
@@ -712,15 +711,8 @@ function telemetryModeFinding(stateDir: string, cwd: string): DoctorFinding {
 			detail: `settings unreadable: ${err instanceof Error ? err.message : String(err)}`,
 		};
 	}
-	const consent = readTelemetryConsent(stateDir);
-	let workspace: string | null = null;
-	try {
-		workspace = resolveConsentWorkspace(cwd);
-	} catch {
-		// An unresolvable directory has no consent; the row says so below.
-	}
-	const covering = workspace === null ? null : consentCovering(consent.entries, workspace);
-	const capture = effectiveTelemetryCapture(telemetry, covering !== null);
+	const telemetry = settings.telemetry;
+	const { capture, covering, consent } = workspaceTelemetryCapture(telemetry, stateDir, cwd);
 	const consents = `${consent.entries.length} workspace consent${consent.entries.length === 1 ? "" : "s"} recorded`;
 	const parts = [`mode ${capture.mode}`];
 	if (capture.mode === "standard") parts.push("research capture off", consents);
@@ -737,7 +729,20 @@ function telemetryModeFinding(stateDir: string, cwd: string): DoctorFinding {
 		else parts.push("content requested, but this workspace has no consent (clio-coder telemetry consent)");
 	}
 	if (consent.error) parts.push(`consent store unreadable, so no workspace has consent: ${consent.error}`);
-	return { ok: true, level: consent.error ? "warn" : "info", name, detail: parts.join("; ") };
+	// The legacy switches still record, without research mode or consent; each names its replacement (#434).
+	const aliases = [
+		settings.systemOne.record ? "systemOne.record (research.systemOneDataset with content)" : null,
+		process.env.CLIO_CODER_BUS_TRACE === "1" ? "CLIO_CODER_BUS_TRACE (research.busTrace)" : null,
+		process.env.CLIO_CODER_MEMORY_TRACE?.trim() ? "CLIO_CODER_MEMORY_TRACE (research.content)" : null,
+		process.env.CLIO_CODER_OBSERVATION_TRACE?.trim() ? "CLIO_CODER_OBSERVATION_TRACE (research.content)" : null,
+	].filter((alias): alias is string => alias !== null);
+	if (aliases.length > 0) parts.push(`deprecated aliases recording: ${aliases.join(", ")}`);
+	return {
+		ok: true,
+		level: consent.error || aliases.length > 0 ? "warn" : "info",
+		name,
+		detail: parts.join("; "),
+	};
 }
 
 /**
@@ -1421,8 +1426,9 @@ async function systemOneFindings(
 	}
 	rows.push(...systemOneEngineFindings(settings, bindings, runtimes, observations, profiles, juliaCounted));
 	// With nothing bound, recording off and no files, the dataset row would only repeat the off row.
-	const quiet = off.length === bindings.length && !settings.systemOne.record;
-	const dataset = datasetFinding(settings.systemOne, () => listDatasetFiles(), formatDatasetBytes, quiet);
+	const recording = systemOneRecordingLabel(settings, process.cwd());
+	const quiet = off.length === bindings.length && recording === "record off";
+	const dataset = datasetFinding(settings.systemOne, recording, () => listDatasetFiles(), formatDatasetBytes, quiet);
 	if (dataset !== null) rows.push(dataset);
 	return rows;
 }
@@ -1506,12 +1512,12 @@ function systemOneEngineFindings(
 
 function datasetFinding(
 	systemOne: ReturnType<typeof readSettings>["systemOne"],
+	record: string,
 	listDatasetFiles: () => ReadonlyArray<{ day: string; bytes: number }>,
 	formatBytes: (bytes: number) => string,
 	quietWhenEmpty: boolean,
 ): DoctorFinding | null {
 	const name = "system one dataset";
-	const record = systemOne.record ? "record on" : "record off";
 	let files: ReadonlyArray<{ day: string; bytes: number }>;
 	try {
 		files = listDatasetFiles();

@@ -64,6 +64,7 @@ import { settingsSourceFor, updateProjectLocalSettings } from "../core/settings-
 import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
+import { STANDARD_CAPTURE, systemOneDatasetRecording } from "../core/telemetry/capture.js";
 import { recordTelemetry } from "../core/telemetry/producer.js";
 import type { CallSettled, Payload } from "../core/telemetry/schemas.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
@@ -2084,7 +2085,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		: undefined;
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
-	installBusTracer();
+	// Domain loading emits before the config contract exists; the trace asks for the mode on every event (#434).
+	let researchBusTrace: () => string | null = () => null;
+	installBusTracer(() => researchBusTrace());
 	termination.installSignalHandlers();
 
 	ensureClioState();
@@ -2376,6 +2379,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	const config = result.getContract<ConfigContract>("config");
+	researchBusTrace = () => {
+		const telemetry = config?.get().telemetry;
+		return telemetry?.mode === "research" && telemetry.research.busTrace
+			? join(clioStateDir(), "telemetry", "research", "bus-trace.jsonl")
+			: null;
+	};
 	const providers = result.getContract<ProvidersContract>("providers");
 	timer.mark("providers resolved");
 
@@ -3691,9 +3700,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// leaves a compact row that reaches the ledger at the next turn boundary or
 	// settle, and, when the operator opted in, a redacted record for the dataset.
 	const currentSessionId = (): string | null => session?.current()?.id ?? null;
+	// Research mode keeps the dataset only with content capture for the current session's workspace (#434).
+	const systemOneRecording = (): boolean => {
+		const origin = session?.current();
+		const capture = (origin && observability?.telemetryCapture?.(origin)) ?? STANDARD_CAPTURE;
+		return systemOneDatasetRecording(getCurrentSettings(), capture);
+	};
 	const systemOneRecorder = createRecorder({
 		currentSession: currentSessionId,
 		settings: () => getCurrentSettings(),
+		recording: systemOneRecording,
 		// The park flush writes a session's rows before it closes, so a call that
 		// started in a session that is no longer current is a late answer for a ledger
 		// this process has closed; its dataset copy, when recording, is already queued
@@ -3811,7 +3827,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}))
 				: null,
 		currentSession: currentSessionId,
-		recording: () => getCurrentSettings().systemOne.record,
+		recording: systemOneRecording,
 	});
 	let lastMemoryPromptRuntimeId: string | undefined;
 	const memoryReader = createMemoryPromptReader({
@@ -3848,7 +3864,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		flow: () => flowLedger.current(),
 		task: () => systemOneHost.task(),
 		tracker: followUps,
-		recording: () => getCurrentSettings().systemOne.record,
+		recording: systemOneRecording,
 		mayStart: relevanceMayStart,
 	});
 	// A ranking asked under a session, branch or binding that is gone cannot help

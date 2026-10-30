@@ -1,4 +1,5 @@
 import type { ResponseModelIdObservationCounts } from "../../core/response-model-id.js";
+import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
@@ -161,6 +162,8 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 		label: CallLabel,
 		turnId?: string,
 	): Promise<TelemetrySessionLease>;
+	/** What the session's telemetry captures now, for recorders that write outside the call journal (#434). */
+	telemetryCapture?(origin: TelemetrySessionOrigin): TelemetryCapture;
 	/** Count persisted never-sent assistant calls without adding spend or API calls (#430). */
 	recordNeverSentCalls(count: number): void;
 	/**

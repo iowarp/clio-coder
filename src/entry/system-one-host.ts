@@ -336,7 +336,7 @@ export interface SystemOneHostDeps {
 	/** The session current now, so operator texts kept for one session are never read in another. */
 	currentSession?: () => string | null;
 	/**
-	 * Whether `systemOne.record` is on. A shadowed call can only be recorded, so
+	 * Whether the dataset is kept (research capture, or the deprecated `systemOne.record`). A shadowed call can only be recorded, so
 	 * with recording off it is not made at all. Absent reads as on.
 	 */
 	recording?: () => boolean;

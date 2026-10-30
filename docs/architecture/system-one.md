@@ -119,7 +119,7 @@ Two readers get two artifacts from the same `DecisionRecord`. The recorder is in
 
 **Session ledger rows.** Always on. A compact row per call, custom entry type `systemOne`, drained at the next turn boundary into the session that asked ([rows.ts](../../src/domains/system-one/recorder/rows.ts)). It carries site, site version, engine, kind, build, outcome, error (cut to 160 characters), latency, deadline, the estimated state tokens, a SHA-256 of the state, the number of questions, the answers, usage, `fitted`, the policy summary and the per-engine routes without their rendered text. It never carries the state, so a ledger stays small and safe to share.
 
-**Dataset rows.** Only when `systemOne.record` is true ([dataset.ts](../../src/domains/system-one/recorder/dataset.ts)). One append-only JSONL file per UTC day at `<state dir>/systemone/YYYY-MM-DD.jsonl`, created `0700` for the directory and `0600` for files. Three row kinds start with their own `"kind"` so a reader classifies a line without parsing it.
+**Dataset rows.** Only under research telemetry capture with `telemetry.research.systemOneDataset` and content consent, or when the deprecated `systemOne.record` alias is true ([dataset.ts](../../src/domains/system-one/recorder/dataset.ts), `systemOneDatasetRecording` in [capture.ts](../../src/core/telemetry/capture.ts)). One append-only JSONL file per UTC day at `<state dir>/systemone/YYYY-MM-DD.jsonl`, created `0700` for the directory and `0600` for files. Three row kinds start with their own `"kind"` so a reader classifies a line without parsing it.
 
 | Kind | Holds |
 | --- | --- |
@@ -158,7 +158,7 @@ A new engine or a new build of an existing engine (Laya, Julia-1, the Strands De
 1. Bind the engine to a site and run `node --import tsx scripts/decision-probe.ts <fixture.json> --engine <name>` against a labeled fixture in `tests/fixtures/decision-cases/` (`turn.json`, `turn-end.json`, `tool-calls.json`, `tool-results.json` or `capabilities.json`). The engine comes from `systemOne.engines` in the operator's settings, or from `--kind`, `--target` and `--model`. Each case goes through `createSystemOne` exactly as production does, with an in-memory recorder that keeps the raw answers. The probe calls the engine live and is never part of CI.
 2. For each labeled key, read agreement, abstention, wrong and confidently wrong counts, the probability ranges of the positive and negative classes per run, and the suggested cut with its margin to each side. The suggestion is null when the classes overlap.
 3. Add the cuts to `FITTED_CUTS` under the printed build only for keys whose classes clear the site's margin rule, citing the run beside them, and list the renderer and site versions in `FITTED_CONTRACTS`. An operator can try cuts earlier with `systemOne.cuts`, which overlays the table without changing it.
-4. Record real traffic with `systemOne.record` and export it to compare builds on the operator's own turns.
+4. Record real traffic with research capture (or the deprecated `systemOne.record` alias) and export it to compare builds on the operator's own turns.
 
 A cut from one build says nothing about another build, another vendor, a different renderer or site version, or a chat model reporting logprobs, which is why the key is the identity and an identity absent from the table never acts. The probe and the fixtures live in the source repository and are not in the npm package.
 

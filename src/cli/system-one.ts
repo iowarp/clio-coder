@@ -1,6 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { canonicalizePath } from "../core/path-canonical.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
+import { systemOneRecordingLabel } from "../domains/observability/consent.js";
 import {
 	countDatasetRows,
 	datasetDir,
@@ -20,8 +21,10 @@ clio-coder systemone export --out <file> [--since <YYYY-MM-DD>] [--site <site>]
 
 System One is experimental. Its decision engines answer typed questions about the
 operator's request, tool calls, tool results and finished turns; sites, keys and
-cuts may change between releases. With systemOne.record on, every call and what
-followed it is kept under the state directory as a redacted local dataset.
+cuts may change between releases. In research telemetry mode with
+telemetry.research.systemOneDataset and content consent for the workspace, or with
+the deprecated systemOne.record alias on, every call and what followed it is kept
+under the state directory as a redacted local dataset.
 
 status   whether recording is on, what the dataset holds, and where each site is bound
 export   write one JSON line per decision to a local file, joined with the full text
@@ -93,7 +96,7 @@ function runStatus(): number {
 	const { systemOne, targets } = settings;
 	const summary = summarizeDataset();
 	const rows: string[][] = [
-		["record", systemOne.record ? "on" : "off (systemOne.record)"],
+		["record", systemOneRecordingLabel(settings, process.cwd()).replace(/^record /, "")],
 		["directory", summary.dir],
 		["files", summary.files === 0 ? "none" : `${summary.files} (${summary.oldest} to ${summary.newest})`],
 		["size", `${formatDatasetBytes(summary.bytes)} of ${systemOne.maxMiB} MiB, kept ${systemOne.retentionDays} days`],

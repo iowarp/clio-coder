@@ -4,6 +4,9 @@ import { hostname, userInfo } from "node:os";
 import { isAbsolute, join, sep } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
+import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
+import { effectiveTelemetryCapture, systemOneDatasetRecording } from "../../core/telemetry/capture.js";
+import { clioStateDir } from "../../core/xdg.js";
 
 /**
  * Research content capture needs the operator's consent per workspace (#434, O6).
@@ -77,7 +80,7 @@ export function readTelemetryConsent(stateDir: string): TelemetryConsentRead {
 }
 
 /** A consent covers its workspace and everything under it, compared by real path. */
-export function consentCovering(
+function consentCovering(
 	entries: ReadonlyArray<TelemetryConsentEntry>,
 	realWorkspace: string,
 ): TelemetryConsentEntry | null {
@@ -175,4 +178,30 @@ export function createConsentView(stateDir: string) {
 			return realWorkspace !== null && consentCovering(entries, realWorkspace) !== null;
 		},
 	};
+}
+
+/** The capture a session in `cwd` would get, for status surfaces that run outside a session (#434). */
+export function workspaceTelemetryCapture(
+	telemetry: TelemetrySettings,
+	stateDir: string,
+	cwd: string,
+): { capture: TelemetryCapture; covering: TelemetryConsentEntry | null; consent: TelemetryConsentRead } {
+	const consent = readTelemetryConsent(stateDir);
+	let covering: TelemetryConsentEntry | null = null;
+	try {
+		covering = consentCovering(consent.entries, resolveConsentWorkspace(cwd));
+	} catch {
+		// An unresolvable directory has no consent.
+	}
+	return { capture: effectiveTelemetryCapture(telemetry, covering !== null), covering, consent };
+}
+
+/** Which switch keeps the System One dataset for a session in `cwd`, the deprecated alias included (#434). */
+export function systemOneRecordingLabel(
+	settings: { systemOne: { record: boolean }; telemetry: TelemetrySettings },
+	cwd: string,
+): string {
+	if (settings.systemOne.record) return "record on (systemOne.record, deprecated alias)";
+	const { capture } = workspaceTelemetryCapture(settings.telemetry, clioStateDir(), cwd);
+	return systemOneDatasetRecording(settings, capture) ? "record on (research capture)" : "record off";
 }

@@ -495,7 +495,7 @@ Debug traces are opt-in environment variables, documented with their values in [
 | Variable | Output |
 | --- | --- |
 | `CLIO_CODER_RENDER_TRACE=<path>` | Versioned JSONL timing for the interactive render pipeline, with no conversation text ([render-trace.ts](../../src/interactive/render-trace.ts)). Endpoint definitions are in [architecture.md](architecture.md#interactive-render-transactions). |
-| `CLIO_CODER_BUS_TRACE=1` | Shutdown, session-end, and domain lifecycle bus events on stderr, prefixed `[clio-coder:bus]` ([bus-trace.ts](../../src/core/bus-trace.ts)). |
+| `CLIO_CODER_BUS_TRACE=1` | Shutdown, session-end, and domain lifecycle bus events on stderr, prefixed `[clio-coder:bus]` ([bus-trace.ts](../../src/core/bus-trace.ts)). Deprecated alias: research mode with `telemetry.research.busTrace` appends the same events to `<stateDir>/telemetry/research/bus-trace.jsonl` instead. |
 | `CLIO_CODER_TRACE_BOOT=1` | Boot phase markers with elapsed time since process start, prefixed `[clio-coder:boot]` ([boot-trace.ts](../../src/core/boot-trace.ts)). |
 | `CLIO_CODER_MEMORY_TRACE=<path>` | Raw proactive-memory step envelopes. This file is content-bearing, so read it before sharing it ([task-memory-trace.ts](../../src/domains/memory/task-memory-trace.ts)). |
 

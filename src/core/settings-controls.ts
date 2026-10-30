@@ -685,15 +685,15 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"telemetry.research.systemOneDataset": [
 		"Research: decision dataset",
-		"Reserved for keeping the System One decision dataset under research mode. This build records nothing for it; systemOne.record still controls the dataset.",
+		"In research mode, keep the System One decision dataset. It holds redacted prompts and decision state, so it also needs Research: capture content and consent for the workspace. systemOne.record is a deprecated alias that keeps it without either.",
 	],
 	"telemetry.research.busTrace": [
 		"Research: bus trace",
-		"Reserved for recording shutdown and domain lifecycle bus events in research mode. This build records nothing for it.",
+		"In research mode, append shutdown and domain lifecycle bus events to telemetry/research/bus-trace.jsonl in the state directory.",
 	],
 	"systemOne.record": [
 		"Save decision examples",
-		"Keep local examples of what each decision engine chose and what happened next. Secrets are removed before saving. Files stay on this machine until you export them. Off by default; a short session record is kept either way.",
+		"Deprecated alias for research capture of the decision dataset. Keeps local examples of what each decision engine chose and what happened next, without research mode or workspace consent. Secrets are removed before saving. Files stay on this machine until you export them. User settings only; a short session record is kept either way.",
 	],
 	"systemOne.retentionDays": [
 		"Dataset retention",

@@ -320,6 +320,33 @@ function stripProjectTelemetry(
 }
 
 /**
+ * `systemOne.record` keeps redacted decision state and prompts without research
+ * consent, so as a deprecated alias of research capture only the operator's own
+ * file may turn it on (#434).
+ */
+function stripProjectSystemOneRecord(
+	blob: Record<string, unknown>,
+	origin: SettingsOrigin,
+	issues: SettingsLayerIssue[],
+	userBlob: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+	if (!isRecord(blob.systemOne) || !Object.hasOwn(blob.systemOne, "record") || blob.systemOne.record === false)
+		return blob;
+	if (isRecord(userBlob?.systemOne) && userBlob.systemOne.record === true) return blob;
+	issues.push({
+		origin,
+		path: "systemOne.record",
+		message: "a project may only lower telemetry capture from user settings; project value ignored",
+	});
+	const systemOne = { ...blob.systemOne };
+	delete systemOne.record;
+	const cleaned = { ...blob };
+	if (Object.keys(systemOne).length === 0) delete cleaned.systemOne;
+	else cleaned.systemOne = systemOne;
+	return cleaned;
+}
+
+/**
  * Safety keys only the operator's own file may set. Scratch roots widen where
  * yolo may delete outside the workspace (#419), so a repository can neither set
  * nor extend them. The unattended window decides how long Clio waits for this
@@ -488,11 +515,16 @@ function prepareProjectLayers(
 		const blob =
 			raw.blob === undefined
 				? undefined
-				: stripProjectTelemetry(
-						stripProjectOperatorSafety(
-							stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
+				: stripProjectSystemOneRecord(
+						stripProjectTelemetry(
+							stripProjectOperatorSafety(
+								stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
+								origin,
+								issues,
+							),
 							origin,
 							issues,
+							userBlob,
 						),
 						origin,
 						issues,

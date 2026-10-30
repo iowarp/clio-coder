@@ -90,7 +90,7 @@ All default off; enable with `1`.
 
 | Variable | Controls |
 | --- | --- |
-| `CLIO_CODER_BUS_TRACE` | Event-bus channel tracing to stderr ([bus-trace.ts](../../src/core/bus-trace.ts)). |
+| `CLIO_CODER_BUS_TRACE` | Event-bus channel tracing to stderr ([bus-trace.ts](../../src/core/bus-trace.ts)). Deprecated alias of research mode with `telemetry.research.busTrace`, which writes `<stateDir>/telemetry/research/bus-trace.jsonl`; doctor's `telemetry` row names it while it is set. |
 | `CLIO_CODER_PROFILE_COMPARE` | Prints each configured route that matches no entry in `models/profiles.yaml`, or whose profile differs from the legacy catalog, once per process ([extension.ts](../../src/domains/providers/extension.ts)). |
 | `CLIO_CODER_TRACE_BOOT` | Boot-phase timing trace ([boot-trace.ts](../../src/core/boot-trace.ts)). |
 | `CLIO_CODER_TIMING` | Startup timing report, printed only on the bannered non-interactive boot ([orchestrator.ts](../../src/entry/orchestrator.ts)). |
