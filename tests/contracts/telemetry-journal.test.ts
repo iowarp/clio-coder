@@ -5,9 +5,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall, recordTelemetry, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
+import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
+import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
 import { openCallJournal, readCallJournal } from "../../src/domains/observability/call-journal.js";
+import { foldCallJournal, foldCallsBy, foldFacts } from "../../src/domains/observability/folds.js";
 import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
 
@@ -188,4 +192,96 @@ test("only the next owner repairs torn tails; future records survive reopening a
 		await journal.close();
 		await rm(sessionDirectory, { recursive: true, force: true });
 	}
+});
+
+test("the call fold deduplicates forks and retries, preserves unknown coverage and never adds token subfields twice", () => {
+	const clock = { t: "2026-10-30T12:00:00.000Z", mono: 1 };
+	const started = (): CallStarted => ({
+		callId: newCallId(),
+		attemptId: newAttemptId(),
+		attempt: 0,
+		label: "main",
+		target: { targetId: "target", runtimeId: "fixture", api: "fixture", requestedModel: "model", reportedModel: unknown },
+		roundKind: "normal",
+		toolChoice: "auto",
+	});
+	const first = started();
+	const settle = (start: CallStarted, message: unknown, pricing: "known" | "unknown" = "unknown") =>
+		makeTelemetryRecord(
+			"call.settled",
+			{ ...start, ...callSettlementFromMessage(message, pricing), stages: { settle: 1 } },
+			context,
+			clock,
+		);
+	const priced = settle(
+		first,
+		{
+			stopReason: "stop",
+			usage: { input: 10, output: 4, cacheRead: 6, cacheWrite: 2, cacheWrite1h: 1, reasoning: 2, cost: { total: 0.125 } },
+		},
+		"known",
+	);
+	const zero = settle(
+		{ ...first, attemptId: newAttemptId(), attempt: 1 },
+		{
+			stopReason: "stop",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, clioExternal: { tokenUsage: "provider-reported" } },
+		},
+	);
+	const unsent = settle(started(), { stopReason: "aborted", callInvoked: false });
+	const incomplete = makeTelemetryRecord("call.started", started(), context, clock);
+	const missingCall = newCallId();
+	const refs = [first.callId, missingCall].map((callId) =>
+		makeTelemetryRecord("call.ref", { callId, runId: "run" }, context, clock),
+	);
+	const rows = [
+		priced,
+		zero,
+		unsent,
+		incomplete,
+		...refs,
+		priced,
+		{ ...zero, id: makeTelemetryRecord("session.opened", {}, context, clock).id },
+	];
+	const fold = foldCallJournal(rows);
+	deepStrictEqual(foldCallJournal([...rows].reverse()).totals, fold.totals);
+	strictEqual(fold.totals.logicalCalls, 3);
+	strictEqual(fold.totals.attempts, 4);
+	strictEqual(fold.totals.neverSent, 1);
+	strictEqual(fold.totals.incomplete, 1);
+	strictEqual(fold.totals.promptTokens.measured, 18);
+	strictEqual(fold.totals.totalTokens.measured, 22);
+	strictEqual(fold.totals.usd.measured, 0);
+	strictEqual(fold.totals.usd.estimated, 0.125);
+	strictEqual(fold.totals.usd.unknownCount, 2);
+	strictEqual(fold.totals.usd.absentCount, 1);
+	strictEqual(fold.totals.totalTokens.unknownCount, 1);
+	deepStrictEqual(fold.unresolvedCallIds, [missingCall]);
+	strictEqual(fold.coverage.duplicateRecords, 1);
+	strictEqual(fold.coverage.duplicateAttempts, 1);
+	deepStrictEqual(foldCallsBy(fold.attempts, (call) => call.started.target.targetId).get("target"), fold.totals);
+	strictEqual(foldCallJournal(rows, new Set([first.callId])).totals.attempts, 2);
+	const conflicting = {
+		...priced,
+		id: makeTelemetryRecord("session.opened", {}, context, clock).id,
+		data: {
+			...priced.data,
+			pricing: {
+				...priced.data.pricing,
+				usd: { kind: "estimated" as const, value: 100, method: "target-rates" as const },
+			},
+		},
+	};
+	const damaged = foldCallJournal([priced, conflicting]);
+	strictEqual(damaged.coverage.conflictingAttempts, 1);
+	strictEqual(damaged.totals.usd.estimated, 0);
+	strictEqual(damaged.totals.usd.unknownCount, 1);
+	deepStrictEqual(foldCallJournal([conflicting, priced]).totals, damaged.totals);
+	const facts = foldFacts([
+		{ kind: "measured", value: 0, source: "provider" },
+		unknown,
+		{ kind: "absent", reason: "not-captured-in-mode" },
+	]);
+	deepStrictEqual(facts.coverage, { measured: 1, estimated: 0, unknown: 1 });
+	strictEqual(facts.absentCount, 1);
 });
