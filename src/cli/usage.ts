@@ -9,7 +9,6 @@ import {
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
-import type { CallJournalRead } from "../domains/observability/call-journal.js";
 import {
 	failedCompactionUsageFromCalls,
 	summarizeFailedCompactionUsage,
@@ -27,6 +26,7 @@ import { type OutOfTurnUsageRow, readOutOfTurnUsageRows } from "../domains/obser
 import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { loadSkills } from "../domains/resources/index.js";
+import type { SessionCallJournalRead } from "../domains/session/fork-journal.js";
 import { readSessionCallJournalSync } from "../domains/session/fork-journal.js";
 import {
 	foldPromptCacheTelemetry,
@@ -42,6 +42,7 @@ import {
 	readAuditRows,
 } from "../domains/session/index.js";
 import { journalUsageWindow, uniqueUsageCalls } from "../domains/session/journal-usage.js";
+import { runJournalsInWindow, usageCallsFromRunJournals } from "../domains/session/run-journal-usage.js";
 import { ledgerCallFailureCounts, usageCoverageLabel } from "../domains/session/usage.js";
 import { cwdHash } from "../engine/session.js";
 import { displayToolCall } from "../tools/gateway-display.js";
@@ -143,7 +144,27 @@ function emptyWorkerUsageTotals(): WorkerUsageTotals {
 	};
 }
 
-function addWorkerReceipt(totals: WorkerUsageTotals, receipt: UsageReceipt): void {
+type WorkerUsageContribution = Pick<
+	UsageReceipt,
+	| "unknownCallCoverageRuns"
+	| "costSummary"
+	| "apiCalls"
+	| "missingTokenCalls"
+	| "costProvenance"
+	| "tokenCount"
+	| "inputTokenCount"
+	| "outputTokenCount"
+	| "cacheReadTokenCount"
+	| "cacheWriteTokenCount"
+	| "reasoningTokenCount"
+	| "costUsd"
+	| "missingTokenUsage"
+	| "targetId"
+	| "modelId"
+	| "audience"
+> & { missingBreakdownUsage?: boolean };
+
+function addWorkerReceipt(totals: WorkerUsageTotals, receipt: WorkerUsageContribution): void {
 	totals.runs += 1;
 	totals.apiCalls += receipt.apiCalls;
 	totals.missingTokenCalls += receipt.missingTokenCalls;
@@ -158,20 +179,22 @@ function addWorkerReceipt(totals: WorkerUsageTotals, receipt: UsageReceipt): voi
 	});
 	if (receipt.missingTokenUsage) totals.missingTokenRuns += 1;
 	if (
+		receipt.missingBreakdownUsage ||
 		receipt.inputTokenCount === null ||
 		receipt.outputTokenCount === null ||
 		receipt.cacheReadTokenCount === null ||
 		receipt.cacheWriteTokenCount === null
 	)
 		totals.missingBreakdownRuns += 1;
-	if (receipt.costUsd === null) totals.unpricedRuns += 1;
+	if (receipt.costUsd === null || receipt.costSummary?.hasUnknown) totals.unpricedRuns += 1;
 	totals.totalTokens += receipt.tokenCount ?? 0;
 	totals.input += receipt.inputTokenCount ?? 0;
 	totals.output += receipt.outputTokenCount ?? 0;
 	totals.cacheRead += receipt.cacheReadTokenCount ?? 0;
 	totals.cacheWrite += receipt.cacheWriteTokenCount ?? 0;
 	totals.reasoningTokens += receipt.reasoningTokenCount ?? 0;
-	totals.knownCostUsd += receipt.costUsd ?? 0;
+	totals.knownCostUsd +=
+		receipt.costSummary?.knownUsd ?? (receipt.costProvenance === "unknown" ? 0 : (receipt.costUsd ?? 0));
 }
 
 interface SessionUsage {
@@ -184,6 +207,7 @@ interface SessionUsage {
 	entriesInWindow: number;
 	/** Completed API calls this session recorded in the window, one per call. */
 	usageCalls: LedgerUsageCall[];
+	workerCalls: LedgerUsageCall[];
 	failureCounts: ReturnType<typeof ledgerCallFailureCounts>;
 	/** Backend prompt-cache facts persisted on assistant calls in the window. */
 	promptCache: PromptCacheTelemetry;
@@ -511,8 +535,44 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const workerUsageByModel = new Map<string, { targetId: string; modelId: string; totals: WorkerUsageTotals }>();
 	const workerUsageByAudience = new Map<string, WorkerUsageTotals>();
 	const meteredSessions = new Set(sessions.filter((row) => row.usageCalls.length > 0).map((row) => row.sessionId));
+	const contributions = new Map<string, WorkerUsageContribution>();
+	const excludedRuns = new Set<string>();
 	for (const receipt of receipts) {
-		if (receipt.usageSessionId !== null && meteredSessions.has(receipt.usageSessionId)) continue;
+		if (receipt.usageSessionId !== null && meteredSessions.has(receipt.usageSessionId)) {
+			excludedRuns.add(receipt.runId);
+			continue;
+		}
+		contributions.set(receipt.runId, receipt);
+	}
+	for (const call of uniqueUsageCalls(sessions.flatMap((session) => session.workerCalls))) {
+		if (!call.runId || excludedRuns.has(call.runId)) continue;
+		const receipt = contributions.get(call.runId);
+		if (call.runJournalUnavailable && receipt) continue;
+		contributions.set(call.runId, {
+			targetId: call.providerId,
+			modelId: call.attributedModelId,
+			audience: receipt?.audience ?? "unknown",
+			apiCalls: call.apiCalls ?? 0,
+			missingTokenCalls: call.missingTokenCalls ?? 0,
+			unknownCallCoverageRuns: call.costSummary?.unknownCallCoverageRuns ?? 0,
+			...(call.costSummary ? { costSummary: call.costSummary } : {}),
+			costProvenance: call.costProvenance ?? "unknown",
+			tokenCount: call.totalTokens,
+			inputTokenCount: call.input,
+			outputTokenCount: call.output,
+			cacheReadTokenCount: call.cacheRead,
+			cacheWriteTokenCount: call.cacheWrite,
+			reasoningTokenCount: call.reasoningTokens,
+			costUsd: call.costUsd,
+			missingTokenUsage: call.tokenUsageMissing ?? true,
+			missingBreakdownUsage:
+				!call.usageFacts ||
+				[call.usageFacts.input, call.usageFacts.output, call.usageFacts.cacheRead, call.usageFacts.cacheWrite].some(
+					(sum) => sum.unknownCount > 0,
+				),
+		});
+	}
+	for (const receipt of contributions.values()) {
 		addWorkerReceipt(workerUsage, receipt);
 		const audience = workerUsageByAudience.get(receipt.audience) ?? emptyWorkerUsageTotals();
 		addWorkerReceipt(audience, receipt);
@@ -1393,7 +1453,7 @@ async function readSessions(
 		const accountingEntries = parsedEntries.entries.filter(
 			(entry) => entry.kind === "modelChange" || inWindow(entry.timestamp, windowStart, windowEnd),
 		);
-		let journal: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
+		let journal: SessionCallJournalRead = { records: [], skipped: 0, damaged: 0, runs: new Map() };
 		try {
 			journal = readSessionCallJournalSync(dirname(ref.path), accountingEntries);
 		} catch {
@@ -1420,6 +1480,9 @@ async function readSessions(
 			// usage of their own, and dropping the ones that predate the window
 			// would attribute in-window calls to the wrong target.
 			usageCalls: ledgerUsageCalls(accountingEntries, {}, usageRecords),
+			workerCalls: usageCallsFromRunJournals(
+				runJournalsInWindow(journal, windowStart, windowEnd + USAGE_WINDOW_FUTURE_SKEW_MS),
+			),
 			failureCounts: ledgerCallFailureCounts(accountingEntries, usageRecords, seenFailures),
 			promptCache: foldPromptCacheTelemetry(accountingEntries),
 			recall: foldRecallTelemetry(accountingEntries),
@@ -1460,7 +1523,12 @@ async function readSessions(
 				if (shape.length > 0) usage.bashShapes.set(shape, (usage.bashShapes.get(shape) ?? 0) + 1);
 			}
 		}
-		if (usage.entriesInWindow > 0 || usage.usageCalls.length > 0 || usage.failureCounts.neverInvokedCalls > 0)
+		if (
+			usage.entriesInWindow > 0 ||
+			usage.usageCalls.length > 0 ||
+			usage.workerCalls.length > 0 ||
+			usage.failureCounts.neverInvokedCalls > 0
+		)
 			sessions.push(usage);
 	}
 	return sessions;

@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,13 +35,14 @@ import {
 	usageCallsFromAttempts,
 	usageCallsFromJournal,
 } from "../../src/domains/session/journal-usage.js";
-import { usageCallsFromRunJournals } from "../../src/domains/session/run-journal-usage.js";
+import { runJournalsInWindow, usageCallsFromRunJournals } from "../../src/domains/session/run-journal-usage.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
+import type { SessionUsageSink } from "../../src/domains/session/usage-record.js";
 import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import { reseedSessionUsageFromLedger } from "../../src/domains/session/usage-reseed.js";
 import { isReceiptBearingFrame } from "../../src/worker/protocol.js";
 import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
-import { isolateClioEnv } from "../harness/scratch-env.js";
+import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
 const context = { sessionId: "journal-session", label: "main" as const };
 const writer = { clioVersion: "fixture", piVersion: "fixture" };
@@ -181,7 +183,8 @@ test("overlapping work retains its original session and releases ownership only 
 });
 
 test("parent replay resolves aggregate-only run references and replaces a partial snapshot on settlement", async () => {
-	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-parent-run-"));
+	const scratch = await mkdtemp(join(tmpdir(), "telemetry-parent-run-"));
+	const stateDir = join(scratch, "state");
 	const sessionDirectory = join(stateDir, "sessions", "repo", "parent");
 	const journals = createSessionJournals(stateDir, () => {});
 	const parent = await journals.acquire({ id: "parent", cwdHash: "repo" }, "worker");
@@ -223,10 +226,10 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		await run.flush();
 		await journals.flush();
 		const tracker = createCostTracker();
-		const sink = {
+		const sink: SessionUsageSink = {
 			resetSession: () => tracker.reset(),
 			recordTokens: tracker.accumulate,
-			recordRunTokens: tracker.replace,
+			recordRunTokens: (id, _source, ...args) => tracker.replace(id, ...args),
 		};
 		reseedSessionUsageFromLedger(sink, [], { sessionId: "parent", journalDirectory: sessionDirectory });
 		strictEqual(tracker.sessionTokens().totalTokens, 5);
@@ -235,14 +238,62 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		await run.flush();
 		const snapshot = readSessionCallJournalSync(sessionDirectory, []);
 		strictEqual(snapshot.records.filter(({ record }) => record.k === "run.ref").length, 1);
+		strictEqual(runJournalsInWindow(snapshot, 0, 1).size, 0);
+		const missing = {
+			...snapshot,
+			runs: new Map([...snapshot.runs].map(([id, journal]) => [id, { ...journal, records: [] }])),
+		};
+		const unresolved = usageCallsFromRunJournals(runJournalsInWindow(missing, 0, Number.POSITIVE_INFINITY));
+		strictEqual(unresolved[0]?.apiCalls, 0);
+		strictEqual(unresolved[0]?.costSummary?.unknownCallCoverageRuns, 1);
 		for (const call of usageCallsFromRunJournals(snapshot.runs)) recordUsageCall(sink, call);
 		strictEqual(tracker.sessionTokens().totalTokens, 9);
 		strictEqual(tracker.entries().length, 1);
 		strictEqual(tracker.sessionCost().unknownCallCoverageRuns, 1);
+		await writeFile(join(sessionDirectory, "current.jsonl"), "");
+		await mkdir(join(stateDir, "receipts"));
+		await writeFile(
+			join(stateDir, "receipts", "run.json"),
+			JSON.stringify({
+				runId: "run",
+				sessionId: "parent",
+				endedAt: new Date().toISOString(),
+				tokenCount: 99,
+				apiCalls: 4,
+				missingTokenCalls: 0,
+				costUsd: 0,
+				costProvenance: "known_free",
+				agentAudience: "shadow",
+			}),
+		);
+		const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
+		const cliReport = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				"tsx",
+				"--input-type=module",
+				"-e",
+				`import {runUsageCommand} from ${JSON.stringify(cli)}; await runUsageCommand(['report','--json']);`,
+			],
+			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
+		);
+		strictEqual(cliReport.status, 0, cliReport.stderr);
+		const rows = cliReport.stdout
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as Record<string, unknown>);
+		strictEqual(
+			rows.find((row) => row.fact === "all-recorded-tokens")?.knownSubtotal,
+			tracker.sessionTokens().totalTokens,
+		);
+		strictEqual(rows.find((row) => row.fact === "worker-tokens")?.apiCalls, 0);
+		strictEqual(rows.find((row) => row.fact === "all-recorded-tokens")?.unknownCallCoverageRuns, 1);
+		strictEqual(rows.find((row) => row.fact === "worker-audience-usage" && row.audience === "shadow")?.totalTokens, 9);
 	} finally {
 		await run.close();
 		await parent.release();
-		await rm(stateDir, { recursive: true, force: true });
+		await rm(scratch, { recursive: true, force: true });
 	}
 });
 

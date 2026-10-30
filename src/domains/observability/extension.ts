@@ -264,9 +264,9 @@ export function createObservabilityBundle(
 	};
 
 	const contract: ObservabilityContract = {
-		recordRunTokens(runId, ...args) {
+		recordRunTokens(runId, source, ...args) {
 			// A sealed receipt already restored the complete run; its journal may since have been evicted (#434).
-			if (recordedRuns.has(runId)) return;
+			if (source === "unavailable" && recordedRuns.has(runId)) return;
 			cost.replace(`run:${runId}`, ...args);
 			projection.refresh();
 		},

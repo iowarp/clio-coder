@@ -9,7 +9,11 @@ import type { LedgerUsageCall } from "./usage.js";
 
 /** The slice of ObservabilityContract a reseed needs. */
 export interface SessionUsageSink {
-	recordRunTokens?(runId: string, ...args: Parameters<SessionUsageSink["recordTokens"]>): void;
+	recordRunTokens?(
+		runId: string,
+		source: "journal" | "unavailable",
+		...args: Parameters<SessionUsageSink["recordTokens"]>
+	): void;
 	resetSession(sessionId?: string | null): void;
 	recordNeverSentCalls?(count: number): void;
 	recordTokens(
@@ -52,7 +56,9 @@ export function recordUsageCall(
 		call.apiCalls ?? 1,
 	);
 	const record =
-		call.runId && sink.recordRunTokens ? sink.recordRunTokens.bind(sink, call.runId) : sink.recordTokens.bind(sink);
+		call.runId && sink.recordRunTokens
+			? sink.recordRunTokens.bind(sink, call.runId, call.runJournalUnavailable ? "unavailable" : "journal")
+			: sink.recordTokens.bind(sink);
 	record(
 		call.providerId,
 		call.attributedModelId,

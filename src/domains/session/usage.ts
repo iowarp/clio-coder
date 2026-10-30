@@ -25,11 +25,14 @@ import { journalOwnsSideUsage, usageCallsFromJournal } from "./journal-usage.js"
 /** One attempt projected from the journal, or a legacy ledger usage row (#434). */
 export interface LedgerUsageCall {
 	runId?: string;
+	runJournalUnavailable?: boolean;
 	/** Replay-only boundary for comparing a frozen fork prefix with the run owner's complete scope (#434). */
 	runCutoff?: number;
 	callId?: string;
 	attemptId?: string;
 	facts?: CallTotals;
+	usageFacts?: CallTotals["usage"];
+	tokenUsageMissing?: boolean;
 	costSummary?: CostAggregate;
 	callOutcome?: "success" | "error" | "aborted";
 	compactionOutcome?: Payload<"compaction.closed">["outcome"] | "unknown";
