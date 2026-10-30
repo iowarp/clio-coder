@@ -20,10 +20,10 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 	const lease = options ? await options.acquire(options.origin, options.label) : undefined;
 	let call: TelemetryCall | undefined;
 	return {
-		startAttempt(): void {
+		startAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): void {
 			if (!options || !lease) return;
 			call = call
-				? (call.nextAttempt() ?? call)
+				? (call.nextAttempt(request) ?? call)
 				: beginCall(
 						{
 							label: options.label,
@@ -36,6 +36,7 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 							},
 							roundKind: "tools-removed",
 							toolChoice: "none",
+							...request,
 						},
 						lease.context,
 					);

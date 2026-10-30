@@ -4,6 +4,9 @@ import {
 	getToolStateChanges,
 	toToolDeclaration,
 } from "@earendil-works/pi-ai";
+import { trackCallFetch } from "../core/call-failure.js";
+import type { CallJournalOptions, CallScope } from "../domains/observability/call-scope.js";
+import { openCallScope } from "../domains/observability/call-scope.js";
 import { normalizeContext } from "./context.js";
 /**
  * One bounded-output warm through the eventual caller's engine request path.
@@ -48,6 +51,7 @@ export interface PrewarmContext {
 const LLM_MESSAGE_ROLES: ReadonlySet<string> = new Set(["system", "user", "assistant", "toolResult"]);
 
 export interface PrewarmRoundInput {
+	telemetry?: CallJournalOptions;
 	model: EngineModel;
 	/** Live agent state the next turn would send. Read-only; the round copies it. */
 	state: {
@@ -133,6 +137,16 @@ export function prewarmPromptTokens(result: Pick<PrewarmRoundResult, "usage" | "
  * backend that refuses it must not be able to break the session it was warming.
  */
 export async function runPrewarmRound(input: PrewarmRoundInput): Promise<PrewarmRoundResult> {
+	const scope = await openCallScope(input.telemetry, input.model);
+	try {
+		return await runPrewarmAttempt(input, scope);
+	} finally {
+		await scope.close();
+	}
+}
+
+async function runPrewarmAttempt(input: PrewarmRoundInput, scope: CallScope): Promise<PrewarmRoundResult> {
+	scope.startAttempt({ roundKind: "normal", toolChoice: "auto" });
 	// pi-agent-core maps `thinkingLevel: "off"` onto an absent `reasoning`; the
 	// pre-warm has to make the same mapping or the thinking composition resolves
 	// against a different level and the rendered template moves.
@@ -176,6 +190,8 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 		};
 	}
 
+	const tracking = trackCallFetch(options.fetch as typeof globalThis.fetch | undefined);
+	options.fetch = tracking.fetch;
 	const send = input.streamFn ?? input.agent?.streamFunction ?? streamSimple;
 	const startedAt = performance.now();
 	let firstDeltaAt: number | null = null;
@@ -214,6 +230,7 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 			throw new Error("pre-warm input estimate exceeds its token budget");
 		}
 		if (input.canSend?.() === false) {
+			scope.settle({ stopReason: "aborted", callInvoked: false });
 			return {
 				invoked,
 				aborted: true,
@@ -224,7 +241,10 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 			};
 		}
 		invoked = true;
-		const events = await send(model, context, options as unknown as Parameters<typeof streamSimple>[2]);
+		tracking.start(model.api, typeof options.transport === "string" ? options.transport : undefined);
+		const events = await scope.withContext(() =>
+			send(model, context, options as unknown as Parameters<typeof streamSimple>[2]),
+		);
 		for await (const event of events) {
 			const hasDelta =
 				event.type === "toolcall_start" ||
@@ -232,6 +252,7 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 					event.delta.length > 0);
 			if (firstDeltaAt === null && hasDelta) firstDeltaAt = performance.now();
 			if (event.type === "done") {
+				scope.settle(event.message);
 				return {
 					invoked,
 					aborted: false,
@@ -244,6 +265,7 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 			if (event.type === "error") {
 				const failed = event.error as { stopReason?: unknown; errorMessage?: unknown };
 				const aborted = event.reason === "aborted" || failed.stopReason === "aborted" || input.signal?.aborted === true;
+				scope.settle({ ...event.error, failure: tracking.failure(event.error, aborted) });
 				return {
 					invoked,
 					aborted,
@@ -255,6 +277,10 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 			}
 		}
 	} catch (error) {
+		scope.settle({
+			stopReason: input.signal?.aborted ? "aborted" : "error",
+			failure: tracking.failure(error, input.signal?.aborted),
+		});
 		return {
 			invoked,
 			aborted: input.signal?.aborted === true,
@@ -264,6 +290,7 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 			errorMessage: input.signal?.aborted === true ? null : error instanceof Error ? error.message : String(error),
 		};
 	}
+	scope.settle({ stopReason: "error", failure: tracking.failure("stream ended without terminal response") });
 	return {
 		invoked,
 		aborted: input.signal?.aborted === true,

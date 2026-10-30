@@ -1,3 +1,4 @@
+import type { CallJournalOptions } from "../domains/observability/call-scope.js";
 /**
  * Pre-warm ownership: when the prefix is sent, what stops it, and what it
  * records. The round itself lives in `prewarm.ts`.
@@ -74,6 +75,10 @@ export interface TurnPrewarmDeps {
 	/** Freeze the session tool surface onto the agent, exactly as a submit does. */
 	applySessionTools: (runtime: AgentRuntime) => void;
 	/** Report the round's provider usage under its own `/usage` label. */
+	callJournal?: (
+		runtime: AgentRuntime,
+		origin: ReturnType<SessionContract["current"]>,
+	) => { telemetry?: CallJournalOptions };
 	recordUsage: (runtime: AgentRuntime, usage: Usage | null, origin: ReturnType<SessionContract["current"]>) => void;
 	/**
 	 * Claim one in-flight request on the runtime's endpoint for the duration of
@@ -281,6 +286,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			const deadline = setTimeout(() => controller.abort(), Math.min(target.cache.warm.maxDurationMs ?? 30000, 120000));
 			try {
 				const wake = await round({
+					...deps.callJournal?.(runtime, origin),
 					model: runtime.agent.state.model,
 					state: { systemPrompt: "", messages: [], tools: [], thinkingLevel: "off" },
 					...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
@@ -362,6 +368,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		const deadline = setTimeout(() => controller.abort(), Math.min(target.cache?.warm?.maxDurationMs ?? 30000, 120000));
 		try {
 			result = await round({
+				...deps.callJournal?.(runtime, origin),
 				model: runtime.agent.state.model,
 				agent: runtime.agent,
 				state: {

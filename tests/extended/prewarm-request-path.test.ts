@@ -1,8 +1,13 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { Type } from "typebox";
+import { readCallJournal } from "../../src/domains/observability/call-journal.js";
+import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import llamacpp from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
@@ -128,6 +133,17 @@ test("terminal-only warm reports no TTFT and absent provider usage remains unkno
 });
 
 test("native warm cannot administer residency or JIT-load a model and applies its input bound after transforms", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "prewarm-journal-"));
+	const journals = createSessionJournals(stateDir, () => {});
+	const telemetry = {
+		origin: { id: "prewarm-session", cwdHash: "repo" },
+		acquire: journals.acquire,
+		label: "prewarm" as const,
+		targetId: "local",
+		runtimeId: "llamacpp",
+		costProvenance: "known_free" as const,
+	};
+
 	const paths: string[] = [];
 	let body: Record<string, unknown> | undefined;
 	const server = createServer(async (req, res) => {
@@ -157,7 +173,14 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 			null,
 		);
 		const { agent } = createEngineAgent({ initialState: { model, thinkingLevel: "off", systemPrompt: "instructions" } });
-		const result = await runPrewarmRound({ model, state: agent.state, agent, apiKey: "fixture", maxInputTokens: 100 });
+		const result = await runPrewarmRound({
+			model,
+			state: agent.state,
+			agent,
+			apiKey: "fixture",
+			maxInputTokens: 100,
+			telemetry,
+		});
 		strictEqual(result.errorMessage, null);
 		deepStrictEqual(paths, ["POST /v1/chat/completions?autoload=false"]);
 		strictEqual(body?.cache_prompt, true);
@@ -167,10 +190,27 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 			"foreground authority is unchanged",
 		);
 		agent.transformContext = async (messages) => [{ role: "user", content: "x".repeat(1000), timestamp: 0 }, ...messages];
-		const refused = await runPrewarmRound({ model, state: agent.state, agent, apiKey: "fixture", maxInputTokens: 100 });
+		const refused = await runPrewarmRound({
+			model,
+			state: agent.state,
+			agent,
+			apiKey: "fixture",
+			maxInputTokens: 100,
+			telemetry,
+		});
 		ok(refused.errorMessage?.includes("token budget"));
 		strictEqual(paths.length, 1, "oversized transformed warm never reaches the server");
+		const calls = (await readCallJournal(join(stateDir, "sessions", "repo", "prewarm-session"))).records
+			.map(({ record }) => record)
+			.filter((record) => record.k === "call.settled");
+		strictEqual(calls.length, 2);
+		strictEqual(calls[0]?.data.disposition, "settled");
+		strictEqual(calls[1]?.data.disposition, "never_sent");
+		strictEqual(calls[1]?.data.usage, null);
+		ok(calls.every((record) => record.data.label === "prewarm"));
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
+		await journals.flush();
+		await rm(stateDir, { recursive: true, force: true });
 	}
 });
