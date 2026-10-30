@@ -1,36 +1,38 @@
 /**
- * Quota adapter for the OpenAI Codex subscription.
+ * Quota adapter for the `openai-codex` runtime, the ChatGPT account Clio
+ * itself spends when it runs a native Codex turn.
  *
- * Codex CLI stores its own OAuth record in `auth.json`, honoring
- * `CODEX_HOME` when set the same way the `codex` command does. This
- * adapter reads that file and never writes it, then reads current usage
- * from the ChatGPT backend's usage endpoint.
+ * The credential is the OAuth record Clio's own auth storage persists under
+ * the `openai-codex` provider id, so this adapter reads no other agent's
+ * files and stays registered in a relocated home. It reads the stored
+ * credential without triggering a refresh, because a quota read must never
+ * mutate an authentication record. The Codex CLI's login is a separate
+ * credential that `codex-cli-provider.ts` reads under the interop rules (#434).
  */
 
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { explicitAgentHome, interopDisabled, isClioHomeRelocated } from "../../core/xdg.js";
-import type { QuotaProvider, UsageCredits, UsageSnapshot, UsageWindow } from "./types.js";
-import { formatPlan } from "./types.js";
+import { arch, platform, release } from "node:os";
+import { readClioVersion } from "../../core/package-root.js";
+import { openAuthStorage } from "../providers/auth/index.js";
+import type { CodexAccountToken } from "./codex-usage.js";
+import { asNumber, fetchCodexUsage, isRecord } from "./codex-usage.js";
+import type { QuotaProvider, UsageSnapshot } from "./types.js";
 
 export const CODEX_QUOTA_PROVIDER_ID = "codex";
-export const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
-const DISPLAY_NAME = "Codex";
+/** The provider id Clio's auth storage files an OpenAI Codex OAuth credential under. */
+const AUTH_PROVIDER_ID = "openai-codex";
+const DISPLAY_NAME = "OpenAI Codex";
 const REQUEST_TIMEOUT_MS = 15_000;
-const WINDOW_ORDER: Record<string, number> = { session: 0, weekly: 1 };
-const WEEKLY_THRESHOLD_SECONDS = 86_400;
+const LOGIN_AGAIN = "Run clio-coder auth login openai-codex again";
 
-/** The subset of Codex's stored OAuth record this adapter needs. */
-export interface CodexCredentials {
-	accessToken: string;
-	accountId: string | null;
+/** The subset of Clio's stored OAuth credential this adapter needs. */
+export interface CodexCredentials extends CodexAccountToken {
+	/** Epoch milliseconds the access token expires, or null when the record omits it. */
+	expiresAtMs: number | null;
+	hasRefreshToken: boolean;
 }
 
 export interface CodexQuotaOptions {
-	/** Override the credential file location; defaults to `$CODEX_HOME/auth.json` or `~/.codex/auth.json`. */
-	credentialsPath?: string;
 	/** Replace credential reading entirely, which is how tests supply a token. */
 	readCredentials?: () => Promise<CodexCredentials | null>;
 	fetch?: typeof globalThis.fetch;
@@ -38,47 +40,39 @@ export interface CodexQuotaOptions {
 	now?: () => Date;
 }
 
-/** Codex's default credential file path. */
-function defaultCodexCredentialsPath(): string | null {
-	const home = explicitAgentHome("CODEX_HOME");
-	if (home) return join(home, "auth.json");
-	return isClioHomeRelocated() || interopDisabled() ? null : join(homedir(), ".codex", "auth.json");
-}
-
-/** Extract the access token and account id from a parsed credential document. */
-function parseCodexCredentials(raw: unknown): CodexCredentials | null {
-	if (!isRecord(raw)) return null;
-	const tokens = raw.tokens;
-	if (!isRecord(tokens)) return null;
-	const accessToken = tokens.access_token;
-	if (typeof accessToken !== "string" || accessToken.length === 0) return null;
-	const accountId = tokens.account_id;
+/** Shape a stored auth credential into the fields a usage read needs. */
+function parseStoredCodexCredential(raw: unknown): CodexCredentials | null {
+	if (!isRecord(raw) || raw.type !== "oauth") return null;
+	const access = raw.access;
+	if (typeof access !== "string" || access.length === 0) return null;
+	const accountId = raw.accountId;
+	const refresh = raw.refresh;
 	return {
-		accessToken,
-		accountId: typeof accountId === "string" ? accountId : null,
+		accessToken: access,
+		accountId: typeof accountId === "string" && accountId.length > 0 ? accountId : null,
+		expiresAtMs: asNumber(raw.expires),
+		hasRefreshToken: typeof refresh === "string" && refresh.length > 0,
 	};
 }
 
-async function readCredentialsFile(path: string): Promise<CodexCredentials | null> {
-	let text: string;
+/**
+ * Read Clio's stored OpenAI Codex credential.
+ *
+ * `AuthStorage.get` is the accessor that does no refresh, unlike
+ * `resolveApiKey`, which renews an expiring credential as a side effect.
+ */
+async function readStoredCredential(): Promise<CodexCredentials | null> {
 	try {
-		text = await readFile(path, "utf8");
+		return parseStoredCodexCredential(openAuthStorage().get(AUTH_PROVIDER_ID));
 	} catch {
-		return null;
-	}
-	try {
-		return parseCodexCredentials(JSON.parse(text));
-	} catch {
+		// An unreadable credential store reads as no login; the snapshot says so.
 		return null;
 	}
 }
 
 /** Build the read-only `codex` quota adapter. */
 export function createCodexQuotaProvider(options: CodexQuotaOptions = {}): QuotaProvider {
-	const credentialsPath = options.credentialsPath ?? defaultCodexCredentialsPath();
-	const readCredentials =
-		options.readCredentials ??
-		(() => (credentialsPath === null ? Promise.resolve(null) : readCredentialsFile(credentialsPath)));
+	const readCredentials = options.readCredentials ?? readStoredCredential;
 	const doFetch = options.fetch ?? globalThis.fetch;
 	const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
 	const now = options.now ?? (() => new Date());
@@ -108,134 +102,26 @@ export function createCodexQuotaProvider(options: CodexQuotaOptions = {}): Quota
 		async fetch(): Promise<UsageSnapshot> {
 			const credentials = await readCredentials();
 			if (credentials === null) {
-				return snapshot("no_credentials", "No Codex credentials found");
+				return snapshot("no_credentials", "Clio holds no OpenAI Codex OAuth credential");
+			}
+			if (credentials.expiresAtMs !== null && credentials.expiresAtMs <= now().getTime()) {
+				return snapshot(
+					"expired",
+					credentials.hasRefreshToken ? "Clio's OpenAI Codex token expired; the next turn refreshes it" : LOGIN_AGAIN,
+				);
 			}
 
-			const headers: Record<string, string> = {
-				Authorization: `Bearer ${credentials.accessToken}`,
-				"User-Agent": "codex-cli",
-			};
-			if (credentials.accountId !== null) {
-				headers["ChatGPT-Account-Id"] = credentials.accountId;
-			}
-
-			const controller = new AbortController();
-			const timer = setTimeout(() => controller.abort(), timeoutMs);
-			let response: Response;
-			try {
-				response = await doFetch(CODEX_USAGE_URL, {
-					method: "GET",
-					headers,
-					signal: controller.signal,
-				});
-			} catch (error) {
-				return snapshot("error", describeError(error, timeoutMs));
-			} finally {
-				clearTimeout(timer);
-			}
-
-			if (response.status === 401 || response.status === 403) {
-				await discardBody(response);
-				return snapshot("expired", "Sign in with Codex again");
-			}
-			if (response.status !== 200) {
-				await discardBody(response);
-				return snapshot("error", `HTTP ${response.status}`);
-			}
-
-			let body: unknown;
-			try {
-				body = await response.json();
-			} catch {
-				return snapshot("error", "Unexpected usage response");
-			}
-			if (!isRecord(body)) {
-				return snapshot("error", "Unexpected usage response");
-			}
-
-			const planType = typeof body.plan_type === "string" ? body.plan_type : null;
-			return snapshot("ok", null, {
-				windows: usageWindows(body.rate_limit),
-				credits: usageCredits(body.credits),
-				plan: formatPlan(planType),
+			// The read names Clio as the client, as the native Codex transport does.
+			const usage = await fetchCodexUsage(credentials, {
+				fetch: doFetch,
+				timeoutMs,
+				identity: {
+					originator: "clio-coder",
+					"User-Agent": `clio-coder/${readClioVersion()} (${platform()} ${release()}; ${arch()})`,
+				},
 			});
+			if (usage.status !== "ok") return snapshot(usage.status, usage.message ?? LOGIN_AGAIN);
+			return snapshot("ok", null, { windows: usage.windows, credits: usage.credits, plan: usage.plan });
 		},
 	};
-}
-
-/** Windows from the `rate_limit.primary_window` and `.secondary_window` slots. */
-function usageWindows(raw: unknown): UsageWindow[] {
-	if (!isRecord(raw)) return [];
-	const windows: UsageWindow[] = [];
-	const primary = buildWindow(raw.primary_window, "session");
-	if (primary !== null) windows.push(primary);
-	const secondary = buildWindow(raw.secondary_window, "weekly");
-	if (secondary !== null) windows.push(secondary);
-	return windows.sort((left, right) => {
-		const order = (WINDOW_ORDER[left.key] ?? 2) - (WINDOW_ORDER[right.key] ?? 2);
-		return order !== 0 ? order : left.label.localeCompare(right.label);
-	});
-}
-
-/** One `rate_limit` window slot, with the key defaulting when `limit_window_seconds` is absent. */
-function buildWindow(raw: unknown, defaultKey: "session" | "weekly"): UsageWindow | null {
-	if (!isRecord(raw)) return null;
-	const usedPct = asNumber(raw.used_percent);
-	if (usedPct === null) return null;
-	const key = windowKey(raw.limit_window_seconds, defaultKey);
-	const label = key === "weekly" ? "Weekly" : "5h";
-	const short = key === "weekly" ? "wk" : "5h";
-	return { key, label, short, usedPct, resetsAt: epochSecondsToIso(raw.reset_at) };
-}
-
-function windowKey(limitWindowSeconds: unknown, defaultKey: "session" | "weekly"): "session" | "weekly" {
-	const seconds = asNumber(limitWindowSeconds);
-	if (seconds === null) return defaultKey;
-	return seconds >= WEEKLY_THRESHOLD_SECONDS ? "weekly" : "session";
-}
-
-/** Credit balance from the `credits` block, present only for credit-billed plans. */
-function usageCredits(raw: unknown): UsageCredits | null {
-	if (!isRecord(raw)) return null;
-	if (raw.unlimited === true) return { display: "Unlimited", usedPct: null };
-	if (raw.has_credits === true && typeof raw.balance === "string" && raw.balance.length > 0) {
-		return { display: raw.balance, usedPct: null };
-	}
-	return null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function asNumber(value: unknown): number | null {
-	if (typeof value === "number") return Number.isFinite(value) ? value : null;
-	if (typeof value === "string") {
-		const parsed = Number.parseFloat(value.trim());
-		return Number.isFinite(parsed) ? parsed : null;
-	}
-	return null;
-}
-
-/** Convert a UNIX epoch seconds value into an ISO 8601 instant. */
-function epochSecondsToIso(value: unknown): string | null {
-	const seconds = asNumber(value);
-	if (seconds === null) return null;
-	const date = new Date(seconds * 1000);
-	return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function describeError(error: unknown, timeoutMs: number): string {
-	if (error instanceof Error) {
-		return error.name === "AbortError" ? `timeout after ${timeoutMs}ms` : error.message;
-	}
-	return String(error);
-}
-
-async function discardBody(response: Response): Promise<void> {
-	try {
-		await response.body?.cancel();
-	} catch {
-		return;
-	}
 }

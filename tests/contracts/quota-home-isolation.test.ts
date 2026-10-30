@@ -6,6 +6,7 @@ import { isClioHomeRelocated, resolveClioDirs } from "../../src/core/xdg.js";
 import { createAnthropicMaxQuotaProvider } from "../../src/domains/quota/anthropic-max-provider.js";
 import { createAntigravityQuotaProvider } from "../../src/domains/quota/antigravity-provider.js";
 import { createClaudeCodeQuotaProvider } from "../../src/domains/quota/claude-code-provider.js";
+import { createCodexCliQuotaProvider } from "../../src/domains/quota/codex-cli-provider.js";
 import { createCodexQuotaProvider } from "../../src/domains/quota/codex-provider.js";
 import { buildQuotaProviders } from "../../src/domains/quota/registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -31,7 +32,7 @@ test("BT-006 relocated homes exclude implicit sibling credentials before detecti
 			throw new Error("unexpected network");
 		};
 		for (const provider of [
-			createCodexQuotaProvider({ fetch }),
+			createCodexCliQuotaProvider({ fetch }),
 			createClaudeCodeQuotaProvider({ fetch }),
 			createAntigravityQuotaProvider({ fetch }),
 		]) {
@@ -41,7 +42,7 @@ test("BT-006 relocated homes exclude implicit sibling credentials before detecti
 		strictEqual(requests, 0);
 		deepStrictEqual(
 			buildQuotaProviders().map((p) => p.id),
-			["anthropic-max"],
+			["anthropic-max", "codex"],
 		);
 	} finally {
 		env.restore();
@@ -67,12 +68,12 @@ test("BT-006 explicit sibling homes opt in independently and default roots prese
 			{ claudeAiOauth: { accessToken: "scratch" } },
 			{ token: { access_token: "scratch" } },
 		];
-		const factories = [createCodexQuotaProvider, createClaudeCodeQuotaProvider, createAntigravityQuotaProvider];
+		const factories = [createCodexCliQuotaProvider, createClaudeCodeQuotaProvider, createAntigravityQuotaProvider];
 		for (const [index, key] of homes.entries()) {
 			process.env[key] = env.dir;
 			writeFileSync(join(env.dir, leaves[index] ?? "missing"), JSON.stringify(records[index]));
 			strictEqual(await factories[index]?.().detect(), true);
-			strictEqual(buildQuotaProviders().length, 2);
+			strictEqual(buildQuotaProviders().length, 3);
 			delete process.env[key];
 		}
 		for (const key of [
@@ -86,7 +87,7 @@ test("BT-006 explicit sibling homes opt in independently and default roots prese
 		strictEqual(isClioHomeRelocated(), false);
 		deepStrictEqual(
 			buildQuotaProviders().map((p) => p.id),
-			["anthropic-max", "claude-code", "codex", "antigravity"],
+			["anthropic-max", "claude-code", "codex", "codex-cli", "antigravity"],
 		);
 		process.env.CLIO_CODER_CONFIG_DIR = resolveClioDirs().config;
 		strictEqual(isClioHomeRelocated(), false);
@@ -94,14 +95,14 @@ test("BT-006 explicit sibling homes opt in independently and default roots prese
 		strictEqual(isClioHomeRelocated(), true);
 		deepStrictEqual(
 			buildQuotaProviders().map((p) => p.id),
-			["anthropic-max"],
+			["anthropic-max", "codex"],
 		);
 	} finally {
 		env.restore();
 	}
 });
 
-test("BT-006 Clio-owned Anthropic credentials stay usable in a relocated home", async () => {
+test("BT-006 Clio-owned Anthropic and OpenAI Codex credentials stay usable in a relocated home", async () => {
 	const env = await isolateClioEnv();
 	try {
 		mkdirSync(join(env.dir, "config"), { recursive: true });
@@ -117,6 +118,14 @@ test("BT-006 Clio-owned Anthropic credentials stay usable in a relocated home", 
 						expires: Date.now() + 3600000,
 						updatedAt: new Date().toISOString(),
 					},
+					"openai-codex": {
+						type: "oauth",
+						access: "scratch",
+						refresh: "scratch",
+						expires: Date.now() + 3600000,
+						accountId: "acct-scratch",
+						updatedAt: new Date().toISOString(),
+					},
 				},
 			}),
 		);
@@ -130,6 +139,16 @@ test("BT-006 Clio-owned Anthropic credentials stay usable in a relocated home", 
 		strictEqual(await provider.detect(), true);
 		strictEqual((await provider.fetch()).status, "ok");
 		strictEqual(requests, 1);
+		const accounts: Array<string | null> = [];
+		const codex = createCodexQuotaProvider({
+			fetch: async (_input, init) => {
+				accounts.push(new Headers(init?.headers).get("chatgpt-account-id"));
+				return new Response(JSON.stringify({ rate_limit: {} }), { status: 200 });
+			},
+		});
+		strictEqual(await codex.detect(), true);
+		strictEqual((await codex.fetch()).status, "ok");
+		deepStrictEqual(accounts, ["acct-scratch"]);
 	} finally {
 		env.restore();
 	}

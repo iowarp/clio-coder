@@ -373,11 +373,11 @@ it("registers explicitly connected adapters in display order", async () => {
 		const providers = buildQuotaProviders();
 		assert.deepEqual(
 			providers.map((entry) => entry.id),
-			["anthropic-max", "claude-code", "codex", "antigravity"],
+			["anthropic-max", "claude-code", "codex", "codex-cli", "antigravity"],
 		);
 		assert.deepEqual(
 			providers.map((entry) => entry.displayName),
-			["Anthropic Max", "Claude Code", "Codex", "Antigravity"],
+			["Anthropic Max", "Claude Code", "OpenAI Codex", "Codex CLI", "Antigravity"],
 		);
 	} finally {
 		env.restore();

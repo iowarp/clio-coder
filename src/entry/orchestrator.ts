@@ -930,7 +930,10 @@ function prepareBackgroundMemoryRoute(
 						const stored = providers.auth.getStored(status.providerId);
 						const scope =
 							status.source === "stored-oauth" && stored?.type === "oauth" ? codexAccountScope(stored.access) : null;
-						routeQuota = observedCodexQuota(targetId, scope, nowMs);
+						// #434: the `codex` poll reads Clio's default openai-codex login and stands in for no other profile.
+						if (status.source !== "stored-oauth" || status.providerId !== "openai-codex") routeQuota = null;
+						const streamed = observedCodexQuota(targetId, scope, nowMs);
+						if (streamed !== null && !streamed.stale) routeQuota = streamed;
 					} else if (initial.refined.runtimeId === "anthropic-max") {
 						const status = providers.auth.statusForTarget(initial.refined.target, initial.refined.runtime);
 						const profile = status.source === "stored-oauth" ? status.providerId : null;

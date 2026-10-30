@@ -7,8 +7,10 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { validPayload } from "../../src/core/telemetry/schemas.js";
 import { decideBackgroundStep } from "../../src/domains/memory/background-budget.js";
 import { getCatalogModelForRuntime } from "../../src/domains/providers/catalog.js";
+import { createCodexCliQuotaProvider } from "../../src/domains/quota/codex-cli-provider.js";
 import type { CodexCredentials } from "../../src/domains/quota/codex-provider.js";
-import { CODEX_USAGE_URL, createCodexQuotaProvider } from "../../src/domains/quota/codex-provider.js";
+import { createCodexQuotaProvider } from "../../src/domains/quota/codex-provider.js";
+import { CODEX_USAGE_URL } from "../../src/domains/quota/codex-usage.js";
 import {
 	codexStreamSnapshots,
 	noteCodexStreamQuota,
@@ -29,6 +31,8 @@ const NOW = new Date("2026-01-01T00:00:00.000Z");
 const CREDENTIALS: CodexCredentials = {
 	accessToken: "sk-codex-test",
 	accountId: "acct-123",
+	expiresAtMs: null,
+	hasRefreshToken: true,
 };
 
 interface FetchCall {
@@ -92,7 +96,8 @@ it("reads both rate limit windows, using limit_window_seconds to pick their keys
 	assert.equal(calls.length, 1);
 	assert.equal(calls[0]?.url, CODEX_USAGE_URL);
 	assert.equal(calls[0]?.headers.authorization, `Bearer ${CREDENTIALS.accessToken}`);
-	assert.equal(calls[0]?.headers["user-agent"], "codex-cli");
+	assert.match(calls[0]?.headers["user-agent"] ?? "", /^clio-coder\//);
+	assert.equal(calls[0]?.headers.originator, "clio-coder");
 });
 
 it("defaults primary to session and secondary to weekly when limit_window_seconds is absent", async () => {
@@ -145,7 +150,7 @@ it("maps 401 and 403 to an expired session", async () => {
 		const { fetch } = stubFetch(() => new Response("", { status }));
 		const snapshot = await provider(fetch).fetch();
 		assert.equal(snapshot.status, "expired");
-		assert.equal(snapshot.message, "Sign in with Codex again");
+		assert.equal(snapshot.message, "Run clio-coder auth login openai-codex again");
 		assert.deepEqual(snapshot.windows, []);
 	}
 });
@@ -182,7 +187,7 @@ it("reports missing credentials without spending a network call", async () => {
 	const snapshot = await noCredentials.fetch();
 
 	assert.equal(snapshot.status, "no_credentials");
-	assert.equal(snapshot.message, "No Codex credentials found");
+	assert.equal(snapshot.message, "Clio holds no OpenAI Codex OAuth credential");
 	assert.equal(calls.length, 0);
 });
 
@@ -192,11 +197,11 @@ it("sends ChatGPT-Account-Id only when the credential record carries an account 
 	assert.equal(withAccount.calls[0]?.headers["chatgpt-account-id"], CREDENTIALS.accountId);
 
 	const withoutAccount = stubFetch(() => jsonResponse({}));
-	await provider(withoutAccount.fetch, { accessToken: "sk-codex-test", accountId: null }).fetch();
+	await provider(withoutAccount.fetch, { ...CREDENTIALS, accountId: null }).fetch();
 	assert.equal("chatgpt-account-id" in (withoutAccount.calls[0]?.headers ?? {}), false);
 });
 
-it("detects Codex's own credential file and ignores an unusable one", async () => {
+it("detects the Codex CLI's own credential file and ignores an unusable one", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "clio-quota-codex-"));
 	const good = join(dir, "good.json");
 	const bad = join(dir, "bad.json");
@@ -211,9 +216,9 @@ it("detects Codex's own credential file and ignores an unusable one", async () =
 	);
 	await writeFile(bad, JSON.stringify({ tokens: { access_token: "" } }));
 
-	assert.equal(await createCodexQuotaProvider({ credentialsPath: good }).detect(), true);
-	assert.equal(await createCodexQuotaProvider({ credentialsPath: bad }).detect(), false);
-	assert.equal(await createCodexQuotaProvider({ credentialsPath: join(dir, "missing.json") }).detect(), false);
+	assert.equal(await createCodexCliQuotaProvider({ credentialsPath: good }).detect(), true);
+	assert.equal(await createCodexCliQuotaProvider({ credentialsPath: bad }).detect(), false);
+	assert.equal(await createCodexCliQuotaProvider({ credentialsPath: join(dir, "missing.json") }).detect(), false);
 });
 
 it("captures stream quota without a request and keeps target/account evidence distinct", async () => {
