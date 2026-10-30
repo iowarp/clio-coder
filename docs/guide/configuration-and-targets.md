@@ -135,7 +135,7 @@ This inventory lists compiled defaults and selected optional settings in the ver
 | `chat.modelPicker.recentLimit` | `12` | immediately |
 | `chat.maxOutputTokens` | `0` | next turn |
 | `chat.prewarm` | `false` | next turn |
-| `chat.cacheKeepalive` | `true` | immediately |
+| `chat.cacheKeepalive` | `true` | immediately; see [prompt cache retention and keepalive](../architecture/model-catalog.md#prompt-cache-retention-and-keepalive) |
 | `chat.retry.enabled` | `true` | next turn |
 | `chat.retry.maxRetries` | `3` | next turn |
 | `chat.retry.baseDelayMs` | `2000` | next turn |
@@ -588,7 +588,7 @@ Clio supplies a thinking choice for model calls outside the main conversation in
 
 Hidden registrations stay resolvable by id: `llamacpp-anthropic`, `llamacpp-completion`, `llamacpp-embed` and `llamacpp-rerank` are the other surfaces of one llama.cpp server, `lemonade-anthropic` is Lemonade's Anthropic surface, `systemone` is the System One decision server, and `typesafe-jev` is its hosted engine. `alcf` is documented in the [ALCF provider contract](../architecture/alcf-provider.md). A custom runtime joins the registry as the [provider adapter cookbook](../architecture/provider-adapter-cookbook.md) describes. The Claude Agent SDK is an optional dependency that the installer skips; see the [installation guide](installation-and-lifecycle.md) for how `claude-sdk` obtains it on first use.
 
-`inception` declares no reasoning support and pins `reasoning_effort: "instant"` on every chat request, because Mercury's reasoning is not observable over its API and any higher effort returns an empty completion. Thinking controls supplied by callers are still removed for it.
+`inception` declares no reasoning support. The older Mercury models get `reasoning_effort: "instant"` pinned on every chat request, because their reasoning is not observable over the API and any higher effort returns an empty completion. `mercury-3` takes no pin. Thinking controls supplied by callers are still removed for it.
 
 ## Auth
 
