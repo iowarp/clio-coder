@@ -775,13 +775,17 @@ function runModelKey(run: Run): string {
 	const target = run.fold.aggregate?.target ?? run.attempts[0]?.settled?.target ?? run.attempts[0]?.started.target;
 	return target ? modelKey(target) : "unknown/unknown";
 }
+/**
+ * A cache break re-prefilled what the cache had served: a re-prefill above zero, or an unknown one on a call whose
+ * verdict says the cache missed. `partial` also labels an ordinary call that appended a tool result to a warm prefix
+ * (#423), so a partial call whose re-prefill is a known zero is no break.
+ */
 function isBreak(attempt: Attempt): boolean {
 	const settled = attempt.settled;
 	if (!settled || settled.disposition === "never_sent") return false;
 	const re = settled.cache.rePrefilledTokens;
-	return (
-		(re.kind === "measured" && re.value > 0) || settled.cache.verdict === "cold" || settled.cache.verdict === "partial"
-	);
+	if (re.kind === "measured" || re.kind === "estimated") return re.value > 0;
+	return re.kind === "unknown" && (settled.cache.verdict === "cold" || settled.cache.verdict === "partial");
 }
 function coldKeys(attempt: Attempt): string[] {
 	const reasons = attempt.settled?.cache.expectedColdReasons ?? [];

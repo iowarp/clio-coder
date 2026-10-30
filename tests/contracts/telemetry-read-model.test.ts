@@ -27,6 +27,7 @@ import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { FactSum } from "../../src/core/telemetry/fact.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
+import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
@@ -554,4 +555,40 @@ test("a model's cost splits into the sessions' own calls and the worker runs, in
 	check(costReport(session, "model", now), 0.5, 0.25, { session });
 	check(repoCostReport(repo, { repo: "all", days: 30 }, "model", now), 0.5, 0.375, { repo });
 	ok(repoCostReport(repo, { repo: "all", days: 30 }, "label", now).groups.every((group) => group.audience === null));
+});
+
+test("a cache break is a re-prefill above zero, or an unknown one on a missed cache, never a partial call that re-read nothing (#423, #434 §13.2)", () => {
+	const call = (verdict: CallSettled["cache"]["verdict"], rePrefilled: CallSettled["cache"]["rePrefilledTokens"]) =>
+		telemetryCall("cache-breaks").map((record) =>
+			record.k === "call.settled"
+				? ({
+						...record,
+						data: { ...record.data, cache: { ...record.data.cache, verdict, rePrefilledTokens: rePrefilled } },
+					} as TelemetryRecord)
+				: record,
+		);
+	const measured = (value: number) => ({ kind: "measured" as const, value, source: "local-count" as const });
+	const unknown = { kind: "unknown" as const, reason: "not-observed" as const };
+	const report = cacheReport(
+		{
+			...source,
+			sessionId: "cache-breaks",
+			journal: {
+				...source.journal,
+				records: [
+					// An ordinary tool-result append on a warm prefix.
+					...call("partial", measured(0)),
+					...call("partial", measured(4_096)),
+					...call("partial", unknown),
+					...call("cold", unknown),
+					...call("hot", unknown),
+				],
+			},
+		},
+		now,
+	);
+	deepStrictEqual(
+		report.breaks.map((row) => row.verdict),
+		["partial", "partial", "cold"],
+	);
 });
