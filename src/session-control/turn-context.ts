@@ -2599,6 +2599,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const sessionId = deps.session?.current()?.id ?? "";
 			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
 			const checkpointId = postureCheckpoint(entries);
+			// #423: a posture update is a later system message, which Pi folds into the leading instructions for a
+			// model without this compat flag (collapseSystemMessages), so it would rewrite the prefix anyway; such a
+			// route recompiles instead. gpt-5.3-codex-spark has no row in Pi's openai-codex catalog and so no flag;
+			// measured 2026-10-30, the ChatGPT Codex backend refuses the model outright ("not supported when using
+			// Codex with a ChatGPT account"), so nothing vouches for mid-conversation developer items there.
 			const supportsPolicyUpdates =
 				deps.prompts.renderSessionPostureUpdate !== undefined &&
 				(agentRuntime.agent.state.model?.compat as { supportsMidConvoSystemMessages?: boolean } | undefined)

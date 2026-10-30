@@ -204,6 +204,10 @@ export function setEngineCodexConfiguration(agent: Agent, configuration: CodexCo
 	else codexConfigurations.delete(agent);
 }
 
+export function engineCodexConfiguration(agent: Agent): CodexConfiguration | undefined {
+	return codexConfigurations.get(agent);
+}
+
 export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgentHandle {
 	const {
 		streamFn,
