@@ -1719,3 +1719,62 @@ test("a repository window counts side calls whose session it cannot load, as the
 		await rm(stateDir, { recursive: true, force: true });
 	}
 });
+
+test("fleet status totals a run that recorded no tokens as unknown, beside the known part, never as zero (#434 §11.3)", async () => {
+	const scratch = await mkdtemp(join(tmpdir(), "telemetry-fleet-status-"));
+	const stateDir = join(scratch, "state");
+	const row = (id: string, usage: Record<string, number>) => ({
+		id,
+		agentId: "scout",
+		task: "t",
+		status: "completed",
+		startedAt: "2026-10-30T00:00:00.000Z",
+		endedAt: "2026-10-30T00:01:00.000Z",
+		pid: 1,
+		tokenCount: 100,
+		costUsd: 0.12,
+		costProvenance: "known",
+		runtimeKind: "native",
+		cwd: scratch,
+		...usage,
+	});
+	try {
+		await mkdir(stateDir, { recursive: true });
+		await writeFile(
+			join(stateDir, "runs.json"),
+			JSON.stringify([
+				row("whole", { apiCalls: 2, missingTokenCalls: 0, inputTokenCount: 70, outputTokenCount: 30 }),
+				// Written before the ledger carried a split or call coverage, with no receipt to supply them.
+				row("legacy", {}),
+			]),
+		);
+		const cli = new URL("../../src/cli/fleet.ts", import.meta.url).href;
+		const status = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				"tsx",
+				"--input-type=module",
+				"-e",
+				`import {runFleetCommand} from ${JSON.stringify(cli)}; process.exitCode = await runFleetCommand(['status','--all','--json']);`,
+			],
+			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
+		);
+		strictEqual(status.status, 0, status.stderr);
+		const { totals } = JSON.parse(status.stdout) as {
+			totals: {
+				inputTokens: number;
+				totalTokens: number;
+				coverage: { runs: number; unknownRuns: { input: number; total: number } };
+				display: { input: string; total: string };
+			};
+		};
+		strictEqual(totals.inputTokens, 70, "the known part only");
+		strictEqual(totals.totalTokens, 200);
+		deepStrictEqual(totals.coverage, { runs: 2, unknownRuns: { input: 1, output: 1, total: 1 } });
+		strictEqual(totals.display.input, "≥70 (1 run unknown)");
+		strictEqual(totals.display.total, "≥200 (1 run unknown)");
+	} finally {
+		await rm(scratch, { recursive: true, force: true });
+	}
+});

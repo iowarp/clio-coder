@@ -256,11 +256,6 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 			"the transcript's per-turn receipt line folds the turn's own assistant messages, an unknown field as zero, while the footer already reads that turn from the live read model; it moves onto that fold in 0.6.6",
 	},
 	{
-		file: "src/cli/fleet.ts",
-		functions: ["statusSnapshot"],
-		reason: "fleet status totals the run ledger's sealed rows, a store the read model has no scope over",
-	},
-	{
 		file: "src/cli/fleet-board-model.ts",
 		functions: ["applyEvent"],
 		reason: "the fleet board's live per-run token count follows the run feed's message_end lines as they stream",

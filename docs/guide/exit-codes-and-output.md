@@ -131,7 +131,7 @@ Many Clio Coder CLI subcommands provide structured JSON output for integration w
 | `clio-coder agents` | `--json` | JSON array of registered agent recipe metadata objects. |
 | `clio-coder targets` | `--json` | JSON object containing the configured `targets` array. |
 | `clio-coder models` | `--json` | JSON array of catalog models with capability flags. |
-| `clio-coder fleet status` | `--json` | JSON snapshot object with `generatedAt`, `admission` (`open` or `draining`), `running`, `retrying`, and `totals`. Each run row carries its `node`, defaulting to `local`. |
+| `clio-coder fleet status` | `--json` | JSON snapshot object with `generatedAt`, `admission` (`open` or `draining`), `running`, `retrying`, and `totals`. Each run row carries its `node`, defaulting to `local`. The `totals` token numbers are the known part; `totals.coverage` counts the runs and, per field, the runs that recorded the field only in part or not at all, and `totals.display` words each field as a lower bound beside those runs. |
 | `clio-coder playbook validate` | `--json` | JSON report with `valid`, `playbook`, and either successful `checks` plus `planHash` or failure `diagnostics`. Validation failures exit `1`; usage errors exit `2`. |
 | `clio-coder playbook graph` | `--json` | JSON object with `playbook`, `planHash`, compiled `waves`, and expanded `loops`. Playbook failures exit `1`; usage errors exit `2`. |
 | `clio-coder fleet run --resume` | `--json` | NDJSON step records include `status: "replayed"` and the original receipt reference for replayed prefix steps. Plan or variable mismatches exit `1`. |

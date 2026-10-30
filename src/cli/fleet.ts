@@ -74,6 +74,7 @@ import {
 	renderCostAggregate,
 	renderCostAmount,
 } from "../domains/observability/index.js";
+import { type RunTokenField, runsTotal } from "../domains/observability/read-model.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import {
 	type CostProvenance,
@@ -637,36 +638,13 @@ function finiteCount(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
-function receiptTokenSplit(row: RunEnvelope): { input: number; output: number } | null {
-	const path = row.receiptPath ?? join(clioStateDir(), "receipts", `${row.id}.json`);
-	try {
-		const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<RunReceipt>;
-		return {
-			input: finiteCount(parsed.inputTokenCount),
-			output: finiteCount(parsed.outputTokenCount),
-		};
-	} catch {
-		return null;
-	}
+/** A running row's input/output split, which the ledger carries once the run finalizes. */
+function rowTokenSplit(row: RunEnvelope): { input: number; output: number } {
+	return { input: finiteCount(row.inputTokenCount), output: finiteCount(row.outputTokenCount) };
 }
 
-/**
- * Input/output token split for a ledger row. Finalized rows carry the split
- * directly; rows written before the ledger carried it fall back to the
- * durable receipt so status totals agree with what the receipt records.
- */
-function rowTokenSplit(row: RunEnvelope): { input: number; output: number } {
-	if (row.inputTokenCount !== undefined || row.outputTokenCount !== undefined) {
-		return {
-			input: finiteCount(row.inputTokenCount),
-			output: finiteCount(row.outputTokenCount),
-		};
-	}
-	if (row.endedAt !== null) {
-		return receiptTokenSplit(row) ?? { input: 0, output: 0 };
-	}
-	return { input: 0, output: 0 };
-}
+const countOrNull = (value: unknown): number | null =>
+	typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 
 export type FleetAdmissionStatus =
 	| { state: "open" }
@@ -688,6 +666,7 @@ function statusSnapshot(all = false): {
 	running: Array<Record<string, unknown>>;
 	retrying: Array<Record<string, unknown>>;
 	totals: {
+		/** The known part of each token field: a run whose journal left it unknown adds nothing here. */
 		inputTokens: number;
 		outputTokens: number;
 		totalTokens: number;
@@ -696,6 +675,10 @@ function statusSnapshot(all = false): {
 		/** Mirrors what `DispatchSnapshot.totals.cost` declares for the in-process surface. */
 		cost: CostAggregate;
 		runtimeSeconds: number;
+		/** How many runs the totals cover, and how many left each token field partial or unknown (#434 §11.3). */
+		coverage: { runs: number; unknownRuns: { input: number; output: number; total: number } };
+		/** Each token field as the read model words it, a lower bound beside its unknown runs. */
+		display: { input: string; output: string; total: string };
 	};
 } {
 	const ledger = openLedger();
@@ -725,7 +708,15 @@ function statusSnapshot(all = false): {
 				node: row.node?.id ?? "local",
 			};
 		});
-	const totals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
+	// The rows' own counts, folded so a run that recorded none is unknown rather than zero. Reading every run journal
+	// instead cost ~3 s over a full 1,000-run ring, against ~12 ms for the ledger alone.
+	const fields = rows.map(rowTokenFields);
+	const tokens = {
+		input: runsTotal(fields.map((field) => field.input)),
+		output: runsTotal(fields.map((field) => field.output)),
+		total: runsTotal(fields.map((field) => field.total)),
+	};
+	let runtimeSeconds = 0;
 	// Folded rather than summed: a ledger of runs nobody priced totals to an
 	// absent cost claim, not to zero dollars.
 	const cost = aggregateCostAmounts(
@@ -738,14 +729,10 @@ function statusSnapshot(all = false): {
 		})),
 	);
 	for (const row of rows) {
-		const split = rowTokenSplit(row);
-		totals.inputTokens += split.input;
-		totals.outputTokens += split.output;
-		totals.totalTokens += row.tokenCount;
 		const startedMs = Date.parse(row.startedAt);
 		const endedMs = row.endedAt !== null ? Date.parse(row.endedAt) : nowMs;
 		if (Number.isFinite(startedMs) && Number.isFinite(endedMs)) {
-			totals.runtimeSeconds += Math.max(0, endedMs - startedMs) / 1000;
+			runtimeSeconds += Math.max(0, endedMs - startedMs) / 1000;
 		}
 	}
 	// The retry queue is in-memory orchestrator state and intentionally not
@@ -755,8 +742,54 @@ function statusSnapshot(all = false): {
 		admission: admissionStatus(capacityDrain(nowMs)),
 		running,
 		retrying: [],
-		totals: { ...totals, costUsd: cost.knownUsd, cost },
+		totals: {
+			inputTokens: tokens.input.known,
+			outputTokens: tokens.output.known,
+			totalTokens: tokens.total.known,
+			costUsd: cost.knownUsd,
+			cost,
+			runtimeSeconds,
+			coverage: {
+				runs: rows.length,
+				unknownRuns: {
+					input: tokens.input.unknownRuns,
+					output: tokens.output.unknownRuns,
+					total: tokens.total.unknownRuns,
+				},
+			},
+			display: { input: tokens.input.display, output: tokens.output.display, total: tokens.total.display },
+		},
 	};
+}
+
+/**
+ * A ledger row's token fields as the read model folds them. A row is partial when some of its calls reported no usage,
+ * or when it predates the count that says so. A row written before the ledger carried the split takes its receipt's,
+ * and a field neither holds is unknown, never zero (#434 §6.3).
+ */
+function rowTokenFields(row: RunEnvelope): Record<"input" | "output" | "total", RunTokenField> {
+	const partial = row.missingTokenCalls === undefined ? row.apiCalls === undefined : row.missingTokenCalls > 0;
+	const split =
+		row.inputTokenCount !== undefined || row.outputTokenCount !== undefined
+			? { input: countOrNull(row.inputTokenCount), output: countOrNull(row.outputTokenCount) }
+			: row.endedAt !== null
+				? receiptTokenFields(row)
+				: { input: null, output: null };
+	return {
+		input: { known: split.input, partial },
+		output: { known: split.output, partial },
+		total: { known: countOrNull(row.tokenCount), partial },
+	};
+}
+
+function receiptTokenFields(row: RunEnvelope): { input: number | null; output: number | null } {
+	const path = row.receiptPath ?? join(clioStateDir(), "receipts", `${row.id}.json`);
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<RunReceipt>;
+		return { input: countOrNull(parsed.inputTokenCount), output: countOrNull(parsed.outputTokenCount) };
+	} catch {
+		return { input: null, output: null };
+	}
 }
 
 function runStatus(args: ReadonlyArray<string>): number {
@@ -801,7 +834,7 @@ function runStatus(args: ReadonlyArray<string>): number {
 	}
 	const t = snapshot.totals;
 	process.stdout.write(
-		`totals: tokens=${t.totalTokens} (in=${t.inputTokens} out=${t.outputTokens}) cost=${renderCostAggregate(t.cost)} runtime=${Math.round(t.runtimeSeconds)}s\n`,
+		`totals: tokens=${t.display.total} (in=${t.display.input} out=${t.display.output}) cost=${renderCostAggregate(t.cost)} runtime=${Math.round(t.runtimeSeconds)}s\n`,
 	);
 	return 0;
 }

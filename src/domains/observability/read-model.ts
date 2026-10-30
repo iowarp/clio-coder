@@ -1707,6 +1707,41 @@ export function repoCostReport(
 	};
 }
 
+/** One run's token field as a store with no journal fold records it: the count it holds, and whether it is whole. */
+export interface RunTokenField {
+	/** Null when the store holds no count for the field. */
+	known: number | null;
+	/** Some of the run's calls reported no usage, or the store cannot say whether any did. */
+	partial: boolean;
+}
+
+/** A token field over many runs, each run one contribution (#434 §11.3). */
+export interface RunsTotal {
+	/** The known part. */
+	known: number;
+	/** Runs that left the field partial or unknown. */
+	unknownRuns: number;
+	display: string;
+}
+
+/**
+ * A token field over runs the read model holds no journal fold for, such as the run ledger `fleet status` lists, where
+ * reading every run journal costs seconds. A run that left the field partial or unknown counts once, so the total
+ * renders as a lower bound beside the number of such runs, never as a sum that took an unknown run for zero.
+ */
+export function runsTotal(fields: readonly RunTokenField[]): RunsTotal {
+	const sum = sumFactSums(
+		fields.map((field) =>
+			field.known === null
+				? unknownSum(1)
+				: field.partial
+					? sumFactSums([counted(field.known), unknownSum(1)])
+					: counted(field.known),
+		),
+	);
+	return { known: sum.measured + sum.estimated, unknownRuns: sum.unknownCount, display: renderCountSum(sum, "run") };
+}
+
 /** A repository window's token fields: the session view's token quantities over the `repo` scope (#434 §11.1). */
 export function repoTokenQuantities(repo: RepoSource): SessionTelemetryV1["own"]["tokens"] {
 	return tokenQuantities({ repo }, { scope: "repo", owner: repo.owner });
