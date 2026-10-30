@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import { assistantModelLabel } from "../core/assistant-model.js";
 import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assistant-prose.js";
 import type { OutputStyle } from "../core/defaults.js";
+import { messageUsageForAccounting } from "../core/message-accounting.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
@@ -538,7 +539,7 @@ function extractAssistantThinking(message: unknown): string {
  */
 function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 	if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return undefined;
-	const recordedUsage = (message as { usage?: unknown }).usage;
+	const recordedUsage = messageUsageForAccounting(message);
 	const neverSent =
 		(message as { callInvoked?: boolean }).callInvoked === false ||
 		(recordedUsage as { callInvoked?: boolean } | null | undefined)?.callInvoked === false;

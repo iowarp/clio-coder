@@ -7,6 +7,7 @@
 
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
+import { messageUsageForAccounting } from "../core/message-accounting.js";
 import type { PackageIdentity } from "../core/package-identity.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
@@ -52,7 +53,6 @@ import {
 	sumRunUsage,
 	terminalFailureFromAssistantMessage,
 	toolResultSummary,
-	unmeteredInvokedUsage,
 } from "./chat-loop-messages.js";
 import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
 import type { RetryStatusPayload } from "./turn-recovery.js";
@@ -309,7 +309,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	const accumulateTraceUsage = (message: AgentMessage): void => {
 		if (traceRunId === null) return;
 		const summary = sumRunUsage([message]);
-		const rawUsage = (message as { usage?: Record<string, unknown> }).usage ?? {};
+		const rawUsage = messageUsageForAccounting(message) ?? {};
 		if (rawUsage.callInvoked === false) return;
 		usageSources += 1;
 		const reported = normalizeTokenUsage(rawUsage);
@@ -388,7 +388,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		if (timing) {
 			payload.timing = timing;
 			payload.apiMs = timing.apiMs;
-		} else if ((message as { usage?: { callInvoked?: boolean } }).usage?.callInvoked === false) {
+		} else if (messageUsageForAccounting(message)?.callInvoked === false || payload.callInvoked === false) {
 			payload.apiMs = 0;
 		}
 		if (deliveryId) {
@@ -399,13 +399,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		const interruptedUsage =
 			(message as { estimatedUsage?: Record<string, unknown> }).estimatedUsage ??
 			(interruptClosure === undefined ? estimatedUsageForInterruptedTurn(message, deps.promptSideTokens()) : null);
-		// A call that reached the provider and failed unmetered is recorded as
-		// unknown, not as the zeros its stream started with (#423).
-		const recordedUsage = unmeteredInvokedUsage(message);
-		if (payload.callInvoked !== false) {
-			if (recordedUsage !== null) payload.usage = recordedUsage;
-			if (interruptedUsage !== null) payload.estimatedUsage = interruptedUsage;
-		}
+		if (payload.callInvoked !== false && interruptedUsage !== null) payload.estimatedUsage = interruptedUsage;
+
 		if (isLengthStopAssistantMessage(message) && state.runtime) {
 			const contextExhaustion = recordValue(payload.contextExhaustion);
 			const contextWindow = state.runtime.runtimeResolution.capabilityDecisions.contextWindow;

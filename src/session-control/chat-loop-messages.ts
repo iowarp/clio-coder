@@ -1,4 +1,5 @@
 import { classifyCallFailure, readCallFailure } from "../core/call-failure.js";
+import { messageUsageForAccounting } from "../core/message-accounting.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 /**
  * Pure helpers over agent messages, tool policies, and session payload
@@ -143,7 +144,7 @@ export function terminalFailureFromAssistantMessage(
 	const observedFailure = readCallFailure(
 		rawFailure?.stage === "budget" ? { ...rawFailure, stage: "admission" } : rawFailure,
 	);
-	const usage = (message as unknown as { usage?: Record<string, unknown> }).usage;
+	const usage = messageUsageForAccounting(message);
 	const failure =
 		observedFailure ??
 		(usage
@@ -483,7 +484,7 @@ export function sumRunUsage(
 		if (!message || typeof message !== "object") continue;
 		if (message.role !== "assistant") continue;
 		const record = message as unknown as Record<string, unknown>;
-		const providerUsage = message.usage as unknown as Record<string, unknown> | undefined;
+		const providerUsage = messageUsageForAccounting(message);
 		if (!providerUsage || typeof providerUsage !== "object" || providerUsage.callInvoked === false) continue;
 		const estimate = record.estimatedUsage as Record<string, unknown> | undefined;
 		// Display estimates must never enter provider accounting by default (#423, #430).
@@ -580,6 +581,7 @@ export function assistantSessionPayload(
 		"callId",
 		"attemptId",
 		"callInvoked",
+		"callAccounting",
 		"estimatedUsage",
 		"failure",
 		"api",
@@ -596,11 +598,7 @@ export function assistantSessionPayload(
 		if (raw[key] !== undefined) payload[key] = raw[key];
 	}
 	if (failure?.failure) payload.failure = failure.failure;
-	if (failure && raw.usage && typeof raw.usage === "object") {
-		const usage = raw.usage as Record<string, unknown>;
-		const observed = normalizeTokenUsage(usage).observed;
-		payload.usage = { ...usage, usageObserved: observed, ...(!observed ? { costProvenance: "unknown" } : {}) };
-	}
+
 	const usage = raw.usage as Record<string, unknown> | null | undefined;
 	if (raw.callInvoked === false || usage?.callInvoked === false || failure?.failure?.invoked === false) {
 		// Keep the SDK's in-memory shape, but never persist synthetic usage for an unsent call (#434).
@@ -671,38 +669,6 @@ export function estimatedUsageForInterruptedTurn(
 		totalTokens: input + output,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		estimated: true,
-	};
-}
-
-/**
- * Usage for a call that reached the provider and failed before the provider
- * reported any, or null when it reported some or never ran.
- *
- * The stream's initial zeros said such a call was free. In #423 a 326K-token
- * Codex request ran 119 s on the server, ended on a WebSocket error and was
- * recorded with zero usage. Its spend is unknown, so the token and cost fields
- * are null, the shape the out-of-turn ledger writes for missing usage, and the
- * readers that fold the ledger count it under `missingTokenCalls`.
- */
-export function unmeteredInvokedUsage(message: AgentMessage): Record<string, unknown> | null {
-	const stopReason = (message as { stopReason?: unknown }).stopReason;
-	if (stopReason !== "error" && stopReason !== "aborted") return null;
-	const usage = (message as unknown as { usage?: Record<string, unknown> }).usage;
-	if (!usage || typeof usage !== "object" || usage.callInvoked !== true) return null;
-	if (normalizeTokenUsage(usage).observed) return null;
-	return {
-		...usage,
-		input: null,
-		output: null,
-		cacheRead: null,
-		cacheWrite: null,
-		...("cacheWrite1h" in usage ? { cacheWrite1h: null } : {}),
-		...("reasoning" in usage ? { reasoning: null } : {}),
-		totalTokens: null,
-		cost: { input: null, output: null, cacheRead: null, cacheWrite: null, total: null },
-		costProvenance: "unknown",
-		usageObserved: false,
-		missingTokenCalls: 1,
 	};
 }
 

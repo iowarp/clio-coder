@@ -6,6 +6,131 @@ export interface BoundaryCheckResult {
 	violations: string[];
 }
 
+/** Provider usage in messages/ledger payloads is immutable outside engine adapters (#434). */
+export function checkLedgerUsageMutation(file: string, source: string): string[] {
+	if (file.startsWith("src/engine/")) return [];
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const aliases = new Set<string>();
+	const wholeAliases = new Set<string>();
+	const unwrap = (node: ts.Expression): ts.Expression => {
+		while (
+			ts.isAsExpression(node) ||
+			ts.isTypeAssertionExpression(node) ||
+			ts.isParenthesizedExpression(node) ||
+			ts.isNonNullExpression(node)
+		)
+			node = node.expression;
+		return node;
+	};
+	const property = (node: ts.Expression): string | undefined => {
+		node = unwrap(node);
+		return ts.isPropertyAccessExpression(node)
+			? node.name.text
+			: ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)
+				? node.argumentExpression.text
+				: undefined;
+	};
+	const providerUsage = (input: ts.Expression): boolean => {
+		const node = unwrap(input);
+		if (ts.isIdentifier(node)) return aliases.has(node.text);
+		if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)
+			return providerUsage(node.left);
+		if (!ts.isPropertyAccessExpression(node) && !ts.isElementAccessExpression(node)) return false;
+		return (
+			(property(node) === "usage" && /message|payload|\braw\b/i.test(node.expression.getText(tree))) ||
+			providerUsage(node.expression)
+		);
+	};
+	const collect = (node: ts.Node): void => {
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isIdentifier(node.name) &&
+			node.initializer &&
+			providerUsage(node.initializer)
+		) {
+			aliases.add(node.name.text);
+			const value = unwrap(node.initializer);
+			if (property(value) === "usage" || (ts.isIdentifier(value) && wholeAliases.has(value.text)))
+				wholeAliases.add(node.name.text);
+		}
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isObjectBindingPattern(node.name) &&
+			node.initializer &&
+			/message|payload|\braw\b/i.test(node.initializer.getText(tree))
+		) {
+			for (const binding of node.name.elements) {
+				if (ts.isIdentifier(binding.name) && (binding.propertyName?.getText(tree) ?? binding.name.text) === "usage") {
+					aliases.add(binding.name.text);
+					wholeAliases.add(binding.name.text);
+				}
+			}
+		}
+		ts.forEachChild(node, collect);
+	};
+	collect(tree);
+	const violations: string[] = [];
+	const report = (node: ts.Node) =>
+		violations.push(
+			`rule12: ${file}:${tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1} mutates provider usage; keep Clio accounting beside the raw usage and link the call journal`,
+		);
+	const visit = (node: ts.Node): void => {
+		if (
+			ts.isBinaryExpression(node) &&
+			node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+			node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+		) {
+			const target = unwrap(node.left);
+			if ((ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) && providerUsage(target)) {
+				// The P0 never-sent contract stores null; direct copies preserve provider bytes (#434).
+				const copy =
+					property(target) === "usage" &&
+					node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+					(node.right.kind === ts.SyntaxKind.NullKeyword ||
+						(property(node.right) === "usage" && providerUsage(node.right)) ||
+						(ts.isIdentifier(unwrap(node.right)) && wholeAliases.has(unwrap(node.right).getText(tree))));
+				if (!copy) report(node);
+			}
+		}
+		if (
+			(ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+			(node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken) &&
+			providerUsage(node.operand)
+		)
+			report(node);
+		if (
+			ts.isCallExpression(node) &&
+			node.expression.getText(tree) === "Object.assign" &&
+			node.arguments[0] &&
+			/message|payload|\braw\b/i.test(node.arguments[0].getText(tree))
+		) {
+			for (const argument of node.arguments.slice(1)) {
+				if (
+					ts.isObjectLiteralExpression(argument) &&
+					argument.properties.some(
+						(field) =>
+							ts.isPropertyAssignment(field) &&
+							field.name.getText(tree).replace(/["']/g, "") === "usage" &&
+							field.initializer.kind !== ts.SyntaxKind.NullKeyword,
+					)
+				)
+					report(argument);
+			}
+		}
+		if (ts.isDeleteExpression(node) && providerUsage(node.expression)) report(node);
+		if (
+			ts.isCallExpression(node) &&
+			node.expression.getText(tree) === "Object.assign" &&
+			node.arguments[0] &&
+			providerUsage(node.arguments[0])
+		)
+			report(node);
+		ts.forEachChild(node, visit);
+	};
+	visit(tree);
+	return violations;
+}
+
 /** Applied to the producer's complete local value-import closure, including helper modules (#434). */
 export function checkTelemetryProducer(file: string, source: string): string[] {
 	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
@@ -541,6 +666,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	for (const filePath of walk(srcRoot)) {
 		const source = readFileSync(filePath, "utf8");
 		violations.push(...checkCostRendering(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
+		violations.push(...checkLedgerUsageMutation(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		const specifiers = extractSpecifiers(source);
 		const references = extractReferenceDirectives(source);
 

@@ -1,5 +1,6 @@
 import type { BudgetAlertPayload } from "../core/bus-events.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
+import { messageUsageForAccounting } from "../core/message-accounting.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall } from "../core/telemetry/producer.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
@@ -1255,7 +1256,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message?.role === "assistant") {
 				const message = enrichedEvent.message;
 				const usage = (message.usage ?? {}) as unknown as Record<string, unknown>;
-				if (!message.usage) Object.assign(message, { usage });
+
 				const observed = normalizeTokenUsage(usage).observed;
 				const responseId = (message as { responseId?: unknown }).responseId;
 				const responseObserved = observed || (typeof responseId === "string" && responseId.length > 0);
@@ -1278,17 +1279,18 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								? { ...failure, stage: "budget", errorClass: "budget_wait" }
 								: failure,
 					});
-					usage.callInvoked = failure.invoked;
+					Object.assign(message, { callInvoked: failure.invoked });
 				} else {
-					usage.callInvoked = apiCallStartedAt !== null || responseObserved;
+					Object.assign(message, { callInvoked: apiCallStartedAt !== null || responseObserved });
 				}
-				usage.usageObserved = observed;
-				usage.costProvenance = !observed
+				const costProvenance = !observed
 					? "unknown"
 					: (usage.clioExternal as { cost?: string } | undefined)?.cost === "provider-reported"
 						? "known"
 						: localRuntime.runtimeResolution.costProvenance;
-				usage.targetId = localRuntime.targetId;
+				Object.assign(message, {
+					callAccounting: { usageObserved: observed, costProvenance, targetId: localRuntime.targetId },
+				});
 				const gatewayRouting = gatewayRoutingObservationFromRecord(
 					enrichedEvent.message as unknown as Record<string, unknown>,
 				);
@@ -1360,7 +1362,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message.role === "assistant" && deps.observability) {
 				const summary = sumRunUsage([enrichedEvent.message]);
-				const rawUsage = enrichedEvent.message.usage as unknown as Record<string, unknown>;
+				const rawUsage = messageUsageForAccounting(enrichedEvent.message) ?? {};
 				const reported = normalizeTokenUsage(rawUsage ?? {});
 				if (summary.hadUsage && rawUsage.callInvoked === true) {
 					deps.observability.recordTokens(

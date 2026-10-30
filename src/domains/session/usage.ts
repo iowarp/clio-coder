@@ -17,6 +17,8 @@
  * contribute to coverage, without adding estimates to the token subtotal.
  */
 
+import { messageUsageForAccounting } from "../../core/message-accounting.js";
+
 import {
 	attributedModelId,
 	type ResponseModelIdObservation,
@@ -132,7 +134,7 @@ export function ledgerUsageCalls(
 		const payload = entry.payload;
 		if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
 		const record = payload as Record<string, unknown>;
-		const rawUsage = record.usage;
+		const rawUsage = messageUsageForAccounting(record);
 		if (!rawUsage || typeof rawUsage !== "object" || Array.isArray(rawUsage)) continue;
 		const usage = rawUsage as Record<string, unknown>;
 		if (usage.callInvoked === false || (record.failure as { invoked?: boolean } | undefined)?.invoked === false) continue;

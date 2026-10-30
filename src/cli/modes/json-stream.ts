@@ -1,3 +1,4 @@
+import { messageUsageForAccounting } from "../../core/message-accounting.js";
 /**
  * Projection from chat-loop events to the headless `--json` wire stream.
  *
@@ -210,9 +211,8 @@ export function projectDispatchJsonEvent(
 /** An assistant call that reached the provider and came back without usage (#423). */
 function unmeteredCall(message: AgentMessage): boolean {
 	if (message.role !== "assistant") return false;
-	const usage = (message as { usage?: unknown }).usage;
-	if (typeof usage !== "object" || usage === null) return false;
-	const raw = usage as Record<string, unknown>;
+	const raw = messageUsageForAccounting(message);
+	if (raw === null) return false;
 	return raw.callInvoked !== false && !normalizeTokenUsage(raw).observed;
 }
 

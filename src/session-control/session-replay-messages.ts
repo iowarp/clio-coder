@@ -199,6 +199,11 @@ export function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number)
 		if (failure) message.errorMessage = failure.errorMessage;
 		for (const key of [
 			"usage",
+			"callId",
+			"attemptId",
+			"callInvoked",
+			"callAccounting",
+			"failure",
 			"estimatedUsage",
 			"api",
 			"provider",

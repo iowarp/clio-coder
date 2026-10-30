@@ -1,5 +1,6 @@
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
+import { messageUsageForAccounting } from "../../core/message-accounting.js";
 import { readClioVersion } from "../../core/package-root.js";
 import {
 	addResponseModelIdObservationCounts,
@@ -1025,7 +1026,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// (middleware nudges and finish-contract reprompts start new agent
 			// runs), so nothing here may key on the last segment alone.
 			const usageSummary = sumRunUsage([event.message]);
-			const rawUsage = (event.message as { usage?: Record<string, unknown> }).usage ?? {};
+			const rawUsage = messageUsageForAccounting(event.message) ?? {};
 			if (usageSummary.hadUsage && rawUsage.callInvoked !== false) {
 				const reported = normalizeTokenUsage(rawUsage);
 				Object.assign(usageSummary, {

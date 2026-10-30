@@ -372,9 +372,9 @@ for (const mode of ["partial", "thinking", "empty"] as const) {
 			strictEqual(payload.stopReason, "aborted");
 			const usage = recordValue(payload.usage);
 			ok(usage);
-			strictEqual(usage.usageObserved, false);
-			strictEqual(usage.costProvenance, "unknown");
-			for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"]) strictEqual(usage[key], null);
+			strictEqual(recordValue(payload.callAccounting)?.usageObserved, false);
+			strictEqual(recordValue(payload.callAccounting)?.costProvenance, "unknown");
+			for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"]) strictEqual(usage[key], 0);
 			const estimatedUsage = recordValue(payload.estimatedUsage);
 			ok(estimatedUsage);
 			strictEqual(estimatedUsage.estimated, true);
@@ -528,8 +528,8 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			const assistant = assistants[0];
 			ok(assistant?.kind === "message");
 			const payload = recordValue(assistant.payload);
-			strictEqual(recordValue(payload?.usage)?.usageObserved, false);
-			strictEqual(recordValue(payload?.usage)?.input, null);
+			strictEqual(recordValue(payload?.callAccounting)?.usageObserved, false);
+			strictEqual(recordValue(payload?.usage)?.input, 0);
 			strictEqual(recordValue(payload?.failure)?.invoked, true);
 			strictEqual(recordValue(payload?.interruptClosure)?.operatorCancel, source === "stream_cancel");
 			strictEqual(recordValue(payload?.estimatedUsage)?.output, 0);

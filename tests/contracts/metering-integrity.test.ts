@@ -3,6 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import { projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { messageUsageForAccounting } from "../../src/core/message-accounting.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import { callCoverageForRun, createCostTracker, renderCostAggregate } from "../../src/domains/observability/cost.js";
 import { aggregateCostEntries } from "../../src/domains/observability/cost-rows.js";
@@ -18,10 +19,15 @@ import {
 } from "../../src/engine/apis/output-budget.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { reseedSessionUsageFromLedger } from "../../src/interactive/session-usage-reseed.js";
-import { estimatedUsageForInterruptedTurn } from "../../src/session-control/chat-loop-messages.js";
+import {
+	assistantSessionPayload,
+	estimatedUsageForInterruptedTurn,
+	sumRunUsage,
+	terminalFailureFromAssistantMessage,
+} from "../../src/session-control/chat-loop-messages.js";
 import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
 import { createTurnState } from "../../src/session-control/turn-state.js";
-import { checkCostRendering, runBoundaryCheck } from "../boundaries/check-boundaries.js";
+import { checkCostRendering, checkLedgerUsageMutation, runBoundaryCheck } from "../boundaries/check-boundaries.js";
 
 const zeroUsage = {
 	input: 0,
@@ -55,6 +61,63 @@ function assistant(
 
 describe("contracts/metering integrity", () => {
 	afterEach(() => setGlobalDefaultMaxOutputTokens(0));
+
+	it("keeps provider usage immutable while accounting reads separate annotations and legacy rows", () => {
+		for (const reported of [zeroUsage, { ...zeroUsage, input: 10, output: 3, totalTokens: 13 }]) {
+			const usage = Object.freeze({ ...reported, cost: Object.freeze({ ...reported.cost }) });
+			const message = {
+				role: "assistant",
+				content: [{ type: "text", text: "partial" }],
+				stopReason: "aborted",
+				usage,
+				callId: "call-fixture",
+				attemptId: "attempt-fixture",
+				callInvoked: true,
+				callAccounting: { usageObserved: reported.totalTokens > 0, targetId: "selected-target", costProvenance: "unknown" },
+			} as unknown as AgentMessage;
+			const payload = assistantSessionPayload(message, terminalFailureFromAssistantMessage(message));
+			strictEqual(payload.usage, usage);
+			strictEqual(payload.callId, "call-fixture");
+			strictEqual(payload.attemptId, "attempt-fixture");
+			const entry = assistant("immutable", "aborted", usage, payload);
+			const calls = ledgerUsageCalls([entry]);
+			strictEqual(calls[0]?.providerId, "selected-target");
+			strictEqual(calls[0]?.totalTokens, reported.totalTokens);
+			strictEqual(sumRunUsage([message]).tokens, reported.totalTokens);
+			const projected = messageUsageForAccounting(payload);
+			ok(projected);
+			projected.input = 999;
+			strictEqual(usage.input, reported.input);
+			const legacy = assistant(
+				"legacy",
+				"aborted",
+				{
+					...usage,
+					...(payload.callAccounting as Record<string, unknown>),
+					callInvoked: true,
+				},
+				{ responseModelIdObservation: payload.responseModelIdObservation },
+			);
+			deepStrictEqual(ledgerUsageCalls([legacy]), calls);
+		}
+		for (const source of [
+			"message.usage.input = 0;",
+			"const { usage } = message; usage.input += 2;",
+			"Object.assign(message, { usage: { input: 0 } });",
+			"const usage = message.usage; usage.cost = {};",
+			"Object.assign(payload.usage, { input: 0 });",
+			'payload["usage"] = { input: 0 };',
+		])
+			strictEqual(checkLedgerUsageMutation("src/session-control/example.ts", source).length, 1);
+		deepStrictEqual(
+			checkLedgerUsageMutation(
+				"src/session-control/example.ts",
+				"payload.usage = null; payload.usage = message.usage; const projection = { ...message.usage }; projection.input = 0;",
+			),
+			[],
+		);
+		deepStrictEqual(checkLedgerUsageMutation("src/engine/example.ts", "message.usage.input = 0;"), []);
+	});
 
 	it("preserves declared call counts and unknown run coverage through usage projections", () => {
 		const tracker = createCostTracker();
@@ -172,6 +235,11 @@ describe("contracts/metering integrity", () => {
 			usage,
 		} as unknown as AgentMessage;
 		strictEqual(estimatedUsageForInterruptedTurn(message, 326_637), null);
+		const frame = projectDispatchJsonEvent({
+			type: "agent_end",
+			messages: [{ ...message, usage: zeroUsage, callInvoked: false }],
+		}) as { usage: { missingTokenCalls?: number } };
+		strictEqual(frame.usage.missingTokenCalls ?? 0, 0);
 		const unknown = assistant("unknown", "aborted", { ...zeroUsage, callInvoked: true });
 		for (const neverSent of [
 			assistant("never-sent", "aborted", usage),

@@ -6,6 +6,7 @@ import {
 	readContextOperation,
 } from "../../core/context-operation.js";
 import type { JobRecord } from "../../core/job-types.js";
+import { messageUsageForAccounting } from "../../core/message-accounting.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { CostAggregate } from "../../domains/observability/cost.js";
@@ -1444,7 +1445,7 @@ function mergeMessageUsage(into: AcpServerUsage, message: unknown, seen?: WeakSe
 		if (seen.has(message)) return;
 		seen.add(message);
 	}
-	mergeUsage(into, message.usage);
+	mergeUsage(into, messageUsageForAccounting(message));
 }
 
 function mergeMessagesUsage(into: AcpServerUsage, messages: unknown, seen?: WeakSet<object>): void {
