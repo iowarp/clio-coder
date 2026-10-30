@@ -412,6 +412,11 @@ export const KIND_REGISTRY = {
 			closed,
 		),
 	),
+	/**
+	 * Written when the session itself opens or resumes, beside meta.json's reopen, and never when a writer reopens
+	 * after an idle close: the read model reads either one newer than a ledger close as the session reopening (#434
+	 * §6.1).
+	 */
 	"session.opened": accountability(empty),
 	"session.resumed": accountability(empty),
 	"session.forked_from": accountability(
