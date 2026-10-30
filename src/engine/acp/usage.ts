@@ -67,6 +67,14 @@ const partial = (quantity: Quantity): boolean =>
 const estimated = (quantity: Quantity): boolean =>
 	"kind" in quantity.fact ? quantity.fact.kind === "estimated" : quantity.fact.coverage.estimated > 0;
 
+/**
+ * The contributions to a call count whose number is unknown. Only a worker run leaves one, by recording no call
+ * telemetry, so it is v1's `unknownCallCoverageRuns`: a plain `calls` number never says it is short (#434 §11.3).
+ */
+export function unknownCallCoverage(calls: Quantity): number {
+	return "kind" in calls.fact ? (calls.fact.kind === "unknown" ? 1 : 0) : calls.fact.unknownCount;
+}
+
 /** Free only when every priced call was free and nothing went unpriced. */
 export function knownFree(pricedBy: CostReportV1["total"]["pricedBy"], usd: Quantity): boolean {
 	const { free, ...priced } = pricedBy;
@@ -75,18 +83,28 @@ export function knownFree(pricedBy: CostReportV1["total"]["pricedBy"], usd: Quan
 
 /** A v1 cost block: the usd quantity's known part and its display, with its provenance as flags. */
 function costV1(usd: Quantity, calls: Quantity, pricedBy: CostReportV1["total"]["pricedBy"]) {
+	const unknownCallCoverageRuns = unknownCallCoverage(calls);
 	return {
 		knownUsd: knownPart(usd),
 		display: usd.display,
 		calls: knownPart(calls),
+		...(unknownCallCoverageRuns > 0 ? { unknownCallCoverageRuns } : {}),
 		estimated: estimated(usd),
 		unknown: partial(usd),
 		free: knownFree(pricedBy, usd),
 	};
 }
 
+const EMPTY_COST: ReturnType<typeof costV1> = {
+	knownUsd: 0,
+	display: COST_NOT_MEASURED,
+	calls: 0,
+	estimated: false,
+	unknown: false,
+	free: false,
+};
 const EMPTY_SESSION_USAGE = {
-	cost: { knownUsd: 0, display: COST_NOT_MEASURED, calls: 0, estimated: false, unknown: false, free: false },
+	cost: EMPTY_COST,
 	tokens: 0,
 	rows: [],
 	truncated: false,

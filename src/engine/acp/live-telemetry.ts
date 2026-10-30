@@ -33,7 +33,7 @@ import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js
 import { ACP_CONTEXT_META_KEY, projectContextLedger } from "./context-ledger.js";
 import type { AcpCostAggregate } from "./types.js";
 import { ACP_USAGE_META_KEY } from "./types.js";
-import { knownFree, knownPart } from "./usage.js";
+import { knownFree, knownPart, unknownCallCoverage } from "./usage.js";
 
 const MAX_PLAN_ENTRIES = 100;
 const MAX_TEXT_BYTES = 1024;
@@ -165,6 +165,7 @@ interface SessionTotals {
 	costUsd: number;
 	costProvenance: CostProvenance;
 	calls: number;
+	unknownCallCoverageRuns?: number;
 	missingTokenCalls?: number;
 	hasEstimatedCost?: boolean;
 }
@@ -191,6 +192,7 @@ export function sessionUsageTotals(view: TelemetryView): SessionTotals {
 		hasUnknown: "kind" in fact ? fact.kind === "unknown" : fact.unknownCount > 0,
 		allKnownFree: knownFree(total.pricedBy, usd),
 		calls: knownPart(total.calls),
+		...(unknownCallCoverage(total.calls) > 0 ? { unknownCallCoverageRuns: unknownCallCoverage(total.calls) } : {}),
 	};
 	const missingTokenCalls = knownPart(read("missingTokenCalls"));
 	return {
@@ -205,6 +207,7 @@ export function sessionUsageTotals(view: TelemetryView): SessionTotals {
 		costUsd: summary.knownUsd,
 		costProvenance: provenanceOf(summary),
 		calls: summary.calls,
+		...(summary.unknownCallCoverageRuns ? { unknownCallCoverageRuns: summary.unknownCallCoverageRuns } : {}),
 		...(missingTokenCalls > 0 ? { missingTokenCalls } : {}),
 		...(summary.hasEstimated ? { hasEstimatedCost: true } : {}),
 	};
@@ -296,6 +299,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 									costDisplay: session.costDisplay,
 									costProvenance: session.costProvenance,
 									calls: session.calls,
+									...(session.unknownCallCoverageRuns ? { unknownCallCoverageRuns: session.unknownCallCoverageRuns } : {}),
 									...(session.missingTokenCalls ? { missingTokenCalls: session.missingTokenCalls } : {}),
 									...(session.hasEstimatedCost ? { hasEstimatedCost: true } : {}),
 								},
