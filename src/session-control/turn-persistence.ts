@@ -7,7 +7,7 @@
 
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
-import { messageUsageForAccounting } from "../core/message-accounting.js";
+import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
 import type { PackageIdentity } from "../core/package-identity.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
@@ -208,6 +208,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	let lastTracedTurn: { runId: string; usage: SessionTurnUsage | null } | null = null;
 	let usageSources = 0;
 	let reportedUsageSources = 0;
+	let measuredUsageSources = 0;
 	const traceToolStarts = new Map<string, string>();
 	// Trace rows and the terminal row name the capability a gateway op=call
 	// ran. Its result may not name it (a refused capability), so the call's own
@@ -265,6 +266,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		lastTracedTurn = null;
 		usageSources = 0;
 		reportedUsageSources = 0;
+		measuredUsageSources = 0;
 		if (deps.observability === undefined) return;
 		const runtime = submitted ?? state.runtime;
 		if (!runtime) return;
@@ -311,10 +313,18 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		if (traceRunId === null) return;
 		const summary = sumRunUsage([message]);
 		const rawUsage = messageUsageForAccounting(message) ?? {};
-		if (rawUsage.callInvoked === false) return;
-		usageSources += 1;
+		if (summary.costSummary ? !summary.hadUsage : rawUsage.callInvoked === false) return;
 		const reported = normalizeTokenUsage(rawUsage);
-		if (reported.observed) reportedUsageSources += 1;
+		const apiCalls = summary.costSummary ? summary.apiCalls : 1;
+		const missingTokenCalls = summary.costSummary ? (summary.missingTokenCalls ?? 0) : reported.observed ? 0 : 1;
+		usageSources += apiCalls;
+		reportedUsageSources += apiCalls - missingTokenCalls;
+		const calls = messageCallsForAccounting(message);
+		measuredUsageSources += calls
+			? calls.filter((call) => call.disposition === "settled").length
+			: reported.observed
+				? 1
+				: 0;
 		const total: SessionTurnUsage = traceUsage ?? {
 			inputTokens: 0,
 			outputTokens: 0,
@@ -332,7 +342,13 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			...(total.costSummary
 				? [{ usd: total.costSummary.knownUsd, provenance: pricing, costSummary: total.costSummary }]
 				: []),
-			{ usd: summary.costUsd, provenance: pricing, apiCalls: 1, missingTokenCalls: reported.observed ? 0 : 1 },
+			{
+				usd: summary.costUsd,
+				provenance: pricing,
+				apiCalls,
+				missingTokenCalls,
+				...(summary.costSummary ? { costSummary: summary.costSummary } : {}),
+			},
 		]);
 		traceUsage = {
 			inputTokens: total.inputTokens + summary.input,
@@ -346,8 +362,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			totalTokens: total.totalTokens + summary.tokens,
 			costUsd: costSummary.hasUnknown && costSummary.knownUsd === 0 ? null : costSummary.knownUsd,
 			costSummary,
-			apiCalls: (total.apiCalls ?? 0) + 1,
-			missingTokenCalls: (total.missingTokenCalls ?? 0) + (reported.observed ? 0 : 1),
+			apiCalls: (total.apiCalls ?? 0) + apiCalls,
+			missingTokenCalls: (total.missingTokenCalls ?? 0) + missingTokenCalls,
 		};
 	};
 
@@ -471,7 +487,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				outputTokens: usage?.outputTokens ?? 0,
 				cacheReadTokens: usage?.cacheReadTokens ?? 0,
 				totalTokens: usage?.totalTokens ?? 0,
-				provenance: reportedUsageSources === 0 ? "none" : reportedUsageSources === usageSources ? "reported" : "partial",
+				provenance: measuredUsageSources === 0 ? "none" : reportedUsageSources === usageSources ? "reported" : "partial",
 			};
 		},
 		wasPersisted(message: unknown): boolean {

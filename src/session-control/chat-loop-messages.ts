@@ -1,5 +1,9 @@
 import { classifyCallFailure, readCallFailure } from "../core/call-failure.js";
-import { messageUsageForAccounting } from "../core/message-accounting.js";
+import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
+import type { CostAggregate, CostAmount } from "../domains/observability/cost.js";
+import { aggregateCostAmounts } from "../domains/observability/cost.js";
+import { resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
+import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 /**
  * Pure helpers over agent messages, tool policies, and session payload
@@ -419,6 +423,7 @@ export function createAskUserToolPolicy(
 }
 
 export interface RunUsageSummary {
+	costSummary?: CostAggregate;
 	missingTokenCalls?: number;
 	tokens: number;
 	costUsd: number;
@@ -466,6 +471,9 @@ export function sumRunUsage(
 		lastResponseModelIdObservation: { state: "not-observed" },
 		lastDifferingResponseModelId: null,
 	};
+	const seenAttempts = new Set<string>();
+	const costAmounts: CostAmount[] = [];
+	let journalObserved = false;
 	for (const raw of messages) {
 		const message = raw as
 			| AgentMessage
@@ -484,6 +492,60 @@ export function sumRunUsage(
 		if (!message || typeof message !== "object") continue;
 		if (message.role !== "assistant") continue;
 		const record = message as unknown as Record<string, unknown>;
+
+		const calls = messageCallsForAccounting(message);
+		if (calls !== undefined) {
+			journalObserved = true;
+			const unique = calls.filter((call) => {
+				if (seenAttempts.has(call.attemptId)) return false;
+				seenAttempts.add(call.attemptId);
+				return true;
+			});
+			for (const call of usageCallsFromAttempts(unique.map((settled) => ({ started: settled, settled })))) {
+				summary.hadUsage = true;
+				summary.apiCalls += call.apiCalls ?? 0;
+				summary.missingTokenCalls = (summary.missingTokenCalls ?? 0) + (call.missingTokenCalls ?? 0);
+				summary.input += call.input;
+				summary.output += call.output;
+				summary.cacheRead += call.cacheRead;
+				summary.cacheWrite += call.cacheWrite;
+				if (call.cacheWrite1h !== undefined) summary.cacheWrite1h = (summary.cacheWrite1h ?? 0) + call.cacheWrite1h;
+				summary.reasoning += call.reasoningTokens;
+				summary.hadReasoning ||= (call.facts?.usage.reasoning.coverage.measured ?? 0) > 0;
+				summary.tokens += call.totalTokens;
+				summary.costUsd += call.costUsd;
+				summary.lastResponseModelIdObservation = call.responseModelIdObservation;
+				addResponseModelIdObservationCount(summary.responseModelIdObservationCounts, call.responseModelIdObservation);
+				summary.lastDifferingResponseModelId =
+					call.responseModelIdObservation.state === "reported" &&
+					call.responseModelIdObservation.reportedModelId !== call.requestedModelId
+						? call.responseModelIdObservation.reportedModelId
+						: null;
+				costAmounts.push({
+					usd: call.costUsd,
+					provenance: call.costProvenance ?? "unknown",
+					...(call.costSummary ? { costSummary: call.costSummary } : {}),
+				});
+			}
+			// Aborted output estimates remain a display-only addition; they never alter journal facts (#423, #434).
+			const estimate = record.estimatedUsage as Record<string, unknown> | undefined;
+			const terminal = unique.at(-1);
+			if (
+				options.includeEstimates &&
+				terminal?.disposition === "sent_unsettled" &&
+				record.stopReason === "aborted" &&
+				estimate?.estimated === true
+			) {
+				const display = normalizeTokenUsage({ ...estimate, estimated: false });
+				summary.input += display.input;
+				summary.output += display.output;
+				summary.cacheRead += display.cacheRead;
+				summary.cacheWrite += display.cacheWrite;
+				summary.tokens += display.totalTokens;
+				summary.estimated = true;
+			}
+			continue;
+		}
 		const providerUsage = messageUsageForAccounting(message);
 		if (!providerUsage || typeof providerUsage !== "object" || providerUsage.callInvoked === false) continue;
 		const estimate = record.estimatedUsage as Record<string, unknown> | undefined;
@@ -520,7 +582,13 @@ export function sumRunUsage(
 		const total = usage.cost && typeof usage.cost === "object" ? (usage.cost as { total?: unknown }).total : undefined;
 		if ((usage as { estimated?: unknown }).estimated !== true && typeof total === "number" && Number.isFinite(total))
 			summary.costUsd += total;
+		costAmounts.push({
+			usd: typeof total === "number" && Number.isFinite(total) ? total : 0,
+			provenance: usage.estimated === true ? "unknown" : resolveCostProvenance(usage.costProvenance, "unknown"),
+			missingTokenCalls: reported.observed ? 0 : 1,
+		});
 	}
+	if (journalObserved) summary.costSummary = aggregateCostAmounts(costAmounts);
 	return summary;
 }
 

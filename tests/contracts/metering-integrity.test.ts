@@ -3,8 +3,10 @@ import { afterEach, describe, it } from "node:test";
 import { projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { messageUsageForAccounting } from "../../src/core/message-accounting.js";
+import { messageUsageForAccounting, rememberMessageCalls } from "../../src/core/message-accounting.js";
+import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
+import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
 import { callCoverageForRun, createCostTracker, renderCostAggregate } from "../../src/domains/observability/cost.js";
 import { aggregateCostEntries } from "../../src/domains/observability/cost-rows.js";
 import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
@@ -19,6 +21,7 @@ import {
 } from "../../src/engine/apis/output-budget.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { reseedSessionUsageFromLedger } from "../../src/interactive/session-usage-reseed.js";
+import { emptyRunTally, foldMessageIntoRunTally } from "../../src/interactive/status/summary.js";
 import {
 	assistantSessionPayload,
 	estimatedUsageForInterruptedTurn,
@@ -61,6 +64,61 @@ function assistant(
 
 describe("contracts/metering integrity", () => {
 	afterEach(() => setGlobalDefaultMaxOutputTokens(0));
+
+	it("folds retry facts once across messages while keeping unknown usage and display estimates separate", () => {
+		const usage = Object.freeze({
+			...zeroUsage,
+			input: 8,
+			output: 2,
+			totalTokens: 10,
+			cost: Object.freeze({ ...zeroUsage.cost, total: 0.25 }),
+			clioExternal: { tokenUsage: "provider-reported", cost: "provider-reported" },
+		});
+		const settled = (attempt: number, message: unknown): CallSettled => ({
+			callId: "call-fixture",
+			attemptId: `attempt-${attempt}`,
+			attempt,
+			label: "main",
+			roundKind: "normal",
+			toolChoice: "auto",
+			target: {
+				targetId: "test",
+				runtimeId: "test",
+				api: "test",
+				requestedModel: "requested",
+				reportedModel: { kind: "measured", value: "served", source: "provider" },
+			},
+			stages: { settle: 1 },
+			...callSettlementFromMessage(message, "known"),
+		});
+		const first = settled(0, { stopReason: "stop", usage });
+		for (const invoked of [false, true]) {
+			const message = {
+				role: "assistant",
+				content: [],
+				stopReason: "aborted",
+				callInvoked: invoked,
+				usage: zeroUsage,
+				estimatedUsage: { input: 20, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 23, estimated: true },
+			} as unknown as AgentMessage;
+			rememberMessageCalls(message, [first, settled(1, message)]);
+			const summary = sumRunUsage([message, message]);
+			strictEqual(summary.tokens, 10);
+			strictEqual(summary.costUsd, 0.25);
+			strictEqual(summary.apiCalls, invoked ? 2 : 1);
+			strictEqual(summary.missingTokenCalls, invoked ? 1 : 0);
+			strictEqual(summary.costSummary?.hasUnknown, invoked);
+			strictEqual(summary.costSummary?.calls, invoked ? 2 : 1);
+			strictEqual(summary.lastResponseModelIdObservation.state, "reported");
+			const display = sumRunUsage([message], { includeEstimates: true });
+			strictEqual(display.tokens, invoked ? 33 : 10);
+			strictEqual(display.costUsd, 0.25);
+			const tally = foldMessageIntoRunTally(emptyRunTally(), message);
+			strictEqual(tally.inputTokens, display.input);
+			strictEqual(tally.outputTokens, display.output);
+			strictEqual((message as unknown as { usage: unknown }).usage, zeroUsage);
+		}
+	});
 
 	it("keeps provider usage immutable while accounting reads separate annotations and legacy rows", () => {
 		for (const reported of [zeroUsage, { ...zeroUsage, input: 10, output: 3, totalTokens: 13 }]) {

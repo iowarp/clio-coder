@@ -1,6 +1,6 @@
 import type { BudgetAlertPayload } from "../core/bus-events.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
-import { messageUsageForAccounting } from "../core/message-accounting.js";
+import { messageUsageForAccounting, rememberMessageCalls } from "../core/message-accounting.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
@@ -635,11 +635,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let callTracking: ReturnType<typeof trackCallFetch> | null = null;
 		let modelCall: TelemetryCall | undefined;
 		let journalLease: TelemetrySessionLease | undefined;
+		let settledAttempts: CallSettled[] = [];
 		const recordSettledCall = (
 			facts: CallSettled | undefined,
 			ownerSessionId: string | undefined,
 			hidden = false,
 		): void => {
+			if (facts) settledAttempts.push(facts);
 			if (!facts || !deps.observability || !currentRun() || ownerSessionId !== deps.sessionOrigin?.()?.id) return;
 			// Final never-sent messages are counted when persisted; hidden retries have no ledger row (#430, #434).
 			if (hidden && facts.disposition === "never_sent") deps.observability.recordNeverSentCalls(1);
@@ -665,6 +667,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					reportedModelFromMessage(message),
 				);
 				recordSettledCall(facts, lease?.context.sessionId);
+				rememberMessageCalls(message, settledAttempts);
 			}
 			await lease?.release();
 			return call !== undefined;
@@ -1167,6 +1170,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				return;
 			}
 			if (event.type === "turn_start") {
+				settledAttempts = [];
 				const origin = deps.sessionOrigin?.();
 				if (origin && deps.observability?.acquireTelemetrySession) {
 					journalLease = await deps.observability.acquireTelemetrySession(

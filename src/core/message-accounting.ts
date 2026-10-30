@@ -1,3 +1,16 @@
+import type { CallSettled } from "./telemetry/schemas.js";
+
+// Message lifetime bounds this projection; only call IDs enter the ledger (#434).
+const settledCalls = new WeakMap<object, readonly CallSettled[]>();
+
+export function rememberMessageCalls(message: object, calls: readonly CallSettled[]): void {
+	settledCalls.set(message, Object.freeze([...calls]));
+}
+
+export function messageCallsForAccounting(message: unknown): readonly CallSettled[] | undefined {
+	return message !== null && typeof message === "object" ? settledCalls.get(message) : undefined;
+}
+
 const record = (value: unknown): Record<string, unknown> | null =>
 	value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 

@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import { assistantModelLabel } from "../core/assistant-model.js";
 import { AssistantProseProjection, sanitizeAssistantProse } from "../core/assistant-prose.js";
 import type { OutputStyle } from "../core/defaults.js";
-import { messageUsageForAccounting } from "../core/message-accounting.js";
+import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
@@ -540,10 +540,12 @@ function extractAssistantThinking(message: unknown): string {
 function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 	if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return undefined;
 	const recordedUsage = messageUsageForAccounting(message);
+	const calls = messageCallsForAccounting(message);
+	const summary = sumRunUsage([message as AgentMessage]);
 	const neverSent =
 		(message as { callInvoked?: boolean }).callInvoked === false ||
 		(recordedUsage as { callInvoked?: boolean } | null | undefined)?.callInvoked === false;
-	if ((!recordedUsage || typeof recordedUsage !== "object") && !neverSent) return undefined;
+	if ((!recordedUsage || typeof recordedUsage !== "object") && !neverSent && !summary.costSummary) return undefined;
 	const rawUsage = (recordedUsage ?? {}) as Record<string, unknown>;
 	const unknownUsage = !neverSent && !normalizeTokenUsage(rawUsage).observed;
 	const tally = foldMessageIntoRunTally(emptyRunTally(), message as AgentMessage);
@@ -570,10 +572,15 @@ function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 		turnUsage.reasoningTokens = reasoning.tokens;
 		turnUsage.reasoningTokenProvenance = reasoning.provenance;
 	}
-	if (!neverSent) {
+	if (calls !== undefined) {
+		turnUsage.modelCalls = summary.apiCalls;
+		turnUsage.neverSentCalls = calls.filter((call) => call.disposition === "never_sent").length;
+		turnUsage.unknownUsageCalls = summary.missingTokenCalls ?? 0;
+		if (summary.costSummary) turnUsage.costSummary = summary.costSummary;
+	} else if (!neverSent) {
 		turnUsage.costSummary = aggregateCostAmounts([
 			{
-				usd: sumRunUsage([message as AgentMessage]).costUsd,
+				usd: summary.costUsd,
 				provenance: resolveCostProvenance(rawUsage.costProvenance, "unknown"),
 				apiCalls: 1,
 				...(normalizeTokenUsage(rawUsage).observed ? {} : { missingTokenCalls: 1 }),

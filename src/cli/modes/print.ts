@@ -1027,16 +1027,20 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// runs), so nothing here may key on the last segment alone.
 			const usageSummary = sumRunUsage([event.message]);
 			const rawUsage = messageUsageForAccounting(event.message) ?? {};
-			if (usageSummary.hadUsage && rawUsage.callInvoked !== false) {
-				const reported = normalizeTokenUsage(rawUsage);
-				Object.assign(usageSummary, {
-					...reported,
-					tokens: reported.totalTokens,
-					missingTokenCalls: reported.observed ? 0 : 1,
-					costUsd: rawUsage.estimated === true ? 0 : usageSummary.costUsd,
-				});
+			if (usageSummary.hadUsage && (usageSummary.costSummary || rawUsage.callInvoked !== false)) {
+				if (!usageSummary.costSummary) {
+					const reported = normalizeTokenUsage(rawUsage);
+					Object.assign(usageSummary, {
+						...reported,
+						tokens: reported.totalTokens,
+						missingTokenCalls: reported.observed ? 0 : 1,
+						costUsd: rawUsage.estimated === true ? 0 : usageSummary.costUsd,
+					});
+				}
 				receiptStats.costAmounts.push({
 					usd: usageSummary.costUsd,
+					apiCalls: usageSummary.apiCalls,
+					...(usageSummary.costSummary ? { costSummary: usageSummary.costSummary } : {}),
 					provenance:
 						rawUsage.estimated === true
 							? "unknown"

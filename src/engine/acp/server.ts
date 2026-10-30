@@ -6,11 +6,12 @@ import {
 	readContextOperation,
 } from "../../core/context-operation.js";
 import type { JobRecord } from "../../core/job-types.js";
-import { messageUsageForAccounting } from "../../core/message-accounting.js";
+import { messageCallsForAccounting, messageUsageForAccounting } from "../../core/message-accounting.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { CostAggregate } from "../../domains/observability/cost.js";
 import { accumulateCostAmount, emptyCostAggregate, renderCostAmount } from "../../domains/observability/cost.js";
+import { usageCallsFromAttempts } from "../../domains/session/journal-usage.js";
 import {
 	ACP_DISPATCH_STEER_METHOD,
 	ACP_EGGS_META_KEY,
@@ -1444,6 +1445,37 @@ function mergeMessageUsage(into: AcpServerUsage, message: unknown, seen?: WeakSe
 	if (seen) {
 		if (seen.has(message)) return;
 		seen.add(message);
+	}
+	const facts = messageCallsForAccounting(message);
+	if (facts !== undefined) {
+		for (const call of usageCallsFromAttempts(facts.map((settled) => ({ started: settled, settled })))) {
+			into.input += call.input;
+			into.output += call.output;
+			into.cacheRead += call.cacheRead;
+			into.cacheWrite += call.cacheWrite;
+			into.reasoning += call.reasoningTokens;
+			into.totalTokens += call.totalTokens;
+			into.apiCalls = (into.apiCalls ?? 0) + (call.apiCalls ?? 0);
+			into.missingTokenCalls = (into.missingTokenCalls ?? 0) + (call.missingTokenCalls ?? 0);
+			into.costSummary = accumulateCostAmount(into.costSummary ?? emptyCostAggregate(), {
+				usd: call.costUsd,
+				provenance: call.costProvenance ?? "unknown",
+				...(call.costSummary ? { costSummary: call.costSummary } : {}),
+			});
+		}
+		const cost = into.costSummary;
+		if (cost && cost.calls > 0) {
+			into.costUsd = cost.knownUsd;
+			into.costProvenance = cost.hasUnknown
+				? "unknown"
+				: cost.hasEstimated
+					? "estimated"
+					: cost.allKnownFree
+						? "known_free"
+						: "known";
+			into.costProvenanceObserved = true;
+		}
+		return;
 	}
 	mergeUsage(into, messageUsageForAccounting(message));
 }
