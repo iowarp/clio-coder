@@ -180,6 +180,15 @@ export function renderTraceCost(row: {
 	});
 }
 
+/**
+ * A configured limit or a computed upper bound (a session ceiling, a run cap, a
+ * route's cost bound). It is a figure someone set or derived, not spend, so it
+ * renders plainly and a zero limit reads as `$0.00` (#434).
+ */
+export function renderUsdLimit(value: number | null | undefined): string {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? formatUsdAmount(value) : "not set";
+}
+
 /** Provider credit limits are measured balances; they can be denominated outside USD. */
 export function renderCreditAmount(value: number, currency: string): string {
 	if (currency.toUpperCase() === "USD") return renderCostAmount(value, "known");

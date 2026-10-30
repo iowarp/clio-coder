@@ -9,6 +9,7 @@ export {
 	aggregateCostAmounts,
 	renderCostAggregate,
 	renderTraceCost,
+	renderUsdLimit,
 } from "../../../../src/domains/observability/cost.js";
 export {
 	AcpProcessError,

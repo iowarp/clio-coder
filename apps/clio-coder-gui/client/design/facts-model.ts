@@ -117,8 +117,10 @@ export function factsOf(
 ): { facts: Fact[]; omitted: number } {
 	if (scalar(value) || Array.isArray(value)) return { facts: [factFor("Value", "value", value, depth)], omitted: 0 };
 	const hide = new Set(options.hide ?? []);
-	const entries = Object.entries(value as Record<string, unknown>).filter(
-		([key]) => !hide.has(key) && key !== "costDisplay",
+	const record = value as Record<string, unknown>;
+	// Server-rendered displays travel beside their number and are read through it, never listed (#434).
+	const entries = Object.entries(record).filter(
+		([key]) => !hide.has(key) && key !== "costDisplay" && !(key.endsWith("Display") && key.slice(0, -7) in record),
 	);
 	const lead = (options.order ?? []).flatMap((key) => entries.filter(([candidate]) => candidate === key));
 	const rest = entries.filter(([key]) => !(options.order ?? []).includes(key));
@@ -132,10 +134,11 @@ export function factsOf(
 					key,
 					item,
 					depth,
-					/^(costUsd|knownUsd|knownCostUsd|total_cost_usd)$/.test(key) &&
-						typeof (value as Record<string, unknown>).costDisplay === "string"
-						? (value as Record<string, string>).costDisplay
-						: undefined,
+					typeof record[`${key}Display`] === "string"
+						? (record[`${key}Display`] as string)
+						: /^(costUsd|knownUsd|knownCostUsd|total_cost_usd)$/.test(key) && typeof record.costDisplay === "string"
+							? record.costDisplay
+							: undefined,
 				),
 			),
 		omitted: Math.max(0, ordered.length - FACT_LIMITS.keys),

@@ -16,7 +16,7 @@ import {
 	FleetRoot,
 	FleetRootDetail,
 } from "../../../contracts/fleet.js";
-import { withCostDisplay } from "../../services/cost-display.js";
+import { reportCostDisplays, withCostDisplay } from "../../services/cost-display.js";
 import { AppProblem } from "../../services/problem.js";
 import { artifactPage, containedFile, readArtifact } from "./storage.js";
 
@@ -39,7 +39,10 @@ function dispatchSummary(row: RunEnvelope): DispatchRun {
 }
 function receipt(id: string) {
 	const raw = readArtifact(clioStateDir(), "receipts", `${id}.json`);
-	return raw && typeof raw === "object" && !Array.isArray(raw) ? withCostDisplay(raw as Record<string, unknown>) : null;
+	// Nested route bounds and caps need their own displays beside the receipt's cost (#434).
+	return raw && typeof raw === "object" && !Array.isArray(raw)
+		? withCostDisplay(reportCostDisplays(raw) as Record<string, unknown>)
+		: null;
 }
 function rootRecord(id: string) {
 	if (!containedFile(clioStateDir(), "fleet-runs", `${id}.json`)) return null;

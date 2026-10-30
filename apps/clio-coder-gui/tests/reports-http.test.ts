@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { UsageReport } from "../contracts/reports.js";
+import { reportCostDisplays } from "../server/services/cost-display.js";
 import { harness, json } from "./harness/app.js";
 import { seedReports } from "./harness/reports-fixture.js";
 
@@ -33,4 +34,20 @@ test("usage JSON Lines bridge reports exact canonical workspace usage and distin
 	} finally {
 		await h.close();
 	}
+});
+
+test("report limits carry server-rendered displays beside their numbers (#434)", () => {
+	const rendered = reportCostDisplays({
+		costCap: { maxUsd: 2 },
+		route: { totalCostUpperBoundUsd: 0.25, ceilingUsd: null },
+	});
+	assert.deepEqual(rendered, {
+		costCap: { maxUsd: 2, maxUsdDisplay: "$2.00" },
+		route: {
+			totalCostUpperBoundUsd: 0.25,
+			totalCostUpperBoundUsdDisplay: "$0.25",
+			ceilingUsd: null,
+			ceilingUsdDisplay: "not set",
+		},
+	});
 });

@@ -115,3 +115,14 @@ test("a vocabulary key reads its wire word as words, and an identifier is never 
 	assert.equal(scalarText("commode", "not_observed").text, "not_observed");
 	assert.equal(humanizeToken("not_applicable"), "Not applicable");
 });
+
+test("a limit reads through its server display beside the number and is never unmeasured (#434)", () => {
+	const { facts } = factsOf({ budgetUsd: 5, budgetUsdDisplay: "$5.00", costUsd: 0.5, costDisplay: "$0.50" });
+	assert.deepEqual(
+		facts.map((fact) => (fact.kind === "value" ? [fact.label, fact.text] : [fact.label])),
+		[
+			["Budget", "$5.00"],
+			["Cost", "$0.50"],
+		],
+	);
+});

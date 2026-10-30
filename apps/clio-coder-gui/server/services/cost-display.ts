@@ -2,7 +2,11 @@ import { Value } from "typebox/value";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import { AcpUsageMetaSchema } from "../../contracts/wire.js";
 import type { CostAggregate } from "../clio/http-shims.js";
-import { aggregateCostAmounts, renderCostAggregate } from "../clio/http-shims.js";
+import { aggregateCostAmounts, renderCostAggregate, renderUsdLimit } from "../clio/http-shims.js";
+
+/** Limits and bounds, as opposed to spend: ceilings, caps, budgets and route cost bounds (#434). */
+const USD_LIMIT_KEY =
+	/^(?:max|runMax|maxCost|budget|ceiling|newCeiling|initialCeiling|costCeiling|raiseTo|configured|additional)Usd$|UpperBoundUsd$/u;
 
 function summary(value: unknown): CostAggregate | undefined {
 	const schema = AcpUsageMetaSchema.properties.costSummary;
@@ -33,11 +37,17 @@ export function withCostDisplay<T extends Record<string, unknown>>(row: T): T & 
 	};
 }
 
-/** Report facts contain nested aggregate rows, so each monetary record carries its own display. */
+/**
+ * Report facts and receipts contain nested aggregate rows, so each monetary record carries its own display, and
+ * each limit carries a `<key>Display` sibling: a bound is not spend and must never read as unmeasured (#434).
+ */
 export function reportCostDisplays(value: unknown): unknown {
 	if (Array.isArray(value)) return value.map(reportCostDisplays);
 	if (!value || typeof value !== "object") return value;
 	const row = Object.fromEntries(Object.entries(value).map(([key, item]) => [key, reportCostDisplays(item)]));
+	for (const [key, item] of Object.entries(row))
+		if (USD_LIMIT_KEY.test(key) && (typeof item === "number" || item === null))
+			row[`${key}Display`] = renderUsdLimit(item);
 	return "costUsd" in row || "knownUsd" in row || "cost" in row ? withCostDisplay(row) : row;
 }
 

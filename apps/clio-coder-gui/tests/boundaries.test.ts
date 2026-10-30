@@ -11,7 +11,7 @@ const httpModules = new Map([
 	// Cost display stays on the server; browser contracts carry only rendered strings (#434).
 	[
 		"src/domains/observability/cost.ts",
-		new Set(["aggregateCostAmounts", "renderCostAggregate", "renderTraceCost", "CostAggregate"]),
+		new Set(["aggregateCostAmounts", "renderCostAggregate", "renderTraceCost", "renderUsdLimit", "CostAggregate"]),
 	],
 	// The server records its loaded build and reads activation so live status can report a pending upgrade.
 	["src/core/running-build.ts", new Set(["registerRunningBuild", "pendingInstalledVersion"])],
