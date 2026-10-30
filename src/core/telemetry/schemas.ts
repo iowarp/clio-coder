@@ -355,7 +355,8 @@ export const KIND_REGISTRY = {
 		Type.Object(
 			{
 				terminalReason: RunTerminalReason,
-				callIds: Type.Array(CallIdSchema),
+				/** Null when no call telemetry reached the host: unknown, never zero calls (R1, #434). */
+				callIds: Type.Union([Type.Array(CallIdSchema), Type.Null()]),
 				processExitCode: Type.Union([Type.Integer(), Type.Null()]),
 				boundKind: Type.Optional(RunBoundKind),
 				/** Only the worker's repair loop can count its rounds; the host never infers zero (#425). */

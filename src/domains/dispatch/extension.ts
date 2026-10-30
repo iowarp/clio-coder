@@ -762,7 +762,7 @@ function runSettledFacts(
 ): Payload<"run.settled"> {
 	return {
 		terminalReason: terminal.terminalReason,
-		callIds: receipt.callIds ?? [],
+		callIds: receipt.callIds ?? null,
 		processExitCode,
 		...(terminal.boundKind ? { boundKind: terminal.boundKind } : {}),
 		repairRounds:
