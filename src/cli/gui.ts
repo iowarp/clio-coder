@@ -30,6 +30,7 @@ A browser opens by itself only from an interactive terminal on a desktop.
 private server, and so does any of --port, --idle-exit <milliseconds>, --token
 or --log-file. --path opens a particular page. --reuse-background fails instead
 of starting a private server when the background app cannot be used.
+--token-stdin takes the launch token from the first line of stdin instead.
 
 On Linux with a systemd user session, background install keeps the app at a
 stable address from login, so the browser can install it as an app. That
