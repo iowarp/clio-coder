@@ -136,14 +136,27 @@ test("Homebrew and winget installs get a notice with their own upgrade command a
 	}
 });
 
-test("detects replacement and same-version rebuilds without consulting the registry", async (t) => {
+test("a source checkout at a release version is told that upgrade prints the git steps (#436)", async (t) => {
 	const f = await fixture("source");
+	t.after(f.home.cleanup);
+	const notice = await createUpdateCheck({ ...f, fetchVersion: async () => "0.5.5" }).probe(
+		new AbortController().signal,
+	);
+	assert.deepEqual(notice, {
+		kind: "available",
+		key: "available:0.5.4:0.5.5",
+		text: "v0.5.5 available · clio-coder upgrade prints the git steps",
+	});
+});
+
+test("detects replacement and same-version rebuilds without consulting the registry", async (t) => {
+	const f = await fixture("local");
 	t.after(f.home.cleanup);
 	const controller = new AbortController();
 	const check = createUpdateCheck({
 		...f,
 		fetchVersion: async () => {
-			throw new Error("source check must stay local");
+			throw new Error("local check must stay local");
 		},
 	});
 	assert.equal(await check.probe(controller.signal), null);
@@ -162,8 +175,12 @@ test("development, local and unknown installations never check the registry; bad
 	for (const kind of ["source", "local", "unknown"] as const) {
 		const f = await fixture(kind);
 		t.after(f.home.cleanup);
+		// A source checkout checks only at a release version; its development tree has nothing published (#436).
+		const dev = kind === "source" ? "0.5.5-dev" : null;
+		if (dev) await writeFile(join(f.root, "package.json"), JSON.stringify({ name: "@iowarp/clio-coder", version: dev }));
 		const check = createUpdateCheck({
 			...f,
+			...(dev ? { runningVersion: dev } : {}),
 			fetchVersion: async () => {
 				throw new Error("unexpected registry request");
 			},

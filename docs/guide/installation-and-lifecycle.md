@@ -731,11 +731,14 @@ five-second delay. Registry requests have a 2.5-second timeout and are cached fo
 the registry named by `npm_config_registry` or `NPM_CONFIG_REGISTRY` when it is an
 `http` or `https` URL, so a mirror announces the version its own `npm install`
 fetches, and to `registry.npmjs.org` otherwise. npm,
-pnpm, Bun, Homebrew, winget and installer installs check the `latest` tag. A release candidate also
+pnpm, Bun, Homebrew, winget and installer installs, and a source checkout at a release
+version, check the `latest` tag. A release candidate also
 reads `beta`, a `-snapshot.` build also reads `dev`, and an installer install reads
 the channel it recorded instead.
-Source checkouts, local or npx copies, unknown layouts and pinned installer
-installs skip registry checks. Installed files are also checked once a minute for
+A source checkout on a `-dev` version, local or npx copies, unknown layouts and pinned
+installer installs skip registry checks. A source checkout's notice reads
+`v<version> available · clio-coder upgrade prints the git steps`, because it updates
+through git. Installed files are also checked once a minute for
 a version change or a rebuild since this process started.
 
 The result is one muted footer line, visible only when the editor is empty and

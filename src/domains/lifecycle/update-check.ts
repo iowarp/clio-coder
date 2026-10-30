@@ -309,12 +309,13 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 			// An install being replaced, an unreadable disk, or a removed checkout is not a prompt to reinstall.
 		}
 		signal.throwIfAborted();
-		// Development trees, local/npx copies and unknown layouts never generate registry traffic.
+		// Development trees, local/npx copies and unknown layouts never generate registry traffic;
+		// a source checkout at a release tag does.
 		// A `-dev` version has no published artifact: the `beta` track would call it an rc, and
 		// `latest` is always an older stable, so neither answer is one the developer should see.
 		const running = parseReleaseVersion(runningVersion);
 		if (
-			!["npm", "pnpm", "bun", "installer", "homebrew", "winget"].includes(installation.kind) ||
+			!["npm", "pnpm", "bun", "installer", "homebrew", "winget", "source"].includes(installation.kind) ||
 			running === null ||
 			(isDevVersion(runningVersion) && !installation.installer)
 		)
@@ -383,6 +384,9 @@ export function createUpdateCheck(options: UpdateCheckOptions) {
 		// Homebrew and winget replace their own installs; the notice names their upgrade command (#436).
 		if (installation.kind === "homebrew" || installation.kind === "winget")
 			return { kind: "available", key, text: `v${available} available · ${installationCommand(installation, "upgrade")}` };
+		// A release checkout moves by git; its several-line steps do not fit a footer, and upgrade prints them (#436).
+		if (installation.kind === "source")
+			return { kind: "available", key, text: `v${available} available · clio-coder upgrade prints the git steps` };
 		// Package-manager installs never update while Clio runs: a user-writable
 		// prefix is handed to a wrapper when the session quits; any other gets
 		// the exact command (#436).
