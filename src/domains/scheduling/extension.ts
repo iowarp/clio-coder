@@ -4,9 +4,12 @@
  * callers wait for an operator ceiling increase; headless callers reject.
  */
 
-import { type BudgetAlertPayload, BusChannels } from "../../core/bus-events.js";
+import { performance } from "node:perf_hooks";
+import { type BudgetAlertPayload, BusChannels, type ConfigChangeSource } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { recordTelemetry } from "../../core/telemetry/producer.js";
+import type { Payload } from "../../core/telemetry/schemas.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ObservabilityContract } from "../observability/contract.js";
 import { createBudgetState, type RunCostCap, SessionCostCeilingError, sessionCeilingReached } from "./budget.js";
@@ -50,6 +53,10 @@ export function createSchedulingBundle(
 	const unsubscribes: Array<() => void> = [];
 
 	let runCap: RunCostCap | null = null;
+	// The latest settings change to the session ceiling, so a hold it releases can say who raised it (#424).
+	let ceilingChange: { ceilingUsd: number; source: ConfigChangeSource; at: number } | undefined;
+	// Sessions and ceilings whose crossing is journaled; a crossing is one per ceiling value, not one per held call.
+	const crossings = new Set<string>();
 
 	function syncBudget(): void {
 		const nextCeiling = (options.getSettings?.() ?? config.get()).safety.limits.sessionCostUsd;
@@ -65,6 +72,16 @@ export function createSchedulingBundle(
 
 	const extension: DomainExtension = {
 		async start() {
+			unsubscribes.push(
+				config.onChange("hotReload", ({ diff, settings, source }) => {
+					if (!diff.hotReload.includes("safety.limits.sessionCostUsd")) return;
+					ceilingChange = {
+						ceilingUsd: settings.safety.limits.sessionCostUsd,
+						source: source ?? "unattributed",
+						at: performance.now(),
+					};
+				}),
+			);
 			unsubscribes.push(
 				context.bus.on(BusChannels.DispatchEnqueued, () => {
 					const { verdict, currentUsd } = evaluate();
@@ -93,37 +110,85 @@ export function createSchedulingBundle(
 			const { verdict, currentUsd } = evaluate();
 			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };
 		},
-		admitPaidRequest: async ({ waitForRaise, additionalUsd = 0, getCeilingUsd, contextTokens, onBlocked, signal }) => {
-			let alerted = false;
+		admitPaidRequest: async ({
+			waitForRaise,
+			additionalUsd = 0,
+			getCeilingUsd,
+			contextTokens,
+			onBlocked,
+			telemetry,
+			signal,
+		}) => {
+			let held: { block: BudgetAlertPayload; since: number } | undefined;
+			// The hold is journaled once, when it ends, for the call it held (#424).
+			const recordHold = (outcome: Payload<"budget.wait">["outcome"], ceilingUsd?: number): void => {
+				if (!telemetry || !held) return;
+				const { block, since } = held;
+				const raised = outcome === "raised" && ceilingUsd !== undefined;
+				const by = raised && ceilingChange?.ceilingUsd === ceilingUsd && ceilingChange.at >= since ? ceilingChange : null;
+				recordTelemetry(
+					"budget.wait",
+					{
+						level: block.level,
+						spendUsd: block.currentUsd,
+						ceilingUsd: block.ceilingUsd,
+						...(block.contextTokens !== undefined ? { contextTokens: block.contextTokens } : {}),
+						outcome,
+						waitedMs: Math.max(0, performance.now() - since),
+						...(raised ? { raisedToUsd: ceilingUsd, raisedBy: by?.source ?? "unattributed" } : {}),
+					},
+					telemetry,
+				);
+			};
 			for (;;) {
 				const { currentUsd } = evaluate();
 				const spend = currentUsd + additionalUsd;
 				const ceilingUsd = getCeilingUsd?.() ?? budget.ceilingUsd;
-				if (!sessionCeilingReached(spend, ceilingUsd)) return;
-				if (signal?.aborted) throw signal.reason ?? new Error("budget wait aborted");
-				if (!alerted) {
-					alerted = true;
+				if (!sessionCeilingReached(spend, ceilingUsd)) {
+					if (held)
+						recordHold(ceilingUsd <= 0 ? "removed" : ceilingUsd > held.block.ceilingUsd ? "raised" : "cleared", ceilingUsd);
+					return;
+				}
+				if (signal?.aborted) {
+					recordHold("aborted");
+					throw signal.reason ?? new Error("budget wait aborted");
+				}
+				if (!held) {
 					const block: BudgetAlertPayload = {
 						level: spend > ceilingUsd ? "over" : "at",
 						currentUsd: spend,
 						ceilingUsd,
 						...(contextTokens !== undefined ? { contextTokens } : {}),
 					};
+					held = { block, since: performance.now() };
 					onBlocked?.(block);
 					context.bus.emit(BusChannels.BudgetAlert, block);
+					const crossing = JSON.stringify([telemetry?.sessionId, ceilingUsd]);
+					if (telemetry && !crossings.has(crossing)) {
+						const { currentUsd: spendUsd, ...rest } = block;
+						if (recordTelemetry("budget.crossing", { ...rest, spendUsd }, telemetry)) crossings.add(crossing);
+					}
 				}
-				if (!waitForRaise) throw new SessionCostCeilingError(spend, ceilingUsd, runCap ?? undefined, contextTokens);
-				await new Promise<void>((resolve, reject) => {
-					const onAbort = (): void => {
-						clearTimeout(timer);
-						reject(signal?.reason ?? new Error("budget wait aborted"));
-					};
-					const timer = setTimeout(() => {
-						signal?.removeEventListener("abort", onAbort);
-						resolve();
-					}, 250);
-					signal?.addEventListener("abort", onAbort, { once: true });
-				});
+				if (!waitForRaise) {
+					recordHold("refused");
+					throw new SessionCostCeilingError(spend, ceilingUsd, runCap ?? undefined, contextTokens);
+				}
+				try {
+					await new Promise<void>((resolve, reject) => {
+						const onAbort = (): void => {
+							clearTimeout(timer);
+							reject(signal?.reason ?? new Error("budget wait aborted"));
+						};
+						const timer = setTimeout(() => {
+							signal?.removeEventListener("abort", onAbort);
+							resolve();
+						}, 250);
+						signal?.addEventListener("abort", onAbort, { once: true });
+					});
+				} catch (error) {
+					recordHold("aborted");
+					throw error;
+				}
 			}
 		},
 		setRunCostCap: (cap) => {

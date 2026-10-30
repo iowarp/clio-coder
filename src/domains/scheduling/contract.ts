@@ -1,4 +1,5 @@
 import type { BudgetAlertPayload } from "../../core/bus-events.js";
+import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { BudgetVerdict, RunCostCap } from "./budget.js";
 import type { FleetRegistry } from "./cluster.js";
 import type { LocalCapacity } from "./local-capacity.js";
@@ -29,6 +30,8 @@ export interface SchedulingContract {
 		contextTokens?: number;
 		/** Record the first block before either waiting or rejecting (#424). */
 		onBlocked?: (block: BudgetAlertPayload) => void;
+		/** The held call's telemetry context; with it the crossing and the hold are journaled for that call (#424, #434). */
+		telemetry?: TelemetryContext;
 		signal?: AbortSignal;
 	}): Promise<void>;
 	/** Arm a `clio-coder run --max-cost-usd` cap, so a stop at it names the flag. */

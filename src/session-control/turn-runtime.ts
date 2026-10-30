@@ -1012,6 +1012,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 									getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
 									contextTokens: input,
 									onBlocked: recordBlock,
+									...(modelCall && journalLease
+										? {
+												telemetry: {
+													...journalLease.context,
+													callId: modelCall.callId,
+													attemptId: modelCall.attemptId,
+												},
+											}
+										: {}),
 									...(streamOptions?.signal ? { signal: streamOptions.signal } : {}),
 								});
 							} finally {

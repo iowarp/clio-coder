@@ -299,6 +299,8 @@ export const KIND_NAMES = [
 	"process.exited",
 	"prompt.text",
 	"quota.reading",
+	"budget.crossing",
+	"budget.wait",
 	"config.snapshot",
 	"config.changed",
 ] as const;
@@ -441,6 +443,42 @@ export const KIND_REGISTRY = {
 			closed,
 		),
 	},
+	// Admission found the session's priced spend at or over a ceiling, once per ceiling; ctx names the call it held (#424).
+	"budget.crossing": accountability(
+		Type.Object(
+			{
+				level: vocabulary(["at", "over"]),
+				spendUsd: duration,
+				ceilingUsd: duration,
+				/** Estimated input tokens of the held request, which is what each further call re-sends (#423). */
+				contextTokens: Type.Optional(count),
+			},
+			closed,
+		),
+	),
+	// One paid request held at the ceiling, recorded when the hold ends; ctx names the held call (#424).
+	"budget.wait": accountability(
+		Type.Object(
+			{
+				level: vocabulary(["at", "over"]),
+				spendUsd: duration,
+				ceilingUsd: duration,
+				contextTokens: Type.Optional(count),
+				/**
+				 * raised: a higher ceiling released it. removed: the ceiling was cleared to none. cleared: spend fell under
+				 * the ceiling it held at. refused: the caller could not wait. aborted: the request was cancelled first.
+				 */
+				outcome: vocabulary(["raised", "removed", "cleared", "refused", "aborted"]),
+				waitedMs: duration,
+				raisedToUsd: Type.Optional(duration),
+				/** Who changed the ceiling, when a settings change during the wait set the one that released it. */
+				raisedBy: Type.Optional(
+					vocabulary(["file", "settings-ui", "cli", "session-override", "slash-command", "unattributed"]),
+				),
+			},
+			closed,
+		),
+	),
 	// The effective settings when a session's writer opens, so every later record reads against known settings (#434).
 	"config.snapshot": {
 		version: 1,
