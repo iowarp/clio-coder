@@ -149,6 +149,8 @@ export interface UsageBreakdown {
 	totalTokens: number;
 	apiCalls?: number;
 	missingTokenCalls?: number;
+	/** Persisted assistant calls that never reached the provider (#430). */
+	neverSentCalls?: number;
 }
 
 /**
@@ -207,6 +209,7 @@ export interface CostTracker {
 	sessionTotal(): number;
 	sessionCost(): CostAggregate;
 	sessionTokens(): UsageBreakdown;
+	recordNeverSentCalls(count: number): void;
 	entries(): ReadonlyArray<CostEntry>;
 	reset(): void;
 }
@@ -294,6 +297,9 @@ export function createCostTracker(): CostTracker {
 		sessionTokens() {
 			return { ...totals };
 		},
+		recordNeverSentCalls(count) {
+			if (count > 0) totals.neverSentCalls = (totals.neverSentCalls ?? 0) + count;
+		},
 		entries() {
 			return log;
 		},
@@ -309,6 +315,7 @@ export function createCostTracker(): CostTracker {
 			totals.totalTokens = 0;
 			delete totals.apiCalls;
 			delete totals.missingTokenCalls;
+			delete totals.neverSentCalls;
 		},
 	};
 }

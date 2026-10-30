@@ -23,11 +23,12 @@ import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import type { SessionEntry } from "./entries.js";
 import { filterEntriesToActivePath } from "./tree/active-path.js";
-import { ledgerUsageCalls, type SessionUsageDefaults } from "./usage.js";
+import { ledgerCallFailureCounts, ledgerUsageCalls, type SessionUsageDefaults } from "./usage.js";
 
 /** The slice of ObservabilityContract a reseed needs. */
 export interface SessionUsageSink {
 	resetSession(sessionId?: string | null): void;
+	recordNeverSentCalls?(count: number): void;
 	recordTokens(
 		providerId: string,
 		attributedModelId: string,
@@ -77,6 +78,7 @@ export function reseedSessionUsageFromLedger(
 ): void {
 	sink.resetSession(defaults.sessionId);
 	const scoped = filterEntriesToActivePath(entries, activeLeafTurnId ?? undefined);
+	sink.recordNeverSentCalls?.(ledgerCallFailureCounts(scoped).neverInvokedCalls);
 	for (const call of ledgerUsageCalls(scoped, defaults)) {
 		const responseModelIdObservationCounts = emptyResponseModelIdObservationCounts();
 		addResponseModelIdObservationCount(

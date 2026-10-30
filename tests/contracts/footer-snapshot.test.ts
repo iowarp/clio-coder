@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
@@ -69,4 +69,42 @@ test("compact footer names an unknown serving window without a percentage", () =
 	const rows = renderCompactDashboard(state, 100).map(stripTerminalSequences).join("\n");
 	match(rows, /100\/unknown/u);
 	strictEqual(/\?%/u.test(rows), false);
+});
+
+test("footer totals distinguish unknown usage from never-sent calls, including when no tokens were spent", () => {
+	let total = 0;
+	let missing = 0;
+	let neverSent = 1;
+	const panel = buildFooterDashboard({
+		providers: { list: () => [] } as never,
+		resolveCurrentBranch: async () => null,
+		getTerminalRows: () => 120,
+		getSessionTokens: () => ({
+			input: total,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			reasoningTokens: 0,
+			totalTokens: total,
+			missingTokenCalls: missing,
+			neverSentCalls: neverSent,
+		}),
+	});
+	try {
+		panel.setExpanded(true);
+		for (const mixed of [false, true]) {
+			total = mixed ? 150 : 0;
+			missing = mixed ? 2 : 0;
+			neverSent = mixed ? 3 : 1;
+			for (const width of [40, 80, 120]) {
+				const rows = panel.view.render(width);
+				const text = rows.map(stripTerminalSequences).join(" ").replace(/\s+/gu, " ");
+				match(text, mixed ? /Σ150 \+\? \(2 calls with unknown usage\) · 3 calls never sent/u : /Σ0 · 1 call never sent/u);
+				if (!mixed) doesNotMatch(text, /unknown usage|\+\?/u);
+				for (const row of rows) ok(visibleWidth(row) <= width);
+			}
+		}
+	} finally {
+		panel.dispose();
+	}
 });

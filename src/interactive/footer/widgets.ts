@@ -616,13 +616,14 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	}
 	const total = cumulativeTokens(options.sessionTokens);
 	const missing = options.sessionTokens?.missingTokenCalls ?? 0;
+	const neverSent = options.sessionTokens?.neverSentCalls ?? 0;
 	rows.push(
-		total > 0 || missing > 0
+		total > 0 || missing > 0 || neverSent > 0
 			? styledKv(
 					"totals",
 					theme.fg(
 						"counter",
-						`Σ${formatFooterTokens(total)}${missing > 0 ? ` +? (${missing} call${missing === 1 ? "" : "s"})` : ""}`,
+						`Σ${formatFooterTokens(total)}${missing > 0 ? ` +? (${missing} call${missing === 1 ? "" : "s"} with unknown usage)` : ""}${neverSent > 0 ? ` · ${neverSent} call${neverSent === 1 ? "" : "s"} never sent` : ""}`,
 					),
 				)
 			: statusRow(null),

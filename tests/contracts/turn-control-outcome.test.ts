@@ -105,15 +105,24 @@ it("reduces a question, a duplicate dispatch, and a canceled turn without mutati
 	});
 	strictEqual(dispatch.conversation.clarificationStreak, 0);
 	deepStrictEqual(dispatch.completion, input.completion);
+	const failure = {
+		invoked: false,
+		stage: "budget" as const,
+		httpStatus: null,
+		errorClass: "timeout",
+		retryAttempts: 3,
+	};
 	const canceled = reduceTurnOutcome({
 		...base,
 		canceled: true,
 		stopReason: "aborted",
+		failure,
 		finalAssistantText: "Canceled.",
 		durationMs: 20,
 	});
 	deepStrictEqual(canceled.operator, { canceled: true });
 	strictEqual(canceled.stopReason, "aborted");
+	deepStrictEqual(canceled.failure, failure);
 	strictEqual(canceled.durationMs, 20);
 	strictEqual(base.previousClarificationStreak, 2);
 	deepStrictEqual(base.toolNames, []);

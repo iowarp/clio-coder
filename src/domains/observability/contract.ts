@@ -148,6 +148,8 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 	costEntries(): ReadonlyArray<CostEntry>;
 	/** Reset the running session token and cost totals. */
 	resetSession(sessionId?: string | null): void;
+	/** Count persisted never-sent assistant calls without adding spend or API calls (#430). */
+	recordNeverSentCalls(count: number): void;
 	/**
 	 * Record a token count. Used by dispatch glue, diags, and the chat loop's
 	 * `message_end` handler. `breakdown` is optional for call sites (dispatch

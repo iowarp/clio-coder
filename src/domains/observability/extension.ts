@@ -332,6 +332,10 @@ export function createObservabilityBundle(
 			latestThroughput = null;
 			projection.refresh();
 		},
+		recordNeverSentCalls(count) {
+			cost.recordNeverSentCalls(count);
+			projection.refresh();
+		},
 		recordTokens(
 			providerId,
 			attributedModelId,
