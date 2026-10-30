@@ -195,8 +195,8 @@ test("a session's lifetime tells a clean close, an open owner, an abnormal end a
 			closed: { at: "2099-01-01T00:00:00.000Z", reason: null },
 		},
 	);
-	// A ledger close older than the journal's last fact was reopened since; the owner decides.
-	strictEqual(lifetime({ endedAt: "2000-01-01T00:00:00.000Z", owner }, true).state, "open");
+	// Facts written after a ledger close, with no journal open or resume after it, do not reopen the session.
+	strictEqual(lifetime({ endedAt: "2000-01-01T00:00:00.000Z", owner }, true).state, "closed");
 	strictEqual(lifetime({ endedAt: null, owner }, true).state, "open");
 	strictEqual(lifetime({ endedAt: null, owner }, false).state, "ended-abnormally");
 	strictEqual(lifetime({ endedAt: null, owner }, null).state, "unverifiable");

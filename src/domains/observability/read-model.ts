@@ -1278,7 +1278,7 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 		sessionId: id,
 		modes: [...new Set(source.journal.modes)],
 		journal: journalCoverage(source.journal, analysis.fold, source.legacy.aggregates),
-		lifetime: { firstRecordAt: firstAt, lastRecordAt: lastAt, ...lifecycle(source, lastAt, options) },
+		lifetime: { firstRecordAt: firstAt, lastRecordAt: lastAt, ...lifecycle(source, options) },
 		lineage: source.parent
 			? {
 					parent: { sessionId: source.parent.sessionId, turnId: source.parent.turnId, at: source.parent.at },
@@ -1325,12 +1325,12 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 }
 
 /**
- * Closed when the journal's latest lifecycle record is a close, or the ledger's close postdates every journal fact.
- * Otherwise the session's owner decides: the ledger's, else the journal's last segment writer (#434 §6.1).
+ * Closed when the journal's latest lifecycle record is a close, or the ledger's close postdates the journal's latest
+ * open or resume. Otherwise the session's owner decides: the ledger's, else the journal's last segment writer (#434
+ * §6.1).
  */
 function lifecycle(
 	source: SessionSource,
-	lastAt: string | null,
 	options: ReadOptions,
 ): Pick<SessionTelemetryV1["lifetime"], "state" | "closed"> {
 	let latest: Extract<TelemetryRecord, { k: "session.opened" | "session.resumed" | "session.closed" }> | null = null;
@@ -1342,7 +1342,10 @@ function lifecycle(
 			latest = record;
 	if (latest?.k === "session.closed") return { state: "closed", closed: { at: latest.t, reason: latest.data.reason } };
 	const ledger = source.ledger;
-	if (ledger?.endedAt && (lastAt === null || ledger.endedAt >= lastAt))
+	// Every reopen clears endedAt on disk before the reopened process writes, so a set endedAt is a close. Facts dated
+	// after it are late writes, such as health windows on a writer idling after `/new` or a background call settling;
+	// only a journal open or resume says the session reopened.
+	if (ledger?.endedAt && (latest === null || ledger.endedAt >= latest.t))
 		return { state: "closed", closed: { at: ledger.endedAt, reason: null } };
 	// The ledger restamps its owner on every reopen, before a new writer may have written anything.
 	const writer = ledger?.owner ?? source.journal.writer ?? null;
