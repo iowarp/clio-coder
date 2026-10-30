@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -220,6 +221,18 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				assert.equal(rows.length, 1);
 				assert.equal(rows[0]?.sessionId, origin.id);
 				if (!switched) {
+					const steps = readFileSync(join(env.dir, "state", "memory", "steps.jsonl"), "utf8")
+						.trim()
+						.split("\n")
+						.map((line) => JSON.parse(line));
+					assert.ok(
+						steps.some((step) =>
+							step.calls?.some(
+								(call: { callId: string; sessionId: string; repoIdentity: string }) =>
+									call.callId === calls[0]?.data.callId && call.sessionId === origin.id && call.repoIdentity === origin.cwdHash,
+							),
+						),
+					);
 					const spend = readTaskMemorySpendSummary(join(env.dir, "state"));
 					assert.equal(spend.missingTokenCalls, ending === "no-usage" ? 1 : 0);
 					assert.equal(spend.unreportedUsageSteps, 0);
@@ -581,6 +594,7 @@ test("fallback shares the original deadline and cancellation discards its late c
 		getFallbackModelClient: () => ({
 			complete: (input) => {
 				fallbackSignal = input.signal;
+				input.onCall?.({ sessionId: "origin", repoIdentity: "repo", callId: "call-fixture", attemptId: "attempt-fixture" });
 				return response;
 			},
 		}),
@@ -596,7 +610,11 @@ test("fallback shares the original deadline and cancellation discards its late c
 	await Promise.resolve();
 	assert.equal(fallbackSignal.aborted, false);
 	t.mock.timers.tick(1);
-	assert.equal((await result).reason, "deadline", "fallback gets 15 remaining milliseconds, not a new 50");
+	const timedOut = await result;
+	assert.equal(timedOut.reason, "deadline", "fallback gets 15 remaining milliseconds, not a new 50");
+	assert.deepEqual(timedOut.calls, [
+		{ sessionId: "origin", repoIdentity: "repo", callId: "call-fixture", attemptId: "attempt-fixture" },
+	]);
 	assert.equal(fallbackSignal.aborted, true);
 	registration.reset();
 	const known: TaskMemoryStepUsage = {

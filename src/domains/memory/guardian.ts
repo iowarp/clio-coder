@@ -465,6 +465,7 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 						? "dropped"
 						: result.decision,
 				reason: result.reason,
+				...(result.calls === undefined ? {} : { calls: result.calls }),
 				bankOperations: result.bankOperations,
 				droppedOperations: result.droppedOperations,
 				citedEntries: 0,

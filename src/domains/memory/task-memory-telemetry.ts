@@ -7,7 +7,12 @@ import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import type { TaskMemoryEntry, TaskMemorySnapshot } from "./task-bank.js";
-import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason, TaskMemoryRoute } from "./task-memory-policy.js";
+import type {
+	TaskMemoryCallReference,
+	TaskMemoryPolicyDecision,
+	TaskMemoryPolicyReason,
+	TaskMemoryRoute,
+} from "./task-memory-policy.js";
 
 /**
  * Version 2 adds `reason`, `bankOperations`, and `droppedOperations`. Version 1
@@ -77,6 +82,7 @@ export interface TaskMemoryTokenCost {
 }
 
 export interface TaskMemoryTelemetryRecord {
+	calls?: readonly TaskMemoryCallReference[];
 	version: 2;
 	at: string;
 	triggerReasons: TaskMemoryTelemetryTrigger[];
@@ -103,6 +109,7 @@ export interface TaskMemoryTelemetryRecord {
 }
 
 export interface TaskMemoryTelemetryStep {
+	calls?: readonly TaskMemoryCallReference[];
 	triggerReasons: ReadonlyArray<TaskMemoryTelemetryTrigger>;
 	tier: TaskMemoryTelemetryTier;
 	bankDelta: TaskMemoryBankDelta;
@@ -161,6 +168,7 @@ export function taskMemoryTelemetryRecord(step: TaskMemoryTelemetryStep, at: Dat
 	const output = nonNegativeInteger(step.outputTokens);
 	return {
 		version: TASK_MEMORY_TELEMETRY_VERSION,
+		...(step.calls === undefined ? {} : { calls: step.calls.map((call) => ({ ...call })) }),
 		at: at.toISOString(),
 		triggerReasons: [...new Set(step.triggerReasons)],
 		tier: step.tier,
@@ -190,9 +198,10 @@ export function taskMemoryBankDelta(before: TaskMemorySnapshot, after: TaskMemor
 export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTelemetryRecord | null {
 	if (
 		!isRecord(value) ||
-		!hasKeys(value, TELEMETRY_KEYS, [...ROUTE_KEYS, "refusalReason", "resumeAt", "missingTokenCalls"])
+		!hasKeys(value, TELEMETRY_KEYS, [...ROUTE_KEYS, "refusalReason", "resumeAt", "missingTokenCalls", "calls"])
 	)
 		return null;
+	if (value.calls !== undefined && (!Array.isArray(value.calls) || !value.calls.every(validCallReference))) return null;
 	if (value.missingTokenCalls !== undefined && !isNonNegativeInteger(value.missingTokenCalls)) return null;
 	if (value.refusalReason !== undefined && typeof value.refusalReason !== "string") return null;
 	if (value.resumeAt !== undefined && !validIsoTimestamp(value.resumeAt)) return null;
@@ -207,6 +216,9 @@ export function parseTaskMemoryTelemetryRecord(value: unknown): TaskMemoryTeleme
 	if (bankDelta === null || tokenCost === null || !isNonNegativeFinite(value.latencyMs)) return null;
 	return {
 		version: TASK_MEMORY_TELEMETRY_VERSION,
+		...(value.calls === undefined
+			? {}
+			: { calls: (value.calls as TaskMemoryCallReference[]).map((call) => ({ ...call })) }),
 		at: value.at,
 		triggerReasons: value.triggerReasons,
 		tier: value.tier,
@@ -440,4 +452,11 @@ function isNonNegativeFinite(value: unknown): value is number {
 
 function nonNegativeFinite(value: number): number {
 	return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function validCallReference(value: unknown): value is TaskMemoryCallReference {
+	if (!isRecord(value) || !hasKeys(value, ["sessionId", "repoIdentity", "callId", "attemptId"], [])) return false;
+	return [value.sessionId, value.repoIdentity, value.callId, value.attemptId].every(
+		(part) => typeof part === "string" && /^[A-Za-z0-9_-]+$/.test(part),
+	);
 }

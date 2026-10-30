@@ -68,7 +68,16 @@ export class TaskMemoryBudgetSkipError extends Error {
 	}
 }
 
+/** Captured before admission so timed-out steps can still resolve their eventual call facts (#434). */
+export interface TaskMemoryCallReference {
+	sessionId: string;
+	repoIdentity: string;
+	callId: string;
+	attemptId: string;
+}
+
 export interface TaskMemoryModelRequest {
+	onCall?: (reference: TaskMemoryCallReference) => void;
 	callTelemetry?: CallMessageObserver;
 	purpose?: "observation" | "reflection" | "lesson";
 	systemPrompt: string;
@@ -292,6 +301,7 @@ export interface TaskMemoryPolicyInput {
 }
 
 export interface TaskMemoryPolicyResult {
+	calls?: readonly TaskMemoryCallReference[];
 	/** Admission diagnostic, present only when information flow refused the request. */
 	refusalReason?: string;
 	/** When a budget skip expects room again: a quota window reset or a 429 retry instant. */
@@ -395,6 +405,7 @@ export async function runTaskMemoryPolicy(
 	let rawResponse = "";
 	let clientError: string | null = null;
 	let stepUsage: TaskMemoryStepUsage | null = null;
+	const calls: TaskMemoryCallReference[] = [];
 	let presentedEntries: TaskMemoryEntry[] = [];
 	let usageReported = false;
 	const reportUsage = (usage: TaskMemoryStepUsage): void => {
@@ -423,6 +434,7 @@ export async function runTaskMemoryPolicy(
 			inputTokens: parts.inputTokens ?? stepUsage?.input ?? 0,
 			outputTokens: parts.outputTokens ?? stepUsage?.output ?? 0,
 			usage: stepUsage,
+			...(calls.length ? { calls: [...calls] } : {}),
 			...(parts.refusalReason === undefined ? {} : { refusalReason: parts.refusalReason }),
 			...(parts.resumeAt === undefined ? {} : { resumeAt: parts.resumeAt }),
 			...(parts.retiredLessonIds === undefined ? {} : { retiredLessonIds: parts.retiredLessonIds }),
@@ -469,6 +481,9 @@ export async function runTaskMemoryPolicy(
 				maxTokens: positiveInteger(input.modelMaxTokens, input.maxTokens),
 				signal: controller.signal,
 				onUsage: reportUsage,
+				onCall: (reference) => {
+					if (!calls.some((call) => call.attemptId === reference.attemptId)) calls.push({ ...reference });
+				},
 			})
 			.then((response) => {
 				if (response.usage !== undefined) reportUsage(response.usage);

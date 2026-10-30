@@ -2,6 +2,7 @@ import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { mkdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { test } from "node:test";
+import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import {
 	foldTaskMemorySpend,
 	formatTaskMemorySpend,
@@ -33,10 +34,19 @@ const AT = new Date("2026-09-29T10:00:00.000Z");
 
 test("a step row records the resolved target and model and round-trips through the parser", () => {
 	const row = taskMemoryTelemetryRecord(
-		{ ...STEP, route: { targetId: "zbook-lemonade", modelId: "Gemma-4-26B-A4B-it-MTP-GGUF" } },
+		{
+			...STEP,
+			route: { targetId: "zbook-lemonade", modelId: "Gemma-4-26B-A4B-it-MTP-GGUF" },
+			calls: [{ sessionId: "original", repoIdentity: "repo", callId: newCallId(), attemptId: newAttemptId() }],
+		},
 		AT,
 	);
 	strictEqual(row.targetId, "zbook-lemonade");
+	strictEqual(row.calls?.[0]?.sessionId, "original");
+	strictEqual(
+		parseTaskMemoryTelemetryRecord({ ...row, calls: [{ ...row.calls?.[0], repoIdentity: "../other" }] }),
+		null,
+	);
 	strictEqual(row.modelId, "Gemma-4-26B-A4B-it-MTP-GGUF");
 	deepStrictEqual(parseTaskMemoryTelemetryRecord(JSON.parse(JSON.stringify(row))), row);
 });

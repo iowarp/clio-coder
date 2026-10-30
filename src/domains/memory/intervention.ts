@@ -1342,6 +1342,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 								promptedResult.outputTokens,
 								started,
 								{
+									...(promptedResult.calls === undefined ? {} : { calls: promptedResult.calls }),
 									bankOperations: promptedResult.bankOperations,
 									droppedOperations: promptedResult.droppedOperations,
 									...(promptedResult.usage === null ? {} : { missingTokenCalls: promptedResult.usage.missingTokenCalls ?? 0 }),
@@ -1428,6 +1429,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			promptedResult.outputTokens,
 			attemptStarted,
 			{
+				...(promptedResult.calls === undefined ? {} : { calls: promptedResult.calls }),
 				bankOperations: promptedResult.bankOperations,
 				droppedOperations: promptedResult.droppedOperations,
 				...(promptedResult.usage === null ? {} : { missingTokenCalls: promptedResult.usage.missingTokenCalls ?? 0 }),
@@ -1464,6 +1466,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		outputTokens: number,
 		started: bigint,
 		operations: {
+			calls?: TaskMemoryPolicyResult["calls"];
 			bankOperations: number;
 			droppedOperations: number;
 			refusalReason?: string;
@@ -1486,6 +1489,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				bankDelta,
 				decision,
 				reason,
+				...(operations.calls === undefined ? {} : { calls: operations.calls }),
 				bankOperations: operations.bankOperations,
 				droppedOperations: operations.droppedOperations,
 				...(operations.refusalReason === undefined ? {} : { refusalReason: operations.refusalReason }),

@@ -1117,9 +1117,22 @@ export function createBackgroundMemoryRouting(
 					api: options ? (providers.getRuntime(options.runtimeId)?.apiFamily ?? "unknown") : "unknown",
 					id: destination?.modelId ?? "unknown",
 				});
-				scope.startAttempt();
+				const callTelemetry = {
+					...scope,
+					startAttempt() {
+						const identity = scope.startAttempt();
+						if (identity && options) {
+							try {
+								request.onCall?.({ ...identity, sessionId: options.origin.id, repoIdentity: options.origin.cwdHash });
+							} catch {
+								writeDiagnostic("[clio-coder:telemetry] memory call reference was not recorded\n");
+							}
+						}
+					},
+				};
+				callTelemetry.startAttempt();
 				try {
-					return await scope.withContext(() => client.complete({ ...request, callTelemetry: scope }));
+					return await scope.withContext(() => client.complete({ ...request, callTelemetry }));
 				} catch (error) {
 					// Engine attempts settle first; only failures in preparation reach this fallback (#434).
 					scope.settle({

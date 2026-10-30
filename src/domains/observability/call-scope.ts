@@ -24,7 +24,9 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 	let settledIdentity: { callId: string; attemptId: string } | undefined;
 	return {
 		identity: () => settledIdentity,
-		startAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): void {
+		startAttempt(
+			request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>,
+		): { callId: string; attemptId: string } | undefined {
 			if (!options || !lease) return;
 			call = call
 				? (call.nextAttempt(request) ?? call)
@@ -44,6 +46,7 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 						},
 						lease.context,
 					);
+			return { callId: call.callId, attemptId: call.attemptId };
 		},
 		settle(message: unknown): CallSettled | undefined {
 			if (!call || !options) return undefined;
