@@ -577,6 +577,7 @@ export function assistantSessionPayload(
 	payload.responseModelIdObservation = responseModelIdObservationFromRecord(raw, "not-observed");
 	for (const key of [
 		"usage",
+		"callInvoked",
 		"estimatedUsage",
 		"failure",
 		"api",
@@ -597,6 +598,13 @@ export function assistantSessionPayload(
 		const usage = raw.usage as Record<string, unknown>;
 		const observed = normalizeTokenUsage(usage).observed;
 		payload.usage = { ...usage, usageObserved: observed, ...(!observed ? { costProvenance: "unknown" } : {}) };
+	}
+	const usage = raw.usage as Record<string, unknown> | null | undefined;
+	if (raw.callInvoked === false || usage?.callInvoked === false || failure?.failure?.invoked === false) {
+		// Keep the SDK's in-memory shape, but never persist synthetic usage for an unsent call (#434).
+		payload.usage = null;
+		payload.callInvoked = false;
+		delete payload.estimatedUsage;
 	}
 	if (failure && !isSelfExplainingAbort({ stopReason: raw.stopReason, errorMessage: raw.errorMessage, text })) {
 		payload.stopReason = failure.stopReason;
@@ -636,7 +644,12 @@ export function estimatedUsageForInterruptedTurn(
 	const reported = (message as { usage?: Record<string, unknown> }).usage;
 	// A request cancelled before invocation sent no prompt. Estimating one put
 	// the whole context on the meter for each budget-wait abort in #423.
-	if (reported?.callInvoked === false) return null;
+	if (
+		reported?.callInvoked === false ||
+		(message as { callInvoked?: boolean }).callInvoked === false ||
+		(message as { failure?: { invoked?: boolean } }).failure?.invoked === false
+	)
+		return null;
 	if (reported && typeof reported === "object" && reported.estimated !== true) {
 		for (const key of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"] as const) {
 			const value = reported[key];

@@ -539,9 +539,11 @@ function extractAssistantThinking(message: unknown): string {
 function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 	if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return undefined;
 	const recordedUsage = (message as { usage?: unknown }).usage;
-	if (!recordedUsage || typeof recordedUsage !== "object") return undefined;
-	const rawUsage = recordedUsage as Record<string, unknown>;
-	const neverSent = rawUsage.callInvoked === false;
+	const neverSent =
+		(message as { callInvoked?: boolean }).callInvoked === false ||
+		(recordedUsage as { callInvoked?: boolean } | null | undefined)?.callInvoked === false;
+	if ((!recordedUsage || typeof recordedUsage !== "object") && !neverSent) return undefined;
+	const rawUsage = (recordedUsage ?? {}) as Record<string, unknown>;
 	const unknownUsage = !neverSent && !normalizeTokenUsage(rawUsage).observed;
 	const tally = foldMessageIntoRunTally(emptyRunTally(), message as AgentMessage);
 	const reasoning = reasoningFromTally(tally);
@@ -567,7 +569,7 @@ function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
 		turnUsage.reasoningTokens = reasoning.tokens;
 		turnUsage.reasoningTokenProvenance = reasoning.provenance;
 	}
-	if (rawUsage.callInvoked !== false) {
+	if (!neverSent) {
 		turnUsage.costSummary = aggregateCostAmounts([
 			{
 				usd: sumRunUsage([message as AgentMessage]).costUsd,

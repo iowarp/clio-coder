@@ -402,8 +402,10 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		// A call that reached the provider and failed unmetered is recorded as
 		// unknown, not as the zeros its stream started with (#423).
 		const recordedUsage = unmeteredInvokedUsage(message);
-		if (recordedUsage !== null) payload.usage = recordedUsage;
-		if (interruptedUsage !== null) payload.estimatedUsage = interruptedUsage;
+		if (payload.callInvoked !== false) {
+			if (recordedUsage !== null) payload.usage = recordedUsage;
+			if (interruptedUsage !== null) payload.estimatedUsage = interruptedUsage;
+		}
 		if (isLengthStopAssistantMessage(message) && state.runtime) {
 			const contextExhaustion = recordValue(payload.contextExhaustion);
 			const contextWindow = state.runtime.runtimeResolution.capabilityDecisions.contextWindow;

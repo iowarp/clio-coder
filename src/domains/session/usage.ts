@@ -174,9 +174,14 @@ export function ledgerCallFailureCounts(entries: ReadonlyArray<SessionEntry>) {
 	let neverInvokedCalls = 0;
 	for (const entry of entries) {
 		if (entry.kind !== "message" || entry.role !== "assistant") continue;
-		const payload = entry.payload as { usage?: Record<string, unknown>; failure?: { invoked?: boolean } } | null;
+		const payload = entry.payload as {
+			usage?: Record<string, unknown> | null;
+			callInvoked?: boolean;
+			failure?: { invoked?: boolean };
+		} | null;
 		const usage = payload?.usage;
-		if (usage?.callInvoked === false || payload?.failure?.invoked === false) neverInvokedCalls += 1;
+		if (payload?.callInvoked === false || usage?.callInvoked === false || payload?.failure?.invoked === false)
+			neverInvokedCalls += 1;
 		else if (usage && !normalizeTokenUsage(usage).observed) invokedUnknownCalls += 1;
 	}
 	return { invokedUnknownCalls, neverInvokedCalls };
