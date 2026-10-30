@@ -237,7 +237,37 @@ export function ledgerUsageCalls(
 		),
 	);
 	for (const id of sideIds) if (!projected.has(id)) calls.push(...(journalCalls.get(id) ?? []));
+	for (const id of orphanMainCallIds(entries, journal))
+		if (!projected.has(id)) calls.push(...(journalCalls.get(id) ?? []));
 	return calls;
+}
+
+/**
+ * Main calls the journal settled but no ledger entry links: a crash after settlement lost the assistant message.
+ * Only a call whose user turn is on the supplied (active-path) entries counts, so an abandoned branch or a
+ * fork-inherited prefix keeps its own attribution (#434).
+ */
+function orphanMainCallIds(entries: ReadonlyArray<SessionEntry>, journal: ReadonlyArray<TelemetryRecord>): Set<string> {
+	const turns = new Set<string>();
+	const linked = new Set<string>();
+	for (const entry of entries) {
+		if (entry.kind === "compactionSummary") for (const id of entry.callIds ?? []) linked.add(id);
+		if (entry.kind !== "message") continue;
+		if (entry.role === "user") turns.add(entry.turnId);
+		const callId = (entry.payload as { callId?: unknown } | null)?.callId;
+		if (entry.role === "assistant" && typeof callId === "string") linked.add(callId);
+	}
+	const orphans = new Set<string>();
+	for (const row of journal)
+		if (
+			(row.k === "call.started" || row.k === "call.settled") &&
+			row.data.label === "main" &&
+			row.ctx.turnId !== undefined &&
+			turns.has(row.ctx.turnId) &&
+			!linked.has(row.data.callId)
+		)
+			orphans.add(row.data.callId);
+	return orphans;
 }
 
 /** Never-sent rows stay outside spending, but remain visible in coverage (#430). */
@@ -258,6 +288,7 @@ export function ledgerCallFailureCounts(
 		if ((row.k === "call.started" || row.k === "call.settled") && journalOwnsSideUsage(row.data.label))
 			linked.add(row.data.callId);
 	}
+	for (const id of orphanMainCallIds(entries, journal)) linked.add(id);
 	const folded = foldCallJournal(journal, linked);
 	const projected = new Set(folded.attempts.map(({ started }) => started.callId));
 	const unique = folded.attempts.filter(({ started }) => {

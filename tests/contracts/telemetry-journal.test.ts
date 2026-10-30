@@ -994,3 +994,48 @@ test("audit writes rotate at UTC midnight and readers merge legacy days without 
 		env.restore();
 	}
 });
+
+test("a crash-orphaned main call counts only when its user turn is on the active path (#434)", () => {
+	const owner = { ...context, turnId: "user-1" };
+	const call = beginCall(
+		{
+			label: "main",
+			target: { targetId: "test", runtimeId: "test", api: "test", requestedModel: "test", reportedModel: unknown },
+			roundKind: "normal",
+			toolChoice: "auto",
+		},
+		owner,
+	);
+	const message = {
+		stopReason: "stop",
+		usage: { input: 5, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
+	};
+	const facts = call.settle(callSettlementFromMessage(message, "unknown"));
+	ok(facts);
+	const scope = { ...owner, callId: facts.callId, attemptId: facts.attemptId };
+	const clock = { t: new Date().toISOString(), mono: 1 };
+	const { callId, attemptId, attempt, label, target, roundKind, toolChoice } = facts;
+	const rows = [
+		makeTelemetryRecord(
+			"call.started",
+			{ callId, attemptId, attempt, label, target, roundKind, toolChoice },
+			scope,
+			clock,
+		),
+		makeTelemetryRecord("call.settled", facts, scope, clock),
+	];
+	const user = (turnId: string): SessionEntry => ({
+		kind: "message",
+		role: "user",
+		turnId,
+		parentTurnId: null,
+		timestamp: clock.t,
+		payload: { text: "go" },
+	});
+	deepStrictEqual(
+		ledgerUsageCalls([user("user-1")], {}, rows).map((row) => row.callId),
+		[callId],
+		"the settled call survives the lost assistant message",
+	);
+	deepStrictEqual(ledgerUsageCalls([user("other-branch")], {}, rows), [], "another branch's turn keeps its own calls");
+});
