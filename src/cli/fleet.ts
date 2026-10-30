@@ -638,7 +638,7 @@ function finiteCount(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
-/** A running row's input/output split, which the ledger carries once the run finalizes. */
+/** A running row's input/output split, which the owning process writes to the ledger on each reconciler tick. */
 function rowTokenSplit(row: RunEnvelope): { input: number; output: number } {
 	return { input: finiteCount(row.inputTokenCount), output: finiteCount(row.outputTokenCount) };
 }
@@ -666,7 +666,7 @@ function statusSnapshot(all = false): {
 	running: Array<Record<string, unknown>>;
 	retrying: Array<Record<string, unknown>>;
 	totals: {
-		/** The known part of each token field: a run whose journal left it unknown adds nothing here. */
+		/** The known part of each token field: a run whose ledger row and receipt hold no count adds nothing here. */
 		inputTokens: number;
 		outputTokens: number;
 		totalTokens: number;
