@@ -5,7 +5,7 @@
  * neither unknown nor zero). The detectors live in tests/harness/telemetry-lies.ts so the GUI route tests run the
  * same ones over the DTOs they serve.
  */
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -193,7 +193,7 @@ test("live equals CLI: the live model folds exactly the batches a cold read of t
 	}
 });
 
-test("a session's lifetime tells a clean close, an open owner, an abnormal end and an unprobeable host apart (#434 §6.1)", () => {
+test("a session's lifetime tells a clean close, an open owner, an abnormal end and an unprobeable host apart, and why-stopped reads it (#434 §6.1)", () => {
 	const owner = { host: "elsewhere", pid: 4242, birthToken: null };
 	const lifetime = (ledger: SessionSource["ledger"], alive: boolean | null) =>
 		sessionTelemetry({ ...source, ...(ledger ? { ledger } : {}) }, { ...now, alive: () => alive }).lifetime;
@@ -213,6 +213,15 @@ test("a session's lifetime tells a clean close, an open owner, an abnormal end a
 	strictEqual(lifetime({ endedAt: null, owner }, null).state, "unverifiable");
 	strictEqual(lifetime(undefined, true).state, "unknown");
 	ok(Value.Check(SessionTelemetrySchema, sessionTelemetry({ ...source, ledger: { endedAt: null, owner } }, now)));
+	// why-stopped reads the same lifecycle: a ledger close with no session.closed record reads closed.
+	const why = (ledger: NonNullable<SessionSource["ledger"]>, alive: boolean | null) =>
+		whyStopped({ ...source, ledger }, { ...now, alive: () => alive });
+	const closed = why({ endedAt: "2099-01-01T00:00:00.000Z", owner }, true);
+	strictEqual(closed.state, "closed");
+	ok(closed.findings.includes("The session closed at 2099-01-01T00:00:00.000Z."));
+	const crashed = why({ endedAt: null, owner }, false);
+	notStrictEqual(crashed.state, "closed");
+	ok(crashed.findings.includes("The session's process ended without closing it."));
 });
 
 test("a run's receipt evidence carries sealed checks only under a seal that verifies (#434 §11.3)", () => {

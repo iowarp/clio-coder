@@ -2208,12 +2208,12 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	const analysis = analyze(source);
 	const id = source.sessionId;
 	let last: { at: string; record: Extract<TelemetryRecord, { k: "turn.settled" }> } | null = null;
-	let closedAt: string | null = null;
+	// The session DTO's lifecycle, so a close the ledger recorded reads closed here too (#434 §6.1).
+	const life = lifecycle(source, options);
 	const budget: BudgetEntry[] = [];
 	const latestQuota = new Map<string, QuotaEntry>();
 	for (const record of source.journal.records) {
 		if (record.k === "turn.settled" && (!last || record.t >= last.at)) last = { at: record.t, record };
-		if (record.k === "session.closed" && (!closedAt || record.t > closedAt)) closedAt = record.t;
 		if (record.k === "budget.crossing" || record.k === "budget.wait") budget.push(budgetEntry(analysis, record));
 		if (record.k === "quota.reading") {
 			const account = `${record.data.provider}\u0000${record.data.targetId}`;
@@ -2245,7 +2245,7 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 		if (waitedOn) waits.add(waitedOn);
 	}
 	const state: WhyStoppedV1["state"] =
-		closedAt && (!last || closedAt >= last.at)
+		life.state === "closed"
 			? "closed"
 			: !terminal
 				? "no-turns"
@@ -2293,7 +2293,9 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 				: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
 		);
 	}
-	if (state === "closed") findings.push("The session closed after its last turn.");
+	if (life.closed)
+		findings.push(`The session closed at ${life.closed.at}${life.closed.reason ? ` (${life.closed.reason})` : ""}.`);
+	else if (life.state === "ended-abnormally") findings.push("The session's process ended without closing it.");
 	const crossing = budget.filter((entry) => entry.event === "crossing").at(-1);
 	if (crossing)
 		findings.push(
