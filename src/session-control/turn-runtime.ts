@@ -753,6 +753,23 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			await lease?.release();
 			return call !== undefined;
 		};
+		// A round the loop moves past without an assistant message still settles its attempt, so no call.started stays
+		// open and no lease is held past the run (#434, R9). It has no ledger row, so a never-sent one is counted here.
+		const abandonModelCall = async (): Promise<void> => {
+			const call = modelCall;
+			const lease = journalLease;
+			modelCall = undefined;
+			journalLease = undefined;
+			attemptRequest = undefined;
+			if (call) {
+				recordSettledCall(
+					call.abandon(state.activeInterruptByOperator ? "operator_cancel" : "internal"),
+					lease?.context.sessionId,
+					true,
+				);
+			}
+			await lease?.release();
+		};
 		let apiCallFirstDeltaAt: number | null = null;
 		// Where a request is before `onStreamInvocation`. A watchdog abort while
 		// `apiCallStartedAt` is null names this step, because no request has
@@ -1289,17 +1306,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 
 		const onAgentEvent = async (event: AgentEvent): Promise<void> => {
 			if (event.type === "agent_start") runIdentity = deps.turnIdentity?.();
-			if (event.type === "agent_end" && journalLease) {
-				await journalLease.release();
-				journalLease = undefined;
-				modelCall = undefined;
-			}
+			if (event.type === "agent_end") await abandonModelCall();
 			if (!currentRun()) {
 				if (event.type === "message_end" && event.message.role === "assistant") await settleModelCall(event.message);
 				clearStallTimer();
 				return;
 			}
 			if (event.type === "turn_start") {
+				await abandonModelCall();
 				settledAttempts = [];
 				attemptRequest = undefined;
 				const origin = deps.sessionOrigin?.();

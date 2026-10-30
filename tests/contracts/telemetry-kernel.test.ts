@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
 import {
@@ -12,7 +12,13 @@ import type { SegmentHeader, TelemetryRecord } from "../../src/core/telemetry/en
 import { makeTelemetryRecord, monotonicSpan, readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { newAttemptId, newCallId, newRecordId, UUID_V7_PATTERN } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
-import { recordTelemetry, registerRunTelemetrySink, registerTelemetrySink } from "../../src/core/telemetry/producer.js";
+import {
+	beginCall,
+	recordTelemetry,
+	registerRunTelemetrySink,
+	registerTelemetrySink,
+	telemetryCallInContext,
+} from "../../src/core/telemetry/producer.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { KIND_NAMES, KIND_REGISTRY, validPayload } from "../../src/core/telemetry/schemas.js";
 import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
@@ -77,6 +83,43 @@ test("tool contexts retain provider attribution only within the same owner and t
 			});
 		}
 	});
+});
+
+test("an abandoned attempt settles once, as never sent before its send stage and unsettled after it (#434, R9)", () => {
+	const records: PendingTelemetry[] = [];
+	const release = registerTelemetrySink("abandon-session", { enqueue: (record) => Boolean(records.push(record)) });
+	try {
+		const started = {
+			label: "main" as const,
+			target: {
+				targetId: "target",
+				runtimeId: "runtime",
+				api: "api",
+				requestedModel: "model",
+				reportedModel: { kind: "unknown", reason: "not-observed" } as const,
+			},
+			roundKind: "normal" as const,
+			toolChoice: "auto" as const,
+		};
+		const ctx = { sessionId: "abandon-session", label: "main" as const };
+		const unsent = beginCall(started, ctx);
+		strictEqual(unsent.abandon("internal")?.disposition, "never_sent");
+		strictEqual(unsent.abandon("internal"), undefined, "a settled attempt is never settled twice");
+		const sent = beginCall(started, ctx);
+		sent.stage("send", "start");
+		const facts = sent.abandon("operator_cancel");
+		strictEqual(facts?.disposition, "sent_unsettled");
+		deepStrictEqual(facts?.stop, { reason: "aborted", failure: "operator_cancel" });
+		strictEqual(
+			sent.withContext(() => telemetryCallInContext()),
+			undefined,
+		);
+		const settled = records.flatMap((record) => (record.kind === "call.settled" ? [record.data] : []));
+		strictEqual(settled.length, 2);
+		ok(settled.every((data) => validPayload("call.settled", data)));
+	} finally {
+		release();
+	}
 });
 
 test("run owners stay separate from session owners, including standalone runs", () => {

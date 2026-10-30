@@ -1,6 +1,7 @@
 import { captureAdmits, STANDARD_CAPTURE } from "./capture.js";
 import type { TelemetryContext } from "./context.js";
 import { telemetryContext, telemetryOwner, withTelemetryContext } from "./context.js";
+import type { FailureCause } from "./enums.js";
 import type { ClockOrigin } from "./envelope.js";
 import { newAttemptId, newCallId } from "./ids.js";
 import type { CallSettled, CallStarted, Kind, Payload } from "./schemas.js";
@@ -91,8 +92,41 @@ export interface TelemetryCall {
 	mark(mark: "firstByte" | "firstToken"): void;
 	/** The first settlement returns the enqueued facts for read-only live projections (#434). */
 	settle(data: Settlement, reportedModel?: CallStarted["target"]["reportedModel"]): CallSettled | undefined;
+	/**
+	 * Settle an attempt its owner moves past without a message, so no call.started stays open (#434, R9). It was
+	 * never sent unless its send stage began; nothing else about it was observed.
+	 */
+	abandon(cause: FailureCause): CallSettled | undefined;
 	/** One successor per settled attempt. A live attempt cannot silently disappear (#434). */
 	nextAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): TelemetryCall | null;
+}
+
+function abandonedSettlement(sent: boolean, cause: FailureCause): Settlement {
+	const unobserved = { kind: "unknown", reason: "not-observed" } as const;
+	const notApplicable = { kind: "absent", reason: "not-applicable" } as const;
+	return {
+		disposition: sent ? "sent_unsettled" : "never_sent",
+		stop: { reason: cause === "operator_cancel" || cause === "parent_cancel" ? "aborted" : "error", failure: cause },
+		usage: sent
+			? {
+					input: unobserved,
+					output: unobserved,
+					cacheRead: unobserved,
+					cacheWrite: unobserved,
+					cacheWrite1h: unobserved,
+					reasoning: unobserved,
+				}
+			: null,
+		pricing: { usd: sent ? unobserved : notApplicable, pricedBy: "none" },
+		transport: { kind: "unknown", continuation: unobserved, requestBytes: unobserved, sessionPinnedToSse: unobserved },
+		cache: {
+			firstDivergentSection: sent ? unobserved : notApplicable,
+			expectedColdReasons: [],
+			rePrefilledTokens: sent ? unobserved : notApplicable,
+			uncachedPrefillTokens: unobserved,
+			verdict: "unknown",
+		},
+	};
 }
 
 /** The unsettled attempt this async context belongs to, so a shared engine seam can time it (#434). */
@@ -151,6 +185,9 @@ export function beginCall(
 				};
 				recordTelemetry("call.settled", facts, scope);
 				return facts;
+			},
+			abandon(cause) {
+				return handle.settle(abandonedSettlement(starts.send !== undefined, cause));
 			},
 			nextAttempt(request) {
 				if (!settled) return null;

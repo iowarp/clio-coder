@@ -22,6 +22,17 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 	const lease = options ? await options.acquire(options.origin, options.label) : undefined;
 	let call: TelemetryCall | undefined;
 	let settledIdentity: { callId: string; attemptId: string } | undefined;
+	const settled = (facts: CallSettled | undefined): CallSettled | undefined => {
+		if (facts) settledIdentity = { callId: facts.callId, attemptId: facts.attemptId };
+		if (facts && options?.onSettled) {
+			try {
+				options.onSettled(facts);
+			} catch {
+				writeDiagnostic("[clio-coder:telemetry] live helper projection failed; journal retains the call\n");
+			}
+		}
+		return facts;
+	};
 	return {
 		identity: () => settledIdentity,
 		startAttempt(
@@ -52,24 +63,16 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 		},
 		settle(message: unknown): CallSettled | undefined {
 			if (!call || !options) return undefined;
-			const facts = call.settle(
-				callSettlementFromMessage(message, options.costProvenance),
-				reportedModelFromMessage(message),
+			return settled(
+				call.settle(callSettlementFromMessage(message, options.costProvenance), reportedModelFromMessage(message)),
 			);
-			if (facts) settledIdentity = { callId: facts.callId, attemptId: facts.attemptId };
-			if (facts && options.onSettled) {
-				try {
-					options.onSettled(facts);
-				} catch {
-					writeDiagnostic("[clio-coder:telemetry] live helper projection failed; journal retains the call\n");
-				}
-			}
-			return facts;
 		},
 		withContext<T>(work: () => T): T {
 			return call ? call.withContext(work) : work();
 		},
 		async close(): Promise<void> {
+			// An attempt that got no message before its helper finished still settles; a settled one is untouched (#434).
+			if (call) settled(call.abandon("internal"));
 			await lease?.release();
 		},
 	};
