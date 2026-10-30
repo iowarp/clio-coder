@@ -172,6 +172,7 @@ export const KIND_NAMES = [
 	"segment.closed",
 	"turn.settled",
 	"run.settled",
+	"run.feed",
 	"process.started",
 	"process.exited",
 ] as const;
@@ -256,6 +257,12 @@ export const KIND_REGISTRY = {
 			closed,
 		),
 	),
+	"run.feed": {
+		version: 1,
+		tier: "operational",
+		cc: "content-bearing",
+		schema: Type.Object({ seq: Type.Integer({ minimum: 1 }), body: Type.Record(Type.String(), Type.Unknown()) }, closed),
+	},
 	"process.started": accountability(empty),
 	"process.exited": accountability(Type.Object({ exitCode: Type.Integer() }, closed)),
 } satisfies Record<Kind, KindDefinition>;

@@ -11,6 +11,8 @@ import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall, recordTelemetry, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
+import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
+import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/observability/call-facts.js";
 import { openCallJournal, readCallJournal, readCallJournalSync } from "../../src/domains/observability/call-journal.js";
 import { foldCallJournal, foldCallsBy, foldFacts } from "../../src/domains/observability/folds.js";
@@ -151,6 +153,55 @@ test("overlapping work retains its original session and releases ownership only 
 	} finally {
 		await journals.flush();
 		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("a standalone run shares one envelope writer for calls and bounded display history", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "telemetry-run-"));
+	const run = { sessionId: null, runId: "standalone-run", label: "worker" as const };
+	const journal = await openRunTelemetry(run, join(directory, run.runId));
+	try {
+		const display = defaultRunEventJournal();
+		display.open(run.runId, "scout");
+		journal.feed({ kind: "event", type: "text", detail: "bounded display" }, 1);
+		display.receipt(run.runId, { outcome: "succeeded", exitCode: 0 });
+		display.terminal(run.runId, "succeeded");
+		display.append(run.runId, { at: new Date().toISOString(), type: "late-display" });
+		const call = beginCall(
+			{
+				label: "worker",
+				target: {
+					targetId: "fixture",
+					runtimeId: "fixture",
+					api: "fixture",
+					requestedModel: "fixture",
+					reportedModel: unknown,
+				},
+				roundKind: "tools-removed",
+				toolChoice: "none",
+			},
+			run,
+		);
+		call.settle(unsent);
+		await journal.close();
+		const saved = await readCallJournal(join(directory, run.runId), "events.ndjson");
+		strictEqual(saved.damaged, 0);
+		strictEqual(saved.records.filter(({ record }) => record.k === "call.settled").length, 1);
+		const feed = readRunEventJournal(run.runId, { root: directory });
+		deepStrictEqual(
+			feed.lines.map((line) => line.kind),
+			["open", "journal_truncated", "receipt", "terminal"],
+		);
+		strictEqual(feed.terminal?.outcome, "succeeded");
+		strictEqual(feed.truncated, true);
+		strictEqual(feed.agentId, "scout");
+		strictEqual((await readdir(directory)).length, 1, "standalone ownership never materializes a session");
+		const before = await readFile(join(directory, run.runId, "events.ndjson"));
+		display.open(run.runId, "late");
+		deepStrictEqual(await readFile(join(directory, run.runId, "events.ndjson")), before);
+	} finally {
+		await journal.close();
+		await rm(directory, { recursive: true, force: true });
 	}
 });
 

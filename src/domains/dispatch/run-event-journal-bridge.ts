@@ -77,6 +77,7 @@ const FACT_MAX_BYTES = 240;
  * carries the call's literal arguments, which never belong on disk here.
  */
 const UNJOURNALED_TYPES = new Set([
+	"clio_coder_telemetry",
 	"heartbeat",
 	"message_start",
 	"message_update",

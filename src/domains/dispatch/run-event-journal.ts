@@ -28,28 +28,34 @@ import { readToolRounds } from "./types.js";
  * are never dropped, so a capped journal still answers what the run was and how
  * it ended.
  *
- * Writes are synchronous, one `appendFileSync` per line, rather than queued
- * onto an async chain. A queue would need a timer to drain, and a timer on the
- * dispatch event path either keeps a finished process alive or has to be
- * unref'd and then races finalization. Lines used to be batched until 8 KiB
- * were pending, which kept a running call's start line, and everything after
- * it, out of the file until the run had said a great deal more: the workers
- * dashboard then showed a run's history only once it was over. Lines now
- * arrive already coalesced (prose in 250 ms windows, no deltas or heartbeats,
- * see run-event-journal-bridge.ts), so writing each one as it comes costs a
- * few small appends per second per live run and leaves the file current.
+ * Native runs forward display lines to the run's batched envelope writer (#434).
+ * Legacy runs retain the plain-line writer below; readers accept either format.
+ * The display terminal closes the feed, while call facts may still drain before
+ * dispatch releases the writer.
  *
  * A sink failure (ENOSPC, EPERM, a removed state root) degrades the whole
  * journal to off after one notice. Nothing here ever throws into a dispatch.
  */
 
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+	appendFileSync,
+	closeSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	readSync,
+	rmSync,
+	statSync,
+} from "node:fs";
 import { join } from "node:path";
 import { normalizeClioCoderEventType } from "../../core/naming-events.js";
+import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import type { CallUsage } from "../../core/token-split.js";
 import { normalizeCallUsage } from "../../core/token-split.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { ToolAuditFacts } from "../../tools/agent-tools.js";
+import { runTelemetryJournal } from "./run-telemetry.js";
 
 /** Directory name under the state root holding one subdirectory per run. */
 export const RUN_EVENT_JOURNAL_DIR = "runs";
@@ -334,7 +340,12 @@ function createRunEventJournal(options: CreateRunEventJournalOptions = {}): RunE
 		} catch {
 			// First write for this run; the file does not exist yet.
 		}
-		if (bytes > 0) seq = countJournalSeq(path);
+		if (bytes > 0) {
+			const existingSeq = countJournalSeq(path);
+			// An envelope journal belongs to its async writer, including after that owner exits (#434).
+			if (existingSeq === null) return null;
+			seq = existingSeq;
+		}
 		const state: RunJournalState = {
 			path,
 			seq,
@@ -379,8 +390,15 @@ function createRunEventJournal(options: CreateRunEventJournalOptions = {}): RunE
 		if (!droppable || state.pendingBytes >= flushBytes) flushState(state);
 	};
 
+	const forward = (runId: string, body: RunEventJournalBody): boolean => {
+		const owner = runTelemetryJournal(runId);
+		if (!owner) return false;
+		if (isEnabled() && !stateRootRemoved()) owner.feed(body, capBytes);
+		return true;
+	};
 	return {
 		open(runId, agentId): void {
+			if (forward(runId, { kind: "open", runId, agentId })) return;
 			const state = stateFor(runId);
 			if (state === null) return;
 			// Reopening a run that already has lines is a resume or a second
@@ -389,28 +407,28 @@ function createRunEventJournal(options: CreateRunEventJournalOptions = {}): RunE
 			write(state, { kind: "open", runId, agentId }, false);
 		},
 		append(runId, entry): void {
+			const { at: _at, ...body } = entry;
+			if (forward(runId, { kind: "event", ...body })) return;
 			const state = stateFor(runId);
 			if (state === null) return;
-			const { at: _at, ...body } = entry;
 			write(state, { kind: "event", ...body }, true);
 		},
 		receipt(runId, receipt): void {
+			const body: RunEventJournalBody = {
+				kind: "receipt",
+				outcome: receipt.outcome,
+				exitCode: receipt.exitCode,
+				...(receipt.digest !== undefined ? { digest: receipt.digest } : {}),
+				...(receipt.receiptPath !== undefined ? { receiptPath: receipt.receiptPath } : {}),
+				...(receipt.attemptRunId !== undefined ? { attemptRunId: receipt.attemptRunId } : {}),
+			};
+			if (forward(runId, body)) return;
 			const state = stateFor(runId);
 			if (state === null) return;
-			write(
-				state,
-				{
-					kind: "receipt",
-					outcome: receipt.outcome,
-					exitCode: receipt.exitCode,
-					...(receipt.digest !== undefined ? { digest: receipt.digest } : {}),
-					...(receipt.receiptPath !== undefined ? { receiptPath: receipt.receiptPath } : {}),
-					...(receipt.attemptRunId !== undefined ? { attemptRunId: receipt.attemptRunId } : {}),
-				},
-				false,
-			);
+			write(state, body, false);
 		},
 		terminal(runId, outcome, detail): void {
+			if (forward(runId, { kind: "terminal", outcome, ...(detail !== undefined ? { detail } : {}) })) return;
 			const state = stateFor(runId);
 			if (state === null) return;
 			write(state, detail === undefined ? { kind: "terminal", outcome } : { kind: "terminal", outcome, detail }, false);
@@ -432,9 +450,10 @@ function createRunEventJournal(options: CreateRunEventJournalOptions = {}): RunE
  * Highest `seq` already in a run's file. Only read when a journal is reopened,
  * which happens on resume or after state eviction, never on the common path.
  */
-function countJournalSeq(path: string): number {
+function countJournalSeq(path: string): number | null {
 	try {
 		const raw = readFileSync(path, "utf8");
+		if (raw.includes("\t#")) return null;
 		let highest = 0;
 		for (const line of raw.split("\n")) {
 			if (line.length === 0) continue;
@@ -556,7 +575,11 @@ function journalFacts(record: Record<string, unknown>): RunEventJournalFacts {
 export function parseRunEventJournalLine(raw: string): RunEventJournalLine | null {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(raw);
+		if (raw.includes("\t#")) {
+			const row = scanTelemetrySegment(Buffer.from(`${raw}\n`)).rows[0];
+			if (row?.kind !== "record" || row.record.k !== "run.feed") return null;
+			parsed = { ...row.record.data.body, seq: row.record.data.seq, at: row.record.t };
+		} else parsed = JSON.parse(raw);
 	} catch {
 		return null;
 	}
@@ -640,16 +663,38 @@ export function readRunEventJournal(runId: string, options: ReadRunEventJournalO
 	let size: number;
 	let headDropped = false;
 	try {
-		size = statSync(path).size;
-		if (size <= tailBytes) {
-			raw = readFileSync(path, "utf8");
-		} else {
-			const buffer = readFileSync(path);
-			raw = buffer.subarray(size - tailBytes).toString("utf8");
-			const firstBreak = raw.indexOf("\n");
-			raw = firstBreak === -1 ? "" : raw.slice(firstBreak + 1);
-			headDropped = true;
+		const directory = runEventJournalDir(runId, options.root);
+		const files = readdirSync(directory)
+			.filter((name) => /^events\.rec_[0-9a-f-]+\.ndjson$/.test(name))
+			.sort();
+		files.push(RUN_EVENT_JOURNAL_FILE);
+		const chunks: Buffer[] = [];
+		let remaining = Math.max(0, Math.floor(tailBytes));
+		size = 0;
+		for (const file of files.reverse()) {
+			const filePath = join(directory, file);
+			const length = statSync(filePath).size;
+			size += length;
+			if (remaining === 0) {
+				headDropped ||= length > 0;
+				continue;
+			}
+			const start = Math.max(0, length - remaining);
+			const chunk = Buffer.alloc(length - start);
+			const handle = openSync(filePath, "r");
+			try {
+				const count = readSync(handle, chunk, 0, chunk.length, start);
+				const bytes = chunk.subarray(0, count);
+				chunks.unshift(
+					start > 0 ? bytes.subarray(bytes.indexOf(0x0a) < 0 ? bytes.length : bytes.indexOf(0x0a) + 1) : bytes,
+				);
+			} finally {
+				closeSync(handle);
+			}
+			remaining -= chunk.length;
+			headDropped ||= start > 0;
 		}
+		raw = Buffer.concat(chunks).toString("utf8");
 	} catch {
 		return empty;
 	}
