@@ -26,7 +26,7 @@ test("repeated shapes are hoisted once, deterministically, and every operation's
 	const schemas = document.components.schemas as Record<string, unknown>;
 	const names = Object.keys(schemas);
 	assert.deepEqual(names, [...names].sort(), "component names are sorted");
-	assert.ok(names.includes("SessionTelemetryV1") && names.includes("Object_display_fact_ref_b6182503"));
+	assert.ok(names.includes("SessionTelemetryV1") && names.includes("Object_display_fact_ref_b20aecff"));
 	// Applying the hoist to an already hoisted document changes nothing, so regeneration is byte-stable.
 	assert.deepEqual(hoistSharedSchemas(document), document);
 	type Operation = { responses: Record<string, { content: Record<string, { schema: unknown }> }> };

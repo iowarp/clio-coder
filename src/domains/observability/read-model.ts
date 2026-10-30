@@ -37,6 +37,7 @@ import {
 	renderUsdSum,
 } from "../../core/telemetry/render.js";
 import type { CallSettled, CallUsage, Payload } from "../../core/telemetry/schemas.js";
+import { ToolNames } from "../../core/tool-names.js";
 import type { CallJournalFolder, CallTotals, FoldedAttempt, JournalFold } from "./folds.js";
 import {
 	addCallTotals,
@@ -139,6 +140,32 @@ interface Attempt extends FoldedAttempt {
 	settledAt: string | null;
 	ctx: TelemetryContext | null;
 	recordIds: string[];
+	/** The tools the attempt's call asked for, as tool.settled recorded them; null when none is recorded. */
+	tools: ToolSummary | null;
+}
+/** The tool calls one model call asked for (#434 §12.3, §12.4). */
+interface ToolSummary {
+	calls: number;
+	durationMs: number;
+	/** Every tool was bookkeeping: the round re-read its context for no work on the task. */
+	bookkeepingOnly: boolean;
+}
+
+/**
+ * The tools whose rounds the epic counts as bookkeeping: they update the plan or record a decision and do no work on
+ * the task, so a round that called only them paid a context re-read for nothing else (#434 §12.4).
+ */
+const BOOKKEEPING_TOOLS: ReadonlySet<string> = new Set([ToolNames.Tasks, ToolNames.Decide]);
+
+function noteTool(tools: Map<string, ToolSummary>, record: TelemetryRecord): string | null {
+	if (record.k !== "tool.settled" || record.ctx.callId === undefined) return null;
+	const prior = tools.get(record.ctx.callId);
+	tools.set(record.ctx.callId, {
+		calls: (prior?.calls ?? 0) + 1,
+		durationMs: (prior?.durationMs ?? 0) + record.data.durationMs,
+		bookkeepingOnly: (prior?.bookkeepingOnly ?? true) && BOOKKEEPING_TOOLS.has(record.data.tool),
+	});
+	return record.ctx.callId;
 }
 interface Run {
 	runId: string;
@@ -180,6 +207,9 @@ interface Analysis {
 interface Growth {
 	folder: CallJournalFolder;
 	meta: Map<string, AttemptMeta>;
+	/** Tool calls by the model call that asked for them, and each call's attempts, so a late tool record moves its call. */
+	tools: Map<string, ToolSummary>;
+	callAttempts: Map<string, Set<string>>;
 	/** The first session record referencing each run. */
 	references: Map<string, TelemetryRecord>;
 	/** A gap other than policy was folded. */
@@ -231,13 +261,18 @@ function noteMeta(meta: Map<string, AttemptMeta>, record: TelemetryRecord): void
 	meta.set(record.data.attemptId, entry);
 }
 
-function attemptOf(attempt: FoldedAttempt, entry: AttemptMeta | undefined): Attempt {
+function attemptOf(
+	attempt: FoldedAttempt,
+	entry: AttemptMeta | undefined,
+	tools: ReadonlyMap<string, ToolSummary>,
+): Attempt {
 	return {
 		...attempt,
 		startedAt: entry?.startedAt ?? entry?.settledAt ?? EPOCH,
 		settledAt: attempt.settled ? (entry?.settledAt ?? null) : null,
 		ctx: entry?.ctx ?? null,
 		recordIds: [...(entry?.ids ?? [])].sort(),
+		tools: tools.get(attempt.started.callId) ?? null,
 	};
 }
 
@@ -254,8 +289,12 @@ const byAttemptId = (a: Attempt, b: Attempt) => a.started.attemptId.localeCompar
 
 function attemptsOf(records: readonly TelemetryRecord[], attempts: readonly FoldedAttempt[]): Attempt[] {
 	const meta = new Map<string, AttemptMeta>();
-	for (const record of records) noteMeta(meta, record);
-	return attempts.map((attempt) => attemptOf(attempt, meta.get(attempt.started.attemptId))).sort(byStart);
+	const tools = new Map<string, ToolSummary>();
+	for (const record of records) {
+		noteMeta(meta, record);
+		noteTool(tools, record);
+	}
+	return attempts.map((attempt) => attemptOf(attempt, meta.get(attempt.started.attemptId), tools)).sort(byStart);
 }
 
 const unavailable: JournalSource = { present: false, records: [], modes: [], skipped: 0, damaged: 0 };
@@ -298,6 +337,14 @@ function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryR
 /** Fold one record into the growth state; returns the attempts it may have changed. */
 function grow(growth: Growth, record: TelemetryRecord): readonly string[] {
 	noteMeta(growth.meta, record);
+	if (record.k === "call.started" || record.k === "call.settled") {
+		const attempts = growth.callAttempts.get(record.data.callId) ?? new Set<string>();
+		attempts.add(record.data.attemptId);
+		growth.callAttempts.set(record.data.callId, attempts);
+	}
+	// A tool settles after the call that asked for it, so its record changes that call's attempts.
+	const toolCall = noteTool(growth.tools, record);
+	if (toolCall !== null) return [...(growth.callAttempts.get(toolCall) ?? [])];
 	if ((record.k === "run.ref" || record.k === "call.ref") && !growth.references.has(record.data.runId))
 		growth.references.set(record.data.runId, record);
 	// A mode-filtered or research-cap gap is policy: only research or content kinds go uncaptured, never
@@ -327,6 +374,8 @@ function buildAnalysis(
 	const growth: Growth = {
 		folder: callJournalFolder(),
 		meta: new Map(),
+		tools: new Map(),
+		callAttempts: new Map(),
 		references: new Map(),
 		gapRecord: false,
 		head,
@@ -344,7 +393,7 @@ function buildAnalysis(
 		}
 	const attempts = growth.folder
 		.attempts()
-		.map((attempt) => attemptOf(attempt, growth.meta.get(attempt.started.attemptId)))
+		.map((attempt) => attemptOf(attempt, growth.meta.get(attempt.started.attemptId), growth.tools))
 		.sort(byStart);
 	const analysis: Analysis = {
 		sessionId,
@@ -391,7 +440,7 @@ function extendAnalysis(
 	for (const attemptId of touched) {
 		const before = analysis.byAttempt.get(attemptId);
 		const folded = growth.folder.attempt(attemptId);
-		const after = folded ? attemptOf(folded, growth.meta.get(attemptId)) : undefined;
+		const after = folded ? attemptOf(folded, growth.meta.get(attemptId), growth.tools) : undefined;
 		if (after) analysis.byAttempt.set(attemptId, after);
 		else analysis.byAttempt.delete(attemptId);
 		for (const selection of analysis.selections.values()) updateSelection(selection, before, after);
@@ -887,6 +936,11 @@ const FAMILY: Record<FactMetric, Family> = {
 	breakUsd: "usd",
 	repairRounds: "count",
 	runs: "count",
+	harnessTime: "duration",
+	networkTime: "duration",
+	toolTime: "duration",
+	bookkeepingRounds: "count",
+	roundTripTax: "count",
 };
 const RULES: Record<FactMetric, string> = {
 	calls: "count(distinct callId); a run contributes its API calls",
@@ -919,6 +973,12 @@ const RULES: Record<FactMetric, string> = {
 	breakUsd: "rePrefilledTokens × (input rate − cache-read rate), as each call records it",
 	repairRounds: "run.settled.repairRounds",
 	runs: "count(referenced runs)",
+	harnessTime:
+		"stages.send.start − (stages.admission.end − stages.admission.start): the harness's own work before sending",
+	networkTime: "(stages.connect.end − stages.connect.start) + (stages.firstByte − stages.send.end)",
+	toolTime: "sum(tool.settled.durationMs) over the tools the call asked for, approval parks excluded",
+	bookkeepingRounds: `count(main attempts whose every tool was ${[...BOOKKEEPING_TOOLS].join(" or ")})`,
+	roundTripTax: `sum(prompt tokens of main attempts whose every tool was ${[...BOOKKEEPING_TOOLS].join(" or ")})`,
 };
 const USAGE_FIELDS = new Set<FactMetric>(["input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "reasoning"]);
 /** Metrics one attempt states as a single fact; the rest are folds even over one attempt (prompt, total, counts). */
@@ -935,6 +995,11 @@ const ATTEMPT_FACTS = new Set<FactMetric>([
 	"rePrefilled",
 	"uncachedPrefill",
 	"breakUsd",
+	"harnessTime",
+	"networkTime",
+	"toolTime",
+	"bookkeepingRounds",
+	"roundTripTax",
 ]);
 
 /** One attempt's own fact for a per-attempt metric; never_sent reached nothing, so it is not applicable (R2). */
@@ -973,9 +1038,50 @@ function attemptFact(attempt: Attempt, metric: FactMetric): Fact<number> {
 		case "breakUsd":
 			// Fixed at settle from the call's own rates; a call settled before cache physics has none (#434 P2.4).
 			return settled.cache.bill?.usd ?? unobserved;
+		case "harnessTime": {
+			if (!stages.send) return unobserved;
+			const held = stages.admission ? stages.admission.end - stages.admission.start : 0;
+			return localClock(Math.max(0, stages.send.start - held));
+		}
+		case "networkTime":
+			// Pi owns the provider socket, so a call that recorded no connect span cannot split network from the wait for
+			// the model (option B, #434).
+			if (!stages.connect || stages.firstByte === undefined || !stages.send)
+				return { kind: "unknown", reason: "unsupported" };
+			return localClock(stages.connect.end - stages.connect.start + Math.max(0, stages.firstByte - stages.send.end));
+		case "toolTime":
+			if (settled.stop.reason !== "toolUse") return localClock(0);
+			return attempt.tools ? localClock(attempt.tools.durationMs) : unobserved;
+		case "bookkeepingRounds":
+		case "roundTripTax":
+			return roundTrip(attempt, metric);
 		default:
 			return unobserved;
 	}
+}
+
+/**
+ * A main-loop round whose every tool was bookkeeping re-read its whole context for no work on the task (#434 §12.4).
+ * A round that asked for no tool is no such round; one whose tools went unrecorded is unknown.
+ */
+function roundTrip(attempt: Attempt, metric: "bookkeepingRounds" | "roundTripTax"): Fact<number> {
+	const settled = attempt.settled;
+	if (attempt.started.label !== "main" || !settled) return notApplicable;
+	if (settled.stop.reason !== "toolUse") return localCount(0);
+	if (!attempt.tools) return unobserved;
+	if (!attempt.tools.bookkeepingOnly) return localCount(0);
+	if (metric === "bookkeepingRounds") return localCount(1);
+	const totals = emptyCallTotals();
+	addCallTotals(totals, settled);
+	const prompt = totals.promptTokens;
+	if (prompt.unknownCount > 0) return unobserved;
+	if (prompt.coverage.estimated === 0) return { kind: "measured", value: prompt.measured, source: "provider" };
+	// The prompt is estimated by the method its estimated counts name (R3).
+	const usage = settled.usage;
+	const method = [usage?.input, usage?.cacheRead, usage?.cacheWrite].find((fact) => fact?.kind === "estimated");
+	return method?.kind === "estimated"
+		? { kind: "estimated", value: prompt.measured + prompt.estimated, method: method.method }
+		: unobserved;
 }
 
 function attemptsSum(attempts: readonly Attempt[], metric: FactMetric): FactSum {
@@ -1276,6 +1382,7 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 			latest = attempt;
 	const session = (metric: FactMetric, extra: Partial<ParsedFactRef> = {}) =>
 		quantity(view, { scope: "session", owner: id, metric, ...extra });
+	const mainLoop = (metric: FactMetric) => quantity(view, own(id, metric, { group: { by: "label", key: "main" } }));
 	return {
 		...header(options),
 		kind: "session",
@@ -1312,6 +1419,15 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 			usd: quantity(view, { scope: "runs", owner: id, metric: "usd" }),
 		},
 		totals: { tokens: session("total"), usd: session("usd") },
+		overhead: {
+			harness: mainLoop("harnessTime"),
+			network: mainLoop("networkTime"),
+			model: mainLoop("modelTime"),
+			tool: mainLoop("toolTime"),
+			bookkeepingRounds: mainLoop("bookkeepingRounds"),
+			roundTripTax: mainLoop("roundTripTax"),
+			prompt: mainLoop("prompt"),
+		},
 		transport: latest?.settled
 			? {
 					attemptId: latest.started.attemptId,
@@ -1393,7 +1509,15 @@ function callRow(view: View, scope: "own" | "run", owner: string, attempt: Attem
 		usd: q("usd"),
 		pricedBy: settled?.pricing.pricedBy ?? "none",
 		stages: settled?.stages ?? null,
-		timing: { ttft: q("ttft"), modelTime: q("modelTime"), settle: q("settle"), admissionWait: q("admissionWait") },
+		timing: {
+			ttft: q("ttft"),
+			modelTime: q("modelTime"),
+			settle: q("settle"),
+			admissionWait: q("admissionWait"),
+			harness: q("harnessTime"),
+			network: q("networkTime"),
+			tool: q("toolTime"),
+		},
 		admission: settled?.stages.admission?.waitedOn ?? null,
 		transport: {
 			kind: settled?.transport.kind ?? "unknown",
@@ -2147,6 +2271,11 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 		rePrefilled: quantity(view, own(id, "rePrefilled")),
 		breakUsd: quantity(view, own(id, "breakUsd")),
 	};
+	const main = { group: { by: "label" as const, key: "main" } };
+	const roundTrips = {
+		rounds: quantity(view, own(id, "bookkeepingRounds", main)),
+		tax: quantity(view, own(id, "roundTripTax", main)),
+	};
 	const findings: string[] = [];
 	if (state === "no-turns") findings.push("No turn has settled in this session's journal.");
 	else if (terminal) {
@@ -2187,6 +2316,11 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 		findings.push(`Failed on ${row.cause}: ${row.calls.display} attempt(s), the last at ${row.lastAt}.`);
 	findings.push(`Spend: ${spend.usd.display} over ${spend.tokens.display} tokens.`);
 	findings.push(`Re-prefilled tokens: ${cache.rePrefilled.display}; cache-break bill: ${cache.breakUsd.display}.`);
+	const rounds = roundTrips.rounds.fact;
+	if ("kind" in rounds ? rounds.kind !== "measured" || rounds.value > 0 : rounds.measured > 0 || rounds.unknownCount > 0)
+		findings.push(
+			`Bookkeeping-only rounds: ${roundTrips.rounds.display}, re-reading ${roundTrips.tax.display} prompt tokens.`,
+		);
 	return {
 		...header(options),
 		kind: "why-stopped",
@@ -2207,6 +2341,7 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 		causes: causeRows,
 		waits: waitRows,
 		cache,
+		roundTrips,
 		spend,
 		budget,
 		quota,

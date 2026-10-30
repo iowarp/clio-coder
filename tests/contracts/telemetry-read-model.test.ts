@@ -24,6 +24,7 @@ import {
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { openCallJournal } from "../../src/domains/observability/call-journal.js";
@@ -171,11 +172,21 @@ test("live equals CLI: the live model folds exactly the batches a cold read of t
 		// before the main call it overlapped, still folds to the cold read's exact sums and order (#434 §11).
 		const main = telemetryCall("golden-p0", { turnId: "turn-late", usage: { input: 7, output: null }, usd: 0.0137 });
 		const side = telemetryCall("golden-p0", { label: "memory", turnId: "turn-late", usd: 0.0021 });
-		for (const record of [main[0], side[0], side[1], main[1]]) {
+		// The main call's tool settles after it, so the call's tool time and round-trip facts move on a later batch.
+		const golden = main[1] as Extract<TelemetryRecord, { k: "call.settled" }>;
+		const settledMain: TelemetryRecord = { ...golden, data: { ...golden.data, stop: { reason: "toolUse" } } };
+		main[1] = settledMain;
+		const tool = makeTelemetryRecord(
+			"tool.settled",
+			{ tool: ToolNames.Tasks, outcome: "ok", durationMs: 4 },
+			{ ...settledMain.ctx, toolCallId: "tc-late" },
+			{ t: settledMain.t, mono: 0 },
+		);
+		for (const record of [main[0], side[0], side[1], main[1], tool]) {
 			await write([record as TelemetryRecord]);
 			model.live()?.cost("turn");
 		}
-		equalsCold(imported.records.length + 4);
+		equalsCold(imported.records.length + 5);
 	} finally {
 		model.stop();
 		await writer.close();
@@ -429,4 +440,44 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 	strictEqual(tool?.kind === "tool" ? tool.duration.display : null, "1.25s");
 	const context = dto.entries.find((entry) => entry.kind === "context");
 	strictEqual(context?.kind === "context" ? context.estimated?.display : null, "~9,100 (chars/4)");
+});
+
+test("the main loop's time splits into harness, network, model and tools, and bookkeeping-only rounds count their re-read (#434 §12.3, §12.4)", () => {
+	const stages = {
+		admission: { start: 0, end: 10, waitedOn: "budget" as const },
+		send: { start: 40, end: 45 },
+		firstToken: 300,
+		settle: 900,
+	};
+	const round = (at: string, tool: string, durationMs: number) => {
+		const [started, settled] = telemetryCall("overhead", { at, usage: { input: 100, cacheRead: 900 }, usd: 0.01 });
+		if (settled?.k !== "call.settled" || !started) throw new Error("fixture call missing");
+		const asked: TelemetryRecord = {
+			...settled,
+			data: { ...settled.data, stop: { reason: "toolUse" }, stages: { ...settled.data.stages, ...stages } },
+		};
+		const ctx = { ...settled.ctx, toolCallId: `tc-${tool}` };
+		return [
+			started,
+			asked,
+			makeTelemetryRecord("tool.settled", { tool, outcome: "ok", durationMs }, ctx, { t: at, mono: 0 }),
+		];
+	};
+	const records = [
+		...round("2026-10-30T00:00:01.000Z", ToolNames.Tasks, 5),
+		...round("2026-10-30T00:00:02.000Z", ToolNames.Bash, 1250),
+	];
+	const recorded: SessionSource = { ...source, sessionId: "overhead", journal: { ...source.journal, records } };
+	const overhead = sessionTelemetry(recorded, now).overhead;
+	ok(Value.Check(SessionTelemetrySchema, sessionTelemetry(recorded, now)));
+	strictEqual(overhead.harness.display, "60ms");
+	strictEqual(overhead.tool.display, "1.25s");
+	strictEqual(overhead.bookkeepingRounds.display, "1");
+	strictEqual(overhead.roundTripTax.display, "1,000");
+	strictEqual(overhead.prompt.display, "2,000");
+	// No connect span is recorded while Pi owns the socket, so network time stays unknown (option B).
+	ok(/unknown/.test(overhead.network.display), overhead.network.display);
+	deepStrictEqual(unknownRenderedAsTotal(quantitiesOf(overhead)), []);
+	const why = whyStopped(recorded, now);
+	ok(why.findings.includes("Bookkeeping-only rounds: 1, re-reading 1,000 prompt tokens."), why.findings.join("\n"));
 });

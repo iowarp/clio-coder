@@ -155,6 +155,8 @@ function printSession(dto: SessionTelemetryV1): string {
 		`cost      ${show(dto.own.cost.usd)}${priced ? ` (priced by ${priced})` : ""}`,
 		`runs      ${dto.runs.count}${dto.runs.unresolved > 0 ? ` (${dto.runs.unresolved} unreadable)` : ""} · ${show(dto.runs.apiCalls)} calls · ${show(dto.runs.tokens)} tokens · ${show(dto.runs.usd)}`,
 		`charged   ${show(dto.totals.tokens)} tokens · ${show(dto.totals.usd)}`,
+		`main loop harness ${show(dto.overhead.harness)} · network ${show(dto.overhead.network)} · model ${show(dto.overhead.model)} · tools ${show(dto.overhead.tool)}`,
+		`          bookkeeping-only rounds ${show(dto.overhead.bookkeepingRounds)} re-read ${show(dto.overhead.roundTripTax)} of ${show(dto.overhead.prompt)} prompt tokens`,
 	);
 	if (dto.transport)
 		lines.push(

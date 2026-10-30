@@ -90,6 +90,11 @@ export const FACT_METRICS = [
 	"breakUsd",
 	"repairRounds",
 	"runs",
+	"harnessTime",
+	"networkTime",
+	"toolTime",
+	"bookkeepingRounds",
+	"roundTripTax",
 ] as const;
 export type FactMetric = (typeof FACT_METRICS)[number];
 /** `cause` selects a closed failure cause, `wait` an admission hold, `cold` an expected cold reason. */
@@ -279,6 +284,22 @@ export const SessionTelemetrySchema = Type.Object(
 		/** Own calls plus referenced runs: what the account was charged for this session. */
 		totals,
 		/**
+		 * The main loop's wall time split into the harness's own work, network, model and tools, and its bookkeeping-only
+		 * rounds with the prompt tokens they re-read beside the main loop's whole prompt (#434 §12.3, §12.4).
+		 */
+		overhead: Type.Object(
+			{
+				harness: QuantitySchema,
+				network: QuantitySchema,
+				model: QuantitySchema,
+				tool: QuantitySchema,
+				bookkeepingRounds: QuantitySchema,
+				roundTripTax: QuantitySchema,
+				prompt: QuantitySchema,
+			},
+			closed,
+		),
+		/**
 		 * The latest sent main-loop call's transport facts, with the session's WebSocket failures and SSE fallbacks.
 		 * Transitions are per-call facts, not a record kind (#434).
 		 */
@@ -345,7 +366,18 @@ export const CallRowSchema = Type.Object(
 		/** Offsets from the attempt's start in ms, on the clock of the process that sent it. */
 		stages: Type.Union([CallSettledSchema.properties.stages, Type.Null()]),
 		timing: Type.Object(
-			{ ttft: QuantitySchema, modelTime: QuantitySchema, settle: QuantitySchema, admissionWait: QuantitySchema },
+			{
+				ttft: QuantitySchema,
+				modelTime: QuantitySchema,
+				settle: QuantitySchema,
+				admissionWait: QuantitySchema,
+				/** The harness's own work before sending, admission holds excluded (#434 §12.3). */
+				harness: QuantitySchema,
+				/** Unknown unless the call recorded its connect span and first byte. */
+				network: QuantitySchema,
+				/** The tools this call asked for, approval parks excluded. */
+				tool: QuantitySchema,
+			},
 			closed,
 		),
 		admission: Type.Union([vocabulary(["budget", "capacity", "steering"]), Type.Null()]),
@@ -1031,6 +1063,8 @@ export const WhyStoppedSchema = Type.Object(
 			),
 		),
 		cache: Type.Object({ rePrefilled: QuantitySchema, breakUsd: QuantitySchema }, closed),
+		/** Main-loop rounds whose only tools were bookkeeping, and the prompt tokens they re-read (#434 §12.4). */
+		roundTrips: Type.Object({ rounds: QuantitySchema, tax: QuantitySchema }, closed),
 		spend: totals,
 		/** Every ceiling crossing and held request the journal recorded, oldest first (#434 §12.6). */
 		budget: Type.Array(BudgetEntrySchema),
