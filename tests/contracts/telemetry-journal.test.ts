@@ -46,7 +46,12 @@ import { observationTracing, traceObservation } from "../../src/domains/memory/o
 import { createTaskMemoryTrace } from "../../src/domains/memory/task-memory-trace.js";
 import { exportTelemetryBundle, importTelemetryBundle } from "../../src/domains/observability/bundle.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/observability/call-facts.js";
-import { openCallJournal, readCallJournal, readCallJournalSync } from "../../src/domains/observability/call-journal.js";
+import {
+	callJournalHeader,
+	openCallJournal,
+	readCallJournal,
+	readCallJournalSync,
+} from "../../src/domains/observability/call-journal.js";
 import {
 	createConsentView,
 	grantTelemetryConsent,
@@ -55,7 +60,12 @@ import {
 	revokeTelemetryConsent,
 } from "../../src/domains/observability/consent.js";
 import { createCostTracker } from "../../src/domains/observability/cost.js";
-import { foldCallJournal, foldCallsBy, foldFacts } from "../../src/domains/observability/folds.js";
+import {
+	foldCallJournal,
+	foldCallsBy,
+	foldFacts,
+	TELEMETRY_FOLD_VERSION,
+} from "../../src/domains/observability/folds.js";
 import { createHealthWindows } from "../../src/domains/observability/health-window.js";
 import {
 	readTelemetryObject,
@@ -84,12 +94,14 @@ import {
 import { runJournalsInWindow, usageCallsFromRunJournals } from "../../src/domains/session/run-journal-usage.js";
 import { loadRepoTelemetrySources } from "../../src/domains/session/telemetry-source.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
+import { rebuildUsageProjections } from "../../src/domains/session/usage-projection.js";
 import type { SessionUsageSink } from "../../src/domains/session/usage-record.js";
 import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import { reseedSessionUsageFromLedger } from "../../src/domains/session/usage-reseed.js";
 import { isReceiptBearingFrame } from "../../src/worker/protocol.js";
 import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
+import { telemetryCall } from "../harness/telemetry-view.js";
 
 const context = { sessionId: "journal-session", label: "main" as const };
 const writer = { clioCoderVersion: "fixture", piVersion: "fixture" };
@@ -951,6 +963,38 @@ test("a research export round-trips through import-bundle into a fixture with th
 		await run.close();
 		await journals.closeAll();
 		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("rebuild re-projects a session's meta.json usage from its journal and reports the drift (#434 §10)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-rebuild-"));
+	const directory = join(stateDir, "sessions", "hash", "rebuilt");
+	const metaPath = join(directory, "meta.json");
+	try {
+		await mkdir(directory, { recursive: true });
+		const records = [callJournalHeader(writer), ...telemetryCall("rebuilt", { usd: 2 })];
+		await writeFile(join(directory, "calls.jsonl"), Buffer.concat(records.map(encodeTelemetryLine)));
+		const legacy = { knownUsd: 9, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 1 };
+		await writeFile(
+			metaPath,
+			JSON.stringify({
+				id: "rebuilt",
+				endedAt: "2026-01-01T00:00:00.000Z",
+				owner: null,
+				usage: { tokens: 1, cost: legacy },
+			}),
+		);
+		const [dry] = rebuildUsageProjections(stateDir, { apply: false });
+		strictEqual(dry?.state, "drifted");
+		ok(dry?.before.includes("running total, no fold version"), dry?.before);
+		strictEqual(JSON.parse(await readFile(metaPath, "utf8")).usage.tokens, 1, "a dry run writes nothing");
+		rebuildUsageProjections(stateDir, { apply: true });
+		const usage = JSON.parse(await readFile(metaPath, "utf8")).usage;
+		strictEqual(usage.foldVersion, TELEMETRY_FOLD_VERSION);
+		strictEqual(usage.usd.fact.measured + usage.usd.fact.estimated, 2);
+		strictEqual(rebuildUsageProjections(stateDir, { apply: false })[0]?.state, "unchanged");
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
 	}
 });
 

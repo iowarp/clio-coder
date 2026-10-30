@@ -148,6 +148,8 @@ The environment variables `CLIO_CODER_MEMORY_TRACE`, `CLIO_CODER_OBSERVATION_TRA
 
 `clio-coder telemetry prune` is a dry run unless `--apply`. It removes, oldest first, session journals and their objects past 90 days or over 1 GiB, unreferenced run journals by the same rule, objects no record cites, and research content past 30 days or over 4 GiB, together with the research files under `<stateDir>/telemetry/research/`. It never touches a live or locked session or run, a fork parent a kept child reads, or a run that a kept journal or a receipt references. Research content expires before the records that cite it, which then read as missing. Ledgers, receipts and `trace.sqlite` are not telemetry journals and are never pruned by it.
 
+`clio-coder telemetry rebuild` re-projects each session's `meta.json` usage, the spend the resume picker shows, from its journals through the read model: the whole-session totals a live session projects as it runs, stamped with the fold version ([usage-projection.ts](../../src/domains/session/usage-projection.ts)). It lists every session whose stored projection drifted, with its old and new totals and fold versions; a meta written before the projection has no fold version and always drifts. It writes only with `--apply`, and never a live session's meta, which its own process projects.
+
 ## Vocabulary mapping
 
 Older stores and receipts use the vocabularies on the left. New records use the facts on the right, and the legacy importer (`clio-coder telemetry import-legacy`) maps old ledgers the same way ([call-facts.ts](../../src/domains/observability/call-facts.ts), [legacy-import.ts](../../src/domains/session/legacy-import.ts)).
@@ -171,7 +173,6 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 These parts of the design are not in this build yet:
 
 - Opt-in pruning of receipts whose sealed evidence copy verifies, with one resolver that follows the tombstone.
-- `clio-coder telemetry rebuild`, which rebuilds projections from journals and reports rule drift.
 - The GUI explain popover and timeline view.
 
 Startup diagnostics stay in their own `startup/<date>.jsonl` file; they are not journal records.
