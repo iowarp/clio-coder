@@ -45,6 +45,8 @@ export const guiTests = [
 	"egress-policy",
 	"sessions-http",
 	"app-state",
+	"ssh-model",
+	"machine-proxy",
 ].map((name) => `tests/${name}.test.ts`);
 
 export const packageTests = ["tests/smoke/installed-package.test.ts", "tests/smoke/native-call-timing.test.ts"];
