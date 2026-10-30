@@ -22,7 +22,8 @@ documented compatibility normalization.
 
 | Artifact / Subsystem | Current Version | Symbol / Type & Source Location | Persisted Path / Wire Location | Schema Semantics & Version Differences | Mismatch Handling |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Run Receipt** | `20` | `RUN_RECEIPT_INTEGRITY_VERSION = 20`<br>[receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts) | `<stateDir>/receipts/<runId>.json` | Run record sealed with an unkeyed SHA-256 digest. Version 20 adds `pathProvenance` on dispatch intent and the resolved `pathScope`, over the v19 base of provenance fields, routing intent, quality labels, `validationGrounding`, `capabilityMismatch`, council provenance, and fleet gate provenance. Current writers omit `pathScope`, `fleetGate`, `attestation`, `ledgerContribution`, `staticShellHash`, `identity.hpc`, and `reproducibility.git`; the reader verifies these optional legacy fields when present. | Fail-closed. A receipt below v20 is reported as retired rather than invalid, is never read as evidence, and is never migrated; a malformed v20 receipt, or one edited without recomputing its digest, fails verification. |
+| **Run Receipt** | `21` | `RUN_RECEIPT_INTEGRITY_VERSION = 21`<br>[receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts) | `<stateDir>/receipts/<runId>.json` | Run record sealed with an unkeyed SHA-256 digest over the receipt fields and `integrity.ledger`, a labelled SHA-256 commitment to the run-ledger projection, instead of over the ledger row itself. Version 21 adds `callIds` (the logical calls the run's accounting folded, omitted when no call telemetry reached the host), `terminalReason` (how the worker loop ended, apart from the host verdict in `outcome` and `outcomeCode`) and `hashSet`, which names the hash declaration set below. It keeps the v20 base of dispatch intent path provenance, provenance fields, routing intent, quality labels, `validationGrounding`, `capabilityMismatch`, council provenance and fleet gate provenance. Current writers omit `pathScope`, `fleetGate`, `attestation`, `ledgerContribution`, `staticShellHash`, `identity.hpc`, and `reproducibility.git`; the reader verifies these optional legacy fields when present. | Fail-closed. A receipt below v21 is reported as retired rather than invalid, is never read as evidence, and is never migrated. A malformed v21 receipt, or one edited without recomputing its digest, fails verification. When the run ledger ring has evicted the receipt's row, the seal verifies on its own and reports verified (ledger evicted). |
+| **Receipt hash declarations** | `clio-coder.receipt-hashes/1` | `RECEIPT_HASH_SET`<br>[receipt-hashes.ts](../../src/domains/dispatch/receipt-hashes.ts) | Named by `hashSet` in each v21 receipt | Declares the function, canonicalization, subject and label (`commitment` or `resolvable`, with its store) of every hash a receipt can carry, with main-agent variants where the same field hashes a different preimage. Peer and model JSON sealed verbatim is outside the set. | Sealing refuses a receipt that carries a hash-shaped field the set does not declare. |
 | **Dispatch Intent** | `2` | `DISPATCH_INTENT_VERSION = 2`, `DISPATCH_INTENT_SUPPORTED_VERSIONS = [2]`<br>[intent-compatibility.ts](../../src/domains/dispatch/intent-compatibility.ts) | Inside the resolved dispatch plan artifact, the `JobSpec`/`DispatchRequest`, and the sealed run receipt | Typed model- and producer-declared scope: `read_roots`, `write_roots`, `relevant_paths`, `expected_outputs`, and declared-id `verification`, plus the `pathProvenance` binding every policy-bearing path to the field that declared it. Version 2 adds `pathProvenance` over the v1 path-and-output shape. | Fail-closed, never migrated. The supported set is a membership list, not a range: any other version is refused with `intent_version_unsupported` and the caller restates the fields on a fresh dispatch call. Omitted intent is accepted through the separately tracked legacy inference path; contradictory intent is a terminal refusal. See [dispatch-typed-intent.md](dispatch-typed-intent.md). |
 | **Dispatch Path Scope Provenance** | `1` | `version: 1` in `interface DispatchPathScopeProvenance`<br>[path-scope.ts](../../src/domains/dispatch/path-scope.ts) | Optional legacy `pathScope` on run receipts | Resolved policy-bearing paths with per-field provenance (`declared`/`derived`/`inferred`), source, and confidence. Never carries the task or briefing prose an inferred path came from. | Sealed inside the receipt integrity digest; shares the receipt's fail-closed policy. |
 | **Resolved Dispatch Plan Artifact** | `3` | `version: 3` in `interface ResolvedDispatchPlanArtifact`<br>[dispatch-plan.ts](../../src/tools/dispatch-plan.ts) | Trusted admission-time tool argument, rendered and hashed into the plan approval | Pinned agent/target/model/node per task plus the sealed `intent` and admission-resolved `resolvedVerification`. The rendered artifact carries `intent_sha256` for a declared task and the full inferred scope table for a legacy one. | Fail-closed. Any version but 3 parses as `null`, as does any task whose present `intent` is not a normalized v2 intent; omitted intent remains the valid legacy-inference shape. The call falls back to unresolved admission rather than executing a half-understood plan. |
@@ -90,29 +91,27 @@ reader. Evidence and memory semantics are in [evidence-and-memory.md](evidence-a
 
 ## 3. Integrity Verification Contracts
 
-### Receipt Integrity (Version 20)
+### Receipt Integrity (Version 21)
 
-Receipt integrity checks that a sealed receipt matches its ledger envelope and its recorded digest. The digest is unkeyed, so it catches an edit that leaves the digest stale but not a receipt and ledger row rewritten together with a recomputed digest. The private `computeReceiptIntegrity` helper hashes a canonical payload built from both records:
+Receipt integrity checks that a sealed receipt matches its recorded digest and, while the run ledger still holds its row, that row. The digest is unkeyed, so it catches an edit that leaves the digest stale but not a receipt and ledger row rewritten together with a recomputed digest. The private `computeReceiptIntegrity` helper commits to the ledger projection first and then seals the receipt fields together with that commitment:
 
 ```typescript
-function computeReceiptIntegrity(
-  receipt: RunReceipt | RunReceiptDraft,
-  envelope: RunEnvelope,
-  legacyNaming = false,
-): RunReceiptIntegrity {
+function computeReceiptIntegrity(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): RunReceiptIntegrity {
+  const ledger = ledgerCommitment(envelope); // { label: "commitment", function: "sha256", subject: "run-ledger-projection", digest }
   return {
-    version: 20,
+    version: 21,
     algorithm: "sha256",
-    digest: sha256(canonicalJson(integrityPayload(receipt, envelope, legacyNaming))),
+    digest: receiptDigest(receipt, ledger),
+    ledger,
   };
 }
 ```
 
 Receipt verification checks:
-1. The quality block and integrity block have their strict current shapes, including `integrity.version === 20`. A receipt sealed at a lower version is reported as retired rather than invalid: it is intact, but is not read as evidence and is never migrated.
+1. The quality block and integrity block have their strict current shapes, including `integrity.version === 21` and a labelled `integrity.ledger` commitment. A receipt sealed at a lower version is reported as retired rather than invalid: it is intact, but is not read as evidence and is never migrated.
 2. `executionRole` and `routingIntent` parse, and an optional `routeDecision` is current.
-3. Receipt identity, route, timing, usage, cost, outcome, node, briefing, budget, and steering fields agree with the run ledger envelope.
-4. The SHA-256 of the canonical receipt-and-ledger payload matches `integrity.digest`; the reader also recognizes the released legacy contract-name spelling when recomputing an otherwise current v20 digest.
+3. The SHA-256 of the canonical receipt fields and the stored ledger commitment matches `integrity.digest`.
+4. When the run ledger still holds the row, receipt identity, route, timing, usage, cost, outcome, node, briefing, budget, and steering fields agree with it, and the row's projection matches the commitment. When the ring has evicted the row, steps 1 to 3 alone verify the receipt and the result says the ledger was evicted.
 
 ---
 
