@@ -38,6 +38,7 @@ type Live = {
 	command: Owned | null;
 	forward: Owned | null;
 	localPort: number | null;
+	remotePort: number | null;
 };
 type Entry = {
 	attachment: MachineAttachment;
@@ -154,8 +155,8 @@ export class MachineAttachments implements MachineAttachmentsApi {
 		if (!entry) return null;
 		const state = entry.attachment.state;
 		if (state !== "ready") return { kind: "pending", state };
-		return entry.live?.localPort
-			? { kind: "ready", port: entry.live.localPort, token: entry.live.token }
+		return entry.live?.localPort && entry.live.remotePort
+			? { kind: "ready", port: entry.live.localPort, remotePort: entry.live.remotePort, token: entry.live.token }
 			: { kind: "pending", state: "connecting" };
 	}
 
@@ -201,6 +202,7 @@ export class MachineAttachments implements MachineAttachmentsApi {
 				command: null,
 				forward: null,
 				localPort: null,
+				remotePort: null,
 			},
 			timer: null,
 			failures,
@@ -233,6 +235,7 @@ export class MachineAttachments implements MachineAttachmentsApi {
 		command.child.stdin?.write(`${live.token}\n`);
 		const remotePort = await readyPort(command.child, this.deps.readyTimeoutMs ?? 30_000);
 		if (!this.current(entry)) return;
+		live.remotePort = remotePort;
 		// Keep the channel's pipes draining so the remote never blocks on a full pipe.
 		command.child.stdout?.on("data", () => {});
 		command.child.stderr?.on("data", () => {});
@@ -244,7 +247,7 @@ export class MachineAttachments implements MachineAttachmentsApi {
 		live.forward = forward;
 		forward.child.stderr?.on("data", () => {});
 		forward.child.once("exit", (code) => this.channelExited(entry, "forward", code));
-		const remote = await this.waitForMeta(entry, localPort, live.token);
+		const remote = await this.waitForMeta(entry, localPort, remotePort, live.token);
 		if (!this.current(entry)) return;
 		if (!remote) throw new Error("The node's GUI did not answer through the SSH forward.");
 		const gate = versionGate(entry.attachment.id, this.deps.local(), remote);
@@ -273,10 +276,15 @@ export class MachineAttachments implements MachineAttachmentsApi {
 		this.publish(entry);
 	}
 
-	private async waitForMeta(entry: Entry, port: number, token: string): Promise<RemoteServerMeta | null> {
+	private async waitForMeta(
+		entry: Entry,
+		port: number,
+		listenerPort: number,
+		token: string,
+	): Promise<RemoteServerMeta | null> {
 		const deadline = performance.now() + (this.deps.metaTimeoutMs ?? 10_000);
 		while (performance.now() < deadline && this.current(entry)) {
-			const meta = await remoteServerMeta(port, token);
+			const meta = await remoteServerMeta(port, listenerPort, token);
 			if (meta) return meta;
 			await sleep(200);
 		}
@@ -346,6 +354,7 @@ export class MachineAttachments implements MachineAttachmentsApi {
 		live.command = null;
 		live.forward = null;
 		live.localPort = null;
+		live.remotePort = null;
 		return children;
 	}
 

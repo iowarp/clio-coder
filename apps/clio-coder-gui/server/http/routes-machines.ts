@@ -7,9 +7,9 @@ import type { MachinesService } from "../services/machines.js";
 import { AppProblem } from "../services/problem.js";
 import { idempotencyKey, register } from "./validate.js";
 
-/** Where a node's GUI answers, once it does. */
+/** Where a node's GUI answers, once it does: the forward's local port, and the port the node listens on. */
 export type MachineRoute =
-	| { kind: "ready"; port: number; token: string }
+	| { kind: "ready"; port: number; remotePort: number; token: string }
 	| { kind: "pending"; state: Exclude<MachineAttachmentState, "ready"> };
 
 /** What the attach routes and the proxy need from the per-machine supervisor. */
@@ -76,7 +76,7 @@ export function machinesRoutes(
 			if (!UNFORWARDED_REQUEST_HEADERS.has(name)) headers[name] = value;
 		let upstream: Awaited<ReturnType<typeof proxyRequest>>;
 		try {
-			upstream = await proxyRequest(route.port, route.token, {
+			upstream = await proxyRequest(route.port, route.remotePort, route.token, {
 				method: context.req.method,
 				path: `${url.pathname.slice(`/m/${id}`.length)}${url.search}`,
 				headers,

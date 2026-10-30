@@ -32,12 +32,22 @@ function identity(port: number, token: string) {
 		throw new Error("Invalid local server identity.");
 }
 
-/** The meta document of the app listening on `port`, or null when nothing answers as this app with this token. */
-function readMeta(port: number, token: string) {
+/**
+ * The meta document of the app reached on `port`, or null when nothing answers as this app with this
+ * token. A listener authenticates on its own Host, so a probe through a forward names the listener's
+ * port rather than the forward's.
+ */
+function readMeta(port: number, token: string, listenerPort = port) {
 	identity(port, token);
+	identity(listenerPort, token);
 	return new Promise<Record<string, unknown> | null>((resolve) => {
 		const req = request(
-			{ hostname: "127.0.0.1", port, path: "/api/meta", headers: { Authorization: `Bearer ${token}` } },
+			{
+				hostname: "127.0.0.1",
+				port,
+				path: "/api/meta",
+				headers: { Authorization: `Bearer ${token}`, Host: `127.0.0.1:${listenerPort}` },
+			},
 			(response) => {
 				let body = "";
 				response.on("data", (chunk: Buffer) => {
@@ -86,8 +96,12 @@ export interface RemoteServerMeta {
 	build: string | null;
 	host: string;
 }
-export async function remoteServerMeta(port: number, token: string): Promise<RemoteServerMeta | null> {
-	const value = await readMeta(port, token);
+export async function remoteServerMeta(
+	port: number,
+	listenerPort: number,
+	token: string,
+): Promise<RemoteServerMeta | null> {
+	const value = await readMeta(port, token, listenerPort);
 	if (value?.apiVersion !== 1 || typeof value.clio !== "string") return null;
 	return {
 		clio: value.clio.slice(0, 64),
@@ -112,12 +126,18 @@ export interface UpstreamResponse {
 }
 
 /**
- * One request to a fleet node's GUI through its SSH forward, answered as soon as its headers arrive so
- * a stream is piped rather than buffered. The remote listener authenticates on its own Host, Origin
- * and bearer, which this sets; the browser's own never reach it.
+ * One request to a fleet node's GUI through its SSH forward on `port`, answered as soon as its headers
+ * arrive so a stream is piped rather than buffered. The remote listener authenticates on its own Host
+ * and Origin, which name `listenerPort`, and on its bearer; the browser's own never reach it.
  */
-export function proxyRequest(port: number, token: string, init: UpstreamRequest): Promise<UpstreamResponse> {
+export function proxyRequest(
+	port: number,
+	listenerPort: number,
+	token: string,
+	init: UpstreamRequest,
+): Promise<UpstreamResponse> {
 	identity(port, token);
+	identity(listenerPort, token);
 	return new Promise((resolve, reject) => {
 		const req = request(
 			{
@@ -127,8 +147,8 @@ export function proxyRequest(port: number, token: string, init: UpstreamRequest)
 				method: init.method,
 				headers: {
 					...init.headers,
-					host: `127.0.0.1:${port}`,
-					origin: `http://127.0.0.1:${port}`,
+					host: `127.0.0.1:${listenerPort}`,
+					origin: `http://127.0.0.1:${listenerPort}`,
 					authorization: `Bearer ${token}`,
 				},
 			},

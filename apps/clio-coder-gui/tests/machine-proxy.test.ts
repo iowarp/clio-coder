@@ -13,6 +13,8 @@ import { EventHub } from "../server/services/event-hub.js";
 const LOCAL_TOKEN = "local-launch-token-0123456789abcdefghij";
 const REMOTE_TOKEN = "remote-attach-token-0123456789abcdefghij";
 const ORIGIN = "http://127.0.0.1:4317";
+/** The port the node's own GUI listens on, which its auth expects in Host; the forward's port differs. */
+const REMOTE_LISTENER_PORT = 38211;
 
 test("the node proxy rewrites Host, Origin and bearer, strips browser credentials, and refuses what is not attached", async (t) => {
 	// The fake node GUI: records what reached it and answers like a private server would.
@@ -42,7 +44,7 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 		},
 		route: (id) =>
 			id === "blade"
-				? { kind: "ready", port, token: REMOTE_TOKEN }
+				? { kind: "ready", port, remotePort: REMOTE_LISTENER_PORT, token: REMOTE_TOKEN }
 				: id === "mini"
 					? { kind: "pending", state: "connecting" }
 					: null,
@@ -73,8 +75,8 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 	const first = seen.at(-1);
 	assert.ok(first);
 	assert.equal(new URL(first.url).pathname + new URL(first.url).search, "/api/meta?after=x");
-	assert.equal(first.headers.host, `127.0.0.1:${port}`);
-	assert.equal(first.headers.origin, `http://127.0.0.1:${port}`);
+	assert.equal(first.headers.host, `127.0.0.1:${REMOTE_LISTENER_PORT}`);
+	assert.equal(first.headers.origin, `http://127.0.0.1:${REMOTE_LISTENER_PORT}`);
 	assert.equal(first.headers.authorization, `Bearer ${REMOTE_TOKEN}`);
 	assert.equal(first.headers.cookie, undefined);
 	assert.equal(first.headers["x-keep"], "1");
