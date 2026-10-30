@@ -9,11 +9,11 @@ import {
 	settledPrefixLength,
 } from "../../src/engine/apis/diffusion-frames.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
+import { hasAssistantGenerationDelta } from "../../src/engine/generation-delta.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { reduceStatus } from "../../src/interactive/status/state-machine.js";
 import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
 import { fgSequence } from "../../src/interactive/theme/index.js";
-import { hasAssistantGenerationDelta } from "../../src/session-control/assistant-generation-timing.js";
 import { INITIAL_STATUS } from "../../src/session-control/status-types.js";
 
 afterEach(() => setDiffusionFramesEnabled(false));

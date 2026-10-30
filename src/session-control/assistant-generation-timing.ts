@@ -1,6 +1,6 @@
 import { assistantOutputChars } from "../core/assistant-output.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
-import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
+import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
 
 type TimingEvent = {
 	type: string;
@@ -10,20 +10,6 @@ type TimingEvent = {
 	};
 	assistantMessageEvent?: unknown;
 };
-
-export function hasAssistantGenerationDelta(update: unknown): boolean {
-	if (typeof update !== "object" || update === null) return false;
-	const event = update as { type?: unknown; delta?: unknown };
-	return (
-		event.type === "toolcall_start" ||
-		// A diffusion frame empties its delta so accumulators see no append, but
-		// it is still generated text: the first one is the call's first token.
-		(event.type === "text_delta" && readDiffusionFrame(event) !== null) ||
-		((event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") &&
-			typeof event.delta === "string" &&
-			event.delta.length > 0)
-	);
-}
 
 /**
  * A delta window shorter than this arrived in one burst after work the stream

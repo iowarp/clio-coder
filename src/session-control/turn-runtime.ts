@@ -14,6 +14,7 @@ import { recordUsageCall } from "../domains/session/usage-record.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
+import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
 import type { ContinuityController } from "./continuity-controller.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 /**
@@ -60,7 +61,7 @@ import { applyToolRounds, streamToolRound } from "../engine/provider-payload.js"
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { effectiveToolCall } from "../tools/surface.js";
-import { createAssistantGenerationTiming, hasAssistantGenerationDelta } from "./assistant-generation-timing.js";
+import { createAssistantGenerationTiming } from "./assistant-generation-timing.js";
 import {
 	type AssistantCallTiming,
 	type BackendCacheVerdict,
