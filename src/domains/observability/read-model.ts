@@ -1785,6 +1785,30 @@ export function runsTotal(fields: readonly RunTokenField[]): RunsTotal {
 	return { known: sum.measured + sum.estimated, unknownRuns: sum.unknownCount, display: renderCountSum(sum, "run") };
 }
 
+/** One run's sealed cost as a store with no journal fold records it: its amount and the provenance it was sealed with. */
+export interface RunCostField {
+	/** Null when no receipt holds the run's cost. */
+	usd: number | null;
+	provenance: "known" | "known_free" | "estimated" | "unknown";
+}
+
+/**
+ * A cost over runs the read model holds no journal fold for, each run one contribution, worded by the canonical
+ * renderer: an estimated run marks the whole `~`, and a run nobody priced leaves it a lower bound (#434 §11.3).
+ */
+export function runsCost(fields: readonly RunCostField[]): { fact: FactSum; display: string } {
+	const fact = foldFacts(
+		fields.map((field): Fact<number> => {
+			if (field.usd === null || !Number.isFinite(field.usd) || field.usd < 0 || field.provenance === "unknown")
+				return unobserved;
+			if (field.provenance === "estimated") return { kind: "estimated", value: field.usd, method: "catalog" };
+			return { kind: "measured", value: field.provenance === "known_free" ? 0 : field.usd, source: "local-count" };
+		}),
+	);
+	const free = fields.length > 0 && fields.every((field) => field.provenance === "known_free");
+	return { fact, display: renderUsdSum(fact, free) };
+}
+
 /**
  * A finished run's token count as its terminal event or sealed receipt states it, worded with its call coverage: calls
  * that reported no usage make it a lower bound beside them, and a run that never recorded its coverage says so, so a

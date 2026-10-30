@@ -135,10 +135,12 @@ it("separates known, estimated and unknown run costs and reports missing usage",
 			},
 		});
 		assert.equal(dispatched, 5);
+		// A run with no receipt, one that never recorded its call coverage and one whose calls went unreported each
+		// leave a lower bound; a run nobody priced leaves the cost one (#434 §11.3).
 		assert.deepEqual(summaries, [
-			"5 dispatched runs; reported tokens: total=207, input=120, output=40, cache read=20, cache write=20, missing-usage calls=2" +
-				"; incomplete usage breakdown=2 runs; missing-usage count unknown=2 runs" +
-				"; reported cost subtotals: known=$1.25, estimated=~$0.75 est; unknown cost=3 runs; usage/cost totals may be incomplete",
+			"5 dispatched runs; reported tokens: total=≥207 (3 runs unknown), input=≥120 (3 runs unknown), output=≥40 (3 runs unknown)" +
+				", cache read=≥20 (3 runs unknown), cache write=≥20 (3 runs unknown), missing-usage calls=≥2 (2 runs unknown)" +
+				"; reported cost=~$2.00 +?",
 		]);
 	} finally {
 		isolated.restore();
@@ -331,18 +333,19 @@ it("counts every attempt of a transiently retried dispatch and pairs each run id
 			assert.match(detail, /; run=retry-1; tokens: total=500,/u);
 			assert.doesNotMatch(detail, /run=retry-0; tokens/u);
 			assert.match(detail, /attempts=2 \(earlier: retry-0 tokens=100 outcome=failed\)/u);
-			assert.match(detail, /all-attempt tokens total=600(?!\s*\(incomplete)/u);
+			// The earlier attempt had a call that reported no usage, so the total is a lower bound.
+			assert.match(detail, /all-attempt tokens total=≥600 \(1 run unknown\)/u);
 		}
 		const attemptsAdmitted = details.length;
 		assert.equal(summaries.length, 1);
 		assert.match(
 			summaries[0] ?? "",
 			new RegExp(
-				`^${attemptsAdmitted * 2} dispatched runs; reported tokens: total=${attemptsAdmitted * 600}, input=${attemptsAdmitted * 360}, output=${attemptsAdmitted * 120}, cache read=${attemptsAdmitted * 60}, cache write=${attemptsAdmitted * 60}, missing-usage calls=${attemptsAdmitted}; incomplete usage breakdown=0 runs; missing-usage count unknown=0 runs`,
+				`^${attemptsAdmitted * 2} dispatched runs; reported tokens: total=≥${(attemptsAdmitted * 600).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), input=≥${(attemptsAdmitted * 360).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), output=≥${(attemptsAdmitted * 120).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), cache read=≥${(attemptsAdmitted * 60).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), cache write=≥${(attemptsAdmitted * 60).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), missing-usage calls=${attemptsAdmitted}; reported cost=\\$[0-9.]+$`,
 				"u",
 			),
 		);
-		assert.match(summaries[0] ?? "", /unknown cost=0 runs/u);
+		assert.doesNotMatch(summaries[0] ?? "", /\+\?/u);
 	} finally {
 		isolated.restore();
 	}
@@ -475,7 +478,8 @@ it("flags usage as incomplete when the attempt ledger cannot be read", async () 
 		});
 		assert.ok(details.length > 0);
 		for (const detail of details) assert.match(detail, /earlier attempts unrecoverable.*\(incomplete\)/u);
-		assert.match(summaries[0] ?? "", /incomplete usage breakdown=[1-9]\d* runs/u);
+		// Unrecoverable earlier attempts leave every total and the cost a lower bound.
+		assert.match(summaries[0] ?? "", /total=≥\d+ \(\d+ runs? unknown\)/u);
 	} finally {
 		isolated.restore();
 	}

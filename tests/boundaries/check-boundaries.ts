@@ -403,11 +403,6 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 		reason:
 			"a headless run folds its own calls into the main-agent receipt it seals and the --max-cost-usd cap it enforces",
 	},
-	{
-		file: "src/cli/wiki-generate.ts",
-		functions: ["attemptsBreakdown", "invocationUsage"],
-		reason: "the wiki generator's footer totals its own workers' sealed receipts for the run it just made",
-	},
 ];
 
 const USAGE_FIELD = /^(?:input|output|cacheRead|cacheWrite|cacheWrite1h|reasoning)$/;

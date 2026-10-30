@@ -39,6 +39,7 @@ import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { renderCostAmount } from "../domains/observability/cost.js";
 import { createObservabilityDomainModule } from "../domains/observability/index.js";
+import { runsCost, runsTotal } from "../domains/observability/read-model.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { canonicalizeWireModelId, type ProvidersContract, ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
@@ -383,61 +384,65 @@ function cacheReadText(usage: WikiUsage, cache: CacheReadSummary): string | unde
 	return undefined;
 }
 
+/**
+ * One receipt field as the read model folds it over runs: absent when no receipt holds it, and partial when some of
+ * the run's calls reported no usage or the receipt never recorded whether any did.
+ */
+function runField(usage: WikiRunUsage | undefined, key: (typeof USAGE_FIELDS)[number][0], unrecovered = false) {
+	const known = usage?.[key];
+	return {
+		known: typeof known === "number" ? known : null,
+		partial:
+			key !== "missingTokenCalls" &&
+			(unrecovered || usage?.missingTokenCalls === undefined || usage.missingTokenCalls > 0),
+	};
+}
+
 function attemptsBreakdown(attempts: WikiAttempts, terminal: WikiRunUsage | undefined): string {
 	const shown = attempts.earlier
 		.slice(0, ATTEMPT_LINE_LIMIT)
 		.map((a) => `${a.runId} tokens=${a.usage?.tokenCount ?? "unknown"} outcome=${a.outcome}`);
 	const hidden = attempts.earlier.length - shown.length;
 	const all = [terminal, ...attempts.earlier.map((a) => a.usage)];
-	const total = all.reduce((sum, usage) => sum + (usage?.tokenCount ?? 0), 0);
-	const incomplete = all.some((usage) => usage === undefined);
 	return (
 		`; attempts=${attempts.count} (earlier: ${shown.join(", ")}${hidden > 0 ? `, +${hidden} more` : ""})` +
-		`; all-attempt tokens total=${total}${incomplete ? " (incomplete)" : ""}`
+		`; all-attempt tokens total=${runsTotal(all.map((usage) => runField(usage, "tokenCount"))).display}`
 	);
 }
 
+/** The invocation's totals over its runs' sealed receipts, each folded by the read model, so a run with no receipt or a partial one leaves a lower bound rather than a zero (#434 §11.3). */
 function invocationUsage(receipts: WikiReceipts): string {
 	if (receipts.length === 0) return "no worker runs admitted; no usage recorded";
-	const totals: WikiUsage = { tokenCount: 0 };
-	let known = 0;
-	let estimated = 0;
-	let unknown = 0;
-	let incomplete = 0;
-	let missingUsage = 0;
-	for (const { receipt, unrecoveredAttempts } of receipts) {
-		if (unrecoveredAttempts && receipt) {
-			incomplete += 1;
-			missingUsage += 1;
-		}
-		if (!receipt) {
-			unknown += 1;
-			incomplete += 1;
-			missingUsage += 1;
-			continue;
-		}
-		for (const [key] of USAGE_FIELDS) totals[key] = (totals[key] ?? 0) + (receipt[key] ?? 0);
-		if (USAGE_FIELDS.some(([key]) => receipt[key] === undefined)) incomplete += 1;
-		if (receipt.missingTokenCalls === undefined) missingUsage += 1;
-		if (receipt.costProvenance === "unknown") unknown += 1;
-		else if (receipt.costProvenance === "estimated") estimated += receipt.costUsd;
-		else known += receipt.costUsd;
-	}
+	const fields = (key: (typeof USAGE_FIELDS)[number][0]) =>
+		runsTotal(receipts.map((run) => runField(run.receipt, key, run.unrecoveredAttempts === true))).display;
+	const totals = Object.fromEntries(USAGE_FIELDS.map(([key]) => [key, fields(key)])) as Record<
+		(typeof USAGE_FIELDS)[number][0],
+		string
+	>;
 	const partial = receipts.filter((run) => run.cacheReporting === "unreported" || run.cacheReporting === "mixed").length;
 	const cacheRead = receipts.every((run) => run.cacheReporting === "unreported")
 		? "unreported"
 		: partial > 0
-			? `${totals.cacheReadTokenCount ?? "unknown"} (unreported on ${partial} runs)`
+			? `${totals.cacheReadTokenCount} (unreported on ${partial} runs)`
 			: undefined;
+	const cost = runsCost(
+		receipts.flatMap((run) => [
+			run.receipt
+				? { usd: run.receipt.costUsd, provenance: run.receipt.costProvenance }
+				: { usd: null, provenance: "unknown" as const },
+			// An attempt ledger that could not be read may hide earlier attempts nobody priced.
+			...(run.unrecoveredAttempts ? [{ usd: null, provenance: "unknown" as const }] : []),
+		]),
+	);
 	const capped = receipts.flatMap((run) => (run.completedAfterCapPage ? [run.completedAfterCapPage] : []));
 	return (
-		`${receipts.length} dispatched runs; reported tokens: ${usageDetail(totals, cacheRead)}` +
+		`${receipts.length} dispatched runs; reported tokens: ${USAGE_FIELDS.map(([key, label]) =>
+			key === "cacheReadTokenCount" && cacheRead !== undefined ? `${label}=${cacheRead}` : `${label}=${totals[key]}`,
+		).join(", ")}` +
 		(receipts.some((run) => run.kind === "repair")
 			? `; repair runs=${receipts.filter((run) => run.kind === "repair").length}`
 			: "") +
-		`; incomplete usage breakdown=${incomplete} runs; missing-usage count unknown=${missingUsage} runs` +
-		`; reported cost subtotals: known=${renderCostAmount(known, "known")}, estimated=${renderCostAmount(estimated, "estimated")}; unknown cost=${unknown} runs` +
-		((totals.missingTokenCalls ?? 0) > 0 || incomplete > 0 ? "; usage/cost totals may be incomplete" : "") +
+		`; reported cost=${cost.display}` +
 		(capped.length > 0
 			? `; pages completed after tool-call cap=${capped.length} (${capped.slice(0, CAPPED_PAGE_LIMIT).join(", ")}${capped.length > CAPPED_PAGE_LIMIT ? `, +${capped.length - CAPPED_PAGE_LIMIT} more` : ""})`
 			: "")
