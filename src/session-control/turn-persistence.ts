@@ -230,20 +230,17 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		else finishTracedTurn(status, error);
 	};
 
-	// Once per turn (traceRunId clears on close) and only into the session the turn started in;
-	// an abandoned turn closing after a /resume drops its spend.
-	const recordSessionUsage = (usage: SessionTurnUsage | null): void => {
-		if (
-			traceSessionId === null ||
-			deps.session?.current()?.id !== traceSessionId ||
-			usage === null ||
-			usage.costSummary === undefined
-		)
-			return;
+	// Once per turn (traceRunId clears on close) and only into the session the turn started in; an abandoned turn
+	// closing after a /resume leaves the other session's meta alone. The meta is a projection of the journal fold,
+	// so side calls and runs settled since the last turn land with this one (#434 §10).
+	const projectSessionUsage = (): void => {
+		if (traceSessionId === null || deps.session?.current()?.id !== traceSessionId) return;
+		const usage = deps.observability?.sessionUsageProjection?.();
+		if (!usage) return;
 		try {
-			deps.session.recordUsage({ tokens: usage.totalTokens, cost: usage.costSummary });
+			deps.session.projectUsage(usage);
 		} catch {
-			// Spend on the resume picker is a convenience; the trace already holds the turn.
+			// Spend on the resume picker is a convenience; the journal already holds the turn.
 		}
 	};
 
@@ -251,7 +248,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		scheduledTraceClose = null;
 		if (traceRunId === null) return;
 		mirror({ kind: "finish", runId: traceRunId, status, error, usage: traceUsage, at: traceNow() });
-		recordSessionUsage(traceUsage);
+		projectSessionUsage();
 		// Settlement runs after the assessor; keep the facts even though the trace is already closed.
 		lastTracedTurn = { runId: traceRunId, usage: traceUsage };
 		traceRunId = null;

@@ -27,6 +27,7 @@ import { createConsentView } from "./consent.js";
 import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
 import { callCoverageForRun, createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
+import { TELEMETRY_FOLD_VERSION } from "./folds.js";
 import { createHealthWindows } from "./health-window.js";
 import { storeTelemetryObject } from "./objects.js";
 import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
@@ -480,6 +481,11 @@ export function createObservabilityBundle(
 		},
 		sessionCost: () => cost.sessionTotal(),
 		sessionCostSummary: () => cost.sessionCost(),
+		sessionUsageProjection: () => ({
+			tokens: cost.sessionTokens().totalTokens,
+			cost: cost.sessionCost(),
+			foldVersion: TELEMETRY_FOLD_VERSION,
+		}),
 		costEntries: () => cost.entries(),
 		resetSession(nextSessionId) {
 			sessionId = nextSessionId;

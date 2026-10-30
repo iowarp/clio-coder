@@ -211,6 +211,8 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 	/** Running session USD cost. */
 	sessionCost(): number;
 	sessionCostSummary(): CostAggregate;
+	/** The session's usage as meta.json projects it: the live fold's totals and the fold version that made them (#434). */
+	sessionUsageProjection?(): { tokens: number; cost: CostAggregate; foldVersion: number };
 	/** Running session cost log entries. */
 	costEntries(): ReadonlyArray<CostEntry>;
 	/** Reset the running session token and cost totals. */

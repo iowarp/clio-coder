@@ -49,8 +49,12 @@ export type ClioSessionMetaExtension = {
 	workspace?: WorkspaceSnapshot;
 	/** Ordered record of skills activated in this session. */
 	skillActivations?: SkillActivation[];
-	/** Clio's recorded totals for the session's turns; absent on sessions recorded before this field. */
-	usage?: { tokens: number; cost: CostAggregate };
+	/**
+	 * The session's usage as the call-journal fold last totalled it, for the resume picker. A projection, never a
+	 * source: `foldVersion` names the fold that made it, and a meta written before it carries a running total without
+	 * one (#434 §10).
+	 */
+	usage?: SessionUsageProjection;
 	/**
 	 * The turn `/tree` last switched the append point to, persisted so it
 	 * survives quit + resume. `resume()`/`switchBranch()` prefer this over
@@ -60,6 +64,13 @@ export type ClioSessionMetaExtension = {
 	 */
 	pinnedLeafTurnId?: string | null;
 };
+
+/** Session usage totals as meta.json keeps them; `foldVersion` is absent on metas written before #434. */
+export interface SessionUsageProjection {
+	tokens: number;
+	cost: CostAggregate;
+	foldVersion?: number;
+}
 
 export type SessionMeta = ClioSessionMeta & ClioSessionMetaExtension;
 
@@ -110,8 +121,8 @@ export interface SessionContract {
 	replaceEntries(entries: ReadonlyArray<SessionEntry>): void;
 	/** Append a skill activation ledger entry and mirror it into meta.json. */
 	recordSkillActivation(activation: SkillActivation): SkillActivation;
-	/** Fold one settled turn's recorded totals into the session's meta.json `usage`. */
-	recordUsage(turn: { tokens: number; cost: CostAggregate }): void;
+	/** Replace the current session's meta.json `usage` with the journal fold's projection. */
+	projectUsage(usage: SessionUsageProjection & { foldVersion: number }): void;
 	/** Write atomic checkpoint (current.jsonl flush, tree.json persist, meta update). */
 	checkpoint(reason?: string): Promise<void>;
 	/** Synchronously make current.jsonl appends durable; used by write-ahead safety journals. */
