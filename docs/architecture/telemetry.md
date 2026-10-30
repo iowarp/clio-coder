@@ -111,6 +111,7 @@ Pricing is separate from token provenance: `pricing.usd` is a fact, and `pricing
 | `auth.event` | operational | content-free | Each OAuth refresh under the credential lock, in a session or a worker's run: the provider, whether the stored token was near expiry or the provider rejected it, whether this process called the refresh endpoint, the outcome (`refreshed`, `adopted` when another writer had already replaced it, `failed` or `cancelled`), the pid that wrote the credential in use when it was this process, and the credential's `updatedAt` before and after. No token is recorded. |
 | `middleware.fired` | operational | content-free | Each middleware rule that emitted effects at a hook, in a session or a worker's run: the hook, the sync, async or awaited phase, the rule id, its effect kinds, its strongest reminder severity, the tool at a tool hook, and the evidence class the rule names, such as `regex:PLAN_REQUEST@operator-request` for plan-close or `count:read-only-calls@prior-turn` for the exploration advisory. |
 | `system_one.decision` | operational | content-free | Each System One decision in a session: the site and moment, the outcome, latency and deadline, whether the site was fitted, each engine's outcome and round trip, what the decision did to that engine's breaker (`opened`, `probe`, `closed` or `disabled`), and the journal calls its model requests opened. Those requests run inside their own call, so one the deadline stopped before it left is `never_sent` by its own stages. |
+| `worker.channel` | operational | content-free | Each failure of a worker's channel, in its run journal: the lane (`stdin` for control frames, `stdout` for the worker's NDJSON lane, which the worker reports on stderr), the frame type actually being written, the system error code such as `EPIPE`, whether the worker had already exited, and the closed failure class. A failure after exit is recorded but no longer changes how the run ends. |
 | `context.snapshot` | operational | content-free | Each persisted context snapshot's token split, window and source, under the real session and turn, and the call it was reconciled against. |
 | `health.samples` | research | content-free | The same window's full lag percentile curve, event-loop utilization and heap, in research mode. |
 | `call.timing.deltas` | research | content-free | One call's inter-delta gaps as a histogram with power-of-two bounds from 1 ms to 8,192 ms, never a row per delta. Recorded for main-loop and side calls under `deltas`; worker calls do not record it. |
@@ -167,7 +168,6 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 
 These parts of the design are not in this build yet:
 
-- The record `worker.channel`.
 - Research capture of request bodies and allow-listed provider response headers.
 - Opt-in pruning of receipts whose sealed evidence copy verifies, with one resolver that follows the tombstone.
 - `clio-coder telemetry rebuild`, which rebuilds projections from journals and reports rule drift.

@@ -24,6 +24,8 @@ export interface RunTelemetryJournal {
 	gap(reason: "invalid-record" | "writer-drop", count?: number): void;
 	/** The run's one terminal accountability record, written beside its call facts (#425, #434). */
 	settle(data: Payload<"run.settled">): void;
+	/** A channel failure the host saw, after exit included; a closed journal records nothing (#425). */
+	channel(data: Payload<"worker.channel">): void;
 	feed(body: RunEventJournalBody, capBytes: number): void;
 	flush(): Promise<void>;
 	close(): Promise<void>;
@@ -188,6 +190,10 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			if (journal.closed || settled) return;
 			settled = true;
 			writer.enqueue({ kind: "run.settled", data, ctx: context, wallMs: Date.now(), mono: performance.now() });
+		},
+		channel(data) {
+			if (journal.closed) return;
+			writer.enqueue({ kind: "worker.channel", data, ctx: context, wallMs: Date.now(), mono: performance.now() });
 		},
 		feed(body, capBytes) {
 			if (journal.closed || feedClosed) return;

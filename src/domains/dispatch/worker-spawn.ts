@@ -1,4 +1,5 @@
 import type { FlowRestrictionSet } from "../../core/flow-restrictions.js";
+import type { Payload } from "../../core/telemetry/schemas.js";
 /**
  * Orchestrator-side subprocess spawner for the native worker.
  *
@@ -68,6 +69,7 @@ import {
 	WORKER_QUARANTINE_MAX_FRAMES,
 	WORKER_STDIN_FRAME_MAX_BYTES,
 	WORKER_STDIN_QUEUE_MAX_BYTES,
+	WORKER_STDOUT_FAILURE_MARKER,
 	WORKER_STDOUT_INCOMPLETE_MARKER,
 	type WorkerAdmitFrame,
 	type WorkerAttestation,
@@ -161,10 +163,18 @@ export interface SpawnOptions extends WorkerProcessOptions {
 	workerEntryPath?: string;
 }
 
+const FRAME_TYPE = /^[a-z][a-z0-9_]{0,63}$/;
+const ERRNO = /^E[A-Z0-9]{1,31}$/;
+
 export interface WorkerProcessOptions {
 	cwd?: string;
 	env?: NodeJS.ProcessEnv;
 	shutdownGraceMs?: number;
+	/**
+	 * Every channel failure, the ones after exit that no longer change the outcome included, with the frame type
+	 * actually being written and its error code, for the run's worker.channel records (#425).
+	 */
+	onChannelFailure?: (fact: Payload<"worker.channel">) => void;
 	/**
 	 * Consume the worker's attestation. Remote transports use the announced
 	 * remote pid and process-group id for their kill fallback. Attestation is
@@ -629,7 +639,7 @@ function attachWorkerChannel(
 			// #425: each write callback owns its frame type; the stream event has no frame identity.
 		});
 		child.stdin.write(`${JSON.stringify(spec)}\n`, (error) => {
-			if (error) failChannel("spec", error.message);
+			if (error) failChannel("spec", error.message, "write-failed", error);
 		});
 		startAnnounceDeadline();
 	}
@@ -794,6 +804,10 @@ function attachWorkerChannel(
 			(line) => {
 				if (isControlLine(line)) {
 					handleControlLine(line);
+					return;
+				}
+				if (line.startsWith(WORKER_STDOUT_FAILURE_MARKER)) {
+					reportStdoutFailure(line.slice(WORKER_STDOUT_FAILURE_MARKER.length));
 					return;
 				}
 				appendStderr(`${line}\n`);
@@ -996,7 +1010,48 @@ function attachWorkerChannel(
 	 */
 	let queuedStdinBytes = 0;
 
-	function failChannel(operation: WorkerChannelFailure["operation"], detail: string): false {
+	function reportChannel(fact: Payload<"worker.channel">): void {
+		try {
+			opts?.onChannelFailure?.(fact);
+		} catch {
+			// A record of the failure never changes how the run ends (#425).
+		}
+	}
+
+	/** The worker's own typed twin of its incomplete-output line; anything unreadable is an invalid frame. */
+	function reportStdoutFailure(json: string): void {
+		const known = ["write-failed", "oversize-frame", "unserializable-frame", "backlog-full", "undrained"] as const;
+		let value: { failure?: unknown; errno?: unknown; frameType?: unknown } = {};
+		try {
+			value = JSON.parse(json) as typeof value;
+		} catch {
+			// Reported below as an invalid frame.
+		}
+		const failure = known.find((kind) => kind === value.failure) ?? "invalid-frame";
+		reportChannel({
+			lane: "stdout",
+			frameType: typeof value.frameType === "string" && FRAME_TYPE.test(value.frameType) ? value.frameType : null,
+			errno: typeof value.errno === "string" && ERRNO.test(value.errno) ? value.errno : null,
+			afterExit: false,
+			failure,
+		});
+	}
+
+	function failChannel(
+		operation: WorkerChannelFailure["operation"],
+		detail: string,
+		kind: Payload<"worker.channel">["failure"],
+		error?: unknown,
+		frameType: string = operation,
+	): false {
+		const code = (error as { code?: unknown } | undefined)?.code;
+		reportChannel({
+			lane: "stdin",
+			frameType: FRAME_TYPE.test(frameType) ? frameType : operation,
+			errno: typeof code === "string" && ERRNO.test(code) ? code : null,
+			afterExit: leaderExit !== null || closed,
+			failure: kind,
+		});
 		if (!isAlive() || settled || abortStarted) return false;
 		const failure = new WorkerChannelFailure(operation, detail);
 		// A lost hook answer never hides the failure of a frame the run depends on.
@@ -1019,28 +1074,45 @@ function attachWorkerChannel(
 		// #425: receipt finalization can outlive process exit; late board updates are harmless no-ops.
 		if (!isAlive() || settled || abortStarted || leaderExit !== null) return false;
 		const stdin = child.stdin;
-		if (!stdin || stdin.destroyed || !stdin.writable) return failChannel(operation, "worker stdin is not writable");
+		const written = typeof frameType === "string" ? frameType : operation;
+		if (!stdin || stdin.destroyed || !stdin.writable)
+			return failChannel(operation, "worker stdin is not writable", "write-failed", undefined, written);
 		const line = `${JSON.stringify(value)}\n`;
 		const bytes = Buffer.byteLength(line, "utf8");
 		if (bytes > WORKER_STDIN_FRAME_MAX_BYTES) {
-			return failChannel(operation, `frame of ${bytes} bytes exceeds the ${WORKER_STDIN_FRAME_MAX_BYTES} byte limit`);
+			return failChannel(
+				operation,
+				`frame of ${bytes} bytes exceeds the ${WORKER_STDIN_FRAME_MAX_BYTES} byte limit`,
+				"oversize-frame",
+				undefined,
+				written,
+			);
 		}
 		if (queuedStdinBytes + bytes > WORKER_STDIN_QUEUE_MAX_BYTES) {
 			return failChannel(
 				operation,
 				`stdin queue is full (${queuedStdinBytes} of ${WORKER_STDIN_QUEUE_MAX_BYTES} bytes pending)`,
+				"backlog-full",
+				undefined,
+				written,
 			);
 		}
 		try {
 			queuedStdinBytes += bytes;
 			stdin.write(line, (error) => {
 				queuedStdinBytes -= bytes;
-				if (error) failChannel(operation, error.message);
+				if (error) failChannel(operation, error.message, "write-failed", error, written);
 			});
 			return true;
 		} catch (error) {
 			queuedStdinBytes -= bytes;
-			return failChannel(operation, error instanceof Error ? error.message : String(error));
+			return failChannel(
+				operation,
+				error instanceof Error ? error.message : String(error),
+				"write-failed",
+				error,
+				written,
+			);
 		}
 	};
 

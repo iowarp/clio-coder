@@ -883,7 +883,14 @@ export const KIND_REGISTRY = {
 				errno: Type.Union([Type.String({ pattern: "^E[A-Z0-9]{1,31}$" }), Type.Null()]),
 				/** The worker process had already exited when the failure happened. */
 				afterExit: Type.Boolean(),
-				failure: vocabulary(["write-failed", "oversize-frame", "unserializable-frame", "undrained", "invalid-frame"]),
+				failure: vocabulary([
+					"write-failed",
+					"oversize-frame",
+					"unserializable-frame",
+					"backlog-full",
+					"undrained",
+					"invalid-frame",
+				]),
 			},
 			closed,
 		),

@@ -7385,6 +7385,7 @@ export function createDispatchBundle(
 				now,
 				monotonicNow,
 				onModelLoaded,
+				onChannelFailure: (fact: Payload<"worker.channel">) => runJournal?.channel(fact),
 				...(agentLedgerId !== null ? { onLedgerPost } : {}),
 				...(grantAttempt !== undefined ? { onGrantRequest } : {}),
 				...(spec.extensionHooks !== undefined ? { onHookRequest } : {}),

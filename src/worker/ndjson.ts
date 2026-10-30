@@ -10,9 +10,11 @@
  * entry registers, nothing further is written, and the exit code cannot be 0.
  */
 
+import type { WorkerStdoutFailure } from "./protocol.js";
 import {
 	WORKER_BULK_FRAME_MAX_BYTES,
 	WORKER_STDOUT_BACKLOG_MAX_BYTES,
+	WORKER_STDOUT_FAILURE_MARKER,
 	WORKER_STDOUT_INCOMPLETE_MARKER,
 } from "./protocol.js";
 
@@ -23,11 +25,21 @@ let failure: string | null = null;
 let failureHandler: ((reason: string) => void) | null = null;
 let errorListenerInstalled = false;
 
-function failOutput(reason: string): void {
+function failOutput(reason: string, kind: WorkerStdoutFailure, error?: unknown, event?: unknown): void {
 	if (failure !== null) return;
 	failure = reason;
+	const code = (error as { code?: unknown } | undefined)?.code;
+	const frameType = (event as { type?: unknown } | null | undefined)?.type;
+	const typed = {
+		failure: kind,
+		errno: typeof code === "string" ? code : null,
+		frameType: typeof frameType === "string" ? frameType : null,
+	};
 	try {
-		process.stderr.write(`${WORKER_STDOUT_INCOMPLETE_MARKER}${reason}\n`);
+		// stderr only: stdout is the NDJSON lane and is what just failed (invariant 3).
+		process.stderr.write(
+			`${WORKER_STDOUT_INCOMPLETE_MARKER}${reason}\n${WORKER_STDOUT_FAILURE_MARKER}${JSON.stringify(typed)}\n`,
+		);
 	} catch {
 		// The nonzero exit code still carries the failure when stderr is gone.
 	}
@@ -50,37 +62,50 @@ export function emitEvent(event: unknown): void {
 	if (!errorListenerInstalled) {
 		errorListenerInstalled = true;
 		// An EPIPE from a vanished reader is a lost trail, not an uncaught exception.
-		process.stdout.on("error", (err) => failOutput(`stdout write failed: ${err.message}`));
+		process.stdout.on("error", (err) => failOutput(`stdout write failed: ${err.message}`, "write-failed", err));
 	}
 	let json: string | undefined;
 	try {
 		json = JSON.stringify(event);
 	} catch (err) {
-		failOutput(`an event could not be serialized: ${err instanceof Error ? err.message : String(err)}`);
+		failOutput(
+			`an event could not be serialized: ${err instanceof Error ? err.message : String(err)}`,
+			"unserializable-frame",
+			undefined,
+			event,
+		);
 		return;
 	}
 	if (typeof json !== "string") {
-		failOutput("an event serialized to nothing");
+		failOutput("an event serialized to nothing", "unserializable-frame", undefined, event);
 		return;
 	}
 	const line = `${json}\n`;
 	const bytes = Buffer.byteLength(line, "utf8");
 	if (bytes - 1 > WORKER_BULK_FRAME_MAX_BYTES) {
-		failOutput(`a ${bytes} byte frame exceeds the ${WORKER_BULK_FRAME_MAX_BYTES} byte bulk lane limit`);
+		failOutput(
+			`a ${bytes} byte frame exceeds the ${WORKER_BULK_FRAME_MAX_BYTES} byte bulk lane limit`,
+			"oversize-frame",
+			undefined,
+			event,
+		);
 		return;
 	}
 	if (process.stdout.writableLength + bytes > WORKER_STDOUT_BACKLOG_MAX_BYTES) {
 		failOutput(
 			`the unwritten stdout backlog would pass ${WORKER_STDOUT_BACKLOG_MAX_BYTES} bytes (${process.stdout.writableLength} pending)`,
+			"backlog-full",
+			undefined,
+			event,
 		);
 		return;
 	}
 	try {
 		process.stdout.write(line, (err) => {
-			if (err) failOutput(`stdout write failed: ${err.message}`);
+			if (err) failOutput(`stdout write failed: ${err.message}`, "write-failed", err, event);
 		});
 	} catch (err) {
-		failOutput(`stdout write failed: ${err instanceof Error ? err.message : String(err)}`);
+		failOutput(`stdout write failed: ${err instanceof Error ? err.message : String(err)}`, "write-failed", err, event);
 	}
 }
 
@@ -99,7 +124,7 @@ export function drainStdout(timeoutMs = 2000): Promise<boolean> {
 			if (done) return;
 			done = true;
 			clearTimeout(timer);
-			if (!drained) failOutput(`${WORKER_STDOUT_UNDRAINED_REASON} ${timeoutMs} ms`);
+			if (!drained) failOutput(`${WORKER_STDOUT_UNDRAINED_REASON} ${timeoutMs} ms`, "undrained");
 			resolve(failure === null);
 		};
 		const timer = setTimeout(() => finish(false), timeoutMs);

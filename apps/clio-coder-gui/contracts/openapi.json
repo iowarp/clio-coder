@@ -27692,7 +27692,14 @@
 											"type": "boolean"
 										},
 										"failure": {
-											"enum": ["write-failed", "oversize-frame", "unserializable-frame", "undrained", "invalid-frame"]
+											"enum": [
+												"write-failed",
+												"oversize-frame",
+												"unserializable-frame",
+												"backlog-full",
+												"undrained",
+												"invalid-frame"
+											]
 										}
 									},
 									"additionalProperties": false

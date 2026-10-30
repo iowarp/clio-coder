@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 import { createCliWorkerHooks, workerHookStartupFailure } from "../../src/cli/worker-extension-hooks.js";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { Payload } from "../../src/core/telemetry/schemas.js";
+import { validPayload } from "../../src/core/telemetry/schemas.js";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
 import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
@@ -479,6 +481,57 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", ()
 		{ onControl: (frame) => (frame.kind === "heartbeat" ? onHeartbeat() : undefined) },
 	);
 }
+
+describe("worker channel facts", () => {
+	it("reports the frame actually written, its errno and the worker's typed stdout failure (#425)", {
+		timeout: 15_000,
+	}, async () => {
+		const child = `
+const [prefix, identity] = process.argv.slice(1);
+require("node:readline").createInterface({ input: process.stdin }).once("line", () => {
+  const unknown = { known: false };
+  const attestation = { ...JSON.parse(identity), protocolVersion: ${WORKER_PROTOCOL_VERSION}, pid: process.pid,
+    processGroupId: process.pid, host: "fixture", resources: { labels: [], cpuCount: unknown,
+    totalMemoryBytes: unknown, freeMemoryBytes: unknown, gpuCount: unknown, vramBytes: unknown, residentModels: unknown } };
+  process.stderr.write(prefix + JSON.stringify({ kind: "announce", attestation }) + "\\n");
+  process.stderr.write('[worker] bulk lane failure {"failure":"backlog-full","errno":null,"frameType":"tool_execution_end"}\\n');
+  process.stdin.destroy();
+  setTimeout(() => process.exit(1), 400);
+});
+`;
+		const facts: Payload<"worker.channel">[] = [];
+		const worker = spawnWorkerProcess(
+			process.execPath,
+			["-e", child, CONTROL_FRAME_PREFIX, JSON.stringify(approvedIdentityForSpec(bulkFixtureSpec))],
+			bulkFixtureSpec,
+			{ onChannelFailure: (fact) => facts.push(fact) },
+		);
+		const deadline = Date.now() + 5_000;
+		while (!facts.some((fact) => fact.lane === "stdout") && Date.now() < deadline) await sleep(20);
+		await sleep(50);
+		for (let index = 0; index < 20 && !facts.some((fact) => fact.lane === "stdin"); index++) {
+			worker.send?.({ type: "steer", text: "x".repeat(65_536) });
+			await sleep(20);
+		}
+		await worker.promise;
+		for (const fact of facts) ok(validPayload("worker.channel", fact), JSON.stringify(fact));
+		deepStrictEqual(
+			facts.find((fact) => fact.lane === "stdout"),
+			{
+				lane: "stdout",
+				frameType: "tool_execution_end",
+				errno: null,
+				afterExit: false,
+				failure: "backlog-full",
+			},
+		);
+		const stdin = facts.find((fact) => fact.lane === "stdin");
+		ok(stdin, JSON.stringify(facts));
+		strictEqual(stdin.frameType, "steer");
+		strictEqual(stdin.failure, "write-failed");
+		strictEqual(stdin.errno, "EPIPE");
+	});
+});
 
 describe("bulk-lane backpressure", () => {
 	it("delivers every tool result intact and in order through a paused lane", { timeout: 30_000 }, async () => {
