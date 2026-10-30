@@ -505,8 +505,10 @@ function attemptFact(attempt: Attempt, metric: FactMetric): Fact<number> {
 			return settled.cache.rePrefilledTokens;
 		case "uncachedPrefill":
 			return settled.cache.uncachedPrefillTokens;
+		case "breakUsd":
+			// Fixed at settle from the call's own rates; a call settled before cache physics has none (#434 P2.4).
+			return settled.cache.bill?.usd ?? unobserved;
 		default:
-			// The cache-break bill and other unrecorded facts stay unknown until a call records them (#434 P2).
 			return unobserved;
 	}
 }
@@ -642,12 +644,10 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 		const fact: Fact<number> | FactSum = ATTEMPT_FACTS.has(metric)
 			? attemptFact(attempt, metric)
 			: attemptsSum([attempt], metric);
+		// A cache-break bill names the rates it was priced by, which a free call's local zero depends on.
+		const pricedBy = (metric === "breakUsd" ? attempt.settled?.cache.bill : attempt.settled?.pricing)?.pricedBy;
 		return {
-			quantity: {
-				fact,
-				display: display(metric, fact, attempt.settled?.pricing.pricedBy === "free", attempt.settled?.pricing.pricedBy),
-				ref: encoded,
-			},
+			quantity: { fact, display: display(metric, fact, pricedBy === "free", pricedBy), ref: encoded },
 			selection,
 		};
 	}
