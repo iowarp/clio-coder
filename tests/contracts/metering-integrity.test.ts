@@ -4,10 +4,10 @@ import { projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
-import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
-import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import { callCoverageForRun, createCostTracker, renderCostAggregate } from "../../src/domains/observability/cost.js";
 import { aggregateCostEntries } from "../../src/domains/observability/cost-rows.js";
+import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
+import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import { ledgerUsageCalls, type SessionEntry } from "../../src/domains/session/index.js";
 import { ledgerCallFailureCounts } from "../../src/domains/session/usage.js";
 import { projectSessionUsage } from "../../src/engine/acp/usage.js";
@@ -211,15 +211,26 @@ describe("contracts/metering integrity", () => {
 			});
 			persistence.appendAssistantTurn(message);
 			persistence.appendAssistantTurn(message);
-			strictEqual(entries.length, 1);
-			strictEqual(observability.snapshot().session.tokens.neverSentCalls, 1);
+			// Null usage can carry only the top-level marker; no failure object is required (#434).
+			persistence.appendAssistantTurn({ ...message, usage: null, callInvoked: false } as unknown as AgentMessage);
+			persistence.appendAssistantTurn({
+				...message,
+				usage: zeroUsage,
+				failure: { invoked: false, stage: "admission", errorClass: "aborted", httpStatus: null },
+			} as unknown as AgentMessage);
+			strictEqual(entries.length, 3);
+			for (const entry of entries) {
+				ok("payload" in entry);
+				strictEqual((entry.payload as Record<string, unknown>).usage, null);
+			}
+			strictEqual(observability.snapshot().session.tokens.neverSentCalls, 3);
 			strictEqual(observability.snapshot().session.tokens.apiCalls ?? 0, 0);
 			strictEqual(observability.snapshot().session.cost.calls, 0);
 			deepStrictEqual(observability.costEntries(), []);
 			for (let resume = 0; resume < 2; resume += 1) {
 				reseedSessionUsageFromLedger(observability, [unknown, ...entries]);
 				const snapshot = observability.snapshot();
-				strictEqual(snapshot.session.tokens.neverSentCalls, 1);
+				strictEqual(snapshot.session.tokens.neverSentCalls, 3);
 				strictEqual(snapshot.session.tokens.missingTokenCalls, 1);
 				strictEqual(snapshot.session.tokens.apiCalls, 1);
 				strictEqual(snapshot.session.tokens.totalTokens, 0);
