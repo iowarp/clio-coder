@@ -14,7 +14,7 @@ for (const succeeds of [true, false]) {
 		const notices: string[] = [];
 		let resets = 0;
 		const session = {
-			current: () => ({ id: sessionId, cwd: process.cwd(), target: null, model: null }),
+			current: () => ({ id: sessionId, cwd: process.cwd(), cwdHash: "0123456789abcdef", target: null, model: null }),
 			fork: () => {
 				if (succeeds) sessionId = "child-session";
 			},
