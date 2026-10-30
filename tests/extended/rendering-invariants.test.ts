@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { OutputStyle } from "../../src/core/defaults.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import type { TelemetryView } from "../../src/domains/observability/contract.js";
 import {
 	createWorkerProgressFold,
 	WORKER_ACTION_TRAIL_LIMIT,
@@ -66,6 +67,7 @@ import {
 } from "../../src/session-control/worker-stream.js";
 
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
 function plainRender(panel: ChatPanel, width = 120): string {
 	return panel.render(width).map(stripTerminalSequences).join("\n");
@@ -198,9 +200,11 @@ describe("Clio rendering invariants", () => {
 		style: OutputStyle,
 		steps: ReadonlyArray<readonly [thinking: string | null, call: string | null]>,
 	) => {
-		const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1_000 });
+		// The turn's reasoning count is the read model's, one call per message (#434 §11.3).
+		let view: TelemetryView | null = null;
+		const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1_000, getTelemetry: () => view });
 		panel.appendUser("Find the flaky test");
-		panel.applyEvent({ type: "agent_start" } as never);
+		panel.applyEvent({ type: "agent_start", turnId: "think" } as never);
 		const messages: unknown[] = [];
 		const message = (thinking: string | null, text?: string) => {
 			panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
@@ -263,6 +267,12 @@ describe("Clio rendering invariants", () => {
 			} as never);
 		});
 		message("summarize the cause", "The jitter was real randomness.");
+		view = telemetryViewOf(
+			"thinking-turn",
+			messages.flatMap(() =>
+				telemetryCall("thinking-turn", { turnId: "think", usage: { input: 100, output: 20, reasoning: 40 }, usd: null }),
+			),
+		);
 		panel.applyEvent({ type: "agent_end", messages } as never);
 		return plainRender(panel, 100);
 	};
@@ -1628,9 +1638,13 @@ describe("transcript block grammar", () => {
 
 	it("closes a run split by a worker with exactly one receipt, after the last output", () => {
 		for (const style of ["standard", "detailed"] as const) {
-			const panel = createChatPanel({ getOutputStyle: () => style });
+			const view = telemetryViewOf(
+				"worker-split",
+				telemetryCall("worker-split", { turnId: "review", usage: { input: 10, output: 5 }, usd: null }),
+			);
+			const panel = createChatPanel({ getOutputStyle: () => style, getTelemetry: () => view });
 			panel.appendUser("Delegate the review");
-			panel.applyEvent({ type: "agent_start" } as never);
+			panel.applyEvent({ type: "agent_start", turnId: "review" } as never);
 			say(panel, "Dispatching a reviewer.");
 			act(panel, "d1", "dispatch", { agent: "reviewer", task: "review" }, "1 task dispatched");
 			panel.applyWorkerState({
@@ -2497,11 +2511,14 @@ describe("tool classes", () => {
 			contextTokens: 3_164,
 			receipt: { outcome: "succeeded", durationMs: 8_200, toolCalls: 6, tokenCount: 19_100 },
 		} as unknown as WorkerEntryState;
-		const panel = createChatPanel({ getOutputStyle: () => "detailed" });
 		const usage = { input: 47_200, output: 465, cacheRead: 0, cacheWrite: 0, reasoning: 138, totalTokens: 47_665 };
+		const call = () =>
+			telemetryCall("narrow-row", { turnId: "q", usage: { ...usage, totalTokens: undefined } as never, usd: null });
+		const view = telemetryViewOf("narrow-row", [...call(), ...call()]);
+		const panel = createChatPanel({ getOutputStyle: () => "detailed", getTelemetry: () => view });
 		const message = { role: "assistant", content: [{ type: "text", text: "Done." }], usage, stopReason: "stop" };
 		panel.appendUser("Q");
-		panel.applyEvent({ type: "agent_start" } as never);
+		panel.applyEvent({ type: "agent_start", turnId: "q" } as never);
 		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as never);
 		panel.applyEvent({ type: "message_end", message } as never);
 		panel.applyEvent({ type: "agent_end", messages: [message, message] } as never);

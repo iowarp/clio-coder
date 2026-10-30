@@ -22,7 +22,13 @@ export {
 	UNMEASURED_REASONING,
 } from "./reasoning.js";
 export { type ReduceContext, reduceStatus, type StatusInputEvent } from "./state-machine.js";
-export { type BuildSummaryInput, buildSummary, emptyRunTally, foldMessageIntoRunTally } from "./summary.js";
+export {
+	type BuildSummaryInput,
+	buildSummary,
+	emptyRunTally,
+	foldMessageIntoRunTally,
+	runReasoning,
+} from "./summary.js";
 export {
 	resolveFooterVerb,
 	spinnerFrame,

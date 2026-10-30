@@ -1492,6 +1492,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					enrichedEvent = { ...event, lockedSynthesisSanitized: true } as typeof event;
 				}
 			}
+			// The run's start and end name the operator turn its calls journal under, so the transcript receipt reads
+			// that turn's spend from the read model (#434 §11.3).
+			if ((enrichedEvent.type === "agent_start" || enrichedEvent.type === "agent_end") && state.activeUserTurnId)
+				enrichedEvent = { ...enrichedEvent, turnId: state.activeUserTurnId } as unknown as typeof enrichedEvent;
 			let publicEvent = enrichedEvent;
 			let journalAccounted = false;
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message?.role === "assistant") {

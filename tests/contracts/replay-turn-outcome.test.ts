@@ -7,6 +7,7 @@ import { BusChannels } from "../../src/core/bus-events.js";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { rememberMessageCalls } from "../../src/core/message-accounting.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
@@ -28,6 +29,7 @@ import { createTurnPersistence } from "../../src/session-control/turn-persistenc
 import type { ChatTurnState } from "../../src/session-control/turn-state.js";
 import type { WorkerEntryState, WorkerReceiptFacts } from "../../src/session-control/worker-stream.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
 const usage = {
 	input: 7,
@@ -401,6 +403,10 @@ test("a refused skill load reads the same live and on replay, from its persisted
 });
 
 test("a replayed receipt states the duration and cold-cache reasons the live one did", () => {
+	// The receipt's spend is the read model's for the operator turn, which live and replay both name (#434 §11.3).
+	const turnCall = (turnId: string, cacheRead = 0) =>
+		telemetryCall("replay-receipt", { turnId, usage: { input: 7, output: 5, cacheRead }, usd: null });
+	const view = telemetryViewOf("replay-receipt", [...turnCall("u"), ...turnCall("u2")]);
 	const plainRows = (panel: ReturnType<typeof createChatPanel>) =>
 		panel
 			.render(120)
@@ -417,7 +423,7 @@ test("a replayed receipt states the duration and cold-cache reasons the live one
 	// loop consumes those reasons just before it prompts, so the notice lands
 	// ahead of the run's agent_start.
 	let clock = 1_000;
-	const live = createChatPanel({ now: () => clock, getOutputStyle: () => "detailed" });
+	const live = createChatPanel({ now: () => clock, getOutputStyle: () => "detailed", getTelemetry: () => view });
 	live.appendUser("Question");
 	live.applyEvent({
 		type: "notice",
@@ -427,7 +433,7 @@ test("a replayed receipt states the duration and cold-cache reasons the live one
 		key: "context.cache.cold",
 		coldReasons: ["prompt_recompiled"],
 	} as ChatLoopEvent);
-	live.applyEvent({ type: "agent_start" } as ChatLoopEvent);
+	live.applyEvent({ type: "agent_start", turnId: "u" } as ChatLoopEvent);
 	live.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
 	live.applyEvent({ type: "message_end", message: final } as unknown as ChatLoopEvent);
 	clock += 5_000;
@@ -436,7 +442,7 @@ test("a replayed receipt states the duration and cold-cache reasons the live one
 	assert.equal(liveRows.at(-1), "✓ Done · 5.0s · in 7 · out 5 · cold: prompt recompiled");
 	// The reasons belong to that run alone: the next one, a queued follow-up
 	// here, starts warm.
-	live.applyEvent({ type: "agent_start" } as ChatLoopEvent);
+	live.applyEvent({ type: "agent_start", turnId: "u2" } as ChatLoopEvent);
 	live.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
 	live.applyEvent({ type: "message_end", message: final } as unknown as ChatLoopEvent);
 	live.applyEvent({ type: "agent_end", messages: [final] } as unknown as ChatLoopEvent);
@@ -444,7 +450,7 @@ test("a replayed receipt states the duration and cold-cache reasons the live one
 	assert.doesNotMatch(liveRows.join("\n"), /cache may be cold/u, "the notice itself stays in the footer");
 
 	// Replay: the same facts from the ledger's timestamps and prompt-cache record.
-	const replayed = createChatPanel({ getOutputStyle: () => "detailed" });
+	const replayed = createChatPanel({ getOutputStyle: () => "detailed", getTelemetry: () => view });
 	rehydrateChatPanelFromTurns(replayed, [
 		{
 			turnId: "u",
@@ -469,7 +475,8 @@ test("a replayed receipt states the duration and cold-cache reasons the live one
 	assert.equal(plainRows(replayed).at(-1), liveRows.at(-1));
 
 	// A cache that served tokens was not cold: the receipt states the reuse instead.
-	const warm = createChatPanel({ getOutputStyle: () => "detailed" });
+	const warmView = telemetryViewOf("replay-receipt", turnCall("u", 68_608));
+	const warm = createChatPanel({ getOutputStyle: () => "detailed", getTelemetry: () => warmView });
 	const cached = { ...final, usage: { ...usage, cacheRead: 68_608 } };
 	rehydrateChatPanelFromTurns(warm, [
 		{
@@ -1059,4 +1066,39 @@ test("live assistant model attribution survives copied and HTML transcript views
 	});
 	assert.match(html, /litellm · qwopus-fixture/u);
 	assert.match(html, /anthropic · haiku-fixture/u);
+});
+
+test("a receipt whose run ended before its last call was folded settles on the turn once the fold lands (#434 §11.3)", () => {
+	const first = telemetryCall("settle-receipt", { turnId: "u", usage: { input: 7, output: 5 }, usd: null });
+	const last = telemetryCall("settle-receipt", { turnId: "u", usage: { input: 3, output: 2 }, usd: null });
+	const settledOf = (records: typeof first) =>
+		records.flatMap((record) => (record.k === "call.settled" ? [record.data] : []));
+	const message = (calls: typeof first, text: string) => {
+		const value = { role: "assistant" as const, content: [{ type: "text", text }], stopReason: "stop", usage };
+		rememberMessageCalls(value, settledOf(calls));
+		return value;
+	};
+	const messages = [message(first, "One"), message(last, "Two")];
+	// The writer's batch holding the run's last call has not been folded when the run ends.
+	let view = telemetryViewOf("settle-receipt", first);
+	const panel = createChatPanel({ getOutputStyle: () => "detailed", getTelemetry: () => view, now: () => 0 });
+	const receipt = () =>
+		panel
+			.render(120)
+			.map(stripTerminalSequences)
+			.filter((line) => line.length > 0)
+			.at(-1);
+	panel.appendUser("Question");
+	panel.applyEvent({ type: "agent_start", turnId: "u" } as ChatLoopEvent);
+	for (const value of messages) {
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
+		panel.applyEvent({ type: "message_end", message: value } as unknown as ChatLoopEvent);
+	}
+	panel.applyEvent({ type: "agent_end", messages } as unknown as ChatLoopEvent);
+	assert.equal(receipt(), "✓ Done · 0ms · in 7 · out 5");
+	view = telemetryViewOf("settle-receipt", [...first, ...last]);
+	assert.equal(receipt(), "✓ Done · 0ms · 2 calls · in 10 · out 7");
+	// Settled: a later view no longer moves this turn's receipt.
+	view = telemetryViewOf("settle-receipt", [...first, ...last, ...telemetryCall("settle-receipt", { turnId: "u" })]);
+	assert.equal(receipt(), "✓ Done · 0ms · 2 calls · in 10 · out 7");
 });

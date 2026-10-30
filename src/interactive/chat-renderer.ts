@@ -673,16 +673,22 @@ function replayEntries(
 	// its first call recorded for an expected cold prompt cache.
 	let runStartedAtMs: number | undefined;
 	let runColdReasons: string[] = [];
+	let runTurnId: string | undefined;
 	const selected = selectReplayEntries(turns, options);
 	const runStarts = new Map<string, number>();
+	// The operator turn each answer belongs to, which its calls journal under (#434 §11.3).
+	const runTurns = new Map<string, string>();
 	let userStartedAt: number | undefined;
+	let userTurnId: string | undefined;
 	for (const entry of filterEntriesToActivePath(turns, options.activeLeafTurnId ?? options.uptoTurnId)) {
 		if (entry.kind !== "message") continue;
 		if (entry.role === "user") {
 			const at = Date.parse(entry.timestamp);
 			userStartedAt = Number.isFinite(at) ? at : undefined;
-		} else if (entry.role === "assistant" && userStartedAt !== undefined) {
-			runStarts.set(entry.turnId, userStartedAt);
+			userTurnId = entry.turnId;
+		} else if (entry.role === "assistant") {
+			if (userStartedAt !== undefined) runStarts.set(entry.turnId, userStartedAt);
+			if (userTurnId !== undefined) runTurns.set(entry.turnId, userTurnId);
 		}
 	}
 
@@ -723,6 +729,7 @@ function replayEntries(
 					settleReplayedRun();
 					runAssistantMessages = [];
 					runColdReasons = [];
+					runTurnId = entry.turnId;
 					const startedAt = Date.parse(entry.timestamp);
 					runStartedAtMs = Number.isFinite(startedAt) ? startedAt : undefined;
 					const text = replayedUserText(entry);
@@ -734,6 +741,7 @@ function replayEntries(
 					// A split-turn checkpoint can hide the user row while retaining its
 					// answer; its original timestamp still owns the duration (flywheel r4/5).
 					runStartedAtMs = runStarts.get(entry.turnId) ?? runStartedAtMs;
+					runTurnId = runTurns.get(entry.turnId) ?? runTurnId;
 					const text = chatMessageText(entry);
 					const failure = messageFailure(entry);
 					const richMessage = richMessageFromEntry(entry, Number.POSITIVE_INFINITY);
@@ -779,8 +787,14 @@ function replayEntries(
 								...(runColdReasons.length > 0 ? { coldReasons: [...runColdReasons] } : {}),
 							};
 							const messages = runAssistantMessages;
+							const turnId = runTurnId;
 							pendingSettle = () => {
-								chatPanel.applyEvent({ type: "agent_end", messages, replayed } as ChatLoopEvent);
+								chatPanel.applyEvent({
+									type: "agent_end",
+									messages,
+									replayed,
+									...(turnId === undefined ? {} : { turnId }),
+								} as ChatLoopEvent);
 								if (interruptClosure !== null) {
 									chatPanel.applyEvent({
 										type: "notice",

@@ -1371,6 +1371,7 @@ function runRow(view: View, run: Run): RunRowV1 {
 	return {
 		runId: run.runId,
 		sessionId: run.sessionId,
+		turnId: run.turnId,
 		firstAt: run.firstAt,
 		lastAt: run.lastAt,
 		terminalReason: run.settled?.data.terminalReason ?? null,

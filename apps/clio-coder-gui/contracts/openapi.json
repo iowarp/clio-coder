@@ -23130,9 +23130,20 @@
 			},
 			"RunRowV1": {
 				"type": "object",
-				"required": ["runId", "sessionId", "firstAt", "lastAt", "terminalReason", "source", "apiCalls", "tokens", "usd"],
+				"required": [
+					"runId",
+					"sessionId",
+					"turnId",
+					"firstAt",
+					"lastAt",
+					"terminalReason",
+					"source",
+					"apiCalls",
+					"tokens",
+					"usd"
+				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_2fb69bf5"
+					"$ref": "#/components/schemas/Shape_5b21bd37"
 				},
 				"additionalProperties": false
 			},
@@ -24337,37 +24348,6 @@
 					"$ref": "#/components/schemas/Array_de2d36b0"
 				}
 			},
-			"Shape_2fb69bf5": {
-				"runId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"sessionId": {
-					"$ref": "#/components/schemas/Union_21b008c5"
-				},
-				"firstAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"lastAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"terminalReason": {
-					"$ref": "#/components/schemas/Union_069a7c9b"
-				},
-				"source": {
-					"enum": ["calls", "aggregate", "parts", "conflict", "unavailable"]
-				},
-				"apiCalls": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
-				},
-				"tokens": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
-				},
-				"usd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
-				}
-			},
 			"Shape_33da2f86": {
 				"firstRecordAt": {
 					"$ref": "#/components/schemas/Union_9d36f13d"
@@ -24683,6 +24663,40 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
 				},
 				"admissionWait": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
+				}
+			},
+			"Shape_5b21bd37": {
+				"runId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"sessionId": {
+					"$ref": "#/components/schemas/Union_21b008c5"
+				},
+				"turnId": {
+					"$ref": "#/components/schemas/Union_21b008c5"
+				},
+				"firstAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"lastAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"terminalReason": {
+					"$ref": "#/components/schemas/Union_069a7c9b"
+				},
+				"source": {
+					"enum": ["calls", "aggregate", "parts", "conflict", "unavailable"]
+				},
+				"apiCalls": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
+				},
+				"tokens": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
+				},
+				"usd": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
 				}
 			},

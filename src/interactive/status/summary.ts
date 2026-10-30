@@ -11,6 +11,7 @@ import type {
 	TurnSummary,
 	WatchdogTier,
 } from "../../session-control/status-types.js";
+import { type ReasoningUsageView, reasoningFromTally } from "./reasoning.js";
 
 export interface BuildSummaryInput {
 	startedAt: number;
@@ -149,6 +150,18 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 		next.hadEstimatedReasoning = true;
 	}
 	return next;
+}
+
+/**
+ * The reasoning a run's own messages report, with its provenance. The call journal holds only provider-reported
+ * reasoning, so a run whose provider sent thinking text without a count keeps its chars/4 estimate here (#434 §11.3).
+ */
+export function runReasoning(messages: ReadonlyArray<unknown>): ReasoningUsageView {
+	let tally = emptyRunTally();
+	for (const message of messages)
+		if (message && typeof message === "object" && (message as { role?: unknown }).role === "assistant")
+			tally = foldMessageIntoRunTally(tally, message as AgentMessage);
+	return reasoningFromTally(tally);
 }
 
 export interface SummaryFromTallyInput {

@@ -5,13 +5,10 @@ import type { OutputStyle } from "../core/defaults.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
-import { normalizeTokenUsage } from "../core/token-split.js";
 import { ToolNames } from "../core/tool-names.js";
-import { aggregateCostAmounts, type CostAggregate, formatCostAggregate } from "../domains/observability/cost.js";
-import { resolveCostProvenance } from "../domains/providers/index.js";
+import type { TelemetryView } from "../domains/observability/contract.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
-import { usageCoverageLabel } from "../domains/session/usage.js";
 import type { ViewArtifact } from "../domains/session/view-artifacts.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import {
@@ -26,7 +23,7 @@ import {
 } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload, SpeculativeDispatchCounts } from "../session-control/chat-loop.js";
-import { extractText, isSelfExplainingAbort, sumRunUsage } from "../session-control/chat-loop-messages.js";
+import { extractText, isSelfExplainingAbort } from "../session-control/chat-loop-messages.js";
 import { coldReasonText } from "../session-control/cold-reasons.js";
 import type { WorkerEntryState } from "../session-control/worker-stream.js";
 import { editPreviewDiff } from "./mutation-preview.js";
@@ -53,15 +50,7 @@ import {
 } from "./renderers/tool-execution.js";
 import type { WorkerEntryRenderOptions } from "./renderers/worker-entry.js";
 import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
-import {
-	compactReasoningTokens,
-	emptyRunTally,
-	foldMessageIntoRunTally,
-	type ReasoningTokenProvenance,
-	type ReasoningUsageView,
-	reasoningFromTally,
-	UNMEASURED_REASONING,
-} from "./status/index.js";
+import { compactReasoningTokens, type ReasoningUsageView, runReasoning, UNMEASURED_REASONING } from "./status/index.js";
 import {
 	clioTheme,
 	fgSequence,
@@ -77,6 +66,7 @@ import {
 } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
 import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-detail.js";
+import { type TurnSpend, turnSpend } from "./turn-spend.js";
 
 // Every fenced code block, top level or nested in a list or quote, reaches the
 // screen through pi-tui's Markdown component, which exposes the
@@ -141,20 +131,15 @@ export type { ReasoningTokenProvenance } from "./status/index.js";
 
 export interface ChatPanelTurnUsage {
 	elapsedMs?: number;
-	estimated?: boolean;
 	outcome?: string;
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
-	reasoningTokens?: number;
-	reasoningTokenProvenance?: ReasoningTokenProvenance;
-	/** Priced spend with its provenance; absent when the call was never invoked. */
-	costSummary?: CostAggregate;
-	/** Model calls the totals were summed over; absent when the count is unknown. */
-	modelCalls?: number;
-	unknownUsageCalls?: number;
-	neverSentCalls?: number;
+	/** The operator turn whose spend the receipt reads from the telemetry read model (#434 §11.3). */
+	turnId?: string;
+	/** The calls the run's own messages settled; the receipt reads the fold until it holds them all. */
+	callIds?: ReadonlyArray<string>;
+	/** The turn's spend as the read model last worded it; absent until a view resolved the turn. */
+	spend?: TurnSpend;
+	/** The reasoning the run's own messages report, `≈` when Clio estimated it from thinking text. */
+	reasoning?: ReasoningUsageView;
 	/** Why the run's prompt cache was expected to be cold (`prompt_recompiled`, …). */
 	coldReasons?: ReadonlyArray<string>;
 	/** Settled speculative workers, shown only on the Detailed receipt. */
@@ -452,6 +437,8 @@ export interface ChatPanel extends Component {
 
 export interface ChatPanelOptions {
 	getTerminalRows?: () => number;
+	/** The telemetry read model's live view, whose turn quantities each turn's receipt reads (#434 §11.3). */
+	getTelemetry?: () => TelemetryView | null;
 	/** Live transcript detail mode. Settings changes take effect on the next frame. */
 	getOutputStyle?: () => OutputStyle;
 	/** Receives measured panel render cost; no FPS claim is made by the panel. */
@@ -532,105 +519,25 @@ function extractAssistantThinking(message: unknown): string {
 }
 
 /**
- * The panel's view of one assistant message's spend, folded through the same
- * `foldMessageIntoRunTally` the status machine uses. The panel used to
- * re-derive reasoning here with its own provider-lookup-then-estimate rule, so
- * the transcript receipt and the footer could report the same turn differently.
+ * Whether an assistant message settled a call its turn's receipt reports: one with recorded usage, one that never
+ * left, or one whose usage went unreported. The receipt's figures are the read model's, not this message's.
  */
-function assistantUsage(message: unknown): ChatPanelTurnUsage | undefined {
-	if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return undefined;
-	const recordedUsage = messageUsageForAccounting(message);
-	const calls = messageCallsForAccounting(message);
-	const summary = sumRunUsage([message as AgentMessage]);
-	const neverSent =
-		(message as { callInvoked?: boolean }).callInvoked === false ||
-		(recordedUsage as { callInvoked?: boolean } | null | undefined)?.callInvoked === false;
-	if ((!recordedUsage || typeof recordedUsage !== "object") && !neverSent && !summary.costSummary) return undefined;
-	const rawUsage = (recordedUsage ?? {}) as Record<string, unknown>;
-	const unknownUsage = !neverSent && !normalizeTokenUsage(rawUsage).observed;
-	const tally = foldMessageIntoRunTally(emptyRunTally(), message as AgentMessage);
-	const reasoning = reasoningFromTally(tally);
-	if (
-		tally.inputTokens + tally.outputTokens + tally.cacheReadTokens + tally.cacheWriteTokens === 0 &&
-		reasoning.provenance === "unmeasured" &&
-		!neverSent &&
-		!unknownUsage
-	) {
-		return undefined;
-	}
-	const turnUsage: ChatPanelTurnUsage = {
-		...(tally.estimated === true ? { estimated: true } : {}),
-		inputTokens: tally.inputTokens,
-		outputTokens: tally.outputTokens,
-		cacheReadTokens: tally.cacheReadTokens,
-		cacheWriteTokens: tally.cacheWriteTokens,
-		modelCalls: neverSent ? 0 : 1,
-		...(neverSent ? { neverSentCalls: 1 } : {}),
-		...(unknownUsage ? { unknownUsageCalls: 1 } : {}),
-	};
-	if (reasoning.provenance !== "unmeasured") {
-		turnUsage.reasoningTokens = reasoning.tokens;
-		turnUsage.reasoningTokenProvenance = reasoning.provenance;
-	}
-	if (calls !== undefined) {
-		turnUsage.modelCalls = summary.apiCalls;
-		turnUsage.neverSentCalls = calls.filter((call) => call.disposition === "never_sent").length;
-		turnUsage.unknownUsageCalls = summary.missingTokenCalls ?? 0;
-		if (summary.costSummary) turnUsage.costSummary = summary.costSummary;
-	} else if (!neverSent) {
-		turnUsage.costSummary = aggregateCostAmounts([
-			{
-				usd: summary.costUsd,
-				provenance: resolveCostProvenance(rawUsage.costProvenance, "unknown"),
-				apiCalls: 1,
-				...(normalizeTokenUsage(rawUsage).observed ? {} : { missingTokenCalls: 1 }),
-			},
-		]);
-	}
-	return turnUsage;
+function reportsCall(message: unknown): boolean {
+	if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return false;
+	if ((messageCallsForAccounting(message)?.length ?? 0) > 0) return true;
+	return (message as { callInvoked?: boolean }).callInvoked === false || messageUsageForAccounting(message) !== null;
+}
+
+/** The call ids a run's own messages settled, which the read model must hold before the receipt stops reading it. */
+function runCallIds(messages: ReadonlyArray<unknown>): string[] {
+	return [
+		...new Set(messages.flatMap((message) => (messageCallsForAccounting(message) ?? []).map((call) => call.callId))),
+	];
 }
 
 /** Settled-turn adapter onto the shared projection; the panel's own summary shape. */
 function reasoningFromTurnUsage(usage: ChatPanelTurnUsage | undefined): ReasoningUsageView {
-	if (!usage || usage.reasoningTokenProvenance === undefined) return UNMEASURED_REASONING;
-	return { tokens: Math.max(0, usage.reasoningTokens ?? 0), provenance: usage.reasoningTokenProvenance };
-}
-
-function aggregateAssistantUsage(messages: unknown): ChatPanelTurnUsage | undefined {
-	if (!Array.isArray(messages)) return undefined;
-	const total: ChatPanelTurnUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
-	let found = false;
-	let provider = false;
-	let estimated = false;
-	const costs: CostAggregate[] = [];
-	for (const message of messages) {
-		const usage = assistantUsage(message);
-		if (!usage) continue;
-		found = true;
-		if (usage.costSummary !== undefined) costs.push(usage.costSummary);
-		total.modelCalls = (total.modelCalls ?? 0) + (usage.modelCalls ?? 1);
-		total.unknownUsageCalls = (total.unknownUsageCalls ?? 0) + (usage.unknownUsageCalls ?? 0);
-		total.neverSentCalls = (total.neverSentCalls ?? 0) + (usage.neverSentCalls ?? 0);
-		total.inputTokens += usage.inputTokens;
-		total.outputTokens += usage.outputTokens;
-		if (usage.estimated) total.estimated = true;
-		total.cacheReadTokens += usage.cacheReadTokens;
-		total.cacheWriteTokens += usage.cacheWriteTokens;
-		if (usage.reasoningTokens !== undefined) {
-			total.reasoningTokens = (total.reasoningTokens ?? 0) + usage.reasoningTokens;
-			if (usage.reasoningTokenProvenance === "provider") provider = true;
-			else estimated = true;
-		}
-	}
-	if (!found) return undefined;
-	if (costs.length > 0) {
-		total.costSummary = aggregateCostAmounts(
-			costs.map((costSummary) => ({ usd: 0, provenance: "unknown", costSummary })),
-		);
-	}
-	if (provider || estimated)
-		total.reasoningTokenProvenance = provider && estimated ? "mixed" : provider ? "provider" : "estimated";
-	return total;
+	return usage?.reasoning ?? UNMEASURED_REASONING;
 }
 
 function extractAssistantTerminalError(message: unknown): string {
@@ -1097,34 +1004,33 @@ function renderTurnUsageLine(
 ): string[] {
 	if (receipt === "none") return [];
 	const outcome = usage.outcome ?? "Done";
-	const coverage =
-		(usage.unknownUsageCalls ?? 0) > 0 || (usage.neverSentCalls ?? 0) > 0
-			? ` · ${usageCoverageLabel(usage.unknownUsageCalls ?? 0, usage.neverSentCalls ?? 0)}`
-			: "";
+	const spend = usage.spend;
+	const coverage = spend?.coverage ? ` · ${spend.coverage}` : "";
 	const settled = `${outcome}${coverage}${usage.elapsedMs === undefined ? "" : ` · ${formatCompactMs(usage.elapsedMs)}`}`;
 	const glyph = receiptGlyph(outcome);
 	if (receipt === "compact") {
 		return [`${glyph}${dimLine(settled, Math.max(1, width - PROSE_GUTTER_WIDTH))}`];
 	}
-	// Detailed states what the run spent, one fact per field: the calls it made,
-	// input and output tokens in the compact token format, what the provider
-	// served from its prompt cache, the reasoning it reported (`≈` when Clio
-	// estimated it), and why the cache was expected to be cold when nothing was
-	// reused. A field with nothing to say is left out.
-	const tokens = compactReasoningTokens;
+	// Detailed states what the turn spent, one fact per field, as the read model
+	// folds the turn with its workers, so the line and the footer agree: the
+	// calls it made, input and output tokens in the compact token format, what
+	// the provider served from its prompt cache, the reasoning it reported (`≈`
+	// when Clio estimated it), and why the cache was expected to be cold when
+	// nothing was reused. A field with nothing to say is left out, and with no
+	// read model the line keeps only what the run itself knows.
 	const facts: string[] = [settled];
-	if (usage.modelCalls !== undefined && usage.modelCalls > 1) facts.push(`${usage.modelCalls} calls`);
-	const estimate = usage.estimated ? "≈" : "";
-	facts.push(`in ${estimate}${tokens(usage.inputTokens)}`, `out ${estimate}${tokens(usage.outputTokens)}`);
-	if (usage.cacheReadTokens > 0) facts.push(`cached ${tokens(usage.cacheReadTokens)}`);
-	if (usage.cacheWriteTokens > 0) facts.push(`cache write ${tokens(usage.cacheWriteTokens)}`);
-	const view = reasoningFromTurnUsage(usage);
-	if (view.tokens > 0 && view.provenance !== "unmeasured") {
-		facts.push(`reasoning ${view.provenance === "provider" ? "" : "≈"}${tokens(view.tokens)}`);
+	if (spend) {
+		if (spend.calls !== null && spend.calls > 1) facts.push(`${spend.calls} calls`);
+		facts.push(`in ${spend.input}`, `out ${spend.output}`);
+		if (spend.cacheRead !== null) facts.push(`cached ${spend.cacheRead}`);
+		if (spend.cacheWrite !== null) facts.push(`cache write ${spend.cacheWrite}`);
 	}
-	const cost = formatCostAggregate(usage.costSummary);
-	if (cost !== null) facts.push(cost);
-	if (usage.cacheReadTokens === 0 && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
+	const reasoning = reasoningFromTurnUsage(usage);
+	if (reasoning.tokens > 0 && reasoning.provenance !== "unmeasured") {
+		facts.push(`reasoning ${reasoning.provenance === "provider" ? "" : "≈"}${compactReasoningTokens(reasoning.tokens)}`);
+	}
+	if (spend?.cost != null) facts.push(spend.cost);
+	if (spend?.cacheRead == null && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
 		facts.push(`cold: ${usage.coldReasons.map(coldReasonText).join(", ")}`);
 	}
 	if (usage.prewarm !== undefined) {
@@ -1594,6 +1500,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * total, so a receipt never lands in the middle of a turn.
 	 */
 	let runStartIndex: number | undefined;
+	/** The operator turn the current run's calls journal under, from its start event or a replayed run end. */
+	let runTurnId: string | undefined;
+	/**
+	 * Receipts still reading the read model. A run can end before the writer's batch holding its last call is folded,
+	 * and a worker it started can settle later, so a receipt rereads its turn on every new view until the view holds
+	 * the run's own calls and no run of the turn is still going (#434 §11.3).
+	 */
+	const liveReceipts = new Set<Extract<TranscriptEntry, { role: "assistant" }>>();
+	let receiptView: TelemetryView | null = null;
 	/** The latest settled receipt eligible for the turn's post-settlement prewarm record. */
 	let lastSettledReceipt: Extract<TranscriptEntry, { role: "assistant" }> | null = null;
 	let cachedWidth: number | undefined;
@@ -1682,6 +1597,45 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		const index = transcript.indexOf(entry);
 		if (frozen !== null && index < frozen.through) frozen = null;
 		if (prerender !== null && index >= 0 && index < prerender.next) prerender.next = index;
+	};
+	/** Read one receipt's turn from the view; it stays live until the view holds all of the turn's spend. */
+	const readReceipt = (
+		entry: Extract<TranscriptEntry, { role: "assistant" }>,
+		view: TelemetryView,
+		runningTurns: ReadonlySet<string>,
+	): void => {
+		const usage = entry.turnUsage;
+		if (usage?.turnId === undefined) {
+			liveReceipts.delete(entry);
+			return;
+		}
+		const spend = turnSpend(view, usage.turnId);
+		if (spend === null) return;
+		if (JSON.stringify(spend) !== JSON.stringify(usage.spend)) {
+			invalidateEntryCache(entry);
+			entry.turnUsage = { ...usage, spend };
+			markDirty();
+		}
+		if (spend.ownCalls >= (usage.callIds?.length ?? 0) && !runningTurns.has(usage.turnId)) liveReceipts.delete(entry);
+	};
+	/** The turns with a referenced run still going, read once per view. */
+	const runningTurns = (view: TelemetryView): Set<string> =>
+		new Set(view.runs().flatMap((run) => (run.terminalReason === null && run.turnId !== null ? [run.turnId] : [])));
+	const refreshReceipts = (): void => {
+		if (liveReceipts.size === 0) return;
+		const view = options.getTelemetry?.() ?? null;
+		if (view === receiptView) return;
+		receiptView = view;
+		// A view still merging its cold read holds a partial session; its turns are read once it has merged.
+		if (view === null || view.seeding) return;
+		const running = runningTurns(view);
+		for (const entry of liveReceipts) readReceipt(entry, view, running);
+	};
+	/** A receipt the run just gave a turn: read now, and again on each new view while it is live. */
+	const trackReceipt = (entry: Extract<TranscriptEntry, { role: "assistant" }>): void => {
+		liveReceipts.add(entry);
+		const view = options.getTelemetry?.() ?? null;
+		if (view !== null && !view.seeding) readReceipt(entry, view, runningTurns(view));
 	};
 	/** Full drop of both render caches; used by the toggle paths that touch many entries. */
 	const clearRenderCaches = (): void => {
@@ -2026,6 +1980,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 */
 	const renderFrame = (width: number): { prefix: readonly string[]; tail: string[] } => {
 		syncSkin();
+		refreshReceipts();
 		const startedAt = performance.now();
 		const detail = currentDetail();
 		const terminalRows = options.getTerminalRows?.() ?? 40;
@@ -2398,6 +2353,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		reset(): void {
 			transcript.length = 0;
 			lastSettledReceipt = null;
+			liveReceipts.clear();
+			receiptView = null;
+			runTurnId = undefined;
 			runStartedAt = undefined;
 			runStartIndex = undefined;
 			runColdReasons = [];
@@ -2425,6 +2383,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// and cleared once the run's receipt has stated them.
 				runStartedAt = now();
 				runStartIndex = transcript.length;
+				runTurnId = (event as { turnId?: string }).turnId;
 				return;
 			}
 			if (event.type === "agent_status") {
@@ -2734,8 +2693,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					current?.role === "assistant"
 						? scopeTerminalErrorAfterSuccessfulTool(current, extractedTerminalError)
 						: extractedTerminalError;
-				const usage = assistantUsage(event.message);
-				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0 && usage === undefined) {
+				const reports = reportsCall(event.message);
+				if (text.length === 0 && thinking.length === 0 && terminalError.length === 0 && !reports) {
 					if (completedStreamedArgs) markDirty();
 					return;
 				}
@@ -2747,7 +2706,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					assistant.models ??= [];
 					assistant.models.push(model);
 				}
-				if (usage !== undefined) assistant.turnUsage = usage;
+				// Until its run ends, an entry's receipt reads the turn so far.
+				if (reports) {
+					const reasoning = runReasoning([event.message]);
+					assistant.turnUsage = {
+						...(runTurnId === undefined ? {} : { turnId: runTurnId }),
+						...(reasoning.provenance === "unmeasured" ? {} : { reasoning }),
+					};
+					trackReceipt(assistant);
+				}
 				if (terminalError.length > 0) assistant.isError = true;
 				// The message is settled, so whatever reasoning it streamed is closed.
 				// A message that carried thinking the panel never saw as deltas (a
@@ -2802,8 +2769,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// removes, and any entry it settles or un-pends below. Each is
 				// invalidated at the point of mutation instead of dropping the whole
 				// cache and re-rendering settled history.
-				const runUsage = aggregateAssistantUsage(event.messages);
-				if (runUsage !== undefined) {
+				const turnId = (event as { turnId?: string }).turnId ?? runTurnId;
+				if (Array.isArray(event.messages) && event.messages.some(reportsCall)) {
 					// The usage line is a caption on rendered output, so it goes on the
 					// last entry that rendered any. A mid-turn notice splits entries, and
 					// a turn that stops after one leaves an empty tail entry behind: the
@@ -2829,8 +2796,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 									? undefined
 									: Math.max(0, now() - runStartedAt);
 						const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
+						const callIds = runCallIds(event.messages);
+						const reasoning = runReasoning(event.messages);
 						target.turnUsage = {
-							...runUsage,
+							...(reasoning.provenance === "unmeasured" ? {} : { reasoning }),
+							...(turnId === undefined ? {} : { turnId }),
+							...(callIds.length > 0 ? { callIds } : {}),
 							...(elapsedMs === undefined ? {} : { elapsedMs }),
 							...(coldReasons.length > 0 ? { coldReasons: [...coldReasons] } : {}),
 							outcome:
@@ -2844,6 +2815,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 											? "Output limit"
 											: "Done",
 						};
+						trackReceipt(target);
 					}
 					const firstRunEntry = runStartIndex ?? runStartFallback(index);
 					for (let other = firstRunEntry; other < transcript.length; other += 1) {
@@ -2852,10 +2824,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						if (sibling?.role !== "assistant") continue;
 						if (sibling.turnUsage !== undefined) invalidateEntryCache(sibling);
 						delete sibling.turnUsage;
+						liveReceipts.delete(sibling);
 					}
 				}
 				runStartIndex = undefined;
 				runColdReasons = [];
+				runTurnId = undefined;
 				// The run is over: no tool can still be executing anywhere in the
 				// transcript, not just in the tail entry (a mid-turn notice splits
 				// entries). Settle any tool segment whose `tool_execution_end` never

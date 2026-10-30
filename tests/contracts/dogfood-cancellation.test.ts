@@ -538,20 +538,19 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			rehydrateChatPanelFromTurns(replay, f.entries());
 			const resumedLines = replay.render(120);
 			const resumed = resumedLines.map(stripTerminalSequences).join("\n");
+			// This fixture runs without a telemetry read model, so the receipt states only what the run knows; its spend
+			// is the read model's (#434 §11.3).
 			for (const rendered of [live, resumed]) {
-				match(rendered, /⊘ Cancelled · 1 call with unknown usage; token amounts are known subtotals/u);
-				match(rendered, /in ≈\S+ · out ≈0/u);
+				match(rendered, /⊘ Cancelled · \S+$/mu);
 				strictEqual(rendered.split("Cancelled").length - 1, 1, rendered);
 				doesNotMatch(rendered, /✦|\[aborted\]/u);
 			}
-			strictEqual(resumed.match(/in ≈\S+ · out ≈0/u)?.[0], live.match(/in ≈\S+ · out ≈0/u)?.[0]);
 			const html = renderSessionHtml({
 				sessionId: source,
 				exportedAt: "2026-09-07T00:00:00Z",
 				ansiLines: resumedLines,
 			}).replace(/<[^>]*>/gu, "");
-			match(html, /⊘ Cancelled · 1 call with unknown usage; token amounts are known subtotals/u);
-			match(html, /in ≈\S+ · out ≈0/u);
+			match(html, /⊘ Cancelled · \S+/u);
 			strictEqual(html.split("Cancelled").length - 1, 1, html);
 			if (source === "loop_guard") {
 				for (const rendered of [resumed, html]) {

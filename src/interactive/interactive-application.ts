@@ -1092,6 +1092,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	const slashRuntime = createInteractiveSlashRuntime({
 		recordFeature,
+		...(deps.observability.telemetry ? { getTelemetry: () => deps.observability.telemetry?.live() ?? null } : {}),
 		keyboardActions: {
 			background: () => backgroundActiveDispatch(),
 			editor: (text) => editorSubmit.openExternalEditorForInput(text),

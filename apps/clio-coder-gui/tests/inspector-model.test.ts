@@ -73,6 +73,7 @@ const journaled = (tokens: string, usd: string, apiCalls: string): TraceRun["tel
 	return {
 		runId: "run-0",
 		sessionId: null,
+		turnId: null,
 		firstAt: "2026-09-20T10:00:00.000Z",
 		lastAt: "2026-09-20T10:00:30.000Z",
 		terminalReason: null,

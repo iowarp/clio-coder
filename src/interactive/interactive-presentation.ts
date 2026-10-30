@@ -354,6 +354,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	if (deps.startsResumed === true) banner.collapseToSessionHeader();
 	const renderTrace = getActiveRenderTrace();
 	const chatPanel = factories.createChatPanel({
+		...(deps.observability.telemetry ? { getTelemetry: () => deps.observability.telemetry?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
 		requestRender,

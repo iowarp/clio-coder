@@ -12,6 +12,7 @@ import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import type { MusicOperations } from "../domains/mux/music-operations.js";
 import type { PanesOperations } from "../domains/mux/operations.js";
+import type { TelemetryView } from "../domains/observability/contract.js";
 import {
 	type ProvidersContract,
 	type ResolvedThinkingCapability,
@@ -156,6 +157,8 @@ export interface InteractiveSlashRuntimeDeps {
 	dismissContextBootstrapNotices: () => void;
 	recordSubmittedTurn: () => void;
 	readStructuredEntries: (sessionId: string) => ReadonlyArray<SessionEntry>;
+	/** The live telemetry view whose turn spend `/export` receipts read, as the transcript's do (#434 §11.3). */
+	getTelemetry?: () => TelemetryView | null;
 	/**
 	 * Leaf lookup for `/export`, so the export follows the branch the session
 	 * is actually on. current.jsonl still holds the abandoned turns after a
@@ -740,6 +743,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					unboundedToolBodies: true,
 					bareCodeFences: true,
 					getOutputStyle: () => "detailed",
+					...(deps.getTelemetry ? { getTelemetry: deps.getTelemetry } : {}),
 				});
 				// Scoped to the leaf the session is on, the same way /resume replays
 				// (issue #107): with a /tree pin persisted and not yet extended, the

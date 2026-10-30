@@ -219,6 +219,8 @@ export const RunRowSchema = Type.Object(
 	{
 		runId: ExistingId,
 		sessionId: Type.Union([ExistingId, Type.Null()]),
+		/** The operator turn whose reference started the run; null for a run no session turn referenced. */
+		turnId: Type.Union([ExistingId, Type.Null()]),
 		firstAt: Type.Union([UtcSchema, Type.Null()]),
 		lastAt: Type.Union([UtcSchema, Type.Null()]),
 		/** Null while the run has not settled or its journal is unreadable. */
