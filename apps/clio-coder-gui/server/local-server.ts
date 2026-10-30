@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { request } from "node:http";
+import { Readable } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { setTimeout } from "node:timers/promises";
 import { listenPorts } from "./launcher/ports.js";
 
@@ -25,11 +27,15 @@ export async function findLocalServer(port: number, token: string) {
 	return null;
 }
 
-/** The background app's own report, or null when nothing ready answers as this app with this token. */
-export async function localServerMeta(port: number, token: string) {
+function identity(port: number, token: string) {
 	if (!Number.isInteger(port) || port < 1 || port > 65535 || !/^[\w-]{32,256}$/.test(token))
 		throw new Error("Invalid local server identity.");
-	return new Promise<LocalServerMeta | null>((resolve) => {
+}
+
+/** The meta document of the app listening on `port`, or null when nothing answers as this app with this token. */
+function readMeta(port: number, token: string) {
+	identity(port, token);
+	return new Promise<Record<string, unknown> | null>((resolve) => {
 		const req = request(
 			{ hostname: "127.0.0.1", port, path: "/api/meta", headers: { Authorization: `Bearer ${token}` } },
 			(response) => {
@@ -41,14 +47,10 @@ export async function localServerMeta(port: number, token: string) {
 				response.on("error", () => resolve(null));
 				response.on("end", () => {
 					try {
-						const value = JSON.parse(body);
+						const value: unknown = JSON.parse(body);
 						resolve(
-							response.statusCode === 200 && value.apiVersion === 1 && value.pwa === true
-								? {
-										clio: typeof value.clio === "string" ? value.clio.slice(0, 64) : "unknown",
-										...(typeof value.idle === "boolean" ? { idle: value.idle } : {}),
-										port,
-									}
+							response.statusCode === 200 && value && typeof value === "object" && !Array.isArray(value)
+								? (value as Record<string, unknown>)
 								: null,
 						);
 					} catch {
@@ -63,6 +65,88 @@ export async function localServerMeta(port: number, token: string) {
 			resolve(null);
 		});
 		req.end();
+	});
+}
+
+/** The background app's own report, or null when nothing ready answers as this app with this token. */
+export async function localServerMeta(port: number, token: string): Promise<LocalServerMeta | null> {
+	const value = await readMeta(port, token);
+	return value && value.apiVersion === 1 && value.pwa === true
+		? {
+				clio: typeof value.clio === "string" ? value.clio.slice(0, 64) : "unknown",
+				...(typeof value.idle === "boolean" ? { idle: value.idle } : {}),
+				port,
+			}
+		: null;
+}
+
+/** What a fleet node's own GUI reports about itself through its forward; the version gate reads it. */
+export interface RemoteServerMeta {
+	clio: string;
+	build: string | null;
+	host: string;
+}
+export async function remoteServerMeta(port: number, token: string): Promise<RemoteServerMeta | null> {
+	const value = await readMeta(port, token);
+	if (value?.apiVersion !== 1 || typeof value.clio !== "string") return null;
+	return {
+		clio: value.clio.slice(0, 64),
+		build: typeof value.build === "string" ? value.build.slice(0, 128) : null,
+		host: typeof value.host === "string" ? value.host.slice(0, 253) : "",
+	};
+}
+
+export interface UpstreamRequest {
+	method: string;
+	/** Path and query as the remote server should see them. */
+	path: string;
+	/** Lower-cased names; the caller has already removed what must not travel. */
+	headers: Record<string, string>;
+	body: ReadableStream<Uint8Array> | null;
+	signal?: AbortSignal;
+}
+export interface UpstreamResponse {
+	status: number;
+	headers: [string, string][];
+	body: ReadableStream<Uint8Array>;
+}
+
+/**
+ * One request to a fleet node's GUI through its SSH forward, answered as soon as its headers arrive so
+ * a stream is piped rather than buffered. The remote listener authenticates on its own Host, Origin
+ * and bearer, which this sets; the browser's own never reach it.
+ */
+export function proxyRequest(port: number, token: string, init: UpstreamRequest): Promise<UpstreamResponse> {
+	identity(port, token);
+	return new Promise((resolve, reject) => {
+		const req = request(
+			{
+				hostname: "127.0.0.1",
+				port,
+				path: init.path,
+				method: init.method,
+				headers: {
+					...init.headers,
+					host: `127.0.0.1:${port}`,
+					origin: `http://127.0.0.1:${port}`,
+					authorization: `Bearer ${token}`,
+				},
+			},
+			(response) => {
+				const headers: [string, string][] = [];
+				for (let index = 0; index + 1 < response.rawHeaders.length; index += 2)
+					headers.push([response.rawHeaders[index] as string, response.rawHeaders[index + 1] as string]);
+				resolve({
+					status: response.statusCode ?? 502,
+					headers,
+					body: Readable.toWeb(response) as unknown as ReadableStream<Uint8Array>,
+				});
+			},
+		);
+		req.on("error", reject);
+		init.signal?.addEventListener("abort", () => req.destroy(), { once: true });
+		if (init.body) Readable.fromWeb(init.body as unknown as NodeReadableStream<Uint8Array>).pipe(req);
+		else req.end();
 	});
 }
 /**

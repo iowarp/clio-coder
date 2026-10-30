@@ -12,7 +12,7 @@ import { problemResponse } from "./http/problem.js";
 import { evidenceRoutes } from "./http/routes-evidence.js";
 import { fleetRoutes } from "./http/routes-fleet.js";
 import { libraryRoutes } from "./http/routes-library.js";
-import { machinesRoutes } from "./http/routes-machines.js";
+import { type MachineAttachmentsApi, machinesRoutes } from "./http/routes-machines.js";
 import { reportRoutes } from "./http/routes-reports.js";
 import { sessionRoutes } from "./http/routes-sessions.js";
 import { settingsRoutes } from "./http/routes-settings.js";
@@ -56,6 +56,8 @@ export function createApp(options: {
 	targets: TargetsService;
 	fleet: FleetService;
 	machines?: MachinesService;
+	/** Attachments to registered nodes' own GUIs, proxied under /m/<id>/api. */
+	attachments?: MachineAttachmentsApi;
 	system: SystemService;
 	library: LibraryService;
 	reports: ReportsService;
@@ -137,7 +139,7 @@ export function createApp(options: {
 	settingsRoutes(app, hub, options.settings);
 	targetsRoutes(app, hub, options.targets, options.setup);
 	fleetRoutes(app, hub, options.fleet, artifacts);
-	machinesRoutes(app, hub, options.machines);
+	machinesRoutes(app, hub, options.machines, options.attachments);
 	systemRoutes(app, hub, options.system);
 	libraryRoutes(app, hub, options.library, options.sessions.supervisor);
 	reportRoutes(app, hub, options.reports);

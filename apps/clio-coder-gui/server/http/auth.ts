@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
+import { machinePrefix } from "../../contracts/pages.js";
 import { routes } from "../../contracts/routes.js";
 import { AppProblem } from "../services/problem.js";
 import { SECURITY_HEADERS } from "./security-headers.js";
@@ -7,6 +8,12 @@ import { SECURITY_HEADERS } from "./security-headers.js";
 const streams = Object.values(routes)
 	.filter((route) => route.stream)
 	.map((route) => new RegExp(`^${route.path.replace(/:[A-Za-z0-9]+/g, "[^/]+")}$`));
+
+/** The API path a request names, on this server or through a node prefix; null for a page or asset. */
+function apiPath(path: string): string | null {
+	const rest = machinePrefix(path)?.rest ?? path;
+	return rest === "/api" || rest.startsWith("/api/") ? rest : null;
+}
 
 export function auth(token: string, origin: () => string): MiddlewareHandler {
 	return async (context, next) => {
@@ -19,11 +26,12 @@ export function auth(token: string, origin: () => string): MiddlewareHandler {
 		// One set for API responses, problem responses, the SSE stream and static
 		// assets alike; a second copy anywhere else would only drift from this one.
 		for (const [name, value] of Object.entries(SECURITY_HEADERS)) context.header(name, value);
-		if (context.req.path === "/api" || context.req.path.startsWith("/api/")) {
+		const api = apiPath(context.req.path);
+		if (api !== null) {
 			const authorization = context.req.header("authorization");
 			const supplied =
 				(authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined) ??
-				(streams.some((pattern) => pattern.test(context.req.path)) ? context.req.query("token") : undefined) ??
+				(streams.some((pattern) => pattern.test(api)) ? context.req.query("token") : undefined) ??
 				"";
 			const a = Buffer.from(token),
 				b = Buffer.from(supplied);

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -8,7 +8,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createAdaptorServer } from "@hono/node-server";
 import { Supervisor } from "./acp/supervisor.js";
 import { createApp } from "./app.js";
-import { getVersionInfo, registerRunningBuild, resolveClioDirs, resolvePackageRoot } from "./clio/http-shims.js";
+import {
+	getVersionInfo,
+	registerRunningBuild,
+	resolveClioDirs,
+	resolvePackageRoot,
+	runningBuildId,
+} from "./clio/http-shims.js";
 import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
 import { listenPorts } from "./launcher/ports.js";
 import { showPage } from "./local-server.js";
@@ -22,6 +28,7 @@ import { FleetService } from "./services/fleet.js";
 import { IdleExit } from "./services/idle-exit.js";
 import { LibraryService } from "./services/library.js";
 import { lifecycleLog } from "./services/log.js";
+import { MachineAttachments } from "./services/machine-attach.js";
 import { MachinesService } from "./services/machines.js";
 import { OperationRegistry } from "./services/operations.js";
 import { ReportsService } from "./services/reports.js";
@@ -181,7 +188,8 @@ export async function main(args = process.argv.slice(2)) {
 		ops = new WorkerHost("ops", settings, env, compiledDirectory);
 	const hub = new EventHub(),
 		operations = new OperationRegistry(hub);
-	const files = new AppFiles(scratch ? join(scratch, "state") : resolveClioDirs().state);
+	const stateRoot = scratch ? join(scratch, "state") : resolveClioDirs().state;
+	const files = new AppFiles(stateRoot);
 	const workspaces = new WorkspaceService(files, reads),
 		supervisor = new Supervisor(workspaces, files, hub, env, undefined, undefined, (cwd, sessionId) =>
 			ops.call("sessions.recover", { cwd, sessionId }),
@@ -207,6 +215,13 @@ export async function main(args = process.argv.slice(2)) {
 		throw error;
 	}
 	let origin = `http://127.0.0.1:${port}`;
+	const attachments = new MachineAttachments({
+		// The registry is user-level; the state directory is a canonical cwd the CLI runner accepts.
+		endpoints: async () => reads.call("machines.endpoints", { cwd: await realpath(stateRoot) }, { deadlineMs: 65_000 }),
+		local: () => ({ clio: getVersionInfo().clio, build: runningBuildId }),
+		hub,
+		env,
+	});
 	const app = createApp({
 		token,
 		origin: () => origin,
@@ -219,6 +234,7 @@ export async function main(args = process.argv.slice(2)) {
 		setup,
 		fleet: new FleetService(reads),
 		machines: new MachinesService(reads, ops, workspaces, operations),
+		attachments,
 		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(cli, workspaces),
@@ -310,7 +326,7 @@ export async function main(args = process.argv.slice(2)) {
 		process.removeListener("SIGTERM", stop);
 		server.close();
 		if ("closeAllConnections" in server) server.closeAllConnections();
-		await Promise.all([supervisor.shutdown(), cli.close(), setup.close()]);
+		await Promise.all([supervisor.shutdown(), cli.close(), setup.close(), attachments.stopAll()]);
 		await Promise.all([reads.close(), ops.close()]);
 		if (scratch) await rm(scratch, { recursive: true, force: true });
 		try {
