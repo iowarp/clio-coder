@@ -642,10 +642,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const kb = getKnowledgeBase();
 	const kbHit = kb.lookup(input.wireModelId, input.runtime.id);
 	const synthesized = input.runtime.synthesizeModel(input.target, input.wireModelId, kbHit);
-	const model = applyModelCapabilityPatch(
-		input.target.runtime === "faux" && fauxModel ? fauxModel : synthesized,
-		input.modelCapabilities,
-	);
+	const model = applyModelCapabilityPatch(fauxModel ?? synthesized, input.modelCapabilities);
 
 	// Per-run safety contract: one loop-detector state per worker subprocess.
 	// The loop guard rides on the registry's middleware contract as a

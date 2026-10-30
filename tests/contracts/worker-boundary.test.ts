@@ -549,6 +549,47 @@ describe("bulk-lane backpressure", () => {
 });
 
 describe("worker admission", () => {
+	it("uses faux responses through dispatch only when the env flag is enabled", { timeout: 90_000 }, async () => {
+		const env = await isolateClioEnv("clio-worker-faux-dispatch-");
+		try {
+			process.env.CLIO_CODER_WORKER_FAUX_TEXT = "faux dispatch response";
+			await withModelFixture(async (url, requests) => {
+				const settings = structuredClone(DEFAULT_SETTINGS);
+				settings.fleet.retry.maxRetries = 0;
+				settings.targets = [{ id: "fixture", runtime: "litellm", url, defaultModel: "fixture" }];
+				settings.fleet.default.target = "fixture";
+				settings.fleet.default.model = "fixture";
+				const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: litellm }), {
+					spawnWorker: (spec, options) =>
+						spawnWorkerProcess(process.execPath, ["--import", import.meta.resolve("tsx"), WORKER_ENTRY], spec, options),
+				});
+				try {
+					await bundle.extension.start();
+					for (const flag of [undefined, "1"]) {
+						if (flag === undefined) delete process.env.CLIO_CODER_WORKER_FAUX;
+						else process.env.CLIO_CODER_WORKER_FAUX = flag;
+						const run = await bundle.contract.dispatch({
+							agentId: "scout",
+							executionRole: "researcher",
+							task: "Reply with a short response.",
+							cwd: env.dir,
+							requestOrigin: "internal",
+							resultContractOverride: { kind: "external-delegation" },
+						});
+						const receipt = await run.finalPromise;
+						strictEqual(receipt.outcome, "succeeded", receipt.outcomeDetail ?? receipt.outcome);
+						strictEqual(receipt.output?.text, flag === "1" ? "faux dispatch response" : "done");
+						strictEqual(requests(), 1, "only the worker without the faux flag calls the provider fixture");
+					}
+				} finally {
+					await bundle.extension.stop?.();
+				}
+			});
+		} finally {
+			env.restore();
+		}
+	});
+
 	it("starts no model run until the orchestrator admits the attested digest", { timeout: 90_000 }, async () => {
 		const env = await isolateClioEnv("clio-worker-admission-");
 		try {
