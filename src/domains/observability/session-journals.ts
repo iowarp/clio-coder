@@ -20,7 +20,17 @@ interface Entry {
 	users: number;
 	journal: Promise<CallJournal | null>;
 	closing?: Promise<void>;
+	/** Pending close of a writer no work holds; the next lease cancels it (#434). */
+	idle?: NodeJS.Timeout | undefined;
 }
+
+/**
+ * How long a writer stays open after its last lease. Every lease cycle that
+ * closed the writer reopened it on the next call: a full read and scan of the
+ * journal plus a new segment header, 23 ms at 150 calls and 78 ms at 600 in a
+ * probe, on the thread that runs the turn (#434).
+ */
+export const JOURNAL_IDLE_CLOSE_MS = 30_000;
 
 /** Active work, rather than the selected UI session, owns the writer's lifetime (#434). */
 export function createSessionJournals(stateDir: string, unavailable: () => void) {
@@ -40,6 +50,20 @@ export function createSessionJournals(stateDir: string, unavailable: () => void)
 		} catch {
 			/* A diagnostic observer cannot change the call's result (#434). */
 		}
+	};
+	const close = (id: string, entry: Entry): Promise<void> => {
+		if (entry.idle) clearTimeout(entry.idle);
+		entry.idle = undefined;
+		entry.closing ??= entry.journal.then(async (journal) => {
+			try {
+				await journal?.close();
+			} catch {
+				report();
+			} finally {
+				if (entries.get(id) === entry) entries.delete(id);
+			}
+		});
+		return entry.closing;
 	};
 	const acquire = async (
 		origin: TelemetrySessionOrigin,
@@ -76,6 +100,8 @@ export function createSessionJournals(stateDir: string, unavailable: () => void)
 			};
 			entries.set(origin.id, entry);
 		}
+		if (entry.idle) clearTimeout(entry.idle);
+		entry.idle = undefined;
 		entry.users += 1;
 		await entry.journal;
 		const owned = entry;
@@ -87,16 +113,18 @@ export function createSessionJournals(stateDir: string, unavailable: () => void)
 				released = true;
 				owned.users -= 1;
 				if (owned.users !== 0) return;
-				owned.closing = owned.journal.then(async (journal) => {
-					try {
-						await journal?.close();
-					} catch {
-						report();
-					} finally {
-						if (entries.get(origin.id) === owned) entries.delete(origin.id);
-					}
-				});
-				await owned.closing;
+				// The settlement is durable before the caller continues; the writer itself stays open for the next call.
+				try {
+					await (await owned.journal)?.flush();
+				} catch {
+					report();
+				}
+				if (owned.users !== 0 || owned.closing || owned.idle) return;
+				owned.idle = setTimeout(() => {
+					owned.idle = undefined;
+					if (owned.users === 0) void close(origin.id, owned);
+				}, JOURNAL_IDLE_CLOSE_MS);
+				owned.idle.unref();
 			},
 		};
 	};
@@ -113,6 +141,10 @@ export function createSessionJournals(stateDir: string, unavailable: () => void)
 					}
 				}),
 			);
+		},
+		/** Shutdown: every writer closes and releases its lease, held leases included. */
+		async closeAll(): Promise<void> {
+			await Promise.all([...entries.entries()].map(([id, entry]) => close(id, entry)));
 		},
 	};
 }

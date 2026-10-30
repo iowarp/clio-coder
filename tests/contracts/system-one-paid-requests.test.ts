@@ -79,7 +79,7 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 	const journals = createSessionJournals(stateDir, () => {
 		throw new Error("journal unavailable");
 	});
-	flushers.push(journals.flush);
+	flushers.push(journals.closeAll);
 	const observability: Pick<ObservabilityContract, "recordTokens" | "acquireTelemetrySession" | "recordNeverSentCalls"> =
 		{
 			acquireTelemetrySession: journals.acquire,

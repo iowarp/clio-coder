@@ -235,6 +235,8 @@ for (const continuation of [false, true])
 			} finally {
 				loop.dispose();
 				await loop.whenSettled();
+				// The writer stays open between calls; the next iteration reuses this session id (#434).
+				await journals.closeAll();
 				store.close();
 				scratch.restore();
 			}

@@ -245,7 +245,7 @@ export function createObservabilityBundle(
 			);
 		},
 		async stop() {
-			await journals.flush();
+			await journals.closeAll();
 			for (const off of unsubscribes) off();
 			unsubscribes.length = 0;
 			projection.stop();
