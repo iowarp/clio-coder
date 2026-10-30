@@ -107,7 +107,8 @@ export type FactScope = (typeof FACT_SCOPES)[number];
  * `<scope>:<owner>[/attempt:<attemptId>]#<metric>[@<group>=<key>]`, the key URI-encoded. Scopes: `own` is the calls a
  * session's journal owns; `runs` the worker runs it referenced; `session` both, what the account was charged; `lineage`
  * a session with its fork ancestors; `run` one run journal; `repo` a repository's sessions and runs over a window, owned
- * as `<cwdHash>-<days>d` or `all-<days>d`. An attempt narrows `own` or `run` to one attempt.
+ * as `<cwdHash>-<days>d` or `all-<days>d`. `own` and `runs` also take a `repo` owner, splitting its window into the
+ * sessions' own calls and the worker runs. An attempt narrows `own` or `run` to one attempt.
  */
 const REF_PATTERN = new RegExp(
 	`^(${FACT_SCOPES.join("|")}):([A-Za-z0-9_-]{1,128})(?:/attempt:(att_[0-9a-f-]{36}))?#(${FACT_METRICS.join("|")})(?:@(${FACT_GROUPS.join("|")})=([^\\s#@/]{1,512}))?$`,
@@ -444,6 +445,7 @@ export const CallsReportSchema = Type.Object(
 );
 export type CallsReportV1 = Static<typeof CallsReportSchema>;
 
+const audienceShare = Type.Object({ calls: QuantitySchema, tokens: QuantitySchema, usd: QuantitySchema }, closed);
 const costGroup = Type.Object(
 	{
 		key: text,
@@ -451,6 +453,11 @@ const costGroup = Type.Object(
 		tokens: QuantitySchema,
 		usd: QuantitySchema,
 		pricedBy,
+		/**
+		 * The group split by who spent it: the sessions' own calls (`own` refs) and the worker runs (`runs` refs). Null
+		 * when grouped by label, whose `worker` row already is the split, and for one run, which is all worker spend.
+		 */
+		audience: Type.Union([Type.Object({ session: audienceShare, worker: audienceShare }, closed), Type.Null()]),
 	},
 	closed,
 );

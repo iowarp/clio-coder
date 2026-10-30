@@ -487,8 +487,15 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		process.stdout.write(
 			indent(
 				formatColumns([
-					[subject, "calls", "tokens", "cost"],
-					...report.groups.map((group) => [group.key, group.calls.display, group.tokens.display, group.usd.display]),
+					// A model's row splits its cost between the sessions' own calls and the worker runs (#434 §11.3).
+					[subject, "calls", "tokens", "cost", ...(report.groupBy === "label" ? [] : ["session cost", "worker cost"])],
+					...report.groups.map((group) => [
+						group.key,
+						group.calls.display,
+						group.tokens.display,
+						group.usd.display,
+						...(group.audience ? [group.audience.session.usd.display, group.audience.worker.usd.display] : []),
+					]),
 				]),
 			),
 		);

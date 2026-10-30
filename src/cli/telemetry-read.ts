@@ -333,8 +333,9 @@ function emit<T>(dto: T, json: boolean, text: (dto: T) => string): number {
 }
 
 /**
- * A `repo` reference names a window, not a moment: it is rebuilt the way `usage report` loads it, ending now, so a
- * reference copied from an earlier report folds whatever the window holds today (#434 §11.4).
+ * A `repo` reference, or an `own` or `runs` one with a repo owner, names a window, not a moment: it is rebuilt the way
+ * `usage report` loads it, ending now, so a reference copied from an earlier report folds whatever the window holds
+ * today (#434 §11.4).
  */
 async function explainRepo(stateDir: string, ref: string, owner: string): Promise<ExplanationV1 | null> {
 	const window = parseRepoOwner(owner);
@@ -366,7 +367,7 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 			const explained =
 				ref.scope === "run"
 					? explain(target as string, { runId: ref.owner, run: loadRunTelemetrySource(stateDir, ref.owner) })
-					: ref.scope === "repo"
+					: ref.scope === "repo" || ((ref.scope === "own" || ref.scope === "runs") && parseRepoOwner(ref.owner))
 						? await explainRepo(stateDir, target as string, ref.owner)
 						: (() => {
 								const session = loadSessionTelemetrySource(stateDir, ref.owner);

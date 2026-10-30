@@ -841,9 +841,13 @@ const runGap = (run: Run) => (run.source.present ? run.gap : 0);
 
 function select(view: View, ref: ParsedFactRef): Selection | null {
 	const group = ref.group;
-	if (ref.scope === "repo")
-		return "repo" in view && view.repo.owner === ref.owner && !ref.attemptId ? selectRepo(view.repo, group) : null;
-	if ("repo" in view) return null;
+	if ("repo" in view)
+		return (ref.scope === "repo" || ref.scope === "own" || ref.scope === "runs") &&
+			view.repo.owner === ref.owner &&
+			!ref.attemptId
+			? selectRepo(view.repo, group, ref.scope)
+			: null;
+	if (ref.scope === "repo") return null;
 	if (ref.scope === "run") {
 		const run =
 			"run" in view ? (view.run.runId === ref.owner ? view.run : undefined) : analyze(view.session).runs.get(ref.owner);
@@ -887,26 +891,38 @@ function select(view: View, ref: ParsedFactRef): Selection | null {
 	};
 }
 
-/** Each session's own attempts and its runs, a run two sessions reference counted once, then the scope's own runs. */
-function selectRepo(repo: RepoSource, group: { by: FactGroup; key: string } | undefined): Selection {
+/**
+ * Each session's own attempts and its runs, a run two sessions reference counted once, then the scope's own runs.
+ * `own` keeps only the sessions' attempts and `runs` only the runs, the window's session and worker audiences.
+ */
+function selectRepo(
+	repo: RepoSource,
+	group: { by: FactGroup; key: string } | undefined,
+	scope: "repo" | "own" | "runs",
+): Selection {
 	const parts: Part[] = [];
 	const counted = new Set<string>();
 	const addRun = (run: Run) => {
-		if (counted.has(run.runId)) return;
+		if (scope === "own" || counted.has(run.runId)) return;
 		counted.add(run.runId);
 		if (!group || runInGroup(run, group)) parts.push({ run, gap: runGap(run) });
 	};
 	for (const session of repo.sessions) {
 		const analysis = analyze(session);
-		const selection = selectionOf(analysis, group);
-		parts.push({ attempts: selection.members, selection, gap: analysis.gap });
+		if (scope !== "runs") {
+			const selection = selectionOf(analysis, group);
+			parts.push({ attempts: selection.members, selection, gap: analysis.gap });
+		}
 		for (const run of analysis.runs.values()) addRun(run);
 	}
-	for (const [runId, source] of [...repo.runs].sort(([a], [b]) => a.localeCompare(b))) addRun(analyzeRun(runId, source));
-	return {
-		parts,
-		describe: `${renderCount(repo.sessions.length)} sessions' attempts + each run's journal fold${group ? ` where ${group.by}=${group.key}` : ""}`,
-	};
+	if (scope !== "own")
+		for (const [runId, source] of [...repo.runs].sort(([a], [b]) => a.localeCompare(b)))
+			addRun(analyzeRun(runId, source));
+	const described = [
+		...(scope !== "runs" ? [`${renderCount(repo.sessions.length)} sessions' attempts`] : []),
+		...(scope !== "own" ? ["each run's journal fold"] : []),
+	];
+	return { parts, describe: `${described.join(" + ")}${group ? ` where ${group.by}=${group.key}` : ""}` };
 }
 
 // ---- measurement ----
@@ -1618,14 +1634,27 @@ function groupKeys(runs: readonly Run[], attempts: readonly Attempt[], by: Group
 }
 
 function costGroups(view: View, base: Omit<ParsedFactRef, "metric">, keys: readonly string[], by: GroupBy) {
+	// A session or repository window splits into its own calls and its worker runs; one run is all worker spend.
+	const split = by !== "label" && (base.scope === "session" || base.scope === "repo");
 	return keys.map((key) => {
-		const ref = (metric: FactMetric): ParsedFactRef => ({ ...base, metric, group: { by, key } });
+		const ref = (metric: FactMetric, scope = base.scope): ParsedFactRef => ({
+			...base,
+			scope,
+			metric,
+			group: { by, key },
+		});
+		const share = (scope: "own" | "runs") => ({
+			calls: quantity(view, ref("calls", scope)),
+			tokens: quantity(view, ref("total", scope)),
+			usd: quantity(view, ref("usd", scope)),
+		});
 		return {
 			key,
 			calls: quantity(view, ref("calls")),
 			tokens: quantity(view, ref("total")),
 			usd: quantity(view, ref("usd")),
 			pricedBy: pricedByCounts(select(view, ref("usd"))?.parts ?? []),
+			audience: split ? { session: share("own"), worker: share("runs") } : null,
 		};
 	});
 }

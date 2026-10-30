@@ -18340,12 +18340,6 @@
 			}
 		},
 		"schemas": {
-			"Array_003432ce": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_calls_key_pricedBy_f7687eb3"
-				}
-			},
 			"Array_0608acf6": {
 				"type": "array",
 				"items": {
@@ -18601,6 +18595,12 @@
 					"$ref": "#/components/schemas/Object_at_fact_id_2412d100"
 				},
 				"maxItems": 128
+			},
+			"Array_b4e5d84e": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_audience_calls_key_d070ad29"
+				}
 			},
 			"Array_bc9113de": {
 				"type": "array",
@@ -18902,7 +18902,7 @@
 				"type": "object",
 				"required": ["v", "foldVersion", "generatedAt", "kind", "scope", "groupBy", "total", "groups"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_ee99153f"
+					"$ref": "#/components/schemas/Shape_b60eea4f"
 				},
 				"additionalProperties": false
 			},
@@ -21617,6 +21617,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_audience_calls_key_d070ad29": {
+				"type": "object",
+				"required": ["key", "calls", "tokens", "usd", "pricedBy", "audience"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_c1737f79"
+				},
+				"additionalProperties": false
+			},
 			"Object_auditRows_blockedToolCalls_costDisplay_80b41069": {
 				"type": "object",
 				"required": [
@@ -22065,14 +22073,6 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_calls_key_pricedBy_f7687eb3": {
-				"type": "object",
-				"required": ["key", "calls", "tokens", "usd", "pricedBy"],
-				"properties": {
-					"$ref": "#/components/schemas/Shape_cad22bd9"
-				},
-				"additionalProperties": false
-			},
 			"Object_calls_label_tokens_630ed68e": {
 				"type": "object",
 				"required": ["label", "calls", "tokens", "usd"],
@@ -22086,6 +22086,14 @@
 				"required": ["calls", "tokens", "usd", "pricedBy"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_c5f20da6"
+				},
+				"additionalProperties": false
+			},
+			"Object_calls_tokens_usd_7a10d797": {
+				"type": "object",
+				"required": ["calls", "tokens", "usd"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_825e2396"
 				},
 				"additionalProperties": false
 			},
@@ -23569,6 +23577,14 @@
 						"minLength": 1,
 						"maxLength": 512
 					}
+				},
+				"additionalProperties": false
+			},
+			"Object_session_worker_182e8d27": {
+				"type": "object",
+				"required": ["session", "worker"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_ad65f27f"
 				},
 				"additionalProperties": false
 			},
@@ -25619,6 +25635,17 @@
 					"$ref": "#/components/schemas/Union_68efcd2c"
 				}
 			},
+			"Shape_825e2396": {
+				"calls": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
+				},
+				"tokens": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
+				},
+				"usd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
+				}
+			},
 			"Shape_82687510": {
 				"verdict": {
 					"enum": ["hot", "partial", "cold", "small", "unknown"]
@@ -25995,6 +26022,14 @@
 					"$ref": "#/components/schemas/Object_blocksThisTurn_budget_disposition_6c12f627"
 				}
 			},
+			"Shape_ad65f27f": {
+				"session": {
+					"$ref": "#/components/schemas/Object_calls_tokens_usd_7a10d797"
+				},
+				"worker": {
+					"$ref": "#/components/schemas/Object_calls_tokens_usd_7a10d797"
+				}
+			},
 			"Shape_af3bc047": {
 				"type": {
 					"type": "string",
@@ -26037,6 +26072,36 @@
 				},
 				"latest": {
 					"$ref": "#/components/schemas/Union_f4e71cff"
+				}
+			},
+			"Shape_b60eea4f": {
+				"v": {
+					"type": "number",
+					"const": 1
+				},
+				"foldVersion": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"generatedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"kind": {
+					"type": "string",
+					"const": "cost"
+				},
+				"scope": {
+					"$ref": "#/components/schemas/Union_dd57b145"
+				},
+				"groupBy": {
+					"enum": ["label", "model", "turn"]
+				},
+				"total": {
+					"$ref": "#/components/schemas/Object_calls_pricedBy_tokens_38586dd3"
+				},
+				"groups": {
+					"$ref": "#/components/schemas/Array_b4e5d84e"
 				}
 			},
 			"Shape_b99de657": {
@@ -26315,6 +26380,27 @@
 					"maxLength": 1024
 				}
 			},
+			"Shape_c1737f79": {
+				"key": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"calls": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
+				},
+				"tokens": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
+				},
+				"usd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
+				},
+				"pricedBy": {
+					"$ref": "#/components/schemas/Object_catalog_free_none_6f8359dd"
+				},
+				"audience": {
+					"$ref": "#/components/schemas/Union_388425b1"
+				}
+			},
 			"Shape_c5f20da6": {
 				"calls": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
@@ -26503,24 +26589,6 @@
 				},
 				"decisions": {
 					"$ref": "#/components/schemas/Array_9ecffbdb"
-				}
-			},
-			"Shape_cad22bd9": {
-				"key": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"calls": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
-				},
-				"tokens": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
-				},
-				"usd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
-				},
-				"pricedBy": {
-					"$ref": "#/components/schemas/Object_catalog_free_none_6f8359dd"
 				}
 			},
 			"Shape_d090b763": {
@@ -26932,36 +27000,6 @@
 				"queued": {
 					"type": "boolean",
 					"const": true
-				}
-			},
-			"Shape_ee99153f": {
-				"v": {
-					"type": "number",
-					"const": 1
-				},
-				"foldVersion": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"generatedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"kind": {
-					"type": "string",
-					"const": "cost"
-				},
-				"scope": {
-					"$ref": "#/components/schemas/Union_dd57b145"
-				},
-				"groupBy": {
-					"enum": ["label", "model", "turn"]
-				},
-				"total": {
-					"$ref": "#/components/schemas/Object_calls_pricedBy_tokens_38586dd3"
-				},
-				"groups": {
-					"$ref": "#/components/schemas/Array_003432ce"
 				}
 			},
 			"Shape_f0cf5df2": {
@@ -28105,6 +28143,16 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Object_backend_backendVerdict_cacheReadTokens_bb1d823e"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_388425b1": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_session_worker_182e8d27"
 					},
 					{
 						"type": "null"

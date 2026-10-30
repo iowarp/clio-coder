@@ -16,6 +16,8 @@ import {
 	CacheReportSchema,
 	CallsReportSchema,
 	CostReportSchema,
+	type CostReportV1,
+	parseFactRef,
 	ReceiptEvidenceSchema,
 	SessionTelemetrySchema,
 	TimelineSchema,
@@ -23,17 +25,20 @@ import {
 } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import type { FactSum } from "../../src/core/telemetry/fact.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { openCallJournal } from "../../src/domains/observability/call-journal.js";
-import type { SessionSource } from "../../src/domains/observability/read-model.js";
+import type { RepoSource, SessionSource } from "../../src/domains/observability/read-model.js";
 import {
 	cacheReport,
 	callsReport,
 	costReport,
 	explain,
+	repoCostReport,
+	repoOwner,
 	sessionTelemetry,
 	timeline,
 	whyStopped,
@@ -489,4 +494,64 @@ test("the main loop's time splits into harness, network, model and tools, and bo
 	deepStrictEqual(unknownRenderedAsTotal(quantitiesOf(overhead)), []);
 	const why = whyStopped(recorded, now);
 	ok(why.findings.includes("Bookkeeping-only rounds: 1, re-reading 1,000 prompt tokens."), why.findings.join("\n"));
+});
+
+test("a model's cost splits into the sessions' own calls and the worker runs, in a session and a repository window (#434 §11.3)", () => {
+	const journal = (records: readonly TelemetryRecord[]) => ({
+		present: true,
+		records,
+		modes: ["standard" as const],
+		skipped: 0,
+		damaged: 0,
+	});
+	const inRun = (runId: string, records: TelemetryRecord[]) =>
+		records.map((record) => ({ ...record, ctx: { ...record.ctx, runId } }) as TelemetryRecord);
+	const main = telemetryCall("split-session", { model: "shared", usd: 0.5 });
+	const ref = makeTelemetryRecord(
+		"run.ref",
+		{ runId: "run-owned" },
+		main[0]?.ctx ?? { sessionId: "split-session", label: "main" },
+		{
+			t: main[0]?.t ?? now.now.toISOString(),
+			mono: 0,
+		},
+	);
+	const session: SessionSource = {
+		...source,
+		sessionId: "split-session",
+		journal: journal([...main, ref]),
+		runs: new Map([
+			[
+				"run-owned",
+				journal(inRun("run-owned", telemetryCall("split-session", { label: "worker", model: "shared", usd: 0.25 }))),
+			],
+		]),
+	};
+	const standalone = inRun(
+		"run-standalone",
+		telemetryCall("split-session", { label: "worker", model: "shared", usd: 0.125 }),
+	);
+	const repo: RepoSource = {
+		owner: repoOwner(null, 30),
+		sessions: [session],
+		runs: new Map([["run-standalone", journal(standalone)]]),
+	};
+	const usd = (quantity: { fact: unknown }) => (quantity.fact as FactSum).measured;
+	const check = (report: CostReportV1, own: number, runs: number, explainIn: Parameters<typeof explain>[1]) => {
+		ok(Value.Check(CostReportSchema, report), [...Value.Errors(CostReportSchema, report)][0]?.message);
+		const [group] = report.groups;
+		strictEqual(report.groups.length, 1, "one model, whoever called it");
+		const audience = group?.audience;
+		if (!group || !audience) throw new Error("a model row carries its audience split");
+		strictEqual(usd(group.usd), own + runs);
+		strictEqual(usd(audience.session.usd), own);
+		strictEqual(usd(audience.worker.usd), runs);
+		strictEqual(parseFactRef(audience.session.usd.ref)?.scope, "own");
+		strictEqual(parseFactRef(audience.worker.usd.ref)?.scope, "runs");
+		for (const quantity of [audience.session.usd, audience.worker.tokens, audience.worker.calls])
+			deepStrictEqual(explain(quantity.ref, explainIn, now)?.value, quantity, quantity.ref);
+	};
+	check(costReport(session, "model", now), 0.5, 0.25, { session });
+	check(repoCostReport(repo, { repo: "all", days: 30 }, "model", now), 0.5, 0.375, { repo });
+	ok(repoCostReport(repo, { repo: "all", days: 30 }, "label", now).groups.every((group) => group.audience === null));
 });
