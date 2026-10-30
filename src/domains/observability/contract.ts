@@ -1,5 +1,22 @@
 import type { ResponseModelIdObservationCounts } from "../../core/response-model-id.js";
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
+import type {
+	CacheReportV1,
+	CallFilter,
+	CallsReportV1,
+	CostReportV1,
+	ExplanationV1,
+	FactRef,
+	HealthV1,
+	QuotaStateV1,
+	RunRowV1,
+	RunTelemetryV1,
+	SessionTelemetryV1,
+	TelemetryTopic,
+	TelemetryUpdateV1,
+	TimelineV1,
+	WhyStoppedV1,
+} from "../../core/telemetry/dto.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
@@ -143,7 +160,45 @@ export interface ObservabilityRunProjection {
 	setFleetPhase(runId: string, phase: NonNullable<ObservabilityRunSummary["phase"]>): void;
 }
 
+/** One session's telemetry DTOs over one fixed read; every quantity carries its fact, display and ref (#434 §11). */
+export interface TelemetryView {
+	readonly sessionId: string;
+	/** True while the live model's cold read has not merged; whole-scope sums stay partial until it does. */
+	readonly seeding: boolean;
+	session(): SessionTelemetryV1;
+	calls(filter?: CallFilter): CallsReportV1;
+	cost(groupBy?: CostReportV1["groupBy"]): CostReportV1;
+	cache(): CacheReportV1;
+	timeline(range?: { from: string; to: string } | null): TimelineV1;
+	runs(): RunRowV1[];
+	/** A run this session references; null for any other run. */
+	run(runId: string): RunTelemetryV1 | null;
+	whyStopped(): WhyStoppedV1;
+	explain(ref: FactRef): ExplanationV1 | null;
+}
+
+/**
+ * The telemetry read model (#434 §11). `live()` folds exactly the batches the bound session's writers made durable,
+ * so it equals a cold read of the same files; `open()` is that cold read, for any session, off the event loop.
+ */
+export interface TelemetryReadModel {
+	/** The bound session, current with every persisted batch; null only when no session is bound. */
+	live(): TelemetryView | null;
+	/** A cold read identical to `clio-coder telemetry`; null when no session directory holds the id. */
+	open(sessionId: string): Promise<TelemetryView | null>;
+	/** Any run journal, read cold. */
+	run(runId: string): Promise<RunTelemetryV1>;
+	/** Resolve a reference against the live session when it owns the ref, else against a cold read of its owner. */
+	explain(ref: FactRef): Promise<ExplanationV1 | null>;
+	quota(provider?: string): QuotaStateV1;
+	health(): HealthV1;
+	/** Coalesced to at most 10 Hz and never per token; readers fetch the topics they show. */
+	subscribe(topic: TelemetryTopic, listener: (update: TelemetryUpdateV1) => void): () => void;
+}
+
 export interface ObservabilityContract extends ObservabilityRunProjection {
+	/** Absent on contracts built without the observability extension, such as test doubles. */
+	telemetry?: TelemetryReadModel;
 	recordRunTokens?(
 		runId: string,
 		source: "journal" | "unavailable",

@@ -26,6 +26,7 @@ import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
 import { createObservabilityProjection } from "./projection.js";
 import type { SessionCapture } from "./session-journals.js";
 import { createSessionJournals } from "./session-journals.js";
+import { createLiveTelemetryModel } from "./telemetry-live.js";
 import { createDispatchTraceMirror, type DispatchTraceMirror, traceDatabasePath } from "./trace-store.js";
 
 /**
@@ -197,6 +198,7 @@ export function createObservabilityBundle(
 		() => writeDiagnostic("[clio-coder:telemetry] call journal unavailable; coverage is incomplete\n"),
 		sessionCapture,
 	);
+	const telemetry = createLiveTelemetryModel({ stateDir: clioStateDir });
 	let sessionId: string | null | undefined;
 	const recordedRuns = new Set<string>();
 	const recordRun = (payload: DispatchTerminalLike, replayed = false): void => {
@@ -281,6 +283,7 @@ export function createObservabilityBundle(
 		},
 		async stop() {
 			await journals.closeAll();
+			telemetry.stop();
 			for (const off of unsubscribes) off();
 			unsubscribes.length = 0;
 			projection.stop();
@@ -318,11 +321,13 @@ export function createObservabilityBundle(
 			}
 			return sessionCapture.current(origin);
 		},
+		telemetry,
 		sessionCost: () => cost.sessionTotal(),
 		sessionCostSummary: () => cost.sessionCost(),
 		costEntries: () => cost.entries(),
 		resetSession(nextSessionId) {
 			sessionId = nextSessionId;
+			telemetry.bind(nextSessionId ?? null);
 			cost.reset();
 			recordedRuns.clear();
 			if (sessionId) {

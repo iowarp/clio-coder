@@ -6,7 +6,9 @@
  * same ones over the DTOs they serve.
  */
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
@@ -18,6 +20,9 @@ import {
 	TimelineSchema,
 	WhyStoppedSchema,
 } from "../../src/core/telemetry/dto.js";
+import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
+import { openCallJournal } from "../../src/domains/observability/call-journal.js";
 import type { SessionSource } from "../../src/domains/observability/read-model.js";
 import {
 	cacheReport,
@@ -28,8 +33,10 @@ import {
 	timeline,
 	whyStopped,
 } from "../../src/domains/observability/read-model.js";
+import { createLiveTelemetryModel } from "../../src/domains/observability/telemetry-live.js";
 import { isSessionEntry } from "../../src/domains/session/entries.js";
 import { importLegacySession } from "../../src/domains/session/legacy-import.js";
+import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import {
 	absentRenderedOtherwise,
 	quantitiesOf,
@@ -95,4 +102,63 @@ test("L2 and L9: a never-sent call carries no usage, and absent renders as not a
 	strictEqual(calls[0]?.usage, null);
 	strictEqual("kind" in (calls[0]?.usd.fact ?? {}) ? (calls[0]?.usd.fact as { kind: string }).kind : null, "absent");
 	deepStrictEqual(absentRenderedOtherwise(all), []);
+});
+
+test("live equals CLI: the live model folds exactly the batches a cold read of the same journal holds (#434 §11)", {
+	timeout: 10_000,
+}, async () => {
+	const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-telemetry-live-"));
+	const writer = await openCallJournal({
+		sessionDirectory: join(stateDir, "sessions", "bucket", "golden-p0"),
+		context: { sessionId: "golden-p0", label: "main" },
+		writer: { clioCoderVersion: "test", piVersion: "test" },
+	});
+	const write = async (records: readonly TelemetryRecord[]) => {
+		for (const record of records)
+			ok(
+				writer.enqueue({
+					kind: record.k,
+					data: record.data,
+					ctx: record.ctx,
+					wallMs: Date.parse(record.t),
+					mono: record.mono,
+					recordId: record.id,
+				} as PendingTelemetry),
+			);
+		await writer.flush();
+	};
+	const third = Math.ceil(imported.records.length / 3);
+	await write(imported.records.slice(0, third));
+	const model = createLiveTelemetryModel({ stateDir: () => stateDir });
+	try {
+		model.bind("golden-p0");
+		const seeded = new Promise<void>((resolve) =>
+			model.subscribe("session", () => {
+				if (model.live()?.seeding === false) resolve();
+			}),
+		);
+		// Before the seed merges, live() is the hub-buffered view marked partial, never null.
+		strictEqual(model.live()?.session().journal.seeding, true);
+		await write(imported.records.slice(third, 2 * third));
+		await seeded;
+		await write(imported.records.slice(2 * third));
+		const live = model.live();
+		const cold = loadSessionTelemetrySource(stateDir, "golden-p0");
+		ok(live && cold);
+		strictEqual(live.session().journal.records, imported.records.length);
+		const timeless = (dto: unknown) =>
+			JSON.parse(JSON.stringify(dto, (key, value: unknown) => (key === "generatedAt" ? undefined : value))) as unknown;
+		const pairs: Array<[string, unknown, unknown]> = [
+			["session", live.session(), sessionTelemetry(cold)],
+			["calls", live.calls(), callsReport(cold)],
+			["cost by model", live.cost("model"), costReport(cold, "model")],
+			["cache", live.cache(), cacheReport(cold)],
+			["timeline", live.timeline(), timeline(cold)],
+			["why-stopped", live.whyStopped(), whyStopped(cold)],
+		];
+		for (const [name, actual, expected] of pairs) deepStrictEqual(timeless(actual), timeless(expected), name);
+	} finally {
+		model.stop();
+		await writer.close();
+	}
 });

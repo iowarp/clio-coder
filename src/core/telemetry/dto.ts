@@ -178,6 +178,8 @@ const callCounts = Type.Object({ calls: QuantitySchema, attempts: QuantitySchema
 export const JournalCoverageSchema = Type.Object(
 	{
 		present: Type.Boolean(),
+		/** The live model is still merging its cold read; every sum this journal feeds is partial meanwhile. */
+		seeding: Type.Boolean(),
 		records: count,
 		skipped: count,
 		damaged: count,
@@ -670,6 +672,7 @@ export const HealthSchema = Type.Object(
 					persisted: liveCount,
 					dropped: liveCount,
 					invalid: liveCount,
+					filtered: liveCount,
 					writeErrors: liveCount,
 				},
 				closed,

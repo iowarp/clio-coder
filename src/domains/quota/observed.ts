@@ -208,6 +208,34 @@ export function observedCodexQuota(targetId: string, accountScope: string | null
 	return accountScope === null ? null : readObserved(codexKey(targetId, accountScope), nowMs);
 }
 
+interface ObservedQuotaReading {
+	snapshot: UsageSnapshot;
+	stale: boolean;
+	source: "poll" | "response-headers" | "stream-event";
+}
+
+/** Every reading this process holds and how it arrived, for the telemetry read model's quota view (#434 §11). */
+export function observedQuotaReadings(nowMs = Date.now()): ObservedQuotaReading[] {
+	const anthropicKeys = new Set([...anthropicTargets.values()].map((target) => target.key));
+	const codexKeys = new Map([...codexTargets].map(([targetId, key]) => [key, targetId]));
+	return [...observed.keys()].flatMap((key): ObservedQuotaReading[] => {
+		const reading = readObserved(key, nowMs);
+		if (!reading?.snapshot) return [];
+		const codexTarget = codexKeys.get(key);
+		return codexTarget === undefined
+			? [
+					{ snapshot: reading.snapshot, stale: reading.stale, source: anthropicKeys.has(key) ? "response-headers" : "poll" },
+				]
+			: [
+					{
+						snapshot: { ...reading.snapshot, providerId: `codex:${codexTarget}` },
+						stale: reading.stale,
+						source: "stream-event",
+					},
+				];
+	});
+}
+
 /** Quota views show Clio stream accounts separately from the sibling Codex CLI login. */
 export function codexStreamSnapshots(nowMs = Date.now()): UsageSnapshot[] {
 	return [...codexTargets].flatMap(([targetId, key]) => {

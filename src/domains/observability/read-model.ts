@@ -49,6 +49,8 @@ export interface JournalSource {
 	modes: readonly Mode[];
 	skipped: number;
 	damaged: number;
+	/** The live model has not merged this owner's cold read yet; whole-scope sums stay partial until it does (#434). */
+	seeding?: boolean;
 }
 export interface SessionSource {
 	sessionId: string;
@@ -188,7 +190,7 @@ function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryR
 		sessionId: source.records[0]?.ctx.sessionId ?? reference?.ctx.sessionId ?? null,
 		turnId: reference?.ctx.turnId ?? null,
 		referencedAt: reference?.t ?? null,
-		gap: !source.present || source.skipped > 0 || source.damaged > 0 ? 1 : 0,
+		gap: !source.present || source.skipped > 0 || source.damaged > 0 || source.seeding ? 1 : 0,
 	};
 }
 
@@ -224,7 +226,7 @@ const analyses = new WeakMap<SessionSource, Analysis>();
 function analyze(source: SessionSource): Analysis {
 	let analysis = analyses.get(source);
 	if (!analysis) {
-		const read = source.journal.skipped > 0 || source.journal.damaged > 0 ? 1 : 0;
+		const read = source.journal.skipped > 0 || source.journal.damaged > 0 || source.journal.seeding ? 1 : 0;
 		analysis = analyzeRecords(
 			source.sessionId,
 			[...source.journal.records, ...source.legacy.records],
@@ -722,6 +724,7 @@ function pricedByCounts(parts: readonly Part[]): Record<PricedBy, number> {
 function journalCoverage(source: JournalSource, fold: ReturnType<typeof foldCallJournal>, aggregates = 0) {
 	return {
 		present: source.present,
+		seeding: source.seeding === true,
 		records: source.records.length,
 		skipped: source.skipped,
 		damaged: source.damaged,
@@ -1156,6 +1159,12 @@ export function timeline(
 			.filter((entry) => within(entry.at))
 			.sort((a, b) => (a.at === b.at ? order[a.kind] - order[b.kind] : a.at < b.at ? -1 : 1)),
 	};
+}
+
+/** The runs a session's own records reference, in run id order. */
+export function runsReport(source: SessionSource): RunRowV1[] {
+	const view: View = { session: source };
+	return [...analyze(source).runs.values()].map((run) => runRow(view, run));
 }
 
 export function runTelemetry(runId: string, source: JournalSource, options: ReadOptions = {}): RunTelemetryV1 {
