@@ -15,7 +15,6 @@ const ENV_KEYS: Readonly<Record<string, string>> = {
 	"qwen-token-plan-individual": "QWEN_TOKEN_PLAN_API_KEY",
 	openai: "OPENAI_API_KEY",
 	meta: "META_API_KEY",
-	"azure-openai-responses": "AZURE_OPENAI_API_KEY",
 	nvidia: "NVIDIA_API_KEY",
 	deepseek: "DEEPSEEK_API_KEY",
 	google: "GEMINI_API_KEY",
@@ -64,13 +63,13 @@ function apiKeyEnvVars(provider: string): readonly string[] | undefined {
 }
 
 /**
- * Synchronous provider-key discovery. Pi 1.0.0 exports `findEnvKeys` and
+ * Synchronous provider-key discovery. Pi 1.4.0 exports `findEnvKeys` and
  * `getEnvApiKey` only from `pi-ai/compat`, an import that costs roughly 0.2 s
  * and tens of MB of RSS and would land on the synchronous pre-TUI preflight
  * (`bootAuthStatus`). Pi's own provider auth is async (`AuthContext.env`
  * returns a Promise), so this module loads no Pi code at runtime until the sync
- * callers can go async. The table equals Pi 1.0.0's 38 env entries plus Clio's
- * `inception` row.
+ * callers can go async. The table holds Pi 1.4.0's env entries except `azure`,
+ * which Clio does not route, plus Clio's `inception` row.
  */
 export function findEngineEnvKeys(provider: string, env?: ProviderEnv): string[] | undefined {
 	const names = apiKeyEnvVars(provider);

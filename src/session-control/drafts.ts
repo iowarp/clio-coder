@@ -69,7 +69,7 @@ export interface DraftModelShape {
 function transportRefusesTemperature(model: DraftModelShape): boolean {
 	if ((model.compat as { supportsTemperature?: boolean } | undefined)?.supportsTemperature === false) return true;
 	if (model.api === "openai-codex-responses") return true;
-	return (model.api === "openai-responses" || model.api === "azure-openai-responses") && model.reasoning === true;
+	return model.api === "openai-responses" && model.reasoning === true;
 }
 
 /**

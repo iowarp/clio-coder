@@ -2410,7 +2410,6 @@ const TOOL_CARRYING_API_FAMILIES: ReadonlySet<RuntimeApiFamily> = new Set([
 	"openai-completions",
 	"openai-responses",
 	"openai-codex-responses",
-	"azure-openai-responses",
 	"anthropic-messages",
 	"bedrock-converse-stream",
 	"google-generative-ai",

@@ -3,7 +3,6 @@ import type {
 	AssistantMessage,
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
-	AzureOpenAIResponsesOptions,
 	BedrockOptions,
 	Context,
 	GoogleOptions,
@@ -40,8 +39,6 @@ const NAMED_CHOICE = {
 		rejected ? "auto" : { type: "function", function: { name } },
 	"openai-responses": (name: string, rejected: boolean): Choice<OpenAIResponsesOptions> =>
 		rejected ? "auto" : { type: "function", name },
-	"azure-openai-responses": (name: string, rejected: boolean): Choice<AzureOpenAIResponsesOptions> =>
-		rejected ? "auto" : { type: "function", name },
 	// Codex previously rejected forcing with "Unsupported parameter: 'tool_choice'
 	// is not supported by rustponsesapi" (#426). Live full requests now accept
 	// required/named, but Pi's delta omits tools and then Codex rejects it:
@@ -53,7 +50,7 @@ const NAMED_CHOICE = {
 } as const;
 
 function isOpenAIResponsesApi(api: string): boolean {
-	return api === "openai-codex-responses" || api === "openai-responses" || api === "azure-openai-responses";
+	return api === "openai-codex-responses" || api === "openai-responses";
 }
 
 /** APIs whose named-tool request is expressible as a Pi tool choice. */

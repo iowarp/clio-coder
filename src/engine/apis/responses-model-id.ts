@@ -11,11 +11,7 @@ import type { CodexQuotaObservation } from "../types.js";
 import { codexAccountScope, parseCodexQuotaEvent } from "./codex-quota.js";
 
 /** APIs whose lifecycle events carry the provider's response object. */
-const RESPONSES_APIS: ReadonlySet<Api> = new Set([
-	"openai-codex-responses",
-	"openai-responses",
-	"azure-openai-responses",
-]);
+const RESPONSES_APIS: ReadonlySet<Api> = new Set(["openai-codex-responses", "openai-responses"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);

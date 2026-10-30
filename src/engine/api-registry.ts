@@ -9,7 +9,6 @@ import type {
 	StreamOptions,
 } from "@earendil-works/pi-ai";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
-import { azureOpenAIResponsesApi } from "@earendil-works/pi-ai/api/azure-openai-responses.lazy";
 import { bedrockConverseStreamApi } from "@earendil-works/pi-ai/api/bedrock-converse-stream.lazy";
 import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy";
 import { googleVertexApi } from "@earendil-works/pi-ai/api/google-vertex.lazy";
@@ -82,7 +81,6 @@ const BUILTIN_APIS: readonly (readonly [Api, ProviderStreams])[] = [
 	["openai-completions", openAICompletionsApi()],
 	["openai-responses", openAIResponsesApi()],
 	["openai-codex-responses", openAICodexResponsesApi()],
-	["azure-openai-responses", azureOpenAIResponsesApi()],
 	["google-generative-ai", googleGenerativeAIApi()],
 	["google-vertex", googleVertexApi()],
 	["mistral-conversations", mistralConversationsApi()],

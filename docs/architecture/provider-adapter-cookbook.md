@@ -176,8 +176,8 @@ level onto `thinking.type: "adaptive"` plus `output_config.effort` (read from th
 `thinkingLevelMap` and `compat.forceAdaptiveThinking`) or onto a bounded `budget_tokens` for
 budget-based models. Clio Coder's request controls in `src/engine/provider-payload.ts` remove thinking
 and effort only on forced-tool rounds for Claude models that accept forced choice. Models that
-reject forced choice keep thinking and use automatic tool selection. OpenAI Responses, Azure
-Responses and Codex use Pi's stock `reasoning.summary: "auto"`; Clio Coder does not override it.
+reject forced choice keep thinking and use automatic tool selection. OpenAI Responses and
+Codex use Pi's stock `reasoning.summary: "auto"`; Clio Coder does not override it.
 A required-tool round on Codex always sends `tool_choice: "auto"` over the narrowed tool surface: Pi's
 WebSocket continuation delta omits `tools`, and Codex rejects a `required` or named choice without
 them, while a text-only `none` is accepted.
