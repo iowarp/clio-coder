@@ -112,6 +112,8 @@ Pricing is separate from token provenance: `pricing.usd` is a fact, and `pricing
 | `middleware.fired` | operational | content-free | Each middleware rule that emitted effects at a hook, in a session or a worker's run: the hook, the sync, async or awaited phase, the rule id, its effect kinds, its strongest reminder severity, the tool at a tool hook, and the trigger evidence class as `matcher:subject@scope`. Every builtin rule declares one, and a rule that knows a narrower trigger reports it for that firing, such as `regex:PLAN_REQUEST@operator-request` for plan-close or `count:read-only-calls@prior-turn` for the exploration advisory. An operator's hook names its kind, point and settings layer, and an extension hook its point. |
 | `system_one.decision` | operational | content-free | Each System One decision in a session: the site and moment, the outcome, latency and deadline, whether the site was fitted, each engine's outcome and round trip, what the decision did to that engine's breaker (`opened`, `probe`, `closed` or `disabled`), and the journal calls its model requests opened. Those requests run inside their own call, so one the deadline stopped before it left is `never_sent` by its own stages. |
 | `worker.channel` | operational | content-free | Each failure of a worker's channel, in its run journal: the lane (`stdin` for control frames, `stdout` for the worker's NDJSON lane, which the worker reports on stderr), the frame type actually being written, the system error code such as `EPIPE`, whether the worker had already exited, and the closed failure class. A failure after exit is recorded but no longer changes how the run ends. |
+| `request.capture` | research | content-bearing | The body a main-loop or side call handed its provider, as a `request` object, with its size; a body past 1 Mi characters keeps only its head as text and says so. Needs `content` and consent. |
+| `provider.headers` | research | content-free | The allowlisted headers of a call's last 2xx response: Codex quota windows, `x-ratelimit-*`, `anthropic-ratelimit-*`, retry hints, request ids and server timing. Any other header, cookies included, is never recorded. Needs `providerHeaders`. |
 | `context.snapshot` | operational | content-free | Each persisted context snapshot's token split, window and source, under the real session and turn, and the call it was reconciled against. |
 | `health.samples` | research | content-free | The same window's full lag percentile curve, event-loop utilization and heap, in research mode. |
 | `call.timing.deltas` | research | content-free | One call's inter-delta gaps as a histogram with power-of-two bounds from 1 ms to 8,192 ms, never a row per delta. Recorded for main-loop and side calls under `deltas`; worker calls do not record it. |
@@ -129,7 +131,7 @@ There is no transport-state record. Each `call.settled` carries its own transpor
 `telemetry.mode` is `standard` (the default) or `research` ([settings inventory](../guide/configuration-and-targets.md#telemetry)). Accountability records are written in both modes; there is no off.
 
 - **Standard** admits accountability and operational records, all of them content-free or structural. It writes no content-bearing record.
-- **Research** also admits the research-tier kinds that the `telemetry.research` flags turn on. `content` additionally needs the operator's consent for the workspace, recorded by `clio-coder telemetry consent` in `<stateDir>/telemetry/consent.json`, keyed by the workspace's real path and never stored in the workspace. `systemOneDataset` needs `content` and consent too, `busTrace` writes `<stateDir>/telemetry/research/bus-trace.jsonl`, and `deltas` records `call.timing.deltas`. `providerHeaders` records nothing in this build.
+- **Research** also admits the research-tier kinds that the `telemetry.research` flags turn on. `content` additionally needs the operator's consent for the workspace, recorded by `clio-coder telemetry consent` in `<stateDir>/telemetry/consent.json`, keyed by the workspace's real path and never stored in the workspace. `systemOneDataset` needs `content` and consent too, `busTrace` writes `<stateDir>/telemetry/research/bus-trace.jsonl`, `deltas` records `call.timing.deltas`, and `providerHeaders` records `provider.headers`. Under `content` and consent, each main-loop and side call also records its request body as `request.capture`.
 - A project or local settings layer can lower capture but never raise it.
 - Research capture is capped at 256 MiB per session, counting its research records and the preimages they store. A refusal is a `gap{research-cap}`, and accountability records continue.
 - The journal writer stores a research record's content in `objects/`, reserving it against the cap first, before writing the record that cites it. Content that could not be stored drops its record as a `gap{writer-drop}`.
@@ -138,7 +140,7 @@ The environment variables `CLIO_CODER_MEMORY_TRACE`, `CLIO_CODER_OBSERVATION_TRA
 
 ## Objects
 
-`objects/` in a session directory holds `obj_<sha256>.json` files: canonical sorted JSON (`json-sorted-v1`), redacted of secrets before hashing, written atomically and never overwritten with different bytes ([objects.ts](../../src/domains/observability/objects.ts)). The structural subjects are `prompt-structure`, `tool-schemas` and `config`; a `config` object keeps the names of every `headers` and `env` map but withholds their values, which carry whatever an operator typed. The content subjects are `prompt-text`, `memory-trace` and `observation-trace`. A reader that finds a missing object reports it as missing, and a digest mismatch is an error.
+`objects/` in a session directory holds `obj_<sha256>.json` files: canonical sorted JSON (`json-sorted-v1`), redacted of secrets before hashing, written atomically and never overwritten with different bytes ([objects.ts](../../src/domains/observability/objects.ts)). The structural subjects are `prompt-structure`, `tool-schemas` and `config`; a `config` object keeps the names of every `headers` and `env` map but withholds their values, which carry whatever an operator typed. The content subjects are `prompt-text`, `request`, `memory-trace` and `observation-trace`. A reader that finds a missing object reports it as missing, and a digest mismatch is an error.
 
 ## Export, import and retention
 
@@ -168,7 +170,6 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 
 These parts of the design are not in this build yet:
 
-- Research capture of request bodies and allow-listed provider response headers.
 - Opt-in pruning of receipts whose sealed evidence copy verifies, with one resolver that follows the tombstone.
 - `clio-coder telemetry rebuild`, which rebuilds projections from journals and reports rule drift.
 - The GUI explain popover and timeline view.

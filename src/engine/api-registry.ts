@@ -24,6 +24,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import "@earendil-works/pi-ai/providers/images/register-builtins";
 
+import { telemetryContext } from "../core/telemetry/context.js";
 import { telemetryCallInContext } from "../core/telemetry/producer.js";
 import { withAnthropicDiagnostics } from "./apis/anthropic-diagnostics.js";
 import { observeAnthropicResponse } from "./apis/anthropic-response.js";
@@ -39,6 +40,7 @@ import { getEngineEnvApiKey } from "./env-api-keys.js";
 import { onFirstGeneration } from "./generation-delta.js";
 import { observePayloadBytes } from "./payload-bytes.js";
 import { instrumentProviderCall, type ProviderCallScope } from "./provider-diagnostics.js";
+import { researchCaptureFor } from "./research-capture.js";
 import { guardToolArgumentStream } from "./tool-argument-stream.js";
 
 export interface EngineRegisteredApiProvider extends ProviderStreams {
@@ -202,6 +204,7 @@ function scopedEngineStreamSimple(
 	// attempts through turn-runtime. Main and worker attempts also mark their own stages; each keeps its first (#434).
 	const call = telemetryCallInContext();
 	call?.stage("send", "start");
+	const research = researchCaptureFor(call, telemetryContext());
 	// The one place a call sees its provider's HTTP response; the caller's own hook still runs after it (#434).
 	const withResponse: SimpleStreamOptions | undefined = call?.observeResponse
 		? {
@@ -229,7 +232,12 @@ function scopedEngineStreamSimple(
 					observeAnthropicResponse(model, effective, (anthropic) =>
 						observeCodexTransport(model, anthropic, (transport) =>
 							observeResponsesModelId(model, transport, (observed) =>
-								observePayloadBytes(model, observed, (sized) => dispatchEngineStreamSimple(model, context, sized)),
+								observePayloadBytes(
+									model,
+									observed,
+									(sized) => dispatchEngineStreamSimple(model, context, sized),
+									research?.settle,
+								),
 							),
 						),
 					),

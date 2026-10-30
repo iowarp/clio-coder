@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Type } from "typebox";
+import { telemetryContext } from "../../src/core/telemetry/context.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { beginCall, registerTelemetrySink } from "../../src/core/telemetry/producer.js";
@@ -13,6 +14,7 @@ import { createMiddlewareBundle } from "../../src/domains/middleware/extension.j
 import { listMiddlewareRuleDefinitions } from "../../src/domains/middleware/rules.js";
 import { createHealthWindows } from "../../src/domains/observability/health-window.js";
 import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
+import { researchCaptureFor } from "../../src/engine/research-capture.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { prefixBlocksOf } from "../../src/session-control/prefix-blocks.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
@@ -221,5 +223,54 @@ test("prompt.compiled is recorded once per structure by a writer, under the call
 		ok(lines[0]?.includes(ids[0] as string));
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("research capture keeps a request body and only allowlisted headers, and standard capture assembles neither (#434)", () => {
+	const deep = capture("producer-capture-research", true);
+	const standard = capture("producer-capture-standard");
+	try {
+		const target = {
+			targetId: "t",
+			runtimeId: "r",
+			api: "a",
+			requestedModel: "m",
+			reportedModel: { kind: "unknown", reason: "not-observed" },
+		} as const;
+		const ctx = { sessionId: "producer-capture-research", label: "main" } as const;
+		const call = beginCall({ label: "main", target, roundKind: "normal", toolChoice: "auto" }, ctx);
+		call.observeResponse?.({
+			status: 200,
+			headers: { "X-Codex-Primary-Used-Percent": "12", "set-cookie": "session=secret", "x-request-id": "req_1" },
+		});
+		const scoped = call.withContext(() => telemetryContext());
+		const sent = JSON.stringify({ model: "m", input: [{ role: "user", content: "hi" }] });
+		researchCaptureFor(call, scoped)?.settle(sent);
+		const [body] = deep.of("request.capture");
+		deepStrictEqual(body?.preimage, { body: JSON.parse(sent) });
+		deepStrictEqual(body.data, { bodyBytes: Buffer.byteLength(sent), truncated: false });
+		const [headers] = deep.of("provider.headers");
+		ok(headers && validPayload("provider.headers", headers.data), JSON.stringify(headers?.data));
+		deepStrictEqual(headers.data, {
+			status: 200,
+			headers: { "x-codex-primary-used-percent": "12", "x-request-id": "req_1" },
+		});
+		const plain = beginCall(
+			{ label: "main", target, roundKind: "normal", toolChoice: "auto" },
+			{ sessionId: "producer-capture-standard", label: "main" },
+		);
+		strictEqual(
+			researchCaptureFor(
+				plain,
+				plain.withContext(() => telemetryContext()),
+			),
+			undefined,
+		);
+		call.abandon("internal");
+		plain.abandon("internal");
+		strictEqual(standard.of("request.capture").length + standard.of("provider.headers").length, 0);
+	} finally {
+		deep.release();
+		standard.release();
 	}
 });

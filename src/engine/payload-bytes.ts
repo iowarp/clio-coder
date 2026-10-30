@@ -10,6 +10,8 @@ export function observePayloadBytes<T extends StreamOptions>(
 	model: Model<Api>,
 	options: T | undefined,
 	invoke: (options: T | undefined) => AssistantMessageEventStream,
+	/** Research capture's copy of the serialized payload, handed over once when the call ends (#434). */
+	onSettled?: (serialized: string | undefined) => void,
 ): AssistantMessageEventStream {
 	let payload: unknown;
 	const onPayload = options?.onPayload;
@@ -21,16 +23,23 @@ export function observePayloadBytes<T extends StreamOptions>(
 			return replacement;
 		},
 	} as T);
+	let handedOver = false;
 	const remember = (message: AssistantMessage): void => {
-		if (payload === undefined) return;
-		try {
-			(message as AssistantMessage & { clioCoderRequestBytes?: number }).clioCoderRequestBytes = Buffer.byteLength(
-				JSON.stringify(payload),
-			);
-		} catch {
-			// A payload that cannot be serialized leaves the request size unobserved.
+		let serialized: string | undefined;
+		if (payload !== undefined) {
+			try {
+				serialized = JSON.stringify(payload);
+				(message as AssistantMessage & { clioCoderRequestBytes?: number }).clioCoderRequestBytes =
+					Buffer.byteLength(serialized);
+			} catch {
+				// A payload that cannot be serialized leaves the request size unobserved.
+			}
 		}
 		payload = undefined;
+		if (!handedOver) {
+			handedOver = true;
+			onSettled?.(serialized);
+		}
 	};
 	const output = createAssistantMessageEventStream();
 	void (async () => {
