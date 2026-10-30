@@ -135,6 +135,13 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 				if (!references.has(callId) && recordTelemetry("call.ref", { runId: context.runId, callId }, parent))
 					references.add(callId);
 			}
+			if (
+				parent &&
+				record.kind === "run.usage" &&
+				!references.has(context.runId) &&
+				recordTelemetry("run.ref", { runId: context.runId }, parent)
+			)
+				references.add(context.runId);
 			return true;
 		},
 		gap(reason, count = 1) {

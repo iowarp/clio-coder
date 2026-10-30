@@ -9,7 +9,7 @@ import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js
 import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall, recordTelemetry, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
-import type { CallStarted } from "../../src/core/telemetry/schemas.js";
+import type { CallStarted, RunUsage } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
 import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
@@ -513,6 +513,62 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	strictEqual(fold.coverage.duplicateAttempts, 1);
 	deepStrictEqual(foldCallsBy(fold.attempts, (call) => call.started.target.targetId).get("target"), fold.totals);
 	strictEqual(foldCallJournal(rows, new Set([first.callId])).totals.attempts, 2);
+	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
+	const aggregate: RunUsage = {
+		source: "acp",
+		scope: "peer-session",
+		revision: 1,
+		coverage: "complete",
+		target: first.target,
+		usage: {
+			input: measured(80),
+			output: measured(20),
+			cacheRead: unknown,
+			cacheWrite: unknown,
+			cacheWrite1h: unknown,
+			reasoning: unknown,
+		},
+		totalTokens: measured(100),
+		apiCalls: unknown,
+		missingTokenCalls: unknown,
+		pricing: { usd: measured(1), pricedBy: "provider" },
+	};
+	const aggregateRecord = makeTelemetryRecord(
+		"run.usage",
+		aggregate,
+		{ sessionId: "session", runId: "run", label: "worker" },
+		clock,
+	);
+	const withAggregate = [...rows, aggregateRecord, aggregateRecord];
+	const runAggregate = runUsageFromCallRecords(withAggregate);
+	strictEqual(runAggregate.totalTokens, 100, "the snapshot includes per-call usage; never add both");
+	strictEqual(runAggregate.costUsd, 1);
+	strictEqual(runAggregate.apiCalls, 0, "aggregate usage never invents a call count");
+	strictEqual(runAggregate.costSummary.unknownCallCoverageRuns, 1);
+	deepStrictEqual(runUsageFromCallRecords([...withAggregate].reverse()), runAggregate);
+	const zeroAggregate = makeTelemetryRecord(
+		"run.usage",
+		{
+			...aggregate,
+			revision: 2,
+			totalTokens: measured(0),
+			apiCalls: measured(0),
+			missingTokenCalls: measured(0),
+			pricing: { usd: measured(0), pricedBy: "provider" },
+		},
+		aggregateRecord.ctx,
+		clock,
+	);
+	strictEqual(
+		runUsageFromCallRecords([...withAggregate, zeroAggregate]).totalTokens,
+		0,
+		"latest revision replaces earlier snapshots, including measured zero",
+	);
+	const conflictingAggregate = { ...aggregateRecord, data: { ...aggregate, totalTokens: measured(200) } };
+	const damagedAggregate = runUsageFromCallRecords([...withAggregate, conflictingAggregate]);
+	strictEqual(damagedAggregate.totalTokens, 0);
+	strictEqual(damagedAggregate.tokenUsageMissing, true);
+	deepStrictEqual(runUsageFromCallRecords([conflictingAggregate, ...withAggregate].reverse()), damagedAggregate);
 	const conflicting = {
 		...priced,
 		id: makeTelemetryRecord("session.opened", {}, context, clock).id,

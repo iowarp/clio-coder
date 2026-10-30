@@ -489,6 +489,7 @@ import type { WriteBoundaryAttribution, WriteBoundaryAttributionDowngrade } from
 
 interface RunTokenMeter {
 	callFacts?: RunCallUsage["callFacts"];
+	usageFacts?: RunCallUsage["usageFacts"];
 	costSummary?: RunCallUsage["costSummary"];
 	costProvenance?: RunCallUsage["costProvenance"];
 	toolRounds?: ToolRoundRecord[];
@@ -8191,7 +8192,7 @@ export function createDispatchBundle(
 				...(tokenMeter.costSummary ? { costSummary: tokenMeter.costSummary } : {}),
 				inputTokenCount: tokenMeter.inputTokens,
 				outputTokenCount: tokenMeter.outputTokens,
-				...(tokenMeter.callFacts && tokenMeter.callFacts.usage.cacheRead.unknownCount > 0
+				...(tokenMeter.usageFacts && tokenMeter.usageFacts.cacheRead.unknownCount > 0
 					? {}
 					: { cacheReadTokenCount: tokenMeter.cacheReadTokens }),
 				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,

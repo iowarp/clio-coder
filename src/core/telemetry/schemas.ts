@@ -159,6 +159,24 @@ export const CallSettledSchema = Type.Object(
 );
 export type CallSettled = Static<typeof CallSettledSchema>;
 
+/** Aggregate snapshots describe a delegated scope, never an invented provider call (#434). */
+export const RunUsageSchema = Type.Object(
+	{
+		source: vocabulary(["claude-sdk", "external-cli", "acp", "legacy-import"]),
+		scope: vocabulary(["run", "peer-session"]),
+		revision: count,
+		coverage: vocabulary(["complete", "partial", "unknown"]),
+		target,
+		usage: UsageSchema,
+		totalTokens: factSchema(count),
+		apiCalls: factSchema(count),
+		missingTokenCalls: factSchema(count),
+		pricing: PricingSchema,
+	},
+	closed,
+);
+export type RunUsage = Static<typeof RunUsageSchema>;
+
 export const RUN_FEED_EVENTS = [
 	"agent_start",
 	"agent_end",
@@ -234,6 +252,8 @@ export const KIND_NAMES = [
 	"turn.settled",
 	"run.settled",
 	"run.feed",
+	"run.usage",
+	"run.ref",
 	"process.started",
 	"process.exited",
 ] as const;
@@ -324,6 +344,8 @@ export const KIND_REGISTRY = {
 		cc: "structural",
 		schema: Type.Object({ seq: Type.Integer({ minimum: 1 }), body: RunFeedBodySchema }, closed),
 	},
+	"run.usage": { version: 1, tier: "accountability", cc: "structural", schema: RunUsageSchema },
+	"run.ref": accountability(Type.Object({ runId: ExistingId }, closed)),
 	"process.started": accountability(empty),
 	"process.exited": accountability(Type.Object({ exitCode: Type.Integer() }, closed)),
 } satisfies Record<Kind, KindDefinition>;

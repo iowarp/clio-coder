@@ -201,3 +201,49 @@ export function foldCallsBy(
 		[...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, group]) => [name, foldCalls(group)]),
 	);
 }
+
+/** A run snapshot includes its constituent calls. Pick one accounting source, independent of replay order (#434). */
+export function foldRunJournal(records: Iterable<TelemetryRecord>) {
+	const rows = [...records];
+	const calls = foldCallJournal(rows);
+	const aggregates = rows.flatMap((row) => (row.k === "run.usage" ? [row.data] : []));
+	const revision = aggregates.reduce((maximum, row) => Math.max(maximum, row.revision), -1);
+	const latest = aggregates.filter((row) => row.revision === revision);
+	const aggregate = latest[0];
+	const conflict =
+		aggregate !== undefined &&
+		(aggregates.some((row) => row.source !== aggregate.source || row.scope !== aggregate.scope) ||
+			latest.some((row) => !isDeepStrictEqual(row, aggregate)));
+	const observed = (value: number): Fact<number> => ({ kind: "measured", value, source: "local-count" });
+	const fromFact = (fact: Fact<number>) => foldFacts([fact]);
+	const callTotals = calls.totals;
+	const apiCalls = callTotals.settled + callTotals.settledNoUsage + callTotals.sentUnsettled;
+	const missingCalls = foldCalls(calls.attempts.filter((attempt) => attempt.settled !== null)).totalTokens.unknownCount;
+	const choose = (fact: Fact<number>) => fromFact(conflict ? unknown : fact);
+	const usage = aggregate
+		? (Object.fromEntries(fields.map((field) => [field, choose(aggregate.usage[field])])) as Record<
+				keyof CallUsage,
+				FactSum
+			>)
+		: callTotals.usage;
+	return {
+		calls,
+		aggregate: conflict ? null : (aggregate ?? null),
+		source: aggregate ? (conflict ? ("conflict" as const) : ("aggregate" as const)) : ("calls" as const),
+		usage,
+		totalTokens: aggregate ? choose(aggregate.totalTokens) : callTotals.totalTokens,
+		usd: aggregate ? choose(aggregate.pricing.usd) : callTotals.usd,
+		apiCalls: aggregate ? choose(aggregate.apiCalls) : fromFact(observed(apiCalls)),
+		missingTokenCalls: aggregate ? choose(aggregate.missingTokenCalls) : fromFact(observed(missingCalls)),
+		unknownCoverage:
+			calls.coverage.gapRecords > 0 ||
+			conflict ||
+			(aggregate
+				? aggregate.coverage !== "complete" ||
+					aggregate.apiCalls.kind === "unknown" ||
+					aggregate.apiCalls.kind === "absent" ||
+					aggregate.missingTokenCalls.kind === "unknown" ||
+					aggregate.missingTokenCalls.kind === "absent"
+				: callTotals.incomplete > 0 || calls.unresolvedCallIds.length > 0),
+	};
+}

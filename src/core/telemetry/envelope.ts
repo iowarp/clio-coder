@@ -126,6 +126,11 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 			return { kind: "skipped", reason: "invalid-record" };
 		}
 	}
+	if (
+		value.k === "run.usage" &&
+		(!value.ctx.runId || value.ctx.label !== "worker" || value.ctx.callId || value.ctx.attemptId)
+	)
+		return { kind: "skipped", reason: "invalid-record" };
 	return { kind: "record", record: { ...value, kv: definition.version, data } as TelemetryRecord };
 }
 

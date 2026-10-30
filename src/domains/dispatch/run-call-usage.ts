@@ -5,13 +5,14 @@ import type { FactSum } from "../../core/telemetry/fact.js";
 import { readWorkerTelemetryRecord } from "../../core/telemetry/forwarder.js";
 import type { CostAggregate } from "../observability/cost.js";
 import type { CallTotals } from "../observability/folds.js";
-import { foldCallJournal } from "../observability/folds.js";
+import { foldRunJournal } from "../observability/folds.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import { usageCallsFromAttempts } from "../session/journal-usage.js";
 
 export interface RunCallUsage {
 	callIds: string[];
 	callFacts: CallTotals;
+	usageFacts: CallTotals["usage"];
 	apiCalls: number;
 	missingTokenCalls: number;
 	totalTokens: number;
@@ -31,24 +32,28 @@ const subtotal = (sum: FactSum) => sum.measured + sum.estimated;
 
 /** Live meters and receipts project the same fold as session replay; unknown facts retain coverage (#434). */
 export function runUsageFromCallRecords(records: Iterable<TelemetryRecord>): RunCallUsage {
-	const folded = foldCallJournal(records);
-	const facts = folded.totals;
-	const calls = usageCallsFromAttempts(folded.attempts);
-	const apiCalls = facts.settled + facts.settledNoUsage + facts.sentUnsettled;
-	const unknownCoverage = facts.incomplete > 0 || folded.coverage.gapRecords > 0 || folded.unresolvedCallIds.length > 0;
+	const folded = foldRunJournal(records);
+	const facts = folded;
+	const calls = usageCallsFromAttempts(folded.calls.attempts);
+	const apiCalls = subtotal(folded.apiCalls);
+	const unknownCoverage = folded.unknownCoverage;
 	const costSummary: CostAggregate = {
 		knownUsd: subtotal(facts.usd),
 		hasEstimated: facts.usd.coverage.estimated > 0,
 		hasUnknown: facts.usd.unknownCount > 0 || unknownCoverage,
-		allKnownFree: calls.length > 0 && calls.every((call) => call.costSummary?.allKnownFree === true),
+		allKnownFree:
+			folded.source === "aggregate"
+				? folded.aggregate?.pricing.pricedBy === "free"
+				: folded.source === "calls" && calls.length > 0 && calls.every((call) => call.costSummary?.allKnownFree === true),
 		calls: apiCalls,
 		...(unknownCoverage ? { unknownCallCoverageRuns: 1 } : {}),
 	};
 	return {
-		callIds: [...new Set(folded.attempts.map(({ started }) => started.callId))].sort(),
-		callFacts: facts,
+		callIds: [...new Set(folded.calls.attempts.map(({ started }) => started.callId))].sort(),
+		callFacts: folded.calls.totals,
+		usageFacts: folded.usage,
 		apiCalls,
-		missingTokenCalls: calls.reduce((sum, call) => sum + (call.missingTokenCalls ?? 0), 0),
+		missingTokenCalls: subtotal(folded.missingTokenCalls),
 		totalTokens: subtotal(facts.totalTokens),
 		inputTokens: subtotal(facts.usage.input),
 		outputTokens: subtotal(facts.usage.output),
@@ -83,7 +88,8 @@ export function createRunCallUsage(context: WorkerTelemetryContext) {
 				snapshot ??= runUsageFromCallRecords(records);
 				return true;
 			}
-			if (record.k !== "call.started" && record.k !== "call.settled" && record.k !== "gap") return true;
+			if (record.k !== "call.started" && record.k !== "call.settled" && record.k !== "run.usage" && record.k !== "gap")
+				return true;
 			records.push(record);
 			snapshot = runUsageFromCallRecords(records);
 			return true;
