@@ -584,17 +584,17 @@ export interface ChatSubmitOptions {
 	onAdmitted?: () => void;
 }
 
-/**
- * Placeholder key a target that needs no auth still has to be handed. Mirrors
- * the turn runtime's own local fallback, so a `/btw` round against a local
- * server authenticates exactly the way a turn against it does.
- */
 /** The endpoint stream slot an out-of-turn round holds; both calls are idempotent (#250). */
 interface EndpointSlot {
 	acquire(): void;
 	release(): void;
 }
 
+/**
+ * Placeholder key a target that needs no auth still has to be handed. Mirrors
+ * the turn runtime's own local fallback, so a `/btw` round against a local
+ * server authenticates exactly the way a turn against it does.
+ */
 const LOCAL_SIDE_QUESTION_API_KEY = "clio-coder-local-target";
 
 /** Closing notice an operator interrupt leaves in the transcript and the ledger. */
