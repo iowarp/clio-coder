@@ -258,6 +258,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.handle = openContextOverlayFactory(deps.tui, deps.getContextLedger, {
 			bus: deps.bus,
 			chat: deps.contextChat,
+			...(deps.observability.telemetry ? { telemetry: deps.observability.telemetry } : {}),
 			getWorkingSet: () => {
 				const readSessionEntries = deps.readSessionEntries;
 				if (!readSessionEntries) return null;

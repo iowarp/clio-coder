@@ -4,6 +4,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
+import type { TelemetryReadModel, TelemetryView } from "../domains/observability/contract.js";
 import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import type { RecallTelemetry } from "../domains/session/recall-telemetry.js";
@@ -166,6 +167,8 @@ function renderContextLedgerLines(
 	workingSet?: WorkingSetView | null,
 	workingSetConfig?: WorkingSetConfigView | null,
 	recall?: RecallTelemetry | null,
+	telemetry?: TelemetryView | null,
+	hasTelemetry = telemetry !== undefined,
 ): string[] {
 	const theme = clioTheme();
 	const lines: string[] = [];
@@ -230,47 +233,62 @@ function renderContextLedgerLines(
 	const footer = toolsLabel ? `${compaction}${ceiling} · ${toolsLabel}` : `${compaction}${ceiling}`;
 	lines.push(theme.fg("annotation", footer));
 
-	if (ledger.promptCache) {
-		const cache = ledger.promptCache;
-		const shell = cache.shellReused ? "shell reused" : "shell recompiled";
-		const backendCacheReadsUnknown = cache.backendVerdict === "unknown" || cache.backend?.cachedTokens === null;
-		const backend = backendCacheReadsUnknown
-			? "server does not report cache reads"
-			: cache.backendVerdict === "hot" || cache.backendVerdict === "partial"
-				? "backend reused"
-				: cache.backendVerdict === "cold"
-					? "backend cold"
-					: cache.backendVerdict === "small"
-						? "backend small"
-						: "backend n/a";
-		const read = cache.cacheReadTokens !== null ? `cache read ${formatTokens(cache.cacheReadTokens)}` : "cache read n/a";
-		const uncached =
-			cache.uncachedInputTokens !== null ? `uncached input ${formatTokens(cache.uncachedInputTokens)}` : null;
-		const line = backendCacheReadsUnknown
-			? ["prompt cache:", shell, "·", backend].join(" ")
-			: ["prompt cache:", shell, "·", backend, "·", read, ...(uncached ? ["·", uncached] : [])].join(" ");
-		// Reasons Clio recorded before the run describe either prefix-byte changes
-		// or local-server activity that displaced the cached prefix. A cold turn
-		// after one of them is expected rather than a provider surprise.
-		const coldReasons =
-			cache.backendVerdict === "cold" && !backendCacheReadsUnknown ? (cache.expectedColdReasons ?? []) : [];
-		// A reused shell with a cold backend means Clio kept the bytes stable
-		// but the provider re-prefilled anyway; surface that disagreement
-		// instead of hiding it. An expected reason explains the same numbers, so
-		// it is reported on its own line and not as a warning.
-		const misleading =
-			cache.shellReused && cache.backendVerdict === "cold" && !backendCacheReadsUnknown && coldReasons.length === 0;
-		lines.push(theme.fg(misleading ? "warning" : "annotation", line));
-		if (cache.backend) {
-			const prefill =
-				cache.backend.cachedTokens !== null && cache.uncachedPrefillTokens !== null
-					? `prefill: ${formatTokens(cache.uncachedPrefillTokens)} uncached · ${formatTokens(cache.backend.cachedTokens)} cached · ${formatTokens(cache.backend.promptMs)} ms`
-					: `prefill: ${formatTokens(cache.backend.promptTokens)} prompt · ${formatTokens(cache.backend.promptMs)} ms`;
-			lines.push(theme.fg("annotation", prefill));
-		}
-		if (coldReasons.length > 0) {
-			const reasons = coldReasons.map(coldReasonText).join(", ");
-			lines.push(theme.fg("annotation", `last cache-affecting events: ${reasons} (reuse measured separately)`));
+	// Cache facts are the newest main call's journal record (#434 §11.3), so an unreported cache read reads unknown,
+	// never 0. The session shell hash and the serving backend's timings are Clio's own and stay on the ledger.
+	const cache = ledger.promptCache;
+	const call = telemetry?.calls({ labels: ["main"], limit: 1 }).calls[0] ?? null;
+	if (cache || call) {
+		const shell = cache ? (cache.shellReused ? "shell reused" : "shell recompiled") : "shell n/a";
+		if (!hasTelemetry) lines.push(theme.fg("annotation", `prompt cache: ${shell} · cache facts not available`));
+		else if (!call?.usage) lines.push(theme.fg("annotation", `prompt cache: ${shell} · no settled call yet`));
+		else {
+			const verdict = call.cache.verdict;
+			const readFact = call.usage.cacheRead.fact;
+			const backendCacheReadsUnknown =
+				verdict === "unknown" ||
+				("kind" in readFact && readFact.kind === "unknown") ||
+				cache?.backend?.cachedTokens === null;
+			const backend = backendCacheReadsUnknown
+				? "server does not report cache reads"
+				: verdict === "hot" || verdict === "partial"
+					? "backend reused"
+					: verdict === "cold"
+						? "backend cold"
+						: "backend small";
+			const line = backendCacheReadsUnknown
+				? ["prompt cache:", shell, "·", backend].join(" ")
+				: [
+						"prompt cache:",
+						shell,
+						"·",
+						backend,
+						"·",
+						`cache read ${call.usage.cacheRead.display}`,
+						"·",
+						`uncached input ${call.usage.input.display}`,
+					].join(" ");
+			// Reasons Clio recorded before the call describe either prefix-byte changes
+			// or local-server activity that displaced the cached prefix. A cold turn
+			// after one of them is expected rather than a provider surprise.
+			const coldReasons = verdict === "cold" && !backendCacheReadsUnknown ? call.cache.expectedColdReasons : [];
+			// A reused shell with a cold backend means Clio kept the bytes stable
+			// but the provider re-prefilled anyway; surface that disagreement
+			// instead of hiding it. An expected reason explains the same numbers, so
+			// it is reported on its own line and not as a warning.
+			const misleading =
+				cache?.shellReused === true && verdict === "cold" && !backendCacheReadsUnknown && coldReasons.length === 0;
+			lines.push(theme.fg(misleading ? "warning" : "annotation", line));
+			if (cache?.backend) {
+				const prefill =
+					cache.backend.cachedTokens !== null
+						? `prefill: ${call.cache.uncachedPrefill.display} uncached · ${formatTokens(cache.backend.cachedTokens)} cached · ${formatTokens(cache.backend.promptMs)} ms`
+						: `prefill: ${formatTokens(cache.backend.promptTokens)} prompt · ${formatTokens(cache.backend.promptMs)} ms`;
+				lines.push(theme.fg("annotation", prefill));
+			}
+			if (coldReasons.length > 0) {
+				const reasons = coldReasons.map(coldReasonText).join(", ");
+				lines.push(theme.fg("annotation", `last cache-affecting events: ${reasons} (reuse measured separately)`));
+			}
 		}
 	}
 
@@ -311,6 +329,8 @@ export interface OpenContextOverlayOptions {
 	getWorkingSetConfig?: () => WorkingSetConfigView | null;
 	/** Recall fold over the same active path as `getWorkingSet`; absent hides the readmitted figure (#422). */
 	getRecallTelemetry?: () => RecallTelemetry | null;
+	/** The telemetry read model; absent renders the cache facts as not available. */
+	telemetry?: Pick<TelemetryReadModel, "live" | "subscribe">;
 }
 
 /**
@@ -332,6 +352,7 @@ export function openContextOverlay(
 			options?.getWorkingSet?.() ?? null,
 			options?.getWorkingSetConfig?.() ?? null,
 			options?.getRecallTelemetry?.() ?? null,
+			options?.telemetry ? options.telemetry.live() : undefined,
 		);
 		const inspection = options?.chat?.inspectLiveBudget?.();
 		if (inspection?.status === "available") {
@@ -397,6 +418,10 @@ export function openContextOverlay(
 	if (options?.bus) {
 		unsubscribes.push(options.bus.on(BusChannels.ContextPruned, refresh));
 		unsubscribes.push(options.bus.on(BusChannels.ContextWarning, refresh));
+	}
+	// A settled call's journal batch lands just after its chat event; repaint when it does, at most 10 Hz.
+	if (options?.telemetry) {
+		unsubscribes.push(options.telemetry.subscribe("calls", refresh));
 	}
 	if (options?.chat) {
 		unsubscribes.push(
