@@ -16,7 +16,6 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
@@ -59,6 +58,7 @@ import {
 	planFleetResume,
 	readFleetRun,
 } from "../domains/dispatch/index.js";
+import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
@@ -785,7 +785,7 @@ function rowTokenFields(row: RunEnvelope): Record<"input" | "output" | "total", 
 function receiptTokenFields(row: RunEnvelope): { input: number | null; output: number | null } {
 	const path = row.receiptPath ?? join(clioStateDir(), "receipts", `${row.id}.json`);
 	try {
-		const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<RunReceipt>;
+		const parsed = JSON.parse(readReceiptTextSync(path)) as Partial<RunReceipt>;
 		return { input: countOrNull(parsed.inputTokenCount), output: countOrNull(parsed.outputTokenCount) };
 	} catch {
 		return { input: null, output: null };

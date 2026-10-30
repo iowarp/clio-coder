@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import {
 	formatBudgetPolicy,
 	formatBudgetReasons,
@@ -8,6 +7,7 @@ import {
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { type DispatchOwnership, dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
+import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { isTerminalRunEnvelope, type RunEnvelope, type RunReceipt } from "../domains/dispatch/types.js";
 import { summarizeTrustStatus, trustStateWord } from "../domains/evidence/trust-projection.js";
 import {
@@ -454,7 +454,7 @@ function runReceipt(deps: MonitorToolDeps, runId: string, ownership: DispatchOwn
 	}
 	let raw: string;
 	try {
-		raw = readFileSync(run.receiptPath, "utf8");
+		raw = readReceiptTextSync(run.receiptPath);
 	} catch (err) {
 		return {
 			kind: "error",

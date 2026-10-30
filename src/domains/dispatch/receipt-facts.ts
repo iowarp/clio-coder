@@ -24,6 +24,7 @@ import { inspectRunReceiptTrustStatus, retiredIntegrityVersionOf } from "../evid
 import { readEvidenceIndex } from "../observability/evidence-index.js";
 import { TELEMETRY_FOLD_VERSION } from "../observability/folds.js";
 import { receiptFilePath } from "../session/view-artifacts.js";
+import { readReceiptTextSync } from "./receipt-store.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
 
 export type RunResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
@@ -209,7 +210,7 @@ function workerReceiptFacts(receipt: Record<string, unknown>): RunReceiptFacts |
 function readReceiptFileFacts(runId: string, stateDir: string): RunReceiptFacts | null {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(readFileSync(receiptFilePath(stateDir, runId), "utf8"));
+		parsed = JSON.parse(readReceiptTextSync(receiptFilePath(stateDir, runId)));
 	} catch {
 		return null;
 	}
@@ -475,7 +476,7 @@ export function readReceiptEvidence(
 	let receipt: Record<string, unknown> | null = null;
 	let state: ReceiptEvidenceV1["receipt"] = "missing";
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(receiptFilePath(stateDir, runId), "utf8"));
+		const parsed: unknown = JSON.parse(readReceiptTextSync(receiptFilePath(stateDir, runId)));
 		if (isRecord(parsed) && optionalString(parsed.runId) === runId) {
 			receipt = parsed;
 			// Whether the seal verifies is the integrity check's to say; this only tells a file that carries none.

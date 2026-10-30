@@ -6,6 +6,7 @@ import type { SideCallAuth } from "../core/oauth-retry.js";
 import { observedToolCallOrigin, telemetryContext } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { recordTelemetry } from "../core/telemetry/producer.js";
+import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { turnSettlementFromCalls } from "../domains/observability/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/observability/call-scope.js";
 import type { TelemetrySessionLease } from "../domains/observability/session-journals.js";
@@ -58,7 +59,7 @@ import { ContinuityController } from "./continuity-controller.js";
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { BusChannels, type RunAbortSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
@@ -391,7 +392,7 @@ function readWorkerReceipt(
 		const envelope = dispatch?.getRun(runId);
 		if (!envelope) return null;
 		const path = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${runId}.json`);
-		const receipt = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+		const receipt = JSON.parse(readReceiptTextSync(path)) as Record<string, unknown>;
 		return receipt.runId === runId ? receipt : null;
 	} catch {
 		// A run without a sealed receipt yet reads as absent; the caller marks it partial.

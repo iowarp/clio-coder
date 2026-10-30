@@ -68,6 +68,7 @@ import {
 } from "./gate-decisions.js";
 import { type DispatchIntent, declaredScopeIntent } from "./intent.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
+import { readReceiptTextSync } from "./receipt-store.js";
 import { type FleetRunRecord, writeFleetRun, writeFleetRunSync } from "./state.js";
 import type { RunReceipt } from "./types.js";
 import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "./workspace-checkpoint.js";
@@ -563,7 +564,7 @@ async function runFleetHoldingWorkspace(
 	for (const [stepId, replayedResult] of replayed) {
 		try {
 			const receipt = JSON.parse(
-				readFileSync(join(clioStateDir(), "receipts", `${replayedResult.terminalRunId}.json`), "utf8"),
+				readReceiptTextSync(join(clioStateDir(), "receipts", `${replayedResult.terminalRunId}.json`)),
 			) as RunReceipt;
 			receiptsByStep.set(stepId, receipt);
 		} catch {

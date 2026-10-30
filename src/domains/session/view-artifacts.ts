@@ -10,6 +10,7 @@ import type { DispatchContract } from "../dispatch/contract.js";
 import type { DispatchOwnership } from "../dispatch/ownership.js";
 import { dispatchOwnership } from "../dispatch/ownership.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "../dispatch/receipt-integrity.js";
+import { readReceiptText, readReceiptTextSync } from "../dispatch/receipt-store.js";
 import type { RunEnvelope, RunReceipt } from "../dispatch/types.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../evidence/store.js";
 import { renderEvidenceTokens } from "../evidence/totals-display.js";
@@ -368,7 +369,7 @@ function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerifyResult
 	const target = receiptFilePath(stateDir, runId);
 	let raw: string;
 	try {
-		raw = readFileSync(target, "utf8");
+		raw = readReceiptTextSync(target);
 	} catch (err) {
 		const e = err as NodeJS.ErrnoException;
 		if (e.code === "ENOENT") return { ok: false, reason: "receipt file not found" };
@@ -519,7 +520,7 @@ export function verifyReceiptFileReport(stateDir: string, runId: string): Receip
 	const result = verifyReceiptFile(stateDir, runId);
 	let receipt: RunReceipt | null = null;
 	try {
-		receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(receiptPath)) as RunReceipt;
 	} catch {
 		// The verifier's named file or JSON check below retains the actionable error.
 	}
@@ -929,7 +930,7 @@ async function loadReceiptSummary(path: string, stateDir: string, runId: string)
 	try {
 		if ((await stat(path)).size > JSON_PRETTY_MAX_BYTES)
 			return { format: "text", lines: ["Receipt is too large to summarize. Press i for the stored content."], details };
-		const receipt = JSON.parse(await readFile(path, "utf8")) as RunReceipt;
+		const receipt = JSON.parse(await readReceiptText(path)) as RunReceipt;
 		const report = verifyReceiptFileReport(stateDir, runId);
 		return {
 			format: "markdown",
@@ -1185,7 +1186,7 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 					try {
 						receiptTooLarge = (await stat(receiptPath)).size > JSON_PRETTY_MAX_BYTES;
 						if (!receiptTooLarge) {
-							receipt = JSON.parse(await readFile(receiptPath, "utf8")) as RunReceipt;
+							receipt = JSON.parse(await readReceiptText(receiptPath)) as RunReceipt;
 						}
 					} catch {
 						// A missing or unreadable receipt can still have session tool output to show.

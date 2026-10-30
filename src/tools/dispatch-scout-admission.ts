@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import { parseScoutResult, resultContractSourceId, type ScoutResult } from "../domains/agents/result-contract.js";
@@ -13,6 +13,7 @@ import { type ExecutionPlan, requireAgentSteps } from "../domains/dispatch/execu
 import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
+import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import type { RoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { compileScoutTransition, type ScoutAgentBinding } from "../domains/dispatch/scout-transition.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
@@ -105,7 +106,7 @@ export function loadVerifiedScoutSource(input: {
 	if (!existsSync(receiptPath)) throw new Error(`dispatch: Scout source receipt '${input.ref.runId}' is unavailable`);
 	let receipt: RunReceipt;
 	try {
-		receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(receiptPath)) as RunReceipt;
 	} catch (error) {
 		throw new Error(
 			`dispatch: Scout source receipt is unreadable: ${error instanceof Error ? error.message : String(error)}`,

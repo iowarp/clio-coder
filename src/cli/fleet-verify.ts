@@ -14,9 +14,9 @@
  * because shape alone does not prove the id was ever served.
  */
 
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
+import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { inspectRunReceiptTrustStatus, TRUST_STATUS_AXES, type TrustStatusAxis } from "../domains/evidence/index.js";
@@ -77,7 +77,7 @@ function classify(reason: string): FleetVerifyReason {
 function loadReceipt(envelope: RunEnvelope): RunReceipt | null {
 	const path = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${envelope.id}.json`);
 	try {
-		return JSON.parse(readFileSync(path, "utf8")) as RunReceipt;
+		return JSON.parse(readReceiptTextSync(path)) as RunReceipt;
 	} catch {
 		return null;
 	}

@@ -20,6 +20,7 @@ import type { Payload } from "../../core/telemetry/schemas.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { hostRunSettledFacts, runStatusForOutcome } from "./outcome.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "./receipt-integrity.js";
+import { readReceiptTextSync, receiptTombstoneOf } from "./receipt-store.js";
 import type { Ledger } from "./state.js";
 import type { RunEnvelope, RunReceipt, RunStatus } from "./types.js";
 
@@ -164,7 +165,7 @@ function sealedEnvelopeFor(runId: string): { envelope: RunEnvelope; receipt: Run
 	if (!existsSync(path)) return null;
 	let receipt: RunReceipt;
 	try {
-		receipt = JSON.parse(readFileSync(path, "utf8")) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(path)) as RunReceipt;
 	} catch {
 		return null;
 	}
@@ -310,7 +311,13 @@ export function recoverOrphanReceipts(ledger: Ledger): OrphanRecoverySummary {
 		}
 		let receipt: RunReceipt;
 		try {
-			receipt = JSON.parse(readFileSync(path, "utf8")) as RunReceipt;
+			const text = readFileSync(path, "utf8");
+			// A pruned receipt's tombstone is no orphan: its run was sealed and its evidence copy holds the receipt.
+			if (receiptTombstoneOf(text) !== null) {
+				summary.skipped += 1;
+				continue;
+			}
+			receipt = JSON.parse(text) as RunReceipt;
 		} catch {
 			summary.corrupt += quarantine(path) ? 1 : 0;
 			continue;

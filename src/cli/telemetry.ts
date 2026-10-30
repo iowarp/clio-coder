@@ -27,6 +27,7 @@ clio-coder telemetry consent [--workspace <dir>] [--revoke | --list]
 clio-coder telemetry export <session-id> --out <dir> [--content-free | --structural | --research]
 clio-coder telemetry import-bundle <bundle-dir> --out <dir>
 clio-coder telemetry prune [--apply] [--days N] [--max-gib N] [--research-days N] [--research-max-gib N]
+clio-coder telemetry prune --receipts [--apply]
 clio-coder telemetry rebuild [--session <id>] [--apply]
 
 import-legacy rebuilds call facts from a session ledger written before the call
@@ -67,6 +68,12 @@ Ledgers, receipts and trace.sqlite are not telemetry journals and stay. Nothing
 is deleted without --apply, which re-checks each owner first and prints every
 file it removed.
 
+prune --receipts is the opt-in receipt pass. It lists each sealed receipt whose
+run's evidence bundle holds a copy under the same seal that verifies, and with
+--apply replaces that receipt with a tombstone naming the copy, which every
+receipt reader follows. A receipt of an open run, an unsealed one, or one with
+no verified copy stays, with the reason printed.
+
 rebuild re-projects each session's meta.json usage, the spend the resume picker
 shows, from its journals through the read model, and lists every session whose
 stored projection drifted: its old and new totals and the fold versions that
@@ -80,7 +87,41 @@ function formatBytes(bytes: number): string {
 	return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MiB` : `${bytes} B`;
 }
 
+/** The opt-in receipt pass: tombstone a receipt only where its evidence copy verifies under its seal (#434, 5b a). */
+async function runReceiptPrune(apply: boolean): Promise<number> {
+	const { applyReceiptPrune, planReceiptPrune } = await import("../domains/dispatch/receipt-prune.js");
+	const plan = planReceiptPrune();
+	for (const hold of plan.held) process.stdout.write(`kept ${hold.path} (${hold.reason})\n`);
+	const total = plan.prune.reduce((sum, action) => sum + action.bytes, 0);
+	if (!apply) {
+		for (const action of plan.prune)
+			process.stdout.write(
+				`would prune ${action.path} (${formatBytes(action.bytes)}; evidence ${action.evidenceId} keeps it)\n`,
+			);
+		process.stdout.write(
+			`dry run: ${plan.prune.length} receipt(s), ${formatBytes(total)}; nothing pruned (pass --apply)\n`,
+		);
+		return 0;
+	}
+	const result = applyReceiptPrune(plan);
+	for (const action of result.pruned)
+		process.stdout.write(
+			`pruned ${action.path} (${formatBytes(action.bytes)}; evidence ${action.evidenceId} keeps it)\n`,
+		);
+	for (const skipped of result.skipped) process.stdout.write(`skipped ${skipped.path} (${skipped.reason})\n`);
+	process.stdout.write(`pruned ${result.pruned.length} receipt(s); skipped ${result.skipped.length}\n`);
+	return 0;
+}
+
 async function runPrune(argv: ReadonlyArray<string>): Promise<number> {
+	if (argv.includes("--receipts")) {
+		const rest = argv.filter((arg) => arg !== "--receipts");
+		if (rest.some((arg) => arg !== "--apply")) {
+			process.stderr.write(HELP);
+			return 2;
+		}
+		return runReceiptPrune(rest.includes("--apply"));
+	}
 	const policy = { ...DEFAULT_PRUNE_POLICY };
 	const numeric: Record<string, (value: number) => void> = {
 		"--days": (value) => {

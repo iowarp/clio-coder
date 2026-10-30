@@ -13,6 +13,7 @@ import type {
 	ToolCallStat,
 } from "../dispatch/index.js";
 import { type ExecutionRole, isExecutionRole, readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
+import { readReceiptText } from "../dispatch/receipt-store.js";
 import { aggregateCostAmounts, callCoverageForRun } from "../observability/cost.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import { foldDecisionBoard } from "../session/decision-board.js";
@@ -1656,7 +1657,7 @@ async function readReceipt(
 	const receiptPath = envelope.receiptPath ?? join(stateDir, "receipts", `${envelope.id}.json`);
 	let raw: string;
 	try {
-		raw = await readFile(receiptPath, "utf8");
+		raw = await readReceiptText(receiptPath);
 	} catch (error) {
 		const err = error as NodeJS.ErrnoException;
 		if (err.code === "ENOENT") {

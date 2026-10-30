@@ -29,8 +29,10 @@ import type { FactSum } from "../../src/core/telemetry/fact.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { clioDataDir } from "../../src/core/xdg.js";
 import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { applyReceiptPrune, planReceiptPrune } from "../../src/domains/dispatch/receipt-prune.js";
 import { openCallJournal } from "../../src/domains/observability/call-journal.js";
 import type { RepoSource, SessionSource } from "../../src/domains/observability/read-model.js";
 import {
@@ -273,6 +275,30 @@ test("a run's receipt evidence carries sealed checks only under a seal that veri
 	strictEqual(failed?.pricing.usd.kind, "unknown");
 	strictEqual(failed?.target.targetId, envelope.targetId);
 	strictEqual(imported({ ...receipt, integrity: undefined })?.usage.input.kind, "measured");
+
+	// Opt-in pruning tombstones a receipt only once its evidence copy verifies, and readers follow the tombstone back.
+	writeReceipt(receipt);
+	writeFileSync(join(stateDir, "runs.json"), JSON.stringify([envelope]));
+	strictEqual(planReceiptPrune(stateDir).held[0]?.reason, "no-evidence-copy");
+	const evidenceId = `evidence-${Date.now()}`;
+	mkdirSync(join(clioDataDir(), "evidence", evidenceId), { recursive: true });
+	writeFileSync(
+		join(clioDataDir(), "evidence", evidenceId, "receipt.json"),
+		JSON.stringify({ version: 1, receipts: [receipt] }),
+	);
+	const row = { runId: "run-evidence", evidenceId, tags: [], firstPassSuccess: true, findingCount: 0 };
+	writeFileSync(join(stateDir, "evidence-index.json"), JSON.stringify([{ ...row, generatedAt: now.now.toISOString() }]));
+	const plan = planReceiptPrune(stateDir);
+	strictEqual(plan.prune[0]?.evidenceId, evidenceId);
+	strictEqual(applyReceiptPrune(plan).pruned.length, 1);
+	ok(readFileSync(join(stateDir, "receipts", "run-evidence.json"), "utf8").includes("clio-receipt-tombstone/1"));
+	strictEqual(read().integrity.state, "verified");
+	strictEqual(
+		imported(JSON.parse(readFileSync(join(stateDir, "receipts", "run-evidence.json"), "utf8")))?.usage.input.kind,
+		"measured",
+	);
+	rmSync(join(clioDataDir(), "evidence", evidenceId), { recursive: true });
+	strictEqual(read().receipt, "missing", "a tombstone whose copy is gone reads as a missing receipt");
 });
 
 test("the timeline and why-stopped carry config, budget and quota records, spend marked as its calls were priced (#434 §8, §12.6)", () => {

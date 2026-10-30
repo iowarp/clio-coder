@@ -1,4 +1,5 @@
 import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
+import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { renderCostAmount } from "../domains/observability/cost.js";
 /**
  * `clio-coder fleet view <runId|fleetRootId> [--follow]`.
@@ -168,7 +169,7 @@ function evidenceLine(run: RunEnvelope): { text: string; receiptPath: string | n
 	const path = receiptPathFor(run);
 	let receipt: RunReceipt;
 	try {
-		receipt = JSON.parse(readFileSync(path, "utf8")) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(path)) as RunReceipt;
 	} catch (error) {
 		return {
 			text: `receipt unavailable: cannot read ${path} (${error instanceof Error ? error.message : String(error)})`,

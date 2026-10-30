@@ -1,10 +1,10 @@
-import { readFileSync } from "node:fs";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { readAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
 import type { DispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
+import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import type { RunEnvelope, RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
 import { isTerminalRunEnvelope } from "../domains/dispatch/types.js";
 import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
@@ -79,7 +79,7 @@ export function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence 
 	}
 	let receipt: RunReceipt;
 	try {
-		receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(run.receiptPath)) as RunReceipt;
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return unavailableRunEvidence(

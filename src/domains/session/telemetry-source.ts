@@ -5,6 +5,7 @@ import { assertSafeId } from "../../core/safe-id.js";
 import type { ReceiptEvidenceV1 } from "../../core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { readReceiptEvidence } from "../dispatch/receipt-facts.js";
+import { evidenceReceiptCopyPath, receiptFromEvidenceCopy, receiptTombstoneOf } from "../dispatch/receipt-store.js";
 import type { RunEnvelope, RunReceipt } from "../dispatch/types.js";
 import type { ReceiptIntegrityOutcome } from "../evidence/trust-status.js";
 import { verifyReceiptIntegrityOutcome } from "../evidence/trust-status.js";
@@ -237,12 +238,18 @@ function* receiptSource(stateDir: string, runId: string): Load<JournalSource | n
 	const raw = yield* text(join(stateDir, "receipts", `${runId}.json`));
 	if (raw === null) return null;
 	let value: unknown;
-	try {
-		value = JSON.parse(raw);
-	} catch {
-		// A torn receipt holds no totals to keep; the run stays unknown coverage.
-		return null;
-	}
+	const tombstone = receiptTombstoneOf(raw);
+	if (tombstone !== null) {
+		// A pruned receipt reads from its evidence copy under the same seal, or not at all (#434).
+		value = receiptFromEvidenceCopy(tombstone, yield* text(evidenceReceiptCopyPath(tombstone.evidenceId)));
+		if (value === null) return null;
+	} else
+		try {
+			value = JSON.parse(raw);
+		} catch {
+			// A torn receipt holds no totals to keep; the run stays unknown coverage.
+			return null;
+		}
 	const record = importLegacyReceipt(runId, value, yield* receiptSeal(stateDir, runId, value));
 	return record ? { present: true, records: [record], modes: [], skipped: 0, damaged: 0 } : null;
 }

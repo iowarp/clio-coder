@@ -1,4 +1,5 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import { readReceiptTextSync } from "../dispatch/receipt-store.js";
 
 /**
  * Observability domain wire-up. Listens to the dispatch bus channels and folds
@@ -8,7 +9,7 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
  * bundle landed.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
 	BusChannels,
@@ -552,7 +553,7 @@ export function createObservabilityBundle(
 					if (!name.endsWith(".json")) continue;
 					let run: RunReceipt;
 					try {
-						run = JSON.parse(readFileSync(join(receiptsDir, name), "utf8")) as RunReceipt;
+						run = JSON.parse(readReceiptTextSync(join(receiptsDir, name))) as RunReceipt;
 					} catch (error) {
 						writeDiagnostic(`[clio-coder:usage] cannot read receipt ${name}: ${String(error)}\n`);
 						continue;

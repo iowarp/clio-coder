@@ -148,6 +148,8 @@ The environment variables `CLIO_CODER_MEMORY_TRACE`, `CLIO_CODER_OBSERVATION_TRA
 
 `clio-coder telemetry prune` is a dry run unless `--apply`. It removes, oldest first, session journals and their objects past 90 days or over 1 GiB, unreferenced run journals by the same rule, objects no record cites, and research content past 30 days or over 4 GiB, together with the research files under `<stateDir>/telemetry/research/`. It never touches a live or locked session or run, a fork parent a kept child reads, or a run that a kept journal or a receipt references. Research content expires before the records that cite it, which then read as missing. Ledgers, receipts and `trace.sqlite` are not telemetry journals and are never pruned by it.
 
+Receipt pruning is a separate, opt-in pass: `clio-coder telemetry prune --receipts` lists each sealed receipt whose run's evidence bundle holds a copy under the same seal digest that verifies, against the run's ledger row while the ring holds it, and with `--apply` replaces that receipt with a `clio-receipt-tombstone/1` file naming the copy ([receipt-prune.ts](../../src/domains/dispatch/receipt-prune.ts)). Every receipt reader goes through one resolver that follows the tombstone back to the copy ([receipt-store.ts](../../src/domains/dispatch/receipt-store.ts)); a copy that no longer holds the receipt under its seal reads as a missing receipt. A receipt of an open run, an unsealed one, or one with no verified copy stays.
+
 `clio-coder telemetry rebuild` re-projects each session's `meta.json` usage, the spend the resume picker shows, from its journals through the read model: the whole-session totals a live session projects as it runs, stamped with the fold version ([usage-projection.ts](../../src/domains/session/usage-projection.ts)). It lists every session whose stored projection drifted, with its old and new totals and fold versions; a meta written before the projection has no fold version and always drifts. It writes only with `--apply`, and never a live session's meta, which its own process projects.
 
 ## Vocabulary mapping
@@ -172,7 +174,6 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 
 These parts of the design are not in this build yet:
 
-- Opt-in pruning of receipts whose sealed evidence copy verifies, with one resolver that follows the tombstone.
 - The GUI explain popover and timeline view.
 
 Startup diagnostics stay in their own `startup/<date>.jsonl` file; they are not journal records.

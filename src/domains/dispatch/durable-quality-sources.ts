@@ -19,6 +19,7 @@
 import { existsSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { join } from "node:path";
 import { type GateDecisionArtifact, gateDecisionsDirectory, verifyGateDecisionArtifact } from "./gate-decisions.js";
+import { readReceiptTextSync } from "./receipt-store.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
 
 export interface DurableReceiptSource {
@@ -138,7 +139,7 @@ export function createDurableQualitySourceCache(
 			changed = true;
 			let source: DurableReceiptSource | null = null;
 			try {
-				const receipt = JSON.parse(readFile(path)) as unknown;
+				const receipt = JSON.parse(readReceiptTextSync(path)) as unknown;
 				if (isObject(receipt)) source = { receipt: receipt as unknown as RunReceipt, envelope };
 			} catch {
 				source = null;

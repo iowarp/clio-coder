@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -56,6 +56,7 @@ import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requireme
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
+import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
 import { newRunId } from "../domains/dispatch/state.js";
 import type {
@@ -1102,7 +1103,7 @@ function readVerifiedGateReceipt(deps: DispatchToolDeps, runId: string): RunRece
 	if (!existsSync(path)) return null;
 	let receipt: RunReceipt;
 	try {
-		receipt = JSON.parse(readFileSync(path, "utf8")) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(path)) as RunReceipt;
 	} catch (error) {
 		throw new Error(`pending gate receipt ${runId} is unreadable: ${competeErrorMessage(error)}`);
 	}
