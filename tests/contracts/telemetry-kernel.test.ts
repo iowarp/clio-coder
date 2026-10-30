@@ -125,6 +125,12 @@ test("segment readers preserve future records and distinguish a torn tail from i
 	});
 	deepStrictEqual(Object.keys(KIND_REGISTRY), [...KIND_NAMES]);
 	for (const definition of Object.values(KIND_REGISTRY)) strictEqual(Value.Check(definition.schema, undefined), false);
+	const callId = newCallId();
+	const outcome = { callIds: [callId], outcome: "committed", checkpointTurnId: "checkpoint" };
+	strictEqual(validPayload("compaction.closed", outcome), true);
+	strictEqual(validPayload("compaction.closed", { ...outcome, checkpointTurnId: null }), false);
+	strictEqual(validPayload("compaction.closed", { ...outcome, callIds: [callId, callId] }), false);
+	strictEqual(validPayload("compaction.closed", { ...outcome, outcome: "failed", checkpointTurnId: null }), true);
 });
 
 test("monotonic spans never cross a process or segment origin", () => {

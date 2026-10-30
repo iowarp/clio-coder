@@ -244,6 +244,10 @@ describe("production compaction controls", () => {
 		return {
 			session,
 			liveUsage,
+			journalOutcomes: async () =>
+				(await readCallJournal(join(clioStateDir(), "sessions", state.meta.cwdHash, state.meta.id))).records
+					.map(({ record }) => record)
+					.filter((record) => record.k === "compaction.closed"),
 			journalCalls: async () =>
 				(await readCallJournal(join(clioStateDir(), "sessions", state.meta.cwdHash, state.meta.id))).records
 					.map(({ record }) => record)
@@ -978,6 +982,10 @@ describe("production compaction controls", () => {
 		const journalCalls = await f.journalCalls();
 		deepStrictEqual(persisted.callIds, [...new Set(journalCalls.map((row) => row.data.callId))]);
 		strictEqual(persisted.callIds?.length, f.calls.length);
+		deepStrictEqual(
+			(await f.journalOutcomes()).map((row) => row.data),
+			[{ callIds: persisted.callIds, outcome: "committed", checkpointTurnId: persisted.turnId }],
+		);
 	});
 	it("reads the configured system prompt at call time, separate from focus", async () => {
 		const f = fixture();
@@ -1186,6 +1194,10 @@ describe("production compaction controls", () => {
 		strictEqual(journalCalls[0]?.data.disposition, "settled");
 		strictEqual(journalCalls[1]?.data.disposition, "sent_unsettled");
 		ok(journalCalls.every((record) => record.data.label === "compaction"));
+		deepStrictEqual(
+			(await f.journalOutcomes()).map((row) => row.data),
+			[{ callIds: journalCalls.map((row) => row.data.callId), outcome: "failed", checkpointTurnId: null }],
+		);
 		const read = readOutOfTurnUsageRows(clioStateDir());
 		deepStrictEqual(read.errors, []);
 		strictEqual(read.rows.length, 2);
@@ -1437,6 +1449,7 @@ describe("production compaction controls", () => {
 			throw new Error("post-append failure");
 		};
 		await rejects(f.run(), /post-append failure/);
+		strictEqual((await f.journalOutcomes())[0]?.data.outcome, "committed");
 		strictEqual(ledgerUsageCalls(f.entries()).length, 1);
 		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 0);
 	});
@@ -1447,6 +1460,7 @@ describe("production compaction controls", () => {
 			throw new Error("partial append failure");
 		};
 		await rejects(f.run(), /checkpoint persistence is unresolved/);
+		strictEqual((await f.journalOutcomes())[0]?.data.outcome, "unresolved");
 		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 0);
 		match(readFileSync(sessionPaths(f.state.meta).current, "utf8"), /compactionSummary/);
 	});

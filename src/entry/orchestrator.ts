@@ -64,6 +64,8 @@ import { settingsSourceFor, updateProjectLocalSettings } from "../core/settings-
 import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
+import { recordTelemetry } from "../core/telemetry/producer.js";
+import type { Payload } from "../core/telemetry/schemas.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -1536,285 +1538,50 @@ async function runCompactionFlow(
 		session.current()?.id === meta.id && (session.tree(meta.id).leafId ?? undefined) === activeLeafTurnId;
 	const entries = withProviderCheckpointMeasurements(filterEntriesToActivePath(session.readEntries(), activeLeafTurnId));
 	if (entries.length === 0) return null;
-	// Folded over the full applicable ledger before this compaction cuts it, so
-	// the carry written below reflects every durable transition, including ones
-	// older than the cut. Resolved once and used for three things: the payload
-	// the summary carries, the note's one-time price on both sides of the
-	// before/after comparison, and nothing else. Inspection never executes the
-	// action it proposes.
-	const continuity = resolveContinuityProjection({
-		entries,
-		sessionId: meta.id,
-		...(meta.parentSessionId && meta.parentTurnId
-			? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
-			: {}),
-	});
-	// Only this session's own validated fold is carried forward. An inherited
-	// note is recall: writing it into this session's summary would republish
-	// another branch's transaction under this one's compaction.
-	const continuityNote = {
-		tokens: continuityProjectionTokens(continuity),
-		anchorTurnId: continuity.noteAnchorTurnId,
-	};
-	budget?.signal?.throwIfAborted();
-	const systemPrompt = await readCompactionSystemPrompt(settings.context.compaction.systemPrompt, meta.cwd);
-	budget?.signal?.throwIfAborted();
-	const resolved = await resolveCompactionModel(settings, providers, budget?.signal);
-	budget?.signal?.throwIfAborted();
-	if (!resolved) {
-		throw new Error("no model configured; set chat.target + chat.model");
-	}
-	// Summarize only the active branch: after a /tree switch the raw file
-	// still holds abandoned sibling turns, and a summary that folds them in
-	// would persist abandoned content back into the active context. The full
-	// file read stays in place for protected artifacts and the masking
-	// rewrite, which are session-global. The task board is not: it used to
-	// read the full file too (last taskLedger entry in file order, with no
-	// branch filter at all), which was a second, independent instance of this
-	// same bug. See the taskBoard wiring below for the fix.
-	if (!isOriginCurrent()) throw new Error("compaction session or branch changed before summarization");
-	const calls: CompactionCallObservation[] = [];
-	const preserveCalls = () =>
-		recordFailedCompactionCalls(
-			{
-				stateDir,
-				sessionId: meta.id,
-				repoIdentity: meta.cwdHash || cwdHash(meta.cwd),
-				target: resolved.targetId,
-				model: resolved.wireModelId,
-			},
-			calls,
-			isOriginCurrent() ? observability : undefined,
-		);
-
-	// A compaction summary is a full streamed request against its resolved target.
-	// The whole transcript goes to it, so the session's restrictions decide first.
-	const flowViolation = admission?.admitFlow?.({
-		targetId: resolved.targetId,
-		runtimeId: resolved.runtimeId,
-		wireModelId: resolved.wireModelId,
-	});
-
-	// Hold the same canonical endpoint slot as an ordinary turn, /btw round, or
-	// pre-warm so dispatch admission and background memory see its real usage.
-	const releaseEndpointSlot = resolved.endpointKey === null ? () => {} : registerForegroundStream(resolved.endpointKey);
-	const { providerCompaction, ...compactionBudget } = budget ?? {};
-	const nativeEnabled =
-		settings.context.compaction.provider === "native" &&
-		!settings.context.compaction.model &&
-		resolved.runtimeId === "openai-codex";
-	let nativeAdmission: Promise<void> | undefined;
-	const admitSummary = async (): Promise<void> => {
-		if (admission?.summaryAdmitted) return;
-		await budget?.beforeSummaryCall?.();
-		if (resolved.costProvenance === "known" || resolved.costProvenance === "estimated") {
-			await admission?.scheduling?.admitPaidRequest?.({
-				waitForRaise: admission.headless !== true,
-				...(admission.getCeilingUsd ? { getCeilingUsd: admission.getCeilingUsd } : {}),
-				...(budget?.signal ? { signal: budget.signal } : {}),
-			});
-		}
-	};
-
-	let result: CompactResult;
+	// Keep this owner alive through checkpoint publication, after individual streams close (#434).
+	const lease = await observability?.acquireTelemetrySession?.(meta, "compaction");
+	const callIds = new Set<string>();
+	const closure: Payload<"compaction.closed"> = { callIds: [], outcome: "failed", checkpointTurnId: null };
 	try {
-		result = await compact({
-			...(observability?.acquireTelemetrySession
-				? {
-						telemetry: {
-							origin: meta,
-							acquire: observability.acquireTelemetrySession,
-							label: "compaction",
-							targetId: resolved.targetId,
-							runtimeId: resolved.runtimeId,
-							costProvenance: resolved.costProvenance,
-						},
-					}
-				: {}),
+		// Folded over the full applicable ledger before this compaction cuts it, so
+		// the carry written below reflects every durable transition, including ones
+		// older than the cut. Resolved once and used for three things: the payload
+		// the summary carries, the note's one-time price on both sides of the
+		// before/after comparison, and nothing else. Inspection never executes the
+		// action it proposes.
+		const continuity = resolveContinuityProjection({
 			entries,
-			offerMemory: (slice, ordinary, projected) => {
-				const scope = admission?.memory?.observationStatus().scope;
-				if (!scope) return null;
-				// Units come from the raw ledger slice, the material the batches were
-				// prepared from; an uncovered unit is serialized from the projected
-				// entries so it costs what the ordinary summary would have paid for it.
-				return (
-					admission?.memory?.offerCompaction({
-						source: { ...scope, checkpoint: observationCheckpoint(entries), units: observationSourceUnits(slice) },
-						ordinary,
-						serialize: (refs) => serializeConversation(projected.filter((entry) => refs.includes(entry.turnId))),
-					}) ?? null
-				);
-			},
-			continuityNote,
-			...compactionBudget,
-			...(nativeEnabled && providerCompaction ? { providerCompaction } : {}),
-			...(nativeEnabled ? { providerCheckpointSource: { sessionId: meta.id, archive: sessionPaths(meta).current } } : {}),
-			...(settings.context.compaction.provider === "native" && !nativeEnabled
-				? { providerFallbackReason: "non-codex-or-compaction-override" }
+			sessionId: meta.id,
+			...(meta.parentSessionId && meta.parentTurnId
+				? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
 				: {}),
-			// Native rejection and its portable retry share one transaction admission (#423).
-			beforeSummaryCall: () => {
-				if (flowViolation !== undefined && flowViolation !== null) throw new Error(`compaction refused: ${flowViolation}`);
-				if (!nativeEnabled || !providerCompaction) return admitSummary();
-				nativeAdmission ??= admitSummary();
-				return nativeAdmission;
-			},
-			...(summarize ? { summarize } : {}),
-			onCall: (call) => calls.push(call),
-			model: resolved.model,
-			...(systemPrompt !== undefined ? { systemPrompt } : {}),
-			...(resolved.headers !== undefined ? { headers: resolved.headers } : {}),
-			...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
-			...(resolved.refreshApiKey ? { refreshApiKey: resolved.refreshApiKey } : {}),
-			...(instructions !== undefined ? { instructions } : {}),
 		});
-	} catch (error) {
-		try {
-			preserveCalls();
-		} catch (recordingError) {
-			throw new AggregateError([error, recordingError], "compaction failed and its usage could not be fully recorded");
-		}
-		throw error;
-	} finally {
-		releaseEndpointSlot();
-	}
-	if (budget?.signal?.aborted) {
-		preserveCalls();
-		budget.signal.throwIfAborted();
-	}
-	if (!isOriginCurrent()) {
-		preserveCalls();
-		throw new Error("compaction session or branch changed; summary discarded and originating usage retained");
-	}
-	if (result.messagesSummarized === 0 || result.summary.length === 0) {
-		preserveCalls();
-		if (calls.length > 0) throw new Error("compaction returned no summary; reported usage retained without a checkpoint");
-		// The empty result carries why nothing was summarized, which the
-		// operation's conclusion names (#422).
-		return result;
-	}
-	if (estimateTokensAfterCompaction(entries, result, continuityNote.tokens) >= result.tokensBefore) {
-		preserveCalls();
-		return { ...result, noGain: true };
-	}
-	if (result.usage) {
-		result.usage = { ...result.usage, targetId: resolved.targetId, modelId: resolved.wireModelId };
-	}
-
-	// Refold before publishing the carry. The projection above was resolved
-	// before prompt loading, route resolution and the summary stream, and a
-	// transition appended during any of those awaits leaves the message leaf
-	// untouched, so the origin check just above passes while the carry in hand
-	// still says `ready`. §3 requires the summary to embed the *current*
-	// validated fold, so the ledger is re-read and refolded here. Only the carry
-	// is re-derived: `result` indexes the entry array the cut was computed
-	// against, which must not move under it.
-	const settledContinuity = resolveContinuityProjection({
-		entries: filterEntriesToActivePath(session.readEntries(), activeLeafTurnId),
-		sessionId: meta.id,
-		...(meta.parentSessionId && meta.parentTurnId
-			? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
-			: {}),
-	});
-	// A suppressed projection publishes no authoritative carry: the adapter marks
-	// its own fold unvalidated, and `continuityPayloadFromFold` refuses one.
-	const continuityCarry =
-		settledContinuity.current === null ? null : continuityPayloadFromFold(settledContinuity.current);
-
-	if (result.usage)
-		result.usage = {
-			...result.usage,
-			targetId: resolved.targetId,
-			modelId: resolved.wireModelId,
-			costProvenance: resolved.costProvenance,
+		// Only this session's own validated fold is carried forward. An inherited
+		// note is recall: writing it into this session's summary would republish
+		// another branch's transaction under this one's compaction.
+		const continuityNote = {
+			tokens: continuityProjectionTokens(continuity),
+			anchorTurnId: continuity.noteAnchorTurnId,
 		};
-	const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
-		kind: "compactionSummary",
-		...(result.callIds === undefined ? {} : { callIds: result.callIds }),
-		turnId: randomUUID(),
-		parentTurnId: result.checkpointParentTurnId ?? result.firstKeptTurnId ?? null,
-		summary: result.summary,
-		...(result.providerCheckpoint ? { providerCheckpoint: result.providerCheckpoint } : {}),
-		...(result.providerFallbackReason ? { providerFallbackReason: result.providerFallbackReason } : {}),
-		...(result.skillContext ? { skillContext: result.skillContext } : {}),
-		...(result.userContext ? { userContext: result.userContext } : {}),
-		...(result.memoryReceipt ? { memoryReceipt: result.memoryReceipt } : {}),
-		tokensBefore: result.tokensBefore,
-		firstKeptTurnId: result.firstKeptTurnId ?? "",
-		messagesSummarized: result.messagesSummarized,
-		isSplitTurn: result.isSplitTurn,
-		tokensAfter: estimateTokensAfterCompaction(entries, result, continuityNote.tokens),
-		// The latest validated fold, carried so the transaction survives the cut
-		// that is about to remove its earlier records from replay. It preserves
-		// the immutable identity, accepted note, original policy and commit; it
-		// never manufactures a commit and never turns an eviction-only outcome
-		// into a summarized one. A later ordinary compaction with no handoff of
-		// its own still carries the newest validated payload forward, which is
-		// what keeps an eviction-only commit's state alive across summary cycles.
-		...(continuityCarry === null ? {} : { continuity: continuityCarry }),
-		// The summarization call is a real model call. Persisting its provider
-		// usage on the entry is what puts it in front of `/usage` and `clio-coder usage
-		// report`, which folded the ledger and so counted every call but this one.
-		...(result.usage !== undefined ? { usage: result.usage } : {}),
-	};
-	if (budget?.checkpointTokenFigures) {
-		const figures = budget.checkpointTokenFigures(entry);
-		entry.tokensBefore = figures.tokensBefore;
-		entry.tokensAfter = figures.tokensAfter;
-	}
-	if (budget?.checkpointForSummary) {
-		entry.continuity = budget.checkpointForSummary(entry.turnId, entry.tokensBefore, entry.tokensAfter ?? 0);
-	}
-	if (trigger !== undefined) entry.trigger = trigger;
-	// No asynchronous work may separate private publication from the owned ledger append (#423).
-	if (budget?.signal?.aborted) {
-		preserveCalls();
-		budget.signal.throwIfAborted();
-	}
-	if (!isOriginCurrent()) {
-		preserveCalls();
-		throw new Error("compaction ownership changed before publication");
-	}
-	try {
-		result.publishProviderCheckpoint?.();
-	} catch {
-		preserveCalls();
 		budget?.signal?.throwIfAborted();
-		const { providerCompaction: _native, ...portableBudget } = budget ?? {};
-		return runCompactionFlow(
-			session,
-			settings,
-			providers,
-			instructions,
-			trigger,
-			observability,
-			{ ...portableBudget, providerFallbackReason: "checkpoint-publication-failed" },
-			summarize,
-			{ ...admission, summaryAdmitted: true },
-		);
-	}
-	try {
-		session.appendEntry(entry);
-	} catch (error) {
-		// A write may have reached the ledger before its caller threw. Reconcile
-		// this exact checkpoint identity before choosing a second accounting store.
-		try {
-			if (!compactionCheckpointWasWritten(sessionPaths(meta).current, entry.turnId)) {
-				preserveCalls();
-				if (result.providerCheckpoint) pruneProviderCheckpoints(result.providerCheckpoint);
-			}
-		} catch (recordingError) {
-			throw new AggregateError(
-				[error, recordingError],
-				"compaction checkpoint persistence is unresolved; usage was not duplicated",
-			);
+		const systemPrompt = await readCompactionSystemPrompt(settings.context.compaction.systemPrompt, meta.cwd);
+		budget?.signal?.throwIfAborted();
+		const resolved = await resolveCompactionModel(settings, providers, budget?.signal);
+		budget?.signal?.throwIfAborted();
+		if (!resolved) {
+			throw new Error("no model configured; set chat.target + chat.model");
 		}
-		throw error;
-	}
-	session.flushAppends?.();
-	if (calls.some((call) => call.outcome !== "success")) {
-		try {
+		// Summarize only the active branch: after a /tree switch the raw file
+		// still holds abandoned sibling turns, and a summary that folds them in
+		// would persist abandoned content back into the active context. The full
+		// file read stays in place for protected artifacts and the masking
+		// rewrite, which are session-global. The task board is not: it used to
+		// read the full file too (last taskLedger entry in file order, with no
+		// branch filter at all), which was a second, independent instance of this
+		// same bug. See the taskBoard wiring below for the fix.
+		if (!isOriginCurrent()) throw new Error("compaction session or branch changed before summarization");
+		const calls: CompactionCallObservation[] = [];
+		const preserveCalls = () =>
 			recordFailedCompactionCalls(
 				{
 					stateDir,
@@ -1823,17 +1590,270 @@ async function runCompactionFlow(
 					target: resolved.targetId,
 					model: resolved.wireModelId,
 				},
-				calls.filter((call) => call.outcome !== "success"),
-				observability,
+				calls,
+				isOriginCurrent() ? observability : undefined,
 			);
-		} catch {
-			// The cut is already durable; a secondary accounting failure must not invalidate it (#423).
-			process.emitWarning("Compaction completed, but failed-attempt usage could not be saved", {
-				code: "CLIO_CODER_COMPACTION_USAGE_PERSISTENCE_FAILED",
+
+		// A compaction summary is a full streamed request against its resolved target.
+		// The whole transcript goes to it, so the session's restrictions decide first.
+		const flowViolation = admission?.admitFlow?.({
+			targetId: resolved.targetId,
+			runtimeId: resolved.runtimeId,
+			wireModelId: resolved.wireModelId,
+		});
+
+		// Hold the same canonical endpoint slot as an ordinary turn, /btw round, or
+		// pre-warm so dispatch admission and background memory see its real usage.
+		const releaseEndpointSlot = resolved.endpointKey === null ? () => {} : registerForegroundStream(resolved.endpointKey);
+		const { providerCompaction, ...compactionBudget } = budget ?? {};
+		const nativeEnabled =
+			settings.context.compaction.provider === "native" &&
+			!settings.context.compaction.model &&
+			resolved.runtimeId === "openai-codex";
+		let nativeAdmission: Promise<void> | undefined;
+		const admitSummary = async (): Promise<void> => {
+			if (admission?.summaryAdmitted) return;
+			await budget?.beforeSummaryCall?.();
+			if (resolved.costProvenance === "known" || resolved.costProvenance === "estimated") {
+				await admission?.scheduling?.admitPaidRequest?.({
+					waitForRaise: admission.headless !== true,
+					...(admission.getCeilingUsd ? { getCeilingUsd: admission.getCeilingUsd } : {}),
+					...(budget?.signal ? { signal: budget.signal } : {}),
+				});
+			}
+		};
+
+		let result: CompactResult;
+		try {
+			result = await compact({
+				...(observability?.acquireTelemetrySession
+					? {
+							telemetry: {
+								origin: meta,
+								acquire: observability.acquireTelemetrySession,
+								label: "compaction",
+								targetId: resolved.targetId,
+								runtimeId: resolved.runtimeId,
+								costProvenance: resolved.costProvenance,
+								onSettled: (facts) => callIds.add(facts.callId),
+							},
+						}
+					: {}),
+				entries,
+				offerMemory: (slice, ordinary, projected) => {
+					const scope = admission?.memory?.observationStatus().scope;
+					if (!scope) return null;
+					// Units come from the raw ledger slice, the material the batches were
+					// prepared from; an uncovered unit is serialized from the projected
+					// entries so it costs what the ordinary summary would have paid for it.
+					return (
+						admission?.memory?.offerCompaction({
+							source: { ...scope, checkpoint: observationCheckpoint(entries), units: observationSourceUnits(slice) },
+							ordinary,
+							serialize: (refs) => serializeConversation(projected.filter((entry) => refs.includes(entry.turnId))),
+						}) ?? null
+					);
+				},
+				continuityNote,
+				...compactionBudget,
+				...(nativeEnabled && providerCompaction ? { providerCompaction } : {}),
+				...(nativeEnabled ? { providerCheckpointSource: { sessionId: meta.id, archive: sessionPaths(meta).current } } : {}),
+				...(settings.context.compaction.provider === "native" && !nativeEnabled
+					? { providerFallbackReason: "non-codex-or-compaction-override" }
+					: {}),
+				// Native rejection and its portable retry share one transaction admission (#423).
+				beforeSummaryCall: () => {
+					if (flowViolation !== undefined && flowViolation !== null) throw new Error(`compaction refused: ${flowViolation}`);
+					if (!nativeEnabled || !providerCompaction) return admitSummary();
+					nativeAdmission ??= admitSummary();
+					return nativeAdmission;
+				},
+				...(summarize ? { summarize } : {}),
+				onCall: (call) => calls.push(call),
+				model: resolved.model,
+				...(systemPrompt !== undefined ? { systemPrompt } : {}),
+				...(resolved.headers !== undefined ? { headers: resolved.headers } : {}),
+				...(resolved.apiKey !== undefined ? { apiKey: resolved.apiKey } : {}),
+				...(resolved.refreshApiKey ? { refreshApiKey: resolved.refreshApiKey } : {}),
+				...(instructions !== undefined ? { instructions } : {}),
 			});
+		} catch (error) {
+			try {
+				preserveCalls();
+			} catch (recordingError) {
+				throw new AggregateError([error, recordingError], "compaction failed and its usage could not be fully recorded");
+			}
+			throw error;
+		} finally {
+			releaseEndpointSlot();
 		}
+		if (budget?.signal?.aborted) {
+			preserveCalls();
+			budget.signal.throwIfAborted();
+		}
+		if (!isOriginCurrent()) {
+			preserveCalls();
+			throw new Error("compaction session or branch changed; summary discarded and originating usage retained");
+		}
+		if (result.messagesSummarized === 0 || result.summary.length === 0) {
+			closure.outcome = "discarded";
+			preserveCalls();
+			if (calls.length > 0)
+				throw new Error("compaction returned no summary; reported usage retained without a checkpoint");
+			// The empty result carries why nothing was summarized, which the
+			// operation's conclusion names (#422).
+			return result;
+		}
+		if (estimateTokensAfterCompaction(entries, result, continuityNote.tokens) >= result.tokensBefore) {
+			closure.outcome = "discarded";
+			preserveCalls();
+			return { ...result, noGain: true };
+		}
+		if (result.usage) {
+			result.usage = { ...result.usage, targetId: resolved.targetId, modelId: resolved.wireModelId };
+		}
+
+		// Refold before publishing the carry. The projection above was resolved
+		// before prompt loading, route resolution and the summary stream, and a
+		// transition appended during any of those awaits leaves the message leaf
+		// untouched, so the origin check just above passes while the carry in hand
+		// still says `ready`. §3 requires the summary to embed the *current*
+		// validated fold, so the ledger is re-read and refolded here. Only the carry
+		// is re-derived: `result` indexes the entry array the cut was computed
+		// against, which must not move under it.
+		const settledContinuity = resolveContinuityProjection({
+			entries: filterEntriesToActivePath(session.readEntries(), activeLeafTurnId),
+			sessionId: meta.id,
+			...(meta.parentSessionId && meta.parentTurnId
+				? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
+				: {}),
+		});
+		// A suppressed projection publishes no authoritative carry: the adapter marks
+		// its own fold unvalidated, and `continuityPayloadFromFold` refuses one.
+		const continuityCarry =
+			settledContinuity.current === null ? null : continuityPayloadFromFold(settledContinuity.current);
+
+		if (result.usage)
+			result.usage = {
+				...result.usage,
+				targetId: resolved.targetId,
+				modelId: resolved.wireModelId,
+				costProvenance: resolved.costProvenance,
+			};
+		const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
+			kind: "compactionSummary",
+			...(result.callIds === undefined ? {} : { callIds: result.callIds }),
+			turnId: randomUUID(),
+			parentTurnId: result.checkpointParentTurnId ?? result.firstKeptTurnId ?? null,
+			summary: result.summary,
+			...(result.providerCheckpoint ? { providerCheckpoint: result.providerCheckpoint } : {}),
+			...(result.providerFallbackReason ? { providerFallbackReason: result.providerFallbackReason } : {}),
+			...(result.skillContext ? { skillContext: result.skillContext } : {}),
+			...(result.userContext ? { userContext: result.userContext } : {}),
+			...(result.memoryReceipt ? { memoryReceipt: result.memoryReceipt } : {}),
+			tokensBefore: result.tokensBefore,
+			firstKeptTurnId: result.firstKeptTurnId ?? "",
+			messagesSummarized: result.messagesSummarized,
+			isSplitTurn: result.isSplitTurn,
+			tokensAfter: estimateTokensAfterCompaction(entries, result, continuityNote.tokens),
+			// The latest validated fold, carried so the transaction survives the cut
+			// that is about to remove its earlier records from replay. It preserves
+			// the immutable identity, accepted note, original policy and commit; it
+			// never manufactures a commit and never turns an eviction-only outcome
+			// into a summarized one. A later ordinary compaction with no handoff of
+			// its own still carries the newest validated payload forward, which is
+			// what keeps an eviction-only commit's state alive across summary cycles.
+			...(continuityCarry === null ? {} : { continuity: continuityCarry }),
+			// The summarization call is a real model call. Persisting its provider
+			// usage on the entry is what puts it in front of `/usage` and `clio-coder usage
+			// report`, which folded the ledger and so counted every call but this one.
+			...(result.usage !== undefined ? { usage: result.usage } : {}),
+		};
+		if (budget?.checkpointTokenFigures) {
+			const figures = budget.checkpointTokenFigures(entry);
+			entry.tokensBefore = figures.tokensBefore;
+			entry.tokensAfter = figures.tokensAfter;
+		}
+		if (budget?.checkpointForSummary) {
+			entry.continuity = budget.checkpointForSummary(entry.turnId, entry.tokensBefore, entry.tokensAfter ?? 0);
+		}
+		if (trigger !== undefined) entry.trigger = trigger;
+		// No asynchronous work may separate private publication from the owned ledger append (#423).
+		if (budget?.signal?.aborted) {
+			preserveCalls();
+			budget.signal.throwIfAborted();
+		}
+		if (!isOriginCurrent()) {
+			preserveCalls();
+			throw new Error("compaction ownership changed before publication");
+		}
+		try {
+			result.publishProviderCheckpoint?.();
+		} catch {
+			preserveCalls();
+			budget?.signal?.throwIfAborted();
+			const { providerCompaction: _native, ...portableBudget } = budget ?? {};
+			return runCompactionFlow(
+				session,
+				settings,
+				providers,
+				instructions,
+				trigger,
+				observability,
+				{ ...portableBudget, providerFallbackReason: "checkpoint-publication-failed" },
+				summarize,
+				{ ...admission, summaryAdmitted: true },
+			);
+		}
+		closure.checkpointTurnId = entry.turnId;
+		closure.outcome = "unresolved";
+		try {
+			session.appendEntry(entry);
+		} catch (error) {
+			// A write may have reached the ledger before its caller threw. Reconcile
+			// this exact checkpoint identity before choosing a second accounting store.
+			try {
+				if (!compactionCheckpointWasWritten(sessionPaths(meta).current, entry.turnId)) {
+					closure.outcome = "failed";
+					preserveCalls();
+					if (result.providerCheckpoint) pruneProviderCheckpoints(result.providerCheckpoint);
+				} else closure.outcome = "committed";
+			} catch (recordingError) {
+				throw new AggregateError(
+					[error, recordingError],
+					"compaction checkpoint persistence is unresolved; usage was not duplicated",
+				);
+			}
+			throw error;
+		}
+		session.flushAppends?.();
+		closure.outcome = "committed";
+		if (calls.some((call) => call.outcome !== "success")) {
+			try {
+				recordFailedCompactionCalls(
+					{
+						stateDir,
+						sessionId: meta.id,
+						repoIdentity: meta.cwdHash || cwdHash(meta.cwd),
+						target: resolved.targetId,
+						model: resolved.wireModelId,
+					},
+					calls.filter((call) => call.outcome !== "success"),
+					observability,
+				);
+			} catch {
+				// The cut is already durable; a secondary accounting failure must not invalidate it (#423).
+				process.emitWarning("Compaction completed, but failed-attempt usage could not be saved", {
+					code: "CLIO_CODER_COMPACTION_USAGE_PERSISTENCE_FAILED",
+				});
+			}
+		}
+		return result;
+	} finally {
+		if (lease && callIds.size > 0)
+			recordTelemetry("compaction.closed", { ...closure, callIds: [...callIds] }, lease.context);
+		await lease?.release();
 	}
-	return result;
 }
 
 function compactionCheckpointWasWritten(path: string, turnId: string): boolean {

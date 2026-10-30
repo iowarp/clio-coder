@@ -163,6 +163,7 @@ export const KIND_NAMES = [
 	"call.started",
 	"call.settled",
 	"call.ref",
+	"compaction.closed",
 	"gap",
 	"session.opened",
 	"session.resumed",
@@ -190,6 +191,16 @@ export const KIND_REGISTRY = {
 	"call.started": accountability(CallStartedSchema),
 	"call.settled": accountability(CallSettledSchema),
 	"call.ref": accountability(Type.Object({ runId: ExistingId, callId: CallIdSchema }, closed)),
+	"compaction.closed": accountability(
+		Type.Object(
+			{
+				callIds: Type.Array(CallIdSchema, { minItems: 1, uniqueItems: true }),
+				outcome: vocabulary(["committed", "discarded", "failed", "unresolved"]),
+				checkpointTurnId: Type.Union([ExistingId, Type.Null()]),
+			},
+			closed,
+		),
+	),
 	gap: accountability(
 		Type.Object(
 			{
@@ -258,6 +269,10 @@ export function isKind(kind: string): kind is Kind {
 /** Schema validation plus the cross-field invariants that JSON Schema cannot express (#434). */
 export function validPayload<K extends Kind>(kind: K, data: unknown): data is Payload<K> {
 	if (!Value.Check(KIND_REGISTRY[kind].schema, data)) return false;
+	if (kind === "compaction.closed") {
+		const outcome = data as Payload<"compaction.closed">;
+		return outcome.outcome !== "committed" || outcome.checkpointTurnId !== null;
+	}
 	if (kind !== "call.settled") return true;
 	const call = data as CallSettled;
 	if ((call.disposition === "never_sent") !== (call.usage === null)) return false;
