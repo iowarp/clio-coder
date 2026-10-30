@@ -392,15 +392,18 @@ function buildAssistantMessage(input: {
 	const output = raw?.output_tokens;
 	const thinking = raw?.thinking_tokens;
 	const total = raw?.total_tokens;
+	// Antigravity's input_tokens includes cached tokens and thinking is reported beside output; a field
+	// it omitted subtracts or adds nothing and stays unknown in its own right (#434).
+	const cachedCount = count(cached) ? cached : 0;
+	const thinkingCount = count(thinking) ? thinking : 0;
 	return bindExternalUsage(message, {
 		usage: {
-			input: count(prompt) && count(cached) && prompt >= cached ? prompt - cached : undefined,
-			output:
-				count(prompt) && count(output) && count(thinking) && count(total)
-					? total >= prompt + output + thinking
-						? output + thinking
-						: output
-					: undefined,
+			input: count(prompt) && prompt >= cachedCount ? prompt - cachedCount : undefined,
+			output: count(output)
+				? count(prompt) && count(total) && total >= prompt + output + thinkingCount
+					? output + thinkingCount
+					: output
+				: undefined,
 			cacheRead: cached,
 			reasoning: thinking,
 			totalTokens: total,

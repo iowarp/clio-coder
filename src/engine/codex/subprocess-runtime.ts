@@ -204,12 +204,12 @@ function assistantMessage(
 	const cached = rawUsage?.cached_input_tokens;
 	const written = rawUsage?.cache_write_input_tokens;
 	const output = rawUsage?.output_tokens;
+	// Codex reports input_tokens inclusive of its cache fields and omits a cache field it did not
+	// bill, so an absent field subtracts nothing while staying unknown in its own right (#434).
+	const subtracted = (count(cached) ? cached : 0) + (count(written) ? written : 0);
 	return bindExternalUsage(message, {
 		usage: {
-			input:
-				count(prompt) && count(cached) && count(written) && prompt >= cached + written
-					? prompt - cached - written
-					: undefined,
+			input: count(prompt) && prompt >= subtracted ? prompt - subtracted : undefined,
 			output,
 			cacheRead: cached,
 			cacheWrite: written,
