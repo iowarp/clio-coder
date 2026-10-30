@@ -1178,11 +1178,21 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						"main",
 						state.activeUserTurnId ?? undefined,
 					);
+					const compiled = context.compiledSessionPrompt?.();
+					const objects = await journalLease.storeRequestObjects?.({
+						...(compiled ? { prompt: compiled } : {}),
+						tools: localRuntime.agent.state.tools.map(({ name, description, parameters }) => ({
+							name,
+							description,
+							parameters,
+						})),
+					});
 					const choice = middlewareToolChoice.current();
 					const textOnly = state.synthesisToolLock || choice.kind === "none";
 					modelCall = beginCall(
 						{
 							label: "main",
+							...(objects && Object.keys(objects).length > 0 ? { objects } : {}),
 							target: {
 								targetId: localRuntime.targetId,
 								runtimeId: localRuntime.runtimeId,

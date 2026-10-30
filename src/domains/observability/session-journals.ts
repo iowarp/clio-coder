@@ -4,8 +4,10 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { SegmentHeader } from "../../core/telemetry/envelope.js";
+import type { CallStarted } from "../../core/telemetry/schemas.js";
 import type { CallJournal } from "./call-journal.js";
 import { openCallJournal } from "./call-journal.js";
+import { storeTelemetryObject, telemetryPromptStructure } from "./objects.js";
 
 export interface TelemetrySessionOrigin {
 	id: string;
@@ -13,6 +15,11 @@ export interface TelemetrySessionOrigin {
 }
 export interface TelemetrySessionLease {
 	context: TelemetryContext;
+	/** Cold request preparation, before beginCall enters the enqueue-only lane (#434). */
+	storeRequestObjects?(input: {
+		prompt?: Parameters<typeof telemetryPromptStructure>[0];
+		tools?: unknown;
+	}): Promise<NonNullable<CallStarted["objects"]>>;
 	release(): Promise<void>;
 }
 
@@ -108,6 +115,23 @@ export function createSessionJournals(stateDir: string, unavailable: () => void)
 		let released = false;
 		return {
 			context,
+			async storeRequestObjects(input) {
+				const refs: NonNullable<CallStarted["objects"]> = {};
+				if (released || !(await owned.journal)) return refs;
+				const directory = join(stateDir, "sessions", origin.cwdHash, origin.id);
+				for (const subject of ["prompt-structure", "tool-schemas"] as const) {
+					try {
+						if (subject === "prompt-structure" && input.prompt !== undefined)
+							refs.promptStructure = await storeTelemetryObject(directory, subject, telemetryPromptStructure(input.prompt));
+						else if (subject === "tool-schemas" && input.tools !== undefined)
+							refs.toolSchemas = await storeTelemetryObject(directory, subject, input.tools);
+					} catch {
+						// Object capture never blocks the request or claims a missing preimage resolves (#434).
+						report();
+					}
+				}
+				return refs;
+			},
 			async release() {
 				if (released) return;
 				released = true;

@@ -63,6 +63,16 @@ const target = Type.Object(
 	closed,
 );
 const call = {
+	// The compiled prompt and attached tool surface; wire transformations are separate facts (#434).
+	objects: Type.Optional(
+		Type.Object(
+			{
+				promptStructure: Type.Optional(ObjectRefSchema),
+				toolSchemas: Type.Optional(ObjectRefSchema),
+			},
+			closed,
+		),
+	),
 	callId: CallIdSchema,
 	attemptId: AttemptIdSchema,
 	attempt: count,

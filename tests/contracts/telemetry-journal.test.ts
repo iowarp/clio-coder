@@ -174,8 +174,44 @@ test("overlapping work retains its original session and releases ownership only 
 			[next.context],
 		);
 		const reopened = await journals.acquire(origin, "main");
+		const objects = await reopened.storeRequestObjects?.({
+			prompt: {
+				sections: [{ id: "identity", tokenEstimate: 3, contentHash: "a".repeat(64) }],
+				fragmentManifest: [{ id: "identity.base", contentHash: "b".repeat(64), dynamic: false }],
+			},
+			tools: [
+				{
+					name: "read",
+					description: "Read a file",
+					parameters: { type: "object", properties: { path: { type: "string" } } },
+				},
+			],
+		});
+		ok(objects?.promptStructure);
+		ok(objects.toolSchemas);
+		const directory = join(stateDir, "sessions", "repo", "original");
+		strictEqual((await readTelemetryObject(directory, objects.promptStructure)).kind, "resolved");
+		strictEqual((await readTelemetryObject(directory, objects.toolSchemas)).kind, "resolved");
+		deepStrictEqual(await reopened.storeRequestObjects?.({ tools: { invalid: Number.NaN } }), {});
+		const request = beginCall(
+			{
+				label: "main",
+				target: { targetId: "t", runtimeId: "r", api: "a", requestedModel: "m", reportedModel: unknown },
+				roundKind: "normal",
+				toolChoice: "auto",
+				objects,
+			},
+			reopened.context,
+		);
+		request.settle(unsent);
 		await reopened.release();
-		strictEqual(failures, 0);
+		const captured = await readCallJournal(directory);
+		const settled = captured.records.find(({ record }) => record.k === "call.settled")?.record;
+		ok(settled?.k === "call.settled");
+		deepStrictEqual(settled.data.objects, objects);
+		deepStrictEqual(await reopened.storeRequestObjects?.({ tools: [] }), {});
+
+		strictEqual(failures, 1, "failed object capture is reported and never claims a resolvable reference");
 	} finally {
 		await journals.flush();
 		await rm(stateDir, { recursive: true, force: true });

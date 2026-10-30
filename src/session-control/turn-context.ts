@@ -334,6 +334,7 @@ export interface TurnContext {
 	 * reminder: what changed in frozen prompt inputs since the compile (#423).
 	 */
 	sessionPromptDelta(): string;
+	compiledSessionPrompt?(): CompiledSessionPrompt | null;
 	logPromptCompileIfPending(): void;
 	invalidateSessionPromptCache(): void;
 	addWorkingContextPaths(paths: ReadonlyArray<string>): void;
@@ -3021,6 +3022,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			appendPromptCompileRecord(currentMeta, entry);
 		},
 
+		compiledSessionPrompt: () => sessionPrompt,
 		sessionPromptDelta(): string {
 			return sessionPromptDelta;
 		},
