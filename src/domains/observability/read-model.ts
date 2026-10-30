@@ -31,8 +31,19 @@ import {
 	renderUsdSum,
 } from "../../core/telemetry/render.js";
 import type { CallSettled, CallUsage, Payload } from "../../core/telemetry/schemas.js";
-import type { FoldedAttempt } from "./folds.js";
-import { foldCallJournal, foldCalls, foldFacts, foldRunJournal, sumFactSums, TELEMETRY_FOLD_VERSION } from "./folds.js";
+import type { CallJournalFolder, CallTotals, FoldedAttempt, JournalFold } from "./folds.js";
+import {
+	addCallTotals,
+	addGroup,
+	callJournalFolder,
+	emptyCallTotals,
+	emptyFactSum,
+	foldCalls,
+	foldFacts,
+	foldRunJournal,
+	sumFactSums,
+	TELEMETRY_FOLD_VERSION,
+} from "./folds.js";
 
 /**
  * The telemetry read model (#434 §11). Pure: callers hand it journal records (read from disk, or the live writer's
@@ -96,6 +107,8 @@ interface Attempt extends FoldedAttempt {
 interface Run {
 	runId: string;
 	source: JournalSource;
+	/** The session record that referenced the run, which the run's turn and reference time come from. */
+	reference: TelemetryRecord | null;
 	fold: ReturnType<typeof foldRunJournal>;
 	attempts: Attempt[];
 	byAttempt: Map<string, Attempt>;
@@ -111,13 +124,43 @@ interface Run {
 }
 interface Analysis {
 	sessionId: string;
-	records: TelemetryRecord[];
+	/** Every attempt in the read model's order; the same array as the whole selection's members. */
 	attempts: Attempt[];
 	byAttempt: Map<string, Attempt>;
-	fold: ReturnType<typeof foldCallJournal>;
+	fold: Pick<JournalFold, "coverage">;
 	/** Unknown contributions added to every whole-scope sum: an incomplete read and unattributed aggregates. */
 	gap: number;
 	runs: Map<string, Run>;
+	/** One running fold per selection a reader asked for, keyed by group; the whole set is `""`. */
+	selections: Map<string, SelectionState>;
+	growth: Growth;
+}
+
+/**
+ * What a live analysis needs to fold only the records a later read appends (#434 §11). Records fold as `head` then
+ * the fixed `tail` (legacy rows, then ancestors' records for a lineage), while a cold read folds appended records
+ * before the tail; a new record that names an id the tail carries could fold differently, so it rebuilds instead.
+ */
+interface Growth {
+	folder: CallJournalFolder;
+	meta: Map<string, AttemptMeta>;
+	/** The first session record referencing each run. */
+	references: Map<string, TelemetryRecord>;
+	/** A gap other than policy was folded. */
+	gapRecord: boolean;
+	head: readonly TelemetryRecord[];
+	tail: { records: Set<string>; attempts: Set<string>; runs: Set<string> };
+	legacy: SessionSource["legacy"];
+	/** A lineage's parent source; null for a session's own analysis. */
+	parent: SessionSource | null;
+}
+
+/** Facts an attempt's records give it beyond the fold: when it started and settled, its context and record ids. */
+interface AttemptMeta {
+	startedAt?: string;
+	settledAt?: string;
+	ctx?: TelemetryContext;
+	ids: Set<string>;
 }
 
 const EPOCH = "1970-01-01T00:00:00.000Z";
@@ -132,42 +175,52 @@ const header = (options: ReadOptions) => ({
 	generatedAt: (options.now ?? new Date()).toISOString(),
 });
 
+function noteMeta(meta: Map<string, AttemptMeta>, record: TelemetryRecord): void {
+	if (record.k !== "call.started" && record.k !== "call.settled") return;
+	const entry = meta.get(record.data.attemptId) ?? { ids: new Set<string>() };
+	entry.ids.add(record.id);
+	entry.ctx ??= record.ctx;
+	if (record.k === "call.started") {
+		if (entry.startedAt === undefined || record.t < entry.startedAt) entry.startedAt = record.t;
+	} else if (entry.settledAt === undefined || record.t < entry.settledAt) entry.settledAt = record.t;
+	meta.set(record.data.attemptId, entry);
+}
+
+function attemptOf(attempt: FoldedAttempt, entry: AttemptMeta | undefined): Attempt {
+	return {
+		...attempt,
+		startedAt: entry?.startedAt ?? entry?.settledAt ?? EPOCH,
+		settledAt: attempt.settled ? (entry?.settledAt ?? null) : null,
+		ctx: entry?.ctx ?? null,
+		recordIds: [...(entry?.ids ?? [])].sort(),
+	};
+}
+
+/** The read model's attempt order, which per-attempt fact sums follow: start time, then attempt id. */
+function byStart(a: Attempt, b: Attempt): number {
+	return a.startedAt === b.startedAt
+		? a.started.attemptId.localeCompare(b.started.attemptId)
+		: a.startedAt < b.startedAt
+			? -1
+			: 1;
+}
+/** {@link foldCalls}'s order, which keeps every reader's floating-point sums identical (#434). */
+const byAttemptId = (a: Attempt, b: Attempt) => a.started.attemptId.localeCompare(b.started.attemptId);
+
 function attemptsOf(records: readonly TelemetryRecord[], attempts: readonly FoldedAttempt[]): Attempt[] {
-	const meta = new Map<string, { startedAt?: string; settledAt?: string; ctx?: TelemetryContext; ids: Set<string> }>();
-	for (const record of records) {
-		if (record.k !== "call.started" && record.k !== "call.settled") continue;
-		const entry = meta.get(record.data.attemptId) ?? { ids: new Set<string>() };
-		entry.ids.add(record.id);
-		entry.ctx ??= record.ctx;
-		if (record.k === "call.started") {
-			if (entry.startedAt === undefined || record.t < entry.startedAt) entry.startedAt = record.t;
-		} else if (entry.settledAt === undefined || record.t < entry.settledAt) entry.settledAt = record.t;
-		meta.set(record.data.attemptId, entry);
-	}
-	return attempts
-		.map((attempt) => {
-			const entry = meta.get(attempt.started.attemptId);
-			return {
-				...attempt,
-				startedAt: entry?.startedAt ?? entry?.settledAt ?? EPOCH,
-				settledAt: attempt.settled ? (entry?.settledAt ?? null) : null,
-				ctx: entry?.ctx ?? null,
-				recordIds: [...(entry?.ids ?? [])].sort(),
-			};
-		})
-		.sort((a, b) =>
-			a.startedAt === b.startedAt
-				? a.started.attemptId.localeCompare(b.started.attemptId)
-				: a.startedAt < b.startedAt
-					? -1
-					: 1,
-		);
+	const meta = new Map<string, AttemptMeta>();
+	for (const record of records) noteMeta(meta, record);
+	return attempts.map((attempt) => attemptOf(attempt, meta.get(attempt.started.attemptId))).sort(byStart);
 }
 
 const unavailable: JournalSource = { present: false, records: [], modes: [], skipped: 0, damaged: 0 };
 const POLICY_GAPS: ReadonlySet<string> = new Set(["mode-filtered", "research-cap"]);
 
+/** A run journal reads the same until the live model swaps its source, so each source is folded once. */
+const runAnalyses = new WeakMap<JournalSource, Run>();
 function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryRecord): Run {
+	const cached = runAnalyses.get(source);
+	if (cached && cached.runId === runId && cached.reference === (reference ?? null)) return cached;
 	const fold = foldRunJournal(source.records);
 	const attempts = attemptsOf(source.records, fold.calls.attempts);
 	let settled: Run["settled"] = null;
@@ -178,9 +231,10 @@ function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryR
 		if (lastAt === null || record.t > lastAt) lastAt = record.t;
 		if (record.k === "run.settled" && (!settled || record.t >= settled.at)) settled = { at: record.t, data: record.data };
 	}
-	return {
+	const run: Run = {
 		runId,
 		source,
+		reference: reference ?? null,
 		fold,
 		attempts,
 		byAttempt: new Map(attempts.map((attempt) => [attempt.started.attemptId, attempt])),
@@ -192,71 +246,412 @@ function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryR
 		referencedAt: reference?.t ?? null,
 		gap: !source.present || source.skipped > 0 || source.damaged > 0 || source.seeding ? 1 : 0,
 	};
+	runAnalyses.set(source, run);
+	return run;
 }
 
-function analyzeRecords(
+/** Fold one record into the growth state; returns the attempts it may have changed. */
+function grow(growth: Growth, record: TelemetryRecord): readonly string[] {
+	noteMeta(growth.meta, record);
+	if ((record.k === "run.ref" || record.k === "call.ref") && !growth.references.has(record.data.runId))
+		growth.references.set(record.data.runId, record);
+	// A mode-filtered or research-cap gap is policy: only research or content kinds go uncaptured, never
+	// accountability, so neither makes a total partial (#434, R10).
+	if (record.k === "gap" && !POLICY_GAPS.has(record.data.reason)) growth.gapRecord = true;
+	return growth.folder.add(record);
+}
+
+function settleRuns(analysis: Analysis, runSources: ReadonlyMap<string, JournalSource>, gap: number): void {
+	const growth = analysis.growth;
+	analysis.gap = gap + (growth.gapRecord ? 1 : 0);
+	const runs = new Map<string, Run>();
+	for (const runId of [...new Set([...growth.references.keys(), ...runSources.keys()])].sort())
+		runs.set(runId, analyzeRun(runId, runSources.get(runId) ?? unavailable, growth.references.get(runId)));
+	analysis.runs = runs;
+}
+
+function buildAnalysis(
 	sessionId: string,
-	records: TelemetryRecord[],
+	head: readonly TelemetryRecord[],
+	tail: readonly (readonly TelemetryRecord[])[],
 	runSources: ReadonlyMap<string, JournalSource>,
 	gap: number,
+	legacy: SessionSource["legacy"],
+	parent: SessionSource | null,
 ): Analysis {
-	const fold = foldCallJournal(records);
-	const attempts = attemptsOf(records, fold.attempts);
-	const references = new Map<string, TelemetryRecord>();
-	for (const record of records)
-		if ((record.k === "run.ref" || record.k === "call.ref") && !references.has(record.data.runId))
-			references.set(record.data.runId, record);
-	const runs = new Map<string, Run>();
-	for (const runId of [...new Set([...references.keys(), ...runSources.keys()])].sort())
-		runs.set(runId, analyzeRun(runId, runSources.get(runId) ?? unavailable, references.get(runId)));
-	return {
+	const growth: Growth = {
+		folder: callJournalFolder(),
+		meta: new Map(),
+		references: new Map(),
+		gapRecord: false,
+		head,
+		tail: { records: new Set(), attempts: new Set(), runs: new Set() },
+		legacy,
+		parent,
+	};
+	for (const record of head) grow(growth, record);
+	for (const segment of tail)
+		for (const record of segment) {
+			grow(growth, record);
+			growth.tail.records.add(record.id);
+			if (record.k === "call.started" || record.k === "call.settled") growth.tail.attempts.add(record.data.attemptId);
+			if (record.k === "run.ref" || record.k === "call.ref") growth.tail.runs.add(record.data.runId);
+		}
+	const attempts = growth.folder
+		.attempts()
+		.map((attempt) => attemptOf(attempt, growth.meta.get(attempt.started.attemptId)))
+		.sort(byStart);
+	const analysis: Analysis = {
 		sessionId,
-		records,
 		attempts,
 		byAttempt: new Map(attempts.map((attempt) => [attempt.started.attemptId, attempt])),
-		fold,
-		// A mode-filtered or research-cap gap is policy: only research or content kinds go uncaptured, never
-		// accountability, so neither makes a total partial (#434, R10).
-		gap: gap + (records.some((record) => record.k === "gap" && !POLICY_GAPS.has(record.data.reason)) ? 1 : 0),
-		runs,
+		fold: { coverage: growth.folder.coverage },
+		gap: 0,
+		runs: new Map(),
+		selections: new Map([["", selectionState(attempts, () => true)]]),
+		growth,
 	};
+	settleRuns(analysis, runSources, gap);
+	return analysis;
 }
 
+/**
+ * Fold only what `head` appends to the records the analysis already holds, moving every running selection fold by
+ * the attempts those records changed. False, with nothing changed, when `head` does not extend what was folded.
+ */
+function extendAnalysis(
+	analysis: Analysis,
+	head: readonly TelemetryRecord[],
+	runSources: ReadonlyMap<string, JournalSource>,
+	gap: number,
+): boolean {
+	const growth = analysis.growth;
+	const folded = growth.head.length;
+	if (head.length < folded) return false;
+	for (let index = 0; index < folded; index += 1) if (head[index] !== growth.head[index]) return false;
+	const tail = growth.tail;
+	for (let index = folded; index < head.length; index += 1) {
+		const record = head[index] as TelemetryRecord;
+		if (
+			tail.records.has(record.id) ||
+			((record.k === "call.started" || record.k === "call.settled") && tail.attempts.has(record.data.attemptId)) ||
+			((record.k === "run.ref" || record.k === "call.ref") && tail.runs.has(record.data.runId))
+		)
+			return false;
+	}
+	const touched = new Set<string>();
+	for (let index = folded; index < head.length; index += 1)
+		for (const attemptId of grow(growth, head[index] as TelemetryRecord)) touched.add(attemptId);
+	growth.head = head;
+	for (const attemptId of touched) {
+		const before = analysis.byAttempt.get(attemptId);
+		const folded = growth.folder.attempt(attemptId);
+		const after = folded ? attemptOf(folded, growth.meta.get(attemptId)) : undefined;
+		if (after) analysis.byAttempt.set(attemptId, after);
+		else analysis.byAttempt.delete(attemptId);
+		for (const selection of analysis.selections.values()) updateSelection(selection, before, after);
+	}
+	settleRuns(analysis, runSources, gap);
+	return true;
+}
+
+const readGap = (journal: JournalSource) => (journal.skipped > 0 || journal.damaged > 0 || journal.seeding ? 1 : 0);
+
+/**
+ * Analyses keyed by the source they fold. A live source declared a continuation of an analyzed one takes that
+ * analysis over and folds only its appended records; the older source re-folds from scratch if it is read again.
+ */
 const analyses = new WeakMap<SessionSource, Analysis>();
+const lineages = new WeakMap<SessionSource, Analysis>();
+const continuations = new WeakMap<
+	SessionSource,
+	{ own: SessionSource | undefined; lineage: SessionSource | undefined }
+>();
+
+/**
+ * Declare `next` a later read of `previous`: the same session with its own journal grown only by appending, so
+ * analyzing it folds just the appended records (#434 §11). The read model verifies the append before relying on it.
+ */
+export function continueSource(next: SessionSource, previous: SessionSource): void {
+	const prior = continuations.get(previous);
+	continuations.set(next, {
+		own: analyses.has(previous) ? previous : prior?.own,
+		lineage: lineages.has(previous) ? previous : prior?.lineage,
+	});
+}
+
 function analyze(source: SessionSource): Analysis {
 	let analysis = analyses.get(source);
-	if (!analysis) {
-		const read = source.journal.skipped > 0 || source.journal.damaged > 0 || source.journal.seeding ? 1 : 0;
-		analysis = analyzeRecords(
+	if (analysis) return analysis;
+	const gap = readGap(source.journal) + source.legacy.aggregates;
+	const continuation = continuations.get(source);
+	const base = continuation?.own;
+	const prior = base ? analyses.get(base) : undefined;
+	if (
+		base &&
+		prior &&
+		prior.sessionId === source.sessionId &&
+		prior.growth.legacy === source.legacy &&
+		extendAnalysis(prior, source.journal.records, source.runs, gap)
+	) {
+		analyses.delete(base);
+		analysis = prior;
+	} else
+		analysis = buildAnalysis(
 			source.sessionId,
-			[...source.journal.records, ...source.legacy.records],
+			source.journal.records,
+			[source.legacy.records],
 			source.runs,
-			read + source.legacy.aggregates,
+			gap,
+			source.legacy,
+			null,
 		);
-		analyses.set(source, analysis);
-	}
+	if (continuation) continuation.own = undefined;
+	analyses.set(source, analysis);
 	return analysis;
 }
 
 /** A child's journal holds only its own calls; ancestors contribute theirs once, deduplicated by the fold (#434). */
-const lineages = new WeakMap<SessionSource, Analysis>();
 function analyzeLineage(source: SessionSource): Analysis {
 	let analysis = lineages.get(source);
 	if (analysis) return analysis;
-	const records: TelemetryRecord[] = [];
+	const tail: (readonly TelemetryRecord[])[] = [source.legacy.records];
 	const runs = new Map<string, JournalSource>();
 	let gap = 0;
 	for (let node: SessionSource | null = source, depth = 0; node && depth < 128; depth += 1) {
 		const own = analyze(node);
-		records.push(...own.records);
+		if (node !== source) tail.push(node.journal.records, node.legacy.records);
 		for (const [runId, run] of own.runs) if (!runs.has(runId)) runs.set(runId, run.source);
 		gap += own.gap;
 		if (node.parent && !node.parent.source) gap += 1;
 		node = node.parent?.source ?? null;
 	}
-	analysis = analyzeRecords(source.sessionId, records, runs, gap);
+	const parent = source.parent?.source ?? null;
+	const continuation = continuations.get(source);
+	const base = continuation?.lineage;
+	const prior = base ? lineages.get(base) : undefined;
+	if (
+		base &&
+		prior &&
+		prior.sessionId === source.sessionId &&
+		prior.growth.legacy === source.legacy &&
+		prior.growth.parent === parent &&
+		extendAnalysis(prior, source.journal.records, runs, gap)
+	) {
+		lineages.delete(base);
+		analysis = prior;
+	} else analysis = buildAnalysis(source.sessionId, source.journal.records, tail, runs, gap, source.legacy, parent);
+	if (continuation) continuation.lineage = undefined;
 	lineages.set(source, analysis);
 	return analysis;
+}
+
+// ---- running selection folds ----
+
+/** A fold over an ordered list that keeps the value before its last item, so the newest attempt settling refolds nothing. */
+interface Fold<S> {
+	value: S;
+	/** The fold of every item but the last; null once a removal left it unknown. */
+	previous: S | null;
+	readonly empty: () => S;
+	readonly add: (state: S, attempt: Attempt) => void;
+	readonly copy: (state: S) => S;
+}
+/** How an edit moved the end of an ordered list; anything else refolds the list. */
+type Edit = "append" | "replace-last" | "drop-last" | "other";
+
+/** Lower bound: the first index whose item does not sort before `item`. */
+function locate(items: readonly Attempt[], item: Attempt, order: (a: Attempt, b: Attempt) => number): number {
+	let low = 0;
+	let high = items.length;
+	while (low < high) {
+		const mid = (low + high) >>> 1;
+		if (order(items[mid] as Attempt, item) < 0) low = mid + 1;
+		else high = mid;
+	}
+	return low;
+}
+
+function edit(
+	items: Attempt[],
+	order: (a: Attempt, b: Attempt) => number,
+	before: Attempt | undefined,
+	after: Attempt | undefined,
+): Edit {
+	let wasLast = false;
+	if (before) {
+		const at = locate(items, before, order);
+		if (items[at] !== before) {
+			// Not where its key says; fall back to identity so the list never keeps a stale attempt.
+			const index = items.indexOf(before);
+			if (index !== -1) items.splice(index, 1);
+			if (after) items.splice(locate(items, after, order), 0, after);
+			return "other";
+		}
+		wasLast = at === items.length - 1;
+		items.splice(at, 1);
+	}
+	if (!after) return wasLast ? "drop-last" : "other";
+	const at = locate(items, after, order);
+	items.splice(at, 0, after);
+	if (at !== items.length - 1) return "other";
+	return before === undefined ? "append" : wasLast ? "replace-last" : "other";
+}
+
+function refold<S>(fold: Fold<S>, items: readonly Attempt[]): void {
+	const state = fold.empty();
+	const last = items.length - 1;
+	for (let index = 0; index < last; index += 1) fold.add(state, items[index] as Attempt);
+	if (last < 0) {
+		fold.previous = null;
+		fold.value = state;
+		return;
+	}
+	fold.previous = fold.copy(state);
+	fold.add(state, items[last] as Attempt);
+	fold.value = state;
+}
+
+/** Values already handed to a DTO are never mutated: every step folds into a copy. */
+function advance<S>(fold: Fold<S>, change: Edit, after: Attempt | undefined, items: readonly Attempt[]): void {
+	if (change === "append" && after) {
+		const next = fold.copy(fold.value);
+		fold.add(next, after);
+		fold.previous = fold.value;
+		fold.value = next;
+	} else if (change === "replace-last" && after && fold.previous) {
+		const next = fold.copy(fold.previous);
+		fold.add(next, after);
+		fold.value = next;
+	} else if (change === "drop-last" && fold.previous) {
+		fold.value = fold.previous;
+		fold.previous = null;
+	} else refold(fold, items);
+}
+
+const copySum = (sum: FactSum): FactSum => ({ ...sum, coverage: { ...sum.coverage } });
+function copyTotals(totals: CallTotals): CallTotals {
+	return {
+		...totals,
+		usage: {
+			input: copySum(totals.usage.input),
+			output: copySum(totals.usage.output),
+			cacheRead: copySum(totals.usage.cacheRead),
+			cacheWrite: copySum(totals.usage.cacheWrite),
+			cacheWrite1h: copySum(totals.usage.cacheWrite1h),
+			reasoning: copySum(totals.usage.reasoning),
+		},
+		promptTokens: copySum(totals.promptTokens),
+		totalTokens: copySum(totals.totalTokens),
+		usd: copySum(totals.usd),
+	};
+}
+
+type PricedBy = CallSettled["pricing"]["pricedBy"];
+const noPricing = (): Record<PricedBy, number> => ({ provider: 0, "target-rates": 0, catalog: 0, free: 0, none: 0 });
+
+/**
+ * One selection's attempts and their sums, kept current as batches land. The call fold follows attemptId order and
+ * per-attempt fact folds follow the read model's order, exactly as a cold fold of the same members would (#434).
+ */
+interface SelectionState {
+	readonly matches: (attempt: Attempt) => boolean;
+	readonly members: Attempt[];
+	readonly byId: Attempt[];
+	readonly calls: Fold<CallTotals>;
+	readonly facts: Map<FactMetric, Fold<FactSum>>;
+	/** Members per call id, for the distinct call count. */
+	readonly callIds: Map<string, number>;
+	/** Invoked members whose token total is unknown. */
+	missing: number;
+	/** Invoked members by what priced them. */
+	readonly pricedBy: Record<PricedBy, number>;
+	totals: CallTotals | null;
+}
+
+function tokensUnknown(attempt: Attempt): boolean {
+	const totals = emptyCallTotals();
+	addCallTotals(totals, attempt.settled);
+	return totals.totalTokens.unknownCount > 0;
+}
+
+function tallyMember(selection: SelectionState, attempt: Attempt, sign: 1 | -1): void {
+	const callId = attempt.started.callId;
+	const members = (selection.callIds.get(callId) ?? 0) + sign;
+	if (members > 0) selection.callIds.set(callId, members);
+	else selection.callIds.delete(callId);
+	if (invoked(attempt) && attempt.settled) {
+		selection.pricedBy[attempt.settled.pricing.pricedBy] += sign;
+		if (tokensUnknown(attempt)) selection.missing += sign;
+	}
+}
+
+/** `members` must already be in the read model's order; the selection owns the array from here on. */
+function selectionState(members: Attempt[], matches: (attempt: Attempt) => boolean): SelectionState {
+	const selection: SelectionState = {
+		matches,
+		members,
+		byId: [...members].sort(byAttemptId),
+		calls: {
+			value: emptyCallTotals(),
+			previous: null,
+			empty: emptyCallTotals,
+			add: (totals, attempt) => addCallTotals(totals, attempt.settled),
+			copy: copyTotals,
+		},
+		facts: new Map(),
+		callIds: new Map(),
+		missing: 0,
+		pricedBy: noPricing(),
+		totals: null,
+	};
+	for (const attempt of members) tallyMember(selection, attempt, 1);
+	refold(selection.calls, selection.byId);
+	return selection;
+}
+
+function updateSelection(selection: SelectionState, before: Attempt | undefined, after: Attempt | undefined): void {
+	const leaving = before && selection.matches(before) ? before : undefined;
+	const joining = after && selection.matches(after) ? after : undefined;
+	if (!leaving && !joining) return;
+	if (leaving) tallyMember(selection, leaving, -1);
+	if (joining) tallyMember(selection, joining, 1);
+	const started = edit(selection.members, byStart, leaving, joining);
+	for (const fold of selection.facts.values()) advance(fold, started, joining, selection.members);
+	advance(selection.calls, edit(selection.byId, byAttemptId, leaving, joining), joining, selection.byId);
+	selection.totals = null;
+}
+
+function selectionTotals(selection: SelectionState): CallTotals {
+	selection.totals ??= { ...selection.calls.value, logicalCalls: selection.callIds.size };
+	return selection.totals;
+}
+
+function selectionFacts(selection: SelectionState, metric: FactMetric): FactSum {
+	let fold = selection.facts.get(metric);
+	if (!fold) {
+		fold = {
+			value: emptyFactSum(),
+			previous: null,
+			empty: emptyFactSum,
+			add: (sum, attempt) => addGroup(sum, [attemptFact(attempt, metric)]),
+			copy: copySum,
+		};
+		refold(fold, selection.members);
+		selection.facts.set(metric, fold);
+	}
+	return fold.value;
+}
+
+function selectionOf(analysis: Analysis, group: { by: FactGroup; key: string } | undefined): SelectionState {
+	const key = group ? `${group.by}\u0000${group.key}` : "";
+	let selection = analysis.selections.get(key);
+	if (!selection) {
+		const matches = (attempt: Attempt) => (group ? attemptInGroup(attempt, group) : true);
+		selection = selectionState(analysis.attempts.filter(matches), matches);
+		analysis.selections.set(key, selection);
+	}
+	return selection;
 }
 
 function unreadableAncestors(source: SessionSource): number {
@@ -328,6 +723,8 @@ function runInGroup(run: Run, group: { by: FactGroup; key: string }): boolean {
 
 interface Part {
 	attempts?: Attempt[];
+	/** The running fold `attempts` belong to, when the selection keeps one. */
+	selection?: SelectionState;
 	run?: Run;
 	gap: number;
 }
@@ -371,10 +768,8 @@ function select(view: View, ref: ParsedFactRef): Selection | null {
 	const parts: Part[] = [];
 	const described: string[] = [];
 	if (ref.scope !== "runs") {
-		parts.push({
-			attempts: group ? analysis.attempts.filter((attempt) => attemptInGroup(attempt, group)) : analysis.attempts,
-			gap: analysis.gap,
-		});
+		const selection = selectionOf(analysis, group);
+		parts.push({ attempts: selection.members, selection, gap: analysis.gap });
 		described.push(`${ref.scope === "lineage" ? "the lineage's" : "the session's own"} attempts`);
 	}
 	if (ref.scope !== "own") {
@@ -514,41 +909,60 @@ function attemptFact(attempt: Attempt, metric: FactMetric): Fact<number> {
 }
 
 function attemptsSum(attempts: readonly Attempt[], metric: FactMetric): FactSum {
-	const totals = foldCalls(attempts);
+	return callSum(
+		() => foldCalls(attempts),
+		metric,
+		() => foldCalls(attempts.filter(invoked)).totalTokens.unknownCount,
+		() => foldFacts(attempts.map((attempt) => attemptFact(attempt, metric))),
+	);
+}
+
+function selectionSum(selection: SelectionState, metric: FactMetric): FactSum {
+	return callSum(
+		() => selectionTotals(selection),
+		metric,
+		() => selection.missing,
+		() => selectionFacts(selection, metric),
+	);
+}
+
+function callSum(totals: () => CallTotals, metric: FactMetric, missing: () => number, facts: () => FactSum): FactSum {
 	switch (metric) {
 		case "calls":
-			return counted(totals.logicalCalls);
+			return counted(totals().logicalCalls);
 		case "attempts":
-			return counted(totals.attempts);
+			return counted(totals().attempts);
 		case "neverSent":
 		case "sentUnsettled":
 		case "settledNoUsage":
 		case "settled":
 		case "incomplete":
-			return counted(totals[metric]);
+			return counted(totals()[metric]);
 		case "input":
 		case "output":
 		case "cacheRead":
 		case "cacheWrite":
 		case "cacheWrite1h":
 		case "reasoning":
-			return totals.usage[metric];
+			return totals().usage[metric];
 		case "prompt":
-			return totals.promptTokens;
+			return totals().promptTokens;
 		case "total":
-			return totals.totalTokens;
+			return totals().totalTokens;
 		case "usd":
-			return totals.usd;
-		case "apiCalls":
-			return counted(totals.settled + totals.settledNoUsage + totals.sentUnsettled);
+			return totals().usd;
+		case "apiCalls": {
+			const all = totals();
+			return counted(all.settled + all.settledNoUsage + all.sentUnsettled);
+		}
 		case "missingTokenCalls":
-			return counted(foldCalls(attempts.filter(invoked)).totalTokens.unknownCount);
+			return counted(missing());
 		case "runs":
 			return counted(0);
 		case "repairRounds":
 			return foldFacts([]);
 		default:
-			return foldFacts(attempts.map((attempt) => attemptFact(attempt, metric)));
+			return facts();
 	}
 }
 
@@ -610,7 +1024,15 @@ function allFree(parts: readonly Part[]): boolean {
 			)
 				return false;
 		}
-		for (const attempt of (part.attempts ?? []).filter(invoked)) {
+		if (part.selection) {
+			const counts = part.selection.pricedBy;
+			const free = counts.free;
+			if (counts.provider + counts["target-rates"] + counts.catalog + counts.none > 0) return false;
+			if (free > 0) any = true;
+			continue;
+		}
+		for (const attempt of part.attempts ?? []) {
+			if (!invoked(attempt)) continue;
 			if (attempt.settled?.pricing.pricedBy !== "free") return false;
 			any = true;
 		}
@@ -652,7 +1074,14 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 		};
 	}
 	const sums = selection.parts.map((part) =>
-		withGap(part.run ? runSum(part.run, ref.metric) : attemptsSum(part.attempts ?? [], ref.metric), part.gap),
+		withGap(
+			part.run
+				? runSum(part.run, ref.metric)
+				: part.selection
+					? selectionSum(part.selection, ref.metric)
+					: attemptsSum(part.attempts ?? [], ref.metric),
+			part.gap,
+		),
 	);
 	const fact = sums.length === 1 && sums[0] ? sums[0] : sumFactSums(sums);
 	return { quantity: { fact, display: display(ref.metric, fact, allFree(selection.parts)), ref: encoded }, selection };
@@ -706,12 +1135,14 @@ function callCounts(view: View, base: Omit<ParsedFactRef, "metric">) {
 	};
 }
 
-type PricedBy = CallSettled["pricing"]["pricedBy"];
 function pricedByCounts(parts: readonly Part[]): Record<PricedBy, number> {
-	const counts: Record<PricedBy, number> = { provider: 0, "target-rates": 0, catalog: 0, free: 0, none: 0 };
+	const counts = noPricing();
 	for (const part of parts) {
-		for (const attempt of part.attempts ?? [])
-			if (invoked(attempt) && attempt.settled) counts[attempt.settled.pricing.pricedBy] += 1;
+		if (part.selection)
+			for (const [by, count] of Object.entries(part.selection.pricedBy)) counts[by as PricedBy] += count;
+		else
+			for (const attempt of part.attempts ?? [])
+				if (invoked(attempt) && attempt.settled) counts[attempt.settled.pricing.pricedBy] += 1;
 		if (part.run) {
 			for (const attempt of part.run.attempts)
 				if (invoked(attempt) && attempt.settled) counts[attempt.settled.pricing.pricedBy] += 1;
@@ -721,7 +1152,7 @@ function pricedByCounts(parts: readonly Part[]): Record<PricedBy, number> {
 	return counts;
 }
 
-function journalCoverage(source: JournalSource, fold: ReturnType<typeof foldCallJournal>, aggregates = 0) {
+function journalCoverage(source: JournalSource, fold: Pick<JournalFold, "coverage">, aggregates = 0) {
 	return {
 		present: source.present,
 		seeding: source.seeding === true,
@@ -1302,6 +1733,12 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 }
 
 /** One quantity by reference, measured exactly as every DTO measures it; null when the source cannot see the ref. */
+/** Fold a source now, so the first reader after a live seed finds its analysis built (#434 §11). */
+export function prepareSource(source: SessionSource): void {
+	analyze(source);
+	if (source.parent) analyzeLineage(source);
+}
+
 export function quantityOf(ref: FactRef, source: SessionSource): Quantity | null {
 	const parsed = parseFactRef(ref);
 	return parsed ? (measure({ session: source }, parsed)?.quantity ?? null) : null;

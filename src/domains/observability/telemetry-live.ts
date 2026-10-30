@@ -24,9 +24,11 @@ import type { JournalSource, SessionSource } from "./read-model.js";
 import {
 	cacheReport,
 	callsReport,
+	continueSource,
 	costReport,
 	explain,
 	journalSourceFromRead,
+	prepareSource,
 	quantityOf,
 	runsReport,
 	runTelemetry,
@@ -435,6 +437,8 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			}
 			// No session directory yet: a new session's writer has not opened, so the hub holds everything there is.
 			install(binding, source ?? absent({ present: false, records: [], modes: [], skipped: 0, damaged: 0 }));
+			// The whole-session fold runs once here, in the seed's own task, never on the first render after it.
+			if (binding.root) prepareSource(snapshot(binding, binding.root));
 			return;
 		}
 	};
@@ -479,6 +483,8 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 				? { sessionId: node.parent.sessionId, turnId: node.parent.turnId, at: node.parent.at, source: parent }
 				: null,
 		};
+		// The node's journal only grows by appending after its seed, so the read model folds just the new batch (#434).
+		if (cached) continueSource(source, cached.source);
 		node.snapshot = { journal, runs, parent, source };
 		return source;
 	};

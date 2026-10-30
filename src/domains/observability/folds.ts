@@ -18,7 +18,7 @@ export const emptyFactSum = (): FactSum => ({
 });
 
 /** One group is one call's contribution. Partial groups retain known subtotals and count missing coverage once (#434). */
-function addGroup(sum: FactSum, facts: readonly Fact<number>[]): void {
+export function addGroup(sum: FactSum, facts: readonly Fact<number>[]): void {
 	const kinds = new Set<Fact<number>["kind"]>();
 	for (const fact of facts) {
 		kinds.add(fact.kind);
@@ -59,11 +59,10 @@ export interface CallTotals {
 	usd: FactSum;
 }
 
-/** All projections use these definitions: reasoning is included in output; cacheWrite1h is a cacheWrite subfield (#434). */
-export function foldCalls(attempts: readonly FoldedAttempt[]): CallTotals {
-	const totals: CallTotals = {
-		logicalCalls: new Set(attempts.map(({ started }) => started.callId)).size,
-		attempts: attempts.length,
+export function emptyCallTotals(): CallTotals {
+	return {
+		logicalCalls: 0,
+		attempts: 0,
 		neverSent: 0,
 		sentUnsettled: 0,
 		settledNoUsage: 0,
@@ -81,24 +80,38 @@ export function foldCalls(attempts: readonly FoldedAttempt[]): CallTotals {
 		totalTokens: emptyFactSum(),
 		usd: emptyFactSum(),
 	};
+}
+
+/**
+ * Fold one more attempt into `totals` in place; {@link foldCalls} is this over attempts in attemptId order. Distinct
+ * calls are a property of the whole set, so `logicalCalls` is the caller's.
+ */
+export function addCallTotals(totals: CallTotals, settled: CallSettled | null): void {
+	totals.attempts += 1;
+	if (!settled) totals.incomplete += 1;
+	else if (settled.disposition === "never_sent") totals.neverSent += 1;
+	else if (settled.disposition === "sent_unsettled") totals.sentUnsettled += 1;
+	else if (settled.disposition === "settled_no_usage") totals.settledNoUsage += 1;
+	else totals.settled += 1;
+	const fact = (field: keyof CallUsage) =>
+		settled?.disposition === "never_sent" ? absent : (settled?.usage?.[field] ?? unknown);
+	// An unsettled call's counts are a lower bound, so every sum it enters stays partial (#434).
+	const bound = settled?.disposition === "sent_unsettled" ? [unknown] : [];
+	for (const field of fields) addGroup(totals.usage[field], [fact(field), ...bound]);
+	const prompt = [fact("input"), fact("cacheRead"), fact("cacheWrite")];
+	addGroup(totals.promptTokens, [...prompt, ...bound]);
+	const total = settled?.usage?.total;
+	addGroup(totals.totalTokens, [...(total ? [total] : [...prompt, fact("output")]), ...bound]);
+	addGroup(totals.usd, [settled?.pricing.usd ?? unknown, ...bound]);
+}
+
+/** All projections use these definitions: reasoning is included in output; cacheWrite1h is a cacheWrite subfield (#434). */
+export function foldCalls(attempts: readonly FoldedAttempt[]): CallTotals {
+	const totals = emptyCallTotals();
+	totals.logicalCalls = new Set(attempts.map(({ started }) => started.callId)).size;
 	// Stable order makes independent consumers sum floating-point costs identically (#434).
-	for (const { settled } of [...attempts].sort((a, b) => a.started.attemptId.localeCompare(b.started.attemptId))) {
-		if (!settled) totals.incomplete += 1;
-		else if (settled.disposition === "never_sent") totals.neverSent += 1;
-		else if (settled.disposition === "sent_unsettled") totals.sentUnsettled += 1;
-		else if (settled.disposition === "settled_no_usage") totals.settledNoUsage += 1;
-		else totals.settled += 1;
-		const fact = (field: keyof CallUsage) =>
-			settled?.disposition === "never_sent" ? absent : (settled?.usage?.[field] ?? unknown);
-		// An unsettled call's counts are a lower bound, so every sum it enters stays partial (#434).
-		const bound = settled?.disposition === "sent_unsettled" ? [unknown] : [];
-		for (const field of fields) addGroup(totals.usage[field], [fact(field), ...bound]);
-		const prompt = [fact("input"), fact("cacheRead"), fact("cacheWrite")];
-		addGroup(totals.promptTokens, [...prompt, ...bound]);
-		const total = settled?.usage?.total;
-		addGroup(totals.totalTokens, [...(total ? [total] : [...prompt, fact("output")]), ...bound]);
-		addGroup(totals.usd, [settled?.pricing.usd ?? unknown, ...bound]);
-	}
+	for (const { settled } of [...attempts].sort((a, b) => a.started.attemptId.localeCompare(b.started.attemptId)))
+		addCallTotals(totals, settled);
 	return totals;
 }
 
@@ -116,8 +129,20 @@ export interface JournalFold {
 	};
 }
 
-/** Fold supplied journal and referenced run records once, irrespective of replay order or fork copies (#434). */
-export function foldCallJournal(records: Iterable<TelemetryRecord>, callIds?: ReadonlySet<string>): JournalFold {
+/** The state {@link foldCallJournal} folds records into, kept by the live read model so each batch folds once (#434). */
+export interface CallJournalFolder {
+	/** Fold one record; returns the attempts whose folded start or settlement it may have changed. */
+	add(record: TelemetryRecord): readonly string[];
+	/** One attempt as the fold would emit it; undefined until its call.started arrives. */
+	attempt(attemptId: string): FoldedAttempt | undefined;
+	/** Every attempt as the fold emits them, in attemptId order. */
+	attempts(): FoldedAttempt[];
+	/** Current counters, kept up to date by `add`. */
+	readonly coverage: JournalFold["coverage"];
+	fold(): JournalFold;
+}
+
+export function callJournalFolder(callIds?: ReadonlySet<string>): CallJournalFolder {
 	const seen = new Map<string, TelemetryRecord>();
 	const starts = new Map<string, CallStarted>();
 	const settlements = new Map<string, CallSettled>();
@@ -130,68 +155,92 @@ export function foldCallJournal(records: Iterable<TelemetryRecord>, callIds?: Re
 		gapRecords: 0,
 		droppedRecords: 0,
 	};
-	for (const record of records) {
-		const previous = seen.get(record.id);
-		if (previous && isDeepStrictEqual(previous, record)) {
-			coverage.duplicateRecords += 1;
-			continue;
-		}
-		if (previous) {
-			for (const conflicting of [previous, record])
-				if (conflicting.k === "call.started" || conflicting.k === "call.settled") conflicts.add(conflicting.data.attemptId);
-		}
-		seen.set(record.id, record);
-		if (record.k === "gap") {
-			// A mode change or the research cap only refuses research-tier records; accounting never passes either
-			// gate, so neither leaves a call total partial (#434).
-			if (record.data.reason === "mode-filtered" || record.data.reason === "research-cap") continue;
-			coverage.gapRecords += 1;
-			coverage.droppedRecords += record.data.count;
-			continue;
-		}
-		if (record.k === "call.ref") {
-			if (!callIds || callIds.has(record.data.callId)) references.add(record.data.callId);
-			continue;
-		}
-		if (record.k !== "call.started" && record.k !== "call.settled") continue;
-		const data = record.data;
-		if (callIds && !callIds.has(data.callId)) continue;
-		const started: CallStarted = {
-			callId: data.callId,
-			attemptId: data.attemptId,
-			attempt: data.attempt,
-			label: data.label,
-			// A response model is learned at settlement; it is not part of the request identity (#434).
-			target: { ...data.target, reportedModel: { kind: "unknown", reason: "not-observed" } },
-			roundKind: data.roundKind,
-			toolChoice: data.toolChoice,
-		};
-		const priorStart = starts.get(data.attemptId);
-		if (priorStart && !isDeepStrictEqual(priorStart, started)) {
-			conflicts.add(data.attemptId);
-			if (JSON.stringify(started) < JSON.stringify(priorStart)) starts.set(data.attemptId, started);
-		} else starts.set(data.attemptId, started);
-		if (record.k === "call.settled") {
-			const prior = settlements.get(data.attemptId);
-			if (prior && !isDeepStrictEqual(prior, record.data)) conflicts.add(data.attemptId);
-			else if (prior) coverage.duplicateAttempts += 1;
-			else settlements.set(data.attemptId, record.data);
-		}
-	}
-	const attempts = [...starts.values()]
-		.sort((a, b) => a.attemptId.localeCompare(b.attemptId))
-		.map((started) => ({
-			started,
-			settled: conflicts.has(started.attemptId) ? null : (settlements.get(started.attemptId) ?? null),
-		}));
-	coverage.conflictingAttempts = conflicts.size;
-	const resolved = new Set(attempts.map(({ started }) => started.callId));
+	const attempt = (started: CallStarted): FoldedAttempt => ({
+		started,
+		settled: conflicts.has(started.attemptId) ? null : (settlements.get(started.attemptId) ?? null),
+	});
+	const ordered = () => [...starts.values()].sort((a, b) => a.attemptId.localeCompare(b.attemptId)).map(attempt);
 	return {
-		attempts,
-		totals: foldCalls(attempts),
-		unresolvedCallIds: [...references].filter((id) => !resolved.has(id)).sort(),
 		coverage,
+		add(record) {
+			const touched: string[] = [];
+			const previous = seen.get(record.id);
+			if (previous && isDeepStrictEqual(previous, record)) {
+				coverage.duplicateRecords += 1;
+				return touched;
+			}
+			if (previous) {
+				for (const conflicting of [previous, record])
+					if (conflicting.k === "call.started" || conflicting.k === "call.settled") {
+						conflicts.add(conflicting.data.attemptId);
+						touched.push(conflicting.data.attemptId);
+					}
+				coverage.conflictingAttempts = conflicts.size;
+			}
+			seen.set(record.id, record);
+			if (record.k === "gap") {
+				// A mode change or the research cap only refuses research-tier records; accounting never passes either
+				// gate, so neither leaves a call total partial (#434).
+				if (record.data.reason === "mode-filtered" || record.data.reason === "research-cap") return touched;
+				coverage.gapRecords += 1;
+				coverage.droppedRecords += record.data.count;
+				return touched;
+			}
+			if (record.k === "call.ref") {
+				if (!callIds || callIds.has(record.data.callId)) references.add(record.data.callId);
+				return touched;
+			}
+			if (record.k !== "call.started" && record.k !== "call.settled") return touched;
+			const data = record.data;
+			if (callIds && !callIds.has(data.callId)) return touched;
+			touched.push(data.attemptId);
+			const started: CallStarted = {
+				callId: data.callId,
+				attemptId: data.attemptId,
+				attempt: data.attempt,
+				label: data.label,
+				// A response model is learned at settlement; it is not part of the request identity (#434).
+				target: { ...data.target, reportedModel: { kind: "unknown", reason: "not-observed" } },
+				roundKind: data.roundKind,
+				toolChoice: data.toolChoice,
+			};
+			const priorStart = starts.get(data.attemptId);
+			if (priorStart && !isDeepStrictEqual(priorStart, started)) {
+				conflicts.add(data.attemptId);
+				if (JSON.stringify(started) < JSON.stringify(priorStart)) starts.set(data.attemptId, started);
+			} else starts.set(data.attemptId, started);
+			if (record.k === "call.settled") {
+				const prior = settlements.get(data.attemptId);
+				if (prior && !isDeepStrictEqual(prior, record.data)) conflicts.add(data.attemptId);
+				else if (prior) coverage.duplicateAttempts += 1;
+				else settlements.set(data.attemptId, record.data);
+			}
+			coverage.conflictingAttempts = conflicts.size;
+			return touched;
+		},
+		attempt(attemptId) {
+			const started = starts.get(attemptId);
+			return started ? attempt(started) : undefined;
+		},
+		attempts: ordered,
+		fold() {
+			const attempts = ordered();
+			const resolved = new Set(attempts.map(({ started }) => started.callId));
+			return {
+				attempts,
+				totals: foldCalls(attempts),
+				unresolvedCallIds: [...references].filter((id) => !resolved.has(id)).sort(),
+				coverage: { ...coverage },
+			};
+		},
 	};
+}
+
+/** Fold supplied journal and referenced run records once, irrespective of replay order or fork copies (#434). */
+export function foldCallJournal(records: Iterable<TelemetryRecord>, callIds?: ReadonlySet<string>): JournalFold {
+	const folder = callJournalFolder(callIds);
+	for (const record of records) folder.add(record);
+	return folder.fold();
 }
 
 /** Grouping selects attempts only; every group's arithmetic remains the same fold (#434). */

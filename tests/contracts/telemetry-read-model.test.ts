@@ -44,6 +44,7 @@ import {
 	unmarkedEstimates,
 	unparsableRefs,
 } from "../harness/telemetry-lies.js";
+import { telemetryCall } from "../harness/telemetry-view.js";
 
 const ledger = readFileSync(new URL("../fixtures/telemetry/golden/p0/current.jsonl", import.meta.url), "utf8")
 	.trim()
@@ -142,21 +143,34 @@ test("live equals CLI: the live model folds exactly the batches a cold read of t
 		await write(imported.records.slice(third, 2 * third));
 		await seeded;
 		await write(imported.records.slice(2 * third));
-		const live = model.live();
-		const cold = loadSessionTelemetrySource(stateDir, "golden-p0");
-		ok(live && cold);
-		strictEqual(live.session().journal.records, imported.records.length);
 		const timeless = (dto: unknown) =>
 			JSON.parse(JSON.stringify(dto, (key, value: unknown) => (key === "generatedAt" ? undefined : value))) as unknown;
-		const pairs: Array<[string, unknown, unknown]> = [
-			["session", live.session(), sessionTelemetry(cold)],
-			["calls", live.calls(), callsReport(cold)],
-			["cost by model", live.cost("model"), costReport(cold, "model")],
-			["cache", live.cache(), cacheReport(cold)],
-			["timeline", live.timeline(), timeline(cold)],
-			["why-stopped", live.whyStopped(), whyStopped(cold)],
-		];
-		for (const [name, actual, expected] of pairs) deepStrictEqual(timeless(actual), timeless(expected), name);
+		const equalsCold = (records: number) => {
+			const live = model.live();
+			const cold = loadSessionTelemetrySource(stateDir, "golden-p0");
+			ok(live && cold);
+			strictEqual(live.session().journal.records, records);
+			const pairs: Array<[string, unknown, unknown]> = [
+				["session", live.session(), sessionTelemetry(cold)],
+				["calls", live.calls(), callsReport(cold)],
+				["cost by model", live.cost("model"), costReport(cold, "model")],
+				["cost by turn", live.cost("turn"), costReport(cold, "turn")],
+				["cache", live.cache(), cacheReport(cold)],
+				["timeline", live.timeline(), timeline(cold)],
+				["why-stopped", live.whyStopped(), whyStopped(cold)],
+			];
+			for (const [name, actual, expected] of pairs) deepStrictEqual(timeless(actual), timeless(expected), name);
+		};
+		equalsCold(imported.records.length);
+		// The live fold extends per batch: one record per batch, read between batches, with a later side call settling
+		// before the main call it overlapped, still folds to the cold read's exact sums and order (#434 §11).
+		const main = telemetryCall("golden-p0", { turnId: "turn-late", usage: { input: 7, output: null }, usd: 0.0137 });
+		const side = telemetryCall("golden-p0", { label: "memory", turnId: "turn-late", usd: 0.0021 });
+		for (const record of [main[0], side[0], side[1], main[1]]) {
+			await write([record as TelemetryRecord]);
+			model.live()?.cost("turn");
+		}
+		equalsCold(imported.records.length + 4);
 	} finally {
 		model.stop();
 		await writer.close();
