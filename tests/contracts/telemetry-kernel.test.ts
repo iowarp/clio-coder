@@ -295,7 +295,39 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 		requestBytes: { kind: "estimated", value: 2048, method: "payload-json" },
 		sessionPinnedToSse: counted(false),
 		connectionReused: counted(true),
+		websocketFailures: counted(0),
+		sseFallbacks: counted(0),
 	});
+	const pinned = callSettlementFromMessage(
+		{
+			stopReason: "stop",
+			usage: { input: 5, output: 1, totalTokens: 6 },
+			codexTransport: {
+				mode: "sse",
+				request: "full",
+				attribution: "exclusive",
+				counters: {
+					requests: 1,
+					connectionsCreated: 0,
+					connectionsReused: 0,
+					fullContextRequests: 0,
+					deltaRequests: 0,
+					websocketFailures: 1,
+					sseFallbacks: 1,
+				},
+				lastInputItems: null,
+				fallbackActive: true,
+				reason: "transport_failure",
+				retryAt: "2026-10-30T12:00:30.000Z",
+				cooldownMs: 30000,
+			},
+		},
+		"unknown",
+	).transport;
+	deepStrictEqual(
+		[pinned.kind, pinned.sessionPinnedToSse, pinned.websocketFailures, pinned.sseFallbacks, pinned.pinReason],
+		["sse", counted(true), counted(1), counted(1), "transport_failure"],
+	);
 	deepStrictEqual(codex("delta").requestBytes, { kind: "unknown", reason: "not-observed" });
 	deepStrictEqual(codex("full", "overlap"), {
 		kind: "websocket",

@@ -29,6 +29,17 @@ function transportFacts(raw: Record<string, unknown>, sent: boolean): CallSettle
 	const codex = record(raw.codexTransport);
 	const counters = record(codex.counters);
 	const counted = <T>(value: T) => ({ kind: "measured", value, source: "local-count" }) as const;
+	const exclusive = codex.attribution === "exclusive" && typeof counters.requests === "number";
+	const count = (value: unknown) => (typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null);
+	const failures = exclusive ? count(counters.websocketFailures) : null;
+	const fallbacks = exclusive ? count(counters.sseFallbacks) : null;
+	const recovery = record(codex.recovery);
+	const pinReasons = ["auth_rejection", "transport_failure", "post_stream_or_unknown_failure"] as const;
+	const pinReason = pinReasons.find((reason) => reason === codex.reason);
+	const actions = ["cooldown_reset", "auth_reset"] as const;
+	const outcomes = ["eligible", "recovered", "failed", "unknown"] as const;
+	const action = actions.find((value) => value === recovery.action);
+	const outcome = outcomes.find((value) => value === recovery.outcome);
 	const continuation = codex.request === "delta" || codex.request === "full" ? codex.request : undefined;
 	const bytes = sent && continuation !== "delta" ? amount(raw.clioCoderRequestBytes) : null;
 	return {
@@ -42,6 +53,10 @@ function transportFacts(raw: Record<string, unknown>, sent: boolean): CallSettle
 		...(codex.mode === "websocket" && codex.attribution === "exclusive" && counters.requests === 1
 			? { connectionReused: counted(counters.connectionsReused === 1 && counters.connectionsCreated === 0) }
 			: {}),
+		...(failures !== null ? { websocketFailures: counted(failures) } : {}),
+		...(fallbacks !== null ? { sseFallbacks: counted(fallbacks) } : {}),
+		...(codex.fallbackActive === true && pinReason ? { pinReason } : {}),
+		...(action && outcome ? { recovery: { action, outcome } } : {}),
 	};
 }
 

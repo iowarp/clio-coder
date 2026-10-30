@@ -126,6 +126,20 @@ export const CallSettledSchema = Type.Object(
 				sessionPinnedToSse: factSchema(Type.Boolean()),
 				/** Present only when the call's own connection counters were attributable to it (#434). */
 				connectionReused: Type.Optional(factSchema(Type.Boolean())),
+				/** WebSocket failures and SSE fallbacks inside this call, from the same attributable counters (#423). */
+				websocketFailures: Type.Optional(factSchema(count)),
+				sseFallbacks: Type.Optional(factSchema(count)),
+				/** Why the session is pinned to SSE after this call, when it is (#423, #427). */
+				pinReason: Type.Optional(vocabulary(["auth_rejection", "transport_failure", "post_stream_or_unknown_failure"])),
+				recovery: Type.Optional(
+					Type.Object(
+						{
+							action: vocabulary(["cooldown_reset", "auth_reset"]),
+							outcome: vocabulary(["eligible", "recovered", "failed", "unknown"]),
+						},
+						closed,
+					),
+				),
 				promptCacheKey: Type.Optional(ObjectRefSchema),
 			},
 			closed,
