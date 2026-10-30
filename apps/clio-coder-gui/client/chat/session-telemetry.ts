@@ -6,7 +6,6 @@ import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { sessionReadScope } from "../api/sessions.js";
-import { compactCount } from "./overview-model.js";
 
 import type { Spend } from "./session-usage-model.js";
 
@@ -96,12 +95,23 @@ export function useSessionUsage(client: Client, sessionId: string, settled: numb
 	});
 }
 
+/** The read model's own session fold, read cold for a task that is not open (#434). */
+export function useTelemetrySession(client: Client, sessionId: string, enabled: boolean) {
+	return useQuery({
+		meta: { errorSurface: "inline" },
+		queryKey: ["telemetry", sessionId, "session"],
+		queryFn: ({ signal }) =>
+			client.call(routes.telemetrySession, { params: { id: sessionId }, query: {}, body: {} }, undefined, signal),
+		enabled,
+		retry: false,
+		staleTime: 30_000,
+	});
+}
+
 export function spendLine(spend: Spend): string | null {
-	const parts = [
-		spend.tokens > 0 || spend.missingTokenCalls
-			? `${compactCount(spend.tokens)} tokens${spend.missingTokenCalls ? ` +? (${spend.missingTokenCalls} call${spend.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`
-			: null,
-		spend.cost,
-	].filter(Boolean);
+	const missing = spend.missingTokenCalls
+		? ` (${spend.missingTokenCalls} ${spend.missingTokenCalls === 1 ? "call" : "calls"} missing usage)`
+		: "";
+	const parts = [spend.tokens === null ? null : `${spend.tokens} tokens${missing}`, spend.cost].filter(Boolean);
 	return parts.length > 0 ? parts.join(" · ") : null;
 }

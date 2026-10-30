@@ -16,7 +16,7 @@ import { branchView } from "./branch-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
 import { FLEET_STATE_LABELS, FLEET_STATE_TONES, fleetEvidence, foldFleetRuns, isLiveRun } from "./fleet-facts.js";
 import { summarizeHealth } from "./health.js";
-import { compactCount, compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
+import { compactDuration, contextMeter, contextSegments, taskOverview } from "./overview-model.js";
 import { ProjectTrustNotice } from "./ProjectTrustNotice.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
 import { ReceiptLine } from "./ReceiptLine.js";
@@ -28,6 +28,7 @@ import {
 	useContextLedger,
 	useSessionCapabilities,
 	useSessionUsage,
+	useTelemetrySession,
 } from "./session-telemetry.js";
 import { sessionSpend } from "./session-usage-model.js";
 import { livePlanView } from "./telemetry-model.js";
@@ -238,12 +239,14 @@ export function SessionOverview({
 	const done = plan?.rows.filter((row) => row.tone === "success").length ?? 0;
 	const openTasks = view?.tasks.filter((task) => task.actions.length > 0).length ?? 0;
 	const decisions = view?.activeDecisions.length ?? 0;
-	const spend = sessionSpend(
-		session.turns,
-		usage.data,
-		overview.running || !usage.data || usage.isPlaceholderData ? session.telemetry?.usage : undefined,
-		session.costDisplay,
-	);
+	// A task that is not open has no usage read; the cold telemetry route folds its journal instead (#434).
+	const cold = useTelemetrySession(client, session.id, active && more && !open);
+	const spend = sessionSpend({
+		usage: usage.data,
+		live: overview.running || !usage.data || usage.isPlaceholderData ? session.telemetry?.usage : undefined,
+		cold: cold.data,
+		recordedCostDisplay: session.costDisplay,
+	});
 	const used = spendLine(spend);
 	const healthSection =
 		health.rows.length > 0 ? (
@@ -562,11 +565,9 @@ export function SessionOverview({
 								<dl className="pane-usage-stats">
 									<div>
 										<dt>Tokens</dt>
-										<dd title={`${spend.tokens.toLocaleString("en-US")} tokens`}>
-											{compactCount(spend.tokens)}
-											{spend.missingTokenCalls
-												? ` +? (${spend.missingTokenCalls} call${spend.missingTokenCalls === 1 ? "" : "s"})`
-												: ""}
+										<dd>
+											{spend.tokens ?? "not recorded"}
+											{spend.missingTokenCalls ? ` (${spend.missingTokenCalls} missing usage)` : ""}
 										</dd>
 									</div>
 									<div>

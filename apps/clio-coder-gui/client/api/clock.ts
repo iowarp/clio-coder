@@ -13,8 +13,6 @@ export function serverClock(now: () => number = Date.now) {
 	};
 }
 export const clock = serverClock();
-export const formatTokens = (value: number | null | undefined, missingTokenCalls?: number | null) =>
-	`${value == null ? "not recorded" : value.toLocaleString("en-US")}${missingTokenCalls ? ` +? (${missingTokenCalls} call${missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`;
 const date = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" });
 const time = new Intl.DateTimeFormat("en-GB", {
 	hourCycle: "h23",

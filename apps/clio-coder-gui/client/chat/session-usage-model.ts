@@ -1,41 +1,111 @@
 // What this conversation spent and what each provider reports about its plan, before any of it is drawn.
-// Every number is the agent's own: cost and tokens are Clio Coder's accounting, folded per provider and
-// model as the terminal's /usage folds them, and quota is each provider's report. Nothing is summed here.
+// The read model's DTOs carry every figure with its display (#434 §11.2); the v1 counts beside them are
+// legacy until P5 retires them. Nothing is summed, suffixed or inferred here.
 
 import type { LiveUsage } from "../../contracts/session-telemetry.js";
-import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { SessionUsage } from "../../contracts/usage.js";
+import type { SessionTelemetryV1 } from "../../contracts/wire.js";
 import type { StatusTone } from "../design/status.js";
-import { taskOverview } from "./overview-model.js";
+import { countText } from "../telemetry/quantity-model.js";
 
 type Cost = SessionUsage["session"]["cost"];
-
-const tokens = (value: number) => value.toLocaleString("en-US");
 
 export function costText(cost: Cost): string {
 	return cost.display ?? "not measured";
 }
 
-export function usageTotals(usage: SessionUsage): Array<{ label: string; value: string }> {
+export interface Spend {
+	/** The server's wording for the tokens; null when nothing reported them. */
+	readonly tokens: string | null;
+	readonly cost: string | null;
+	readonly calls: string | null;
+	/** `telemetry`: the read model's fold, every unknown kept. `legacy`: the v1 counts, which retire in P5. */
+	readonly source: "telemetry" | "legacy" | "none";
+	/** Legacy only: calls the v1 counts could not cover, named beside them and never folded into them. */
+	readonly missingTokenCalls?: number;
+}
+
+/**
+ * One spend figure for every surface. The read model wins wherever it is present: on the usage read for an open
+ * session, or from the cold telemetry route for a closed one. The v1 counts are the fallback for an agent build
+ * that carries no telemetry, and a session with neither shows only its recorded cost.
+ */
+export function sessionSpend(input: {
+	usage?: SessionUsage | undefined;
+	live?: LiveUsage | undefined;
+	cold?: SessionTelemetryV1 | null | undefined;
+	recordedCostDisplay?: string | undefined;
+}): Spend {
+	const session = input.usage?.telemetry?.session ?? input.cold ?? null;
+	if (session)
+		return {
+			tokens: session.totals.tokens.display,
+			cost: session.totals.usd.display,
+			calls: session.own.counts.calls.display,
+			source: "telemetry",
+		};
+	const live = input.live?.session;
+	if (live)
+		return {
+			tokens: countText(live.totalTokens),
+			cost: live.costDisplay ?? "not measured",
+			calls: live.calls === undefined ? null : countText(live.calls),
+			source: "legacy",
+			...(live.missingTokenCalls ? { missingTokenCalls: live.missingTokenCalls } : {}),
+		};
+	if (input.usage) {
+		const legacy = input.usage.session;
+		return {
+			tokens: countText(legacy.tokens),
+			cost: costText(legacy.cost),
+			calls: countText(legacy.cost.calls),
+			source: "legacy",
+			...(legacy.missingTokenCalls ? { missingTokenCalls: legacy.missingTokenCalls } : {}),
+		};
+	}
+	return { tokens: null, cost: input.recordedCostDisplay ?? null, calls: null, source: "none" };
+}
+
+function spendTotals(spend: Spend, unknownCallCoverageRuns = 0): Array<{ label: string; value: string }> {
+	if (spend.source === "none") return spend.cost ? [{ label: "Cost", value: spend.cost }] : [];
 	return [
-		{ label: "Cost", value: costText(usage.session.cost) },
-		{
-			label: "Tokens",
-			value: `${tokens(usage.session.tokens)}${usage.session.missingTokenCalls ? ` +? (${tokens(usage.session.missingTokenCalls)} call${usage.session.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`,
-		},
-		{
-			label: "Model calls",
-			value: usage.session.cost.unknownCallCoverageRuns
-				? `${tokens(usage.session.cost.calls)} known; ${usage.session.cost.unknownCallCoverageRuns} runs with unknown call coverage`
-				: tokens(usage.session.cost.calls),
-		},
+		{ label: "Cost", value: spend.cost ?? "not measured" },
+		{ label: "Tokens", value: spend.tokens ?? "not recorded" },
+		...(spend.calls === null ? [] : [{ label: "Model calls", value: spend.calls }]),
+		...(spend.missingTokenCalls ? [{ label: "Calls missing usage", value: countText(spend.missingTokenCalls) }] : []),
+		...(unknownCallCoverageRuns > 0
+			? [{ label: "Runs with unknown call coverage", value: countText(unknownCallCoverageRuns) }]
+			: []),
 	];
+}
+
+export function usageTotals(usage: SessionUsage): Array<{ label: string; value: string }> {
+	return spendTotals(sessionSpend({ usage }), usage.telemetry ? 0 : (usage.session.cost.unknownCallCoverageRuns ?? 0));
 }
 
 const counted = (value: number, one: string, many: string) =>
 	value > 0 ? [`${value} ${value === 1 ? one : many}`] : [];
 
-export function usageRows(usage: SessionUsage, detail: "summary" | "fields" = "summary") {
+export interface UsageRow {
+	key: string;
+	route: string;
+	tokens: string;
+	cost: string;
+	calls: string | null;
+	beside: string | null;
+}
+
+/** Per-model rows: the read model's cost report by model when the usage read carries it, else the v1 rows. */
+export function usageRows(usage: SessionUsage, detail: "summary" | "fields" = "summary"): UsageRow[] {
+	if (usage.telemetry)
+		return usage.telemetry.cost.groups.map((group) => ({
+			key: group.key,
+			route: group.key,
+			tokens: `${group.tokens.display} tokens`,
+			cost: group.usd.display,
+			calls: group.calls.display,
+			beside: null,
+		}));
 	return usage.session.rows.map((row) => {
 		const beside = [
 			...counted(row.beside.sideQuestions, "side question", "side questions"),
@@ -53,28 +123,29 @@ export function usageRows(usage: SessionUsage, detail: "summary" | "fields" = "s
 				"runs with unknown call coverage",
 			),
 		];
-		const cache = row.tokens.cacheRead + row.tokens.cacheWrite;
-		const field = (value: number) => `${tokens(value)}${row.missingTokenCalls ? " +?" : ""}`;
+		// Legacy v1 fields: cache read and write stay separate, since a v1 count cannot say which is unknown.
 		return {
 			key: `${row.provider}/${row.model}`,
 			route: `${row.provider} · ${row.model}`,
 			tokens: (detail === "fields"
 				? [
-						`${field(row.tokens.total)} total`,
-						`${field(row.tokens.input)} input`,
-						`${field(row.tokens.output)} output`,
-						`${field(row.tokens.cacheRead)} cache read`,
-						`${field(row.tokens.cacheWrite)} cache write`,
-						...(row.tokens.reasoning > 0 ? [`${field(row.tokens.reasoning)} reasoning`] : []),
+						`${countText(row.tokens.total)} total`,
+						`${countText(row.tokens.input)} input`,
+						`${countText(row.tokens.output)} output`,
+						`${countText(row.tokens.cacheRead)} cache read`,
+						`${countText(row.tokens.cacheWrite)} cache write`,
+						...(row.tokens.reasoning > 0 ? [`${countText(row.tokens.reasoning)} reasoning`] : []),
 					]
 				: [
-						`${tokens(row.tokens.input)} in`,
-						`${tokens(row.tokens.output)} out`,
-						...(cache > 0 ? [`${tokens(cache)} cache`] : []),
-						...(row.tokens.reasoning > 0 ? [`${tokens(row.tokens.reasoning)} reasoning`] : []),
+						`${countText(row.tokens.input)} in`,
+						`${countText(row.tokens.output)} out`,
+						...(row.tokens.cacheRead > 0 ? [`${countText(row.tokens.cacheRead)} cache read`] : []),
+						...(row.tokens.cacheWrite > 0 ? [`${countText(row.tokens.cacheWrite)} cache write`] : []),
+						...(row.tokens.reasoning > 0 ? [`${countText(row.tokens.reasoning)} reasoning`] : []),
 					]
 			).join(" · "),
 			cost: costText(row.cost),
+			calls: countText(row.calls),
 			beside: beside.length > 0 ? beside.join(", ") : null,
 		};
 	});
@@ -152,95 +223,27 @@ export function quotaTone(share: number): "ok" | "warn" | "full" {
 	return share >= 85 ? "full" : share >= 65 ? "warn" : "ok";
 }
 
-export interface Spend {
-	missingTokenCalls?: number;
-	readonly tokens: number;
-	/** "$0.42", "~$0.42" when estimated, "$0.42 +?" when some calls are unpriced; null when nothing is priced. */
-	readonly cost: string | null;
-	/** Clio's accounting covers side questions and handoffs; the turn sums cover only the transcript. */
-	readonly source: "clio" | "turns";
-}
-
-/**
- * One spend figure for every surface. Clio's own accounting wins whenever the session reports it,
- * because it also counts what ran beside the conversation; the per-turn sums are the fallback for a
- * session that does not.
- */
-export function sessionSpend(
-	turns: SessionSnapshot["turns"],
-	usage: SessionUsage | undefined,
-	live?: LiveUsage,
-	recordedCostDisplay?: string,
-): Spend {
-	if (live?.session) {
-		const totals = live.session;
-		const cost = totals.costDisplay ?? "not measured";
-		return {
-			tokens: totals.totalTokens,
-			cost,
-			source: "clio",
-			...(totals.missingTokenCalls ? { missingTokenCalls: totals.missingTokenCalls } : {}),
-		};
-	}
-	if (usage) {
-		const cost = usage.session.cost;
-		const priced = costText(cost);
-		return {
-			tokens: usage.session.tokens,
-			cost: priced,
-			source: "clio",
-			...(usage.session.missingTokenCalls ? { missingTokenCalls: usage.session.missingTokenCalls } : {}),
-		};
-	}
-	const overview = taskOverview(turns, 0);
-	return {
-		tokens: overview.tokens,
-		cost: recordedCostDisplay ?? "not measured",
-		...(overview.missingTokenCalls ? { missingTokenCalls: overview.missingTokenCalls } : {}),
-		source: "turns",
-	};
-}
-
 export function usageSummary(
 	sessionOpen: boolean,
-	turns: SessionSnapshot["turns"],
 	usage: SessionUsage | undefined,
 	recorded: LiveUsage | undefined,
 	recordedCostDisplay?: string,
+	cold?: SessionTelemetryV1 | null,
 ) {
-	const hasSnapshot = !!recorded?.session || turns.some((turn) => !!turn.usage);
-	const spend = sessionSpend(turns, usage, recorded, recordedCostDisplay);
-	const totals =
-		!recorded?.session && usage
-			? usageTotals(usage)
-			: hasSnapshot
-				? [
-						{ label: "Cost", value: spend.cost ?? "not measured" },
-						{
-							label: "Tokens",
-							value: `${tokens(spend.tokens)}${spend.missingTokenCalls ? ` +? (${tokens(spend.missingTokenCalls)} call${spend.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`,
-						},
-						...(recorded?.session?.calls !== undefined
-							? [
-									{
-										label: "Model calls",
-										value: recorded.session.unknownCallCoverageRuns
-											? `${tokens(recorded.session.calls)} known; ${recorded.session.unknownCallCoverageRuns} runs with unknown call coverage`
-											: tokens(recorded.session.calls),
-									},
-								]
-							: []),
-					]
-				: [];
+	const spend = sessionSpend({ usage, live: recorded, cold, recordedCostDisplay });
+	const totals = spendTotals(spend, usage && !usage.telemetry ? (usage.session.cost.unknownCallCoverageRuns ?? 0) : 0);
 	return {
 		totals,
 		details: sessionOpen && !!usage,
+		source: spend.source,
 		note: !sessionOpen
 			? totals.length > 0
 				? "Last recorded totals. Open this task to refresh model details and provider quota."
 				: "No usage totals were recorded. Open this task to read its usage."
-			: recorded?.session
-				? "Live totals. Model details below update when the turn finishes."
-				: "Clio Coder’s own accounting for this conversation.",
+			: spend.source === "telemetry"
+				? "The read model's figures for this conversation; a partial sum reads as a lower bound with its gap."
+				: recorded?.session
+					? "Live totals. Model details below update when the turn finishes."
+					: "Clio Coder’s own accounting for this conversation.",
 	};
 }

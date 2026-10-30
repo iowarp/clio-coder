@@ -5,13 +5,12 @@
 import type { ContextLedger } from "../../contracts/context-ledger.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 
+/**
+ * Turn count, wall time and whether a turn is running. Tokens and cost are not summed here: the read model folds
+ * them and the usage read carries its displays, so a client sum would be a second, lesser accounting (#434).
+ */
 export interface TaskOverview {
 	readonly turns: number;
-	readonly tokens: number;
-	readonly missingTokenCalls: number;
-	readonly hasEstimatedCost: boolean;
-	readonly hasUnknownCost: boolean;
-	readonly costUsd: number | null;
 	readonly elapsedMs: number;
 	readonly running: boolean;
 }
@@ -22,32 +21,9 @@ function at(value: string | null | undefined): number | null {
 }
 
 export function taskOverview(turns: SessionSnapshot["turns"], nowMs: number): TaskOverview {
-	let tokens = 0;
-	let cost = 0;
-	let costSeen = false;
-	let missingTokenCalls = 0;
-	let hasEstimatedCost = false;
-	let hasUnknownCost = false;
 	let elapsed = 0;
 	let running = false;
 	for (const turn of turns) {
-		if (turn.usage) {
-			tokens +=
-				turn.usage.totalTokens ?? turn.usage.input + turn.usage.output + turn.usage.cacheRead + turn.usage.cacheWrite;
-			missingTokenCalls += turn.usage.missingTokenCalls ?? 0;
-			hasEstimatedCost ||=
-				turn.usage.costSummary?.hasEstimated ??
-				(turn.usage.costProvenance === "estimated" || turn.usage.costProvenance === undefined);
-			hasUnknownCost ||=
-				turn.usage.costSummary?.hasUnknown ??
-				(turn.usage.costProvenance === "unknown" ||
-					turn.usage.costUsd === undefined ||
-					(turn.usage.missingTokenCalls ?? 0) > 0);
-			if (turn.usage.costSummary || (turn.usage.costUsd !== undefined && turn.usage.costProvenance !== "unknown")) {
-				cost += turn.usage.costSummary?.knownUsd ?? turn.usage.costUsd ?? 0;
-				costSeen = true;
-			}
-		}
 		const start = at(turn.startedAt);
 		if (start === null) continue;
 		const end = at(turn.finishedAt);
@@ -57,16 +33,7 @@ export function taskOverview(turns: SessionSnapshot["turns"], nowMs: number): Ta
 			elapsed += nowMs > 0 ? Math.max(0, nowMs - start) : 0;
 		}
 	}
-	return {
-		turns: turns.length,
-		tokens,
-		missingTokenCalls,
-		hasEstimatedCost,
-		hasUnknownCost,
-		costUsd: costSeen ? cost : null,
-		elapsedMs: elapsed,
-		running,
-	};
+	return { turns: turns.length, elapsedMs: elapsed, running };
 }
 
 /** 842 → "842", 12 400 → "12.4K", 1 250 000 → "1.3M". */

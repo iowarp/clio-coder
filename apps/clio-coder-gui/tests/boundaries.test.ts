@@ -276,3 +276,30 @@ test("the browser contract reaches no Node builtin through its value imports, ro
 	for (const file of files(resolve(app, "contracts"))) visit(file);
 	assert.deepEqual(reached, []);
 });
+
+test("the browser sums no telemetry quantity: no accumulation over tokens, cost, calls or missing-usage counts", () => {
+	const sums: string[] = [];
+	// The read model's quantity names; plain counters such as a tool tally or an attachment size are not these.
+	const telemetry = /\b(?:tokens|totalTokens|tokenCount|usd|costUsd|knownUsd|missingTokenCalls|apiCalls)\b/;
+	for (const file of files(resolve(app, "client"))) {
+		const tree = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+		const walk = (node: ts.Node) => {
+			if (
+				ts.isBinaryExpression(node) &&
+				node.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken &&
+				telemetry.test(node.left.getText(tree))
+			)
+				sums.push(`${relative(app, file)}: ${node.getText(tree)}`);
+			if (
+				ts.isCallExpression(node) &&
+				ts.isPropertyAccessExpression(node.expression) &&
+				node.expression.name.text === "reduce" &&
+				telemetry.test(node.arguments.map((argument) => argument.getText(tree)).join(" "))
+			)
+				sums.push(`${relative(app, file)}: ${node.expression.getText(tree)}(…)`);
+			ts.forEachChild(node, walk);
+		};
+		walk(tree);
+	}
+	assert.deepEqual(sums, []);
+});

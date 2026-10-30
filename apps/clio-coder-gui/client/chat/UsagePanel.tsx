@@ -3,11 +3,11 @@ import { memo, useId, useRef } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { LiveUsage } from "../../contracts/session-telemetry.js";
-import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { sessionReadScope } from "../api/sessions.js";
 import { StatusMark } from "../design/status.js";
+import { useTelemetrySession } from "./session-telemetry.js";
 import { quotaCards, quotaTone, usageCoverageNotes, usageRows, usageSummary } from "./session-usage-model.js";
 import "./session-board.css";
 import "./usage-panel.css";
@@ -26,7 +26,6 @@ export const UsagePanel = memo(function UsagePanel({
 	settledTurns,
 	liveUsage,
 	costDisplay,
-	turns,
 }: {
 	client: Client;
 	sessionId: string;
@@ -35,7 +34,6 @@ export const UsagePanel = memo(function UsagePanel({
 	settledTurns: number;
 	liveUsage?: LiveUsage;
 	costDisplay?: string | undefined;
-	turns: SessionSnapshot["turns"];
 }) {
 	const supported = !!capabilities?.usage;
 	const scope = sessionReadScope(sessionId);
@@ -53,7 +51,9 @@ export const UsagePanel = memo(function UsagePanel({
 		placeholderData: (previous, previousQuery) =>
 			previousQuery?.queryKey[1] === sessionId && previousQuery.queryKey.at(-1) === scope ? previous : undefined,
 	});
-	const summary = usageSummary(sessionOpen, turns, usage.data, liveUsage, costDisplay);
+	// A closed task has no live usage read; the cold telemetry route folds its journal instead (#434).
+	const cold = useTelemetrySession(client, sessionId, !sessionOpen);
+	const summary = usageSummary(sessionOpen, usage.data, liveUsage, costDisplay, cold.data);
 	const quota = usage.data ? quotaCards(usage.data) : null;
 	const refresh = () => {
 		if (usage.isFetching) return;

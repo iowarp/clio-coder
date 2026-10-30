@@ -2,10 +2,11 @@ import { Fragment, useMemo } from "react";
 import { Link } from "react-router";
 import type { Static } from "typebox";
 import type { TraceEvent, TraceGate, TracePhase, TraceReceipt, TraceRun } from "../../../contracts/traces.js";
-import { clock, formatDuration, formatTime, formatTokens } from "../../api/clock.js";
+import { clock, formatDuration, formatTime } from "../../api/clock.js";
 import { Facts as RecordFacts } from "../../design/facts.js";
 import { humanizeKey } from "../../design/facts-model.js";
 import { StatusMark } from "../../design/status.js";
+import { countText } from "../../telemetry/quantity-model.js";
 import { ReceiptChecks } from "./receipt-checks.js";
 import { phasePosition, provenanceFacts } from "./trace-model.js";
 export function object(value: unknown): Record<string, unknown> {
@@ -141,7 +142,7 @@ export function EventRow({ event, start, payload = true }: { event: TraceEvent; 
 						: event.ended_at
 							? " · duration unavailable"
 							: " · end not recorded"}
-					{event.tokens == null ? "" : ` · ${formatTokens(event.tokens)} tokens`}
+					{event.tokens == null ? "" : ` · ${countText(event.tokens)} tokens`}
 				</small>
 			</div>
 			{record.truncated === true ? <p className="trace-warning">Payload exceeded the trace limit; snippet only.</p> : null}

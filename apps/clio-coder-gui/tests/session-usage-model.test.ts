@@ -12,7 +12,6 @@ import {
 import type { SessionSnapshot } from "../contracts/sessions.js";
 import type { SessionUsage } from "../contracts/usage.js";
 import { renderCostAggregate } from "../server/clio/http-shims.js";
-import { snapshotCostDisplay } from "../server/services/cost-display.js";
 
 const cost = (knownUsd: number, extra: Partial<SessionUsage["session"]["cost"]> = {}) => {
 	const value = { knownUsd, calls: 2, estimated: false, unknown: false, free: false, ...extra };
@@ -36,37 +35,28 @@ test("cost is worded as measured, estimated, partly unpriced, free or not yet re
 	assert.equal(costText(cost(0, { free: true })), "$0.00 local");
 	assert.equal(costText(cost(0, { calls: 0 })), "not measured");
 	assert.equal(costText(cost(0, { unknown: true })), "not measured");
+});
+
+test("the turn overview counts turns and wall time and sums no tokens or cost (#434)", () => {
 	const turns = [
-		{
-			status: "succeeded",
-			startedAt: null,
-			finishedAt: null,
-			usage: {
-				input: 10,
-				output: 5,
-				cacheRead: 20,
-				cacheWrite: 1,
-				reasoning: 2,
-				totalTokens: 36,
-				missingTokenCalls: 1,
-				costUsd: 0.42,
-				costProvenance: "unknown",
-				costSummary: { knownUsd: 0.42, calls: 3, hasEstimated: true, hasUnknown: true, allKnownFree: false },
-			},
-		},
+		{ status: "succeeded", startedAt: "2026-10-30T10:00:00.000Z", finishedAt: "2026-10-30T10:00:30.000Z", usage: null },
+		{ status: "running", startedAt: "2026-10-30T10:01:00.000Z", finishedAt: null, usage: null },
 	] as unknown as SessionSnapshot["turns"];
-	const display = snapshotCostDisplay({ turns } as SessionSnapshot).costDisplay;
-	assert.equal(taskOverview(turns, 0).tokens, 36);
-	assert.deepEqual(usageSummary(false, turns, undefined, undefined, display).totals, [
-		{ label: "Cost", value: "~$0.42 +?" },
-		{ label: "Tokens", value: "36 +? (1 call missing usage)" },
-	]);
-	assert.deepEqual(sessionSpend(turns, undefined, undefined, display), {
-		tokens: 36,
-		cost: "~$0.42 +?",
-		source: "turns",
-		missingTokenCalls: 1,
+	assert.deepEqual(taskOverview(turns, Date.parse("2026-10-30T10:01:10.000Z")), {
+		turns: 2,
+		elapsedMs: 40_000,
+		running: true,
 	});
+	// With neither a usage read nor telemetry, a session shows only the cost its snapshot recorded.
+	assert.deepEqual(sessionSpend({ recordedCostDisplay: "~$0.42 +?" }), {
+		tokens: null,
+		cost: "~$0.42 +?",
+		calls: null,
+		source: "none",
+	});
+	assert.deepEqual(usageSummary(false, undefined, undefined, "~$0.42 +?").totals, [
+		{ label: "Cost", value: "~$0.42 +?" },
+	]);
 });
 
 const usage: SessionUsage = {
@@ -128,22 +118,75 @@ const usage: SessionUsage = {
 	},
 };
 
-test("session totals and rows read the agent's own accounting, with calls beside the conversation named", () => {
+test("legacy v1 totals and rows read the agent's counts without a sum or a suffix the client invents", () => {
 	assert.deepEqual(usageTotals(usage), [
 		{ label: "Cost", value: "$0.42" },
-		{ label: "Tokens", value: "5,200 +? (1 call missing usage)" },
+		{ label: "Tokens", value: "5,200" },
 		{ label: "Model calls", value: "7" },
+		{ label: "Calls missing usage", value: "1" },
 	]);
 	assert.deepEqual(usageRows(usage), [
 		{
 			key: "anthropic/claude-sonnet-5",
 			route: "anthropic · claude-sonnet-5",
-			tokens: "4,000 in · 1,000 out · 200 cache",
+			tokens: "4,000 in · 1,000 out · 150 cache read · 50 cache write",
 			cost: "$0.42",
+			calls: "7",
 			beside:
 				"1 side question, 2 pre-warms, 1 System One call, 1 failed compaction call, 1 worker call, 1 call missing token usage",
 		},
 	]);
+});
+
+/** The read-model DTOs as the usage read carries them; only the fields the model reads are spelled out. */
+const telemetry = {
+	session: {
+		totals: {
+			tokens: { display: "≥5,120 (1 call unknown)" },
+			usd: { display: "$0.42 +?" },
+		},
+		own: { counts: { calls: { display: "7" } } },
+	},
+	cost: {
+		groups: [
+			{
+				key: "claude-sonnet-5",
+				calls: { display: "7" },
+				tokens: { display: "≥5,120 (1 call unknown)" },
+				usd: { display: "$0.42 +?" },
+			},
+		],
+	},
+} as unknown as NonNullable<SessionUsage["telemetry"]>;
+
+test("the read model's displays win over the v1 counts wherever the usage read carries them (#434)", () => {
+	const withTelemetry = { ...usage, telemetry };
+	assert.deepEqual(sessionSpend({ usage: withTelemetry }), {
+		tokens: "≥5,120 (1 call unknown)",
+		cost: "$0.42 +?",
+		calls: "7",
+		source: "telemetry",
+	});
+	assert.deepEqual(usageTotals(withTelemetry), [
+		{ label: "Cost", value: "$0.42 +?" },
+		{ label: "Tokens", value: "≥5,120 (1 call unknown)" },
+		{ label: "Model calls", value: "7" },
+	]);
+	assert.deepEqual(usageRows(withTelemetry), [
+		{
+			key: "claude-sonnet-5",
+			route: "claude-sonnet-5",
+			tokens: "≥5,120 (1 call unknown) tokens",
+			cost: "$0.42 +?",
+			calls: "7",
+			beside: null,
+		},
+	]);
+	// A closed task has no usage read; its cold session fold takes the same place.
+	assert.equal(sessionSpend({ cold: telemetry.session }).source, "telemetry");
+	const summary = usageSummary(true, withTelemetry, undefined);
+	assert.equal(summary.source, "telemetry");
+	assert.match(summary.note, /read model/);
 });
 
 test("quota cards say what each provider reported, and a stale reading says so", () => {
@@ -181,18 +224,18 @@ test("parked usage shows recorded totals without exposing live model details or 
 			costProvenance: "estimated" as const,
 		},
 	};
-	const parked = usageSummary(false, [], usage, recorded);
+	const parked = usageSummary(false, usage, recorded);
 	assert.deepEqual(parked.totals, [
 		{ label: "Cost", value: "~$0.03 est" },
 		{ label: "Tokens", value: "1,284,413" },
 	]);
 	assert.match(parked.note, /^Last recorded totals\./);
 	assert.equal(parked.details, false);
-	assert.deepEqual(usageSummary(false, [], undefined, recorded), parked);
-	assert.deepEqual(usageSummary(false, [], usage, undefined).totals, usageTotals(usage));
-	assert.equal(usageSummary(true, [], usage, recorded).details, true);
-	assert.match(usageSummary(true, [], usage, recorded).note, /^Live totals\./);
-	const absent = usageSummary(false, [], undefined, undefined);
+	assert.deepEqual(usageSummary(false, undefined, recorded), parked);
+	assert.deepEqual(usageSummary(false, usage, undefined).totals, usageTotals(usage));
+	assert.equal(usageSummary(true, usage, recorded).details, true);
+	assert.match(usageSummary(true, usage, recorded).note, /^Live totals\./);
+	const absent = usageSummary(false, undefined, undefined);
 	assert.deepEqual(absent.totals, []);
 	assert.match(absent.note, /^No usage totals were recorded\./);
 });

@@ -1,5 +1,5 @@
 import type { UsageReport } from "../../contracts/reports.js";
-import { formatTokens } from "../api/clock.js";
+import { countText } from "../telemetry/quantity-model.js";
 
 export type UsageMetric = "calls" | "tokens" | "cost";
 export const USAGE_METRICS: ReadonlyArray<{ id: UsageMetric; label: string; description: string }> = [
@@ -84,23 +84,10 @@ function amountsOf(values: Record<string, unknown>) {
 	};
 }
 
-function combine(a: UsageAmount, b: UsageAmount): UsageAmount {
-	const value = a.value === null && b.value === null ? null : (a.value ?? 0) + (b.value ?? 0);
-	const partial = a.partial || b.partial || a.value === null || b.value === null;
-	const estimated = a.estimated || b.estimated;
-	const labels = [...new Set([a.label, b.label])];
-	// Two sources' server displays stand side by side; the client never re-prices their sum.
-	const displays = [...new Set([a.display, b.display].filter((item): item is string => item !== null))];
-	return {
-		value,
-		partial,
-		estimated,
-		label: labels.join("; "),
-		display: displays.length > 0 ? displays.join(" + ") : null,
-	};
-}
-
-/** CLI model rows are disjoint: metered worker sessions are excluded from receipt totals upstream. */
+/**
+ * One row per source and model pair: the session's calls and the worker receipts for the same model stay two
+ * rows, because adding their counts here would be a client total of two server facts (#434).
+ */
 export function usageModelInsights(report: UsageReport): UsageModelInsight[] {
 	const models = new Map<string, UsageModelInsight>();
 	for (const fact of report.facts) {
@@ -108,19 +95,12 @@ export function usageModelInsights(report: UsageReport): UsageModelInsight[] {
 		const worker = fact.name === "worker-model-usage";
 		const target = name(worker ? fact.values.targetId : fact.values.providerId, "Unknown target");
 		const model = name(worker ? fact.values.modelId : fact.values.attributedModelId, "Unknown model");
-		const id = JSON.stringify([target, model]);
-		const amounts = amountsOf(fact.values);
 		const source = worker ? "Worker receipts" : "Session & side calls";
+		const id = JSON.stringify([target, model, source]);
+		const amounts = amountsOf(fact.values);
 		const existing = models.get(id);
-		if (!existing) {
-			models.set(id, { id, target, model, ...amounts, sources: [source], facts: [fact] });
-		} else {
-			existing.calls = combine(existing.calls, amounts.calls);
-			existing.tokens = combine(existing.tokens, amounts.tokens);
-			existing.cost = combine(existing.cost, amounts.cost);
-			existing.facts.push(fact);
-			if (!existing.sources.includes(source)) existing.sources.push(source);
-		}
+		if (!existing) models.set(id, { id, target, model, ...amounts, sources: [source], facts: [fact] });
+		else existing.facts.push(fact);
 	}
 	return [...models.values()];
 }
@@ -128,7 +108,8 @@ export function usageModelInsights(report: UsageReport): UsageModelInsight[] {
 export function usageAmountText(amount: UsageAmount, metric: UsageMetric): string {
 	if (metric === "cost") return amount.display ?? (amount.partial ? "Unpriced" : "Not recorded");
 	if (amount.value === null) return "Not recorded";
-	return `${amount.estimated ? "~" : ""}${formatTokens(amount.value)}${amount.partial ? " +?" : ""}`;
+	// A partial count is named by its label, never marked by a suffix the client invents.
+	return `${amount.estimated ? "~" : ""}${countText(amount.value)}`;
 }
 
 export function compareUsageModels(models: UsageModelInsight[], metric: UsageMetric) {
@@ -145,9 +126,16 @@ export function compareUsageModels(models: UsageModelInsight[], metric: UsageMet
 	return rows.map((row) => ({ ...row, width: max > 0 ? ((row[metric].value ?? 0) / max) * 100 : 0 }));
 }
 
-export function usageCallShares(models: UsageModelInsight[]) {
-	const total = models.reduce((sum, row) => sum + (row.calls.value ?? 0), 0);
-	if (!models.length || models.some((row) => row.calls.value === null || row.calls.partial) || total <= 0) return null;
+/** The report's own attributed API call count, the only denominator a share may use (#434). */
+export function attributedCalls(report: UsageReport): number | null {
+	const fact = report.facts.find((item) => item.name === "tokens");
+	return fact ? number(fact.values.apiCalls) : null;
+}
+
+/** Shares of the report's attributed calls; null until every row's count is known and the report names the total. */
+export function usageCallShares(models: UsageModelInsight[], total: number | null) {
+	if (total === null || total <= 0) return null;
+	if (!models.length || models.some((row) => row.calls.value === null || row.calls.partial)) return null;
 	let offset = 0;
 	return {
 		total,
@@ -184,10 +172,7 @@ export function usageCacheEvidence(report: UsageReport) {
 		rows: facts.slice(0, 24).map((fact, index) => {
 			const values = fact.values;
 			const verdicts = record(values.verdictCounts);
-			const count = (value: unknown) => {
-				const tokens = number(value);
-				return tokens === null ? "Not recorded" : tokens.toLocaleString("en-US");
-			};
+			const count = (value: unknown) => countText(number(value));
 			return {
 				key: `${index}:${name(values.sessionId, "unknown")}`,
 				session: name(values.sessionId, "Session not recorded"),

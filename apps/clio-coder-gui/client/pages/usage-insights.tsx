@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { UsageReport } from "../../contracts/reports.js";
 import { Facts } from "../design/facts.js";
 import { Icon } from "../design/icons.js";
+import { countText } from "../telemetry/quantity-model.js";
 import type { UsageMetric } from "./usage-insights-model.js";
 import {
+	attributedCalls,
 	compareUsageModels,
 	filterUsageModels,
 	USAGE_METRICS,
@@ -24,7 +26,7 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 	const matching = filterUsageModels(models, query, coverage);
 	const rows = compareUsageModels(matching, metric);
 	const selected = models.find((row) => row.id === selectedId);
-	const shares = usageCallShares(models);
+	const shares = usageCallShares(models, attributedCalls(report));
 	const activeMetric = USAGE_METRICS.find((item) => item.id === metric);
 	const missing = rows.filter((row) => row[metric].value === null || row[metric].partial).length;
 	useEffect(() => {
@@ -190,7 +192,7 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 								className="usage-donut"
 								viewBox="0 0 200 200"
 								role="img"
-								aria-label={`${shares.total.toLocaleString("en-US")} attributed API calls. Shares by model and target are listed below.`}
+								aria-label={`${countText(shares.total)} attributed API calls. Shares by model and target are listed below.`}
 							>
 								<title>API call shares by model and target</title>
 								<circle className="usage-donut-ground" cx="100" cy="100" r="78" />
@@ -212,7 +214,7 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 								))}
 							</svg>
 							<div className="usage-donut-center" aria-hidden="true">
-								<strong>{shares.total.toLocaleString("en-US")}</strong>
+								<strong>{countText(shares.total)}</strong>
 								<span>attributed calls</span>
 							</div>
 						</div>
@@ -233,7 +235,7 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 										<span>
 											<strong>{segment.model}</strong>
 											<small>
-												{segment.target} · {segment.calls?.toLocaleString("en-US")} calls
+												{segment.target} · {countText(segment.calls)} calls
 											</small>
 										</span>
 										<span>{(segment.share * 100).toFixed(1)}%</span>

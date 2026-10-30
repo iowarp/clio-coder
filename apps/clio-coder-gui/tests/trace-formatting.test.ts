@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatTime, formatTokens, serverClock } from "../client/api/clock.js";
+import { formatTime, serverClock } from "../client/api/clock.js";
+import { countText } from "../client/telemetry/quantity-model.js";
 
 test("trace formatting keeps missing counts distinct from zero and adopts server clock once", () => {
-	assert.equal(formatTokens(24, 1), "24 +? (1 call missing usage)");
-	assert.equal(formatTokens(null), "not recorded");
-	assert.equal(formatTokens(0), "0");
+	assert.equal(countText(null), "not recorded");
+	assert.equal(countText(0), "0");
+	assert.equal(countText(1234567), "1,234,567");
 	assert.match(formatTime("2026-09-11T12:00:00Z"), /^2026-09-11 \d{2}:\d{2}:\d{2}$/);
 	let now = 10000;
 	const clock = serverClock(() => now);

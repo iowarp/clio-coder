@@ -67,3 +67,14 @@ export const TelemetryRunsQuery = Type.Object(
 	closed,
 );
 export const TELEMETRY_RUNS_PAGE = 50;
+
+/** `_meta["clio-coder/telemetry"]` on initialize: the read methods and the coalesced update notification (#434). */
+export const TelemetryCapability = Type.Object(
+	{
+		version: Type.Literal(1),
+		methods: Type.Record(Type.String({ maxLength: 64 }), Type.String({ maxLength: 128 })),
+		update: Type.String({ maxLength: 128 }),
+	},
+	closed,
+);
+export type TelemetryCapability = Static<typeof TelemetryCapability>;

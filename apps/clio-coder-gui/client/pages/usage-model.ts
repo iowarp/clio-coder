@@ -4,9 +4,10 @@
 // Pure, so the wording and the ordering are testable without a browser.
 
 import type { UsageReport } from "../../contracts/reports.js";
-import { formatDay, formatTokens } from "../api/clock.js";
+import { formatDay } from "../api/clock.js";
 import { humanizeKey, scalarText } from "../design/facts-model.js";
 import { emptyState } from "../design/panel-model.js";
+import { countText } from "../telemetry/quantity-model.js";
 
 export interface UsageFigure {
 	label: string;
@@ -106,7 +107,7 @@ const number = (value: unknown): number | null => (typeof value === "number" && 
 const single = (values: Record<string, unknown>): string | null => {
 	const keys = Object.keys(values);
 	const only = keys.length === 1 && keys[0] === "value" ? number(values.value) : null;
-	return only === null ? null : only.toLocaleString("en-US");
+	return only === null ? null : countText(only);
 };
 const text = (value: unknown): string | null => (typeof value === "string" && value ? value : null);
 
@@ -201,7 +202,7 @@ export function usageView(report: UsageReport): UsageView {
 		const row = first(name);
 		const count = number(row?.value);
 		if (first(missing) || count === null) return { label, value: "—", note: emptyState.dash() };
-		return { label, value: count.toLocaleString("en-US") };
+		return { label, value: countText(count) };
 	};
 
 	const apiCalls = number(tokens.apiCalls);
@@ -211,8 +212,8 @@ export function usageView(report: UsageReport): UsageView {
 	const headline: UsageFigure[] = [
 		{
 			label: "Tokens",
-			value: formatTokens(totalTokens),
-			...(apiCalls === null ? {} : { note: `${apiCalls.toLocaleString("en-US")} API calls` }),
+			value: countText(totalTokens),
+			...(apiCalls === null ? {} : { note: `${countText(apiCalls)} API calls` }),
 		},
 		{
 			label: "Cost",
@@ -242,7 +243,7 @@ export function usageView(report: UsageReport): UsageView {
 	const widest = Math.max(0, ...measured.map((bar) => bar.tokens ?? 0));
 	const bars: UsageBar[] = measured.map((bar) => ({
 		label: bar.label,
-		value: `${formatTokens(bar.tokens)}${bar.tokens !== null && partialBreakdown ? " +?" : ""}`,
+		value: countText(bar.tokens),
 		share: bar.tokens && widest > 0 ? bar.tokens / widest : 0,
 	}));
 
@@ -250,19 +251,19 @@ export function usageView(report: UsageReport): UsageView {
 	const origins = ORIGINS.flatMap(([key, label]) => {
 		if (!Object.hasOwn(sessionTokens, key)) return [];
 		const value = number(sessionTokens[key]);
-		return [{ label, value: value === null ? "Not recorded" : value.toLocaleString("en-US") }];
+		return [{ label, value: countText(value) }];
 	});
 	if (!hasOriginSplit && first("tokens") && workers) {
 		const calls = number(sessionTokens.apiCalls);
 		origins.push({
 			label: "Session and side calls",
-			value: calls === null ? "Not recorded" : calls.toLocaleString("en-US"),
+			value: countText(calls),
 		});
 	}
 
 	if (workers) {
 		const calls = number(workers.apiCalls);
-		origins.push({ label: "Worker calls", value: calls === null ? "Not recorded" : calls.toLocaleString("en-US") });
+		origins.push({ label: "Worker calls", value: countText(calls) });
 	}
 	const leftover = tablesOf(rows.filter((row) => !CLAIMED.has(row.name)));
 	return {
@@ -272,7 +273,7 @@ export function usageView(report: UsageReport): UsageView {
 		barsCaveat: `${BARS_CAVEAT}${partialBreakdown ? " Some calls lack token fields; displayed fields are known subtotals, and absent amounts do not mean zero." : ""}`,
 		knownSubtotals:
 			missing > 0 || sessionTokens.knownSubtotals === true || overall?.knownSubtotals === true
-				? `${missing > 0 ? `${missing.toLocaleString("en-US")} recorded calls are missing token usage. ` : ""}Token amounts are known subtotals; missing usage is not zero. Reports cover retained local records, not provider invoices.`
+				? `${missing > 0 ? `${countText(missing)} recorded calls are missing token usage. ` : ""}Token amounts are known subtotals; missing usage is not zero. Reports cover retained local records, not provider invoices.`
 				: null,
 		origins,
 		originsNote: origins.length

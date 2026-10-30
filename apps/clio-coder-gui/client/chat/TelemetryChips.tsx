@@ -1,18 +1,26 @@
 import { memo } from "react";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
-import { compactCount, contextMeter } from "./overview-model.js";
+import { contextMeter } from "./overview-model.js";
 import type { PaneView } from "./pane-model.js";
 import {
 	settledTurns,
+	spendLine,
 	useContextLedger,
 	useSessionCapabilities,
 	useSessionTelemetry,
 	useSessionUsage,
+	useTelemetrySession,
 } from "./session-telemetry.js";
+import type { Spend } from "./session-usage-model.js";
 import { sessionSpend } from "./session-usage-model.js";
 
 const RING = 2 * Math.PI * 6;
+const SOURCE_TITLE: Record<Spend["source"], string> = {
+	telemetry: "The read model's figures for this chat",
+	legacy: "Clio's v1 accounting for this chat (legacy counts)",
+	none: "The recorded cost for this chat",
+};
 
 /**
  * The top bar's live readout: how full the window is and what the chat has spent. Each chip opens the
@@ -49,12 +57,13 @@ export const TelemetryChips = memo(function TelemetryChips({
 					measured: null,
 				})
 			: null;
-	const spend = sessionSpend(
-		turns,
-		usage.data,
-		turns.at(-1)?.status === "running" || !usage.data || usage.isPlaceholderData ? telemetry?.usage : undefined,
-		costDisplay,
-	);
+	const cold = useTelemetrySession(client, sessionId, !open);
+	const spend = sessionSpend({
+		usage: usage.data,
+		live: turns.at(-1)?.status === "running" || !usage.data || usage.isPlaceholderData ? telemetry?.usage : undefined,
+		cold: cold.data,
+		recordedCostDisplay: costDisplay,
+	});
 	const contextId = `${sessionId}-chip-context`;
 	const spendId = `${sessionId}-chip-spend`;
 	return (
@@ -82,21 +91,21 @@ export const TelemetryChips = memo(function TelemetryChips({
 					<span>{Math.round(meter.percent)}%</span>
 				</button>
 			) : null}
-			{spend.cost || spend.tokens > 0 || spend.missingTokenCalls ? (
+			{spend.cost || spend.tokens !== null ? (
 				<button
 					id={spendId}
 					type="button"
 					className="wb-chip wb-chip--figure"
-					aria-label={`${spend.tokens.toLocaleString("en-US")} tokens${spend.cost ? ` · ${spend.cost}` : ""}. Open usage.`}
-					title={spend.source === "clio" ? "Clio's accounting for this chat" : "Summed from this chat's turns"}
+					aria-label={`${spendLine(spend) ?? "Usage"}. Open usage.`}
+					title={SOURCE_TITLE[spend.source]}
 					onClick={() => onOpen("usage", spendId)}
 				>
-					<span className="wb-chip__tokens">
-						{compactCount(spend.tokens)} tok
-						{spend.missingTokenCalls
-							? ` +? (${spend.missingTokenCalls} call${spend.missingTokenCalls === 1 ? "" : "s"})`
-							: ""}
-					</span>
+					{spend.tokens !== null ? (
+						<span className="wb-chip__tokens">
+							{spend.tokens} tok
+							{spend.missingTokenCalls ? ` (${spend.missingTokenCalls} missing usage)` : ""}
+						</span>
+					) : null}
 					{spend.cost ? <span>{spend.cost}</span> : null}
 				</button>
 			) : null}
