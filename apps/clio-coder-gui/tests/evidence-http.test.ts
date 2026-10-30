@@ -117,7 +117,8 @@ test("real CLI builds evidence once per key, follows typed storage, and rechecks
 		await writeFile(receiptPath, JSON.stringify(receipt));
 		const failed = await verify();
 		assert.equal(failed.state, "failed");
-		assert.equal(failed.reason, "ledger-mismatch");
+		// The v21 seal covers the receipt's own fields and is checked before the ledger row (#434).
+		assert.equal(failed.reason, "integrity-mismatch");
 		assert.equal((await h.post(path, { argv: ["--session", "escape"] })).status, 422);
 		assert.equal(h.cli.activeCount, 0);
 	} finally {
