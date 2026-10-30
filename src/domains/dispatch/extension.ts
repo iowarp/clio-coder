@@ -8894,7 +8894,7 @@ export function createDispatchBundle(
 								worktreeReceipt = { ...landed, detail: `operator merge refused: ${landed.detail ?? landed.reason}` };
 								finalOutcome = "failed";
 								outcomeCode = "merge_withheld";
-								// Not the withheld detail: its `git merge` command would land work
+								// Not the withheld detail: its `clio-coder fleet land` command would land work
 								// nobody previewed.
 								finalDetail = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator merge refused: ${landed.detail ?? landed.reason} Branch ${req.taskWorktree.branch} or its worktree changed after the preview, so inspect it before merging.`;
 								failureMessage = finalDetail;
@@ -8947,7 +8947,7 @@ export function createDispatchBundle(
 									detail: `operator discard: removed the worktree, but deleting branch ${req.taskWorktree.branch} failed; the branch is preserved`,
 								};
 							} else if (discardChanged !== null) {
-								// Not the withheld detail: its `git merge` command would land work
+								// Not the withheld detail: its `clio-coder fleet land` command would land work
 								// nobody previewed.
 								finalDetail = `merge withheld: ${withheldVerdict?.reason ?? "its report"}; operator discard refused: ${discardChanged}. Branch ${req.taskWorktree.branch} and its worktree are preserved; inspect them before merging or discarding.`;
 								worktreeReceipt = {
