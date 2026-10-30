@@ -250,7 +250,14 @@ const estimatedSum = (value: number): FactSum => ({
 	absentCount: 0,
 	coverage: { measured: 0, estimated: 1, unknown: 0 },
 });
-const unknownSum = (count: number): FactSum => foldFacts(Array.from({ length: count }, () => unobserved));
+/** `count` unknown contributions, built directly: a count read from a forged record must not size an allocation. */
+const unknownSum = (count: number): FactSum => ({
+	measured: 0,
+	estimated: 0,
+	unknownCount: count,
+	absentCount: 0,
+	coverage: { measured: 0, estimated: 0, unknown: count },
+});
 const header = (options: ReadOptions) => ({
 	v: TELEMETRY_DTO_VERSION as typeof TELEMETRY_DTO_VERSION,
 	foldVersion: TELEMETRY_FOLD_VERSION,
