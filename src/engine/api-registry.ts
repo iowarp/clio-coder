@@ -37,6 +37,7 @@ import { withClioIdentity } from "./client-identity.js";
 import { normalizeContext } from "./context.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
 import { onFirstGeneration } from "./generation-delta.js";
+import { observePayloadBytes } from "./payload-bytes.js";
 import { instrumentProviderCall, type ProviderCallScope } from "./provider-diagnostics.js";
 import { guardToolArgumentStream } from "./tool-argument-stream.js";
 
@@ -159,7 +160,9 @@ export function engineStream(
 				(effective) =>
 					observeAnthropicResponse(model, effective, (anthropic) =>
 						observeCodexTransport(model, anthropic, (transport) =>
-							observeResponsesModelId(model, transport, (observed) => dispatchEngineStream(model, context, observed)),
+							observeResponsesModelId(model, transport, (observed) =>
+								observePayloadBytes(model, observed, (sized) => dispatchEngineStream(model, context, sized)),
+							),
 						),
 					),
 			),
@@ -214,7 +217,9 @@ function scopedEngineStreamSimple(
 				(effective) =>
 					observeAnthropicResponse(model, effective, (anthropic) =>
 						observeCodexTransport(model, anthropic, (transport) =>
-							observeResponsesModelId(model, transport, (observed) => dispatchEngineStreamSimple(model, context, observed)),
+							observeResponsesModelId(model, transport, (observed) =>
+								observePayloadBytes(model, observed, (sized) => dispatchEngineStreamSimple(model, context, sized)),
+							),
 						),
 					),
 				scope,
