@@ -2,6 +2,7 @@ import type { TSchema } from "typebox";
 import { Problem } from "./common.js";
 import { Event } from "./events.js";
 import { APP_VERSION } from "./meta.js";
+import { hoistSharedSchemas } from "./openapi-hoist.js";
 import { routes } from "./routes.js";
 import { TELEMETRY_DTO_SCHEMAS } from "./wire.js";
 
@@ -32,12 +33,6 @@ const components = {
 } satisfies Record<string, TSchema>;
 export function openapi() {
 	const paths: Record<string, Record<string, unknown>> = {};
-	const named = new Map<TSchema, string>(Object.entries(components).map(([name, schema]) => [schema, name]));
-	// A response that is a named component is referenced, not inlined, so the document carries each DTO once.
-	const response = (schema: TSchema) => {
-		const name = named.get(schema);
-		return name ? { $ref: `#/components/schemas/${name}` } : schema;
-	};
 	for (const [id, route] of Object.entries(routes)) {
 		const path = route.path.replace(/:([A-Za-z0-9]+)/g, "{$1}");
 		const contentType = route.stream ? "text/event-stream" : "application/json";
@@ -75,7 +70,7 @@ export function openapi() {
 			responses: {
 				[route.status]: {
 					description: route.status === 202 ? "Accepted" : "Success",
-					content: { [contentType]: { schema: response(route.response) } },
+					content: { [contentType]: { schema: route.response } },
 					headers: {
 						"X-Clio-Epoch": { schema: { type: "string" }, description: "Server epoch" },
 						"X-Clio-Seq": { schema: { type: "integer" }, description: "Sequence before assembling the snapshot" },
@@ -88,7 +83,8 @@ export function openapi() {
 			},
 		};
 	}
-	return {
+	// Named components and every repeated shape are written once and referenced; see openapi-hoist.ts.
+	return hoistSharedSchemas({
 		openapi: "3.1.0",
 		jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
 		info: { title: "Clio Coder", version: APP_VERSION },
@@ -100,7 +96,7 @@ export function openapi() {
 			},
 			schemas: components,
 		},
-	};
+	});
 }
 export function openapiText() {
 	return `${JSON.stringify(openapi(), null, "\t")}\n`;
