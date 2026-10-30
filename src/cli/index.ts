@@ -87,6 +87,7 @@ Usage:
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
   clio-coder session list|terminate <id> [--force]  open sessions on this state dir from any host; end or release one
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
+  clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain  read session and run telemetry (--json for the DTO)
   clio-coder telemetry import-legacy  rebuild call facts from a pre-journal session ledger
   clio-coder systemone status|export  System One decision dataset: what it holds, and export it as JSONL (experimental)
   clio-coder trace                query or view the durable dispatch trace mirror

@@ -34,10 +34,12 @@ function readLedger(directory: string): SessionEntry[] {
 }
 
 export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<number> {
+	const read = await import("./telemetry-read.js");
 	if (argv[0] === "--help" || argv[0] === "-h") {
-		process.stdout.write(HELP);
+		process.stdout.write(`${read.READ_HELP}${HELP}`);
 		return 0;
 	}
+	if (argv[0] !== undefined && read.READ_COMMANDS.has(argv[0])) return read.runTelemetryReadCommand(argv);
 	if (argv[0] !== "import-legacy") {
 		if (argv[0] !== undefined) printError(`unknown telemetry command: ${argv[0]}`);
 		process.stderr.write(HELP);
