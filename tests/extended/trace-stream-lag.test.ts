@@ -4,9 +4,10 @@
  * `message_update` frame became its own synchronous SQLite transaction (#428).
  * Display-only deltas now never reach the queue and a tick's facts share one
  * transaction, so the events table stays at a handful of fact rows per run
- * however many deltas stream, and the dispatch-window lag sampler stays under
- * a stall-shaped ceiling. The pre-fix store wrote 352 to 1,676 rows per run
- * for this same drive and dropped 23,767 frames; this build writes 16.
+ * however many deltas stream, and the dispatch-window lag sampler keeps its
+ * p99 inside the epic's budget and its max under a stall-shaped ceiling. The
+ * pre-fix store wrote 352 to 1,676 rows per run for this same drive and
+ * dropped 23,767 frames; this build writes 16.
  */
 import { equal, ok } from "node:assert/strict";
 import { createServer } from "node:http";
@@ -33,6 +34,13 @@ const DELTAS_PER_RESPONSE = 3_000;
 const MAX_FACT_ROWS_PER_RUN = 32;
 /** A stall-shaped ceiling, not the fix's own signature: this build measured 23 to 43 ms. */
 const MAX_LOOP_LAG_MS = 250;
+/** The loop-lag budget's p99 (#434 P0.10); this build measured 9.8 ms over about 430 samples. */
+const MAX_LOOP_LAG_P99_MS = 50;
+/**
+ * The window's p99 comes from one histogram over every 10 ms tick it sampled. Below 100 ticks a p99 is just the
+ * window's worst tick, so a shorter window cannot speak for the budget.
+ */
+const MIN_LAG_SAMPLES = 100;
 const DISPLAY_DELTA_KINDS = new Set([
 	"message_update",
 	"text_delta",
@@ -135,6 +143,8 @@ it("keeps three streaming workers to fact rows and a bounded main-thread lag", {
 			t.diagnostic(
 				`event-loop lag over ${lag.samples} samples: p99 ${lag.p99Ms.toFixed(1)} ms, max ${lag.maxMs.toFixed(1)} ms`,
 			);
+			ok(lag.samples >= MIN_LAG_SAMPLES, `the dispatch window sampled only ${lag.samples} ticks`);
+			ok(lag.p99Ms < MAX_LOOP_LAG_P99_MS, `p99 event-loop lag ${lag.p99Ms.toFixed(1)} ms`);
 			ok(lag.maxMs < MAX_LOOP_LAG_MS, `max event-loop lag ${lag.maxMs.toFixed(1)} ms`);
 		} finally {
 			reader.close();
