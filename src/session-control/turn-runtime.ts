@@ -1,6 +1,6 @@
 import type { BudgetAlertPayload } from "../core/bus-events.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
-import { messageUsageForAccounting, rememberMessageCalls } from "../core/message-accounting.js";
+import { isHostAuthored, messageUsageForAccounting, rememberMessageCalls } from "../core/message-accounting.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall, recordTelemetry } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
@@ -795,6 +795,40 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			await lease?.release();
 		};
+		// The journal's call for the next model response of this run (#434).
+		const openModelCall = async (): Promise<void> => {
+			const origin = deps.sessionOrigin?.();
+			if (!origin || !deps.observability?.acquireTelemetrySession) return;
+			journalLease = await deps.observability.acquireTelemetrySession(origin, "main", state.activeUserTurnId ?? undefined);
+			const compiled = context.compiledSessionPrompt?.();
+			const objects = await journalLease.storeRequestObjects?.({
+				...(compiled ? { prompt: compiled } : {}),
+				tools: localRuntime.agent.state.tools.map(({ name, description, parameters }) => ({
+					name,
+					description,
+					parameters,
+				})),
+			});
+			const choice = middlewareToolChoice.current();
+			const textOnly = state.synthesisToolLock || choice.kind === "none";
+			modelCall = beginCall(
+				{
+					label: "main",
+					...(objects && Object.keys(objects).length > 0 ? { objects } : {}),
+					target: {
+						targetId: localRuntime.targetId,
+						runtimeId: localRuntime.runtimeId,
+						api: model.api,
+						requestedModel: localRuntime.wireModelId,
+						reportedModel: { kind: "unknown", reason: "not-observed" },
+					},
+					roundKind: textOnly ? "text-only" : choice.kind === "required" ? "required" : "normal",
+					toolChoice: textOnly ? "none" : choice.kind === "required" ? { name: choice.toolName } : "auto",
+				},
+				journalLease.context,
+			);
+			modelCall.stage("transform", "start");
+		};
 		let apiCallFirstDeltaAt: number | null = null;
 		// Where a request is before `onStreamInvocation`. A watchdog abort while
 		// `apiCallStartedAt` is null names this step, because no request has
@@ -1354,42 +1388,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				await abandonModelCall();
 				settledAttempts = [];
 				attemptRequest = undefined;
-				const origin = deps.sessionOrigin?.();
-				if (origin && deps.observability?.acquireTelemetrySession) {
-					journalLease = await deps.observability.acquireTelemetrySession(
-						origin,
-						"main",
-						state.activeUserTurnId ?? undefined,
-					);
-					const compiled = context.compiledSessionPrompt?.();
-					const objects = await journalLease.storeRequestObjects?.({
-						...(compiled ? { prompt: compiled } : {}),
-						tools: localRuntime.agent.state.tools.map(({ name, description, parameters }) => ({
-							name,
-							description,
-							parameters,
-						})),
-					});
-					const choice = middlewareToolChoice.current();
-					const textOnly = state.synthesisToolLock || choice.kind === "none";
-					modelCall = beginCall(
-						{
-							label: "main",
-							...(objects && Object.keys(objects).length > 0 ? { objects } : {}),
-							target: {
-								targetId: localRuntime.targetId,
-								runtimeId: localRuntime.runtimeId,
-								api: model.api,
-								requestedModel: localRuntime.wireModelId,
-								reportedModel: { kind: "unknown", reason: "not-observed" },
-							},
-							roundKind: textOnly ? "text-only" : choice.kind === "required" ? "required" : "normal",
-							toolChoice: textOnly ? "none" : choice.kind === "required" ? { name: choice.toolName } : "auto",
-						},
-						journalLease.context,
-					);
-					modelCall.stage("transform", "start");
-				}
+				await openModelCall();
 			}
 			// Every span below is measured on the monotonic frame, so an NTP
 			// correction mid-turn cannot corrupt a tool duration or a TTFT.
@@ -1525,6 +1524,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					Object.assign(enrichedEvent.message, { estimatedUsage: interruptedUsage });
 				}
 				journalAccounted = await settleModelCall(enrichedEvent.message);
+				// A reply Clio wrote into the prompt, such as the loop guard's recovery pair, settles the call opened at
+				// turn_start as never sent, as its ledger row counts it; the model's own reply gets a call of its own (#434).
+				if (isHostAuthored(message)) await openModelCall();
 			}
 
 			if (publicEvent?.type === "message_end" && publicEvent.message.role === "assistant" && apiCallStartedAt !== null) {

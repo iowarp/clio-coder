@@ -28,6 +28,7 @@ import {
 	workerToolCallCapExceededReason,
 	workerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
+import { markHostAuthored } from "../core/message-accounting.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
 import { dispatchMutatedParentWorkspace } from "../domains/dispatch/workspace-mutation.js";
@@ -237,7 +238,7 @@ export function lockedSynthesisRepromptMessages(
 	const id = `clio-synthesis-reprompt-${attempt}`;
 	const timestamp = Date.now();
 	return [
-		{
+		markHostAuthored({
 			role: "assistant",
 			content: [{ type: "toolCall", id, name: LOCKED_SYNTHESIS_REPROMPT_TOOL, arguments: {} }],
 			stopReason: "toolUse",
@@ -254,7 +255,7 @@ export function lockedSynthesisRepromptMessages(
 			},
 			...origin,
 			timestamp,
-		},
+		} as AgentMessage),
 		{
 			role: "toolResult",
 			toolCallId: id,

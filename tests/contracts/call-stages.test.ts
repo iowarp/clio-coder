@@ -16,6 +16,7 @@ import type { SessionContract, TurnInput } from "../../src/domains/session/contr
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
+import { lockedSynthesisRepromptMessages } from "../../src/engine/loop-guard.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -39,7 +40,7 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		},
 	};
-	faux.setResponses([reply, reply]);
+	faux.setResponses([reply, reply, reply]);
 	const capabilities = { chat: true, tools: true, reasoning: false, contextWindow: 131072, maxTokens: 8192 };
 	const runtime = {
 		id: "fixture",
@@ -79,6 +80,7 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 		},
 	} as unknown as ProvidersContract;
 	let refuse = false;
+	let agent: ReturnType<typeof createEngineAgent>["agent"] | undefined;
 	let memory = "one";
 	const scheduling = {
 		preflight: () => ({ currentUsd: 5, ceilingUsd: 5, verdict: "at" }),
@@ -128,7 +130,11 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 			runHook: () => ({ effects: [], ruleIds: [] }),
 		} as unknown as MiddlewareContract,
 		knownTargets: () => new Set([target.id]),
-		createAgent: (options) => createEngineAgent(options),
+		createAgent: (options) => {
+			const created = createEngineAgent(options);
+			agent = created.agent;
+			return created;
+		},
 		observability: {
 			acquireTelemetrySession: journals.acquire,
 			recordSessionTurn() {},
@@ -154,13 +160,24 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 		await loop.submit("stage this");
 		memory = "two";
 		await loop.submit("recompile this");
+		// The loop guard's recovery pair opens with a reply Clio wrote; the model's answer after it is its own call.
+		await agent?.prompt([...lockedSynthesisRepromptMessages(1, { provider: "fixture", api: faux.api, model: "chat" })]);
 		refuse = true;
 		await loop.submit("refuse this");
 		await journals.flush();
 		const journal = await readCallJournal(join(clioStateDir(), "sessions", "stages-repo", "stages-session"));
 		const calls = journal.records.flatMap(({ record }) => (record.k === "call.settled" ? [record.data] : []));
-		strictEqual(calls.length, 3, JSON.stringify(journal));
-		const [sent, recompiled, refused] = calls as [CallSettled, CallSettled, CallSettled];
+		strictEqual(calls.length, 5, JSON.stringify(journal));
+		const [sent, recompiled, written, answered, refused] = calls as [
+			CallSettled,
+			CallSettled,
+			CallSettled,
+			CallSettled,
+			CallSettled,
+		];
+		strictEqual(written.disposition, "never_sent");
+		strictEqual(answered.disposition, "settled");
+		ok(answered.callId !== written.callId);
 		strictEqual(sent.disposition, "settled");
 		const { transform, auth, admission, send, firstToken, settle } = sent.stages;
 		ok(transform && auth && admission && send && firstToken !== undefined && settle !== null, JSON.stringify(sent));

@@ -11,6 +11,18 @@ export function messageCallsForAccounting(message: unknown): readonly CallSettle
 	return message !== null && typeof message === "object" ? settledCalls.get(message) : undefined;
 }
 
+// Messages Clio writes into a prompt itself. A run emits them like replies, but no model produced them (#434).
+const hostAuthored = new WeakSet<object>();
+
+export function markHostAuthored<T extends object>(message: T): T {
+	hostAuthored.add(message);
+	return message;
+}
+
+export function isHostAuthored(message: unknown): boolean {
+	return message !== null && typeof message === "object" && hostAuthored.has(message);
+}
+
 const record = (value: unknown): Record<string, unknown> | null =>
 	value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
