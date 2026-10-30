@@ -65,6 +65,7 @@ import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { captureAdmits, STANDARD_CAPTURE, systemOneDatasetRecording } from "../core/telemetry/capture.js";
+import { factRef } from "../core/telemetry/dto.js";
 import { recordTelemetry } from "../core/telemetry/producer.js";
 import { registerResearchTraceSink } from "../core/telemetry/research-trace.js";
 import type { CallSettled, Payload } from "../core/telemetry/schemas.js";
@@ -178,6 +179,7 @@ import type { BackgroundMemoryUsageSink } from "../domains/observability/backgro
 import type { AdmissionHold, CallJournalOptions } from "../domains/observability/call-scope.js";
 import { openCallScope } from "../domains/observability/call-scope.js";
 import { recordFailedCompactionCalls } from "../domains/observability/compaction-usage.js";
+import { TELEMETRY_FOLD_VERSION } from "../domains/observability/folds.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { committedPluginSnapshot, PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
@@ -4513,6 +4515,30 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	termination.onDrain(bus.on(BusChannels.SessionResumed, reseedUsage));
 	termination.onDrain(bus.on(BusChannels.SessionTurnSwitched, reseedUsage));
+
+	// meta.json usage projects the read model's whole-session totals, every branch and referenced run, as the session
+	// view shows them; the active path filters a view and never the session's spend. The session topic follows each
+	// published record batch, so a session's last call lands too (#434 §10).
+	let projectedUsage: string | null = null;
+	const projectSessionUsage = (): void => {
+		const meta = session?.current();
+		const view = observability?.telemetry?.live();
+		if (!meta || !session || !view || view.sessionId !== meta.id || view.seeding) return;
+		// Two quantities over the cached analysis, not the whole session DTO, at up to 10 Hz.
+		const tokens = view.quantity(factRef({ scope: "session", owner: meta.id, metric: "total" }));
+		const usd = view.quantity(factRef({ scope: "session", owner: meta.id, metric: "usd" }));
+		if (!tokens || !usd) return;
+		const key = JSON.stringify([meta.id, TELEMETRY_FOLD_VERSION, tokens.fact, usd.fact, usd.display]);
+		if (key === projectedUsage) return;
+		try {
+			session.projectUsage({ foldVersion: TELEMETRY_FOLD_VERSION, tokens, usd });
+			projectedUsage = key;
+		} catch {
+			// The resume picker's spend is a convenience; the journal already holds every call.
+		}
+	};
+	const unsubscribeUsageProjection = observability?.telemetry?.subscribe("session", projectSessionUsage);
+	if (unsubscribeUsageProjection) termination.onDrain(unsubscribeUsageProjection);
 
 	const turnOutcomeCollector = createTurnOutcomeCollector();
 	let outcomeSessionId: string | null = null;

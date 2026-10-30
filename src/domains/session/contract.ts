@@ -1,4 +1,5 @@
 import type { SkillActivation } from "../../core/skill-activation.js";
+import type { Quantity } from "../../core/telemetry/dto.js";
 import type { ClioSessionMeta, ClioTurnRecord } from "../../engine/session.js";
 import type { CostAggregate } from "../observability/cost.js";
 import type { SessionEntry } from "./entries.js";
@@ -50,11 +51,10 @@ export type ClioSessionMetaExtension = {
 	/** Ordered record of skills activated in this session. */
 	skillActivations?: SkillActivation[];
 	/**
-	 * The session's usage as the call-journal fold last totalled it, for the resume picker. A projection, never a
-	 * source: `foldVersion` names the fold that made it, and a meta written before it carries a running total without
-	 * one (#434 §10).
+	 * The session's spend for the resume picker: a projection of the read model's whole-session totals, every branch
+	 * and referenced run, never a source. A meta written before it keeps a running total (#434 §10).
 	 */
-	usage?: SessionUsageProjection;
+	usage?: SessionUsageProjection | LegacySessionUsage;
 	/**
 	 * The turn `/tree` last switched the append point to, persisted so it
 	 * survives quit + resume. `resume()`/`switchBranch()` prefer this over
@@ -65,8 +65,14 @@ export type ClioSessionMetaExtension = {
 	pinnedLeafTurnId?: string | null;
 };
 
-/** Session usage totals as meta.json keeps them; `foldVersion` is absent on metas written before #434. */
+/** meta.json `usage` as the read model projects it: the whole-session totals and the fold version that made them. */
 export interface SessionUsageProjection {
+	foldVersion: number;
+	tokens: Quantity;
+	usd: Quantity;
+}
+/** The running total a meta written before the projection kept; still read, never written (#434 §10). */
+export interface LegacySessionUsage {
 	tokens: number;
 	cost: CostAggregate;
 	foldVersion?: number;
@@ -121,8 +127,8 @@ export interface SessionContract {
 	replaceEntries(entries: ReadonlyArray<SessionEntry>): void;
 	/** Append a skill activation ledger entry and mirror it into meta.json. */
 	recordSkillActivation(activation: SkillActivation): SkillActivation;
-	/** Replace the current session's meta.json `usage` with the journal fold's projection. */
-	projectUsage(usage: SessionUsageProjection & { foldVersion: number }): void;
+	/** Replace the current session's meta.json `usage` with the read model's whole-session projection. */
+	projectUsage(usage: SessionUsageProjection): void;
 	/** Write atomic checkpoint (current.jsonl flush, tree.json persist, meta update). */
 	checkpoint(reason?: string): Promise<void>;
 	/** Synchronously make current.jsonl appends durable; used by write-ahead safety journals. */

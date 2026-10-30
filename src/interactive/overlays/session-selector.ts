@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import { formatFooterTokens } from "../../core/display-units.js";
+import { renderCompactCount } from "../../core/telemetry/render.js";
 import { formatCostAggregate } from "../../domains/observability/cost.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/index.js";
@@ -105,9 +106,12 @@ function metaStrip(meta: SessionMeta, now: number): string {
 	const countLabel = count === 1 ? "1 turn" : `${count} turns`;
 	const folder = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "") || "no folder";
 	const base = `${status} ${when} · ${countLabel} · ${folder} · ${shortTarget(meta)}`;
-	if (!meta.usage) return base;
-	const cost = formatCostAggregate(meta.usage.cost);
-	return `${base} · ${formatFooterTokens(meta.usage.tokens)} tok${cost !== null ? ` · ${cost}` : ""}`;
+	const usage = meta.usage;
+	if (!usage) return base;
+	// The read model's projection is already worded by the canonical renderers; an older meta keeps its running total.
+	if ("usd" in usage) return `${base} · ${renderCompactCount(usage.tokens.fact)} tok · ${usage.usd.display}`;
+	const cost = formatCostAggregate(usage.cost);
+	return `${base} · ${formatFooterTokens(usage.tokens)} tok${cost !== null ? ` · ${cost}` : ""}`;
 }
 
 /**

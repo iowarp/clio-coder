@@ -257,7 +257,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 		},
 		projectUsage(usage) {
 			if (!state) throw new Error("session.projectUsage: no current session");
-			state.meta.usage = { tokens: usage.tokens, cost: usage.cost, foldVersion: usage.foldVersion };
+			state.meta.usage = { foldVersion: usage.foldVersion, tokens: usage.tokens, usd: usage.usd };
 			persistSessionMeta(state);
 		},
 		async checkpoint(reason) {
