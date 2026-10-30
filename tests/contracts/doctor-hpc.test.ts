@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { HPC_TOOLS, hpcToolchainFindings } from "../../src/cli/doctor-hpc.js";
+import { pdfAttachmentFinding } from "../../src/cli/doctor-toolchain.js";
 import { formatDoctorReport } from "../../src/domains/lifecycle/doctor.js";
+import { popplerInstallHint } from "../../src/tools/read-documents/pdf.js";
 
 let root: string;
 let bin: string;
@@ -117,5 +119,22 @@ describe("doctor HPC toolchain probes", () => {
 		strictEqual(byName.get("toolchain make")?.level, "ok");
 		strictEqual(byName.get("toolchain nvcc")?.level, "info");
 		ok(findings.every((f) => f.ok));
+	});
+});
+
+describe("doctor pdf attachments row (#438)", () => {
+	it("is INFO naming the install command without poppler, and OK with the pdftotext -v version with it", async () => {
+		const missing = await pdfAttachmentFinding();
+		strictEqual(missing.level, "info");
+		match(missing.detail, /^pdftotext and pdfinfo not on PATH; /);
+		ok(missing.detail.includes(popplerInstallHint()));
+		fakeTool("pdftotext", 'echo "pdftotext version 24.02.0" >&2');
+		fakeTool("pdfinfo", "exit 0");
+		deepStrictEqual(await pdfAttachmentFinding(), {
+			ok: true,
+			name: "pdf attachments",
+			level: "ok",
+			detail: `${path.join(bin, "pdftotext")}: pdftotext version 24.02.0; pdfinfo ${path.join(bin, "pdfinfo")}`,
+		});
 	});
 });

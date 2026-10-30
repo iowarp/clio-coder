@@ -125,6 +125,14 @@ both `yazi` and `ya` resolve, and Yazi validates the staged profile first. See [
 for the rows `panes mode`, `panes socket`, `panes protocol`, `panes binary`,
 `panes layout`, `naming panes` and `panes journal dir`, none of which is an error.
 
+The `pdf attachments` row is `OK` when poppler's `pdftotext` and `pdfinfo` are on
+`PATH`, and names the version `pdftotext -v` reports. It is `INFO` when either is
+missing or `pdftotext -v` prints no version, and then names the install command for
+the platform: `brew install poppler` on macOS, `scoop install poppler` on Windows,
+and `poppler-utils` from the system package manager elsewhere. `@`-attached PDFs and
+`read` on a PDF need both binaries. The row reads only `PATH`, so it also appears on
+a home Clio Coder has never written to.
+
 ## HPC toolchain rows
 
 The full findings include one `toolchain <name>` row for each of `cc`, `c++`, `clang`,

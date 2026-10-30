@@ -1,3 +1,6 @@
+import { tmpdir } from "node:os";
+import { runCommandVector } from "../core/safe-exec.js";
+import { resolveOnPath } from "../domains/interop/detect.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import {
 	describeYaziProfile,
@@ -7,6 +10,7 @@ import {
 	yaziProfileDir,
 } from "../domains/mux/index.js";
 import { describeResolution, resolveToolBinary, toolStatuses } from "../domains/toolchain/index.js";
+import { popplerInstallHint } from "../tools/read-documents/pdf.js";
 
 export interface ToolchainFindingOptions {
 	panesEnabled?: boolean;
@@ -95,4 +99,35 @@ export function toolchainFindings(options: ToolchainFindingOptions = {}): Doctor
 					: ("ok" as const),
 	}));
 	return [...tools, yaziProfileFinding(filesEnabled, options.fix === true)];
+}
+
+/**
+ * Whether `@`-attached PDFs and `read` on a PDF can extract text: poppler's
+ * pdftotext and pdfinfo on PATH, with pdftotext answering `-v` (it reads
+ * `--version` as a file name). PDFs are optional input, so a missing poppler
+ * is INFO with the command that installs it, never a warning (#438).
+ */
+export async function pdfAttachmentFinding(timeoutMs = 2_000): Promise<DoctorFinding> {
+	const name = "pdf attachments";
+	const pdftotext = resolveOnPath(["pdftotext"]).binary;
+	const pdfinfo = resolveOnPath(["pdfinfo"]).binary;
+	const missing = [...(pdftotext ? [] : ["pdftotext"]), ...(pdfinfo ? [] : ["pdfinfo"])];
+	const hint = `@-attached PDFs and read on a PDF need poppler (${popplerInstallHint()})`;
+	if (pdftotext === undefined || pdfinfo === undefined)
+		return { ok: true, name, level: "info", detail: `${missing.join(" and ")} not on PATH; ${hint}` };
+	// A scratch cwd, as the HPC version probes use.
+	const cwd = tmpdir();
+	const probe = await runCommandVector(pdftotext, ["-v"], { cwd, workspaceRoot: cwd, timeoutMs, maxOutputBytes: 4096 });
+	const version = `${probe.stdout}\n${probe.stderr}`
+		.split(/\r?\n/u)
+		.map((line) => line.trim())
+		.find((line) => /\d+\.\d+/u.test(line));
+	if (version === undefined)
+		return {
+			ok: true,
+			name,
+			level: "info",
+			detail: `${pdftotext} -v printed no version (${probe.timedOut ? `no answer within ${timeoutMs}ms` : `exit ${probe.exitCode ?? "on a signal"}`}); ${hint}`,
+		};
+	return { ok: true, name, level: "ok", detail: `${pdftotext}: ${version}; pdfinfo ${pdfinfo}` };
 }

@@ -38,7 +38,7 @@ import { panesFindings } from "./doctor-panes.js";
 import { slurmMcpFindings } from "./doctor-slurm.js";
 import { stateStorageFinding } from "./doctor-state-size.js";
 import { taskWorktreeFindings } from "./doctor-task-worktrees.js";
-import { toolchainFindings } from "./doctor-toolchain.js";
+import { pdfAttachmentFinding, toolchainFindings } from "./doctor-toolchain.js";
 import { validationContractFinding } from "./doctor-validation-contract.js";
 import { createLifecyclePresenter } from "./lifecycle-presenter.js";
 import { printError } from "./shared.js";
@@ -418,7 +418,11 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// Resolution reads PATH and the vendor root and creates nothing, but on an
 	// untouched home there is no vendor root to look at and the answer would be
 	// "none" for every row regardless, so the sweep stays with the others.
-	const toolChecks = untouched ? [] : toolchainFindings({ panesEnabled, filesEnabled, fix });
+	// The PDF row reads PATH only, so it runs on an untouched home too.
+	const toolChecks = [
+		...(untouched ? [] : toolchainFindings({ panesEnabled, filesEnabled, fix })),
+		await pdfAttachmentFinding(),
+	];
 	// Compilers, MPI, build systems, and the scheduler. Each probe resolves PATH
 	// and runs a bounded `--version` in a scratch directory, so it creates
 	// nothing and runs on an untouched home too.
