@@ -69,7 +69,10 @@ const call = {
 	label: CallLabel,
 	target,
 	roundKind: RoundKind,
-	toolChoice: Type.Union([vocabulary(["auto", "none", "required"]), Type.Object({ name: ExistingId }, closed)]),
+	toolChoice: Type.Union([
+		vocabulary(["auto", "none", "required", "unknown"]),
+		Type.Object({ name: ExistingId }, closed),
+	]),
 };
 const span = { start: duration, end: duration };
 const stop = Type.Object(
@@ -96,7 +99,7 @@ export const CallSettledSchema = Type.Object(
 				send: Type.Optional(Type.Object(span, closed)),
 				firstByte: Type.Optional(duration),
 				firstToken: Type.Optional(duration),
-				settle: duration,
+				settle: Type.Union([duration, Type.Null()]),
 			},
 			closed,
 		),
@@ -373,8 +376,12 @@ export function validPayload<K extends Kind>(kind: K, data: unknown): data is Pa
 	if (call.disposition === "sent_unsettled" || call.disposition === "settled_no_usage") {
 		if (Object.values(call.usage ?? {}).some((fact) => fact.kind === "measured")) return false;
 	}
-	return Object.values(call.stages).every((value) =>
-		typeof value === "number" ? value <= call.stages.settle : value.end >= value.start && value.end <= call.stages.settle,
+	const settledAt = call.stages.settle;
+	if (settledAt === null) return Object.keys(call.stages).length === 1;
+	return Object.values(call.stages).every(
+		(value) =>
+			value !== null &&
+			(typeof value === "number" ? value <= settledAt : value.end >= value.start && value.end <= settledAt),
 	);
 }
 

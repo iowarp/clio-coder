@@ -69,7 +69,13 @@ export function callSettlementFromMessage(
 	const reported = normalizeTokenUsage(usage).observed;
 	const read = (key: keyof CallUsage): Fact<number> => {
 		const value = amount(usage[key]);
-		if (usage.estimated === true || value === null || !Number.isInteger(value)) return unknown;
+		if (
+			usage.estimated === true ||
+			(usage.clioExternal !== undefined && external.tokenUsage !== "provider-reported") ||
+			value === null ||
+			!Number.isInteger(value)
+		)
+			return unknown;
 		if (key === "cacheRead" && usage.cacheReadReported === false) return unknown;
 		if (
 			value > 0 ||

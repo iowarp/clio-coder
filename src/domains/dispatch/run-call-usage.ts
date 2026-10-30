@@ -40,7 +40,7 @@ export function runUsageFromCallRecords(records: Iterable<TelemetryRecord>): Run
 	const costSummary: CostAggregate = {
 		knownUsd: subtotal(facts.usd),
 		hasEstimated: facts.usd.coverage.estimated > 0,
-		hasUnknown: facts.usd.unknownCount > 0 || unknownCoverage,
+		hasUnknown: facts.usd.unknownCount > 0 || folded.amountCoverageUnknown,
 		allKnownFree:
 			folded.source === "aggregate"
 				? folded.aggregate?.pricing.pricedBy === "free"
@@ -69,10 +69,10 @@ export function runUsageFromCallRecords(records: Iterable<TelemetryRecord>): Run
 				? "estimated"
 				: costSummary.allKnownFree
 					? "known_free"
-					: apiCalls > 0
+					: facts.usd.coverage.measured > 0
 						? "known"
 						: "unknown",
-		tokenUsageMissing: facts.totalTokens.unknownCount > 0 || unknownCoverage,
+		tokenUsageMissing: facts.totalTokens.unknownCount > 0 || folded.amountCoverageUnknown,
 	};
 }
 

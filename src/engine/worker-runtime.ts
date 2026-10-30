@@ -144,6 +144,7 @@ import { createEngineAgent, type EngineAgentOptions } from "./agent.js";
 import { registerFauxFromEnv } from "./ai.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./apis/index.js";
 import { startClaudeSdkWorkerRun } from "./claude/sdk-runtime.js";
+import { observeExternalWorkerRun } from "./external-call-telemetry.js";
 import { startExternalCliWorkerRun } from "./external-cli/connectors.js";
 import {
 	createLoopGuardRegistration,
@@ -609,7 +610,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		throw new Error("helperResult requires a supported internal JSON contract and native HTTP worker");
 	}
 	if (input.runtime.id === "claude-sdk") {
-		return startClaudeSdkWorkerRun(input, emit);
+		return observeExternalWorkerRun(input, emit, (observedEmit) => startClaudeSdkWorkerRun(input, observedEmit));
 	}
 	if (input.runtime.kind === "subprocess") return startExternalCliWorkerRun(input, emit);
 

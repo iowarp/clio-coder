@@ -1,0 +1,169 @@
+import { hostname } from "node:os";
+import { processBirthToken } from "../core/process-identity.js";
+import type { Fact } from "../core/telemetry/fact.js";
+import { createTelemetryForwarder } from "../core/telemetry/forwarder.js";
+import { newAttemptId, newCallId } from "../core/telemetry/ids.js";
+import { recordTelemetry } from "../core/telemetry/producer.js";
+import type { CallUsage, RunUsage } from "../core/telemetry/schemas.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
+import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput } from "./worker-runtime.js";
+
+const unknown = { kind: "unknown", reason: "provider-omitted" } as const;
+const record = (value: unknown): Record<string, unknown> =>
+	value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+const fields = ["input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "reasoning"] as const;
+
+interface ExternalUsageObservation {
+	usage: Record<string, unknown>;
+	coverage: RunUsage["coverage"];
+	stopReason?: "stop" | "toolUse" | "length";
+	/** Normalized fallback rows may contain placeholders; only positive verified fields survive (#434). */
+	normalized?: boolean;
+}
+const observations = new WeakMap<object, ExternalUsageObservation>();
+
+/** Keep raw field presence in process memory; the existing message and SDK payload stay unchanged (#434). */
+export function bindExternalUsage<T extends object>(message: T, observation: ExternalUsageObservation): T {
+	observations.set(message, observation);
+	return message;
+}
+
+export function externalUsageFacts(
+	observation: ExternalUsageObservation,
+): Pick<RunUsage, "usage" | "totalTokens" | "apiCalls" | "missingTokenCalls" | "pricing" | "coverage"> {
+	const raw = observation.usage;
+	const external = record(raw.clioExternal);
+	const tokensVerified =
+		raw.estimated !== true && (raw.clioExternal === undefined || external.tokenUsage === "provider-reported");
+	const read = (value: unknown, integer = true): Fact<number> =>
+		typeof value === "number" && Number.isFinite(value) && value >= 0 && (!integer || Number.isSafeInteger(value))
+			? { kind: "measured", value, source: "provider" }
+			: unknown;
+	const token = (key: string): Fact<number> =>
+		!tokensVerified || (observation.normalized && raw[key] === 0) ? unknown : read(raw[key]);
+	const usage = Object.fromEntries(fields.map((key) => [key, token(key)])) as CallUsage;
+	const usd =
+		raw.costProvenance === "unknown" || external.cost === "missing" || external.cost === "unverified"
+			? unknown
+			: read(record(raw.cost).total ?? raw.costUsd, false);
+	const estimatedUsd =
+		usd.kind === "measured" &&
+		(raw.costProvenance === "estimated" || raw.costProvenance === "known") &&
+		external.cost !== "provider-reported"
+			? {
+					kind: "estimated" as const,
+					value: usd.value,
+					method: raw.costProvenance === "known" ? ("target-rates" as const) : ("catalog" as const),
+				}
+			: usd;
+	return {
+		usage,
+		totalTokens: token("totalTokens"),
+		apiCalls: read(raw.apiCalls),
+		missingTokenCalls: read(raw.missingTokenCalls),
+		pricing: {
+			usd: estimatedUsd,
+			pricedBy:
+				estimatedUsd.kind === "estimated"
+					? raw.costProvenance === "known"
+						? "target-rates"
+						: "catalog"
+					: estimatedUsd.kind === "measured"
+						? "provider"
+						: "none",
+		},
+		coverage: observation.coverage,
+	};
+}
+
+/** The engine observes external summaries without pretending each summary is one provider request (#434). */
+export function observeExternalWorkerRun(
+	input: WorkerRunInput,
+	emit: WorkerEventEmit,
+	start: (emit: WorkerEventEmit) => WorkerRunHandle,
+): WorkerRunHandle {
+	const context = input.telemetryContext;
+	if (!context) return start(emit);
+	const forwarder = createTelemetryForwarder(
+		context,
+		{ host: hostname(), pid: process.pid, birthToken: processBirthToken(), monoEpochWallMs: performance.timeOrigin },
+		emit,
+	);
+	const target = {
+		targetId: input.target.id,
+		runtimeId: input.runtime.id,
+		api: input.runtime.id,
+		requestedModel: input.wireModelId,
+		reportedModel: { kind: "unknown", reason: "not-observed" } as const,
+	};
+	let revision = 0;
+	const calls = new Set<string>();
+	recordTelemetry("process.started", {}, context);
+	forwarder.flush();
+	try {
+		const handle = start((event) => {
+			if (event.type === "clio_coder_model_call") {
+				const payload = event.payload;
+				const observed = observations.get(payload);
+				const identity = payload.responseId ?? String(payload.callIndex);
+				if (observed && !calls.has(identity)) {
+					calls.add(identity);
+					const facts = externalUsageFacts(observed);
+					const callId = newCallId();
+					const attemptId = newAttemptId();
+					const settlement = callSettlementFromMessage(
+						{ stopReason: "stop", usage: { ...observed.usage, clioExternal: { tokenUsage: "provider-reported" } } },
+						"unknown",
+					);
+					recordTelemetry(
+						"call.settled",
+						{
+							...settlement,
+							disposition:
+								observed.coverage === "complete"
+									? Object.values(facts.usage).some((fact) => fact.kind === "measured")
+										? "settled"
+										: "settled_no_usage"
+									: "sent_unsettled",
+							stop: { reason: observed.stopReason ?? "unknown" },
+							usage:
+								observed.coverage === "complete"
+									? facts.usage
+									: (Object.fromEntries(fields.map((field) => [field, unknown])) as CallUsage),
+							pricing: facts.pricing,
+							callId,
+							attemptId,
+							attempt: 0,
+							label: "worker",
+							target: { ...target, reportedModel: reportedModelFromMessage(payload) },
+							roundKind: "unknown",
+							toolChoice: "unknown",
+							stages: { settle: null },
+						},
+						{ ...context, callId, attemptId },
+					);
+				}
+			} else if (event.type === "message_end" && event.message.role === "assistant") {
+				const message = event.message;
+				const bound = observations.get(message);
+				const facts = externalUsageFacts(bound ?? { usage: record(message.usage), coverage: "unknown", normalized: true });
+				recordTelemetry(
+					"run.usage",
+					{
+						...facts,
+						source: input.runtime.id === "claude-sdk" ? "claude-sdk" : "external-cli",
+						scope: "run",
+						revision: revision++,
+						target,
+					},
+					context,
+				);
+			}
+			emit(event);
+		});
+		return { ...handle, promise: handle.promise.finally(() => forwarder.close()) };
+	} catch (error) {
+		forwarder.close();
+		throw error;
+	}
+}

@@ -4,6 +4,9 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { claudeAuthEnvironment, withClaudeCredential } from "../../src/core/claude-environment.js";
 import { runCommandVector } from "../../src/core/safe-exec.js";
+import { readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
+import { runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import {
 	ClaudeAgentSdkUnavailableError,
 	claudeSdkComponentDir,
@@ -19,6 +22,7 @@ import {
 import { loadClaudeAgentSdk } from "../../src/engine/claude/sdk-module.js";
 import { startClaudeSdkWorkerRun } from "../../src/engine/claude/sdk-runtime.js";
 import type { WorkerRunInput } from "../../src/engine/worker-runtime.js";
+import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function sdk(prefix: string, code: string): string {
@@ -95,8 +99,8 @@ export function query({ prompt, options }) {
       const text = input.message.content[0].text;
       state.messages.push(text);
       started();
-      yield { type: "assistant", message: { content: [{ type: "text", text }], model: "sonnet" } };
-      if (!text.startsWith("Wait")) yield { type: "result", subtype: "success", result: text };
+      yield { type: "assistant", message: { id: "call-" + state.messages.length, content: [{ type: "text", text }], model: "sonnet", stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 0, cache_read_input_tokens: 0 } } };
+      if (!text.startsWith("Wait")) yield { type: "result", subtype: "success", result: text, usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, total_cost_usd: 0.25 };
     }
   })();
   output.close = () => { state.closed++; };
@@ -123,18 +127,37 @@ test("SDK steering uses one open input lane, keeps Clio mediation, and closes af
 	const module = (await loadClaudeAgentSdk()) as unknown as {
 		state: { messages: string[]; closed: number; options: Record<string, unknown> };
 	};
-	const handle = startClaudeSdkWorkerRun(
+	const frames: WorkerTelemetryFrame[] = [];
+	const handle = startWorkerRun(
 		{
 			...workerInput(env.dir),
+			telemetryContext: { sessionId: null, runId: "sdk-test", label: "worker" },
 			authProfile: "anthropic-max",
 			apiKey: "sk-ant-oat01-stale",
 		},
-		() => {},
+		(event) => {
+			if (event.type === "clio_coder_telemetry") frames.push(event);
+		},
 	);
 	ok(handle.steer);
 	strictEqual(await handle.steer("Steered follow-up"), true);
 	const result = await handle.promise;
 	strictEqual(result.exitCode, 0);
+	ok(frames.every((frame) => readTelemetryRecord(frame.record).kind === "record"));
+	strictEqual(frames[0]?.record.k, "process.started");
+	const usage = runUsageFromCallRecords(frames.map(({ record }) => record));
+	strictEqual(usage.callIds.length, 2);
+	strictEqual(usage.totalTokens, 12, "the SDK aggregate replaces its constituent call usage");
+	strictEqual(usage.costUsd, 0.25);
+	strictEqual(usage.costProvenance, "known", "unknown request counts do not invalidate a complete provider bill");
+	strictEqual(usage.tokenUsageMissing, false);
+	strictEqual(usage.apiCalls, 2, "identified calls give a lower bound; the aggregate request count stays unknown");
+	strictEqual(usage.costSummary.unknownCallCoverageRuns, 1);
+	const calls = frames.flatMap(({ record }) => (record.k === "call.settled" ? [record.data] : []));
+	strictEqual(calls[0]?.usage?.output.kind, "measured");
+	strictEqual(calls[0]?.usage?.cacheWrite.kind, "unknown");
+	strictEqual(calls[0]?.stages.settle, null);
+	strictEqual(calls[0]?.roundKind, "unknown");
 	deepStrictEqual(module.state.messages, ["Initial task", "Steered follow-up"]);
 	strictEqual(module.state.closed, 1);
 	strictEqual(module.state.options.permissionMode, "default");

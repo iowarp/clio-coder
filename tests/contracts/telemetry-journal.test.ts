@@ -539,11 +539,14 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		{ sessionId: "session", runId: "run", label: "worker" },
 		clock,
 	);
+	const aggregateOnly = runUsageFromCallRecords([aggregateRecord]);
+	strictEqual(aggregateOnly.apiCalls, 0);
+	strictEqual(aggregateOnly.costProvenance, "known");
 	const withAggregate = [...rows, aggregateRecord, aggregateRecord];
 	const runAggregate = runUsageFromCallRecords(withAggregate);
 	strictEqual(runAggregate.totalTokens, 100, "the snapshot includes per-call usage; never add both");
 	strictEqual(runAggregate.costUsd, 1);
-	strictEqual(runAggregate.apiCalls, 0, "aggregate usage never invents a call count");
+	strictEqual(runAggregate.apiCalls, 2, "only identified calls establish a count; aggregate coverage remains unknown");
 	strictEqual(runAggregate.costSummary.unknownCallCoverageRuns, 1);
 	deepStrictEqual(runUsageFromCallRecords([...withAggregate].reverse()), runAggregate);
 	const zeroAggregate = makeTelemetryRecord(

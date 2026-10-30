@@ -41,8 +41,8 @@ export const FailureCause = vocabulary([
 	"internal",
 ]);
 export type FailureCause = Static<typeof FailureCause>;
-export const StopReason = vocabulary(["stop", "toolUse", "length", "error", "aborted"]);
-export const RoundKind = vocabulary(["normal", "text-only", "required", "tools-removed"]);
+export const StopReason = vocabulary(["stop", "toolUse", "length", "error", "aborted", "unknown"]);
+export const RoundKind = vocabulary(["normal", "text-only", "required", "tools-removed", "unknown"]);
 export const TransportKind = vocabulary(["websocket", "sse", "http", "local", "subprocess", "unknown"]);
 export const Tier = vocabulary(["accountability", "operational", "research"]);
 export type Tier = Static<typeof Tier>;

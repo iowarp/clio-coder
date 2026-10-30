@@ -110,6 +110,17 @@ test("call schemas distinguish measured zero, unknown, absent, and never sent", 
 	};
 	strictEqual(validPayload("call.settled", call), true);
 	strictEqual(
+		validPayload("call.settled", {
+			...call,
+			roundKind: "unknown",
+			toolChoice: "unknown",
+			stop: { reason: "unknown" },
+			stages: { settle: null },
+		}),
+		true,
+	);
+	strictEqual(validPayload("call.settled", { ...call, stages: { settle: null, firstToken: 0 } }), false);
+	strictEqual(
 		validPayload("call.settled", { ...call, usage: { ...call.usage, input: { kind: "estimated", value: 4 } } }),
 		false,
 	);
@@ -181,6 +192,11 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 	const omitted = callSettlementFromMessage({ stopReason: "stop", usage }, "unknown");
 	strictEqual(omitted.disposition, "settled_no_usage");
 	strictEqual(omitted.usage?.input.kind, "unknown");
+	const unverified = callSettlementFromMessage(
+		{ stopReason: "stop", usage: { input: 123, clioExternal: { tokenUsage: "unverified" } } },
+		"unknown",
+	);
+	strictEqual(unverified.usage?.input.kind, "unknown");
 	const zero = callSettlementFromMessage(
 		{
 			stopReason: "stop",

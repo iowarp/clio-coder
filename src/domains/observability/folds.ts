@@ -226,17 +226,36 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>) {
 				FactSum
 			>)
 		: callTotals.usage;
+	const aggregateTokenSubtotal = emptyFactSum();
+	if (aggregate)
+		addGroup(aggregateTokenSubtotal, [
+			aggregate.usage.input,
+			aggregate.usage.output,
+			aggregate.usage.cacheRead,
+			aggregate.usage.cacheWrite,
+		]);
 	return {
 		calls,
 		aggregate: conflict ? null : (aggregate ?? null),
 		source: aggregate ? (conflict ? ("conflict" as const) : ("aggregate" as const)) : ("calls" as const),
 		usage,
-		totalTokens: aggregate ? choose(aggregate.totalTokens) : callTotals.totalTokens,
+		totalTokens: aggregate
+			? !conflict && aggregate.totalTokens.kind === "unknown"
+				? aggregateTokenSubtotal
+				: choose(aggregate.totalTokens)
+			: callTotals.totalTokens,
 		usd: aggregate ? choose(aggregate.pricing.usd) : callTotals.usd,
-		apiCalls: aggregate ? choose(aggregate.apiCalls) : fromFact(observed(apiCalls)),
+		// Identified constituent calls provide a lower bound even when the aggregate omits its count (#434).
+		apiCalls: aggregate
+			? !conflict && aggregate.apiCalls.kind === "unknown"
+				? foldFacts([observed(apiCalls), aggregate.apiCalls])
+				: choose(aggregate.apiCalls)
+			: fromFact(observed(apiCalls)),
 		missingTokenCalls: aggregate ? choose(aggregate.missingTokenCalls) : fromFact(observed(missingCalls)),
+		amountCoverageUnknown: aggregate
+			? conflict || aggregate.coverage !== "complete"
+			: calls.coverage.gapRecords > 0 || callTotals.incomplete > 0 || calls.unresolvedCallIds.length > 0,
 		unknownCoverage:
-			calls.coverage.gapRecords > 0 ||
 			conflict ||
 			(aggregate
 				? aggregate.coverage !== "complete" ||
@@ -244,6 +263,6 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>) {
 					aggregate.apiCalls.kind === "absent" ||
 					aggregate.missingTokenCalls.kind === "unknown" ||
 					aggregate.missingTokenCalls.kind === "absent"
-				: callTotals.incomplete > 0 || calls.unresolvedCallIds.length > 0),
+				: calls.coverage.gapRecords > 0 || callTotals.incomplete > 0 || calls.unresolvedCallIds.length > 0),
 	};
 }

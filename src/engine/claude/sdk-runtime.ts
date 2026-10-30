@@ -24,6 +24,7 @@ import { mainGrantsUnavailable } from "../../domains/safety/worker-permit.js";
 import { findExecutableOnPath } from "../../domains/toolchain/resolve.js";
 import { toolAuditFacts } from "../../tools/agent-tools.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerBudget } from "../../worker/spec-contract.js";
+import { bindExternalUsage } from "../external-call-telemetry.js";
 import { isReserveAdmittedTool, resolveDeliveryTools } from "../loop-guard.js";
 import type { AgentEvent, AgentMessage, Usage } from "../types.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput, WorkerRunResult } from "../worker-runtime.js";
@@ -132,6 +133,17 @@ function nestedRecord(record: Record<string, unknown>, key: string): Record<stri
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: null;
+}
+
+function telemetryUsage(raw: unknown, totalCostUsd?: number): Record<string, unknown> {
+	const usage = coerceToolInput(raw);
+	return {
+		input: usage.input_tokens,
+		output: usage.output_tokens,
+		cacheRead: usage.cache_read_input_tokens,
+		cacheWrite: usage.cache_creation_input_tokens,
+		costUsd: totalCostUsd,
+	};
 }
 
 function normalizeUsage(raw: unknown, totalCostUsd = 0): Usage {
@@ -295,7 +307,10 @@ function buildAssistantMessage(input: {
 	if (input.responseModel !== undefined) message.responseModel = input.responseModel;
 	if (input.responseId !== undefined) message.responseId = input.responseId;
 	if (input.errorMessage !== undefined && input.errorMessage.length > 0) message.errorMessage = input.errorMessage;
-	return message;
+	return bindExternalUsage(message, {
+		usage: telemetryUsage(input.result?.usage, input.result?.total_cost_usd),
+		coverage: input.result ? "complete" : "partial",
+	});
 }
 
 function emitTextDelta(
@@ -724,7 +739,16 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 		let result: SDKResultMessage | null = null;
 		let responseModel: string | undefined;
 		let responseId: string | undefined;
-		const modelCalls = new Map<string, { model?: string; responseId?: string; usage: Record<string, unknown> }>();
+		const modelCalls = new Map<
+			string,
+			{
+				model?: string;
+				responseId?: string;
+				stopReason?: "stop" | "toolUse" | "length";
+				complete?: boolean;
+				usage: Record<string, unknown>;
+			}
+		>();
 		let currentCall: string | undefined;
 		const captureCall = (message: Record<string, unknown>): void => {
 			if (typeof message.id !== "string") return;
@@ -732,6 +756,10 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			const call = modelCalls.get(message.id) ?? { usage: {} };
 			if (typeof message.model === "string") call.model = message.model;
 			call.responseId = message.id;
+			if (message.stop_reason === "end_turn" || message.stop_reason === "stop_sequence") call.stopReason = "stop";
+			else if (message.stop_reason === "tool_use") call.stopReason = "toolUse";
+			else if (message.stop_reason === "max_tokens") call.stopReason = "length";
+			if (typeof message.stop_reason === "string" || message.complete === true) call.complete = true;
 			const usage = coerceToolInput(message.usage);
 			for (const key of [
 				"input_tokens",
@@ -749,13 +777,20 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			for (const call of modelCalls.values())
 				emit({
 					type: "clio_coder_model_call",
-					payload: {
-						callIndex: ++callIndex,
-						usage: normalizeTokenUsage({ ...normalizeUsage(call.usage) }),
-						model: input.wireModelId,
-						...(call.model ? { responseModel: call.model } : {}),
-						...(call.responseId ? { responseId: call.responseId } : {}),
-					},
+					payload: bindExternalUsage(
+						{
+							callIndex: ++callIndex,
+							usage: normalizeTokenUsage({ ...normalizeUsage(call.usage) }),
+							model: input.wireModelId,
+							...(call.model ? { responseModel: call.model } : {}),
+							...(call.responseId ? { responseId: call.responseId } : {}),
+						},
+						{
+							usage: telemetryUsage(call.usage),
+							coverage: call.complete ? "complete" : "partial",
+							...(call.stopReason ? { stopReason: call.stopReason } : {}),
+						},
+					),
 				});
 			modelCalls.clear();
 		};
@@ -794,7 +829,9 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 				if (sdkMessage.type === "stream_event") {
 					const event = coerceToolInput((sdkMessage as { event?: unknown }).event);
 					if (event.type === "message_start") captureCall(coerceToolInput(event.message));
-					if (event.type === "message_delta" && currentCall) captureCall({ id: currentCall, usage: event.usage });
+					if (event.type === "message_delta" && currentCall)
+						captureCall({ id: currentCall, usage: event.usage, stop_reason: coerceToolInput(event.delta).stop_reason });
+					if (event.type === "message_stop" && currentCall) captureCall({ id: currentCall, complete: true });
 					emitTextDelta(emit, streamState, extractStreamDelta(sdkMessage));
 					continue;
 				}
