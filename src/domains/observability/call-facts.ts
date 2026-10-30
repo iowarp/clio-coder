@@ -2,6 +2,7 @@ import { responseModelIdObservationFromRecord } from "../../core/response-model-
 import type { FailureCause } from "../../core/telemetry/enums.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
+import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 
 const unknown = { kind: "unknown", reason: "provider-omitted" } as const;
@@ -50,7 +51,11 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
 	return failure.errorClass === "internal" ? "internal" : undefined;
 }
 
-/** Adapter placeholders are not measurements. Only an explicit report or a positive count proves a field (#434). */
+/**
+ * Adapter placeholders are not measurements. A usage object is the provider's report once any count in it is
+ * positive or the adapter marked it provider-reported; its zeros are then measured zeros (#434). An all-zero
+ * object without that mark is the seed pi writes before a response arrives, and every field stays unknown.
+ */
 export function callSettlementFromMessage(
 	message: unknown,
 	costProvenance: CostProvenance,
@@ -61,12 +66,14 @@ export function callSettlementFromMessage(
 	const failure = record(raw.failure);
 	const external = record(usage.clioExternal);
 	const neverSent = raw.callInvoked === false || usage.callInvoked === false || failure.invoked === false;
+	const reported = normalizeTokenUsage(usage).observed;
 	const read = (key: keyof CallUsage): Fact<number> => {
 		const value = amount(usage[key]);
 		if (usage.estimated === true || value === null || !Number.isInteger(value)) return unknown;
 		if (key === "cacheRead" && usage.cacheReadReported === false) return unknown;
 		if (
 			value > 0 ||
+			reported ||
 			external.tokenUsage === "provider-reported" ||
 			(key === "cacheRead" && usage.cacheReadReported === true)
 		) {

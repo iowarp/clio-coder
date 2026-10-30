@@ -216,7 +216,7 @@ for (const continuation of [false, true])
 					outputTokens: 5,
 					cacheReadTokens: 0,
 					totalTokens: 12,
-					provenance: "partial",
+					provenance: "reported",
 				});
 				strictEqual(outcome.completion.decision, "ok");
 				strictEqual(outcome.conversation.clarificationStreak, 1);
@@ -225,7 +225,7 @@ for (const continuation of [false, true])
 					const runId = `session:${outcome.turnId}`;
 					strictEqual(reader.run(runId)?.status, "success");
 					strictEqual(reader.run(runId)?.api_calls, 1);
-					strictEqual(reader.run(runId)?.missing_token_calls, 1);
+					strictEqual(reader.run(runId)?.missing_token_calls, 0);
 					const mirrored = reader.events(runId).filter((event) => event.type === "turn_outcome");
 					strictEqual(mirrored.length, 1);
 					deepStrictEqual(JSON.parse(mirrored[0]?.payload_json ?? "null"), outcome);
