@@ -7,20 +7,28 @@ import { UUID_V7_PATTERN } from "./ids.js";
 export const CallIdSchema = Type.String({ pattern: `^cal_${UUID_V7_PATTERN}$` });
 export const AttemptIdSchema = Type.String({ pattern: `^att_${UUID_V7_PATTERN}$` });
 export const ExistingId = Type.String({ minLength: 1, maxLength: 512 });
-export const TelemetryContextSchema = Type.Object(
-	{
-		sessionId: ExistingId,
-		turnId: Type.Optional(ExistingId),
-		runId: Type.Optional(ExistingId),
-		batchId: Type.Optional(ExistingId),
-		parentRunId: Type.Optional(ExistingId),
-		callId: Type.Optional(CallIdSchema),
-		attemptId: Type.Optional(AttemptIdSchema),
-		label: CallLabel,
-	},
-	{ additionalProperties: false },
-);
+const contextFields = {
+	turnId: Type.Optional(ExistingId),
+	batchId: Type.Optional(ExistingId),
+	parentRunId: Type.Optional(ExistingId),
+	callId: Type.Optional(CallIdSchema),
+	attemptId: Type.Optional(AttemptIdSchema),
+	label: CallLabel,
+};
+// Standalone runs have no session; their real run id owns the journal (#434).
+export const TelemetryContextSchema = Type.Union([
+	Type.Object(
+		{ ...contextFields, sessionId: ExistingId, runId: Type.Optional(ExistingId) },
+		{ additionalProperties: false },
+	),
+	Type.Object({ ...contextFields, sessionId: Type.Null(), runId: ExistingId }, { additionalProperties: false }),
+]);
 export type TelemetryContext = Readonly<Static<typeof TelemetryContextSchema>>;
+
+/** Run facts belong to their run even when a parent session exists (#434). */
+export function telemetryOwner(context: TelemetryContext): string {
+	return context.runId !== undefined ? `run:${context.runId}` : `session:${context.sessionId}`;
+}
 
 const contexts = new AsyncLocalStorage<TelemetryContext>();
 export function telemetryContext(): TelemetryContext | undefined {

@@ -1,10 +1,12 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
-import { telemetryContext, withTelemetryContext } from "../../src/core/telemetry/context.js";
+import { TelemetryContextSchema, telemetryContext, withTelemetryContext } from "../../src/core/telemetry/context.js";
 import type { SegmentHeader, TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord, monotonicSpan, readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { newAttemptId, newCallId, newRecordId, UUID_V7_PATTERN } from "../../src/core/telemetry/ids.js";
+import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
+import { recordTelemetry, registerRunTelemetrySink, registerTelemetrySink } from "../../src/core/telemetry/producer.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { KIND_NAMES, KIND_REGISTRY, validPayload } from "../../src/core/telemetry/schemas.js";
 import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
@@ -40,6 +42,38 @@ test("telemetry keeps existing ids, mints namespaced UUIDv7 ids, and isolates co
 		),
 	);
 	strictEqual(telemetryContext(), undefined);
+	strictEqual(Value.Check(TelemetryContextSchema, { sessionId: null, runId: "run", label: "worker" }), true);
+	strictEqual(Value.Check(TelemetryContextSchema, { sessionId: null, label: "worker" }), false);
+	strictEqual(Value.Check(TelemetryContextSchema, { sessionId: null, runId: "", label: "worker" }), false);
+});
+
+test("run owners stay separate from session owners, including standalone runs", () => {
+	const session: PendingTelemetry[] = [];
+	const run: PendingTelemetry[] = [];
+	const releaseSession = registerTelemetrySink("same-id", { enqueue: (record) => Boolean(session.push(record)) });
+	const releaseRun = registerRunTelemetrySink("same-id", { enqueue: (record) => Boolean(run.push(record)) });
+	try {
+		strictEqual(recordTelemetry("session.opened", {}, { sessionId: "same-id", label: "main" }), true);
+		strictEqual(recordTelemetry("process.started", {}, { sessionId: null, runId: "same-id", label: "worker" }), true);
+		strictEqual(
+			recordTelemetry("process.started", {}, { sessionId: "same-id", runId: "same-id", label: "worker" }),
+			true,
+		);
+		strictEqual(session.length, 1);
+		deepStrictEqual(
+			run.map((record) => record.ctx.sessionId),
+			[null, "same-id"],
+		);
+		releaseRun();
+		strictEqual(
+			recordTelemetry("process.started", {}, { sessionId: "same-id", runId: "same-id", label: "worker" }),
+			false,
+		);
+		strictEqual(session.length, 1, "a missing run writer never falls back to the parent session");
+	} finally {
+		releaseRun();
+		releaseSession();
+	}
 });
 
 test("call schemas distinguish measured zero, unknown, absent, and never sent", () => {

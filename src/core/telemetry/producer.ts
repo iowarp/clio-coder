@@ -1,5 +1,5 @@
 import type { TelemetryContext } from "./context.js";
-import { telemetryContext, withTelemetryContext } from "./context.js";
+import { telemetryContext, telemetryOwner, withTelemetryContext } from "./context.js";
 import { newAttemptId, newCallId } from "./ids.js";
 import type { CallSettled, CallStarted, Kind, Payload } from "./schemas.js";
 
@@ -30,10 +30,18 @@ let unownedRecords = 0;
 let sinkFailures = 0;
 
 export function registerTelemetrySink(sessionId: string, sink: TelemetrySink): () => void {
-	if (sinks.has(sessionId)) throw new Error(`telemetry already has an owner for session ${sessionId}`);
-	sinks.set(sessionId, sink);
+	return registerSink(`session:${sessionId}`, sink);
+}
+
+export function registerRunTelemetrySink(runId: string, sink: TelemetrySink): () => void {
+	return registerSink(`run:${runId}`, sink);
+}
+
+function registerSink(owner: string, sink: TelemetrySink): () => void {
+	if (sinks.has(owner)) throw new Error(`telemetry already has an owner for ${owner}`);
+	sinks.set(owner, sink);
 	return () => {
-		if (sinks.get(sessionId) === sink) sinks.delete(sessionId);
+		if (sinks.get(owner) === sink) sinks.delete(owner);
 	};
 }
 
@@ -43,7 +51,7 @@ export function telemetryProducerHealth(): { unownedRecords: number; sinkFailure
 
 /** No serialization, filesystem access, or locks may enter this call stack (#434, rule13). */
 export function recordTelemetry<K extends Kind>(kind: K, data: Payload<K>, ctx = telemetryContext()): boolean {
-	const sink = ctx ? sinks.get(ctx.sessionId) : undefined;
+	const sink = ctx ? sinks.get(telemetryOwner(ctx)) : undefined;
 	if (!ctx || !sink) {
 		unownedRecords += 1;
 		return false;

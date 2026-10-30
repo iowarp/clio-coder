@@ -7,11 +7,12 @@ import { processBirthToken } from "../../core/process-identity.js";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
+import { telemetryOwner } from "../../core/telemetry/context.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { makeTelemetryRecord, readTelemetryRecord } from "../../core/telemetry/envelope.js";
 import { newRecordId } from "../../core/telemetry/ids.js";
 import type { PendingTelemetry, TelemetrySink } from "../../core/telemetry/producer.js";
-import { registerTelemetrySink } from "../../core/telemetry/producer.js";
+import { registerRunTelemetrySink, registerTelemetrySink } from "../../core/telemetry/producer.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
 
@@ -215,7 +216,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			};
 			const journal: CallJournal = {
 				enqueue(record) {
-					if (closed || failed || record.ctx.sessionId !== options.context.sessionId || count === capacity) {
+					if (closed || failed || telemetryOwner(record.ctx) !== telemetryOwner(options.context) || count === capacity) {
 						dropped += 1;
 						schedule();
 						return false;
@@ -240,7 +241,9 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 					return closing;
 				},
 			};
-			unregister = registerTelemetrySink(options.context.sessionId, journal);
+			if (options.context.runId !== undefined) unregister = registerRunTelemetrySink(options.context.runId, journal);
+			else if (options.context.sessionId !== null) unregister = registerTelemetrySink(options.context.sessionId, journal);
+			else throw new Error("telemetry journal requires a session or run owner");
 			ready(journal);
 			await lifetime;
 		},

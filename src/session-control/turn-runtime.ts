@@ -638,7 +638,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let settledAttempts: CallSettled[] = [];
 		const recordSettledCall = (
 			facts: CallSettled | undefined,
-			ownerSessionId: string | undefined,
+			ownerSessionId: string | null | undefined,
 			hidden = false,
 		): void => {
 			if (facts) settledAttempts.push(facts);
