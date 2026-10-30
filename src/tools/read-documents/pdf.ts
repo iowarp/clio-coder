@@ -13,8 +13,15 @@ import { type DocumentRequest, RENDER_CAP_BYTES, type Rendered } from "./shared.
 const PDF_TIMEOUT_MS = 60_000;
 
 const PDF_DEFAULT_PAGES = 50;
-const POPPLER_MISSING =
-	"PDF text needs poppler's pdftotext and pdfinfo on PATH (install poppler-utils), or use run_script with pypdf";
+
+/** The command that installs poppler here; doctor's `pdf attachments` row names it too (#438). */
+export function popplerInstallHint(platform: NodeJS.Platform = process.platform): string {
+	if (platform === "darwin") return "brew install poppler";
+	if (platform === "win32") return "scoop install poppler";
+	return "install poppler-utils with the system package manager";
+}
+
+const POPPLER_MISSING = `PDF text needs poppler's pdftotext and pdfinfo on PATH (${popplerInstallHint()}), or use run_script with pypdf`;
 
 function parsePages(spec: string | undefined, pageCount: number): { first: number; last: number } | { error: string } {
 	if (spec === undefined) return { first: 1, last: Math.min(pageCount, PDF_DEFAULT_PAGES) };
