@@ -121,7 +121,7 @@ import {
 } from "../../contracts/wire.js";
 import { ACP_CONTEXT_STATUS_METHOD } from "../clio/http-shims.js";
 import { childRunning, startAcpChild } from "../process-policy.js";
-import { snapshotCostDisplay, withCostDisplay } from "../services/cost-display.js";
+import { turnCostDisplays, withCostDisplay } from "../services/cost-display.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
 import type { WorkspaceService } from "../services/workspaces.js";
@@ -287,14 +287,14 @@ export class Supervisor {
 		return value;
 	}
 	get(id: string) {
-		return snapshotCostDisplay(structuredClone(this.snapshot(id)));
+		return turnCostDisplays(structuredClone(this.snapshot(id)));
 	}
 	/** Whether this server holds the session, open or not; a cold telemetry read of one it holds never 404s (#434). */
 	knows(id: string): boolean {
 		return this.snapshots.has(id);
 	}
 	list() {
-		return [...this.snapshots.values()].map((value) => snapshotCostDisplay(structuredClone(value)));
+		return [...this.snapshots.values()].map((value) => turnCostDisplays(structuredClone(value)));
 	}
 	/** Lists control facts without cloning transcripts, tool output, or permission request bodies. */
 	overview() {
@@ -749,10 +749,6 @@ export class Supervisor {
 		if (!entry.turnId) return;
 		entry.permissions?.cancel();
 		entry.interviews?.cancel();
-		const displayed = snapshotCostDisplay({
-			...this.snapshot(entry.id),
-			turns: this.snapshot(entry.id).turns.map((turn) => (turn.id === entry.turnId ? { ...turn, usage } : turn)),
-		});
 		this.publish({
 			type: "turn.finished",
 			payload: {
@@ -761,7 +757,6 @@ export class Supervisor {
 				turnId: entry.turnId,
 				stopReason,
 				usage: usage ? withCostDisplay(usage) : null,
-				...(displayed.costDisplay !== undefined ? { costDisplay: displayed.costDisplay } : {}),
 				problem,
 				finishedAt,
 				...(details ? { details } : {}),

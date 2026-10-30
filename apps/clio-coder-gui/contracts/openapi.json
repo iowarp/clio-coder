@@ -13840,7 +13840,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_1c48324b"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_62d1801f"
 								}
 							}
 						},
@@ -14743,7 +14743,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_1c48324b"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_62d1801f"
 								}
 							}
 						},
@@ -14838,7 +14838,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_1c48324b"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_62d1801f"
 								}
 							}
 						},
@@ -14888,7 +14888,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_1c48324b"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_62d1801f"
 									}
 								}
 							}
@@ -15379,7 +15379,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_costDisplay_1c48324b"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_62d1801f"
 								}
 							}
 						},
@@ -18811,9 +18811,6 @@
 								"type": "object",
 								"required": ["resource", "revision", "turnId", "stopReason", "usage", "problem", "finishedAt"],
 								"properties": {
-									"costDisplay": {
-										"type": "string"
-									},
 									"resource": {
 										"type": "string",
 										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -21680,7 +21677,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_costDisplay_1c48324b": {
+			"Object_config_contextWork_fleet_62d1801f": {
 				"type": "object",
 				"required": [
 					"id",
@@ -21697,7 +21694,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_a7c47c31"
+					"$ref": "#/components/schemas/Shape_d96efc41"
 				},
 				"additionalProperties": false
 			},
@@ -25303,69 +25300,6 @@
 					"$ref": "#/components/schemas/Object_evidenceId_findingCount_firstPassSuccess_9636d862"
 				}
 			},
-			"Shape_a7c47c31": {
-				"costDisplay": {
-					"type": "string"
-				},
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_11bb1234"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_ad017d75"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_878ab071"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_862a0b3c"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_b473b104"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
-				}
-			},
 			"Shape_abb5a769": {
 				"type": {
 					"type": "string",
@@ -26081,6 +26015,66 @@
 				},
 				"cacheVerdict": {
 					"enum": ["hot", "partial", "cold", "small", "unknown"]
+				}
+			},
+			"Shape_d96efc41": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_11bb1234"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_ad017d75"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_878ab071"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_862a0b3c"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_b473b104"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_e120b9e1": {

@@ -463,7 +463,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						) : null}
 						<span className="wb-bar__spacer" />
 						<TelemetryChips
-							costDisplay={snapshot.costDisplay}
 							client={client}
 							sessionId={snapshot.id}
 							state={snapshot.state}

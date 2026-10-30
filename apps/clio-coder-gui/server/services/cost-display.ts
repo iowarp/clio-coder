@@ -51,26 +51,13 @@ export function reportCostDisplays(value: unknown): unknown {
 	return "costUsd" in row || "knownUsd" in row || "cost" in row ? withCostDisplay(row) : row;
 }
 
-/** Historic snapshots can lack live accounting; fold their recorded turns with the same cost algebra. */
-export function snapshotCostDisplay(snapshot: SessionSnapshot): SessionSnapshot {
-	const cost = aggregateCostAmounts(
-		snapshot.turns.flatMap(({ usage }) =>
-			usage
-				? [
-						{
-							usd: usage.costUsd ?? 0,
-							provenance: provenance(usage.costProvenance),
-							...(usage.costSummary ? { costSummary: usage.costSummary } : {}),
-							...(usage.apiCalls !== undefined ? { apiCalls: usage.apiCalls } : {}),
-							...(usage.missingTokenCalls !== undefined ? { missingTokenCalls: usage.missingTokenCalls } : {}),
-						},
-					]
-				: [],
-		),
-	);
+/**
+ * Each recorded turn's own cost, worded on the server. A session's spend is never folded from these: the read
+ * model's session DTO is its one source (#434 §11.3), so a snapshot carries no session total.
+ */
+export function turnCostDisplays(snapshot: SessionSnapshot): SessionSnapshot {
 	return {
 		...snapshot,
-		costDisplay: renderCostAggregate(cost),
 		turns: snapshot.turns.map((turn) => ({ ...turn, usage: turn.usage ? withCostDisplay(turn.usage) : null })),
 	};
 }

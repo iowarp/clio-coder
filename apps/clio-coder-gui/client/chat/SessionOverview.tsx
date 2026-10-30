@@ -245,7 +245,6 @@ export function SessionOverview({
 		usage: usage.data,
 		live: overview.running || !usage.data || usage.isPlaceholderData ? session.telemetry?.usage : undefined,
 		cold: cold.data,
-		recordedCostDisplay: session.costDisplay,
 	});
 	const used = spendLine(spend);
 	const healthSection =

@@ -349,7 +349,6 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 			const status = stopReason === "cancelled" ? "cancelled" : problem ? "failed" : "succeeded";
 			state = {
 				...state,
-				costDisplay: event.payload.costDisplay ?? "not measured",
 				turns: state.turns.map((turn) => {
 					if (turn.id !== turnId) return turn;
 					const { queued: _queued, ...settled } = turn;

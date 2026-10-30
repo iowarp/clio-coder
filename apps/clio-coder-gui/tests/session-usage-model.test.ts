@@ -48,16 +48,9 @@ test("the turn overview counts turns and wall time and sums no tokens or cost (#
 		elapsedMs: 40_000,
 		running: true,
 	});
-	// With neither a usage read nor telemetry, a session shows only the cost its snapshot recorded.
-	assert.deepEqual(sessionSpend({ recordedCostDisplay: "~$0.42 +?" }), {
-		tokens: null,
-		cost: "~$0.42 +?",
-		calls: null,
-		source: "none",
-	});
-	assert.deepEqual(usageSummary(false, undefined, undefined, "~$0.42 +?").totals, [
-		{ label: "Cost", value: "~$0.42 +?" },
-	]);
+	// With neither a usage read nor telemetry, a session shows no spend: nothing outside the read model folds one.
+	assert.deepEqual(sessionSpend({}), { tokens: null, cost: null, calls: null, source: "none" });
+	assert.deepEqual(usageSummary(false, undefined, undefined).totals, []);
 });
 
 const usage: SessionUsage = {
@@ -222,12 +215,7 @@ test("the read model's displays win over the v1 counts wherever the usage read c
 		sessionSpend({ usage: { ...usage, telemetry: { ...telemetry, session: unjournaled } } }).source,
 		"legacy",
 	);
-	assert.deepEqual(sessionSpend({ cold: unjournaled, recordedCostDisplay: "$0.10" }), {
-		tokens: null,
-		cost: "$0.10",
-		calls: null,
-		source: "none",
-	});
+	assert.deepEqual(sessionSpend({ cold: unjournaled }), { tokens: null, cost: null, calls: null, source: "none" });
 	const summary = usageSummary(true, withTelemetry, undefined);
 	assert.equal(summary.source, "telemetry");
 	assert.match(summary.note, /read model/);

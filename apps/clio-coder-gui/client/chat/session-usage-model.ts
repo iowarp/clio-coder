@@ -52,13 +52,13 @@ export interface Spend {
 /**
  * One spend figure for every surface. The read model wins wherever it is present: on the usage read for an open
  * session, or from the cold telemetry route for a closed one. The v1 counts are the fallback for an agent build
- * that carries no telemetry, and a session with neither shows only its recorded cost.
+ * that carries no telemetry, and a session with neither shows no spend rather than a figure folded outside the read
+ * model (#434).
  */
 export function sessionSpend(input: {
 	usage?: SessionUsage | undefined;
 	live?: LiveUsage | undefined;
 	cold?: SessionTelemetryV1 | null | undefined;
-	recordedCostDisplay?: string | undefined;
 }): Spend {
 	const session = [input.usage?.telemetry?.session, input.cold].find(hasJournalFacts) ?? null;
 	if (session)
@@ -87,7 +87,7 @@ export function sessionSpend(input: {
 			...(legacy.missingTokenCalls ? { missingTokenCalls: legacy.missingTokenCalls } : {}),
 		};
 	}
-	return { tokens: null, cost: input.recordedCostDisplay ?? null, calls: null, source: "none" };
+	return { tokens: null, cost: null, calls: null, source: "none" };
 }
 
 function spendTotals(spend: Spend, unknownCallCoverageRuns = 0): Array<{ label: string; value: string }> {
@@ -253,10 +253,9 @@ export function usageSummary(
 	sessionOpen: boolean,
 	usage: SessionUsage | undefined,
 	recorded: LiveUsage | undefined,
-	recordedCostDisplay?: string,
 	cold?: SessionTelemetryV1 | null,
 ) {
-	const spend = sessionSpend({ usage, live: recorded, cold, recordedCostDisplay });
+	const spend = sessionSpend({ usage, live: recorded, cold });
 	const totals = spendTotals(spend, usage && !journaled(usage) ? (usage.session.cost.unknownCallCoverageRuns ?? 0) : 0);
 	return {
 		totals,

@@ -31,14 +31,12 @@ export const TelemetryChips = memo(function TelemetryChips({
 	sessionId,
 	state,
 	turns,
-	costDisplay,
 	onOpen,
 }: {
 	client: Client;
 	sessionId: string;
 	state: SessionSnapshot["state"];
 	turns: SessionSnapshot["turns"];
-	costDisplay?: string | undefined;
 	onOpen: (view: PaneView, trigger: string) => void;
 }) {
 	const open = state === "open";
@@ -62,7 +60,6 @@ export const TelemetryChips = memo(function TelemetryChips({
 		usage: usage.data,
 		live: turns.at(-1)?.status === "running" || !usage.data || usage.isPlaceholderData ? telemetry?.usage : undefined,
 		cold: cold.data,
-		recordedCostDisplay: costDisplay,
 	});
 	const contextId = `${sessionId}-chip-context`;
 	const spendId = `${sessionId}-chip-spend`;

@@ -107,7 +107,9 @@ test("workspace and session routes stream one complete turn with recorded usage 
 	);
 	assert.equal(turnEvents.filter((event) => event.type === "turn.finished").length, 1);
 	const finished = events.find((event) => event.type === "turn.finished");
-	assert.equal(finished?.payload.costDisplay, snapshot.costDisplay);
+	// Session spend is the read model's; neither the snapshot nor the turn event folds one (#434).
+	assert.equal(finished && "costDisplay" in finished.payload, false);
+	assert.equal("costDisplay" in snapshot, false);
 	await h.post(`/api/sessions/${session.id}/close`);
 	assert.deepEqual(await h.files.read("children"), []);
 });

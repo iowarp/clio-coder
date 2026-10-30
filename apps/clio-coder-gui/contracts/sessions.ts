@@ -203,7 +203,6 @@ export const SessionState = Type.Union([
 ]);
 export const SessionSnapshot = Type.Object(
 	{
-		costDisplay: Type.Optional(Type.String()),
 		id: Id,
 		workspaceId: Id,
 		state: SessionState,
@@ -248,7 +247,6 @@ export const SessionDeltas = {
 	"turn.tool": Type.Object({ ...base, item: TimelineItem }, closed),
 	"turn.finished": Type.Object(
 		{
-			costDisplay: Type.Optional(string),
 			...base,
 			turnId: Id,
 			stopReason: string,

@@ -25,7 +25,6 @@ export const UsagePanel = memo(function UsagePanel({
 	capabilities,
 	settledTurns,
 	liveUsage,
-	costDisplay,
 }: {
 	client: Client;
 	sessionId: string;
@@ -33,7 +32,6 @@ export const UsagePanel = memo(function UsagePanel({
 	capabilities: AgentCapabilities | undefined;
 	settledTurns: number;
 	liveUsage?: LiveUsage;
-	costDisplay?: string | undefined;
 }) {
 	const supported = !!capabilities?.usage;
 	const scope = sessionReadScope(sessionId);
@@ -53,7 +51,7 @@ export const UsagePanel = memo(function UsagePanel({
 	});
 	// A closed task has no live usage read; the cold telemetry route folds its journal instead (#434).
 	const cold = useTelemetrySession(client, sessionId, !sessionOpen);
-	const summary = usageSummary(sessionOpen, usage.data, liveUsage, costDisplay, cold.data);
+	const summary = usageSummary(sessionOpen, usage.data, liveUsage, cold.data);
 	const quota = usage.data ? quotaCards(usage.data) : null;
 	const refresh = () => {
 		if (usage.isFetching) return;
