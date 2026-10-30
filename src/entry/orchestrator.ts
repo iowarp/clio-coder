@@ -5893,14 +5893,29 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// The first turn's turn_start reaches a runtime only once the startup
 			// generation has committed. A run whose startup failed goes on without runtimes.
 			await headlessExtensionHost?.ready.catch(() => undefined);
+			// SIGINT while an `@path` in the prompt is read ends the run before any
+			// request; aborting kills poppler, a detached child that would outlive it (#438).
+			const attachmentRead = new AbortController();
+			const stopAttachmentRead = bus.on(BusChannels.ShutdownRequested, () => attachmentRead.abort());
 			const fileExpansion = await expandInlineFileReferencesAsync(
 				promptExpansion?.expanded ? promptExpansion.text : parsedSkillRequest.text,
 				{
 					cwd: process.cwd(),
 					includeImages: true,
 					missing: "leave",
+					signal: attachmentRead.signal,
 				},
-			);
+			)
+				.catch((err: unknown) => {
+					if (!attachmentRead.signal.aborted) throw err;
+					return null;
+				})
+				.finally(stopAttachmentRead);
+			if (fileExpansion === null || attachmentRead.signal.aborted) {
+				writeRunDiagnostic("clio-coder run: interrupted while reading file attachments; nothing was sent\n");
+				await termination.shutdown(130);
+				return { exitCode: 130, bootTimeMs: timer.snapshot().totalMs };
+			}
 			// A template's allowed-tools and delegated-tools narrow the run's own
 			// --allow-tools and --delegate-tools scope, never widen it.
 			const template = promptExpansion?.expanded ? promptExpansion.template : undefined;
