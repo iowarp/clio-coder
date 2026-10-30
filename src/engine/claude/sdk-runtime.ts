@@ -135,6 +135,7 @@ function nestedRecord(record: Record<string, unknown>, key: string): Record<stri
 		: null;
 }
 
+/** The SDK prices its own calls from a client-side table, so its total is a peer estimate, never a bill (#434). */
 function telemetryUsage(raw: unknown, totalCostUsd?: number): Record<string, unknown> {
 	const usage = coerceToolInput(raw);
 	return {
@@ -143,6 +144,7 @@ function telemetryUsage(raw: unknown, totalCostUsd?: number): Record<string, unk
 		cacheRead: usage.cache_read_input_tokens,
 		cacheWrite: usage.cache_creation_input_tokens,
 		costUsd: totalCostUsd,
+		...(totalCostUsd === undefined ? {} : { costProvenance: "estimated" }),
 	};
 }
 
@@ -310,6 +312,7 @@ function buildAssistantMessage(input: {
 	return bindExternalUsage(message, {
 		usage: telemetryUsage(input.result?.usage, input.result?.total_cost_usd),
 		coverage: input.result ? "complete" : "partial",
+		costEstimateMethod: "peer-report",
 	});
 }
 

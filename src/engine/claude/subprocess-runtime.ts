@@ -193,6 +193,8 @@ function buildAssistantMessage(input: {
 	if (typeof input.result?.model === "string") message.responseModel = input.result.model;
 	if (errorMessage.length > 0) message.errorMessage = boundedExternalDiagnostic(errorMessage);
 	const usage = input.result ? nestedRecord(input.result, "usage") : null;
+	const costUsd = input.result?.total_cost_usd ?? usage?.costUSD ?? usage?.cost_usd;
+	// Claude Code prices its own run from a client-side table; that total is a peer estimate, never a bill (#434).
 	return bindExternalUsage(message, {
 		usage: {
 			input: usage?.input_tokens ?? usage?.inputTokens ?? usage?.input ?? usage?.prompt_tokens ?? usage?.promptTokens,
@@ -205,9 +207,11 @@ function buildAssistantMessage(input: {
 				usage?.cacheCreationInputTokens ??
 				usage?.cacheWrite ??
 				usage?.cacheWriteTokens,
-			costUsd: input.result?.total_cost_usd ?? usage?.costUSD ?? usage?.cost_usd,
+			costUsd,
+			...(costUsd === undefined ? {} : { costProvenance: "estimated" }),
 		},
 		coverage: input.result ? "complete" : "partial",
+		costEstimateMethod: "peer-report",
 	});
 }
 

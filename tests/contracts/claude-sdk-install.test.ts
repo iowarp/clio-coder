@@ -149,7 +149,11 @@ test("SDK steering uses one open input lane, keeps Clio mediation, and closes af
 	strictEqual(usage.callIds.length, 2);
 	strictEqual(usage.totalTokens, 12, "the SDK aggregate replaces its constituent call usage");
 	strictEqual(usage.costUsd, 0.25);
-	strictEqual(usage.costProvenance, "known", "unknown request counts do not invalidate a complete provider bill");
+	strictEqual(
+		usage.costProvenance,
+		"estimated",
+		"the SDK total is a peer estimate; unknown request counts do not invalidate it",
+	);
 	strictEqual(usage.tokenUsageMissing, false);
 	strictEqual(usage.apiCalls, 2, "identified calls give a lower bound; the aggregate request count stays unknown");
 	strictEqual(usage.costSummary.unknownCallCoverageRuns, 1);
