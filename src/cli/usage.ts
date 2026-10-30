@@ -492,7 +492,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const [byOrigin] = costReports;
 	if (spendMeasurable && byOrigin)
 		out(
-			`  recorded spend in window: ${byOrigin.total.usd.display} over ${byOrigin.total.tokens.display} tokens in ${byOrigin.total.calls.display} calls (sessions, side calls and worker runs)`,
+			`  recorded spend in window (sessions, side calls and worker runs): cost ${byOrigin.total.usd.display}, tokens ${byOrigin.total.tokens.display}, calls ${byOrigin.total.calls.display}`,
 		);
 	if (spendMeasurable)
 		out(

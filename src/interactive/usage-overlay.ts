@@ -74,6 +74,16 @@ function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>): st
 	});
 }
 
+const BARE_COUNT = /^~?\d[\d,]*$/;
+
+/**
+ * A token display with its unit. The unit follows a bare count ("5,120 tokens"); a display that carries its own gap
+ * clause ("≥5,120 (1 call unknown)") takes it as a label, since a unit after the clause misreads (#434).
+ */
+function tokensText(display: string): string {
+	return BARE_COUNT.test(display) ? `${display} tokens` : `tokens: ${display}`;
+}
+
 /** Whole-session token rows, optionally for one model group; every value is the read model's own display. */
 function tokenRows(view: TelemetryView, model?: string): Array<readonly [string, string, string?]> {
 	const display = (metric: FactMetric) =>
@@ -91,7 +101,7 @@ function tokenRows(view: TelemetryView, model?: string): Array<readonly [string,
 		["reasoning", display("reasoning"), REASONING_NOTE],
 		["cache read", display("cacheRead")],
 		["cache write", display("cacheWrite")],
-		["processed", `${display("total")} tokens`],
+		["processed", tokensText(display("total"))],
 	];
 }
 
@@ -220,7 +230,7 @@ function renderActivity(
 	else {
 		const totals = view.session().totals;
 		const cost = contributed(totals.usd) ? `${totals.usd.display} · ` : "";
-		lines.push(`${label("Session")}${cost}${theme.fg("counter", `${totals.tokens.display} tokens`)}${elapsed}`);
+		lines.push(`${label("Session")}${cost}${theme.fg("counter", tokensText(totals.tokens.display))}${elapsed}`);
 		const missing = view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "missingTokenCalls" }));
 		const neverSent = view.session().own.counts.dispositions.neverSent;
 		const usage = [
