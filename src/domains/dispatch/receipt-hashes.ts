@@ -179,14 +179,16 @@ const DECLARATIONS: ReadonlyArray<DeclarationRow> = [
 const HASH_KEY = /(?:Hash|hash|Digest|digest|Signature|Fingerprint|fingerprint|^sha256)$/u;
 
 /**
- * Subtrees a receipt seals verbatim from another process: the ACP peer's
- * `initialize` capabilities and the inputs of the tool calls it made. Their
- * keys are the peer's, not Clio's hashes, so R7 does not bind them and the
- * walk skips them instead of refusing the seal on a key the peer chose (#434).
+ * Subtrees a receipt seals verbatim from another process or a model: the ACP
+ * peer's `initialize` capabilities, the inputs of the tool calls it made, and
+ * the worker's validated structured result, whose keys the model chose (a
+ * report naming a `commitHash`, say). Their keys are not Clio's hashes, so R7
+ * does not bind them and the walk skips them instead of refusing the seal (#434).
  */
 const OPAQUE_SUBTREES: ReadonlyArray<RegExp> = [
 	/^delegation\.agentCapabilities$/u,
 	/^delegation\.toolCallLog\[\]\.arguments$/u,
+	/^output\.structured\.data$/u,
 ];
 
 /** The declaration for one normalized receipt path, or null when the set does not declare it. */

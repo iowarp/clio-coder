@@ -186,6 +186,18 @@ describe("receipt v21 seal (#434)", () => {
 			},
 		} as unknown as RunReceiptDraft;
 		equal(withReceiptIntegrity(peer, envelope).hashSet, RECEIPT_HASH_SET);
+		// A worker's structured result carries the model's keys too.
+		const structured = {
+			...fixtureReceiptDraft(envelope),
+			output: {
+				state: "final",
+				text: "{}",
+				bytes: 2,
+				truncated: false,
+				structured: { version: 1, kind: "scout-report", data: { commitHash: "c".repeat(40) } },
+			},
+		} as unknown as RunReceiptDraft;
+		equal(withReceiptIntegrity(structured, envelope).hashSet, RECEIPT_HASH_SET);
 	});
 
 	it("names how the worker loop ended apart from the host's verdict", () => {
