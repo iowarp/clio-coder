@@ -10,6 +10,9 @@ const DISCUSSION_REQUEST =
 const LONG_MESSAGE_CHARS = 4_000;
 // A full 128K request is too expensive to repeat solely for a closing card (#431).
 const PLAN_CLOSE_CONTEXT_THRESHOLD = 128_000;
+// Match the exploration advisory's short follow-up scope; a new task drops the close (#431).
+const PLAN_CLOSE_REMINDER_IDLE_MS = 5 * 60_000;
+const PLAN_CLOSE_FOLLOW_UP = /^(?:continue|go on|keep going|carry on|proceed)(?:[.!]|\s+please[.!]?)?$/iu;
 
 function operatorRequest(text: string, promptChars: unknown): string {
 	const long = typeof promptChars === "number" ? promptChars > LONG_MESSAGE_CHARS : text.length > LONG_MESSAGE_CHARS;
@@ -47,6 +50,7 @@ export function createPlanCloseRegistration(deps: {
 	let changed = false;
 	let asked = false;
 	let closed = false;
+	let pending: { at: number; sessionId: string | undefined; message: string } | null = null;
 	return {
 		id: "nudge.plan-close",
 		description: "close an unapproved plan through ask_user once",
@@ -57,7 +61,17 @@ export function createPlanCloseRegistration(deps: {
 				changed = false;
 				asked = false;
 				closed = false;
-				if (input.metadata?.requestContinuation !== true && deps.canAsk()) {
+				const reminder = pending;
+				pending = null;
+				if (!deps.canAsk()) return [];
+				if (
+					reminder !== null &&
+					reminder.sessionId === input.sessionId &&
+					performance.now() - reminder.at < PLAN_CLOSE_REMINDER_IDLE_MS &&
+					(input.metadata?.requestContinuation === true || PLAN_CLOSE_FOLLOW_UP.test(input.text?.trim() ?? ""))
+				)
+					return [{ kind: "inject_reminder", audience: "model", message: reminder.message }];
+				if (input.metadata?.requestContinuation !== true) {
 					const request = operatorRequest(input.text ?? "", input.metadata?.promptChars);
 					const wantsPlan = PLAN_REQUEST.test(request) && !DISCUSSION_REQUEST.test(request);
 					planOnly = wantsPlan && isPlanOnlyRequest(request);
@@ -110,9 +124,11 @@ export function createPlanCloseRegistration(deps: {
 					: "") +
 				'Close this plan with ask_user "Carry out this plan?". Put any open choices in the options, with one-line descriptions and the recommended option first, and end with "Revise the plan first" so the operator can decline. Do not restate the plan.';
 			const contextTokens = input.metadata?.contextTokens;
-			return typeof contextTokens === "number" && contextTokens >= PLAN_CLOSE_CONTEXT_THRESHOLD
-				? [{ kind: "inject_reminder", audience: "model", message }]
-				: [{ kind: "request_continuation", note: "", message }];
+			if (typeof contextTokens === "number" && contextTokens >= PLAN_CLOSE_CONTEXT_THRESHOLD) {
+				pending = { at: performance.now(), sessionId: input.sessionId, message };
+				return [];
+			}
+			return [{ kind: "request_continuation", note: "", message }];
 		},
 	};
 }

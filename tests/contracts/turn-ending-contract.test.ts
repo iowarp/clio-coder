@@ -135,6 +135,45 @@ it("continues only an armed plan that has not asked or changed files, once", () 
 	strictEqual(end().length, 1);
 });
 
+// #431: an expensive plan close belongs only to a current continuation of that task.
+it("delivers a downgraded plan close once, only on a current same-session continuation", (t) => {
+	let elapsed = 0;
+	t.mock.method(performance, "now", () => elapsed);
+	for (const scenario of [
+		{ text: "continue", sessionId: "original", idleMs: 0, requestContinuation: false, expected: true },
+		{ text: "", sessionId: "original", idleMs: 0, requestContinuation: true, expected: true },
+		{ text: "Proceed please.", sessionId: "original", idleMs: 0, requestContinuation: false, expected: true },
+		{ text: "go on", sessionId: "original", idleMs: 299_999, requestContinuation: false, expected: true },
+		{ text: "Implement the cache", sessionId: "original", idleMs: 0, requestContinuation: false, expected: false },
+		{ text: "continue", sessionId: "original", idleMs: 300_000, requestContinuation: false, expected: false },
+		{ text: "", sessionId: "original", idleMs: 300_000, requestContinuation: true, expected: false },
+		{ text: "continue", sessionId: "other", idleMs: 0, requestContinuation: false, expected: false },
+	]) {
+		elapsed = 1_000;
+		const rule = createPlanCloseRegistration({ canAsk: () => true, isPlan: () => undefined });
+		rule.evaluate({ hook: "turn_start", sessionId: "original", text: "Write a plan for adding a cache." });
+		deepStrictEqual(
+			rule.evaluate({ hook: "turn_end", sessionId: "original", metadata: { stopReason: "stop", contextTokens: 128_000 } }),
+			[],
+		);
+		elapsed += scenario.idleMs;
+		const effects = rule.evaluate({
+			hook: "turn_start",
+			sessionId: scenario.sessionId,
+			text: scenario.text,
+			metadata: { requestContinuation: scenario.requestContinuation },
+		});
+		strictEqual(effects.length, scenario.expected ? 1 : 0, JSON.stringify(scenario));
+		if (scenario.expected) {
+			const effect = effects[0];
+			ok(effect?.kind === "inject_reminder" && effect.audience === "model");
+			ok(effect.message.includes('ask_user "Carry out this plan?"'));
+		}
+		deepStrictEqual(rule.evaluate({ hook: "turn_end", metadata: { stopReason: "stop" } }), []);
+		deepStrictEqual(rule.evaluate({ hook: "turn_start", sessionId: "original", text: "continue" }), []);
+	}
+});
+
 // #431: a long pasted document that mentions planning is evidence, not a plan request.
 it("does not arm on a long pasted document that mentions planning", () => {
 	const rule = createPlanCloseRegistration({ canAsk: () => true, isPlan: () => undefined });
