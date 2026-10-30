@@ -73,7 +73,7 @@ export async function harness(
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
-		telemetry: new TelemetryService(reads),
+		telemetry: new TelemetryService(reads, (id) => supervisor.knows(id)),
 		settings: settingsService,
 		setup,
 		fleet: new FleetService(reads),

@@ -40,7 +40,7 @@ export function readTelemetry(input: TelemetryRequest): unknown {
 		const explained =
 			ref.scope === "run"
 				? explain(input.ref, { runId: ref.owner, run: loadRunTelemetrySource(state, ref.owner) })
-				: resolveSession(state, ref.owner, (session) => explain(input.ref, { session }));
+				: resolveSession(state, ref.owner, false, (session) => explain(input.ref, { session }));
 		if (!explained) throw new AppProblem("not_found", "Nothing in the journals resolves that telemetry reference.");
 		return explained;
 	}
@@ -58,8 +58,8 @@ export function readTelemetry(input: TelemetryRequest): unknown {
 		return runTelemetry(input.runId, loadRunTelemetrySource(state, input.runId));
 	}
 	if (!Value.Check(Id, input.sessionId)) throw new AppProblem("validation", "Invalid session identifier.");
-	if (!preflightLedger()) throw notFound();
-	return resolveSession(state, input.sessionId, (source) => {
+	if (!preflightLedger() && !input.knownSession) throw notFound();
+	return resolveSession(state, input.sessionId, input.knownSession === true, (source) => {
 		switch (input.kind) {
 			case "session":
 				return sessionTelemetry(source);
@@ -96,9 +96,24 @@ function notFound() {
 	return new AppProblem("not_found", "No session journal or ledger holds that id.");
 }
 
+/**
+ * A session the host holds but no directory journals: one from before journaling, or one that never made a model
+ * call. Its coverage is unknown, which the read model says by folding an unreadable journal, never by a zero (R9).
+ */
+function unknownCoverage(sessionId: string): NonNullable<ReturnType<typeof loadSessionTelemetrySource>> {
+	return {
+		sessionId,
+		journal: { present: false, records: [], modes: [], skipped: 1, damaged: 0 },
+		legacy: { records: [], aggregates: 0 },
+		runs: new Map(),
+		parent: null,
+	};
+}
+
 function resolveSession<T>(
 	state: string,
 	sessionId: string,
+	known: boolean,
 	read: (source: NonNullable<ReturnType<typeof loadSessionTelemetrySource>>) => T,
 ): T {
 	let source: ReturnType<typeof loadSessionTelemetrySource>;
@@ -108,6 +123,6 @@ function resolveSession<T>(
 		if (error instanceof AppProblem) throw error;
 		throw new AppProblem("unavailable", "The session's telemetry journal cannot be read.");
 	}
-	if (!source) throw notFound();
-	return read(source);
+	if (!source && !known) throw notFound();
+	return read(source ?? unknownCoverage(sessionId));
 }

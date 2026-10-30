@@ -211,7 +211,7 @@ export async function main(args = process.argv.slice(2)) {
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
-		telemetry: new TelemetryService(reads),
+		telemetry: new TelemetryService(reads, (id) => supervisor.knows(id)),
 		settings: settingsService,
 		setup,
 		fleet: new FleetService(reads),

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { taskOverview } from "../client/chat/overview-model.js";
 import {
 	costText,
+	hasJournalFacts,
 	quotaCards,
 	sessionSpend,
 	usageRows,
@@ -145,7 +146,20 @@ const telemetry = {
 			tokens: { display: "≥5,120 (1 call unknown)" },
 			usd: { display: "$0.42 +?" },
 		},
-		own: { counts: { calls: { display: "7" } } },
+		own: {
+			counts: {
+				attempts: {
+					fact: {
+						measured: 7,
+						estimated: 0,
+						unknownCount: 0,
+						absentCount: 0,
+						coverage: { measured: 1, estimated: 0, unknown: 0 },
+					},
+				},
+				calls: { display: "7" },
+			},
+		},
 	},
 	cost: {
 		groups: [
@@ -184,6 +198,36 @@ test("the read model's displays win over the v1 counts wherever the usage read c
 	]);
 	// A closed task has no usage read; its cold session fold takes the same place.
 	assert.equal(sessionSpend({ cold: telemetry.session }).source, "telemetry");
+	// A session the host knows but never journaled answers unknown coverage (R9): the legacy counts stand.
+	const unjournaled = {
+		...telemetry.session,
+		own: {
+			counts: {
+				attempts: {
+					fact: {
+						measured: 0,
+						estimated: 0,
+						unknownCount: 1,
+						absentCount: 0,
+						coverage: { measured: 0, estimated: 0, unknown: 1 },
+					},
+				},
+				calls: { display: "unknown (1 call unknown)" },
+			},
+		},
+	} as unknown as NonNullable<SessionUsage["telemetry"]>["session"];
+	assert.equal(hasJournalFacts(unjournaled), false);
+	assert.equal(sessionSpend({ usage, cold: unjournaled }).source, "legacy");
+	assert.equal(
+		sessionSpend({ usage: { ...usage, telemetry: { ...telemetry, session: unjournaled } } }).source,
+		"legacy",
+	);
+	assert.deepEqual(sessionSpend({ cold: unjournaled, recordedCostDisplay: "$0.10" }), {
+		tokens: null,
+		cost: "$0.10",
+		calls: null,
+		source: "none",
+	});
 	const summary = usageSummary(true, withTelemetry, undefined);
 	assert.equal(summary.source, "telemetry");
 	assert.match(summary.note, /read model/);

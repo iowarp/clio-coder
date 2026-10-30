@@ -14,6 +14,19 @@ export function costText(cost: Cost): string {
 	return cost.display ?? "not measured";
 }
 
+/**
+ * Whether a session DTO holds any call the fold could count. A session the host knows but never journaled answers
+ * unknown coverage (R9): no measured or estimated attempt, only the gap. Such a DTO says nothing a surface can show
+ * in place of the legacy counts, so the legacy counts stand until a journal exists.
+ */
+export function hasJournalFacts(session: SessionTelemetryV1 | null | undefined): session is SessionTelemetryV1 {
+	if (!session) return false;
+	const attempts = session.own.counts.attempts.fact;
+	return "kind" in attempts
+		? attempts.kind === "measured" || attempts.kind === "estimated"
+		: attempts.coverage.measured + attempts.coverage.estimated > 0;
+}
+
 export interface Spend {
 	/** The server's wording for the tokens; null when nothing reported them. */
 	readonly tokens: string | null;
@@ -36,7 +49,7 @@ export function sessionSpend(input: {
 	cold?: SessionTelemetryV1 | null | undefined;
 	recordedCostDisplay?: string | undefined;
 }): Spend {
-	const session = input.usage?.telemetry?.session ?? input.cold ?? null;
+	const session = [input.usage?.telemetry?.session, input.cold].find(hasJournalFacts) ?? null;
 	if (session)
 		return {
 			tokens: session.totals.tokens.display,
@@ -79,8 +92,10 @@ function spendTotals(spend: Spend, unknownCallCoverageRuns = 0): Array<{ label: 
 	];
 }
 
+const journaled = (usage: SessionUsage | undefined) => hasJournalFacts(usage?.telemetry?.session);
+
 export function usageTotals(usage: SessionUsage): Array<{ label: string; value: string }> {
-	return spendTotals(sessionSpend({ usage }), usage.telemetry ? 0 : (usage.session.cost.unknownCallCoverageRuns ?? 0));
+	return spendTotals(sessionSpend({ usage }), journaled(usage) ? 0 : (usage.session.cost.unknownCallCoverageRuns ?? 0));
 }
 
 const counted = (value: number, one: string, many: string) =>
@@ -97,7 +112,7 @@ export interface UsageRow {
 
 /** Per-model rows: the read model's cost report by model when the usage read carries it, else the v1 rows. */
 export function usageRows(usage: SessionUsage, detail: "summary" | "fields" = "summary"): UsageRow[] {
-	if (usage.telemetry)
+	if (usage.telemetry && journaled(usage))
 		return usage.telemetry.cost.groups.map((group) => ({
 			key: group.key,
 			route: group.key,
@@ -231,7 +246,7 @@ export function usageSummary(
 	cold?: SessionTelemetryV1 | null,
 ) {
 	const spend = sessionSpend({ usage, live: recorded, cold, recordedCostDisplay });
-	const totals = spendTotals(spend, usage && !usage.telemetry ? (usage.session.cost.unknownCallCoverageRuns ?? 0) : 0);
+	const totals = spendTotals(spend, usage && !journaled(usage) ? (usage.session.cost.unknownCallCoverageRuns ?? 0) : 0);
 	return {
 		totals,
 		details: sessionOpen && !!usage,

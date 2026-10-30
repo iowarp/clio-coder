@@ -46,11 +46,19 @@ export const TelemetryCostQuery = Type.Object(
 export const TelemetryRangeQuery = Type.Object({ from: Type.Optional(utc), to: Type.Optional(utc) }, closed);
 export const TelemetryExplainQuery = Type.Object({ ref: FactRefSchema }, closed);
 
+interface SessionRead {
+	sessionId: string;
+	/**
+	 * The host holds this session, so a missing journal is unknown coverage and answers a DTO that says so (R9);
+	 * only an id the host has never seen is a missing resource.
+	 */
+	knownSession?: boolean;
+}
 export type TelemetryRequest =
-	| { kind: "session" | "cache" | "why-stopped"; sessionId: string }
-	| { kind: "calls"; sessionId: string; filter: CallFilter }
-	| { kind: "cost"; sessionId: string; by: "label" | "model" | "turn" }
-	| { kind: "timeline"; sessionId: string; range: { from: string; to: string } | null }
+	| ({ kind: "session" | "cache" | "why-stopped" } & SessionRead)
+	| ({ kind: "calls"; filter: CallFilter } & SessionRead)
+	| ({ kind: "cost"; by: "label" | "model" | "turn" } & SessionRead)
+	| ({ kind: "timeline"; range: { from: string; to: string } | null } & SessionRead)
 	| { kind: "runs"; limit: number; cursor?: string }
 	| { kind: "run"; runId: string }
 	| { kind: "explain"; ref: string };

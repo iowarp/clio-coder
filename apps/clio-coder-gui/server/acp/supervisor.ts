@@ -289,6 +289,10 @@ export class Supervisor {
 	get(id: string) {
 		return snapshotCostDisplay(structuredClone(this.snapshot(id)));
 	}
+	/** Whether this server holds the session, open or not; a cold telemetry read of one it holds never 404s (#434). */
+	knows(id: string): boolean {
+		return this.snapshots.has(id);
+	}
 	list() {
 		return [...this.snapshots.values()].map((value) => snapshotCostDisplay(structuredClone(value)));
 	}

@@ -49,6 +49,24 @@ test("telemetry routes refuse what the journals cannot answer with problems, nev
 	t.after(() => h.close());
 	const state = join(h.home.path, "state");
 	assert.equal((await h.request("/api/telemetry/sessions/absent-session")).status, 404);
+	// A session this host holds with no journal is unknown coverage, never a missing resource (R9): the fixture
+	// agent journals nothing, as a session from before journaling or one that never called a model would not.
+	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
+	const held = await json(
+		await h.post(`/api/workspaces/${workspace.id}/sessions`, {}, "new-session"),
+		routes.newSession.response,
+	);
+	const unjournaled = await json(
+		await h.request(`/api/telemetry/sessions/${held.id}`),
+		routes.telemetrySession.response,
+	);
+	assert.equal(unjournaled.journal.present, false);
+	assert.equal(unjournaled.journal.skipped, 1);
+	assert.match(unjournaled.totals.tokens.display, /unknown/);
+	assert.match(unjournaled.totals.usd.display, /unknown|not measured/);
+	assert.deepEqual(telemetryLies(quantitiesOf(unjournaled)), []);
+	assert.equal((await h.request(`/api/telemetry/sessions/${held.id}/cost`)).status, 200);
+	assert.equal((await h.request(`/api/telemetry/sessions/${held.id}/why-stopped`)).status, 200);
 	const id = seedGoldenSession(state);
 	const base = `/api/telemetry/sessions/${id}`;
 	assert.equal((await h.request("/api/telemetry/sessions/absent-session")).status, 404);
