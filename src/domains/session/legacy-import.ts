@@ -59,6 +59,7 @@ export function importLegacySession(
 		message: Record<string, unknown>,
 		route: { targetId: string; api: string; model: string },
 		turnId: string | undefined,
+		responded = false,
 	) => {
 		const callId = newCallId();
 		const attemptId = newAttemptId();
@@ -80,7 +81,7 @@ export function importLegacySession(
 		const usage = message.usage as Record<string, unknown> | null | undefined;
 		const settled = {
 			...started,
-			...callSettlementFromMessage(message, provenance(usage?.costProvenance, fallback)),
+			...callSettlementFromMessage(message, provenance(usage?.costProvenance, fallback), undefined, responded),
 			target: { ...started.target, reportedModel: reportedModelFromMessage(message) },
 			stages: { settle: null },
 		};
@@ -125,7 +126,23 @@ export function importLegacySession(
 	}
 	for (const row of options.outOfTurn ?? []) {
 		if (row.sessionId !== sessionId) continue;
-		const usage = row.usage as unknown as Record<string, unknown>;
+		// An error row that recorded provider counts was billed for them, and legacy accounting counted that spend.
+		// Its zeros may only mark where the stream stopped, so they stay unknown rather than measured zero (#434).
+		const responded =
+			row.callOutcome === "error" &&
+			[row.usage.input, row.usage.output, row.usage.cacheRead, row.usage.cacheWrite, row.usage.totalTokens].some(
+				(count) => typeof count === "number" && count > 0,
+			);
+		const count = (value: number | null | undefined) => (responded && value === 0 ? null : value);
+		const usage = {
+			...row.usage,
+			input: count(row.usage.input),
+			output: count(row.usage.output),
+			cacheRead: count(row.usage.cacheRead),
+			cacheWrite: count(row.usage.cacheWrite),
+			cacheWrite1h: count(row.usage.cacheWrite1h),
+			reasoning: count(row.usage.reasoning),
+		};
 		add(
 			OUT_OF_TURN_LABELS[row.label] ?? "helper",
 			row.timestamp,
@@ -140,6 +157,7 @@ export function importLegacySession(
 			},
 			{ targetId: row.target, api: "unknown", model: row.attributedModelId },
 			undefined,
+			responded,
 		);
 	}
 	return result;

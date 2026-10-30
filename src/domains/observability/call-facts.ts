@@ -60,6 +60,8 @@ export function callSettlementFromMessage(
 	message: unknown,
 	costProvenance: CostProvenance,
 	cause?: FailureCause,
+	/** The caller holds evidence that a terminal response arrived although the stop reads as a failure (#434). */
+	responded = false,
 ): Omit<CallSettled, keyof CallStarted | "stages"> {
 	const raw = record(message);
 	const usage = record(raw.usage);
@@ -99,7 +101,7 @@ export function callSettlementFromMessage(
 	const stop = raw.stopReason;
 	const reason = stop === "stop" || stop === "toolUse" || stop === "length" || stop === "aborted" ? stop : "error";
 	const failureCode = cause ?? failureCause(failure);
-	const terminal = (reason !== "error" && reason !== "aborted") || typeof failure.httpStatus === "number";
+	const terminal = responded || (reason !== "error" && reason !== "aborted") || typeof failure.httpStatus === "number";
 	const usd = amount(record(usage.cost).total);
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };
 	if (neverSent) pricing = { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" };

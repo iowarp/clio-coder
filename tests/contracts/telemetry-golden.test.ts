@@ -41,6 +41,33 @@ test("dispositions and causes come from recorded facts, and a budget wait is nev
 	strictEqual(rejected.stop.failure, "auth_rejected");
 });
 
+test("an out-of-turn error row keeps the tokens it recorded as settled spend (#434)", () => {
+	const row = {
+		sessionId: "side",
+		label: "side-question" as const,
+		repoIdentity: null,
+		timestamp: "2026-10-20T12:00:00.000Z",
+		target: "fixture",
+		attributedModelId: "model",
+		callOutcome: "error" as const,
+		usage: { input: 300, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: null, totalTokens: 300, costUsd: 0.01 },
+	};
+	const unrecorded = { ...row, usage: { ...row.usage, input: null, totalTokens: null, costUsd: null } };
+	const calls = importLegacySession("side", [], {
+		outOfTurn: [row, unrecorded],
+		costProvenance: "known",
+	}).records.flatMap((record) => (record.k === "call.settled" ? [record.data as CallSettled] : []));
+	deepStrictEqual(
+		calls.map((call) => [call.disposition, call.stop.reason]),
+		[
+			["settled", "error"],
+			["sent_unsettled", "error"],
+		],
+	);
+	deepStrictEqual(calls[0]?.usage?.input, { kind: "measured", value: 300, source: "provider" });
+	strictEqual(calls[0]?.usage?.output.kind, "unknown", "a zero where the stream stopped is not a measured zero");
+});
+
 test("totals keep unknown apart from zero and render partial cost with its marker", () => {
 	const fold = foldCallJournal(imported.records);
 	strictEqual(fold.totals.neverSent, 1);
