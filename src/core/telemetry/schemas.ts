@@ -255,7 +255,7 @@ export const RUN_FEED_OUTCOMES = [
 	"unknown",
 ] as const;
 const runFeedOutcome = vocabulary(RUN_FEED_OUTCOMES);
-const RunFeedBodySchema = Type.Union([
+export const RunFeedBodySchema = Type.Union([
 	Type.Object({ kind: Type.Literal("open"), runId: ExistingId, agentId: ExistingId }, closed),
 	Type.Object(
 		{

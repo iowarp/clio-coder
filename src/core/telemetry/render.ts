@@ -225,3 +225,34 @@ export function renderTextFact(fact: Fact<string | boolean | null>): string {
 			return renderAbsent(fact.reason);
 	}
 }
+
+/**
+ * Where a value came from, by fact kind, for an explanation (#434 §11.4). A single fact names its source, method or
+ * reason; a fold result counts its contributions per kind, so `≥` on a sum always has its unknown part named here.
+ */
+export function renderCoverage(fact: Fact<number> | FactSum): string {
+	if ("kind" in fact) {
+		switch (fact.kind) {
+			case "measured":
+				return `measured (${fact.source})`;
+			case "estimated":
+				return `estimated (${fact.method})`;
+			case "unknown":
+				return renderUnknown(fact.reason);
+			case "absent":
+				return renderAbsent(fact.reason);
+		}
+	}
+	const parts = [
+		[fact.coverage.measured, "measured"],
+		[fact.coverage.estimated, "estimated"],
+		[fact.unknownCount, "unknown"],
+		[fact.absentCount, "not applicable"],
+	] as const;
+	const total = fact.coverage.measured + fact.coverage.estimated + fact.unknownCount + fact.absentCount;
+	if (total === 0) return "no contributions";
+	return `${plural(total, "contribution")}: ${parts
+		.filter(([value]) => value > 0)
+		.map(([value, label]) => `${renderCount(value)} ${label}`)
+		.join(", ")}`;
+}

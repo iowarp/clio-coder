@@ -13,7 +13,7 @@ import {
 } from "./enums.js";
 import { factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
-import { CallSettledSchema, ObjectRefSchema, PricingSchema, UtcSchema } from "./schemas.js";
+import { CallSettledSchema, ObjectRefSchema, PricingSchema, RunFeedBodySchema, UtcSchema } from "./schemas.js";
 
 /**
  * Read-model DTOs (#434 §11.2). TUI, ACP, CLI `--json` and the GUI serve these shapes unchanged, so one fact has one
@@ -467,6 +467,45 @@ export const CacheReportSchema = Type.Object(
 export type CacheReportV1 = Static<typeof CacheReportSchema>;
 
 const at = { at: UtcSchema };
+const callTiming = Type.Object(
+	{ ttft: QuantitySchema, modelTime: QuantitySchema, settle: QuantitySchema, admissionWait: QuantitySchema },
+	closed,
+);
+const callEntry = Type.Object(
+	{
+		kind: Type.Literal("call"),
+		...at,
+		endAt: Type.Union([UtcSchema, Type.Null()]),
+		callId: CallIdSchema,
+		attemptId: AttemptIdSchema,
+		label: CallLabel,
+		turnId: Type.Union([ExistingId, Type.Null()]),
+		runId: Type.Union([ExistingId, Type.Null()]),
+		disposition: Type.Union([Disposition, Type.Literal("incomplete")]),
+		failure: Type.Union([FailureCause, Type.Null()]),
+		stages: Type.Union([CallSettledSchema.properties.stages, Type.Null()]),
+		/** The stage spans as quantities, so a surface labels a stage bar with the renderer's wording (#434). */
+		timing: callTiming,
+		tokens: QuantitySchema,
+		usd: QuantitySchema,
+		cacheVerdict: CallSettledSchema.properties.cache.properties.verdict,
+	},
+	closed,
+);
+const runEntry = Type.Object(
+	{
+		kind: Type.Literal("run"),
+		...at,
+		runId: ExistingId,
+		event: vocabulary(["referenced", "settled"]),
+		terminalReason: Type.Union([RunTerminalReason, Type.Null()]),
+	},
+	closed,
+);
+const gapEntry = Type.Object(
+	{ kind: Type.Literal("gap"), ...at, sink: ExistingId, reason: text, count: count },
+	closed,
+);
 /** A value a record carries rather than a fold; explained through its record, so it names no reference. */
 const shown = Type.Object(
 	{ fact: Type.Union([factSchema(nonNegative), FactSumSchema]), display: Type.String() },
@@ -476,25 +515,7 @@ const shown = Type.Object(
 const limit = Type.Object({ usd: nonNegative, display: Type.String() }, closed);
 const settingsSource = vocabulary(["file", "settings-ui", "cli", "session-override", "slash-command", "unattributed"]);
 export const TimelineEntrySchema = Type.Union([
-	Type.Object(
-		{
-			kind: Type.Literal("call"),
-			...at,
-			endAt: Type.Union([UtcSchema, Type.Null()]),
-			callId: CallIdSchema,
-			attemptId: AttemptIdSchema,
-			label: CallLabel,
-			turnId: Type.Union([ExistingId, Type.Null()]),
-			runId: Type.Union([ExistingId, Type.Null()]),
-			disposition: Type.Union([Disposition, Type.Literal("incomplete")]),
-			failure: Type.Union([FailureCause, Type.Null()]),
-			stages: Type.Union([CallSettledSchema.properties.stages, Type.Null()]),
-			tokens: QuantitySchema,
-			usd: QuantitySchema,
-			cacheVerdict: CallSettledSchema.properties.cache.properties.verdict,
-		},
-		closed,
-	),
+	callEntry,
 	Type.Object(
 		{
 			kind: Type.Literal("turn"),
@@ -508,16 +529,7 @@ export const TimelineEntrySchema = Type.Union([
 		},
 		closed,
 	),
-	Type.Object(
-		{
-			kind: Type.Literal("run"),
-			...at,
-			runId: ExistingId,
-			event: vocabulary(["referenced", "settled"]),
-			terminalReason: Type.Union([RunTerminalReason, Type.Null()]),
-		},
-		closed,
-	),
+	runEntry,
 	Type.Object(
 		{
 			kind: Type.Literal("compaction"),
@@ -536,7 +548,7 @@ export const TimelineEntrySchema = Type.Union([
 		},
 		closed,
 	),
-	Type.Object({ kind: Type.Literal("gap"), ...at, sink: ExistingId, reason: text, count: count }, closed),
+	gapEntry,
 	/** The effective settings when the writer opened (`snapshot`), or one change with the paths it touched (#434 §8). */
 	Type.Object(
 		{
@@ -616,6 +628,50 @@ export const TimelineSchema = Type.Object(
 	closed,
 );
 export type TimelineV1 = Static<typeof TimelineSchema>;
+
+/** A display with its fact and no reference: a span one record states, not a fold `explain` resolves. */
+const spanDisplay = Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed);
+/**
+ * One run journal in time order (#434 §11.3): its call attempts, the bounded run feed, the worker process's start
+ * and exit, gaps, and the settlement. A run's own entry union, so the session timeline's kinds stay as they are.
+ */
+export const RunTimelineEntrySchema = Type.Union([
+	callEntry,
+	runEntry,
+	gapEntry,
+	Type.Object(
+		{
+			kind: Type.Literal("feed"),
+			...at,
+			seq: Type.Integer({ minimum: 1 }),
+			body: RunFeedBodySchema,
+			/** An event body's `durationMs` as a display; null when the body carries none. */
+			duration: Type.Union([spanDisplay, Type.Null()]),
+		},
+		closed,
+	),
+	Type.Object(
+		{
+			kind: Type.Literal("process"),
+			...at,
+			event: vocabulary(["started", "exited"]),
+			exitCode: Type.Union([Type.Integer(), Type.Null()]),
+		},
+		closed,
+	),
+]);
+export type RunTimelineEntry = Static<typeof RunTimelineEntrySchema>;
+export const RunTimelineSchema = Type.Object(
+	{
+		...header,
+		kind: Type.Literal("run-timeline"),
+		runId: ExistingId,
+		sessionId: Type.Union([ExistingId, Type.Null()]),
+		entries: Type.Array(RunTimelineEntrySchema),
+	},
+	closed,
+);
+export type RunTimelineV1 = Static<typeof RunTimelineSchema>;
 
 const trustAxis = (states: readonly string[]) =>
 	Type.Object(
@@ -856,6 +912,8 @@ export const ExplanationSchema = Type.Object(
 		kind: Type.Literal("explanation"),
 		ref: FactRefSchema,
 		value: QuantitySchema,
+		/** How the value's contributions split by fact kind, in the canonical renderer's wording. */
+		coverage: Type.String(),
 		/** The fold rule, e.g. `sum(call.usage.input) over attempts where disposition≠never_sent`. */
 		rule: Type.String(),
 		from: Type.Object(
@@ -959,6 +1017,7 @@ export const TELEMETRY_DTO_SCHEMAS = {
 	cache: CacheReportSchema,
 	timeline: TimelineSchema,
 	run: RunTelemetrySchema,
+	runTimeline: RunTimelineSchema,
 	runs: Type.Array(RunRowSchema),
 	receiptEvidence: ReceiptEvidenceSchema,
 	whyStopped: WhyStoppedSchema,

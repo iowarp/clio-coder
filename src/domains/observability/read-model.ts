@@ -15,6 +15,8 @@ import type {
 	ReceiptEvidenceV1,
 	RunRowV1,
 	RunTelemetryV1,
+	RunTimelineEntry,
+	RunTimelineV1,
 	SessionTelemetryV1,
 	TimelineEntry,
 	TimelineV1,
@@ -26,6 +28,7 @@ import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import {
 	renderCount,
 	renderCountSum,
+	renderCoverage,
 	renderDurationSum,
 	renderFact,
 	renderTextFact,
@@ -1631,7 +1634,7 @@ export function timeline(
 	const view: View = { session: source };
 	const analysis = analyze(source);
 	const id = source.sessionId;
-	const entries: TimelineEntry[] = [];
+	const entries: TimelineEntry[] = analysis.attempts.map((attempt) => callEntry(view, "own", id, attempt));
 	/**
 	 * The spend admission saw at `t`, marked as the session's priced calls settled by then were: estimated when any was,
 	 * with every sent call it could not price beside it, as the cost tracker that fed admission words it (#434 §8).
@@ -1655,25 +1658,6 @@ export function timeline(
 			coverage: { measured: estimated ? 0 : 1, estimated: estimated ? 1 : 0, unknown: unpriced },
 		};
 	};
-	for (const attempt of analysis.attempts) {
-		const q = (metric: FactMetric) => quantity(view, own(id, metric, { attemptId: attempt.started.attemptId }));
-		entries.push({
-			kind: "call",
-			at: attempt.startedAt,
-			endAt: attempt.settledAt,
-			callId: attempt.started.callId as CallRowV1["callId"],
-			attemptId: attempt.started.attemptId as CallRowV1["attemptId"],
-			label: attempt.started.label,
-			turnId: attempt.ctx?.turnId ?? null,
-			runId: attempt.ctx?.runId ?? null,
-			disposition: attempt.settled?.disposition ?? "incomplete",
-			failure: attempt.settled?.stop.failure ?? null,
-			stages: attempt.settled?.stages ?? null,
-			tokens: q("total"),
-			usd: q("usd"),
-			cacheVerdict: attempt.settled?.cache.verdict ?? "unknown",
-		});
-	}
 	for (const record of source.journal.records) {
 		const at = record.t;
 		switch (record.k) {
@@ -1820,6 +1804,86 @@ export function timeline(
 		entries: entries
 			.filter((entry) => within(entry.at))
 			.sort((a, b) => (a.at === b.at ? order[a.kind] - order[b.kind] : a.at < b.at ? -1 : 1)),
+	};
+}
+
+/** One attempt on a timeline, its quantities under the scope that owns it. */
+function callEntry(
+	view: View,
+	scope: "own" | "run",
+	owner: string,
+	attempt: Attempt,
+): Extract<TimelineEntry, { kind: "call" }> {
+	const q = (metric: FactMetric) => quantity(view, { scope, owner, attemptId: attempt.started.attemptId, metric });
+	return {
+		kind: "call",
+		at: attempt.startedAt,
+		endAt: attempt.settledAt,
+		callId: attempt.started.callId as CallRowV1["callId"],
+		attemptId: attempt.started.attemptId as CallRowV1["attemptId"],
+		label: attempt.started.label,
+		turnId: attempt.ctx?.turnId ?? null,
+		runId: attempt.ctx?.runId ?? null,
+		disposition: attempt.settled?.disposition ?? "incomplete",
+		failure: attempt.settled?.stop.failure ?? null,
+		stages: attempt.settled?.stages ?? null,
+		timing: { ttft: q("ttft"), modelTime: q("modelTime"), settle: q("settle"), admissionWait: q("admissionWait") },
+		tokens: q("total"),
+		usd: q("usd"),
+		cacheVerdict: attempt.settled?.cache.verdict ?? "unknown",
+	};
+}
+
+/**
+ * One run journal in time order (#434 §11.3): attempts, the bounded run feed, the worker process's start and exit,
+ * gaps and the settlement. Entries at the same instant keep journal order within a kind, so feed sequence holds.
+ */
+export function runTimeline(runId: string, source: JournalSource, options: ReadOptions = {}): RunTimelineV1 {
+	const run = analyzeRun(runId, source);
+	const view: View = { run };
+	const entries: RunTimelineEntry[] = run.attempts.map((attempt) => callEntry(view, "run", runId, attempt));
+	for (const record of source.records) {
+		const at = record.t;
+		switch (record.k) {
+			case "run.feed": {
+				const body = record.data.body;
+				const ms = body.kind === "event" ? body.durationMs : undefined;
+				const fact = ms === undefined ? null : localClock(ms);
+				entries.push({
+					kind: "feed",
+					at,
+					seq: record.data.seq,
+					body,
+					duration: fact ? { fact, display: renderFact(fact, "duration") } : null,
+				});
+				break;
+			}
+			case "process.started":
+				entries.push({ kind: "process", at, event: "started", exitCode: null });
+				break;
+			case "process.exited":
+				entries.push({ kind: "process", at, event: "exited", exitCode: record.data.exitCode });
+				break;
+			case "gap":
+				entries.push({ kind: "gap", at, sink: record.data.sink, reason: record.data.reason, count: record.data.count });
+				break;
+		}
+	}
+	if (run.settled)
+		entries.push({
+			kind: "run",
+			at: run.settled.at,
+			runId,
+			event: "settled",
+			terminalReason: run.settled.data.terminalReason,
+		});
+	const order: Record<RunTimelineEntry["kind"], number> = { process: 0, gap: 1, call: 2, feed: 3, run: 4 };
+	return {
+		...header(options),
+		kind: "run-timeline",
+		runId,
+		sessionId: run.sessionId,
+		entries: entries.sort((a, b) => (a.at === b.at ? order[a.kind] - order[b.kind] : a.at < b.at ? -1 : 1)),
 	};
 }
 
@@ -2007,6 +2071,7 @@ export function explain(
 		kind: "explanation",
 		ref: factRef(parsed),
 		value: measured.quantity,
+		coverage: renderCoverage(measured.quantity.fact),
 		rule: `${RULES[parsed.metric]} over ${measured.selection.describe}; a never_sent attempt contributes nothing (R2), and unknown, unsettled or unreadable contributions keep the sum partial${
 			gaps > 0 ? ` (${renderCount(gaps)} unreadable or unattributed ${gaps === 1 ? "source" : "sources"})` : ""
 		}`,
