@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { openCallJournal } from "../../../../src/domains/observability/call-journal.js";
 
 export { quantitiesOf, telemetryLies } from "../../../../tests/harness/telemetry-lies.js";
 
@@ -16,4 +17,16 @@ export function seedGoldenSession(state: string, sessionId = "golden-p0"): strin
 	mkdirSync(directory, { recursive: true });
 	writeFileSync(join(directory, "current.jsonl"), ledger);
 	return sessionId;
+}
+
+/** A worker run journal with only its segment header: a run the read model knows, with no calls to fold. */
+export async function seedRunJournal(state: string, runId: string): Promise<string> {
+	const journal = await openCallJournal({
+		sessionDirectory: join(state, "runs", runId),
+		fileName: "events.ndjson",
+		context: { sessionId: null, runId, label: "worker" },
+		writer: { clioCoderVersion: "test", piVersion: "test" },
+	});
+	await journal.close();
+	return runId;
 }

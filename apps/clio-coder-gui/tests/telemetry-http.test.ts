@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { routes } from "../contracts/routes.js";
 import { harness, json } from "./harness/app.js";
-import { quantitiesOf, seedGoldenSession, telemetryLies } from "./harness/telemetry-fixture.js";
+import { quantitiesOf, seedGoldenSession, seedRunJournal, telemetryLies } from "./harness/telemetry-fixture.js";
 
 test("telemetry routes serve the read-model DTOs; every quantity passes the lie detectors and explains to itself", async (t) => {
 	const h = await harness();
@@ -65,4 +65,38 @@ test("telemetry routes refuse what the journals cannot answer with problems, nev
 	);
 	assert.match(gone.value.display, /unknown|not measured/);
 	assert.match(gone.rule, /unreadable/);
+});
+
+test("run routes list run journals newest first as read-model rows and serve one run's telemetry", async (t) => {
+	const h = await harness();
+	t.after(() => h.close());
+	const state = join(h.home.path, "state");
+	assert.deepEqual(await json(await h.request("/api/telemetry/runs"), routes.telemetryRuns.response), {
+		runs: [],
+		nextCursor: null,
+	});
+	await seedRunJournal(state, "run-alpha");
+	await seedRunJournal(state, "run-beta");
+	const page = await json(await h.request("/api/telemetry/runs?limit=1"), routes.telemetryRuns.response);
+	assert.equal(page.runs.length, 1);
+	assert.ok(page.nextCursor);
+	const rest = await json(
+		await h.request(`/api/telemetry/runs?limit=1&cursor=${page.nextCursor}`),
+		routes.telemetryRuns.response,
+	);
+	assert.deepEqual(new Set([...page.runs, ...rest.runs].map((row) => row.runId)), new Set(["run-alpha", "run-beta"]));
+	assert.equal(rest.nextCursor, null);
+	const run = await json(await h.request("/api/telemetry/runs/run-alpha"), routes.telemetryRun.response);
+	assert.equal(run.kind, "run");
+	assert.equal(run.row.runId, "run-alpha");
+	const quantities = [page, rest, run].flatMap((dto) => quantitiesOf(dto));
+	assert.deepEqual(telemetryLies(quantities), []);
+	const explained = await json(
+		await h.request(`/api/telemetry/explain?ref=${encodeURIComponent(run.row.usd.ref)}`),
+		routes.telemetryExplain.response,
+	);
+	assert.deepEqual(explained.value, run.row.usd);
+	assert.equal((await h.request("/api/telemetry/runs/run-absent")).status, 404);
+	assert.equal((await h.request("/api/telemetry/runs?cursor=not-a-cursor")).status, 422);
+	assert.equal((await h.request("/api/telemetry/runs?limit=0")).status, 422);
 });

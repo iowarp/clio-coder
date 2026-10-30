@@ -18,7 +18,7 @@ function parameters(schema: TSchema, location: "path" | "query") {
 	}));
 }
 // Every named schema in the document: the read-model DTOs a route or notification serves, under their versioned
-// names (#434 §11.2). Run rows join when the run routes land; quota and health stay live-only.
+// names (#434 §11.2). Quota and health stay live-only.
 const components = {
 	Problem,
 	Event,
@@ -27,6 +27,8 @@ const components = {
 	CostReportV1: TELEMETRY_DTO_SCHEMAS.cost,
 	CacheReportV1: TELEMETRY_DTO_SCHEMAS.cache,
 	TimelineV1: TELEMETRY_DTO_SCHEMAS.timeline,
+	RunRowV1: TELEMETRY_DTO_SCHEMAS.runs.items,
+	RunTelemetryV1: TELEMETRY_DTO_SCHEMAS.run,
 	WhyStoppedV1: TELEMETRY_DTO_SCHEMAS.whyStopped,
 	ExplanationV1: TELEMETRY_DTO_SCHEMAS.explanation,
 	TelemetryUpdateV1: TELEMETRY_DTO_SCHEMAS.update,

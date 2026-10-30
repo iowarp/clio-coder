@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
 import {
@@ -5,11 +8,15 @@ import {
 	callsReport,
 	costReport,
 	explain,
+	runRowTelemetry,
+	runTelemetry,
 	sessionTelemetry,
 	timeline,
 	whyStopped,
 } from "../../../../../src/domains/observability/read-model.js";
+import type { RunListCursor } from "../../../../../src/domains/session/telemetry-source.js";
 import {
+	listRunTelemetrySources,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
 } from "../../../../../src/domains/session/telemetry-source.js";
@@ -37,6 +44,19 @@ export function readTelemetry(input: TelemetryRequest): unknown {
 		if (!explained) throw new AppProblem("not_found", "Nothing in the journals resolves that telemetry reference.");
 		return explained;
 	}
+	if (input.kind === "runs") {
+		const page = listRunTelemetrySources(state, { limit: input.limit, before: cursorOf(input.cursor) });
+		return {
+			runs: page.runs.map(({ runId, source }) => runRowTelemetry(runId, source)),
+			nextCursor: page.nextBefore ? Buffer.from(JSON.stringify(page.nextBefore)).toString("base64url") : null,
+		};
+	}
+	if (input.kind === "run") {
+		if (!Value.Check(Id, input.runId)) throw new AppProblem("validation", "Invalid run identifier.");
+		// A run that never had a directory is not found; one whose journal is missing or torn is unknown coverage.
+		if (!existsSync(join(state, "runs", input.runId))) throw new AppProblem("not_found", "No run journal holds that id.");
+		return runTelemetry(input.runId, loadRunTelemetrySource(state, input.runId));
+	}
 	if (!Value.Check(Id, input.sessionId)) throw new AppProblem("validation", "Invalid session identifier.");
 	if (!preflightLedger()) throw notFound();
 	return resolveSession(state, input.sessionId, (source) => {
@@ -55,6 +75,21 @@ export function readTelemetry(input: TelemetryRequest): unknown {
 				return whyStopped(source);
 		}
 	});
+}
+
+const Cursor = Type.Object(
+	{ writtenMs: Type.Union([Type.Number(), Type.Null()]), runId: Id },
+	{ additionalProperties: false },
+);
+function cursorOf(encoded: string | undefined): RunListCursor | null {
+	if (encoded === undefined) return null;
+	try {
+		const decoded: unknown = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+		if (!Value.Check(Cursor, decoded)) throw new Error("cursor");
+		return decoded;
+	} catch {
+		throw new AppProblem("validation", "Invalid telemetry run cursor.");
+	}
 }
 
 function notFound() {

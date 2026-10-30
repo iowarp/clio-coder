@@ -17535,6 +17535,146 @@
 				}
 			}
 		},
+		"/api/telemetry/runs": {
+			"get": {
+				"operationId": "telemetryRuns",
+				"summary": "Worker run journals newest write first, each as its read-model row",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 200
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 1024,
+							"pattern": "^[A-Za-z0-9_-]+$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["runs", "nextCursor"],
+									"properties": {
+										"runs": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/RunRowV1"
+											}
+										},
+										"nextCursor": {
+											"$ref": "#/components/schemas/Union_82d022dc"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/telemetry/runs/{runId}": {
+			"get": {
+				"operationId": "telemetryRun",
+				"summary": "One run's telemetry: its row, journal coverage, counts, tokens and settlement",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "runId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RunTelemetryV1"
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/telemetry/explain": {
 			"get": {
 				"operationId": "telemetryExplain",
@@ -19090,6 +19230,23 @@
 					"shared-account-window-delta",
 					"peer-report",
 					"payload-json"
+				]
+			},
+			"Enum_8bfbcdd9": {
+				"enum": [
+					"completed",
+					"cancelled_by_parent",
+					"cancelled_by_operator",
+					"cancelled_by_peer",
+					"preempted",
+					"bound_reached",
+					"final_output_missing_no_repair",
+					"contract_exhausted_after_repair",
+					"channel_failure",
+					"spawn_error",
+					"stalled",
+					"denied_by_policy",
+					"worker_failed"
 				]
 			},
 			"Enum_96cd94f8": {
@@ -21489,6 +21646,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_attempts_calls_dispositions_c9f4745b": {
+				"type": "object",
+				"required": ["calls", "attempts", "dispositions"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_8c3db16c"
+				},
+				"additionalProperties": false
+			},
 			"Object_auditRows_blockedToolCalls_costDisplay_9a20835b": {
 				"type": "object",
 				"required": [
@@ -22189,6 +22354,62 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_conflictingAttempts_damaged_droppedRecords_fc03a4ff": {
+				"type": "object",
+				"required": [
+					"present",
+					"seeding",
+					"records",
+					"skipped",
+					"damaged",
+					"gapRecords",
+					"droppedRecords",
+					"duplicateRecords",
+					"conflictingAttempts",
+					"unattributedAggregates"
+				],
+				"properties": {
+					"present": {
+						"type": "boolean"
+					},
+					"seeding": {
+						"type": "boolean"
+					},
+					"records": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"skipped": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"damaged": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"gapRecords": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"droppedRecords": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"duplicateRecords": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"conflictingAttempts": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"unattributedAggregates": {
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_connectionReused_continuation_kind_e501926b": {
 				"type": "object",
 				"required": [
@@ -22646,6 +22867,14 @@
 				"required": ["ignored"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_12e39c26"
+				},
+				"additionalProperties": false
+			},
+			"Object_incomplete_neverSent_sentUnsettled_83cf2571": {
+				"type": "object",
+				"required": ["neverSent", "sentUnsettled", "settledNoUsage", "settled", "incomplete"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_319482bf"
 				},
 				"additionalProperties": false
 			},
@@ -23316,6 +23545,128 @@
 				},
 				"additionalProperties": false
 			},
+			"RunRowV1": {
+				"type": "object",
+				"required": ["runId", "sessionId", "firstAt", "lastAt", "terminalReason", "source", "apiCalls", "tokens", "usd"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_41fcd9d1"
+				},
+				"additionalProperties": false
+			},
+			"RunTelemetryV1": {
+				"type": "object",
+				"required": [
+					"v",
+					"foldVersion",
+					"generatedAt",
+					"kind",
+					"row",
+					"journal",
+					"counts",
+					"tokens",
+					"missingTokenCalls",
+					"settled"
+				],
+				"properties": {
+					"v": {
+						"type": "number",
+						"const": 1
+					},
+					"foldVersion": {
+						"type": "integer",
+						"minimum": 1
+					},
+					"generatedAt": {
+						"type": "string",
+						"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+					},
+					"kind": {
+						"type": "string",
+						"const": "run"
+					},
+					"row": {
+						"$ref": "#/components/schemas/RunRowV1"
+					},
+					"journal": {
+						"$ref": "#/components/schemas/Object_conflictingAttempts_damaged_droppedRecords_fc03a4ff"
+					},
+					"counts": {
+						"$ref": "#/components/schemas/Object_attempts_calls_dispositions_c9f4745b"
+					},
+					"tokens": {
+						"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_cacheWrite1h_50e06f6b"
+					},
+					"missingTokenCalls": {
+						"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+					},
+					"settled": {
+						"anyOf": [
+							{
+								"type": "object",
+								"required": ["at", "terminalReason", "processExitCode", "boundKind", "repairRounds", "frameType", "callIds"],
+								"properties": {
+									"at": {
+										"type": "string",
+										"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+									},
+									"terminalReason": {
+										"$ref": "#/components/schemas/Enum_8bfbcdd9"
+									},
+									"processExitCode": {
+										"anyOf": [
+											{
+												"type": "integer"
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"boundKind": {
+										"anyOf": [
+											{
+												"enum": ["turns", "tokens", "cost", "time", "tools"]
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"repairRounds": {
+										"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+									},
+									"frameType": {
+										"anyOf": [
+											{
+												"type": "string",
+												"maxLength": 4096
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"callIds": {
+										"anyOf": [
+											{
+												"$ref": "#/components/schemas/Array_972d2468"
+											},
+											{
+												"type": "null"
+											}
+										]
+									}
+								},
+								"additionalProperties": false
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"additionalProperties": false
+			},
 			"SessionTelemetryV1": {
 				"type": "object",
 				"required": [
@@ -23363,60 +23714,7 @@
 						}
 					},
 					"journal": {
-						"type": "object",
-						"required": [
-							"present",
-							"seeding",
-							"records",
-							"skipped",
-							"damaged",
-							"gapRecords",
-							"droppedRecords",
-							"duplicateRecords",
-							"conflictingAttempts",
-							"unattributedAggregates"
-						],
-						"properties": {
-							"present": {
-								"type": "boolean"
-							},
-							"seeding": {
-								"type": "boolean"
-							},
-							"records": {
-								"type": "integer",
-								"minimum": 0
-							},
-							"skipped": {
-								"type": "integer",
-								"minimum": 0
-							},
-							"damaged": {
-								"type": "integer",
-								"minimum": 0
-							},
-							"gapRecords": {
-								"type": "integer",
-								"minimum": 0
-							},
-							"droppedRecords": {
-								"type": "integer",
-								"minimum": 0
-							},
-							"duplicateRecords": {
-								"type": "integer",
-								"minimum": 0
-							},
-							"conflictingAttempts": {
-								"type": "integer",
-								"minimum": 0
-							},
-							"unattributedAggregates": {
-								"type": "integer",
-								"minimum": 0
-							}
-						},
-						"additionalProperties": false
+						"$ref": "#/components/schemas/Object_conflictingAttempts_damaged_droppedRecords_fc03a4ff"
 					},
 					"lifetime": {
 						"type": "object",
@@ -23506,39 +23804,7 @@
 						"required": ["counts", "tokens", "cost"],
 						"properties": {
 							"counts": {
-								"type": "object",
-								"required": ["calls", "attempts", "dispositions"],
-								"properties": {
-									"calls": {
-										"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
-									},
-									"attempts": {
-										"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
-									},
-									"dispositions": {
-										"type": "object",
-										"required": ["neverSent", "sentUnsettled", "settledNoUsage", "settled", "incomplete"],
-										"properties": {
-											"neverSent": {
-												"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
-											},
-											"sentUnsettled": {
-												"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
-											},
-											"settledNoUsage": {
-												"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
-											},
-											"settled": {
-												"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
-											},
-											"incomplete": {
-												"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
-											}
-										},
-										"additionalProperties": false
-									}
-								},
-								"additionalProperties": false
+								"$ref": "#/components/schemas/Object_attempts_calls_dispositions_c9f4745b"
 							},
 							"tokens": {
 								"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_cacheWrite1h_50e06f6b"
@@ -23880,6 +24146,23 @@
 					"$ref": "#/components/schemas/Array_de2d36b0"
 				}
 			},
+			"Shape_319482bf": {
+				"neverSent": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				},
+				"sentUnsettled": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				},
+				"settledNoUsage": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				},
+				"settled": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				},
+				"incomplete": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				}
+			},
 			"Shape_39fec1f7": {
 				"resource": {
 					"type": "string",
@@ -23973,6 +24256,37 @@
 				},
 				"jobs": {
 					"$ref": "#/components/schemas/Array_3610e4f1"
+				}
+			},
+			"Shape_41fcd9d1": {
+				"runId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"sessionId": {
+					"$ref": "#/components/schemas/Union_21b008c5"
+				},
+				"firstAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"lastAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"terminalReason": {
+					"$ref": "#/components/schemas/Union_069a7c9b"
+				},
+				"source": {
+					"enum": ["calls", "aggregate", "parts", "conflict", "unavailable"]
+				},
+				"apiCalls": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				},
+				"tokens": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				},
+				"usd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
 				}
 			},
 			"Shape_48539726": {
@@ -24607,6 +24921,17 @@
 				},
 				"admissionWait": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				}
+			},
+			"Shape_8c3db16c": {
+				"calls": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				},
+				"attempts": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_e6153a37"
+				},
+				"dispositions": {
+					"$ref": "#/components/schemas/Object_incomplete_neverSent_sentUnsettled_83cf2571"
 				}
 			},
 			"Shape_92bc19ac": {
@@ -25749,28 +26074,7 @@
 											"enum": ["referenced", "settled"]
 										},
 										"terminalReason": {
-											"anyOf": [
-												{
-													"enum": [
-														"completed",
-														"cancelled_by_parent",
-														"cancelled_by_operator",
-														"cancelled_by_peer",
-														"preempted",
-														"bound_reached",
-														"final_output_missing_no_repair",
-														"contract_exhausted_after_repair",
-														"channel_failure",
-														"spawn_error",
-														"stalled",
-														"denied_by_policy",
-														"worker_failed"
-													]
-												},
-												{
-													"type": "null"
-												}
-											]
+											"$ref": "#/components/schemas/Union_069a7c9b"
 										}
 									},
 									"additionalProperties": false
@@ -25926,6 +26230,16 @@
 					{
 						"type": "string",
 						"const": "yolo"
+					}
+				]
+			},
+			"Union_069a7c9b": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Enum_8bfbcdd9"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},

@@ -106,6 +106,7 @@ const testModules = new Set([
 	"src/domains/observability/trace-store.ts",
 	"tests/harness/openai-compat-fixture.ts",
 	"tests/harness/telemetry-lies.ts",
+	"src/domains/observability/call-journal.ts",
 ]);
 function files(directory: string): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>

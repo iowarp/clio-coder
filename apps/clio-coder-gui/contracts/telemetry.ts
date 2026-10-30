@@ -1,6 +1,6 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
-import { Id } from "./common.js";
+import { Id, PageCursor } from "./common.js";
 import type { CallFilter } from "./wire.js";
 import { FactRefSchema, TELEMETRY_DTO_SCHEMAS } from "./wire.js";
 
@@ -51,4 +51,19 @@ export type TelemetryRequest =
 	| { kind: "calls"; sessionId: string; filter: CallFilter }
 	| { kind: "cost"; sessionId: string; by: "label" | "model" | "turn" }
 	| { kind: "timeline"; sessionId: string; range: { from: string; to: string } | null }
+	| { kind: "runs"; limit: number; cursor?: string }
+	| { kind: "run"; runId: string }
 	| { kind: "explain"; ref: string };
+
+export const TelemetryRun = TELEMETRY_DTO_SCHEMAS.run;
+export const TelemetryRunRow = TELEMETRY_DTO_SCHEMAS.runs.items;
+/** Run journals newest write first; a run directory with no journal lists last with unknown coverage (R9). */
+export const TelemetryRuns = Type.Object(
+	{ runs: TELEMETRY_DTO_SCHEMAS.runs, nextCursor: Type.Union([PageCursor, Type.Null()]) },
+	closed,
+);
+export const TelemetryRunsQuery = Type.Object(
+	{ limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })), cursor: Type.Optional(PageCursor) },
+	closed,
+);
+export const TELEMETRY_RUNS_PAGE = 50;

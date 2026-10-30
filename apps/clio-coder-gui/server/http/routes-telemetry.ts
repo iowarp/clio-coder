@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { routes } from "../../contracts/routes.js";
-import type { TelemetryCallsQuery } from "../../contracts/telemetry.js";
+import { TELEMETRY_RUNS_PAGE, type TelemetryCallsQuery } from "../../contracts/telemetry.js";
 import { CallFilterSchema } from "../../contracts/wire.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
@@ -42,6 +42,19 @@ export function telemetryRoutes(app: Hono, hub: EventHub, telemetry: TelemetrySe
 	});
 	register(app, hub, routes.telemetryWhyStopped, ({ params }) =>
 		telemetry.read({ kind: "why-stopped", sessionId: params.id }, routes.telemetryWhyStopped.response),
+	);
+	register(app, hub, routes.telemetryRuns, ({ query }) =>
+		telemetry.read(
+			{
+				kind: "runs",
+				limit: query.limit ?? TELEMETRY_RUNS_PAGE,
+				...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
+			},
+			routes.telemetryRuns.response,
+		),
+	);
+	register(app, hub, routes.telemetryRun, ({ params }) =>
+		telemetry.read({ kind: "run", runId: params.runId }, routes.telemetryRun.response),
 	);
 	register(app, hub, routes.telemetryExplain, ({ query }) =>
 		telemetry.read({ kind: "explain", ref: query.ref }, routes.telemetryExplain.response),
