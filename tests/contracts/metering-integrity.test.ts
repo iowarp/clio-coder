@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import { projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
@@ -30,6 +31,7 @@ import { createTurnPersistence } from "../../src/session-control/turn-persistenc
 import { createTurnState } from "../../src/session-control/turn-state.js";
 import {
 	checkCostRendering,
+	checkLedgerUsageKeys,
 	checkLedgerUsageMutation,
 	checkSurfaceTotals,
 	runBoundaryCheck,
@@ -197,6 +199,31 @@ describe("contracts/metering integrity", () => {
 			[],
 		);
 		deepStrictEqual(checkLedgerUsageMutation("src/engine/example.ts", "message.usage.input = 0;"), []);
+		// Nor does a ledger payload gain a usage-shaped key beside the provider's own usage (#434 §5.1).
+		for (const source of [
+			"payload.estimatedUsage = estimate;",
+			'payload["costUsd"] = 0.25;',
+			'session.append({ kind: "message", payload: { text, inputTokens: 3 } });',
+			"Object.assign(payload, { callAccounting });",
+			'for (const key of ["usage", "callAccounting"]) if (raw[key] !== undefined) payload[key] = raw[key];',
+		])
+			strictEqual(checkLedgerUsageKeys("src/session-control/example.ts", source).length, 1, source);
+		deepStrictEqual(
+			checkLedgerUsageKeys(
+				"src/session-control/example.ts",
+				'for (const key of ["usage", "callId"]) payload[key] = raw[key]; payload.apiMs = 3;',
+			),
+			[],
+		);
+		deepStrictEqual(checkLedgerUsageKeys("src/domains/dispatch/example.ts", "payload.estimatedUsage = estimate;"), []);
+		const file = "src/session-control/chat-loop-messages.ts";
+		const copyList = readFileSync(new URL(`../../${file}`, import.meta.url), "utf8");
+		deepStrictEqual(checkLedgerUsageKeys(file, copyList), []);
+		strictEqual(
+			checkLedgerUsageKeys(file, copyList.replace('"callInvoked",', '"callInvoked",\n\t\t"estimatedUsage",')).length,
+			1,
+			"re-adding the estimate to assistantSessionPayload's copy list",
+		);
 	});
 
 	it("preserves declared call counts and unknown run coverage through usage projections", () => {

@@ -131,6 +131,78 @@ export function checkLedgerUsageMutation(file: string, source: string): string[]
 	return violations;
 }
 
+/** A key that counts tokens, prices them or annotates their accounting; the provider's own `usage` is not one. */
+const USAGE_SHAPED_KEY = /^(?:usage.+|tokens?|cost.*|usd|.+(?:Usage|Tokens|TokenCount|Cost|Usd|Accounting))$/;
+/** The modules that build session-ledger message payloads. */
+const LEDGER_PAYLOAD_ROOTS = ["src/session-control/", "src/domains/session/"];
+
+/** The ledger is the conversation record and the journal owns usage, so no payload gains a usage-shaped key (#434 §5.1, §5.3). */
+export function checkLedgerUsageKeys(file: string, source: string): string[] {
+	if (!LEDGER_PAYLOAD_ROOTS.some((root) => file.startsWith(root))) return [];
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const payloadLike = (node: ts.Node) => /payload/i.test(node.getText(tree));
+	const keyOf = (name: ts.Node): string | undefined =>
+		ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name) ? name.text : undefined;
+	const violations: string[] = [];
+	const report = (node: ts.Node, key: string) =>
+		violations.push(
+			`rule12: ${file}:${tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1} puts usage-shaped ${key} on a ledger payload; the ledger is the conversation record and the call journal owns usage`,
+		);
+	const literalKeys = (literal: ts.ObjectLiteralExpression) => {
+		for (const field of literal.properties) {
+			const key = field.name && keyOf(field.name);
+			if (key !== undefined && USAGE_SHAPED_KEY.test(key)) report(field, key);
+		}
+	};
+	const visit = (node: ts.Node): void => {
+		// payload.key = ... and payload["key"] = ...
+		if (
+			ts.isBinaryExpression(node) &&
+			node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+			(ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left)) &&
+			payloadLike(node.left.expression)
+		) {
+			const key = ts.isPropertyAccessExpression(node.left) ? node.left.name.text : keyOf(node.left.argumentExpression);
+			if (key !== undefined && USAGE_SHAPED_KEY.test(key)) report(node, key);
+		}
+		// payload: { key: ... } and const payload = { key: ... }
+		if (
+			(ts.isPropertyAssignment(node) || ts.isVariableDeclaration(node)) &&
+			node.initializer &&
+			ts.isObjectLiteralExpression(node.initializer) &&
+			payloadLike(node.name)
+		)
+			literalKeys(node.initializer);
+		// Object.assign(payload, { key: ... })
+		if (
+			ts.isCallExpression(node) &&
+			node.expression.getText(tree) === "Object.assign" &&
+			node.arguments[0] &&
+			payloadLike(node.arguments[0])
+		)
+			for (const argument of node.arguments.slice(1)) if (ts.isObjectLiteralExpression(argument)) literalKeys(argument);
+		// for (const key of ["usage", ...]) payload[key] = ...: the copy list names the keys a payload keeps.
+		if (
+			ts.isForOfStatement(node) &&
+			ts.isArrayLiteralExpression(node.expression) &&
+			ts.isVariableDeclarationList(node.initializer)
+		) {
+			const loopKey = node.initializer.declarations[0]?.name.getText(tree);
+			const copies = (child: ts.Node): boolean =>
+				(ts.isElementAccessExpression(child) &&
+					payloadLike(child.expression) &&
+					child.argumentExpression.getText(tree) === loopKey) ||
+				ts.forEachChild(child, copies) === true;
+			if (loopKey !== undefined && copies(node.statement))
+				for (const element of node.expression.elements)
+					if (ts.isStringLiteral(element) && USAGE_SHAPED_KEY.test(element.text)) report(element, element.text);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(tree);
+	return violations;
+}
+
 /** Applied to the producer's complete local value-import closure, including helper modules (#434). */
 export function checkTelemetryProducer(file: string, source: string): string[] {
 	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
@@ -923,6 +995,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 		violations.push(...checkCostRendering(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(...checkLedgerUsageMutation(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(...checkTelemetryWrites(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
+		violations.push(...checkLedgerUsageKeys(path.relative(projectRoot, filePath).split(path.sep).join("/"), source));
 		violations.push(
 			...checkSurfaceTotals(path.relative(projectRoot, filePath).split(path.sep).join("/"), source, usedSurfaceExemptions),
 		);
