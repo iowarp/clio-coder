@@ -401,9 +401,12 @@ export function validPayload<K extends Kind>(kind: K, data: unknown): data is Pa
 		return false;
 	if (call.disposition === "settled" && !Object.values(call.usage ?? {}).some((fact) => fact.kind === "measured"))
 		return false;
-	if (call.disposition === "sent_unsettled" || call.disposition === "settled_no_usage") {
-		if (Object.values(call.usage ?? {}).some((fact) => fact.kind === "measured")) return false;
-	}
+	// A sent_unsettled call may carry the counts its provider reported before the response ended (#434).
+	if (
+		call.disposition === "settled_no_usage" &&
+		Object.values(call.usage ?? {}).some((fact) => fact.kind === "measured")
+	)
+		return false;
 	const settledAt = call.stages.settle;
 	if (settledAt === null) return Object.keys(call.stages).length === 1;
 	return Object.values(call.stages).every(

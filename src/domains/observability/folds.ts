@@ -50,7 +50,7 @@ export interface CallTotals {
 	settledNoUsage: number;
 	settled: number;
 	incomplete: number;
-	usage: Record<keyof CallUsage, FactSum>;
+	usage: Record<(typeof fields)[number], FactSum>;
 	promptTokens: FactSum;
 	totalTokens: FactSum;
 	usd: FactSum;
@@ -87,11 +87,13 @@ export function foldCalls(attempts: readonly FoldedAttempt[]): CallTotals {
 		else totals.settled += 1;
 		const fact = (field: keyof CallUsage) =>
 			settled?.disposition === "never_sent" ? absent : (settled?.usage?.[field] ?? unknown);
-		for (const field of fields) addGroup(totals.usage[field], [fact(field)]);
+		// An unsettled call's counts are a lower bound, so every sum it enters stays partial (#434).
+		const bound = settled?.disposition === "sent_unsettled" ? [unknown] : [];
+		for (const field of fields) addGroup(totals.usage[field], [fact(field), ...bound]);
 		const prompt = [fact("input"), fact("cacheRead"), fact("cacheWrite")];
-		addGroup(totals.promptTokens, prompt);
-		addGroup(totals.totalTokens, [...prompt, fact("output")]);
-		addGroup(totals.usd, [settled?.pricing.usd ?? unknown]);
+		addGroup(totals.promptTokens, [...prompt, ...bound]);
+		addGroup(totals.totalTokens, [...prompt, fact("output"), ...bound]);
+		addGroup(totals.usd, [settled?.pricing.usd ?? unknown, ...bound]);
 	}
 	return totals;
 }
@@ -226,7 +228,7 @@ function foldRunScope(records: Iterable<TelemetryRecord>) {
 			: choose(fact);
 	const usage = aggregate
 		? (Object.fromEntries(fields.map((field) => [field, choose(aggregate.usage[field])])) as Record<
-				keyof CallUsage,
+				(typeof fields)[number],
 				FactSum
 			>)
 		: callTotals.usage;
@@ -322,7 +324,7 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>) {
 		source: "parts" as const,
 		usage: Object.fromEntries(
 			fields.map((field) => [field, sumFactSums(scopes.map((scope) => scope.usage[field]))]),
-		) as Record<keyof CallUsage, FactSum>,
+		) as Record<(typeof fields)[number], FactSum>,
 		totalTokens: sum("totalTokens"),
 		usd: sum("usd"),
 		apiCalls,

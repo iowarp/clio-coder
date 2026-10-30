@@ -1241,14 +1241,15 @@ describe("production compaction controls", () => {
 		strictEqual(summary.calls, 2);
 		strictEqual(summary.successfulCalls, 1);
 		strictEqual(summary.erroredCalls, 1);
-		strictEqual(summary.knownUsage.totalTokens, 15);
-		strictEqual(summary.erroredKnownUsage.totalTokens, null);
+		// The failed stream's reported counts are a measured lower bound beside the settled chunk (#434).
+		strictEqual(summary.knownUsage.totalTokens, 30);
+		strictEqual(summary.erroredKnownUsage.totalTokens, 15);
 		strictEqual(summary.unobservedUsageCalls.totalTokens, 1, "only the unsettled stream lacks its token counts");
 		strictEqual(summary.unobservedUsageCalls.costUsd, 2);
 		strictEqual(f.liveUsage.length, 2);
 		strictEqual(
 			f.liveUsage.reduce((sum, row) => sum + Number(row[2]), 0),
-			15,
+			30,
 		);
 		ok(calls.every((call) => call.providerId === "summary-target" && call.label === "failed-compaction"));
 	});

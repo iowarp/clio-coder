@@ -18,6 +18,11 @@ export const CallLabel = vocabulary([
 	"safety-judge",
 ]);
 export type CallLabel = Static<typeof CallLabel>;
+/**
+ * never_sent carries no usage. sent_unsettled usage is a lower bound: counts the provider reported before the
+ * response ended are measured, the rest unknown, and folds mark its sums partial. settled_no_usage is a terminal
+ * response without usage; settled is a terminal response with usage (#434).
+ */
 export const Disposition = vocabulary(["never_sent", "sent_unsettled", "settled_no_usage", "settled"]);
 export type Disposition = Static<typeof Disposition>;
 export const FailureCause = vocabulary([

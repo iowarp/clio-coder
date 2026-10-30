@@ -242,7 +242,8 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 					assert.equal(spend.missingTokenCalls, ending === "stop" ? 0 : 1);
 					assert.equal(spend.unreportedUsageSteps, 0);
 				}
-				assert.deepEqual(live, switched ? [] : [ending === "stop" ? 17 : 0]);
+				// Counts a provider reported before a failed ending are a measured lower bound (#434).
+				assert.deepEqual(live, switched ? [] : [ending === "no-usage" ? 0 : 17]);
 				const usable = ending === "stop" && !switched;
 				assert.equal(bank.snapshot().knowledge.length, usable ? 1 : 0);
 				assert.equal(reminders.length, usable ? 1 : 0);

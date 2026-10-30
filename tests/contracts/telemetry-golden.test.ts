@@ -41,7 +41,7 @@ test("dispositions and causes come from recorded facts, and a budget wait is nev
 	strictEqual(rejected.stop.failure, "auth_rejected");
 });
 
-test("an out-of-turn error row keeps the tokens it recorded as settled spend (#434)", () => {
+test("an out-of-turn error row keeps its recorded tokens and cost as a lower bound (#434)", () => {
 	const row = {
 		sessionId: "side",
 		label: "side-question" as const,
@@ -53,19 +53,25 @@ test("an out-of-turn error row keeps the tokens it recorded as settled spend (#4
 		usage: { input: 300, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: null, totalTokens: 300, costUsd: 0.01 },
 	};
 	const unrecorded = { ...row, usage: { ...row.usage, input: null, totalTokens: null, costUsd: null } };
-	const calls = importLegacySession("side", [], {
+	const records = importLegacySession("side", [], {
 		outOfTurn: [row, unrecorded],
 		costProvenance: "known",
-	}).records.flatMap((record) => (record.k === "call.settled" ? [record.data as CallSettled] : []));
+	}).records;
+	const calls = records.flatMap((record) => (record.k === "call.settled" ? [record.data as CallSettled] : []));
 	deepStrictEqual(
-		calls.map((call) => [call.disposition, call.stop.reason]),
-		[
-			["settled", "error"],
-			["sent_unsettled", "error"],
-		],
+		calls.map((call) => call.disposition),
+		["sent_unsettled", "sent_unsettled"],
+		"a usage report is not evidence that the response ended",
 	);
 	deepStrictEqual(calls[0]?.usage?.input, { kind: "measured", value: 300, source: "provider" });
 	strictEqual(calls[0]?.usage?.output.kind, "unknown", "a zero where the stream stopped is not a measured zero");
+	deepStrictEqual(
+		calls.map((call) => call.pricing.usd.kind === "measured" && call.pricing.usd.value),
+		[0.01, false],
+	);
+	const totals = foldCallJournal(records).totals;
+	strictEqual(totals.totalTokens.measured, 300);
+	strictEqual(totals.totalTokens.unknownCount, 2, "every unsettled call leaves its sum partial");
 });
 
 test("totals keep unknown apart from zero and render partial cost with its marker", () => {

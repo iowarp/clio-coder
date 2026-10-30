@@ -55,13 +55,13 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
  * Adapter placeholders are not measurements. A usage object is the provider's report once any count in it is
  * positive or the adapter marked it provider-reported; its zeros are then measured zeros (#434). An all-zero
  * object without that mark is the seed pi writes before a response arrives, and every field stays unknown.
+ * A response that never reached its end keeps the positive counts its provider reported as a lower bound, and its
+ * zeros stay unknown, because they may only mark where the stream stopped.
  */
 export function callSettlementFromMessage(
 	message: unknown,
 	costProvenance: CostProvenance,
 	cause?: FailureCause,
-	/** The caller holds evidence that a terminal response arrived although the stop reads as a failure (#434). */
-	responded = false,
 ): Omit<CallSettled, keyof CallStarted | "stages"> {
 	const raw = record(message);
 	const usage = record(raw.usage);
@@ -69,8 +69,12 @@ export function callSettlementFromMessage(
 	const external = record(usage.clioExternal);
 	const neverSent = raw.callInvoked === false || usage.callInvoked === false || failure.invoked === false;
 	const reported = normalizeTokenUsage(usage).observed;
+	const stop = raw.stopReason;
+	const reason = stop === "stop" || stop === "toolUse" || stop === "length" || stop === "aborted" ? stop : "error";
+	const terminal = (reason !== "error" && reason !== "aborted") || typeof failure.httpStatus === "number";
 	const read = (key: keyof CallUsage): Fact<number> => {
 		const value = amount(usage[key]);
+		if (value === 0 && !terminal) return unknown;
 		if (
 			usage.estimated === true ||
 			(usage.clioExternal !== undefined && external.tokenUsage !== "provider-reported") ||
@@ -98,16 +102,13 @@ export function callSettlementFromMessage(
 		reasoning: read("reasoning"),
 	};
 	const observed = Object.values(counts).some((fact) => fact.kind === "measured");
-	const stop = raw.stopReason;
-	const reason = stop === "stop" || stop === "toolUse" || stop === "length" || stop === "aborted" ? stop : "error";
 	const failureCode = cause ?? failureCause(failure);
-	const terminal = responded || (reason !== "error" && reason !== "aborted") || typeof failure.httpStatus === "number";
 	const usd = amount(record(usage.cost).total);
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };
 	if (neverSent) pricing = { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" };
 	else if (costProvenance === "known_free")
 		pricing = { usd: { kind: "measured", value: 0, source: "local-count" }, pricedBy: "free" };
-	else if (usd !== null && observed && terminal) {
+	else if (usd !== null && observed) {
 		if (external.cost === "provider-reported")
 			pricing = { usd: { kind: "measured", value: usd, source: "provider" }, pricedBy: "provider" };
 		// Declared target rates price measured tokens exactly as 0.6.5 did: known, ranked only below a provider's own
@@ -120,18 +121,7 @@ export function callSettlementFromMessage(
 	return {
 		disposition: neverSent ? "never_sent" : !terminal ? "sent_unsettled" : observed ? "settled" : "settled_no_usage",
 		stop: { reason, ...((reason === "aborted" || reason === "error") && failureCode ? { failure: failureCode } : {}) },
-		usage: neverSent
-			? null
-			: terminal
-				? counts
-				: {
-						input: unknown,
-						output: unknown,
-						cacheRead: unknown,
-						cacheWrite: unknown,
-						cacheWrite1h: unknown,
-						reasoning: unknown,
-					},
+		usage: neverSent ? null : counts,
 		pricing,
 		transport: { kind: "unknown", continuation: unobserved, requestBytes: unobserved, sessionPinnedToSse: unobserved },
 		cache: {

@@ -256,7 +256,9 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 		"known",
 	);
 	strictEqual(dropped.disposition, "sent_unsettled");
-	strictEqual(dropped.usage?.input.kind, "unknown");
+	// What the provider reported before the stream ended is a measured lower bound; its zeros stay unknown.
+	deepStrictEqual(dropped.usage?.input, { kind: "measured", value: 5, source: "provider" });
+	strictEqual(dropped.usage?.output.kind, "unknown");
 	strictEqual(dropped.pricing.usd.kind, "unknown");
 	strictEqual(dropped.stop.failure, undefined);
 	strictEqual(
