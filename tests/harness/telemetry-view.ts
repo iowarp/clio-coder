@@ -63,6 +63,8 @@ export interface TelemetryCallOptions {
 	disposition?: Disposition;
 	/** An interrupted call's display estimate, as the producer journals it beside the usage. */
 	interruptedEstimate?: CallSettled["interruptedEstimate"];
+	/** Cache facts over the golden call's own. */
+	cache?: Partial<CallSettled["cache"]>;
 }
 
 /** One call's started and settled records, cloned from a golden settled call with fresh ids and the given facts. */
@@ -121,6 +123,7 @@ export function telemetryCall(sessionId: string, options: TelemetryCallOptions =
 					reasoning: count(usage.reasoning),
 				},
 				pricing: { usd, pricedBy },
+				cache: { ...settled.data.cache, ...options.cache },
 				...(options.interruptedEstimate ? { interruptedEstimate: options.interruptedEstimate } : {}),
 			},
 		},

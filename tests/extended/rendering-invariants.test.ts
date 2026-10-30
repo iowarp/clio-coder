@@ -1019,6 +1019,39 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("words a partial cache reuse with the re-prefilled count the call's journal records", () => {
+		const ledger = () =>
+			buildContextLedger({
+				provider: "fixture",
+				model: "fixture",
+				contextWindow: 32768,
+				systemPromptTokens: 1200,
+				toolSchemaTokens: 800,
+				messageTokens: 1000,
+				compactionThreshold: 0.9,
+				compactionAuto: true,
+			});
+		const view = telemetryViewOf(
+			"partial-cache",
+			telemetryCall("partial-cache", {
+				usage: { input: 3000, cacheRead: 9000 },
+				cache: { verdict: "partial", rePrefilledTokens: { kind: "measured", value: 3000, source: "local-count" } },
+			}),
+		);
+		const tui = {
+			showOverlay: () => ({ hide() {} }),
+			requestRender() {},
+		} as unknown as TUI;
+		const handle = openContextOverlay(tui, ledger, { telemetry: { live: () => view, subscribe: () => () => {} } });
+		try {
+			const plain = (dockTop(tui)?.frame.renderDockBody(120, 60) ?? []).map(stripTerminalSequences).join("\n");
+			match(plain, /backend partly reused · re-prefilled 3,000 · cache read 9,000/u);
+			doesNotMatch(plain, /backend reused/u);
+		} finally {
+			handle.hide();
+		}
+	});
+
 	it("keeps framed bounds live through visibility, resize, and removal", () => {
 		const terminal = new RenderingTerminal();
 		const tui = new TuiAltScreen(terminal);

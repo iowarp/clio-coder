@@ -250,11 +250,16 @@ function renderContextLedgerLines(
 				cache?.backend?.cachedTokens === null;
 			const backend = backendCacheReadsUnknown
 				? "server does not report cache reads"
-				: verdict === "hot" || verdict === "partial"
+				: verdict === "hot"
 					? "backend reused"
-					: verdict === "cold"
-						? "backend cold"
-						: "backend small";
+					: verdict === "partial"
+						? "backend partly reused"
+						: verdict === "cold"
+							? "backend cold"
+							: "backend small";
+			// A partial or cold call charged again some of the prefix the previous request had; the journal counts it.
+			const rePrefilled =
+				verdict === "partial" || verdict === "cold" ? ["·", `re-prefilled ${call.cache.rePrefilled.display}`] : [];
 			const line = backendCacheReadsUnknown
 				? ["prompt cache:", shell, "·", backend].join(" ")
 				: [
@@ -262,6 +267,7 @@ function renderContextLedgerLines(
 						shell,
 						"·",
 						backend,
+						...rePrefilled,
 						"·",
 						`cache read ${call.usage.cacheRead.display}`,
 						"·",
