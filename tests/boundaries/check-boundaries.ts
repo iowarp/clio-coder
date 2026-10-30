@@ -159,7 +159,7 @@ export function checkTelemetryProducer(file: string, source: string): string[] {
 
 /** Guard monetary presentation without confusing token/duration precision or shell dollars (#434). */
 export function checkCostRendering(file: string, source: string): string[] {
-	if (file === "src/domains/observability/cost.ts") return [];
+	if (file === "src/core/telemetry/render.ts") return [];
 	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 	const violations: string[] = [];
 	const monetary = /cost|usd|price|spend|amount|dollars|ceiling|budget/i;
@@ -198,7 +198,7 @@ export function checkCostRendering(file: string, source: string): string[] {
 		if (bypass) {
 			const line = tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
 			violations.push(
-				`rule10: ${file}:${line} formats money outside domains/observability/cost.ts; use renderCostAggregate/renderCostAmount, or a server-rendered GUI display string`,
+				`rule10: ${file}:${line} formats money outside core/telemetry/render.ts; use the canonical renderer (renderCostAggregate/renderCostAmount or a DTO display), or a server-rendered GUI display string`,
 			);
 		}
 		ts.forEachChild(node, visit);
@@ -632,7 +632,7 @@ function isAllowedWorkerProviderValueImport(resolved: string, providersDomainRoo
  *      included. It is the one session contract the TUI, headless run and the
  *      ACP server all call, so a render module in its graph would make the
  *      terminal a dependency of every surface.
- *  10. Root and GUI monetary display uses domains/observability/cost.ts;
+ *  10. Root and GUI monetary display uses core/telemetry/render.ts;
  *      browser code consumes display strings rendered by the server.
  *   9. src/engine/** never imports src/interactive/**, type-only included.
  *      The ACP server reaches session behavior through src/session-control.

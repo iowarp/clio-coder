@@ -14,6 +14,13 @@
  */
 
 import type { ResponseModelIdObservationCounts } from "../../core/response-model-id.js";
+import {
+	COST_NOT_MEASURED,
+	costClaimMeasured,
+	renderCostClaim,
+	renderCredit,
+	renderUsdLimit as renderLimit,
+} from "../../core/telemetry/render.js";
 import { type CostProvenance, normalizeCostProvenance } from "../providers/index.js";
 
 export interface CostAmount {
@@ -51,7 +58,7 @@ export function emptyCostAggregate(): CostAggregate {
 
 /** False when nothing has been priced yet, so no cost claim of any kind is available. */
 export function costWasMeasured(cost: CostAggregate | null | undefined): cost is CostAggregate {
-	return cost !== null && cost !== undefined && (cost.calls > 0 || (cost.unknownCallCoverageRuns ?? 0) > 0);
+	return cost !== null && cost !== undefined && costClaimMeasured(cost);
 }
 
 /** Receipt totals never reveal how many calls ran or went unmetered (#434). */
@@ -91,13 +98,6 @@ export function aggregateCostAmounts(amounts: ReadonlyArray<CostAmount>): CostAg
 	return amounts.reduce((aggregate, amount) => accumulateCostAmount(aggregate, amount), emptyCostAggregate());
 }
 
-function formatUsdAmount(value: number): string {
-	if (!Number.isFinite(value) || value <= 0) return "$0.00";
-	if (value < 0.00000001) return `$${value.toExponential(2)}`;
-	const digits = value < 0.01 ? Math.min(8, Math.max(4, Math.ceil(-Math.log10(value)))) : 2;
-	return `$${value.toFixed(digits)}`;
-}
-
 /**
  * The one derivation every cost surface renders. Null means there is no cost
  * claim to make, and a null must be shown as the absence of a cost field rather
@@ -112,13 +112,8 @@ function formatUsdAmount(value: number): string {
  * doubt too. Usage always shows; cost shows when something priced it.
  */
 export function formatCostAggregate(cost: CostAggregate | null | undefined): string | null {
-	if (!costWasMeasured(cost)) return null;
-	if (cost.allKnownFree) return "$0.00 local";
-	// Partly priced still says what it knows, with the `+?` marking the rest.
-	if (cost.hasUnknown)
-		return cost.knownUsd > 0 ? `${cost.hasEstimated ? "~" : ""}${formatUsdAmount(cost.knownUsd)} +?` : null;
-	if (cost.hasEstimated) return `~${formatUsdAmount(cost.knownUsd)} est`;
-	return formatUsdAmount(cost.knownUsd);
+	// The wording itself lives in the canonical telemetry renderer (#434, R5).
+	return renderCostClaim(cost);
 }
 
 /**
@@ -126,7 +121,7 @@ export function formatCostAggregate(cost: CostAggregate | null | undefined): str
  * `/usage` drop their cost field instead; a table cell that owns a column cannot,
  * so it says the same thing in words rather than inventing `$0.00`.
  */
-export const COST_NOT_MEASURED = "not measured";
+export { COST_NOT_MEASURED };
 
 export function costAggregateForAmount(
 	usd: number,
@@ -186,13 +181,12 @@ export function renderTraceCost(row: {
  * renders plainly and a zero limit reads as `$0.00` (#434).
  */
 export function renderUsdLimit(value: number | null | undefined): string {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? formatUsdAmount(value) : "not set";
+	return renderLimit(value);
 }
 
 /** Provider credit limits are measured balances; they can be denominated outside USD. */
 export function renderCreditAmount(value: number, currency: string): string {
-	if (currency.toUpperCase() === "USD") return renderCostAmount(value, "known");
-	return `${value.toFixed(2)} ${currency}`;
+	return currency.toUpperCase() === "USD" ? renderCostAmount(value, "known") : renderCredit(value, currency);
 }
 
 export interface UsageBreakdown {
