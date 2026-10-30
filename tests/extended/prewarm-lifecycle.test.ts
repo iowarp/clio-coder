@@ -129,3 +129,16 @@ test("shutdown aborts detached work and forbids later schedules without releasin
 	strictEqual(f.rounds.length, 1);
 	deepStrictEqual(f.counts(), { reservations: 0, recorded: 1, visible: 0 });
 });
+
+test("journaled warming keeps its display result without writing a second usage row", async () => {
+	const f = fixture();
+	try {
+		f.warm.schedule("session-start");
+		await f.roundStarted;
+		f.rounds[0]?.finish({ ...completed, callId: "call-fixture", attemptId: "attempt-fixture" });
+		await f.warm.settled();
+		deepStrictEqual(f.counts(), { reservations: 0, recorded: 0, visible: 1 });
+	} finally {
+		f.warm.dispose();
+	}
+});

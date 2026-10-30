@@ -294,7 +294,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 					maxInputTokens: Math.min(256, target.cache.warm.maxInputTokens ?? 256),
 					canSend,
 				});
-				if (wake.invoked !== false) deps.recordUsage(runtime, wake.usage, origin);
+				if (wake.invoked !== false && !wake.callId) deps.recordUsage(runtime, wake.usage, origin);
 				recordStartupDiagnostic({
 					kind: "model-wake",
 					target: target.id,
@@ -404,7 +404,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				aborted: result.aborted,
 			});
 		}
-		if (result.invoked !== false) deps.recordUsage(runtime, result.usage, origin);
+		if (result.invoked !== false && !result.callId) deps.recordUsage(runtime, result.usage, origin);
 		recordStartupDiagnostic({
 			kind: "prompt-warm",
 			target: runtime.targetId,

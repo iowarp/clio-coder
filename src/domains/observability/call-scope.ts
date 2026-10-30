@@ -21,7 +21,9 @@ export interface CallJournalOptions {
 export async function openCallScope(options: CallJournalOptions | undefined, model: { api: string; id: string }) {
 	const lease = options ? await options.acquire(options.origin, options.label) : undefined;
 	let call: TelemetryCall | undefined;
+	let settledIdentity: { callId: string; attemptId: string } | undefined;
 	return {
+		identity: () => settledIdentity,
 		startAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): void {
 			if (!options || !lease) return;
 			call = call
@@ -49,6 +51,7 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 				callSettlementFromMessage(message, options.costProvenance),
 				reportedModelFromMessage(message),
 			);
+			if (facts) settledIdentity = { callId: facts.callId, attemptId: facts.attemptId };
 			if (facts && options.onSettled) {
 				try {
 					options.onSettled(facts);

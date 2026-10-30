@@ -6,10 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Type } from "typebox";
+import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { readCallJournal } from "../../src/domains/observability/call-journal.js";
 import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import llamacpp from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import { usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
+import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { streamSimple } from "../../src/engine/ai.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
@@ -135,7 +138,11 @@ test("terminal-only warm reports no TTFT and absent provider usage remains unkno
 test("native warm cannot administer residency or JIT-load a model and applies its input bound after transforms", async () => {
 	const stateDir = await mkdtemp(join(tmpdir(), "prewarm-journal-"));
 	const journals = createSessionJournals(stateDir, () => {});
+	const live: CallSettled[] = [];
 	const telemetry = {
+		onSettled: (call: CallSettled) => {
+			live.push(call);
+		},
 		origin: { id: "prewarm-session", cwdHash: "repo" },
 		acquire: journals.acquire,
 		label: "prewarm" as const,
@@ -200,9 +207,19 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 		});
 		ok(refused.errorMessage?.includes("token budget"));
 		strictEqual(paths.length, 1, "oversized transformed warm never reaches the server");
-		const calls = (await readCallJournal(join(stateDir, "sessions", "repo", "prewarm-session"))).records
-			.map(({ record }) => record)
-			.filter((record) => record.k === "call.settled");
+		const records = (await readCallJournal(join(stateDir, "sessions", "repo", "prewarm-session"))).records.map(
+			({ record }) => record,
+		);
+		const calls = records.filter((record) => record.k === "call.settled");
+		strictEqual(result.callId, calls[0]?.data.callId);
+		strictEqual(refused.callId, calls[1]?.data.callId);
+		strictEqual(result.attemptId, calls[0]?.data.attemptId);
+		strictEqual(live.length, 2);
+		deepStrictEqual(
+			ledgerUsageCalls([], {}, records),
+			usageCallsFromAttempts(live.map((settled) => ({ started: settled, settled }))),
+		);
+		strictEqual(ledgerCallFailureCounts([], records).neverInvokedCalls, 1);
 		strictEqual(calls.length, 2);
 		strictEqual(calls[0]?.data.disposition, "settled");
 		strictEqual(calls[1]?.data.disposition, "never_sent");

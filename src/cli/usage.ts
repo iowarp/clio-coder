@@ -647,6 +647,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			callOrigins.rows += 1;
 			if (call.label === "side-question" || call.label === "helper") callOrigins.sideQuestions += 1;
 			else if (call.label === "handoff") callOrigins.handoffs += 1;
+			else if (call.label === "prewarm") callOrigins.prewarms += 1;
 		}
 	}
 	for (const row of outOfTurnRows) {

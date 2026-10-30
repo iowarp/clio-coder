@@ -84,6 +84,8 @@ export interface PrewarmRoundInput {
 }
 
 export interface PrewarmRoundResult {
+	callId?: string;
+	attemptId?: string;
 	invoked?: boolean;
 	/** True when the operator submitted (or the session moved) before the round settled. */
 	aborted: boolean;
@@ -139,7 +141,8 @@ export function prewarmPromptTokens(result: Pick<PrewarmRoundResult, "usage" | "
 export async function runPrewarmRound(input: PrewarmRoundInput): Promise<PrewarmRoundResult> {
 	const scope = await openCallScope(input.telemetry, input.model);
 	try {
-		return await runPrewarmAttempt(input, scope);
+		const result = await runPrewarmAttempt(input, scope);
+		return { ...result, ...scope.identity() };
 	} finally {
 		await scope.close();
 	}
