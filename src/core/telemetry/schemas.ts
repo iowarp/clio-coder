@@ -15,11 +15,12 @@ import {
 	TransportKind,
 	vocabulary,
 } from "./enums.js";
-import { factSchema } from "./fact.js";
+import { EstimateMethod, factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
 
 const closed = { additionalProperties: false };
 const count = Type.Integer({ minimum: 0 });
+const estimatedCount = Type.Object({ kind: Type.Literal("estimated"), value: count, method: EstimateMethod }, closed);
 const duration = Type.Number({ minimum: 0 });
 const text = Type.String({ maxLength: 4096 });
 const utc = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" });
@@ -202,6 +203,12 @@ export const CallSettledSchema = Type.Object(
 			Type.Object({ provider: ExistingId, windows: Type.Array(QuotaWindowSchema), source: quotaSource }, closed),
 		),
 		responseId: Type.Optional(text),
+		/**
+		 * What an interrupted call the provider never reported on is estimated to have spent: the prompt side from the
+		 * turn's context accounting and the output from the text that arrived. A transcript shows it; no fold sums it,
+		 * so the usage above stays the measured lower bound (#423, #430, #434).
+		 */
+		interruptedEstimate: Type.Optional(Type.Object({ input: estimatedCount, output: estimatedCount }, closed)),
 	},
 	closed,
 );

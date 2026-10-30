@@ -105,6 +105,16 @@ describe("contracts/metering integrity", () => {
 				estimatedUsage: { input: 20, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 23, estimated: true },
 			} as unknown as AgentMessage;
 			rememberMessageCalls(message, [first, settled(1, message)]);
+			// The journal keeps the display estimate beside the usage, where no fold sums it.
+			deepStrictEqual(
+				settled(1, message).interruptedEstimate,
+				invoked
+					? {
+							input: { kind: "estimated", value: 20, method: "prompt-side-only" },
+							output: { kind: "estimated", value: 3, method: "chars/4" },
+						}
+					: undefined,
+			);
 			const summary = sumRunUsage([message, message]);
 			strictEqual(summary.tokens, 10);
 			strictEqual(summary.costUsd, 0.25);

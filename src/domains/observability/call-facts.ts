@@ -170,6 +170,19 @@ export function callSettlementFromMessage(
 		else if (costProvenance === "estimated")
 			pricing = { usd: { kind: "estimated", value: usd, method: "catalog" }, pricedBy: "catalog" };
 	}
+	// The display estimate an interrupted call carries when the provider reported nothing; the journal keeps it beside
+	// the measured usage, never inside it, so a resumed transcript reads as the live one did (#430, #434).
+	const estimate = record(raw.estimatedUsage);
+	const estimated = (value: unknown, method: "prompt-side-only" | "chars/4") => {
+		const tokens = amount(value);
+		return tokens !== null && Number.isInteger(tokens) ? { kind: "estimated" as const, value: tokens, method } : null;
+	};
+	const interruptedInput = estimated(estimate.input, "prompt-side-only");
+	const interruptedOutput = estimated(estimate.output, "chars/4");
+	const interruptedEstimate =
+		!neverSent && !terminal && !observed && estimate.estimated === true && interruptedInput && interruptedOutput
+			? { input: interruptedInput, output: interruptedOutput }
+			: undefined;
 	return {
 		disposition: neverSent ? "never_sent" : !terminal ? "sent_unsettled" : observed ? "settled" : "settled_no_usage",
 		stop: { reason, ...((reason === "aborted" || reason === "error") && failureCode ? { failure: failureCode } : {}) },
@@ -184,6 +197,7 @@ export function callSettlementFromMessage(
 			verdict: "unknown",
 		},
 		...(typeof raw.responseId === "string" ? { responseId: raw.responseId } : {}),
+		...(interruptedEstimate ? { interruptedEstimate } : {}),
 	};
 }
 
