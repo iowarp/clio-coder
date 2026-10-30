@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import { type GateDecisionArtifact, parseRecordingManifest, verifyGateDecisionArtifact } from "../dispatch/index.js";
+import type { CostAggregate } from "../observability/cost.js";
 import { isDecisionRecord } from "../session/entries.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
 import { hasRunProvenance, type RunProvenanceView, runProvenanceFromUnknown } from "./provenance.js";
@@ -269,6 +270,10 @@ function readSource(value: unknown, source: string): EvidenceOverview["source"] 
 function readTotals(value: unknown, source: string): EvidenceOverview["totals"] {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
 	return {
+		// The build writes the summary (#434); a bundle from before it has none and reads without one.
+		...(value.costSummary === undefined
+			? {}
+			: { costSummary: readCostSummary(value.costSummary, `${source}.costSummary`) }),
 		runs: readNumber(value, source, "runs"),
 		receipts: readNumber(value, source, "receipts"),
 		toolCalls: readNumber(value, source, "toolCalls"),
@@ -283,6 +288,26 @@ function readTotals(value: unknown, source: string): EvidenceOverview["totals"] 
 		costUsd: readNumber(value, source, "costUsd"),
 		wallTimeMs: readNumber(value, source, "wallTimeMs"),
 	};
+}
+
+function readCostSummary(value: unknown, source: string): CostAggregate {
+	if (!isRecord(value)) throw new Error(`${source}: expected object`);
+	return {
+		...(value.unknownCallCoverageRuns === undefined
+			? {}
+			: { unknownCallCoverageRuns: readNumber(value, source, "unknownCallCoverageRuns") }),
+		knownUsd: readNumber(value, source, "knownUsd"),
+		hasEstimated: readBoolean(value, source, "hasEstimated"),
+		hasUnknown: readBoolean(value, source, "hasUnknown"),
+		allKnownFree: readBoolean(value, source, "allKnownFree"),
+		calls: readNumber(value, source, "calls"),
+	};
+}
+
+function readBoolean(record: Record<string, unknown>, source: string, field: string): boolean {
+	const value = record[field];
+	if (typeof value !== "boolean") throw new Error(`${source}.${field}: expected boolean`);
+	return value;
 }
 
 function readString(record: Record<string, unknown>, source: string, field: string): string {
