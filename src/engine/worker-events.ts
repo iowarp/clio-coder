@@ -5,6 +5,7 @@
  * events without disturbing pi-agent-core consumers.
  */
 
+import type { WorkerTelemetryFrame } from "../core/telemetry/forwarder.js";
 import type { NormalizedTokenUsage } from "../core/token-split.js";
 import type { StructuredHelperResult } from "../domains/agents/result-contract.js";
 import type { RunOutcomeCode } from "../domains/dispatch/types.js";
@@ -167,6 +168,7 @@ export interface ClioHelperResultEvent {
 }
 
 export type ClioWorkerEvent =
+	| WorkerTelemetryFrame
 	| ClioToolStartEvent
 	| ClioToolFinishEvent
 	| ClioToolObservationEvent

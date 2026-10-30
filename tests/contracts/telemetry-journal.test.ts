@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
+import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall, recordTelemetry, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
@@ -26,6 +28,7 @@ import { usageCallsFromAttempts, usageCallsFromJournal } from "../../src/domains
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import { reseedSessionUsageFromLedger } from "../../src/domains/session/usage-reseed.js";
+import { isReceiptBearingFrame } from "../../src/worker/protocol.js";
 import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -51,6 +54,59 @@ test("producer boundaries reject filesystem helpers and serialization without bl
 	strictEqual(checkTelemetryProducer("helper.ts", 'import { open as write } from "node:fs/promises";').length, 1);
 	strictEqual(checkTelemetryProducer("helper.ts", 'JSON.stringify(event); new DatabaseSync("file");').length, 2);
 	deepStrictEqual(checkTelemetryProducer("producer.ts", "sink.enqueue(event);"), []);
+});
+
+test("worker forwarding preserves identity and source clocks with bounded deferred delivery", async () => {
+	const run = { sessionId: null, runId: "standalone-run", label: "worker" as const };
+	const origin = { host: "remote-worker", pid: 17, birthToken: "worker-birth", monoEpochWallMs: 1000 };
+	const frames: WorkerTelemetryFrame[] = [];
+	const forwarder = createTelemetryForwarder(run, origin, (frame) => frames.push(frame), 2);
+	try {
+		const call = beginCall(
+			{
+				label: "worker",
+				target: { targetId: "test", runtimeId: "test", api: "test", requestedModel: "test", reportedModel: unknown },
+				roundKind: "normal",
+				toolChoice: "auto",
+			},
+			run,
+		);
+		call.settle(unsent);
+		strictEqual(recordTelemetry("process.exited", { exitCode: 0 }, run), false);
+		strictEqual(frames.length, 0, "enqueue does not serialize or emit inline");
+		forwarder.close();
+		deepStrictEqual(
+			frames.map((frame) => frame.record.k),
+			["call.started", "call.settled", "gap"],
+		);
+		ok(frames.every(isReceiptBearingFrame));
+		strictEqual(readWorkerTelemetryFrame(frames[0], { ...run, runId: "different-run" }), null);
+		strictEqual(readWorkerTelemetryFrame(frames[0], { ...run, sessionId: "different-session" }), null);
+		const directory = await mkdtemp(join(tmpdir(), "telemetry-forwarded-"));
+		const journal = await openCallJournal({ sessionDirectory: directory, context: run, writer });
+		try {
+			for (const frame of frames) {
+				const pending = readWorkerTelemetryFrame(frame, run);
+				ok(pending);
+				ok(journal.enqueue(pending));
+			}
+			await journal.flush();
+			const saved = await readCallJournal(directory);
+			deepStrictEqual(
+				saved.records.map(({ record }) => record.id),
+				frames.map((frame) => frame.record.id),
+			);
+			ok(saved.records.every((row) => row.origin.host === "remote-worker" && row.record.ctx.sessionId === null));
+			const folded = foldCallJournal(saved.records.map(({ record }) => record));
+			strictEqual(folded.totals.neverSent, 1);
+			strictEqual(folded.coverage.droppedRecords, 1);
+		} finally {
+			await journal.close();
+			await rm(directory, { recursive: true, force: true });
+		}
+	} finally {
+		forwarder.close();
+	}
 });
 
 test("overlapping work retains its original session and releases ownership only after the last settlement", async () => {

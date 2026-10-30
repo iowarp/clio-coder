@@ -50,6 +50,8 @@ export const EnvelopeSchema = Type.Object(
 		id: Type.String({ pattern: `^rec_${UUID_V7_PATTERN}$` }),
 		t: UtcSchema,
 		mono: Type.Number({ minimum: 0 }),
+		/** Forwarded worker records retain their source clock; local records use the segment origin (#434). */
+		origin: Type.Optional(ClockOriginSchema),
 		ctx: TelemetryContextSchema,
 		tier: Tier,
 		cc: ContentClass,

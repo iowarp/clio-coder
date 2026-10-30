@@ -161,10 +161,14 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							if (!pending) continue;
 							dequeued += 1;
 							const record = redactSecretsDeep(
-								makeTelemetryRecord(pending.kind, pending.data, pending.ctx, {
-									t: new Date(pending.wallMs).toISOString(),
-									mono: pending.mono,
-								}),
+								{
+									...makeTelemetryRecord(pending.kind, pending.data, pending.ctx, {
+										t: new Date(pending.wallMs).toISOString(),
+										mono: pending.mono,
+									}),
+									...(pending.recordId ? { id: pending.recordId } : {}),
+									...(pending.origin ? { origin: pending.origin } : {}),
+								},
 								createRedactionTally(),
 							);
 							if (readTelemetryRecord(record).kind !== "record") {
@@ -314,7 +318,8 @@ function appendReadSegment(result: CallJournalRead, bytes: Buffer): void {
 	let origin: ClockOrigin | undefined;
 	for (const row of scan.rows) {
 		if (row.kind === "header") origin = row.header.clockOrigin;
-		else if (row.kind === "record" && origin) result.records.push({ record: row.record, origin });
+		else if (row.kind === "record" && origin)
+			result.records.push({ record: row.record, origin: row.record.origin ?? origin });
 		else {
 			if (row.kind === "skipped" && row.segment) origin = undefined;
 			result.skipped += 1;

@@ -1,5 +1,6 @@
 import type { TelemetryContext } from "./context.js";
 import { telemetryContext, telemetryOwner, withTelemetryContext } from "./context.js";
+import type { ClockOrigin } from "./envelope.js";
 import { newAttemptId, newCallId } from "./ids.js";
 import type { CallSettled, CallStarted, Kind, Payload } from "./schemas.js";
 
@@ -10,6 +11,9 @@ export type PendingTelemetry<K extends Kind = Kind> = K extends Kind
 			ctx: TelemetryContext;
 			wallMs: number;
 			mono: number;
+			/** Preserved when an already-enveloped worker record crosses into the host writer (#434). */
+			recordId?: string;
+			origin?: ClockOrigin;
 		}
 	: never;
 
