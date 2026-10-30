@@ -661,6 +661,8 @@ test("standard mode writes no content-bearing record; content needs research, th
 		}
 		deepStrictEqual(seen, ["gap:mode-filtered", "segment.closed", "prompt.text", "gap:research-cap"]);
 		strictEqual(journal.health().capped, 1);
+		const fold = foldCallJournal((await readCallJournal(sessionDirectory)).records.map(({ record }) => record));
+		strictEqual(fold.coverage.gapRecords, 0, "refused research capture never leaves accounting partial");
 	} finally {
 		await journal.close();
 		await rm(sessionDirectory, { recursive: true, force: true });

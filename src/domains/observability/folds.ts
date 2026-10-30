@@ -142,6 +142,9 @@ export function foldCallJournal(records: Iterable<TelemetryRecord>, callIds?: Re
 		}
 		seen.set(record.id, record);
 		if (record.k === "gap") {
+			// A mode change or the research cap only refuses research-tier records; accounting never passes either
+			// gate, so neither leaves a call total partial (#434).
+			if (record.data.reason === "mode-filtered" || record.data.reason === "research-cap") continue;
 			coverage.gapRecords += 1;
 			coverage.droppedRecords += record.data.count;
 			continue;
