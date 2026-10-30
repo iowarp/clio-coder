@@ -58,6 +58,11 @@ function fakeWorker(): SpawnedWorker {
 	};
 }
 
+/** The spec with its run id normalized: each dispatch carries its own run's id to the worker (#434). */
+function runNormalized(spec: WorkerSpec | undefined): WorkerSpec | undefined {
+	return spec?.telemetryContext ? { ...spec, telemetryContext: { ...spec.telemetryContext, runId: "run" } } : spec;
+}
+
 interface Harness {
 	held: HeldWorkerKey[];
 	adopted: WorkerSpec[];
@@ -141,7 +146,9 @@ describe("contracts/speculative dispatch", () => {
 			const coldRun = await dispatchOnce(h);
 			strictEqual(h.cold.length, 1, "with nothing held the next dispatch spawns cold");
 			strictEqual(coldRun?.timing?.heldWorkerAdoptedAt, undefined);
-			deepStrictEqual(h.adopted[0], h.cold[0], "adoption changed the spec");
+			strictEqual(h.adopted[0]?.telemetryContext?.runId, adoptedRun?.id, "the adopted spec names its own run");
+			strictEqual(h.cold[0]?.telemetryContext?.runId, coldRun?.id, "the cold spec names its own run");
+			deepStrictEqual(runNormalized(h.adopted[0]), runNormalized(h.cold[0]), "adoption changed the spec");
 			deepStrictEqual(h.bundle.contract.speculativeStats?.(), { held: 1, adopted: 1, discarded: 0, live: 0 });
 		} finally {
 			await h.bundle.extension.stop?.();
