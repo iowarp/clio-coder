@@ -2,9 +2,16 @@ import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 
 import { readSettings } from "../core/config.js";
-import { authNotRequiredStatus, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
+import {
+	authNotRequiredStatus,
+	openAuthStorage,
+	resolveAuthTarget,
+	resolveRuntimeAuthTarget,
+	targetRequiresAuth,
+} from "../domains/providers/auth/index.js";
 import type { AuthStatus } from "../domains/providers/index.js";
 import { supportGroupLabel } from "../domains/providers/index.js";
+import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { createDelayedManualCodeInput } from "./oauth-manual-input.js";
 import { promptOAuthSelection } from "./oauth-select.js";
 import {
@@ -84,20 +91,46 @@ function warnIfCredentialsDamaged(auth: ReturnType<typeof openAuthStorage>): voi
 	process.stderr.write("warning: entries below may be understated. Nothing will be written until it is repaired.\n");
 }
 
-function renderStatusRows(rows: ReadonlyArray<ConnectableProviderRow>): string {
+function renderStatusRows(
+	rows: ReadonlyArray<ConnectableProviderRow>,
+	auth: ReturnType<typeof openAuthStorage>,
+): string {
+	const targets = readSettings().targets;
 	return formatColumns(
-		rows.map((row) => {
+		rows.flatMap((row) => {
 			const status = row.status;
 			if (status === null) {
-				return [row.entry.runtimeId, row.entry.label, "-", "unknown", "no auth probe available"];
+				return [[row.entry.runtimeId, row.entry.label, "-", "unknown", "no auth probe available"]];
 			}
-			return [
+			const runtimeRow = [
 				row.entry.runtimeId,
 				row.entry.label,
 				status.credentialType ?? "-",
 				status.available ? "present" : "absent",
 				status.detail ?? status.source,
 			];
+			// A target with its own credential reference (configure stores a
+			// gateway key as `target:<id>`) is never read by its runtime's row,
+			// which then said absent beside a working target. Name each one.
+			const runtime = getRuntimeRegistry().get(row.entry.runtimeId);
+			if (!runtime) return [runtimeRow];
+			const runtimeProviderId = resolveRuntimeAuthTarget(runtime).providerId;
+			const targetRows = targets.flatMap((target) => {
+				if (target.runtime !== runtime.id || !targetRequiresAuth(target, runtime)) return [];
+				const authTarget = resolveAuthTarget(target, runtime);
+				if (authTarget.providerId === runtimeProviderId) return [];
+				const targetStatus = auth.statusForTarget(authTarget, { includeFallback: false });
+				return [
+					[
+						authTarget.providerId,
+						`${row.entry.label} (target ${target.id})`,
+						targetStatus.credentialType ?? "-",
+						targetStatus.available ? "present" : "absent",
+						targetStatus.detail ?? targetStatus.source,
+					],
+				];
+			});
+			return [runtimeRow, ...targetRows];
 		}),
 	);
 }
@@ -368,7 +401,7 @@ async function runStatus(args: ReadonlyArray<string>): Promise<number> {
 		return status.available ? 0 : 1;
 	}
 
-	process.stdout.write(renderStatusRows(listConnectableProviderRows()));
+	process.stdout.write(renderStatusRows(listConnectableProviderRows(), auth));
 	return 0;
 }
 
