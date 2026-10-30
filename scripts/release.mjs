@@ -152,6 +152,11 @@ async function main() {
 			for (const name of [`candidate-${commit}`, `results-${commit}`])
 				if (!artifacts.some((artifact) => artifact.name === name && !artifact.expired))
 					throw new Error("Qualification artifact expired; run qualification again before publishing.");
+			// A rehearsal qualifies on a scratch branch, so origin's version branch can still lack
+			// the candidate that release.yml is dispatched against (#442). A plain push refuses
+			// to move a diverged remote branch.
+			await ask(`Synchronize ${branch} with origin by fast-forward before publishing. This publishes nothing.`);
+			run("git", ["push", "--set-upstream", "origin", branch]);
 		}
 		if (values.rehearse) {
 			console.log("Non-public rehearsal passed. No release was published.");
@@ -212,10 +217,19 @@ async function main() {
 			.find((entry) => entry.includes("branch refs/heads/main"))
 			?.split("\n")[0]
 			?.slice("worktree ".length);
-		if (!mainTree) throw new Error("No main worktree is present; synchronize it manually.");
-		if (git("-C", mainTree, "status", "--porcelain"))
-			throw new Error("Local main is dirty; keep its edits and synchronize it manually.");
-		run("git", ["-C", mainTree, "merge", "--ff-only", "origin/main"]);
+		// The release already succeeded, so a local main that cannot move is a notice, not a failure (#442).
+		if (mainTree && git("-C", mainTree, "status", "--porcelain"))
+			console.log(`Local main at ${mainTree} is dirty; keep its edits and synchronize it manually.`);
+		else if (mainTree) run("git", ["-C", mainTree, "merge", "--ff-only", "origin/main"]);
+		// The main checkout usually sits on the version branch with main checked out nowhere;
+		// fetching into the unchecked-out ref fast-forwards it or refuses a diverged one.
+		else
+			try {
+				run("git", ["fetch", "origin", "main:main"]);
+			} catch {
+				// git printed why it refused; the release itself is complete.
+				console.log("Local main did not fast-forward to origin/main; synchronize it manually.");
+			}
 		if (git("rev-parse", "origin/main") === commit) {
 			run("git", ["switch", "--detach", commit]);
 			run("git", ["branch", "-d", branch]);
