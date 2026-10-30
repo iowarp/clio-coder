@@ -56,7 +56,8 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
  * positive or the adapter marked it provider-reported; its zeros are then measured zeros (#434). An all-zero
  * object without that mark is the seed pi writes before a response arrives, and every field stays unknown.
  * A response that never reached its end keeps the positive counts its provider reported as a lower bound, and its
- * zeros stay unknown, because they may only mark where the stream stopped.
+ * zeros stay unknown, because they may only mark where the stream stopped. A reported total above its own
+ * breakdown leaves the breakdown's zeros unknown too, and the total is kept beside it.
  */
 export function callSettlementFromMessage(
 	message: unknown,
@@ -72,9 +73,15 @@ export function callSettlementFromMessage(
 	const stop = raw.stopReason;
 	const reason = stop === "stop" || stop === "toolUse" || stop === "length" || stop === "aborted" ? stop : "error";
 	const terminal = (reason !== "error" && reason !== "aborted") || typeof failure.httpStatus === "number";
-	const read = (key: keyof CallUsage): Fact<number> => {
+	const providerTotal = amount(usage.totalTokens);
+	const breakdown = (["input", "output", "cacheRead", "cacheWrite"] as const).reduce(
+		(sum, key) => sum + (amount(usage[key]) ?? 0),
+		0,
+	);
+	const breakdownIncomplete = providerTotal !== null && providerTotal > breakdown;
+	const read = (key: keyof CallUsage | "totalTokens"): Fact<number> => {
 		const value = amount(usage[key]);
-		if (value === 0 && !terminal) return unknown;
+		if (value === 0 && (!terminal || breakdownIncomplete)) return unknown;
 		if (
 			usage.estimated === true ||
 			(usage.clioExternal !== undefined && external.tokenUsage !== "provider-reported") ||
@@ -93,6 +100,7 @@ export function callSettlementFromMessage(
 		}
 		return unknown;
 	};
+	const total = breakdownIncomplete ? read("totalTokens") : undefined;
 	const counts: CallUsage = {
 		input: read("input"),
 		output: read("output"),
@@ -100,6 +108,7 @@ export function callSettlementFromMessage(
 		cacheWrite: read("cacheWrite"),
 		cacheWrite1h: read("cacheWrite1h"),
 		reasoning: read("reasoning"),
+		...(total?.kind === "measured" ? { total } : {}),
 	};
 	const observed = Object.values(counts).some((fact) => fact.kind === "measured");
 	const failureCode = cause ?? failureCause(failure);

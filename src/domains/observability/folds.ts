@@ -92,7 +92,8 @@ export function foldCalls(attempts: readonly FoldedAttempt[]): CallTotals {
 		for (const field of fields) addGroup(totals.usage[field], [fact(field), ...bound]);
 		const prompt = [fact("input"), fact("cacheRead"), fact("cacheWrite")];
 		addGroup(totals.promptTokens, [...prompt, ...bound]);
-		addGroup(totals.totalTokens, [...prompt, fact("output"), ...bound]);
+		const total = settled?.usage?.total;
+		addGroup(totals.totalTokens, [...(total ? [total] : [...prompt, fact("output")]), ...bound]);
 		addGroup(totals.usd, [settled?.pricing.usd ?? unknown, ...bound]);
 	}
 	return totals;

@@ -41,7 +41,7 @@ test("dispositions and causes come from recorded facts, and a budget wait is nev
 	strictEqual(rejected.stop.failure, "auth_rejected");
 });
 
-test("an out-of-turn error row keeps its recorded tokens and cost as a lower bound (#434)", () => {
+test("an out-of-turn error row keeps its recorded tokens, total and cost as a lower bound (#434)", () => {
 	const row = {
 		sessionId: "side",
 		label: "side-question" as const,
@@ -52,26 +52,28 @@ test("an out-of-turn error row keeps its recorded tokens and cost as a lower bou
 		callOutcome: "error" as const,
 		usage: { input: 300, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: null, totalTokens: 300, costUsd: 0.01 },
 	};
+	const totalOnly = { ...row, usage: { ...row.usage, input: 0, totalTokens: 500, costUsd: 0.02 } };
 	const unrecorded = { ...row, usage: { ...row.usage, input: null, totalTokens: null, costUsd: null } };
 	const records = importLegacySession("side", [], {
-		outOfTurn: [row, unrecorded],
+		outOfTurn: [row, totalOnly, unrecorded],
 		costProvenance: "known",
 	}).records;
 	const calls = records.flatMap((record) => (record.k === "call.settled" ? [record.data as CallSettled] : []));
 	deepStrictEqual(
 		calls.map((call) => call.disposition),
-		["sent_unsettled", "sent_unsettled"],
+		["sent_unsettled", "sent_unsettled", "sent_unsettled"],
 		"a usage report is not evidence that the response ended",
 	);
 	deepStrictEqual(calls[0]?.usage?.input, { kind: "measured", value: 300, source: "provider" });
 	strictEqual(calls[0]?.usage?.output.kind, "unknown", "a zero where the stream stopped is not a measured zero");
+	deepStrictEqual(calls[1]?.usage?.total, { kind: "measured", value: 500, source: "provider" });
 	deepStrictEqual(
 		calls.map((call) => call.pricing.usd.kind === "measured" && call.pricing.usd.value),
-		[0.01, false],
+		[0.01, 0.02, false],
 	);
 	const totals = foldCallJournal(records).totals;
-	strictEqual(totals.totalTokens.measured, 300);
-	strictEqual(totals.totalTokens.unknownCount, 2, "every unsettled call leaves its sum partial");
+	strictEqual(totals.totalTokens.measured, 800);
+	strictEqual(totals.totalTokens.unknownCount, 3, "every unsettled call leaves its sum partial");
 });
 
 test("totals keep unknown apart from zero and render partial cost with its marker", () => {
