@@ -180,7 +180,7 @@ const event = (kind, payload, terminal = false) =>
 // steer/queue/interrupt controls and the fleet strip's Guide/Stop are exercised in a browser.
 // Every other scenario stays a v1 peer, which is what keeps the 409 degradation tested.
 const STEERING =
-	scenario === "markdown" || scenario === "steer"
+	scenario === "markdown" || scenario === "steer" || scenario === "telemetry"
 		? {
 				version: 1,
 				main: true,
@@ -577,6 +577,15 @@ async function handle(frame) {
 							? {
 									_meta: {
 										"clio-coder/steering": STEERING,
+										...(scenario === "telemetry"
+											? {
+													"clio-coder/telemetry": {
+														version: 1,
+														methods: { session: "_clio-coder/telemetry/session" },
+														update: "_clio-coder/telemetry/update",
+													},
+												}
+											: {}),
 										...(ROUTE
 											? {
 													"clio-coder/settings": { get_safe: true, patch_safe: true },
@@ -782,6 +791,19 @@ async function handle(frame) {
 					// kind the app DOES handle stays fatal, because continuing there means
 					// drawing a shape no contract describes.
 					update({ sessionUpdate: "future_unknown_kind", anything: true });
+					// The engine's coalesced telemetry_update: a bare invalidation naming the topics that moved (#434).
+					if (scenario === "telemetry")
+						send({
+							method: "_clio-coder/telemetry/update",
+							params: {
+								v: 1,
+								kind: "telemetry_update",
+								sessionId,
+								seq: 1,
+								generatedAt: new Date().toISOString(),
+								topics: ["session", "cost"],
+							},
+						});
 					if (scenario === "malformed-update")
 						update({ sessionUpdate: "agent_message_chunk", content: { type: "image", data: "not-text" } });
 					if (["gateway-chain", "gateway-chain-failed", "unrelated-chain"].includes(scenario)) {

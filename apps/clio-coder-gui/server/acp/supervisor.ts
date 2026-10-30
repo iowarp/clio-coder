@@ -64,6 +64,7 @@ import {
 	SteerResult,
 } from "../../contracts/steering.js";
 import { SessionTargets, TargetProbe } from "../../contracts/targets.js";
+import { TelemetryUpdate } from "../../contracts/telemetry.js";
 import { SessionUsage } from "../../contracts/usage.js";
 import type { AcpSafeSettingsPatch as SafeSettingsPatch } from "../../contracts/wire.js";
 import {
@@ -109,6 +110,7 @@ import {
 	ACP_SHELL_META_KEY,
 	ACP_TARGETS_LIST_METHOD,
 	ACP_TARGETS_PROBE_METHOD,
+	ACP_TELEMETRY_UPDATE_NOTIFICATION,
 	ACP_TRUNCATED_META_KEY,
 	ACP_USAGE_READ_METHOD,
 	type AcpJob,
@@ -534,6 +536,13 @@ export class Supervisor {
 				const changed = Value.Clean(QueueChanged, structuredClone(params));
 				if (Value.Check(QueueChanged, changed) && changed.sessionId === owned.id)
 					this.hub.publish({ type: "queue.changed", payload: { resource: owned.id, entries: changed.entries } });
+			});
+			// The agent coalesces telemetry_update to at most 10 Hz; the host forwards it as an invalidation for the
+			// session it names and reads nothing itself (#434). A health or quota notice has no session and stays here.
+			transport.onNotification(ACP_TELEMETRY_UPDATE_NOTIFICATION, (params) => {
+				const update = Value.Clean(TelemetryUpdate, structuredClone(params));
+				if (Value.Check(TelemetryUpdate, update) && update.sessionId === owned.id)
+					this.hub.publish({ type: "telemetry.updated", payload: { resource: owned.id, update } });
 			});
 			transport.onNotification("session/update", (params) => {
 				try {

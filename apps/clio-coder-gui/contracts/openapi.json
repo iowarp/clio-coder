@@ -20453,6 +20453,45 @@
 							},
 							"type": {
 								"type": "string",
+								"const": "telemetry.updated"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "update"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"update": {
+										"$ref": "#/components/schemas/TelemetryUpdateV1"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
 								"const": "app.launch"
 							},
 							"payload": {

@@ -4,6 +4,7 @@ import { InterviewRound } from "./interviews.js";
 import { Operation, Progress } from "./operations.js";
 import { SessionDeltas } from "./sessions.js";
 import { QUEUE_MAX_ENTRIES, QueueEntry } from "./steering.js";
+import { TelemetryUpdate } from "./telemetry.js";
 
 const base = { v: Type.Literal(1), epoch: Id, seq: Type.Integer({ minimum: 0 }), at: Type.String() };
 const cursor = { epoch: Id, seq: Type.Integer({ minimum: 0 }) };
@@ -73,6 +74,15 @@ export const Event = Type.Union([
 		payload: Type.Object({ ...resource, kind: Type.String(), operation: Type.Optional(Operation) }),
 	}),
 	Type.Object({ ...base, type: Type.Literal("toolchain.changed"), payload: Type.Object({ id: Id }) }),
+	/**
+	 * The agent's coalesced telemetry_update for a session this host holds (at most 10 Hz, never per token): an
+	 * invalidation only, naming the topics whose reads moved; the client re-reads and folds nothing (#434).
+	 */
+	Type.Object({
+		...base,
+		type: Type.Literal("telemetry.updated"),
+		payload: Type.Object({ resource: Id, update: TelemetryUpdate }, { additionalProperties: false }),
+	}),
 	/** A launch found the app window open and asks it to show a page. The window the launcher focused takes it. */
 	Type.Object({
 		...base,

@@ -4,6 +4,7 @@ import type { Operation } from "../../contracts/operations.js";
 import { routes } from "../../contracts/routes.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot } from "../../contracts/sessions.js";
 import type { QueueSnapshot } from "../../contracts/steering.js";
+import { telemetryInvalidations } from "../telemetry/live-model.js";
 import { onTokenRejected, tokenRejected } from "./auth-state.js";
 import { type Client, emptyInput } from "./client.js";
 import { clock } from "./clock.js";
@@ -218,6 +219,12 @@ export function subscribe(
 				});
 			}
 			if (event.type === "toolchain.changed") invalidate.add("tools");
+			// A coalesced telemetry_update re-reads the moved topics for its session; nothing is folded here (#434).
+			if (event.type === "telemetry.updated") {
+				const keys = refreshReads.get(event.payload.resource) ?? new Set<string>();
+				for (const key of telemetryInvalidations(event.payload.update)) keys.add(key);
+				refreshReads.set(event.payload.resource, keys);
+			}
 			if (event.type === "app.launch" && clock.now() - Date.parse(event.at) < LAUNCH_FRESH_MS)
 				launched = event.payload.path;
 		}
