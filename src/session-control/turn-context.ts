@@ -2814,6 +2814,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const frozenInputs = withMemory(frozenMemory);
 			const key = promptKey(frozenInputs);
 			// #423: compare the already-resolved key before compiling; this query makes no provider call.
+			// A new session's first compile keys on an empty session id, so its
+			// second turn changes key with identical bytes; the recompile reason
+			// waits for the compile to show whether the prompt moved.
+			let noteCacheReuse: ((recompiled: boolean) => void) | undefined;
 			if (beforeSend) {
 				loadCacheCallBaseline();
 				if (cacheCallBaseline) {
@@ -2826,15 +2830,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					const pendingRecompile =
 						sessionPromptKey !== null && sessionPromptKey !== key && recompileReuseNoticeStamp !== recompileStamp;
 					if (idle || pendingRecompile) {
-						if (idle) idleReuseNoticeStamp = idleStamp;
-						if (pendingRecompile) recompileReuseNoticeStamp = recompileStamp;
-						const elapsed = elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s` : `${Math.floor(elapsedMs / 60_000)}m`;
-						const reason = [idle ? "idle" : "", pendingRecompile ? "prompt recompile pending" : ""]
-							.filter(Boolean)
-							.join(", ");
-						const text = `reuse uncertain: last use ${elapsed} ago; estimated re-prefill ${inclusiveInputTokens.toLocaleString("en-US")} tokens (previous call input; ${reason})`;
-						if (deps.emitCacheReuseNotice) deps.emitCacheReuseNotice(text);
-						else deps.emitNotice(text);
+						noteCacheReuse = (recompiled) => {
+							const recompile = pendingRecompile && recompiled;
+							if (!idle && !recompile) return;
+							if (idle) idleReuseNoticeStamp = idleStamp;
+							if (recompile) recompileReuseNoticeStamp = recompileStamp;
+							const elapsed = elapsedMs < 60_000 ? `${Math.floor(elapsedMs / 1000)}s` : `${Math.floor(elapsedMs / 60_000)}m`;
+							const reason = [idle ? "idle" : "", recompile ? "prompt recompile pending" : ""].filter(Boolean).join(", ");
+							const text = `reuse uncertain: last use ${elapsed} ago; estimated re-prefill ${inclusiveInputTokens.toLocaleString("en-US")} tokens (previous call input; ${reason})`;
+							if (deps.emitCacheReuseNotice) deps.emitCacheReuseNotice(text);
+							else deps.emitNotice(text);
+						};
 					}
 				}
 			}
@@ -2848,6 +2854,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				lastSystemPromptReused = true;
 				sessionPromptDelta = memoryDelta(frozenMemory);
 				preparePosture();
+				noteCacheReuse?.(false);
 				return sessionPrompt;
 			}
 			try {
@@ -2877,6 +2884,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				if (!current()) return null;
 				const compiledAt = new Date().toISOString();
 				const changed = engineInitialSystemPrompt(agentRuntime.agent) !== result.systemPrompt;
+				noteCacheReuse?.(changed);
 				if (supportsPolicyUpdates && (!postureGeneration || result.systemPromptHash !== postureGeneration.promptHash)) {
 					postureGeneration = {
 						version: 1,
@@ -2941,6 +2949,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				return result;
 			} catch (err) {
 				if (!current()) return null;
+				// The engine keeps the prompt it already had.
+				noteCacheReuse?.(false);
 				deps.emitNotice(
 					`[Clio Coder] prompt compile failed; using fallback identity: ${err instanceof Error ? err.message : String(err)}`,
 				);
