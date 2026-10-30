@@ -69,7 +69,8 @@ function readObserved(key: string, nowMs: number): ObservedQuota | null {
 }
 
 const codexTargets = new Map<string, string>();
-const STREAM_QUOTA_TTL_MS = 5 * 60_000;
+/** How long a stream or response observation reads as current; a journaled reading ages the same way (#434). */
+export const STREAM_QUOTA_TTL_MS = 5 * 60_000;
 
 const anthropicTargets = new Map<string, { key: string; authProfile: string | null }>();
 const anthropicListeners = new Set<(targetId: string, snapshot: UsageSnapshot) => void>();

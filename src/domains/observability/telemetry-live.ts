@@ -10,7 +10,8 @@ import type { SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelo
 import type { Fact } from "../../core/telemetry/fact.js";
 import { telemetryProducerHealth } from "../../core/telemetry/producer.js";
 import { renderFact } from "../../core/telemetry/render.js";
-import { observedQuotaReadings } from "../quota/observed.js";
+import type { Payload } from "../../core/telemetry/schemas.js";
+import { observedQuotaReadings, STREAM_QUOTA_TTL_MS } from "../quota/observed.js";
 import type { CallJournalRead, PersistedTelemetry } from "./call-journal.js";
 import {
 	appendPersistedTelemetry,
@@ -130,7 +131,20 @@ interface Binding {
 	off: Array<() => void>;
 	version: number;
 	view?: { version: number; view: TelemetryView };
+	quota: QuotaCursor;
 }
+
+type QuotaReading = Payload<"quota.reading">;
+type QuotaRow = QuotaStateV1["providers"][number];
+/** The newest journaled reading per account, scanned forward as the session's journal grows (#434). */
+interface QuotaCursor {
+	records: readonly TelemetryRecord[] | null;
+	scanned: number;
+	latest: Map<string, QuotaReading>;
+}
+/** The account a reading names, as the process's own observations key it: Codex readings are per target. */
+const quotaAccount = (reading: QuotaReading) =>
+	reading.provider === "codex" ? `codex:${reading.targetId}` : reading.provider;
 
 function owned(owner: string): Owned {
 	return {
@@ -207,7 +221,8 @@ function referencedRuns(records: readonly TelemetryRecord[]): string[] {
 }
 
 function topicsFor(owner: string, root: string, records: readonly TelemetryRecord[]): Set<TelemetryTopic> {
-	if (owner.startsWith("run:")) return new Set(RUN_TOPICS);
+	if (owner.startsWith("run:"))
+		return new Set<TelemetryTopic>(records.some((record) => record.k === "gap") ? [...RUN_TOPICS, "health"] : RUN_TOPICS);
 	// An ancestor's batches move only the lineage totals the session DTO carries.
 	if (owner !== root) return new Set<TelemetryTopic>(["session"]);
 	const topics = new Set<TelemetryTopic>();
@@ -217,7 +232,8 @@ function topicsFor(owner: string, root: string, records: readonly TelemetryRecor
 		else if (record.k === "gap") {
 			topics.add("session");
 			topics.add("health");
-		} else {
+		} else if (record.k === "quota.reading") topics.add("quota");
+		else {
 			topics.add("session");
 			topics.add("timeline");
 		}
@@ -444,7 +460,15 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	};
 
 	const bindTo = (sessionId: string) => {
-		const binding: Binding = { sessionId, owners: new Map(), root: null, nodes: new Map(), off: [], version: 0 };
+		const binding: Binding = {
+			sessionId,
+			owners: new Map(),
+			root: null,
+			nodes: new Map(),
+			off: [],
+			version: 0,
+			quota: { records: null, scanned: 0, latest: new Map() },
+		};
 		current = binding;
 		binding.off.push(subscribeAllPersistedTelemetry(onEvent(binding)));
 		markDirty(TELEMETRY_TOPICS);
@@ -501,6 +525,28 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		};
 	};
 
+	/** Never a cold read: only records the bound session's journal already holds, scanned once each. */
+	const journaledQuota = (): ReadonlyMap<string, QuotaReading> => {
+		const binding = current;
+		const records = binding?.owners.get(sessionOwner(binding.sessionId))?.records;
+		if (!binding || !records) return new Map();
+		const cursor = binding.quota;
+		// The seed's merge replaces the record list; anything else only appends to it.
+		if (cursor.records !== records) {
+			cursor.records = records;
+			cursor.scanned = 0;
+			cursor.latest = new Map();
+		}
+		for (; cursor.scanned < records.length; cursor.scanned += 1) {
+			const record = records[cursor.scanned];
+			if (record?.k !== "quota.reading") continue;
+			const account = quotaAccount(record.data);
+			const prior = cursor.latest.get(account);
+			if (!prior || record.data.observedAt > prior.observedAt) cursor.latest.set(account, record.data);
+		}
+		return cursor.latest;
+	};
+
 	const live = (): TelemetryView | null => {
 		activate();
 		const binding = current;
@@ -549,35 +595,69 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		},
 		quota(provider) {
 			const now = Date.now();
+			const windows = (
+				readings: ReadonlyArray<{ key: string; usedPct: Fact<number>; resetsAt?: string | null }>,
+				labels: ReadonlyMap<string, string>,
+			): QuotaRow["windows"] =>
+				readings.map((window) => {
+					const value = "value" in window.usedPct ? window.usedPct.value : 0;
+					const fact: Fact<number> =
+						Number.isFinite(value) && value >= 0 && value <= 100
+							? window.usedPct
+							: { kind: "unknown", reason: "unsupported" };
+					return {
+						key: window.key,
+						label: labels.get(window.key) ?? null,
+						usedPct: { fact, display: renderFact(fact, "percent") },
+						resetsAt: utc(window.resetsAt),
+					};
+				});
 			// The process's own readings: every quota cache reports here, and stream observations land here (#423).
-			const readings = observedQuotaReadings(now).filter(
-				(reading) => provider === undefined || reading.snapshot.providerId === provider,
-			);
+			let rows: QuotaRow[] = observedQuotaReadings(now)
+				.filter((reading) => provider === undefined || reading.snapshot.providerId === provider)
+				.map(({ snapshot, stale, source }) => ({
+					provider: snapshot.providerId,
+					source,
+					observedAt: utc(snapshot.fetchedAt),
+					stale,
+					windows: windows(
+						snapshot.windows.map((window) => ({
+							key: window.key,
+							usedPct: Number.isFinite(window.usedPct)
+								? { kind: "measured", value: window.usedPct, source: "provider" }
+								: { kind: "unknown", reason: "unsupported" },
+							resetsAt: window.resetsAt,
+						})),
+						new Map(snapshot.windows.flatMap((window) => (window.label.length > 0 ? [[window.key, window.label]] : []))),
+					),
+				}));
+			// The session's journaled readings: a resumed session's last sight of an account, and any reading newer than
+			// what this process holds. The newer observation of an account wins (#434).
+			for (const [account, reading] of journaledQuota()) {
+				if (provider !== undefined && account !== provider) continue;
+				const observedAt = utc(reading.observedAt);
+				const held = rows.filter((row) => row.provider === account);
+				if (observedAt === null || held.some((row) => row.observedAt !== null && row.observedAt >= observedAt)) continue;
+				const labels = new Map(
+					held.flatMap((row) => row.windows.flatMap((window) => (window.label ? [[window.key, window.label]] : []))),
+				);
+				rows = [
+					...rows.filter((row) => row.provider !== account),
+					{
+						provider: account,
+						source: reading.source,
+						observedAt,
+						stale: now - Date.parse(observedAt) >= STREAM_QUOTA_TTL_MS,
+						windows: windows(reading.windows, labels),
+					},
+				];
+			}
 			return {
 				v: TELEMETRY_DTO_VERSION,
 				foldVersion: TELEMETRY_FOLD_VERSION,
 				generatedAt: new Date(now).toISOString(),
 				kind: "quota",
-				providers: readings
-					.map(({ snapshot, stale, source }) => ({
-						provider: snapshot.providerId,
-						source,
-						observedAt: utc(snapshot.fetchedAt),
-						stale,
-						windows: snapshot.windows.map((window) => {
-							const fact: Fact<number> =
-								Number.isFinite(window.usedPct) && window.usedPct >= 0 && window.usedPct <= 100
-									? { kind: "measured", value: window.usedPct, source: "provider" }
-									: { kind: "unknown", reason: "unsupported" };
-							return {
-								key: window.key,
-								label: window.label.length > 0 ? window.label : null,
-								usedPct: { fact, display: renderFact(fact, "percent") },
-								resetsAt: utc(window.resetsAt),
-							};
-						}),
-					}))
-					.sort((a, b) => a.provider.localeCompare(b.provider) || a.source.localeCompare(b.source)),
+				providers: rows.sort((a, b) => a.provider.localeCompare(b.provider) || a.source.localeCompare(b.source)),
 			} satisfies QuotaStateV1;
 		},
 		health() {
