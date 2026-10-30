@@ -9,6 +9,8 @@ export const EstimateMethod = vocabulary([
 	"prompt-side-only",
 	"shared-account-window-delta",
 	"peer-report",
+	// The serialized size of the payload Pi handed its provider; the wire frame may wrap it (#434).
+	"payload-json",
 ]);
 export type EstimateMethod = Static<typeof EstimateMethod>;
 export const UnknownReason = vocabulary([

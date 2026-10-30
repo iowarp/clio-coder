@@ -261,6 +261,48 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 	strictEqual(dropped.usage?.output.kind, "unknown");
 	strictEqual(dropped.pricing.usd.kind, "unknown");
 	strictEqual(dropped.stop.failure, undefined);
+	const counted = <T>(value: T) => ({ kind: "measured", value, source: "local-count" });
+	const codex = (request: "full" | "delta", attribution = "exclusive") =>
+		callSettlementFromMessage(
+			{
+				stopReason: "stop",
+				usage: { input: 5, output: 1, totalTokens: 6 },
+				clioCoderRequestBytes: 2048,
+				codexTransport: {
+					mode: "websocket",
+					request: attribution === "exclusive" ? request : "unknown",
+					attribution,
+					counters: {
+						requests: 1,
+						connectionsCreated: 0,
+						connectionsReused: 1,
+						fullContextRequests: request === "full" ? 1 : 0,
+						deltaRequests: request === "delta" ? 1 : 0,
+						websocketFailures: 0,
+						sseFallbacks: 0,
+					},
+					lastInputItems: 3,
+					fallbackActive: false,
+				},
+			},
+			"unknown",
+		).transport;
+	// Pi's per-session counters attribute continuation and reuse to one exclusive call; a delta frame's bytes are not
+	// the payload's, and an overlapping stream proves nothing about either (#434).
+	deepStrictEqual(codex("full"), {
+		kind: "websocket",
+		continuation: counted("full"),
+		requestBytes: { kind: "estimated", value: 2048, method: "payload-json" },
+		sessionPinnedToSse: counted(false),
+		connectionReused: counted(true),
+	});
+	deepStrictEqual(codex("delta").requestBytes, { kind: "unknown", reason: "not-observed" });
+	deepStrictEqual(codex("full", "overlap"), {
+		kind: "websocket",
+		continuation: { kind: "unknown", reason: "not-observed" },
+		requestBytes: { kind: "estimated", value: 2048, method: "payload-json" },
+		sessionPinnedToSse: counted(false),
+	});
 	strictEqual(
 		callSettlementFromMessage(
 			{ stopReason: "error", failure: { stage: "provider", errorClass: "provider_error" } },

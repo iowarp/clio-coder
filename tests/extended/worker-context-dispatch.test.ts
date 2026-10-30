@@ -120,6 +120,9 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 				"settle",
 				"transform",
 			]);
+			// The payload Pi handed its provider sizes the request; the wire frame may wrap it (#434).
+			const bytes = callFacts[0]?.transport.requestBytes;
+			ok(bytes?.kind === "estimated" && bytes.method === "payload-json" && bytes.value > 0, JSON.stringify(bytes));
 			const request = JSON.stringify(fixture.requests[0]);
 			equal(request.split("PARENT_CONSTRAINT_42").length - 1, mode === "isolated" ? 0 : 1);
 			ok(!request.includes("LATER_PARENT_TURN"));

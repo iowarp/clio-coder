@@ -124,6 +124,8 @@ export const CallSettledSchema = Type.Object(
 				continuation: factSchema(vocabulary(["delta", "full"])),
 				requestBytes: factSchema(count),
 				sessionPinnedToSse: factSchema(Type.Boolean()),
+				/** Present only when the call's own connection counters were attributable to it (#434). */
+				connectionReused: Type.Optional(factSchema(Type.Boolean())),
 				promptCacheKey: Type.Optional(ObjectRefSchema),
 			},
 			closed,

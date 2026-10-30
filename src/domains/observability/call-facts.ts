@@ -20,6 +20,31 @@ export function reportedModelFromMessage(message: unknown): Fact<string> {
 		: { kind: "unknown", reason: observation.state === "not-reported" ? "provider-omitted" : "not-observed" };
 }
 
+/**
+ * Transport facts Clio observes under option B: Pi keeps the Codex socket, so continuation, reuse and the SSE pin
+ * come from Pi's per-session counters, attributed only when no other stream overlapped the call. The connect span and
+ * handshake headers stay unknown. A delta frame's bytes are not the payload's, so they stay unknown too (#434).
+ */
+function transportFacts(raw: Record<string, unknown>, sent: boolean): CallSettled["transport"] {
+	const codex = record(raw.codexTransport);
+	const counters = record(codex.counters);
+	const counted = <T>(value: T) => ({ kind: "measured", value, source: "local-count" }) as const;
+	const continuation = codex.request === "delta" || codex.request === "full" ? codex.request : undefined;
+	const bytes = sent && continuation !== "delta" ? amount(raw.clioCoderRequestBytes) : null;
+	return {
+		kind: codex.mode === "websocket" || codex.mode === "sse" ? codex.mode : "unknown",
+		continuation: continuation ? counted(continuation) : unobserved,
+		requestBytes:
+			bytes === null || !Number.isInteger(bytes)
+				? unobserved
+				: { kind: "estimated", value: bytes, method: "payload-json" },
+		sessionPinnedToSse: typeof codex.fallbackActive === "boolean" ? counted(codex.fallbackActive) : unobserved,
+		...(codex.mode === "websocket" && codex.attribution === "exclusive" && counters.requests === 1
+			? { connectionReused: counted(counters.connectionsReused === 1 && counters.connectionsCreated === 0) }
+			: {}),
+	};
+}
+
 /** Map existing structured causes; prose is never a telemetry classifier (#434). */
 function failureCause(failure: Record<string, unknown>): FailureCause | undefined {
 	switch (failure.errorClass) {
@@ -132,7 +157,7 @@ export function callSettlementFromMessage(
 		stop: { reason, ...((reason === "aborted" || reason === "error") && failureCode ? { failure: failureCode } : {}) },
 		usage: neverSent ? null : counts,
 		pricing,
-		transport: { kind: "unknown", continuation: unobserved, requestBytes: unobserved, sessionPinnedToSse: unobserved },
+		transport: transportFacts(raw, !neverSent),
 		cache: {
 			firstDivergentSection: unobserved,
 			expectedColdReasons: [],
