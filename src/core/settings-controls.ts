@@ -706,6 +706,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Where task copies live",
 		"Choose disk for the normal location, memory for temporary RAM storage, automatic to prefer memory when available, or enter an absolute directory you control.",
 	],
+	"chat.cacheKeepalive": [
+		"Keep prompt cache warm",
+		"While a turn waits on its own tools, such as an attached dispatch, refresh a hosted provider's prompt cache shortly before it expires when that is expected to save more than it costs. Applies to Anthropic, OpenAI and Codex routes.",
+	],
 	"fleet.speculativeDispatch": [
 		"Start predicted work early",
 		"Experimental. System One's turn site is asked which recipe a dispatch would name first. Only a fitted build's answer starts a worker early, and the result is held. The agent still decides whether to use that work.",

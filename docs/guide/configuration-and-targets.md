@@ -135,6 +135,7 @@ This inventory lists compiled defaults and selected optional settings in the ver
 | `chat.modelPicker.recentLimit` | `12` | immediately |
 | `chat.maxOutputTokens` | `0` | next turn |
 | `chat.prewarm` | `false` | next turn |
+| `chat.cacheKeepalive` | `true` | immediately |
 | `chat.retry.enabled` | `true` | next turn |
 | `chat.retry.maxRetries` | `3` | next turn |
 | `chat.retry.baseDelayMs` | `2000` | next turn |

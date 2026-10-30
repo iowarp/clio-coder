@@ -1664,6 +1664,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"modelPicker",
 				"maxOutputTokens",
 				"prewarm",
+				"cacheKeepalive",
 				"retry",
 				"steering",
 			]);
@@ -1707,6 +1708,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			if ("prewarm" in chat) {
 				const parsed = expectBoolean(issues, "chat.prewarm", chat.prewarm);
 				if (parsed !== undefined) settings.chat.prewarm = parsed;
+			}
+			if ("cacheKeepalive" in chat) {
+				const parsed = expectBoolean(issues, "chat.cacheKeepalive", chat.cacheKeepalive);
+				if (parsed !== undefined) settings.chat.cacheKeepalive = parsed;
 			}
 			if ("retry" in chat) {
 				if (!isPlainObject(chat.retry)) issues.add("chat.retry", `expected a map, got ${describe(chat.retry)}`);

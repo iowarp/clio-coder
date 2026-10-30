@@ -159,6 +159,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "chat.maxOutputTokens":
 			return place("models", "Reasoning & length");
 		case "chat.prewarm":
+		case "chat.cacheKeepalive":
 			return place("models", "Speed");
 		case "chat.retry.enabled":
 		case "chat.retry.maxRetries":

@@ -591,6 +591,12 @@ export interface ChatSettings extends WorkerTarget {
 	modelPicker: ModelSelectorSettings;
 	maxOutputTokens: number;
 	prewarm: boolean;
+	/**
+	 * Hosted prompt-cache keepalive (#423). While a turn waits on its own tools, above all an attached dispatch,
+	 * Clio refreshes the turn's cached prefix shortly before a hosted provider would drop it, when the refresh is
+	 * expected to save more than it costs. Anthropic, OpenAI Responses and Codex routes, each refresh output-capped.
+	 */
+	cacheKeepalive: boolean;
 	retry: RetrySettings;
 	steering: SteeringSettings;
 }
@@ -750,6 +756,7 @@ export const DEFAULT_SETTINGS = {
 		} as ModelSelectorSettings,
 		maxOutputTokens: 0,
 		prewarm: false,
+		cacheKeepalive: true,
 		retry: {
 			enabled: true,
 			maxRetries: 3,
@@ -953,6 +960,7 @@ chat:
     recentLimit: 12
   maxOutputTokens: 0
   prewarm: false
+  cacheKeepalive: true
   retry:
     enabled: true
     maxRetries: 3

@@ -46,6 +46,7 @@ import { enginePinnedPrefix } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { engineMainStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
+import type { CacheKeepaliveReply, CacheKeepaliveRequest } from "../engine/cache-keepalive.js";
 import { lockedSynthesisSystemPrompt, sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
 import { applyToolRounds, streamToolRound } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
@@ -191,6 +192,12 @@ export interface TurnRuntimeDeps {
 	scheduling?: SchedulingContract | undefined;
 	headless?: boolean | undefined;
 	createAgent: typeof createEngineAgent;
+	/** Every main-turn request as sent, for the hosted cache keepalive (#423). */
+	noteMainRequest?: (
+		runtime: AgentRuntime,
+		request: CacheKeepaliveRequest,
+		stream: { result(): Promise<CacheKeepaliveReply> },
+	) => void;
 	middlewareToolChoice: MiddlewareToolChoiceControl;
 	persistence: TurnPersistence;
 	context: TurnContext;
@@ -667,14 +674,28 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								await request.options?.onResponse?.(...args);
 							},
 						};
-						if (!state.synthesisToolLock && !(middlewareChoice.kind === "none" && request.options?.toolChoice === "auto"))
-							return engineMainStreamSimple(currentModel, request.context, requestOptions);
-						const resolved = resolvedRequestContext(request.context);
-						return engineMainStreamSimple(
-							currentModel,
-							{ ...resolved, systemPrompt: lockedSynthesisSystemPrompt(resolved.systemPrompt ?? "") },
-							requestOptions,
+						let sent = request.context;
+						if (state.synthesisToolLock || (middlewareChoice.kind === "none" && request.options?.toolChoice === "auto")) {
+							const resolved = resolvedRequestContext(request.context);
+							sent = { ...resolved, systemPrompt: lockedSynthesisSystemPrompt(resolved.systemPrompt ?? "") };
+						}
+						const stream = engineMainStreamSimple(currentModel, sent, requestOptions);
+						// #423: a cache keepalive replays exactly this request, without this turn's call tracker or status hook.
+						const { fetch: _tracked, onResponse: _status, ...replayed } = requestOptions;
+						deps.noteMainRequest?.(
+							localRuntime,
+							{
+								model: currentModel,
+								context: sent,
+								options: {
+									...replayed,
+									...(request.options?.fetch ? { fetch: request.options.fetch } : {}),
+									...(request.options?.onResponse ? { onResponse: request.options.onResponse } : {}),
+								},
+							},
+							stream,
 						);
+						return stream;
 					},
 					target.target.id,
 				);

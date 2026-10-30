@@ -17,6 +17,28 @@ export type ProviderCallScope = "main" | "side";
 
 type ClioCoderCacheMetadata = { clioCoder?: { cache?: TargetCacheSettings; mainThreadCacheRetention?: "long" } };
 
+/**
+ * The cache retention a request takes once the request, the target, the Anthropic environment override and the
+ * main-thread default have spoken, in that order (#422). The cache keepalive reads the same answer (#423).
+ */
+export function effectiveCacheRetention(
+	model: Model<Api>,
+	options: StreamOptions | undefined,
+	scope: ProviderCallScope,
+): StreamOptions["cacheRetention"] {
+	const metadata = (model as Model<Api> & ClioCoderCacheMetadata).clioCoder;
+	const requested = options?.cacheRetention ?? metadata?.cache?.retention;
+	if (requested !== undefined || model.api !== "anthropic-messages") return requested;
+	const retention = process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
+	if (retention !== undefined && retention !== "") {
+		if (retention !== "none" && retention !== "short" && retention !== "long") {
+			throw new Error("CLIO_CODER_ANTHROPIC_CACHE_RETENTION must be none, short, or long");
+		}
+		return retention;
+	}
+	return scope === "main" ? metadata?.mainThreadCacheRetention : undefined;
+}
+
 /** Process-owned opt-in reaches every native engine call, including prewarm and workers. */
 export function instrumentProviderCall<T extends StreamOptions>(
 	model: Model<Api>,
@@ -24,23 +46,11 @@ export function instrumentProviderCall<T extends StreamOptions>(
 	invoke: (options: T | undefined) => AssistantMessageEventStream,
 	scope: ProviderCallScope = "side",
 ): AssistantMessageEventStream {
-	let effective = options;
-	const metadata = (model as Model<Api> & ClioCoderCacheMetadata).clioCoder;
-	const configured = metadata?.cache?.retention;
-	if (options?.cacheRetention === undefined && configured !== undefined) {
-		effective = { ...options, cacheRetention: configured } as T;
-	}
-	if (model.api === "anthropic-messages" && effective?.cacheRetention === undefined) {
-		const retention = process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
-		if (retention !== undefined && retention !== "") {
-			if (retention !== "none" && retention !== "short" && retention !== "long") {
-				throw new Error("CLIO_CODER_ANTHROPIC_CACHE_RETENTION must be none, short, or long");
-			}
-			effective = { ...options, cacheRetention: retention } as T;
-		} else if (scope === "main" && metadata?.mainThreadCacheRetention !== undefined) {
-			effective = { ...options, cacheRetention: metadata.mainThreadCacheRetention } as T;
-		}
-	}
+	const retention = effectiveCacheRetention(model, options, scope);
+	let effective =
+		options?.cacheRetention !== undefined || retention === undefined
+			? options
+			: ({ ...options, cacheRetention: retention } as T);
 	const { clioCoderPinnedPrefix, ...providerOptions } = (effective ?? {}) as T & {
 		clioCoderPinnedPrefix?: PinnedPromptPrefix;
 	};

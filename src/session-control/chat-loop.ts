@@ -102,6 +102,7 @@ import {
 import { type VisionSidecar, visionObservationText } from "../domains/providers/vision-sidecar.js";
 import { type AutonomyLevel, modelMayActivateSkills } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
+import { sessionCeilingReached } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
 import type { ContextSnapshot } from "../domains/session/context-accounting.js";
@@ -185,6 +186,7 @@ import {
 } from "./steering-triage.js";
 import type { LiveContextUsage, TurnContextDeps } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
+import { createTurnKeepalive } from "./turn-keepalive.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
 import type { TurnOutcomeCollector } from "./turn-outcome-collector.js";
 import { createTurnOutcomeCollector } from "./turn-outcome-collector.js";
@@ -1702,6 +1704,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		scheduling: deps.scheduling,
 		headless: deps.headless,
 		createAgent,
+		noteMainRequest: (runtime, request, stream) => keepalive.noteRequest(runtime, request, stream),
 		continuity,
 		hasQueuedSteering: () => queues.hasPendingSteer(),
 		queueHandOver: {
@@ -2192,6 +2195,48 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		...(deps.registerPrewarmEndpointSlot ? { registerEndpointSlot: deps.registerPrewarmEndpointSlot } : {}),
 	});
 	const unsubscribePrewarmCompaction = subscribePrewarmToCompaction(deps.bus, prewarm);
+	// #423: a hosted route's prompt cache outlives the turn's waits on its own tools, above all an attached dispatch.
+	const keepalive = createTurnKeepalive({
+		enabled: () => deps.getSettings().chat.cacheKeepalive,
+		isTurnActive: () => turnActive,
+		waitsOnOperator: () => state.currentAskUserPolicy?.inFlight === true || deps.toolRegistry?.hasParkedCalls() === true,
+		hasAttachedDispatch: () => deps.hasAttachedDispatch?.() === true,
+		isCurrentRuntime: (runtime) => state.runtime === runtime,
+		canSpend: (usd) => {
+			const budget = deps.scheduling?.preflight();
+			return budget === undefined || !sessionCeilingReached(budget.currentUsd + usd, budget.ceilingUsd);
+		},
+		withEndpointSlot,
+		record: (runtime, refresh) => {
+			const origin = deps.session?.current() ?? null;
+			recordOutOfTurnUsage(runtime, sideQuestionUsage(refresh.message?.usage), "prewarm", origin);
+			try {
+				deps.session?.appendEntry({
+					kind: "custom",
+					customType: "prewarm",
+					// A fact about the provider cache, never a model message or a transcript block.
+					display: false,
+					parentTurnId: state.lastTurnId,
+					data: {
+						trigger: "keepalive",
+						phase: refresh.phase,
+						target: runtime.targetId,
+						model: runtime.wireModelId,
+						promptTokens: refresh.promptTokens,
+						economics: refresh.economics,
+						promptCache: {
+							input: refresh.message?.usage.input ?? null,
+							cacheRead: refresh.message?.usage.cacheRead ?? null,
+							cacheWrite: refresh.message?.usage.cacheWrite ?? null,
+						},
+						...(refresh.error === null ? {} : { error: refresh.error }),
+					},
+				});
+			} catch {
+				// The ledger entry is diagnostics; the spend is already booked above.
+			}
+		},
+	});
 	// The prompt this process will send is known now: the session prompt compiles
 	// against the configured target, and a boot-time resume rebuilds the message
 	// array in the same tick, which the scheduler collapses onto one round.
@@ -3680,6 +3725,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			unsubscribeToolBudgetLock?.();
 			unsubscribePrewarmCompaction();
 			prewarm.dispose();
+			keepalive.dispose();
 			context.dispose();
 			if (state.runtime) {
 				state.runtime.agent.abort();
@@ -3949,6 +3995,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const run = submitInner(text, options).finally(() => {
 			if (machinePreparation?.token === preparationToken) machinePreparation = null;
 			turnActive = false;
+			keepalive.cancel();
 			try {
 				const counts = deps.onTurnSettled?.();
 				if (counts !== undefined) emit({ type: "speculative_dispatch", counts });
@@ -3982,6 +4029,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// aborting here costs nothing and stops the real turn from queueing behind
 		// a request nobody is waiting on.
 		prewarm.cancel();
+		keepalive.cancel();
 		const previous = admissionTail;
 		let release: () => void = () => {};
 		const ticket = new Promise<void>((resolve) => {

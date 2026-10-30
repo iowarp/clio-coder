@@ -30,6 +30,8 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	// reads it per call, so a raise lifts a live wait (#424).
 	"safety.limits.sessionCostUsd",
 	"chat.modelPicker",
+	// The keepalive reads it before every refresh, so a change applies to the next one (#423).
+	"chat.cacheKeepalive",
 	"interface.outputDetail",
 	"interface.demo",
 	"interface.smoothStreaming",
