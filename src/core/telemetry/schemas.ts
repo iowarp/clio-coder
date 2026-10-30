@@ -297,7 +297,7 @@ export const DELTA_GAP_BOUNDS_MS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024,
  */
 export const PROVIDER_HEADER_PATTERN =
 	"^(?:x-codex-(?:primary|secondary|credits)-[a-z0-9-]{1,48}|x-ratelimit-[a-z0-9-]{1,48}|anthropic-ratelimit-[a-z0-9-]{1,48}|retry-after|retry-after-ms|openai-processing-ms|openai-version|x-request-id|request-id|cf-ray)$";
-const MIDDLEWARE_EFFECTS = vocabulary([
+export const MIDDLEWARE_EFFECTS = vocabulary([
 	"inject_reminder",
 	"annotate_tool_result",
 	"block_tool",
@@ -308,7 +308,7 @@ const MIDDLEWARE_EFFECTS = vocabulary([
 	"notify_operator",
 	"rewrite_tool_input",
 ]);
-const SYSTEM_ONE_OUTCOME = vocabulary([
+export const SYSTEM_ONE_OUTCOME = vocabulary([
 	"answered",
 	"failed",
 	"timeout",

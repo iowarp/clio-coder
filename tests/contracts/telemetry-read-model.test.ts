@@ -320,3 +320,113 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 		],
 	);
 });
+
+test("the timeline carries tool, middleware, auth, prompt, context, System One and worker channel records (#434 §8)", () => {
+	const ctx = { sessionId: "timeline-signals", label: "main" as const, turnId: "turn-1" };
+	const clock = (second: number) => ({ t: `2026-10-30T00:00:0${second}.000Z`, mono: 0 });
+	const structure = {
+		label: "resolvable" as const,
+		function: "sha256" as const,
+		canonicalization: "json-sorted-v1" as const,
+		subject: "prompt-structure" as const,
+		id: `obj_${"b".repeat(64)}`,
+	};
+	const records: TelemetryRecord[] = [
+		makeTelemetryRecord(
+			"auth.event",
+			{
+				provider: "openai-codex",
+				trigger: "expiry",
+				attempted: true,
+				outcome: "refreshed",
+				writerPid: 7,
+				durationMs: 210,
+			},
+			ctx,
+			clock(1),
+		),
+		makeTelemetryRecord(
+			"prompt.compiled",
+			{ structure, layoutVersion: 1, tokenEstimate: 9000, sections: 12 },
+			ctx,
+			clock(2),
+		),
+		makeTelemetryRecord(
+			"context.snapshot",
+			{
+				snapshotId: "snap-1",
+				categories: {
+					system: 1,
+					tools: 1,
+					agents: 0,
+					skills: 0,
+					memory: 0,
+					project: 0,
+					messages: 1,
+					reserve: 0,
+					free: 0,
+					streaming: 0,
+				},
+				window: { desired: 200_000, effective: 200_000, source: "catalog" },
+				source: "reconciled",
+				estimatedTokens: 9100,
+				reconciledTokens: 9342,
+			},
+			ctx,
+			clock(3),
+		),
+		makeTelemetryRecord(
+			"system_one.decision",
+			{
+				site: "intent",
+				outcome: "timeout",
+				latencyMs: 900,
+				deadlineMs: 800,
+				routes: [{ engine: "local", kind: "model", outcome: "timeout", breaker: "opened" }],
+				callIds: [],
+			},
+			ctx,
+			clock(4),
+		),
+		makeTelemetryRecord(
+			"middleware.fired",
+			{ hook: "turn_start", phase: "sync", ruleId: "plan-request", effects: ["inject_reminder"], severity: "advisory" },
+			ctx,
+			clock(5),
+		),
+		makeTelemetryRecord(
+			"tool.settled",
+			{ tool: "bash", outcome: "ok", durationMs: 1250, resultBytes: 512 },
+			{ ...ctx, toolCallId: "tc-1" },
+			clock(6),
+		),
+		makeTelemetryRecord("run.ref", { runId: "run-signals" }, ctx, clock(7)),
+	];
+	const run = [
+		makeTelemetryRecord(
+			"worker.channel",
+			{ lane: "stdin", frameType: "steer", errno: "EPIPE", afterExit: true, failure: "write-failed" },
+			{ sessionId: "timeline-signals", runId: "run-signals", label: "worker" },
+			clock(8),
+		),
+	];
+	const dto = timeline(
+		{
+			...source,
+			sessionId: "timeline-signals",
+			journal: { ...source.journal, records },
+			runs: new Map([["run-signals", { present: true, records: run, modes: ["standard"], skipped: 0, damaged: 0 }]]),
+		},
+		null,
+		now,
+	);
+	ok(Value.Check(TimelineSchema, dto), [...Value.Errors(TimelineSchema, dto)][0]?.message);
+	deepStrictEqual(
+		dto.entries.map((entry) => entry.kind),
+		["auth", "prompt", "context", "system-one", "middleware", "tool", "run", "worker-channel"],
+	);
+	const tool = dto.entries.find((entry) => entry.kind === "tool");
+	strictEqual(tool?.kind === "tool" ? tool.duration.display : null, "1.25s");
+	const context = dto.entries.find((entry) => entry.kind === "context");
+	strictEqual(context?.kind === "context" ? context.estimated?.display : null, "~9,100 (chars/4)");
+});

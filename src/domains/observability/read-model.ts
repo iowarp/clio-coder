@@ -203,6 +203,7 @@ const EPOCH = "1970-01-01T00:00:00.000Z";
 const notApplicable: Fact<number> = { kind: "absent", reason: "not-applicable" };
 const unobserved = { kind: "unknown", reason: "not-observed" } as const satisfies Fact<number>;
 const localClock = (value: number): Fact<number> => ({ kind: "measured", value, source: "local-clock" });
+const localCount = (value: number): Fact<number> => ({ kind: "measured", value, source: "local-count" });
 const counted = (value: number): FactSum => foldFacts([{ kind: "measured", value, source: "local-count" }]);
 /** One estimate whose producer named no method; a sum marks it `~` without claiming one (R3). */
 const estimatedSum = (value: number): FactSum => ({
@@ -1787,8 +1788,132 @@ export function timeline(
 			case "quota.reading":
 				entries.push(quotaEntry(record));
 				break;
+			case "tool.settled": {
+				const data = record.data;
+				const duration = localClock(data.durationMs);
+				const parked = data.parkedMs === undefined ? null : localClock(data.parkedMs);
+				const bytes = data.resultBytes === undefined ? null : localCount(data.resultBytes);
+				entries.push({
+					kind: "tool",
+					at,
+					tool: data.tool,
+					outcome: data.outcome,
+					blocked: data.blocked ?? null,
+					toolCallId: record.ctx.toolCallId ?? null,
+					callId: (record.ctx.callId ?? null) as CallRowV1["callId"] | null,
+					turnId: record.ctx.turnId ?? null,
+					runId: record.ctx.runId ?? null,
+					duration: { fact: duration, display: renderFact(duration, "duration") },
+					parked: parked ? { fact: parked, display: renderFact(parked, "duration") } : null,
+					resultBytes: bytes ? { fact: bytes, display: renderFact(bytes) } : null,
+				});
+				break;
+			}
+			case "middleware.fired":
+				entries.push({
+					kind: "middleware",
+					at,
+					hook: record.data.hook,
+					phase: record.data.phase,
+					ruleId: record.data.ruleId,
+					effects: record.data.effects,
+					severity: record.data.severity ?? null,
+					evidence: record.data.evidence ?? null,
+					tool: record.data.tool ?? null,
+					turnId: record.ctx.turnId ?? null,
+				});
+				break;
+			case "auth.event": {
+				const duration = localClock(record.data.durationMs);
+				entries.push({
+					kind: "auth",
+					at,
+					provider: record.data.provider,
+					trigger: record.data.trigger,
+					attempted: record.data.attempted,
+					outcome: record.data.outcome,
+					wroteCredential: record.data.writerPid !== null,
+					duration: { fact: duration, display: renderFact(duration, "duration") },
+				});
+				break;
+			}
+			case "prompt.compiled": {
+				const tokens: Fact<number> = { kind: "estimated", value: record.data.tokenEstimate, method: "chars/4" };
+				entries.push({
+					kind: "prompt",
+					at,
+					structure: record.data.structure,
+					layoutVersion: record.data.layoutVersion,
+					sections: record.data.sections,
+					tokens: { fact: tokens, display: renderFact(tokens) },
+					callId: (record.ctx.callId ?? null) as CallRowV1["callId"] | null,
+				});
+				break;
+			}
+			case "context.snapshot": {
+				const data = record.data;
+				const estimated: Fact<number> | null =
+					data.estimatedTokens === undefined ? null : { kind: "estimated", value: data.estimatedTokens, method: "chars/4" };
+				const reconciled: Fact<number> | null =
+					data.reconciledTokens === undefined
+						? null
+						: { kind: "measured", value: data.reconciledTokens, source: "provider" };
+				entries.push({
+					kind: "context",
+					at,
+					snapshotId: data.snapshotId,
+					source: data.source,
+					window: data.window,
+					estimated: estimated ? { fact: estimated, display: renderFact(estimated) } : null,
+					reconciled: reconciled ? { fact: reconciled, display: renderFact(reconciled) } : null,
+					turnId: record.ctx.turnId ?? null,
+					callId: (record.ctx.callId ?? null) as CallRowV1["callId"] | null,
+				});
+				break;
+			}
+			case "system_one.decision": {
+				const data = record.data;
+				const latency = localClock(data.latencyMs);
+				const deadline = localClock(data.deadlineMs);
+				entries.push({
+					kind: "system-one",
+					at,
+					site: data.site,
+					moment: data.moment ?? null,
+					outcome: data.outcome,
+					latency: { fact: latency, display: renderFact(latency, "duration") },
+					deadline: { fact: deadline, display: renderFact(deadline, "duration") },
+					fitted: data.fitted ?? null,
+					routes: data.routes.map((route) => {
+						const roundTrip = route.roundTripMs === undefined ? null : localClock(route.roundTripMs);
+						return {
+							engine: route.engine,
+							kind: route.kind,
+							outcome: route.outcome,
+							roundTrip: roundTrip ? { fact: roundTrip, display: renderFact(roundTrip, "duration") } : null,
+							breaker: route.breaker ?? null,
+						};
+					}),
+					callIds: data.callIds as CallRowV1["callId"][],
+				});
+				break;
+			}
 		}
 	}
+	// A worker's channel failures live in its run journal; the session shows those of the runs it referenced (#425).
+	for (const run of analysis.runs.values())
+		for (const record of run.source.records)
+			if (record.k === "worker.channel")
+				entries.push({
+					kind: "worker-channel",
+					at: record.t,
+					runId: run.runId,
+					lane: record.data.lane,
+					frameType: record.data.frameType,
+					errno: record.data.errno,
+					afterExit: record.data.afterExit,
+					failure: record.data.failure,
+				});
 	for (const run of analysis.runs.values())
 		if (run.settled)
 			entries.push({
@@ -1802,12 +1927,19 @@ export function timeline(
 		session: 0,
 		gap: 1,
 		config: 2,
-		quota: 3,
-		budget: 4,
-		call: 5,
-		compaction: 6,
-		run: 7,
-		turn: 8,
+		auth: 3,
+		quota: 4,
+		budget: 5,
+		prompt: 6,
+		context: 7,
+		"system-one": 8,
+		middleware: 9,
+		call: 10,
+		tool: 11,
+		"worker-channel": 12,
+		compaction: 13,
+		run: 14,
+		turn: 15,
 	};
 	const within = (at: string) => !range || (at >= range.from && at <= range.to);
 	return {

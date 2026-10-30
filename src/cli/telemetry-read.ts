@@ -283,6 +283,20 @@ function printTimeline(dto: TimelineV1): string {
 			}
 			case "budget":
 				return `${entry.at}  budget   ${entry.event} ${entry.level} · spend ${entry.spend.display} of ${entry.ceiling.display}${entry.waited ? ` · waited ${entry.waited.display}` : ""}${entry.outcome ? ` · ${entry.outcome}` : ""}${entry.raisedTo ? ` to ${entry.raisedTo.display}` : ""}${entry.raisedBy ? ` by ${entry.raisedBy}` : ""}`;
+			case "tool":
+				return `${entry.at}  tool     ${entry.tool} ${entry.outcome}${entry.blocked ? ` (${entry.blocked})` : ""} · ${entry.duration.display}${entry.parked ? ` · parked ${entry.parked.display}` : ""}${entry.resultBytes ? ` · ${entry.resultBytes.display} bytes` : ""}`;
+			case "middleware":
+				return `${entry.at}  rule     ${entry.ruleId} at ${entry.hook} · ${entry.effects.join(", ")}${entry.severity ? ` · ${entry.severity}` : ""}${entry.evidence ? ` · ${entry.evidence}` : ""}`;
+			case "auth":
+				return `${entry.at}  auth     ${entry.provider} ${entry.trigger} · ${entry.outcome}${entry.attempted ? "" : " without a refresh call"} · ${entry.duration.display}`;
+			case "prompt":
+				return `${entry.at}  prompt   layout v${entry.layoutVersion} · ${entry.sections} sections · ${entry.tokens.display} tokens`;
+			case "context":
+				return `${entry.at}  context  ${entry.source} · window ${entry.window.effective} (${entry.window.source})${entry.estimated ? ` · estimated ${entry.estimated.display}` : ""}${entry.reconciled ? ` · provider ${entry.reconciled.display}` : ""}`;
+			case "system-one":
+				return `${entry.at}  s1       ${entry.site} ${entry.outcome} · ${entry.latency.display} of ${entry.deadline.display}${entry.routes.some((route) => route.breaker) ? ` · breaker ${entry.routes.flatMap((route) => (route.breaker ? [`${route.engine} ${route.breaker}`] : [])).join(", ")}` : ""}`;
+			case "worker-channel":
+				return `${entry.at}  channel  ${entry.runId} ${entry.lane} ${entry.failure}${entry.frameType ? ` on ${entry.frameType}` : ""}${entry.errno ? ` (${entry.errno})` : ""}${entry.afterExit ? " after exit" : ""}`;
 			default:
 				return `${entry.at}  quota    ${entry.provider} ${entry.source}${entry.limitReached ? " · limit reached" : ""} · ${entry.windows.map((window) => `${window.key} ${window.usedPct.display}`).join(", ")}`;
 		}

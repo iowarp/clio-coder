@@ -13,7 +13,15 @@ import {
 } from "./enums.js";
 import { factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
-import { CallSettledSchema, ObjectRefSchema, PricingSchema, RunFeedBodySchema, UtcSchema } from "./schemas.js";
+import {
+	CallSettledSchema,
+	MIDDLEWARE_EFFECTS,
+	ObjectRefSchema,
+	PricingSchema,
+	RunFeedBodySchema,
+	SYSTEM_ONE_OUTCOME,
+	UtcSchema,
+} from "./schemas.js";
 
 /**
  * Read-model DTOs (#434 §11.2). TUI, ACP, CLI `--json` and the GUI serve these shapes unchanged, so one fact has one
@@ -617,6 +625,126 @@ export const TimelineEntrySchema = Type.Union([
 	),
 	BudgetEntrySchema,
 	QuotaEntrySchema,
+	/** One tool call as the model's tool wrapper settled it; its own time excludes any wait for approval. */
+	Type.Object(
+		{
+			kind: Type.Literal("tool"),
+			...at,
+			tool: ExistingId,
+			outcome: vocabulary(["ok", "error", "blocked"]),
+			blocked: Type.Union([vocabulary(["refused", "denied-park", "redundant-repeat"]), Type.Null()]),
+			toolCallId: Type.Union([ExistingId, Type.Null()]),
+			/** The model call that asked for the tool. */
+			callId: Type.Union([CallIdSchema, Type.Null()]),
+			turnId: Type.Union([ExistingId, Type.Null()]),
+			runId: Type.Union([ExistingId, Type.Null()]),
+			duration: shown,
+			parked: Type.Union([shown, Type.Null()]),
+			resultBytes: Type.Union([shown, Type.Null()]),
+		},
+		closed,
+	),
+	/** One middleware rule that emitted effects at a hook, with the evidence class it matched (#431). */
+	Type.Object(
+		{
+			kind: Type.Literal("middleware"),
+			...at,
+			hook: vocabulary(["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"]),
+			phase: vocabulary(["sync", "async", "awaited"]),
+			ruleId: ExistingId,
+			effects: Type.Array(MIDDLEWARE_EFFECTS),
+			severity: Type.Union([vocabulary(["info", "advisory", "warn", "hard-block"]), Type.Null()]),
+			evidence: Type.Union([text, Type.Null()]),
+			tool: Type.Union([ExistingId, Type.Null()]),
+			turnId: Type.Union([ExistingId, Type.Null()]),
+		},
+		closed,
+	),
+	/** One OAuth credential refresh under the storage lock (#427). */
+	Type.Object(
+		{
+			kind: Type.Literal("auth"),
+			...at,
+			provider: ExistingId,
+			trigger: vocabulary(["expiry", "rejected"]),
+			attempted: Type.Boolean(),
+			outcome: vocabulary(["refreshed", "adopted", "failed", "cancelled"]),
+			/** True when this session's process wrote the credential now in use; false when another process did. */
+			wroteCredential: Type.Boolean(),
+			duration: shown,
+		},
+		closed,
+	),
+	/** The first request to cite a compiled prompt structure; the structure object resolves its sections. */
+	Type.Object(
+		{
+			kind: Type.Literal("prompt"),
+			...at,
+			structure: ObjectRefSchema,
+			layoutVersion: Type.Integer({ minimum: 1 }),
+			sections: count,
+			/** The structure's own chars/4 estimate. */
+			tokens: shown,
+			callId: Type.Union([CallIdSchema, Type.Null()]),
+		},
+		closed,
+	),
+	/** One persisted context snapshot: its window, and its prompt-side estimate beside the provider's count when reconciled. */
+	Type.Object(
+		{
+			kind: Type.Literal("context"),
+			...at,
+			snapshotId: ExistingId,
+			source: vocabulary(["estimated", "exact", "reconciled", "streaming"]),
+			window: Type.Object({ desired: count, effective: count, source: ExistingId }, closed),
+			estimated: Type.Union([shown, Type.Null()]),
+			reconciled: Type.Union([shown, Type.Null()]),
+			turnId: Type.Union([ExistingId, Type.Null()]),
+			callId: Type.Union([CallIdSchema, Type.Null()]),
+		},
+		closed,
+	),
+	/** One System One decision: each engine's answer against the deadline, and its breaker transitions (#429). */
+	Type.Object(
+		{
+			kind: Type.Literal("system-one"),
+			...at,
+			site: ExistingId,
+			moment: Type.Union([ExistingId, Type.Null()]),
+			outcome: SYSTEM_ONE_OUTCOME,
+			latency: shown,
+			deadline: shown,
+			fitted: Type.Union([Type.Boolean(), Type.Null()]),
+			routes: Type.Array(
+				Type.Object(
+					{
+						engine: ExistingId,
+						kind: ExistingId,
+						outcome: SYSTEM_ONE_OUTCOME,
+						roundTrip: Type.Union([shown, Type.Null()]),
+						breaker: Type.Union([vocabulary(["opened", "probe", "closed", "disabled"]), Type.Null()]),
+					},
+					closed,
+				),
+			),
+			callIds: Type.Array(CallIdSchema),
+		},
+		closed,
+	),
+	/** A referenced worker run's channel failure as its host saw it (#425). */
+	Type.Object(
+		{
+			kind: Type.Literal("worker-channel"),
+			...at,
+			runId: ExistingId,
+			lane: vocabulary(["stdin", "stdout"]),
+			frameType: Type.Union([text, Type.Null()]),
+			errno: Type.Union([text, Type.Null()]),
+			afterExit: Type.Boolean(),
+			failure: vocabulary(["write-failed", "oversize-frame", "unserializable-frame", "undrained", "invalid-frame"]),
+		},
+		closed,
+	),
 ]);
 export type TimelineEntry = Static<typeof TimelineEntrySchema>;
 export const TimelineSchema = Type.Object(
