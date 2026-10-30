@@ -63,6 +63,9 @@ import {
 	telemetryCommitment,
 	telemetryPromptStructure,
 } from "../../src/domains/observability/objects.js";
+import { appendOutOfTurnUsageRow } from "../../src/domains/observability/out-of-turn-usage.js";
+import type { RepoSource } from "../../src/domains/observability/read-model.js";
+import { repoOwner, repoTokenQuantities } from "../../src/domains/observability/read-model.js";
 import {
 	applyTelemetryPrune,
 	DEFAULT_PRUNE_POLICY,
@@ -79,6 +82,7 @@ import {
 	usageCallsFromJournal,
 } from "../../src/domains/session/journal-usage.js";
 import { runJournalsInWindow, usageCallsFromRunJournals } from "../../src/domains/session/run-journal-usage.js";
+import { loadRepoTelemetrySources } from "../../src/domains/session/telemetry-source.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import type { SessionUsageSink } from "../../src/domains/session/usage-record.js";
 import { recordUsageCall } from "../../src/domains/session/usage-record.js";
@@ -1670,5 +1674,31 @@ test("usage report discovers a standalone run journal that has no session and no
 	} finally {
 		await run.close();
 		await rm(scratch, { recursive: true, force: true });
+	}
+});
+
+test("a repository window counts side calls whose session it cannot load, as the pre-0.6.6 report did (#434 R9)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-unowned-side-calls-"));
+	try {
+		const at = new Date().toISOString();
+		const row = (sessionId: string | undefined, input: number) =>
+			appendOutOfTurnUsageRow(stateDir, {
+				...(sessionId === undefined ? {} : { sessionId }),
+				label: "side-question",
+				repoIdentity: null,
+				timestamp: at,
+				target: "fixture",
+				attributedModelId: "fixture-model",
+				usage: { input, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: input, costUsd: null },
+			});
+		// One written while no session was current, one whose session directory was removed since.
+		row(undefined, 100);
+		row("gone0session", 20);
+		const window = { cwdHash: null, from: Date.now() - 60_000, to: Date.now() + 60_000, standaloneRuns: "all" as const };
+		const sources = loadRepoTelemetrySources(stateDir, window);
+		const repo: RepoSource = { owner: repoOwner(null, 1), ...sources };
+		strictEqual(repoTokenQuantities(repo).input.display, "120");
+	} finally {
+		await rm(stateDir, { recursive: true, force: true });
 	}
 });

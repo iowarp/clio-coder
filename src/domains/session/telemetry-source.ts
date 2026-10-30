@@ -511,14 +511,11 @@ function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTele
 	// A side call settles into the machine-wide store, not the session's files, so its session counts by its rows.
 	const storePath = outOfTurnUsagePath(stateDir);
 	const store = yield* text(storePath);
-	const sideCallSessions = new Set(
-		(store ? parseOutOfTurnUsageRows(store, storePath).rows : []).flatMap((row) => {
-			const at = Date.parse(row.timestamp);
-			return row.sessionId && at >= from && at <= to && (window.cwdHash === null || row.repoIdentity === window.cwdHash)
-				? [row.sessionId]
-				: [];
-		}),
-	);
+	const sideCalls = (store ? parseOutOfTurnUsageRows(store, storePath).rows : []).filter((row) => {
+		const at = Date.parse(row.timestamp);
+		return at >= from && at <= to && (window.cwdHash === null || row.repoIdentity === window.cwdHash);
+	});
+	const sideCallSessions = new Set(sideCalls.flatMap((row) => (row.sessionId ? [row.sessionId] : [])));
 	const root = join(stateDir, "sessions");
 	const buckets = window.cwdHash === null ? ((yield* list(root)) ?? []).filter(safeId).sort() : [window.cwdHash];
 	const sessions: SessionSource[] = [];
@@ -532,6 +529,7 @@ function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTele
 			for (const runId of source.runs.keys()) referenced.add(runId);
 			sessions.push(windowSession(source, from, to));
 		}
+	sessions.push(...unownedSideCalls(sideCalls, new Set(sessions.map((session) => session.sessionId)), from, to));
 	const runs = new Map<string, JournalSource>();
 	const runsRoot = join(stateDir, "runs");
 	const receiptsRoot = join(stateDir, "receipts");
@@ -558,6 +556,45 @@ function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTele
 		if (windowed.records.some(accounting) || !source.present) runs.set(runId, windowed);
 	}
 	return { sessions, runs };
+}
+
+/** Owner of side calls recorded while no session was current; never a real session id, which is 12 base36 characters. */
+const NO_SESSION = "no-session";
+
+/**
+ * Side calls whose session the window loaded no source for still count, as pre-0.6.6 reports counted them (#434 R9):
+ * a row written while no session was current (no `sessionId`), and a row whose session directory is gone. Each
+ * folds as its own sessionless source, through the importer every session's side calls go through.
+ */
+function unownedSideCalls(
+	rows: readonly OutOfTurnUsageRow[],
+	loaded: ReadonlySet<string>,
+	from: number,
+	to: number,
+): SessionSource[] {
+	const byOwner = new Map<string, OutOfTurnUsageRow[]>();
+	for (const row of rows) {
+		const sessionId = typeof row.sessionId === "string" ? row.sessionId : null;
+		if (sessionId !== null && loaded.has(sessionId)) continue;
+		const owner = sessionId !== null && safeId(sessionId) ? sessionId : NO_SESSION;
+		byOwner.set(owner, [...(byOwner.get(owner) ?? []), { ...row, sessionId: owner }]);
+	}
+	return [...byOwner]
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([owner, owned]) => {
+			const imported = importLegacySession(owner, [], { outOfTurn: owned, ids: "derived" });
+			return windowSession(
+				{
+					sessionId: owner,
+					journal: { present: false, records: [], modes: [], skipped: 0, damaged: 0 },
+					legacy: { records: imported.records, aggregates: imported.aggregates + imported.invalid },
+					runs: new Map(),
+					parent: null,
+				},
+				from,
+				to,
+			);
+		});
 }
 
 /** True when the receipt's spend is a session's own, which that session's ledger and journal already hold. */
