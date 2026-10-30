@@ -64,12 +64,21 @@ export function readSessionCallJournalSync(
 		seen.add(path);
 		const local = readCallJournalSync(path);
 		const rows = local.records;
+		// A side call belongs to the side of the boundary it started on, read
+		// from its earliest record. Judged record by record, memory that settled
+		// after the fork kept only its start in the child and folded as an
+		// unsettled call (#434).
+		const sideCallStarts = new Map<string, number>();
+		for (const { record } of rows) {
+			if ((record.k !== "call.started" && record.k !== "call.settled") || !journalOwnsSideUsage(record.data.label))
+				continue;
+			const at = Date.parse(record.t);
+			sideCallStarts.set(record.data.callId, Math.min(at, sideCallStarts.get(record.data.callId) ?? at));
+		}
 		local.records = rows.filter(({ record }) => {
 			if (cutoff === Number.POSITIVE_INFINITY) return true;
 			if (record.k === "call.started" || record.k === "call.settled")
-				return (
-					linked.has(record.data.callId) || (journalOwnsSideUsage(record.data.label) && Date.parse(record.t) <= cutoff)
-				);
+				return linked.has(record.data.callId) || (sideCallStarts.get(record.data.callId) ?? Number.NaN) <= cutoff;
 			if (record.k === "compaction.closed")
 				return record.data.callIds.some((id) => linked.has(id)) || Date.parse(record.t) <= cutoff;
 			return Date.parse(record.t) <= cutoff;
