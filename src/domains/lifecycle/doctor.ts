@@ -8,6 +8,7 @@ import { readClioVersion } from "../../core/package-root.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
 import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
 import { shellQuote } from "../../core/shell-quote.js";
+import { effectiveTelemetryCapture } from "../../core/telemetry/capture.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
 import {
@@ -17,6 +18,7 @@ import {
 	validateHarness,
 } from "../agents/harness-validate.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
+import { consentCovering, readTelemetryConsent, resolveConsentWorkspace } from "../observability/consent.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../providers/auth/index.js";
 import { credentialsPresent } from "../providers/credentials.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
@@ -691,8 +693,51 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 		const cacheTelemetry = latestSessionCacheFinding(dirs.state);
 		if (cacheTelemetry !== null) findings.push(cacheTelemetry);
 	}
+	findings.push(telemetryModeFinding(dirs.state, process.cwd()));
 
 	return findings;
+}
+
+/** The mode, the capture it yields here, and this workspace's consent, as a session in this directory sees them (#434). */
+function telemetryModeFinding(stateDir: string, cwd: string): DoctorFinding {
+	const name = "telemetry";
+	let telemetry: ReturnType<typeof readSettings>["telemetry"];
+	try {
+		telemetry = readLayeredSettings(cwd).settings.telemetry;
+	} catch (err) {
+		return {
+			ok: true,
+			level: "warn",
+			name,
+			detail: `settings unreadable: ${err instanceof Error ? err.message : String(err)}`,
+		};
+	}
+	const consent = readTelemetryConsent(stateDir);
+	let workspace: string | null = null;
+	try {
+		workspace = resolveConsentWorkspace(cwd);
+	} catch {
+		// An unresolvable directory has no consent; the row says so below.
+	}
+	const covering = workspace === null ? null : consentCovering(consent.entries, workspace);
+	const capture = effectiveTelemetryCapture(telemetry, covering !== null);
+	const consents = `${consent.entries.length} workspace consent${consent.entries.length === 1 ? "" : "s"} recorded`;
+	const parts = [`mode ${capture.mode}`];
+	if (capture.mode === "standard") parts.push("research capture off", consents);
+	else {
+		const flags = (Object.keys(capture.capture) as Array<keyof typeof capture.capture>).filter(
+			(flag) => flag !== "content" && capture.capture[flag],
+		);
+		parts.push(flags.length > 0 ? `research flags on: ${flags.join(", ")}` : "every research flag off");
+		if (!telemetry.research.content) parts.push("content off (telemetry.research.content)");
+		else if (covering)
+			parts.push(
+				`content on: consent for ${covering.workspace} granted ${covering.grantedAt} by ${covering.grantedBy.user}@${covering.grantedBy.host}`,
+			);
+		else parts.push("content requested, but this workspace has no consent (clio-coder telemetry consent)");
+	}
+	if (consent.error) parts.push(`consent store unreadable, so no workspace has consent: ${consent.error}`);
+	return { ok: true, level: consent.error ? "warn" : "info", name, detail: parts.join("; ") };
 }
 
 /**

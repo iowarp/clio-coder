@@ -11,7 +11,7 @@ import { createRedactionTally, secretRedactingReplacer } from "../evidence/redac
 import { canonicalJson } from "../prompts/hash.js";
 
 const maximumBytes = 16 * 1024 * 1024;
-type StoredSubject = "prompt-structure" | "tool-schemas";
+type StoredSubject = "prompt-structure" | "tool-schemas" | "prompt-text";
 const hash = Type.String({ pattern: "^[0-9a-f]{64}$" });
 const promptStructureSchema = Type.Object(
 	{
@@ -87,16 +87,23 @@ async function readObjectBytes(path: string): Promise<string | null> {
 	}
 }
 
-/** Cold-path storage only. A reference becomes resolvable only after its redacted preimage is durable (#434). */
+const promptTextSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
+
+/**
+ * Cold-path storage only. A reference becomes resolvable only after its redacted preimage is durable (#434).
+ * `prompt-text` is content: only a caller holding research content capture for the session stores it.
+ */
 export async function storeTelemetryObject(
 	sessionDirectory: string,
 	subject: StoredSubject,
 	value: unknown,
 ): Promise<ObjectRef> {
-	if (subject !== "prompt-structure" && subject !== "tool-schemas")
-		throw new Error("telemetry object subject is not enabled for standard capture");
+	if (subject !== "prompt-structure" && subject !== "tool-schemas" && subject !== "prompt-text")
+		throw new Error("telemetry object subject is not enabled for capture");
 	if (subject === "prompt-structure" && !Value.Check(promptStructureSchema, value))
 		throw new Error("telemetry prompt structure contains unsupported fields");
+	if (subject === "prompt-text" && !Value.Check(promptTextSchema, value))
+		throw new Error("telemetry prompt text must be { text }");
 	// Validate before JSON's replacer could silently convert non-finite numbers to null (#434).
 	const canonical = canonicalJson(value);
 	const redacted = JSON.parse(canonical, secretRedactingReplacer(createRedactionTally()));

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
@@ -5,6 +6,7 @@ import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { SegmentHeader } from "../../core/telemetry/envelope.js";
+import { recordTelemetry } from "../../core/telemetry/producer.js";
 import type { CallStarted } from "../../core/telemetry/schemas.js";
 import type { CallJournal } from "./call-journal.js";
 import { openCallJournal } from "./call-journal.js";
@@ -18,15 +20,24 @@ export interface TelemetrySessionLease {
 	context: TelemetryContext;
 	/** Cold request preparation, before beginCall enters the enqueue-only lane (#434). */
 	storeRequestObjects?(input: {
-		prompt?: Parameters<typeof telemetryPromptStructure>[0];
+		/** `systemPrompt` is content: it is kept only under research content capture (#434). */
+		prompt?: Parameters<typeof telemetryPromptStructure>[0] & { systemPrompt?: string };
 		tools?: unknown;
 	}): Promise<NonNullable<CallStarted["objects"]>>;
 	release(): Promise<void>;
 }
 
+/** What a session's writer captures; `prepare` refreshes it on the cold path before each lease (#434). */
+export interface SessionCapture {
+	prepare?(origin: TelemetrySessionOrigin, sessionDirectory: string): Promise<void>;
+	current(origin: TelemetrySessionOrigin): TelemetryCapture;
+}
+
 interface Entry {
 	users: number;
 	journal: Promise<CallJournal | null>;
+	/** Prompt texts this writer already recorded, by digest, so a repeated prompt costs no research bytes. */
+	promptTexts: Set<string>;
 	closing?: Promise<void>;
 	/** Pending close of a writer no work holds; the next lease cancels it (#434). */
 	idle?: NodeJS.Timeout | undefined;
@@ -41,11 +52,7 @@ interface Entry {
 export const JOURNAL_IDLE_CLOSE_MS = 30_000;
 
 /** Active work, rather than the selected UI session, owns the writer's lifetime (#434). */
-export function createSessionJournals(
-	stateDir: string,
-	unavailable: () => void,
-	capture?: (origin: TelemetrySessionOrigin) => TelemetryCapture,
-) {
+export function createSessionJournals(stateDir: string, unavailable: () => void, capture?: SessionCapture) {
 	const entries = new Map<string, Entry>();
 	let versions: Promise<SegmentHeader["writer"]> | undefined;
 	const writer = () =>
@@ -88,6 +95,13 @@ export function createSessionJournals(
 			report();
 			return { context, async release() {} };
 		}
+		const directory = join(stateDir, "sessions", origin.cwdHash, origin.id);
+		try {
+			await capture?.prepare?.(origin, directory);
+		} catch {
+			// A failed refresh keeps the previous capture; consent is never granted by an error (#434).
+			report();
+		}
 		let entry = entries.get(origin.id);
 		if (entry?.closing) {
 			await entry.closing;
@@ -96,14 +110,15 @@ export function createSessionJournals(
 		if (!entry) {
 			entry = {
 				users: 0,
+				promptTexts: new Set(),
 				journal: Promise.resolve()
 					.then(writer)
 					.then((writer) =>
 						openCallJournal({
-							sessionDirectory: join(stateDir, "sessions", origin.cwdHash, origin.id),
+							sessionDirectory: directory,
 							context,
 							writer,
-							...(capture ? { capture: () => capture(origin) } : {}),
+							...(capture ? { capture: () => capture.current(origin) } : {}),
 						}),
 					)
 					.catch(() => {
@@ -123,8 +138,8 @@ export function createSessionJournals(
 			context,
 			async storeRequestObjects(input) {
 				const refs: NonNullable<CallStarted["objects"]> = {};
-				if (released || !(await owned.journal)) return refs;
-				const directory = join(stateDir, "sessions", origin.cwdHash, origin.id);
+				const journal = released ? null : await owned.journal;
+				if (!journal) return refs;
 				for (const subject of ["prompt-structure", "tool-schemas"] as const) {
 					try {
 						if (subject === "prompt-structure" && input.prompt !== undefined)
@@ -134,6 +149,27 @@ export function createSessionJournals(
 					} catch {
 						// Object capture never blocks the request or claims a missing preimage resolves (#434).
 						report();
+					}
+				}
+				const text = input.prompt?.systemPrompt;
+				if (text !== undefined && journal.admits("prompt.text")) {
+					const digest = createHash("sha256").update(text).digest("hex");
+					if (!owned.promptTexts.has(digest) && journal.reserveResearchBytes(Buffer.byteLength(text))) {
+						try {
+							const stored = await storeTelemetryObject(directory, "prompt-text", { text });
+							owned.promptTexts.add(digest);
+							recordTelemetry(
+								"prompt.text",
+								{
+									...(refs.promptStructure ? { structure: refs.promptStructure } : {}),
+									text: stored,
+									bytes: Buffer.byteLength(text),
+								},
+								context,
+							);
+						} catch {
+							report();
+						}
 					}
 				}
 				return refs;

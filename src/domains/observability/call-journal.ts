@@ -15,6 +15,8 @@ import { makeTelemetryRecord, readTelemetryRecord } from "../../core/telemetry/e
 import { newRecordId } from "../../core/telemetry/ids.js";
 import type { PendingTelemetry, TelemetrySink } from "../../core/telemetry/producer.js";
 import { registerRunTelemetrySink, registerTelemetrySink } from "../../core/telemetry/producer.js";
+import type { Kind } from "../../core/telemetry/schemas.js";
+import type { SegmentScan } from "../../core/telemetry/segment.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
 
@@ -25,13 +27,21 @@ export interface JournalHealth {
 	invalid: number;
 	/** Records queued under a mode their segment no longer admitted at write time (#434). */
 	filtered: number;
+	/** Research records and preimages refused at the session's research byte cap (#434). */
+	capped: number;
 	writeErrors: number;
 	skipped: number;
 }
 export interface CallJournal extends TelemetrySink {
+	admits(kind: Kind): boolean;
 	flush(): Promise<void>;
 	close(): Promise<void>;
 	health(): JournalHealth;
+	/**
+	 * Reserve research-capture bytes for a preimage before storing it. False at the cap: the caller stores
+	 * nothing, and the next batch records a research-cap gap (#434).
+	 */
+	reserveResearchBytes(bytes: number): boolean;
 }
 export interface CallJournalOptions {
 	sessionDirectory: string;
@@ -42,6 +52,32 @@ export interface CallJournalOptions {
 	segmentBytes?: number;
 	/** Read when a segment opens and before every batch; a change opens a new segment. Defaults to standard (#434). */
 	capture?: () => TelemetryCapture;
+	/** Research capture budget across the journal's segments and the preimages its records declare. */
+	researchBytes?: number;
+}
+
+/** Research mode is capped per session apart from standard retention (#434, §14). */
+export const RESEARCH_SESSION_BYTES = 256 * 1024 * 1024;
+
+/** Preimage bytes a research record declares it stored in `objects/`. */
+function declaredBytes(record: TelemetryRecord): number {
+	const declared = (record.data as { bytes?: unknown }).bytes;
+	return typeof declared === "number" ? declared : 0;
+}
+
+/** Every segment of the journal counts toward the cap; a segment that cannot be read leaves capture at the cap. */
+async function researchBytesOnDisk(directory: string, fileName: JournalFileName, active: SegmentScan): Promise<number> {
+	let total = 0;
+	const count = (scan: SegmentScan) => {
+		for (const row of scan.rows)
+			if (row.kind === "record" && row.record.tier === "research")
+				total += encodeTelemetryLine(row.record).length + declaredBytes(row.record);
+	};
+	count(active);
+	for (const file of journalFiles(await readdir(directory), fileName)) {
+		if (file !== fileName) count(scanTelemetrySegment(await readFile(join(directory, file))));
+	}
+	return total;
 }
 
 export type JournalFileName = "calls.jsonl" | "events.ndjson";
@@ -127,7 +163,10 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				// Another installation may own a newer segment format. Never truncate or retire it (#434).
 				throw new Error("call journal segment header is unsupported");
 			}
-			const gap = (reason: "torn-tail" | "writer-drop" | "invalid-record" | "mode-filtered", count: number) =>
+			const gap = (
+				reason: "torn-tail" | "writer-drop" | "invalid-record" | "mode-filtered" | "research-cap",
+				count: number,
+			) =>
 				makeTelemetryRecord("gap", { sink: fileName, reason, count }, options.context, {
 					t: new Date().toISOString(),
 					mono: performance.now(),
@@ -148,6 +187,10 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				await handle.sync();
 			}
 			let size = prefix.length + opening.length;
+			const researchCap = options.researchBytes ?? RESEARCH_SESSION_BYTES;
+			let researchBytes = await researchBytesOnDisk(options.sessionDirectory, fileName, scan).catch(() => researchCap);
+			let capped = 0;
+			let reportedCapped = 0;
 			const capacity = options.queueCapacity ?? 4096;
 			if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 1_000_000)
 				throw new Error("invalid call journal queue capacity");
@@ -172,6 +215,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				dropped,
 				invalid,
 				filtered,
+				capped,
 				writeErrors,
 				skipped,
 			});
@@ -184,8 +228,11 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			};
 			const flush = (): Promise<void> => {
 				if (failed) return Promise.resolve();
-				if (flushing) return flushing.then(() => (count > 0 || dropped > reportedDrops ? flush() : undefined));
-				if (count === 0 && dropped === reportedDrops) return Promise.resolve();
+				if (flushing)
+					return flushing.then(() =>
+						count > 0 || dropped > reportedDrops || capped > reportedCapped ? flush() : undefined,
+					);
+				if (count === 0 && dropped === reportedDrops && capped === reportedCapped) return Promise.resolve();
 				if (scheduled) {
 					clearImmediate(scheduled);
 					scheduled = undefined;
@@ -235,13 +282,27 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 								invalidBatch += 1;
 								continue;
 							}
-							lines.push(encodeTelemetryLine(record));
+							const line = encodeTelemetryLine(record);
+							if (record.tier === "research") {
+								// The preimage was reserved before it was stored; only the record itself is new here.
+								const cost = line.length;
+								if (researchBytes + cost > researchCap) {
+									capped += 1;
+									continue;
+								}
+								researchBytes += cost;
+							}
+							lines.push(line);
 							batchCount += 1;
 						}
 						invalid += invalidBatch;
 						if (invalidBatch) lines.push(encodeTelemetryLine(gap("invalid-record", invalidBatch)));
 						filtered += filteredBatch;
 						if (filteredBatch) lines.push(encodeTelemetryLine(gap("mode-filtered", filteredBatch)));
+						if (capped > reportedCapped) {
+							lines.push(encodeTelemetryLine(gap("research-cap", capped - reportedCapped)));
+							reportedCapped = capped;
+						}
 						if (!handle) throw new Error("call journal closed before flush");
 						if (size >= (options.segmentBytes ?? 32 * 1024 * 1024)) {
 							await appendAll(
@@ -287,13 +348,23 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 					}
 				})().finally(() => {
 					flushing = undefined;
-					if (count > 0 || dropped > reportedDrops) schedule();
+					if (count > 0 || dropped > reportedDrops || capped > reportedCapped) schedule();
 				});
 				return flushing;
 			};
 			const journal: CallJournal = {
 				admits(kind) {
 					return captureAdmits(captureNow(), kind);
+				},
+				reserveResearchBytes(bytes) {
+					if (closed || failed) return false;
+					if (!Number.isSafeInteger(bytes) || bytes < 0 || researchBytes + bytes > researchCap) {
+						capped += 1;
+						schedule();
+						return false;
+					}
+					researchBytes += bytes;
+					return true;
 				},
 				enqueue(record) {
 					if (closed || failed || telemetryOwner(record.ctx) !== telemetryOwner(options.context) || count === capacity) {

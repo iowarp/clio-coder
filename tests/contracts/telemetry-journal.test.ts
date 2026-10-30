@@ -1,6 +1,18 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import {
+	appendFile,
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	realpath,
+	rm,
+	stat,
+	symlink,
+	utimes,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -20,6 +32,13 @@ import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/d
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/observability/call-facts.js";
 import { openCallJournal, readCallJournal, readCallJournalSync } from "../../src/domains/observability/call-journal.js";
+import {
+	createConsentView,
+	grantTelemetryConsent,
+	readTelemetryConsent,
+	resolveConsentWorkspace,
+	revokeTelemetryConsent,
+} from "../../src/domains/observability/consent.js";
 import { createCostTracker } from "../../src/domains/observability/cost.js";
 import { foldCallJournal, foldCallsBy, foldFacts } from "../../src/domains/observability/folds.js";
 import {
@@ -598,6 +617,121 @@ test("a segment header says what its mode admits, and a mode change opens a new 
 	} finally {
 		await journal.close();
 		await rm(sessionDirectory, { recursive: true, force: true });
+	}
+});
+
+test("standard mode writes no content-bearing record; content needs research, the flag and consent, under a cap (#434)", async () => {
+	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const research = { content: true, deltas: true, providerHeaders: true, systemOneDataset: true, busTrace: false };
+	let capture = STANDARD_CAPTURE;
+	const journal = await openCallJournal({
+		sessionDirectory,
+		context,
+		writer,
+		capture: () => capture,
+		researchBytes: 4096,
+	});
+	const text = {
+		label: "resolvable",
+		function: "sha256",
+		canonicalization: "json-sorted-v1",
+		subject: "prompt-text",
+		id: `obj_${"a".repeat(64)}`,
+	} as const;
+	const prompt = { text, bytes: 10 };
+	try {
+		strictEqual(recordTelemetry("prompt.text", prompt, context), false);
+		// A forwarded record skips the producer check; the writer still refuses it under standard.
+		journal.enqueue({ kind: "prompt.text", data: prompt, ctx: context, wallMs: Date.now(), mono: performance.now() });
+		await journal.flush();
+		capture = effectiveTelemetryCapture({ mode: "research", research }, false);
+		strictEqual(recordTelemetry("prompt.text", prompt, context), false, "research without consent keeps no content");
+		capture = effectiveTelemetryCapture({ mode: "research", research }, true);
+		strictEqual(recordTelemetry("prompt.text", prompt, context), true);
+		strictEqual(journal.reserveResearchBytes(5000), false, "a preimage past the session cap is refused");
+		await journal.flush();
+		let admitsContent = false;
+		const seen: string[] = [];
+		for (const row of scanTelemetrySegment(await readFile(join(sessionDirectory, "calls.jsonl"))).rows) {
+			if (row.kind === "header") admitsContent = row.header.capture.content;
+			else if (row.kind === "record") {
+				if (row.record.cc === "content-bearing") ok(admitsContent, "content only under a header that admits it");
+				seen.push(row.record.k === "gap" ? `gap:${(row.record.data as { reason: string }).reason}` : row.record.k);
+			}
+		}
+		deepStrictEqual(seen, ["gap:mode-filtered", "segment.closed", "prompt.text", "gap:research-cap"]);
+		strictEqual(journal.health().capped, 1);
+	} finally {
+		await journal.close();
+		await rm(sessionDirectory, { recursive: true, force: true });
+	}
+});
+
+test("a session stores prompt text only under content capture, once per distinct prompt (#434)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const research = { content: true, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false };
+	let capture = STANDARD_CAPTURE;
+	const journals = createSessionJournals(stateDir, () => {}, { current: () => capture });
+	const origin = { id: "prompt-session", cwdHash: "prompthash" };
+	const prompt = {
+		sections: [],
+		fragmentManifest: [],
+		systemPrompt: `you are a fixture; api_key=${"secret".repeat(4)}`,
+	};
+	try {
+		const standard = await journals.acquire(origin, "main");
+		await standard.storeRequestObjects?.({ prompt });
+		await standard.release();
+		capture = effectiveTelemetryCapture({ mode: "research", research }, true);
+		for (let n = 0; n < 2; n += 1) {
+			const lease = await journals.acquire(origin, "main");
+			await lease.storeRequestObjects?.({ prompt });
+			await lease.release();
+		}
+		const directory = join(stateDir, "sessions", origin.cwdHash, origin.id);
+		const texts = (await readCallJournal(directory)).records.flatMap(({ record }) =>
+			record.k === "prompt.text" ? [record] : [],
+		);
+		strictEqual(texts.length, 1, "standard stored none, and a repeated prompt is recorded once");
+		const stored = await readTelemetryObject(directory, texts[0]?.data.text ?? telemetryCommitment("prompt-text", ""));
+		ok(stored.kind === "resolved");
+		deepStrictEqual(stored.value, { text: "you are a fixture; api_key=[redacted:assignment]" });
+	} finally {
+		await journals.closeAll();
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("consent is the operator's, covers a workspace subtree by real path, and revocation ends it (#434)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-consent-"));
+	const stateDir = join(root, "state");
+	const workspace = join(root, "workspace");
+	const session = join(stateDir, "sessions", "hash", "consent-session");
+	try {
+		await mkdir(join(workspace, "src", ".clio-coder"), { recursive: true });
+		await mkdir(session, { recursive: true });
+		await symlink(workspace, join(root, "alias"));
+		await writeFile(join(session, "meta.json"), JSON.stringify({ cwd: join(root, "alias", "src") }));
+		// A file a repository could commit never grants consent.
+		await writeFile(join(workspace, "src", ".clio-coder", "telemetry-consent.json"), '{"version":1,"workspaces":{}}');
+		const view = createConsentView(stateDir);
+		await view.refresh();
+		const sessionWorkspace = await view.sessionWorkspace(session);
+		strictEqual(view.covers(sessionWorkspace), false);
+		const granted = grantTelemetryConsent(stateDir, resolveConsentWorkspace(join(root, "alias")));
+		strictEqual(granted.entry.workspace, await realpath(workspace));
+		await view.refresh();
+		strictEqual(view.covers(sessionWorkspace), true, "a session under the workspace is covered");
+		deepStrictEqual(
+			readTelemetryConsent(stateDir).entries.map((entry) => entry.workspace),
+			[await realpath(workspace)],
+		);
+		ok(revokeTelemetryConsent(stateDir, granted.entry.workspace));
+		await view.refresh();
+		strictEqual(view.covers(sessionWorkspace), false);
+		strictEqual(revokeTelemetryConsent(stateDir, granted.entry.workspace), null);
+	} finally {
+		await rm(root, { recursive: true, force: true });
 	}
 });
 

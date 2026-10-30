@@ -303,6 +303,7 @@ export const KIND_NAMES = [
 	"run.ref",
 	"process.started",
 	"process.exited",
+	"prompt.text",
 ] as const;
 export type Kind = (typeof KIND_NAMES)[number];
 interface KindDefinition {
@@ -346,6 +347,8 @@ export const KIND_REGISTRY = {
 					"rotation",
 					// The segment's mode or capture flags no longer admitted a record queued before a change (#434).
 					"mode-filtered",
+					// The session's research capture reached its byte cap; accountability records continue (#434).
+					"research-cap",
 				]),
 				count: Type.Integer({ minimum: 1 }),
 			},
@@ -410,6 +413,14 @@ export const KIND_REGISTRY = {
 	"run.ref": accountability(Type.Object({ runId: ExistingId }, closed)),
 	"process.started": accountability(empty),
 	"process.exited": accountability(Type.Object({ exitCode: Type.Integer() }, closed)),
+	/** The compiled system prompt's redacted text, linked to calls by the structure ref they carry (#434). */
+	"prompt.text": {
+		version: 1,
+		tier: "research",
+		cc: "content-bearing",
+		capture: "content",
+		schema: Type.Object({ structure: Type.Optional(ObjectRefSchema), text: ObjectRefSchema, bytes: count }, closed),
+	},
 } satisfies Record<Kind, KindDefinition>;
 export type Payload<K extends Kind> = Static<(typeof KIND_REGISTRY)[K]["schema"]>;
 export { utc as UtcSchema };
@@ -421,6 +432,14 @@ export function isKind(kind: string): kind is Kind {
 /** Schema validation plus the cross-field invariants that JSON Schema cannot express (#434). */
 export function validPayload<K extends Kind>(kind: K, data: unknown): data is Payload<K> {
 	if (!Value.Check(KIND_REGISTRY[kind].schema, data)) return false;
+	if (kind === "prompt.text") {
+		const prompt = data as Payload<"prompt.text">;
+		return (
+			prompt.text.subject === "prompt-text" &&
+			prompt.text.label === "resolvable" &&
+			(prompt.structure === undefined || prompt.structure.subject === "prompt-structure")
+		);
+	}
 	if (kind === "compaction.closed") {
 		const outcome = data as Payload<"compaction.closed">;
 		return outcome.outcome !== "committed" || outcome.checkpointTurnId !== null;

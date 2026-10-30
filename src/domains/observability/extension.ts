@@ -18,6 +18,7 @@ import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/index.js";
 import type { RunReceipt } from "../dispatch/types.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
+import { createConsentView } from "./consent.js";
 import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
 import { callCoverageForRun, createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
@@ -163,18 +164,34 @@ export function createObservabilityBundle(
 	options: ObservabilityBundleOptions = {},
 ): DomainBundle<ObservabilityContract> {
 	const cost = createCostTracker();
-	// Writers ask before every record and batch, so reuse the capture until the settings snapshot changes (#434).
-	let captureFor: { settings: TelemetrySettings; capture: TelemetryCapture } | undefined;
+	// Writers ask before every record and batch, so the capture is answered from memory: consent per session
+	// refreshes on the cold path before each lease, and the result is reused until settings or consent change (#434).
+	const consent = createConsentView(clioStateDir());
+	const consented = new Map<string, boolean>();
+	const captures = new Map<string, { settings: TelemetrySettings; consent: boolean; capture: TelemetryCapture }>();
 	const journals = createSessionJournals(
 		clioStateDir(),
 		() => writeDiagnostic("[clio-coder:telemetry] call journal unavailable; coverage is incomplete\n"),
-		() => {
-			const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
-			if (!settings) return STANDARD_CAPTURE;
-			if (captureFor?.settings !== settings)
-				// No consent store exists yet, so no workspace has granted content capture (#434, O6).
-				captureFor = { settings, capture: effectiveTelemetryCapture(settings, false) };
-			return captureFor.capture;
+		{
+			async prepare(origin, directory) {
+				const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
+				if (settings?.mode !== "research" || !settings.research.content) {
+					consented.set(origin.id, false);
+					return;
+				}
+				await consent.refresh();
+				consented.set(origin.id, consent.covers(await consent.sessionWorkspace(directory)));
+			},
+			current(origin) {
+				const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
+				if (!settings) return STANDARD_CAPTURE;
+				const granted = consented.get(origin.id) ?? false;
+				const cached = captures.get(origin.id);
+				if (cached?.settings === settings && cached.consent === granted) return cached.capture;
+				const capture = effectiveTelemetryCapture(settings, granted);
+				captures.set(origin.id, { settings, consent: granted, capture });
+				return capture;
+			},
 		},
 	);
 	let sessionId: string | null | undefined;

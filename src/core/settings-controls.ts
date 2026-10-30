@@ -673,23 +673,23 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"telemetry.research.content": [
 		"Research: capture content",
-		"In research mode, also keep prompt text and request bodies, with secrets removed. Takes effect only in a workspace you consented for with clio-coder telemetry consent.",
+		"In research mode, also keep the text of each distinct system prompt Clio compiles for a session, with secrets removed, in that session's telemetry objects. Takes effect only in a workspace you consented for with clio-coder telemetry consent. Request bodies are not captured.",
 	],
 	"telemetry.research.deltas": [
 		"Research: token timing",
-		"In research mode, keep a per-call histogram of gaps between streamed tokens. Never one record per token.",
+		"Reserved for per-call token timing in research mode. This build records nothing for it.",
 	],
 	"telemetry.research.providerHeaders": [
 		"Research: provider headers",
-		"In research mode, keep allow-listed provider response headers, such as rate-limit windows. Credentials are never kept.",
+		"Reserved for allow-listed provider response headers in research mode. This build records nothing for it.",
 	],
 	"telemetry.research.systemOneDataset": [
 		"Research: decision dataset",
-		"In research mode, keep the System One decision dataset that systemOne.record keeps.",
+		"Reserved for keeping the System One decision dataset under research mode. This build records nothing for it; systemOne.record still controls the dataset.",
 	],
 	"telemetry.research.busTrace": [
 		"Research: bus trace",
-		"In research mode, record shutdown and domain lifecycle bus events.",
+		"Reserved for recording shutdown and domain lifecycle bus events in research mode. This build records nothing for it.",
 	],
 	"systemOne.record": [
 		"Save decision examples",
