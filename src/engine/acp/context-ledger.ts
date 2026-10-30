@@ -19,6 +19,7 @@ import type { ContextLedger } from "../../domains/session/context-ledger.js";
 
 const MAX_GROUPS = 32;
 const MAX_HANDBOOK_FILES = 16;
+const MAX_COLD_REASONS = 16;
 const MAX_TEXT_BYTES = 256;
 
 function bounded(text: string): string {
@@ -35,6 +36,7 @@ function bounded(text: string): string {
 
 const optional = (text: string | null | undefined) => (text === null || text === undefined ? null : bounded(text));
 const count = (value: number) => (Number.isFinite(value) && value > 0 ? Math.round(value) : 0);
+const duration = (value: number) => (Number.isFinite(value) && value > 0 ? value : 0);
 const nullableCount = (value: number | null | undefined) =>
 	value === null || value === undefined || !Number.isFinite(value) ? null : Math.max(0, Math.round(value));
 
@@ -86,6 +88,20 @@ export function projectContextLedger(ledger: ContextLedger): AcpContextLedger {
 						cacheWriteTokens: nullableCount(cache.cacheWriteTokens),
 						uncachedInputTokens: nullableCount(cache.uncachedInputTokens),
 						backendVerdict: cache.backendVerdict,
+						// The three facts /context reads for its divergence warning, so a client can show it too (#434).
+						expectedColdReasons: (cache.expectedColdReasons ?? []).slice(0, MAX_COLD_REASONS).map(bounded),
+						backend:
+							cache.backend === null
+								? null
+								: {
+										promptTokens: count(cache.backend.promptTokens),
+										cachedTokens: nullableCount(cache.backend.cachedTokens),
+										predictedTokens: count(cache.backend.predictedTokens),
+										promptMs: duration(cache.backend.promptMs),
+										predictedMs: duration(cache.backend.predictedMs),
+										source: cache.backend.source,
+									},
+						uncachedPrefillTokens: nullableCount(cache.uncachedPrefillTokens),
 					},
 	};
 }

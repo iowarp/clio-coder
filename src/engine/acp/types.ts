@@ -1270,6 +1270,19 @@ export interface AcpContextLedger {
 		cacheWriteTokens: number | null;
 		uncachedInputTokens: number | null;
 		backendVerdict: "hot" | "partial" | "cold" | "small" | "unknown" | null;
+		/** Cache disturbances Clio expected before the last settled run, so a client can tell a planned cold start. */
+		expectedColdReasons?: string[];
+		/** The serving backend's own prefill timings for the run's last call; null when none were captured. */
+		backend?: {
+			promptTokens: number;
+			cachedTokens: number | null;
+			predictedTokens: number;
+			promptMs: number;
+			predictedMs: number;
+			source: "llamacpp-timings" | "lmstudio-timings";
+		} | null;
+		/** Backend prompt tokens not served from cache; null unless cache reads were reported. */
+		uncachedPrefillTokens?: number | null;
 	} | null;
 }
 
@@ -1934,6 +1947,24 @@ export const AcpContextLedgerSchema = Type.Object(
 						Type.Literal("unknown"),
 						Type.Null(),
 					]),
+					expectedColdReasons: Type.Optional(Type.Array(wireContextLedgerText, { maxItems: 16 })),
+					backend: Type.Optional(
+						Type.Union([
+							Type.Object(
+								{
+									promptTokens: wireContextLedgerTokens,
+									cachedTokens: wireContextLedgerNullableCount,
+									predictedTokens: wireContextLedgerTokens,
+									promptMs: Type.Number({ minimum: 0 }),
+									predictedMs: Type.Number({ minimum: 0 }),
+									source: Type.Union([Type.Literal("llamacpp-timings"), Type.Literal("lmstudio-timings")]),
+								},
+								closed,
+							),
+							Type.Null(),
+						]),
+					),
+					uncachedPrefillTokens: Type.Optional(wireContextLedgerNullableCount),
 				},
 				closed,
 			),
