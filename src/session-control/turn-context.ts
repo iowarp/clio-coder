@@ -62,7 +62,7 @@ import type {
 	CacheCallTransport,
 	CacheRequestFingerprint,
 } from "../core/cache-telemetry.js";
-import { buildCacheCallObservation, uncachedPrefillTokens } from "../core/cache-telemetry.js";
+import { buildCacheCallObservation, firstChangedSection, uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
@@ -412,6 +412,10 @@ export interface TurnContext {
 	noteCacheRequestToolChoice(toolChoice: string): void;
 	/** Consume disturbances since the last settled run (T3.3 honesty). */
 	consumeExpectedColdReasons(runtimeId: string): void;
+	/** Disturbances since the last main request was sent; the journal stamps them on the next one (#434). */
+	takeCallColdReasons?(): ExpectedColdReason[];
+	/** Advances whenever cache comparison restarts: a committed compaction or a session reset (#423, #434). */
+	cacheGeneration?(): number;
 	/** Prompt-cache record for one persisted assistant call, with cold-reason stamp. */
 	promptCachePayloadForAssistant(
 		usage: Usage,
@@ -654,6 +658,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const pendingColdReasons = new Set<ExpectedColdReason>();
 	let runExpectedColdReasons: ExpectedColdReason[] = [];
 	let nextAssistantColdReasons: ExpectedColdReason[] = [];
+	// The journal stamps each disturbance on the first request sent after it, hidden retries included, while the
+	// ledger above stamps the first persisted reply; the two lists are consumed independently (#434).
+	let callColdReasons: ExpectedColdReason[] = [];
+	let cacheGeneration = 0;
 	let cacheCallBaseline: CacheCallBaseline | null = null;
 	let cacheCallBaselineLoaded = false;
 	let cacheRequestToolChoice = "auto";
@@ -698,6 +706,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		cacheCallBaseline = null;
 		// #423: a generation reset must not reload the pre-reduction ledger baseline.
 		cacheCallBaselineLoaded = true;
+		cacheGeneration += 1;
 	};
 	// #423: prefix-byte and reasoning changes can cool every tier. Residency,
 	// dispatch traffic, and compaction retain the local-native disturbance gate.
@@ -726,6 +735,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return;
 		}
 		if (!stampsOnTier(reason, state.runtime?.runtimeId)) return;
+		if (!callColdReasons.includes(reason)) callColdReasons.push(reason);
 		if (!runExpectedColdReasons.includes(reason)) runExpectedColdReasons.push(reason);
 		if (nextAssistantColdReasons.includes(reason)) return;
 		nextAssistantColdReasons.push(reason);
@@ -3012,17 +3022,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// the stamp requires the hash to have moved, not merely to have a predecessor.
 				if (entry.previousHash !== null && entry.previousHash !== entry.systemPromptHash) {
 					noteColdReason("prompt_recompiled");
-					// #423: compare exact ordered sections; old manifests without hashes cannot attribute bytes.
-					if (previousPromptSections?.every((section) => section.contentHash !== undefined)) {
-						const count = Math.max(previousPromptSections.length, entry.sections.length);
-						for (let index = 0; index < count; index += 1) {
-							const before = previousPromptSections[index];
-							const after = entry.sections[index];
-							if (before?.id !== after?.id || before?.contentHash !== after?.contentHash) {
-								nextChangedSection ??= after?.id ?? before?.id;
-								break;
-							}
-						}
+					if (previousPromptSections) {
+						nextChangedSection ??= firstChangedSection(previousPromptSections, entry.sections);
 					}
 				}
 			} catch {
@@ -3223,10 +3224,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				if (reasons.length > 0) {
 					runExpectedColdReasons = reasons;
 					nextAssistantColdReasons = reasons;
+					callColdReasons = [...new Set([...callColdReasons, ...reasons])];
 					noteExpectedCold(reasons);
 				}
 			}
 		},
+
+		takeCallColdReasons(): ExpectedColdReason[] {
+			const reasons = callColdReasons;
+			callColdReasons = [];
+			return reasons;
+		},
+
+		cacheGeneration: () => cacheGeneration,
 
 		noteCacheRequestToolChoice(toolChoice): void {
 			cacheRequestToolChoice = toolChoice;
@@ -3386,6 +3396,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		resetForSession(incomingBranchAnchorTurnId: string | null = null): void {
 			cacheCallBaseline = null;
 			cacheCallBaselineLoaded = false;
+			cacheGeneration += 1;
 			if (state.runtime) setEngineCodexConfiguration(state.runtime.agent, undefined);
 			thinkingUsesConfigurationUpdate = false;
 			cacheRequestToolChoice = "auto";

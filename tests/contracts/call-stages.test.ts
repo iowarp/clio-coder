@@ -19,28 +19,27 @@ import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-it("a main call journals its stages in Pi's order, a budget refusal never reaches send, and each turn settles once (#434)", async () => {
+it("a main call journals its stages in Pi's order and its cache physics, a budget refusal never reaches send, and each turn settles once (#434)", async () => {
 	const env = await isolateClioEnv("clio-coder-call-stages-");
 	const faux = registerEngineFauxProvider({ api: "call-stages-fixture", models: [{ id: "chat" }], tokensPerSecond: 0 });
-	faux.setResponses([
-		{
-			role: "assistant",
-			content: [{ type: "text", text: "staged" }],
-			api: faux.api,
-			provider: "fixture",
-			model: "chat",
-			stopReason: "stop",
-			timestamp: Date.now(),
-			usage: {
-				input: 3,
-				output: 2,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 5,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
+	const reply = {
+		role: "assistant" as const,
+		content: [{ type: "text" as const, text: "staged" }],
+		api: faux.api,
+		provider: "fixture",
+		model: "chat",
+		stopReason: "stop" as const,
+		timestamp: Date.now(),
+		usage: {
+			input: 3,
+			output: 2,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 5,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		},
-	]);
+	};
+	faux.setResponses([reply, reply]);
 	const capabilities = { chat: true, tools: true, reasoning: false, contextWindow: 131072, maxTokens: 8192 };
 	const runtime = {
 		id: "fixture",
@@ -58,7 +57,7 @@ it("a main call journals its stages in Pi's order, a budget refusal never reache
 		url: "https://chat.invalid/v1",
 		defaultModel: "chat",
 		capabilities: { contextWindow: 131072 },
-		pricing: { input: 1, output: 1 },
+		pricing: { input: 1, output: 1, cacheRead: 0.1 },
 	};
 	const providers = {
 		list: () => [
@@ -80,6 +79,7 @@ it("a main call journals its stages in Pi's order, a budget refusal never reache
 		},
 	} as unknown as ProvidersContract;
 	let refuse = false;
+	let memory = "one";
 	const scheduling = {
 		preflight: () => ({ currentUsd: 5, ceilingUsd: 5, verdict: "at" }),
 		async admitPaidRequest(options: Parameters<NonNullable<SchedulingContract["admitPaidRequest"]>>[0]) {
@@ -137,25 +137,30 @@ it("a main call journals its stages in Pi's order, a budget refusal never reache
 			recordNeverSentCalls() {},
 		} as unknown as ObservabilityContract,
 		prompts: {
-			inputEpoch: () => 0,
+			inputEpoch: () => (memory === "one" ? 0 : 1),
 			compileSessionPrompt: async () => ({
-				systemPrompt: "fixture prompt",
-				systemPromptHash: "fixture",
+				systemPrompt: `fixture prompt\n\nmemory ${memory}`,
+				systemPromptHash: `fixture-${memory}`,
 				tokenEstimate: 1,
-				sections: [],
+				sections: [
+					{ id: "identity", tokenEstimate: 1, contentHash: "identity" },
+					{ id: "memory", tokenEstimate: 1, contentHash: memory },
+				],
 				fragmentManifest: [],
 			}),
 		} as unknown as PromptsContract,
 	});
 	try {
 		await loop.submit("stage this");
+		memory = "two";
+		await loop.submit("recompile this");
 		refuse = true;
 		await loop.submit("refuse this");
 		await journals.flush();
 		const journal = await readCallJournal(join(clioStateDir(), "sessions", "stages-repo", "stages-session"));
 		const calls = journal.records.flatMap(({ record }) => (record.k === "call.settled" ? [record.data] : []));
-		strictEqual(calls.length, 2, JSON.stringify(journal));
-		const [sent, refused] = calls as [CallSettled, CallSettled];
+		strictEqual(calls.length, 3, JSON.stringify(journal));
+		const [sent, recompiled, refused] = calls as [CallSettled, CallSettled, CallSettled];
 		strictEqual(sent.disposition, "settled");
 		const { transform, auth, admission, send, firstToken, settle } = sent.stages;
 		ok(transform && auth && admission && send && firstToken !== undefined && settle !== null, JSON.stringify(sent));
@@ -177,6 +182,30 @@ it("a main call journals its stages in Pi's order, a budget refusal never reache
 			order,
 			[...order].sort((a, b) => a - b),
 		);
+		// A fresh session's first request re-prefills nothing. A recompiled memory section is named, and its re-prefill,
+		// min(uncached, previous prompt − cache read), is billed at the input rate less the cache-read rate.
+		const counted = (value: unknown) => ({ kind: "measured", value, source: "local-count" });
+		const notApplicable = { kind: "absent", reason: "not-applicable" };
+		deepStrictEqual(sent.cache.firstDivergentSection, notApplicable);
+		deepStrictEqual(sent.cache.rePrefilledTokens, counted(0));
+		deepStrictEqual(sent.cache.bill, { usd: counted(0), pricedBy: "target-rates" });
+		const value = (fact: { kind: string; value?: unknown } | undefined) =>
+			fact?.kind === "measured" ? Number(fact.value) : NaN;
+		const previousPrompt = value(sent.usage?.input) + value(sent.usage?.cacheRead) + value(sent.usage?.cacheWrite);
+		const rePrefilled = Math.min(value(recompiled.usage?.input), previousPrompt - value(recompiled.usage?.cacheRead));
+		ok(rePrefilled > 0, JSON.stringify([sent.usage, recompiled.usage]));
+		deepStrictEqual(recompiled.cache.firstDivergentSection, counted("memory"));
+		deepStrictEqual(recompiled.cache.rePrefilledTokens, counted(rePrefilled));
+		const bill = recompiled.cache.bill;
+		ok(
+			bill?.usd.kind === "measured" && Math.abs(bill.usd.value - (rePrefilled * 0.9) / 1e6) < 1e-15,
+			JSON.stringify(bill),
+		);
+		strictEqual(bill.pricedBy, "target-rates");
+		ok(recompiled.cache.expectedColdReasons.includes("prompt_recompiled"), JSON.stringify(recompiled.cache));
+		strictEqual(recompiled.cache.verdict, "hot");
+		deepStrictEqual(refused.cache.rePrefilledTokens, notApplicable);
+		deepStrictEqual(refused.cache.firstDivergentSection, notApplicable);
 		strictEqual(refused.disposition, "never_sent");
 		strictEqual(refused.stages.admission?.waitedOn, "budget");
 		strictEqual(refused.stages.send, undefined);
@@ -187,6 +216,10 @@ it("a main call journals its stages in Pi's order, a budget refusal never reache
 			{
 				stopReason: "stop",
 				terminal: { cause: null, stage: "firstToken", retries: 0, callIds: [sent.callId] },
+			},
+			{
+				stopReason: "stop",
+				terminal: { cause: null, stage: "firstToken", retries: 0, callIds: [recompiled.callId] },
 			},
 			{
 				stopReason: "error",

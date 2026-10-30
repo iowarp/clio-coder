@@ -148,6 +148,10 @@ export const CallSettledSchema = Type.Object(
 		cache: Type.Object(
 			{
 				promptManifestRef: Type.Optional(ObjectRefSchema),
+				/**
+				 * Where this request first departs from the previous one on its cache key: a compiled prompt section id,
+				 * "system-prompt" when no section can be named, "tools" or "messages". Null when it only extends it (#434).
+				 */
 				firstDivergentSection: factSchema(Type.Union([text, Type.Null()])),
 				expectedColdReasons: Type.Array(
 					vocabulary([
@@ -161,10 +165,14 @@ export const CallSettledSchema = Type.Object(
 						"background_memory",
 						"model_changed",
 						"transport_reset",
+						"input_changed",
+						"tool_choice_change",
 					]),
 				),
 				rePrefilledTokens: factSchema(count),
 				uncachedPrefillTokens: factSchema(count),
+				/** rePrefilledTokens priced at the input rate less the cache-read rate, fixed at settle (#434). */
+				bill: Type.Optional(PricingSchema),
 				verdict: vocabulary(["hot", "partial", "cold", "small", "unknown"]),
 			},
 			closed,

@@ -7,14 +7,18 @@ import type { CallSettled } from "../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { traceObservation } from "../domains/memory/observation-trace.js";
+import type { CacheBaseline } from "../domains/observability/cache-physics.js";
+import { cachePhysics } from "../domains/observability/cache-physics.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/observability/session-journals.js";
+import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
 import { recordUsageCall } from "../domains/session/usage-record.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
 import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
+import { requestStructure } from "../engine/request-structure.js";
 import type { ContinuityController } from "./continuity-controller.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 /**
@@ -78,7 +82,7 @@ import {
 	toolResultSummary,
 } from "./chat-loop-messages.js";
 import { assessToolProseLoop, runtimeNarratesToolCalls, shouldAssessToolProse } from "./tool-prose-loop.js";
-import type { TurnContext } from "./turn-context.js";
+import type { ExpectedColdReason, TurnContext } from "./turn-context.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
 import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatLoopTarget, ChatTurnState, PreInvocationStage } from "./turn-state.js";
@@ -322,6 +326,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 */
 	const announcedResolutionWarnings = new Set<string>();
 	const turnCalls = new Map<string, CallSettled[]>();
+	// The last request sent on each cache key, kept across runtime rebuilds and dropped whenever turn-context restarts
+	// cache comparison, so the journal compares within one context generation as #423 does (#434).
+	const cacheBaselines = new Map<string, CacheBaseline>();
+	let cacheBaselineGeneration: number | undefined;
+	// Disturbances taken for a request that never left still precede the next one that does (#434).
+	let unsentColdReasons: ExpectedColdReason[] = [];
 
 	const readTarget = (): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
@@ -642,6 +652,66 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let modelCall: TelemetryCall | undefined;
 		let journalLease: TelemetrySessionLease | undefined;
 		let settledAttempts: CallSettled[] = [];
+		// What each attempt handed Pi, digested only at settle so the hashing stays off the send path (#434).
+		let attemptRequest:
+			| {
+					model: Parameters<typeof requestStructure>[0];
+					context: Parameters<typeof requestStructure>[1];
+					compiled: Parameters<typeof requestStructure>[2];
+					coldReasons: ExpectedColdReason[];
+			  }
+			| undefined;
+		/**
+		 * Cache physics against the previous request on the same key. Every attempt the provider saw advances the
+		 * baseline, hidden #426 retries included, so the ledger's #423 shortfall, which only persisted replies
+		 * advance, can differ from rePrefilledTokens until the ledger copy retires (#434).
+		 */
+		const withCachePhysics = (
+			settlement: ReturnType<typeof callSettlementFromMessage>,
+			message: AgentMessage,
+		): ReturnType<typeof callSettlementFromMessage> => {
+			const request = attemptRequest;
+			attemptRequest = undefined;
+			const sent = settlement.disposition !== "never_sent";
+			const reasons = request?.coldReasons ?? [];
+			if (!sent) unsentColdReasons = [...new Set([...unsentColdReasons, ...reasons])];
+			const generation = context.cacheGeneration?.() ?? 0;
+			if (generation !== cacheBaselineGeneration) {
+				cacheBaselines.clear();
+				cacheBaselineGeneration = generation;
+			}
+			const resolution = localRuntime.runtimeResolution;
+			const key = JSON.stringify([localRuntime.targetId, request?.model.api ?? model.api, localRuntime.wireModelId]);
+			let structure: ReturnType<typeof requestStructure> | undefined;
+			try {
+				structure = request ? requestStructure(request.model, request.context, request.compiled) : undefined;
+			} catch {
+				// A request Clio cannot digest leaves its cache facts unobserved; telemetry never fails the call (#434).
+			}
+			const physics = cachePhysics({
+				settlement,
+				structure,
+				previous: cacheBaselines.get(key),
+				pricing: resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId),
+			});
+			if (physics.baseline) cacheBaselines.set(key, physics.baseline);
+			else cacheBaselines.delete(key);
+			const usage = (message as { usage?: Record<string, unknown> }).usage ?? {};
+			const backend = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
+			const verdict =
+				settlement.disposition === "settled" && typeof usage.input === "number" && typeof usage.cacheRead === "number"
+					? backendCacheVerdict(
+							usage.input,
+							usage.cacheRead,
+							backend,
+							typeof usage.cacheReadReported === "boolean" ? usage.cacheReadReported : undefined,
+						)
+					: "unknown";
+			return {
+				...settlement,
+				cache: { ...settlement.cache, ...physics.cache, expectedColdReasons: sent ? reasons : [], verdict },
+			};
+		};
 		const recordSettledCall = (
 			facts: CallSettled | undefined,
 			ownerSessionId: string | null | undefined,
@@ -665,12 +735,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (call) {
 				Object.assign(message, { callId: call.callId, attemptId: call.attemptId });
 				const facts = call.settle(
-					callSettlementFromMessage(
+					withCachePhysics(
+						callSettlementFromMessage(
+							message,
+							localRuntime.runtimeResolution.costProvenance,
+							message.role === "assistant" && message.stopReason === "aborted" && state.activeInterruptByOperator
+								? "operator_cancel"
+								: undefined,
+						),
 						message,
-						localRuntime.runtimeResolution.costProvenance,
-						message.role === "assistant" && message.stopReason === "aborted" && state.activeInterruptByOperator
-							? "operator_cancel"
-							: undefined,
 					),
 					reportedModelFromMessage(message),
 				);
@@ -758,6 +831,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							const resolved = resolvedRequestContext(request.context);
 							sent = { ...resolved, systemPrompt: lockedSynthesisSystemPrompt(resolved.systemPrompt ?? "") };
 						}
+						if (attempt) {
+							attemptRequest = {
+								model: currentModel,
+								context: sent,
+								compiled: context.compiledSessionPrompt?.() ?? null,
+								coldReasons: [...new Set([...unsentColdReasons, ...(context.takeCallColdReasons?.() ?? [])])],
+							};
+							unsentColdReasons = [];
+						}
 						const stream = engineMainStreamSimple(currentModel, sent, requestOptions);
 						// send.end is the handoff to Pi's provider, which owns serialization and the socket under
 						// transport option B. The journal's TTFT is firstToken minus this mark (#434).
@@ -788,9 +870,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							? tracking.failure(terminal.errorMessage, terminal.stopReason === "aborted", reported)
 							: undefined;
 						const facts = modelCall.settle(
-							callSettlementFromMessage(
-								{ ...message, ...(failure ? { failure } : {}) },
-								localRuntime.runtimeResolution.costProvenance,
+							withCachePhysics(
+								callSettlementFromMessage(
+									{ ...message, ...(failure ? { failure } : {}) },
+									localRuntime.runtimeResolution.costProvenance,
+								),
+								message,
 							),
 							reportedModelFromMessage(message),
 						);
@@ -1216,6 +1301,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (event.type === "turn_start") {
 				settledAttempts = [];
+				attemptRequest = undefined;
 				const origin = deps.sessionOrigin?.();
 				if (origin && deps.observability?.acquireTelemetrySession) {
 					journalLease = await deps.observability.acquireTelemetrySession(

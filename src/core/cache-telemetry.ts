@@ -42,6 +42,38 @@ export function uncachedPrefillTokens(backend: BackendCompletionTimings | null |
 	return backend.promptTokens - backend.cachedTokens;
 }
 
+/** A request's cacheable structure, kept as digests so the journal can compare calls without holding text (#434). */
+export interface CacheRequestStructure {
+	/** The leading system prompt text. */
+	system: string;
+	/** The compiled prompt's ordered sections, present only when the leading prompt is exactly that compile. */
+	sections?: ReadonlyArray<{ id: string; contentHash?: string }>;
+	/** The leading tool declarations. */
+	tools: string;
+	/** Every later transcript entry, in the order the provider sends them. */
+	entries: string[];
+	/** An earlier call's reply rides in this request, so some call on this history came before it. */
+	answered: boolean;
+}
+
+/**
+ * #423: the first ordered prompt section whose id or bytes changed. Undefined when nothing changed or when the
+ * earlier compile predates section hashes, which cannot attribute bytes.
+ */
+export function firstChangedSection(
+	before: ReadonlyArray<{ id: string; contentHash?: string | undefined }>,
+	after: ReadonlyArray<{ id: string; contentHash?: string | undefined }>,
+): string | undefined {
+	if (!before.every((section) => section.contentHash !== undefined)) return undefined;
+	const count = Math.max(before.length, after.length);
+	for (let index = 0; index < count; index += 1) {
+		const prior = before[index];
+		const next = after[index];
+		if (prior?.id !== next?.id || prior?.contentHash !== next?.contentHash) return next?.id ?? prior?.id;
+	}
+	return undefined;
+}
+
 export type CacheBreakCause =
 	| "none"
 	| "tool_choice_changed"
