@@ -11,7 +11,7 @@ import { createRedactionTally, secretRedactingReplacer } from "../evidence/redac
 import { canonicalJson } from "../prompts/hash.js";
 
 const maximumBytes = 16 * 1024 * 1024;
-type StoredSubject = "prompt-structure" | "tool-schemas" | "prompt-text";
+type StoredSubject = "prompt-structure" | "tool-schemas" | "prompt-text" | "config";
 const hash = Type.String({ pattern: "^[0-9a-f]{64}$" });
 const promptStructureSchema = Type.Object(
 	{
@@ -98,7 +98,8 @@ export async function storeTelemetryObject(
 	subject: StoredSubject,
 	value: unknown,
 ): Promise<ObjectRef> {
-	if (subject !== "prompt-structure" && subject !== "tool-schemas" && subject !== "prompt-text")
+	// Effective settings are structure and references; the redaction below removes any secret a header carries (#434).
+	if (subject !== "prompt-structure" && subject !== "tool-schemas" && subject !== "prompt-text" && subject !== "config")
 		throw new Error("telemetry object subject is not enabled for capture");
 	if (subject === "prompt-structure" && !Value.Check(promptStructureSchema, value))
 		throw new Error("telemetry prompt structure contains unsupported fields");

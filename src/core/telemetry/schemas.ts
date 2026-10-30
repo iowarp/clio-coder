@@ -89,6 +89,7 @@ const call = {
 	]),
 };
 const span = { start: duration, end: duration };
+const sha256Hex = Type.String({ pattern: "^[0-9a-f]{64}$" });
 const QuotaWindowSchema = Type.Object(
 	{
 		key: ExistingId,
@@ -298,6 +299,8 @@ export const KIND_NAMES = [
 	"process.exited",
 	"prompt.text",
 	"quota.reading",
+	"config.snapshot",
+	"config.changed",
 ] as const;
 export type Kind = (typeof KIND_NAMES)[number];
 interface KindDefinition {
@@ -434,6 +437,37 @@ export const KIND_REGISTRY = {
 				windows: Type.Array(QuotaWindowSchema, { minItems: 1 }),
 				/** The provider reported that this account cannot send now. */
 				limitReached: Type.Optional(Type.Boolean()),
+			},
+			closed,
+		),
+	},
+	// The effective settings when a session's writer opens, so every later record reads against known settings (#434).
+	"config.snapshot": {
+		version: 1,
+		tier: "operational",
+		cc: "structural",
+		schema: Type.Object({ settings: ObjectRefSchema, settingsFingerprint: sha256Hex }, closed),
+	},
+	// One settings change: the paths it touched by when they take effect, and both documents (#434).
+	"config.changed": {
+		version: 1,
+		tier: "operational",
+		cc: "structural",
+		schema: Type.Object(
+			{
+				source: vocabulary(["file", "settings-ui", "cli", "session-override", "slash-command", "unattributed"]),
+				paths: Type.Object(
+					{
+						hotReload: Type.Array(text),
+						nextTurn: Type.Array(text),
+						restartRequired: Type.Array(text),
+					},
+					closed,
+				),
+				before: ObjectRefSchema,
+				after: ObjectRefSchema,
+				/** The digest a worker spec and route decision carry for the new settings, so they resolve here. */
+				settingsFingerprint: sha256Hex,
 			},
 			closed,
 		),

@@ -10,18 +10,24 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-events.js";
+import { BusChannels, type ConfigChangePayload, type DispatchCompletedPayload } from "../../core/bus-events.js";
+import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
 import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
+import type { TelemetryContext } from "../../core/telemetry/context.js";
+import { recordTelemetry } from "../../core/telemetry/producer.js";
+import type { Payload } from "../../core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/index.js";
+import { computeSettingsFingerprint } from "../dispatch/settings-fingerprint.js";
 import type { RunReceipt } from "../dispatch/types.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
 import { createConsentView } from "./consent.js";
 import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
 import { callCoverageForRun, createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
+import { storeTelemetryObject } from "./objects.js";
 import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
 import { createObservabilityProjection } from "./projection.js";
 import type { SessionCapture } from "./session-journals.js";
@@ -193,12 +199,62 @@ export function createObservabilityBundle(
 			return capture;
 		},
 	};
+	const config = () => context.getContract<ConfigContract>("config");
+	const sessionContext = (sessionId: string): TelemetryContext => ({ sessionId, label: "main" });
+	const settingsUnavailable = () =>
+		writeDiagnostic("[clio-coder:telemetry] settings record unavailable; coverage is incomplete\n");
+	// Writes of config.changed still storing their documents; shutdown waits for them before closing writers (#434).
+	const pendingSettingsRecords = new Set<Promise<void>>();
 	const journals = createSessionJournals(
 		clioStateDir(),
 		() => writeDiagnostic("[clio-coder:telemetry] call journal unavailable; coverage is incomplete\n"),
 		sessionCapture,
+		// Each writer opens with the settings it records under, so its records never read against unknown settings.
+		async (origin, sessionDirectory) => {
+			let settings: Readonly<ClioSettings> | undefined;
+			try {
+				settings = config()?.get();
+			} catch {
+				// A writer that opens before the config domain starts has no settings to record yet.
+			}
+			if (!settings) return;
+			const ref = await storeTelemetryObject(sessionDirectory, "config", settings);
+			recordTelemetry(
+				"config.snapshot",
+				{ settings: ref, settingsFingerprint: computeSettingsFingerprint(settings) },
+				sessionContext(origin.id),
+			);
+		},
 	);
 	const telemetry = createLiveTelemetryModel({ stateDir: clioStateDir });
+	// A change touching several effect kinds reaches each listener with one payload; it is one change (#434).
+	const recordedChanges = new WeakSet<object>();
+	const recordSettingsChange = (payload: ConfigChangePayload): void => {
+		const previous = payload.previous;
+		if (!previous || recordedChanges.has(payload)) return;
+		recordedChanges.add(payload);
+		const data: Omit<Payload<"config.changed">, "before" | "after"> = {
+			source: payload.source ?? "unattributed",
+			paths: {
+				hotReload: [...payload.diff.hotReload],
+				nextTurn: [...payload.diff.nextTurn],
+				restartRequired: [...payload.diff.restartRequired],
+			},
+			settingsFingerprint: computeSettingsFingerprint(payload.settings),
+		};
+		for (const { origin, sessionDirectory } of journals.openSessions()) {
+			const write: Promise<void> = Promise.all([
+				storeTelemetryObject(sessionDirectory, "config", previous),
+				storeTelemetryObject(sessionDirectory, "config", payload.settings),
+			])
+				.then(([before, after]) => {
+					recordTelemetry("config.changed", { ...data, before, after }, sessionContext(origin.id));
+				})
+				.catch(settingsUnavailable)
+				.finally(() => pendingSettingsRecords.delete(write));
+			pendingSettingsRecords.add(write);
+		}
+	};
 	let sessionId: string | null | undefined;
 	const recordedRuns = new Set<string>();
 	const recordRun = (payload: DispatchTerminalLike, replayed = false): void => {
@@ -249,6 +305,11 @@ export function createObservabilityBundle(
 
 	const extension: DomainExtension = {
 		async start() {
+			const settings = config();
+			if (settings) {
+				for (const kind of ["hotReload", "nextTurn", "restartRequired"] as const)
+					unsubscribes.push(settings.onChange(kind, recordSettingsChange));
+			}
 			for (const channel of [
 				BusChannels.DispatchEnqueued,
 				BusChannels.DispatchStarted,
@@ -282,6 +343,7 @@ export function createObservabilityBundle(
 			);
 		},
 		async stop() {
+			await Promise.all(pendingSettingsRecords);
 			await journals.closeAll();
 			telemetry.stop();
 			for (const off of unsubscribes) off();

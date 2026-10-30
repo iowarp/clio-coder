@@ -1,3 +1,4 @@
+import type { ConfigChangeSource } from "../../core/bus-events.js";
 import type { ClioSettings, SettingsMutator } from "../../core/config.js";
 import type { SettingsOrigin } from "../../core/settings-layers.js";
 import type { ChangeKind, ConfigDiff } from "./classify.js";
@@ -20,12 +21,18 @@ export interface ConfigContract {
 	 * two processes patching different fields cannot drop each other's writes.
 	 * Refreshes the in-memory snapshot and dispatches change events.
 	 */
-	update?(mutate: SettingsMutator): void;
+	update?(mutate: SettingsMutator, source?: ConfigChangeSource): void;
 	/** Save an explicit edit to this workspace's trusted private settings layer. */
-	updateProject?(mutate: SettingsMutator): void;
+	updateProject?(mutate: SettingsMutator, source?: ConfigChangeSource): void;
+	/** A change that touches several kinds reaches each with the same payload object. */
 	onChange(
 		kind: ChangeKind,
-		listener: (payload: { diff: ConfigDiff; settings: Readonly<ClioSettings> }) => void,
+		listener: (payload: {
+			diff: ConfigDiff;
+			settings: Readonly<ClioSettings>;
+			previous?: Readonly<ClioSettings>;
+			source?: ConfigChangeSource;
+		}) => void,
 	): () => void;
 	/**
 	 * End a boot-time hold on watcher reloads and run the one reload a held

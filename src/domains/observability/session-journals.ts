@@ -35,9 +35,12 @@ export interface SessionCapture {
 
 interface Entry {
 	users: number;
+	origin: TelemetrySessionOrigin;
 	journal: Promise<CallJournal | null>;
 	/** Prompt texts this writer already recorded, by digest, so a repeated prompt costs no research bytes. */
 	promptTexts: Set<string>;
+	/** Set once the writer has opened, until it starts closing. */
+	open?: boolean;
 	closing?: Promise<void>;
 	/** Pending close of a writer no work holds; the next lease cancels it (#434). */
 	idle?: NodeJS.Timeout | undefined;
@@ -52,7 +55,13 @@ interface Entry {
 export const JOURNAL_IDLE_CLOSE_MS = 30_000;
 
 /** Active work, rather than the selected UI session, owns the writer's lifetime (#434). */
-export function createSessionJournals(stateDir: string, unavailable: () => void, capture?: SessionCapture) {
+export function createSessionJournals(
+	stateDir: string,
+	unavailable: () => void,
+	capture?: SessionCapture,
+	/** Runs once per writer open, before any lease proceeds, so its records lead the writer's first batch (#434). */
+	opened?: (origin: TelemetrySessionOrigin, sessionDirectory: string) => Promise<void>,
+) {
 	const entries = new Map<string, Entry>();
 	let versions: Promise<SegmentHeader["writer"]> | undefined;
 	const writer = () =>
@@ -73,6 +82,7 @@ export function createSessionJournals(stateDir: string, unavailable: () => void,
 	const close = (id: string, entry: Entry): Promise<void> => {
 		if (entry.idle) clearTimeout(entry.idle);
 		entry.idle = undefined;
+		entry.open = false;
 		entry.closing ??= entry.journal.then(async (journal) => {
 			try {
 				await journal?.close();
@@ -108,8 +118,9 @@ export function createSessionJournals(stateDir: string, unavailable: () => void,
 			return acquire(origin, label, turnId);
 		}
 		if (!entry) {
-			entry = {
+			const created: Entry = {
 				users: 0,
+				origin,
 				promptTexts: new Set(),
 				journal: Promise.resolve()
 					.then(writer)
@@ -121,11 +132,21 @@ export function createSessionJournals(stateDir: string, unavailable: () => void,
 							...(capture ? { capture: () => capture.current(origin) } : {}),
 						}),
 					)
+					.then(async (journal) => {
+						try {
+							await opened?.(origin, directory);
+						} catch {
+							report();
+						}
+						if (!created.closing) created.open = true;
+						return journal;
+					})
 					.catch(() => {
 						report();
 						return null;
 					}),
 			};
+			entry = created;
 			entries.set(origin.id, entry);
 		}
 		if (entry.idle) clearTimeout(entry.idle);
@@ -196,6 +217,12 @@ export function createSessionJournals(stateDir: string, unavailable: () => void,
 	};
 	return {
 		acquire,
+		/** Sessions whose writer is open now; a closed writer records its settings again when it reopens (#434). */
+		openSessions(): Array<{ origin: TelemetrySessionOrigin; sessionDirectory: string }> {
+			return [...entries.values()]
+				.filter((entry) => entry.open === true)
+				.map(({ origin }) => ({ origin, sessionDirectory: join(stateDir, "sessions", origin.cwdHash, origin.id) }));
+		},
 		async flush(): Promise<void> {
 			await Promise.all(
 				[...entries.values()].map(async (entry) => {

@@ -1,4 +1,4 @@
-import { BusChannels, type ConfigChangePayload } from "../../core/bus-events.js";
+import { BusChannels, type ConfigChangePayload, type ConfigChangeSource } from "../../core/bus-events.js";
 import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
@@ -83,6 +83,19 @@ export function createConfigBundle(
 		}
 	}
 
+	/** One payload object per change, so a listener on several kinds can tell one change from two. */
+	function dispatchChange(
+		previous: Readonly<ClioSettings>,
+		settings: Readonly<ClioSettings>,
+		source: ConfigChangeSource,
+	): void {
+		const diff = diffSettings(previous, settings);
+		const payload: ConfigChangePayload = { diff, settings, previous, source };
+		if (diff.hotReload.length > 0) dispatch("hotReload", payload);
+		if (diff.nextTurn.length > 0) dispatch("nextTurn", payload);
+		if (diff.restartRequired.length > 0) dispatch("restartRequired", payload);
+	}
+
 	/**
 	 * Publish the rejection as one operator line, on transitions only. It used
 	 * to go to `console.error` with the raw error, which inside a running TUI
@@ -127,10 +140,7 @@ export function createConfigBundle(
 		snapshot = retainSessionTargets(next);
 		setGitCommitAttributionEnabled(next.integrations.git.commitAttribution);
 		if (!prev) return;
-		const diff = diffSettings(prev, next);
-		if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: next });
-		if (diff.nextTurn.length > 0) dispatch("nextTurn", { diff, settings: next });
-		if (diff.restartRequired.length > 0) dispatch("restartRequired", { diff, settings: next });
+		dispatchChange(prev, next, "file");
 	}
 
 	const extension: DomainExtension = {
@@ -170,7 +180,7 @@ export function createConfigBundle(
 				sourcesFor = { snapshot, sources: readLayeredSettings(process.cwd()).sources };
 			return sourcesFor.sources;
 		},
-		update(mutate) {
+		update(mutate, source = "unattributed") {
 			if (!snapshot) throw new Error("config domain not started");
 			const previous = snapshot;
 			// Apply the effective-view delta to the user document under one lock,
@@ -183,12 +193,9 @@ export function createConfigBundle(
 			});
 			snapshot = retainSessionTargets(normalized);
 			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
-			const diff = diffSettings(previous, normalized);
-			if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: normalized });
-			if (diff.nextTurn.length > 0) dispatch("nextTurn", { diff, settings: normalized });
-			if (diff.restartRequired.length > 0) dispatch("restartRequired", { diff, settings: normalized });
+			dispatchChange(previous, normalized, source);
 		},
-		updateProject(mutate) {
+		updateProject(mutate, source = "unattributed") {
 			if (!snapshot) throw new Error("config domain not started");
 			const previous = snapshot;
 			const normalized = updateProjectLocalSettings(process.cwd(), (candidate) => {
@@ -198,10 +205,7 @@ export function createConfigBundle(
 			});
 			snapshot = retainSessionTargets(normalized);
 			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
-			const diff = diffSettings(previous, normalized);
-			if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: normalized });
-			if (diff.nextTurn.length > 0) dispatch("nextTurn", { diff, settings: normalized });
-			if (diff.restartRequired.length > 0) dispatch("restartRequired", { diff, settings: normalized });
+			dispatchChange(previous, normalized, source);
 		},
 		onChange(kind, listener) {
 			listeners.get(kind)?.add(listener);

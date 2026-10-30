@@ -496,9 +496,15 @@ export interface DomainFailedPayload {
  * channel encodes the change class, the diff says which paths moved, and
  * `settings` is the freshly validated snapshot.
  */
+/** Who changed the settings: a file write the watcher saw, or an in-process edit that named its surface (#434). */
+export type ConfigChangeSource = "file" | "settings-ui" | "cli" | "session-override" | "slash-command" | "unattributed";
+
 export interface ConfigChangePayload {
 	diff: ConfigDiff;
 	settings: Readonly<ClioSettings>;
+	/** The settings the change replaced. */
+	previous?: Readonly<ClioSettings>;
+	source?: ConfigChangeSource;
 }
 
 /**
