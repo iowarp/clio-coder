@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { TelemetryContext, WorkerTelemetryContext } from "../../core/telemetry/context.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { readWorkerTelemetryFrame } from "../../core/telemetry/forwarder.js";
 import { recordTelemetry } from "../../core/telemetry/producer.js";
 import type { Payload, StructuralRunFeedBody } from "../../core/telemetry/schemas.js";
@@ -12,7 +13,13 @@ import type { RunEventJournalBody } from "./run-event-journal.js";
 export interface RunTelemetryJournal {
 	context: WorkerTelemetryContext;
 	closed: boolean;
+	/**
+	 * False when the frame is refused. The journal records its own reason: an invalid frame leaves an invalid-record
+	 * gap, a refused enqueue the writer's own writer-drop gap, and a closed journal can write nothing (#434).
+	 */
 	worker(frame: unknown): boolean;
+	/** Host settlements for attempts the worker started and never settled (#434). */
+	settleCalls(records: readonly TelemetryRecord<"call.settled">[]): void;
 	linkSession(context: TelemetryContext): void;
 	gap(reason: "invalid-record" | "writer-drop", count?: number): void;
 	/** The run's one terminal accountability record, written beside its call facts (#425, #434). */
@@ -134,8 +141,13 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			parent = owner;
 		},
 		worker(frame) {
+			if (journal.closed) return false;
 			const record = readWorkerTelemetryFrame(frame, context);
-			if (journal.closed || record === null || !writer.enqueue(record)) return false;
+			if (record === null) {
+				journal.gap("invalid-record");
+				return false;
+			}
+			if (!writer.enqueue(record)) return false;
 			if (parent && (record.kind === "call.started" || record.kind === "call.settled")) {
 				const callId = record.data.callId;
 				if (!references.has(callId) && recordTelemetry("call.ref", { runId: context.runId, callId }, parent))
@@ -149,6 +161,18 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			)
 				references.add(context.runId);
 			return true;
+		},
+		settleCalls(records) {
+			if (journal.closed) return;
+			for (const record of records)
+				writer.enqueue({
+					kind: record.k,
+					data: record.data,
+					ctx: record.ctx,
+					wallMs: Date.parse(record.t),
+					mono: record.mono,
+					recordId: record.id,
+				});
 		},
 		gap(reason, count = 1) {
 			if (journal.closed) return;

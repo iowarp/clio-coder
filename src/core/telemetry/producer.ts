@@ -113,7 +113,8 @@ export interface TelemetryCall {
 	nextAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): TelemetryCall | null;
 }
 
-function abandonedSettlement(sent: boolean, cause: FailureCause): Settlement {
+/** Also how a host settles an attempt whose process died before settling it (#434). */
+export function abandonedSettlement(sent: boolean, cause: FailureCause): Settlement {
 	const unobserved = { kind: "unknown", reason: "not-observed" } as const;
 	const notApplicable = { kind: "absent", reason: "not-applicable" } as const;
 	return {

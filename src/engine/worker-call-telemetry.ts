@@ -37,7 +37,9 @@ export function createWorkerCallTelemetry(
 	let call: TelemetryCall | undefined;
 	const settle = (attempt: TelemetryCall | undefined, message: unknown): void => {
 		if (!attempt) return;
-		attempt.settle(callSettlementFromMessage(message, pricing), reportedModelFromMessage(message));
+		// Once per attempt, never per delta: the settlement reaches stdout ahead of the message_end the live display
+		// counts, so a kill between the two cannot keep a call the display showed out of the receipt (#434).
+		if (attempt.settle(callSettlementFromMessage(message, pricing), reportedModelFromMessage(message))) forwarder.flush();
 	};
 	return {
 		begin(request: Request): void {

@@ -1,8 +1,10 @@
 import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
+import type { FailureCause } from "../../core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { FactSum } from "../../core/telemetry/fact.js";
 import { readWorkerTelemetryRecord } from "../../core/telemetry/forwarder.js";
+import { abandonedSettlement } from "../../core/telemetry/producer.js";
 import type { CostAggregate } from "../observability/cost.js";
 import type { CallTotals } from "../observability/folds.js";
 import { foldRunJournal } from "../observability/folds.js";
@@ -98,6 +100,31 @@ export function createRunCallUsage(context: WorkerTelemetryContext) {
 				}),
 			);
 			snapshot = runUsageFromCallRecords(records);
+		},
+		/**
+		 * Settle every attempt the worker started and never settled, once its stream has ended. A killed worker cannot
+		 * settle its own, and the host cannot see its stages, so each reads as sent with its spend unknown (#434).
+		 */
+		settleOpen(cause: FailureCause): TelemetryRecord<"call.settled">[] {
+			const settledAttempts = new Set(
+				records.flatMap((record) => (record.k === "call.settled" ? [record.data.attemptId] : [])),
+			);
+			const open = new Map<string, TelemetryRecord<"call.started">>();
+			for (const record of records)
+				if (record.k === "call.started" && !settledAttempts.has(record.data.attemptId))
+					open.set(record.data.attemptId, record);
+			const settled = [...open.values()].map((started) =>
+				makeTelemetryRecord(
+					"call.settled",
+					{ ...started.data, ...abandonedSettlement(true, cause), stages: { settle: null } },
+					started.ctx,
+					{ t: new Date().toISOString(), mono: performance.now() },
+				),
+			);
+			if (settled.length === 0) return settled;
+			records.push(...settled);
+			snapshot = runUsageFromCallRecords(records);
+			return settled;
 		},
 		snapshot: () => snapshot,
 	};

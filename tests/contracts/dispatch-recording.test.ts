@@ -371,3 +371,92 @@ it("run event journal keeps the per-call cacheReadReported flag through a write 
 	);
 	deepStrictEqual(flags, [true, false, undefined]);
 });
+
+it("a worker killed mid-call keeps the calls it settled and settles its open attempt as sent (#434)", async () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.retry.maxRetries = 0;
+	const spawnWorker = (spec: WorkerSpec) => ({
+		pid: null,
+		heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+		abort() {},
+		promise: Promise.resolve({
+			exitCode: 1,
+			signal: "SIGKILL" as const,
+			evidenceIncomplete: "the worker was terminated by SIGKILL before it finished its output",
+		}),
+		events: (async function* () {
+			const context = spec.telemetryContext;
+			ok(context);
+			const origin = { host: "local-worker", pid: 42, birthToken: "fixture", monoEpochWallMs: 0 };
+			const frame = (kind: "call.started" | "call.settled", data: CallStarted, extra = {}) => ({
+				type: "clio_coder_telemetry",
+				record: {
+					...makeTelemetryRecord(
+						kind,
+						{ ...data, ...extra } as CallStarted,
+						{ ...context, callId: data.callId, attemptId: data.attemptId },
+						{ t: new Date().toISOString(), mono: 0 },
+					),
+					origin,
+				},
+			});
+			for (let index = 0; index < 4; index += 1) {
+				const call: CallStarted = {
+					callId: newCallId(),
+					attemptId: newAttemptId(),
+					attempt: 0,
+					label: "worker",
+					roundKind: "normal",
+					toolChoice: "auto",
+					target: {
+						targetId: "fixture",
+						runtimeId: "fixture",
+						api: "fixture",
+						requestedModel: "fixture",
+						reportedModel: { kind: "unknown", reason: "not-observed" },
+					},
+				};
+				yield frame("call.started", call);
+				if (index === 3) return;
+				yield frame("call.settled", call, {
+					stages: { settle: 1 },
+					...callSettlementFromMessage({ stopReason: "toolUse", usage: { input: 5, output: 1 } }, "unknown"),
+				});
+			}
+		})(),
+	});
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), { spawnWorker, journalRunEvents: false });
+	await bundle.extension.start();
+	try {
+		const handle = await bundle.contract.dispatch({
+			agentId: "scout",
+			executionRole: "researcher",
+			task: "Inspect isolated evidence.",
+			cwd: env.dir,
+			requestOrigin: "internal",
+		});
+		const receipt = await handle.finalPromise;
+		equal(receipt.apiCalls, 4);
+		equal(receipt.tokenCount, 18);
+		const journal = await readCallJournal(join(clioStateDir(), "runs", handle.runId), "events.ndjson");
+		const records = journal.records.map(({ record }) => record);
+		deepStrictEqual(
+			records.map((record) => (record.k === "gap" ? `gap:${record.data.reason}` : record.k)),
+			[
+				...Array.from({ length: 3 }, () => ["call.started", "call.settled"]).flat(),
+				"call.started",
+				"gap:writer-drop",
+				"call.settled",
+				"run.settled",
+			],
+		);
+		const open = records[6];
+		const settled = records[8];
+		ok(open?.k === "call.started" && settled?.k === "call.settled");
+		equal(settled.data.attemptId, open.data.attemptId);
+		equal(settled.data.disposition, "sent_unsettled");
+		deepStrictEqual(settled.data.usage?.input, { kind: "unknown", reason: "not-observed" });
+	} finally {
+		await bundle.extension.stop?.();
+	}
+});

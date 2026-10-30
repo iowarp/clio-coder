@@ -6014,7 +6014,7 @@ export function createDispatchBundle(
 		});
 		const foldAcpEvent = (raw: unknown): void => {
 			if (isRecord(raw) && raw.type === "clio_coder_telemetry") {
-				if (runJournal && !runJournal.worker(raw)) runJournal.gap("invalid-record");
+				runJournal?.worker(raw);
 				if (callUsage && !callUsage.observe(raw)) callUsage.gap();
 				const usage = callUsage?.snapshot();
 				if (usage) {
@@ -7551,7 +7551,7 @@ export function createDispatchBundle(
 		});
 		const foldWorkerEvent = (raw: unknown): void => {
 			if (raw !== null && typeof raw === "object" && "type" in raw && raw.type === "clio_coder_telemetry") {
-				if (runJournal && !runJournal.worker(raw)) runJournal.gap("invalid-record");
+				runJournal?.worker(raw);
 				if (callUsage && !callUsage.observe(raw)) callUsage.gap();
 				if (callUsage) {
 					const usage = callUsage.snapshot();
@@ -8493,7 +8493,8 @@ export function createDispatchBundle(
 				// always waits (bounded by the drain grace) for the pump to finish
 				// the source stream, whether or not an external consumer ever
 				// subscribed, so a fast worker cannot seal a zero-token receipt.
-				if (!(await awaitEventDrain(eventPump.done))) {
+				const drained = await awaitEventDrain(eventPump.done);
+				if (!drained) {
 					runJournal?.gap("writer-drop");
 					callUsage?.gap();
 					recordingJournal.gap(envelope.id, 1);
@@ -8503,11 +8504,17 @@ export function createDispatchBundle(
 						new Error("event stream did not drain before receipt finalization"),
 					);
 				}
-				const lostCallFrames = malformedWorkerStdoutLineCount(result) + (result.evidenceIncomplete !== undefined ? 1 : 0);
+				const malformedFrames = malformedWorkerStdoutLineCount(result);
+				const lostCallFrames = malformedFrames + (result.evidenceIncomplete !== undefined ? 1 : 0);
 				if (lostCallFrames > 0) {
-					runJournal?.gap("invalid-record", lostCallFrames);
+					// An unparseable line is an invalid record; a trail a signal or an undrained lane cut short dropped
+					// whatever the worker still held (#434).
+					if (malformedFrames > 0) runJournal?.gap("invalid-record", malformedFrames);
+					if (result.evidenceIncomplete !== undefined) runJournal?.gap("writer-drop");
 					callUsage?.gap(lostCallFrames);
 				}
+				// Only a drained stream can show an attempt will never settle; a late frame would settle it twice (#434).
+				if (drained) runJournal?.settleCalls(callUsage?.settleOpen("internal") ?? []);
 				const finalCallUsage = callUsage?.snapshot();
 				if (finalCallUsage) Object.assign(tokenMeter, finalCallUsage);
 				// The worker is gone: every grant it held settles now, after its last
