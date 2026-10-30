@@ -15,7 +15,8 @@ import { journalFiles } from "./call-journal.js";
  * journal (#434, P4): `bundle.json`, `calls.jsonl` with every segment's lines
  * verbatim, `runs/<runId>/events.ndjson` for each run the session references,
  * only the `objects/` its records reference, and `current.jsonl` only when
- * content was exported under research mode and consent.
+ * content was exported under research mode and consent. Its content class
+ * bounds what any record carries; a content-free bundle holds no objects.
  */
 export const BUNDLE_FORMAT = "clio-telemetry-bundle/1";
 const MAX_FILE_BYTES = 1024 * 1024 * 1024;
@@ -28,6 +29,17 @@ export const CONTENT_SUBJECTS: ReadonlySet<string> = new Set([
 	"memory-trace",
 	"observation-trace",
 ]);
+
+/**
+ * The most a bundle's records may carry: content-free facts only, structure beside them, or content under research
+ * mode and consent. An export is content-free unless asked for more (#434 §11.3, §14).
+ */
+export type BundleContentClass = "content-free" | "structural" | "content-bearing";
+const CLASS_RANK: Readonly<Record<BundleContentClass, number>> = {
+	"content-free": 0,
+	structural: 1,
+	"content-bearing": 2,
+};
 
 export interface BundleFile {
 	path: string;
@@ -50,8 +62,18 @@ export interface BundleManifest {
 	};
 	/** The most any line or file in the bundle captured; content is true only when content was exported. */
 	ceiling: TelemetryCapture;
+	/**
+	 * The content class the export allowed. A content-free bundle carries no objects, since every object is a preimage
+	 * of structure or content. Absent on a bundle written before export classes, which reads as structural, or as
+	 * content-bearing when its ceiling captured content.
+	 */
+	contentClass: BundleContentClass;
 	excluded: {
 		contentBearing: number;
+		/** Structural records a content-free export left out; absent on a bundle written before export classes. */
+		structural?: number;
+		/** Objects a content-free export withheld although its records cite them. */
+		withheldObjects?: number;
 		/** Lines whose content class this version cannot read; a content-free export never guesses. */
 		unclassified: number;
 		/** A live writer's unfinished last line in any copied file. */
@@ -68,6 +90,7 @@ interface FilteredJournal {
 	headers: SegmentHeader[];
 	parsed: Array<Record<string, unknown>>;
 	contentBearing: number;
+	structural: number;
 	unclassified: number;
 	tornTailBytes: number;
 }
@@ -102,7 +125,7 @@ function* journalLines(bytes: Buffer): Generator<{ line: Buffer; value: unknown 
 
 function filterJournal(
 	segments: Buffer[],
-	content: boolean,
+	contentClass: BundleContentClass,
 	keep: (value: Record<string, unknown>) => boolean,
 ): FilteredJournal {
 	const out: FilteredJournal = {
@@ -111,6 +134,7 @@ function filterJournal(
 		headers: [],
 		parsed: [],
 		contentBearing: 0,
+		structural: 0,
 		unclassified: 0,
 		tornTailBytes: 0,
 	};
@@ -133,8 +157,9 @@ function filterJournal(
 				out.unclassified += 1;
 				continue;
 			}
-			if (cc === "content-bearing" && !content) {
-				out.contentBearing += 1;
+			if (CLASS_RANK[cc] > CLASS_RANK[contentClass]) {
+				if (cc === "content-bearing") out.contentBearing += 1;
+				else out.structural += 1;
 				continue;
 			}
 			if (!value || !keep(value)) continue;
@@ -236,8 +261,8 @@ export interface ExportBundleInput {
 	cwdHash: string;
 	sessionId: string;
 	out: string;
-	/** Content-bearing records, content objects and the ledger; the caller has checked research mode and consent. */
-	content: boolean;
+	/** `content-bearing` adds content records, content objects and the ledger; the caller checked research and consent. */
+	contentClass: BundleContentClass;
 	writer: SegmentHeader["writer"];
 }
 
@@ -248,7 +273,8 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 	const directory = join(input.stateDir, "sessions", input.cwdHash, input.sessionId);
 	const segments = await readSegments(directory, "calls.jsonl");
 	if (segments === null || segments.length === 0) throw new Error(`session ${input.sessionId} has no call journal`);
-	const session = filterJournal(segments, input.content, () => true);
+	const content = input.contentClass === "content-bearing";
+	const session = filterJournal(segments, input.contentClass, () => true);
 	const files = new Map<string, Buffer>([["calls.jsonl", session.bytes]]);
 	const listed: BundleFile[] = [];
 	const headers = [...session.headers];
@@ -257,6 +283,8 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 	let forkedFrom: BundleManifest["source"]["forkedFrom"] = null;
 	const excluded: BundleManifest["excluded"] = {
 		contentBearing: session.contentBearing,
+		structural: session.structural,
+		withheldObjects: 0,
 		unclassified: session.unclassified,
 		tornTailBytes: session.tornTailBytes,
 		missingRuns: [],
@@ -289,11 +317,12 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 			continue;
 		}
 		// A run directory belongs to its run; only this session's view of that run is exported (#434).
-		const run = filterJournal(runSegments, input.content, (record) => {
+		const run = filterJournal(runSegments, input.contentClass, (record) => {
 			const ctx = record.ctx as Record<string, unknown> | undefined;
 			return ctx?.runId === runId && ctx.sessionId === input.sessionId;
 		});
 		excluded.contentBearing += run.contentBearing;
+		excluded.structural = (excluded.structural ?? 0) + run.structural;
 		excluded.unclassified += run.unclassified;
 		excluded.tornTailBytes += run.tornTailBytes;
 		headers.push(...run.headers);
@@ -303,7 +332,11 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 		listed.push({ path, sha256: sha256(run.bytes), bytes: run.bytes.length, records: run.records });
 	}
 	for (const [id, subject] of [...refs].sort(([a], [b]) => a.localeCompare(b))) {
-		if (CONTENT_SUBJECTS.has(subject) && !input.content) continue;
+		if (input.contentClass === "content-free") {
+			excluded.withheldObjects = (excluded.withheldObjects ?? 0) + 1;
+			continue;
+		}
+		if (CONTENT_SUBJECTS.has(subject) && !content) continue;
 		let bytes: Buffer;
 		try {
 			bytes = await readRegular(join(directory, "objects", `${id}.json`));
@@ -317,7 +350,7 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 		listed.push({ path, sha256: sha256(bytes), bytes: bytes.length, records: 1 });
 	}
 	let ledgerIncluded = false;
-	if (input.content) {
+	if (content) {
 		try {
 			const ledger = await readRegular(join(directory, "current.jsonl"));
 			const complete = ledger.subarray(0, ledger.lastIndexOf(0x0a) + 1);
@@ -339,7 +372,8 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 		createdAt: new Date().toISOString(),
 		writer: input.writer,
 		source: { sessionId: input.sessionId, cwdHash: input.cwdHash, forkedFrom, runs: [...runs].sort() },
-		ceiling: ceilingOf(headers, input.content && contentIncluded),
+		ceiling: ceilingOf(headers, content && contentIncluded),
+		contentClass: input.contentClass,
 		excluded,
 		files: listed,
 	};
@@ -380,6 +414,9 @@ function readManifest(value: unknown): BundleManifest {
 	}
 	if (!manifest.ceiling || (manifest.ceiling.mode !== "standard" && manifest.ceiling.mode !== "research"))
 		throw new Error("bundle.json has no capture ceiling");
+	if (manifest.contentClass === undefined)
+		return { ...manifest, contentClass: manifest.ceiling.capture.content ? "content-bearing" : "structural" };
+	if (!(manifest.contentClass in CLASS_RANK)) throw new Error("bundle.json has an invalid content class");
 	return manifest;
 }
 
@@ -404,6 +441,7 @@ export async function importTelemetryBundle(source: string, out: string): Promis
 			continue;
 		}
 		if (file.path.startsWith("objects/")) {
+			if (manifest.contentClass === "content-free") throw new Error(`${file.path} is an object in a content-free bundle`);
 			if (`obj_${sha256(bytes)}` !== file.path.slice("objects/".length, -".json".length))
 				throw new Error(`${file.path} does not match its digest`);
 			result.objects += 1;
@@ -426,6 +464,8 @@ export async function importTelemetryBundle(source: string, out: string): Promis
 			}
 			if (row.record.cc === "content-bearing" && !content)
 				throw new Error(`${file.path} carries content above the bundle's ceiling`);
+			if (CLASS_RANK[row.record.cc] > CLASS_RANK[manifest.contentClass])
+				throw new Error(`${file.path} carries ${row.record.cc} records above the bundle's content class`);
 			if (row.record.tier === "research" && manifest.ceiling.mode !== "research")
 				throw new Error(`${file.path} carries research records above the bundle's ceiling`);
 			if (row.record.k === "call.settled") result.calls += 1;
@@ -444,7 +484,8 @@ export async function importTelemetryBundle(source: string, out: string): Promis
 	for (const id of refs.keys())
 		if (!files.has(`objects/${id}.json`) && !manifest.excluded?.missingObjects?.includes(id)) {
 			const subject = refs.get(id) ?? "";
-			if (content || !CONTENT_SUBJECTS.has(subject)) throw new Error(`object ${id} is referenced but missing`);
+			if (manifest.contentClass !== "content-free" && (content || !CONTENT_SUBJECTS.has(subject)))
+				throw new Error(`object ${id} is referenced but missing`);
 		}
 	await publish(out, files, manifest);
 	return result;

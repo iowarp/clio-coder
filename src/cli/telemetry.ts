@@ -5,6 +5,7 @@ import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
 import { encodeTelemetryLine } from "../core/telemetry/segment.js";
 import { clioStateDir } from "../core/xdg.js";
+import type { BundleContentClass } from "../domains/observability/bundle.js";
 import { exportTelemetryBundle, importTelemetryBundle } from "../domains/observability/bundle.js";
 import { callJournalHeader } from "../domains/observability/call-journal.js";
 import {
@@ -23,7 +24,7 @@ import { printError } from "./shared.js";
 
 const HELP = `clio-coder telemetry import-legacy <session-dir> --out <file>
 clio-coder telemetry consent [--workspace <dir>] [--revoke | --list]
-clio-coder telemetry export <session-id> --out <dir> [--content]
+clio-coder telemetry export <session-id> --out <dir> [--content-free | --structural | --research]
 clio-coder telemetry import-bundle <bundle-dir> --out <dir>
 clio-coder telemetry prune [--apply] [--days N] [--max-gib N] [--research-days N] [--research-max-gib N]
 
@@ -40,11 +41,14 @@ content captured before that stays in the sessions that recorded it. --list
 shows every consent.
 
 export writes one session's telemetry as a bundle directory: bundle.json with
-the capture ceiling and a sha256 and record count per file, calls.jsonl with the
-journal's lines verbatim, each referenced run's events.ndjson, and only the
-objects those records reference. It is content-free unless --content, which
-also needs research mode, telemetry.research.content and consent for the
-session's workspace, and then includes the session ledger.
+the capture ceiling, the content class and a sha256 and record count per file,
+calls.jsonl with the journal's kept lines verbatim, each referenced run's
+events.ndjson, and the objects those records reference. --content-free, the
+default, keeps only content-free records and no objects. --structural adds the
+structural records and their objects, such as settings and prompt structure.
+--research adds content records, content objects and the session ledger, and
+needs research mode, telemetry.research.content and consent for the session's
+workspace.
 
 import-bundle verifies every hash, count, checksum, schema and the ceiling of a
 bundle and writes the verified copy to --out, which is also the golden fixture
@@ -170,8 +174,8 @@ function parseOut(
 }
 
 async function runExport(argv: ReadonlyArray<string>): Promise<number> {
-	const args = parseOut(argv, ["--content"]);
-	if (!args) {
+	const args = parseOut(argv, ["--content-free", "--structural", "--research"]);
+	if (!args || args.flags.size > 1) {
 		process.stderr.write(HELP);
 		return 2;
 	}
@@ -181,8 +185,12 @@ async function runExport(argv: ReadonlyArray<string>): Promise<number> {
 		printError(`no session ${args.positional} with a call journal under ${join(stateDir, "sessions")}`);
 		return 1;
 	}
-	const content = args.flags.has("--content");
-	if (content) {
+	const contentClass: BundleContentClass = args.flags.has("--research")
+		? "content-bearing"
+		: args.flags.has("--structural")
+			? "structural"
+			: "content-free";
+	if (contentClass === "content-bearing") {
 		// Content leaves the journal only as the operator captured it: research mode, the flag and consent (#434, O6).
 		let cwd: unknown;
 		try {
@@ -195,7 +203,7 @@ async function runExport(argv: ReadonlyArray<string>): Promise<number> {
 			workspaceTelemetryCapture(readLayeredSettings(cwd).settings.telemetry, stateDir, cwd).capture.capture.content;
 		if (!allowed) {
 			printError(
-				"--content needs telemetry.mode: research, telemetry.research.content: true and clio-coder telemetry consent for the session's workspace",
+				"--research needs telemetry.mode: research, telemetry.research.content: true and clio-coder telemetry consent for the session's workspace",
 			);
 			return 1;
 		}
@@ -206,12 +214,12 @@ async function runExport(argv: ReadonlyArray<string>): Promise<number> {
 			cwdHash: session.cwdHash,
 			sessionId: args.positional,
 			out: args.out,
-			content,
+			contentClass,
 			writer: packageWriter(),
 		});
 		const excluded = manifest.excluded;
 		process.stdout.write(
-			`exported session ${args.positional} to ${args.out}: ${manifest.files.length} file(s), ${manifest.source.runs.length} run(s), ceiling ${manifest.ceiling.mode}${manifest.ceiling.capture.content ? " with content" : ", content-free"}; left out ${excluded.contentBearing} content record(s), ${excluded.unclassified} unclassified line(s), ${excluded.tornTailBytes} unfinished byte(s), ${excluded.missingRuns.length} missing run(s), ${excluded.missingObjects.length} missing object(s)\n`,
+			`exported session ${args.positional} to ${args.out}: ${manifest.files.length} file(s), ${manifest.source.runs.length} run(s), ${manifest.contentClass}, ceiling ${manifest.ceiling.mode}${manifest.ceiling.capture.content ? " with content" : ""}; left out ${excluded.contentBearing} content record(s), ${excluded.structural ?? 0} structural record(s), ${excluded.withheldObjects ?? 0} withheld object(s), ${excluded.unclassified} unclassified line(s), ${excluded.tornTailBytes} unfinished byte(s), ${excluded.missingRuns.length} missing run(s), ${excluded.missingObjects.length} missing object(s)\n`,
 		);
 		return 0;
 	} catch (error) {

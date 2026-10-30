@@ -914,32 +914,39 @@ test("a research export round-trips through import-bundle into a fixture with th
 			].map(({ record }) => record),
 		);
 		strictEqual(source.attempts.length, 2);
-		for (const content of [true, false]) {
-			const bundle = join(root, `bundle-${content}`);
-			const fixture = join(root, `fixture-${content}`);
+		for (const contentClass of ["content-bearing", "structural", "content-free"] as const) {
+			const content = contentClass === "content-bearing";
+			const bundle = join(root, `bundle-${contentClass}`);
+			const fixture = join(root, `fixture-${contentClass}`);
 			await exportTelemetryBundle({
 				stateDir,
 				...{ cwdHash: origin.cwdHash, sessionId: origin.id },
 				out: bundle,
-				content,
+				contentClass,
 				writer,
 			});
 			const imported = await importTelemetryBundle(bundle, fixture);
 			deepStrictEqual(imported.manifest.source.runs, [runId]);
 			strictEqual(imported.manifest.ceiling.mode, "research");
 			strictEqual(imported.manifest.ceiling.capture.content, content);
+			strictEqual(imported.manifest.contentClass, contentClass);
 			const rows = (await sources(fixture)).map(({ record }) => record);
 			deepStrictEqual(foldCallJournal(rows).totals, source.totals, "the fixture folds to the session's totals");
 			strictEqual(
 				rows.some((row) => row.cc === "content-bearing"),
 				content,
 			);
-			const objects = await readdir(join(fixture, "objects"));
-			strictEqual(objects.length, content ? 3 : 2, "structure and tool schemas always; prompt text only with content");
+			ok(contentClass !== "content-free" || rows.every((row) => row.cc === "content-free"));
+			const objects = await readdir(join(fixture, "objects")).catch(() => []);
+			strictEqual(
+				objects.length,
+				{ "content-bearing": 3, structural: 2, "content-free": 0 }[contentClass],
+				"structure and tool schemas with structure; prompt text only with content; none content-free",
+			);
 			strictEqual(imported.manifest.excluded.contentBearing, content ? 0 : 1);
 		}
-		await appendFile(join(root, "bundle-false", "calls.jsonl"), "x");
-		await rejects(importTelemetryBundle(join(root, "bundle-false"), join(root, "tampered")), /sha256/);
+		await appendFile(join(root, "bundle-structural", "calls.jsonl"), "x");
+		await rejects(importTelemetryBundle(join(root, "bundle-structural"), join(root, "tampered")), /sha256/);
 	} finally {
 		await run.close();
 		await journals.closeAll();
