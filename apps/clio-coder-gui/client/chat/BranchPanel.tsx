@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
@@ -47,6 +47,9 @@ export const BranchPanel = memo(function BranchPanel({
 		meta: { errorSurface: "inline" },
 		queryKey: ["session-tree", sessionId, settledTurns],
 		queryFn: () => client.call(routes.sessionTree, { ...params, body: {} }),
+		// A continue replays turns and moves the key; the panel and its heading stay mounted meanwhile,
+		// so the focus it hands to the heading afterwards has somewhere to land.
+		placeholderData: keepPreviousData,
 		enabled: sessionOpen && supported,
 		retry: false,
 	});
