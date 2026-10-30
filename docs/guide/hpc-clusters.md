@@ -87,7 +87,7 @@ Point the installer at mirrors laid out like the upstream directories. A
 | `CLIO_CODER_NODE_KEYRING` | A local copy of the release keyring (`gpg-only-active-keys/pubring.kbx` from `nodejs/release-keys`) |
 | `CLIO_CODER_NODE_TARBALL` | One Node tarball by path, with its `SHASUMS256.txt` next to it or named by `CLIO_CODER_NODE_SHASUMS` |
 | `CLIO_CODER_PACKAGE` | A local `npm pack` tarball of `@iowarp/clio-coder` |
-| `npm_config_registry` | An npm registry mirror (Artifactory, Nexus, Verdaccio) for the package's dependencies |
+| `npm_config_registry` | An npm registry mirror (Artifactory, Nexus, Verdaccio) for the package's dependencies. The update check reads release dist-tags from it too, when it is an `http` or `https` URL, so a mirror announces the version its own `npm install` would fetch |
 
 A local package tarball still needs its dependencies from a registry, so a fully
 offline site needs a registry mirror as well as the Node mirror. Without one,

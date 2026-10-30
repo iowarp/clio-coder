@@ -101,7 +101,7 @@ Use **Connections → Add a target** to reopen Guided setup inside the TUI. It r
 
 Each section keeps related controls together. Configure combines a route's connection and model into one guided action; the TUI offers separate connection and model pickers in the same group. Select **Use connection default** in a TUI or GUI model picker to clear that route's model override. A blank override in the text fallback has the same meaning; a typed model id is unverified. **Context & Memory → Proactive memory → Memory connection → Chat route (no memory model set)** clears the dedicated memory route, so the memory tier follows the active chat route. Turn proactive memory off to disable it.
 
-In the TUI, use arrows to move, Enter to open, and `/` to filter by name or canonical key. On wide terminals, Tab switches between sections and their controls; narrow terminals show one level at a time. Esc goes back. Previewing a value does not save it. Edits offer this session, this project, global, or cancel when the control supports that scope. Project saves require trusted project settings. Restart-required controls explain that timing before saving; target and profile removal shows affected routes before confirmation.
+In the TUI, use arrows to move, Enter to open, and `/` to filter by name or canonical key. On wide terminals, Tab switches between sections and their controls; narrow terminals show one level at a time. Esc goes back. Previewing a value does not save it. Edits offer this session, this project, global, or cancel when the control supports that scope. A **this session** choice belongs to the conversation that was open when it was made, and it is not saved to any file. Switching conversations swaps in that conversation's own choices. A choice made before the first message goes to the conversation that message creates, and resuming an existing conversation drops it. A fork starts from a copy of its parent's choices, and a resumed conversation gets the ones it kept. Startup flags such as `--autonomy` and `--demo` apply to every conversation. Project saves require trusted project settings. Restart-required controls explain that timing before saving; target and profile removal shows affected routes before confirmation.
 
 Configure edits saved global defaults. It does not offer the TUI's session/project scope menu or redirect an already-running chat session. In **Advanced**, the TUI's **Check setup** and **Edit all settings** rows show the terminal commands for diagnostics and the validated file editor.
 
@@ -205,8 +205,8 @@ explains worker route selection.
 | `context.workingSet.rearmFraction` | `0.1` | next turn |
 | `context.compaction.auto` | `true` | next turn |
 | `context.compaction.threshold` | `0.8` | next turn |
-| `context.compaction.maxTokens` | `200000` | next turn |
-| `context.compaction.provider` | `off` | next turn |
+| `context.compaction.maxTokens` | `200000` | immediately |
+| `context.compaction.provider` | `off` | immediately |
 | `context.compaction.model` | unset | next turn |
 | `context.compaction.systemPrompt` | unset | next turn |
 | `context.memory.enabled` | `true` | next turn |
@@ -253,7 +253,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | Key | Default | When it applies |
 | --- | --- | --- |
 | `safety.autonomy` | `default` | immediately; user layer or operator session control, and a project layer can only tighten it |
-| `safety.limits.sessionCostUsd` | `5` | next turn |
+| `safety.limits.sessionCostUsd` | `5` | immediately; a parked request re-reads it every 250 ms |
 | `safety.limits.chatToolCallsPerTurn` | `60` | next turn |
 | `safety.limits.readBytesPerCall` | `51200` | next turn |
 | `safety.limits.observationBytesPerTurn` | `196608` | next turn |
@@ -290,7 +290,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 | `interface.smoothStreaming` | `auto` | immediately |
 | `interface.exitSummary` | `auto` | immediately, at the next exit |
 | `interface.desktopNotifications` | `false` | next turn |
-| `interface.autoUpdate` | `true` | immediately; `false` keeps the update notice and leaves the native background install to `clio-coder upgrade` |
+| `interface.autoUpdate` | `true` | immediately; `false` keeps the update notice and leaves the native background install and the after-quit npm, pnpm, Bun or Volta update to `clio-coder upgrade` |
 | `interface.panes.enabled` | `embedded` | restart; bare Clio Coder can offer to open a pane host, while `auto` only joins one already running |
 | `interface.panes.notifications` | `failures` | immediately |
 | `interface.panes.layout` | `off` | restart |

@@ -28,12 +28,13 @@ Routing defaults are a separate rule. `chat.target`, `chat.model`, `chat.thinkin
 
 ### Chat settings
 
-Default chat settings control interactive conversation routing, reasoning effort, token output budgets, and prefix prewarming:
+Default chat settings control interactive conversation routing, reasoning effort, token output budgets, prefix prewarming, and prompt-cache keepalive:
 - `chat.target`: default chat target id (`null`).
 - `chat.model`: default chat model id (`null`).
 - `chat.thinkingLevel`: default reasoning effort for the chat model (`"low"`; clamped to supported provider levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`).
 - `chat.prewarm`: whether prompt-prefix prewarming runs on session start (`false`). When enabled, prewarming prefills the prompt prefix before the first turn, and again after a resume or a compaction settles. It runs against `local-native` runtimes and against a `litellm` target that binds `cache.deployment`; every other tier is skipped whatever this setting says. Dispatched workers and headless runs do not prewarm.
 - `chat.maxOutputTokens`: per-turn output token limit (`0`, meaning each model's own cap and its profile's recommended output budget).
+- `chat.cacheKeepalive`: whether Clio refreshes a hosted provider's prompt cache while a turn waits on its own tools (`true`). A hosted cache entry expires after a few idle minutes, and a turn that waits on an attached dispatch can outlast it. Clio then replays the turn's last request, with the route's smallest output cap (1 token on Anthropic, 16 on OpenAI Responses and Codex), at 90% of the entry's lifetime, only when the refresh is expected to save at least $0.05 over the miss it prevents. The keepalive follows one turn for up to two hours while a dispatch is attached and up to one hour for any other tool. It stands down while a permission ask or `ask_user` round waits on a person, between turns, and when the route declares no lifetime, retention is `none`, or the cost ceiling would be reached. Each refresh is booked as `prewarm` usage and recorded on the session ledger. `false` turns it off.
 - `chat.retry.*`: retry backoff (`baseDelayMs: 2000`, `maxDelayMs: 60000`), attempt limit (`maxRetries: 3`), and stream stall timeouts (`streamStallMs: 180000`, `firstTokenStallMs: 600000`).
 
 | Key | Default | Accepted values and meaning | Effect |
@@ -51,6 +52,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `chat.modelPicker.recentLimit` | `12` | Integer at least 1. Recently used refs `/model` keeps. | hot reload |
 | `chat.maxOutputTokens` | `0` | Integer at least 0. Output tokens requested per turn on every target, clamped to the model's output cap and the remaining window. `0` leaves the budget to the model cap and the profile's recommendation. | next turn |
 | `chat.prewarm` | `false` | Boolean. See above. | next turn |
+| `chat.cacheKeepalive` | `true` | Boolean. See above. | hot reload |
 | `chat.retry.enabled` | `true` | Boolean. Retry transient provider errors. | next turn |
 | `chat.retry.maxRetries` | `3` | Integer at least 0. Attempts after the first failure. | next turn |
 | `chat.retry.baseDelayMs` | `2000` | Integer at least 0. First retry delay. | next turn |
@@ -98,6 +100,8 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `context.workingSet.rearmFraction` | `0.1` | Number from 0 up to but not including 1. Growth, as a fraction of the window, required before another automatic cleanup; `0` disables the band. | next turn |
 | `context.compaction.auto` | `true` | Boolean. Off still allows `/context compact` and overflow recovery. | next turn |
 | `context.compaction.threshold` | `0.8` | Number from 0 to 1. Context pressure at which compaction acts. | next turn |
+| `context.compaction.maxTokens` | `200000` | Integer at least 1. Request-size ceiling in tokens that starts compaction whatever the model's window is, and the stand-in window while the serving window is unknown. A model whose input price steps up at a token count lowers it to 98% of that boundary. | hot reload |
+| `context.compaction.provider` | `"off"` | `off` or `native`. `native` asks the Codex backend for opaque checkpoints on the `openai-codex` runtime and keeps them under `<stateDir>/provider-checkpoints/`; `off` keeps portable Clio summaries. | hot reload |
 | `context.memory.enabled` | `true` | Boolean. Task memory updates. `false` turns proactive memory off, including its model calls. | next turn |
 | `context.memory.target` | `null` | Target id for a dedicated memory route. With `target` and `model` both `null`, the memory tier runs on the active chat route (`chat.target` and `chat.model`) and its calls are billed to the chat model. An explicit route wins. | next turn |
 | `context.memory.model` | `null` | Wire model id; cleared when `target` is `null`, otherwise defaults to the target's `defaultModel`. | next turn |
@@ -122,7 +126,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `systemOne.retentionDays` | `30` | Integer at least 1. Days of dataset day files kept. | next turn |
 | `systemOne.maxMiB` | `64` | Integer at least 1. Size cap of the dataset directory. | next turn |
 | `safety.autonomy` | `"default"` | `default` or `yolo`. User layer or operator session control. A project layer can only tighten the user level (`default` over `yolo`); a looser value is ignored with a layer issue. | hot reload |
-| `safety.limits.sessionCostUsd` | `5` | Finite number at least 0, in USD; a negative value fails validation. Session cost ceiling. It gates requests on routes priced `known` or `estimated`; see [pricing](configuration-and-targets.md#pricing-and-cost-provenance). `0` means no session ceiling: paid requests are admitted, dispatch plans and Scout continuations carry a ceiling of 0, and fleet previews skip the remaining-budget check. | next turn |
+| `safety.limits.sessionCostUsd` | `5` | Finite number at least 0, in USD; a negative value fails validation. Session cost ceiling. It gates requests on routes priced `known` or `estimated`; see [pricing](configuration-and-targets.md#pricing-and-cost-provenance). `0` means no session ceiling: paid requests are admitted, dispatch plans and Scout continuations carry a ceiling of 0, and fleet previews skip the remaining-budget check. A parked request re-reads the ceiling every 250 ms and dispatch admission reads it per call, so raising it releases a waiting request. | hot reload |
 | `safety.limits.chatToolCallsPerTurn` | `60` | Integer at least 1. At the limit Clio stops using tools and summarizes the turn. | next turn |
 | `safety.limits.readBytesPerCall` | `51200` | Integer at least 1. Most text one file read returns; a read gets at least 1 KB. | next turn |
 | `safety.limits.observationBytesPerTurn` | `196608` | Integer at least 1. Combined tool output the model may receive in one turn. While the value stays at this default the pool scales to 1.5 bytes per context-window token, between 192 KiB and 1 MiB; any other value applies exactly. | next turn |
@@ -150,7 +154,7 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `interface.fullscreenScrollbar` | `"auto"` | `hidden`, `auto` or `always`. | restart required |
 | `interface.smoothStreaming` | `"auto"` | `off`, `auto` or `on`. Presentation-only pacing of streamed text and thinking. | hot reload |
 | `interface.desktopNotifications` | `false` | Boolean. Content-free alerts when a turn ends, a detached batch settles or an approval parks. Interactive TTY sessions only. | next turn |
-| `interface.autoUpdate` | `true` | Boolean. A native-installer install fetches and activates a newer release in the background; running sessions keep their version until restart. `false` keeps the update notice and leaves the install to `clio-coder upgrade`. Package-manager installs only show their upgrade command. | hot reload |
+| `interface.autoUpdate` | `true` | Boolean. A native-installer install fetches and activates a newer release in the background; running sessions keep their version until restart. A user-writable npm, pnpm, Bun or Volta install on Linux or macOS updates after the session quits, once every session of that install has exited (the wait is bounded at 30 minutes). `false` keeps the update notice and leaves the install to `clio-coder upgrade`. Other layouts only show their upgrade command. | hot reload |
 | `interface.panes.enabled` | `"embedded"` | `auto`, `embedded` or `off`. `embedded` lets bare `clio-coder` open a workspace in a pane host after one remembered question, and joins a host it is started inside. `auto` uses a detected pane host and never starts one. `off` never detects or opens a pane. | restart required |
 | `interface.panes.notifications` | `"failures"` | `failures`, `all` or `off`. Which run states raise a pane-host toast. | hot reload |
 | `interface.panes.layout` | `"off"` | `off`, `workers` or `cockpit`. Panes composed at interactive boot. | restart required |

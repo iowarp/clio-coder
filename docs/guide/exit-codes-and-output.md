@@ -8,7 +8,7 @@ Source implementations: `src/cli/` and `src/entry/`.
 
 ## 1. Global Exit Codes
 
-Clio Coder follows one exit code taxonomy across commands. A signal that ends an interactive session or a headless main-agent run exits `128 + signal`: `129` for SIGHUP, `130` for SIGINT and `143` for SIGTERM. `clio-coder configure` also exits `130` when you leave first-run setup before any target is saved, which a bare `clio-coder` launch reads as "nothing was configured".
+Clio Coder follows one exit code taxonomy across commands. A signal that ends an interactive session or a headless main-agent run exits `128 + signal`: `129` for SIGHUP, `130` for SIGINT and `143` for SIGTERM. A `clio-coder run` interrupted by SIGINT while it reads `@file` attachments also exits `130`, before any request is sent, after printing `clio-coder run: interrupted while reading file attachments; nothing was sent`. `clio-coder configure` also exits `130` when you leave first-run setup before any target is saved, which a bare `clio-coder` launch reads as "nothing was configured".
 
 | Exit Code | Meaning | Typical Causes & Conditions |
 | :--- | :--- | :--- |
@@ -21,7 +21,13 @@ Clio Coder follows one exit code taxonomy across commands. A signal that ends an
 | **`2`** | **Syntax / Usage Error** | Unknown subcommand, invalid flag, missing required positional arguments, global flag placed after subcommand, an unknown target, an unknown agent recipe, a refused admission or capability request, `clio-coder run --autonomy yolo` as root outside a detected container, or a data mutation SQL keyword passed to `clio-coder trace sql`. In lifecycle commands, also an unsafe directory layout, a flag conflict (`reset --all` with a level, `upgrade --restart` with `--json`), and `reset` or `uninstall` run without a terminal, `--force` or `--dry-run`. |
 | **`3`** | **Worker permission refusal (`permission_required`)** | The exit code of a dispatched native worker that was ended by the permission refusal limit or by `fleet.permissions.mode: fail`. It appears in the receipt as `exit=3`. `clio-coder run --agent` passes receipt exits 0, 2, 3 and 4 to the shell unchanged and maps every other receipt exit to `1`, so the command itself exits `3`. See [Worker permission refusals](#worker-permission-refusals-exit-3). |
 | **`4`** | **Priced spend ceiling** | The session ceiling (`safety.limits.sessionCostUsd`, default 5 USD) or a main-agent `run --max-cost-usd <n>` cap was reached. A session stop reads `budget_ceiling: session priced spend $<spent> reached the $<ceiling> ceiling; raise safety.limits.sessionCostUsd`. A run-cap stop reads `budget_ceiling: this run's priced spend $<spent> reached its --max-cost-usd $<cap> cap`; amounts use four decimal places. Earlier spend in a continued session does not count against the run cap, but a lower configured session ceiling still holds. Unpriced usage is not counted. Setting `safety.limits.sessionCostUsd: 0` disables the session ceiling; an explicit run cap still holds. `--max-cost-usd` with `--agent` exits 2. |
+| **`75`** | **Install busy (`EX_TEMPFAIL`)** | A retry-later outcome that changed nothing. `install.sh` or `install.ps1` found `.install-lock` held by a live process, another host or a recent crash. `clio-coder upgrade` refused to replace an npm install under other live processes or an update lease and listed them as `pid@host`. The `clio-coder` launcher waited 120 seconds for a package-manager update that was still running. A background update treats 75 as busy rather than failed and tries again later. |
 | **`124`** | **Run Timeout** | `clio-coder run --timeout <seconds>` elapsed. The run took the coordinated shutdown path a SIGTERM takes: the turn was aborted, a running bash tool's process group was signalled, and the receipt was sealed with outcome `timed_out` and run status `failed`, the status a dispatched worker's `timed_out` receipt seals with. The code matches `timeout(1)`. An external SIGTERM still exits 143 with outcome `canceled`. A timeout that fires during boot, before the turn starts, exits 124 with no receipt. `--timeout` applies to the main agent; with `--agent` it exits 2. |
+
+Two command families reuse small codes for their own states:
+
+- `clio-coder fleet events` exits `0` for a sealed, intact journal, `1` for an integrity break or read error, `2` for usage, `3` when the journal read so far is intact but not sealed (the fleet may still be running), and `4` when a `--follow` stopped because the fleet can no longer seal its journal.
+- `clio-coder session terminate` exits `0` when it wrote a request, signalled the owner or released the session, `1` when no live record names that id, and `2` for usage or a refused `--force`. `session list` exits `0`, and `2` for usage.
 
 ---
 
@@ -58,6 +64,10 @@ In headless execution (`clio-coder run`):
    clio-coder run cannot confirm permission requests; rerun interactively to approve this action.
    ```
    The denial is delivered to the model so it can recover through permitted work or report a limitation. An unresolved block with no successful write exits `1` with receipt outcome `failed` and `outcomeDetail: "noop"`; this does not require `--fail-on-noop`. A later substantive success of the same action class can resolve a block. A successful `limitation` call fails with detail `limitation`. `--fail-on-noop` also rejects runs whose attempted tools all failed without a block. The no-op rules are in [commands and modes](commands-and-modes.md).
+
+### Failures before output starts
+
+With `--json` or `--json-events`, a headless main-agent run that fails before it writes any output still ends its stream with one terminal frame, so a consumer never sees an empty stdout. The frame is `{"type":"turn_end","startedAt":…,"endedAt":…,"exitCode":<n>,"text":"","error":…,"outcome":…}`. `error` carries the last diagnostic the run printed, or `clio-coder run failed before output started (exit <n>)` when it printed none. `outcome` is `timed_out` for exit 124 and `failed` for any other nonzero code. A run that exits 0 never gets this frame.
 
 ### Dispatched agent output (`clio-coder run --agent`)
 
@@ -115,6 +125,9 @@ Many Clio Coder CLI subcommands provide structured JSON output for integration w
 | `clio-coder run --agent` | `--json` | JSONL: a `session` header, one frame per worker event and scope notice, and a final `receipt` frame with the sealed run receipt. `--json-events` is refused with `--agent` (exit 2). See [Dispatched agent output](#dispatched-agent-output-clio-coder-run---agent). |
 | `clio-coder doctor` | `--json` | `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }` on stdout. Exit 1 when any row is an error. See [Doctor](doctor.md). |
 | `clio-coder upgrade`, `reset`, `uninstall` | `--json` | One report document: `command`, `title`, `method`, `status` (`success`, `skipped`, `dry-run` or `error`), `items` (path, bytes and `remove`, `keep`, `absent`, `skip` or `clean` status), `steps`, `warnings`, `errors`, `advice` and `summary`. The text output carries the same facts. |
+| `clio-coder session list` | `--json` | `{ stateDir, staleAfterMs, sessions: [...], malformed, clockOffsetMs }`. Each session carries its live record (`id`, `host`, `pid`, `surface`, `startedAt`, `cwd`) plus `ageMs`, `skewMs` and `state` (`live`, `stale` or `terminating`). `--stale` keeps only stale sessions. |
+| `clio-coder session terminate` | `--json` | `{ id, host, pid, action, message, ageMs }` with `action` one of `requested`, `signaled`, `released` or `refused`, plus `exited` for a signal and `released` counts after `--force`. |
+| `clio-coder fleet events` | `--json` | The stored hash-chained NDJSON journal lines, verbatim, one per line. `--follow` keeps reading until `fleet_sealed`. |
 | `clio-coder agents` | `--json` | JSON array of registered agent recipe metadata objects. |
 | `clio-coder targets` | `--json` | JSON object containing the configured `targets` array. |
 | `clio-coder models` | `--json` | JSON array of catalog models with capability flags. |

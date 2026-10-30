@@ -27,8 +27,8 @@ On native Windows, which is best effort, run
 returns its exit status. Both install the same layout under
 `%LOCALAPPDATA%\clio-coder\install` with the launcher
 `%USERPROFILE%\.local\bin\clio-coder.cmd`, and need no administrator rights.
-`install.ps1` refuses a package older than 0.6.0 before it changes the active
-launcher. `install.sh` run from an MSYS, MinGW or Cygwin shell stops and names the
+Both installers refuse a package older than 0.6.0 before they change the active
+installation (`install.sh` leaves it unchanged and exits with an error). `install.sh` run from an MSYS, MinGW or Cygwin shell stops and names the
 PowerShell command. A relative path given to `install.ps1` for the install
 directory, the bin directory or `-Package` resolves against the PowerShell
 location, not the process directory. Linux, macOS and WSL are the primary
@@ -111,7 +111,7 @@ for them.
 | `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version. Every version and runtime stays on disk until `uninstall --remove-binary`, because a running session may still load code from the version it started with; the manifest names the current and previous ones. |
 | `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher, the channel, any version pin, whether background updates are on, whether a package manager wraps the install, and whether the installer added the launcher directory to `PATH`. Activating a version is one atomic write of this file. It is a different file from the state root's `install.json`, which records the Clio Coder version and install times. |
 | `.../launchers/`, `.../.active/` | The launcher's helper script, and one receipt per running session, which `uninstall` checks before it removes anything. |
-| `.../.installer-owner`, `.../.install-lock/` | The ownership marker that stops an installer from claiming a directory that already holds `runtime/` or `versions/`, and the lock held while an install, rollback or uninstall runs. A lock left by an exited process is removed by deleting that one directory. |
+| `.../.installer-owner`, `.../.install-lock/` | The ownership marker that stops an installer from claiming a directory that already holds `runtime/` or `versions/`, and the lock held while an install, rollback or uninstall runs. Each installer reclaims a lock on its own when this machine wrote it, the owner pid is gone and the lock is older than 10 minutes. A lock held by a live process, a foreign host or a recent crash stops the run with exit status 75, and deleting only that directory once its owner has exited clears it. |
 | `~/.local/bin/clio-coder` (`%USERPROFILE%\.local\bin\clio-coder.cmd` on Windows) | A small launcher that reads the manifest on each start and runs the managed Node on the current prefix. |
 
 The install root sits beside the data root rather than inside it, so
@@ -286,7 +286,7 @@ from `curl` with no terminal skips it. The prompt reads
 Enter or `y` installs; anything else skips. `--gui` installs without asking and
 `--no-gui` skips; `CLIO_CODER_INSTALL_GUI` sets the same choice. A failed
 install is a warning, not an installer failure:
-`the desktop app was not set up (it needs a systemd user session). Retry later with: clio-coder gui background install`.
+`the desktop app was not set up. Retry with: clio-coder doctor --fix (verified service handover waits until active work finishes)`. The installer runs `clio-coder gui background install --handover`, which takes over a verified idle background app that another installation owns and keeps its address and credentials.
 
 The installer does not echo the command's JSON report. After a successful
 install it states the outcome in two lines. The first is
@@ -315,7 +315,7 @@ and an explicit `--gui` (or `CLIO_CODER_INSTALL_GUI=1`) warns
 | Choose models for each role | `clio-coder configure --settings` | Open Chat, Fleet, or Context & Memory to choose the target and model used for that work. |
 | Change any setting or repair YAML | `clio-coder configure --edit` | Edit a draft, validate, and save with a backup. |
 | Diagnose the installation | `clio-coder doctor` | Read-only diagnosis. `clio-coder doctor --fix` repairs structure and permissions, and records fleet preflight results. |
-| Review an available update in the TUI | `/upgrade` | Recheck the release, show exactly what is preserved, and ask before replacing an npm-global or installer install. It follows the channel an installer install recorded and leaves a pinned install alone. After success, Clio asks you to exit and restart. |
+| Review an available update in the TUI | `/upgrade` | Recheck the release, show exactly what is preserved, and ask before replacing an npm-global or installer install. It follows the channel an installer install recorded and leaves a pinned install alone. After success, Clio asks you to exit and restart. A user-writable npm, pnpm, Bun or Volta install on Linux or macOS is not replaced under the running session: `/upgrade` arms the update to run after every session of that install has quit. |
 | Finish a package-manager update | `clio-coder upgrade --post-install` | Apply local migrations and installation checks. |
 | Undo the last installer upgrade | `clio-coder upgrade --rollback` | Make the previous version current again and turn background updates off. A version pin moves to the restored version. |
 | Start configuration over | `clio-coder reset --config` | Delete `settings.yaml`, keep credentials and history, then print `clio-coder configure` as the next step. |
@@ -545,6 +545,7 @@ clio-coder upgrade --rollback [--dry-run]
 install uses the channel recorded in its manifest and every other layout uses
 `latest`. An unknown argument, a bad channel, an unsafe directory layout and the
 flag conflicts below exit 2; a failed install, migration or integrity check exits 1;
+an install held by other processes exits 75;
 a completed run, a dry run and a run that is already current exit 0. `--json` emits
 one report document with `command`, `title`, `method`, `status`, `items`, `steps`,
 `warnings`, `errors`, `advice` and `summary`.
@@ -557,7 +558,13 @@ migrations before its final doctor repair.
 For npm global installs, `upgrade` derives the prefix from the running package,
 including custom prefixes, and runs post-install checks through the exact installed
 entry. Another launcher on `PATH` cannot take over those checks. An older dist-tag
-does not trigger a downgrade.
+does not trigger a downgrade. npm replaces the package in place, so on a prefix the
+current user can write, `upgrade` first checks for other processes of the install.
+While any other session, update lease or `clio-coder` process of the same root is
+running it replaces nothing. It lists each holder as `pid@host`, prints the command
+to rerun after they quit or to run `/upgrade` in a session to install after every
+session quits, and exits 75. A held lease also stops a second `upgrade` from starting
+in parallel, and SIGINT or SIGTERM stops npm before it releases the lease.
 
 For an installer install, `upgrade` runs the installer that shipped with the
 running package against the same install root and launcher directory. The new
@@ -613,8 +620,9 @@ restored version, so the next bare `upgrade` keeps that version, and the second 
 no managed lifecycle: update it by rerunning the installer, and roll it back with the
 installer's `--rollback`.
 
-Inside the TUI, `/upgrade` offers the same npm-global path, and the same
-replacement for installer installs. It first checks that
+Inside the TUI, `/upgrade` offers the same replacement for installer installs and for
+an npm-global install it can replace, and an after-quit update for a user-writable
+npm, pnpm, Bun or Volta install on Linux or macOS. It first checks that
 the session is idle, then shows the current and available versions, package
 prefix, preserved user data, and post-install checks. For an installer install it
 follows the channel the install recorded (`beta` or `dev`, otherwise `latest`), and
@@ -626,12 +634,19 @@ restart-required notice is shown and Clio asks whether to exit now; start
 `clio-coder` again and use `/resume`. Choosing **Not now** leaves the quiet update
 reminder in place.
 
+For an install that updates after quit, the choice is **After I quit** instead.
+The approval text says the package manager replaces the install in place, so it runs
+only after this session and every other session of the install have exited. Choosing
+it arms one detached wrapper for this session and reports how many other sessions it
+will wait for. A second `/upgrade` while an update is pending reports that one is
+already pending and starts nothing.
+
 `/upgrade` leaves a pinned installer install alone. It prints
 `This install is pinned to <X>, so /upgrade leaves it there. To follow its channel again, run:`
 followed by the same installer command `upgrade` prints. A source checkout is told
 `This source checkout updates through git, not the package registry. Run:` with its
-git steps. pnpm, Bun, repository-local, and unknown installations receive their
-owner-specific shell instructions instead of an unsafe in-process replacement.
+git steps. Homebrew, winget, repository-local, unknown, and any pnpm or Bun installation whose prefix
+the user cannot write receive their owner-specific shell instructions instead of an unsafe in-process replacement.
 
 To update and return to the project from a shell, finish the turn, leave with
 `/quit`, and run:
@@ -712,9 +727,13 @@ background update made it.
 
 Interactive sessions start an update monitor after the first full frame and a
 five-second delay. Registry requests have a 2.5-second timeout and are cached for
-24 hours, including failed attempts, so an offline session stays quiet. npm,
-pnpm, Bun and installer installs check the public npm `latest` tag; a prerelease
-also reads `beta`, and an installer install reads the channel it recorded instead.
+24 hours, including failed attempts, so an offline session stays quiet. They go to
+the registry named by `npm_config_registry` or `NPM_CONFIG_REGISTRY` when it is an
+`http` or `https` URL, so a mirror announces the version its own `npm install`
+fetches, and to `registry.npmjs.org` otherwise. npm,
+pnpm, Bun and installer installs check the `latest` tag. A release candidate also
+reads `beta`, a `-snapshot.` build also reads `dev`, and an installer install reads
+the channel it recorded instead.
 Source checkouts, local or npx copies, unknown layouts and pinned installer
 installs skip registry checks. Installed files are also checked once a minute for
 a version change or a rebuild since this process started.
@@ -727,34 +746,62 @@ updated. It never opens a prompt, writes a conversation message, or sends a
 desktop notification. Apart from the installer's background updates below, it
 never starts an upgrade by itself. An update hint appears at most once per
 session and once per day across sessions; the same version is suggested no more
-than once a week. Cache records live under the resolved cache directory.
+than once a week. Cache records live under the resolved cache directory. The wording of the line depends on the install; see [Background updates](#background-updates).
 
 Set `CLIO_CODER_UPDATE_CHECK=0` or `NO_UPDATE_NOTIFIER=1` to disable the monitor,
 and with it background updates. CI, headless runs, ACP, and CLI subcommands do
 not start it. Explicit upgrades remain available when the monitor is disabled.
 
-#### Background updates for installer installs
+#### Background updates
 
-An installer install updates itself by default. When the monitor
+`interface.autoUpdate` (default `true`) and `CLIO_CODER_AUTO_UPDATE=0` decide whether
+the monitor installs by itself. Neither disables the update notice. Installer
+installs and package-manager installs update differently, because a package manager
+replaces the install in place and a running session loads code lazily from it.
+
+An installer install updates itself while the session runs. When the monitor
 finds a newer release on the install's channel and the session is idle, it runs
 the installer that shipped with the running package for that release, at most
 once a day. The new version is installed beside the current one and activated
 for the next start; the running session keeps its version, and the footer says
-`Updated to v<version> · current session preserved; restart then /resume to use it; upgrade --rollback to undo`.
+`Updated to v<version> · restart clio-coder to use it; this session keeps v<running>; upgrade --rollback undoes`.
 Background updates skip post-install migrations, never edit `PATH`, keep the
 managed Node, and need no administrator rights. If the install was pinned, opted
 out, moved to another channel or updated by someone else while the update ran,
-the new version is not activated.
+the new version is not activated. An installer run that finds the install lock
+held (exit 75) is not recorded as a failure, and a later probe tries again.
+
+An npm, pnpm, Bun or Volta install on Linux or macOS updates after the session
+quits, never during it. The conditions are a user-writable package prefix, a
+non-root user, no `sudo`, and an install that the package manager owns. While the
+session runs the footer says `v<version> available · installs after you quit`, with
+`; the last attempt waited for <holders>` when an earlier wrapper gave up. When the
+session exits, Clio starts one detached wrapper that waits until no process of that
+install is left, runs the package manager for that exact version, and writes a result
+file. The wrapper waits up to 30 minutes for other sessions, then gives up for that
+quit, and caps the package-manager run itself at 10 minutes. `/upgrade` arms the same
+wrapper on request. The next interactive launch reports the outcome once, as
+`Updated to v<version> · installed by <manager> after your last session` or
+`background update to v<version> failed (<detail>); log: <path>; run <command>`.
+Windows, root, `sudo`, a prefix this user cannot write, Homebrew, winget and unknown
+layouts keep the plain notice `v<version> available · <exact upgrade command>`.
+
+A launch that starts while a wrapper holds the install waits up to 120 seconds for it
+to finish, printing `Clio Coder is updating (<manager>); waiting…`. When the wrapper
+is still running after 120 seconds the launcher exits 75 and names the wrapper's log.
+`doctor` shows the auto-update state and the last background result; see [Doctor](doctor.md).
 
 Background updates are off for a pinned install and after a rollback. Turn them
 off with the installer's `--no-auto-update` (`-NoAutoUpdate`), which is recorded
-in `install.json`, or for one process with `CLIO_CODER_AUTO_UPDATE=0`. Turn them
-back on with `--auto-update` (`-AutoUpdate`) on an unpinned install. npm, pnpm and
-Bun installs never update in the background; their package manager owns updates.
+in `install.json`, with `interface.autoUpdate: false`, or for one process with
+`CLIO_CODER_AUTO_UPDATE=0`. Turn the installer's recorded choice
+back on with `--auto-update` (`-AutoUpdate`) on an unpinned install. With updates
+off, the footer says `v<version> available · clio-coder upgrade` (with `--channel=<channel>`
+for a recorded prerelease channel) for installer installs.
 
 #### Current migration contract
 
-The source tree registers five migrations in execution order
+The source tree registers six migrations in execution order
 (`src/domains/lifecycle/migrations/index.ts`):
 
 1. `2026-09-01-settings-v2`
@@ -762,12 +809,13 @@ The source tree registers five migrations in execution order
 3. `2026-10-06-playbooks-and-packages`
 4. `2026-10-07-acp-adapters`
 5. `2026-10-07-claude-subscription`
+6. `2026-10-20-fleet-permissions-judge`
 
 The package migration converts the playbook layout and repairs bundled package
 installations as described above. The adapter migration updates only the
 unchanged ACP recipes Clio previously offered. The subscription migration moves
 Clio's stored Anthropic OAuth login to `anthropic-max` and updates matching
-subscription targets; Anthropic API keys stay under `anthropic`.
+subscription targets; Anthropic API keys stay under `anthropic`. The fleet permissions migration moves each user-layer `fleet.permissions.mode: deny` to `judge`, because the 0.6.4 default is `judge` but earlier settings templates wrote `deny` into every new home. It edits only that value in place, keeps the file's quoting and comments, leaves project layers alone, and reports how to restore `deny`. A `deny` that comes through a YAML anchor, alias or escape stays as written and is named in the report.
 
 The naming migration `2026-09-01-clio-coder-naming` and the runtime-id
 migrations `2026-08-18-lmstudio-runtime-id` and `2026-09-18-ollama-runtime-id`
