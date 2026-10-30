@@ -44,6 +44,7 @@ export const DispatchRun = Type.Object(
 		sessionId: nullable,
 		tokenCount: Type.Number(),
 		costUsd: Type.Number(),
+		costDisplay: Type.Optional(text),
 		parentRunId: nullable,
 		rootRunId: nullable,
 	},

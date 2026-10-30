@@ -11,24 +11,31 @@ import {
 } from "../client/chat/session-usage-model.js";
 import type { SessionSnapshot } from "../contracts/sessions.js";
 import type { SessionUsage } from "../contracts/usage.js";
+import { renderCostAggregate } from "../server/clio/http-shims.js";
+import { snapshotCostDisplay } from "../server/services/cost-display.js";
 
-const cost = (knownUsd: number, extra: Partial<SessionUsage["session"]["cost"]> = {}) => ({
-	knownUsd,
-	calls: 2,
-	estimated: false,
-	unknown: false,
-	free: false,
-	...extra,
-});
+const cost = (knownUsd: number, extra: Partial<SessionUsage["session"]["cost"]> = {}) => {
+	const value = { knownUsd, calls: 2, estimated: false, unknown: false, free: false, ...extra };
+	return {
+		...value,
+		display: renderCostAggregate({
+			knownUsd,
+			calls: value.calls,
+			hasEstimated: value.estimated,
+			hasUnknown: value.unknown,
+			allKnownFree: value.free,
+		}),
+	};
+};
 
 test("cost is worded as measured, estimated, partly unpriced, free or not yet recorded", () => {
 	assert.equal(costText(cost(0.4213)), "$0.42");
 	assert.equal(costText(cost(0.0042)), "$0.0042");
-	assert.equal(costText(cost(0.42, { estimated: true })), "about $0.42");
-	assert.equal(costText(cost(0.42, { unknown: true })), "$0.42 subtotal, some calls unpriced");
-	assert.equal(costText(cost(0, { free: true })), "$0.00, every call free");
-	assert.equal(costText(cost(0, { calls: 0 })), "Nothing recorded yet");
-	assert.equal(costText(cost(0, { unknown: true })), "Cost not measured");
+	assert.equal(costText(cost(0.42, { estimated: true })), "~$0.42 est");
+	assert.equal(costText(cost(0.42, { unknown: true })), "$0.42 +?");
+	assert.equal(costText(cost(0, { free: true })), "$0.00 local");
+	assert.equal(costText(cost(0, { calls: 0 })), "not measured");
+	assert.equal(costText(cost(0, { unknown: true })), "not measured");
 	const turns = [
 		{
 			status: "succeeded",
@@ -48,12 +55,13 @@ test("cost is worded as measured, estimated, partly unpriced, free or not yet re
 			},
 		},
 	] as unknown as SessionSnapshot["turns"];
+	const display = snapshotCostDisplay({ turns } as SessionSnapshot).costDisplay;
 	assert.equal(taskOverview(turns, 0).tokens, 36);
-	assert.deepEqual(usageSummary(false, turns, undefined, undefined).totals, [
+	assert.deepEqual(usageSummary(false, turns, undefined, undefined, display).totals, [
 		{ label: "Cost", value: "~$0.42 +?" },
 		{ label: "Tokens", value: "36 +? (1 call missing usage)" },
 	]);
-	assert.deepEqual(sessionSpend(turns, undefined), {
+	assert.deepEqual(sessionSpend(turns, undefined, undefined, display), {
 		tokens: 36,
 		cost: "~$0.42 +?",
 		source: "turns",
@@ -169,12 +177,13 @@ test("parked usage shows recorded totals without exposing live model details or 
 			reasoning: 0,
 			totalTokens: 1_284_413,
 			costUsd: 0.03,
+			costDisplay: "~$0.03 est",
 			costProvenance: "estimated" as const,
 		},
 	};
 	const parked = usageSummary(false, [], usage, recorded);
 	assert.deepEqual(parked.totals, [
-		{ label: "Cost", value: "~$0.03" },
+		{ label: "Cost", value: "~$0.03 est" },
 		{ label: "Tokens", value: "1,284,413" },
 	]);
 	assert.match(parked.note, /^Last recorded totals\./);

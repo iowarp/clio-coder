@@ -4,6 +4,12 @@ export { processAlive, processBirthToken } from "../../../../src/core/process-id
 export { pendingInstalledVersion, registerRunningBuild } from "../../../../src/core/running-build.js";
 export { clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "../../../../src/core/xdg.js";
 export { getVersionInfo } from "../../../../src/domains/lifecycle/version.js";
+export type { CostAggregate } from "../../../../src/domains/observability/cost.js";
+export {
+	aggregateCostAmounts,
+	renderCostAggregate,
+	renderTraceCost,
+} from "../../../../src/domains/observability/cost.js";
 export {
 	AcpProcessError,
 	AcpProtocolError,

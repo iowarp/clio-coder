@@ -8,6 +8,11 @@ import ts from "typescript";
 const app = fileURLToPath(new URL("../", import.meta.url));
 const root = resolve(app, "../..");
 const httpModules = new Map([
+	// Cost display stays on the server; browser contracts carry only rendered strings (#434).
+	[
+		"src/domains/observability/cost.ts",
+		new Set(["aggregateCostAmounts", "renderCostAggregate", "renderTraceCost", "CostAggregate"]),
+	],
 	// The server records its loaded build and reads activation so live status can report a pending upgrade.
 	["src/core/running-build.ts", new Set(["registerRunningBuild", "pendingInstalledVersion"])],
 	["src/engine/acp/transport.ts", new Set(["createStdioTransport", "AcpJsonRpcTransport"])],

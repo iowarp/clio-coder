@@ -12,18 +12,8 @@ type Cost = SessionUsage["session"]["cost"];
 
 const tokens = (value: number) => value.toLocaleString("en-US");
 
-function dollars(value: number): string {
-	// Sub-cent spend is common on cheap models; two decimals would round it to a claim of nothing.
-	return value > 0 && value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`;
-}
-
 export function costText(cost: Cost): string {
-	if (cost.calls === 0 && !cost.unknownCallCoverageRuns) return "Nothing recorded yet";
-	if (cost.free) return "$0.00, every call free";
-	if (cost.unknown && cost.knownUsd === 0) return "Cost not measured";
-	if (cost.unknown) return `${cost.estimated ? "about " : ""}${dollars(cost.knownUsd)} subtotal, some calls unpriced`;
-	if (cost.estimated) return `about ${dollars(cost.knownUsd)}`;
-	return dollars(cost.knownUsd);
+	return cost.display ?? "not measured";
 }
 
 export function usageTotals(usage: SessionUsage): Array<{ label: string; value: string }> {
@@ -157,15 +147,11 @@ export function sessionSpend(
 	turns: SessionSnapshot["turns"],
 	usage: SessionUsage | undefined,
 	live?: LiveUsage,
+	recordedCostDisplay?: string,
 ): Spend {
 	if (live?.session) {
 		const totals = live.session;
-		const cost =
-			totals.costProvenance === "unknown"
-				? totals.costUsd > 0
-					? `${totals.hasEstimatedCost ? "~" : ""}${dollars(totals.costUsd)} +?`
-					: null
-				: `${totals.costProvenance === "estimated" ? "~" : ""}${dollars(totals.costUsd)}`;
+		const cost = totals.costDisplay ?? "not measured";
 		return {
 			tokens: totals.totalTokens,
 			cost,
@@ -175,12 +161,7 @@ export function sessionSpend(
 	}
 	if (usage) {
 		const cost = usage.session.cost;
-		const priced =
-			cost.calls === 0 || (cost.unknown && cost.knownUsd === 0)
-				? null
-				: cost.free
-					? "$0.00"
-					: `${cost.estimated ? "~" : ""}${dollars(cost.knownUsd)}${cost.unknown ? " +?" : ""}`;
+		const priced = costText(cost);
 		return {
 			tokens: usage.session.tokens,
 			cost: priced,
@@ -191,10 +172,7 @@ export function sessionSpend(
 	const overview = taskOverview(turns, 0);
 	return {
 		tokens: overview.tokens,
-		cost:
-			overview.costUsd !== null && overview.costUsd > 0
-				? `${overview.hasEstimatedCost ? "~" : ""}${dollars(overview.costUsd)}${overview.hasUnknownCost ? " +?" : ""}`
-				: null,
+		cost: recordedCostDisplay ?? "not measured",
 		...(overview.missingTokenCalls ? { missingTokenCalls: overview.missingTokenCalls } : {}),
 		source: "turns",
 	};
@@ -205,21 +183,29 @@ export function usageSummary(
 	turns: SessionSnapshot["turns"],
 	usage: SessionUsage | undefined,
 	recorded: LiveUsage | undefined,
+	recordedCostDisplay?: string,
 ) {
 	const hasSnapshot = !!recorded?.session || turns.some((turn) => !!turn.usage);
-	const spend = sessionSpend(turns, usage, recorded);
+	const spend = sessionSpend(turns, usage, recorded, recordedCostDisplay);
 	const totals =
 		!recorded?.session && usage
 			? usageTotals(usage)
 			: hasSnapshot
 				? [
-						{ label: "Cost", value: spend.cost ?? "Unpriced" },
+						{ label: "Cost", value: spend.cost ?? "not measured" },
 						{
 							label: "Tokens",
 							value: `${tokens(spend.tokens)}${spend.missingTokenCalls ? ` +? (${tokens(spend.missingTokenCalls)} call${spend.missingTokenCalls === 1 ? "" : "s"} missing usage)` : ""}`,
 						},
 						...(recorded?.session?.calls !== undefined
-							? [{ label: "Model calls", value: tokens(recorded.session.calls) }]
+							? [
+									{
+										label: "Model calls",
+										value: recorded.session.unknownCallCoverageRuns
+											? `${tokens(recorded.session.calls)} known; ${recorded.session.unknownCallCoverageRuns} runs with unknown call coverage`
+											: tokens(recorded.session.calls),
+									},
+								]
 							: []),
 					]
 				: [];

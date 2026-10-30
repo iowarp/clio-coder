@@ -4664,6 +4664,9 @@
 																	"costUsd": {
 																		"type": "number"
 																	},
+																	"costDisplay": {
+																		"type": "string"
+																	},
 																	"wallTimeMs": {
 																		"type": "number"
 																	}
@@ -5083,6 +5086,9 @@
 														},
 														"costUsd": {
 															"type": "number"
+														},
+														"costDisplay": {
+															"type": "string"
 														},
 														"wallTimeMs": {
 															"type": "number"
@@ -6733,6 +6739,9 @@
 													"costUsd": {
 														"type": "number"
 													},
+													"costDisplay": {
+														"type": "string"
+													},
 													"parentRunId": {
 														"anyOf": [
 															{
@@ -6988,6 +6997,9 @@
 										},
 										"costUsd": {
 											"type": "number"
+										},
+										"costDisplay": {
+											"type": "string"
 										},
 										"parentRunId": {
 											"anyOf": [
@@ -15177,6 +15189,9 @@
 													"type": "object",
 													"required": ["knownUsd", "calls", "estimated", "unknown", "free"],
 													"properties": {
+														"display": {
+															"type": "string"
+														},
 														"knownUsd": {
 															"type": "number",
 															"minimum": 0
@@ -15309,6 +15324,9 @@
 																"type": "object",
 																"required": ["knownUsd", "calls", "estimated", "unknown", "free"],
 																"properties": {
+																	"display": {
+																		"type": "string"
+																	},
 																	"knownUsd": {
 																		"type": "number",
 																		"minimum": 0
@@ -17893,6 +17911,15 @@
 														"ceilingUsd": {
 															"type": "number",
 															"minimum": 0
+														},
+														"ceilingDisplay": {
+															"type": "string"
+														},
+														"currentDisplay": {
+															"type": "string"
+														},
+														"playbookDisplay": {
+															"type": "string"
 														},
 														"currentUsd": {
 															"type": "number",
@@ -20934,6 +20961,9 @@
 										"health"
 									],
 									"properties": {
+										"costDisplay": {
+											"type": "string"
+										},
 										"id": {
 											"type": "string",
 											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -21228,6 +21258,9 @@
 																"type": "object",
 																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 																"properties": {
+																	"costDisplay": {
+																		"type": "string"
+																	},
 																	"costSummary": {
 																		"type": "object",
 																		"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
@@ -21943,6 +21976,10 @@
 																	"type": "integer",
 																	"minimum": 0
 																},
+																"unknownCallCoverageRuns": {
+																	"type": "integer",
+																	"minimum": 0
+																},
 																"missingTokenCalls": {
 																	"type": "integer",
 																	"minimum": 0
@@ -21953,6 +21990,10 @@
 																"costUsd": {
 																	"type": "number",
 																	"minimum": 0
+																},
+																"costDisplay": {
+																	"type": "string",
+																	"maxLength": 4096
 																},
 																"costProvenance": {
 																	"anyOf": [
@@ -23042,6 +23083,9 @@
 															"costCeilingUsd": {
 																"type": "number",
 																"minimum": 0
+															},
+															"costCeilingDisplay": {
+																"type": "string"
 															},
 															"deadlineMs": {
 																"type": "integer",
@@ -24400,6 +24444,9 @@
 																"type": "null"
 															}
 														]
+													},
+													"costDisplay": {
+														"type": "string"
 													},
 													"saved": {
 														"type": "boolean"
@@ -25989,6 +26036,9 @@
 										"health"
 									],
 									"properties": {
+										"costDisplay": {
+											"type": "string"
+										},
 										"id": {
 											"type": "string",
 											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -26283,6 +26333,9 @@
 																"type": "object",
 																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 																"properties": {
+																	"costDisplay": {
+																		"type": "string"
+																	},
 																	"costSummary": {
 																		"type": "object",
 																		"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
@@ -26998,6 +27051,10 @@
 																	"type": "integer",
 																	"minimum": 0
 																},
+																"unknownCallCoverageRuns": {
+																	"type": "integer",
+																	"minimum": 0
+																},
 																"missingTokenCalls": {
 																	"type": "integer",
 																	"minimum": 0
@@ -27008,6 +27065,10 @@
 																"costUsd": {
 																	"type": "number",
 																	"minimum": 0
+																},
+																"costDisplay": {
+																	"type": "string",
+																	"maxLength": 4096
 																},
 																"costProvenance": {
 																	"anyOf": [
@@ -28097,6 +28158,9 @@
 															"costCeilingUsd": {
 																"type": "number",
 																"minimum": 0
+															},
+															"costCeilingDisplay": {
+																"type": "string"
 															},
 															"deadlineMs": {
 																"type": "integer",
@@ -29455,6 +29519,9 @@
 																"type": "null"
 															}
 														]
+													},
+													"costDisplay": {
+														"type": "string"
 													},
 													"saved": {
 														"type": "boolean"
@@ -29629,6 +29696,9 @@
 										"health"
 									],
 									"properties": {
+										"costDisplay": {
+											"type": "string"
+										},
 										"id": {
 											"type": "string",
 											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -29923,6 +29993,9 @@
 																"type": "object",
 																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 																"properties": {
+																	"costDisplay": {
+																		"type": "string"
+																	},
 																	"costSummary": {
 																		"type": "object",
 																		"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
@@ -30638,6 +30711,10 @@
 																	"type": "integer",
 																	"minimum": 0
 																},
+																"unknownCallCoverageRuns": {
+																	"type": "integer",
+																	"minimum": 0
+																},
 																"missingTokenCalls": {
 																	"type": "integer",
 																	"minimum": 0
@@ -30648,6 +30725,10 @@
 																"costUsd": {
 																	"type": "number",
 																	"minimum": 0
+																},
+																"costDisplay": {
+																	"type": "string",
+																	"maxLength": 4096
 																},
 																"costProvenance": {
 																	"anyOf": [
@@ -31737,6 +31818,9 @@
 															"costCeilingUsd": {
 																"type": "number",
 																"minimum": 0
+															},
+															"costCeilingDisplay": {
+																"type": "string"
 															},
 															"deadlineMs": {
 																"type": "integer",
@@ -33096,6 +33180,9 @@
 															}
 														]
 													},
+													"costDisplay": {
+														"type": "string"
+													},
 													"saved": {
 														"type": "boolean"
 													},
@@ -33233,6 +33320,9 @@
 											"health"
 										],
 										"properties": {
+											"costDisplay": {
+												"type": "string"
+											},
 											"id": {
 												"type": "string",
 												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -33527,6 +33617,9 @@
 																	"type": "object",
 																	"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 																	"properties": {
+																		"costDisplay": {
+																			"type": "string"
+																		},
 																		"costSummary": {
 																			"type": "object",
 																			"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
@@ -34242,6 +34335,10 @@
 																		"type": "integer",
 																		"minimum": 0
 																	},
+																	"unknownCallCoverageRuns": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
 																	"missingTokenCalls": {
 																		"type": "integer",
 																		"minimum": 0
@@ -34252,6 +34349,10 @@
 																	"costUsd": {
 																		"type": "number",
 																		"minimum": 0
+																	},
+																	"costDisplay": {
+																		"type": "string",
+																		"maxLength": 4096
 																	},
 																	"costProvenance": {
 																		"anyOf": [
@@ -35341,6 +35442,9 @@
 																"costCeilingUsd": {
 																	"type": "number",
 																	"minimum": 0
+																},
+																"costCeilingDisplay": {
+																	"type": "string"
 																},
 																"deadlineMs": {
 																	"type": "integer",
@@ -36700,6 +36804,9 @@
 																}
 															]
 														},
+														"costDisplay": {
+															"type": "string"
+														},
 														"saved": {
 															"type": "boolean"
 														},
@@ -37084,6 +37191,9 @@
 										"health"
 									],
 									"properties": {
+										"costDisplay": {
+											"type": "string"
+										},
 										"id": {
 											"type": "string",
 											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -37378,6 +37488,9 @@
 																"type": "object",
 																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 																"properties": {
+																	"costDisplay": {
+																		"type": "string"
+																	},
 																	"costSummary": {
 																		"type": "object",
 																		"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
@@ -38093,6 +38206,10 @@
 																	"type": "integer",
 																	"minimum": 0
 																},
+																"unknownCallCoverageRuns": {
+																	"type": "integer",
+																	"minimum": 0
+																},
 																"missingTokenCalls": {
 																	"type": "integer",
 																	"minimum": 0
@@ -38103,6 +38220,10 @@
 																"costUsd": {
 																	"type": "number",
 																	"minimum": 0
+																},
+																"costDisplay": {
+																	"type": "string",
+																	"maxLength": 4096
 																},
 																"costProvenance": {
 																	"anyOf": [
@@ -39192,6 +39313,9 @@
 															"costCeilingUsd": {
 																"type": "number",
 																"minimum": 0
+															},
+															"costCeilingDisplay": {
+																"type": "string"
 															},
 															"deadlineMs": {
 																"type": "integer",
@@ -40551,6 +40675,9 @@
 															}
 														]
 													},
+													"costDisplay": {
+														"type": "string"
+													},
 													"saved": {
 														"type": "boolean"
 													},
@@ -41320,6 +41447,9 @@
 															}
 														]
 													},
+													"costDisplay": {
+														"type": "string"
+													},
 													"cost_estimated": {
 														"anyOf": [
 															{
@@ -41602,6 +41732,9 @@
 													"type": "null"
 												}
 											]
+										},
+										"costDisplay": {
+											"type": "string"
 										},
 										"cost_estimated": {
 											"anyOf": [
@@ -41955,6 +42088,9 @@
 														"type": "null"
 													}
 												]
+											},
+											"costDisplay": {
+												"type": "string"
 											},
 											"cost_estimated": {
 												"anyOf": [
@@ -44663,6 +44799,9 @@
 																								"costUsd": {
 																									"type": "number"
 																								},
+																								"costDisplay": {
+																									"type": "string"
+																								},
 																								"wallTimeMs": {
 																									"type": "number"
 																								}
@@ -45814,6 +45953,9 @@
 																								},
 																								"costUsd": {
 																									"type": "number"
+																								},
+																								"costDisplay": {
+																									"type": "string"
 																								},
 																								"wallTimeMs": {
 																									"type": "number"
@@ -47896,6 +48038,10 @@
 																"type": "integer",
 																"minimum": 0
 															},
+															"unknownCallCoverageRuns": {
+																"type": "integer",
+																"minimum": 0
+															},
 															"missingTokenCalls": {
 																"type": "integer",
 																"minimum": 0
@@ -47906,6 +48052,10 @@
 															"costUsd": {
 																"type": "number",
 																"minimum": 0
+															},
+															"costDisplay": {
+																"type": "string",
+																"maxLength": 4096
 															},
 															"costProvenance": {
 																"anyOf": [
@@ -48486,6 +48636,9 @@
 														"type": "object",
 														"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 														"properties": {
+															"costDisplay": {
+																"type": "string"
+															},
 															"costSummary": {
 																"type": "object",
 																"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
@@ -49285,6 +49438,9 @@
 								"type": "object",
 								"required": ["resource", "revision", "turnId", "stopReason", "usage", "problem", "finishedAt"],
 								"properties": {
+									"costDisplay": {
+										"type": "string"
+									},
 									"resource": {
 										"type": "string",
 										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -49306,6 +49462,9 @@
 												"type": "object",
 												"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
 												"properties": {
+													"costDisplay": {
+														"type": "string"
+													},
 													"costSummary": {
 														"type": "object",
 														"required": ["knownUsd", "hasEstimated", "hasUnknown", "allKnownFree", "calls"],
@@ -49717,6 +49876,9 @@
 														"type": "number",
 														"minimum": 0
 													},
+													"costCeilingDisplay": {
+														"type": "string"
+													},
 													"deadlineMs": {
 														"type": "integer",
 														"minimum": 0
@@ -50087,6 +50249,9 @@
 													"costCeilingUsd": {
 														"type": "number",
 														"minimum": 0
+													},
+													"costCeilingDisplay": {
+														"type": "string"
 													},
 													"deadlineMs": {
 														"type": "integer",
@@ -50459,6 +50624,9 @@
 														"type": "number",
 														"minimum": 0
 													},
+													"costCeilingDisplay": {
+														"type": "string"
+													},
 													"deadlineMs": {
 														"type": "integer",
 														"minimum": 0
@@ -50829,6 +50997,9 @@
 													"costCeilingUsd": {
 														"type": "number",
 														"minimum": 0
+													},
+													"costCeilingDisplay": {
+														"type": "string"
 													},
 													"deadlineMs": {
 														"type": "integer",
@@ -57647,6 +57818,9 @@
 													}
 												]
 											},
+											"costDisplay": {
+												"type": "string"
+											},
 											"saved": {
 												"type": "boolean"
 											},
@@ -58021,6 +58195,9 @@
 															"type": "null"
 														}
 													]
+												},
+												"costDisplay": {
+													"type": "string"
 												},
 												"saved": {
 													"type": "boolean"
@@ -58967,6 +59144,9 @@
 																									},
 																									"costUsd": {
 																										"type": "number"
+																									},
+																									"costDisplay": {
+																										"type": "string"
 																									},
 																									"wallTimeMs": {
 																										"type": "number"

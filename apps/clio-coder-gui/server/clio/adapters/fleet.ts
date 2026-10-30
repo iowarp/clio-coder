@@ -16,6 +16,7 @@ import {
 	FleetRoot,
 	FleetRootDetail,
 } from "../../../contracts/fleet.js";
+import { withCostDisplay } from "../../services/cost-display.js";
 import { AppProblem } from "../../services/problem.js";
 import { artifactPage, containedFile, readArtifact } from "./storage.js";
 
@@ -29,7 +30,7 @@ function rootSummary(record: FleetRunRecord): FleetRoot {
 }
 function dispatchSummary(row: RunEnvelope): DispatchRun {
 	return checked(DispatchRun, {
-		...row,
+		...withCostDisplay({ ...row }),
 		outcome: row.outcome ?? null,
 		outcomeDetail: row.outcomeDetail ?? null,
 		parentRunId: row.lineage?.parentRunId ?? null,
@@ -38,7 +39,7 @@ function dispatchSummary(row: RunEnvelope): DispatchRun {
 }
 function receipt(id: string) {
 	const raw = readArtifact(clioStateDir(), "receipts", `${id}.json`);
-	return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
+	return raw && typeof raw === "object" && !Array.isArray(raw) ? withCostDisplay(raw as Record<string, unknown>) : null;
 }
 function rootRecord(id: string) {
 	if (!containedFile(clioStateDir(), "fleet-runs", `${id}.json`)) return null;

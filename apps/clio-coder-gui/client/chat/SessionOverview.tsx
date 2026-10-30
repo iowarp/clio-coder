@@ -231,6 +231,7 @@ export function SessionOverview({
 		session.turns,
 		usage.data,
 		overview.running || !usage.data || usage.isPlaceholderData ? session.telemetry?.usage : undefined,
+		session.costDisplay,
 	);
 	const used = spendLine(spend);
 	const healthSection =

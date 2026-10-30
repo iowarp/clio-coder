@@ -12,6 +12,7 @@ import type {
 	ToolCallStat,
 } from "../dispatch/index.js";
 import { type ExecutionRole, isExecutionRole, readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
+import { aggregateCostAmounts, callCoverageForRun } from "../observability/cost.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import { foldDecisionBoard } from "../session/decision-board.js";
 import { type DecisionLedgerEntry, decisionRef, type TaskLedgerValidationEvidence } from "../session/entries.js";
@@ -265,6 +266,14 @@ function buildOverview(
 		const receipt = authenticatedReceipt(item);
 		return receipt === null ? [] : [receipt];
 	});
+	const costSummary = aggregateCostAmounts(
+		receipts.map((receipt) => ({
+			usd: receipt.costUsd,
+			provenance: receipt.costProvenance ?? "unknown",
+			...callCoverageForRun(receipt),
+			...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
+		})),
+	);
 	const toolStats = receipts.flatMap((receipt) => receipt.toolStats);
 	const runIds = envelopes.map((envelope) => envelope.id).sort(compareStrings);
 	const sessionIds = uniqueStrings(
@@ -304,7 +313,8 @@ function buildOverview(
 			linkedToolEvents: toolEventRows.filter((event) => event.source !== "receipt-aggregate").length,
 			protectedArtifacts: protectedArtifacts.artifacts.length,
 			tokens: receipts.reduce((total, receipt) => total + receipt.tokenCount, 0),
-			costUsd: receipts.reduce((total, receipt) => total + receipt.costUsd, 0),
+			costUsd: costSummary.knownUsd,
+			costSummary,
 			wallTimeMs,
 		},
 		tags: uniqueTags(findings.map((finding) => finding.tag)),

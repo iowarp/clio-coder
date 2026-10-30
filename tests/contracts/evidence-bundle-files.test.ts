@@ -39,6 +39,10 @@ it("writes exactly the files the overview lists and none of the retired ones", a
 	const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
 	const written = (await readdir(built.directory)).sort();
 	deepStrictEqual(written, [...EVIDENCE_FILES].sort());
+	// The authenticated fixture has a raw amount but explicitly unknown pricing (#434).
+	equal(built.overview.totals.costUsd, 0);
+	equal(built.overview.totals.costSummary?.hasUnknown, true);
+	equal(built.overview.totals.costSummary?.unknownCallCoverageRuns, 1);
 	deepStrictEqual([...built.overview.files].sort(), [...EVIDENCE_FILES].sort());
 	for (const file of RETIRED) equal((written as string[]).includes(file), false, `${file} must not be written`);
 });

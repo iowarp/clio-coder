@@ -96,6 +96,7 @@ test("workspace and session routes stream one complete turn with recorded usage 
 		reasoning: 15,
 		totalTokens: 50,
 		costUsd: 0.001,
+		costDisplay: "not measured",
 	});
 	const turnEvents = events.filter((event) => event.type.startsWith("turn."));
 	assert.equal(turnEvents[0]?.type, "turn.started");
@@ -105,6 +106,8 @@ test("workspace and session routes stream one complete turn with recorded usage 
 		["Hello ", "from ", "Clio."],
 	);
 	assert.equal(turnEvents.filter((event) => event.type === "turn.finished").length, 1);
+	const finished = events.find((event) => event.type === "turn.finished");
+	assert.equal(finished?.payload.costDisplay, snapshot.costDisplay);
 	await h.post(`/api/sessions/${session.id}/close`);
 	assert.deepEqual(await h.files.read("children"), []);
 });

@@ -1,3 +1,4 @@
+import { renderCostAmount } from "../../domains/observability/cost.js";
 import type { AcpDispatchPlanMeta } from "./types.js";
 
 export type { AcpDispatchPlanMeta } from "./types.js";
@@ -61,7 +62,9 @@ export function projectDispatchPlanMeta(view: DispatchPlanView): AcpDispatchPlan
 		taskCount: view.taskCount,
 		planScale: view.planScale,
 		hash: view.hash,
-		...(view.costCeilingUsd !== undefined ? { costCeilingUsd: view.costCeilingUsd } : {}),
+		...(view.costCeilingUsd !== undefined
+			? { costCeilingUsd: view.costCeilingUsd, costCeilingDisplay: renderCostAmount(view.costCeilingUsd, "known") }
+			: {}),
 		...(view.deadlineMs !== undefined ? { deadlineMs: view.deadlineMs } : {}),
 		tasks,
 		truncated: view.tasks.length > ACP_DISPATCH_PLAN_MAX_TASKS,

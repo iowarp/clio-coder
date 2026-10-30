@@ -810,22 +810,7 @@ export function usageTitle(usage: Usage): string {
 }
 
 function turnCost(usage: Usage | null): string | null {
-	if (!usage) return null;
-	const summary = usage.costSummary;
-	if (summary?.calls === 0 || (!summary && usage.costUsd === undefined && usage.costProvenance === undefined))
-		return null;
-	const provenance = usage.costProvenance ?? "unknown";
-	const amount = summary?.knownUsd ?? (provenance === "unknown" ? 0 : usage.costUsd);
-	const unknown =
-		(summary?.hasUnknown ?? provenance === "unknown") ||
-		((usage.missingTokenCalls ?? 0) > 0 && provenance !== "known_free");
-	const estimated = summary?.hasEstimated ?? provenance === "estimated";
-	const free = summary?.allKnownFree ?? provenance === "known_free";
-	if (free) return "$0 (free)";
-	if (unknown && (!amount || !Number.isFinite(amount))) return "Cost unknown";
-	if (amount === undefined || !Number.isFinite(amount)) return null;
-	const value = `${estimated ? "Estimated " : ""}${amount === 0 ? "$0" : `$${amount.toFixed(4)}`}`;
-	return unknown ? `${value} subtotal, some calls unpriced` : value;
+	return usage ? (usage.costDisplay ?? "not measured") : null;
 }
 
 const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: string; label: string }>> = {

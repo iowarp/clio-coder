@@ -42,6 +42,7 @@ export function migratedPaneView(value: unknown): PaneView {
  */
 export interface PaneSession {
 	readonly id: string;
+	readonly costDisplay: string | undefined;
 	readonly state: SessionSnapshot["state"];
 	readonly turns: SessionSnapshot["turns"];
 	readonly fleet: SessionSnapshot["fleet"];
@@ -64,6 +65,7 @@ const readsPane = (item: TimelineItem): boolean =>
 export function selectPaneSession(session: SessionSnapshot): PaneSession {
 	return {
 		id: session.id,
+		costDisplay: session.costDisplay,
 		state: session.state,
 		turns: session.turns,
 		fleet: session.fleet,

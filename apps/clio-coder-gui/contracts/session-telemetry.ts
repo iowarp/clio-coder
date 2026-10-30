@@ -24,9 +24,11 @@ export const LiveUsage = Type.Object(
 					reasoning: count,
 					totalTokens: count,
 					calls: Type.Optional(count),
+					unknownCallCoverageRuns: Type.Optional(count),
 					missingTokenCalls: Type.Optional(count),
 					hasEstimatedCost: Type.Optional(Type.Boolean()),
 					costUsd: Type.Number({ minimum: 0 }),
+					costDisplay: Type.Optional(text),
 					costProvenance: Type.Union([
 						Type.Literal("known"),
 						Type.Literal("known_free"),

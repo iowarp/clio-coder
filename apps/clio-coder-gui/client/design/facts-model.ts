@@ -2,7 +2,7 @@
 // `Record<string, unknown>` on the contract, so the rules here are about the value and the key's
 // own words, never about a particular schema. Pure, so the wording is testable without a browser.
 
-import { formatCost, formatDuration, formatTime } from "../api/clock.js";
+import { formatDuration, formatTime } from "../api/clock.js";
 
 export type Fact =
 	| { kind: "value"; label: string; text: string; tone?: "absent" | "yes" | "no"; mono?: boolean }
@@ -82,13 +82,15 @@ const clip = (text: string) => (text.length > FACT_LIMITS.text ? `${text.slice(0
 export function scalarText(
 	key: string,
 	value: string | number | boolean | null | undefined,
+	costDisplay?: string,
 ): { text: string; tone?: "absent" | "yes" | "no"; mono?: boolean } {
-	// Absent and zero are different facts, and only absent reads "not recorded".
+	// Monetary claims arrive rendered from the server; missing display is never measured zero (#434).
+	if (/usd$/i.test(key) && typeof value !== "string") return { text: costDisplay ?? "not measured" };
+	// Absent and zero are different non-monetary facts.
 	if (value === null || value === undefined) return { text: "Not recorded", tone: "absent" };
 	if (typeof value === "boolean") return value ? { text: "Yes", tone: "yes" } : { text: "No", tone: "no" };
 	if (typeof value === "number") {
 		if (!Number.isFinite(value)) return { text: "Not recorded", tone: "absent" };
-		if (/usd$/i.test(key)) return { text: formatCost(value) };
 		if (/ms$/i.test(key)) return { text: formatDuration(value) };
 		if (/(bytes|Bytes)$/.test(key)) return { text: `${value.toLocaleString("en-US")} bytes` };
 		return { text: value.toLocaleString("en-US") };
@@ -115,18 +117,33 @@ export function factsOf(
 ): { facts: Fact[]; omitted: number } {
 	if (scalar(value) || Array.isArray(value)) return { facts: [factFor("Value", "value", value, depth)], omitted: 0 };
 	const hide = new Set(options.hide ?? []);
-	const entries = Object.entries(value as Record<string, unknown>).filter(([key]) => !hide.has(key));
+	const entries = Object.entries(value as Record<string, unknown>).filter(
+		([key]) => !hide.has(key) && key !== "costDisplay",
+	);
 	const lead = (options.order ?? []).flatMap((key) => entries.filter(([candidate]) => candidate === key));
 	const rest = entries.filter(([key]) => !(options.order ?? []).includes(key));
 	const ordered = [...lead, ...rest];
 	return {
-		facts: ordered.slice(0, FACT_LIMITS.keys).map(([key, item]) => factFor(humanizeKey(key), key, item, depth)),
+		facts: ordered
+			.slice(0, FACT_LIMITS.keys)
+			.map(([key, item]) =>
+				factFor(
+					humanizeKey(key),
+					key,
+					item,
+					depth,
+					/^(costUsd|knownUsd|knownCostUsd|total_cost_usd)$/.test(key) &&
+						typeof (value as Record<string, unknown>).costDisplay === "string"
+						? (value as Record<string, string>).costDisplay
+						: undefined,
+				),
+			),
 		omitted: Math.max(0, ordered.length - FACT_LIMITS.keys),
 	};
 }
 
-function factFor(label: string, key: string, value: unknown, depth: number): Fact {
-	if (scalar(value)) return { kind: "value", label, ...scalarText(key, value) };
+function factFor(label: string, key: string, value: unknown, depth: number, costDisplay?: string): Fact {
+	if (scalar(value)) return { kind: "value", label, ...scalarText(key, value, costDisplay) };
 	if (Array.isArray(value)) {
 		if (!value.length) return { kind: "value", label, text: "None", tone: "absent" };
 		const shown = value.slice(0, FACT_LIMITS.items);

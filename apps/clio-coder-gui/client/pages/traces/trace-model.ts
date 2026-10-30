@@ -3,7 +3,7 @@
 // so the ordering and the wording are testable without a browser.
 
 import type { TraceCaptureCoverage, TracePhase, TraceRun } from "../../../contracts/traces.js";
-import { formatCost, formatDuration, formatTokens } from "../../api/clock.js";
+import { formatDuration, formatTokens } from "../../api/clock.js";
 import { omittedSentence } from "../../design/facts-model.js";
 import type { StatusTone } from "../../design/status.js";
 import { toneForOutcome } from "../../design/status.js";
@@ -47,7 +47,7 @@ export function runTotals(run: TraceRun, now: number): RunTotal[] {
 	const ended = run.ended_at ? Date.parse(run.ended_at) : run.status === "running" ? now : Number.NaN;
 	return [
 		{ label: "Tokens", value: formatTokens(run.total_tokens, run.missing_token_calls) },
-		{ label: "Cost", value: formatCost(run.total_cost_usd, run) },
+		{ label: "Cost", value: run.costDisplay ?? "not measured" },
 		{
 			label: "Wall time",
 			value:

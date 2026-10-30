@@ -624,6 +624,7 @@ export const AcpJob = Type.Object(
 			Type.Null(),
 		]),
 		costUsd: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+		costDisplay: Type.Optional(Type.String()),
 		saved: Type.Boolean(),
 		/** False while polling may have ended but an analysis delivery, cancel or cleanup is unresolved. */
 		complete: Type.Boolean(),
@@ -1364,7 +1365,14 @@ export type AcpFleetPreview =
 			planHash: string;
 			stepCount: number;
 			waves: Array<{ index: number; steps: AcpFleetStep[] }>;
-			budget: { ceilingUsd: number; currentUsd: number; playbookUsd: number | null };
+			budget: {
+				ceilingUsd: number;
+				currentUsd: number;
+				playbookUsd: number | null;
+				ceilingDisplay?: string;
+				currentDisplay?: string;
+				playbookDisplay?: string;
+			};
 			/** True when steps, lists or displayed text were cut at the wire bounds. */
 			truncated: boolean;
 			/** Present when the run resumes a prior root: the steps it replays, in plan order. */
@@ -1544,6 +1552,8 @@ export interface AcpCommandResult {
 }
 
 const usageMetaFields = {
+	unknownCallCoverageRuns: Type.Optional(Type.Integer({ minimum: 0 })),
+	costDisplay: Type.Optional(Type.String()),
 	costSummary: Type.Optional(
 		Type.Object(
 			{
@@ -2163,6 +2173,7 @@ const wireUsagePct = Type.Number({ minimum: 0, maximum: 100 });
 
 const wireUsageCost = Type.Object(
 	{
+		display: Type.Optional(Type.String()),
 		knownUsd: Type.Number({ minimum: 0 }),
 		calls: wireUsageCount,
 		unknownCallCoverageRuns: Type.Optional(wireUsageCount),
@@ -2336,6 +2347,9 @@ export const AcpFleetPreviewSchema = Type.Union([
 			budget: Type.Object(
 				{
 					ceilingUsd: Type.Number({ minimum: 0 }),
+					ceilingDisplay: Type.Optional(Type.String()),
+					currentDisplay: Type.Optional(Type.String()),
+					playbookDisplay: Type.Optional(Type.String()),
 					currentUsd: Type.Number({ minimum: 0 }),
 					playbookUsd: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
 				},
@@ -2582,6 +2596,7 @@ export const AcpDispatchPlanFactsSchema = Type.Object(
 		planScale: Type.Boolean(),
 		hash: Type.String({ pattern: "^[0-9a-f]{64}$" }),
 		costCeilingUsd: Type.Optional(Type.Number({ minimum: 0 })),
+		costCeilingDisplay: Type.Optional(Type.String()),
 		deadlineMs: Type.Optional(Type.Integer({ minimum: 0 })),
 		tasks: Type.Array(
 			Type.Object(

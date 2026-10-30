@@ -9,7 +9,7 @@ import type { JobRecord } from "../../core/job-types.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { CostAggregate } from "../../domains/observability/cost.js";
-import { accumulateCostAmount, emptyCostAggregate } from "../../domains/observability/cost.js";
+import { accumulateCostAmount, emptyCostAggregate, renderCostAmount } from "../../domains/observability/cost.js";
 import {
 	ACP_DISPATCH_STEER_METHOD,
 	ACP_EGGS_META_KEY,
@@ -2110,6 +2110,7 @@ function jobEventPayload(job: JobRecord, complete: boolean, turn: boolean): AcpJ
 						truncated: last.truncated,
 					},
 		delivery: job.delivery === null ? null : { kind: job.delivery.kind, state: job.delivery.state },
+		costDisplay: renderCostAmount(job.costUsd ?? 0, undefined),
 		costUsd: job.costUsd !== null && Number.isFinite(job.costUsd) && job.costUsd >= 0 ? job.costUsd : null,
 		saved: job.persistenceError === null,
 		complete,

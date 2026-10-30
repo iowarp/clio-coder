@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { Link } from "react-router";
 import type { Static } from "typebox";
 import type { TraceEvent, TraceGate, TracePhase, TraceReceipt, TraceRun } from "../../../contracts/traces.js";
-import { clock, formatCost, formatDuration, formatTime, formatTokens } from "../../api/clock.js";
+import { clock, formatDuration, formatTime, formatTokens } from "../../api/clock.js";
 import { Facts as RecordFacts } from "../../design/facts.js";
 import { humanizeKey } from "../../design/facts-model.js";
 import { StatusMark } from "../../design/status.js";
@@ -149,7 +149,7 @@ export function CostPanel({ phase }: { phase: TracePhase }) {
 					</tbody>
 				</table>
 			</section>
-			<p>Cost: {formatCost(phase.total_cost_usd, phase)}</p>
+			<p>Cost: {phase.costDisplay ?? "not measured"}</p>
 			{phase.api_calls != null ? <p>Model calls: {phase.api_calls}</p> : null}
 			<p>
 				Context: {formatTokens(phase.context_tokens)} / {formatTokens(phase.context_window)}
@@ -223,7 +223,6 @@ export function ReceiptPanel({
 	full: boolean;
 }) {
 	const r = data.receipt;
-	const costSummary = object(r?.costSummary);
 	return (
 		<section className="trace-panel">
 			<div className="page-heading">
@@ -256,22 +255,7 @@ export function ReceiptPanel({
 						<h3>Spend</h3>
 						<Facts
 							entries={[
-								[
-									"cost",
-									formatCost(
-										typeof costSummary.knownUsd === "number"
-											? (costSummary.knownUsd as number)
-											: typeof r.costUsd === "number"
-												? r.costUsd
-												: null,
-										{
-											cost_estimated: Number(costSummary.hasEstimated ?? r.costProvenance === "estimated"),
-											cost_unknown: Number(
-												costSummary.hasUnknown ?? !["known", "known_free", "estimated"].includes(String(r.costProvenance)),
-											),
-										},
-									),
-								],
+								["cost", typeof r.costDisplay === "string" ? r.costDisplay : "not measured"],
 								...[
 									"costProvenance",
 									"tokenCount",

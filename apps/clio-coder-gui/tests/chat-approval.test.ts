@@ -504,6 +504,7 @@ const PLAN_FACTS = {
 	planScale: true,
 	hash: "3f2a9c1e04b7d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e",
 	costCeilingUsd: 2.5,
+	costCeilingDisplay: "$2.50",
 	tasks: [
 		{ agent: "scout", task: "Survey the samples", target: "mini", model: "gemma", dependencies: [] },
 		{

@@ -14,6 +14,7 @@ import { summarizeTrustStatus, trustVerdict } from "../../../../../src/domains/e
 import type { EvidenceTrustStatusView } from "../../../../../src/domains/evidence/types.js";
 import { Id } from "../../../contracts/common.js";
 import { EvidenceOverview, type EvidenceRequest } from "../../../contracts/evidence.js";
+import { withCostDisplay } from "../../services/cost-display.js";
 import { AppProblem } from "../../services/problem.js";
 import { artifactPage, containedFile } from "./storage.js";
 
@@ -41,6 +42,10 @@ function verdict(trust: EvidenceTrustStatusView) {
 		"unknown"
 	);
 }
+function displayOverview(overview: Awaited<ReturnType<typeof listEvidenceOverviews>>[number]) {
+	const { costSummary: _summary, ...totals } = withCostDisplay({ ...overview.totals });
+	return { ...overview, totals };
+}
 async function inventory(data: string) {
 	let entries: string[];
 	try {
@@ -58,9 +63,9 @@ async function inventory(data: string) {
 	}
 	return {
 		present: true,
-		rows: (await listEvidenceOverviews(data)).filter(
-			(row) => Value.Check(EvidenceOverview, row) && Number.isFinite(Date.parse(row.generatedAt)),
-		),
+		rows: (await listEvidenceOverviews(data))
+			.map(displayOverview)
+			.filter((row) => Value.Check(EvidenceOverview, row) && Number.isFinite(Date.parse(row.generatedAt))),
 	};
 }
 async function item(data: string, overview: Awaited<ReturnType<typeof inventory>>["rows"][number]) {
@@ -137,7 +142,7 @@ export async function readEvidence(input: EvidenceRequest): Promise<unknown> {
 		const detail = await inspectEvidence(data, input.id);
 		const provenance = await loadEvidenceRunProvenance(data, input.id);
 		return {
-			overview: detail.overview,
+			overview: displayOverview(detail.overview),
 			findings: detail.findings,
 			verdict: verdict(detail.trustStatus),
 			projection: detail.trustStatus.projection,

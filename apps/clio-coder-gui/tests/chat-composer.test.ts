@@ -31,6 +31,7 @@ import type { KeyEventLike } from "../client/interaction/keybindings.js";
 import type { AgentCapabilities } from "../contracts/capabilities.js";
 import type { Turn, Usage } from "../contracts/sessions.js";
 import { STEER_TEXT_MAX_BYTES } from "../contracts/steering.js";
+import { withCostDisplay } from "../server/services/cost-display.js";
 
 function keys(): () => string {
 	let next = 0;
@@ -372,7 +373,7 @@ test("a completed turn footer carries its reported tool count and spend, and not
 	const view = turnOutcome(turn(), 3);
 	assert.equal(view.tone, "success");
 	assert.equal(view.label, "Done");
-	assert.deepEqual(view.facts, ["12s", "3 tool calls"]);
+	assert.deepEqual(view.facts, ["12s", "not measured", "3 tool calls"]);
 	assert.deepEqual(view.breakdown.at(-1), { group: "Tools", label: "Calls", value: "3" });
 	assert.equal(view.usageLabel, "12K in / 678 out");
 	assert.equal(view.usage, usage, "the full reported accounting stays reachable from the compact outcome");
@@ -440,23 +441,19 @@ test("a /name the session cannot run is flagged before it is sent, and nothing e
 });
 
 for (const [name, accounting, expected] of [
-	["absent provenance with zero cost", { costUsd: 0 }, "Cost unknown"],
-	["absent provenance with positive cost", { costUsd: 0.25 }, "Cost unknown"],
-	["unknown with positive cost", { costUsd: 0.25, costProvenance: "unknown" }, "Cost unknown"],
-	[
-		"known with missing token calls",
-		{ costUsd: 0.25, costProvenance: "known", missingTokenCalls: 1 },
-		"$0.2500 subtotal, some calls unpriced",
-	],
+	["absent provenance with zero cost", { costUsd: 0 }, "not measured"],
+	["absent provenance with positive cost", { costUsd: 0.25 }, "not measured"],
+	["unknown with positive cost", { costUsd: 0.25, costProvenance: "unknown" }, "not measured"],
+	["known with missing token calls", { costUsd: 0.25, costProvenance: "known", missingTokenCalls: 1 }, "$0.25 +?"],
 	[
 		"estimated with missing token calls",
 		{ costUsd: 0.25, costProvenance: "estimated", missingTokenCalls: 1 },
-		"Estimated $0.2500 subtotal, some calls unpriced",
+		"~$0.25 +?",
 	],
 	[
 		"known free with missing token calls",
 		{ costUsd: 0, costProvenance: "known_free", missingTokenCalls: 1 },
-		"$0 (free)",
+		"$0.00 local",
 	],
 	[
 		"priced summary with missing token calls",
@@ -466,15 +463,15 @@ for (const [name, accounting, expected] of [
 			missingTokenCalls: 1,
 			costSummary: { knownUsd: 0.25, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 1 },
 		},
-		"$0.2500 subtotal, some calls unpriced",
+		"$0.25 +?",
 	],
-	["unknown", { costUsd: 0, costProvenance: "unknown" }, "Cost unknown"],
-	["unknown without amount", { costProvenance: "unknown" }, "Cost unknown"],
-	["estimated", { costUsd: 0.0123, costProvenance: "estimated" }, "Estimated $0.0123"],
-	["known free", { costUsd: 0, costProvenance: "known_free" }, "$0 (free)"],
-	["known", { costUsd: 0.0123, costProvenance: "known" }, "$0.0123"],
-	["known zero", { costUsd: 0, costProvenance: "known" }, "$0"],
-	["unreported", {}, null],
+	["unknown", { costUsd: 0, costProvenance: "unknown" }, "not measured"],
+	["unknown without amount", { costProvenance: "unknown" }, "not measured"],
+	["estimated", { costUsd: 0.0123, costProvenance: "estimated" }, "~$0.01 est"],
+	["known free", { costUsd: 0, costProvenance: "known_free" }, "$0.00 local"],
+	["known", { costUsd: 0.0123, costProvenance: "known" }, "$0.01"],
+	["known zero", { costUsd: 0, costProvenance: "known" }, "$0.00"],
+	["unreported", {}, "not measured"],
 	[
 		"mixed known and unknown",
 		{
@@ -482,7 +479,7 @@ for (const [name, accounting, expected] of [
 			costProvenance: "unknown",
 			costSummary: { knownUsd: 0.25, hasEstimated: false, hasUnknown: true, allKnownFree: false, calls: 2 },
 		},
-		"$0.2500 subtotal, some calls unpriced",
+		"$0.25 +?",
 	],
 	[
 		"mixed estimated and unknown",
@@ -491,7 +488,7 @@ for (const [name, accounting, expected] of [
 			costProvenance: "unknown",
 			costSummary: { knownUsd: 0.25, hasEstimated: true, hasUnknown: true, allKnownFree: false, calls: 2 },
 		},
-		"Estimated $0.2500 subtotal, some calls unpriced",
+		"~$0.25 +?",
 	],
 	[
 		"free and unknown",
@@ -500,7 +497,7 @@ for (const [name, accounting, expected] of [
 			costProvenance: "unknown",
 			costSummary: { knownUsd: 0, hasEstimated: false, hasUnknown: true, allKnownFree: false, calls: 2 },
 		},
-		"Cost unknown",
+		"not measured",
 	],
 	[
 		"summary wins over turn amount",
@@ -509,11 +506,11 @@ for (const [name, accounting, expected] of [
 			costProvenance: "unknown",
 			costSummary: { knownUsd: 0.25, hasEstimated: true, hasUnknown: false, allKnownFree: false, calls: 2 },
 		},
-		"Estimated $0.2500",
+		"~$0.25 est",
 	],
 ] satisfies Array<[string, Partial<Usage>, string | null]>) {
 	test(`completed turn cost: ${name}`, () => {
-		const outcome = turnOutcome(turn({ startedAt: null, usage: { ...usage, ...accounting } }), 0);
+		const outcome = turnOutcome(turn({ startedAt: null, usage: withCostDisplay({ ...usage, ...accounting }) }), 0);
 		assert.deepEqual(outcome.facts, expected === null ? [] : [expected]);
 		assert.equal(outcome.usageLabel, "12K in / 678 out", "pricing provenance does not change reported tokens");
 		assert.deepEqual(
@@ -543,12 +540,13 @@ test("known-free pricing does not invent tokens when usage is missing", () => {
 				reasoning: 0,
 				costUsd: 0,
 				costProvenance: "known_free",
+				costDisplay: "$0.00 local",
 				missingTokenCalls: 1,
 			},
 		}),
 		0,
 	);
-	assert.deepEqual(outcome.facts, ["$0 (free)"]);
+	assert.deepEqual(outcome.facts, ["$0.00 local"]);
 	assert.equal(outcome.usageLabel, null);
 	assert.deepEqual(
 		outcome.breakdown.filter((row) => row.group === "Usage"),

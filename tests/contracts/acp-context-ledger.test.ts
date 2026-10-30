@@ -251,6 +251,7 @@ test("a long turn streams usage_update per model response with the meter rising 
 		reasoning: 0,
 		totalTokens: 910,
 		costUsd: 2.35,
+		costDisplay: "~$2.35 +?",
 		costProvenance: "unknown",
 		calls: 9,
 		missingTokenCalls: 1,

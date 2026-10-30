@@ -205,6 +205,7 @@ export const SessionPane = memo(function SessionPane({
 						<UsagePanel
 							{...facts}
 							turns={pane.turns}
+							costDisplay={pane.costDisplay}
 							{...((pane.state !== "open" || pane.turns.at(-1)?.status === "running") && pane.telemetry?.usage
 								? { liveUsage: pane.telemetry.usage }
 								: {})}

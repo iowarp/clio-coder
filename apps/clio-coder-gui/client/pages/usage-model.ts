@@ -4,7 +4,7 @@
 // Pure, so the wording and the ordering are testable without a browser.
 
 import type { UsageReport } from "../../contracts/reports.js";
-import { formatCost, formatDay, formatTokens } from "../api/clock.js";
+import { formatDay, formatTokens } from "../api/clock.js";
 import { humanizeKey, scalarText } from "../design/facts-model.js";
 import { emptyState } from "../design/panel-model.js";
 
@@ -116,15 +116,19 @@ const text = (value: unknown): string | null => (typeof value === "string" && va
 export const usageLabel = humanizeKey;
 
 /** One cell. A nested record reads as `hot 0 · cold 13`, never as JSON. */
-function cell(key: string, value: unknown): string {
+function cell(key: string, value: unknown, costDisplay?: string): string {
 	if (Array.isArray(value)) return value.length ? value.map((item) => cell(key, item)).join(", ") : "None";
 	if (value && typeof value === "object")
 		return (
 			Object.entries(value)
-				.map(([inner, item]) => `${humanizeKey(inner).toLowerCase()} ${cell(inner, item)}`)
+				.filter(([key]) => key !== "costDisplay")
+				.map(
+					([inner, item]) =>
+						`${humanizeKey(inner).toLowerCase()} ${cell(inner, item, text((value as Record<string, unknown>).costDisplay) ?? undefined)}`,
+				)
 				.join(" · ") || "None"
 		);
-	return scalarText(key, value as string | number | boolean | null | undefined).text;
+	return scalarText(key, value as string | number | boolean | null | undefined, costDisplay).text;
 }
 
 function tablesOf(rows: UsageGroup[]): { singles: UsageGroup[]; tables: UsageTable[] } {
@@ -139,14 +143,18 @@ function tablesOf(rows: UsageGroup[]): { singles: UsageGroup[]; tables: UsageTab
 			singles.push(first);
 			continue;
 		}
-		const keys = [...new Set(members.flatMap((member) => Object.keys(member.values)))];
+		const keys = [
+			...new Set(members.flatMap((member) => Object.keys(member.values).filter((key) => key !== "costDisplay"))),
+		];
 		const shown = keys.slice(0, USAGE_TABLE_LIMITS.columns);
 		tables.push({
 			name,
 			label: first.label,
 			total: members.length,
 			columns: shown.map(humanizeKey),
-			rows: members.slice(0, USAGE_TABLE_LIMITS.rows).map((member) => shown.map((key) => cell(key, member.values[key]))),
+			rows: members
+				.slice(0, USAGE_TABLE_LIMITS.rows)
+				.map((member) => shown.map((key) => cell(key, member.values[key], text(member.values.costDisplay) ?? undefined))),
 			omitted: Math.max(0, members.length - USAGE_TABLE_LIMITS.rows),
 			omittedColumns: keys.length - shown.length,
 		});
@@ -168,7 +176,7 @@ export function usageView(report: UsageReport): UsageView {
 	const workers = first("worker-tokens");
 	const tokens = overall ?? sessionTokens;
 	const cost = tokens.cost as
-		| { knownUsd?: number; hasEstimated?: boolean; hasUnknown?: boolean; calls?: number }
+		| { knownUsd?: number; hasEstimated?: boolean; hasUnknown?: boolean; calls?: number; costDisplay?: string }
 		| undefined;
 	const missing = number(overall?.missingTokenCalls ?? sessionTokens.missingTokenCalls) ?? 0;
 
@@ -198,11 +206,7 @@ export function usageView(report: UsageReport): UsageView {
 		},
 		{
 			label: "Cost",
-			value: cost
-				? cost.calls === 0 || (cost.hasUnknown && !cost.knownUsd)
-					? "—"
-					: `${cost.hasEstimated ? "~" : ""}${formatCost(number(cost.knownUsd))}${cost.hasUnknown ? " +?" : ""}`
-				: formatCost(number(tokens.costUsd)),
+			value: text(tokens.costDisplay) ?? cost?.costDisplay ?? "not measured",
 			note: cost?.hasUnknown
 				? "Known subtotal; some calls are unpriced"
 				: cost?.hasEstimated

@@ -1,3 +1,4 @@
+import { renderCostAmount } from "../../domains/observability/cost.js";
 import type { AcpFleetPreview, AcpFleetStep } from "./types.js";
 
 export type { AcpFleetPreview, AcpFleetStep } from "./types.js";
@@ -125,7 +126,14 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 		planHash: preview.planHash,
 		stepCount: preview.plan.steps.length,
 		waves: waves.filter((wave) => wave.steps.length > 0),
-		budget: { ...preview.budget },
+		budget: {
+			...preview.budget,
+			ceilingDisplay: renderCostAmount(preview.budget.ceilingUsd, "known"),
+			currentDisplay: renderCostAmount(preview.budget.currentUsd, "known"),
+			...(preview.budget.playbookUsd !== null
+				? { playbookDisplay: renderCostAmount(preview.budget.playbookUsd, "known") }
+				: {}),
+		},
 		truncated,
 		...(preview.resume !== undefined
 			? {

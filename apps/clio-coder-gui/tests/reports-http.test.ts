@@ -21,6 +21,7 @@ test("usage JSON Lines bridge reports exact canonical workspace usage and distin
 		assert.equal(usage?.apiCalls, 2);
 		assert.equal(usage?.totalTokens, 44);
 		assert.equal(usage?.costUsd, 0.02);
+		assert.equal(usage?.costDisplay, "~$0.02 est");
 		const foreign = join(h.home.path, "another-workspace");
 		await mkdir(foreign);
 		const other = await h.workspaces.open(foreign);

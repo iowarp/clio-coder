@@ -74,6 +74,7 @@ test("the headline includes worker totals and marks partial estimated costs", ()
 					knownSubtotal: 2850,
 					apiCalls: 14,
 					missingTokenCalls: 1,
+					costDisplay: "~$0.03 +?",
 					cost: { knownUsd: 0.03, calls: 14, hasEstimated: true, hasUnknown: true },
 				},
 			},

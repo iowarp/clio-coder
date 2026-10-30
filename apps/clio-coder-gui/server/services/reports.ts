@@ -1,6 +1,7 @@
 import { Value } from "typebox/value";
 import { UsageReport } from "../../contracts/reports.js";
 import type { CliRunner } from "./cli-runner.js";
+import { reportCostDisplays } from "./cost-display.js";
 import { AppProblem } from "./problem.js";
 import type { WorkspaceService } from "./workspaces.js";
 
@@ -42,7 +43,8 @@ export class ReportsService {
 				throw new AppProblem("unavailable", "Usage report windows do not agree.");
 			from = start;
 			to = end;
-			if (kind === "fact" && typeof fact === "string") facts.push({ name: fact, values });
+			if (kind === "fact" && typeof fact === "string")
+				facts.push({ name: fact, values: reportCostDisplays(values) as Record<string, unknown> });
 			else if (
 				kind === "opportunity" &&
 				typeof opportunity === "string" &&

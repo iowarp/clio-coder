@@ -23,6 +23,7 @@ export const UsagePanel = memo(function UsagePanel({
 	capabilities,
 	settledTurns,
 	liveUsage,
+	costDisplay,
 	turns,
 }: {
 	client: Client;
@@ -31,6 +32,7 @@ export const UsagePanel = memo(function UsagePanel({
 	capabilities: AgentCapabilities | undefined;
 	settledTurns: number;
 	liveUsage?: LiveUsage;
+	costDisplay?: string | undefined;
 	turns: SessionSnapshot["turns"];
 }) {
 	const supported = !!capabilities?.usage;
@@ -44,7 +46,7 @@ export const UsagePanel = memo(function UsagePanel({
 		// so rows (and the focus a row holds) do not vanish between the two reads.
 		placeholderData: (previous) => previous,
 	});
-	const summary = usageSummary(sessionOpen, turns, usage.data, liveUsage);
+	const summary = usageSummary(sessionOpen, turns, usage.data, liveUsage, costDisplay);
 	const quota = usage.data ? quotaCards(usage.data) : null;
 	return (
 		<div className="pane-drill drill usage-panel">

@@ -1,3 +1,4 @@
+import { renderCostAggregate } from "../../domains/observability/cost.js";
 import type { AcpCostAggregate, AcpQuotaSnapshot, AcpUsageRow } from "./types.js";
 
 export type { AcpCostAggregate, AcpQuotaSnapshot, AcpUsageRow } from "./types.js";
@@ -54,6 +55,7 @@ const usd = (value: number) => (Number.isFinite(value) && value > 0 ? value : 0)
 function projectCost(cost: AcpCostAggregate) {
 	return {
 		knownUsd: usd(cost.knownUsd),
+		display: renderCostAggregate(cost),
 		calls: count(cost.calls),
 		...(cost.unknownCallCoverageRuns ? { unknownCallCoverageRuns: count(cost.unknownCallCoverageRuns) } : {}),
 		estimated: cost.hasEstimated,

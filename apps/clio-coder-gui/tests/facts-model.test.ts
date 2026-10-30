@@ -21,10 +21,10 @@ test("keys read as words and keep their acronyms", () => {
 });
 
 test("absent and zero are different facts, and the key chooses the unit", () => {
-	assert.deepEqual(scalarText("costUsd", null), { text: "Not recorded", tone: "absent" });
+	assert.deepEqual(scalarText("costUsd", null), { text: "not measured" });
 	// A local runtime that prices at zero is not a run whose cost was never recorded.
-	assert.deepEqual(scalarText("costUsd", 0), { text: "$0.00" });
-	assert.deepEqual(scalarText("costUsd", 0.004), { text: "$0.0040" });
+	assert.deepEqual(scalarText("costUsd", 0), { text: "not measured" });
+	assert.deepEqual(scalarText("costUsd", 0.004, "$0.0040"), { text: "$0.0040" });
 	assert.deepEqual(scalarText("wallTimeMs", 61_000), { text: "1m 1s" });
 	assert.deepEqual(scalarText("tokens", 1234567), { text: "1,234,567" });
 	assert.deepEqual(scalarText("readBytes", 2048), { text: "2,048 bytes" });

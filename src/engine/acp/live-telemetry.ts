@@ -1,3 +1,4 @@
+import { aggregateCostAmounts, costWasMeasured, renderCostAggregate } from "../../domains/observability/cost.js";
 import type { AcpTurnUsage, AcpWorkspaceView } from "./types.js";
 
 export type { AcpTurnUsage, AcpWorkspaceView } from "./types.js";
@@ -47,6 +48,17 @@ export function turnUsageMeta(usage: AcpTurnUsage) {
 		reasoning: usage.reasoning,
 		totalTokens: usage.totalTokens,
 		costUsd: usage.costUsd,
+		costDisplay: renderCostAggregate(
+			aggregateCostAmounts([
+				{
+					usd: usage.costUsd,
+					provenance: usage.costProvenance,
+					...(usage.costSummary ? { costSummary: usage.costSummary } : {}),
+					...(usage.apiCalls !== undefined ? { apiCalls: usage.apiCalls } : {}),
+					...(usage.missingTokenCalls !== undefined ? { missingTokenCalls: usage.missingTokenCalls } : {}),
+				},
+			]),
+		),
 		costProvenance: usage.costProvenance,
 		...(usage.costSummary ? { costSummary: usage.costSummary } : {}),
 		...(usage.apiCalls !== undefined ? { apiCalls: usage.apiCalls } : {}),
@@ -138,6 +150,8 @@ function projectAcpPlan(plan: TaskBoardSnapshot | null) {
 const EMPTY_PLAN_SIGNATURE = JSON.stringify(projectAcpPlan(null));
 
 interface SessionTotals {
+	unknownCallCoverageRuns?: number;
+	costDisplay: string;
 	costSummary: AcpCostAggregate;
 	input: number;
 	output: number;
@@ -155,7 +169,7 @@ interface SessionTotals {
 const count = (value: number) => (Number.isFinite(value) && value > 0 ? value : 0);
 
 function provenanceOf(cost: AcpCostAggregate): CostProvenance {
-	if (cost.hasUnknown) return "unknown";
+	if (!costWasMeasured(cost) || cost.hasUnknown) return "unknown";
 	if (cost.hasEstimated) return "estimated";
 	return cost.allKnownFree ? "known_free" : "known";
 }
@@ -166,6 +180,8 @@ export function sessionUsageTotals(session: {
 }): SessionTotals {
 	const totals: SessionTotals = {
 		costSummary: session.cost,
+		costDisplay: renderCostAggregate(session.cost),
+		...(session.cost.unknownCallCoverageRuns ? { unknownCallCoverageRuns: session.cost.unknownCallCoverageRuns } : {}),
 		input: 0,
 		output: 0,
 		cacheRead: 0,
@@ -271,8 +287,10 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 									reasoning: session.reasoning,
 									totalTokens: session.totalTokens,
 									costUsd: session.costUsd,
+									costDisplay: session.costDisplay,
 									costProvenance: session.costProvenance,
 									calls: session.calls,
+									...(session.unknownCallCoverageRuns ? { unknownCallCoverageRuns: session.unknownCallCoverageRuns } : {}),
 									...(session.missingTokenCalls ? { missingTokenCalls: session.missingTokenCalls } : {}),
 									...(session.hasEstimatedCost ? { hasEstimatedCost: true } : {}),
 								},

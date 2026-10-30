@@ -13,7 +13,9 @@ import {
 import { Id } from "../../../contracts/common.js";
 import type { TraceRequest } from "../../../contracts/traces.js";
 import { TraceId } from "../../../contracts/traces.js";
+import { withCostDisplay } from "../../services/cost-display.js";
 import { AppProblem } from "../../services/problem.js";
+import { renderTraceCost } from "../http-shims.js";
 
 const Cursor = Type.Object(
 	{ startedAt: Type.String({ maxLength: 64 }), runId: TraceId },
@@ -89,17 +91,18 @@ export class TraceAdapter {
 					filter: { ...(source ? { source } : {}), ...(status ? { status } : {}), ...(q ? { q } : {}) },
 				});
 				return {
-					runs: page.runs,
+					runs: page.runs.map((run) => ({ ...run, costDisplay: renderTraceCost(run) })),
 					nextCursor: page.nextBefore ? Buffer.from(JSON.stringify(page.nextBefore)).toString("base64url") : null,
 				};
 			}
-			const run = reader.run(input.runId);
+			const rawRun = reader.run(input.runId);
+			const run = rawRun ? { ...rawRun, costDisplay: renderTraceCost(rawRun) } : null;
 			if (!run) throw new AppProblem("not_found", "Trace run was not found.");
 			switch (input.kind) {
 				case "run":
 					return run;
 				case "phases":
-					return reader.phases(input.runId);
+					return reader.phases(input.runId).map((phase) => ({ ...phase, costDisplay: renderTraceCost(phase) }));
 				case "gates":
 					return reader.gateResults(input.runId);
 				case "processes":
@@ -150,6 +153,6 @@ export class TraceAdapter {
 		// Avoid sending the large payload through RPC until explicitly requested. Public policy also lives in the service.
 		if (receipt && !full)
 			for (const key of ["output", "upstreamResponses", "routeDecision", "briefing", "steering"]) delete receipt[key];
-		return { receipt, evidence };
+		return { receipt: receipt ? withCostDisplay(receipt) : null, evidence };
 	}
 }

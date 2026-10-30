@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router";
 import type { Input } from "../../../contracts/routes.js";
 import { routes } from "../../../contracts/routes.js";
 import type { Client } from "../../api/client.js";
-import { formatCost, formatTime, formatTokens } from "../../api/clock.js";
+import { formatTime, formatTokens } from "../../api/clock.js";
 import { PanelEmpty } from "../../design/panel.js";
 import { listDestination } from "../run-inspection-model.js";
 import "../run-inspection.css";
@@ -119,7 +119,7 @@ export function TraceRuns({ client }: { client: Client }) {
 								</small>
 							</div>
 							<div className="trace-spend">
-								<strong>{formatCost(run.total_cost_usd, run)}</strong>
+								<strong>{run.costDisplay ?? "not measured"}</strong>
 								<small>{formatTokens(run.total_tokens, run.missing_token_calls)} tokens</small>
 							</div>
 						</Link>

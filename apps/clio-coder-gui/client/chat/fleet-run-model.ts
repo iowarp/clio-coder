@@ -57,16 +57,16 @@ function describeStep(step: FleetStep): FleetStepRow {
 }
 
 export function fleetPlanView(preview: Extract<FleetPreview, { status: "ready" }>) {
-	const { ceilingUsd, currentUsd, playbookUsd } = preview.budget;
+	const { ceilingUsd, playbookUsd, ceilingDisplay, currentDisplay, playbookDisplay } = preview.budget;
 	return {
 		heading: `${preview.stepCount} ${preview.stepCount === 1 ? "step" : "steps"} in ${preview.waves.length} ${preview.waves.length === 1 ? "wave" : "waves"}`,
 		waves: preview.waves.map((wave) => ({ label: `Wave ${wave.index + 1}`, rows: wave.steps.map(describeStep) })),
 		budget:
 			ceilingUsd > 0
-				? `$${currentUsd.toFixed(2)} of this session's $${ceilingUsd.toFixed(2)} ceiling is spent${playbookUsd === null ? "" : `; the playbook asks for up to $${playbookUsd.toFixed(2)}`}.`
+				? `${currentDisplay ?? "not measured"} of this session's ${ceilingDisplay ?? "not measured"} ceiling is spent${playbookUsd === null ? "" : `; the playbook asks for up to ${playbookDisplay ?? "not measured"}`}.`
 				: playbookUsd === null
 					? "No budget ceiling is set for this session or the playbook."
-					: `The playbook asks for up to $${playbookUsd.toFixed(2)}; this session has no ceiling.`,
+					: `The playbook asks for up to ${playbookDisplay ?? "not measured"}; this session has no ceiling.`,
 		hash: { short: preview.planHash.slice(0, 12), full: preview.planHash },
 		truncated: preview.truncated,
 	};

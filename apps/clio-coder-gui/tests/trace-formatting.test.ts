@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatCost, formatTime, formatTokens, serverClock } from "../client/api/clock.js";
+import { formatTime, formatTokens, serverClock } from "../client/api/clock.js";
+import { renderTraceCost } from "../server/clio/http-shims.js";
 
 test("trace formatting keeps missing spend distinct from zero and adopts server clock once", () => {
-	assert.equal(formatCost(null), "not recorded");
-	assert.equal(formatCost(undefined), "not recorded");
-	assert.equal(formatCost(0), "$0.00");
-	assert.equal(formatCost(0.0024), "$0.0024");
-	assert.equal(formatCost(0.25, { cost_estimated: 1, cost_unknown: 1 }), "about $0.25 subtotal, some calls unpriced");
-	assert.equal(formatCost(0.25, { cost_estimated: 0, cost_unknown: 0 }), "$0.25");
-	assert.equal(formatCost(0.25, {}), "$0.25 (pricing unknown)");
-	assert.equal(formatCost(0, { cost_unknown: 1 }), "Cost not measured");
+	for (const [row, expected] of [
+		[{ total_cost_usd: null }, "not measured"],
+		[{ total_cost_usd: 0 }, "not measured"],
+		[{ total_cost_usd: 0, cost_unknown: 0, api_calls: 0 }, "not measured"],
+		[{ total_cost_usd: 0, cost_unknown: 0, api_calls: 1 }, "$0.00"],
+		[{ total_cost_usd: 0.0024, cost_unknown: 0, api_calls: 1 }, "$0.0024"],
+		[{ total_cost_usd: 0.25, cost_estimated: 1, cost_unknown: 1, api_calls: 2 }, "~$0.25 +?"],
+		[{ total_cost_usd: 0, cost_unknown: 1, api_calls: 1 }, "not measured"],
+	] as const)
+		assert.equal(renderTraceCost(row), expected);
 	assert.equal(formatTokens(24, 1), "24 +? (1 call missing usage)");
 	assert.equal(formatTokens(null), "not recorded");
 	assert.equal(formatTokens(0), "0");

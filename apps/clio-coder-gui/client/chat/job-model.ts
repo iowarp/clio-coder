@@ -74,9 +74,7 @@ function costFact(job: AcpJob): string | null {
 	// A command-only job makes no model call. A main run, or a command job whose match requested a main-turn
 	// analysis, spends model tokens, so its recorded cost is shown and an unrecorded one is unknown, never free.
 	if (job.runner === "command" && job.delivery?.kind !== "main_turn") return "no model cost";
-	return job.costUsd === null
-		? "cost unknown"
-		: `$${job.costUsd.toFixed(job.costUsd > 0 && job.costUsd < 0.01 ? 4 : 2)}`;
+	return job.costDisplay ?? "not measured";
 }
 
 function stateOf(job: AcpJob): { state: string; tone: StatusTone; working: boolean } {

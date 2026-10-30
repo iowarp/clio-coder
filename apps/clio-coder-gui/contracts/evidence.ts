@@ -70,6 +70,7 @@ export const EvidenceOverview = Type.Object(
 				protectedArtifacts: Type.Number(),
 				tokens: Type.Number(),
 				costUsd: Type.Number(),
+				costDisplay: Type.Optional(Type.String()),
 				wallTimeMs: Type.Number(),
 			},
 			closed,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { sessionUsageTotals } from "../../src/engine/acp/live-telemetry.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import type { AcpUsageSource } from "../../src/engine/acp/usage.js";
@@ -115,7 +116,7 @@ test("usage reads the session's own accounting per provider and model, and each 
 		assert.deepEqual(meta["clio-coder/accounting"], { version: 1, read: "_clio-coder/usage/read" });
 		const read = await agent.call("_clio-coder/usage/read", { sessionId: agent.sessionId });
 		assert.deepEqual(read.session, {
-			cost: { knownUsd: 0.42, calls: 3, estimated: true, unknown: false, free: false },
+			cost: { display: "~$0.42 est", knownUsd: 0.42, calls: 3, estimated: true, unknown: false, free: false },
 			tokens: 5200,
 			missingTokenCalls: 1,
 			rows: [
@@ -135,7 +136,7 @@ test("usage reads the session's own accounting per provider and model, and each 
 						workers: 1,
 						failedCompaction: 1,
 					},
-					cost: { knownUsd: 0.42, calls: 3, estimated: true, unknown: false, free: false },
+					cost: { display: "~$0.42 est", knownUsd: 0.42, calls: 3, estimated: true, unknown: false, free: false },
 				},
 			],
 			truncated: false,
@@ -188,7 +189,7 @@ test("a quota read that throws is reported as failed, and the session numbers st
 		const read = await agent.call("_clio-coder/usage/read", { sessionId: agent.sessionId });
 		assert.deepEqual(read.quota, { status: "failed", reason: "quota cache locked" });
 		assert.deepEqual(read.session, {
-			cost: { knownUsd: 0, calls: 0, estimated: false, unknown: false, free: false },
+			cost: { display: "not measured", knownUsd: 0, calls: 0, estimated: false, unknown: false, free: false },
 			tokens: 0,
 			rows: [],
 			truncated: false,
@@ -196,4 +197,14 @@ test("a quota read that throws is reported as failed, and the session numbers st
 	} finally {
 		await agent.stop();
 	}
+});
+
+test("live accounting distinguishes no calls from measured free calls", () => {
+	const cost = { knownUsd: 0, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 0 };
+	const empty = sessionUsageTotals({ cost, rows: [] });
+	assert.equal(empty.costProvenance, "unknown");
+	assert.equal(empty.costDisplay, "not measured");
+	const free = sessionUsageTotals({ cost: { ...cost, calls: 1, allKnownFree: true }, rows: [] });
+	assert.equal(free.costProvenance, "known_free");
+	assert.equal(free.costDisplay, "$0.00 local");
 });

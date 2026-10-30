@@ -477,7 +477,7 @@ export function planPreview(plan: DispatchPlanFacts): PlanPreview {
 			plan.costCeilingUsd === undefined
 				? null
 				: plan.costCeilingUsd > 0
-					? `Scheduling stops at a cost of $${plan.costCeilingUsd.toFixed(2)}.`
+					? `Scheduling stops at a cost of ${plan.costCeilingDisplay ?? "not measured"}.`
 					: "No cost ceiling is set, so scheduling does not stop on cost.",
 	};
 }
