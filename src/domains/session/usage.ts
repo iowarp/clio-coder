@@ -24,6 +24,9 @@ import { journalOwnsSideUsage, usageCallsFromJournal } from "./journal-usage.js"
 
 /** One attempt projected from the journal, or a legacy ledger usage row (#434). */
 export interface LedgerUsageCall {
+	runId?: string;
+	/** Replay-only boundary for comparing a frozen fork prefix with the run owner's complete scope (#434). */
+	runCutoff?: number;
 	callId?: string;
 	attemptId?: string;
 	facts?: CallTotals;

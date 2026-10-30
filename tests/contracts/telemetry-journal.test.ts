@@ -16,6 +16,7 @@ import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/d
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/observability/call-facts.js";
 import { openCallJournal, readCallJournal, readCallJournalSync } from "../../src/domains/observability/call-journal.js";
+import { createCostTracker } from "../../src/domains/observability/cost.js";
 import { foldCallJournal, foldCallsBy, foldFacts } from "../../src/domains/observability/folds.js";
 import {
 	readTelemetryObject,
@@ -33,6 +34,7 @@ import {
 	usageCallsFromAttempts,
 	usageCallsFromJournal,
 } from "../../src/domains/session/journal-usage.js";
+import { usageCallsFromRunJournals } from "../../src/domains/session/run-journal-usage.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import { reseedSessionUsageFromLedger } from "../../src/domains/session/usage-reseed.js";
@@ -174,6 +176,72 @@ test("overlapping work retains its original session and releases ownership only 
 		strictEqual(failures, 0);
 	} finally {
 		await journals.flush();
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("parent replay resolves aggregate-only run references and replaces a partial snapshot on settlement", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-parent-run-"));
+	const sessionDirectory = join(stateDir, "sessions", "repo", "parent");
+	const journals = createSessionJournals(stateDir, () => {});
+	const parent = await journals.acquire({ id: "parent", cwdHash: "repo" }, "worker");
+	const context = { sessionId: "parent", runId: "run", label: "worker" as const };
+	const run = await openRunTelemetry(context, join(stateDir, "runs", "run"));
+	run.linkSession(parent.context);
+	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
+	const aggregate = (tokens: number, revision: number): RunUsage => ({
+		source: "acp",
+		scope: "run",
+		revision,
+		coverage: "complete",
+		pricingCoverage: "unknown",
+		callCountCoverage: "complete",
+		target: { targetId: "target", runtimeId: "acp", api: "acp", requestedModel: "model", reportedModel: unknown },
+		usage: {
+			input: unknown,
+			output: unknown,
+			cacheRead: unknown,
+			cacheWrite: unknown,
+			cacheWrite1h: unknown,
+			reasoning: unknown,
+		},
+		totalTokens: measured(tokens),
+		apiCalls: unknown,
+		missingTokenCalls: unknown,
+		pricing: { usd: unknown, pricedBy: "none" },
+	});
+	const report = (tokens: number, revision: number) =>
+		run.worker({
+			type: "clio_coder_telemetry",
+			record: {
+				...makeTelemetryRecord("run.usage", aggregate(tokens, revision), context, { t: new Date().toISOString(), mono: 1 }),
+				origin: { host: "fixture", pid: 1, birthToken: "fixture", monoEpochWallMs: 1 },
+			},
+		});
+	try {
+		ok(report(5, 0));
+		await run.flush();
+		await journals.flush();
+		const tracker = createCostTracker();
+		const sink = {
+			resetSession: () => tracker.reset(),
+			recordTokens: tracker.accumulate,
+			recordRunTokens: tracker.replace,
+		};
+		reseedSessionUsageFromLedger(sink, [], { sessionId: "parent", journalDirectory: sessionDirectory });
+		strictEqual(tracker.sessionTokens().totalTokens, 5);
+		strictEqual(tracker.sessionTokens().apiCalls, 0);
+		ok(report(9, 1));
+		await run.flush();
+		const snapshot = readSessionCallJournalSync(sessionDirectory, []);
+		strictEqual(snapshot.records.filter(({ record }) => record.k === "run.ref").length, 1);
+		for (const call of usageCallsFromRunJournals(snapshot.runs)) recordUsageCall(sink, call);
+		strictEqual(tracker.sessionTokens().totalTokens, 9);
+		strictEqual(tracker.entries().length, 1);
+		strictEqual(tracker.sessionCost().unknownCallCoverageRuns, 1);
+	} finally {
+		await run.close();
+		await parent.release();
 		await rm(stateDir, { recursive: true, force: true });
 	}
 });

@@ -28,10 +28,15 @@ export function uniqueUsageCalls(calls: readonly LedgerUsageCall[]): LedgerUsage
 	const unique = new Map<string | LedgerUsageCall, LedgerUsageCall>();
 	for (const call of calls) {
 		if (call.callId && !call.attemptId && canonical.has(call.callId)) continue;
-		const key = call.attemptId ?? call.callId ?? call;
+		const key = call.attemptId ?? call.callId ?? call.runId ?? call;
 		const prior = unique.get(key);
 		// A frozen ancestor cut may contain only the start; a later owner snapshot can contain its settlement (#434).
-		if (!prior || ((prior.facts?.incomplete ?? 0) > 0 && call.facts?.incomplete === 0)) unique.set(key, call);
+		if (
+			!prior ||
+			((prior.facts?.incomplete ?? 0) > 0 && call.facts?.incomplete === 0) ||
+			(call.runId && (call.runCutoff ?? 0) > (prior.runCutoff ?? 0))
+		)
+			unique.set(key, call);
 	}
 	return [...unique.values()];
 }

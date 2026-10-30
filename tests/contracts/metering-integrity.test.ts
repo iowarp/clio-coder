@@ -212,6 +212,40 @@ describe("contracts/metering integrity", () => {
 		strictEqual(renderCostAggregate(tracker.sessionCost()), "not measured");
 	});
 
+	it("replaces replayed run snapshots without retaining their previous amounts or missing coverage", () => {
+		const tracker = createCostTracker();
+		tracker.accumulate("main", "model", 10, 0, { apiCalls: 1 }, "known_free");
+		tracker.replace(
+			"run:worker",
+			"worker",
+			"model",
+			3,
+			0,
+			{ apiCalls: 0, unknownCallCoverageRuns: 1, cacheWrite1h: 2 },
+			"unknown",
+		);
+		strictEqual(tracker.sessionTokens().totalTokens, 13);
+		strictEqual(tracker.sessionCost().hasUnknown, true);
+		tracker.replace(
+			"run:worker",
+			"worker",
+			"model",
+			7,
+			0,
+			{ apiCalls: 2, missingTokenCalls: 0, cacheWrite1h: 4 },
+			"known_free",
+		);
+		strictEqual(tracker.sessionTokens().totalTokens, 17);
+		strictEqual(tracker.sessionTokens().cacheWrite1h, 4);
+		strictEqual(tracker.sessionCost().calls, 3);
+		strictEqual(tracker.sessionCost().hasUnknown, false);
+		strictEqual(tracker.sessionCost().unknownCallCoverageRuns, undefined);
+		strictEqual(tracker.entries().length, 2);
+		tracker.reset();
+		strictEqual(tracker.sessionTokens().totalTokens, 0);
+		strictEqual(tracker.entries().length, 0);
+	});
+
 	it("attributes provider usage to the target and the model that answered", () => {
 		const [call] = ledgerUsageCalls(
 			[

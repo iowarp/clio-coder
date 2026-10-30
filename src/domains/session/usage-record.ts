@@ -9,6 +9,7 @@ import type { LedgerUsageCall } from "./usage.js";
 
 /** The slice of ObservabilityContract a reseed needs. */
 export interface SessionUsageSink {
+	recordRunTokens?(runId: string, ...args: Parameters<SessionUsageSink["recordTokens"]>): void;
 	resetSession(sessionId?: string | null): void;
 	recordNeverSentCalls?(count: number): void;
 	recordTokens(
@@ -40,7 +41,7 @@ export interface SessionUsageSink {
 
 /** Both live and replayed calls use the same sink wiring (#434). */
 export function recordUsageCall(
-	sink: Pick<SessionUsageSink, "recordTokens">,
+	sink: Pick<SessionUsageSink, "recordTokens" | "recordRunTokens">,
 	call: LedgerUsageCall,
 	replayed = false,
 ): void {
@@ -50,7 +51,9 @@ export function recordUsageCall(
 		call.responseModelIdObservation,
 		call.apiCalls ?? 1,
 	);
-	sink.recordTokens(
+	const record =
+		call.runId && sink.recordRunTokens ? sink.recordRunTokens.bind(sink, call.runId) : sink.recordTokens.bind(sink);
+	record(
 		call.providerId,
 		call.attributedModelId,
 		call.totalTokens,

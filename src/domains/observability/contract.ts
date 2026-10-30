@@ -143,6 +143,7 @@ export interface ObservabilityRunProjection {
 }
 
 export interface ObservabilityContract extends ObservabilityRunProjection {
+	recordRunTokens?(runId: string, ...args: Parameters<ObservabilityContract["recordTokens"]>): void;
 	/** Running session USD cost. */
 	sessionCost(): number;
 	sessionCostSummary(): CostAggregate;

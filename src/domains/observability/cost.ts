@@ -241,6 +241,8 @@ export interface CostEntry {
 }
 
 export interface CostTracker {
+	/** Replace a replayed run snapshot when its terminal facts arrive; never add both (#434). */
+	replace(key: string, ...args: Parameters<CostTracker["accumulate"]>): number;
 	accumulate(
 		providerId: string,
 		attributedModelId: string,
@@ -272,7 +274,44 @@ export function createCostTracker(): CostTracker {
 	const log: CostEntry[] = [];
 	let aggregate = emptyCostAggregate();
 	const totals = emptyBreakdown();
+	const keyed = new Map<string, CostTracker>();
+	let combinedCache: { cost: CostAggregate; tokens: UsageBreakdown } | undefined;
+	let entriesCache: readonly CostEntry[] | undefined;
+	const combined = () => {
+		if (combinedCache) return combinedCache;
+		let cost = aggregate;
+		const tokens = { ...totals };
+		for (const [, contribution] of [...keyed.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+			const usage = contribution.sessionTokens();
+			const summary = contribution.sessionCost();
+			cost = accumulateCostAmount(cost, { usd: summary.knownUsd, provenance: "unknown", costSummary: summary });
+			for (const field of [
+				"input",
+				"output",
+				"cacheRead",
+				"cacheWrite",
+				"cacheWrite1h",
+				"reasoningTokens",
+				"totalTokens",
+				"apiCalls",
+				"missingTokenCalls",
+				"unknownCallCoverageRuns",
+				"neverSentCalls",
+			] as const)
+				if (usage[field] !== undefined) tokens[field] = (tokens[field] ?? 0) + usage[field];
+		}
+		combinedCache = { cost, tokens };
+		return combinedCache;
+	};
 	return {
+		replace(key, ...args) {
+			const contribution = createCostTracker();
+			const usd = contribution.accumulate(...args);
+			keyed.set(key, contribution);
+			combinedCache = undefined;
+			entriesCache = undefined;
+			return usd;
+		},
 		accumulate(
 			providerId,
 			attributedModelId,
@@ -285,6 +324,8 @@ export function createCostTracker(): CostTracker {
 			costSummary,
 			replayed,
 		) {
+			combinedCache = undefined;
+			entriesCache = undefined;
 			const resolvedUsd = usd ?? 0;
 			const provenance = normalizeCostProvenance(costProvenance);
 			const input = breakdown?.input ?? 0;
@@ -344,21 +385,33 @@ export function createCostTracker(): CostTracker {
 			return resolvedUsd;
 		},
 		sessionTotal() {
-			return aggregate.knownUsd;
+			return combined().cost.knownUsd;
 		},
 		sessionCost() {
-			return { ...aggregate };
+			return { ...combined().cost };
 		},
 		sessionTokens() {
-			return { ...totals };
+			return { ...combined().tokens };
 		},
 		recordNeverSentCalls(count) {
+			combinedCache = undefined;
+			entriesCache = undefined;
 			if (count > 0) totals.neverSentCalls = (totals.neverSentCalls ?? 0) + count;
 		},
 		entries() {
-			return log;
+			if (keyed.size === 0) return log;
+			entriesCache ??= [
+				...log,
+				...[...keyed.entries()]
+					.sort(([a], [b]) => a.localeCompare(b))
+					.flatMap(([, contribution]) => contribution.entries()),
+			];
+			return entriesCache;
 		},
 		reset() {
+			keyed.clear();
+			combinedCache = undefined;
+			entriesCache = undefined;
 			log.length = 0;
 			aggregate = emptyCostAggregate();
 			totals.input = 0;

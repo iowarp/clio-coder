@@ -15,9 +15,10 @@
  */
 
 import { writeDiagnostic } from "../../core/diagnostics.js";
-import type { CallJournalRead } from "../observability/call-journal.js";
 import type { SessionEntry } from "./entries.js";
+import type { SessionCallJournalRead } from "./fork-journal.js";
 import { readSessionCallJournalSync } from "./fork-journal.js";
+import { usageCallsFromRunJournals } from "./run-journal-usage.js";
 import { filterEntriesToActivePath } from "./tree/active-path.js";
 import type { SessionUsageDefaults } from "./usage.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "./usage.js";
@@ -47,7 +48,7 @@ export function reseedSessionUsageFromLedger(
 	activeLeafTurnId?: string | null,
 ): void {
 	const scoped = filterEntriesToActivePath(entries, activeLeafTurnId ?? undefined);
-	let journal: CallJournalRead | undefined;
+	let journal: SessionCallJournalRead | undefined;
 	if (defaults.journalDirectory) {
 		try {
 			journal = readSessionCallJournalSync(defaults.journalDirectory, scoped);
@@ -62,4 +63,5 @@ export function reseedSessionUsageFromLedger(
 	const records = journal?.records.map(({ record }) => record);
 	sink.recordNeverSentCalls?.(ledgerCallFailureCounts(scoped, records).neverInvokedCalls);
 	for (const call of ledgerUsageCalls(scoped, defaults, records)) recordUsageCall(sink, call, true);
+	if (journal) for (const call of usageCallsFromRunJournals(journal.runs)) recordUsageCall(sink, call, true);
 }

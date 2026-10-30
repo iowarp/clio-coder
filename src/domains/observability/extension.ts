@@ -58,7 +58,8 @@ function recordDispatchCost(
 	// Dispatch terminal payloads carry the same full split as receipts. Preserve
 	// it so /usage and the footer agree with the fleet board instead of showing
 	// zero input/output/cache for worker-only sessions.
-	cost.accumulate(
+	const accumulate = payload.runId ? cost.replace.bind(cost, `run:${payload.runId}`) : cost.accumulate.bind(cost);
+	accumulate(
 		payload.targetId,
 		payload.wireModelId,
 		payload.tokenCount,
@@ -263,6 +264,12 @@ export function createObservabilityBundle(
 	};
 
 	const contract: ObservabilityContract = {
+		recordRunTokens(runId, ...args) {
+			// A sealed receipt already restored the complete run; its journal may since have been evicted (#434).
+			if (recordedRuns.has(runId)) return;
+			cost.replace(`run:${runId}`, ...args);
+			projection.refresh();
+		},
 		acquireTelemetrySession: journals.acquire,
 		sessionCost: () => cost.sessionTotal(),
 		sessionCostSummary: () => cost.sessionCost(),
