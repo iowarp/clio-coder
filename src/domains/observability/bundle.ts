@@ -22,7 +22,12 @@ const MAX_FILE_BYTES = 1024 * 1024 * 1024;
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 const OBJECT_ID = /^obj_[0-9a-f]{64}$/;
 /** Object subjects that hold content; research retention expires them before the records that cite them. */
-export const CONTENT_SUBJECTS: ReadonlySet<string> = new Set(["prompt-text", "request"]);
+export const CONTENT_SUBJECTS: ReadonlySet<string> = new Set([
+	"prompt-text",
+	"request",
+	"memory-trace",
+	"observation-trace",
+]);
 
 export interface BundleFile {
 	path: string;

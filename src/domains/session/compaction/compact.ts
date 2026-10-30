@@ -10,7 +10,7 @@ import type { CallMessageObserver } from "../../../core/telemetry/producer.js";
 // interactive Stage 0 graph, and the barrel would pull in the whole runtime.
 import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
 import type { MemoryCompactionOffer, MemoryConsumptionReceipt } from "../../memory/contract.js";
-import { traceObservation } from "../../memory/observation-trace.js";
+import { observationTracing, traceObservation } from "../../memory/observation-trace.js";
 import type { CallJournalOptions, CallScope } from "../../observability/call-scope.js";
 import { openCallScope } from "../../observability/call-scope.js";
 
@@ -958,13 +958,14 @@ async function runSummaryRequest(
 	input.signal?.throwIfAborted();
 	await input.beforeSummaryCall?.();
 	const timestamp = new Date().toISOString();
-	traceObservation("compaction-input", {
-		systemPrompt,
-		userText,
-		maxTokens: maxTokens ?? null,
-		estimatedInput,
-		contextWindow,
-	});
+	if (observationTracing())
+		traceObservation("compaction-input", {
+			systemPrompt,
+			userText,
+			maxTokens: maxTokens ?? null,
+			estimatedInput,
+			contextWindow,
+		});
 	let usage: unknown;
 	let reported: Record<string, unknown> = {};
 	let outcome: CompactionCallObservation["outcome"] = "error";
@@ -1330,7 +1331,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		if (memoryOffer !== null || input.offerMemory === undefined) return raw;
 		const offer = input.offerMemory(rawSlice, ordinary, slice);
 		const declined = (reason: string, facts: Record<string, unknown> = {}) => {
-			traceObservation("offer-declined", { reason, split, entries: slice.length, ...facts });
+			if (observationTracing()) traceObservation("offer-declined", { reason, split, entries: slice.length, ...facts });
 			return raw;
 		};
 		if (!offer) return declined("no-offer");
@@ -1348,11 +1349,12 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		memoryOffer = offer;
 		commitMemoryOffer = () => {
 			offer.onUse?.(use);
-			traceObservation("offer-used", {
-				receipt: offer.receipt,
-				...use,
-				retainedBoundary: firstKept?.turnId ?? null,
-			});
+			if (observationTracing())
+				traceObservation("offer-used", {
+					receipt: offer.receipt,
+					...use,
+					retainedBoundary: firstKept?.turnId ?? null,
+				});
 		};
 		return proposed;
 	};

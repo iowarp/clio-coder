@@ -862,7 +862,9 @@ When debugging a model route, set `CLIO_CODER_MEMORY_TRACE` to a file path. Each
 step then appends one content-bearing JSON row there (the reminder, plus the
 prompt and the raw response each clipped to 8,000 characters), and the file is
 truncated when the session opens it. The trace is never written unless the variable is set; see
-[Environment variables](environment-variables.md).
+[Environment variables](environment-variables.md). The variable is a deprecated alias: research mode
+with `telemetry.research.content` and workspace consent records the same step as a `memory.trace`
+record in the session's call journal.
 
 ## Session scope
 

@@ -16,7 +16,7 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
 import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
-import { recordTelemetry } from "../../core/telemetry/producer.js";
+import { recordTelemetry, recordTelemetryContent } from "../../core/telemetry/producer.js";
 import type { Payload } from "../../core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/index.js";
@@ -384,6 +384,28 @@ export function createObservabilityBundle(
 			return sessionCapture.current(origin);
 		},
 		telemetry,
+		recordResearchTrace(origin, kind, data, preimage) {
+			// Facts can point at live runtime state; the journal keeps what the event saw (#434).
+			let owned: { data: typeof data; preimage: unknown };
+			try {
+				owned = structuredClone({ data, preimage });
+			} catch {
+				// A fact that cannot be cloned is not journaled; the step it describes is unaffected (#434).
+				return;
+			}
+			void journals
+				.acquire(origin, "memory")
+				.then(async (lease) => {
+					try {
+						recordTelemetryContent(kind, owned.data, owned.preimage, lease.context);
+					} finally {
+						await lease.release();
+					}
+				})
+				.catch(() => {
+					// The journal reports its own unavailability; a trace never fails the work it describes (#434).
+				});
+		},
 		sessionCost: () => cost.sessionTotal(),
 		sessionCostSummary: () => cost.sessionCost(),
 		costEntries: () => cost.entries(),

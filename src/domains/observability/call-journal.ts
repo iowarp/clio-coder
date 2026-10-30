@@ -15,10 +15,13 @@ import { makeTelemetryRecord, readTelemetryRecord } from "../../core/telemetry/e
 import { newRecordId } from "../../core/telemetry/ids.js";
 import type { PendingTelemetry, TelemetrySink } from "../../core/telemetry/producer.js";
 import { registerRunTelemetrySink, registerTelemetrySink } from "../../core/telemetry/producer.js";
-import type { Kind } from "../../core/telemetry/schemas.js";
+import type { Kind, PreimageKind } from "../../core/telemetry/schemas.js";
+import { PREIMAGE_SUBJECTS } from "../../core/telemetry/schemas.js";
 import type { SegmentScan } from "../../core/telemetry/segment.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
+import { canonicalJson } from "../prompts/hash.js";
+import { storeTelemetryObject } from "./objects.js";
 
 export interface JournalHealth {
 	queueDepth: number;
@@ -322,6 +325,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 						}
 						let invalidBatch = 0;
 						let filteredBatch = 0;
+						let unstoredBatch = 0;
 						while (count > 0) {
 							const pending = ring[head];
 							ring[head] = undefined;
@@ -333,9 +337,37 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 								filteredBatch += 1;
 								continue;
 							}
+							let data = pending.data;
+							if (pending.preimage !== undefined) {
+								// Content is reserved against the cap and durable in objects/ before a record cites it (#434).
+								const subject = Object.hasOwn(PREIMAGE_SUBJECTS, pending.kind)
+									? PREIMAGE_SUBJECTS[pending.kind as PreimageKind]
+									: undefined;
+								let bytes: number;
+								try {
+									if (subject === undefined) throw new Error("kind carries no preimage");
+									bytes = Buffer.byteLength(canonicalJson(pending.preimage));
+								} catch {
+									invalidBatch += 1;
+									continue;
+								}
+								if (researchBytes + bytes > researchCap) {
+									capped += 1;
+									continue;
+								}
+								researchBytes += bytes;
+								try {
+									const content = await storeTelemetryObject(options.sessionDirectory, subject, pending.preimage);
+									data = { ...pending.data, content, bytes } as typeof data;
+								} catch {
+									researchBytes -= bytes;
+									unstoredBatch += 1;
+									continue;
+								}
+							}
 							const record = redactSecretsDeep(
 								{
-									...makeTelemetryRecord(pending.kind, pending.data, pending.ctx, {
+									...makeTelemetryRecord(pending.kind, data, pending.ctx, {
 										t: new Date(pending.wallMs).toISOString(),
 										mono: pending.mono,
 									}),
@@ -365,6 +397,12 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 						if (invalidBatch) lines.push(encodeTelemetryLine(gap("invalid-record", invalidBatch)));
 						filtered += filteredBatch;
 						if (filteredBatch) lines.push(encodeTelemetryLine(gap("mode-filtered", filteredBatch)));
+						// A preimage that could not be stored drops its record; nothing may cite content that is not on disk.
+						dropped += unstoredBatch;
+						if (dropped > reportedDrops) {
+							lines.push(encodeTelemetryLine(gap("writer-drop", dropped - reportedDrops)));
+							reportedDrops = dropped;
+						}
 						if (capped > reportedCapped) {
 							lines.push(encodeTelemetryLine(gap("research-cap", capped - reportedCapped)));
 							reportedCapped = capped;

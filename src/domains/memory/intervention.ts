@@ -343,10 +343,12 @@ export interface MemoryInterventionDeps {
 	/** Best-effort content-free telemetry; sink failures never affect intervention. */
 	telemetry?: TaskMemoryTelemetrySink;
 	/**
-	 * Opt-in raw-envelope observer. Content-bearing, so the composition root only
-	 * supplies it when the operator named a trace file.
+	 * Opt-in raw-envelope observer. Content-bearing: it records only under
+	 * research capture with consent or the deprecated trace-file alias (#434).
 	 */
 	onEnvelope?: (envelope: TaskMemoryEnvelope) => void;
+	/** Asked per step before an envelope is built; absent means `onEnvelope` always wants one. */
+	tracesEnvelopes?: () => boolean;
 	/**
 	 * Delivery channel for a reminder produced after its turn boundary already
 	 * closed. The composition root buffers it into the next submitted turn, which
@@ -1316,7 +1318,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							previousReminder: lastInjectedMessage,
 							contextLostAt,
 							timeoutMs,
-							...(deps.onEnvelope === undefined
+							...(deps.onEnvelope === undefined || deps.tracesEnvelopes?.() === false
 								? {}
 								: {
 										onEnvelope: (envelope: TaskMemoryEnvelope) => {
@@ -1377,7 +1379,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			// runTaskMemoryPolicy resolves its own failures, so reaching here means
 			// resolving the client itself threw. That is still a broken route.
 			promptedResult = silent("client_error");
-			if (isCurrent())
+			if (isCurrent() && deps.tracesEnvelopes?.() !== false)
 				deps.onEnvelope?.({
 					systemPrompt: "",
 					userPrompt: "",

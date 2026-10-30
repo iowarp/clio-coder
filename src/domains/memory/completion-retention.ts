@@ -9,13 +9,13 @@ import type { MemoryCommitScope } from "./commit-state.js";
 import type { CompletedLessonSource } from "./history-review.js";
 import { lessonEvidence } from "./lesson-evidence.js";
 import type { MemoryLessonJudge } from "./lesson-judge.js";
-import { observationEvent, traceObservation } from "./observation-trace.js";
+import { observationEvent, observationTracing, traceObservation } from "./observation-trace.js";
 import { observationDigest } from "./observations.js";
 import { provenRecipes, recipeAlreadyClaimed } from "./recipes.js";
 import type { TaskMemoryBank, TaskMemoryEntry } from "./task-bank.js";
 import { TASK_MEMORY_CONTENT_MAX_CHARS } from "./task-bank.js";
 import { proposeInjectedTaskMemory } from "./task-bank-promotion.js";
-import type { TaskMemoryModelClient, TaskMemoryStepUsage } from "./task-memory-policy.js";
+import type { TaskMemoryEnvelope, TaskMemoryModelClient, TaskMemoryStepUsage } from "./task-memory-policy.js";
 import { runTaskMemoryPolicy } from "./task-memory-policy.js";
 
 export interface RetentionStatus {
@@ -225,7 +225,7 @@ async function retainWithinDeadline(
 	});
 	const started = performance.now();
 	let usage: TaskMemoryStepUsage | null = null;
-	if (!savedCandidates.length)
+	if (!savedCandidates.length && observationTracing())
 		traceObservation("lesson-input", {
 			sourceRefs: input.source.refs,
 			trajectory: input.source.text,
@@ -258,12 +258,16 @@ async function retainWithinDeadline(
 						usage = step;
 						input.onUsage?.(step, input.isCurrent());
 					},
-					onEnvelope: (envelope) =>
-						traceObservation("lesson-output", {
-							decision: envelope.decision,
-							reason: envelope.reason,
-							response: envelope.response,
-						}),
+					...(observationTracing()
+						? {
+								onEnvelope: (envelope: TaskMemoryEnvelope) =>
+									traceObservation("lesson-output", {
+										decision: envelope.decision,
+										reason: envelope.reason,
+										response: envelope.response,
+									}),
+							}
+						: {}),
 				});
 		if (!restoringCandidates)
 			event("lesson-extraction-settled", {

@@ -1,10 +1,12 @@
 import { appendFileSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
+import { recordResearchTrace, researchTraceAdmits } from "../../core/telemetry/research-trace.js";
 import type { TaskMemoryEnvelope } from "./task-memory-policy.js";
 
 /**
- * Opt-in raw-envelope trace for the LLM memory tier. Off unless
- * CLIO_CODER_MEMORY_TRACE names a file.
+ * Opt-in raw-envelope trace for the LLM memory tier. Off unless research
+ * capture with consent admits `memory.trace`, or the deprecated
+ * CLIO_CODER_MEMORY_TRACE alias names a file (#434).
  *
  * The telemetry row is deliberately content-free: it carries counts and
  * outcomes so it can be shipped and read without exposing the bank, the task,
@@ -36,6 +38,8 @@ export interface TaskMemoryTraceRow {
 }
 
 export interface TaskMemoryTrace {
+	/** Asked before an envelope is built, so a step nothing records allocates nothing for it (#434). */
+	active(): boolean;
 	record(envelope: TaskMemoryEnvelope): void;
 }
 
@@ -51,10 +55,33 @@ export function taskMemoryTracePath(env: NodeJS.ProcessEnv = process.env): strin
 	return raw !== undefined && raw.length > 0 ? raw : null;
 }
 
-export function createTaskMemoryTrace(path: string, now: () => Date = () => new Date()): TaskMemoryTrace {
+export function createTaskMemoryTrace(path: string | null, now: () => Date = () => new Date()): TaskMemoryTrace {
 	let opened = false;
 	return {
+		active() {
+			return path !== null || researchTraceAdmits("memory.trace");
+		},
 		record(envelope) {
+			if (researchTraceAdmits("memory.trace"))
+				recordResearchTrace(
+					"memory.trace",
+					{
+						decision: envelope.decision,
+						reason: envelope.reason,
+						bankOperations: envelope.bankOperations,
+						droppedOperations: envelope.droppedOperations,
+						responseChars: envelope.response.length,
+						userPromptChars: envelope.userPrompt.length,
+						systemPromptChars: envelope.systemPrompt.length,
+					},
+					{
+						response: truncate(envelope.response),
+						userPrompt: truncate(envelope.userPrompt),
+						reminder: envelope.reminder,
+						error: envelope.error,
+					},
+				);
+			if (path === null) return;
 			try {
 				if (!opened) {
 					mkdirSync(dirname(path), { recursive: true });

@@ -18,6 +18,7 @@ import type {
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
+import type { PreimageData, PreimageKind } from "../../core/telemetry/schemas.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
 import type { DispatchSnapshot } from "../dispatch/contract.js";
@@ -219,6 +220,13 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 	): Promise<TelemetrySessionLease>;
 	/** What the session's telemetry captures now, for recorders that write outside the call journal (#434). */
 	telemetryCapture?(origin: TelemetrySessionOrigin): TelemetryCapture;
+	/** Journal a background research trace into the session's own journal, its text into `objects/` (#434). */
+	recordResearchTrace?<K extends PreimageKind>(
+		origin: TelemetrySessionOrigin,
+		kind: K,
+		data: PreimageData<K>,
+		preimage: unknown,
+	): void;
 	/** Count persisted never-sent assistant calls without adding spend or API calls (#430). */
 	recordNeverSentCalls(count: number): void;
 	/**

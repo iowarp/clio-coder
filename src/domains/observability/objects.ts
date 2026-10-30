@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
+import type { TSchema } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
@@ -11,7 +12,13 @@ import { createRedactionTally, secretRedactingReplacer } from "../evidence/redac
 import { canonicalJson } from "../prompts/hash.js";
 
 const maximumBytes = 16 * 1024 * 1024;
-type StoredSubject = "prompt-structure" | "tool-schemas" | "prompt-text" | "config";
+type StoredSubject =
+	| "prompt-structure"
+	| "tool-schemas"
+	| "prompt-text"
+	| "config"
+	| "memory-trace"
+	| "observation-trace";
 const hash = Type.String({ pattern: "^[0-9a-f]{64}$" });
 const promptStructureSchema = Type.Object(
 	{
@@ -88,6 +95,27 @@ async function readObjectBytes(path: string): Promise<string | null> {
 }
 
 const promptTextSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
+const nullableText = Type.Union([Type.String(), Type.Null()]);
+const contentSchemas: Partial<Record<StoredSubject, TSchema>> = {
+	"prompt-structure": promptStructureSchema,
+	"prompt-text": promptTextSchema,
+	"memory-trace": Type.Object(
+		{ response: Type.String(), userPrompt: Type.String(), reminder: nullableText, error: nullableText },
+		{ additionalProperties: false },
+	),
+	"observation-trace": Type.Object(
+		{ event: Type.String(), facts: Type.Record(Type.String(), Type.Unknown()) },
+		{ additionalProperties: false },
+	),
+};
+const storedSubjects: ReadonlySet<string> = new Set<StoredSubject>([
+	"prompt-structure",
+	"tool-schemas",
+	"prompt-text",
+	"config",
+	"memory-trace",
+	"observation-trace",
+]);
 
 /**
  * Settings are structure, but a `headers` or `env` map carries whatever an operator typed, often a credential no
@@ -104,20 +132,18 @@ function withheldSecretMaps(value: unknown, key?: string): unknown {
 
 /**
  * Cold-path storage only. A reference becomes resolvable only after its redacted preimage is durable (#434).
- * `prompt-text` is content: only a caller holding research content capture for the session stores it.
+ * `prompt-text`, `memory-trace` and `observation-trace` are content: only a caller holding research content
+ * capture for the session stores them. `config` is structure and references once its secret maps are withheld.
  */
 export async function storeTelemetryObject(
 	sessionDirectory: string,
 	subject: StoredSubject,
 	value: unknown,
 ): Promise<ObjectRef> {
-	// Effective settings are structure and references; the redaction below removes any secret a header carries (#434).
-	if (subject !== "prompt-structure" && subject !== "tool-schemas" && subject !== "prompt-text" && subject !== "config")
-		throw new Error("telemetry object subject is not enabled for capture");
-	if (subject === "prompt-structure" && !Value.Check(promptStructureSchema, value))
-		throw new Error("telemetry prompt structure contains unsupported fields");
-	if (subject === "prompt-text" && !Value.Check(promptTextSchema, value))
-		throw new Error("telemetry prompt text must be { text }");
+	if (!storedSubjects.has(subject)) throw new Error("telemetry object subject is not enabled for capture");
+	const shape = contentSchemas[subject];
+	if (shape !== undefined && !Value.Check(shape, value))
+		throw new Error(`telemetry ${subject} object contains unsupported fields`);
 	// Validate before JSON's replacer could silently convert non-finite numbers to null (#434).
 	const canonical = canonicalJson(subject === "config" ? withheldSecretMaps(value) : value);
 	const redacted = JSON.parse(canonical, secretRedactingReplacer(createRedactionTally()));

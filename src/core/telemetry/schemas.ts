@@ -27,7 +27,17 @@ export const ObjectRefSchema = Type.Object(
 		label: vocabulary(["resolvable", "commitment"]),
 		function: Type.Literal("sha256"),
 		canonicalization: Type.Literal("json-sorted-v1"),
-		subject: vocabulary(["prompt-structure", "tool-schemas", "config", "briefing", "steering", "request", "prompt-text"]),
+		subject: vocabulary([
+			"prompt-structure",
+			"tool-schemas",
+			"config",
+			"briefing",
+			"steering",
+			"request",
+			"prompt-text",
+			"memory-trace",
+			"observation-trace",
+		]),
 		id: Type.String({ pattern: "^obj_[0-9a-f]{64}$" }),
 	},
 	closed,
@@ -303,6 +313,8 @@ export const KIND_NAMES = [
 	"budget.wait",
 	"config.snapshot",
 	"config.changed",
+	"memory.trace",
+	"memory.observation",
 ] as const;
 export type Kind = (typeof KIND_NAMES)[number];
 interface KindDefinition {
@@ -510,7 +522,49 @@ export const KIND_REGISTRY = {
 			closed,
 		),
 	},
+	/** A task-memory step's prompt and reply beside its content-free step row; replaces CLIO_CODER_MEMORY_TRACE (#434). */
+	"memory.trace": {
+		version: 1,
+		tier: "research",
+		cc: "content-bearing",
+		capture: "content",
+		schema: Type.Object(
+			{
+				decision: Type.String({ minLength: 1, maxLength: 64 }),
+				reason: Type.String({ minLength: 1, maxLength: 64 }),
+				bankOperations: count,
+				droppedOperations: count,
+				responseChars: count,
+				userPromptChars: count,
+				systemPromptChars: count,
+				content: ObjectRefSchema,
+				bytes: count,
+			},
+			closed,
+		),
+	},
+	/** One memory or compaction observation event and its facts; replaces CLIO_CODER_OBSERVATION_TRACE (#434). */
+	"memory.observation": {
+		version: 1,
+		tier: "research",
+		cc: "content-bearing",
+		capture: "content",
+		schema: Type.Object(
+			{ event: Type.String({ minLength: 1, maxLength: 64 }), content: ObjectRefSchema, bytes: count },
+			closed,
+		),
+	},
 } satisfies Record<Kind, KindDefinition>;
+/**
+ * Kinds whose content the journal writer stores in `objects/` and cites as `content`, with its size as `bytes`,
+ * so consent, the research cap, export, prune and GC reach it through the writer alone (#434).
+ */
+export const PREIMAGE_SUBJECTS = {
+	"memory.trace": "memory-trace",
+	"memory.observation": "observation-trace",
+} as const satisfies Partial<Record<Kind, ObjectRef["subject"]>>;
+export type PreimageKind = keyof typeof PREIMAGE_SUBJECTS;
+export type PreimageData<K extends PreimageKind> = Omit<Payload<K>, "content" | "bytes">;
 export type Payload<K extends Kind> = Static<(typeof KIND_REGISTRY)[K]["schema"]>;
 export { utc as UtcSchema };
 
@@ -528,6 +582,10 @@ export function validPayload<K extends Kind>(kind: K, data: unknown): data is Pa
 			prompt.text.label === "resolvable" &&
 			(prompt.structure === undefined || prompt.structure.subject === "prompt-structure")
 		);
+	}
+	if (Object.hasOwn(PREIMAGE_SUBJECTS, kind)) {
+		const content = (data as Payload<PreimageKind>).content;
+		return content.subject === PREIMAGE_SUBJECTS[kind as PreimageKind] && content.label === "resolvable";
 	}
 	if (kind === "compaction.closed") {
 		const outcome = data as Payload<"compaction.closed">;

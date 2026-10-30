@@ -673,7 +673,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"telemetry.research.content": [
 		"Research: capture content",
-		"In research mode, also keep the text of each distinct system prompt Clio compiles for a session, with secrets removed, in that session's telemetry objects. Takes effect only in a workspace you consented for with clio-coder telemetry consent. Request bodies are not captured.",
+		"In research mode, also keep the text of each distinct system prompt Clio compiles for a session, and the prompts, replies and facts of its background memory and compaction steps, with secrets removed, in that session's telemetry objects. Takes effect only in a workspace you consented for with clio-coder telemetry consent. Request bodies are not captured.",
 	],
 	"telemetry.research.deltas": [
 		"Research: token timing",

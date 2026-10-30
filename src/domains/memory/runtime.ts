@@ -34,7 +34,7 @@ import {
 	pruneConsumedObservations,
 	retireObservations,
 } from "./observation-store.js";
-import { observationEvent, traceObservation } from "./observation-trace.js";
+import { observationEvent, observationTracing, traceObservation } from "./observation-trace.js";
 import {
 	buildObservationOffer,
 	compatibleObservation,
@@ -675,15 +675,16 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		if (this.#attempts.size >= 128) this.#attempts.delete(this.#attempts.keys().next().value ?? "");
 		this.#attempts.set(work.revision, (this.#attempts.get(work.revision) ?? 0) + 1);
 		try {
-			traceObservation(this.#reflection ? "reflection-input" : "observation-input", {
-				source: work.source,
-				authority,
-				revision: work.revision,
-				systemPrompt,
-				userPrompt,
-				maxTokens,
-				route: client.route ?? null,
-			});
+			if (observationTracing())
+				traceObservation(this.#reflection ? "reflection-input" : "observation-input", {
+					source: work.source,
+					authority,
+					revision: work.revision,
+					systemPrompt,
+					userPrompt,
+					maxTokens,
+					route: client.route ?? null,
+				});
 			// Race an abort-ignoring client; late usage still belongs to its captured launch.
 			const completion = client.complete({
 				purpose: work.inputs.length ? "reflection" : "observation",
@@ -711,7 +712,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			);
 			const response = await Promise.race([completion, aborted]);
 			usage = response.usage ?? usage;
-			traceObservation(work.inputs.length ? "reflection-output" : "observation-output", { response: response.text });
+			if (observationTracing())
+				traceObservation(work.inputs.length ? "reflection-output" : "observation-output", { response: response.text });
 			if (!isCurrent()) {
 				if (this.#controller === controller) this.#lastReason = "stale-result";
 				return "none";
@@ -729,7 +731,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				...(work.inputs.length ? { inputs: work.inputs } : {}),
 				onRejectedNotes: (rejected, offered) => {
 					this.#event("notes-rejected", { revision: work.revision, rejected, offered });
-					traceObservation("notes-rejected", { revision: work.revision, rejected, offered });
+					if (observationTracing()) traceObservation("notes-rejected", { revision: work.revision, rejected, offered });
 				},
 			});
 			if (
@@ -757,7 +759,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				noteTokens: observationTokens(batch.rendered),
 				inputs: batch.inputs,
 			});
-			traceObservation("prepared", { batch });
+			if (observationTracing()) traceObservation("prepared", { batch });
 			return "ran";
 		} catch (error) {
 			if (error instanceof TaskMemoryEndpointBusyError || error instanceof TaskMemoryEndpointPreemptedError) {
@@ -776,7 +778,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				reason: this.#lastReason,
 				attempts: this.#attempts.get(work.revision),
 			});
-			traceObservation("preparation-failed", { error: error instanceof Error ? error.message : String(error) });
+			if (observationTracing())
+				traceObservation("preparation-failed", { error: error instanceof Error ? error.message : String(error) });
 			return "ran";
 		} finally {
 			clearTimeout(timeout);
@@ -1049,7 +1052,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		} catch (error) {
 			if (isCurrent() || orphan)
 				publish({ ...EMPTY_RETENTION, phase: "pending", reason: "retention-error", revision: source.revision });
-			traceObservation("retention-error", { error: error instanceof Error ? error.message : String(error) });
+			if (observationTracing())
+				traceObservation("retention-error", { error: error instanceof Error ? error.message : String(error) });
 		} finally {
 			if (this.#controller === controller) {
 				this.#controller = null;
@@ -1089,13 +1093,14 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		const section = recordIds.length > 0 ? (selection?.section ?? "") : "";
 		const at = new Date().toISOString();
 		if (selection && section) this.#promptSelection = { ...selection, submittedAt: at };
-		traceObservation("memory-section-submitted", {
-			at,
-			sessionId: this.#registration?.captureMemoryAuthority()?.scope.sessionId ?? null,
-			turnId: selection?.turnId ?? null,
-			text: section,
-			recordIds,
-		});
+		if (observationTracing())
+			traceObservation("memory-section-submitted", {
+				at,
+				sessionId: this.#registration?.captureMemoryAuthority()?.scope.sessionId ?? null,
+				turnId: selection?.turnId ?? null,
+				text: section,
+				recordIds,
+			});
 		// Lifecycle rows record a change, not every request that carried the same section again.
 		const sectionKey = recordIds.length ? observationDigest([selection?.turnId ?? null, section, ...recordIds]) : null;
 		if (sectionKey !== null && sectionKey !== this.#submittedSection)

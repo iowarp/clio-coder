@@ -64,8 +64,9 @@ import { settingsSourceFor, updateProjectLocalSettings } from "../core/settings-
 import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
-import { STANDARD_CAPTURE, systemOneDatasetRecording } from "../core/telemetry/capture.js";
+import { captureAdmits, STANDARD_CAPTURE, systemOneDatasetRecording } from "../core/telemetry/capture.js";
 import { recordTelemetry } from "../core/telemetry/producer.js";
+import { registerResearchTraceSink } from "../core/telemetry/research-trace.js";
 import type { CallSettled, Payload } from "../core/telemetry/schemas.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
@@ -2399,6 +2400,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const safety = result.getContract<SafetyContract>("safety");
 	const session = result.getContract<SessionContract>("session");
 	observability?.resetSession(session?.current()?.id ?? null);
+	// Memory and compaction traces run outside any call; they journal into the session current when they fire,
+	// the same session background memory calls are journaled under (#434).
+	registerResearchTraceSink({
+		admits(kind) {
+			const origin = session?.current();
+			const capture = origin ? observability?.telemetryCapture?.(origin) : undefined;
+			return capture !== undefined && captureAdmits(capture, kind);
+		},
+		record(kind, data, preimage) {
+			const origin = session?.current();
+			if (origin) observability?.recordResearchTrace?.(origin, kind, data, preimage);
+		},
+	});
 	// One durable union of restricted sources per session. Every model send,
 	// mediated outbound call and System One request is judged against it.
 	const flowLedger = createFlowLedger({
@@ -2676,10 +2690,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// the transcript-notice path rather than the reminder buffer. Bound late for
 	// the same reason: the chat loop that owns the transcript is composed below.
 	let deferredWatchdogNoticeSink: ((text: string) => void) | null = null;
-	// Content-bearing, so it exists only when the operator named a file. The
-	// telemetry row says which silence happened; this says what the model wrote.
-	const memoryTracePath = taskMemoryTracePath();
-	const memoryTrace = memoryTracePath === null ? null : createTaskMemoryTrace(memoryTracePath);
+	// Content-bearing, so it records only under research capture with consent or
+	// the deprecated trace-file alias. The telemetry row says which silence
+	// happened; this says what the model wrote (#434).
+	const memoryTrace = createTaskMemoryTrace(taskMemoryTracePath());
 	// The route the last resolved memory client would call, kept so the endpoint
 	// check and the cost row read the same resolution the step itself used.
 	// Journal settlements own memory spend; legacy clients retain the captured usage fallback (#434).
@@ -2781,7 +2795,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			publishGuardianState();
 			memoryGuardian?.wake("step-settled");
 		},
-		...(memoryTrace === null ? {} : { onEnvelope: (envelope) => memoryTrace.record(envelope) }),
+		onEnvelope: (envelope) => memoryTrace.record(envelope),
+		tracesEnvelopes: () => memoryTrace.active(),
 		// A headless run submits no further turn, so a detached step could only
 		// finish after the process that would have read it has exited.
 		deliversDeferredReminders: options.headless === undefined,

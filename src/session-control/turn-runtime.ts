@@ -6,7 +6,7 @@ import { beginCall, recordTelemetry } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
-import { traceObservation } from "../domains/memory/observation-trace.js";
+import { observationTracing, traceObservation } from "../domains/memory/observation-trace.js";
 import type { CacheBaseline } from "../domains/observability/cache-physics.js";
 import { cachePhysics } from "../domains/observability/cache-physics.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
@@ -1080,15 +1080,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (state.activeInterruptReason !== null || state.runtime !== localRuntime) {
 					return { block: true, reason: "Request ownership changed while waiting for budget approval." };
 				}
-				traceObservation("actor-input", {
-					sessionId: deps.sessionId?.() ?? null,
-					target: target.target.id,
-					model: target.wireModelId,
-					window: view.effectiveWindow,
-					inputTokens: input,
-					outputTokens: output,
-					context: resolved,
-				});
+				if (observationTracing())
+					traceObservation("actor-input", {
+						sessionId: deps.sessionId?.() ?? null,
+						target: target.target.id,
+						model: target.wireModelId,
+						window: view.effectiveWindow,
+						inputTokens: input,
+						outputTokens: output,
+						context: resolved,
+					});
 				preInvocationStage = "admission";
 				const admission = deps.continuity?.admission() ?? { block: false };
 				admittedMessages = admission.block ? [] : resolved.messages;

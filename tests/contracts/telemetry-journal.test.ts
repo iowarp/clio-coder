@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import {
+	captureAdmits,
 	effectiveTelemetryCapture,
 	STANDARD_CAPTURE,
 	systemOneDatasetRecording,
@@ -27,13 +28,21 @@ import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
-import { beginCall, recordTelemetry, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
+import {
+	beginCall,
+	recordTelemetry,
+	recordTelemetryContent,
+	telemetryProducerHealth,
+} from "../../src/core/telemetry/producer.js";
+import { registerResearchTraceSink } from "../../src/core/telemetry/research-trace.js";
 import type { CallStarted, RunUsage } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
+import { observationTracing, traceObservation } from "../../src/domains/memory/observation-trace.js";
+import { createTaskMemoryTrace } from "../../src/domains/memory/task-memory-trace.js";
 import { exportTelemetryBundle, importTelemetryBundle } from "../../src/domains/observability/bundle.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/observability/call-facts.js";
 import { openCallJournal, readCallJournal, readCallJournalSync } from "../../src/domains/observability/call-journal.js";
@@ -709,6 +718,73 @@ test("a session stores prompt text only under content capture, once per distinct
 		ok(stored.kind === "resolved");
 		deepStrictEqual(stored.value, { text: "you are a fixture; api_key=[redacted:assignment]" });
 	} finally {
+		await journals.closeAll();
+		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("memory and observation traces journal content only under research capture with consent (#434)", async () => {
+	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const research = { content: true, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false };
+	let capture = STANDARD_CAPTURE;
+	const journals = createSessionJournals(stateDir, () => {}, { current: () => capture });
+	const origin = { id: "trace-session", cwdHash: "tracehash" };
+	const leases: Promise<void>[] = [];
+	const unregister = registerResearchTraceSink({
+		admits: (kind) => captureAdmits(capture, kind),
+		record(kind, data, preimage) {
+			leases.push(
+				journals.acquire(origin, "memory").then(async (lease) => {
+					recordTelemetryContent(kind, data, preimage, lease.context);
+					await lease.release();
+				}),
+			);
+		},
+	});
+	const memoryTrace = createTaskMemoryTrace(null);
+	const secret = `api_key=${"secret".repeat(4)}`;
+	const envelope = {
+		systemPrompt: "system",
+		userPrompt: `task ${secret}`,
+		response: "reply",
+		decision: "silent",
+		reason: "suppressed",
+		bankOperations: 0,
+		droppedOperations: 0,
+		reminder: null,
+		error: null,
+	} as const;
+	try {
+		strictEqual(observationTracing(), false, "standard mode builds no observation facts");
+		strictEqual(memoryTrace.active(), false, "standard mode builds no memory envelope");
+		traceObservation("prepared", { note: secret });
+		memoryTrace.record(envelope);
+		strictEqual(leases.length, 0);
+		capture = effectiveTelemetryCapture({ mode: "research", research }, false);
+		strictEqual(observationTracing(), false, "research without consent keeps no content");
+		capture = effectiveTelemetryCapture({ mode: "research", research }, true);
+		ok(observationTracing() && memoryTrace.active());
+		traceObservation("prepared", { note: secret });
+		memoryTrace.record(envelope);
+		await Promise.all(leases);
+		const directory = join(stateDir, "sessions", origin.cwdHash, origin.id);
+		const records = (await readCallJournal(directory)).records.map(({ record }) => record);
+		deepStrictEqual(
+			records.filter((record) => record.cc === "content-bearing").map((record) => record.k),
+			["memory.observation", "memory.trace"],
+		);
+		const observation = records.find((record) => record.k === "memory.observation");
+		const trace = records.find((record) => record.k === "memory.trace");
+		ok(observation?.k === "memory.observation" && trace?.k === "memory.trace");
+		strictEqual(trace.data.userPromptChars, envelope.userPrompt.length);
+		const observed = await readTelemetryObject(directory, observation.data.content);
+		ok(observed.kind === "resolved");
+		deepStrictEqual(observed.value, { event: "prepared", facts: { note: "api_key=[redacted:assignment]" } });
+		const traced = await readTelemetryObject(directory, trace.data.content);
+		ok(traced.kind === "resolved");
+		strictEqual((traced.value as { userPrompt: string }).userPrompt, "task api_key=[redacted:assignment]");
+	} finally {
+		unregister();
 		await journals.closeAll();
 		await rm(stateDir, { recursive: true, force: true });
 	}

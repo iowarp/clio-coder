@@ -4,7 +4,7 @@ import { telemetryContext, telemetryOwner, withTelemetryContext } from "./contex
 import type { FailureCause } from "./enums.js";
 import type { ClockOrigin } from "./envelope.js";
 import { newAttemptId, newCallId } from "./ids.js";
-import type { CallSettled, CallStarted, Kind, Payload } from "./schemas.js";
+import type { CallSettled, CallStarted, Kind, Payload, PreimageData, PreimageKind } from "./schemas.js";
 
 export type PendingTelemetry<K extends Kind = Kind> = K extends Kind
 	? {
@@ -16,6 +16,8 @@ export type PendingTelemetry<K extends Kind = Kind> = K extends Kind
 			/** Preserved when an already-enveloped worker record crosses into the host writer (#434). */
 			recordId?: string;
 			origin?: ClockOrigin;
+			/** Research content the writer stores in `objects/` and cites as the record's `content` (#434). */
+			preimage?: unknown;
 		}
 	: never;
 
@@ -64,6 +66,28 @@ function sinkAdmits(sink: TelemetrySink, kind: Kind): boolean {
 
 /** No serialization, filesystem access, or locks may enter this call stack (#434, rule13). */
 export function recordTelemetry<K extends Kind>(kind: K, data: Payload<K>, ctx = telemetryContext()): boolean {
+	return enqueueTelemetry(kind, data, undefined, ctx);
+}
+
+/**
+ * Enqueue a content-bearing research record whose preimage the writer stores, reserves against the research cap
+ * and cites before the record is written. The caller hands over ownership of `preimage` (#434).
+ */
+export function recordTelemetryContent<K extends PreimageKind>(
+	kind: K,
+	data: PreimageData<K>,
+	preimage: unknown,
+	ctx = telemetryContext(),
+): boolean {
+	return enqueueTelemetry(kind, data as Payload<K>, preimage, ctx);
+}
+
+function enqueueTelemetry<K extends Kind>(
+	kind: K,
+	data: Payload<K>,
+	preimage: unknown,
+	ctx: TelemetryContext | undefined,
+): boolean {
 	const sink = ctx ? sinks.get(telemetryOwner(ctx)) : undefined;
 	if (!ctx || !sink) {
 		unownedRecords += 1;
@@ -72,7 +96,12 @@ export function recordTelemetry<K extends Kind>(kind: K, data: Payload<K>, ctx =
 	try {
 		// Not capturing a kind the mode excludes is policy, not a drop: it is neither a gap nor a failure (#434, R10).
 		if (!sinkAdmits(sink, kind)) return false;
-		return sink.enqueue({ kind, data, ctx, wallMs: Date.now(), mono: performance.now() } as PendingTelemetry);
+		// Two literals keep the standard path at its single allocation (#434, §14).
+		return sink.enqueue(
+			(preimage === undefined
+				? { kind, data, ctx, wallMs: Date.now(), mono: performance.now() }
+				: { kind, data, ctx, wallMs: Date.now(), mono: performance.now(), preimage }) as PendingTelemetry,
+		);
 	} catch {
 		// Accounting cannot turn a completed call into a retry (#434).
 		sinkFailures += 1;
