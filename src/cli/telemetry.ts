@@ -72,7 +72,7 @@ export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<
 		dependencies: Record<string, string>;
 	};
 	const header = callJournalHeader({
-		clioVersion: pkg.version,
+		clioCoderVersion: pkg.version,
 		piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown",
 	});
 	safeResourceWrite(target, Buffer.concat([header, ...imported.records].map(encodeTelemetryLine)), { mode: 0o600 });

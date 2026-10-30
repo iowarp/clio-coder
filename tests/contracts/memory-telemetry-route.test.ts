@@ -203,7 +203,7 @@ test("linked memory spend follows late journal settlements and deduplicates repe
 	const journal = await openCallJournal({
 		sessionDirectory: join(home.dir, "sessions", "repo", "session"),
 		context,
-		writer: { clioVersion: "fixture", piVersion: "fixture" },
+		writer: { clioCoderVersion: "fixture", piVersion: "fixture" },
 	});
 	try {
 		const call = beginCall(

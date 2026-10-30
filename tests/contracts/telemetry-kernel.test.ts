@@ -26,7 +26,7 @@ const header: SegmentHeader = {
 	mode: "standard",
 	capture: { content: false, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false },
 	clockOrigin: { host: "test-host", pid: 1, birthToken: "birth", monoEpochWallMs: 1000 },
-	writer: { clioVersion: "test", piVersion: "test" },
+	writer: { clioCoderVersion: "test", piVersion: "test" },
 };
 const clock = { t: "2026-10-30T12:00:00.000Z", mono: 10 };
 const record = makeTelemetryRecord("session.opened", {}, context, clock);
@@ -183,6 +183,11 @@ test("segment readers preserve future records and distinguish a torn tail from i
 	);
 	strictEqual(scan.validBytes, lines.length);
 	strictEqual(scan.tornTailBytes, 0);
+	// A development segment written under the legacy writer key still reads, under the canonical one (#434).
+	deepStrictEqual(readTelemetryRecord({ ...header, writer: { clioVersion: "dev", piVersion: "test" } }), {
+		kind: "header",
+		header: { ...header, writer: { clioCoderVersion: "dev", piVersion: "test" } },
+	});
 	const partial = Buffer.from('{"v":1,"k":"call.settled"');
 	const torn = scanTelemetrySegment(Buffer.concat([lines, partial]));
 	strictEqual(torn.validBytes, lines.length);

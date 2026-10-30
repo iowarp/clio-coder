@@ -61,7 +61,7 @@ export function runTelemetryJournal(runId: string): RunTelemetryJournal | undefi
 
 const opening = new Map<string, Promise<RunTelemetryJournal>>();
 /** Every attempt opens a journal before it spawns, so the package versions are read once per process (#434). */
-let writerVersions: Promise<{ clioVersion: string; piVersion: string }> | undefined;
+let writerVersions: Promise<{ clioCoderVersion: string; piVersion: string }> | undefined;
 
 export function openRunTelemetry(context: WorkerTelemetryContext, directory: string): Promise<RunTelemetryJournal> {
 	const pending = opening.get(context.runId);
@@ -89,7 +89,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 	]);
 	writerVersions ??= readFile(join(resolvePackageRoot(), "package.json"), "utf8").then((text) => {
 		const pkg = JSON.parse(text) as { version: string; dependencies: Record<string, string> };
-		return { clioVersion: pkg.version, piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown" };
+		return { clioCoderVersion: pkg.version, piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown" };
 	});
 	const versions = await writerVersions;
 	const previous = await readCallJournal(directory, "events.ndjson");

@@ -36,11 +36,22 @@ export const SegmentHeaderSchema = Type.Object(
 			closed,
 		),
 		clockOrigin: ClockOriginSchema,
-		writer: Type.Object({ clioVersion: Type.String(), piVersion: Type.String() }, closed),
+		writer: Type.Object({ clioCoderVersion: Type.String(), piVersion: Type.String() }, closed),
 	},
 	closed,
 );
 export type SegmentHeader = Static<typeof SegmentHeaderSchema>;
+
+/**
+ * Development builds of 0.6.6 named the writer version `clioVersion`. No release wrote it and nothing writes it now,
+ * but those segments stay readable under the canonical key (#434).
+ */
+function canonicalSegmentHeader(raw: Record<string, unknown>): unknown {
+	const writer = raw.writer;
+	if (!writer || typeof writer !== "object" || !Object.hasOwn(writer, "clioVersion")) return raw;
+	const { clioVersion, ...rest } = writer as Record<string, unknown>;
+	return Object.hasOwn(rest, "clioCoderVersion") ? raw : { ...raw, writer: { clioCoderVersion: clioVersion, ...rest } };
+}
 
 export const EnvelopeSchema = Type.Object(
 	{
@@ -101,8 +112,9 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 		};
 	}
 	if (raw.k === "segment.open") {
-		return Value.Check(SegmentHeaderSchema, value)
-			? { kind: "header", header: value }
+		const header = canonicalSegmentHeader(raw);
+		return Value.Check(SegmentHeaderSchema, header)
+			? { kind: "header", header }
 			: { kind: "skipped", reason: "invalid-record", segment: true };
 	}
 	if (!Value.Check(EnvelopeSchema, value)) return { kind: "skipped", reason: "invalid-record" };

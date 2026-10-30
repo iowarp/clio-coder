@@ -48,7 +48,7 @@ import { checkTelemetryProducer } from "../boundaries/check-boundaries.js";
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
 const context = { sessionId: "journal-session", label: "main" as const };
-const writer = { clioVersion: "fixture", piVersion: "fixture" };
+const writer = { clioCoderVersion: "fixture", piVersion: "fixture" };
 const unknown = { kind: "unknown", reason: "not-observed" } as const;
 const unsent = {
 	disposition: "never_sent" as const,

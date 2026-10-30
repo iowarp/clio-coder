@@ -28,7 +28,7 @@ export function seedForkCallJournal(
 		dependencies: Record<string, string>;
 	};
 	const header = callJournalHeader({
-		clioVersion: pkg.version,
+		clioCoderVersion: pkg.version,
 		piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown",
 	});
 	const row = makeTelemetryRecord(

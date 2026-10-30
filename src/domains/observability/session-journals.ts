@@ -52,7 +52,7 @@ export function createSessionJournals(
 		(versions ??= readFile(join(resolvePackageRoot(), "package.json"), "utf8").then((text) => {
 			const pkg = JSON.parse(text) as { version?: string; dependencies?: Record<string, string> };
 			return {
-				clioVersion: pkg.version ?? "unknown",
+				clioCoderVersion: pkg.version ?? "unknown",
 				piVersion: pkg.dependencies?.["@earendil-works/pi-ai"] ?? "unknown",
 			};
 		}));
