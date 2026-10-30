@@ -4921,10 +4921,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				durationMs: safeCount(facts?.durationMs),
 			};
 			const replayMeta = { ...receiptMeta(identity.runId, facts), [ACP_REPLAY_META_KEY]: { run: true } };
+			// The receipt's call coverage words its token count exactly as the live frame did (#434).
+			const tokens = { tokenCount: safeCount(facts?.tokenCount), ...runTokenCoverage(facts ?? {}) };
 			if (outcome === "succeeded") {
-				forwardEvent("dispatch.completed", null, true, { ...common, tokenCount: safeCount(facts?.tokenCount) }, replayMeta);
+				forwardEvent("dispatch.completed", null, true, { ...common, ...tokens }, replayMeta);
 			} else {
-				forwardEvent("dispatch.failed", null, true, { ...common, reason: outcome }, replayMeta);
+				forwardEvent(
+					"dispatch.failed",
+					null,
+					true,
+					{ ...common, reason: outcome, ...(typeof facts?.tokenCount === "number" ? tokens : {}) },
+					replayMeta,
+				);
 			}
 		}
 	};

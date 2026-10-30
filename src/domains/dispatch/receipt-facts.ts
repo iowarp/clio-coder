@@ -56,6 +56,9 @@ export interface RunReceiptSummary {
 	failureMessage?: string;
 	mergeDetail?: string;
 	tokenCount?: number;
+	/** The calls the run made, and those that reported no usage; absent on receipts that never recorded them (#434). */
+	apiCalls?: number;
+	missingTokenCalls?: number;
 	durationMs?: number;
 	toolCalls?: number;
 	/** Per-tool call counts from the receipt, for the exit summary's tally. */
@@ -148,6 +151,8 @@ function workerReceiptFacts(receipt: Record<string, unknown>): RunReceiptFacts |
 	const outcomeCode = optionalString(receipt.outcomeCode);
 	const exitCode = optionalNumber(receipt.exitCode);
 	const tokenCount = optionalNumber(receipt.tokenCount);
+	const apiCalls = optionalNumber(receipt.apiCalls);
+	const missingTokenCalls = optionalNumber(receipt.missingTokenCalls);
 	const durationMs = elapsedMsFrom(receipt);
 	const toolCalls = optionalNumber(receipt.toolCalls);
 	const external = receipt.runtimeKind === "subprocess" || isRecord(receipt.delegation);
@@ -197,6 +202,8 @@ function workerReceiptFacts(receipt: Record<string, unknown>): RunReceiptFacts |
 		...(mergeDetail !== undefined ? { mergeDetail } : {}),
 		...(exitCode !== undefined ? { exitCode } : {}),
 		...(tokenCount !== undefined ? { tokenCount } : {}),
+		...(apiCalls !== undefined ? { apiCalls } : {}),
+		...(missingTokenCalls !== undefined ? { missingTokenCalls } : {}),
 		...(durationMs !== undefined ? { durationMs } : {}),
 		...(toolCalls !== undefined ? { toolCalls } : {}),
 		...(placement !== undefined ? { placement } : {}),

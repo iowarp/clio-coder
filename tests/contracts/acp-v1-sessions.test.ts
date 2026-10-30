@@ -1,11 +1,15 @@
 import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus, type SafeEventBus } from "../../src/core/event-bus.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { suggestedSessionCostCeilingUsd } from "../../src/domains/scheduling/budget.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { receiptFilePath } from "../../src/domains/session/view-artifacts.js";
 import type { AcpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
@@ -25,6 +29,7 @@ function fixture(
 ) {
 	const requests = new Map<string, (params: unknown) => unknown>();
 	const updates: Array<Record<string, unknown>> = [];
+	const events: Array<Record<string, unknown>> = [];
 	const cwd = process.cwd();
 	const timestamp = "2026-09-25T12:00:00.000Z";
 	const history: SessionMeta[] = Array.from({ length: 55 }, (_, index) => ({
@@ -60,6 +65,7 @@ function fixture(
 		request: async () => ({}) as never,
 		notify: (method, params) => {
 			if (method === "session/update") updates.push(params as Record<string, unknown>);
+			else if (method === "_clio-coder/event") events.push(params as Record<string, unknown>);
 		},
 		onRequest: (method, handler) => {
 			requests.set(method, handler);
@@ -169,6 +175,7 @@ function fixture(
 		requests,
 		emit: (event: unknown) => eventHandler(event),
 		updates,
+		events,
 		history,
 		routingChanges,
 		get cancelled() {
@@ -425,6 +432,80 @@ test("ACP prompt usage writes cost provenance that the delegation adapter reads"
 		strictEqual(result._meta["clio-coder/usage"].costProvenance, "estimated");
 	} finally {
 		await peer.stop();
+	}
+});
+
+test("a reloaded session replays a finished run's tokens with its receipt's call coverage, as the live frame words them (#434)", async () => {
+	const timestamp = "2026-09-25T12:00:00.000Z";
+	const receipt = (runId: string, outcome: string, coverage: Record<string, number>) =>
+		writeFileSync(
+			receiptFilePath(clioStateDir(), runId),
+			JSON.stringify({ outcome, tokenCount: 1_200, startedAt: timestamp, endedAt: timestamp, ...coverage }),
+		);
+	mkdirSync(join(clioStateDir(), "receipts"), { recursive: true });
+	receipt("replay-partial", "succeeded", { apiCalls: 3, missingTokenCalls: 1 });
+	receipt("replay-failed", "failed", { apiCalls: 2, missingTokenCalls: 0 });
+	receipt("replay-legacy", "succeeded", {});
+	const worker = (runId: string, index: number): SessionEntry =>
+		({
+			kind: "workerRun",
+			turnId: `worker-${index}`,
+			parentTurnId: "ask",
+			timestamp,
+			assignmentId: runId,
+			runId,
+			origin: "agent",
+			agentId: "coder",
+			runtime: { kind: "clio", targetId: "target-a", wireModelId: "model-a" },
+		}) as SessionEntry;
+	const loaded = fixture([
+		{ kind: "message", role: "user", turnId: "ask", parentTurnId: null, timestamp, payload: "Ship it" },
+		worker("replay-partial", 1),
+		worker("replay-failed", 2),
+		worker("replay-legacy", 3),
+	]);
+	try {
+		await loaded.call("initialize", {
+			protocolVersion: 1,
+			clientCapabilities: {
+				_meta: { "clio-coder/events": { version: 1, kinds: ["dispatch.completed", "dispatch.failed"] } },
+			},
+		});
+		await loaded.call("session/load", { sessionId: "session-1", cwd: loaded.cwd, mcpServers: [] });
+		deepStrictEqual(
+			loaded.events.map((event) => {
+				const { runId, tokenCount, apiCalls, missingTokenCalls, tokenDisplay } = event.payload as Record<string, unknown>;
+				return { kind: event.kind, runId, tokenCount, apiCalls, missingTokenCalls, tokenDisplay };
+			}),
+			[
+				{
+					kind: "dispatch.completed",
+					runId: "replay-partial",
+					tokenCount: 1_200,
+					apiCalls: 3,
+					missingTokenCalls: 1,
+					tokenDisplay: "≥1,200 (1 call unknown)",
+				},
+				{
+					kind: "dispatch.failed",
+					runId: "replay-failed",
+					tokenCount: 1_200,
+					apiCalls: 2,
+					missingTokenCalls: 0,
+					tokenDisplay: "1,200",
+				},
+				{
+					kind: "dispatch.completed",
+					runId: "replay-legacy",
+					tokenCount: 1_200,
+					apiCalls: null,
+					missingTokenCalls: null,
+					tokenDisplay: "≥1,200 (call coverage not recorded)",
+				},
+			],
+		);
+	} finally {
+		await loaded.stop();
 	}
 });
 
