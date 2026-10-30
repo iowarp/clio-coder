@@ -611,7 +611,8 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		},
 		async explain(ref) {
 			const parsed = parseFactRef(ref);
-			if (!parsed) return null;
+			// A repository window is the usage report's own read; nothing live holds one (#434).
+			if (!parsed || parsed.scope === "repo") return null;
 			const view = live();
 			if (view && (parsed.scope === "run" ? view.run(parsed.owner) !== null : parsed.owner === view.sessionId))
 				return view.explain(ref);

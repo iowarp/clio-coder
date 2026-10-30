@@ -103,12 +103,17 @@ async function performAsync(io: Io): Promise<unknown> {
 	}
 }
 
-function runSync<T>(load: Load<T>): T {
+/** `texts` keeps each file read once across one load, such as the machine-wide out-of-turn store. */
+function runSync<T>(load: Load<T>, texts?: Map<string, unknown>): T {
 	let step = load.next();
 	while (!step.done) {
 		let value: unknown;
 		try {
-			value = performSync(step.value);
+			const io = step.value;
+			if (texts && io.op === "text") {
+				if (!texts.has(io.path)) texts.set(io.path, performSync(io));
+				value = texts.get(io.path);
+			} else value = performSync(io);
 		} catch (error) {
 			step = load.throw(error);
 			continue;
@@ -236,6 +241,7 @@ function* loadSession(
 	sessionId: string,
 	given: string | null | undefined,
 	seen: Set<string>,
+	ancestors = true,
 ): Load<SessionSource | null> {
 	const directory = given === undefined ? yield* findSessionDirectory(stateDir, sessionId) : given;
 	if (directory === null) return null;
@@ -263,7 +269,7 @@ function* loadSession(
 		if ((record.k === "call.ref" || record.k === "run.ref") && !runs.has(record.data.runId))
 			runs.set(record.data.runId, yield* loadRun(stateDir, record.data.runId));
 	let parent: SessionSource | null = null;
-	if (lineage && !seen.has(lineage.sessionId) && seen.size < MAX_LINEAGE) {
+	if (ancestors && lineage && !seen.has(lineage.sessionId) && seen.size < MAX_LINEAGE) {
 		try {
 			assertSafeId(lineage.sessionId, "parent session");
 			parent = yield* loadSession(stateDir, lineage.sessionId, lineage.directory, seen);
@@ -370,4 +376,127 @@ export function listRunTelemetrySourcesAsync(
 	page: { limit: number; before?: RunListCursor | null },
 ): Promise<RunTelemetryListing> {
 	return runAsync(listRuns(stateDir, page));
+}
+
+/** A report window: one workspace bucket's sessions, or every bucket's, between two epoch-ms bounds (#434 §11.1). */
+export interface RepoTelemetryWindow {
+	/** Null reads every bucket. */
+	cwdHash: string | null;
+	from: number;
+	to: number;
+	/** Run journals with no session that count toward the window: every one, or only the ids the caller attributes. */
+	standaloneRuns: "all" | ReadonlySet<string>;
+}
+export interface RepoTelemetrySources {
+	sessions: SessionSource[];
+	/** Standalone run journals, windowed. */
+	runs: Map<string, JournalSource>;
+}
+
+const isCall = (record: TelemetryRecord) => record.k === "call.started" || record.k === "call.settled";
+const accounting = (record: TelemetryRecord) => record.k === "run.usage" || isCall(record);
+
+/**
+ * An attempt counts in the window its settlement falls in, or its start while it has none; any other record counts by
+ * its own time. This is how `usage report` has always windowed calls (#434).
+ */
+function windowRecords(records: readonly TelemetryRecord[], from: number, to: number): TelemetryRecord[] {
+	const within = (at: string) => {
+		const ms = Date.parse(at);
+		return ms >= from && ms <= to;
+	};
+	const selected = new Map<string, boolean>();
+	for (const record of records)
+		if (isCall(record) && (record.k === "call.settled" || !selected.has(record.data.attemptId)))
+			selected.set(record.data.attemptId, within(record.t));
+	return records.filter((record) => (isCall(record) ? selected.get(record.data.attemptId) === true : within(record.t)));
+}
+
+/**
+ * A session as the window sees it: its in-window records, the runs with in-window accounting (or none at all but an
+ * in-window reference), and no ancestor, since an ancestor in the window is one of the window's own sessions.
+ */
+function windowSession(source: SessionSource, from: number, to: number): SessionSource {
+	const records = windowRecords(source.journal.records, from, to);
+	const referenced = new Set(
+		records.flatMap((record) => (record.k === "run.ref" || record.k === "call.ref" ? [record.data.runId] : [])),
+	);
+	const runs = new Map<string, JournalSource>();
+	for (const [runId, run] of source.runs) {
+		const windowed = { ...run, records: windowRecords(run.records, from, to) };
+		if (windowed.records.some(accounting) || (!run.records.some(accounting) && referenced.has(runId)))
+			runs.set(runId, windowed);
+	}
+	return {
+		sessionId: source.sessionId,
+		journal: {
+			...source.journal,
+			// A reference to a run the window leaves out would read as an unreadable run.
+			records: records.filter(
+				(record) => (record.k !== "run.ref" && record.k !== "call.ref") || runs.has(record.data.runId),
+			),
+		},
+		legacy: { ...source.legacy, records: windowRecords(source.legacy.records, from, to) },
+		runs,
+		parent: null,
+	};
+}
+
+/** Newest write among the files matching `pattern`; +∞ when one vanished mid-scan, since it was just written. */
+function* newestWrite(directory: string, pattern: RegExp): Load<number> {
+	let newest = Number.NEGATIVE_INFINITY;
+	for (const name of (yield* list(directory)) ?? []) {
+		if (!pattern.test(name)) continue;
+		newest = Math.max(newest, (yield* mtime(join(directory, name))) ?? Number.POSITIVE_INFINITY);
+	}
+	return newest;
+}
+
+const SESSION_FILES = /^(?:current\.jsonl|calls(?:\.rec_[0-9a-f-]+)?\.jsonl)$/u;
+const RUN_FILES = /^events(?:\.rec_[0-9a-f-]+)?\.ndjson$/u;
+const safeId = (name: string) => /^[a-zA-Z0-9_-]+$/u.test(name);
+
+function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTelemetrySources> {
+	const { from, to } = window;
+	// A side call settles into the machine-wide store, not the session's files, so its session counts by its rows.
+	const storePath = outOfTurnUsagePath(stateDir);
+	const store = yield* text(storePath);
+	const sideCallSessions = new Set(
+		(store ? parseOutOfTurnUsageRows(store, storePath).rows : []).flatMap((row) => {
+			const at = Date.parse(row.timestamp);
+			return row.sessionId && at >= from && at <= to && (window.cwdHash === null || row.repoIdentity === window.cwdHash)
+				? [row.sessionId]
+				: [];
+		}),
+	);
+	const root = join(stateDir, "sessions");
+	const buckets = window.cwdHash === null ? ((yield* list(root)) ?? []).filter(safeId).sort() : [window.cwdHash];
+	const sessions: SessionSource[] = [];
+	const referenced = new Set<string>();
+	for (const bucket of buckets)
+		for (const sessionId of ((yield* list(join(root, bucket))) ?? []).filter(safeId).sort()) {
+			const directory = join(root, bucket, sessionId);
+			if ((yield* newestWrite(directory, SESSION_FILES)) < from && !sideCallSessions.has(sessionId)) continue;
+			const source = yield* loadSession(stateDir, sessionId, directory, new Set(), false);
+			if (!source) continue;
+			for (const runId of source.runs.keys()) referenced.add(runId);
+			sessions.push(windowSession(source, from, to));
+		}
+	const runs = new Map<string, JournalSource>();
+	const runsRoot = join(stateDir, "runs");
+	for (const runId of ((yield* list(runsRoot)) ?? []).filter(safeId).sort()) {
+		if (referenced.has(runId) || (window.standaloneRuns !== "all" && !window.standaloneRuns.has(runId))) continue;
+		if ((yield* newestWrite(join(runsRoot, runId), RUN_FILES)) < from) continue;
+		const source = yield* loadRun(stateDir, runId);
+		// A run a session owns belongs to that session's accounting, in or out of this window (#434).
+		if (source.records.some((record) => record.ctx.sessionId !== null)) continue;
+		const windowed = { ...source, records: windowRecords(source.records, from, to) };
+		if (windowed.records.some(accounting) || !source.present) runs.set(runId, windowed);
+	}
+	return { sessions, runs };
+}
+
+/** Every session and standalone run a `usage report` window covers, windowed; a cold, synchronous read for the CLI. */
+export function loadRepoTelemetrySources(stateDir: string, window: RepoTelemetryWindow): RepoTelemetrySources {
+	return runSync(loadRepo(stateDir, window), new Map());
 }

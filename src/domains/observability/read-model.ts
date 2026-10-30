@@ -73,6 +73,19 @@ export interface SessionSource {
 	/** The fork parent; `source` is null when its journal and ledger could not be read. */
 	parent: { sessionId: string; turnId: string; at: string; source: SessionSource | null } | null;
 }
+/** Several sessions read as one scope: a repository's sessions over a window, already windowed by the loader (#434). */
+export interface RepoSource {
+	/** The ref owner, `<cwdHash>-<days>d` or `all-<days>d`; see {@link repoOwner}. */
+	owner: string;
+	sessions: readonly SessionSource[];
+	/** Run journals no session in the scope references, such as a standalone `run --agent`. */
+	runs: ReadonlyMap<string, JournalSource>;
+}
+
+export function repoOwner(cwdHash: string | null, days: number): string {
+	return `${cwdHash ?? "all"}-${days}d`;
+}
+
 export interface ReadOptions {
 	now?: Date;
 }
@@ -734,12 +747,15 @@ interface Selection {
 	describe: string;
 }
 
-type View = { session: SessionSource } | { run: Run };
+type View = { session: SessionSource } | { run: Run } | { repo: RepoSource };
 /** An absent run journal is already one unknown contribution; a damaged one adds its own. */
 const runGap = (run: Run) => (run.source.present ? run.gap : 0);
 
 function select(view: View, ref: ParsedFactRef): Selection | null {
 	const group = ref.group;
+	if (ref.scope === "repo")
+		return "repo" in view && view.repo.owner === ref.owner && !ref.attemptId ? selectRepo(view.repo, group) : null;
+	if ("repo" in view) return null;
 	if (ref.scope === "run") {
 		const run =
 			"run" in view ? (view.run.runId === ref.owner ? view.run : undefined) : analyze(view.session).runs.get(ref.owner);
@@ -780,6 +796,28 @@ function select(view: View, ref: ParsedFactRef): Selection | null {
 	return {
 		parts,
 		describe: `${described.join(" + ")}${group ? ` where ${group.by}=${group.key}` : ""}`,
+	};
+}
+
+/** Each session's own attempts and its runs, a run two sessions reference counted once, then the scope's own runs. */
+function selectRepo(repo: RepoSource, group: { by: FactGroup; key: string } | undefined): Selection {
+	const parts: Part[] = [];
+	const counted = new Set<string>();
+	const addRun = (run: Run) => {
+		if (counted.has(run.runId)) return;
+		counted.add(run.runId);
+		if (!group || runInGroup(run, group)) parts.push({ run, gap: runGap(run) });
+	};
+	for (const session of repo.sessions) {
+		const analysis = analyze(session);
+		const selection = selectionOf(analysis, group);
+		parts.push({ attempts: selection.members, selection, gap: analysis.gap });
+		for (const run of analysis.runs.values()) addRun(run);
+	}
+	for (const [runId, source] of [...repo.runs].sort(([a], [b]) => a.localeCompare(b))) addRun(analyzeRun(runId, source));
+	return {
+		parts,
+		describe: `${renderCount(repo.sessions.length)} sessions' attempts + each run's journal fold${group ? ` where ${group.by}=${group.key}` : ""}`,
 	};
 }
 
@@ -1418,6 +1456,35 @@ export function costReport(source: SessionSource, groupBy: GroupBy = "label", op
 			pricedBy: pricedByCounts(select(view, { ...base, metric: "usd" })?.parts ?? []),
 		},
 		groups: costGroups(view, base, groupKeys([...analysis.runs.values()], analysis.attempts, groupBy), groupBy),
+	};
+}
+
+/** One cost report across a repository's sessions and runs over a window (#434 §11.1); refs use the `repo` scope. */
+export function repoCostReport(
+	repo: RepoSource,
+	scope: { repo: string; days: number },
+	groupBy: GroupBy = "label",
+	options: ReadOptions = {},
+): CostReportV1 {
+	const view: View = { repo };
+	const base = { scope: "repo" as const, owner: repo.owner };
+	const attempts = repo.sessions.flatMap((session) => analyze(session).attempts);
+	const runs = new Map<string, Run>();
+	for (const session of repo.sessions)
+		for (const run of analyze(session).runs.values()) if (!runs.has(run.runId)) runs.set(run.runId, run);
+	for (const [runId, source] of repo.runs) if (!runs.has(runId)) runs.set(runId, analyzeRun(runId, source));
+	return {
+		...header(options),
+		kind: "cost",
+		scope: { repo: scope.repo, days: scope.days },
+		groupBy,
+		total: {
+			calls: quantity(view, { ...base, metric: "calls" }),
+			tokens: quantity(view, { ...base, metric: "total" }),
+			usd: quantity(view, { ...base, metric: "usd" }),
+			pricedBy: pricedByCounts(select(view, { ...base, metric: "usd" })?.parts ?? []),
+		},
+		groups: costGroups(view, base, groupKeys([...runs.values()], attempts, groupBy), groupBy),
 	};
 }
 
