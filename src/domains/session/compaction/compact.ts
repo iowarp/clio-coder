@@ -11,7 +11,7 @@ import type { CallMessageObserver } from "../../../core/telemetry/producer.js";
 import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
 import type { MemoryCompactionOffer, MemoryConsumptionReceipt } from "../../memory/contract.js";
 import { observationTracing, traceObservation } from "../../memory/observation-trace.js";
-import type { CallJournalOptions, CallScope } from "../../observability/call-scope.js";
+import type { AdmissionHold, CallJournalOptions, CallScope } from "../../observability/call-scope.js";
 import { openCallScope } from "../../observability/call-scope.js";
 
 export {
@@ -132,8 +132,11 @@ export interface CompactInput extends SideCallAuth {
 		ordinary: string,
 		projected: readonly SessionEntry[],
 	) => MemoryCompactionOffer | null;
-	/** Admission after exact request-fit, before each provider call. */
-	beforeSummaryCall?: (() => void | Promise<void>) | undefined;
+	/**
+	 * Admission after exact request-fit, before each provider call. Its time is the call's admission stage; it sets
+	 * `hold.waitedOn` when a ceiling held the call (#434).
+	 */
+	beforeSummaryCall?: ((hold: AdmissionHold) => void | Promise<void>) | undefined;
 	/** Price the proposed replay before persisting the operator-visible figures. */
 	checkpointTokenFigures?: (entry: Readonly<Omit<CompactionSummaryEntry, "timestamp">>) => {
 		tokensBefore: number;
@@ -956,7 +959,7 @@ async function runSummaryRequest(
 	if (maxTokens !== undefined) options.maxTokens = maxTokens;
 
 	input.signal?.throwIfAborted();
-	await input.beforeSummaryCall?.();
+	await scope.admit((hold) => input.beforeSummaryCall?.(hold));
 	const timestamp = new Date().toISOString();
 	if (observationTracing())
 		traceObservation("compaction-input", {
@@ -1079,7 +1082,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		try {
 			if (!skillContext && input.entries.some((entry) => entry.kind === "skillActivation" && !entry.activation.runId))
 				throw new ProviderCompactionError("native-skills-unverified");
-			await input.beforeSummaryCall?.();
+			await scope.admit((hold) => input.beforeSummaryCall?.(hold));
 			input.signal?.throwIfAborted();
 			const native = await scope.withContext(() => providerCompaction((call) => observations.push(call), scope));
 			scope.settle({ stopReason: "stop", usage: native.usage });

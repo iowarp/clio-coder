@@ -17,6 +17,11 @@ export interface CallJournalOptions {
 	onSettled?: (facts: CallSettled) => void;
 }
 
+/** Filled by an admission gate while it runs; `waitedOn` names what held the request (#424, #434). */
+export interface AdmissionHold {
+	waitedOn?: "budget" | "capacity" | "steering";
+}
+
 /** One logical helper call retains its originating writer across schema and auth retries (#434). */
 export async function openCallScope(options: CallJournalOptions | undefined, model: { api: string; id: string }) {
 	const lease = options ? await options.acquire(options.origin, options.label) : undefined;
@@ -66,6 +71,16 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 			return settled(
 				call.settle(callSettlementFromMessage(message, options.costProvenance), reportedModelFromMessage(message)),
 			);
+		},
+		/** Time a gate as the current attempt's admission stage, so a wait reads as admission and never as a stall. */
+		async admit<T>(gate: (hold: AdmissionHold) => T | Promise<T>): Promise<T> {
+			const hold: AdmissionHold = {};
+			call?.stage("admission", "start");
+			try {
+				return await gate(hold);
+			} finally {
+				call?.stage("admission", "end", hold);
+			}
 		},
 		withContext<T>(work: () => T): T {
 			return call ? call.withContext(work) : work();

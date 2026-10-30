@@ -2077,8 +2077,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								tokensAfter: liveContextEstimate(agentRuntime, pendingUserText, messages).tokens,
 							};
 						},
-						beforeSummaryCall: async () => {
-							await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.();
+						beforeSummaryCall: async (hold) => {
+							await (handoff?.beforeSummaryCall ?? budget?.beforeSummaryCall)?.(hold);
 							if (!summaryLifecycleStarted) startSummaryLifecycle();
 							emitCompactionActivity("running", "summarizing session history", "summarize");
 						},

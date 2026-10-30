@@ -2,7 +2,7 @@ import type { CallObservation } from "../core/call-failure.js";
 import { trackCallFetch } from "../core/call-failure.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../core/oauth-retry.js";
-import type { CallJournalOptions, CallScope } from "../domains/observability/call-scope.js";
+import type { AdmissionHold, CallJournalOptions, CallScope } from "../domains/observability/call-scope.js";
 import { openCallScope } from "../domains/observability/call-scope.js";
 /**
  * `/btw`: one model round beside the session, never inside it.
@@ -119,8 +119,11 @@ export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question">
 	runtimeId?: string;
 	/** Sampling temperature; absent leaves the provider's default. `/draft` spreads it across candidates. */
 	temperature?: number;
-	/** Optional host admission and accounting apply to each attempt, including a schema retry. */
-	beforeRequest?: () => Promise<void>;
+	/**
+	 * Optional host admission and accounting apply to each attempt, including a schema retry. Its time is the
+	 * attempt's admission stage; it sets `hold.waitedOn` when a ceiling or capacity held the request (#434).
+	 */
+	beforeRequest?: (hold: AdmissionHold) => Promise<void>;
 }
 
 export interface SideQuestionResult {
@@ -282,9 +285,11 @@ async function runRound(
 	let terminalError: unknown;
 	let text = "";
 	try {
-		const flowRefusal = input.admitFlow?.() ?? null;
-		if (flowRefusal !== null) throw new Error(flowRefusal);
-		await input.beforeRequest?.();
+		await scope.admit(async (hold) => {
+			const flowRefusal = input.admitFlow?.() ?? null;
+			if (flowRefusal !== null) throw new Error(flowRefusal);
+			await input.beforeRequest?.(hold);
+		});
 		input.signal?.throwIfAborted();
 		const options: Record<string, unknown> = {
 			maxTokens: input.maxTokens ?? SIDE_QUESTION_MAX_TOKENS,

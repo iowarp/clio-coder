@@ -175,7 +175,7 @@ import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
 import type { MuxContract } from "../domains/mux/index.js";
 import type { BackgroundMemoryUsageSink } from "../domains/observability/background-memory-usage.js";
-import type { CallJournalOptions } from "../domains/observability/call-scope.js";
+import type { AdmissionHold, CallJournalOptions } from "../domains/observability/call-scope.js";
 import { openCallScope } from "../domains/observability/call-scope.js";
 import { recordFailedCompactionCalls } from "../domains/observability/compaction-usage.js";
 import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
@@ -1614,13 +1614,17 @@ async function runCompactionFlow(
 			!settings.context.compaction.model &&
 			resolved.runtimeId === "openai-codex";
 		let nativeAdmission: Promise<void> | undefined;
-		const admitSummary = async (): Promise<void> => {
+		const admitSummary = async (hold: AdmissionHold): Promise<void> => {
 			if (admission?.summaryAdmitted) return;
-			await budget?.beforeSummaryCall?.();
+			await budget?.beforeSummaryCall?.(hold);
 			if (resolved.costProvenance === "known" || resolved.costProvenance === "estimated") {
 				await admission?.scheduling?.admitPaidRequest?.({
 					waitForRaise: admission.headless !== true,
 					...(admission.getCeilingUsd ? { getCeilingUsd: admission.getCeilingUsd } : {}),
+					// The ceiling held this summary call, so its admission stage reads as a budget wait (#424, #434).
+					onBlocked: () => {
+						hold.waitedOn = "budget";
+					},
 					...(budget?.signal ? { signal: budget.signal } : {}),
 				});
 			}
@@ -1668,10 +1672,10 @@ async function runCompactionFlow(
 					? { providerFallbackReason: "non-codex-or-compaction-override" }
 					: {}),
 				// Native rejection and its portable retry share one transaction admission (#423).
-				beforeSummaryCall: () => {
+				beforeSummaryCall: (hold) => {
 					if (flowViolation !== undefined && flowViolation !== null) throw new Error(`compaction refused: ${flowViolation}`);
-					if (!nativeEnabled || !providerCompaction) return admitSummary();
-					nativeAdmission ??= admitSummary();
+					if (!nativeEnabled || !providerCompaction) return admitSummary(hold);
+					nativeAdmission ??= admitSummary(hold);
 					return nativeAdmission;
 				},
 				...(summarize ? { summarize } : {}),

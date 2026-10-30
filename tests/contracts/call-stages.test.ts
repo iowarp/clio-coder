@@ -18,6 +18,7 @@ import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { lockedSynthesisRepromptMessages } from "../../src/engine/loop-guard.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
+import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 it("a main call journals its stages in Pi's order and its cache physics, a budget refusal never reaches send, and each turn settles once (#434)", async () => {
@@ -247,6 +248,73 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 		loop.dispose();
 		faux.unregister();
 		await journals.flush();
+		env.restore();
+	}
+});
+
+it("a side call times its admission gate as its admission stage and names the ceiling that held it (#434)", async () => {
+	const env = await isolateClioEnv("clio-coder-call-stages-");
+	const faux = registerEngineFauxProvider({
+		api: "side-admission-fixture",
+		models: [{ id: "side" }],
+		tokensPerSecond: 0,
+	});
+	faux.setResponses([
+		{
+			role: "assistant",
+			content: [{ type: "text", text: "answer" }],
+			api: faux.api,
+			provider: "fixture",
+			model: "side",
+			stopReason: "stop",
+			timestamp: Date.now(),
+			usage: {
+				input: 3,
+				output: 2,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 5,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+		},
+	]);
+	const model = faux.getModel("side");
+	ok(model);
+	const journals = createSessionJournals(clioStateDir(), () => {});
+	const origin = { id: "side-admission", cwdHash: "sidehash" };
+	try {
+		const result = await runOutOfTurnRound({
+			telemetry: {
+				origin,
+				acquire: journals.acquire,
+				label: "btw",
+				targetId: "side-target",
+				runtimeId: "fixture",
+				costProvenance: "known",
+			},
+			model,
+			messages: [],
+			systemPrompt: "fixture",
+			userText: "question",
+			thinkingLevel: "off",
+			beforeRequest: async (hold) => {
+				hold.waitedOn = "budget";
+				await new Promise((resolve) => setTimeout(resolve, 5));
+			},
+		});
+		strictEqual(result.text, "answer");
+		await journals.closeAll();
+		const settled = (await readCallJournal(join(clioStateDir(), "sessions", origin.cwdHash, origin.id))).records.flatMap(
+			({ record }) => (record.k === "call.settled" ? [record.data] : []),
+		);
+		strictEqual(settled.length, 1);
+		const admission = settled[0]?.stages.admission;
+		strictEqual(admission?.waitedOn, "budget");
+		ok(admission.end > admission.start, "the wait is inside the admission span");
+		ok((settled[0]?.stages.send?.start ?? -1) >= admission.end, "the send follows admission");
+	} finally {
+		await journals.closeAll();
+		faux.unregister();
 		env.restore();
 	}
 });
