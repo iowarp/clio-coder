@@ -36,7 +36,7 @@ The skill precedence, lowest to highest, is:
 
 Inside Clio Coder's own repository, attended sessions are told to load `clio-coder-dev` before the first edit and `clio-coder-test` when choosing validation ([extension.ts](../../src/domains/prompts/extension.ts)). Headless runs are told to take conventions from the code and neighboring tests and not to load either, and both skills stay discoverable.
 
-Clio Coder-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio-coder/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. Project roots may not leave the workspace and user roots may not leave the home directory through a symlink; an escaping skill is skipped with a warning.
+Clio Coder-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio-coder/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. Project roots may not leave the workspace and user roots may not leave the home directory through a symlink; an escaping skill is skipped with the warning `skill path resolves to <path>, outside <anchor>; a skill root may not leave its scope through a symlink`. A project root is contained strictly: a project skill root that is itself a symlink does not move the boundary to its target, because a repository can offer only what it contains. A user or XDG root the operator placed outside its scope, such as a config directory on another volume, anchors to its own real path instead.
 
 ### Skill collision resolution
 
@@ -131,7 +131,7 @@ Claude, Codex, and OpenCode prompt folders are discovered at user and project sc
 
 ## Skills
 
-Skills follow the Agent Skills `SKILL.md` format. A skill is a directory containing `SKILL.md`, or a single Markdown file under a skill root. YAML frontmatter is required and must include a `description`. Frontmatter validation issues degrade to warnings and the skill still loads. A skill file is skipped only when the description is missing, the file is unreadable, larger than 1 MiB, not valid UTF-8 text, or has frontmatter that cannot be parsed, or when a package reference in the body cannot resolve.
+Skills follow the Agent Skills `SKILL.md` format. A skill is a directory containing `SKILL.md`, or a single Markdown file under a skill root. YAML frontmatter is required and must include a `description`. Frontmatter validation issues degrade to warnings and the skill still loads. A skill file is skipped only when the description is missing, the file is unreadable, not a regular file, larger than 1 MiB, not valid UTF-8 text, or has frontmatter that cannot be parsed, or when a package reference in the body cannot resolve. A `SKILL.md` that is a symlink still marks its directory as a skill, so a linked skill nested in a root loads, and containment and the regular-file check then decide whether its target is acceptable. A FIFO, socket, device or directory named `SKILL.md` is refused with a diagnostic such as `a FIFO, not a regular file`, and the file is opened non-blocking and checked on the open descriptor, so a FIFO can never hang `--skill` or `library validate`.
 
 Example `.clio-coder/skills/hdf5-review/SKILL.md`:
 

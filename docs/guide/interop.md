@@ -25,15 +25,17 @@ are selected explicitly; Clio does not silently switch agents or modes.
 | Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@0.86.0` | `claude-code` | `claude-code` |
 | Codex | `npx -y @agentclientprotocol/codex-acp@2.1.1` | `codex-cli` | `codex` |
 | OpenCode | Native `opencode acp --cwd .` | `opencode-cli` | `opencode` |
+| GitHub Copilot CLI | Native `copilot --acp` | None | None |
 | Antigravity CLI | No verified ACP recipe | `antigravity-code` | `antigravity` |
 | Pi CLI | No verified ACP recipe | `pi-cli` | `pi` |
+| A second Clio Coder | None | None | `clio` |
 
 The recipes live in [registry.ts](../../src/domains/interop/registry.ts). Antigravity
 CLI and Pi have no built-in ACP connection. An operator-configured ACP peer entry
 can use a compatible adapter. A pinned bridge counts as verified only when that
 package at the pinned version sits in the project's `node_modules`; otherwise
 inspection reports the adapter as `unknown` and `npx` may fetch it at first
-launch. OpenCode has no adapter package, so its binary is the whole recipe.
+launch. OpenCode and GitHub Copilot CLI have no adapter package, so their binary is the whole recipe. A `clio` pane opens another `clio-coder` against this session's Clio Coder directories and saved credentials; it takes no brief on its command line, and the model gives it a task through the `panes` tool's `send` action ([Panes and the Files Pane](panes-and-files.md)).
 
 Clio starts an external `pi` with `--print --mode json --no-session --no-extensions --no-approve`.
 Pi 0.99 and later also disable their built-in providers under `--no-extensions`, so
@@ -60,6 +62,7 @@ targets:
   - id: opencode-local
     runtime: opencode-cli
     defaultModel: opencode-cli-default # use OpenCode's selected model
+    trustedUnmediated: true # OpenCode runs its own tools; accept its authority for writes
 integrations:
   externalAgents:
     entries:
@@ -69,7 +72,7 @@ integrations:
         toolGovernance: clio-coder-policy
 ```
 
-Keep the rest of your settings when adding these entries. If OpenCode's provider
+Keep the rest of your settings when adding these entries. Every headless peer runtime (`claude-code`, `codex-cli`, `opencode-cli`, `antigravity-code`, `pi-cli`) runs its own tool loop, so Clio Coder cannot mediate its individual calls. Admission therefore refuses write-capable work on such a target unless the target sets `trustedUnmediated: true`, which is read only from the operator's own settings file; a project settings layer that sets it is ignored with a warning. Without it, `/run --target opencode-local` fails admission with `runtime 'opencode-cli' runs its own tool loop and Clio cannot mediate its individual calls, so it is refused write-capable work`, and OpenCode also refuses a read-only headless run, so the OpenCode target needs the opt-in for any headless work. If OpenCode's provider
 uses an environment credential such as `apiKey: "{env:LAB_GATEWAY_KEY}"` in its
 user `opencode.json` or `opencode.jsonc`, the headless connector passes that
 named variable to OpenCode when it is set. For ACP, add

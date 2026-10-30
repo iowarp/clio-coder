@@ -10,7 +10,7 @@ Clio Coder is a coding harness for terminal and browser sessions, with provider 
 src/
 ├── cli/             # clio-coder subcommands, argument parsing, headless run modes
 ├── core/            # config/state paths, event bus, defaults, domain loader, shared primitives
-├── domains/         # 28 feature-domain directories, loaded through manifests or imported as libraries
+├── domains/         # 31 feature-domain directories, loaded through manifests or imported as libraries
 ├── engine/          # Pi (pi-ai, pi-agent-core, pi-tui) boundary, runtime adapters, ACP, worker runtime
 ├── entry/           # orchestrator bootstrap wiring (bootOrchestrator)
 ├── interactive/     # TUI panels, overlays, key routing, dashboard
@@ -28,9 +28,9 @@ tests/
 
 ## Domains
 
-`src/domains/` holds 28 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, session, observability, scheduling, and dispatch, plus mux when the pane tier is active. Each of those has a `manifest.ts` naming its `dependsOn` list. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
+`src/domains/` holds 31 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, memory, session, observability, scheduling, and dispatch, plus mux when the pane tier is active. Each of those except memory has a `manifest.ts` naming its `dependsOn` list. Memory is declared inline in [orchestrator.ts](../../src/entry/orchestrator.ts) with no dependencies: its module wraps the composition root's `MemoryRuntime`, publishes that runtime's contract and disposes it on stop. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
 
-System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the interactive host ([system-one-host.ts](../../src/entry/system-one-host.ts)). The remaining directories, which are components, evidence, evolution, gateway, lifecycle, memory, quota, system-one, toolchain, turn-control, and user-tasks, are libraries or CLI-owned feature areas whose module functions callers import directly. Of those, gateway (`src/domains/gateway/mcp/`), quota, and user-tasks have no domain-level `index.ts`, so callers import their files.
+System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the interactive host ([system-one-host.ts](../../src/entry/system-one-host.ts)). The remaining directories, which are components, evidence, evolution, gateway, lifecycle, quota, semantic, semantic-app, system-one, toolchain, turn-control, user-tasks, and workspace-snapshots, are libraries or CLI-owned feature areas whose module functions callers import directly. Memory's own files are also imported as a library beside its loaded contract. Of the libraries, gateway (`src/domains/gateway/mcp/`) and user-tasks have no domain-level `index.ts`, so callers import their files.
 
 | Domain | Primary source | Public surface |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 | gateway | `src/domains/gateway/mcp/**` | The local stdio MCP client, strict configuration loading, and explicit trust. |
 | interop | `src/domains/interop/**` | The agent-kind registry, bounded detection of other coding agents, and consent to wire one as a delegation peer. |
 | lifecycle | `src/domains/lifecycle/**` | Doctor diagnostics, upgrade mechanics, migrations, Claude Agent SDK install, uninstallation. |
-| memory | `src/domains/memory/**` | Approved long-term memory, task bank, proactive task intervention. |
+| memory | `src/domains/memory/**` | Approved long-term memory, task bank, proactive task intervention, and the memory runtime contract the inline domain module publishes. |
 | middleware | `src/domains/middleware/**` | Declarative and programmatic lifecycle hooks and budgets. |
 | mux | `src/domains/mux/**` | Optional interactive pane-host integration: Herdr guest mode, the Yazi file pane, and the cliamp music dock. |
 | observability | `src/domains/observability/**` | Cost tracker, projection snapshot, SQLite trace mirror, evidence index, out-of-turn usage store. See [Observability](observability.md) and [Trace Store](trace-store.md). |
@@ -56,12 +56,15 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 | resources | `src/domains/resources/**` | Package library, skills loader, prompts loader. |
 | safety | `src/domains/safety/**` | Ordered policy engine, path policy, zero-access rails, audit. |
 | scheduling | `src/domains/scheduling/**` | Budget ceilings, node cluster states, local capacity, batch capacity checks. |
+| semantic | `src/domains/semantic/**` | The optional semantic context index: source extraction, embedding records and their per-profile storage generations. |
+| semantic-app | `src/domains/semantic-app/**` | The application boundary of the semantic index: the embedding service, search for the `context` tool and CLI, the extension embedding capability, and the session-scoped background refresh. No model is contacted at startup. |
 | session | `src/domains/session/**` | Append-only JSONL transcripts, tree navigation, compaction, handoff, `/view` artifact providers. |
 | share | `src/domains/share/**` | Portable workspace and resource archive export/import. |
 | system-one | `src/domains/system-one/**` | The decision layer: typed questions about one object, pluggable engines, fitted cuts, and the decision ledger. See [System One](system-one.md). |
-| toolchain | `src/domains/toolchain/**` | Pinned external-tool discovery, installation, and resolution (`herdr`, `yazi`, `croc`, `cliamp`). |
+| toolchain | `src/domains/toolchain/**` | Pinned external-tool discovery, installation, and resolution (`asciinema`, `herdr`, `yazi`, `croc`, `cliamp`). |
 | turn-control | `src/domains/turn-control/**` | Pure turn facts, workflow decisions, turn outcome reduction, and the orientation and direction blocks. |
 | user-tasks | `src/domains/user-tasks/**` | Library and CLI-owned durable user task list plus board handoff state. |
+| workspace-snapshots | `src/domains/workspace-snapshots/**` | Git snapshots of the worktree taken before mutating calls, built in a private per-session index under `refs/clio-coder/snapshots/`, and the `/rewind` plan and restore. |
 
 The `interop` domain owns one question: which other coding agents are on this
 machine and in this project. [registry.ts](../../src/domains/interop/registry.ts) is pure data, one
@@ -107,11 +110,12 @@ decision.
 | 10 | agents | config |
 | 11 | prompts | config, context, resources, agents |
 | 12 | middleware | none |
-| 13 | session | config |
-| 14 | observability | providers, session |
-| 15 | scheduling | config, observability |
-| 16 | mux, only when the pane tier is active | none |
-| 17 | dispatch | config, safety, agents, providers, middleware, prompts, scheduling |
+| 13 | memory, declared inline | none |
+| 14 | session | config |
+| 15 | observability | providers, session |
+| 16 | scheduling | config, observability |
+| 17 | mux, only when the pane tier is active | none |
+| 18 | dispatch | config, safety, agents, providers, middleware, prompts, scheduling |
 
 Observability deliberately omits dispatch from its `dependsOn`, even though it listens to the dispatch bus channels, so that scheduling can sit between observability and dispatch without a cycle. The mux module is imported dynamically through [with-panes.ts](../../src/entry/with-panes.ts), and only when `resolvePanesEnablement` ([panes-activation.ts](../../src/entry/panes-activation.ts)) says the extension is active, so a plain boot loads no mux code.
 
@@ -325,8 +329,9 @@ Neither `src/session-control/**` nor `src/engine/**` may import `src/interactive
 
 The graphical application is a separate workspace package, `@iowarp/clio-coder-gui`, under `apps/clio-coder-gui`. It has its own `package.json`, TypeScript configs, test suite, and lint step, and its server is a Hono process bound to `127.0.0.1` that requires a bearer token, random per launch unless the background app or `--token` supplies one. The guide to using it is [the GUI guide](../guide/gui.md).
 
-The root checker in `tests/boundaries/check-boundaries.ts` does not scan it. Its own `apps/clio-coder-gui/tests/boundaries.test.ts` allows exactly three ways to reach root `src/`:
+The root checker in `tests/boundaries/check-boundaries.ts` does not scan it. Its own `apps/clio-coder-gui/tests/boundaries.test.ts` allows exactly four ways to reach root `src/`:
 
+- `server/clio/wire-shims.ts` re-exports the browser-safe ACP wire declarations: everything in `src/engine/acp/types.ts`, plus the context-operation types from `src/core/context-operation.ts` and `src/core/bus-events.ts` as type-only exports. It evaluates no process transport.
 - `server/clio/http-shims.ts` re-exports a fixed allowlist for the HTTP process: the ACP stdio transport, errors, and wire types, the XDG directory helpers, `resolvePackageRoot`, process-identity probes, and `getVersionInfo`. The wire types must be type-only.
 - `server/clio/adapters/*.ts` import an allowlist of root domain and core modules, such as the trace store, evidence index, settings layers, provider registry, and dispatch state types. Adapters are blocking readers, so only the worker entries (`server/worker/reads-main.ts` and `ops-main.ts`) may import them, which keeps their work off the HTTP event loop.
 - `tests/harness` and `tests/fixtures` use a separate test-seam allowlist.
@@ -377,7 +382,8 @@ Core data paths:
 Clio Coder uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:
 
 - Provider capability resolution decides whether tool schemas are sent at all. A tool-capable session gets the complete registry as one deterministic surface, with each tool placed `direct` (schema attached to every request) or behind the `gateway` tool (found and called on demand). Placement changes what the model sees and never what a call is allowed to do ([surface.ts](../../src/tools/surface.ts)).
-- [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Playbook step write boundaries are detect-and-rollback mechanisms (change tracking and rollbacks) with no OS-level confinement. The policy engine blocks writes outside dispatch `write_roots`, and the worker OS sandbox (`safety.sandbox`) binds a sandboxed worker's `bash` and `verify` writes to those roots.
+- [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Playbook step write boundaries are detect-and-rollback mechanisms (change tracking and rollbacks) with no OS-level confinement. The policy engine blocks writes outside dispatch `write_roots`.
+- The OS sandbox (`safety.sandbox`, `src/core/sandbox/`) contains shell commands in two places. A dispatched worker's own `bash`, `run_script` and verification commands run in the worker sandbox, bound to its write roots. At autonomy `default` the main session's `bash` and `run_script` also run contained in the main-session sandbox, which writes the workspace, the temp roots and `safety.scratchRoots`. Credential variables and secret files are hidden inside either sandbox, and `safety.sandboxUnixSockets: block` refuses new Unix-domain sockets.
 - [registry.ts](../../src/tools/registry.ts) is the admission point for every tool invocation.
 - [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts) and related dispatch files persist receipts used by evidence and cost surfaces.
 

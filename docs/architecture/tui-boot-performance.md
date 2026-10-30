@@ -21,7 +21,7 @@ Stage 0 draws before the application loads, so its static module closure is kept
 
 ### Compile cache
 
-The interactive session, `clio-coder run` and `clio-coder acp` enable Node's module compile cache under Clio Coder's cache directory once it exists ([compile-cache.ts](../../src/core/compile-cache.ts)). Read-only commands such as `paths` and bare `doctor` never enable it, so they write nothing to a home Clio has not set up. `NODE_DISABLE_COMPILE_CACHE` turns it off.
+The interactive session, `clio-coder run` and `clio-coder acp` enable Node's module compile cache under Clio Coder's cache directory once it exists ([compile-cache.ts](../../src/core/compile-cache.ts)). Read-only commands such as `paths` and bare `doctor` never enable it, so they write nothing to a home Clio has not set up. A dispatched native worker resolves its whole static graph before its first statement, so the parent hands it the same cache directory through `NODE_COMPILE_CACHE` in the worker's environment, enabling the cache first when no boot entrypoint did, as a direct `fleet run` does ([worker-spawn.ts](../../src/domains/dispatch/worker-spawn.ts)). The worker removes the variable from its own environment once Node has read it, so the cache serves only Clio Coder's entry graph and never the operator's own Node processes. `NODE_DISABLE_COMPILE_CACHE` turns it off.
 
 ## Presentation modes
 

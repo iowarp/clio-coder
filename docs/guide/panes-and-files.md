@@ -30,14 +30,16 @@ Clio closes its docks and leaves utility panes open:
 - **The shell pane.** `/panes open shell` opens a login `bash` in the
   workspace.
 - **Coding peer handoff.** `/peer [--cwd <workspace>] <peer> [brief]` opens
-  Claude Code, Codex, OpenCode, Antigravity CLI, or Pi in a Clio Coder-owned pane.
+  a second Clio Coder, Claude Code, Codex, OpenCode, Antigravity CLI, or Pi in a Clio Coder-owned pane.
   The brief is limited to 8,192 UTF-8 bytes and `--cwd` must name an existing directory.
+  A second Clio Coder takes no brief on its command line; open it without one and give it its task afterwards.
+  It runs against this session's Clio Coder directories and saved credentials, not the pane host's environment.
   This is an interactive handoff; Clio can close the owned pane but does not
   capture a managed run or receipt from its contents. See [Coding Agent
   Interoperability](interop.md).
 - **The workers dock.** `Alt+W` shows the workers dashboard in a dock to the right of the session. The dashboard, its keys and the per-run
   takeover are documented with the fleet in [Fleet Dispatch](fleet-dispatch.md). This page covers the utility panes and the dock contract below.
-- **The music pane.** `/music` or `Alt+A` shows cliamp in a dock below the session for focus radio. It is off until `integrations.music.enabled` is `true` (default `false`, in `/settings interface` under Panes) and needs cliamp from `clio-coder tools install cliamp`. See [Music](music.md).
+- **The music pane.** `/music` or `Alt+A` shows cliamp in a dock below the session for focus radio. It is off until `integrations.music.enabled` is `true` (default `false`, in `/settings interface` under Panes), and it needs the Herdr pane layer and a cliamp at 1.63.2 or newer, either on `PATH` or vendored by `clio-coder tools install cliamp`. See [Music](music.md).
 - **Status and toasts.** In guest mode Clio reports session state on the hosting pane as agent `clio-coder`: `working`, `blocked` while a tool call waits on an approval, and `idle`. A finished dispatch can raise a herdr toast per `interface.panes.notifications`, and a failed run also leaves a transcript notice.
 
 Clio acts only on panes it created, which carry a `clio_coder_owner` metadata token. A pane you opened yourself in herdr is never closed, zoomed, or retargeted. The hosting pane is the one exception: Clio reports status on it, returns keyboard focus to it, and leaves zoom on its tab.
@@ -63,7 +65,7 @@ clears the registry's minimum version.
 | yazi | Files pane engine; the install also provides its `ya` helper. | 26.8.15 | 26.8.15 |
 | cliamp | Music pane. See [Music](music.md). | 1.63.2 | 1.63.2 |
 
-The registry is `src/domains/toolchain/registry.ts`. herdr has pinned assets for Linux and macOS on x64 and arm64 only; on Windows `tools install herdr` reports no pinned asset.
+The registry is `src/domains/toolchain/registry.ts`. herdr has pinned assets for Linux and macOS on x64 and arm64 and for Windows on x64. The Windows asset is a zip holding `herdr.exe` and the ConPTY runtime it loads from `conpty/`, so `tools install herdr` installs and resolves it there, but the pane layer stays off on Windows because Clio Coder's pane client speaks Unix sockets only.
 
 The first `/files` invocation reports any missing dependency and names its
 install command. `doctor` reports the same dependencies. Downloads occur only
@@ -188,12 +190,12 @@ regeneration succeeds or the operator resets the profile.
 | `/panes show <run-or-agent>` | Take the workers dock over for a live (running or retrying) run, matched by agent id substring first and run id prefix second, newest first. The dock behavior is in [Fleet Dispatch](fleet-dispatch.md). |
 | `/panes zoom [target]` | Toggle zoom on a Clio Coder-owned pane (default: the watch pane). |
 | `/panes close [target\|all]` | Close one Clio Coder-owned pane, or all of them (the default). A target matches a pane id exactly, then a label substring, then a purpose, newest first. |
-| `/peer [--cwd <workspace>] <peer> [brief]` | Open `claude-code`, `codex`, `opencode`, `antigravity` or `pi` (binaries `claude`, `codex`, `opencode`, `agy`, `pi`) in an owned pane. |
+| `/peer [--cwd <workspace>] <peer> [brief]` | Open `clio`, `claude-code`, `codex`, `opencode`, `antigravity` or `pi` (binaries `clio-coder`, `claude`, `codex`, `opencode`, `agy`, `pi`) in an owned pane. `clio` refuses a brief. |
 | `Alt+A` | The music pane's single tap (`clio-coder.music.toggle`; `Ctrl+G` then `a`). Two taps within 400 ms close it. See [Music](music.md). |
 | `/music [on\|off\|pause\|next\|status\|station <name or url>]` | Drive the music pane. Bare `/music` does what `Alt+A` does. The contract is in [Music](music.md). |
 
 The model has the same doors with exceptions. Its `panes` tool exists only in a session whose pane host answered,
-takes `list`, `show`, `open`, `handoff` and `close`, opens only the three presets (`files`, `logs`, `shell`), and never opens arbitrary argv or zooms (zooming steals focus). Its `list` action reports each dock as `visible`, `hidden` or `closed`, and what the music pane is playing, whether or not the model may control music. Opening the `files` preset shows a hidden files pane. The model has no action that hides a dock. See
+takes eight actions: `list`, `show`, `open`, `handoff`, `send`, `wait`, `read` and `close`. It opens only the three presets (`files`, `logs`, `shell`), and never opens arbitrary argv or zooms (zooming steals focus). `send`, `wait` and `read` work only on a handoff pane and replace driving the pane host's CLI through `bash`. `send` delivers a prompt of at most 8,192 bytes, or one interrupt key (`esc` or `ctrl+c`), and nothing else, so no field types raw text or presses a key that could accept an approval; a prompt to a second Clio Coder becomes a turn on that Clio's own queue, labelled as coming from this one, and it refuses a peer that is blocked on its operator. `wait` waits up to 120 seconds by default (at most 600) for the peer to settle and reports `blocked` when the peer is asking its operator. `read` returns the last 120 lines by default (at most 400) under the untrusted-content banner, because what a peer prints is its unverified claim. A brief or a prompt leaving the session passes the same information-flow check as a handoff brief. Its `list` action reports each dock as `visible`, `hidden` or `closed`, and what the music pane is playing, whether or not the model may control music. Opening the `files` preset shows a hidden files pane. The model has no action that hides a dock. See
 [Tool Usage](tool-usage.md).
 
 ### Picking a file
