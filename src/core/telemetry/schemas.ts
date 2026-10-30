@@ -380,6 +380,10 @@ export const KIND_REGISTRY = {
 						// The last stage the turn's final call completed; nothing has emitted this kind before #434's P2.
 						stage: Type.Union([vocabulary(["transform", "auth", "admission", "send", "firstToken"]), Type.Null()]),
 						retries: count,
+						/**
+						 * The turn's calls settled by turn end. A call settling later stays journaled under the same ctx.turnId
+						 * and counts in every total; a reader finds it as a matching turn id missing from this list (#434).
+						 */
 						callIds: Type.Array(CallIdSchema),
 					},
 					closed,
