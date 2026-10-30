@@ -40,10 +40,13 @@ test("Help projects only the canonical public allowlist and never forwards priva
 	assert.ok(navigation.every((entry) => entry.path !== ("/docs" as string)));
 });
 
-test("Help opens with shortcuts and keeps offline retrieval in the Documentation view", () => {
+test("Help opens with its guide, keeps shortcuts one view away and offline retrieval in Documentation", () => {
 	const opening = renderToStaticMarkup(<HelpReferenceBody bundledDocsPath="/installed/clio/docs" />);
-	assert.match(opening, /aria-pressed="true"[^>]*>Shortcuts/u);
-	assert.match(opening, /aria-label="Ctrl or Cmd \+ K"/u);
+	assert.match(opening, /aria-pressed="true"[^>]*>Using Clio/u);
+	assert.match(opening, /aria-pressed="false"[^>]*>Shortcuts/u);
+	assert.ok(
+		helpContent("", "shortcuts").shortcuts.some((group) => group.bindings.some((binding) => binding.id === "palette")),
+	);
 	assert.doesNotMatch(opening, /\/installed\/clio\/docs|clio_docs/u);
 	const documentation = helpContent("", "documentation").sections.find((match) => match.section.id === "documentation");
 	assert.ok(documentation);

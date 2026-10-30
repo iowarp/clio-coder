@@ -56,13 +56,13 @@ function listed(staleTime: number) {
 test("the evidence list offers its links only while no refresh can have narrowed the window", () => {
 	const settled = render(listed(Number.POSITIVE_INFINITY), <EvidencePage client={client} />);
 	assert.match(settled, /href="\/evidence\/evidence-007"/);
-	assert.match(settled, /<button type="button">Load more evidence<\/button>/);
+	assert.match(settled, /<button type="button">Load older evidence<\/button>/);
 	// Stale data refetches on mount, which is a refresh: the id stays readable as
 	// text, but nothing links to it and load-more cannot start from the old cursor.
 	const refreshing = render(listed(0), <EvidencePage client={client} />);
 	assert.match(refreshing, /evidence-007/);
 	assert.doesNotMatch(refreshing, /href="\/evidence\/evidence-007"/);
-	assert.match(refreshing, /<button type="button" disabled="">Load more evidence<\/button>/);
+	assert.match(refreshing, /<button type="button" disabled="">Load older evidence<\/button>/);
 });
 
 test("newly collected evidence is named, never linked to its unlisted detail", () => {
@@ -103,16 +103,16 @@ test("both fleet lists offer links only while settled, and render nothing after 
 	const links = /href="\/fleet\/(root-1|dispatches\/run-1)"/g;
 	const settled = render(fleet(Number.POSITIVE_INFINITY), <FleetPage client={client} />);
 	assert.equal(settled.match(links)?.length, 2);
-	assert.match(settled, /<button type="button">Load more fleet runs<\/button>/);
-	assert.match(settled, /<button type="button">Load more dispatch runs<\/button>/);
+	assert.match(settled, /<button type="button">Load older fleet runs<\/button>/);
+	assert.match(settled, /<button type="button">Load older dispatches<\/button>/);
 	// Stale data refetches on mount: a fresh first page may already have replaced
 	// each family's window, so the retained ids are text and load-more waits.
 	const refreshing = render(fleet(0), <FleetPage client={client} />);
 	assert.match(refreshing, /nightly/);
 	assert.match(refreshing, /run-1/);
 	assert.equal(refreshing.match(links), null);
-	assert.match(refreshing, /<button type="button" disabled="">Load more fleet runs<\/button>/);
-	assert.match(refreshing, /<button type="button" disabled="">Load more dispatch runs<\/button>/);
+	assert.match(refreshing, /<button type="button" disabled="">Load older fleet runs<\/button>/);
+	assert.match(refreshing, /<button type="button" disabled="">Load older dispatches<\/button>/);
 	// A refresh that failed after narrowing leaves stale pages cached; none renders.
 	const failed = fleet(Number.POSITIVE_INFINITY);
 	for (const key of ["fleet-roots", "fleet-dispatches"])
@@ -189,7 +189,7 @@ test("Fleet filters search only loaded records and preserve their destination", 
 	assert.doesNotMatch(filtered, /href="\/fleet\/root-1/);
 	assert.match(filtered, /No loaded fleet execution matches these filters/);
 	assert.match(filtered, /href="\/fleet\/dispatches\/dispatch-1\?q=worker&amp;status=active"/);
-	assert.match(filtered, /Root dispatch: root-dispatch/);
+	assert.match(filtered, /Root: root-dispatch/);
 	assert.match(filtered, /Parent: parent-1/);
 	const finished = render(queries, <FleetPage client={client} />, "/fleet?status=finished");
 	assert.match(finished, /No loaded worker dispatch matches these filters/);

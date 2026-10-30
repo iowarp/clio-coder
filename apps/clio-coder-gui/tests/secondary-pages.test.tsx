@@ -120,7 +120,7 @@ test("System prioritizes warnings even when doctor marked the observed condition
 	const html = render(cache, "/system?attention=true", <SystemPage client={client} />);
 	assert.match(html, /Not set up/);
 	assert.doesNotMatch(html, />linux</);
-	assert.match(html, /1 to review/);
+	assert.match(html, /1 warning to review/);
 	assert.doesNotMatch(html, />Repair<\/button>/);
 });
 
