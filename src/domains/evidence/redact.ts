@@ -55,6 +55,45 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 const SECRET_PROPERTY_NAME = /(?:api[_-]?key|apikey|secret|token|passwd|password|credential)[A-Za-z0-9_-]*$/i;
 const CREDENTIAL_PREFIX = /^[^\s"'`;,&|<>]{8,}/;
 
+/**
+ * A known value shorter than this is too likely to be ordinary text (a word,
+ * a port, a short flag) to mask everywhere it appears.
+ */
+export const KNOWN_SECRET_MIN_LENGTH = 8;
+
+let knownSecretPattern: { key: string; re: RegExp | null } | null = null;
+
+/** One alternation over the maskable values, longest first, rebuilt only when the set changes. */
+function knownSecretRegExp(values: Iterable<string>): RegExp | null {
+	const usable = [...new Set(values)]
+		.filter((value) => value.length >= KNOWN_SECRET_MIN_LENGTH)
+		.sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0));
+	const key = usable.join("\0");
+	if (knownSecretPattern?.key === key) return knownSecretPattern.re;
+	const re =
+		usable.length === 0
+			? null
+			: new RegExp(usable.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
+	knownSecretPattern = { key, re };
+	return re;
+}
+
+/**
+ * Replace each occurrence of a known credential value (a resolved key, a
+ * credential variable's value) with `[redacted:known]`. Unlike the patterns
+ * above this matches exact values, so it also catches a credential with no
+ * recognizable shape.
+ */
+export function redactKnownSecrets(text: string, values: Iterable<string>, tally?: RedactionTally): string {
+	if (text.length < KNOWN_SECRET_MIN_LENGTH) return text;
+	const re = knownSecretRegExp(values);
+	if (re === null) return text;
+	return text.replace(re, () => {
+		if (tally) tally.count += 1;
+		return "[redacted:known]";
+	});
+}
+
 /** Replace every secret-shaped value in `text`, tallying replacements. */
 export function redactSecretsText(text: string, tally: RedactionTally): string {
 	let out = text;

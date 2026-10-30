@@ -8,7 +8,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
-import { scrubSandboxEnv } from "./sandbox/env-scrub.js";
+import { knownSecretValues, scrubSandboxEnv } from "./sandbox/env-scrub.js";
 import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-session.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
 import { clampTimerDelayMs } from "./timers.js";
@@ -322,6 +322,11 @@ async function bashSpawnPlan(): Promise<BashSpawnPlan> {
 	// last so they never reach the child from either source.
 	const merged = { ...process.env, ...captured };
 	return { mode: "-c", env: buildToolEnv(merged), source: baseToolEnv(merged) };
+}
+
+/** The credential values a command run through {@link runBashCommand} could print, read from the environment it inherits. */
+export async function bashSecretValues(secretNames?: Iterable<string>): Promise<string[]> {
+	return knownSecretValues((await bashSpawnPlan()).source, secretNames);
 }
 
 export function combineBashOutput(result: Pick<BashCommandResult, "stdout" | "stderr">): string {

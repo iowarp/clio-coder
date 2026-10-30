@@ -1,9 +1,16 @@
 import path from "node:path";
 import { Type } from "typebox";
-import { BASH_HARD_CAP_BYTES, type BashCommandResult, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
+import {
+	BASH_HARD_CAP_BYTES,
+	type BashCommandResult,
+	bashSecretValues,
+	combineBashOutput,
+	runBashCommand,
+} from "../core/bash-exec.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import { ToolNames } from "../core/tool-names.js";
+import { redactKnownSecrets } from "../domains/evidence/redact.js";
 import { expandPath } from "./path-utils.js";
 import { toolPresentationPolicy } from "./presentation.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
@@ -325,6 +332,11 @@ export const bashTool: ToolSpec = {
 		}
 		const timeout = typeof args.timeout_ms === "number" && args.timeout_ms > 0 ? args.timeout_ms : 300_000;
 		try {
+			// Credential values are masked where output is shaped, once per progress
+			// snapshot and once on the captured streams; model context, the cap result
+			// and any offload all read the masked text.
+			const secrets = await bashSecretValues(options?.shellSandbox?.env.secretNames);
+			const mask = (text: string): string => redactKnownSecrets(text, secrets);
 			const runOptions: Parameters<typeof runBashCommand>[1] = {
 				cwd,
 				timeoutMs: timeout,
@@ -333,10 +345,11 @@ export const bashTool: ToolSpec = {
 			};
 			if (options?.onUpdate !== undefined) {
 				runOptions.onUpdate = (progress) => {
-					options.onUpdate?.(shapeBashProgress(combineBashOutput(progress), progress.outputBytes, outputPolicy));
+					options.onUpdate?.(shapeBashProgress(mask(combineBashOutput(progress)), progress.outputBytes, outputPolicy));
 				};
 			}
-			const result = await runBashCommand(args.command, runOptions);
+			const captured = await runBashCommand(args.command, runOptions);
+			const result = { ...captured, stdout: mask(captured.stdout), stderr: mask(captured.stderr) };
 			const { error, aborted, timedOut, outputCapped } = result;
 			const rawOutput = combineBashOutput(result);
 			const output = rawOutput.trim();

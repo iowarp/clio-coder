@@ -10,9 +10,11 @@
 import {
 	type BashCommandProgress,
 	type BashCommandResult,
+	bashSecretValues,
 	combineBashOutput,
 	runBashCommand,
 } from "../../core/bash-exec.js";
+import { redactKnownSecrets } from "../evidence/redact.js";
 import type { SessionEntryInput } from "./contract.js";
 
 export const OPERATOR_SHELL_TIMEOUT_MS = 300_000;
@@ -52,6 +54,11 @@ export async function runOperatorShellLine(input: OperatorShellLineInput): Promi
 		...(input.onUpdate ? { onUpdate: input.onUpdate } : {}),
 	});
 	const unlabeled = input.excludeFromContext ? null : (input.label?.(input.command, input.cwd) ?? null);
+	// The record can join the model's context and is written to the session ledger.
+	const output = redactKnownSecrets(
+		appendStatusNotes(combineBashOutput(result), result, OPERATOR_SHELL_TIMEOUT_MS),
+		await bashSecretValues(),
+	);
 	return {
 		result,
 		unlabeled,
@@ -59,7 +66,7 @@ export async function runOperatorShellLine(input: OperatorShellLineInput): Promi
 			kind: "bashExecution",
 			parentTurnId: input.parentTurnId,
 			command: input.command,
-			output: appendStatusNotes(combineBashOutput(result), result, OPERATOR_SHELL_TIMEOUT_MS),
+			output,
 			exitCode: result.exitCode,
 			cancelled: result.aborted,
 			truncated: result.outputCapped,

@@ -89,6 +89,36 @@ export function scrubSandboxEnv(
 	return { env: out, removed };
 }
 
+/** Credentials Clio resolved in this process (stored keys, OAuth tokens, overrides), which no variable name marks. */
+const resolvedSecrets = new Set<string>();
+
+/** Record a credential Clio resolved, so a command that prints it has it masked in its captured output. */
+export function rememberResolvedSecret(value: string | undefined): void {
+	const trimmed = value?.trim();
+	if (trimmed) resolvedSecrets.add(trimmed);
+}
+
+/** A credential-named variable that holds a path or a plain URL (`KUBECONFIG`, `SSH_AUTH_SOCK`, `VAULT_ADDR`) says where a secret lives. */
+const LOCATOR_VALUE = /^(?:~?[\\/]|[A-Za-z]:[\\/]|[a-z][a-z0-9+.-]*:\/\/)/iu;
+
+/**
+ * The credential values a command's output must not show: every value the
+ * scrub above would hide from a sandbox, judged by the same name and value
+ * rules, and every credential Clio resolved. A path or credential-free URL
+ * under a credential name is left out, because masking it only mangles output.
+ */
+export function knownSecretValues(env: NodeJS.ProcessEnv, secretNames: Iterable<string> = []): string[] {
+	const named = new Set(secretNames);
+	const values = new Set(resolvedSecrets);
+	for (const [key, raw] of Object.entries(env)) {
+		const value = raw?.trim();
+		if (!value) continue;
+		if (isSandboxSecretEnvValue(value)) values.add(value);
+		else if ((named.has(key) || isSandboxSecretEnvName(key)) && !LOCATOR_VALUE.test(value)) values.add(value);
+	}
+	return [...values];
+}
+
 /** The scrub's inputs from settings: the operator's pass list and the variables Clio's targets read keys from. */
 export function sandboxEnvPolicy(settings: {
 	safety: { sandboxPassEnv: ReadonlyArray<string> };

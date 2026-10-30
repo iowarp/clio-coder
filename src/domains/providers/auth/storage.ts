@@ -1,4 +1,5 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { rememberResolvedSecret } from "../../../core/sandbox/env-scrub.js";
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
 import type { AuthOperationOptions } from "../../../engine/types.js";
 import type { RuntimeAuth, RuntimeDescriptor } from "../types/runtime-descriptor.js";
@@ -261,6 +262,12 @@ export type RuntimeAuthMetadata = Pick<
 	RuntimeDescriptor,
 	"id" | "auth" | "tier" | "credentialsEnvVar" | "oauthProviderId"
 >;
+
+/** A resolved key or token is masked in captured shell output from here on (env-scrub.ts). */
+function remembered(resolution: AuthResolution): AuthResolution {
+	rememberResolvedSecret(resolution.apiKey);
+	return resolution;
+}
 
 export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeAuthMetadata): AuthTarget {
 	const providerId =
@@ -585,6 +592,14 @@ export class AuthStorage {
 		rejectedApiKey: string,
 		signal: AbortSignal = new AbortController().signal,
 	): Promise<AuthResolution> {
+		return remembered(await this.forceRefreshUnremembered(providerId, rejectedApiKey, signal));
+	}
+
+	private async forceRefreshUnremembered(
+		providerId: string,
+		rejectedApiKey: string,
+		signal: AbortSignal,
+	): Promise<AuthResolution> {
 		try {
 			// Compare the rejected key under the lock so a concurrent rotation wins (#427).
 			const refreshed = await this.refreshOAuthCredentialWithLock(providerId, signal, rejectedApiKey);
@@ -616,6 +631,13 @@ export class AuthStorage {
 	}
 
 	async resolveApiKey(
+		providerId: string,
+		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean; signal?: AbortSignal },
+	): Promise<AuthResolution> {
+		return remembered(await this.resolveApiKeyUnremembered(providerId, opts));
+	}
+
+	private async resolveApiKeyUnremembered(
 		providerId: string,
 		opts?: { targetId?: string; explicitEnvVar?: string; includeFallback?: boolean; signal?: AbortSignal },
 	): Promise<AuthResolution> {
