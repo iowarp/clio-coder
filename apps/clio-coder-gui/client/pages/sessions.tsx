@@ -6,11 +6,13 @@ import type { Client } from "../api/client.js";
 import { ApiProblem, emptyInput } from "../api/client.js";
 import { clock, formatDuration } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
-import { SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
+import { sessionQuery } from "../api/session-query.js";
+import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
 import { Composer, fillComposer, focusComposer } from "../chat/Composer.js";
 import { ContextWorkCard } from "../chat/ContextWorkCard.js";
+import { ConversationOutline } from "../chat/ConversationOutline.js";
 import { STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { useContextOperationRef, useStopContext } from "../chat/context-command.js";
 import { contextWorkView } from "../chat/context-work-model.js";
@@ -27,8 +29,10 @@ import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
 import { TelemetryChips } from "../chat/TelemetryChips.js";
 import { memoryGuardianMark } from "../chat/telemetry-model.js";
+import { TRANSCRIPT_PAGE_SIZE } from "../chat/transcript-view-model.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { useShown } from "../chat/use-shown.js";
+import { useTranscriptView } from "../chat/use-transcript-view.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { setPageTitle } from "../interaction/announcer.js";
@@ -141,7 +145,7 @@ function EmptyTranscript({ sessionId }: { sessionId: string }) {
 function SessionView({ client, id }: { client: Client; id: string }) {
 	countRender("session-view");
 	const navigate = useNavigate();
-	const ids = { changes: useId(), pane: useId() };
+	const ids = { changes: useId(), pane: useId(), transcript: useId() };
 	const pane = usePaneState(ids.pane);
 	const paneActions = useMemo(
 		() => ({ show: (target: PaneTarget) => pane.show(target, ids.pane) }),
@@ -153,13 +157,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
 	const input = { params: { id }, query: {}, body: {} };
-	const session = useQuery({
-		queryKey: ["session", id],
-		queryFn: async ({ signal }) => {
-			const snapshot = await client.call(routes.session, input, undefined, signal);
-			return sessionBuffer(id).snapshot(snapshot) ?? snapshot;
-		},
-	});
+	const session = useQuery(sessionQuery(client, id));
 	// A saved task this server has not opened answers not_found. Only that answer starts the search for
 	// its project; a task that loads, and a server that cannot be reached, never do.
 	const notOpen =
@@ -202,6 +200,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			client.call(routes.loadSession, { params: { id }, query: {}, body: { workspaceId } }),
 		onSuccess: (snapshot) => {
 			for (const key of SESSION_CACHES) queries.removeQueries({ queryKey: [key, id] });
+			advanceSessionReadScope(id);
 			queries.setQueryData(["session", id], sessionBuffer(id).snapshot(snapshot) ?? snapshot);
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
 			void queries.invalidateQueries({ queryKey: ["session-history", snapshot.workspaceId] });
@@ -210,6 +209,8 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const closeSession = useCallback(() => close.mutate(), [close.mutate]);
 	const renameTask = useRenameTask(client);
 	const [renaming, setRenaming] = useState(false);
+	const [outline, setOutline] = useState(false);
+	const pendingJump = useRef<string | null>(null);
 	const [dismissedContext, setDismissedContext] = useState<string | null>(null);
 	const stopContext = useStopContext(client, id);
 	const scroll = useRef<HTMLDivElement | null>(null);
@@ -246,6 +247,36 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	// A deep link starts without a cached snapshot. Attach the observer only once
 	// the transcript element exists; a ref becoming non-null does not rerun an effect.
 	const follow = useFollowLatest(scroll, snapshot !== undefined, snapshot?.timeline, running);
+	const transcript = useTranscriptView(client, id, turns, snapshot !== undefined, scroll, follow);
+	const restoreScroll = follow.restore;
+	useEffect(() => {
+		if (outline || !pendingJump.current) return;
+		const turnId = pendingJump.current;
+		pendingJump.current = null;
+		let landing = 0;
+		const frame = requestAnimationFrame(() => {
+			landing = requestAnimationFrame(() => {
+				const container = scroll.current;
+				const target = [...(container?.querySelectorAll<HTMLElement>("[data-turn-id]") ?? [])].find(
+					(element) => element.dataset.turnId === turnId,
+				);
+				if (!container || !target) return;
+				// A deliberate jump leaves follow mode. Later output must not pull the reader away.
+				restoreScroll({
+					top: Math.max(
+						0,
+						container.scrollTop + target.getBoundingClientRect().top - container.getBoundingClientRect().top - 24,
+					),
+					following: false,
+				});
+				target.focus({ preventScroll: true });
+			});
+		});
+		return () => {
+			cancelAnimationFrame(frame);
+			cancelAnimationFrame(landing);
+		};
+	}, [outline, restoreScroll]);
 	// One object per change of reported settings or health, so a streamed delta leaves the composer alone.
 	const settings = snapshot?.state === "open" ? sessionSettings.data?.settings.chat : undefined;
 	const config = snapshot?.state === "open" ? snapshot.config : undefined;
@@ -391,6 +422,9 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						) : null}
 						{/* The task's own actions sit with its name, not with the view controls at the far end. */}
 						<Menu label="Task actions">
+							<MenuItem icon="search" onClick={() => setOutline(true)}>
+								Find in conversation
+							</MenuItem>
 							<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
 								Rename task
 							</MenuItem>
@@ -431,6 +465,15 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							onOpen={pane.show}
 						/>
 						<div className="wb-bar__end">
+							<button
+								type="button"
+								className="wb-chip conversation__find"
+								aria-label="Find in conversation"
+								title="Find a request or response in this conversation"
+								onClick={() => setOutline(true)}
+							>
+								<Icon name="search" /> Find
+							</button>
 							<PaneToggles
 								client={client}
 								sessionId={snapshot.id}
@@ -493,11 +536,37 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						) : null}
 						<ApprovalBanner client={client} session={snapshot} />
 					</div>
-					<div className="chat-transcript" ref={scroll}>
+					<div
+						className="chat-transcript"
+						id={ids.transcript}
+						ref={scroll}
+						onClickCapture={(event) => {
+							// Opening a detail is reading intent. Freeze before its height changes, so the live
+							// edge observer cannot carry an expanded request or tool result out of view.
+							if (event.target instanceof Element && event.target.closest("summary")) {
+								follow.restore({ ...follow.snapshot(), following: false });
+							}
+						}}
+					>
 						<div className="chat-transcript__content">
 							{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
+							{transcript.start > 0 ? (
+								<div className="transcript-history">
+									<p>{transcript.start} earlier turns in this conversation</p>
+									<div>
+										<button type="button" onClick={transcript.earlier} aria-controls={ids.transcript}>
+											<Icon name="arrowUp" />
+											Show {Math.min(TRANSCRIPT_PAGE_SIZE, transcript.start)} earlier turns
+										</button>
+										<button type="button" onClick={() => setOutline(true)}>
+											<Icon name="search" />
+											Find in full conversation
+										</button>
+									</div>
+								</div>
+							) : null}
 
-							{turns.map((item) => (
+							{transcript.turns.map((item) => (
 								<ChatTurnView
 									key={item.turnId}
 									turn={item}
@@ -580,6 +649,19 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					onViewChange={pane.setView}
 					route={route}
 				/>
+				{outline ? (
+					<ConversationOutline
+						turns={turns}
+						rows={turnRows}
+						truncated={snapshot.timelineTruncated === true}
+						onClose={() => setOutline(false)}
+						onSelect={(turnId) => {
+							transcript.revealTurn(turnId);
+							pendingJump.current = turnId;
+							setOutline(false);
+						}}
+					/>
+				) : null}
 			</section>
 		</PaneContext.Provider>
 	);

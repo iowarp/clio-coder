@@ -4,7 +4,7 @@ import { Link, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SettingControl, SettingsControls, SettingWritten } from "../../contracts/settings-controls.js";
 import { STRUCTURED_SETTINGS } from "../../contracts/structured-settings.js";
-import { type Client, emptyInput } from "../api/client.js";
+import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { useOperation } from "../api/queries.js";
 import { Switch } from "../design/Switch.js";
@@ -22,6 +22,8 @@ import {
 	type SettingsScopeId,
 	selectOptions,
 	sentence,
+	settingBaselineChanged,
+	settingReviewMatches,
 	sourceLabel,
 	TIMING_PHRASE,
 	TIMING_SENTENCE,
@@ -129,6 +131,8 @@ function ControlRow({
 	workspaceId,
 	draft,
 	expectedValue,
+	refreshCurrent,
+	keepReviewed,
 	onDraft,
 	catalog,
 	showPath = true,
@@ -138,6 +142,8 @@ function ControlRow({
 	workspaceId: string;
 	draft: string | null;
 	expectedValue: string | undefined;
+	refreshCurrent: () => Promise<string>;
+	keepReviewed: (draft: string, current: string) => void;
 	onDraft: (value: string | null, submittedValue?: string) => void;
 	catalog?: ModelCatalog | undefined;
 	/** The dotted setting path, for the Advanced page. The calm pages state the label and nothing else. */
@@ -152,6 +158,7 @@ function ControlRow({
 	const [confirmed, setConfirmed] = useState(false),
 		[saved, setSaved] = useState<{ sentences: string[]; timing: SettingWritten["timing"] } | null>(null);
 	const write = useMutation({
+		meta: { errorSurface: "inline" },
 		scope: { id: `settings-write:${workspaceId}` },
 		mutationFn: save,
 		onSuccess: (result, variables) => {
@@ -166,7 +173,17 @@ function ControlRow({
 			submitting.current = false;
 		},
 	});
+	const [review, setReview] = useState<{ draft: string; current: string } | null>(null);
+	const refresh = useMutation({
+		meta: { errorSurface: "inline" },
+		mutationFn: async (reviewedDraft: string) => ({ draft: reviewedDraft, current: await refreshCurrent() }),
+		onSuccess: setReview,
+	});
+	const conflict =
+		settingBaselineChanged(draft, expectedValue, control.value) ||
+		(write.error instanceof ApiProblem && write.error.problem.status === 409);
 	const value = draft ?? control.value;
+	const reviewMatches = settingReviewMatches(review, value, control.value);
 	const dirty = draft !== null && draft !== control.value;
 	const options = selectOptions(control);
 	const edit = (next: string) => {
@@ -178,7 +195,7 @@ function ControlRow({
 	const writable = control.access === "writable";
 	const structured = control.kind === "json" && !!STRUCTURED_SETTINGS[control.path];
 	return (
-		<div className="setting-control" data-access={control.access}>
+		<div className="setting-control" data-access={control.access} data-dirty={dirty} aria-busy={write.isPending}>
 			<div className="setting-control__about">
 				<label id={labelId} htmlFor={writable && !structured ? fieldId : undefined}>
 					{control.label}
@@ -190,7 +207,7 @@ function ControlRow({
 					{showPath ? <code>{control.path}</code> : null}
 					<Link
 						to={`/settings/effective?${new URLSearchParams({ workspace: workspaceId, q: control.path })}`}
-						title="Inspect the effective value and every layer that sets it"
+						title="Inspect the effective value and its reported source"
 					>
 						{sourceLabel(control.source)}
 					</Link>
@@ -207,7 +224,7 @@ function ControlRow({
 					<form
 						onSubmit={(event) => {
 							event.preventDefault();
-							if (dirty && structuredValid && !submitting.current) {
+							if (dirty && structuredValid && !conflict && !refresh.isPending && !submitting.current) {
 								submitting.current = true;
 								write.mutate({
 									path: control.path,
@@ -307,11 +324,22 @@ function ControlRow({
 							</label>
 						)}
 						{dirty && (
+							<p className="setting-control__draft" role="status">
+								{write.isPaused
+									? "Waiting for the previous save…"
+									: write.isPending
+										? "Saving to user settings…"
+										: "Unsaved change"}
+							</p>
+						)}
+						{dirty && (
 							<div className="setting-control__actions">
 								<button
 									type="submit"
 									className="primary"
-									disabled={write.isPending || !structuredValid || (!!control.confirm && !confirmed)}
+									disabled={
+										write.isPending || conflict || refresh.isPending || !structuredValid || (!!control.confirm && !confirmed)
+									}
 								>
 									{write.isPaused ? "Waiting…" : write.isPending ? "Saving…" : "Save"}
 								</button>
@@ -331,6 +359,69 @@ function ControlRow({
 							<p className="setting-control__error" role="alert">
 								{write.error.message}
 							</p>
+						)}
+						{conflict && (
+							<section className="trace-panel" aria-label="Review setting conflict">
+								<p role="alert">
+									The saved setting changed after this draft began. Refresh the current value and review both values before
+									saving again.
+								</p>
+								<button
+									type="button"
+									disabled={refresh.isPending || write.isPending}
+									onClick={() => {
+										setReview(null);
+										refresh.mutate(value);
+									}}
+								>
+									{refresh.isPending ? "Refreshing current value…" : "Refresh current value for review"}
+								</button>
+								{refresh.error && <p role="alert">{refresh.error.message} Retry refreshing to review the current value.</p>}
+								{review && (
+									<>
+										<dl>
+											<dt>Current saved value</dt>
+											<dd>
+												<pre>{review.current || "(empty)"}</pre>
+											</dd>
+											<dt>Your draft</dt>
+											<dd>
+												<pre>{review.draft || "(empty)"}</pre>
+											</dd>
+										</dl>
+										{!reviewMatches && (
+											<p role="status">The draft or current value changed during review. Refresh again before choosing.</p>
+										)}
+										<button
+											type="button"
+											disabled={!reviewMatches || refresh.isPending}
+											onClick={() => {
+												keepReviewed(review.draft, review.current);
+												setReview(null);
+												write.reset();
+												setConfirmed(false);
+											}}
+										>
+											Keep my draft against this reviewed value
+										</button>
+										<button
+											type="button"
+											disabled={!reviewMatches || refresh.isPending}
+											onClick={() => {
+												edit(review.current);
+												setReview(null);
+												setEditorRevision((previous) => previous + 1);
+											}}
+										>
+											Use current saved value
+										</button>
+										<p>
+											Keeping your draft updates its comparison baseline. Save remains a separate action; another external change
+											will require a new review.
+										</p>
+									</>
+								)}
+							</section>
 						)}
 						{saved && (
 							<p className="setting-control__saved" role="status">
@@ -382,10 +473,12 @@ export function SettingsControlsView({
 		);
 	};
 	const [showDrafts, setShowDrafts] = useState(false);
-	const [drafts, setDrafts, updateDraft, originalDraftValue] = useSettingsDrafts(client, workspaceId);
+	const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+	const [drafts, setDrafts, updateDraft, originalDraftValue, keepReviewedDraft] = useSettingsDrafts(client, workspaceId);
 	const key = ["settings-controls", workspaceId];
 	const report = useQuery({
 		queryKey: key,
+		meta: { errorSurface: "inline" },
 		queryFn: () => client.call(routes.settingsControls, { ...emptyInput, params: { id: workspaceId } }),
 	});
 	useEffect(() => {
@@ -520,7 +613,10 @@ export function SettingsControlsView({
 			) : null}
 			<div className={`settings-write-scope${scope && scope !== "advanced" ? " settings-write-scope--quiet" : ""}`}>
 				{scope && scope !== "advanced" ? null : <strong>Save to your user settings</strong>}
-				<p>Saved to your user settings and applied across projects. Project and command-line overrides take precedence.</p>
+				<p>
+					Save defaults for all your projects to your user settings. The selected project shows its effective values; project
+					and command-line overrides take precedence. For one conversation, use its model control beside Send.
+				</p>
 				{userFile && (
 					<details>
 						<summary>Saved settings file</summary>
@@ -528,19 +624,17 @@ export function SettingsControlsView({
 					</details>
 				)}
 			</div>
-			{scope === undefined || scope === "advanced" ? (
-				<label className="settings-filter">
-					Find a setting
-					<input
-						type="search"
-						value={filter}
-						onChange={(event) => {
-							discover(section, event.target.value, true);
-							setShowDrafts(false);
-						}}
-					/>
-				</label>
-			) : null}
+			<label className="settings-filter">
+				Find a setting
+				<input
+					type="search"
+					value={filter}
+					onChange={(event) => {
+						discover(section, event.target.value, true);
+						setShowDrafts(false);
+					}}
+				/>
+			</label>
 			{compact ? (
 				<div className="sidebar-settings__selection">
 					<div className="sidebar-settings__field">
@@ -628,7 +722,10 @@ export function SettingsControlsView({
 			{unsaved.length > 0 && (
 				<p className="settings-draft-note" role="status">
 					{unsaved.length} unsaved {unsaved.length === 1 ? "change" : "changes"}. Save each control to apply it; filtering
-					preserves drafts in this workspace.
+					preserves drafts in this workspace.{" "}
+					<button type="button" className="setting-control__check" onClick={() => setShowDrafts(!showDrafts)}>
+						{showDrafts ? "Show all settings" : "Review changes"}
+					</button>
 				</p>
 			)}
 			{startCheck.error && <p role="alert">Could not start the model check: {startCheck.error.message}</p>}
@@ -654,14 +751,39 @@ export function SettingsControlsView({
 				</div>
 			)}
 			{!visible.length && active !== "targets" && active !== "advanced" && (
-				<p>{showDrafts ? "No unsaved changes." : "No settings match."}</p>
+				<div className="settings-empty">
+					<p role="status">{showDrafts ? "No unsaved changes remain." : "No settings match your search."}</p>
+					<button
+						type="button"
+						onClick={() => {
+							discover(null, "");
+							setShowDrafts(false);
+						}}
+					>
+						Show all settings
+					</button>
+				</div>
 			)}
-			{groupControls(editorControls).map(({ group, controls: rows }) => {
+			{groupControls(editorControls).map(({ group, controls: rows }, index) => {
 				const note = groupNote(rows);
 				return (
-					<section key={group} className="setting-group" aria-label={group}>
-						{/* A calm page has only its h1 above, so its groups are the next level down. */}
-						{scope ? <h2 className="setting-group__title">{group}</h2> : <h3>{group}</h3>}
+					<details
+						key={group}
+						className="setting-group"
+						aria-label={group}
+						open={!!filter.trim() || showDrafts || (expanded[group] ?? (compact || scope === "models" || index === 0))}
+						onToggle={(event) => {
+							const open = event.currentTarget.open;
+							setExpanded((current) => (current[group] === open ? current : { ...current, [group]: open }));
+						}}
+					>
+						<summary>
+							<h2>{group}</h2>
+							<small>
+								{rows.length} {rows.length === 1 ? "setting" : "settings"}
+								{rows.some((control) => drafts[control.path] !== undefined) ? " · unsaved" : ""}
+							</small>
+						</summary>
 						{note !== null ? <p className="setting-group__note">{note}</p> : null}
 						{rows.map((control) => (
 							<ControlRow
@@ -671,12 +793,22 @@ export function SettingsControlsView({
 								workspaceId={workspaceId}
 								draft={drafts[control.path] ?? null}
 								expectedValue={originalDraftValue(control.path)}
+								refreshCurrent={async () => {
+									const result = await report.refetch({ throwOnError: true });
+									const current = result.data?.controls.find((row) => row.path === control.path);
+									if (!current) throw new Error("This setting is no longer available. Review the current settings list.");
+									return current.value;
+								}}
+								keepReviewed={(draft, current) => {
+									const latest = queries.getQueryData<SettingsControls>(key)?.controls.find((row) => row.path === control.path);
+									if (latest?.value === current) keepReviewedDraft(control.path, draft, current);
+								}}
 								onDraft={(value, submittedValue) => updateDraft(control.path, value, submittedValue, control.value)}
 								catalog={catalogFor(control)}
 								showPath={scope === undefined || scope === "advanced"}
 							/>
 						))}
-					</section>
+					</details>
 				);
 			})}
 		</>

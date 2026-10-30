@@ -1,10 +1,15 @@
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import { Id } from "../contracts/common.js";
+import { MachineAdd, MachineId } from "../contracts/machines.js";
 import { AppProblem } from "./services/problem.js";
 
 const closed = { additionalProperties: false };
 export const CliCommand = Type.Union([
+	Type.Object({ kind: Type.Literal("machines.list") }, closed),
+	Type.Object({ kind: Type.Literal("machines.add"), machine: MachineAdd }, closed),
+	Type.Object({ kind: Type.Literal("machines.remove"), id: MachineId }, closed),
+	Type.Object({ kind: Type.Literal("machines.check"), id: MachineId }, closed),
 	Type.Object({ kind: Type.Literal("library.agents") }, closed),
 	Type.Object({ kind: Type.Literal("library.verifiers") }, closed),
 	Type.Object({ kind: Type.Literal("usage.report") }, closed),
@@ -25,6 +30,31 @@ export function commandPlan(input: unknown, cwd?: string): { argv: string[]; out
 	if (!Value.Check(CliCommand, input))
 		throw new AppProblem("validation", "CLI command is outside the supported command table.");
 	switch (input.kind) {
+		case "machines.list":
+			return { argv: ["fleet", "nodes", "list", "--json"], output: "json" };
+		case "machines.add": {
+			const node = input.machine;
+			return {
+				argv: [
+					"fleet",
+					"nodes",
+					"add",
+					node.id,
+					"--host",
+					node.host,
+					"--max-workers",
+					String(node.maxWorkers),
+					...(node.user ? ["--user", node.user] : []),
+					...(node.port !== undefined ? ["--port", String(node.port)] : []),
+					...(node.labels.length ? ["--labels", node.labels.join(",")] : []),
+				],
+				output: "exit",
+			};
+		}
+		case "machines.remove":
+			return { argv: ["fleet", "nodes", "remove", input.id], output: "exit" };
+		case "machines.check":
+			return { argv: ["fleet", "nodes", "test", input.id, "--record", "--json"], output: "json" };
 		case "library.agents":
 			return { argv: ["agents", "--json"], output: "json" };
 		case "library.verifiers":

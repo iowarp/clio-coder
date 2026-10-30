@@ -85,6 +85,7 @@ const ORIGINS: ReadonlyArray<readonly [string, string]> = [
 	["backgroundMemorySteps", "Background memory steps"],
 	["failedCompactionCalls", "Failed compaction calls"],
 	["systemOneCalls", "System One calls"],
+	["safetyJudgeCalls", "Safety judge calls"],
 ];
 
 /** These four are read out of the report by name; everything else keeps its wire shape. */
@@ -168,7 +169,7 @@ export function usageView(report: UsageReport): UsageView {
 	const workers = first("worker-tokens");
 	const tokens = overall ?? sessionTokens;
 	const cost = tokens.cost as
-		| { knownUsd?: number; hasEstimated?: boolean; hasUnknown?: boolean; calls?: number }
+		| { knownUsd?: number; hasEstimated?: boolean; hasUnknown?: boolean; allKnownFree?: boolean; calls?: number }
 		| undefined;
 	const missing = number(overall?.missingTokenCalls ?? sessionTokens.missingTokenCalls) ?? 0;
 
@@ -188,8 +189,10 @@ export function usageView(report: UsageReport): UsageView {
 		return { label, value: count.toLocaleString("en-US") };
 	};
 
-	const totalTokens = number(overall?.knownSubtotal ?? tokens.totalTokens);
 	const apiCalls = number(tokens.apiCalls);
+	const measuredTokens = number(overall?.knownSubtotal ?? tokens.totalTokens);
+	const totalTokens =
+		measuredTokens === 0 && missing > 0 && apiCalls !== null && missing >= apiCalls ? null : measuredTokens;
 	const headline: UsageFigure[] = [
 		{
 			label: "Tokens",
@@ -203,50 +206,69 @@ export function usageView(report: UsageReport): UsageView {
 					? "—"
 					: `${cost.hasEstimated ? "~" : ""}${formatCost(number(cost.knownUsd))}${cost.hasUnknown ? " +?" : ""}`
 				: formatCost(number(tokens.costUsd)),
-			note: cost?.hasUnknown
-				? "Known subtotal; some calls are unpriced"
-				: cost?.hasEstimated
-					? "Includes estimated prices"
-					: cost
-						? "Recorded prices"
-						: "Historical cost; pricing provenance unavailable",
+			note:
+				cost?.calls === 0
+					? "No priced calls recorded in this window"
+					: cost?.hasUnknown
+						? "Known subtotal; some calls are unpriced"
+						: cost?.hasEstimated
+							? "Includes estimated prices"
+							: cost
+								? cost.allKnownFree
+									? "Every recorded call is known free"
+									: "Recorded prices"
+								: "Historical cost; pricing provenance unavailable",
 		},
 		store("sessions", "session-store-missing", "Sessions"),
 		store("dispatch-runs", "receipt-store-missing", "Dispatch runs"),
 	];
 
-	const measured = TOKEN_BARS.map(([key, label]) => ({ label, tokens: number(tokens[key]) }));
+	const partialBreakdown = missing > 0 || (number(workers?.missingBreakdownRuns) ?? 0) > 0;
+	const measured = TOKEN_BARS.map(([key, label]) => {
+		const value = number(tokens[key]);
+		return { label, tokens: value === 0 && partialBreakdown ? null : value };
+	});
 	const widest = Math.max(0, ...measured.map((bar) => bar.tokens ?? 0));
 	const bars: UsageBar[] = measured.map((bar) => ({
 		label: bar.label,
-		value: formatTokens(bar.tokens),
+		value: `${formatTokens(bar.tokens)}${bar.tokens !== null && partialBreakdown ? " +?" : ""}`,
 		share: bar.tokens && widest > 0 ? bar.tokens / widest : 0,
 	}));
 
+	const hasOriginSplit = ORIGINS.some(([key]) => Object.hasOwn(sessionTokens, key));
 	const origins = ORIGINS.flatMap(([key, label]) => {
+		if (!Object.hasOwn(sessionTokens, key)) return [];
 		const value = number(sessionTokens[key]);
-		return value === null ? [] : [{ label, value: value.toLocaleString("en-US") }];
+		return [{ label, value: value === null ? "Not recorded" : value.toLocaleString("en-US") }];
 	});
-
-	if (workers)
+	if (!hasOriginSplit && first("tokens") && workers) {
+		const calls = number(sessionTokens.apiCalls);
 		origins.push({
-			label: "Worker calls",
-			value: (number(workers.apiCalls) ?? number(workers.runs) ?? 0).toLocaleString("en-US"),
+			label: "Session and side calls",
+			value: calls === null ? "Not recorded" : calls.toLocaleString("en-US"),
 		});
+	}
+
+	if (workers) {
+		const calls = number(workers.apiCalls);
+		origins.push({ label: "Worker calls", value: calls === null ? "Not recorded" : calls.toLocaleString("en-US") });
+	}
 	const leftover = tablesOf(rows.filter((row) => !CLAIMED.has(row.name)));
 	return {
 		window: `from ${formatDay(report.from)} through ${formatDay(report.to)}`,
 		headline,
 		bars,
-		barsCaveat: BARS_CAVEAT,
+		barsCaveat: `${BARS_CAVEAT}${partialBreakdown ? " Some calls lack token fields; displayed fields are known subtotals, and absent amounts do not mean zero." : ""}`,
 		knownSubtotals:
-			missing > 0 || sessionTokens.knownSubtotals === true
+			missing > 0 || sessionTokens.knownSubtotals === true || overall?.knownSubtotals === true
 				? `${missing > 0 ? `${missing.toLocaleString("en-US")} recorded calls are missing token usage. ` : ""}Token amounts are known subtotals; missing usage is not zero. Reports cover retained local records, not provider invoices.`
 				: null,
 		origins,
 		originsNote: origins.length
-			? "Calls are split by what asked for them; a tool loop can make several conversation calls. Worker calls include shadow and internal helpers."
-			: "No side question, handoff, pre-warm or background memory step was recorded in this window, so every recorded call belongs to a turn.",
+			? "Session and side-call counts come from session usage; worker calls come from disjoint receipt totals, including shadow and internal helpers. A tool loop can make several conversation calls."
+			: first("tokens")
+				? "No origin split was recorded. The total alone does not establish that every recorded call belongs to a turn."
+				: "Call origins were not recorded in this window.",
 		missingStores,
 		models: [...all("model-usage"), ...all("worker-model-usage")],
 		skillsActivated: all("skill-activated"),
@@ -257,4 +279,12 @@ export function usageView(report: UsageReport): UsageView {
 		rest: leftover.singles,
 		tables: leftover.tables,
 	};
+}
+
+export function filterUsageFacts(facts: UsageReport["facts"], query: string): UsageReport["facts"] {
+	const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+	return facts.filter((fact) => {
+		const text = `${usageLabel(fact.name)} ${JSON.stringify(fact.values)}`.toLocaleLowerCase();
+		return terms.every((term) => text.includes(term));
+	});
 }

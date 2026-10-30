@@ -318,6 +318,64 @@
 	width: var(--icon-sm);
 	height: var(--icon-sm);
 }
+.pane-more {
+	min-width: 0;
+	margin-top: var(--space-4);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	background: var(--wb-faint);
+}
+.pane-more > summary {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-height: 56px;
+	padding: var(--space-3);
+	border-radius: inherit;
+	cursor: pointer;
+	list-style: none;
+}
+.pane-more > summary::-webkit-details-marker {
+	display: none;
+}
+.pane-more > summary:hover {
+	background: var(--wb-hover);
+}
+.pane-more > summary:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+.pane-more > summary > span {
+	display: grid;
+	flex: 1;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.pane-more > summary strong {
+	font-size: var(--text-meta);
+	font-weight: 500;
+	color: var(--ink);
+}
+.pane-more > summary small {
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.pane-more > summary > .icon {
+	flex: none;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	color: var(--ink-muted);
+}
+.pane-more[open] > summary > .icon:last-child {
+	transform: rotate(90deg);
+}
+.pane-more__body {
+	padding: 0 var(--space-3) var(--space-2);
+	border-top: 1px solid var(--line);
+}
+.pane-more__body > .pane-card:last-child {
+	border-bottom: 0;
+}
 /* In either sidebar a state is a glyph and a word, like the rail's own connection line, never a pill.
    The toned selector is here because a tone's own tint has the same weight as `.pane .status-mark`
    and won on load order, which left a padless tinted chip behind the word. */

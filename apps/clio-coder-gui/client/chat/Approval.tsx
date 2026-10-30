@@ -271,6 +271,11 @@ function ApprovalButtons({
 					)}
 				</button>
 			))}
+			{answering || answerSent ? (
+				<span className="approval-decision-progress" role="status">
+					{answerSent ? "Decision recorded; updating this task…" : "Sending your decision…"}
+				</span>
+			) : null}
 		</>
 	);
 }
@@ -343,7 +348,12 @@ function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, vari
 				<ApprovalButtons sessionId={sessionId} permission={permission} answer={answer} />
 			</div>
 			{hint === undefined ? null : <p className="approval-card__hint">{hint}</p>}
-			{answer.error && answer.variables?.id === permission.id ? <p role="alert">{answer.error.message}</p> : null}
+			{answer.error && answer.variables?.id === permission.id ? (
+				<div role="alert" className="approval-decision-error">
+					<p>{answer.error.message}</p>
+					<p>Your decision was not confirmed. Review the pending request before choosing again.</p>
+				</div>
+			) : null}
 		</article>
 	);
 }
@@ -423,6 +433,12 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 						Review
 					</button>
 				</div>
+				{answer.error && answer.variables?.id === permission.id && (
+					<div className="approval-decision-error" role="alert">
+						<p>{answer.error.message}</p>
+						<p>Your keyboard decision was not confirmed. Open Review to check the pending request and choose again.</p>
+					</div>
+				)}
 			</section>
 		);
 	return (

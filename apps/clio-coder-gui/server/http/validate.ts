@@ -27,6 +27,17 @@ export type Handler<R extends Route> = (
 ) => Output<R> | Response | Promise<Output<R> | Response>;
 export function register<R extends Route>(app: Hono, hub: EventHub, route: R, handler: Handler<R>) {
 	app.on(route.method, route.path, async (context) => {
+		context.header("Date", new Date().toUTCString());
+		context.header("X-Clio-Epoch", hub.epoch);
+		context.header("X-Clio-Seq", String(hub.seq));
+		if (route.method !== "GET") {
+			const expectedEpoch = context.req.header("X-Clio-Epoch");
+			if (expectedEpoch !== undefined && expectedEpoch !== hub.epoch)
+				throw new AppProblem(
+					"conflict",
+					"The command was not admitted because its server epoch is no longer current. Refresh Clio's state before trying again.",
+				);
+		}
 		const query: Record<string, unknown> = {};
 		for (const [key, values] of Object.entries(context.req.queries())) {
 			if (values.length !== 1) throw new AppProblem("validation", `Duplicate query parameter: ${key}`);
@@ -53,9 +64,6 @@ export function register<R extends Route>(app: Hono, hub: EventHub, route: R, ha
 			query: parse(route.query, Value.Convert(route.query, query)),
 			body: parse(route.body, body),
 		} as Input<R>;
-		context.header("Date", new Date().toUTCString());
-		context.header("X-Clio-Epoch", hub.epoch);
-		context.header("X-Clio-Seq", String(hub.seq));
 		const result = await handler(input, context);
 		return result instanceof Response ? result : context.json(result, route.status);
 	});

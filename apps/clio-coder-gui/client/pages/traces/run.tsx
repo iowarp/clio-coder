@@ -7,14 +7,16 @@ import type { Client } from "../../api/client.js";
 import { clock, formatTime } from "../../api/clock.js";
 import { PanelEmpty } from "../../design/panel.js";
 import { emptyState } from "../../design/panel-model.js";
+import { InspectionError, InspectionTabs } from "../../design/run-inspection.js";
 import { StatusMark } from "../../design/status.js";
 import { listDestination } from "../run-inspection-model.js";
 import "./trace-live.css";
-import { CostPanel, EventRow, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
+import { CostPanel, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
 import "../run-inspection.css";
 import type { TraceLiveState } from "./trace-live-model.js";
 import { detailRefetchMs, liveLabel, mergeTraceEvents } from "./trace-live-model.js";
 import { captureCoverageLabel, histogram, orderedPhases, runTone, runTotals } from "./trace-model.js";
+import { TraceReplay } from "./trace-replay.js";
 import { useTraceLive } from "./use-trace-live.js";
 export function TraceRunPage({ client }: { client: Client }) {
 	const { runId = "" } = useParams();
@@ -23,6 +25,13 @@ export function TraceRunPage({ client }: { client: Client }) {
 function Run({ client, runId }: { client: Client; runId: string }) {
 	const [search, setSearch] = useSearchParams();
 	const selected = search.get("phase");
+	const requestedView = search.get("view");
+	const view = requestedView === "execution" || requestedView === "checks" ? requestedView : "replay";
+	const selectView = (value: "replay" | "execution" | "checks") => {
+		const next = new URLSearchParams(search);
+		next.set("view", value);
+		setSearch(next);
+	};
 	const select = (id: string) => {
 		const next = new URLSearchParams(search);
 		next.set("phase", id);
@@ -33,6 +42,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		"q",
 		"source",
 		"status",
+		"sort",
 	]);
 	const [full, setFull] = useState(false),
 		[now, setNow] = useState(clock.now()),
@@ -44,6 +54,8 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		refetchInterval: 5000,
 	});
 	const detail = useQuery({
+		meta: { errorSurface: "inline" },
+		placeholderData: (previous) => previous,
 		queryKey: ["trace-detail", runId, full],
 		queryFn: async () => {
 			const [run, phases, gates, processes, receipt] = await Promise.all([
@@ -59,6 +71,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		refetchInterval: (query) => detailRefetchMs(query.state.data?.run.status, tail),
 	});
 	const events = useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["trace-events", runId],
 		queryFn: async () => {
 			let after = 0;
@@ -81,25 +94,36 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 	}, [detail.data?.run.status]);
 	if ((detail.error && !detail.data) || (events.error && !events.data))
 		return (
-			<div role="alert">
+			<section className="run-inspection">
+				<Link to={back}>← Trace history</Link>
 				<h1>Trace unavailable</h1>
-				<p>{detail.error?.message ?? events.error?.message}</p>
-				<Link to={back}>Back to traces</Link>
-			</div>
+				<InspectionError
+					title="Run could not be read"
+					error={(detail.error ?? events.error) as Error}
+					busy={detail.isFetching || events.isFetching}
+					retry={() => {
+						void detail.refetch();
+						void events.refetch();
+					}}
+				/>
+			</section>
 		);
-	if (!detail.data || !events.data) return <p>Loading run…</p>;
+	if (!detail.data || !events.data)
+		return (
+			<section className="run-inspection">
+				<Link to={back}>← Trace history</Link>
+				<p role="status">Reading the run, events and saved receipt…</p>
+			</section>
+		);
 	const { run, gates, processes, receipt } = detail.data,
 		phases = orderedPhases(detail.data.phases),
-		phase = selected === "all" ? undefined : (phases.find((item) => item.phase_id === selected) ?? phases[0]),
-		phaseEvents = events.data.filter((event) => !phase || event.phase_id === phase.phase_id),
+		phase = phases.find((item) => item.phase_id === selected),
 		eventKinds = histogram(events.data.map((event) => event.type)),
 		processKinds = histogram(processes.map((process) => process.kind));
 	return (
 		<section className="trace-run-detail run-inspection">
 			<Link to={back}>← Trace history</Link>
-			<p className="eyebrow">
-				{run.source} / {run.run_id}
-			</p>
+			<p className="eyebrow">{run.source} execution record</p>
 			<h1>{run.request ?? run.run_id}</h1>
 			<div className="trace-event-head">
 				<StatusMark tone={runTone(run.status)} label={run.status} />
@@ -108,7 +132,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				</span>
 			</div>
 			<p className="panel-note">Durable run record · receipt integrity is a separate check</p>
-			<p className="panel-note">{captureCoverageLabel(coverage.data?.captureCoverage ?? null)}</p>
+
 			<ul className="trace-totals">
 				{runTotals(run, now).map((total) => (
 					<li key={total.label}>
@@ -117,106 +141,148 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 					</li>
 				))}
 			</ul>
-			<Facts
-				entries={[
-					["Agent", run.agent],
-					["Model", run.model],
-					["Target", run.target],
-					["Node", run.node],
-					["Started", formatTime(run.started_at)],
-				]}
-			/>
-			{(detail.error || events.error) && (
-				<p role="alert">
-					Refresh failed: {detail.error?.message ?? events.error?.message}. Showing the last loaded record.
-				</p>
-			)}
-			<div className="inspection-heading">
-				<h2>Execution sequence</h2>
-				<button type="button" aria-pressed={selected === "all"} onClick={() => select("all")}>
-					All phases
-				</button>
-			</div>
-			<Waterfall run={run} phases={phases} events={events.data} selected={phase?.phase_id ?? null} select={select} />
-			{phase ? (
-				<div className="inspection-phase">
-					<section className="trace-panel">
-						<h2>{phase.name}</h2>
-						<Facts
-							entries={[
-								["Description", phase.description],
-								["Status", phase.status],
-								["Owner", phase.owner],
-								["Attempt", phase.attempt],
-								["Retries", phase.retries],
-								["Error", phase.error],
-							]}
-						/>
-					</section>
-					<CostPanel phase={phase} />
-				</div>
-			) : null}
-			<section className="trace-panel">
-				<h2>Recorded activity</h2>
-				<div className="trace-histograms">
-					{[
-						{ title: "Events", data: eventKinds, subject: "event" },
-						{ title: "Processes", data: processKinds, subject: "process" },
-					].map(({ title, data, subject }) => (
-						<div key={title}>
-							<h3>{title}</h3>
-							{!data.rows.length && <PanelEmpty>{emptyState.emptyStore(subject, "for this run")}</PanelEmpty>}
-							<ul className="trace-histogram">
-								{data.rows.map((row) => (
-									<li key={row.label}>
-										<span>{row.label}</span>
-										<span className="trace-histogram__track" aria-hidden="true">
-											<i style={{ width: `${Math.round(row.share * 100)}%` }} />
-										</span>
-										<strong>{row.count.toLocaleString("en-US")}</strong>
-									</li>
-								))}
-							</ul>
-							{data.omitted && <p className="panel-note">{data.omitted}</p>}
-						</div>
-					))}
-				</div>
-			</section>
-			<section className="trace-panel">
-				<h2>
-					{phase ? `${phase.name} · event log` : "Event log"} <small>({phaseEvents.length})</small>
-				</h2>
-				{/* biome-ignore lint/a11y/noNoninteractiveTabindex: The bounded event log is a keyboard-scrollable region. */}
-				<section className="inspection-log" tabIndex={0} aria-label={phase ? `${phase.name} events` : "All run events"}>
-					{phaseEvents.map((event) => (
-						<EventRow key={event.event_id} event={event} start={run.started_at} />
-					))}
-				</section>
-				{!phaseEvents.length ? <PanelEmpty>{emptyState.emptyStore("event", "for this phase")}</PanelEmpty> : null}
-			</section>
-			<Gates gates={gates.filter((gate) => !phase || gate.phase_id === phase.phase_id)} />
 			<details className="trace-panel">
-				<summary>Processes · {processes.length} recorded</summary>
-				{processes.map((process) => (
-					<article className="trace-event" key={process.id}>
-						<h3>
-							{process.name} <span className="trace-badge">{process.ended_at ? "ended" : "no end recorded"}</span>
-						</h3>
-						<Facts
-							entries={[
-								["Kind", process.kind],
-								["PID", process.pid],
-								["Host", process.host],
-								["Started", formatTime(process.started_at)],
-								["Ended", process.ended_at ? formatTime(process.ended_at) : null],
-								["Command", process.command],
-							]}
-						/>
-					</article>
-				))}
-				{!processes.length ? <PanelEmpty>{emptyState.emptyStore("process", "for this run")}</PanelEmpty> : null}
+				<summary>Run identity, runtime & capture coverage</summary>
+				<p className="inspection-id">{run.run_id}</p>
+				<p className="panel-note">{captureCoverageLabel(coverage.data?.captureCoverage ?? null)}</p>
+				<Facts
+					entries={[
+						["Agent", run.agent],
+						["Model", run.model],
+						["Target", run.target],
+						["Node", run.node],
+						["Started", formatTime(run.started_at)],
+					]}
+				/>
 			</details>
-			<ReceiptPanel data={receipt} full={full} loadFull={() => setFull(true)} />
+			{(detail.error || events.error) && (
+				<InspectionError
+					title="Refresh failed; showing the last loaded record"
+					error={(detail.error ?? events.error) as Error}
+					busy={detail.isFetching || events.isFetching}
+					retry={() => {
+						void detail.refetch();
+						void events.refetch();
+					}}
+				/>
+			)}
+			<InspectionTabs
+				label="Trace views"
+				value={view}
+				onChange={selectView}
+				tabs={[
+					{ id: "replay", label: `Replay · ${events.data.length} events` },
+					{ id: "execution", label: `Execution · ${phases.length} phases` },
+					{ id: "checks", label: `Checks & receipt · ${gates.length} gates` },
+				]}
+			>
+				{view === "replay" && (
+					<TraceReplay
+						key={phase?.phase_id ?? "all"}
+						run={run}
+						events={events.data}
+						phases={phases}
+						phaseId={phase?.phase_id ?? null}
+						selectPhase={select}
+						live={live}
+					/>
+				)}
+				{view === "execution" && (
+					<>
+						<div className="inspection-heading">
+							<h2>Execution sequence</h2>
+							<button type="button" aria-pressed={!phase} onClick={() => select("all")}>
+								All phases
+							</button>
+						</div>
+						<Waterfall run={run} phases={phases} events={events.data} selected={phase?.phase_id ?? null} select={select} />
+						{phase ? (
+							<div className="inspection-phase">
+								<section className="trace-panel">
+									<h2>{phase.name}</h2>
+									<Facts
+										entries={[
+											["Description", phase.description],
+											["Status", phase.status],
+											["Owner", phase.owner],
+											["Attempt", phase.attempt],
+											["Retries", phase.retries],
+											["Error", phase.error],
+										]}
+									/>
+								</section>
+								<CostPanel phase={phase} />
+							</div>
+						) : null}
+						<section className="trace-panel">
+							<h2>Recorded activity</h2>
+							<div className="trace-histograms">
+								{[
+									{ title: "Events", data: eventKinds, subject: "event" },
+									{ title: "Processes", data: processKinds, subject: "process" },
+								].map(({ title, data, subject }) => (
+									<div key={title}>
+										<h3>{title}</h3>
+										{!data.rows.length && <PanelEmpty>{emptyState.emptyStore(subject, "for this run")}</PanelEmpty>}
+										<ul className="trace-histogram">
+											{data.rows.map((row) => (
+												<li key={row.label}>
+													<span>{row.label}</span>
+													<span className="trace-histogram__track" aria-hidden="true">
+														<i style={{ width: `${Math.round(row.share * 100)}%` }} />
+													</span>
+													<strong>{row.count.toLocaleString("en-US")}</strong>
+												</li>
+											))}
+										</ul>
+										{data.omitted && <p className="panel-note">{data.omitted}</p>}
+									</div>
+								))}
+							</div>
+						</section>
+
+						<details className="trace-panel">
+							<summary>Processes · {processes.length} recorded</summary>
+							{processes.map((process) => (
+								<article className="trace-event" key={process.id}>
+									<h3>
+										{process.name} <span className="trace-badge">{process.ended_at ? "ended" : "no end recorded"}</span>
+									</h3>
+									<Facts
+										entries={[
+											["Kind", process.kind],
+											["PID", process.pid],
+											["Host", process.host],
+											["Started", formatTime(process.started_at)],
+											["Ended", process.ended_at ? formatTime(process.ended_at) : null],
+											["Command", process.command],
+										]}
+									/>
+								</article>
+							))}
+							{!processes.length ? <PanelEmpty>{emptyState.emptyStore("process", "for this run")}</PanelEmpty> : null}
+						</details>
+					</>
+				)}
+				{view === "checks" && (
+					<>
+						<p className="panel-note">{phase ? `Checks filtered to ${phase.name}.` : "Checks for every recorded phase."}</p>
+						{phase && (
+							<button type="button" onClick={() => select("all")}>
+								Show checks for all phases
+							</button>
+						)}
+						<Gates gates={gates.filter((gate) => !phase || gate.phase_id === phase.phase_id)} />
+						{full && detail.isPlaceholderData && <p role="status">Reading the complete saved receipt…</p>}
+						<ReceiptPanel
+							data={receipt}
+							full={full && !detail.isPlaceholderData}
+							loading={full && detail.isPlaceholderData}
+							loadFull={() => setFull(true)}
+						/>
+					</>
+				)}
+			</InspectionTabs>
 		</section>
 	);
 }

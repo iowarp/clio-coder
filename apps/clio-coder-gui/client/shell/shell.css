@@ -490,6 +490,18 @@
 	color: var(--ink-muted);
 	list-style: none;
 }
+.wb-project__history {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+	text-decoration: none;
+}
+.wb-project__history .icon {
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+}
 .wb-side__tasks > .wb-note {
 	padding-left: 10px;
 }

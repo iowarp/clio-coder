@@ -1,5 +1,7 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { STRUCTURED_SETTINGS, type StructuredField } from "../../contracts/structured-settings.js";
+
+import { invalidCollectionNames } from "./settings-control-model.js";
 
 type Row = { id: string; name: string; values: Record<string, unknown>; members?: Row[] };
 function record(value: unknown): Record<string, unknown> {
@@ -68,8 +70,15 @@ export function StructuredSettingsEditor({
 	const [rows, setRows] = useState(() => rowsFrom(path, value));
 	const [fieldText, setFieldText] = useState<Record<string, string>>({});
 	const id = useId();
+	const root = useRef<HTMLFieldSetElement>(null);
+	const pendingFocus = useRef<string | null>(null);
+	useEffect(() => {
+		if (!pendingFocus.current || !rows.some((row) => row.id === pendingFocus.current)) return;
+		root.current?.querySelector<HTMLElement>(`[data-entry-id="${pendingFocus.current}"] input`)?.focus();
+		pendingFocus.current = null;
+	}, [rows]);
 	const names = rows.map((row) => row.name.trim());
-	const invalidName = editor?.kind !== "list" && names.some((name, index) => !name || names.indexOf(name) !== index);
+	const invalidName = editor?.kind !== "list" && invalidCollectionNames(names);
 	useEffect(() => {
 		onValidityChange(!invalidName);
 	}, [invalidName, onValidityChange]);
@@ -135,10 +144,13 @@ export function StructuredSettingsEditor({
 			);
 		});
 	return (
-		<fieldset className="structured-settings" disabled={disabled} aria-describedby={describedBy}>
+		<fieldset ref={root} className="structured-settings" disabled={disabled} aria-describedby={describedBy}>
 			<legend className="sr-only">Edit {editor.name.toLowerCase()} collection</legend>
+			<p className="structured-settings__count">
+				{rows.length} {rows.length === 1 ? "entry" : "entries"} · add or remove entries, then save this collection.
+			</p>
 			{rows.map((row, index) => (
-				<div className="structured-settings__row" key={row.id}>
+				<div className="structured-settings__row" key={row.id} data-entry-id={row.id}>
 					<div className="structured-settings__row-heading">
 						<strong>
 							{editor.name} {index + 1}
@@ -157,6 +169,7 @@ export function StructuredSettingsEditor({
 							<input
 								value={row.name}
 								required
+								aria-invalid={invalidName || undefined}
 								onChange={(event) => {
 									const name = event.target.value;
 									update(rows.map((item) => (item.id === row.id ? { ...item, name } : item)));
@@ -217,10 +230,12 @@ export function StructuredSettingsEditor({
 					const prefix = `new-${editor.name.toLowerCase().replaceAll(" ", "-")}-`;
 					let number = 1;
 					while (names.includes(`${prefix}${number}`)) number++;
+					const rowId = crypto.randomUUID();
+					pendingFocus.current = rowId;
 					update([
 						...rows,
 						{
-							id: crypto.randomUUID(),
+							id: rowId,
 							name: `${prefix}${number}`,
 							values: {},
 							...(editor.kind === "rosters" ? { members: [] } : {}),

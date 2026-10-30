@@ -7,7 +7,9 @@ import {
 	type CategoryKey,
 	type Choice,
 	type CredentialOption,
+	canSubmitText,
 	matches,
+	modelChoiceVisible,
 	type ProviderOption,
 	type ReviewFact,
 	type StepView,
@@ -155,7 +157,7 @@ export function WelcomeStep({
 						<strong>Connect and choose a model.</strong> Clio checks the address and reads the model list.
 					</li>
 					<li>
-						<strong>Open a folder.</strong> Clio works inside it and asks before it changes anything.
+						<strong>Open a folder.</strong> Clio works inside it. Your approval policy controls which actions ask first.
 					</li>
 				</ol>
 			) : null}
@@ -460,7 +462,7 @@ export function TextStep({
 	const field = useId();
 	if (!text) return null;
 	const submit = () => {
-		if (busy || (value === "" && text.initial === "")) return;
+		if (busy || !canSubmitText(value, text.initial, text.mask)) return;
 		send(textAnswer(text, value));
 		if (text.mask) setValue("");
 	};
@@ -469,7 +471,12 @@ export function TextStep({
 			title={title}
 			lede={lede}
 			actions={
-				<button type="button" className="primary wizard-button" disabled={busy} onClick={submit}>
+				<button
+					type="button"
+					className="primary wizard-button"
+					disabled={busy || !canSubmitText(value, text.initial, text.mask)}
+					onClick={submit}
+				>
 					{submitLabel}
 				</button>
 			}
@@ -581,6 +588,7 @@ export function ModelStep({ view, busy, send }: StepProps<Of<"model">>) {
 		[view.models, query],
 	);
 	const current = view.models.find((model) => model.choice.id === picked);
+	const pickedVisible = modelChoiceVisible(shown, picked);
 	return (
 		<Step
 			title="Which model?"
@@ -592,10 +600,10 @@ export function ModelStep({ view, busy, send }: StepProps<Of<"model">>) {
 				<button
 					type="button"
 					className="primary wizard-button"
-					disabled={busy || !current}
+					disabled={busy || !current || !pickedVisible}
 					onClick={() => current && send(selectAnswer(view.prompt, current.choice))}
 				>
-					{current ? `Use ${current.id}` : "Choose a model"}
+					{current && pickedVisible ? `Use ${current.id}` : "Choose a model"}
 				</button>
 			}
 		>
@@ -616,6 +624,9 @@ export function ModelStep({ view, busy, send }: StepProps<Of<"model">>) {
 					</span>
 				</div>
 			) : null}
+			<p className="wizard-selection" role="status">
+				{shown.length} models shown{current ? ` · selected: ${current.id}` : " · choose a model"}
+			</p>
 			<ul className="wizard-options wizard-options--scroll">
 				{shown.map((model) => (
 					<li key={model.choice.id}>
@@ -636,7 +647,14 @@ export function ModelStep({ view, busy, send }: StepProps<Of<"model">>) {
 					</li>
 				))}
 			</ul>
-			{shown.length === 0 ? <p className="wizard-empty">No model matches “{query}”.</p> : null}
+			{shown.length === 0 ? (
+				<div className="wizard-empty">
+					<p>No model matches “{query}”.</p>
+					<button type="button" className="wizard-quiet" onClick={() => setQuery("")}>
+						Clear search
+					</button>
+				</div>
+			) : null}
 		</Step>
 	);
 }

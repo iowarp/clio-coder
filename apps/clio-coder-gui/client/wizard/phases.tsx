@@ -106,7 +106,7 @@ export function SavedStep({
 			<p className="wizard-step__lede">
 				{view.verified
 					? "Clio reached the connection and has the model it will start on."
-					: "Clio could not reach it just now. The settings are saved, and Settings can check it again."}
+					: "Availability is not verified. The settings are saved; check the connection again in Settings."}
 			</p>
 			{view.summary.length > 0 ? (
 				<ul className="wizard-checks" aria-label="What was saved">
@@ -159,7 +159,8 @@ export function WorkspaceStep({ client, onOpened }: { client: Client; onOpened: 
 				Open your first workspace.
 			</h1>
 			<p className="wizard-step__lede">
-				A folder on this machine. Clio reads and edits files inside it, and asks before it changes anything.
+				A folder on this machine. Clio can read and edit files inside it. Your approval policy controls which actions ask
+				first.
 			</p>
 			<form
 				className="wizard-field"

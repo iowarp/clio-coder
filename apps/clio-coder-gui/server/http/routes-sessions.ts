@@ -182,6 +182,7 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.sessions, () => supervisor.list());
+	register(app, hub, routes.sessionOverview, () => supervisor.overview());
 	register(app, hub, routes.session, async ({ params }, context) => {
 		const snapshot = supervisor.get(params.id);
 		context.header("X-Clio-Revision", String(snapshot.revision));

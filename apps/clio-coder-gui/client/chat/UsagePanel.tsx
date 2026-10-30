@@ -1,15 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { memo, useId } from "react";
+import { memo, useId, useRef } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { LiveUsage } from "../../contracts/session-telemetry.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
+import { sessionReadScope } from "../api/sessions.js";
 import { StatusMark } from "../design/status.js";
-import { quotaCards, quotaTone, usageRows, usageSummary } from "./session-usage-model.js";
+import { quotaCards, quotaTone, usageCoverageNotes, usageRows, usageSummary } from "./session-usage-model.js";
 import "./session-board.css";
 import "./usage-panel.css";
+import "./pane-inspection.css";
 
 /**
  * The terminal's /usage for this conversation: what it spent, per provider and model, and what each
@@ -34,26 +36,52 @@ export const UsagePanel = memo(function UsagePanel({
 	turns: SessionSnapshot["turns"];
 }) {
 	const supported = !!capabilities?.usage;
+	const scope = sessionReadScope(sessionId);
 	const id = useId();
+	const refreshButton = useRef<HTMLButtonElement>(null);
 	const usage = useQuery({
-		queryKey: ["session-usage", sessionId, settledTurns],
-		queryFn: () => client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }),
+		meta: { errorSurface: "inline" },
+		queryKey: ["session-usage", sessionId, settledTurns, scope],
+		queryFn: ({ signal }) =>
+			client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }, undefined, signal),
 		enabled: sessionOpen && supported,
 		retry: false,
 		// The next settled turn changes the key; the last answer stays on screen until the new one lands,
 		// so rows (and the focus a row holds) do not vanish between the two reads.
-		placeholderData: (previous) => previous,
+		placeholderData: (previous, previousQuery) =>
+			previousQuery?.queryKey[1] === sessionId && previousQuery.queryKey.at(-1) === scope ? previous : undefined,
 	});
 	const summary = usageSummary(sessionOpen, turns, usage.data, liveUsage);
 	const quota = usage.data ? quotaCards(usage.data) : null;
+	const refresh = () => {
+		if (usage.isFetching) return;
+		refreshButton.current?.focus();
+		void usage.refetch();
+	};
 	return (
 		<div className="pane-drill drill usage-panel">
+			{sessionOpen && supported && (
+				<div className="pane-inspection-toolbar">
+					<p>Session accounting</p>
+					<button ref={refreshButton} type="button" aria-disabled={usage.isFetching} onClick={refresh}>
+						{usage.isFetching ? "Refreshing…" : "Refresh accounting"}
+					</button>
+				</div>
+			)}
+			{usage.isPlaceholderData && (
+				<p className="drill__note" role="status">
+					Showing the previous accounting while this turn's usage is read.
+				</p>
+			)}
 			{!sessionOpen ? <p className="pane-empty">{summary.note}</p> : null}
 			{sessionOpen && !supported ? <p className="pane-empty">Clio does not report usage for this task.</p> : null}
 			{usage.isPending && sessionOpen && supported ? <p className="pane-empty">Reading usage…</p> : null}
 			{sessionOpen && usage.error ? (
 				<p role="alert" className="pane-empty">
-					{usage.error.message}
+					{usage.error.message} {usage.data ? "Showing the last successful accounting. " : ""}
+					<button type="button" disabled={usage.isFetching} onClick={refresh}>
+						Retry usage
+					</button>
 				</p>
 			) : null}
 			{summary.totals.length > 0 ? (
@@ -75,24 +103,36 @@ export const UsagePanel = memo(function UsagePanel({
 						<section className="drill__section" aria-labelledby={`${id}-models`}>
 							<h3 id={`${id}-models`}>By model</h3>
 							<ul className="drill__rows usage-panel__models" aria-label="Spend by provider and model">
-								{usageRows(usage.data).map((row) => (
+								{usageRows(usage.data, "fields").map((row) => (
 									<li key={row.key}>
 										<span className="drill__main">
 											<span className="usage-panel__route">{row.route}</span>
 											<small className="drill__num">{row.tokens}</small>
-											{row.beside ? <small>Beside the conversation: {row.beside}</small> : null}
+											{row.beside ? <small>Call details: {row.beside}</small> : null}
 										</span>
 										<span className="drill__num usage-panel__cost">{row.cost}</span>
 									</li>
 								))}
 							</ul>
+							{usageCoverageNotes(usage.data).map((note) => (
+								<p key={note} className="drill__note">
+									{note}
+								</p>
+							))}
 						</section>
 					) : null}
-					<section className="drill__section" aria-labelledby={`${id}-quota`}>
-						<h3 id={`${id}-quota`}>Provider quota</h3>
+					<details className="pane-inspection-disclosure">
+						<summary id={`${id}-quota`}>
+							Provider quota
+							{quota?.status === "read" ? ` · ${quota.cards.length} ${quota.cards.length === 1 ? "plan" : "plans"}` : ""}
+						</summary>
+
 						{quota?.status === "failed" ? (
 							<p role="alert" className="pane-empty">
-								{quota.reason}
+								{quota.reason}{" "}
+								<button type="button" disabled={usage.isFetching} onClick={refresh}>
+									Refresh reported quota
+								</button>
 							</p>
 						) : null}
 						{quota?.status === "read" && quota.cards.length === 0 ? (
@@ -138,7 +178,7 @@ export const UsagePanel = memo(function UsagePanel({
 						<p className="drill__note">
 							Each provider's report for the signed-in plan. It covers every tool using that plan, not only Clio Coder.
 						</p>
-					</section>
+					</details>
 				</>
 			) : null}
 		</div>

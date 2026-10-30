@@ -14,7 +14,13 @@ const statusByCode: Record<ProblemCode, number> = {
 };
 export class AppProblem extends Error {
 	readonly problem: Problem;
-	constructor(code: ProblemCode, detail: string, status = statusByCode[code], instance: string = randomUUID()) {
+	constructor(
+		code: ProblemCode,
+		detail: string,
+		status = statusByCode[code],
+		instance: string = randomUUID(),
+		extensions: Pick<Problem, "modelSelection"> = {},
+	) {
 		super(detail);
 		this.problem = {
 			type: `urn:clio-coder:problem:${code}`,
@@ -23,6 +29,7 @@ export class AppProblem extends Error {
 			detail,
 			code,
 			instance,
+			...extensions,
 		};
 	}
 }

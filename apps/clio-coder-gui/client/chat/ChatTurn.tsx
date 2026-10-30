@@ -37,6 +37,7 @@ import {
 	turnStartedAt,
 } from "./chat-turn.js";
 import { turnOutcome } from "./composer-model.js";
+import { longRequestPreview } from "./conversation-outline-model.js";
 import type { HealthRow } from "./health.js";
 import {
 	isLive,
@@ -155,18 +156,34 @@ export const ChatTurnView = memo(function ChatTurnView({
 	const author = responseAuthor(turn);
 	const startedAt = turnStartedAt(row);
 	const prompt = request.missing ? null : request.text;
+	const requestPreview = prompt === null ? null : longRequestPreview(prompt);
 	return (
 		<article
 			className={`chat-turn${live ? " is-live" : " is-settled"}${turn.origin === "replay" ? " is-replay" : ""}`}
 			data-turn-id={turn.turnId}
 			aria-label={turnAriaLabel(turn)}
+			tabIndex={-1}
 		>
 			{/* The request is the operator's own words on a quiet ground. Who wrote it is announced, not
 			    printed; when and the copy action sit under it and surface on hover or focus. */}
 			<div className="chat-request">
 				<span className="sr-only">{request.heading}</span>
 				{/* The operator's own text is never reinterpreted as Markdown. */}
-				<p className={`chat-request__prompt${request.missing ? " is-missing" : ""}`}>{request.text}</p>
+				{requestPreview === null ? (
+					<p className={`chat-request__prompt${request.missing ? " is-missing" : ""}`}>{request.text}</p>
+				) : (
+					<details className="chat-request__long">
+						<summary>
+							<span className="chat-request__preview">{requestPreview}</span>
+							<span className="chat-request__expand">
+								<span className="chat-request__show">Read full request</span>
+								<span className="chat-request__hide">Collapse request</span>
+								<small>{request.text.length.toLocaleString()} characters</small>
+							</span>
+						</summary>
+						<p className="chat-request__full">{request.text}</p>
+					</details>
+				)}
 				<div className="chat-request__meta">
 					{request.replay ? <span className="chat-request__replay">{REPLAY_CHIP}</span> : null}
 					{row?.images ? (
@@ -210,7 +227,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 				<div className="chat-response__body">
 					{runningMs >= VERY_LONG_TURN_MS && working ? (
 						<p className="chat-response__long">
-							This is a long run. Clio is still working, and Stop ends the turn without running anything further.
+							This is a long run. Clio is still working. Use Stop to request that the current turn ends.
 						</p>
 					) : null}
 					{turn.segments.length === 0 && live ? (

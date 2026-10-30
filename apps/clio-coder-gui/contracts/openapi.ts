@@ -36,6 +36,14 @@ export function openapi() {
 								required: true,
 								schema: { type: "string", minLength: 1, maxLength: 128 },
 							},
+							{
+								name: "X-Clio-Epoch",
+								in: "header",
+								required: false,
+								schema: { type: "string" },
+								description:
+									"Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying.",
+							},
 						]
 					: []),
 				...(route.stream ? [{ name: "Last-Event-ID", in: "header", schema: routes.events.query.properties.after }] : []),

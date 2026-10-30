@@ -4,10 +4,35 @@
 // holds everything an operator inspects or configures, so the first thing a new person sees is a
 // task list and a composer, not ten equally weighted destinations.
 
+import type { SessionOverviewItem } from "../../contracts/session-overview.js";
 import type { SessionSnapshot, SessionSummary } from "../../contracts/sessions.js";
 import { isAwaitingAnswer } from "../chat/permission-state.js";
 
-export type TaskState = "starting" | "working" | "waiting" | "approval" | "failed" | "paused" | "idle";
+export type TaskState =
+	| "starting"
+	| "working"
+	| "waiting"
+	| "approval"
+	| "question"
+	| "failed"
+	| "paused"
+	| "unknown"
+	| "idle";
+
+type TaskSession = SessionSnapshot | SessionOverviewItem;
+
+const OVERVIEW_TASK_STATE: Readonly<Record<SessionOverviewItem["activity"], TaskState>> = {
+	approval: "approval",
+	question: "question",
+	working: "working",
+	queued: "waiting",
+	ready: "idle",
+	parked: "paused",
+	closed: "idle",
+	failed: "failed",
+	unknown: "unknown",
+	starting: "starting",
+};
 
 export interface TaskRow {
 	readonly id: string;
@@ -24,9 +49,10 @@ export const NEW_TASK_TITLE = "New task";
 
 /** What the sidebar and the top bar call a task: its reported label, else the first request. */
 export function taskTitle(
-	snapshot: Pick<SessionSnapshot, "label" | "turns" | "timeline">,
+	snapshot: Pick<SessionSnapshot, "label" | "turns" | "timeline"> | Pick<SessionOverviewItem, "title">,
 	saved?: Pick<SessionSummary, "name" | "firstMessagePreview">,
 ): string {
+	if ("title" in snapshot) return snapshot.title.replace(/\s+/g, " ").trim() || NEW_TASK_TITLE;
 	if (snapshot.label?.trim()) return snapshot.label.trim();
 	const prompt =
 		snapshot.turns.find((turn) => turn.prompt.trim() !== "")?.prompt ??
@@ -37,8 +63,11 @@ export function taskTitle(
 }
 
 export function taskState(
-	session: Pick<SessionSnapshot, "state" | "turns" | "permissions" | "contextWork">,
+	session:
+		| Pick<SessionSnapshot, "state" | "turns" | "permissions" | "contextWork">
+		| Pick<SessionOverviewItem, "activity">,
 ): TaskState {
+	if ("activity" in session) return OVERVIEW_TASK_STATE[session.activity];
 	if (session.state === "parked") return "paused";
 	if (session.permissions.some(isAwaitingAnswer)) return "approval";
 	if (session.state === "starting") return "starting";
@@ -55,7 +84,25 @@ export function isHeld(session: Pick<SessionSnapshot, "state">): boolean {
 }
 
 /** True for an open session nobody has typed into. "New task" reuses one its own window made instead of spawning another child. */
-export function isUntouched(session: Pick<SessionSnapshot, "state" | "turns" | "timeline" | "contextWork">): boolean {
+export function isUntouched(
+	session: Pick<SessionSnapshot, "state" | "turns" | "timeline" | "contextWork"> | SessionOverviewItem,
+): boolean {
+	if ("turnCount" in session)
+		return (
+			session.untouched &&
+			session.state === "open" &&
+			session.turnCount === 0 &&
+			session.activity === "ready" &&
+			session.updatedAt === null &&
+			session.currentTurnId === null &&
+			session.pendingApprovals === 0 &&
+			session.pendingQuestions === 0 &&
+			session.activeWorkers === 0 &&
+			session.queuedWorkers === 0 &&
+			session.workersComplete &&
+			session.activeJobs === 0 &&
+			!session.recoveredOrphan
+		);
 	return (
 		session.state === "open" &&
 		session.turns.length === 0 &&
@@ -73,11 +120,11 @@ const OWN_DRAFT_LIMIT = 16;
  * created qualifies: one server serves every window, so reusing another window's draft would put two
  * windows on one session and its steering queue (#420).
  */
-export function reusableDraft(
-	sessions: readonly SessionSnapshot[],
+export function reusableDraft<T extends TaskSession>(
+	sessions: readonly T[],
 	workspaceId: string,
 	ownDrafts: readonly string[],
-): SessionSnapshot | undefined {
+): T | undefined {
 	return sessions.find(
 		(session) => session.workspaceId === workspaceId && ownDrafts.includes(session.id) && isUntouched(session),
 	);
@@ -100,7 +147,7 @@ function parsed(value: string | undefined): number {
  */
 export function taskRows(
 	workspaceId: string,
-	sessions: readonly SessionSnapshot[],
+	sessions: readonly TaskSession[],
 	history: readonly SessionSummary[],
 ): TaskRow[] {
 	const saved = new Map(history.map((row) => [row.id, row]));
@@ -110,14 +157,19 @@ export function taskRows(
 	const liveIds = new Set(live.map((session) => session.id));
 	const rows: TaskRow[] = [
 		...live.map((session): TaskRow => {
-			const turn = session.turns.at(-1);
 			const row = saved.get(session.id);
-			const at = [
-				session.contextWork?.active?.operation?.startedAt,
-				session.contextWork?.latest?.startedAt,
-				turn?.finishedAt ?? turn?.startedAt ?? undefined,
-				row?.lastActivityAt ?? row?.createdAt,
-			].reduce<string | undefined>((latest, value) => (parsed(value) > parsed(latest) ? value : latest), undefined);
+			const activity =
+				"updatedAt" in session
+					? [session.updatedAt ?? undefined]
+					: [
+							session.contextWork?.active?.operation?.startedAt,
+							session.contextWork?.latest?.startedAt,
+							session.turns.at(-1)?.finishedAt ?? session.turns.at(-1)?.startedAt ?? undefined,
+						];
+			const at = [...activity, row?.lastActivityAt ?? row?.createdAt].reduce<string | undefined>(
+				(latest, value) => (parsed(value) > parsed(latest) ? value : latest),
+				undefined,
+			);
 			return {
 				id: session.id,
 				workspaceId,
@@ -163,8 +215,10 @@ export const STATE_LABELS: Readonly<Record<TaskState, string>> = {
 	working: "Working",
 	waiting: "Waiting for a slot",
 	approval: "Needs your approval",
+	question: "Needs your answer",
 	failed: "Last turn failed",
 	paused: "Paused",
+	unknown: "Needs recovery",
 	idle: "",
 };
 
@@ -179,6 +233,7 @@ const SETTINGS_SEGMENTS = new Set([
 	"fleet",
 	"evidence",
 	"docs",
+	"machines",
 ]);
 
 export function isSettingsPath(pathname: string): boolean {
@@ -202,7 +257,8 @@ export interface SettingsSection {
 		| "evidence"
 		| "system"
 		| "shield"
-		| "layers";
+		| "layers"
+		| "sessions";
 	readonly group: SettingsGroup;
 	/** First path segments, or full-prefix matches, that keep this section highlighted. */
 	readonly owns: readonly string[];
@@ -279,6 +335,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 	{ id: "fleet", label: "Fleet", path: "/fleet", icon: "fleet", group: "activity", owns: ["/fleet"] },
 	{ id: "evidence", label: "Evidence", path: "/evidence", icon: "evidence", group: "activity", owns: ["/evidence"] },
 	{ id: "system", label: "System", path: "/system", icon: "system", group: "capabilities", owns: ["/system"] },
+	{ id: "sessions", label: "Sessions", path: "/sessions", icon: "sessions", group: "activity", owns: ["/sessions"] },
+	{ id: "machines", label: "Machines", path: "/machines", icon: "system", group: "capabilities", owns: ["/machines"] },
 ];
 
 export function settingsDestination(path: string, workspaceId: string | null | undefined): string {

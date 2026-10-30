@@ -70,3 +70,38 @@ export function findingAction(finding: Pick<Finding, "name" | "level">): { label
 		return { label: "Inspect recorded sessions", path: "/sessions" };
 	return null;
 }
+
+export function healthOverview(findings: readonly Finding[]) {
+	const errors = findings.filter((row) => row.level === "error").length;
+	const warnings = findings.filter((row) => row.level === "warn").length;
+	return {
+		errors,
+		warnings,
+		ready: findings.filter((row) => row.level === "ok").length,
+		information: findings.filter((row) => row.level === "info").length,
+		tone: errors
+			? ("fail" as const)
+			: warnings
+				? ("warn" as const)
+				: findings.length
+					? ("success" as const)
+					: ("unverified" as const),
+		label: errors
+			? `${errors} ${errors === 1 ? "issue" : "issues"} need attention`
+			: warnings
+				? `${warnings} ${warnings === 1 ? "warning" : "warnings"} to review`
+				: findings.length
+					? "No findings need attention"
+					: "No findings reported",
+	};
+}
+export const SYSTEM_FOLDERS: Readonly<Record<string, string>> = {
+	config: "Saved settings and configuration",
+	data: "Persistent application data",
+	state: "Runtime state and recorded activity",
+	cache: "Reusable caches and temporary runtime data",
+};
+
+export function findingCollapsed(finding: Pick<Finding, "level">, compact: boolean): boolean {
+	return compact || finding.level === "ok" || finding.level === "info";
+}

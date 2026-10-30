@@ -40,7 +40,7 @@ export function usageTotals(usage: SessionUsage): Array<{ label: string; value: 
 const counted = (value: number, one: string, many: string) =>
 	value > 0 ? [`${value} ${value === 1 ? one : many}`] : [];
 
-export function usageRows(usage: SessionUsage) {
+export function usageRows(usage: SessionUsage, detail: "summary" | "fields" = "summary") {
 	return usage.session.rows.map((row) => {
 		const beside = [
 			...counted(row.beside.sideQuestions, "side question", "side questions"),
@@ -54,19 +54,42 @@ export function usageRows(usage: SessionUsage) {
 			...counted(row.missingTokenCalls ?? 0, "call missing token usage", "calls missing token usage"),
 		];
 		const cache = row.tokens.cacheRead + row.tokens.cacheWrite;
+		const field = (value: number) => `${tokens(value)}${row.missingTokenCalls ? " +?" : ""}`;
 		return {
 			key: `${row.provider}/${row.model}`,
 			route: `${row.provider} · ${row.model}`,
-			tokens: [
-				`${tokens(row.tokens.input)} in`,
-				`${tokens(row.tokens.output)} out`,
-				...(cache > 0 ? [`${tokens(cache)} cache`] : []),
-				...(row.tokens.reasoning > 0 ? [`${tokens(row.tokens.reasoning)} reasoning`] : []),
-			].join(" · "),
+			tokens: (detail === "fields"
+				? [
+						`${field(row.tokens.total)} total`,
+						`${field(row.tokens.input)} input`,
+						`${field(row.tokens.output)} output`,
+						`${field(row.tokens.cacheRead)} cache read`,
+						`${field(row.tokens.cacheWrite)} cache write`,
+						...(row.tokens.reasoning > 0 ? [`${field(row.tokens.reasoning)} reasoning`] : []),
+					]
+				: [
+						`${tokens(row.tokens.input)} in`,
+						`${tokens(row.tokens.output)} out`,
+						...(cache > 0 ? [`${tokens(cache)} cache`] : []),
+						...(row.tokens.reasoning > 0 ? [`${tokens(row.tokens.reasoning)} reasoning`] : []),
+					]
+			).join(" · "),
 			cost: costText(row.cost),
 			beside: beside.length > 0 ? beside.join(", ") : null,
 		};
 	});
+}
+
+export function usageCoverageNotes(usage: SessionUsage): string[] {
+	return [
+		...(usage.session.truncated
+			? ["The model list is truncated. Session totals include models beyond the displayed rows."]
+			: []),
+		...(usage.session.missingTokenCalls
+			? ["Token fields are known subtotals because some calls are missing usage. Missing usage does not mean zero."]
+			: []),
+		"Cache reads and writes are separate model prompt-cache fields. Provider token fields can overlap, so they do not establish additive shares, a cache hit rate, or cost savings.",
+	];
 }
 
 const STATUS: Record<string, [StatusTone, string]> = {

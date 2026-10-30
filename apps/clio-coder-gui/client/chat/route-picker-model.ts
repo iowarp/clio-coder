@@ -23,15 +23,24 @@ export function routeDraft(
 		thinking:
 			(scope === "conversation"
 				? config?.options.find((row) => row.id === "thinkingLevel")?.currentValue
-				: chat?.thinkingLevel) ?? "off",
+				: chat?.thinkingLevel) ?? (scope === "conversation" ? "" : "off"),
 	};
 }
 
-export function conversationChanges(draft: RouteDraft, reported: RouteDraft): SetConfigOption[] {
+export function conversationChanges(
+	draft: RouteDraft,
+	reported: RouteDraft,
+	thinkingLevels?: readonly string[],
+): SetConfigOption[] {
 	const changes: SetConfigOption[] = [];
 	if (draft.target !== reported.target) changes.push({ configId: "target", value: draft.target });
 	if (draft.model !== "" && draft.model !== reported.model) changes.push({ configId: "model", value: draft.model });
-	if (draft.thinking !== reported.thinking) changes.push({ configId: "thinkingLevel", value: draft.thinking });
+	if (
+		draft.thinking !== "" &&
+		draft.thinking !== reported.thinking &&
+		(thinkingLevels === undefined || thinkingLevels.includes(draft.thinking))
+	)
+		changes.push({ configId: "thinkingLevel", value: draft.thinking });
 	return changes;
 }
 
@@ -70,24 +79,66 @@ export function routePickerChoices(
 	config: SessionConfig | undefined,
 	draft: RouteDraft,
 	inventory: ReadonlyArray<{ id: string; models: readonly string[] }> | undefined,
-): { targets: ModelOption[]; models: ModelOption[]; targetEditable: boolean; modelEditable: boolean } {
+): {
+	targets: ModelOption[];
+	models: ModelOption[];
+	targetEditable: boolean;
+	modelEditable: boolean;
+	needsConnectionSetup: boolean;
+} {
 	const targetControl = config?.options.find((option) => option.id === "target");
 	const modelControl = config?.options.find((option) => option.id === "model");
-	const targets: ModelOption[] = (inventory ?? [])
-		.filter((row) => targetControl?.options.some((option) => option.value === row.id) ?? row.id === config?.target)
-		.map((row) => ({ value: row.id, label: row.id }));
+	const targets: ModelOption[] = (targetControl?.options ?? []).map((row) => ({ value: row.value, label: row.name }));
 	if (draft.target && !targets.some((row) => row.value === draft.target))
 		targets.unshift({ value: draft.target, label: draft.target });
-	if (!draft.target) targets.unshift({ value: "", label: "Connection not reported" });
-	const current = draft.target === config?.target;
+	if (!draft.target)
+		targets.unshift({ value: "", label: config?.target === null ? "No connection selected" : "Connection not reported" });
+	const current = draft.target === (config?.target ?? "");
 	const models: ModelOption[] = current
 		? (modelControl?.options ?? []).map((row) => ({ value: row.value, label: row.name }))
 		: (inventory?.find((row) => row.id === draft.target)?.models ?? []).map((model) => ({ value: model, label: model }));
+	if (draft.model && !models.some((row) => row.value === draft.model))
+		models.unshift({ value: draft.model, label: `${draft.model} · not in the reported choices` });
 	if (!draft.model) models.push({ value: "", label: "Use connection default" });
 	return {
 		targets,
 		models,
-		targetEditable: targetControl !== undefined,
-		modelEditable: !current || modelControl !== undefined,
+		targetEditable: (targetControl?.options.length ?? 0) > 0,
+		modelEditable: models.some((row) => row.value !== draft.model),
+		needsConnectionSetup: config?.target === null && targetControl === undefined,
 	};
+}
+
+/** An absent control reports no capability; an empty capability list does not mean thinking is off. */
+export function thinkingControlNote(
+	config: SessionConfig | undefined,
+	draft: RouteDraft,
+	levels: readonly string[],
+): string | null {
+	if (
+		draft.target === (config?.target ?? "") &&
+		draft.model === config?.options.find((row) => row.id === "model")?.currentValue
+	) {
+		const control = config?.options.find((row) => row.id === "thinkingLevel");
+		if (control?.notice) return control.notice;
+		if (!control) return "Clio Coder has not reported a thinking control for this conversation.";
+	}
+	if (levels.length === 0)
+		return "No thinking choices are reported for this model. Clio Coder will resolve its thinking behavior when the model is applied.";
+	if (levels.length === 1 && levels[0] === "off") return "This model reports thinking off as its only supported choice.";
+	return null;
+}
+
+export function thinkingChoices(draft: RouteDraft, levels: readonly string[]): ModelOption[] {
+	return [
+		...(levels.includes(draft.thinking)
+			? []
+			: [
+					{
+						value: draft.thinking,
+						label: draft.thinking ? `${draft.thinking} · reported for the current model` : "Not reported",
+					},
+				]),
+		...levels.map((level) => ({ value: level, label: level })),
+	];
 }

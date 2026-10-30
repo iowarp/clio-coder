@@ -2,16 +2,24 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
+import { Link } from "react-router";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { SessionConfig } from "../../contracts/session-config.js";
-import type { Client } from "../api/client.js";
+import type { SessionSnapshot } from "../../contracts/sessions.js";
+import { ApiProblem, type Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { Icon } from "../design/icons.js";
 import { TONE_GLYPHS } from "../design/status.js";
 import { announce } from "../interaction/announcer.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
-import { ACP_TARGET_MODEL_LIMIT, catalogMayBeCut, modelAfterTargetChange } from "../pages/model-picker-model.js";
+import {
+	ACP_TARGET_MODEL_LIMIT,
+	catalogMayBeCut,
+	modelAfterTargetChange,
+	modelRefusalChoices,
+	modelSelectionRefusal,
+} from "../pages/model-picker-model.js";
 import type { RouteFacts } from "./route.js";
 import type { RouteDraft } from "./route-picker-model.js";
 import {
@@ -20,6 +28,8 @@ import {
 	modelThinkingLevels,
 	routeDraft,
 	routePickerChoices,
+	thinkingChoices,
+	thinkingControlNote,
 } from "./route-picker-model.js";
 
 /** Openers keyed by session, so the Session column's Model section can open this composer's picker. */
@@ -137,6 +147,8 @@ function RouteForm({
 	const targetId = useId();
 	const modelId = useId();
 	const thinkingId = useId();
+	const thinkingNoteId = useId();
+	const recoveryId = useId();
 	const scopeId = useId();
 	const targets = useQuery({
 		queryKey: ["session-targets", sessionId],
@@ -150,7 +162,7 @@ function RouteForm({
 		config,
 		requested?.model ?? "",
 		targets.data?.targets.find((row) => row.id === requested?.target)?.thinkingLevels,
-		requested?.target === config?.target,
+		requested?.target === (config?.target ?? ""),
 	);
 	const draft = draftWithSupportedThinking(requested, thinkingLevels);
 	const chosenTarget = draft?.target ?? "";
@@ -173,10 +185,26 @@ function RouteForm({
 	});
 	const catalogFor = (target: string) => targets.data?.targets.find((row) => row.id === target)?.models ?? null;
 	const models = chosenTarget === "" ? null : catalogFor(chosenTarget);
-	const save = useMutation({
+	const [recoveryRequired, setRecoveryRequired] = useState(false);
+	const refresh = useMutation({
+		meta: { errorSurface: "inline" },
 		mutationFn: async () => {
-			if (!draft || !reported) return;
-			for (const body of conversationChanges(draft, reported))
+			await queries.cancelQueries({ queryKey: ["session", sessionId], exact: true });
+			return queries.fetchQuery({
+				queryKey: ["session", sessionId],
+				queryFn: ({ signal }) => client.call(routes.session, input, undefined, signal),
+				staleTime: 0,
+				retry: false,
+			});
+		},
+		onSuccess: () => setRecoveryRequired(false),
+	});
+	const save = useMutation({
+		meta: { errorSurface: "inline" },
+		retry: false,
+		mutationFn: async (requested: RouteDraft) => {
+			if (!reported) throw new Error("Read the conversation controls before applying a model.");
+			for (const body of conversationChanges(requested, reported, thinkingLevels))
 				await client.call(routes.setSessionConfig, { ...input, body });
 			await queries.invalidateQueries({ queryKey: ["session", sessionId] });
 		},
@@ -184,10 +212,11 @@ function RouteForm({
 			announce("Connection, model and thinking changed for this conversation’s next request.");
 			onDone();
 		},
-		onError: () => {
+		onError: (_error, requested) => {
 			// Separate ACP controls can partly succeed. Read the authoritative state before offering a retry.
-			setEdited(null);
-			void queries.invalidateQueries({ queryKey: ["session", sessionId] });
+			setEdited(requested);
+			setRecoveryRequired(true);
+			refresh.mutate();
 		},
 	});
 	if (!draft || !reported)
@@ -196,7 +225,7 @@ function RouteForm({
 				<p>Reading this conversation’s model controls…</p>
 			</div>
 		);
-	const changed = conversationChanges(draft, reported).length > 0;
+	const changed = conversationChanges(draft, reported, thinkingLevels).length > 0;
 	const modelNeedsTarget = draft.target === "" && draft.model.trim() !== "";
 	const edit = (next: Partial<RouteDraft>) => {
 		setEdited({ ...draft, ...next });
@@ -209,7 +238,7 @@ function RouteForm({
 	const count = models === null ? "" : ` ${models.length} ${models.length === 1 ? "model" : "models"}.`;
 	const note =
 		chosenTarget === ""
-			? "Automatic routing chooses the target, so it chooses the model too."
+			? "Select a connection before applying a model to this conversation."
 			: catalogCheck.isFetching
 				? `Asking ${chosenTarget} for its models…`
 				: catalogCheck.data?.healthy
@@ -220,7 +249,11 @@ function RouteForm({
 							? `The check failed: ${catalogCheck.error.message} These are the models Clio Coder last knew for it.${cut}`
 							: `The models Clio Coder knows for ${chosenTarget}.${count}${cut}`;
 	const choices = routePickerChoices(config, draft, targets.data?.targets);
-	const locked = running || save.isPending;
+	const thinkingNote = thinkingControlNote(config, draft, thinkingLevels);
+	const refusal = modelSelectionRefusal(save.error instanceof ApiProblem ? save.error.problem : null);
+	const recoveryModels = modelRefusalChoices(refusal, draft.target);
+	const locked = running || save.isPending || recoveryRequired;
+	const workspaceId = queries.getQueryData<SessionSnapshot>(["session", sessionId])?.workspaceId;
 	return (
 		<div className="route-picker__panel">
 			<p className="route-picker__title">Model for the next request</p>
@@ -257,21 +290,95 @@ function RouteForm({
 				<label htmlFor={thinkingId}>Thinking</label>
 				<select
 					id={thinkingId}
+					aria-describedby={thinkingNote ? thinkingNoteId : undefined}
 					value={draft.thinking}
 					disabled={locked || thinkingLevels.length === 0}
 					onChange={(event) => edit({ thinking: event.target.value })}
 				>
-					{thinkingLevels.map((level) => (
-						<option key={level}>{level}</option>
+					{thinkingChoices(draft, thinkingLevels).map((choice) => (
+						<option key={choice.value} value={choice.value}>
+							{choice.label}
+						</option>
 					))}
 				</select>
 			</div>
+			{thinkingNote ? <p id={thinkingNoteId}>{thinkingNote}</p> : null}
 			<p>{note}</p>
-			{modelNeedsTarget ? <p role="alert">Choose a connection before naming a model.</p> : null}
+			{choices.needsConnectionSetup ? (
+				<p>
+					No connection is selected, and Clio Coder has not exposed a connection selector for this conversation.{" "}
+					<Link
+						to={workspaceId ? `/settings/targets?${new URLSearchParams({ workspace: workspaceId })}` : "/settings/targets"}
+					>
+						Manage saved connections
+					</Link>{" "}
+					to select one for chat, then open a new conversation.
+				</p>
+			) : modelNeedsTarget ? (
+				<p role="alert">Choose a connection before naming a model.</p>
+			) : null}
 			<p className="route-picker__scope" id={scopeId}>
-				<strong>This conversation.</strong> Connection, model and thinking apply from its next request. Saved defaults stay
-				as they are. Change saved defaults in Settings or Connections.
+				<strong>This conversation.</strong> Connection, model and thinking apply from its next request.{" "}
+				<Link to={workspaceId ? `/settings/models?${new URLSearchParams({ workspace: workspaceId })}` : "/settings/models"}>
+					Edit saved defaults
+				</Link>{" "}
+				for your projects in Settings.
 			</p>
+			{save.error ? (
+				<div role="alert">
+					<p>{save.error.message}</p>
+					<p>Your requested connection and model are kept above. Some earlier controls may already have applied.</p>
+					{refusal ? (
+						<>
+							<p>
+								Clio Coder refused {refusal.requestedModel ?? "the requested model"} for{" "}
+								{refusal.targetId ?? "the reported connection"}.
+							</p>
+							{recoveryModels.length > 0 ? (
+								<label htmlFor={recoveryId}>
+									Available models for {refusal.targetId}
+									<select id={recoveryId} value="" disabled={locked} onChange={(event) => edit({ model: event.target.value })}>
+										<option value="" disabled>
+											Choose a replacement…
+										</option>
+										{recoveryModels.map((model) => (
+											<option key={model} value={model}>
+												{model}
+											</option>
+										))}
+									</select>
+								</label>
+							) : (
+								<p>No replacement models were reported for the selected connection.</p>
+							)}
+							<p>{refusal.remedy}</p>
+						</>
+					) : null}
+					<button
+						type="button"
+						disabled={locked}
+						onClick={() => {
+							setEdited(null);
+							save.reset();
+						}}
+					>
+						Use current controls
+					</button>
+				</div>
+			) : null}
+			{recoveryRequired ? (
+				<div role="status">
+					<p>
+						{refresh.isPending
+							? "Reading the conversation’s current controls before you retry…"
+							: "Current controls could not be read. Refresh them before applying another change."}
+					</p>
+					{refresh.error ? <p>{refresh.error.message}</p> : null}
+					<button type="button" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+						Refresh current controls
+					</button>
+				</div>
+			) : null}
 			{running ? <p className="route-picker__wait">You can change this when the current turn finishes.</p> : null}
 			<div className="route-picker__actions">
 				<button
@@ -279,7 +386,7 @@ function RouteForm({
 					className="primary"
 					aria-describedby={scopeId}
 					disabled={locked || !changed || modelNeedsTarget}
-					onClick={() => save.mutate()}
+					onClick={() => save.mutate({ ...draft })}
 				>
 					{save.isPending ? "Applying…" : "Apply to this conversation"}
 				</button>
@@ -287,7 +394,7 @@ function RouteForm({
 					Cancel
 				</button>
 			</div>
-			{save.error || targets.error ? <p role="alert">{save.error?.message ?? targets.error?.message}</p> : null}
+			{targets.error ? <p role="alert">{targets.error.message}</p> : null}
 		</div>
 	);
 }

@@ -280,10 +280,15 @@
 }
 
 .notice-region {
+	position: fixed;
+	inset-inline-end: var(--space-4);
+	inset-block-end: var(--space-4);
+	z-index: 20;
+	width: min(480px, calc(100vw - 2 * var(--space-4)));
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
-	max-height: 30dvh;
+	max-height: min(40dvh, 24rem);
 	pointer-events: none;
 }
 .notice-region:empty {
@@ -307,6 +312,8 @@
 	min-height: 44px;
 }
 .notice-region__list {
+	display: grid;
+	gap: var(--space-2);
 	min-height: 0;
 	overflow-y: auto;
 	overscroll-behavior: contain;
@@ -319,7 +326,7 @@
 	border: 1px solid var(--line-float);
 	border-left: 3px solid var(--status-neutral-line);
 	border-radius: var(--radius-md);
-	box-shadow: var(--shadow-none);
+	box-shadow: var(--shadow-panel);
 }
 .notice--error {
 	border-left-color: var(--status-fail-line);
@@ -388,6 +395,30 @@
 	display: block;
 	color: var(--muted);
 	overflow-wrap: anywhere;
+}
+.notice__repeat {
+	color: var(--muted);
+	font-size: var(--text-meta);
+}
+.notice__meta {
+	margin-top: var(--space-2);
+	font-size: var(--text-instrument);
+	color: var(--ink-muted);
+}
+.notice__meta > summary {
+	cursor: pointer;
+	width: fit-content;
+}
+.notice__meta > div {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	margin-top: var(--space-2);
+}
+.notice__meta code,
+.notice__meta small {
+	margin-top: 0;
+	font-size: inherit;
 }
 
 /* Opacity only: a slide-in transform fights a list that is already moving under it. */
