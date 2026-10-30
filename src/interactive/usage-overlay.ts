@@ -8,8 +8,14 @@ export { aggregateCostEntries, type CostRow };
 
 import { formatCostAggregate } from "../domains/observability/index.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
-import type { PromptCacheTelemetry, SessionEntry } from "../domains/session/index.js";
-import { foldPromptCacheTelemetry, hasPromptCacheTelemetry } from "../domains/session/index.js";
+import type { PromptCacheTelemetry, RecallTelemetry, SessionEntry } from "../domains/session/index.js";
+import {
+	foldPromptCacheTelemetry,
+	foldRecallTelemetry,
+	formatRecallTelemetry,
+	hasPromptCacheTelemetry,
+	hasRecallTelemetry,
+} from "../domains/session/index.js";
 import type { GitChanges } from "../domains/session/workspace/git-probe.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { matchesKey, wrapTextWithAnsi } from "../engine/tui.js";
@@ -117,6 +123,7 @@ function summaryBlock(
 	rows: ReadonlyArray<CostRow>,
 	promptCache: PromptCacheTelemetry | null,
 	neverSentCalls = 0,
+	recall: RecallTelemetry | null = null,
 ): string[] {
 	const totals = sumRows(rows);
 	const resolvedTotal = totalTokens > 0 ? totalTokens : totals.tokens;
@@ -146,6 +153,13 @@ function summaryBlock(
 						`hot ${promptCache.verdictCounts.hot} · partial ${promptCache.verdictCounts.partial} · cold ${promptCache.verdictCounts.cold} · small ${promptCache.verdictCounts.small} · unknown ${promptCache.verdictCounts.unknown}`,
 					] as const,
 				]
+			: [];
+	// #422: a recalled body is written to the cache once and read on every later
+	// request, the same as if it had never left; the tokens here are what the
+	// model asked back, not the recall requests' own prefix reads.
+	const recallRows =
+		recall !== null && hasRecallTelemetry(recall)
+			? [["recalled into context", formatRecallTelemetry(recall), "estimate · excludes operator recalls"] as const]
 			: [];
 	return kvBlock([
 		[
@@ -186,6 +200,7 @@ function summaryBlock(
 		["cache read", ...cacheReadValue(totals.cacheRead, totals.apiCalls)],
 		["cache write", formatTokens(totals.cacheWrite)],
 		...cacheRows,
+		...recallRows,
 		["processed", `${formatTokens(resolvedTotal)} tokens`],
 	]);
 }
@@ -259,6 +274,8 @@ export interface CostSnapshot {
 	totalTokens: number;
 	rows: CostRow[];
 	promptCache: PromptCacheTelemetry | null;
+	/** #422: what working-set recall put back in front of the model. */
+	recall: RecallTelemetry | null;
 	neverSentCalls?: number;
 }
 
@@ -281,6 +298,7 @@ function buildCostSnapshot(
 		totalTokens,
 		rows,
 		promptCache: getSessionEntries ? foldPromptCacheTelemetry(getSessionEntries()) : null,
+		recall: getSessionEntries ? foldRecallTelemetry(getSessionEntries()) : null,
 		neverSentCalls: getSessionEntries ? ledgerCallFailureCounts(getSessionEntries()).neverInvokedCalls : 0,
 	};
 }
@@ -442,6 +460,7 @@ class UsageOverlayBody implements Component {
 					snapshot.rows,
 					snapshot.promptCache,
 					snapshot.neverSentCalls,
+					snapshot.recall,
 				),
 				"",
 				rule(theme, contentWidth),

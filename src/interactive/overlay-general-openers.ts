@@ -24,6 +24,7 @@ import type { ObservabilityContract } from "../domains/observability/index.js";
 import { renderCostAggregate } from "../domains/observability/index.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
+import { foldRecallTelemetry } from "../domains/session/recall-telemetry.js";
 import { foldSessionArtifacts } from "../domains/session/session-artifacts.js";
 import { foldSessionTaskHistory } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
@@ -265,6 +266,13 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			getWorkingSetConfig: () => {
 				const workingSet = deps.getSettings?.().context.workingSet;
 				return workingSet ?? null;
+			},
+			getRecallTelemetry: () => {
+				const readSessionEntries = deps.readSessionEntries;
+				if (!readSessionEntries) return null;
+				return foldRecallTelemetry(
+					filterEntriesToActivePath(readSessionEntries(), deps.getSessionMeta()?.pinnedLeafTurnId ?? undefined),
+				);
 			},
 		});
 		deps.requestRender();

@@ -6,6 +6,7 @@ import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
 import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
+import type { RecallTelemetry } from "../domains/session/recall-telemetry.js";
 import { type OverlayHandle, Text, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { coldReasonText } from "../session-control/cold-reasons.js";
 import {
@@ -134,14 +135,23 @@ function workingSetPolicyLabel(view: WorkingSetView, config: WorkingSetConfigVie
 	return `policy ${config.policy}${lastRan}${profile}${band}${state}`;
 }
 
-function renderWorkingSetLines(view: WorkingSetView, config: WorkingSetConfigView | null | undefined): string[] {
+function renderWorkingSetLines(
+	view: WorkingSetView,
+	config: WorkingSetConfigView | null | undefined,
+	recall: RecallTelemetry | null | undefined,
+): string[] {
 	const theme = clioTheme();
 	const items = view.evicted.size;
+	// #422: `recalls` counts every trigger; the readmitted figure is what the
+	// billed ones (tool and reread) put back in front of the model.
+	const readmitted =
+		recall && recall.readmittedTokens > 0 ? [`${formatTokens(recall.readmittedTokens)} tokens readmitted`] : [];
 	const summary = [
 		`${items} evicted item${items === 1 ? "" : "s"}`,
 		`${formatTokens(evictedTokens(view))} tokens`,
 		`${view.evictionEvents} event${view.evictionEvents === 1 ? "" : "s"}`,
 		`${view.recalls} recall${view.recalls === 1 ? "" : "s"}`,
+		...readmitted,
 		`churn ${formatChurn(view)}`,
 	].join(" · ");
 	return [
@@ -155,6 +165,7 @@ function renderContextLedgerLines(
 	contentWidth: number,
 	workingSet?: WorkingSetView | null,
 	workingSetConfig?: WorkingSetConfigView | null,
+	recall?: RecallTelemetry | null,
 ): string[] {
 	const theme = clioTheme();
 	const lines: string[] = [];
@@ -197,7 +208,7 @@ function renderContextLedgerLines(
 
 	lines.push("");
 	if (workingSet) {
-		for (const line of renderWorkingSetLines(workingSet, workingSetConfig)) lines.push(line);
+		for (const line of renderWorkingSetLines(workingSet, workingSetConfig, recall)) lines.push(line);
 		lines.push("");
 	}
 	if (ledger.projectPreload && ledger.groups.some((group) => group.category === "project")) {
@@ -298,6 +309,8 @@ export interface OpenContextOverlayOptions {
 	getWorkingSet?: () => WorkingSetView | null;
 	/** The configured `context.workingSet` block, so the policy line states what is set. */
 	getWorkingSetConfig?: () => WorkingSetConfigView | null;
+	/** Recall fold over the same active path as `getWorkingSet`; absent hides the readmitted figure (#422). */
+	getRecallTelemetry?: () => RecallTelemetry | null;
 }
 
 /**
@@ -318,6 +331,7 @@ export function openContextOverlay(
 			contentWidth,
 			options?.getWorkingSet?.() ?? null,
 			options?.getWorkingSetConfig?.() ?? null,
+			options?.getRecallTelemetry?.() ?? null,
 		);
 		const inspection = options?.chat?.inspectLiveBudget?.();
 		if (inspection?.status === "available") {

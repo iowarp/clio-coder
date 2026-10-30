@@ -122,6 +122,8 @@ export {
 	protectedArtifactFromSessionEntry,
 	protectedArtifactStateFromSessionEntries,
 } from "./protected-artifacts.js";
+export type { RecallTelemetry } from "./recall-telemetry.js";
+export { foldRecallTelemetry, formatRecallTelemetry, hasRecallTelemetry } from "./recall-telemetry.js";
 export type {
 	TaskBoardCounts,
 	TaskBoardMutation,

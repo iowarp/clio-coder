@@ -19,12 +19,15 @@ import { resolveCostProvenance } from "../domains/providers/types/cost-provenanc
 import { loadSkills } from "../domains/resources/index.js";
 import {
 	foldPromptCacheTelemetry,
+	foldRecallTelemetry,
 	hasPromptCacheTelemetry,
+	hasRecallTelemetry,
 	type LedgerUsageCall,
 	ledgerUsageCalls,
 	listSessionLedgerRefs,
 	type PromptCacheTelemetry,
 	parseSessionEntries,
+	type RecallTelemetry,
 	readAuditRows,
 } from "../domains/session/index.js";
 import { ledgerCallFailureCounts, usageCoverageLabel } from "../domains/session/usage.js";
@@ -167,6 +170,8 @@ interface SessionUsage {
 	failureCounts: ReturnType<typeof ledgerCallFailureCounts>;
 	/** Backend prompt-cache facts persisted on assistant calls in the window. */
 	promptCache: PromptCacheTelemetry;
+	/** #422: working-set recalls in the window and the tokens they sent back into context. */
+	recall: RecallTelemetry;
 }
 
 /** Per-call usage folded over one grouping (a model, or the whole window). */
@@ -676,6 +681,9 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const cacheSessions = sessions
 		.filter((session) => hasPromptCacheTelemetry(session.promptCache))
 		.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
+	const recallSessions = sessions
+		.filter((session) => hasRecallTelemetry(session.recall))
+		.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
 
 	const approvedMemory = memoryRecords.filter((record) => record.approved && record.rejectedAt === undefined);
 	const pendingMemory = memoryRecords.filter((record) => !record.approved && record.rejectedAt === undefined);
@@ -805,6 +813,17 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 					reprefilledTokens: session.promptCache.reprefilledTokens,
 					cacheBreakCalls: session.promptCache.cacheBreakCalls,
 					verdictCounts: session.promptCache.verdictCounts,
+				});
+			}
+			for (const session of recallSessions) {
+				emit({
+					kind: "fact",
+					fact: "session-recall",
+					sessionId: session.sessionId,
+					toolRecalls: session.recall.toolRecalls,
+					rereads: session.recall.rereads,
+					operatorRecalls: session.recall.operatorRecalls,
+					readmittedTokens: session.recall.readmittedTokens,
 				});
 			}
 		}
@@ -1025,6 +1044,26 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 							session.promptCache.verdictCounts.small,
 							session.promptCache.verdictCounts.unknown,
 						].join("/"),
+					]),
+				]),
+			),
+		);
+	}
+	if (recallSessions.length > 0) {
+		out("");
+		out(
+			"  working-set recall by session (tokens the model asked back after eviction; estimate, operator recalls not billed)",
+		);
+		process.stdout.write(
+			indent(
+				formatColumns([
+					["session", "recalls", "rereads", "operator", "readmitted tokens"],
+					...recallSessions.map((session) => [
+						session.sessionId,
+						String(session.recall.toolRecalls),
+						String(session.recall.rereads),
+						String(session.recall.operatorRecalls),
+						String(session.recall.readmittedTokens),
 					]),
 				]),
 			),
@@ -1311,6 +1350,7 @@ async function readSessions(
 			usageCalls: ledgerUsageCalls(accountingEntries),
 			failureCounts: ledgerCallFailureCounts(accountingEntries),
 			promptCache: foldPromptCacheTelemetry(accountingEntries),
+			recall: foldRecallTelemetry(accountingEntries),
 		};
 		for (const entry of parsedEntries.entries) {
 			if (!inWindow(entry.timestamp, windowStart, windowEnd)) continue;
