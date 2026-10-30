@@ -4,18 +4,19 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
 import { readEvidenceIndex } from "../../../../../src/domains/observability/evidence-index.js";
+import { runRowTelemetry } from "../../../../../src/domains/observability/read-model.js";
 import {
 	resolveTraceRetentionPolicy,
 	TRACE_SCHEMA_VERSION,
 	TraceReader,
 	traceDatabasePath,
 } from "../../../../../src/domains/observability/trace-store.js";
+import { loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
 import { Id } from "../../../contracts/common.js";
 import type { TraceRequest } from "../../../contracts/traces.js";
 import { TraceId } from "../../../contracts/traces.js";
 import { withCostDisplay } from "../../services/cost-display.js";
 import { AppProblem } from "../../services/problem.js";
-import { renderTraceCost } from "../http-shims.js";
 
 const Cursor = Type.Object(
 	{ startedAt: Type.String({ maxLength: 64 }), runId: TraceId },
@@ -43,6 +44,14 @@ function contained(state: string, directory: string, filename: string) {
 	if (!inside(root, base) || !inside(base, path))
 		throw new AppProblem("validation", "Trace path escapes its state directory.");
 	return path;
+}
+/**
+ * Tokens and spend for a trace row come from the run journal through the read model, never from the index's own
+ * columns (#434): a dispatch run id names its journal, while a session row is folded under its session.
+ */
+function telemetry(row: { run_id: string; source: string }) {
+	if (row.source !== "dispatch" || !Value.Check(Id, row.run_id)) return null;
+	return runRowTelemetry(row.run_id, loadRunTelemetrySource(clioStateDir(), row.run_id));
 }
 export class TraceAdapter {
 	private reader: TraceReader | undefined;
@@ -91,18 +100,18 @@ export class TraceAdapter {
 					filter: { ...(source ? { source } : {}), ...(status ? { status } : {}), ...(q ? { q } : {}) },
 				});
 				return {
-					runs: page.runs.map((run) => ({ ...run, costDisplay: renderTraceCost(run) })),
+					runs: page.runs.map((run) => ({ ...run, telemetry: telemetry(run) })),
 					nextCursor: page.nextBefore ? Buffer.from(JSON.stringify(page.nextBefore)).toString("base64url") : null,
 				};
 			}
 			const rawRun = reader.run(input.runId);
-			const run = rawRun ? { ...rawRun, costDisplay: renderTraceCost(rawRun) } : null;
+			const run = rawRun ? { ...rawRun, telemetry: telemetry(rawRun) } : null;
 			if (!run) throw new AppProblem("not_found", "Trace run was not found.");
 			switch (input.kind) {
 				case "run":
 					return run;
 				case "phases":
-					return reader.phases(input.runId).map((phase) => ({ ...phase, costDisplay: renderTraceCost(phase) }));
+					return reader.phases(input.runId);
 				case "gates":
 					return reader.gateResults(input.runId);
 				case "processes":

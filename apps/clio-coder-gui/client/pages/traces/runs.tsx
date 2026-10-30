@@ -3,9 +3,10 @@ import { Link, useSearchParams } from "react-router";
 import type { Input } from "../../../contracts/routes.js";
 import { routes } from "../../../contracts/routes.js";
 import type { Client } from "../../api/client.js";
-import { formatTime, formatTokens } from "../../api/clock.js";
+import { formatTime } from "../../api/clock.js";
 import { PanelEmpty } from "../../design/panel.js";
 import { InspectionError, InspectionSummary } from "../../design/run-inspection.js";
+import { quantityText } from "../../telemetry/quantity-model.js";
 import { inspectionSort, listDestination, sortInspectionRecords } from "../run-inspection-model.js";
 import "../run-inspection.css";
 import { emptyState } from "../../design/panel-model.js";
@@ -179,8 +180,8 @@ export function TraceRuns({ client }: { client: Client }) {
 							</small>
 						</div>
 						<div className="trace-spend">
-							<strong>{run.costDisplay ?? "not measured"}</strong>
-							<small>{formatTokens(run.total_tokens, run.missing_token_calls)} tokens</small>
+							<strong>{quantityText(run.telemetry?.usd)}</strong>
+							<small>{quantityText(run.telemetry?.tokens)} tokens</small>
 						</div>
 					</Link>
 				))}

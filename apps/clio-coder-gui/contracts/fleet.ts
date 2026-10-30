@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id, PageCursor } from "./common.js";
+import { TelemetryRunRow } from "./telemetry.js";
 
 const closed = { additionalProperties: false };
 const text = Type.String();
@@ -42,9 +43,8 @@ export const DispatchRun = Type.Object(
 		outcomeDetail: nullable,
 		cwd: text,
 		sessionId: nullable,
-		tokenCount: Type.Number(),
-		costUsd: Type.Number(),
-		costDisplay: Type.Optional(text),
+		/** The run's read-model row; null until its journal is read (#434). */
+		telemetry: Type.Union([TelemetryRunRow, Type.Null()]),
 		parentRunId: nullable,
 		rootRunId: nullable,
 	},

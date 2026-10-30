@@ -2,15 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { evidenceDestination, listDestination, matchesText } from "../client/pages/run-inspection-model.js";
 import { phasePosition, runTotals } from "../client/pages/traces/trace-model.js";
+import { NOT_JOURNALED } from "../client/telemetry/quantity-model.js";
 import type { TracePhase, TraceRun } from "../contracts/traces.js";
-import { renderTraceCost } from "../server/clio/http-shims.js";
 
 const run = {
 	started_at: "2026-09-26T10:00:00Z",
 	ended_at: "2026-09-26T10:01:00Z",
 	status: "success",
-	total_tokens: null,
-	total_cost_usd: null,
+	telemetry: null,
 	runtime: "worker",
 } as TraceRun;
 const phase = {
@@ -19,8 +18,31 @@ const phase = {
 	status: "success",
 } as TracePhase;
 const now = Date.parse("2026-09-26T10:02:00Z");
-/** The traces adapter renders each row's cost on the server; the client shows that display (#434). */
-const served = (row: TraceRun): TraceRun => ({ ...row, costDisplay: renderTraceCost(row) });
+/** A run row as the read model serves it: every quantity already carries its display (#434). */
+const journaled = (tokens: string, usd: string, apiCalls: string): NonNullable<TraceRun["telemetry"]> => {
+	const quantity = (display: string, metric: string) => ({
+		fact: {
+			measured: 0,
+			estimated: 0,
+			unknownCount: 1,
+			absentCount: 0,
+			coverage: { measured: 0, estimated: 0, unknown: 1 },
+		},
+		display,
+		ref: `run:run-0#${metric}`,
+	});
+	return {
+		runId: "run-0",
+		sessionId: null,
+		firstAt: null,
+		lastAt: null,
+		terminalReason: null,
+		source: "calls",
+		apiCalls: quantity(apiCalls, "apiCalls"),
+		tokens: quantity(tokens, "total"),
+		usd: quantity(usd, "usd"),
+	};
+};
 
 test("trace geometry uses recorded timestamps and refuses to invent missing phase timing", () => {
 	assert.deepEqual(phasePosition(phase, run, now), { left: 25, width: 25, duration: 15000 });
@@ -40,23 +62,20 @@ test("trace geometry uses recorded timestamps and refuses to invent missing phas
 	assert.deepEqual(phasePosition(beyond, run, now), { left: 100, width: 0, duration: 60000 });
 });
 
-test("finished records without an end retain unknown wall time and accounting", () => {
-	const totals = runTotals(served({ ...run, ended_at: null }), now);
+test("finished records without an end retain unknown wall time, and a row without a journal says so", () => {
+	const totals = runTotals({ ...run, ended_at: null }, now);
 	assert.equal(totals.find((total) => total.label === "Wall time")?.value, "not recorded");
-	assert.equal(totals.find((total) => total.label === "Cost")?.value, "not measured");
-	assert.equal(totals.find((total) => total.label === "Tokens")?.value, "not recorded");
-	assert.equal(runTotals({ ...run, ended_at: null, status: "running" }, now)[2]?.value, "2m 0s");
+	assert.equal(totals.find((total) => total.label === "Cost")?.value, NOT_JOURNALED);
+	assert.equal(totals.find((total) => total.label === "Tokens")?.value, NOT_JOURNALED);
+	assert.equal(runTotals({ ...run, ended_at: null, status: "running" }, now)[3]?.value, "2m 0s");
 });
 
-test("trace detail totals preserve missing token coverage and pricing provenance", () => {
-	const accounted = { ...run, total_tokens: 24, missing_token_calls: 1, total_cost_usd: 0.25, api_calls: 2 };
-	const partial = runTotals(served({ ...accounted, cost_estimated: 1, cost_unknown: 1 }), now);
-	assert.equal(partial[0]?.value, "24 +? (1 call missing usage)");
-	assert.equal(partial[1]?.value, "~$0.25 +?");
-	assert.equal(runTotals(served({ ...accounted, total_cost_usd: 0, cost_unknown: 1 }), now)[1]?.value, "not measured");
-	// A row recorded before the pricing flags keeps its recorded amount with unknown coverage, as a v20 receipt does.
-	assert.equal(runTotals(served(accounted), now)[1]?.value, "$0.25 +?");
-	assert.equal(runTotals(served({ ...accounted, cost_estimated: 0, cost_unknown: 0 }), now)[1]?.value, "$0.25");
+test("trace detail totals show the journal's displays verbatim, partial and estimate marks included", () => {
+	const totals = runTotals({ ...run, telemetry: journaled("≥24 (1 call unknown)", "~$0.25 +?", "2") }, now);
+	assert.deepEqual(
+		totals.slice(0, 3).map((total) => total.value),
+		["≥24 (1 call unknown)", "~$0.25 +?", "2"],
+	);
 });
 
 test("list navigation preserves owned filters and never propagates launch credentials", () => {

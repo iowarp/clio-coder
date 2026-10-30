@@ -8,7 +8,6 @@ export type { CostAggregate } from "../../../../src/domains/observability/cost.j
 export {
 	aggregateCostAmounts,
 	renderCostAggregate,
-	renderTraceCost,
 	renderUsdLimit,
 } from "../../../../src/domains/observability/cost.js";
 export {

@@ -11,7 +11,7 @@ import { InspectionError, InspectionTabs } from "../../design/run-inspection.js"
 import { StatusMark } from "../../design/status.js";
 import { listDestination } from "../run-inspection-model.js";
 import "./trace-live.css";
-import { CostPanel, Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
+import { Facts, Gates, ReceiptPanel, Waterfall } from "./panels.js";
 import "../run-inspection.css";
 import type { TraceLiveState } from "./trace-live-model.js";
 import { detailRefetchMs, liveLabel, mergeTraceEvents } from "./trace-live-model.js";
@@ -211,7 +211,6 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 										]}
 									/>
 								</section>
-								<CostPanel phase={phase} />
 							</div>
 						) : null}
 						<section className="trace-panel">

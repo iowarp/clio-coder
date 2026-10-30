@@ -211,7 +211,8 @@ test("canonical session turn trace namespaces read and paginate without authoriz
 	const run = await json(await h.request(`/api/traces/runs/${encodeURIComponent(runId)}`), routes.traceRun.response);
 	assert.equal(run.source, "session");
 	assert.equal(run.run_id, runId);
-	assert.equal(run.total_cost_usd, null);
+	// A session row is folded under its session; only a dispatch run id names a run journal.
+	assert.equal(run.telemetry, null);
 	const phases = await json(
 		await h.request(`/api/traces/runs/${encodeURIComponent(runId)}/phases`),
 		routes.tracePhases.response,

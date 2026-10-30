@@ -4474,8 +4474,7 @@
 													"outcomeDetail",
 													"cwd",
 													"sessionId",
-													"tokenCount",
-													"costUsd",
+													"telemetry",
 													"parentRunId",
 													"rootRunId"
 												],
@@ -4551,14 +4550,8 @@
 															}
 														]
 													},
-													"tokenCount": {
-														"type": "number"
-													},
-													"costUsd": {
-														"type": "number"
-													},
-													"costDisplay": {
-														"type": "string"
+													"telemetry": {
+														"$ref": "#/components/schemas/Union_3a8238fc"
 													},
 													"parentRunId": {
 														"anyOf": [
@@ -4665,8 +4658,7 @@
 										"outcomeDetail",
 										"cwd",
 										"sessionId",
-										"tokenCount",
-										"costUsd",
+										"telemetry",
 										"parentRunId",
 										"rootRunId"
 									],
@@ -4742,14 +4734,8 @@
 												}
 											]
 										},
-										"tokenCount": {
-											"type": "number"
-										},
-										"costUsd": {
-											"type": "number"
-										},
-										"costDisplay": {
-											"type": "string"
+										"telemetry": {
+											"$ref": "#/components/schemas/Union_3a8238fc"
 										},
 										"parentRunId": {
 											"anyOf": [
@@ -15790,8 +15776,7 @@
 													"node",
 													"started_at",
 													"ended_at",
-													"total_tokens",
-													"total_cost_usd",
+													"telemetry",
 													"source"
 												],
 												"properties": {
@@ -15862,68 +15847,8 @@
 															}
 														]
 													},
-													"total_tokens": {
-														"anyOf": [
-															{
-																"type": "number"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"total_cost_usd": {
-														"anyOf": [
-															{
-																"type": "number"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"costDisplay": {
-														"type": "string"
-													},
-													"cost_estimated": {
-														"anyOf": [
-															{
-																"type": "number"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"cost_unknown": {
-														"anyOf": [
-															{
-																"type": "number"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"api_calls": {
-														"anyOf": [
-															{
-																"type": "number"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"missing_token_calls": {
-														"anyOf": [
-															{
-																"type": "number"
-															},
-															{
-																"type": "null"
-															}
-														]
+													"telemetry": {
+														"$ref": "#/components/schemas/Union_3a8238fc"
 													},
 													"source": {
 														"$ref": "#/components/schemas/Union_f71033b0"
@@ -16009,8 +15934,7 @@
 										"node",
 										"started_at",
 										"ended_at",
-										"total_tokens",
-										"total_cost_usd",
+										"telemetry",
 										"source"
 									],
 									"properties": {
@@ -16081,68 +16005,8 @@
 												}
 											]
 										},
-										"total_tokens": {
-											"anyOf": [
-												{
-													"type": "number"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"total_cost_usd": {
-											"anyOf": [
-												{
-													"type": "number"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"costDisplay": {
-											"type": "string"
-										},
-										"cost_estimated": {
-											"anyOf": [
-												{
-													"type": "number"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"cost_unknown": {
-											"anyOf": [
-												{
-													"type": "number"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"api_calls": {
-											"anyOf": [
-												{
-													"type": "number"
-												},
-												{
-													"type": "null"
-												}
-											]
-										},
-										"missing_token_calls": {
-											"anyOf": [
-												{
-													"type": "number"
-												},
-												{
-													"type": "null"
-												}
-											]
+										"telemetry": {
+											"$ref": "#/components/schemas/Union_3a8238fc"
 										},
 										"source": {
 											"$ref": "#/components/schemas/Union_f71033b0"
@@ -16224,16 +16088,7 @@
 											"retries",
 											"error",
 											"started_at",
-											"ended_at",
-											"input_tokens",
-											"output_tokens",
-											"cache_read_tokens",
-											"cache_write_tokens",
-											"reasoning_tokens",
-											"total_tokens",
-											"total_cost_usd",
-											"context_tokens",
-											"context_window"
+											"ended_at"
 										],
 										"properties": {
 											"phase_id": {
@@ -16303,149 +16158,6 @@
 												"anyOf": [
 													{
 														"type": "string"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"input_tokens": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"output_tokens": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"cache_read_tokens": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"cache_write_tokens": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"cache_write_1h_tokens": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"reasoning_tokens": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"total_tokens": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"total_cost_usd": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"costDisplay": {
-												"type": "string"
-											},
-											"cost_estimated": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"cost_unknown": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"api_calls": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"missing_token_calls": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"context_tokens": {
-												"anyOf": [
-													{
-														"type": "number"
-													},
-													{
-														"type": "null"
-													}
-												]
-											},
-											"context_window": {
-												"anyOf": [
-													{
-														"type": "number"
 													},
 													{
 														"type": "null"
@@ -26522,6 +26234,16 @@
 					},
 					{
 						"$ref": "#/components/schemas/Object_kind_sessionId_8900903c"
+					}
+				]
+			},
+			"Union_3a8238fc": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/RunRowV1"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},

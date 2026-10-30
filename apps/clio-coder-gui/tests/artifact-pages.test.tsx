@@ -95,7 +95,7 @@ test("both fleet lists offer links only while settled, and render nothing after 
 				status: "running",
 				targetId: "local",
 				wireModelId: "m",
-				tokenCount: 1,
+				telemetry: null,
 			}),
 		);
 		return queries;
@@ -177,7 +177,7 @@ test("Fleet filters search only loaded records and preserve their destination", 
 						endedAt: null,
 						targetId: "local",
 						wireModelId: "model-a",
-						tokenCount: 0,
+						telemetry: null,
 						parentRunId: "parent-1",
 						rootRunId: "root-dispatch",
 					},

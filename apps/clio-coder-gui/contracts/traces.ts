@@ -1,6 +1,7 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { PageCursor } from "./common.js";
+import { TelemetryRunRow } from "./telemetry.js";
 
 const closed = { additionalProperties: false };
 const text = Type.String();
@@ -41,13 +42,8 @@ export const TraceRun = Type.Object(
 		node: optionalText,
 		started_at: text,
 		ended_at: optionalText,
-		total_tokens: count,
-		total_cost_usd: count,
-		costDisplay: Type.Optional(text),
-		cost_estimated: Type.Optional(count),
-		cost_unknown: Type.Optional(count),
-		api_calls: Type.Optional(count),
-		missing_token_calls: Type.Optional(count),
+		/** Tokens and spend come from the run journal through the read model, never from index columns (#434). */
+		telemetry: Type.Union([TelemetryRunRow, Type.Null()]),
 		source: Type.Union([Type.Literal("dispatch"), Type.Literal("session")]),
 	},
 	closed,
@@ -68,21 +64,6 @@ export const TracePhase = Type.Object(
 		error: optionalText,
 		started_at: optionalText,
 		ended_at: optionalText,
-		input_tokens: count,
-		output_tokens: count,
-		cache_read_tokens: count,
-		cache_write_tokens: count,
-		cache_write_1h_tokens: Type.Optional(count),
-		reasoning_tokens: count,
-		total_tokens: count,
-		total_cost_usd: count,
-		costDisplay: Type.Optional(text),
-		cost_estimated: Type.Optional(count),
-		cost_unknown: Type.Optional(count),
-		api_calls: Type.Optional(count),
-		missing_token_calls: Type.Optional(count),
-		context_tokens: count,
-		context_window: count,
 	},
 	closed,
 );

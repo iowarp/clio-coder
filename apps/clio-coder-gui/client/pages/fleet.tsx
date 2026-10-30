@@ -4,13 +4,14 @@ import type { Static } from "typebox";
 import type { Councils, FleetGates } from "../../contracts/fleet.js";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
-import { formatTime, formatTokens } from "../api/clock.js";
+import { formatTime } from "../api/clock.js";
 import { Facts } from "../design/facts.js";
 import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { DISPATCH_SCOPE, emptyState, PANELS } from "../design/panel-model.js";
 import { InspectionError, InspectionSummary } from "../design/run-inspection.js";
 import { StatusMark, toneForOutcome } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
+import { quantityText } from "../telemetry/quantity-model.js";
 import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages, retainedLinksLive } from "./artifact-pagination.js";
 import {
 	evidenceDestination,
@@ -348,7 +349,7 @@ export function FleetPage({ client }: { client: Client }) {
 							{run.targetId} / {run.wireModelId}
 						</p>
 						<p className="panel-note">
-							{formatTime(run.startedAt)} · {formatTokens(run.tokenCount)} recorded tokens
+							{formatTime(run.startedAt)} · {quantityText(run.telemetry?.tokens)} tokens
 						</p>
 						<details>
 							<summary>Run identity & lineage</summary>
@@ -434,7 +435,7 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 						{run.data.agentId} · {run.data.outcome ?? run.data.status}
 					</h2>
 					<p>
-						{run.data.targetId} / {run.data.wireModelId} · {formatTokens(run.data.tokenCount)} tokens
+						{run.data.targetId} / {run.data.wireModelId} · {quantityText(run.data.telemetry?.tokens)} tokens
 					</p>
 					<div className="inspection-jumps">
 						<Link to={evidenceDestination(run.data.id)}>Collect or recheck evidence</Link>

@@ -121,47 +121,6 @@ export function Waterfall({
 		</section>
 	);
 }
-export function CostPanel({ phase }: { phase: TracePhase }) {
-	// The trace records one dollar figure per phase, its total. Per-kind costs were never written,
-	// so the table carries tokens only and the total cost sits beside the context line.
-	return (
-		<section className="trace-panel">
-			<h2>Tokens & spend</h2>
-			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: A table wider than its column scrolls, and a scrolling region must take focus so the keyboard can move it. */}
-			<section className="table-scroll" tabIndex={0} aria-label="Tokens table">
-				<table className="trace-table">
-					<thead>
-						<tr>
-							<th>Usage</th>
-							<th>Tokens</th>
-						</tr>
-					</thead>
-					<tbody>
-						{[
-							["Input", phase.input_tokens],
-							["Output", phase.output_tokens],
-							["Cache read", phase.cache_read_tokens],
-							["Cache write", phase.cache_write_tokens],
-							["Cache write (1h)", phase.cache_write_1h_tokens ?? null],
-							["Reasoning", phase.reasoning_tokens],
-							["Total", formatTokens(phase.total_tokens, phase.missing_token_calls)],
-						].map(([label, tokens]) => (
-							<tr key={String(label)}>
-								<th>{label}</th>
-								<td>{typeof tokens === "string" ? tokens : formatTokens(tokens as number | null)}</td>
-							</tr>
-						))}
-					</tbody>
-				</table>
-			</section>
-			<p>Cost: {phase.costDisplay ?? "not measured"}</p>
-			{phase.api_calls != null ? <p>Model calls: {phase.api_calls}</p> : null}
-			<p>
-				Context: {formatTokens(phase.context_tokens)} / {formatTokens(phase.context_window)}
-			</p>
-		</section>
-	);
-}
 export function EventRow({ event, start, payload = true }: { event: TraceEvent; start: string; payload?: boolean }) {
 	const parsed = parseJson(event.payload_json),
 		record = object(parsed),

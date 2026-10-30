@@ -3,10 +3,11 @@
 // so the ordering and the wording are testable without a browser.
 
 import type { TraceCaptureCoverage, TracePhase, TraceRun } from "../../../contracts/traces.js";
-import { formatDuration, formatTokens } from "../../api/clock.js";
+import { formatDuration } from "../../api/clock.js";
 import { omittedSentence } from "../../design/facts-model.js";
 import type { StatusTone } from "../../design/status.js";
 import { toneForOutcome } from "../../design/status.js";
+import { quantityText } from "../../telemetry/quantity-model.js";
 
 export function captureCoverageLabel(coverage: TraceCaptureCoverage | null): string {
 	if (coverage === null || coverage.status === "unreported")
@@ -42,12 +43,13 @@ export function runTone(status: string): StatusTone {
 	return toneForOutcome(status);
 }
 
-/** Tokens, cost, wall time and the runtime that produced them. A live run measures wall time to now. */
+/** Tokens, cost and model calls from the run journal, wall time and the runtime. A live run measures wall time to now. */
 export function runTotals(run: TraceRun, now: number): RunTotal[] {
 	const ended = run.ended_at ? Date.parse(run.ended_at) : run.status === "running" ? now : Number.NaN;
 	return [
-		{ label: "Tokens", value: formatTokens(run.total_tokens, run.missing_token_calls) },
-		{ label: "Cost", value: run.costDisplay ?? "not measured" },
+		{ label: "Tokens", value: quantityText(run.telemetry?.tokens) },
+		{ label: "Cost", value: quantityText(run.telemetry?.usd) },
+		{ label: "Model calls", value: quantityText(run.telemetry?.apiCalls) },
 		{
 			label: "Wall time",
 			value:

@@ -7,6 +7,8 @@ import { councilTopologies } from "../../../../../src/domains/dispatch/council-t
 import { gateTopology } from "../../../../../src/domains/dispatch/gate-topology.js";
 import { type FleetRunRecord, openLedger, readFleetRun } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
+import { runRowTelemetry } from "../../../../../src/domains/observability/read-model.js";
+import { loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
 import { Id } from "../../../contracts/common.js";
 import {
 	Councils,
@@ -28,9 +30,11 @@ function checked<S extends TSchema>(schema: S, raw: unknown): Static<S> {
 function rootSummary(record: FleetRunRecord): FleetRoot {
 	return checked(FleetRoot, { ...record, stepCount: record.stepIds.length, completedCount: record.steps.length });
 }
+/** A ledger row's own token and cost columns are not shown; its journal is, through the read model (#434). */
 function dispatchSummary(row: RunEnvelope): DispatchRun {
 	return checked(DispatchRun, {
-		...withCostDisplay({ ...row }),
+		...row,
+		telemetry: runRowTelemetry(row.id, loadRunTelemetrySource(clioStateDir(), row.id)),
 		outcome: row.outcome ?? null,
 		outcomeDetail: row.outcomeDetail ?? null,
 		parentRunId: row.lineage?.parentRunId ?? null,
