@@ -17,7 +17,15 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 it("a session writer opens with its settings and journals each change once, with both documents (#434)", async () => {
 	const env = await isolateClioEnv("clio-coder-config-records-");
 	const before = structuredClone(DEFAULT_SETTINGS);
-	const after = structuredClone(DEFAULT_SETTINGS);
+	before.targets = [
+		{
+			id: "proxy",
+			runtime: "litellm",
+			url: "http://127.0.0.1:4000",
+			auth: { headers: { Authorization: "Bearer leaked-proxy-token-0123456789" } },
+		},
+	];
+	const after = structuredClone(before);
 	after.safety.limits.sessionCostUsd = 42;
 	let current = before;
 	const listeners: Array<(payload: ConfigChangePayload) => void> = [];
@@ -57,6 +65,12 @@ it("a session writer opens with its settings and journals each change once, with
 		const changes = records.flatMap((record) => (record.k === "config.changed" ? [record.data] : []));
 		strictEqual(snapshots.length, 1);
 		strictEqual(snapshots[0]?.settingsFingerprint, computeSettingsFingerprint(before));
+		const [opened] = snapshots as [Payload<"config.snapshot">];
+		const stored = await readTelemetryObject(directory, opened.settings);
+		ok(stored.kind === "resolved");
+		const storedText = JSON.stringify(stored.value);
+		ok(!storedText.includes("leaked-proxy-token"), "a target header value never enters objects/");
+		ok(storedText.includes('"Authorization":"[redacted:headers]"'), "the header name stays as structure");
 		strictEqual(changes.length, 1, "a change is journaled once whatever kinds it touches");
 		const [changed] = changes as [Payload<"config.changed">];
 		strictEqual(changed.source, "settings-ui");

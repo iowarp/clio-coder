@@ -90,6 +90,19 @@ async function readObjectBytes(path: string): Promise<string | null> {
 const promptTextSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
 
 /**
+ * Settings are structure, but a `headers` or `env` map carries whatever an operator typed, often a credential no
+ * value pattern recognizes (`Authorization: Bearer <opaque>`). The names stay; every value is withheld (#434).
+ */
+function withheldSecretMaps(value: unknown, key?: string): unknown {
+	if (Array.isArray(value)) return value.map((item) => withheldSecretMaps(item));
+	if (value === null || typeof value !== "object") return value;
+	const entries = Object.entries(value as Record<string, unknown>);
+	if ((key === "headers" || key === "env") && entries.every(([, item]) => typeof item === "string"))
+		return Object.fromEntries(entries.map(([name]) => [name, `[redacted:${key}]`]));
+	return Object.fromEntries(entries.map(([name, item]) => [name, withheldSecretMaps(item, name)]));
+}
+
+/**
  * Cold-path storage only. A reference becomes resolvable only after its redacted preimage is durable (#434).
  * `prompt-text` is content: only a caller holding research content capture for the session stores it.
  */
@@ -106,7 +119,7 @@ export async function storeTelemetryObject(
 	if (subject === "prompt-text" && !Value.Check(promptTextSchema, value))
 		throw new Error("telemetry prompt text must be { text }");
 	// Validate before JSON's replacer could silently convert non-finite numbers to null (#434).
-	const canonical = canonicalJson(value);
+	const canonical = canonicalJson(subject === "config" ? withheldSecretMaps(value) : value);
 	const redacted = JSON.parse(canonical, secretRedactingReplacer(createRedactionTally()));
 	const bytes = canonicalJson(redacted);
 	if (Buffer.byteLength(bytes) > maximumBytes) throw new Error("telemetry object exceeds size limit");
