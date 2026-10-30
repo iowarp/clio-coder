@@ -114,6 +114,8 @@ export function grantTelemetryConsent(
 	workspace: string,
 	now = new Date(),
 ): { entry: TelemetryConsentEntry; existed: boolean } {
+	// The reader rejects a relative key as damage, which would revoke every consent in the store.
+	if (!isAbsolute(workspace)) throw new Error(`consent workspace must be an absolute path: ${workspace}`);
 	return mutate(stateDir, (document) => {
 		const existing = document.workspaces[workspace];
 		if (existing) return { entry: { workspace, ...existing }, existed: true };
