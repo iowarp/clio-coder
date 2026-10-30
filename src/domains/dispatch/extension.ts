@@ -5817,6 +5817,7 @@ export function createDispatchBundle(
 			req.lineage === undefined && req.runIdHint !== undefined
 				? {
 						runId: req.runIdHint,
+						sessionId: req.ownerSessionId ?? null,
 						agentId: req.agentId,
 						task: req.task,
 						requestOrigin: lifecycle.requestOrigin,
@@ -6126,6 +6127,7 @@ export function createDispatchBundle(
 			if (req.lineage !== undefined) {
 				context.bus.emit(BusChannels.DispatchEnqueued, {
 					runId: envelope.id,
+					sessionId: req.ownerSessionId ?? null,
 					agentId: req.agentId,
 					task: req.task,
 					requestOrigin: lifecycle.requestOrigin,
@@ -6138,6 +6140,7 @@ export function createDispatchBundle(
 			context.bus.emit(BusChannels.DispatchStarted, {
 				budget: budgetEnvelope,
 				runId: envelope.id,
+				sessionId: req.ownerSessionId ?? null,
 				agentId: req.agentId,
 				task: req.task,
 				requestOrigin: lifecycle.requestOrigin,
@@ -6927,6 +6930,7 @@ export function createDispatchBundle(
 			req.lineage === undefined && req.runIdHint !== undefined
 				? {
 						runId: req.runIdHint,
+						sessionId: req.ownerSessionId ?? null,
 						agentId: req.agentId,
 						task: req.task,
 						agentAudience: lifecycle.agentAudience,
@@ -7881,6 +7885,7 @@ export function createDispatchBundle(
 			// reroute lineage depth, and the model context window for the
 			// per-worker meter. All optional so consumers degrade to local/plain.
 			const fleetIdentity = {
+				sessionId: req.ownerSessionId ?? null,
 				budget: lifecycle.budgetEnvelope,
 				...(endpoint !== null ? { endpoint: { key: endpoint.key, label: endpoint.label, limit: endpoint.limit } } : {}),
 				...(placement !== undefined && placement !== null ? { node: placement.node.id } : {}),
@@ -9842,6 +9847,7 @@ export function createDispatchBundle(
 		};
 		const identity: DispatchRunIdentity = {
 			runId,
+			sessionId: input.template.sessionId ?? null,
 			agentId: "council-synthesis",
 			task,
 			requestOrigin: origin,

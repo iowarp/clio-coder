@@ -177,6 +177,8 @@ describe("trace-store runs.source column and its migration", () => {
 		try {
 			strictEqual(reader.run("run-legacy-dispatch")?.source, "dispatch");
 			strictEqual(reader.run("run-legacy-session")?.source, "session");
+			strictEqual(reader.run("run-legacy-session")?.session_id, null);
+			strictEqual(reader.run("run-legacy-dispatch")?.session_id, null);
 			const bySource = Object.fromEntries(reader.runs(10).map((row) => [row.run_id, row.source]));
 			strictEqual(bySource["run-legacy-dispatch"], "dispatch");
 			strictEqual(bySource["run-legacy-session"], "session");
@@ -224,6 +226,8 @@ describe("trace-store runs.source column and its migration", () => {
 		try {
 			strictEqual(reader.run("run-legacy-dispatch")?.source, "dispatch");
 			strictEqual(reader.run("run-legacy-session")?.source, "session");
+			strictEqual(reader.run("run-legacy-session")?.session_id, null);
+			strictEqual(reader.run("run-legacy-dispatch")?.session_id, null);
 		} finally {
 			reader.close();
 		}
@@ -234,6 +238,7 @@ describe("trace-store runs.source column and its migration", () => {
 		const store = new TraceStore(path);
 		store.upsertRun({
 			runId: "run-fresh-dispatch",
+			sessionId: "owner-dispatch",
 			agentId: "coder",
 			targetId: "mini",
 			wireModelId: "test-model",
@@ -244,6 +249,7 @@ describe("trace-store runs.source column and its migration", () => {
 		store.recordSessionTurn({
 			kind: "start",
 			runId: "run-fresh-session",
+			sessionId: "owner-main",
 			agent: "main",
 			target: "mini",
 			model: "test-model",
@@ -257,6 +263,8 @@ describe("trace-store runs.source column and its migration", () => {
 		try {
 			strictEqual(reader.run("run-fresh-dispatch")?.source, "dispatch");
 			strictEqual(reader.run("run-fresh-session")?.source, "session");
+			strictEqual(reader.run("run-fresh-session")?.session_id, "owner-main");
+			strictEqual(reader.run("run-fresh-dispatch")?.session_id, "owner-dispatch");
 		} finally {
 			reader.close();
 		}

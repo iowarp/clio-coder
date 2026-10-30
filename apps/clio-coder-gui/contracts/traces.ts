@@ -31,6 +31,7 @@ export const TraceRun = Type.Object(
 	{
 		run_id: TraceId,
 		assignment_id: text,
+		session_id: Type.Optional(optionalText),
 		request: optionalText,
 		status: text,
 		agent: text,

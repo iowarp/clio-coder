@@ -623,6 +623,8 @@ export interface ProviderHealthPayload {
  */
 export interface DispatchRunIdentity {
 	runId: string;
+	/** Session captured when this dispatch was requested; never the currently selected UI session (#434). */
+	sessionId?: string | null;
 	agentId: string;
 	/** Exact dispatched task. UI projections must sanitize and bound it before rendering. */
 	task?: string | undefined;

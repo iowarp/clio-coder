@@ -245,6 +245,7 @@ export interface SessionTurnUsage {
 /** Opens the runs/phases pair for one operator turn. */
 export interface SessionTurnStart {
 	kind: "start";
+	sessionId?: string | null;
 	runId: string;
 	agent: string;
 	target: string;
@@ -311,6 +312,8 @@ export interface TraceEventRow {
 
 export interface TraceRunRow {
 	run_id: string;
+	/** Unknown on rows written before session attribution (#434). */
+	session_id?: string | null;
 	assignment_id: string;
 	request: string | null;
 	status: string;
@@ -441,6 +444,7 @@ INSERT INTO meta(key, value) VALUES ('schema_version', '${TRACE_SCHEMA_VERSION}'
 
 CREATE TABLE runs (
   run_id TEXT PRIMARY KEY,
+  session_id TEXT,
   assignment_id TEXT NOT NULL,
   request TEXT,
   status TEXT NOT NULL CHECK(status IN ('queued','running','success','fail')),
@@ -558,6 +562,13 @@ function ensureRunSourceColumn(db: DatabaseSync): void {
 	db.prepare("UPDATE runs SET source = 'session' WHERE assignment_id = ?").run(SESSION_TRACE_ASSIGNMENT_ID);
 }
 
+/** Additive index metadata; old records cannot establish which session owned them (#434). */
+function ensureRunSessionColumn(db: DatabaseSync): void {
+	const columns = db.prepare("PRAGMA table_info(runs)").all() as { name: string }[];
+	if (!columns.some((column) => column.name === "session_id")) db.exec("ALTER TABLE runs ADD COLUMN session_id TEXT;");
+	db.exec("CREATE INDEX IF NOT EXISTS runs_session_id ON runs(session_id);");
+}
+
 /** Missing lifetime detail stays NULL in older traces; it cannot be reconstructed. */
 function ensureCacheWriteLifetimeColumn(db: DatabaseSync): void {
 	const columns = db.prepare("PRAGMA table_info(phases)").all() as { name: string }[];
@@ -636,6 +647,7 @@ export class TraceStore {
 			else if (version !== TRACE_SCHEMA_VERSION) throw new TraceSchemaVersionError(version);
 			ensureProcessOwnerColumns(this.db);
 			ensureRunSourceColumn(this.db);
+			ensureRunSessionColumn(this.db);
 			ensureCacheWriteLifetimeColumn(this.db);
 			reconcileAbandonedRuns(this.db);
 		});
@@ -767,6 +779,10 @@ export class TraceStore {
 				input.runtimeId,
 				input.node ?? null,
 				at,
+			);
+			this.prepare("UPDATE runs SET session_id=COALESCE(session_id, ?) WHERE run_id=?").run(
+				input.sessionId ?? null,
+				input.runId,
 			);
 			this.prepare(`INSERT INTO phases
           (phase_id, run_id, seq, name, kind, owner, description, status, started_at)
@@ -951,6 +967,10 @@ export class TraceStore {
 				input.node ?? null,
 				fallbackStartedAt,
 			);
+			this.prepare("UPDATE runs SET session_id=COALESCE(session_id, ?) WHERE run_id=?").run(
+				input.sessionId ?? null,
+				input.runId,
+			);
 			this.prepare(`INSERT INTO phases
           (phase_id, run_id, seq, name, kind, owner, description, status, started_at)
           VALUES (?, ?, 0, ?, 'agent', ?, ?, 'running', ?)
@@ -1071,6 +1091,10 @@ export class TraceStore {
 					"INSERT INTO phases (phase_id, run_id, seq, name, kind, owner, status, started_at, ended_at) VALUES (?, ?, 0, 'package activity', 'session', 'host', 'success', ?, ?) ON CONFLICT(phase_id) DO UPDATE SET ended_at=excluded.ended_at",
 				).run(runId, runId, activity.at, activity.at);
 			}
+			this.prepare("UPDATE runs SET session_id=COALESCE(session_id, ?) WHERE run_id=?").run(
+				activity.sessionId ?? null,
+				runId,
+			);
 			const phase = this.prepare("SELECT phase_id FROM phases WHERE run_id = ? ORDER BY seq DESC LIMIT 1").get(runId) as
 				| { phase_id: string }
 				| undefined;
@@ -1102,6 +1126,10 @@ export class TraceStore {
 				traceText(input.model, 256),
 				traceText(input.runtime, 256),
 				input.at,
+			);
+			this.prepare("UPDATE runs SET session_id=COALESCE(session_id, ?) WHERE run_id=?").run(
+				input.sessionId ?? null,
+				input.runId,
 			);
 			this.prepare(`INSERT INTO phases
           (phase_id, run_id, seq, name, kind, owner, description, status, started_at)
@@ -1278,6 +1306,7 @@ export class TraceReader {
 		this.runsSourceExpr = runColumns.some((column) => column.name === "source")
 			? "runs.*"
 			: `runs.*, CASE WHEN runs.assignment_id = '${SESSION_TRACE_ASSIGNMENT_ID}' THEN 'session' ELSE 'dispatch' END AS source`;
+		if (!runColumns.some((column) => column.name === "session_id")) this.runsSourceExpr += ", NULL AS session_id";
 		const phaseColumns = new Set(
 			(this.db.prepare("PRAGMA table_info(phases)").all() as { name: string }[]).map((column) => column.name),
 		);

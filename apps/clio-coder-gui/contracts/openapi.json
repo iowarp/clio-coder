@@ -41439,6 +41439,16 @@
 													"assignment_id": {
 														"type": "string"
 													},
+													"session_id": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
 													"request": {
 														"anyOf": [
 															{
@@ -41724,6 +41734,16 @@
 										},
 										"assignment_id": {
 											"type": "string"
+										},
+										"session_id": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
 										},
 										"request": {
 											"anyOf": [

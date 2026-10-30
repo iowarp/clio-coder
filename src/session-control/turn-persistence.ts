@@ -278,6 +278,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		mirror({
 			kind: "start",
 			runId: traceRunId,
+			sessionId: traceSessionId,
 			agent: SESSION_TRACE_AGENT,
 			target: runtime.targetId,
 			model: runtime.wireModelId,
