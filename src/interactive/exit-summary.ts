@@ -1,7 +1,5 @@
 import type { ExitSummaryStyle, OutputStyle } from "../core/defaults.js";
 import { resolveExitSummaryStyle } from "../core/defaults.js";
-import type { CostRow } from "../domains/observability/cost-rows.js";
-import { renderCostAggregate } from "../domains/observability/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { ExitSummarySnapshot } from "./exit-summary-collector.js";
@@ -9,31 +7,21 @@ import { brandMark, clioTheme, formatCompactMs, frame, innerDivider } from "./th
 
 const count = (value: number): string => value.toLocaleString("en-US");
 
-function tokens(rows: ReadonlyArray<CostRow>): string {
-	const total = rows.reduce(
-		(sum, row) => ({
-			input: sum.input + row.input,
-			output: sum.output + row.output,
-			cacheRead: sum.cacheRead + row.cacheRead,
-			cacheWrite: sum.cacheWrite + row.cacheWrite,
-			reasoning: sum.reasoning + row.reasoningTokens,
-		}),
-		{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
-	);
-	return `${count(total.input)} in · ${count(total.output)} out · ${count(total.cacheRead)} cache read · ${count(total.cacheWrite)} cache write · ${count(total.reasoning)} reasoning`;
-}
+const SPEND_NOT_AVAILABLE = "not available";
 
-function modelList(snapshot: ExitSummarySnapshot): Array<{ target: string; model: string; usage?: CostRow }> {
-	const models = snapshot.usage.map((usage) => ({ target: usage.providerId, model: usage.attributedModelId, usage }));
+type ModelSpend = Extract<ExitSummarySnapshot["spend"], { kind: "ready" }>["models"][number];
+
+/** The read model's `target/model` groups, then any model this visit saw that no call record names. */
+function modelList(snapshot: ExitSummarySnapshot): Array<{ target: string; model: string; spend?: ModelSpend }> {
+	const groups = snapshot.spend.kind === "ready" ? snapshot.spend.models : [];
+	const recorded = groups.map((spend) => {
+		const slash = spend.key.indexOf("/");
+		return { target: spend.key.slice(0, slash), model: spend.key.slice(slash + 1), spend };
+	});
 	const unreported = snapshot.models.filter(
-		(model) =>
-			!snapshot.usage.some(
-				(row) =>
-					row.providerId === model.target &&
-					(row.attributedModelId === model.model || row.requestedModelIds.includes(model.model)),
-			),
+		(model) => !recorded.some((row) => row.target === model.target && row.model === model.model),
 	);
-	return [...models, ...unreported];
+	return [...recorded, ...unreported];
 }
 
 /** `2 questions auto-resolved · 1 permission ask timed out`, or null when Clio answered nothing alone (#421). */
@@ -123,6 +111,7 @@ export function renderExitSummary(
 		if (theme) lines.push(innerDivider(theme, room));
 	};
 	const models = modelList(snapshot);
+	const spend = snapshot.spend;
 	const unattended = unattendedSummary(snapshot);
 	const gitHooks = gitHooksSummary(snapshot);
 	const internalGit = internalGitSummary(snapshot);
@@ -144,8 +133,11 @@ export function renderExitSummary(
 				room,
 			),
 		);
-		add("Tokens", count(snapshot.usage.reduce((sum, usage) => sum + usage.tokens, 0)));
-		add("Cost", `${renderCostAggregate(snapshot.cost)} · ${formatCompactMs(snapshot.wallMs)} wall`);
+		add("Tokens", spend.kind === "ready" ? spend.tokens : SPEND_NOT_AVAILABLE);
+		add(
+			"Cost",
+			`${spend.kind === "ready" ? spend.cost : SPEND_NOT_AVAILABLE} · ${formatCompactMs(snapshot.wallMs)} wall`,
+		);
 		// What Clio decided while the operator was away is never folded away.
 		if (unattended !== null) add("Unattended", unattended);
 		// Nor is a hook that runs outside the sandbox on the next git command.
@@ -154,14 +146,15 @@ export function renderExitSummary(
 	} else {
 		add(
 			"Activity",
-			`${count(snapshot.turns)} turns · ${count(snapshot.files.length)} files changed · ${count(snapshot.workers.length)} workers`,
+			`${count(snapshot.turns)} turns${spend.kind === "ready" ? ` · ${count(spend.visitCalls)} calls this visit` : ""} · ${count(snapshot.files.length)} files changed · ${count(snapshot.workers.length)} workers`,
 		);
 		add(
 			"Time",
 			`${formatCompactMs(snapshot.wallMs)} wall · ${formatCompactMs(snapshot.modelMs)} model${snapshot.modelTimeIncomplete ? " (partly measured)" : ""}`,
 		);
-		add("Tokens", tokens(snapshot.usage));
-		add("Cost", renderCostAggregate(snapshot.cost));
+		// Session totals cover every branch this session paid for; the visit's own share is its call count.
+		add("Tokens", spend.kind === "ready" ? spend.breakdown : SPEND_NOT_AVAILABLE);
+		add("Cost", spend.kind === "ready" ? spend.cost : SPEND_NOT_AVAILABLE);
 		if (snapshot.compactions > 0) add("Compactions", count(snapshot.compactions));
 		if (unattended !== null) add("Unattended", unattended);
 		if (gitHooks !== null) add("Git hooks", gitHooks);
@@ -190,27 +183,13 @@ export function renderExitSummary(
 			};
 			section(
 				`Models (${models.length})`,
-				models.flatMap(({ target, model, usage }) => {
-					if (!usage) return [`${target} / ${model} · usage not reported; cost ${renderCostAggregate(null)}`];
-					const requested = usage.requestedModelIds.filter((id) => id !== model);
-					const extra = [
-						["side questions", usage.sideQuestions],
-						["handoffs", usage.handoffs],
-						["prewarms", usage.prewarms],
-						["memory", usage.backgroundMemory],
-						["failed compactions", usage.failedCompaction],
-						["system one", usage.systemOne ?? 0],
-					]
-						.filter(([, n]) => Number(n) > 0)
-						.map(([label, n]) => `${n} ${label}`);
-					return [
-						`${target} / ${model} · ${count(usage.apiCalls)} calls · ${renderCostAggregate(usage.cost)}`,
-						tokens([usage]),
-						...(requested.length ? [`Requested: ${requested.join(", ")}`] : []),
-						...(extra.length ? [extra.join(" · ")] : []),
-					];
-				}),
+				models.flatMap(({ target, model, spend: recorded }) =>
+					recorded
+						? [`${target} / ${model} · ${recorded.calls} calls · ${recorded.cost}`, recorded.breakdown]
+						: [`${target} / ${model} · no call record names it`],
+				),
 			);
+			if (spend.kind === "ready" && spend.byLabel.length > 0) section("Calls by label", [spend.byLabel]);
 			section(
 				`Tools (${count(snapshot.tools.reduce((sum, tool) => sum + tool.count, 0))} calls)`,
 				snapshot.tools.map(

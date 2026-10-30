@@ -2,12 +2,12 @@ import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { FactMetric } from "../core/telemetry/dto.js";
+import { factRef } from "../core/telemetry/dto.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
-import { aggregateCostAmounts } from "../domains/observability/cost.js";
-import type { CostRow } from "../domains/observability/cost-rows.js";
-import { aggregateCostEntries } from "../domains/observability/cost-rows.js";
-import type { CostAggregate, ObservabilityContract } from "../domains/observability/index.js";
+import type { TelemetryView } from "../domains/observability/contract.js";
+import type { ObservabilityContract } from "../domains/observability/index.js";
 import { mutatingReceipts } from "../domains/safety/finish-contract.js";
 import { UNATTENDED_DECIDED_BY } from "../domains/safety/unattended.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -23,8 +23,8 @@ export interface ExitSummarySnapshot {
 	modelTimeIncomplete: boolean;
 	turns: number;
 	models: ReadonlyArray<{ target: string; model: string }>;
-	usage: ReadonlyArray<CostRow>;
-	cost: CostAggregate;
+	/** Whole-session spend across every branch, read from the telemetry read model at exit (#434 §11.3). */
+	spend: ExitSpend;
 	tools: ReadonlyArray<{ tool: string; count: number; failures: number }>;
 	files: ReadonlyArray<string>;
 	fileChanges: ReadonlyArray<{ path: string; count: number }>;
@@ -100,19 +100,64 @@ interface CollectorDeps {
 	now?: () => number;
 }
 
+/** Every string is the read model's own display, so the card never sums or rewords a number (#434 §11.3). */
+export type ExitSpend =
+	| { kind: "unavailable" }
+	| {
+			kind: "ready";
+			tokens: string;
+			/** `in · out · cache read · cache write · reasoning`, each an honest display. */
+			breakdown: string;
+			cost: string;
+			/** Attempts started since this visit began, counted by the read model. */
+			visitCalls: number;
+			byLabel: string;
+			models: ReadonlyArray<{ key: string; calls: string; cost: string; breakdown: string }>;
+	  };
+
+function tokenBreakdown(view: TelemetryView, model?: string): string {
+	const display = (metric: FactMetric) =>
+		view.quantity(
+			factRef({
+				scope: "session",
+				owner: view.sessionId,
+				metric,
+				...(model === undefined ? {} : { group: { by: "model", key: model } }),
+			}),
+		)?.display ?? "unknown";
+	return `${display("input")} in · ${display("output")} out · ${display("cacheRead")} cache read · ${display("cacheWrite")} cache write · ${display("reasoning")} reasoning`;
+}
+
+export function exitSpend(view: TelemetryView | null | undefined, visitFrom: string): ExitSpend {
+	if (!view) return { kind: "unavailable" };
+	const session = view.session();
+	return {
+		kind: "ready",
+		tokens: session.totals.tokens.display,
+		breakdown: tokenBreakdown(view),
+		cost: session.totals.usd.display,
+		visitCalls: view.calls({ from: visitFrom, limit: 1 }).matched,
+		byLabel: session.byLabel.map((label) => `${label.label} ${label.calls.display}`).join(" · "),
+		models: view.cost("model").groups.map((group) => ({
+			key: group.key,
+			calls: group.calls.display,
+			cost: group.usd.display,
+			breakdown: tokenBreakdown(view, group.key),
+		})),
+	};
+}
+
 /** This visit's account. All ledger folds and receipt reads happen while events arrive. */
 export function createExitSummaryCollector(deps: CollectorDeps) {
 	const now = deps.now ?? (() => performance.now());
 	let startedAt = now();
+	let visitFrom = new Date().toISOString();
 	let baseTurns = deps.getTurns() ?? 0;
 	let priorTurns = 0;
 	let hasModelTurn = deps.session?.current()?.hasModelTurn === true;
 	let modelMs = 0;
 	let timedCalls = 0;
 	let compactions = 0;
-	let usageBaseline = new Set(deps.observability.costEntries());
-	let usage = aggregateCostEntries([]);
-	let cost = aggregateCostAmounts([]);
 	const models = new Map<string, { target: string; model: string }>();
 	const files = new Map<string, number>();
 	const workerPaths = new Map<string, Set<string>>();
@@ -139,11 +184,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	const noteModel = (target: string, model: string): void => {
 		if (target && model) models.set(`${target}\0${model}`, { target, model });
 	};
-	const refreshUsage = (): void => {
-		const entries = deps.observability.costEntries().filter((entry) => !entry.replayed && !usageBaseline.has(entry));
-		usage = aggregateCostEntries(entries);
-		cost = aggregateCostAmounts(entries);
-	};
 	const noteFiles = (paths: ReadonlyArray<string>, cwd = process.cwd(), seen?: Set<string>): void => {
 		for (const path of paths) {
 			const expanded = path.startsWith("~/") ? resolve(homedir(), path.slice(2)) : path;
@@ -156,8 +196,8 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		}
 	};
 	const reset = (): void => {
-		usageBaseline = new Set(deps.observability.costEntries());
 		startedAt = now();
+		visitFrom = new Date().toISOString();
 		baseTurns = deps.getTurns() ?? 0;
 		priorTurns = 0;
 		hasModelTurn = deps.session?.current()?.hasModelTurn === true;
@@ -177,7 +217,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		workerTools.clear();
 		workerStarted.clear();
 		workerCapabilities.clear();
-		refreshUsage();
 	};
 	const settled = (run: { runId: string; agentId: string; outcome: string }): void => {
 		const worker = workers.get(run.runId);
@@ -186,7 +225,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		highlight(`${run.agentId} ${run.outcome}`);
 		noteFiles(deps.dispatch.observedRunWrites?.(run.runId) ?? [], process.cwd(), workerPaths.get(run.runId));
 		workerStarted.delete(run.runId);
-		refreshUsage();
 	};
 	// Like the git hook line, this account is the process's, never reset with the visit.
 	const internalGit = new Map<
@@ -194,7 +232,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		{ operation: string; outcome: string; changes: Map<string, { path: string; kind: string; key?: string }> }
 	>();
 	const unsubscribers = [
-		deps.observability.subscribe(refreshUsage),
 		deps.bus.on(BusChannels.InternalGitDrift, (event) => {
 			if (typeof event?.operation !== "string" || !Array.isArray(event.changes)) return;
 			const outcome = typeof event.outcome === "string" ? event.outcome : event.hardened === true ? "hooks-off" : "yolo";
@@ -339,7 +376,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 					calls.delete(event.toolCallId);
 				}
 			}
-			if (event.type === "agent_end") refreshUsage();
 		},
 		observeReceipt(runId: string, receipt: WorkerReceiptFacts | null): void {
 			const worker = workers.get(runId);
@@ -371,16 +407,16 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			for (const stats of workerTools.values()) {
 				for (const { tool, count } of stats) tools.set(tool, (tools.get(tool) ?? 0) + count);
 			}
+			const spend = exitSpend(deps.observability.telemetry?.live(), visitFrom);
 			return {
 				sessionId: session.id,
 				sessionName: session.name ?? null,
 				wallMs: Math.max(0, now() - startedAt),
 				modelMs,
-				modelTimeIncomplete: usage.reduce((sum, row) => sum + row.apiCalls, 0) > timedCalls,
+				modelTimeIncomplete: spend.kind === "ready" && spend.visitCalls > timedCalls,
 				turns: priorTurns + Math.max(0, (deps.getTurns() ?? 0) - baseTurns),
 				models: [...models.values()],
-				usage,
-				cost,
+				spend,
 				tools: [...new Set([...tools.keys(), ...failures.keys()])]
 					.map((tool) => ({ tool, count: tools.get(tool) ?? 0, failures: failures.get(tool) ?? 0 }))
 					.sort((a, b) => a.tool.localeCompare(b.tool)),
