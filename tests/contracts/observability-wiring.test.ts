@@ -393,7 +393,6 @@ describe("trace mirror tool rows", () => {
 					[`${runId}:event:1`, `${runId}:event:2`, `${runId}:event:3`],
 				);
 				equal(reader.phases(runId)[0]?.context_window, 1000);
-				equal(reader.gateResults(runId)[0]?.gate, "reviewer");
 				progress({ type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: { path: "late.ts" } });
 				await mirror.flush();
 				deepStrictEqual(reader.events(runId, updates.at(-1)?.rowid ?? 0), []);

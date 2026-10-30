@@ -1251,17 +1251,6 @@ function traceDatabaseFootprintBytes(path: string): number {
 	return total;
 }
 
-export interface TraceRunCursor {
-	startedAt: string;
-	runId: string;
-}
-
-export interface TraceRunsPageOptions {
-	before?: TraceRunCursor;
-	limit?: number;
-	filter?: { source?: TraceRunRow["source"]; status?: TraceRunRow["status"]; q?: string };
-}
-
 export class TraceReader {
 	readonly db: DatabaseSync;
 	/**
@@ -1337,40 +1326,6 @@ export class TraceReader {
 			.all(clampInt(limit, 1, 500)) as unknown as TraceRunRow[];
 	}
 
-	/** Stable keyset pagination, including read-only databases predating runs.source. */
-	runsPage({ before, limit = 50, filter = {} }: TraceRunsPageOptions = {}): {
-		runs: TraceRunRow[];
-		nextBefore: TraceRunCursor | null;
-	} {
-		const size = clampInt(limit, 1, 500);
-		const where: string[] = [],
-			args: SQLInputValue[] = [];
-		if (before) {
-			where.push("(started_at < ? OR (started_at = ? AND run_id < ?))");
-			args.push(before.startedAt, before.startedAt, before.runId);
-		}
-		if (filter.source) {
-			where.push("source = ?");
-			args.push(filter.source);
-		}
-		if (filter.status) {
-			where.push("status = ?");
-			args.push(filter.status);
-		}
-		if (filter.q) {
-			where.push("(run_id LIKE ? OR agent LIKE ? OR model LIKE ? OR status LIKE ? OR request LIKE ?)");
-			args.push(...Array<string>(5).fill(`%${filter.q}%`));
-		}
-		const rows = this.db
-			.prepare(
-				`SELECT * FROM (SELECT ${this.runsSourceExpr}, ${ACCOUNTING_COLUMNS} FROM runs ${RUN_ACCOUNTING_JOIN}) ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY started_at DESC, run_id DESC LIMIT ?`,
-			)
-			.all(...args, size + 1) as unknown as TraceRunRow[];
-		const runs = rows.slice(0, size),
-			last = runs.at(-1);
-		return { runs, nextBefore: rows.length > size && last ? { startedAt: last.started_at, runId: last.run_id } : null };
-	}
-
 	run(runId: string): TraceRunRow | null {
 		return (
 			(this.db
@@ -1429,12 +1384,6 @@ export class TraceReader {
 		return this.db
 			.prepare("SELECT * FROM processes WHERE run_id=? ORDER BY ended_at IS NOT NULL, id")
 			.all(runId) as unknown as TraceProcessRow[];
-	}
-
-	gateResults(runId: string): Record<string, SQLInputValue>[] {
-		return this.db
-			.prepare("SELECT * FROM gate_results WHERE run_id=? ORDER BY phase_id, attempt, id")
-			.all(runId) as Record<string, SQLInputValue>[];
 	}
 
 	select(sql: string): Record<string, SQLInputValue>[] {
