@@ -1330,6 +1330,26 @@ async function readReceipts(
 	return receipts;
 }
 
+/** Newest modification across a session's call journal segments; negative infinity without one. */
+async function latestCallJournalMtime(sessionDirectory: string): Promise<number> {
+	let names: string[];
+	try {
+		names = await readdir(sessionDirectory);
+	} catch {
+		return Number.NEGATIVE_INFINITY;
+	}
+	let latest = Number.NEGATIVE_INFINITY;
+	for (const name of names) {
+		if (name !== "calls.jsonl" && !/^calls\.rec_[0-9a-f-]+\.jsonl$/.test(name)) continue;
+		try {
+			latest = Math.max(latest, (await stat(join(sessionDirectory, name))).mtimeMs);
+		} catch {
+			// A segment rotated away between listing and stat; the live file still answers.
+		}
+	}
+	return latest;
+}
+
 async function readSessions(
 	stateDir: string,
 	windowStart: number,
@@ -1340,13 +1360,16 @@ async function readSessions(
 	const refs = await listSessionLedgerRefs(stateDir, repoHash);
 	const sessions: SessionUsage[] = [];
 	for (const ref of refs) {
+		let mtimeMs: number;
 		try {
-			await stat(ref.path);
+			mtimeMs = (await stat(ref.path)).mtimeMs;
 		} catch {
 			// A session directory without current.jsonl (e.g. archived) is not an error.
 			continue;
 		}
-		// Side calls can settle after the last ledger append; the journal has its own UTC window (#434).
+		// Ledgers and journals untouched since before the window cannot contain in-window entries. Side calls
+		// settle after the last ledger append, so the journal files answer for themselves (#434).
+		if (mtimeMs < windowStart && (await latestCallJournalMtime(dirname(ref.path))) < windowStart) continue;
 		let raw: string;
 		try {
 			raw = await readFile(ref.path, "utf8");
