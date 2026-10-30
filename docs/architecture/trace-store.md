@@ -2,7 +2,7 @@
 
 The [tool usage guide](../guide/tool-usage.md) explains how to inspect evidence from a run.
 
-Clio Coder's trace database is a disposable, queryable SQLite mirror of dispatch activity and of the operator's own interactive turns. Receipts, session ledgers, gate artifacts, and evidence remain the source of truth. Removing `<state-dir>/trace.sqlite` loses no authoritative run data. There is no replay or backfill path: a deleted database starts empty and records only runs and turns that start afterward.
+Clio Coder's trace database is a disposable, queryable SQLite mirror of dispatch activity and of the operator's own interactive turns. Receipts, session ledgers, gate artifacts, evidence, and the call journals described in [Telemetry](telemetry.md) remain the source of truth. Removing `<state-dir>/trace.sqlite` loses no authoritative run data. There is no replay or backfill path: a deleted database starts empty and records only runs and turns that start afterward.
 
 The store lives in `src/domains/observability/trace-store.ts`. The observability domain owns the long-lived writer. `clio-coder trace` ([trace.ts](../../src/cli/trace.ts)) and the graphical application read through `TraceReader`, and `trace prune` is the one CLI path that opens a writer, to apply retention.
 

@@ -6,6 +6,9 @@ Clio Coder records what a session and its workers did in a small set of local, d
 | --- | --- | --- | --- |
 | Run ledger | `<stateDir>/runs.json` | dispatch | `/view`, `clio-coder fleet status` and `fleet view` |
 | Receipts | `<stateDir>/receipts/<runId>.json` | dispatch, at the terminal event | `/view verify`, `clio-coder fleet verify`, evidence builds, ACP receipt facts |
+| Session call journal | `<stateDir>/sessions/<cwdHash>/<sessionId>/calls.jsonl`, with rotated `calls.rec_<id>.jsonl` segments | observability domain, the one owner of call facts | `clio-coder telemetry`, `clio-coder usage report`, session resume. The format and capture rules are in [Telemetry](telemetry.md). |
+| Telemetry objects | `<stateDir>/sessions/<cwdHash>/<sessionId>/objects/` | the call journal writer | `clio-coder telemetry export` and `prune`. See [Objects](telemetry.md#objects). |
+| Research consent and files | `<stateDir>/telemetry/consent.json`, `<stateDir>/telemetry/research/` | `clio-coder telemetry consent`; research capture | `clio-coder doctor`, `clio-coder telemetry prune`. See [Capture modes](telemetry.md#capture-modes). |
 | Run event journal | `<stateDir>/runs/<runId>/events.ndjson` | dispatch, as events arrive | `clio-coder fleet view`, the workers dashboard. The line kinds and the 2 MiB per-run cap are in [worker-dispatch-mechanics.md](worker-dispatch-mechanics.md). |
 | Trace mirror | `<stateDir>/trace.sqlite` | observability domain | `clio-coder trace`, the graphical application. See [Trace Store](trace-store.md). |
 | Evidence bundles | `<dataDir>/evidence/<evidenceId>/` | observability domain on terminal dispatch events, `clio-coder evidence build` | `/view`, `clio-coder evidence` |
@@ -480,6 +483,8 @@ A clean interactive exit prints a branded session summary according to `interfac
 | `clio-coder trace inspect --json` | the trace mirror | Fixed bounded snapshot with no request text, for hosts that must not steer the read. |
 | `clio-coder trace code-steps <rootId>` | `<stateDir>/code-steps/` | Deterministic fleet code-step records. |
 | `clio-coder usage report` | ledgers, receipts, out-of-turn rows, audit rows, evidence index, memory | [Cross-Session Usage Facts](#cross-session-usage-facts). |
+| `clio-coder telemetry inspect\|calls\|cost\|cache\|timeline\|why-stopped\|explain` | session and run call journals, through the read model | `--json` prints the read-model DTO. |
+| `clio-coder telemetry consent\|export\|import-bundle\|prune\|import-legacy` | consent store, call journals and objects | [Capture modes](telemetry.md#capture-modes) and [Export, import and retention](telemetry.md#export-import-and-retention). |
 | `clio-coder evidence build\|inspect\|list\|inventory` | evidence bundles and the run ledger | `build` takes `--run <runId>` or `--session <sessionId>`, `inspect` takes an evidence id and `--json`, and `inventory` requires `--json`. The bundle contract is in [evidence-and-memory.md](evidence-and-memory.md). |
 | `clio-coder fleet status\|inspect\|view\|verify` | the run ledger, event journal, and receipts | `inspect --json` is a bounded recent-run projection, `view <runId>` follows one run from a second terminal and, once the receipt verifies, shows the requested and provider-reported model, the cost with its provenance and the settled label, and `verify <runId> --json` re-verifies a receipt. See [fleet-dispatch.md](../guide/fleet-dispatch.md). |
 | `clio-coder doctor` | state directory, latest session | The `state storage` and `cache telemetry` rows. |

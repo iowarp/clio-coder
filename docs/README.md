@@ -99,6 +99,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | The `/view` artifact viewer, trace retention, the evidence spine, cross-session usage facts, the accountability panel, and receipt integrity | [Observability](architecture/observability.md) |
 | Durable evidence bundles, findings, and reviewed memory | [Evidence and Memory](architecture/evidence-and-memory.md) |
 | SQLite trace mirror, schemas, cursors, and rebuildability | [Trace Store](architecture/trace-store.md) |
+| The call journal's rules, record format, fact vocabulary, capture modes and consent, objects, export, and retention | [Telemetry](architecture/telemetry.md) |
 | Where generated files live and who should read them | [Artifact Placement](architecture/artifact-placement.md) |
 | Versioned artifact schemas and migration policy | [Artifact Versions](architecture/artifact-versions.md) |
 
