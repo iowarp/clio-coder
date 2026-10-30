@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
+import type { CallLabel, Disposition } from "../../src/core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import type { Fact } from "../../src/core/telemetry/fact.js";
+import { newAttemptId, newCallId, newRecordId } from "../../src/core/telemetry/ids.js";
+import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import type { TelemetryView } from "../../src/domains/observability/contract.js";
 import type { JournalSource } from "../../src/domains/observability/read-model.js";
 import { telemetryView } from "../../src/domains/observability/telemetry-live.js";
@@ -40,4 +44,79 @@ export function goldenTelemetryRecords(sessionId = "golden-p0"): TelemetryRecord
 		.map((line) => JSON.parse(line) as unknown)
 		.filter(isSessionEntry);
 	return importLegacySession(sessionId, ledger, { ids: "derived" }).records;
+}
+
+export interface TelemetryCallOptions {
+	label?: CallLabel;
+	targetId?: string;
+	/** The model the provider reported; it names the call's `target/model` group. */
+	model?: string;
+	turnId?: string;
+	at?: string;
+	/** Token counts; null is a count the provider did not report. Omitted counts are a measured zero. */
+	usage?: Partial<Record<"input" | "output" | "cacheRead" | "cacheWrite" | "reasoning", number | null>>;
+	/** null is a cost nobody could price. */
+	usd?: number | null;
+	pricedBy?: CallSettled["pricing"]["pricedBy"];
+	disposition?: Disposition;
+}
+
+/** One call's started and settled records, cloned from a golden settled call with fresh ids and the given facts. */
+export function telemetryCall(sessionId: string, options: TelemetryCallOptions = {}): TelemetryRecord[] {
+	const golden = goldenTelemetryRecords(sessionId);
+	const settled = golden.find((record) => record.k === "call.settled" && record.data.disposition === "settled");
+	if (settled?.k !== "call.settled" || settled.data.usage === null) throw new Error("golden settled call missing");
+	const started = golden.find((record) => record.k === "call.started" && record.data.callId === settled.data.callId);
+	if (started?.k !== "call.started") throw new Error("golden started call missing");
+	const base = settled.data.usage;
+	const label = options.label ?? "main";
+	const callId = newCallId();
+	const attemptId = newAttemptId();
+	const at = options.at ?? settled.t;
+	const ctx = { ...settled.ctx, label, callId, attemptId, ...(options.turnId ? { turnId: options.turnId } : {}) };
+	const model = options.model ?? "fixture-model";
+	const target = {
+		...started.data.target,
+		targetId: options.targetId ?? "fixture",
+		requestedModel: model,
+		reportedModel: { kind: "measured" as const, value: model, source: "provider" as const },
+	};
+	const count = (value: number | null | undefined): Fact<number> =>
+		value === null
+			? { kind: "unknown", reason: "provider-omitted" }
+			: { kind: "measured", value: value ?? 0, source: "provider" };
+	const pricedBy = options.pricedBy ?? (options.usd === null ? "none" : "target-rates");
+	const usd: Fact<number> =
+		options.usd === null
+			? { kind: "unknown", reason: "provider-omitted" }
+			: pricedBy === "catalog"
+				? { kind: "estimated", value: options.usd ?? 0, method: "catalog" }
+				: { kind: "measured", value: options.usd ?? 0, source: "local-count" };
+	const usage = options.usage ?? {};
+	return [
+		{ ...started, id: newRecordId(), t: at, ctx, data: { ...started.data, callId, attemptId, label, target } },
+		{
+			...settled,
+			id: newRecordId(),
+			t: at,
+			ctx,
+			data: {
+				...settled.data,
+				callId,
+				attemptId,
+				label,
+				target,
+				disposition: options.disposition ?? "settled",
+				usage: {
+					...base,
+					input: count(usage.input),
+					output: count(usage.output),
+					cacheRead: count(usage.cacheRead),
+					cacheWrite: count(usage.cacheWrite),
+					reasoning: count(usage.reasoning),
+				},
+				pricing: { usd, pricedBy },
+			},
+		},
+	];
 }

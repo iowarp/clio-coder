@@ -3,9 +3,8 @@ import { basename } from "node:path";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createCostTracker } from "../../src/domains/observability/cost.js";
+import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { ObservabilityContract, ObservabilitySnapshot } from "../../src/domains/observability/index.js";
-import { emptyCostAggregate } from "../../src/domains/observability/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { localQuotaSnapshot } from "../../src/domains/quota/presentation.js";
 import { createQuotaSummaryFeed } from "../../src/domains/quota/summary-feed.js";
@@ -21,6 +20,7 @@ import { openUsageOverlay } from "../../src/interactive/usage-overlay.js";
 import { createWelcomeDashboard } from "../../src/interactive/welcome-dashboard.js";
 import type { SlashCommandContext } from "../../src/session-control/slash-commands.js";
 import { dispatchSlashCommand, parseSlashCommand } from "../../src/session-control/slash-commands.js";
+import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
 function accounts(): UsageSnapshot[] {
 	return [
@@ -215,18 +215,29 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 	let renders = 0;
 	const titles: string[] = [];
 	let quota = accounts();
-	const costs = createCostTracker();
-	const snapshot = { session: { cost: emptyCostAggregate() } } as ObservabilitySnapshot;
+	const snapshot = { session: {} } as ObservabilitySnapshot;
+	let calls: TelemetryRecord[] = [];
+	let view = telemetryViewOf("usage-session", calls);
+	const updates = new Set<() => void>();
+	const addCalls = (...more: TelemetryRecord[][]) => {
+		calls = [...calls, ...more.flat()];
+		view = telemetryViewOf("usage-session", calls);
+		for (const update of updates) update();
+	};
 	const observability = {
-		snapshot: () => snapshot,
-		costEntries: () => costs.entries(),
-		sessionCostSummary: emptyCostAggregate,
 		subscribe: (callback: typeof listener) => {
 			listener = callback;
 			callback?.(snapshot);
 			return () => {
 				unsubscribed++;
 			};
+		},
+		telemetry: {
+			live: () => view,
+			subscribe: (_topic: string, update: () => void) => {
+				updates.add(update);
+				return () => updates.delete(update);
+			},
 		},
 	} as unknown as ObservabilityContract;
 	const tui = {
@@ -293,36 +304,51 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		// Twelve rows leave the dock five body rows, one of them content, so the
 		// End and Home checks read a 16-row terminal.
 		frame?.handleInput?.("\x1b[F");
-		match(render(40, 16), /no token usage recorded/);
+		match(render(40, 16), /no calls recorded/);
 		frame?.handleInput?.("\x1b[H");
 		match(render(40, 16), /Session tokens/);
 		frame?.handleInput?.("2");
 		match(render(), /Account-wide limits/);
 		frame?.handleInput?.("4");
-		costs.accumulate("fixture", "model-a", 1234, 0.25, { input: 1000, output: 234, apiCalls: 1 }, "known");
-		listener?.({ ...snapshot, session: { ...snapshot.session, cost: costs.sessionCost() } });
+		const rendersBefore = renders;
+		addCalls(telemetryCall("usage-session", { model: "model-a", usage: { input: 1000, output: 234 }, usd: 0.25 }));
+		ok(renders > rendersBefore);
 		const live = render();
-		match(live, /attributed model model-a/);
+		match(live, /fixture\/model-a/);
 		match(live, /1,234 tokens/);
 		match(live, /\$0.25/);
-		doesNotMatch(live, /no token usage recorded/);
-		costs.accumulate("fixture", "model-a", 100, 0.01, { input: 100, apiCalls: 2 }, "estimated", undefined, "worker");
-		costs.accumulate(
-			"fixture",
-			"model-a",
-			0,
-			0,
-			{ apiCalls: 1, missingTokenCalls: 1 },
-			"unknown",
-			undefined,
-			"system-one",
+		doesNotMatch(live, /no calls recorded/);
+		addCalls(
+			telemetryCall("usage-session", {
+				label: "worker",
+				model: "model-a",
+				usage: { input: 50 },
+				usd: 0.005,
+				pricedBy: "catalog",
+			}),
+			telemetryCall("usage-session", {
+				label: "worker",
+				model: "model-a",
+				usage: { input: 50 },
+				usd: 0.005,
+				pricedBy: "catalog",
+			}),
+			telemetryCall("usage-session", {
+				label: "system-one",
+				model: "model-a",
+				// A gateway that settles with usage but omits the cache read, as litellm did in the battle test.
+				usage: { input: null, output: null, cacheRead: null },
+				usd: null,
+			}),
 		);
 		frame?.handleInput?.("3");
 		const combined = scrolled();
 		match(combined, /worker calls.*2/);
 		match(combined, /conversation calls.*1/);
 		match(combined, /System One.*1/);
-		match(combined, /1 call with unknown usage; token amounts are known subtotals/);
+		match(combined, /unknown token usage.*1 calls/);
+		// An unreported cache read is unknown on this tab, never 0 (#434).
+		match(combined, /cache read\s+≥0 \(1 call unknown\)/);
 
 		quota = [
 			{

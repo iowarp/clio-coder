@@ -1,21 +1,10 @@
-import { responseModelIdObservationCountsLabel } from "../core/response-model-id.js";
-import { aggregateCostEntries, type CostRow } from "../domains/observability/cost-rows.js";
-import type { CostAggregate, ObservabilityContract, ObservabilitySnapshot } from "../domains/observability/index.js";
-import { ledgerCallFailureCounts, usageCoverageLabel } from "../domains/session/usage.js";
-
-// The fold moved to the observability domain so the ACP host can report the same rows without this overlay.
-export { aggregateCostEntries, type CostRow };
-
-import { formatCostAggregate } from "../domains/observability/index.js";
+import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
+import { factRef } from "../core/telemetry/dto.js";
+import type { TelemetryView } from "../domains/observability/contract.js";
+import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
-import type { PromptCacheTelemetry, RecallTelemetry, SessionEntry } from "../domains/session/index.js";
-import {
-	foldPromptCacheTelemetry,
-	foldRecallTelemetry,
-	formatRecallTelemetry,
-	hasPromptCacheTelemetry,
-	hasRecallTelemetry,
-} from "../domains/session/index.js";
+import type { RecallTelemetry, SessionEntry } from "../domains/session/index.js";
+import { foldRecallTelemetry, formatRecallTelemetry, hasRecallTelemetry } from "../domains/session/index.js";
 import type { GitChanges } from "../domains/session/workspace/git-probe.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { matchesKey, wrapTextWithAnsi } from "../engine/tui.js";
@@ -29,66 +18,36 @@ const DEFAULT_CONTENT_WIDTH = 104;
 
 export const USAGE_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
-function formatTokens(n: number): string {
-	return n.toLocaleString("en-US");
+/** What each call label's count reads as; a label added later still shows, under its own name. */
+const LABEL_CAPTION: Readonly<Record<string, string>> = {
+	main: "conversation calls",
+	worker: "worker calls",
+	compaction: "compaction calls",
+	memory: "memory steps",
+	"system-one": "System One calls",
+	prewarm: "pre-warms",
+	btw: "side questions",
+	handoff: "handoffs",
+	helper: "helper calls",
+	"safety-judge": "safety judge calls",
+};
+const NOT_AVAILABLE = "spend not available: this session has no telemetry read model";
+
+/** Any contribution at all: a count of zero calls, or a sum over nothing, hides its row. */
+function nonZero(quantity: Quantity | null | undefined): quantity is Quantity {
+	if (!quantity) return false;
+	const fact = quantity.fact;
+	return "kind" in fact
+		? fact.kind === "unknown" || fact.kind === "estimated" || (fact.kind === "measured" && fact.value > 0)
+		: fact.unknownCount > 0 || fact.measured + fact.estimated > 0;
 }
 
-function sumRows(
-	rows: ReadonlyArray<CostRow>,
-): Omit<
-	CostRow,
-	"providerId" | "attributedModelId" | "requestedModelIds" | "responseModelIdObservationCounts" | "cost"
-> & { systemOne: number; workers: number; compactions: number; missingTokenCalls: number } {
-	return rows.reduce(
-		(acc, row) => ({
-			runs: acc.runs + row.runs,
-			tokens: acc.tokens + row.tokens,
-			input: acc.input + row.input,
-			output: acc.output + row.output,
-			cacheRead: acc.cacheRead + row.cacheRead,
-			cacheWrite: acc.cacheWrite + row.cacheWrite,
-			reasoningTokens: acc.reasoningTokens + row.reasoningTokens,
-			apiCalls: acc.apiCalls + row.apiCalls,
-			sideQuestions: acc.sideQuestions + row.sideQuestions,
-			handoffs: acc.handoffs + row.handoffs,
-			prewarms: acc.prewarms + row.prewarms,
-			backgroundMemory: acc.backgroundMemory + row.backgroundMemory,
-			failedCompaction: acc.failedCompaction + row.failedCompaction,
-			systemOne: acc.systemOne + (row.systemOne ?? 0),
-			workers: acc.workers + (row.workers ?? 0),
-			compactions: acc.compactions + (row.compactions ?? 0),
-			missingTokenCalls: acc.missingTokenCalls + (row.missingTokenCalls ?? 0),
-		}),
-		{
-			runs: 0,
-			tokens: 0,
-			input: 0,
-			output: 0,
-			cacheRead: 0,
-			cacheWrite: 0,
-			reasoningTokens: 0,
-			apiCalls: 0,
-			sideQuestions: 0,
-			handoffs: 0,
-			prewarms: 0,
-			backgroundMemory: 0,
-			failedCompaction: 0,
-			systemOne: 0,
-			workers: 0,
-			compactions: 0,
-			missingTokenCalls: 0,
-		},
-	);
-}
-
-// Cache read splits into a primary value and an optional per-request average
-// annotation, so the number joins the aligned column while the aside hangs
-// after it.
-function cacheReadValue(cacheRead: number, apiCalls: number): readonly [value: string, annotation?: string] {
-	if (apiCalls > 1 && cacheRead > 0) {
-		return [formatTokens(cacheRead), `(avg/call ${formatTokens(Math.round(cacheRead / apiCalls))})`];
-	}
-	return [formatTokens(cacheRead)];
+/** Some call fed this sum, so its value (a measured zero, a local `$0.00`, or `not measured`) is worth a row. */
+function contributed(quantity: Quantity): boolean {
+	const fact = quantity.fact;
+	return "kind" in fact
+		? fact.kind !== "absent"
+		: fact.coverage.measured + fact.coverage.estimated + fact.unknownCount > 0;
 }
 
 /**
@@ -98,9 +57,7 @@ function cacheReadValue(cacheRead: number, apiCalls: number): readonly [value: s
  * which of the two it is rather than leaving a footer reading `r≈900` beside an
  * overlay reading `reasoning 0`.
  */
-function reasoningValue(reasoningTokens: number): readonly [value: string, annotation?: string] {
-	return [formatTokens(reasoningTokens), "provider-reported only"];
-}
+const REASONING_NOTE = "provider-reported only";
 
 // A block of key-value rows in the design-system grammar: a dim padded key and
 // a muted value. Primary values are right-aligned inside the block so the
@@ -117,196 +74,95 @@ function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>): st
 	});
 }
 
-function summaryBlock(
-	totalCost: CostAggregate,
-	totalTokens: number,
-	rows: ReadonlyArray<CostRow>,
-	promptCache: PromptCacheTelemetry | null,
-	neverSentCalls = 0,
-	recall: RecallTelemetry | null = null,
-): string[] {
-	const totals = sumRows(rows);
-	const resolvedTotal = totalTokens > 0 ? totalTokens : totals.tokens;
-	// No priced call, no cost row: neither the `cost $0.00` the overlay used to
-	// print above its own "no token usage recorded" line, nor the `cost cost
-	// unknown` it printed for a target that reports no pricing. The token rows
-	// below are measured and stay either way. See formatCostAggregate.
-	const cost = formatCostAggregate(totalCost);
-	// A side question is billed like anything else and is counted here, but it is
-	// deliberately not a turn: it never entered the session, so `turns` above
-	// excludes it and this row says how much of the spend sat beside the session.
-	const cacheRows =
-		promptCache !== null && hasPromptCacheTelemetry(promptCache)
+/** Whole-session token rows, optionally for one model group; every value is the read model's own display. */
+function tokenRows(view: TelemetryView, model?: string): Array<readonly [string, string, string?]> {
+	const display = (metric: FactMetric) =>
+		view.quantity(
+			factRef({
+				scope: "session",
+				owner: view.sessionId,
+				metric,
+				...(model === undefined ? {} : { group: { by: "model", key: model } }),
+			}),
+		)?.display ?? "unknown";
+	return [
+		["input", display("input")],
+		["output", display("output")],
+		["reasoning", display("reasoning"), REASONING_NOTE],
+		["cache read", display("cacheRead")],
+		["cache write", display("cacheWrite")],
+		["processed", `${display("total")} tokens`],
+	];
+}
+
+/**
+ * The Session tab: every call this session paid for, across every branch, as the telemetry read model folds it
+ * (#434 §11.3). Nothing here adds or subtracts; an unknown cache read reads `unknown`, never `0`.
+ */
+function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null): string[] {
+	const session = view.session();
+	const byLabel = view.cost("label");
+	const cache = view.cache();
+	const missing = view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "missingTokenCalls" }));
+	const neverSent = session.own.counts.dispositions.neverSent;
+	const groups = [...byLabel.groups].sort((a, b) =>
+		a.key === "main" ? -1 : b.key === "main" ? 1 : a.key.localeCompare(b.key),
+	);
+	const cached = nonZero(cache.cacheRead) || nonZero(cache.cacheWrite) || nonZero(cache.rePrefilled);
+	const v = cache.verdicts;
+	return kvBlock([
+		...groups.map((group) => [LABEL_CAPTION[group.key] ?? `${group.key} calls`, group.calls.display] as const),
+		["model calls", byLabel.total.calls.display],
+		...(nonZero(missing)
+			? [["unknown token usage", `${missing.display} calls`, "token amounts are lower bounds"] as const]
+			: []),
+		...(nonZero(neverSent) ? [["never sent", `${neverSent.display} calls`] as const] : []),
+		...(contributed(byLabel.total.usd) ? [["cost", byLabel.total.usd.display] as const] : []),
+		...tokenRows(view),
+		...(cached
 			? [
-					[
-						"uncached prefill",
-						promptCache.uncachedPrefillTokens === null ? "not reported" : formatTokens(promptCache.uncachedPrefillTokens),
-					] as const,
-					[
-						"re-prefilled (estimate)",
-						promptCache.reprefilledTokens == null
-							? "not reported"
-							: `${formatTokens(promptCache.reprefilledTokens)} · ${promptCache.cacheBreakCalls} breaks`,
-					] as const,
+					["uncached prefill", cache.uncachedPrefill.display] as const,
+					["re-prefilled", cache.rePrefilled.display, `${cache.breaks.length} breaks`] as const,
+					["cache-break bill", cache.breakUsd.display] as const,
 					[
 						"cache verdicts",
-						`hot ${promptCache.verdictCounts.hot} · partial ${promptCache.verdictCounts.partial} · cold ${promptCache.verdictCounts.cold} · small ${promptCache.verdictCounts.small} · unknown ${promptCache.verdictCounts.unknown}`,
+						`hot ${v.hot} · partial ${v.partial} · cold ${v.cold} · small ${v.small} · unknown ${v.unknown}`,
 					] as const,
 				]
-			: [];
-	// #422: a recalled body is written to the cache once and read on every later
-	// request, the same as if it had never left; the tokens here are what the
-	// model asked back, not the recall requests' own prefix reads.
-	const recallRows =
-		recall !== null && hasRecallTelemetry(recall)
+			: []),
+		// #422: a recalled body is written to the cache once and read on every later
+		// request, the same as if it had never left; the tokens here are what the
+		// model asked back, not the recall requests' own prefix reads.
+		...(recall !== null && hasRecallTelemetry(recall)
 			? [["recalled into context", formatRecallTelemetry(recall), "estimate · excludes operator recalls"] as const]
-			: [];
-	return kvBlock([
-		[
-			"conversation calls",
-			formatTokens(
-				totals.apiCalls -
-					totals.sideQuestions -
-					totals.handoffs -
-					totals.prewarms -
-					totals.backgroundMemory -
-					totals.failedCompaction -
-					totals.systemOne -
-					totals.workers -
-					totals.compactions,
-			),
-		],
-		["model calls", formatTokens(totals.apiCalls)],
-		...((totalCost.unknownCallCoverageRuns ?? 0) > 0
-			? [["call coverage", `${totalCost.unknownCallCoverageRuns} runs unknown; call counts are known subtotals`] as const]
 			: []),
-		...((totals.workers ?? 0) > 0 ? [["worker calls", formatTokens(totals.workers ?? 0)] as const] : []),
-		...((totals.compactions ?? 0) > 0 ? [["compaction calls", formatTokens(totals.compactions ?? 0)] as const] : []),
-		...((totals.missingTokenCalls ?? 0) > 0 || neverSentCalls > 0
-			? [["missing token usage", usageCoverageLabel(totals.missingTokenCalls ?? 0, neverSentCalls)] as const]
-			: []),
-		...(totals.sideQuestions > 0 ? [["side questions", formatTokens(totals.sideQuestions)] as const] : []),
-		...(totals.handoffs > 0 ? [["handoffs", formatTokens(totals.handoffs)] as const] : []),
-		...(totals.prewarms > 0 ? [["pre-warms", formatTokens(totals.prewarms)] as const] : []),
-		...(totals.backgroundMemory > 0 ? [["memory steps", formatTokens(totals.backgroundMemory)] as const] : []),
-		...(totals.systemOne > 0 ? [["System One calls", formatTokens(totals.systemOne)] as const] : []),
-		...(totals.failedCompaction > 0
-			? [
-					["failed compaction calls", formatTokens(totals.failedCompaction)] as const,
-					["compaction usage", "known subtotals; missing usage is unknown"] as const,
-				]
-			: []),
-		...(cost === null ? [] : [["cost", cost] as const]),
-		["input", formatTokens(totals.input)],
-		["output", formatTokens(totals.output)],
-		["reasoning", ...reasoningValue(totals.reasoningTokens)],
-		["cache read", ...cacheReadValue(totals.cacheRead, totals.apiCalls)],
-		["cache write", formatTokens(totals.cacheWrite)],
-		...cacheRows,
-		...recallRows,
-		["processed", `${formatTokens(resolvedTotal)} tokens`],
 	]);
 }
 
-function modelBlock(row: CostRow): string[] {
-	// A row exists because calls were folded into it, so its tokens are measured.
-	// Its cost is a separate question: a target that reports no pricing leaves the
-	// block with token rows and no cost row.
-	const cost = formatCostAggregate(row.cost);
-	return kvBlock([
-		["requested model ids", row.requestedModelIds.join(", ")],
-		["response model id observation", responseModelIdObservationCountsLabel(row.responseModelIdObservationCounts)],
-		[
-			"conversation calls",
-			formatTokens(
-				row.apiCalls -
-					row.sideQuestions -
-					row.handoffs -
-					row.prewarms -
-					row.backgroundMemory -
-					row.failedCompaction -
-					(row.systemOne ?? 0) -
-					(row.workers ?? 0) -
-					(row.compactions ?? 0),
-			),
-		],
-		["model calls", formatTokens(row.apiCalls)],
-		...((row.cost.unknownCallCoverageRuns ?? 0) > 0
-			? [["call coverage", `${row.cost.unknownCallCoverageRuns} runs unknown; call counts are known subtotals`] as const]
-			: []),
-		...((row.workers ?? 0) > 0 ? [["worker calls", formatTokens(row.workers ?? 0)] as const] : []),
-		...((row.compactions ?? 0) > 0 ? [["compaction calls", formatTokens(row.compactions ?? 0)] as const] : []),
-		...((row.missingTokenCalls ?? 0) > 0
-			? [["missing token usage", usageCoverageLabel(row.missingTokenCalls ?? 0)] as const]
-			: []),
-		...(row.sideQuestions > 0 ? [["side questions", formatTokens(row.sideQuestions)] as const] : []),
-		...(row.handoffs > 0 ? [["handoffs", formatTokens(row.handoffs)] as const] : []),
-		...(row.prewarms > 0 ? [["pre-warms", formatTokens(row.prewarms)] as const] : []),
-		...(row.backgroundMemory > 0 ? [["memory steps", formatTokens(row.backgroundMemory)] as const] : []),
-		...((row.systemOne ?? 0) > 0 ? [["System One calls", formatTokens(row.systemOne ?? 0)] as const] : []),
-		...(row.failedCompaction > 0 ? [["failed compaction calls", formatTokens(row.failedCompaction)] as const] : []),
-		...(cost === null ? [] : [["cost", cost] as const]),
-		["input", formatTokens(row.input)],
-		["output", formatTokens(row.output)],
-		["reasoning", ...reasoningValue(row.reasoningTokens)],
-		["cache read", ...cacheReadValue(row.cacheRead, row.apiCalls)],
-		["cache write", formatTokens(row.cacheWrite)],
-		["processed", `${formatTokens(row.tokens)} tokens`],
-	]);
-}
-
-function modelDetailLines(rows: ReadonlyArray<CostRow>, contentWidth: number): string[] {
+/** The Models tab: one block per `target/model`, the reported model where the provider named one. */
+function modelLines(view: TelemetryView, contentWidth: number): string[] {
 	const theme = clioTheme();
-	const lines: string[] = [rule(theme, contentWidth)];
-	if (rows.length === 0) {
-		lines.push(theme.fg("menuDescription", "no token usage recorded for this session"));
-	} else {
-		for (const [index, row] of rows.entries()) {
-			if (index > 0) lines.push("");
-			lines.push(
-				theme.style("modelIdentity", `${row.providerId} · attributed model ${row.attributedModelId}`, { bold: true }),
-			);
-			for (const line of modelBlock(row)) {
-				lines.push(line);
-			}
-		}
+	const groups = view.cost("model").groups;
+	if (groups.length === 0) return [theme.fg("menuDescription", "no model calls recorded for this session")];
+	const lines: string[] = [];
+	for (const [index, group] of groups.entries()) {
+		if (index > 0) lines.push("");
+		lines.push(theme.style("modelIdentity", group.key, { bold: true }));
+		lines.push(
+			...kvBlock([
+				["model calls", group.calls.display],
+				...(contributed(group.usd) ? [["cost", group.usd.display] as const] : []),
+				...tokenRows(view, group.key),
+			]),
+		);
 	}
-	return lines;
+	return [rule(theme, contentWidth), ...lines];
 }
 
-export interface CostSnapshot {
-	sessionId: string | null;
-	totalCost: CostAggregate;
-	totalTokens: number;
-	rows: CostRow[];
-	promptCache: PromptCacheTelemetry | null;
-	/** #422: what working-set recall put back in front of the model. */
+/** What the overlay reads: the live view, and the ledger's recall fold, re-read on updates rather than per frame. */
+interface UsageData {
+	view: TelemetryView | null;
 	recall: RecallTelemetry | null;
-	neverSentCalls?: number;
-}
-
-// Session totals come from the observability projection: when a snapshot is
-// supplied (the subscribe path holds the latest one), the session cost is read
-// from `snapshot.session.cost`. The per-provider/model rows still fold
-// `costEntries()`, which the snapshot schema deliberately does not carry.
-function buildCostSnapshot(
-	observability: ObservabilityContract,
-	sessionId: string | null,
-	snapshot?: ObservabilitySnapshot,
-	getSessionEntries?: () => ReadonlyArray<SessionEntry>,
-): CostSnapshot {
-	const entries = observability.costEntries();
-	const rows = aggregateCostEntries(entries);
-	const totalTokens = rows.reduce((sum, r) => sum + r.tokens, 0);
-	return {
-		sessionId,
-		totalCost: snapshot?.session.cost ?? observability.sessionCostSummary(),
-		totalTokens,
-		rows,
-		promptCache: getSessionEntries ? foldPromptCacheTelemetry(getSessionEntries()) : null,
-		recall: getSessionEntries ? foldRecallTelemetry(getSessionEntries()) : null,
-		neverSentCalls: getSessionEntries ? ledgerCallFailureCounts(getSessionEntries()).neverInvokedCalls : 0,
-	};
 }
 
 export interface OpenUsageOverlayOptions {
@@ -332,7 +188,7 @@ export interface OpenUsageOverlayOptions {
 function renderActivity(
 	days: ReadonlyMap<string, number>,
 	sessions: number,
-	snapshot: CostSnapshot,
+	data: UsageData,
 	quota: ReadonlyArray<UsageSnapshot>,
 	changes: GitChanges | null,
 	startedAt: string | null,
@@ -355,17 +211,24 @@ function renderActivity(
 			? theme.fg("annotation", "not observed")
 			: `${theme.fg("success", `+${changes.insertions}`)} ${theme.fg("error", `-${changes.deletions}`)} ${theme.fg("annotation", `· ${changes.files} file${changes.files === 1 ? "" : "s"}`)}`;
 	lines.push(`${label("Changes")}${changesValue}`);
-	const cost = formatCostAggregate(snapshot.totalCost);
 	const started = startedAt ? Date.parse(startedAt) : Number.NaN;
 	const elapsed = Number.isFinite(started)
 		? ` ${theme.fg("annotation", `(${formatCompactMs(Math.max(0, now - started))})`)}`
 		: "";
-	lines.push(
-		`${label("Session")}${cost ? `${cost} · ` : ""}${theme.fg("counter", `${formatTokens(snapshot.totalTokens)} tokens`)}${elapsed}`,
-	);
-	const missing = sumRows(snapshot.rows).missingTokenCalls;
-	if (missing > 0 || (snapshot.neverSentCalls ?? 0) > 0)
-		lines.push(`${label("Usage")}${theme.fg("annotation", usageCoverageLabel(missing, snapshot.neverSentCalls ?? 0))}`);
+	const view = data.view;
+	if (!view) lines.push(`${label("Session")}${theme.fg("annotation", NOT_AVAILABLE)}${elapsed}`);
+	else {
+		const totals = view.session().totals;
+		const cost = contributed(totals.usd) ? `${totals.usd.display} · ` : "";
+		lines.push(`${label("Session")}${cost}${theme.fg("counter", `${totals.tokens.display} tokens`)}${elapsed}`);
+		const missing = view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "missingTokenCalls" }));
+		const neverSent = view.session().own.counts.dispositions.neverSent;
+		const usage = [
+			nonZero(missing) ? `${missing.display} calls with unknown usage` : null,
+			nonZero(neverSent) ? `${neverSent.display} never sent` : null,
+		].filter((part) => part !== null);
+		if (usage.length > 0) lines.push(`${label("Usage")}${theme.fg("annotation", usage.join(" · "))}`);
+	}
 	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
 	if (window) {
 		const pct = Math.max(0, Math.min(100, window.item.usedPct));
@@ -386,7 +249,7 @@ class UsageOverlayBody implements Component {
 	private lineCount = 0;
 
 	constructor(
-		private readonly getSnapshot: () => CostSnapshot,
+		private readonly getData: () => UsageData,
 		private readonly getQuotaSnapshots: () => ReadonlyArray<UsageSnapshot>,
 		private readonly getDispatchRows: () => ReadonlyArray<DispatchBoardRow>,
 		private readonly requestRender: () => void,
@@ -426,7 +289,7 @@ class UsageOverlayBody implements Component {
 
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, Math.floor(width));
-		const snapshot = this.getSnapshot();
+		const data = this.getData();
 		const quota = this.getQuotaSnapshots();
 		const theme = clioTheme();
 		const tabs = wrapTextWithAnsi(
@@ -442,7 +305,7 @@ class UsageOverlayBody implements Component {
 			body = renderActivity(
 				this.activity.days,
 				this.activity.sessions,
-				snapshot,
+				data,
 				quota,
 				this.activity.getChanges(),
 				this.activity.startedAt,
@@ -458,35 +321,21 @@ class UsageOverlayBody implements Component {
 		else if (this.tab === 2)
 			body = [
 				theme.style("sectionHeading", "Session tokens & cost", { bold: true }),
-				theme.fg("annotation", "Recorded calls in this session · estimates are marked in the cost totals"),
+				theme.fg("annotation", "Every call this session paid for, across every branch · estimates and gaps are marked"),
 				"",
-				...summaryBlock(
-					snapshot.totalCost,
-					snapshot.totalTokens,
-					snapshot.rows,
-					snapshot.promptCache,
-					snapshot.neverSentCalls,
-					snapshot.recall,
-				),
+				...(data.view ? summaryBlock(data.view, data.recall) : [theme.fg("annotation", NOT_AVAILABLE)]),
 				"",
 				rule(theme, contentWidth),
 				theme.fg("annotation", "Session tokens cannot be converted to subscription percentages."),
-				...(snapshot.rows.length ? [] : ["no token usage recorded for this session"]),
+				...(data.view && !nonZero(data.view.cost("label").total.calls) ? ["no calls recorded for this session"] : []),
 			];
 		else if (this.tab === 3) {
 			body = [
 				theme.style("sectionHeading", "Model activity · this session", { bold: true }),
-				theme.fg("annotation", "Share of recorded processed tokens, including cache traffic; not account quota."),
+				theme.fg("annotation", "Recorded calls per model across every branch, including cache traffic; not account quota."),
 				"",
+				...(data.view ? modelLines(data.view, contentWidth) : [theme.fg("annotation", NOT_AVAILABLE)]),
 			];
-			for (const row of [...snapshot.rows].sort((a, b) => b.tokens - a.tokens)) {
-				const share = snapshot.totalTokens > 0 ? (row.tokens / snapshot.totalTokens) * 100 : 0;
-				body.push(
-					`${row.providerId} · ${row.attributedModelId}`,
-					`${quotaMeter(share, Math.min(24, contentWidth), "normal")} ${share.toFixed(1)}% · ${formatTokens(row.tokens)} tokens`,
-				);
-			}
-			body.push("", ...modelDetailLines(snapshot.rows, contentWidth));
 		} else body = renderWorkerUsage(this.getDispatchRows(), quota, contentWidth);
 		const lines = body.flatMap((line) => wrapTextWithAnsi(line, contentWidth));
 		this.lineCount = lines.length;
@@ -520,11 +369,13 @@ export function openUsageOverlay(
 	options?: OpenUsageOverlayOptions,
 ): OverlayHandle {
 	const sessionId = options?.sessionId ?? null;
-	let latest: ObservabilitySnapshot = observability.snapshot();
+	const telemetry = observability.telemetry;
+	const readRecall = () => (options?.getSessionEntries ? foldRecallTelemetry(options.getSessionEntries()) : null);
+	let recall = readRecall();
 	const now = options?.now ?? (() => Date.now());
 	const sessions = options?.listSessions?.() ?? [];
 	const body = new UsageOverlayBody(
-		() => buildCostSnapshot(observability, sessionId, latest, options?.getSessionEntries),
+		() => ({ view: telemetry?.live() ?? null, recall }),
 		options?.getQuotaSnapshots ?? (() => []),
 		options?.getDispatchRows ?? (() => []),
 		() => tui.requestRender(),
@@ -556,18 +407,22 @@ export function openUsageOverlay(
 		},
 	});
 
-	// subscribe() fires immediately with the current snapshot, then on each
-	// coalesced projection change while the overlay is open.
-	const unsubscribe = observability.subscribe((snapshot) => {
-		latest = snapshot;
-		body.invalidate();
+	// The Workers tab reads the dispatch board, which the projection keeps current.
+	const unsubscribe = observability.subscribe(() => tui.requestRender());
+	// Spend changes arrive as persisted batches, at most 10 Hz; the ledger's recall fold is re-read then, not per frame.
+	const refresh = () => {
+		recall = readRecall();
 		tui.requestRender();
-	});
+	};
+	const offs = telemetry
+		? (["session", "calls", "cost", "cache", "runs"] as const).map((topic) => telemetry.subscribe(topic, refresh))
+		: [];
 
 	return {
 		...handle,
 		hide(): void {
 			unsubscribe();
+			for (const off of offs) off();
 			handle.hide();
 		},
 	};
