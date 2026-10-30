@@ -1,8 +1,9 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { mkdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
+import { beginCall } from "../../src/core/telemetry/producer.js";
 import {
 	foldTaskMemorySpend,
 	formatTaskMemorySpend,
@@ -14,6 +15,8 @@ import {
 	parseTaskMemoryTelemetryRecord,
 	taskMemoryTelemetryRecord,
 } from "../../src/domains/memory/task-memory-telemetry.js";
+import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
+import { openCallJournal } from "../../src/domains/observability/call-journal.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const ZERO = { added: 0, updated: 0, deleted: 0 };
@@ -146,4 +149,62 @@ test("spend keeps a known subtotal beside invalid rows, explicit missing usage, 
 	strictEqual(summary.missingTokenCalls, 1, "a skipped boundary is not an extra missing model call");
 	strictEqual(summary.unreportedUsageSteps, 1, "absent historical coverage remains unreported");
 	match(formatTaskMemorySpend(summary), /^partial retained spend.*3 invalid rows.*1 calls missing usage/u);
+});
+
+test("linked memory spend follows late journal settlements and deduplicates repeated step references", async (t) => {
+	const home = makeScratchHome("clio-coder-memory-journal-");
+	t.after(home.cleanup);
+	const context = { sessionId: "session", label: "memory" as const };
+	const journal = await openCallJournal({
+		sessionDirectory: join(home.dir, "sessions", "repo", "session"),
+		context,
+		writer: { clioVersion: "fixture", piVersion: "fixture" },
+	});
+	try {
+		const call = beginCall(
+			{
+				label: "memory",
+				roundKind: "tools-removed",
+				toolChoice: "none",
+				target: {
+					targetId: "target",
+					runtimeId: "runtime",
+					api: "fixture",
+					requestedModel: "model",
+					reportedModel: { kind: "unknown", reason: "not-observed" },
+				},
+			},
+			context,
+		);
+		const row = taskMemoryTelemetryRecord(
+			{ ...STEP, calls: [{ sessionId: "session", repoIdentity: "repo", callId: call.callId, attemptId: call.attemptId }] },
+			AT,
+		);
+		const path = taskMemoryStepsPath(home.dir);
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, `${JSON.stringify(row)}\n${JSON.stringify(row)}\n`);
+		await journal.flush();
+		const pending = readTaskMemorySpendSummary(home.dir);
+		strictEqual(pending.totalTokens, 0);
+		strictEqual(pending.unresolvedCalls, 1);
+		strictEqual(pending.missingTokenCalls, 0, "an open attempt does not prove an invocation");
+		strictEqual(readTaskMemorySpendSummary(home.dir), pending);
+		call.settle(
+			callSettlementFromMessage(
+				{
+					stopReason: "stop",
+					usage: { input: 4, output: 2, cacheRead: 1, cacheWrite: 0, clioExternal: { tokenUsage: "provider-reported" } },
+				},
+				"unknown",
+			),
+		);
+		await journal.flush();
+		const settled = readTaskMemorySpendSummary(home.dir);
+		strictEqual(settled.totalTokens, 7);
+		strictEqual(settled.llmSteps, 2);
+		strictEqual(settled.unresolvedCalls ?? 0, 0);
+		strictEqual(readTaskMemorySpendSummary(home.dir), settled);
+	} finally {
+		await journal.close();
+	}
 });

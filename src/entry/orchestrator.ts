@@ -280,6 +280,7 @@ import {
 	parseSessionEntries,
 	SessionDomainModule,
 } from "../domains/session/index.js";
+import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
 import {
 	clearPendingProtectedArtifact,
 	reconcilePendingProtectedArtifacts,
@@ -295,6 +296,7 @@ import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
 import { writeTranscriptExport } from "../domains/session/transcript-export.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import { recordUsageCall } from "../domains/session/usage-record.js";
 import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
@@ -1132,7 +1134,18 @@ export function createBackgroundMemoryRouting(
 				};
 				callTelemetry.startAttempt();
 				try {
-					return await scope.withContext(() => client.complete({ ...request, callTelemetry }));
+					const result = await scope.withContext(() =>
+						client.complete({
+							...request,
+							callTelemetry,
+							onUsage: (usage) => {
+								if (!scope.identity() && usage.failure)
+									scope.settle({ stopReason: request.signal.aborted ? "aborted" : "error", failure: usage.failure });
+								request.onUsage?.({ ...usage, ...scope.identity() });
+							},
+						}),
+					);
+					return { ...result, ...(result.usage ? { usage: { ...result.usage, ...scope.identity() } } : {}) };
 				} catch (error) {
 					// Engine attempts settle first; only failures in preparation reach this fallback (#434).
 					scope.settle({
@@ -2623,16 +2636,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const memoryTrace = memoryTracePath === null ? null : createTaskMemoryTrace(memoryTracePath);
 	// The route the last resolved memory client would call, kept so the endpoint
 	// check and the cost row read the same resolution the step itself used.
-	/**
-	 * Account for one background memory step exactly as a `/btw` side question is
-	 * accounted for: the in-process cost tracker under its own label so `/usage`
-	 * shows it while the session lives, and one durable out-of-turn row so
-	 * `clio-coder usage report` can still see it afterwards.
-	 *
-	 * Accounting only. The client wrapper (`announceMemoryStepEndpoint`) holds the
-	 * endpoint slot and publishes the disturbance; it sees the timed-out and
-	 * thrown steps that report no usage. Late reported usage still reaches this sink.
-	 */
+	// Journal settlements own memory spend; legacy clients retain the captured usage fallback (#434).
 	// The spend the scheduling gate admits paid requests against, so a memory
 	// step's projected cost meets the same ceiling chat and dispatch do.
 	const backgroundSessionSpendUsd = (): number =>
@@ -2647,6 +2651,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			origin,
 			acquire,
 			label: "memory",
+			onSettled: (facts) => {
+				if (!observability || session?.current()?.id !== origin.id) return;
+				if (facts.disposition === "never_sent") observability.recordNeverSentCalls(1);
+				for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }]))
+					recordUsageCall(observability, call);
+			},
 			targetId,
 			runtimeId: runtime.id,
 			costProvenance: resolveEffectivePricing(target, runtime, modelId).provenance,

@@ -59,6 +59,7 @@ export function captureTaskMemoryUsage(
 ): (usage: TaskMemoryStepUsage, isCurrent: boolean) => void {
 	const { observability, ...origin } = input;
 	return (usage, isCurrent) => {
+		if (usage.callId) return;
 		recordBackgroundMemoryStep({ ...origin, usage, observability: isCurrent ? observability : undefined });
 	};
 }

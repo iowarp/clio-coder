@@ -650,6 +650,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			else if (call.label === "prewarm") callOrigins.prewarms += 1;
 			else if (call.label === "system-one") callOrigins.systemOne += 1;
 			else if (call.label === "safety-judge") callOrigins.safetyJudge += 1;
+			else if (call.label === "background-memory") callOrigins.backgroundMemory += 1;
 		}
 	}
 	for (const row of outOfTurnRows) {

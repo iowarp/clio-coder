@@ -96,7 +96,8 @@ export function journalOwnsSideUsage(label: CallLabel): boolean {
 		label === "handoff" ||
 		label === "prewarm" ||
 		label === "system-one" ||
-		label === "safety-judge"
+		label === "safety-judge" ||
+		label === "memory"
 	);
 }
 

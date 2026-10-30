@@ -98,6 +98,8 @@ export interface TaskMemoryModelRequest {
  * `/cost` row and in no usage report (#229).
  */
 export interface TaskMemoryStepUsage {
+	callId?: string;
+	attemptId?: string;
 	/** Target the step ran against, used as the cost row's provider id. */
 	targetId: string;
 	attributedModelId: string;

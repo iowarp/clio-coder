@@ -28,6 +28,7 @@ import { createSessionJournals } from "../../src/domains/observability/session-j
 import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { EMPTY_CAPABILITIES, type ProvidersContract } from "../../src/domains/providers/index.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
 import { completeEngineText } from "../../src/engine/ai.js";
 import {
 	createEngineFauxCore,
@@ -159,6 +160,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 			const { contract: session } = createSessionBundle({ bus, getContract: () => undefined });
 			const origin = session.create({ cwd: env.dir });
 			const journals = createSessionJournals(join(env.dir, "state"), () => {});
+			const live: number[] = [];
 			const routing = createBackgroundMemoryRouting(
 				providers,
 				() => settings,
@@ -173,11 +175,15 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 					targetId,
 					runtimeId: "openai-compat",
 					costProvenance: "unknown",
+					onSettled: (facts) => {
+						if (session.current()?.id === origin.id) {
+							for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) live.push(call.totalTokens);
+						}
+					},
 				}),
 			);
 
 			const bank = new TaskMemoryBank();
-			const live: number[] = [];
 			const reminders: string[] = [];
 			const proposals: unknown[] = [];
 			const registration = createMemoryInterventionRegistration({
@@ -218,8 +224,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				assert.equal(calls[0]?.data.label, "memory");
 				assert.equal(calls[0]?.data.disposition, ending === "stop" && !switched ? "settled" : "sent_unsettled");
 				const rows = readOutOfTurnUsageRows(join(env.dir, "state")).rows;
-				assert.equal(rows.length, 1);
-				assert.equal(rows[0]?.sessionId, origin.id);
+				assert.equal(rows.length, 0, "journaled memory calls do not duplicate legacy rows");
 				if (!switched) {
 					const steps = readFileSync(join(env.dir, "state", "memory", "steps.jsonl"), "utf8")
 						.trim()
@@ -234,29 +239,10 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 						),
 					);
 					const spend = readTaskMemorySpendSummary(join(env.dir, "state"));
-					assert.equal(spend.missingTokenCalls, ending === "no-usage" ? 1 : 0);
+					assert.equal(spend.missingTokenCalls, ending === "stop" ? 0 : 1);
 					assert.equal(spend.unreportedUsageSteps, 0);
 				}
-				if (ending === "no-usage") {
-					assert.equal(rows[0]?.usage.totalTokens, null);
-					assert.equal(rows[0]?.usage.costProvenance, "unknown");
-				}
-				if (ending !== "no-usage") {
-					assert.equal(rows[0]?.repoIdentity, origin.cwdHash);
-					assert.equal(rows[0]?.target, "origin-target");
-					assert.equal(rows[0]?.attributedModelId, "memory-model");
-					assert.deepEqual(rows[0]?.usage, {
-						costProvenance: "unknown",
-						input: 7,
-						output: 3,
-						cacheRead: 5,
-						cacheWrite: 2,
-						reasoning: 1,
-						totalTokens: 17,
-						costUsd: 0.375,
-					});
-				}
-				assert.deepEqual(live, switched ? [] : [ending === "no-usage" ? 0 : 17]);
+				assert.deepEqual(live, switched ? [] : [ending === "stop" ? 17 : 0]);
 				const usable = ending === "stop" && !switched;
 				assert.equal(bank.snapshot().knowledge.length, usable ? 1 : 0);
 				assert.equal(reminders.length, usable ? 1 : 0);
