@@ -85,17 +85,23 @@ export function makeTelemetryRecord<K extends Kind>(
 export type RecordRead =
 	| { kind: "record"; record: TelemetryRecord }
 	| { kind: "header"; header: SegmentHeader }
-	| { kind: "skipped"; reason: "unknown-kind" | "unknown-version" | "invalid-record" };
+	| { kind: "skipped"; reason: "unknown-kind" | "unknown-version" | "invalid-record"; segment?: true };
 
 /** Readers never retire future records; even a newer envelope is counted, not rewritten (#434). */
 export function readTelemetryRecord(value: unknown): RecordRead {
 	if (!value || typeof value !== "object") return { kind: "skipped", reason: "invalid-record" };
 	const raw = value as Record<string, unknown>;
-	if (typeof raw.v === "number" && raw.v > 1) return { kind: "skipped", reason: "unknown-version" };
+	if (typeof raw.v === "number" && raw.v > 1) {
+		return {
+			kind: "skipped",
+			reason: "unknown-version",
+			...(raw.k === "segment.open" ? { segment: true as const } : {}),
+		};
+	}
 	if (raw.k === "segment.open") {
 		return Value.Check(SegmentHeaderSchema, value)
 			? { kind: "header", header: value }
-			: { kind: "skipped", reason: "invalid-record" };
+			: { kind: "skipped", reason: "invalid-record", segment: true };
 	}
 	if (!Value.Check(EnvelopeSchema, value)) return { kind: "skipped", reason: "invalid-record" };
 	if (!isKind(value.k)) return { kind: "skipped", reason: "unknown-kind" };

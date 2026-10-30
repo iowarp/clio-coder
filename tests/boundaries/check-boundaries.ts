@@ -6,6 +6,32 @@ export interface BoundaryCheckResult {
 	violations: string[];
 }
 
+/** Applied to the producer's complete local value-import closure, including helper modules (#434). */
+export function checkTelemetryProducer(file: string, source: string): string[] {
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const violations: string[] = [];
+	const visit = (node: ts.Node): void => {
+		if (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly && ts.isStringLiteral(node.moduleSpecifier)) {
+			const specifier = node.moduleSpecifier.text;
+			if (
+				/^(?:node:)?(?:fs(?:\/promises)?|sqlite)$/.test(specifier) ||
+				/state-file-lock|safe-resource-write/.test(specifier)
+			) {
+				violations.push(`rule13: ${file} imports persistence on the telemetry producer path (${specifier})`);
+			}
+		}
+		if (
+			(ts.isCallExpression(node) || ts.isNewExpression(node)) &&
+			/^(?:JSON\.stringify|(?:\w+\.)?(?:appendFileSync|writeSync|DatabaseSync))$/.test(node.expression.getText(tree))
+		) {
+			violations.push(`rule13: ${file} serializes or performs synchronous I/O on the telemetry producer path`);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(tree);
+	return violations;
+}
+
 /** Guard monetary presentation without confusing token/duration precision or shell dollars (#434). */
 export function checkCostRendering(file: string, source: string): string[] {
 	if (file === "src/domains/observability/cost.ts") return [];
@@ -678,6 +704,9 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 				...checkCostRendering(path.relative(projectRoot, file).split(path.sep).join("/"), readFileSync(file, "utf8")),
 			);
 		}
+	}
+	for (const file of valueImportClosure(path.join(projectRoot, "src/core/telemetry/producer.ts"))) {
+		violations.push(...checkTelemetryProducer(path.relative(projectRoot, file), readFileSync(file, "utf8")));
 	}
 	return { violations };
 }
