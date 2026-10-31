@@ -103,6 +103,12 @@ export interface TaskWorktreeReceipt {
 	reason?: string;
 	/** Human-readable explanation of `reason` when the code alone does not carry it. */
 	detail?: string;
+	/**
+	 * New files the host commit left out because no mutation call of the run
+	 * wrote them and the worker did not stage them. `paths` holds at most
+	 * `LEFT_UNCOMMITTED_LIST_LIMIT` of the `count`.
+	 */
+	leftUncommitted?: { count: number; paths: string[] };
 }
 
 /** Receipt reason for a task worktree whose HEAD no longer names its own task branch (F5). */
@@ -204,21 +210,86 @@ export function hostCommitIdentity(cwd: string, identity: string): string[] {
 	return config;
 }
 
+/** What a host commit of a worker's worktree took, and the new files it left out. */
+export interface WorktreeCommit {
+	committed: boolean;
+	/** Untracked files outside the authored set, top-relative and sorted. */
+	leftUncommitted: string[];
+}
+
+/** How many left-out paths a receipt names; the count still covers all of them. */
+export const LEFT_UNCOMMITTED_LIST_LIMIT = 20;
+
+const GIT_PATHSPEC_BATCH = 256;
+
+function untrackedPaths(path: string): string[] {
+	return nullDelimitedPaths(gitBytes(path, ["ls-files", "--others", "--exclude-standard", "-z"]));
+}
+
+/** Top-relative POSIX spellings of the absolute `paths` that sit inside the worktree at `path`. */
+function worktreeRelativePaths(path: string, paths: Iterable<string>): Set<string> {
+	const roots = new Set([resolve(path)]);
+	try {
+		roots.add(realpathSync(path));
+	} catch {
+		// A worktree that cannot be canonicalized is matched by its given spelling only.
+	}
+	const inside = new Set<string>();
+	for (const candidate of paths) {
+		for (const root of roots) {
+			const rel = relative(root, resolve(candidate));
+			if (rel.length === 0 || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) continue;
+			inside.add(rel.split(sep).join("/"));
+		}
+	}
+	return inside;
+}
+
+/**
+ * Commit a worker's worktree as the host. The commit takes changes to tracked
+ * files, whatever the worker staged through the git capability, and the
+ * untracked files in `authoredPaths`, which are the host-observed targets of the
+ * run's own successful mutation calls. Every other new file is a byproduct
+ * (`__pycache__`, object files, build outputs) that the worker never chose to
+ * ship, so it stays out and is reported instead: committed, it lands beside the
+ * fix and collides with the destination's own untracked copies at merge.
+ *
+ * `authoredPaths: null` means the host holds no complete write record for the
+ * run, so it cannot tell an authored file from a byproduct and takes every
+ * untracked file.
+ */
 export function commitWorktreePath(
 	path: string,
 	identity: string,
 	message: string,
-	excludedPaths: ReadonlyArray<string> = [],
-): boolean {
+	scope: { authoredPaths: Iterable<string> | null; excludedPaths?: ReadonlyArray<string> },
+): WorktreeCommit {
+	const excludedPaths = scope.excludedPaths ?? [];
 	// Runtime state can already be staged by a worker. Reset only these exact
 	// index entries, leaving their working files and every authored path intact.
 	if (excludedPaths.length > 0) {
 		git(path, ["reset", "-q", "HEAD", "--", ...excludedPaths.map((entry) => `:(top,literal)${entry}`)]);
 	}
-	git(path, ["add", "-A", "--", ".", ...excludedPaths.map((entry) => `:(top,exclude,literal)${entry}`)]);
-	if (git(path, ["diff", "--cached", "--name-only", "-z"]).length === 0) return false;
+	git(path, ["add", "-u", "--", ".", ...excludedPaths.map((entry) => `:(top,exclude,literal)${entry}`)]);
+	const excluded = new Set(excludedPaths);
+	const untracked = untrackedPaths(path).filter((entry) => !excluded.has(entry));
+	const authored = scope.authoredPaths === null ? new Set(untracked) : worktreeRelativePaths(path, scope.authoredPaths);
+	const take = untracked.filter((entry) => authored.has(entry));
+	for (let index = 0; index < take.length; index += GIT_PATHSPEC_BATCH) {
+		const batch = take.slice(index, index + GIT_PATHSPEC_BATCH);
+		git(path, ["add", "--", ...batch.map((entry) => `:(top,literal)${entry}`)]);
+	}
+	const leftUncommitted = untracked.filter((entry) => !authored.has(entry));
+	if (git(path, ["diff", "--cached", "--name-only", "-z"]).length === 0) return { committed: false, leftUncommitted };
 	git(path, [...hostCommitIdentity(path, identity), "commit", "-m", message, "--no-verify"]);
-	return true;
+	return { committed: true, leftUncommitted };
+}
+
+/** The receipt's bounded account of new files a host commit left out, or nothing when it left none. */
+function leftUncommittedField(paths: ReadonlyArray<string>): Pick<TaskWorktreeReceipt, "leftUncommitted"> {
+	return paths.length === 0
+		? {}
+		: { leftUncommitted: { count: paths.length, paths: paths.slice(0, LEFT_UNCOMMITTED_LIST_LIMIT) } };
 }
 
 export function worktreeBranchDiffStat(root: string, branch: string): string {
@@ -795,8 +866,11 @@ function committedReceipt(worktree: TaskWorktree, commit: string, apply: TaskWor
 /** How a worktree no longer holds exactly the commit that was previewed, or null when it does. */
 function previewDrift(worktree: TaskWorktree, pinned: string, head: string): string | null {
 	if (head !== pinned) return `is now at ${head}`;
-	// Ignored files never reach a commit, so only what a commit would take counts.
-	if (gitBytes(worktree.path, ["status", "--porcelain", "-z"]).length > 0) return "has uncommitted changes";
+	// Only what a commit would take counts. Ignored files never reach one, and
+	// an untracked file reaches one only through the authored set of the settle
+	// commit that already ran, so a byproduct left beside the pin is no drift.
+	if (gitBytes(worktree.path, ["status", "--porcelain", "-z", "--untracked-files=no"]).length > 0)
+		return "has uncommitted changes";
 	return null;
 }
 
@@ -845,6 +919,13 @@ export function applyTaskWorktree(input: {
 	/** The worker's validated `commitMessage`; a merge lands it on the operator's branch. */
 	commitMessage?: string | null;
 	/**
+	 * Absolute paths the run's successful mutation calls wrote, as the host
+	 * observed them. The only untracked files the settle commit takes beside
+	 * what the worker staged, or null when the run has no complete write record;
+	 * see `commitWorktreePath`.
+	 */
+	authoredPaths: Iterable<string> | null;
+	/**
 	 * Merge exactly this commit, one an earlier pass pinned and an operator was
 	 * shown, instead of committing the working tree again. Refused unless the
 	 * branch still names it and the tree holds nothing newer, so a window
@@ -856,12 +937,20 @@ export function applyTaskWorktree(input: {
 	const before = checkTaskWorktreeHead(worktree);
 	if (!before.ok) return headMovedReceipt(worktree, input.apply, before.detail);
 	let commit: string;
+	let leftUncommitted: string[];
 	if (input.pinnedCommit !== undefined) {
 		commit = input.pinnedCommit;
+		// Nothing is committed now, so every untracked file stays out of this merge.
+		leftUncommitted = untrackedPaths(worktree.path);
 		const found = previewDrift(worktree, commit, before.commit);
 		if (found !== null) {
 			const drift = `${WORKTREE_CHANGED_SINCE_PREVIEW}: task worktree ${worktree.runId} ${found} since commit ${commit} was offered for merge. Nothing was merged; the branch ${worktree.branch} is preserved.`;
-			return { ...committedReceipt(worktree, commit, input.apply), reason: WORKTREE_CHANGED_SINCE_PREVIEW, detail: drift };
+			return {
+				...committedReceipt(worktree, commit, input.apply),
+				...leftUncommittedField(leftUncommitted),
+				reason: WORKTREE_CHANGED_SINCE_PREVIEW,
+				detail: drift,
+			};
 		}
 	} else {
 		const taskLine = `Clio Coder task ${worktree.runId}`;
@@ -871,18 +960,19 @@ export function applyTaskWorktree(input: {
 			input.commitMessage === undefined || input.commitMessage === null
 				? undefined
 				: stripAuthoredTrailers(input.commitMessage);
-		commitWorktreePath(
+		leftUncommitted = commitWorktreePath(
 			worktree.path,
 			COMMIT_IDENTITY,
 			authored !== undefined && authored.length > 0 ? `${authored}\n\n${taskLine}` : taskLine,
-		);
+			{ authoredPaths: input.authoredPaths },
+		).leftUncommitted;
 		// Pin the commit the snapshot produced. Everything after this reads and
 		// merges that immutable id, so a branch moved later cannot swap it (F5).
 		const pinned = checkTaskWorktreeHead(worktree);
 		if (!pinned.ok) return headMovedReceipt(worktree, input.apply, pinned.detail);
 		commit = pinned.commit;
 	}
-	const receipt = committedReceipt(worktree, commit, input.apply);
+	const receipt = { ...committedReceipt(worktree, commit, input.apply), ...leftUncommittedField(leftUncommitted) };
 	if (input.apply === "preserve") return receipt;
 	const protectedChanges = protectedPathsChangedByWorktreeBranch(worktree.root, commit, input.protectedPaths ?? []);
 	if (protectedChanges.length > 0) return { ...receipt, reason: "protected_artifact_changed" };

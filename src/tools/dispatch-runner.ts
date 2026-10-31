@@ -1579,8 +1579,17 @@ async function runCompete(
 				const receipt = candidateRuns[index]?.receipt;
 				const failed = receipt !== undefined && isPipelineStepFailure(receipt);
 				if (failed) return "builder failed";
-				if (candidateRuns[index]?.readOnly !== true) {
-					commitCandidateWork(worktree, `clio-coder compete ${group} candidate ${worktree.index}`);
+				const candidate = candidateRuns[index];
+				if (candidate !== undefined && candidate.readOnly !== true) {
+					// Without a write record whose tool trail was complete the host cannot
+					// tell the candidate's new files from its byproducts, so it takes them all.
+					const attribution = deps.dispatch.observedRunWriteAttribution?.(candidate.receipt.runId) ?? null;
+					const recorded =
+						attribution === null ||
+						(attribution.downgrades ?? []).some((entry) => entry.reason === "incomplete_tool_telemetry")
+							? null
+							: attribution.recorded;
+					commitCandidateWork(worktree, `clio-coder compete ${group} candidate ${worktree.index}`, recorded);
 				}
 				return candidateDiffStat(root, worktree.branch);
 			});

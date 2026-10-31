@@ -71,7 +71,7 @@ process.exit(result.status??1);
 		strictEqual(git(client, "rev-parse", "HEAD"), worktree.base);
 		strictEqual(git(worktree.path, "rev-parse", "HEAD"), commit);
 		strictEqual(readFileSync(join(worktree.path, "math.js"), "utf8"), content);
-		const applied = applyTaskWorktree({ worktree, apply: "merge", pinnedCommit: commit });
+		const applied = applyTaskWorktree({ worktree, apply: "merge", pinnedCommit: commit, authoredPaths: [] });
 		strictEqual(applied.applied, true);
 		strictEqual(readFileSync(join(client, "math.js"), "utf8"), content);
 		await cleanupFleetChangeReturn(remote, commit);

@@ -187,7 +187,7 @@ describe("task worktree root", () => {
 		strictEqual(existsSync(`${task.path}.task-owner.json`), false);
 
 		writeFileSync(join(task.path, "a.txt"), "changed in the worktree\n");
-		const receipt = applyTaskWorktree({ worktree: task, apply: "merge" });
+		const receipt = applyTaskWorktree({ worktree: task, apply: "merge", authoredPaths: [] });
 		strictEqual(receipt.applied, true);
 		strictEqual(
 			receipt.detail,

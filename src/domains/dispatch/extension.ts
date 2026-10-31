@@ -6556,6 +6556,9 @@ export function createDispatchBundle(
 						worktree: req.taskWorktree,
 						apply: req.apply ?? "merge",
 						protectedPaths: getProtectedArtifactState().artifacts.map((artifact) => artifact.path),
+						// ACP delegation keeps no write record, so the host cannot tell the
+						// agent's new files from byproducts and commits every untracked file.
+						authoredPaths: null,
 					});
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
@@ -8097,6 +8100,20 @@ export function createDispatchBundle(
 			finalPromise,
 		};
 
+		const toolTelemetryCoverageOf = (
+			ingestionErrors: number,
+			unfinishedCount: number,
+		): "complete" | "partial" | "unavailable" =>
+			lifecycle.runtimeKind === "subprocess"
+				? "unavailable"
+				: ingestionErrors > 0 || unfinishedCount > 0
+					? "partial"
+					: "complete";
+		const telemetryIngestionErrorsOf = (result: SpawnedWorkerResult): number =>
+			toolTelemetryIngestionErrors +
+			malformedWorkerStdoutLineCount(result) +
+			(result.evidenceIncomplete !== undefined ? 1 : 0);
+
 		const buildReceiptDraft = (
 			result: SpawnedWorkerResult,
 			endedAt: string,
@@ -8129,20 +8146,12 @@ export function createDispatchBundle(
 			const finalToolStats = snapshotToolStats(toolStats);
 			const typedValidations = typedValidationFactsFromVerifyCalls(finalToolStats, verifyCalls.calls);
 			const unfinished = snapshotUnfinishedTools(inFlightTools);
-			const telemetryIngestionErrors =
-				toolTelemetryIngestionErrors +
-				malformedWorkerStdoutLineCount(result) +
-				(result.evidenceIncomplete !== undefined ? 1 : 0);
+			const telemetryIngestionErrors = telemetryIngestionErrorsOf(result);
 			const workspaceMutationPossible =
 				lifecycle.runtimeKind === "subprocess"
 					? !["claude-code", "codex-cli", "pi-cli"].includes(lifecycle.target.runtime.id) || !lifecycle.readOnly
 					: lifecycle.admission.allowedTools.some((tool) => classifyAction({ tool }).actionClass !== "read");
-			const toolTelemetryCoverage =
-				lifecycle.runtimeKind === "subprocess"
-					? "unavailable"
-					: telemetryIngestionErrors > 0 || unfinished.length > 0
-						? "partial"
-						: "complete";
+			const toolTelemetryCoverage = toolTelemetryCoverageOf(telemetryIngestionErrors, unfinished.length);
 			return {
 				runId: envelope.id,
 				cwd: envelope.cwd,
@@ -8670,11 +8679,22 @@ export function createDispatchBundle(
 					const taskCommitMessage =
 						authorship?.commitMessage ?? taskCommitSubject(authorship?.summary ?? null) ?? taskCommitSubject(req.task);
 					const protectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
+					// The commit keeps byproducts out only on the strength of a complete
+					// tool trail. A subprocess runtime publishes no tool events and a
+					// partial trail has holes where a write would sit, so either one cannot
+					// tell a file the worker made from a byproduct and commits every
+					// untracked file instead of dropping the worker's own.
+					const authoredPaths =
+						toolTelemetryCoverageOf(telemetryIngestionErrorsOf(result), snapshotUnfinishedTools(inFlightTools).length) ===
+						"complete"
+							? observedRunEffects.mutatedPaths
+							: null;
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
 						apply: mergeWithheld || hostRejectedMerge ? "preserve" : (req.apply ?? "merge"),
 						protectedPaths,
 						commitMessage: taskCommitMessage,
+						authoredPaths,
 					});
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
@@ -8757,6 +8777,7 @@ export function createDispatchBundle(
 								apply: "merge",
 								protectedPaths: mergeProtectedPaths,
 								commitMessage: taskCommitMessage,
+								authoredPaths,
 								...(previewedCommit !== undefined ? { pinnedCommit: previewedCommit } : {}),
 							});
 							if (landed.reason === WORKTREE_CHANGED_SINCE_PREVIEW) {

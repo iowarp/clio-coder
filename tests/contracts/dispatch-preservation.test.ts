@@ -133,7 +133,7 @@ test("compete cleanup preserves a recoverable dirty loser without moving the ope
 		const ownership = claimCompeteGroup(root, "retain-contract");
 		const winner = await createCandidateWorktreeMapped(ownership, 1, git(root, "rev-parse", "HEAD"));
 		writeFileSync(join(winner.path, "winner.txt"), "winning work");
-		commitCandidateWork(winner, "winner");
+		commitCandidateWork(winner, "winner", [join(winner.path, "winner.txt")]);
 		const candidate = await createCandidateWorktreeMapped(ownership, 2, git(root, "rev-parse", "HEAD"));
 		strictEqual(mergeWinnerBranch(root, winner.branch).ok, true);
 		writeFileSync(join(candidate.path, "base.txt"), "candidate work");

@@ -18,7 +18,13 @@ describe("fleet land", () => {
 	function keptTask(runId: string, file: string, text: string, commit = true) {
 		const task = createTaskWorktree(root, runId, undefined, "preserve");
 		writeFileSync(join(task.path, file), text);
-		if (commit) applyTaskWorktree({ worktree: task, apply: "preserve", commitMessage: `edit ${file}` });
+		if (commit)
+			applyTaskWorktree({
+				worktree: task,
+				apply: "preserve",
+				commitMessage: `edit ${file}`,
+				authoredPaths: [join(task.path, file)],
+			});
 		settleTaskWorktree(task);
 		return task;
 	}
@@ -68,11 +74,16 @@ describe("fleet land", () => {
 		strictEqual(git(root, "status", "--porcelain"), "");
 	});
 
-	it("squashes uncommitted work a kept worktree still holds, only when landing", () => {
+	it("squashes staged work a kept worktree still holds, only when landing, and leaves an unstaged new file out", () => {
 		const task = keptTask("t3", "c.txt", "crashed run\n", false);
+		const unstaged = planTaskLand({ root, ref: "t3", mode: "squash" });
+		strictEqual(unstaged.uncommitted, 0);
+		deepStrictEqual(unstaged.leftUncommitted, ["c.txt"]);
+		git(task.path, "add", "c.txt");
 		const plan = planTaskLand({ root, ref: "t3", mode: "squash" });
 		strictEqual(plan.uncommitted, 1);
-		strictEqual(git(task.path, "status", "--porcelain"), "?? c.txt");
+		strictEqual(plan.leftUncommittedCount, 0);
+		strictEqual(git(task.path, "status", "--porcelain"), "A  c.txt");
 		executeTaskLand(plan, { message: "land the crashed run" });
 		strictEqual(git(root, "log", "-1", "--format=%s"), "land the crashed run");
 		strictEqual(git(root, "rev-list", "--count", "HEAD"), "2");

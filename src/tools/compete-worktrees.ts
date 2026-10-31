@@ -531,18 +531,23 @@ export async function createCandidateWorktreeMapped(
 }
 
 /**
- * Seal a candidate's work as one commit on its branch. Returns false when the
- * builder changed nothing (an empty candidate is a legitimate ranking fact).
+ * Seal a candidate's work as one commit on its branch. `authoredPaths` is the
+ * candidate run's host-observed write record, so its byproducts stay out of
+ * what the judge compares; null when it has none, see `commitWorktreePath`. Returns false when the builder changed nothing (an
+ * empty candidate is a legitimate ranking fact).
  */
-export function commitCandidateWork(worktree: CandidateWorktree, message: string): boolean {
+export function commitCandidateWork(
+	worktree: CandidateWorktree,
+	message: string,
+	authoredPaths: Iterable<string> | null,
+): boolean {
 	// Context reads refresh these runtime files even in a read-only worker.
 	// The caller's pending .gitignore update is not part of the candidate base;
 	// exclude the exact files, while keeping operator-owned project assets.
-	return commitWorktreePath(worktree.path, COMPETE_COMMIT_IDENTITY, message, [
-		".clio-coder/codemap.json",
-		".clio-coder/codewiki.json",
-		".clio-coder/state.json",
-	]);
+	return commitWorktreePath(worktree.path, COMPETE_COMMIT_IDENTITY, message, {
+		authoredPaths,
+		excludedPaths: [".clio-coder/codemap.json", ".clio-coder/codewiki.json", ".clio-coder/state.json"],
+	}).committed;
 }
 
 /** One-line stat summary of what a candidate branch changed relative to HEAD. */

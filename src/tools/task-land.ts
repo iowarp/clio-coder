@@ -10,9 +10,9 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { internalGitArgv } from "../core/internal-git.js";
 import { SAFE_TASK_RUN_ID } from "../core/task-worktree-claim.js";
 import {
@@ -22,6 +22,7 @@ import {
 	destinationRefusal,
 	gitOperationInProgress,
 	hostCommitIdentity,
+	LEFT_UNCOMMITTED_LIST_LIMIT,
 	listPreservedTaskWorktrees,
 	loadKeptTaskWorktree,
 	mergeDestination,
@@ -37,8 +38,15 @@ export interface TaskLandPlan {
 	branch: string;
 	/** The run's claimed worktree; null for a branch whose claim was already released. */
 	worktree: TaskWorktree | null;
-	/** Modified, staged or untracked paths in the kept worktree that landing commits onto the branch first. */
+	/** Modified or staged paths in the kept worktree that landing commits onto the branch first. */
 	uncommitted: number;
+	/**
+	 * Untracked files in the kept worktree that landing leaves out, at most
+	 * `LEFT_UNCOMMITTED_LIST_LIMIT` of `leftUncommittedCount`. The run's write
+	 * record died with its process, so only what is tracked or staged lands.
+	 */
+	leftUncommitted: string[];
+	leftUncommittedCount: number;
 	tip: string;
 	/** Tree of the branch tip plus any uncommitted work: what the task contributes. */
 	sourceTree: string;
@@ -126,15 +134,20 @@ function runIdOf(ref: string): string {
 }
 
 /**
- * The tree the kept worktree would commit, written through a private index so
- * neither the worktree's index nor its HEAD changes while only previewing.
+ * The tree the kept worktree would commit, written through a copy of its index
+ * so neither the worktree's index nor its HEAD changes while only previewing.
+ * The copy keeps what the worker staged, and `add -u` adds tracked changes, the
+ * same two things `commitWorktreePath` takes with no authored paths.
  */
 function snapshotTree(path: string, tip: string): string {
 	const directory = mkdtempSync(join(tmpdir(), "clio-coder-land-index-"));
 	try {
 		const env = { GIT_INDEX_FILE: join(directory, "index") };
-		git(path, ["read-tree", tip], env);
-		git(path, ["add", "-A", "--", "."], env);
+		const gitPathIndex = git(path, ["rev-parse", "--git-path", "index"]);
+		const index = isAbsolute(gitPathIndex) ? gitPathIndex : join(path, gitPathIndex);
+		if (existsSync(index)) copyFileSync(index, env.GIT_INDEX_FILE);
+		else git(path, ["read-tree", tip], env);
+		git(path, ["add", "-u", "--", "."], env);
 		return git(path, ["write-tree"], env);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
@@ -164,6 +177,7 @@ export function planTaskLand(input: {
 	const refusals: string[] = [];
 
 	let uncommitted = 0;
+	let untracked: string[] = [];
 	let sourceTree = git(root, ["rev-parse", `${tip}^{tree}`]);
 	if (worktree !== null && existsSync(worktree.path)) {
 		const head = run(worktree.path, ["symbolic-ref", "-q", "HEAD"]).stdout.trim();
@@ -172,8 +186,12 @@ export function planTaskLand(input: {
 				`the kept worktree ${worktree.path} is on ${head || "a detached HEAD"}, not ${branch}; move its work onto ${branch} first`,
 			);
 		} else {
-			const status = git(worktree.path, ["status", "--porcelain", "--untracked-files=all"]);
+			const status = git(worktree.path, ["status", "--porcelain", "--untracked-files=no"]);
 			uncommitted = status.length > 0 ? status.split("\n").length : 0;
+			untracked = git(worktree.path, ["ls-files", "--others", "--exclude-standard", "-z"])
+				.split("\0")
+				.filter((entry) => entry.length > 0)
+				.sort();
 			if (uncommitted > 0) sourceTree = snapshotTree(worktree.path, tip);
 		}
 	}
@@ -233,6 +251,8 @@ export function planTaskLand(input: {
 		branch,
 		worktree,
 		uncommitted,
+		leftUncommitted: untracked.slice(0, LEFT_UNCOMMITTED_LIST_LIMIT),
+		leftUncommittedCount: untracked.length,
 		tip,
 		sourceTree,
 		base,
@@ -286,7 +306,10 @@ export function executeTaskLand(
 	if (tipNow !== plan.tip) throw new Error(`${plan.branch} moved since it was planned; plan again`);
 	let source = plan.tip;
 	if (plan.uncommitted > 0 && plan.worktree !== null) {
-		commitWorktreePath(plan.worktree.path, COMMIT_IDENTITY, `Clio Coder task ${plan.runId}`);
+		commitWorktreePath(plan.worktree.path, COMMIT_IDENTITY, `Clio Coder task ${plan.runId}`, {
+			// Only tracked and staged work lands; the plan lists the untracked files left out.
+			authoredPaths: [],
+		});
 		source = git(plan.root, ["rev-parse", "--verify", "--end-of-options", `refs/heads/${plan.branch}^{commit}`]);
 		if (git(plan.root, ["rev-parse", `${source}^{tree}`]) !== plan.sourceTree)
 			throw new Error(

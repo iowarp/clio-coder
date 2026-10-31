@@ -122,7 +122,7 @@ describe("task worktree restart recovery", () => {
 			const task = createTaskWorktree(root, `run-moved-${apply}`, undefined, apply);
 			git(task.path, "switch", "-q", "-c", `other-${apply}`);
 			writeFileSync(join(task.path, "worker.txt"), "w\n");
-			const receipt = applyTaskWorktree({ worktree: task, apply });
+			const receipt = applyTaskWorktree({ worktree: task, apply, authoredPaths: [join(task.path, "worker.txt")] });
 			strictEqual(receipt.reason, "worktree_head_moved");
 			strictEqual(receipt.applied, false);
 			match(receipt.detail ?? "", new RegExp(`refs/heads/other-${apply}`, "u"));
@@ -137,20 +137,35 @@ describe("task worktree restart recovery", () => {
 		const prepare = (runId: string) => {
 			const task = createTaskWorktree(root, runId, undefined, "merge");
 			writeFileSync(join(task.path, `${runId}.txt`), "w\n");
-			const preview = applyTaskWorktree({ worktree: task, apply: "preserve" });
+			const preview = applyTaskWorktree({
+				worktree: task,
+				apply: "preserve",
+				authoredPaths: [join(task.path, `${runId}.txt`)],
+			});
 			ok(preview.commit !== undefined);
 			return { task, commit: preview.commit };
 		};
 
 		const clean = prepare("run-pinned-clean");
-		const landed = applyTaskWorktree({ worktree: clean.task, apply: "merge", pinnedCommit: clean.commit });
+		const landed = applyTaskWorktree({
+			worktree: clean.task,
+			apply: "merge",
+			pinnedCommit: clean.commit,
+			authoredPaths: [],
+		});
 		strictEqual(landed.applied, true);
 		match(landed.detail ?? "", /^merged [a-f0-9]{7} onto /);
 		strictEqual(landed.commit, clean.commit);
 
 		const dirty = prepare("run-pinned-dirty");
-		writeFileSync(join(dirty.task.path, "late.txt"), "late\n");
-		const dirtyRefusal = applyTaskWorktree({ worktree: dirty.task, apply: "merge", pinnedCommit: dirty.commit });
+		// An untracked file can never join a pinned merge, so drift is a change to a committed path.
+		writeFileSync(join(dirty.task.path, `${dirty.task.runId}.txt`), "late\n");
+		const dirtyRefusal = applyTaskWorktree({
+			worktree: dirty.task,
+			apply: "merge",
+			pinnedCommit: dirty.commit,
+			authoredPaths: [],
+		});
 		strictEqual(dirtyRefusal.reason, "worktree_changed_since_preview");
 		strictEqual(dirtyRefusal.applied, false);
 		strictEqual(dirtyRefusal.commit, dirty.commit);
@@ -162,11 +177,35 @@ describe("task worktree restart recovery", () => {
 		writeFileSync(join(moved.task.path, "more.txt"), "more\n");
 		git(moved.task.path, "add", "-A");
 		git(moved.task.path, "-c", "user.name=w", "-c", "user.email=w@local", "commit", "-qm", "more");
-		const movedRefusal = applyTaskWorktree({ worktree: moved.task, apply: "merge", pinnedCommit: moved.commit });
+		const movedRefusal = applyTaskWorktree({
+			worktree: moved.task,
+			apply: "merge",
+			pinnedCommit: moved.commit,
+			authoredPaths: [],
+		});
 		strictEqual(movedRefusal.reason, "worktree_changed_since_preview");
 		strictEqual(movedRefusal.applied, false);
 		ok(!existsSync(join(root, "more.txt")));
 		ok(!existsSync(join(root, `${moved.task.runId}.txt`)));
+	});
+
+	it("commits tracked edits, tool-authored and worker-staged new files, and leaves a byproduct out of the merge", () => {
+		const task = createTaskWorktree(root, "run-authored", undefined, "merge");
+		writeFileSync(join(task.path, "a.txt"), "fixed\n");
+		writeFileSync(join(task.path, "tool.txt"), "written by edit\n");
+		writeFileSync(join(task.path, "staged.txt"), "made by a shell, staged by the worker\n");
+		git(task.path, "add", "staged.txt");
+		for (const cwd of [task.path, root]) {
+			mkdirSync(join(cwd, "__pycache__"));
+			writeFileSync(join(cwd, "__pycache__", "x.pyc"), `${cwd}\n`);
+		}
+		const receipt = applyTaskWorktree({ worktree: task, apply: "merge", authoredPaths: [join(task.path, "tool.txt")] });
+		strictEqual(receipt.reason, undefined, receipt.detail);
+		strictEqual(receipt.applied, true);
+		deepStrictEqual(receipt.changedPaths, ["a.txt", "staged.txt", "tool.txt"]);
+		deepStrictEqual(receipt.leftUncommitted, { count: 1, paths: ["__pycache__/x.pyc"] });
+		strictEqual(git(root, "ls-files", "__pycache__"), "");
+		strictEqual(readFileSync(join(root, "a.txt"), "utf8"), "fixed\n");
 	});
 
 	it("withholds a merge when the checkout left its dispatch branch or no longer holds the task's base", () => {
@@ -182,7 +221,11 @@ describe("task worktree restart recovery", () => {
 		strictEqual(switched.sourceBranch, "feature-a");
 		writeFileSync(join(switched.path, "task.txt"), "t\n");
 		git(root, "switch", "-q", "main");
-		const refusal = applyTaskWorktree({ worktree: switched, apply: "merge" });
+		const refusal = applyTaskWorktree({
+			worktree: switched,
+			apply: "merge",
+			authoredPaths: [join(switched.path, "task.txt")],
+		});
 		strictEqual(refusal.reason, "worktree_destination_moved");
 		strictEqual(refusal.applied, false);
 		match(refusal.detail ?? "", /dispatched from branch feature-a, but the checkout is now on main/u);
@@ -195,7 +238,11 @@ describe("task worktree restart recovery", () => {
 		const rewound = createTaskWorktree(root, "run-dest-rewound", undefined, "merge");
 		writeFileSync(join(rewound.path, "task.txt"), "t\n");
 		git(root, "reset", "-q", "--hard", mainTip);
-		const lost = applyTaskWorktree({ worktree: rewound, apply: "merge" });
+		const lost = applyTaskWorktree({
+			worktree: rewound,
+			apply: "merge",
+			authoredPaths: [join(rewound.path, "task.txt")],
+		});
 		strictEqual(lost.reason, "worktree_destination_moved");
 		match(
 			lost.detail ?? "",
@@ -208,13 +255,13 @@ describe("task worktree restart recovery", () => {
 	it("an operator discard whose branch deletion fails reports the branch kept and releases the claim", () => {
 		const done = createTaskWorktree(root, "run-discard-done", undefined, "merge");
 		writeFileSync(join(done.path, "w.txt"), "w\n");
-		applyTaskWorktree({ worktree: done, apply: "preserve" });
+		applyTaskWorktree({ worktree: done, apply: "preserve", authoredPaths: [join(done.path, "w.txt")] });
 		deepStrictEqual(discardTaskWorktree(done), { outcome: "discarded", claimReleased: true });
 		ok(!existsSync(done.path) && !existsSync(markerPath(done)) && !branches().includes(done.branch));
 
 		const partial = createTaskWorktree(root, "run-discard-partial", undefined, "merge");
 		writeFileSync(join(partial.path, "w.txt"), "w\n");
-		applyTaskWorktree({ worktree: partial, apply: "preserve" });
+		applyTaskWorktree({ worktree: partial, apply: "preserve", authoredPaths: [join(partial.path, "w.txt")] });
 		// A stale ref lock makes `git branch -D` fail after the worktree is gone.
 		writeFileSync(join(root, ".git", "refs", "heads", `${partial.branch}.lock`), "");
 		const result = discardTaskWorktree(partial);
@@ -227,16 +274,22 @@ describe("task worktree restart recovery", () => {
 		// A pinned discard removes nothing when work arrived after the preview.
 		const late = createTaskWorktree(root, "run-discard-late", undefined, "merge");
 		writeFileSync(join(late.path, "w.txt"), "w\n");
-		const lateCommit = applyTaskWorktree({ worktree: late, apply: "preserve" }).commit;
+		const lateCommit = applyTaskWorktree({
+			worktree: late,
+			apply: "preserve",
+			authoredPaths: [join(late.path, "w.txt")],
+		}).commit;
 		ok(lateCommit !== undefined);
-		writeFileSync(join(late.path, "after-preview.txt"), "x\n");
+		writeFileSync(join(late.path, "w.txt"), "after preview\n");
 		const refused = discardTaskWorktree(late, lateCommit);
 		strictEqual(refused.outcome, "changed");
 		match(refused.outcome === "changed" ? refused.detail : "", /uncommitted changes/u);
 		ok(
-			existsSync(join(late.path, "after-preview.txt")) && branches().includes(late.branch) && existsSync(markerPath(late)),
+			readFileSync(join(late.path, "w.txt"), "utf8") === "after preview\n" &&
+				branches().includes(late.branch) &&
+				existsSync(markerPath(late)),
 		);
-		rmSync(join(late.path, "after-preview.txt"));
+		git(late.path, "checkout", "-q", "--", "w.txt");
 		deepStrictEqual(discardTaskWorktree(late, lateCommit), { outcome: "discarded", claimReleased: true });
 
 		// A branch already gone needs no `git branch -D`: the outcome is what the steps did.
@@ -285,7 +338,10 @@ describe("task worktree restart recovery", () => {
 	it("leaves a settled worktree alone after its owner exits, and doctor lists it with the commands to drop it", () => {
 		const task = createTaskWorktree(root, "run-settled", undefined, "preserve");
 		writeFileSync(join(task.path, "kept.txt"), "kept\n");
-		strictEqual(applyTaskWorktree({ worktree: task, apply: "preserve" }).applied, false);
+		strictEqual(
+			applyTaskWorktree({ worktree: task, apply: "preserve", authoredPaths: [join(task.path, "kept.txt")] }).applied,
+			false,
+		);
 		settleTaskWorktree(task);
 		crash(task);
 		strictEqual(readMarker(task).state, "settled");
