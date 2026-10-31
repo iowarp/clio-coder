@@ -14,7 +14,9 @@ import {
 } from "../../core/skill-activation.js";
 import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import { mainAgent } from "../../core/telemetry/context.js";
-import type { PricedBy } from "../../core/telemetry/pricing.js";
+import type { Fact } from "../../core/telemetry/fact.js";
+import { type PricedBy, pricedUsd, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
+import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
@@ -492,6 +494,35 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	}
 }
 
+/** The headless run's spend from the usage its session accrued, one fact per quantity (#434). */
+function headlessRunSpend(usage: RunUsageSummary | null, cost: ReturnType<typeof aggregateCostAmounts>): RunUsageFacts {
+	if (usage === null || !usage.hadUsage) return unobservedRunUsageFacts();
+	const complete = (usage.missingTokenCalls ?? 0) === 0 && usage.estimated !== true;
+	const count = (value: number): Fact<number> =>
+		complete ? { kind: "measured", value, source: "provider" } : { kind: "unknown", reason: "provider-omitted" };
+	const pricedBy: PricedBy =
+		cost.calls === 0 || cost.hasUnknown
+			? "none"
+			: cost.hasEstimated
+				? "catalog"
+				: cost.allKnownFree
+					? "free"
+					: "target-rates";
+	return {
+		usage: {
+			input: count(usage.input),
+			output: count(usage.output),
+			cacheRead: count(usage.cacheRead),
+			cacheWrite: count(usage.cacheWrite),
+			cacheWrite1h: count(usage.cacheWrite1h ?? 0),
+			reasoning: count(usage.reasoning),
+		},
+		totalTokens: count(usage.tokens),
+		apiCalls: { kind: "measured", value: usage.apiCalls, source: "local-count" },
+		pricing: pricedUsd(pricedBy, cost.knownUsd),
+	};
+}
+
 function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSummary {
 	const responseModelIdObservationCounts = emptyResponseModelIdObservationCounts();
 	addResponseModelIdObservationCounts(responseModelIdObservationCounts, left.responseModelIdObservationCounts);
@@ -624,50 +655,6 @@ function countToolStats(stats: Map<string, ToolCallStat>): number {
 	for (const stat of stats.values()) count += stat.count;
 	return count;
 }
-
-/**
- * The run's spend for its ledger row and result: the read model's fold of its session calls, which run.settled also
- * carries, else the fold of the assistant messages the run saw when no read model is bound (#434).
- */
-function runTotals(calls: RunCallUsage | null, stats: HeadlessMainAgentRunStats) {
-	if (calls !== null)
-		return {
-			tokenCount: calls.totalTokens,
-			inputTokenCount: calls.inputTokens,
-			outputTokenCount: calls.outputTokens,
-			cacheReadTokenCount: calls.cacheReadTokens,
-			cacheWriteTokenCount: calls.cacheWriteTokens,
-			reasoningTokenCount: calls.reasoningTokens,
-			costUsd: calls.costUsd,
-			cost: calls.costSummary,
-			costProvenance: calls.costProvenance,
-			apiCalls: calls.apiCalls,
-			missingTokenCalls: calls.missingTokenCalls,
-		};
-	const usage = stats.usage;
-	const cost = aggregateCostAmounts(stats.costAmounts);
-	return {
-		tokenCount: usage?.tokens ?? 0,
-		inputTokenCount: usage?.input ?? 0,
-		outputTokenCount: usage?.output ?? 0,
-		cacheReadTokenCount: usage?.cacheRead ?? 0,
-		cacheWriteTokenCount: usage?.cacheWrite ?? 0,
-		reasoningTokenCount: usage?.reasoning ?? 0,
-		costUsd: usage?.costUsd ?? 0,
-		cost,
-		costProvenance:
-			cost.calls === 0 || cost.hasUnknown
-				? ("unknown" as const)
-				: cost.hasEstimated
-					? ("estimated" as const)
-					: cost.allKnownFree
-						? ("known_free" as const)
-						: ("known" as const),
-		apiCalls: usage?.apiCalls ?? 0,
-		missingTokenCalls: usage?.missingTokenCalls ?? 0,
-	};
-}
-
 /**
  * Settle the main-agent run the way dispatch settles a worker (#434): one result built with its run.settled, the
  * record made durable and the run scope sealed, and only then the ledger row published terminal, so `fleet verify`
@@ -689,20 +676,8 @@ async function recordHeadlessMainAgentRun(input: {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
 	if (!isMainAgentRunKind(snapshot.runtimeKind)) return;
-	const totals = runTotals(input.calls, input.stats);
-	const {
-		tokenCount,
-		inputTokenCount,
-		outputTokenCount,
-		cacheReadTokenCount,
-		cacheWriteTokenCount,
-		reasoningTokenCount,
-		costUsd,
-		cost,
-		costProvenance,
-		apiCalls,
-		missingTokenCalls,
-	} = totals;
+	// The read model's fold of the run's session calls is its spend; the message fold stands without one (#434).
+	const spend = input.calls?.facts ?? headlessRunSpend(input.stats.usage, aggregateCostAmounts(input.stats.costAmounts));
 	const { exitCode, outcome, status } = input.terminal;
 	const outcomeDetail = input.terminal.outcomeDetail ?? input.terminal.failureMessage;
 	const outcomeCode = outcome === "failed" ? snapshot.outcomeCode : undefined;
@@ -736,17 +711,8 @@ async function recordHeadlessMainAgentRun(input: {
 		...(outcomeCode === undefined ? {} : { outcomeCode }),
 		lineage,
 		exitCode,
-		tokenCount,
-		apiCalls,
+		spend,
 		...(input.stats.toolRounds.length > 0 ? { toolRounds: input.stats.toolRounds } : {}),
-		missingTokenCalls,
-		costSummary: cost,
-		inputTokenCount,
-		outputTokenCount,
-		cacheReadTokenCount,
-		cacheWriteTokenCount,
-		reasoningTokenCount,
-		costUsd,
 		promptSignature: snapshot.promptSignature,
 		toolSignature: snapshot.toolSignature,
 	};
@@ -779,22 +745,12 @@ async function recordHeadlessMainAgentRun(input: {
 			failover: "none",
 		},
 		quality: createRunResultQuality({ runtimeEnforceable: false, enforcementPassed: null, typedValidations }),
-		costProvenance,
 		startedAt: input.startedAt,
 		endedAt: input.endedAt,
 		exitCode,
 		...(input.terminal.failureMessage !== null ? { failureMessage: input.terminal.failureMessage } : {}),
-		tokenCount,
-		apiCalls,
+		spend,
 		...(input.stats.toolRounds.length > 0 ? { toolRounds: input.stats.toolRounds } : {}),
-		missingTokenCalls,
-		costSummary: cost,
-		inputTokenCount,
-		outputTokenCount,
-		cacheReadTokenCount,
-		cacheWriteTokenCount,
-		reasoningTokenCount,
-		costUsd,
 		compiledPromptHash: snapshot.compiledPromptHash,
 		staticCompositionHash: snapshot.staticCompositionHash,
 		promptSignature: snapshot.promptSignature,

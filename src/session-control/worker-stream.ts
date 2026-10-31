@@ -239,7 +239,8 @@ export function workerTargetLabel(runtime: WorkerRunRuntime): string {
  */
 function terminalFacts(payload: DispatchCompletedPayload | DispatchFailedPayload): WorkerReceiptFacts {
 	const detail = nonEmptyString(payload.outcomeDetail);
-	const tokenCount = finiteNumber(payload.tokenCount);
+	const total = payload.spend?.totalTokens;
+	const tokenCount = total?.kind === "measured" || total?.kind === "estimated" ? finiteNumber(total.value) : undefined;
 	const durationMs = finiteNumber(payload.durationMs);
 	const exitCode = finiteNumber(payload.exitCode);
 	return {
@@ -248,6 +249,7 @@ function terminalFacts(payload: DispatchCompletedPayload | DispatchFailedPayload
 		...(detail !== undefined ? { failureMessage: detail } : {}),
 		...(exitCode !== undefined ? { exitCode } : {}),
 		...(tokenCount !== undefined ? { tokenCount } : {}),
+		...(total ? { tokens: total } : {}),
 		...(durationMs !== undefined ? { durationMs } : {}),
 		...(payload.toolActivity ? { toolCalls: payload.toolActivity.calls } : {}),
 	};

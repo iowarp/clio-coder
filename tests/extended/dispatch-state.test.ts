@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
+import { measuredSpend } from "../harness/receipt.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("dispatch run ledger state", () => {
@@ -15,15 +16,16 @@ describe("dispatch run ledger state", () => {
 
 	afterEach(() => scratch.restore());
 
-	it("loads legacy unversioned records as version 1 and skips version 2 records", async () => {
+	it("reads only rows whose spend is one fact per quantity and replaces a file in any other shape (#434)", async () => {
 		const stateDir = clioStateDir();
 		mkdirSync(stateDir, { recursive: true });
 		const runsPath = join(stateDir, "runs.json");
-		const legacyRecord = {
-			id: "run-legacy",
+		const row = {
+			version: 1,
+			id: "run-v1",
 			agentId: "coder",
 			executionRole: "builder",
-			task: "legacy task",
+			task: "task",
 			targetId: "local",
 			wireModelId: "model-a",
 			runtimeId: "openai",
@@ -36,29 +38,16 @@ describe("dispatch run ledger state", () => {
 			heartbeatAt: null,
 			sessionId: "session-1",
 			cwd: "/workspace",
-			tokenCount: 42,
-			costUsd: 0.01,
+			spend: measuredSpend({ input: 20, output: 22 }, 0.01),
 		};
-		const futureRecord = {
-			...legacyRecord,
-			version: 2,
-			id: "run-future",
-		};
-		const v1Record = {
-			...legacyRecord,
-			version: 1,
-			id: "run-v1",
-		};
-		writeFileSync(runsPath, JSON.stringify([legacyRecord, futureRecord, v1Record], null, 2), "utf8");
-
-		const ledger = openLedger();
-		const listed = ledger.list();
-		strictEqual(listed.length, 2);
-		strictEqual(listed[0]?.id, "run-legacy");
-		strictEqual(listed[0]?.version, 1);
-		strictEqual(listed[1]?.id, "run-v1");
-		strictEqual(listed[1]?.version, 1);
-		strictEqual(ledger.get("run-future"), null);
+		writeFileSync(runsPath, JSON.stringify([row], null, 2), "utf8");
+		strictEqual(openLedger().get("run-v1")?.id, "run-v1");
+		// A row that carries numbers where the facts belong makes the whole file foreign: it is not read.
+		const { spend: _spend, ...numeric } = row;
+		writeFileSync(runsPath, JSON.stringify([row, { ...numeric, id: "run-old", tokenCount: 42, costUsd: 0.01 }]), "utf8");
+		strictEqual(openLedger().list().length, 0);
+		writeFileSync(runsPath, JSON.stringify([{ ...row, version: 2 }]), "utf8");
+		strictEqual(openLedger().list().length, 0);
 	});
 
 	it("always stamps version 1 when creating and persisting records", async () => {

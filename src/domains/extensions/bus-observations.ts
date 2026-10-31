@@ -1,4 +1,7 @@
+import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
+import { sumFacts } from "../../core/telemetry/pricing.js";
+import { callSettlementFromMessage } from "../telemetry/call-facts.js";
 import type { ExtensionObservationV2, ExtensionUsage } from "./public-api-v2.js";
 
 /**
@@ -26,13 +29,13 @@ export function subscribeExtensionObservations(
 		bus.subscribe("safety.blocked", (p) => send({ event: "safety_blocked", tool: p.tool })),
 		bus.subscribe("run.started", (p) => send({ event: "dispatch_started", runId: p.runId, agentId: p.agentId })),
 		bus.subscribe("run.completed", (p) => {
+			const { usage: tokens, pricing } = p.spend;
 			const usage: ExtensionUsage = {
-				inputTokens: p.inputTokenCount,
-				outputTokens: p.outputTokenCount,
-				cacheReadTokens: p.cacheReadTokenCount,
-				cacheWriteTokens: p.cacheWriteTokenCount,
-				// A cost the target did not declare is a guess; extensions get null rather than an estimate.
-				costUsd: p.costProvenance === "known" || p.costProvenance === "known_free" ? p.costUsd : null,
+				inputTokens: sumFacts([tokens.input]),
+				outputTokens: sumFacts([tokens.output]),
+				cacheReadTokens: sumFacts([tokens.cacheRead]),
+				cacheWriteTokens: sumFacts([tokens.cacheWrite]),
+				costUsd: pricing.pricedBy === "none" ? null : sumFacts([pricing.usd]),
 				model: p.wireModelId,
 				target: p.targetId,
 			};
@@ -59,12 +62,12 @@ export function subscribeExtensionObservations(
 	};
 }
 
-/** The part of a finished turn an observation carries: its token counts as the provider reported them. */
+/** The part of a finished turn an observation carries: its token sums over the turn's calls. */
 export interface ObservedTurnSummary {
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
+	inputTokens: FactSum;
+	outputTokens: FactSum;
+	cacheReadTokens: FactSum;
+	cacheWriteTokens: FactSum;
 	modelId: string;
 	targetId: string;
 	stopReason: string;
@@ -80,11 +83,15 @@ export function createChatTurnUsage(): {
 	/** The usage so far, with the model and stop reason the run's last assistant message reported. */
 	current(): Omit<ObservedTurnSummary, "targetId">;
 } {
-	const fresh = () => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+	const fresh = () => ({
+		input: [] as Fact<number>[],
+		output: [] as Fact<number>[],
+		cacheRead: [] as Fact<number>[],
+		cacheWrite: [] as Fact<number>[],
+	});
 	let usage = fresh();
 	let modelId = "";
 	let stopReason = "completed";
-	const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 	return {
 		observe(raw) {
 			const event = raw as {
@@ -96,18 +103,26 @@ export function createChatTurnUsage(): {
 				modelId = "";
 				stopReason = "completed";
 			} else if (event.type === "message_end" && event.message?.role === "assistant") {
-				const reported = event.message.usage ?? {};
-				usage = {
-					inputTokens: usage.inputTokens + count(reported.input),
-					outputTokens: usage.outputTokens + count(reported.output),
-					cacheReadTokens: usage.cacheReadTokens + count(reported.cacheRead),
-					cacheWriteTokens: usage.cacheWriteTokens + count(reported.cacheWrite),
-				};
+				// Each reply reads its usage as its call.settled does; a reply that never reached a provider adds nothing.
+				const reported = callSettlementFromMessage(event.message, "none").usage;
+				if (reported) {
+					usage.input.push(reported.input);
+					usage.output.push(reported.output);
+					usage.cacheRead.push(reported.cacheRead);
+					usage.cacheWrite.push(reported.cacheWrite);
+				}
 				if (typeof event.message.model === "string") modelId = event.message.model;
 				if (typeof event.message.stopReason === "string") stopReason = event.message.stopReason;
 			}
 		},
-		current: () => ({ ...usage, modelId, stopReason }),
+		current: () => ({
+			inputTokens: sumFacts(usage.input),
+			outputTokens: sumFacts(usage.output),
+			cacheReadTokens: sumFacts(usage.cacheRead),
+			cacheWriteTokens: sumFacts(usage.cacheWrite),
+			modelId,
+			stopReason,
+		}),
 	};
 }
 

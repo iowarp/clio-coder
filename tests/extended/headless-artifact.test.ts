@@ -2,6 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type HeadlessShutdownHooks, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
+import { factKnownValue } from "../../src/core/telemetry/known.js";
 
 import type { AgentMessage } from "../../src/engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../src/session-control/chat-loop.js";
@@ -318,6 +319,8 @@ for (const scenario of [
 						runtimeKind: "http",
 						wireModelId: "fixture-model",
 						autonomy: "yolo",
+						// Declared rates price the fixture calls, so their cost is measured (#434).
+						pricedBy: "target-rates",
 						compiledPromptHash: null,
 						staticCompositionHash: null,
 						promptSignature: null,
@@ -379,8 +382,16 @@ for (const scenario of [
 						event.message.role === "assistant" &&
 						event.message.stopReason === "length",
 				).length;
-				strictEqual(envelope.tokenCount, scenario.calls * 5 + exhaustedCalls * 55968);
-				strictEqual(envelope.reasoningTokenCount, exhaustedCalls * 7926);
+				deepStrictEqual(envelope.spend.totalTokens, {
+					kind: "measured",
+					value: scenario.calls * 5 + exhaustedCalls * 55968,
+					source: "provider",
+				});
+				deepStrictEqual(envelope.spend.usage.reasoning, {
+					kind: "measured",
+					value: exhaustedCalls * 7926,
+					source: "provider",
+				});
 				if ("exhausted" in scenario) {
 					match(stderr, /output token limit.*stopReason=length/);
 					strictEqual(stderr.trim().split("\n").at(-1), envelope.outcomeDetail);
@@ -402,7 +413,7 @@ for (const scenario of [
 						strictEqual(end.error, envelope.outcomeDetail);
 					}
 				}
-				strictEqual(envelope.costUsd, scenario.calls * 0.25);
+				strictEqual(factKnownValue(envelope.spend.pricing.usd), scenario.calls * 0.25);
 			} finally {
 				scratch.restore();
 			}

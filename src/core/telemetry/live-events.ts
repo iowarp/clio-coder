@@ -12,8 +12,6 @@ import type {
 } from "../../domains/dispatch/types.js";
 import type { MiddlewareHook } from "../../domains/middleware/types.js";
 import type { TargetStatus } from "../../domains/providers/contract.js";
-import type { CostProvenance } from "../../domains/providers/index.js";
-import type { CostAggregate } from "../../domains/telemetry/cost.js";
 import type { ClioSettings } from "../config.js";
 import type { ContextOperation } from "../context-operation.js";
 import type { SkillActivation } from "../skill-activation.js";
@@ -23,6 +21,7 @@ import type {
 	DomainLoadedSchema,
 	EvidenceAssessed,
 	PluginReloadedSchema,
+	RunUsageFacts,
 	ShutdownRequestedSchema,
 } from "./schemas.js";
 
@@ -673,19 +672,9 @@ export interface DispatchProgressPayload {
  */
 export interface DispatchTerminalStats {
 	sessionId?: string | null;
-	apiCalls?: number;
-	missingTokenCalls?: number;
-	costSummary?: CostAggregate;
 	lineage: RunLineage;
-	tokenCount: number;
-	inputTokenCount: number;
-	outputTokenCount: number;
-	cacheReadTokenCount: number;
-	cacheWriteTokenCount: number;
-	cacheWrite1hTokenCount?: number;
-	reasoningTokenCount: number;
-	costUsd: number;
-	costProvenance?: CostProvenance;
+	/** The run's spend, one fact per quantity, as its run.settled states it (#434). */
+	spend: RunUsageFacts;
 	durationMs: number;
 	exitCode: number;
 	/** Honest activity record aggregated from the run's tool telemetry; null when the receipt predates it. */

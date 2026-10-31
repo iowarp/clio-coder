@@ -1,9 +1,10 @@
-import type { CallFailureRecord } from "../../core/call-failure.js";
 import { readCallFailure } from "../../core/call-failure.js";
 import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-environment.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
-import { hasTokenUsageCounts, normalizeCallUsage, normalizeTokenUsage } from "../../core/token-split.js";
+import { factKnownValue } from "../../core/telemetry/known.js";
+import { noCallRunUsageFacts, sumFacts, sumPricing } from "../../core/telemetry/pricing.js";
+import { renderUsdEstimate, renderUsdLimit } from "../../core/telemetry/render.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { ToolRoundRecord } from "../../engine/types.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
@@ -13,7 +14,6 @@ import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
 import type { CapabilityGate } from "../middleware/capability-gate.js";
 import { isBuiltinClaudeAcp, resolveClaudeLaunchCredential } from "../providers/auth/index.js";
-import { type CostProvenance, costProvenanceOf } from "../providers/types/cost-provenance.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import {
 	compileWorkerFlowPolicy,
@@ -22,7 +22,7 @@ import {
 	flowUnmediatedAgentRefusal,
 	resolveModelDestination,
 } from "../safety/information-flow.js";
-import { aggregateCostAmounts, type CostAmount, callCoverageForRun, renderCostAmount } from "../telemetry/cost.js";
+import { callSettlementFromMessage } from "../telemetry/call-facts.js";
 import { assertTurnConstraintCompatibility } from "./tool-constraints.js";
 import { readToolRounds } from "./types.js";
 /**
@@ -40,6 +40,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { type Dirent, existsSync, readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
+import { isDeepStrictEqual } from "node:util";
 import { bashShellPath } from "../../core/bash-shell.js";
 import { taskCommitSubject } from "../../core/commit-message.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
@@ -406,8 +407,8 @@ import {
 import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
 import { reduceRouteQuality, routeQualityRun } from "./route-quality.js";
 import { defaultRoutingIntent } from "./routing-intent.js";
-import type { RunCallUsage } from "./run-call-usage.js";
-import { createRunCallUsage } from "./run-call-usage.js";
+import type { RunCallUsage, RunUsageFacts } from "./run-call-usage.js";
+import { createRunCallUsage, unobservedRunUsageFacts } from "./run-call-usage.js";
 import { defaultRunEventJournal } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import type { VerifyCallOutcome } from "./run-findings.js";
@@ -512,37 +513,22 @@ import {
 } from "./worker-spawn.js";
 import type { WriteBoundaryAttribution, WriteBoundaryAttributionDowngrade } from "./write-boundary.js";
 
+/**
+ * What a running worker has spent, as its own call telemetry folds it. Absent until the first frame reaches the
+ * host: a run whose telemetry never arrives stays unknown, never zero (R1, #434).
+ */
 interface RunTokenMeter {
-	callFacts?: RunCallUsage["callFacts"];
-	usageFacts?: RunCallUsage["usageFacts"];
-	costSummary?: RunCallUsage["costSummary"];
-	costProvenance?: RunCallUsage["costProvenance"];
+	usage?: RunCallUsage;
 	toolRounds?: ToolRoundRecord[];
-	apiCalls?: number;
-	missingTokenCalls?: number;
-	totalTokens?: number;
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
-	cacheWrite1hTokens?: number;
-	reasoningTokens: number;
-	/** Native calls are priced individually by the SDK, including cache TTLs and context tiers. */
-	costUsd?: number;
-	/** An external CLI reported no token counts, so a declared rate cannot price the run. */
-	tokenUsageMissing?: boolean;
 }
 
-/**
- * Target-rate provenance holds only while the meter saw real token counts. A
- * priced external CLI that reported none books $0, and calling that `known`
- * would claim a free run.
- */
-function meterCostProvenance(meter: RunTokenMeter, base: CostProvenance, costUsd: number): CostProvenance {
-	if (meter.costProvenance !== undefined) return meter.costProvenance;
-	if (base === "known_free") return base;
-	if (meter.tokenUsageMissing === true && costUsd === 0) return "unknown";
-	return base === "unknown" && costUsd > 0 ? "estimated" : base;
+function meterSpend(meter: RunTokenMeter): RunUsageFacts {
+	return meter.usage?.facts ?? unobservedRunUsageFacts();
+}
+
+/** The priced part of a running worker's spend; a budget counts it even while other calls are unpriced. */
+function meterKnownUsd(meter: RunTokenMeter): number {
+	return meter.usage ? factKnownValue(meter.usage.sums.usd) : 0;
 }
 
 interface ActiveRun {
@@ -606,7 +592,6 @@ interface ActiveRun {
 	/** Set while the finalizer waits on the operator's merge card; the worker is gone, the orchestrator is the live party. */
 	awaitingOperator?: boolean;
 	meter: RunTokenMeter;
-	costProvenance: import("../providers/index.js").CostProvenance;
 	finalPromise: Promise<RunResult>;
 }
 
@@ -786,82 +771,19 @@ async function settleRunResult(
 function runSettlementReceiptFields(
 	terminal: ResolvedTerminalReason,
 	usage: RunCallUsage | undefined,
-): Pick<RunResultDraft, "terminalReason" | "callIds"> {
-	return { terminalReason: terminal.terminalReason, ...(usage ? { callIds: [...usage.callIds] } : {}) };
+): Pick<RunResultDraft, "terminalReason" | "callIds" | "spend"> {
+	// The receipt's spend is the call fold at settlement, the same facts run.settled records (#434).
+	return {
+		terminalReason: terminal.terminalReason,
+		...(usage ? { callIds: [...usage.callIds] } : {}),
+		spend: usage?.facts ?? unobservedRunUsageFacts(),
+	};
 }
 
 function sealRouteDecision(draft: RunResultDraft, decision: RouteDecisionV1): RunResultDraft {
 	return { ...draft, routeDecision: decision };
 }
 export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
-
-function workerUsageReported(usage: Record<string, unknown>): boolean {
-	const external = isRecord(usage.clioExternal) ? usage.clioExternal : null;
-	// Zero is a valid provider count; only explicit per-call evidence marks missing usage (#434).
-	return (
-		usage.estimated !== true &&
-		(external === null || external.tokenUsage === "provider-reported") &&
-		(usage.usageReported === true ||
-			(usage.usageReported !== false && usage.observed !== false && hasTokenUsageCounts(usage)))
-	);
-}
-
-function accumulateNativeUsage(
-	meter: RunTokenMeter,
-	usage: Record<string, unknown>,
-	pricing: EffectivePricing["rates"],
-	failure?: CallFailureRecord,
-): void {
-	if (usage.callInvoked === false || failure?.invoked === false) return;
-	const external = isRecord(usage.clioExternal) ? usage.clioExternal : null;
-	const usageReported = workerUsageReported(usage);
-	const normalized = normalizeTokenUsage({
-		...usage,
-		estimated: !usageReported,
-	});
-	const call: RunTokenMeter = {
-		inputTokens: normalized.input,
-		outputTokens: normalized.output,
-		cacheReadTokens: normalized.cacheRead,
-		cacheWriteTokens: normalized.cacheWrite,
-		reasoningTokens: normalized.reasoning,
-	};
-	if (typeof usage.cacheWrite1h === "number" && usage.cacheWrite1h >= 0 && usage.cacheWrite1h <= call.cacheWriteTokens)
-		call.cacheWrite1hTokens = usage.cacheWrite1h;
-	meter.apiCalls = (meter.apiCalls ?? 0) + 1;
-	meter.totalTokens = (meter.totalTokens ?? 0) + normalized.totalTokens;
-	if (!usageReported) {
-		meter.missingTokenCalls = (meter.missingTokenCalls ?? 0) + 1;
-		meter.tokenUsageMissing = true;
-	}
-	// External CLIs such as Codex and agy fill cost with a placeholder zero and
-	// say so with cost: "missing"; that zero must not beat the target's rates.
-	const reported = isRecord(usage.cost) && external?.cost !== "missing" ? usage.cost.total : undefined;
-	// An SDK total is already priced with per-call tiers, service tier
-	// and cache-write lifetime. Never reprice it from an aggregate token count.
-	// Retain the target-rate fallback only for workers that omit calculated
-	// cost. Zero remains zero; its provenance still comes from the target.
-	const callCost =
-		typeof reported === "number" && Number.isFinite(reported) && reported >= 0 && usage.estimated !== true
-			? reported
-			: normalized.observed
-				? calculatePricingCostUsd(pricing, {
-						input: call.inputTokens,
-						output: call.outputTokens,
-						cacheRead: call.cacheReadTokens,
-						cacheWrite: call.cacheWriteTokens,
-						cacheWrite1h: call.cacheWrite1hTokens ?? 0,
-					})
-				: 0;
-	meter.costUsd = (meter.costUsd ?? 0) + callCost;
-	meter.inputTokens += call.inputTokens;
-	meter.outputTokens += call.outputTokens;
-	meter.cacheReadTokens += call.cacheReadTokens;
-	meter.cacheWriteTokens += call.cacheWriteTokens;
-	if (call.cacheWrite1hTokens !== undefined)
-		meter.cacheWrite1hTokens = (meter.cacheWrite1hTokens ?? 0) + call.cacheWrite1hTokens;
-	meter.reasoningTokens += call.reasoningTokens;
-}
 
 /**
  * Output-token figure the admission estimate prices a route against. Settings
@@ -942,17 +864,12 @@ function upstreamResponse(
 	callIndex: number,
 	usageScope: "call" | "run-aggregate",
 ): RunResultUpstreamResponse {
-	const usage = isRecord(message.usage) ? message.usage : {};
-	const reported = workerUsageReported(usage);
-	const normalized = normalizeCallUsage({ ...usage, estimated: !reported });
+	// The row states the call's usage the way its call.settled does, one fact per field (#434).
+	const usage = callSettlementFromMessage(message, "none").usage;
 	const gatewayRouting = gatewayRoutingObservationFromRecord(message);
 	return {
 		...(usageScope === "call" ? { callIndex } : {}),
-		usage: {
-			...normalized,
-			observed: reported,
-			...(reported && typeof usage.cacheReadReported === "boolean" ? { cacheReadReported: usage.cacheReadReported } : {}),
-		},
+		...(usage ? { usage } : {}),
 		usageScope,
 		requestedModelId: readStringOrNull(message.model),
 		responseModelIdObservation: responseModelIdObservationFromRecord(message, "not-observed"),
@@ -4084,8 +4001,8 @@ export function createDispatchBundle(
 		routeEstimateUsd = 0,
 	): never {
 		const estimateSuffix =
-			routeEstimateUsd > 0 ? ` (includes ${renderCostAmount(routeEstimateUsd, "estimated")} route estimate)` : "";
-		const reason = `budget ceiling crossed: ${budgetSpendText(preflight.currentUsd, preflight.pricing)} / ${renderCostAmount(preflight.ceilingUsd, "known")}${estimateSuffix}`;
+			routeEstimateUsd > 0 ? ` (includes ${renderUsdEstimate(routeEstimateUsd)} route estimate)` : "";
+		const reason = `budget ceiling crossed: ${budgetSpendText(preflight.currentUsd, preflight.pricing)} / ${renderUsdLimit(preflight.ceilingUsd)}${estimateSuffix}`;
 		safety.decisions.recordToolCall?.({
 			tool: "dispatch",
 			classification: { actionClass: "dispatch" },
@@ -4104,7 +4021,7 @@ export function createDispatchBundle(
 		const telemetry = context.getContract<TelemetryContract>("telemetry");
 		let usd = 0;
 		for (const [runId, run] of active)
-			usd += Math.max(0, (run.meter.costUsd ?? 0) - (telemetry?.journaledRunUsd(runId) ?? 0));
+			usd += Math.max(0, meterKnownUsd(run.meter) - (telemetry?.journaledRunUsd(runId) ?? 0));
 		return usd;
 	}
 
@@ -4112,9 +4029,10 @@ export function createDispatchBundle(
 	function inFlightPricing(): BudgetSpendPricing {
 		const pricing = { estimated: false, unpriced: false };
 		for (const run of active.values()) {
-			const provenance = meterCostProvenance(run.meter, run.costProvenance, run.meter.costUsd ?? 0);
-			if (provenance === "estimated") pricing.estimated = true;
-			else if (provenance === "unknown") pricing.unpriced = true;
+			const usd = run.meter.usage?.sums.usd;
+			if (!usd) continue;
+			if (usd.coverage.estimated > 0) pricing.estimated = true;
+			if (usd.unknownCount > 0) pricing.unpriced = true;
 		}
 		return pricing;
 	}
@@ -4360,8 +4278,8 @@ export function createDispatchBundle(
 	let stopPromise: Promise<void> | null = null;
 
 	/** Session-scope totals for the operator snapshot; finalized runs only. */
-	const finalizedTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 };
-	const finalizedCosts: CostAmount[] = [];
+	let finalizedRuntimeSeconds = 0;
+	const finalizedSpends: RunUsageFacts[] = [];
 
 	function workersMaxRetries(settings: EffectiveSettings = getEffectiveSettings()): number {
 		const value = settings?.fleet?.retry.maxRetries;
@@ -4415,21 +4333,11 @@ export function createDispatchBundle(
 	}
 
 	function accumulateFinalizedTotals(receipt: RunResult): void {
-		finalizedTotals.inputTokens += receipt.inputTokenCount ?? 0;
-		finalizedTotals.outputTokens += receipt.outputTokenCount ?? 0;
-		finalizedTotals.totalTokens += receipt.tokenCount;
-		finalizedTotals.costUsd += receipt.costUsd;
-		finalizedCosts.push({
-			usd: receipt.costUsd,
-			provenance: receipt.costProvenance ?? "unknown",
-			// An omitted count is unknown coverage, never one call per token-positive run (#434).
-			...callCoverageForRun(receipt),
-			...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
-		});
+		finalizedSpends.push(receipt.spend);
 		const startMs = Date.parse(receipt.startedAt);
 		const endMs = Date.parse(receipt.endedAt);
 		if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
-			finalizedTotals.runtimeSeconds += Math.max(0, rawDurationMs(startMs, endMs)) / 1000;
+			finalizedRuntimeSeconds += Math.max(0, rawDurationMs(startMs, endMs)) / 1000;
 		}
 	}
 
@@ -4987,25 +4895,9 @@ export function createDispatchBundle(
 			const row = ledger.get(run.runId);
 			// Finalizers keep active entries while persisting their sealed receipt.
 			if (!row || row.endedAt !== null) continue;
-			const meter = run.meter;
-			const tokenCount =
-				meter.totalTokens ?? meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
-			const costUsd = meter.costUsd ?? 0;
-			const costProvenance = meterCostProvenance(meter, run.costProvenance, costUsd);
-			if (
-				row.tokenCount !== tokenCount ||
-				row.inputTokenCount !== meter.inputTokens ||
-				row.outputTokenCount !== meter.outputTokens ||
-				row.costUsd !== costUsd ||
-				row.costProvenance !== costProvenance
-			) {
-				ledger.update(run.runId, {
-					tokenCount,
-					inputTokenCount: meter.inputTokens,
-					outputTokenCount: meter.outputTokens,
-					costUsd,
-					costProvenance,
-				});
+			const spend = meterSpend(run.meter);
+			if (!isDeepStrictEqual(row.spend, spend)) {
+				ledger.update(run.runId, { spend });
 				liveUsageDirty = true;
 			}
 			if (run.awaitingOperator === true) {
@@ -6022,13 +5914,7 @@ export function createDispatchBundle(
 		}
 		timing.workerSpawnedAt = new Date(now()).toISOString();
 
-		const tokenMeter: RunTokenMeter = {
-			inputTokens: 0,
-			outputTokens: 0,
-			cacheReadTokens: 0,
-			cacheWriteTokens: 0,
-			reasoningTokens: 0,
-		};
+		const tokenMeter: RunTokenMeter = {};
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const toolStats = new Map<string, ToolCallStat>();
@@ -6053,7 +5939,7 @@ export function createDispatchBundle(
 				if (callUsage && !callUsage.observe(raw)) callUsage.gap();
 				const usage = callUsage?.snapshot();
 				if (usage) {
-					Object.assign(tokenMeter, usage);
+					tokenMeter.usage = usage;
 					stopRunsAtRunCostCap();
 				}
 				return;
@@ -6138,8 +6024,6 @@ export function createDispatchBundle(
 					// A message Clio wrote into the loop (a result-contract repair, a
 					// synthesis reprompt) never reached a provider and is not a call.
 				} else if (u !== null) {
-					if (!callUsage?.snapshot()) accumulateNativeUsage(tokenMeter, u, null, failure);
-					stopRunsAtRunCostCap();
 					upstreamResponses.push(
 						upstreamResponse(
 							event.message,
@@ -6148,8 +6032,6 @@ export function createDispatchBundle(
 						),
 					);
 				} else {
-					if (failure?.invoked === true && !callUsage?.snapshot())
-						accumulateNativeUsage(tokenMeter, { usageReported: false }, null, failure);
 					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1, null);
 					if (row !== null) upstreamResponses.push(row);
 				}
@@ -6386,7 +6268,6 @@ export function createDispatchBundle(
 			heartbeatAt: acp.heartbeatAt,
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
-			costProvenance: "unknown",
 			finalPromise,
 		};
 
@@ -6398,25 +6279,9 @@ export function createDispatchBundle(
 			outcomeDetail: string | null,
 			capturedOutput: RunResultOutput | undefined,
 		): RunResultDraft => {
-			// The adapter's aggregate usage is authoritative; event metering saw
-			// the same messages, so adding both would double-count. Event-metered
-			// values survive only when the adapter reported nothing.
-			const canonical = callUsage?.snapshot();
-			const usage = canonical ? { ...result.usage, ...canonical } : result.usage;
-			const adapterReportedUsage = canonical !== undefined || usage.tokensReported;
-			// An unreported peer call count stays unknown coverage instead of a measured zero (#434).
-			const observedApiCalls = adapterReportedUsage ? usage.apiCalls : tokenMeter.apiCalls;
-			if (adapterReportedUsage) {
-				tokenMeter.inputTokens = usage.inputTokens;
-				tokenMeter.outputTokens = usage.outputTokens;
-				tokenMeter.cacheReadTokens = usage.cacheReadTokens;
-				tokenMeter.cacheWriteTokens = usage.cacheWriteTokens;
-				tokenMeter.reasoningTokens = usage.reasoningTokens;
-			}
-			const tokenCount = adapterReportedUsage
-				? usage.totalTokens
-				: (tokenMeter.totalTokens ??
-					tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens);
+			// The peer's own reports reach the run journal as run.usage_reported, so the call fold is the run's spend;
+			// a run whose telemetry never arrived stays unknown (#434).
+			const spend = callUsage?.snapshot()?.facts ?? unobservedRunUsageFacts();
 			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const init = result.delegation.initialize;
 			const agentInfo = init?.agentInfo;
@@ -6461,27 +6326,10 @@ export function createDispatchBundle(
 						? 1
 						: result.exitCode,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
-				tokenCount,
-				...(observedApiCalls !== undefined
-					? {
-							apiCalls: observedApiCalls,
-							missingTokenCalls: (adapterReportedUsage ? usage.missingTokenCalls : tokenMeter.missingTokenCalls) ?? 0,
-						}
-					: {}),
+				spend,
 				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
-				inputTokenCount: tokenMeter.inputTokens,
-				outputTokenCount: tokenMeter.outputTokens,
-				...(canonical && canonical.usageFacts.cacheRead.unknownCount > 0
-					? {}
-					: { cacheReadTokenCount: tokenMeter.cacheReadTokens }),
-				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,
-				...(tokenMeter.cacheWrite1hTokens === undefined ? {} : { cacheWrite1hTokenCount: tokenMeter.cacheWrite1hTokens }),
-				reasoningTokenCount: tokenMeter.reasoningTokens,
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
-				costUsd: usage.costUsd,
-				...(usage.costSummary ? { costSummary: usage.costSummary } : {}),
-				costProvenance: usage.costProvenance ?? "unknown",
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
 				sessionShellHash: lifecycle.sessionShellHash,
@@ -6571,19 +6419,8 @@ export function createDispatchBundle(
 				outcomeCode: receipt.outcomeCode ?? null,
 				outcomeDetail: receipt.outcomeDetail ?? null,
 				lineage: publishedLineage(lineage, hostRun),
-				tokenCount: receipt.tokenCount,
 				sessionId: receipt.sessionId,
-				...(receipt.apiCalls === undefined ? {} : { apiCalls: receipt.apiCalls }),
-				...(receipt.missingTokenCalls === undefined ? {} : { missingTokenCalls: receipt.missingTokenCalls }),
-				inputTokenCount: receipt.inputTokenCount ?? 0,
-				outputTokenCount: receipt.outputTokenCount ?? 0,
-				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
-				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
-				...(receipt.cacheWrite1hTokenCount === undefined ? {} : { cacheWrite1hTokenCount: receipt.cacheWrite1hTokenCount }),
-				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
-				costUsd: receipt.costUsd,
-				costProvenance: receipt.costProvenance ?? "unknown",
-				...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
+				spend: receipt.spend,
 				durationMs,
 				exitCode: receipt.exitCode,
 				toolActivity: receipt.toolActivity ?? null,
@@ -6755,22 +6592,9 @@ export function createDispatchBundle(
 					endedAt,
 					exitCode: receiptDraft.exitCode,
 					sessionId: receiptDraft.sessionId,
-					tokenCount: receiptDraft.tokenCount,
-					...(receiptDraft.apiCalls === undefined ? {} : { apiCalls: receiptDraft.apiCalls }),
-					...(receiptDraft.missingTokenCalls === undefined ? {} : { missingTokenCalls: receiptDraft.missingTokenCalls }),
-					inputTokenCount: receiptDraft.inputTokenCount ?? 0,
-					outputTokenCount: receiptDraft.outputTokenCount ?? 0,
-					costUsd: receiptDraft.costUsd,
-					...(receiptDraft.costProvenance ? { costProvenance: receiptDraft.costProvenance } : {}),
-					...(receiptDraft.costSummary ? { costSummary: receiptDraft.costSummary } : {}),
+					spend: receiptDraft.spend,
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
-					cacheReadTokenCount: receiptDraft.cacheReadTokenCount ?? 0,
-					cacheWriteTokenCount: receiptDraft.cacheWriteTokenCount ?? 0,
-					...(receiptDraft.cacheWrite1hTokenCount === undefined
-						? {}
-						: { cacheWrite1hTokenCount: receiptDraft.cacheWrite1hTokenCount }),
-					reasoningTokenCount: receiptDraft.reasoningTokenCount ?? 0,
 					heartbeatAt: heartbeatIso(acp.heartbeatAt),
 				};
 				activeRun.sealing = true;
@@ -6993,7 +6817,7 @@ export function createDispatchBundle(
 						qualityLabel: quality.label,
 						firstPass: outcome === "succeeded" && (receipt.lineage?.attempt ?? 0) === 0,
 						attempt: receipt.lineage?.attempt ?? 0,
-						costUsd: receipt.costUsd,
+						costUsd: factKnownValue(receipt.spend.pricing.usd),
 						endToEndMs: phases?.totalEndToEndMs ?? 0,
 						receipt,
 						quality,
@@ -7168,13 +6992,7 @@ export function createDispatchBundle(
 				throw error;
 			}
 		})();
-		const tokenMeter: RunTokenMeter = {
-			inputTokens: 0,
-			outputTokens: 0,
-			cacheReadTokens: 0,
-			cacheWriteTokens: 0,
-			reasoningTokens: 0,
-		};
+		const tokenMeter: RunTokenMeter = {};
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
@@ -7620,7 +7438,7 @@ export function createDispatchBundle(
 				if (callUsage) {
 					const usage = callUsage.snapshot();
 					if (usage) {
-						Object.assign(tokenMeter, usage);
+						tokenMeter.usage = usage;
 						stopRunsAtRunCostCap();
 					}
 				}
@@ -7862,8 +7680,6 @@ export function createDispatchBundle(
 					// A message Clio wrote into the loop (a result-contract repair, a
 					// synthesis reprompt) never reached a provider and is not a call.
 				} else if (u !== null) {
-					if (!callUsage?.snapshot()) accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates, failure);
-					stopRunsAtRunCostCap();
 					upstreamResponses.push(
 						upstreamResponse(
 							event.message,
@@ -7872,8 +7688,6 @@ export function createDispatchBundle(
 						),
 					);
 				} else {
-					if (failure?.invoked === true && !callUsage?.snapshot())
-						accumulateNativeUsage(tokenMeter, { usageReported: false }, lifecycle.target.effectivePricing.rates, failure);
 					const row = usagelessUpstreamResponse(event.message, upstreamResponses.length + 1, lifecycle.target.wireModelId);
 					if (row !== null) upstreamResponses.push(row);
 				}
@@ -8266,7 +8080,6 @@ export function createDispatchBundle(
 			heartbeatAt,
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
-			costProvenance: costProvenanceOf(lifecycle.target.effectivePricing.pricedBy),
 			finalPromise,
 		};
 
@@ -8297,11 +8110,7 @@ export function createDispatchBundle(
 			const routeOutcomeDetail = mergeRouteWarningDetail(lifecycle.target.routeWarning, outcomeDetail ?? activityNote);
 			const finalOutcomeDetail = mergeWorkerDiagnosticDetail(routeOutcomeDetail, result, includeDiagnostics);
 			const finalFailureMessage = mergeWorkerDiagnosticFailure(failureMessage, result, includeDiagnostics);
-			const costUsd = tokenMeter.costUsd ?? 0;
 			const safetyMetadata = safety.policy?.metadata() ?? null;
-			const tokenCount =
-				tokenMeter.totalTokens ??
-				tokenMeter.inputTokens + tokenMeter.outputTokens + tokenMeter.cacheReadTokens + tokenMeter.cacheWriteTokens;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
 			const finalToolStats = snapshotToolStats(toolStats);
 			const typedValidations = typedValidationFactsFromVerifyCalls(finalToolStats, verifyCalls.calls);
@@ -8370,29 +8179,10 @@ export function createDispatchBundle(
 				exitCode: receiptExitCode,
 				outcomeDetail: finalOutcomeDetail,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
-				tokenCount,
-				// A meter that observed no call frames cannot claim zero calls; omission reads as unknown coverage (#434).
-				...(tokenMeter.apiCalls !== undefined
-					? { apiCalls: tokenMeter.apiCalls, missingTokenCalls: tokenMeter.missingTokenCalls ?? 0 }
-					: {}),
+				spend: meterSpend(tokenMeter),
 				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
-				...(tokenMeter.costSummary ? { costSummary: tokenMeter.costSummary } : {}),
-				inputTokenCount: tokenMeter.inputTokens,
-				outputTokenCount: tokenMeter.outputTokens,
-				...(tokenMeter.usageFacts && tokenMeter.usageFacts.cacheRead.unknownCount > 0
-					? {}
-					: { cacheReadTokenCount: tokenMeter.cacheReadTokens }),
-				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,
-				...(tokenMeter.cacheWrite1hTokens === undefined ? {} : { cacheWrite1hTokenCount: tokenMeter.cacheWrite1hTokens }),
-				reasoningTokenCount: tokenMeter.reasoningTokens,
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
-				costUsd,
-				costProvenance:
-					callUsage?.snapshot()?.costProvenance ??
-					(externalTelemetry?.cost === "provider-reported"
-						? "known"
-						: meterCostProvenance(tokenMeter, costProvenanceOf(lifecycle.target.effectivePricing.pricedBy), costUsd)),
 				...(externalTelemetry ? { externalTelemetry } : {}),
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
@@ -8490,19 +8280,8 @@ export function createDispatchBundle(
 				outcomeCode: receipt.outcomeCode ?? null,
 				outcomeDetail: receipt.outcomeDetail ?? null,
 				lineage: publishedLineage(lineage, hostRun),
-				tokenCount: receipt.tokenCount,
 				sessionId: receipt.sessionId,
-				...(receipt.apiCalls === undefined ? {} : { apiCalls: receipt.apiCalls }),
-				...(receipt.missingTokenCalls === undefined ? {} : { missingTokenCalls: receipt.missingTokenCalls }),
-				inputTokenCount: receipt.inputTokenCount ?? 0,
-				outputTokenCount: receipt.outputTokenCount ?? 0,
-				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
-				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
-				...(receipt.cacheWrite1hTokenCount === undefined ? {} : { cacheWrite1hTokenCount: receipt.cacheWrite1hTokenCount }),
-				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
-				costUsd: receipt.costUsd,
-				costProvenance: receipt.costProvenance ?? "unknown",
-				...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
+				spend: receipt.spend,
 				durationMs,
 				exitCode: receipt.exitCode,
 				toolActivity: receipt.toolActivity ?? null,
@@ -8589,7 +8368,7 @@ export function createDispatchBundle(
 				// Only a drained stream can show an attempt will never settle; a late frame would settle it twice (#434).
 				if (drained) runJournal?.settleCalls(callUsage?.settleOpen("internal") ?? []);
 				const finalCallUsage = callUsage?.snapshot();
-				if (finalCallUsage) Object.assign(tokenMeter, finalCallUsage);
+				if (finalCallUsage) tokenMeter.usage = finalCallUsage;
 				// The worker is gone: every grant it held settles now, after its last
 				// execution report drained. Retries run as new attempts with new requests.
 				if (grantAttempt !== undefined) {
@@ -9118,30 +8897,11 @@ export function createDispatchBundle(
 					...(steering.length > 0 ? { steering: steering.map((entry) => ({ ...entry })) } : {}),
 					endedAt,
 					exitCode: receiptDraft.exitCode,
-					tokenCount: receiptDraft.tokenCount,
-					...(receiptDraft.apiCalls === undefined ? {} : { apiCalls: receiptDraft.apiCalls }),
-					...(receiptDraft.missingTokenCalls === undefined ? {} : { missingTokenCalls: receiptDraft.missingTokenCalls }),
-					inputTokenCount: receiptDraft.inputTokenCount ?? 0,
-					outputTokenCount: receiptDraft.outputTokenCount ?? 0,
-					costUsd: receiptDraft.costUsd,
-					...(receiptDraft.costProvenance ? { costProvenance: receiptDraft.costProvenance } : {}),
-					...(receiptDraft.costSummary ? { costSummary: receiptDraft.costSummary } : {}),
+					spend: receiptDraft.spend,
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
-					...(receiptDraft.cacheReadTokenCount !== undefined
-						? { cacheReadTokenCount: receiptDraft.cacheReadTokenCount }
-						: {}),
-					...(receiptDraft.cacheWrite1hTokenCount === undefined
-						? {}
-						: { cacheWrite1hTokenCount: receiptDraft.cacheWrite1hTokenCount }),
-					...(receiptDraft.cacheWriteTokenCount !== undefined
-						? { cacheWriteTokenCount: receiptDraft.cacheWriteTokenCount }
-						: {}),
 					...(activeRun.heartbeatAt ? { heartbeatAt: heartbeatIso(activeRun.heartbeatAt) } : {}),
 				};
-				if (receiptDraft.reasoningTokenCount !== undefined) {
-					ledgerPatch.reasoningTokenCount = receiptDraft.reasoningTokenCount;
-				}
 				activeRun.sealing = true;
 				if (runJournal === undefined) throw new Error(`run ${envelope.id} has no run journal to settle in`);
 				const receipt = await settleRunResult(
@@ -10200,15 +9960,8 @@ export function createDispatchBundle(
 						outcome: "succeeded",
 						outcomeDetail: null,
 						exitCode: 0,
-						tokenCount: 0,
-						inputTokenCount: 0,
-						outputTokenCount: 0,
-						reasoningTokenCount: 0,
-						cacheReadTokenCount: 0,
-						cacheWriteTokenCount: 0,
+						spend: noCallRunUsageFacts(),
 						output: { state: "final", text: input.text, bytes: Buffer.byteLength(input.text, "utf8"), truncated: false },
-						costUsd: 0,
-						costProvenance: "unknown",
 						compiledPromptHash: null,
 						staticCompositionHash: null,
 						clioCoderVersion: readClioVersion(),
@@ -10253,14 +10006,7 @@ export function createDispatchBundle(
 				outcomeCode: null,
 				outcomeDetail: null,
 				lineage: input.template.lineage ?? { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 },
-				tokenCount: 0,
-				inputTokenCount: 0,
-				outputTokenCount: 0,
-				cacheReadTokenCount: 0,
-				cacheWriteTokenCount: 0,
-				reasoningTokenCount: 0,
-				costUsd: 0,
-				costProvenance: "unknown",
+				spend: receipt.spend,
 				durationMs: 0,
 				exitCode: 0,
 				toolActivity: null,
@@ -10481,8 +10227,8 @@ export function createDispatchBundle(
 		const tickNow = now();
 		const tickMonotonic = monotonicNow();
 		const running: DispatchSnapshot["running"] = [];
-		const totals = { ...finalizedTotals };
-		const costAmounts = [...finalizedCosts];
+		let runtimeSeconds = finalizedRuntimeSeconds;
+		const spends = [...finalizedSpends];
 		for (const pending of pendingCapacity.values()) {
 			const startedAt = pending.timing.queuedAt ?? pending.timing.requestedAt ?? new Date(tickNow).toISOString();
 			running.push({
@@ -10496,9 +10242,7 @@ export function createDispatchBundle(
 				lineage: { parentRunId: null, rootRunId: pending.identity.runId, attempt: 0, depth: 0 },
 				startedAt,
 				elapsedMs: 0,
-				tokens: { input: 0, output: 0, total: 0 },
-				costUsd: 0,
-				costProvenance: "unknown",
+				spend: unobservedRunUsageFacts(),
 				node: pending.node === null ? null : { ...pending.node },
 			});
 		}
@@ -10515,11 +10259,7 @@ export function createDispatchBundle(
 					heartbeat = classifyHeartbeat(heartbeatMonotonic, tickMonotonic, heartbeatSpec);
 				}
 			}
-			const meter = run.meter;
-			const totalTokens =
-				meter.totalTokens ?? meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
-			const costUsd = meter.costUsd ?? 0;
-			const costProvenance = meterCostProvenance(meter, run.costProvenance, costUsd);
+			const spend = meterSpend(run.meter);
 			const startedMs = Date.parse(run.startedAt);
 			const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, tickNow - startedMs) : 0;
 			running.push({
@@ -10533,27 +10273,11 @@ export function createDispatchBundle(
 				lineage: publishedLineage(run.lineage, run.hostRun),
 				startedAt: run.startedAt,
 				elapsedMs,
-				tokens: {
-					input: meter.inputTokens,
-					output: meter.outputTokens,
-					total: totalTokens,
-					cacheRead: meter.cacheReadTokens,
-				},
-				costUsd,
-				costProvenance,
+				spend,
 				node: run.node !== null ? { ...run.node } : null,
 			});
-			totals.inputTokens += meter.inputTokens;
-			totals.outputTokens += meter.outputTokens;
-			totals.totalTokens += totalTokens;
-			totals.costUsd += costUsd;
-			costAmounts.push({
-				usd: costUsd,
-				provenance: costProvenance,
-				...callCoverageForRun(meter),
-				...(meter.costSummary ? { costSummary: meter.costSummary } : {}),
-			});
-			totals.runtimeSeconds += elapsedMs / 1000;
+			spends.push(spend);
+			runtimeSeconds += elapsedMs / 1000;
 		}
 		const retrying = [...retryQueue.values()].map((entry) => ({
 			runId: entry.runId,
@@ -10563,12 +10287,15 @@ export function createDispatchBundle(
 			dueAt: new Date(entry.dueAt).toISOString(),
 			reason: entry.reason,
 		}));
-		const cost = aggregateCostAmounts(costAmounts);
 		return {
 			generatedAt: new Date(tickNow).toISOString(),
 			running,
 			retrying,
-			totals: { ...totals, costUsd: cost.knownUsd, cost },
+			totals: {
+				tokens: sumFacts(spends.map((spend) => spend.totalTokens)),
+				cost: sumPricing(spends.map((spend) => spend.pricing)),
+				runtimeSeconds,
+			},
 		};
 	}
 

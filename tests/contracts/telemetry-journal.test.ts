@@ -88,6 +88,7 @@ import {
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { isReceiptBearingFrame } from "../../src/worker/protocol.js";
 import { checkTelemetryProducer, checkTelemetryWrites } from "../boundaries/check-boundaries.js";
+import { measuredSpend } from "../harness/receipt.js";
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
 const context = { sessionId: "journal-session", agent: { role: "main" as const, id: "journal-session" } };
@@ -1549,7 +1550,8 @@ test("usage report discovers a standalone run journal that has no session and no
 test("fleet status reads unknown journal facts even when the ledger holds token counts (#434 §11.3)", async () => {
 	const scratch = await mkdtemp(join(tmpdir(), "telemetry-fleet-status-"));
 	const stateDir = join(scratch, "state");
-	const row = (id: string, usage: Record<string, number>) => ({
+	const row = (id: string) => ({
+		version: 1,
 		id,
 		agentId: "scout",
 		task: "t",
@@ -1557,21 +1559,18 @@ test("fleet status reads unknown journal facts even when the ledger holds token 
 		startedAt: "2026-10-30T00:00:00.000Z",
 		endedAt: "2026-10-30T00:01:00.000Z",
 		pid: 1,
-		tokenCount: 100,
-		costUsd: 0.12,
-		costProvenance: "known",
+		spend: measuredSpend({ input: 70, output: 30 }, 0.12),
 		runtimeKind: "native",
 		cwd: scratch,
-		...usage,
 	});
 	try {
 		await mkdir(stateDir, { recursive: true });
 		await writeFile(
 			join(stateDir, "runs.json"),
 			JSON.stringify([
-				row("whole", { apiCalls: 2, missingTokenCalls: 0, inputTokenCount: 70, outputTokenCount: 30 }),
-				// Written before the ledger carried a split or call coverage, with no receipt to supply them.
-				row("legacy", {}),
+				// The ledger's spend facts are live state; without a run journal fleet status holds no journal fact.
+				row("whole"),
+				row("other"),
 			]),
 		);
 		const cli = new URL("../../src/cli/fleet.ts", import.meta.url).href;

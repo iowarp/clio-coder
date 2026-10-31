@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { TelemetryAgent } from "../../core/telemetry/context.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
+import { sumFacts } from "../../core/telemetry/pricing.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
 
 /** Stamped on every read-model DTO; bump when a fold rule changes what a sum means (#434, R4). */
@@ -36,9 +37,7 @@ export function addGroup(sum: FactSum, facts: readonly Fact<number>[]): void {
 }
 
 export function foldFacts(facts: Iterable<Fact<number>>): FactSum {
-	const sum = emptyFactSum();
-	for (const fact of facts) addGroup(sum, [fact]);
-	return sum;
+	return sumFacts(facts);
 }
 
 export interface FoldedAttempt {

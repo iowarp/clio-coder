@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { dispatchBatchSummary, formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
-import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { fixtureEnvelope, fixtureReceiptDraft, measuredSpend } from "../harness/receipt.js";
 import { writeSettledRun } from "../harness/settled-run.js";
 
 function run(
@@ -13,9 +13,9 @@ function run(
 	calls: number,
 	external = false,
 ) {
-	const envelope = { ...fixtureEnvelope(id), costUsd };
+	const pricedBy = provenance === "known" ? "target-rates" : provenance === "estimated" ? "catalog" : "none";
+	const envelope = { ...fixtureEnvelope(id), spend: measuredSpend({ input: 20, output: 22 }, costUsd, pricedBy) };
 	const draft = fixtureReceiptDraft(envelope);
-	draft.costProvenance = provenance;
 	draft.toolCalls = calls;
 	if (external) {
 		draft.externalTelemetry = {

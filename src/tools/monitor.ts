@@ -1,3 +1,4 @@
+import { renderFactField, renderPricing } from "../core/telemetry/render.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	formatBudgetPolicy,
@@ -11,7 +12,6 @@ import { isTerminalRunEnvelope, type RunEnvelope } from "../domains/dispatch/typ
 import { summarizeTrustStatus, trustStateWord } from "../domains/evidence/trust-projection.js";
 import { inspectRunTrustStatus } from "../domains/evidence/trust-status.js";
 import { loadRunRecord } from "../domains/session/telemetry-source.js";
-import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/index.js";
 import type { DispatchRunEventRegistry } from "./dispatch.js";
 import { grantRequestLines, pendingRequestsFor, requestsAwaitingMain } from "./grant-request-text.js";
 import type { JobOperations } from "./job-types.js";
@@ -111,7 +111,7 @@ function observeDispatchChanges(dispatch: DispatchContract): {
 
 function runLine(run: RunEnvelope): string {
 	const state = run.outcome ?? run.status;
-	return `- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} started=${run.startedAt} tokens=${run.tokenCount}`;
+	return `- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} started=${run.startedAt} tokens=${renderFactField(run.spend.totalTokens)}`;
 }
 
 function ownershipFor(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined): DispatchOwnership {
@@ -199,7 +199,7 @@ function runStatus(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 		`state: ${run.status}${run.outcome ? ` outcome=${run.outcome}` : ""}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 		`target=${run.targetId} model=${run.wireModelId} runtime=${run.runtimeKind} node=${run.node?.id ?? "local"}${reroutes}`,
 		`started=${run.startedAt} ended=${run.endedAt ?? "n/a"} exit=${run.exitCode ?? "n/a"}`,
-		`tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance, run.costSummary)) ?? COST_NOT_MEASURED}`,
+		`tokens=${renderFactField(run.spend.totalTokens)} cost=${renderPricing(run.spend.pricing)}`,
 	];
 	if (run.council !== undefined || run.gate?.role === "synthesis") {
 		lines.push(
@@ -216,7 +216,7 @@ function runStatus(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 	}
 	if (live) {
 		lines.push(
-			`live: phase=${live.outcomePhase} heartbeat=${live.heartbeat} elapsed=${Math.round(live.elapsedMs / 1000)}s tokens=${live.tokens.total}`,
+			`live: phase=${live.outcomePhase} heartbeat=${live.heartbeat} elapsed=${Math.round(live.elapsedMs / 1000)}s tokens=${renderFactField(live.spend.totalTokens)}`,
 		);
 	}
 	// A worker ask routed to the main agent waits here until it is answered (Phase D).
@@ -249,9 +249,7 @@ function runStatus(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 			status: run.status,
 			outcome: run.outcome ?? null,
 			exitCode: run.exitCode,
-			tokenCount: run.tokenCount,
-			costUsd: run.costUsd,
-			costProvenance: run.costProvenance ?? "unknown",
+			spend: run.spend,
 			budget: run.budget ?? null,
 			...(run.council !== undefined || run.gate?.role === "synthesis"
 				? {

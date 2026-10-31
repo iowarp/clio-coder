@@ -6,6 +6,7 @@ import { clockLocal } from "../../core/format-time.js";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import type { Fact } from "../../core/telemetry/fact.js";
+import { renderCompactCount, renderPricing } from "../../core/telemetry/render.js";
 import type { RunResultObject } from "../../core/telemetry/schemas.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
 import { expandChainMessages } from "../../tools/surface.js";
@@ -21,7 +22,6 @@ import { inspectRunTrustStatus, TRUST_STATUS_AXES } from "../evidence/trust-stat
 import type { RunEvidence } from "../evidence/types.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { redactSecretString } from "../safety/redaction.js";
-import { renderCostAmount } from "../telemetry/cost.js";
 import { type DecisionRow, decisionRow } from "../telemetry/fact-folds.js";
 import type { AccountabilitySummary } from "../telemetry/index.js";
 import {
@@ -635,17 +635,7 @@ function renderRunChecks(run: SettledRunView): string[] {
 
 /** A run's settled spend in the canonical cost wording. */
 function renderRunCost(settled: SettledRunView["settled"]): string {
-	const usd = settled.pricing.usd;
-	return renderCostAmount(
-		factValue(usd) ?? 0,
-		usd.kind === "unknown" || usd.kind === "absent"
-			? "unknown"
-			: settled.pricing.pricedBy === "free"
-				? "known_free"
-				: usd.kind === "estimated"
-					? "estimated"
-					: "known",
-	);
+	return renderPricing(settled.pricing);
 }
 
 function renderRunSummary(run: SettledRunView, report: RunRecordVerificationReport): string[] {
@@ -962,8 +952,8 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						`runtime: ${env.runtimeKind}:${env.runtimeId}`,
 						`started: ${formatLocalTime(env.startedAt)}`,
 						`ended: ${env.endedAt ? formatLocalTime(env.endedAt) : "running"}`,
-						`tokens: ${formatFooterTokens(env.tokenCount)}`,
-						`cost: ${renderCostAmount(env.costUsd, env.costProvenance, env.costSummary)}`,
+						`tokens: ${renderCompactCount(env.spend.totalTokens)}`,
+						`cost: ${renderPricing(env.spend.pricing)}`,
 						`run journal: ${journalPath}`,
 						"",
 						"## What changed",

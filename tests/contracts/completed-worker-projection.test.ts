@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchCompletedPayload } from "../../src/core/telemetry/live-events.js";
+import { unobservedRunUsageFacts } from "../../src/core/telemetry/pricing.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import type { TelemetryRunReaders } from "../../src/domains/telemetry/contract.js";
 import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
@@ -39,13 +40,7 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 		runtimeKind: "http",
 		requestOrigin: "user",
 		lineage: { rootRunId: "aa-run", parentRunId: null, attempt: 0, depth: 0 },
-		tokenCount: 0,
-		inputTokenCount: 0,
-		outputTokenCount: 0,
-		cacheReadTokenCount: 0,
-		cacheWriteTokenCount: 0,
-		reasoningTokenCount: 0,
-		costUsd: 0,
+		spend: unobservedRunUsageFacts(),
 		durationMs: 1,
 		exitCode: 0,
 		toolActivity: null,

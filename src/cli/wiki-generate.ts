@@ -5,6 +5,10 @@ import { performance } from "node:perf_hooks";
 import { loadDomains } from "../core/domain-loader.js";
 import { asDirectoryPathBoundary } from "../core/path-boundary.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
+import type { Fact } from "../core/telemetry/fact.js";
+import type { Pricing } from "../core/telemetry/pricing.js";
+import { renderFactField, renderPricing } from "../core/telemetry/render.js";
+import type { RunUsageFacts } from "../core/telemetry/schemas.js";
 import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
 import { ALL_TOOL_NAMES, ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
@@ -44,7 +48,6 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
-import { renderCostAmount } from "../domains/telemetry/cost.js";
 import { TelemetryDomainModule } from "../domains/telemetry/index.js";
 import { runsCost, runsTotal } from "../domains/telemetry/read-model.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
@@ -196,18 +199,7 @@ function summaryDetail(summary: DispatchSummary, startedAtClock: number, attempt
 }
 
 /** Usage and cost facts of one attempt, from its receipt or its finalized ledger envelope. */
-type WikiRunUsage = Pick<
-	RunResult,
-	| "tokenCount"
-	| "inputTokenCount"
-	| "outputTokenCount"
-	| "cacheReadTokenCount"
-	| "cacheWriteTokenCount"
-	| "missingTokenCalls"
-	| "costUsd"
-	| "costProvenance"
-> &
-	Partial<Pick<RunResult, "costSummary" | "budget" | "upstreamResponses">>;
+type WikiRunUsage = Pick<RunResult, "spend"> & Partial<Pick<RunResult, "budget" | "upstreamResponses">>;
 
 interface WikiEarlierAttempt {
 	runId: string;
@@ -266,19 +258,7 @@ function collectWikiAttempts(
 			earlier.push({
 				runId: ref.runId,
 				outcome: ref.outcome,
-				usage: finalized
-					? {
-							tokenCount: run.tokenCount,
-							...(run.inputTokenCount !== undefined ? { inputTokenCount: run.inputTokenCount } : {}),
-							...(run.outputTokenCount !== undefined ? { outputTokenCount: run.outputTokenCount } : {}),
-							...(run.cacheReadTokenCount !== undefined ? { cacheReadTokenCount: run.cacheReadTokenCount } : {}),
-							...(run.cacheWriteTokenCount !== undefined ? { cacheWriteTokenCount: run.cacheWriteTokenCount } : {}),
-							...(run.missingTokenCalls !== undefined ? { missingTokenCalls: run.missingTokenCalls } : {}),
-							costUsd: run.costUsd,
-							costProvenance: run.costProvenance ?? "unknown",
-							...(run.costSummary ? { costSummary: run.costSummary } : {}),
-						}
-					: undefined,
+				usage: finalized ? { spend: run.spend } : undefined,
 			});
 		}
 		return { terminalRunId, count: earlier.length + 1, earlier };
@@ -289,18 +269,18 @@ function collectWikiAttempts(
 	}
 }
 
-const USAGE_FIELDS = [
-	["tokenCount", "total"],
-	["inputTokenCount", "input"],
-	["outputTokenCount", "output"],
-	["cacheReadTokenCount", "cache read"],
-	["cacheWriteTokenCount", "cache write"],
-	["missingTokenCalls", "missing-usage calls"],
-] as const;
+type UsageKey = "total" | "input" | "output" | "cacheRead" | "cacheWrite";
+const USAGE_FIELDS: ReadonlyArray<readonly [UsageKey, string, (spend: RunUsageFacts) => Fact<number>]> = [
+	["total", "total", (spend) => spend.totalTokens],
+	["input", "input", (spend) => spend.usage.input],
+	["output", "output", (spend) => spend.usage.output],
+	["cacheRead", "cache read", (spend) => spend.usage.cacheRead],
+	["cacheWrite", "cache write", (spend) => spend.usage.cacheWrite],
+];
 
 /**
- * reported: a tracked call carried a cache-read field or the count is non-zero. unreported: every tracked call
- * omitted it. mixed: tracked calls disagree. untracked: no call says, so the number is shown as recorded.
+ * reported: every tracked call measured its cache read. unreported: every tracked call left it unknown. mixed: tracked
+ * calls disagree. untracked: no call row says, so the run's own fact is shown as recorded.
  */
 type CacheReporting = "reported" | "unreported" | "mixed" | "untracked";
 interface CacheReadSummary {
@@ -311,17 +291,15 @@ interface CacheReadSummary {
 
 function summarizeCacheRead(usage: WikiRunUsage | undefined): CacheReadSummary {
 	const tracked = callLevelUpstreamResponses(usage?.upstreamResponses ?? []).flatMap((response) =>
-		typeof response.usage?.cacheReadReported === "boolean" ? [response.usage.cacheReadReported] : [],
+		response.usage ? [response.usage.cacheRead.kind === "measured"] : [],
 	);
 	const unreportedCalls = tracked.filter((reported) => !reported).length;
 	const base = { unreportedCalls, trackedCalls: tracked.length };
 	if (tracked.length === 0) return { ...base, reporting: "untracked" };
 	if (unreportedCalls === 0) return { ...base, reporting: "reported" };
-	if (unreportedCalls < tracked.length) return { ...base, reporting: "mixed" };
-	return { ...base, reporting: (usage?.cacheReadTokenCount ?? 0) === 0 ? "unreported" : "reported" };
+	return { ...base, reporting: unreportedCalls < tracked.length ? "mixed" : "unreported" };
 }
 
-type WikiUsage = Pick<RunResult, (typeof USAGE_FIELDS)[number][0]>;
 type WikiReceipts = Array<{
 	receipt: WikiRunUsage | undefined;
 	kind: "writer" | "repair";
@@ -336,11 +314,9 @@ const ATTEMPT_LINE_LIMIT = 4;
 const CAPPED_PAGE_LIMIT = 5;
 
 /** `cacheRead` replaces the printed cache-read value when the caller knows it was not measured. */
-function usageDetail(usage: WikiUsage, cacheRead?: string): string {
-	return USAGE_FIELDS.map(([key, label]) =>
-		key === "cacheReadTokenCount" && cacheRead !== undefined
-			? `${label}=${cacheRead}`
-			: `${label}=${usage[key] ?? "unknown"}`,
+function usageDetail(spend: RunUsageFacts, cacheRead?: string): string {
+	return USAGE_FIELDS.map(([key, label, read]) =>
+		key === "cacheRead" && cacheRead !== undefined ? `${label}=${cacheRead}` : `${label}=${renderFactField(read(spend))}`,
 	).join(", ");
 }
 
@@ -369,75 +345,76 @@ function dispatchUsage(
 			? attemptsBreakdown(attempts, receipt)
 			: "";
 	if (!receipt) return `; run=${runId}; usage unavailable${breakdown}`;
-	const provenance = receipt.costProvenance;
+	const { pricing } = receipt.spend;
 	return (
-		`; run=${runId}; tokens: ${usageDetail(receipt, cacheReadText(receipt, cache))}; cost=${renderCostAmount(receipt.costUsd, provenance, receipt.costSummary)} (${provenance})` +
+		`; run=${runId}; tokens: ${usageDetail(receipt.spend, cacheReadText(receipt.spend, cache))}; cost=${renderPricing(pricing)} (priced by ${pricing.pricedBy})` +
 		(receipt.budget ? `; budget=${formatEffectiveBudget(receipt.budget)}` : "") +
 		breakdown
 	);
 }
 
-function cacheReadText(usage: WikiUsage, cache: CacheReadSummary): string | undefined {
+function cacheReadText(spend: RunUsageFacts, cache: CacheReadSummary): string | undefined {
 	if (cache.reporting === "unreported") return "unreported";
 	if (cache.reporting === "mixed")
-		return `${usage.cacheReadTokenCount ?? "unknown"} (unreported on ${cache.unreportedCalls}/${cache.trackedCalls} calls)`;
+		return `${renderFactField(spend.usage.cacheRead)} (unreported on ${cache.unreportedCalls}/${cache.trackedCalls} calls)`;
 	return undefined;
 }
 
+const notObserved: Fact<number> = { kind: "unknown", reason: "not-observed" };
+
 /**
- * One receipt field as the read model folds it over runs: absent when no receipt holds it, and partial when some of
- * the run's calls reported no usage or the receipt never recorded whether any did.
+ * One run's field as the read model folds it over runs: unknown when no receipt holds it, and an attempt ledger that
+ * could not be read adds an unknown contribution for the earlier attempts it may hide.
  */
-function runField(usage: WikiRunUsage | undefined, key: (typeof USAGE_FIELDS)[number][0], unrecovered = false) {
-	const known = usage?.[key];
-	return {
-		known: typeof known === "number" ? known : null,
-		partial:
-			key !== "missingTokenCalls" &&
-			(unrecovered || usage?.missingTokenCalls === undefined || usage.missingTokenCalls > 0),
-	};
+function runField(
+	usage: WikiRunUsage | undefined,
+	read: (spend: RunUsageFacts) => Fact<number>,
+	unrecovered = false,
+): Fact<number>[] {
+	return [usage ? read(usage.spend) : notObserved, ...(unrecovered ? [notObserved] : [])];
 }
 
 function attemptsBreakdown(attempts: WikiAttempts, terminal: WikiRunUsage | undefined): string {
 	const shown = attempts.earlier
 		.slice(0, ATTEMPT_LINE_LIMIT)
-		.map((a) => `${a.runId} tokens=${a.usage?.tokenCount ?? "unknown"} outcome=${a.outcome}`);
+		.map(
+			(a) => `${a.runId} tokens=${a.usage ? renderFactField(a.usage.spend.totalTokens) : "unknown"} outcome=${a.outcome}`,
+		);
 	const hidden = attempts.earlier.length - shown.length;
 	const all = [terminal, ...attempts.earlier.map((a) => a.usage)];
 	return (
 		`; attempts=${attempts.count} (earlier: ${shown.join(", ")}${hidden > 0 ? `, +${hidden} more` : ""})` +
-		`; all-attempt tokens total=${runsTotal(all.map((usage) => runField(usage, "tokenCount"))).display}`
+		`; all-attempt tokens total=${runsTotal(all.flatMap((usage) => runField(usage, (spend) => spend.totalTokens))).display}`
 	);
 }
 
 /** The invocation's totals over its runs' sealed receipts, each folded by the read model, so a run with no receipt or a partial one leaves a lower bound rather than a zero (#434 §11.3). */
 function invocationUsage(receipts: WikiReceipts): string {
 	if (receipts.length === 0) return "no worker runs admitted; no usage recorded";
-	const fields = (key: (typeof USAGE_FIELDS)[number][0]) =>
-		runsTotal(receipts.map((run) => runField(run.receipt, key, run.unrecoveredAttempts === true))).display;
-	const totals = Object.fromEntries(USAGE_FIELDS.map(([key]) => [key, fields(key)])) as Record<
-		(typeof USAGE_FIELDS)[number][0],
-		string
-	>;
+	const totals = Object.fromEntries(
+		USAGE_FIELDS.map(([key, , read]) => [
+			key,
+			runsTotal(receipts.flatMap((run) => runField(run.receipt, read, run.unrecoveredAttempts === true))).display,
+		]),
+	) as Record<UsageKey, string>;
 	const partial = receipts.filter((run) => run.cacheReporting === "unreported" || run.cacheReporting === "mixed").length;
 	const cacheRead = receipts.every((run) => run.cacheReporting === "unreported")
 		? "unreported"
 		: partial > 0
-			? `${totals.cacheReadTokenCount} (unreported on ${partial} runs)`
+			? `${totals.cacheRead} (unreported on ${partial} runs)`
 			: undefined;
+	const unpriced: Pricing = { usd: notObserved, pricedBy: "none" };
 	const cost = runsCost(
 		receipts.flatMap((run) => [
-			run.receipt
-				? { usd: run.receipt.costUsd, provenance: run.receipt.costProvenance }
-				: { usd: null, provenance: "unknown" as const },
+			run.receipt ? run.receipt.spend.pricing : unpriced,
 			// An attempt ledger that could not be read may hide earlier attempts nobody priced.
-			...(run.unrecoveredAttempts ? [{ usd: null, provenance: "unknown" as const }] : []),
+			...(run.unrecoveredAttempts ? [unpriced] : []),
 		]),
 	);
 	const capped = receipts.flatMap((run) => (run.completedAfterCapPage ? [run.completedAfterCapPage] : []));
 	return (
 		`${receipts.length} dispatched runs; reported tokens: ${USAGE_FIELDS.map(([key, label]) =>
-			key === "cacheReadTokenCount" && cacheRead !== undefined ? `${label}=${cacheRead}` : `${label}=${totals[key]}`,
+			key === "cacheRead" && cacheRead !== undefined ? `${label}=${cacheRead}` : `${label}=${totals[key]}`,
 		).join(", ")}` +
 		(receipts.some((run) => run.kind === "repair")
 			? `; repair runs=${receipts.filter((run) => run.kind === "repair").length}`

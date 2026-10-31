@@ -1,3 +1,4 @@
+import type { FactSum } from "../../core/telemetry/fact.js";
 /**
  * Operator runtime API v2. Import these types only; Clio injects the API.
  *
@@ -44,13 +45,16 @@ export interface ExtensionRuntimeSnapshotV2 extends ExtensionRuntimeSnapshot {
 	activeWorkspace: string | null;
 }
 
-/** Token counts as the provider reported them; cost is null unless the target declares pricing. */
+/**
+ * Token and cost sums over the calls of a turn or run, each a fact sum (#434): a call that reported nothing is
+ * counted as unknown, never as zero, and an estimate keeps its estimated coverage. Cost is null when nothing priced it.
+ */
 export interface ExtensionUsage {
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
-	costUsd: number | null;
+	inputTokens: FactSum;
+	outputTokens: FactSum;
+	cacheReadTokens: FactSum;
+	cacheWriteTokens: FactSum;
+	costUsd: FactSum | null;
 	model: string | null;
 	target: string | null;
 }

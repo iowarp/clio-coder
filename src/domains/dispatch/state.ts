@@ -19,9 +19,12 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { Value } from "typebox/value";
 import { resolveGuardrail } from "../../core/guardrails.js";
 import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
+import { unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
+import { RunUsageFactsSchema } from "../../core/telemetry/schemas.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { removeRunTelemetry } from "../telemetry/retention.js";
@@ -58,7 +61,7 @@ export interface LedgerOptions {
 
 export type CreateRunInput = Omit<
 	RunEnvelope,
-	"version" | "id" | "startedAt" | "endedAt" | "exitCode" | "status" | "pid" | "heartbeatAt" | "tokenCount" | "costUsd"
+	"version" | "id" | "startedAt" | "endedAt" | "exitCode" | "status" | "pid" | "heartbeatAt" | "spend"
 > & { id?: string };
 
 export interface Ledger {
@@ -163,12 +166,12 @@ function readRuns(): RunEnvelope[] {
 	if (raw.length === 0) return [];
 	const parsed = JSON.parse(raw) as unknown;
 	if (!Array.isArray(parsed)) return [];
+	// The ledger is live fleet state, not history: a file in any other shape is replaced on the next write, never
+	// read, so a row whose spend is not one fact per quantity drops the whole file (#434).
 	const envelopes: RunEnvelope[] = [];
 	for (const entry of parsed) {
-		if (!isRecord(entry)) continue;
-		const version = entry.version === undefined ? 1 : entry.version;
-		if (version !== 1) continue;
-		envelopes.push({ ...(entry as unknown as RunEnvelope), version: 1 });
+		if (!isRecord(entry) || entry.version !== 1 || !Value.Check(RunUsageFactsSchema, entry.spend)) return [];
+		envelopes.push(entry as unknown as RunEnvelope);
 	}
 	return envelopes;
 }
@@ -295,14 +298,12 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				heartbeatAt: null,
 				sessionId: input.sessionId,
 				cwd: input.cwd,
-				tokenCount: 0,
-				reasoningTokenCount: 0,
+				spend: unobservedRunUsageFacts(),
 				...(input.staticShellHash !== undefined ? { staticShellHash: input.staticShellHash } : {}),
 				...(input.sessionShellHash !== undefined ? { sessionShellHash: input.sessionShellHash } : {}),
 				...(input.dynamicHash !== undefined ? { dynamicHash: input.dynamicHash } : {}),
 				...(input.promptSignature !== undefined ? { promptSignature: input.promptSignature } : {}),
 				...(input.toolSignature !== undefined ? { toolSignature: input.toolSignature } : {}),
-				costUsd: 0,
 			};
 			runs.unshift(envelope);
 			dirty.add(envelope.id);

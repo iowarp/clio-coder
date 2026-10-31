@@ -108,7 +108,7 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 		equal(receipt.outcome, "succeeded");
 		equal(receipt.exitCode, 0);
 		match(receipt.output?.text ?? "", /PONG/);
-		equal(receipt.tokenCount, 4);
+		deepStrictEqual(receipt.spend.totalTokens, { kind: "measured", value: 4, source: "provider" });
 		deepStrictEqual(receipt.externalTelemetry, {
 			tokenUsage: "provider-reported",
 			cost: "missing",
@@ -116,7 +116,7 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 			exitReason: "stop",
 			toolTelemetry: "unavailable",
 		});
-		equal(receipt.costProvenance, "unknown");
+		equal(receipt.spend.pricing.usd.kind, "unknown");
 		equal(receipt.reproducibility?.cwd, root);
 		const stateDir = process.env.CLIO_CODER_STATE_DIR;
 		ok(stateDir);
@@ -202,9 +202,11 @@ for (const event of [
 		});
 		const receipt = await run.finalPromise;
 		equal(receipt.outcome, "succeeded");
-		equal(receipt.tokenCount, 12);
-		equal(receipt.costUsd, 0.02);
-		equal(receipt.costProvenance, "estimated");
+		deepStrictEqual(receipt.spend.totalTokens, { kind: "measured", value: 12, source: "provider" });
+		deepStrictEqual(receipt.spend.pricing, {
+			usd: { kind: "estimated", value: 0.02, method: "peer-report" },
+			pricedBy: "provider",
+		});
 		deepStrictEqual(receipt.externalTelemetry, {
 			tokenUsage: "provider-reported",
 			cost: "peer-estimated",

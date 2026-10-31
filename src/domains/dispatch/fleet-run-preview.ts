@@ -1,4 +1,4 @@
-import { renderCostAmount } from "../telemetry/cost.js";
+import { renderUsdLimit } from "../../core/telemetry/render.js";
 /**
  * What `/fleet run <playbook>` will do, projected before anything dispatches.
  *
@@ -328,13 +328,13 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 	if (input.budget) {
 		if (input.budget.verdict === "over" || input.budget.verdict === "at") {
 			diagnostics.push(
-				`budget ceiling crossed: ${budgetSpendText(budget.currentUsd, budget.pricing)} / ${renderCostAmount(budget.ceilingUsd, "known")}`,
+				`budget ceiling crossed: ${budgetSpendText(budget.currentUsd, budget.pricing)} / ${renderUsdLimit(budget.ceilingUsd)}`,
 			);
 		} else if (playbook.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
 			if (playbook.budgetUsd > remaining) {
 				diagnostics.push(
-					`fleet budget ${renderCostAmount(playbook.budgetUsd, "known")} exceeds remaining session budget ${budgetRemainingText(budget.ceilingUsd, budget.currentUsd, budget.pricing)}`,
+					`fleet budget ${renderUsdLimit(playbook.budgetUsd)} exceeds remaining session budget ${budgetRemainingText(budget.ceilingUsd, budget.currentUsd, budget.pricing)}`,
 				);
 			}
 		}

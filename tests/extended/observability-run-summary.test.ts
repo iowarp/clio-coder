@@ -1,18 +1,15 @@
 /**
- * The telemetry projection's run summary used to accept a NaN or
- * Infinity costUsd/tokenCount off a DispatchCompleted/DispatchFailed payload
- * with a bare `typeof === "number"` check, unlike the interactive dispatch
- * board's identical field, which already rejected non-finite values through
- * parseFiniteNumber. This exercises the fix end to end (through the bus, not
- * just the extracted helper) and confirms the shared status/provenance
- * resolvers are wired in.
+ * The telemetry projection's run summary takes a terminal payload's spend only in the run-usage shape: a malformed
+ * spend off a DispatchCompleted/DispatchFailed payload never replaces the run's facts (#434). This exercises it end to
+ * end through the bus and confirms the shared status resolver is wired in.
  */
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchFailedPayload } from "../../src/core/telemetry/live-events.js";
 import { dispatchHasRunLedger } from "../../src/domains/telemetry/extension.js";
 import { createTelemetryProjection, type ProjectionReadModel } from "../../src/domains/telemetry/projection.js";
+import { measuredSpend } from "../harness/receipt.js";
 
 function stubReadModel(): ProjectionReadModel {
 	return {};
@@ -58,38 +55,18 @@ describe("telemetry run summary: dispatch-failed terminal fields", () => {
 		strictEqual(projection.snapshot().runs[0]?.status, "aborted");
 	});
 
-	it("keeps the prior costUsd rather than storing NaN off a malformed payload", () => {
+	it("keeps the run's spend unknown rather than storing a malformed terminal spend", () => {
 		const bus = createTelemetryHub();
 		const projection = createTelemetryProjection(bus, stubReadModel());
-		bus.emit("run.failed", baseFailedPayload({ costUsd: Number.NaN }));
-		strictEqual(projection.snapshot().runs[0]?.costUsd, 0);
+		bus.emit("run.failed", baseFailedPayload({ spend: { totalTokens: Number.NaN } as never }));
+		strictEqual(projection.snapshot().runs[0]?.spend.totalTokens.kind, "unknown");
 	});
 
-	it("keeps the prior tokenCount rather than storing Infinity off a malformed payload", () => {
+	it("accepts a terminal spend in the run-usage shape", () => {
 		const bus = createTelemetryHub();
 		const projection = createTelemetryProjection(bus, stubReadModel());
-		bus.emit("run.failed", baseFailedPayload({ tokenCount: Number.POSITIVE_INFINITY }));
-		strictEqual(projection.snapshot().runs[0]?.tokens.total, 0);
-	});
-
-	it("accepts a genuine finite costUsd normally", () => {
-		const bus = createTelemetryHub();
-		const projection = createTelemetryProjection(bus, stubReadModel());
-		bus.emit("run.failed", baseFailedPayload({ costUsd: 0.42 }));
-		strictEqual(projection.snapshot().runs[0]?.costUsd, 0.42);
-	});
-
-	it("falls back to unknown rather than storing a provenance value outside the closed set", () => {
-		const bus = createTelemetryHub();
-		const projection = createTelemetryProjection(bus, stubReadModel());
-		bus.emit("run.failed", baseFailedPayload({ costProvenance: "bogus" as never }));
-		strictEqual(projection.snapshot().runs[0]?.costProvenance, "unknown");
-	});
-
-	it("accepts a genuine provenance value", () => {
-		const bus = createTelemetryHub();
-		const projection = createTelemetryProjection(bus, stubReadModel());
-		bus.emit("run.failed", baseFailedPayload({ costProvenance: "estimated" }));
-		strictEqual(projection.snapshot().runs[0]?.costProvenance, "estimated");
+		const spend = measuredSpend({ input: 4, output: 2 }, 0.42, "catalog");
+		bus.emit("run.failed", baseFailedPayload({ spend }));
+		deepStrictEqual(projection.snapshot().runs[0]?.spend, spend);
 	});
 });

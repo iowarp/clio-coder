@@ -82,6 +82,15 @@ export const PricingSchema = Type.Object(
 /** One priced amount: the USD fact and who priced it. Every cost Clio carries has this shape (#434). */
 export type Pricing = Static<typeof PricingSchema>;
 export type PricedBy = Pricing["pricedBy"];
+/**
+ * A run's spend as one fact per quantity: what run.settled states and what the run ledger, live run events and
+ * surfaces carry while the run is open (#434). The read model's fold over the run's calls keeps the per-call coverage.
+ */
+export const RunUsageFactsSchema = Type.Object(
+	{ usage: UsageSchema, totalTokens: factSchema(count), apiCalls: factSchema(count), pricing: PricingSchema },
+	closed,
+);
+export type RunUsageFacts = Static<typeof RunUsageFactsSchema>;
 const target = Type.Object(
 	{
 		targetId: ExistingId,

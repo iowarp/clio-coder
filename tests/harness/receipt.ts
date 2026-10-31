@@ -1,6 +1,44 @@
 /** Run envelope and result draft fixtures for settlement (#434). */
 
+import type { PricedBy } from "../../src/core/telemetry/pricing.js";
+import { pricedUsd } from "../../src/core/telemetry/pricing.js";
+import type { RunUsageFacts } from "../../src/core/telemetry/schemas.js";
 import type { RunEnvelope, RunResultDraft } from "../../src/domains/dispatch/types.js";
+
+/** A run spend whose every count the provider measured, priced as given (#434). */
+export function measuredSpend(
+	counts: {
+		input?: number;
+		output?: number;
+		cacheRead?: number;
+		cacheWrite?: number;
+		cacheWrite1h?: number;
+		reasoning?: number;
+		total?: number;
+		calls?: number;
+	} = {},
+	usd: number | null = null,
+	pricedBy: PricedBy = usd === null ? "none" : "target-rates",
+): RunUsageFacts {
+	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
+	const input = counts.input ?? 0;
+	const output = counts.output ?? 0;
+	const cacheRead = counts.cacheRead ?? 0;
+	const cacheWrite = counts.cacheWrite ?? 0;
+	return {
+		usage: {
+			input: measured(input),
+			output: measured(output),
+			cacheRead: measured(cacheRead),
+			cacheWrite: measured(cacheWrite),
+			cacheWrite1h: measured(counts.cacheWrite1h ?? 0),
+			reasoning: measured(counts.reasoning ?? 0),
+		},
+		totalTokens: measured(counts.total ?? input + output + cacheRead + cacheWrite),
+		apiCalls: { kind: "measured", value: counts.calls ?? 1, source: "local-count" },
+		pricing: pricedUsd(pricedBy, usd),
+	};
+}
 
 export function fixtureEnvelope(runId = "run-1"): RunEnvelope {
 	return {
@@ -23,15 +61,9 @@ export function fixtureEnvelope(runId = "run-1"): RunEnvelope {
 		heartbeatAt: null,
 		sessionId: "session-1",
 		cwd: "/workspace",
-		tokenCount: 42,
-		inputTokenCount: 20,
-		outputTokenCount: 22,
-		reasoningTokenCount: 0,
-		cacheReadTokenCount: 0,
-		cacheWriteTokenCount: 0,
+		spend: measuredSpend({ input: 20, output: 22 }, 0.01),
 		sessionShellHash: null,
 		dynamicHash: null,
-		costUsd: 0.01,
 	};
 }
 
@@ -53,7 +85,6 @@ export function fixtureReceiptDraft(envelope: RunEnvelope): RunResultDraft {
 			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
 			resultContract: null,
 		},
-		costProvenance: "unknown",
 		runId: envelope.id,
 		agentId: envelope.agentId,
 		executionRole: "builder",
@@ -67,13 +98,7 @@ export function fixtureReceiptDraft(envelope: RunEnvelope): RunResultDraft {
 		outcome: "succeeded",
 		outcomeDetail: null,
 		exitCode: 0,
-		tokenCount: envelope.tokenCount,
-		inputTokenCount: 20,
-		outputTokenCount: 22,
-		cacheReadTokenCount: 0,
-		cacheWriteTokenCount: 0,
-		reasoningTokenCount: 0,
-		costUsd: envelope.costUsd,
+		spend: envelope.spend,
 		compiledPromptHash: null,
 		staticCompositionHash: null,
 		sessionShellHash: null,

@@ -216,14 +216,7 @@ function bootstrapTelemetry(
 	if (receipt.runtimeResolution?.effectiveThinkingLevel) {
 		telemetry.thinkingLevel = receipt.runtimeResolution.effectiveThinkingLevel;
 	}
-	telemetry.tokens = {
-		total: receipt.tokenCount,
-		...(receipt.inputTokenCount !== undefined ? { input: receipt.inputTokenCount } : {}),
-		...(receipt.outputTokenCount !== undefined ? { output: receipt.outputTokenCount } : {}),
-		...(receipt.cacheReadTokenCount !== undefined ? { cacheRead: receipt.cacheReadTokenCount } : {}),
-		...(receipt.cacheWriteTokenCount !== undefined ? { cacheWrite: receipt.cacheWriteTokenCount } : {}),
-		...(receipt.reasoningTokenCount !== undefined ? { reasoning: receipt.reasoningTokenCount } : {}),
-	};
+	telemetry.spend = receipt.spend;
 	telemetry.toolCalls = receipt.toolCalls;
 	telemetry.toolFailures = receipt.toolStats.reduce((total, stat) => total + stat.errors, 0);
 	telemetry.toolBlocked = receipt.toolStats.reduce((total, stat) => total + stat.blocked, 0);

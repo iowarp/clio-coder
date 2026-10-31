@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { ClioSettings } from "../core/config.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
+import { renderPricingSum } from "../core/telemetry/render.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -34,7 +35,6 @@ import { probeGitChangesAsync } from "../domains/session/workspace/git-probe.js"
 import type { OutcomeRecord, SystemOne } from "../domains/system-one/index.js";
 import { draftTakenOutcome } from "../domains/system-one/outcomes.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
-import { renderCostAggregate } from "../domains/telemetry/index.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { createWorkspaceSnapshots, type WorkspaceSnapshots } from "../domains/workspace-snapshots/index.js";
@@ -810,10 +810,8 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 				fleetInFlight = null;
 				deps.notify(
 					outcome.cleanRun ? "success" : "warning",
-					// `totalCost` rather than the bare `totalCostUsd` sum: a run whose
-					// receipts were all unpriced reads as not measured instead of as a
-					// measured $0.0000 nobody put a number on.
-					`fleet ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, cost ${renderCostAggregate(outcome.totalCost)}`,
+					// An unpriced run keeps the total a lower bound, never a measured $0.00 nobody put a number on.
+					`fleet ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, cost ${renderPricingSum(outcome.totalCost)}`,
 					"fleet-run:settled",
 				);
 			})

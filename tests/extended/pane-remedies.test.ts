@@ -1,6 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { sumFacts, sumPricing } from "../../src/core/telemetry/pricing.js";
 import type { MuxContract } from "../../src/domains/mux/contract.js";
 import { detectMux } from "../../src/domains/mux/detect.js";
 import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
@@ -23,7 +24,7 @@ describe("contracts/pane refusal remedies", () => {
 				generatedAt: "2026-09-01T00:00:00.000Z",
 				running: [],
 				retrying: [],
-				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+				totals: { tokens: sumFacts([]), cost: sumPricing([]), runtimeSeconds: 0 },
 			}),
 			getCwd: () => "/workspace",
 		});

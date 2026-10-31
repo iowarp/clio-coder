@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { sumFacts, sumPricing } from "../../src/core/telemetry/pricing.js";
 import { terminalBackground } from "../../src/core/terminal-background.js";
 import { roleHex } from "../../src/core/theme-roles.js";
 import { tokenHex } from "../../src/core/theme-token-hex.js";
@@ -37,7 +38,7 @@ const SNAPSHOT = {
 	generatedAt: "2026-09-02T00:00:00.000Z",
 	running: [],
 	retrying: [],
-	totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+	totals: { tokens: sumFacts([]), cost: sumPricing([]), runtimeSeconds: 0 },
 };
 
 /** A pane host stand-in that records what was asked of it. */

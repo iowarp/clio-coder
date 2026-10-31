@@ -1,4 +1,7 @@
+import type { FactSum } from "../../core/telemetry/fact.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
+import type { PricingSum } from "../../core/telemetry/pricing.js";
+import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { DeclaredCheckKind } from "../../tools/verify/catalog.js";
 import type { NumericTolerance } from "../../tools/verify/numeric.js";
@@ -6,7 +9,6 @@ import type { PerfBudgetSpec } from "../../tools/verify/perf.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
 import type { WorkerContextSeed } from "../context/worker/contract.js";
-import type { CostProvenance } from "../providers/index.js";
 import type { ActionClass } from "../safety/action-classifier.js";
 import type { ApprovalAuthority } from "../safety/admission.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
@@ -324,28 +326,14 @@ export interface DispatchSnapshot {
 		startedAt: string;
 		/** Execution-only elapsed time retained for runtime monitoring. */
 		elapsedMs: number;
-		/**
-		 * `input` is fresh input only, as on the receipt. `cacheRead` travels
-		 * beside it so telemetry can fold it in the way it folds a settled
-		 * receipt; without it the live island undercounted input against the
-		 * worker card.
-		 */
-		tokens: { input: number; output: number; total: number; cacheRead?: number };
-		costUsd: number;
-		costProvenance?: CostProvenance;
+		/** The run's spend so far, as its call telemetry folds it; unknown until the first frame arrives (#434). */
+		spend: RunUsageFacts;
 		/** Fleet node this run was placed on; null means the local node. */
 		node: RunNodeIdentity | null;
 	}>;
 	retrying: Array<{ runId: string; agentId: string; task?: string; attempt: number; dueAt: string; reason: string }>;
-	totals: {
-		inputTokens: number;
-		outputTokens: number;
-		totalTokens: number;
-		costUsd: number;
-		/** Structural mirror of telemetry's CostAggregate; `calls` is what separates unpriced from priced-at-zero. */
-		cost?: { knownUsd: number; hasEstimated: boolean; hasUnknown: boolean; allKnownFree: boolean; calls: number };
-		runtimeSeconds: number;
-	};
+	/** Finalized and running runs together, one contribution per run. */
+	totals: { tokens: FactSum; cost: PricingSum; runtimeSeconds: number };
 }
 
 /**

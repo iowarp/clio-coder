@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { RunTelemetryV1 } from "../core/telemetry/dto.js";
+import { renderFactField, renderPricing } from "../core/telemetry/render.js";
 import { clioStateDir } from "../core/xdg.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { readAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
@@ -12,12 +13,7 @@ import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 import { inspectRunTrustStatus, type RunIntegrity } from "../domains/evidence/trust-status.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
 import { loadRunRecord } from "../domains/session/telemetry-source.js";
-import {
-	COST_NOT_MEASURED,
-	costAggregateForAmount,
-	formatCostAggregate,
-	readVerifiedRun,
-} from "../domains/telemetry/index.js";
+import { readVerifiedRun } from "../domains/telemetry/index.js";
 import { telemetryObjectsDirectory, telemetryRunDirectory } from "../domains/telemetry/paths.js";
 import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
 import type { MonitorToolDeps } from "./monitor.js";
@@ -132,7 +128,7 @@ function collectRunLine(row: CollectedRunRow): string[] {
 	const run = row.run;
 	const lines = run
 		? [
-				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance, run.costSummary)) ?? COST_NOT_MEASURED}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
+				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${renderFactField(run.spend.totalTokens)} cost=${renderPricing(run.spend.pricing)}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 			]
 		: [`- ${row.runId} agent=${row.agentId} state=missing (ledger row pruned; its run journal may still exist)`];
 	if (row.assignmentId !== null) {

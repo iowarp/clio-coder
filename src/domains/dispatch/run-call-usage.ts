@@ -4,8 +4,9 @@ import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EstimateMethod, Fact, FactSum } from "../../core/telemetry/fact.js";
 import { readWorkerTelemetryRecord } from "../../core/telemetry/forwarder.js";
+import { unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
 import { abandonedSettlement } from "../../core/telemetry/producer.js";
-import type { RunSettled } from "../../core/telemetry/schemas.js";
+import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import type { CostAggregate } from "../telemetry/cost.js";
 import type { CallTotals, FoldOptions } from "../telemetry/folds.js";
@@ -28,31 +29,17 @@ export interface RunCallUsage {
 	costSummary: CostAggregate;
 	costProvenance: CostProvenance;
 	tokenUsageMissing: boolean;
+	/** The run's spend as sums over its calls, so a budget counts the priced part of a partly priced run (#434). */
+	sums: { usd: FactSum; totalTokens: FactSum };
 	/** The same fold as one fact per quantity, as run.settled records it (#434). */
 	facts: RunUsageFacts;
 }
 
-/** A run's spend as run.settled states it: one Fact per quantity, collapsed from its call and usage records (#434). */
-export type RunUsageFacts = Pick<RunSettled, "usage" | "totalTokens" | "apiCalls" | "pricing">;
+export type { RunUsageFacts };
 
 const notObserved: Fact<number> = { kind: "unknown", reason: "not-observed" };
 
-/** A run with no call telemetry: every quantity unknown, never zero (R1, #434). */
-export function unobservedRunUsageFacts(): RunUsageFacts {
-	return {
-		usage: {
-			input: notObserved,
-			cacheRead: notObserved,
-			cacheWrite: notObserved,
-			cacheWrite1h: notObserved,
-			output: notObserved,
-			reasoning: notObserved,
-		},
-		totalTokens: notObserved,
-		apiCalls: notObserved,
-		pricing: { usd: notObserved, pricedBy: "none" },
-	};
-}
+export { unobservedRunUsageFacts };
 
 type Provenance = { methods: Set<EstimateMethod>; sources: Set<MeasuredSource> };
 type MeasuredSource = Extract<Fact<number>, { kind: "measured" }>["source"];
@@ -185,6 +172,7 @@ export function runUsageFromCallRecords(input: Iterable<TelemetryRecord>, option
 						? "known"
 						: "unknown",
 		tokenUsageMissing: facts.totalTokens.unknownCount > 0 || folded.amountCoverageUnknown,
+		sums: { usd: folded.usd, totalTokens: folded.totalTokens },
 		facts: runUsageFacts(records, folded),
 	};
 }

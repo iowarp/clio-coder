@@ -10,6 +10,7 @@ import type { WikiPlan } from "../../src/domains/context/wiki/plan.js";
 import { readWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { RunResult } from "../../src/domains/dispatch/types.js";
+import { measuredSpend } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 it("reports incomplete publications and fails wiki generation with pending pages, including no-op updates", () => {
@@ -68,44 +69,26 @@ it("separates known, estimated and unknown run costs and reports missing usage",
 				attempts: 0,
 			})),
 		};
-		const usage = {
-			exitCode: 0,
-			tokenCount: 50,
-			inputTokenCount: 30,
-			outputTokenCount: 10,
-			cacheReadTokenCount: 5,
-			cacheWriteTokenCount: 5,
-			missingTokenCalls: 0,
-		};
-		const receipts: Array<
-			| Pick<
-					RunResult,
-					| "exitCode"
-					| "tokenCount"
-					| "inputTokenCount"
-					| "outputTokenCount"
-					| "cacheReadTokenCount"
-					| "cacheWriteTokenCount"
-					| "missingTokenCalls"
-					| "costUsd"
-					| "costProvenance"
-			  >
-			| undefined
-		> = [
-			{
-				...usage,
-				tokenCount: 100,
-				inputTokenCount: 60,
-				outputTokenCount: 20,
-				cacheReadTokenCount: 10,
-				cacheWriteTokenCount: 10,
-				missingTokenCalls: 2,
-				costUsd: 1.25,
-				costProvenance: "known",
+		const unknown = { kind: "unknown", reason: "provider-omitted" } as const;
+		const unknownSpend = {
+			usage: {
+				input: unknown,
+				output: unknown,
+				cacheRead: unknown,
+				cacheWrite: unknown,
+				cacheWrite1h: unknown,
+				reasoning: unknown,
 			},
-			{ ...usage, costUsd: 0.75, costProvenance: "estimated" },
-			{ ...usage, costUsd: 999, costProvenance: "unknown" },
-			{ exitCode: 0, tokenCount: 7, costUsd: 999, costProvenance: "unknown" },
+			totalTokens: unknown,
+			apiCalls: unknown,
+			pricing: { usd: unknown, pricedBy: "none" as const },
+		};
+		const counts = { input: 30, output: 10, cacheRead: 5, cacheWrite: 5 };
+		const receipts: Array<Pick<RunResult, "exitCode" | "spend"> | undefined> = [
+			{ exitCode: 0, spend: measuredSpend({ input: 60, output: 20, cacheRead: 10, cacheWrite: 10 }, 1.25) },
+			{ exitCode: 0, spend: measuredSpend(counts, 0.75, "catalog") },
+			{ exitCode: 0, spend: measuredSpend(counts) },
+			{ exitCode: 0, spend: unknownSpend },
 			undefined,
 		];
 		let dispatched = 0;
@@ -135,11 +118,11 @@ it("separates known, estimated and unknown run costs and reports missing usage",
 			},
 		});
 		assert.equal(dispatched, 5);
-		// A run with no receipt, one that never recorded its call coverage and one whose calls went unreported each
-		// leave a lower bound; a run nobody priced leaves the cost one (#434 §11.3).
+		// A run with no receipt and one whose usage went unreported each leave a lower bound; a run nobody priced leaves
+		// the cost one (#434 §11.3).
 		assert.deepEqual(summaries, [
-			"5 dispatched runs; reported tokens: total=≥207 (3 runs unknown), input=≥120 (3 runs unknown), output=≥40 (3 runs unknown)" +
-				", cache read=≥20 (3 runs unknown), cache write=≥20 (3 runs unknown), missing-usage calls=≥2 (2 runs unknown)" +
+			"5 dispatched runs; reported tokens: total=≥200 (2 runs unknown), input=≥120 (2 runs unknown), output=≥40 (2 runs unknown)" +
+				", cache read=≥20 (2 runs unknown), cache write=≥20 (2 runs unknown)" +
 				"; reported cost=~$2.00 +?",
 		]);
 	} finally {
@@ -172,20 +155,21 @@ async function runCacheReportingFixture(
 			],
 		};
 		// Every dispatch (writer, retry, repair) returns the same receipt so the fixture does not depend on the dispatch count.
+		const cacheRead = (measured: boolean) =>
+			measured
+				? { kind: "measured" as const, value: 0, source: "provider" as const }
+				: { kind: "unknown" as const, reason: "provider-omitted" as const };
+		const spend = measuredSpend({ input: 30, output: 10, cacheRead: 0, cacheWrite: 5 }, 1);
 		const receipt = {
 			exitCode: 0,
-			tokenCount: 50,
-			inputTokenCount: 30,
-			outputTokenCount: 10,
-			cacheReadTokenCount: 0,
-			cacheWriteTokenCount: 5,
-			missingTokenCalls: 0,
-			costUsd: 1,
-			costProvenance: "known",
+			// A run whose every tracked call omitted the field folds to an unknown cache read.
+			spend: flags?.every((reported) => !reported)
+				? { ...spend, usage: { ...spend.usage, cacheRead: cacheRead(false) } }
+				: spend,
 			...(flags
 				? {
-						upstreamResponses: flags.map((cacheReadReported) => ({
-							usage: { observed: true, cacheReadReported },
+						upstreamResponses: flags.map((reported) => ({
+							usage: { ...spend.usage, cacheRead: cacheRead(reported) },
 							usageScope: "call",
 						})),
 					}
@@ -267,28 +251,16 @@ it("counts every attempt of a transiently retried dispatch and pairs each run id
 		const terminal = {
 			runId: "retry-1",
 			exitCode: 1,
-			tokenCount: 500,
-			inputTokenCount: 300,
-			outputTokenCount: 100,
-			cacheReadTokenCount: 50,
-			cacheWriteTokenCount: 50,
-			missingTokenCalls: 0,
-			costUsd: 2,
-			costProvenance: "known",
+			spend: measuredSpend({ input: 300, output: 100, cacheRead: 50, cacheWrite: 50 }, 2),
 		};
+		const earlierSpend = measuredSpend({ input: 60, output: 20, cacheRead: 10, cacheWrite: 10 }, 0.5);
+		// The earlier attempt had a call that reported no usage, so its total is unknown.
 		const firstAttempt = {
 			id: "retry-0",
 			status: "failed",
 			endedAt: "2026-01-01T00:00:00.000Z",
 			lineage: { parentRunId: null, rootRunId: "retry-0", attempt: 0, depth: 0 },
-			tokenCount: 100,
-			inputTokenCount: 60,
-			outputTokenCount: 20,
-			cacheReadTokenCount: 10,
-			cacheWriteTokenCount: 10,
-			missingTokenCalls: 1,
-			costUsd: 0.5,
-			costProvenance: "known",
+			spend: { ...earlierSpend, totalTokens: { kind: "unknown", reason: "provider-omitted" } },
 		};
 		const dispatch = {
 			abort() {},
@@ -332,16 +304,16 @@ it("counts every attempt of a transiently retried dispatch and pairs each run id
 		for (const detail of details) {
 			assert.match(detail, /; run=retry-1; tokens: total=500,/u);
 			assert.doesNotMatch(detail, /run=retry-0; tokens/u);
-			assert.match(detail, /attempts=2 \(earlier: retry-0 tokens=100 outcome=failed\)/u);
+			assert.match(detail, /attempts=2 \(earlier: retry-0 tokens=unknown outcome=failed\)/u);
 			// The earlier attempt had a call that reported no usage, so the total is a lower bound.
-			assert.match(detail, /all-attempt tokens total=≥600 \(1 run unknown\)/u);
+			assert.match(detail, /all-attempt tokens total=≥500 \(1 run unknown\)/u);
 		}
 		const attemptsAdmitted = details.length;
 		assert.equal(summaries.length, 1);
 		assert.match(
 			summaries[0] ?? "",
 			new RegExp(
-				`^${attemptsAdmitted * 2} dispatched runs; reported tokens: total=≥${(attemptsAdmitted * 600).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), input=≥${(attemptsAdmitted * 360).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), output=≥${(attemptsAdmitted * 120).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), cache read=≥${(attemptsAdmitted * 60).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), cache write=≥${(attemptsAdmitted * 60).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), missing-usage calls=${attemptsAdmitted}; reported cost=\\$[0-9.]+$`,
+				`^${attemptsAdmitted * 2} dispatched runs; reported tokens: total=≥${(attemptsAdmitted * 500).toLocaleString("en-US")} \\(${attemptsAdmitted} runs? unknown\\), input=${(attemptsAdmitted * 360).toLocaleString("en-US")}, output=${(attemptsAdmitted * 120).toLocaleString("en-US")}, cache read=${(attemptsAdmitted * 60).toLocaleString("en-US")}, cache write=${(attemptsAdmitted * 60).toLocaleString("en-US")}; reported cost=\\$[0-9.]+$`,
 				"u",
 			),
 		);
@@ -375,10 +347,7 @@ it("records the validation sidecar and last failure under the terminal run of a 
 		const terminal = {
 			runId: "retry-1",
 			exitCode: 0,
-			tokenCount: 10,
-			missingTokenCalls: 0,
-			costUsd: 0,
-			costProvenance: "known",
+			spend: measuredSpend({ input: 5, output: 5 }, 0),
 		};
 		const dispatch = {
 			abort() {},
@@ -439,10 +408,7 @@ it("flags usage as incomplete when the attempt ledger cannot be read", async () 
 		const terminal = {
 			runId: "ledger-0",
 			exitCode: 1,
-			tokenCount: 10,
-			missingTokenCalls: 0,
-			costUsd: 0,
-			costProvenance: "known",
+			spend: measuredSpend({ input: 5, output: 5 }, 0),
 		};
 		const dispatch = {
 			abort() {},

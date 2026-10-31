@@ -1,3 +1,4 @@
+import { Value } from "typebox/value";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 /**
@@ -19,13 +20,14 @@ import { normalizeTokenUsage } from "../../core/token-split.js";
 import { resolveDispatchFailureStatus } from "../../core/dispatch-outcome.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type { DispatchRunIdentity } from "../../core/telemetry/live-events.js";
+import { unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
+import { type RunUsageFacts, RunUsageFactsSchema } from "../../core/telemetry/schemas.js";
 import { truncateToWidth } from "../../engine/tui-primitives.js";
 import type { AgentAudience } from "../agents/spec.js";
 import { cloneRunToolBudgetEnvelope, type RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
 import type { DispatchSnapshot } from "../dispatch/contract.js";
 import type { DispatchRequestOrigin, RunKind } from "../dispatch/types.js";
 import { summarizeTrustStatus } from "../evidence/trust-projection.js";
-import { type CostProvenance, resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import type {
 	TelemetryRunProjection,
@@ -33,7 +35,6 @@ import type {
 	TelemetryRunSummary,
 	TelemetrySnapshot,
 } from "./contract.js";
-import type { CostAggregate } from "./cost.js";
 import { createWorkerProgressFold, type WorkerProgressFold } from "./worker-progress.js";
 
 /** Settled run summaries retained, in addition to all active runs. */
@@ -83,10 +84,6 @@ interface RunEntry extends TelemetryRunSummary {
 }
 
 const TASK_SUMMARY_MAX_WIDTH = 240;
-
-function finiteOrZero(value: unknown): number {
-	return num(value, 0);
-}
 
 function parseRuntimeKind(value: unknown): RunKind {
 	if (value === "sdk" || value === "subprocess" || value === "acp-delegation") return value;
@@ -202,43 +199,17 @@ function readRetrySnapshot(
 	return retrying;
 }
 
-function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
-	string,
-	{
-		inputTokens: number;
-		outputTokens: number;
-		tokenCount: number;
-		costUsd: number;
-		costProvenance: CostProvenance;
-		outcomePhase: string;
-		budget?: RunToolBudgetEnvelope;
-	}
-> {
-	const running = new Map<
-		string,
-		{
-			inputTokens: number;
-			outputTokens: number;
-			tokenCount: number;
-			costUsd: number;
-			costProvenance: CostProvenance;
-			outcomePhase: string;
-			budget?: RunToolBudgetEnvelope;
-		}
-	>();
+function readRunningSnapshot(
+	snapshot: DispatchSnapshot,
+): Map<string, { spend: RunUsageFacts; outcomePhase: string; budget?: RunToolBudgetEnvelope }> {
+	const running = new Map<string, { spend: RunUsageFacts; outcomePhase: string; budget?: RunToolBudgetEnvelope }>();
 	try {
 		for (const value of snapshot.running) {
 			const runId = asRunId(value.runId);
 			if (!runId) continue;
 			const budget = cloneRunToolBudgetEnvelope(value.budget);
 			running.set(runId, {
-				// Input counts cache reads here as it does on the settled receipt
-				// (`applyTerminalTokens`) and in the worker card's processed total.
-				inputTokens: finiteOrZero(value.tokens.input) + finiteOrZero(value.tokens.cacheRead),
-				outputTokens: finiteOrZero(value.tokens.output),
-				tokenCount: finiteOrZero(value.tokens.total),
-				costUsd: finiteOrZero(value.costUsd),
-				costProvenance: value.costProvenance ?? "unknown",
+				spend: structuredClone(value.spend),
 				outcomePhase: value.outcomePhase,
 				...(budget !== undefined ? { budget } : {}),
 			});
@@ -334,9 +305,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			startedAtMs: now,
 			finishedAtMs: null,
 			durationMs: null,
-			tokens: { input: 0, output: 0, total: 0 },
-			costUsd: 0,
-			costProvenance: "unknown",
+			spend: unobservedRunUsageFacts(),
 		};
 	}
 
@@ -364,20 +333,9 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 		Object.assign(summary, Object.fromEntries(Object.entries(additions).filter(([, value]) => value !== undefined)));
 	}
 
-	// num()'s Number.isFinite check matters here specifically: a NaN or
-	// Infinity costUsd/tokenCount from a payload used to pass the bare
-	// `typeof === "number"` check this function had instead, so the projection
-	// could corrupt a run's running total on a malformed terminal payload while
-	// the dispatch board's parseFiniteNumber (an identical check) rejected it.
+	/** A terminal payload crossed the bus untyped; only a spend in the run-usage shape replaces the live one (#434). */
 	function applyTerminalTokens(summary: TelemetryRunSummary, payload: Record<string, unknown>): void {
-		summary.tokens.total = num(payload.tokenCount, summary.tokens.total);
-		if (typeof payload.inputTokenCount === "number") {
-			summary.tokens.input = num(payload.inputTokenCount, summary.tokens.input) + num(payload.cacheReadTokenCount, 0);
-		}
-		summary.tokens.output = num(payload.outputTokenCount, summary.tokens.output);
-		summary.costUsd = num(payload.costUsd, summary.costUsd);
-		summary.costProvenance = resolveCostProvenance(payload.costProvenance, summary.costProvenance);
-		if (payload.costSummary !== undefined) summary.costSummary = payload.costSummary as CostAggregate;
+		if (Value.Check(RunUsageFactsSchema, payload.spend)) summary.spend = structuredClone(payload.spend);
 	}
 
 	function settleFromReceipt(summary: RunEntry): void {
@@ -445,11 +403,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 		for (const [runId, live] of running) {
 			const entry = runs.get(runId);
 			if (!entry || (isTerminal(entry.status) && live.outcomePhase !== "aborting")) continue;
-			entry.tokens.input = live.inputTokens;
-			entry.tokens.output = live.outputTokens;
-			entry.tokens.total = live.tokenCount;
-			entry.costUsd = live.costUsd;
-			entry.costProvenance = live.costProvenance;
+			entry.spend = live.spend;
 			if (live.budget !== undefined) entry.budget = live.budget;
 			if (live.outcomePhase === "aborting" && entry.status !== "completed" && entry.status !== "aborted") {
 				entry.status = "cancelling";
@@ -545,13 +499,9 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			if (type === "message_end" && !isTerminal(summary.status)) {
 				const message = (event.message ?? {}) as { role?: unknown; usage?: Record<string, unknown> };
 				if (message.role === "assistant" && message.usage) {
+					// The run's spend comes from its call fold; a reply only says how full its context was.
 					const usage = normalizeTokenUsage(message.usage);
-					const input = usage.input + usage.cacheRead + usage.cacheWrite;
-					const output = usage.output;
-					summary.tokens.input += input;
-					summary.tokens.output += output;
-					summary.tokens.total += usage.totalTokens;
-					summary.lastContextTokens = input + output;
+					summary.lastContextTokens = usage.input + usage.cacheRead + usage.cacheWrite + usage.output;
 					changed = true;
 				}
 			}

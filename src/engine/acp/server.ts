@@ -6,9 +6,10 @@ import {
 } from "../../core/context-operation.js";
 import type { JobRecord } from "../../core/job-types.js";
 import { messageCallsForAccounting } from "../../core/message-accounting.js";
+import type { Fact } from "../../core/telemetry/fact.js";
+import { renderFact } from "../../core/telemetry/render.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { TelemetryReadModel, TelemetryView } from "../../domains/telemetry/contract.js";
-import { runTokenCount } from "../../domains/telemetry/read-model.js";
 import {
 	ACP_DISPATCH_STEER_METHOD,
 	ACP_EGGS_META_KEY,
@@ -4098,24 +4099,22 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	 * A terminal fleet frame's call coverage beside its token count: null where the run never recorded it, and the count
 	 * worded as a lower bound when calls went unreported, so a board never shows a partly counted run as whole (#434).
 	 */
-	const runTokenCoverage = (payload: {
-		tokenCount?: number;
-		apiCalls?: number;
-		missingTokenCalls?: number;
-	}): { apiCalls: number | null; missingTokenCalls: number | null; tokenDisplay: string | null } => {
-		const tokens = safeCount(payload.tokenCount);
-		const apiCalls = safeCount(payload.apiCalls);
-		const missingTokenCalls = safeCount(payload.missingTokenCalls);
+	const runTokenCoverage = (spend: {
+		totalTokens?: Fact<number>;
+		apiCalls?: Fact<number>;
+	}): {
+		tokenCount: number | null;
+		apiCalls: number | null;
+		missingTokenCalls: number | null;
+		tokenDisplay: string | null;
+	} => {
+		const known = (fact: Fact<number> | undefined) =>
+			fact?.kind === "measured" || fact?.kind === "estimated" ? safeCount(fact.value) : null;
 		return {
-			apiCalls,
-			missingTokenCalls,
-			tokenDisplay:
-				tokens === null
-					? null
-					: runTokenCount(tokens, {
-							...(apiCalls === null ? {} : { apiCalls }),
-							...(missingTokenCalls === null ? {} : { missingTokenCalls }),
-						}).display,
+			tokenCount: known(spend.totalTokens),
+			apiCalls: known(spend.apiCalls),
+			missingTokenCalls: null,
+			tokenDisplay: spend.totalTokens ? renderFact(spend.totalTokens) : null,
 		};
 	};
 	const receiptMeta = (runId: string, facts: RunResultFacts | null): Record<string, unknown> => ({
@@ -4251,8 +4250,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						outcomeCode: safeStoredIdentifier(payload.outcomeCode, 64),
 						outcomeDetail: safeStoredString(payload.outcomeDetail, 2048) || null,
 						durationMs: safeCount(payload.durationMs),
-						tokenCount: safeCount(payload.tokenCount),
-						...runTokenCoverage(payload),
+						...runTokenCoverage(payload.spend),
 					},
 					receiptMeta(identity.runId, readReceipt(identity.runId, false)),
 				);
@@ -4275,9 +4273,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						outcomeCode: safeStoredIdentifier(payload.outcomeCode, 64),
 						outcomeDetail: safeStoredString(payload.outcomeDetail, 2048) || null,
 						durationMs: safeCount(payload.durationMs),
-						...(typeof payload.tokenCount === "number"
-							? { tokenCount: safeCount(payload.tokenCount), ...runTokenCoverage(payload) }
-							: {}),
+						...(payload.spend ? runTokenCoverage(payload.spend) : {}),
 					},
 					receiptMeta(identity.runId, readReceipt(identity.runId, false)),
 				);
@@ -4894,7 +4890,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			};
 			const replayMeta = { ...receiptMeta(identity.runId, facts), [ACP_REPLAY_META_KEY]: { run: true } };
 			// The receipt's call coverage words its token count exactly as the live frame did (#434).
-			const tokens = { tokenCount: safeCount(facts?.tokenCount), ...runTokenCoverage(facts ?? {}) };
+			const tokens = runTokenCoverage({
+				...(facts?.tokens ? { totalTokens: facts.tokens } : {}),
+				...(facts?.apiCalls !== undefined
+					? { apiCalls: { kind: "measured" as const, value: facts.apiCalls, source: "local-count" as const } }
+					: {}),
+			});
 			if (outcome === "succeeded") {
 				forwardEvent("run.completed", null, true, { ...common, ...tokens }, replayMeta);
 			} else {
@@ -4902,7 +4903,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					"run.failed",
 					null,
 					true,
-					{ ...common, reason: outcome, ...(typeof facts?.tokenCount === "number" ? tokens : {}) },
+					{ ...common, reason: outcome, ...(facts?.tokens ? tokens : {}) },
 					replayMeta,
 				);
 			}

@@ -1,7 +1,6 @@
 import type { ToolRoundRecord } from "../../engine/types.js";
 import type { WorkerContextProvenance } from "../context/worker/contract.js";
 import type { FlowRestrictionSet } from "../safety/information-flow.js";
-import type { CostAggregate } from "../telemetry/cost.js";
 /**
  * Shared run + receipt types for the dispatch domain.
  *
@@ -18,11 +17,11 @@ import type { SkillActivation } from "../../core/skill-activation.js";
 import type { RunTerminalReason } from "../../core/telemetry/enums.js";
 import type { RunOutcome, RunOutcomeCode } from "../../core/telemetry/run-vocabulary.js";
 import { RUN_OUTCOME_CODES } from "../../core/telemetry/run-vocabulary.js";
-import type { CallUsage } from "../../core/token-split.js";
+import type { CallUsage, RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import type { AgentAudience } from "../agents/spec.js";
-import type { CostProvenance, RuntimeEnforcement, RuntimeTargetSnapshot } from "../providers/index.js";
+import type { RuntimeEnforcement, RuntimeTargetSnapshot } from "../providers/index.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
@@ -477,19 +476,10 @@ export interface RunEnvelope {
 	heartbeatAt: string | null;
 	sessionId: string | null;
 	cwd: string;
-	tokenCount: number;
-	apiCalls?: number;
+	/** The run's spend so far, one fact per quantity; it becomes the run.settled spend when the run ends (#434). */
+	spend: RunUsageFacts;
 	/** Effective forced routing attempts, including any recovery (#426). */
 	toolRounds?: ToolRoundRecord[];
-	missingTokenCalls?: number;
-	costSummary?: CostAggregate;
-	/** Input/output token split; written at finalization, absent on pre-split ledgers. */
-	inputTokenCount?: number;
-	outputTokenCount?: number;
-	reasoningTokenCount?: number;
-	cacheReadTokenCount?: number;
-	cacheWriteTokenCount?: number;
-	cacheWrite1hTokenCount?: number;
 	/**
 	 * A byte-for-byte copy of the receipt's `staticCompositionHash`, written
 	 * only by builds before 0.5.6. Rows that carry it keep it so the receipts
@@ -500,8 +490,6 @@ export interface RunEnvelope {
 	dynamicHash?: string | null;
 	promptSignature?: string | null;
 	toolSignature?: string | null;
-	costUsd: number;
-	costProvenance?: CostProvenance;
 }
 
 /**
@@ -775,7 +763,7 @@ export interface RunResultReproducibility {
 export interface RunResultUpstreamResponse {
 	/** One-based assistant-call index within this run; absent in older receipts. */
 	callIndex?: number;
-	/** Normalized counts; observed=false explicitly records unavailable provider usage. */
+	/** The call's usage, one fact per field; absent when the reply carried no usage at all. */
 	usage?: CallUsage;
 	usageScope?: "call" | "run-aggregate";
 	requestedModelId: string | null;
@@ -1016,24 +1004,13 @@ export interface RunResult {
 	operatorProfileApplied?: boolean;
 	exitCode: number;
 	failureMessage?: string;
-	tokenCount: number;
-	apiCalls?: number;
+	/** The run's spend, one fact per quantity, as run.settled states it (#434). */
+	spend: RunUsageFacts;
 	/** Effective forced routing attempts, including any recovery (#426). */
 	toolRounds?: ToolRoundRecord[];
-	missingTokenCalls?: number;
-	costSummary?: CostAggregate;
-	inputTokenCount?: number;
-	outputTokenCount?: number;
-	cacheReadTokenCount?: number;
-	cacheWriteTokenCount?: number;
-	cacheWrite1hTokenCount?: number;
-	reasoningTokenCount?: number;
 	upstreamResponses?: RunResultUpstreamResponse[];
 	/** Bounded final/partial assistant output; absent when none was captured. */
 	output?: RunResultOutput;
-	costUsd: number;
-	/** Pricing-source truth. Sealed on every receipt; unknown pricing says so. */
-	costProvenance: CostProvenance;
 	/** External CLI observation, distinct from Clio's target-pricing estimate. */
 	externalTelemetry?: {
 		tokenUsage: "provider-reported" | "missing" | "unverified";

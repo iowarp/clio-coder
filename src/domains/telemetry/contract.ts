@@ -21,14 +21,13 @@ import type {
 } from "../../core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { PreimageData, PreimageEventName } from "../../core/telemetry/events.js";
+import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
 import type { DispatchSnapshot } from "../dispatch/contract.js";
 import type { DispatchRequestOrigin, RunKind } from "../dispatch/types.js";
 import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
-import type { CostProvenance } from "../providers/index.js";
-import type { CostAggregate } from "./cost.js";
 import type { TurnsSum } from "./read-model.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "./session-journals.js";
 import type { WorkerProgressSnapshot } from "./worker-progress.js";
@@ -84,14 +83,8 @@ export interface TelemetryRunSummary {
 	startedAtMs: number;
 	finishedAtMs: number | null;
 	durationMs: number | null;
-	tokens: {
-		input: number;
-		output: number;
-		total: number;
-	};
-	costUsd: number;
-	costProvenance: CostProvenance;
-	costSummary?: CostAggregate;
+	/** The run's spend as the dispatch snapshot or its terminal event states it; unknown until either arrives (#434). */
+	spend: RunUsageFacts;
 	outcomeDetail?: string | null;
 	/** The run's journaled assessment, as its `evidence.assessed` reported it (#434). */
 	evidence?: { firstPassSuccess: boolean; findingCount: number } | null;

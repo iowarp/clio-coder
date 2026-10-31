@@ -47,10 +47,9 @@ import type { RouteObservation } from "./route-policy.js";
 import { type RouteQualityLabel, type RouteQualityReduction, reduceRouteQuality } from "./route-quality.js";
 import type { RunResult } from "./types.js";
 
+/** A run's spend fact holds no partial sum: a run with any unpriced call has an unknown cost (#434). */
 function receiptHasUnknownCost(receipt: RunResult): boolean {
-	return (
-		receipt.costSummary?.hasUnknown ?? (receipt.costProvenance === undefined || receipt.costProvenance === "unknown")
-	);
+	return receipt.spend.pricing.usd.kind === "unknown";
 }
 
 // ---------------------------------------------------------------------------
@@ -468,13 +467,14 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 							: "failure";
 				const completed = realized.outcome === "succeeded" && outcome.quality.label !== "fail";
 				const unpriced = receiptHasUnknownCost(outcome.receipt);
+				const cacheReadFact = outcome.receipt.spend.usage.cacheRead;
 				samples?.record(realized.route, {
 					qualityLabel: outcome.quality.label,
 					reliability,
 					firstPass: realized.firstPass,
 					completedCostUsd: completed && !unpriced ? realized.costUsd : null,
 					completedEndToEndMs: completed ? realized.endToEndMs : null,
-					cacheRead: outcome.receipt.cacheReadTokenCount == null ? null : outcome.receipt.cacheReadTokenCount > 0,
+					cacheRead: cacheReadFact.kind === "measured" ? cacheReadFact.value > 0 : null,
 					queueWaitMs: completed ? (outcome.phaseTiming?.queueWaitMs ?? null) : null,
 				});
 			} catch {

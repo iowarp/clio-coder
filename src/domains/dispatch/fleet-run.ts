@@ -19,22 +19,16 @@ import { attributeCommitMessage } from "../../core/commit-attribution.js";
 import { telemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
+import { type PricingSum, sumFacts, sumPricing } from "../../core/telemetry/pricing.js";
+import { renderPricing } from "../../core/telemetry/render.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { Playbook } from "../agents/playbook.js";
 import type { PlaybookCommandRegistry } from "../agents/playbook-commands.js";
 import { mutationReportPaths, resultContractAuthorship } from "../agents/result-contract.js";
 import type { AgentSpec } from "../agents/spec.js";
-import type { CostProvenance } from "../providers/index.js";
 import { activeDecisionRefs } from "../session/decision-board.js";
 import type { DecisionLedgerEntry } from "../session/entries.js";
-import {
-	aggregateCostAmounts,
-	type CostAggregate,
-	costAggregateOfFactSum,
-	renderCostAmount,
-} from "../telemetry/cost.js";
-import { foldFacts } from "../telemetry/folds.js";
 import { telemetryJournalPath, telemetryRunDirectory } from "../telemetry/paths.js";
 import { readVerifiedRun } from "../telemetry/run-record.js";
 import {
@@ -119,17 +113,12 @@ export interface FleetRunStepOutcome extends FleetRunStepEvent {
 	failureReason?: string;
 	/** Terminal run id, which names the run record for an agent step. */
 	terminalRunId: string;
-	costUsd: number;
 	/**
-	 * Where the number in `costUsd` came from, carried beside it because the two
-	 * are one fact. A gateway-routed run seals `costUsd: 0` with `unknown`: its
-	 * tokens were measured and nobody priced them. A renderer that reads the
-	 * amount without this prints `$0.0000` and turns unpriced work into a
-	 * measured zero. `known_free` on a deterministic step is the honest reading:
-	 * no model ran, so the zero is something code observed rather than missed.
+	 * What the step cost as a sum of priced contributions, so a resumed step keeps the known subtotal of a partly
+	 * priced run. A gateway-routed run that nobody priced is unknown, never `$0.00`; a deterministic step made no
+	 * model call, so its cost is not applicable (#434).
 	 */
-	costProvenance: CostProvenance;
-	costSummary?: CostAggregate;
+	pricing: PricingSum;
 	/** The agent run's result when this was an agent step. */
 	run?: RunResult;
 	/** The durable code-step record when this was a deterministic step. */
@@ -289,12 +278,8 @@ export interface FleetRunOutcome {
 	planHash: string;
 	result: ExecutionPlanResult;
 	receipts: ReadonlyArray<RunResult>;
-	/**
-	 * The fold that keeps unpriced calls distinguishable from priced ones, so a
-	 * run whose every receipt came back `unknown` renders as not measured rather
-	 * than as a total of zero dollars.
-	 */
-	totalCost: CostAggregate;
+	/** Every receipt's cost, one contribution per run, so an unpriced run keeps the total a lower bound (#434). */
+	totalCost: PricingSum;
 	/** Steps that ran unconditionally, excluding nodes a resolved loop skipped. */
 	requiredStepCount: number;
 	succeededStepCount: number;
@@ -317,9 +302,7 @@ interface StepRun {
 	runtimeId: string;
 	nodeId: string;
 	changedPaths: ReadonlyArray<string>;
-	costUsd: number;
-	costProvenance: RunResult["costProvenance"];
-	costSummary?: RunResult["costSummary"];
+	pricing: PricingSum;
 }
 
 function stepRunOf(result: RunResult): StepRun {
@@ -332,9 +315,7 @@ function stepRunOf(result: RunResult): StepRun {
 		runtimeId: result.runtimeId,
 		nodeId: result.node?.id ?? "local",
 		changedPaths: [...(result.worktree?.changedPaths ?? []), ...(result.checkoutChanges?.changedPaths ?? [])],
-		costUsd: result.costUsd,
-		costProvenance: result.costProvenance,
-		...(result.costSummary ? { costSummary: result.costSummary } : {}),
+		pricing: sumPricing([result.spend.pricing]),
 	};
 }
 
@@ -346,10 +327,6 @@ function replayedStepRun(runId: string, digest: string): StepRun | null {
 	const delivered = record.result?.state === "resolved" ? record.result.value : null;
 	// The run's folded spend keeps a measured subtotal its settled fact collapses to unknown once any call is (#434).
 	const usd = record.row.usd.fact;
-	const costSummary = costAggregateOfFactSum(
-		"unknownCount" in usd ? usd : foldFacts([usd]),
-		settled.pricing.pricedBy === "free",
-	);
 	return {
 		runId,
 		digest: settled.digest,
@@ -359,15 +336,7 @@ function replayedStepRun(runId: string, digest: string): StepRun | null {
 		runtimeId: settled.route.runtimeId,
 		nodeId: settled.node?.id ?? "local",
 		changedPaths: [...(delivered?.worktree?.changedPaths ?? []), ...(delivered?.checkoutChanges?.changedPaths ?? [])],
-		costUsd: costSummary.knownUsd,
-		costProvenance: costSummary.hasUnknown
-			? "unknown"
-			: costSummary.hasEstimated
-				? "estimated"
-				: costSummary.allKnownFree
-					? "known_free"
-					: "known",
-		costSummary,
+		pricing: { usd: "unknownCount" in usd ? usd : sumFacts([usd]), free: settled.pricing.pricedBy === "free" },
 	};
 }
 
@@ -700,16 +669,14 @@ async function runFleetHoldingWorkspace(
 			replayed: true,
 		};
 		stepDispatched(event);
-		const replayedCostSummary = receiptsByStep.get(stepId)?.costSummary;
 		input.onStepSettled?.({
 			...event,
 			succeeded: true,
 			terminalRunId: replayedResult.terminalRunId,
-			costUsd: receiptsByStep.get(stepId)?.costUsd ?? 0,
-			// A replay whose run cannot be read back has no cost claim at all,
-			// which is `unknown` rather than a zero the projection invented.
-			costProvenance: receiptsByStep.get(stepId)?.costProvenance ?? "unknown",
-			...(replayedCostSummary ? { costSummary: replayedCostSummary } : {}),
+			// A replay whose run cannot be read back has no cost claim at all: unknown, never a zero.
+			pricing:
+				receiptsByStep.get(stepId)?.pricing ??
+				sumPricing([{ usd: { kind: "unknown", reason: "not-observed" }, pricedBy: "none" }]),
 			result: replayedResult,
 		});
 		await fileStepAttempt(replayedResult.terminalRunId);
@@ -1075,15 +1042,13 @@ async function runFleetHoldingWorkspace(
 							agentId: step.agentId,
 							succeeded: stepSucceeded,
 							terminalRunId: receipt.runId,
-							costUsd: receipt.costUsd,
-							costProvenance: receipt.costProvenance,
-							...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
+							pricing: sumPricing([receipt.spend.pricing]),
 							run: receipt,
 							...(failureReason !== undefined ? { failureReason } : {}),
 						});
 						if (input.onStepSettled === undefined) {
 							notice(
-								`step ${step.id} ${step.agentId}: ${stepSucceeded ? "succeeded" : "failed"}${failureReason !== undefined ? ` reason=${failureReason}` : ""} assignment=${handle.runId} terminal-run=${receipt.runId} cost=${renderCostAmount(receipt.costUsd, receipt.costProvenance, receipt.costSummary)}`,
+								`step ${step.id} ${step.agentId}: ${stepSucceeded ? "succeeded" : "failed"}${failureReason !== undefined ? ` reason=${failureReason}` : ""} assignment=${handle.runId} terminal-run=${receipt.runId} cost=${renderPricing(receipt.spend.pricing)}`,
 							);
 						}
 						return {
@@ -1213,9 +1178,8 @@ async function runFleetHoldingWorkspace(
 						...event,
 						succeeded: outcome.report.passed,
 						terminalRunId: outcome.record.runId,
-						costUsd: 0,
-						// No model ran, so nothing needed pricing. This zero was observed.
-						costProvenance: "known_free",
+						// No model ran, so there was nothing to price.
+						pricing: sumPricing([{ usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" }]),
 						codeStep: outcome.record,
 						recordPath,
 					});
@@ -1409,15 +1373,7 @@ async function runFleetHoldingWorkspace(
 		planHash: input.plan.hash,
 		result,
 		receipts,
-		totalCost: aggregateCostAmounts(
-			receipts.map((receipt) => ({
-				usd: receipt.costUsd,
-				provenance: receipt.costProvenance,
-				apiCalls: receipt.apiCalls ?? 1,
-				missingTokenCalls: receipt.missingTokenCalls ?? 0,
-				...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
-			})),
-		),
+		totalCost: sumPricing(receipts.map((receipt) => receipt.spend.pricing)),
 		requiredStepCount: required.length,
 		succeededStepCount,
 		resolvedLoopCount: result.loops.length - failedLoops.length,

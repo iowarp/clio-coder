@@ -18,6 +18,7 @@
 import { randomBytes } from "node:crypto";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
+import { renderPricingSum, renderUsdLimit } from "../core/telemetry/render.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -74,12 +75,7 @@ import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { budgetRemainingText, budgetSpendText, SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
-import {
-	renderCostAggregate,
-	renderCostAmount,
-	type TelemetryContract,
-	TelemetryDomainModule,
-} from "../domains/telemetry/index.js";
+import { type TelemetryContract, TelemetryDomainModule } from "../domains/telemetry/index.js";
 import { fleetTotals, runTelemetry } from "../domains/telemetry/read-model.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
@@ -233,12 +229,12 @@ function preflightPlaybook(playbook: Playbook, deps: FleetPreflightDeps): string
 	if (deps.scheduling) {
 		const budget = deps.scheduling.preflight();
 		if (budget.verdict === "over" || budget.verdict === "at") {
-			return `budget ceiling crossed: ${budgetSpendText(budget.currentUsd, budget.pricing)} / ${renderCostAmount(budget.ceilingUsd, "known")}`;
+			return `budget ceiling crossed: ${budgetSpendText(budget.currentUsd, budget.pricing)} / ${renderUsdLimit(budget.ceilingUsd)}`;
 		}
 		if (playbook.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
 			if (playbook.budgetUsd > remaining) {
-				return `fleet budget ${renderCostAmount(playbook.budgetUsd, "known")} exceeds remaining session budget ${budgetRemainingText(budget.ceilingUsd, budget.currentUsd, budget.pricing)}`;
+				return `fleet budget ${renderUsdLimit(playbook.budgetUsd)} exceeds remaining session budget ${budgetRemainingText(budget.ceilingUsd, budget.currentUsd, budget.pricing)}`;
 			}
 		}
 	}
@@ -522,7 +518,7 @@ async function runFleet(
 							if (json) reporter.stdout(`${JSON.stringify(step.run)}\n`);
 							else {
 								reporter.stdout(
-									`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance, step.costSummary)}\n`,
+									`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderPricingSum(step.pricing)}\n`,
 								);
 							}
 							return;
@@ -595,7 +591,7 @@ async function runFleet(
 		);
 	} else {
 		reporter.stdout(
-			`fleet ${playbook.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost ${renderCostAggregate(outcome.totalCost)}\n`,
+			`fleet ${playbook.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps succeeded, ${outcome.resolvedLoopCount}/${outcome.result.loops.length} loops resolved, total cost ${renderPricingSum(outcome.totalCost)}\n`,
 		);
 		for (const loop of outcome.result.loops) {
 			reporter.stdout(

@@ -100,7 +100,6 @@ describe("exhausted result contract detail", () => {
 			...origin,
 		};
 		const receipt = await exhaustedRun(REASON, [answered, repair, failed]);
-		strictEqual(receipt.apiCalls, 2);
 		const rows = receipt.upstreamResponses ?? [];
 		strictEqual(rows.length, 2, JSON.stringify(rows));
 		strictEqual(rows[0]?.providerResponseId, "resp-1");

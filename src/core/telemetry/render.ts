@@ -1,5 +1,6 @@
 import { formatFooterTokens } from "../display-units.js";
 import type { Fact, FactSum } from "./fact.js";
+import type { Pricing, PricingSum } from "./pricing.js";
 
 /**
  * The canonical renderer (#434, R5). Every display string a telemetry DTO carries comes from here, and this module
@@ -101,6 +102,11 @@ export function renderCostClaim(cost: CostClaim | null | undefined): string | nu
 	if (cost.hasUnknown) return cost.knownUsd > 0 ? `${cost.hasEstimated ? "~" : ""}${renderUsd(cost.knownUsd)} +?` : null;
 	if (cost.hasEstimated) return `~${renderUsd(cost.knownUsd)} est`;
 	return renderUsd(cost.knownUsd);
+}
+
+/** A projected amount, such as a route's admission estimate: a figure Clio derived, never spend. */
+export function renderUsdEstimate(usd: number): string {
+	return `~${renderUsd(usd)} est`;
 }
 
 /**
@@ -218,6 +224,33 @@ export function renderUsdFact(fact: Fact<number>, pricedBy: string): string {
 	if (fact.kind === "estimated") return `~${renderUsd(fact.value)} est`;
 	if (fact.kind === "unknown") return COST_NOT_MEASURED;
 	return renderFact(fact, "usd");
+}
+
+/**
+ * One count as a `key=value` field: no spaces and no grouping, so a line stays machine-splittable. An estimate keeps
+ * `~`, and an unknown or absent count says so rather than reading as `0` (R1, R10).
+ */
+export function renderFactField(fact: Fact<number>): string {
+	switch (fact.kind) {
+		case "measured":
+			return String(fact.value);
+		case "estimated":
+			return `~${fact.value}`;
+		case "unknown":
+			return "unknown";
+		case "absent":
+			return "n/a";
+	}
+}
+
+/** One priced amount, as a cost field renders it. */
+export function renderPricing(pricing: Pricing): string {
+	return renderUsdFact(pricing.usd, pricing.pricedBy);
+}
+
+/** Several priced amounts folded; `+?` and `~` mark the unpriced and estimated parts as on any sum. */
+export function renderPricingSum(sum: PricingSum): string {
+	return renderUsdSum(sum.usd, sum.free);
 }
 
 export function renderTextFact(fact: Fact<string | boolean | null>): string {

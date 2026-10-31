@@ -8,6 +8,7 @@ import { internalGitArgv } from "../../core/internal-git.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ContextActivityPayload } from "../../core/telemetry/live-events.js";
+import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
 import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
 import { pythonProposals } from "../../tools/verify/toolchain.js";
@@ -116,14 +117,8 @@ export interface BootstrapRunTelemetry {
 	runtimeId?: string;
 	runtimeKind?: string;
 	thinkingLevel?: string;
-	tokens?: {
-		total: number;
-		input?: number;
-		output?: number;
-		cacheRead?: number;
-		cacheWrite?: number;
-		reasoning?: number;
-	};
+	/** The generation run's spend, one fact per quantity (#434). */
+	spend?: RunUsageFacts;
 	toolCalls?: number;
 	toolFailures?: number;
 	toolBlocked?: number;
@@ -1505,7 +1500,8 @@ function durableGenerationTelemetry(telemetry: BootstrapGenerationTelemetry): Bo
 		if (bounded) state[key] = bounded;
 	}
 	for (const [key, value] of [
-		["tokenCount", run.tokens?.total],
+		// The project state keeps a plain count, so only a measured total is recorded (#434).
+		["tokenCount", run.spend?.totalTokens.kind === "measured" ? run.spend.totalTokens.value : undefined],
 		["toolCalls", run.toolCalls],
 		["durationMs", run.durationMs],
 		["promptBytes", run.promptBytes],

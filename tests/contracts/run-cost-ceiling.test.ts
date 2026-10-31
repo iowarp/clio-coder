@@ -2,8 +2,13 @@ import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, test } from "node:test";
 import { parseRunCliArgs } from "../../src/cli/args.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
+import { factKnownValue } from "../../src/core/telemetry/known.js";
+import type { CallStarted } from "../../src/core/telemetry/schemas.js";
+import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createRunCostCap, runCostCeilingUsd, sessionCeilingReached } from "../../src/domains/scheduling/budget.js";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -32,7 +37,7 @@ describe("--max-cost-usd and parallel dispatches", () => {
 		settings.fleet.retry.maxRetries = 0;
 		settings.safety.limits.sessionCostUsd = capUsd;
 		// Each worker would spend $3 over ten calls if nothing stopped it.
-		const pricedWorker = (): SpawnedWorker => {
+		const pricedWorker = (spec: WorkerSpec): SpawnedWorker => {
 			let aborted = false;
 			let settle!: (result: SpawnedWorkerResult) => void;
 			const promise = new Promise<SpawnedWorkerResult>((resolve) => {
@@ -50,15 +55,42 @@ describe("--max-cost-usd and parallel dispatches", () => {
 					for (let call = 0; call < 10; call++) {
 						await new Promise((resolve) => setImmediate(resolve));
 						if (aborted) break;
-						yield {
-							type: "message_end",
-							message: {
-								role: "assistant",
-								stopReason: "toolUse",
-								content: [],
-								usage: { input: 1000, output: 100, totalTokens: 1100, cost: { total: callUsd } },
+						// The run's spend reaches the host as call telemetry, the one source its meter reads (#434).
+						const context = spec.telemetryContext;
+						ok(context);
+						const started: CallStarted = {
+							callId: newCallId(),
+							attemptId: newAttemptId(),
+							attempt: 0,
+							roundKind: "normal",
+							toolChoice: "auto",
+							target: {
+								targetId: "fixture",
+								runtimeId: "fixture",
+								api: "fixture",
+								requestedModel: "fixture",
+								reportedModel: { kind: "unknown", reason: "not-observed" },
 							},
 						};
+						const message = {
+							role: "assistant",
+							stopReason: "toolUse",
+							content: [],
+							usage: { input: 1000, output: 100, totalTokens: 1100, cost: { total: callUsd } },
+						};
+						yield {
+							type: "clio_coder_telemetry",
+							record: {
+								...makeTelemetryRecord(
+									"call.settled",
+									{ ...started, stages: { settle: 1 }, ...callSettlementFromMessage(message, "target-rates") },
+									{ ...context, callId: started.callId, attemptId: started.attemptId },
+									{ t: new Date().toISOString(), mono: call },
+								),
+								origin: { host: "local-worker", pid: 42, birthToken: "fixture", monoEpochWallMs: 0 },
+							},
+						};
+						yield { type: "message_end", message };
 					}
 					settle(aborted ? { exitCode: null, signal: "SIGTERM" } : { exitCode: 0, signal: null });
 				})(),
@@ -85,7 +117,7 @@ describe("--max-cost-usd and parallel dispatches", () => {
 			};
 			const runs = await Promise.all([bundle.contract.dispatch(request), bundle.contract.dispatch(request)]);
 			const receipts = await Promise.all(runs.map((run) => run.finalPromise));
-			const spentUsd = receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0);
+			const spentUsd = receipts.reduce((sum, receipt) => sum + factKnownValue(receipt.spend.pricing.usd), 0);
 			// The documented bound: the cap plus one in-flight call per running worker, to 1e-9 USD.
 			ok(spentUsd <= capUsd + 2 * callUsd + 1e-9, `spent ${spentUsd}`);
 			for (const receipt of receipts) {

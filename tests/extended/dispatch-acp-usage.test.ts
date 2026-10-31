@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { factKnownValue } from "../../src/core/telemetry/known.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import { runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
@@ -63,7 +64,8 @@ for (const scenario of [
 		}),
 		total: 150,
 		split: [140, 10, 0, 0, 0],
-		cost: 0.02,
+		// The session cost is partly unpriced, so the run's one cost fact is unknown, never the priced part (#434).
+		cost: 0,
 		provenance: "unknown",
 	},
 	{
@@ -169,23 +171,29 @@ for (const scenario of [
 			ok(aggregate?.k === "run.usage_reported");
 			strictEqual(aggregate.ctx.sessionId, null);
 			const replayed = runUsageFromCallRecords(journal.records.map(({ record }) => record));
-			strictEqual(receipt.tokenCount, replayed.totalTokens);
-			strictEqual(receipt.costUsd, replayed.costUsd);
-			if (aggregate.data.usage.cacheRead.kind === "unknown") strictEqual(receipt.cacheReadTokenCount, undefined);
-			if (aggregate.data.apiCalls.kind === "unknown") strictEqual(receipt.apiCalls, 0);
+			deepStrictEqual(receipt.spend, replayed.facts);
 			const integrity = verifyRunRecordReport(stateDir, run.runId);
 			ok(integrity.ok, JSON.stringify(integrity));
+			const { spend } = receipt;
+			const pricing = spend.pricing;
 			const facts = {
-				tokenCount: receipt.tokenCount,
+				tokenCount: factKnownValue(spend.totalTokens),
 				split: [
-					receipt.inputTokenCount,
-					receipt.outputTokenCount,
-					receipt.cacheReadTokenCount ?? 0,
-					receipt.cacheWriteTokenCount,
-					receipt.reasoningTokenCount,
-				],
-				costUsd: receipt.costUsd,
-				costProvenance: receipt.costProvenance,
+					spend.usage.input,
+					spend.usage.output,
+					spend.usage.cacheRead,
+					spend.usage.cacheWrite,
+					spend.usage.reasoning,
+				].map(factKnownValue),
+				costUsd: factKnownValue(pricing.usd),
+				costProvenance:
+					pricing.usd.kind === "unknown" || pricing.usd.kind === "absent"
+						? "unknown"
+						: pricing.pricedBy === "free"
+							? "known_free"
+							: pricing.usd.kind === "estimated"
+								? "estimated"
+								: "known",
 			};
 			t.diagnostic(
 				JSON.stringify({
@@ -212,20 +220,11 @@ for (const scenario of [
 				strictEqual("usage" in (receipt.upstreamResponses?.[0] ?? {}), false);
 			}
 			if (scenario.name === "Clio metadata costUsd with estimated provenance") {
-				strictEqual(receipt.apiCalls, 3);
-				strictEqual(receipt.missingTokenCalls, 1);
-				strictEqual(bundle.contract.snapshot().totals.cost?.knownUsd, 0.02);
-				deepStrictEqual(receipt.costSummary, {
-					knownUsd: 0.02,
-					hasEstimated: true,
-					hasUnknown: true,
-					allKnownFree: false,
-					calls: 3,
-				});
+				deepStrictEqual(spend.apiCalls, { kind: "measured", value: 3, source: "provider" });
+				const { usd } = bundle.contract.snapshot().totals.cost;
+				strictEqual(usd.measured + usd.estimated, factKnownValue(pricing.usd));
 			}
-			strictEqual(envelope.tokenCount, receipt.tokenCount);
-			strictEqual(envelope.costUsd, receipt.costUsd);
-			strictEqual(envelope.costProvenance, receipt.costProvenance);
+			deepStrictEqual(envelope.spend, receipt.spend);
 
 			deepStrictEqual(bundle.contract.snapshot().running, []);
 			deepStrictEqual(bundle.contract.snapshot().retrying, []);

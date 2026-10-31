@@ -5,6 +5,8 @@ import { evaluateSkillToolSurface } from "../core/skill-activation.js";
 import type { TelemetryContext } from "../core/telemetry/context.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
+import { sumPricing } from "../core/telemetry/pricing.js";
+import { renderFactField, renderPricingSum } from "../core/telemetry/render.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsTool } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
@@ -70,7 +72,6 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
-import { aggregateCostAmounts, renderCostAggregate } from "../domains/telemetry/cost.js";
 import type { SettledRunRecord } from "../domains/telemetry/index.js";
 import { readVerifiedRun } from "../domains/telemetry/index.js";
 import { renderCompeteJudgeTask } from "./compete-judge-task.js";
@@ -578,9 +579,7 @@ export function dispatchBatchSummary(runs: ReadonlyArray<CompletedRun>): {
 	return {
 		observedToolCalls: observable.reduce((total, receipt) => total + receipt.toolCalls, 0),
 		unobservableToolRuns: trusted.length - observable.length,
-		cost: renderCostAggregate(
-			aggregateCostAmounts(trusted.map((receipt) => ({ usd: receipt.costUsd, provenance: receipt.costProvenance }))),
-		),
+		cost: renderPricingSum(sumPricing(trusted.map((receipt) => receipt.spend.pricing))),
 	};
 }
 
@@ -682,7 +681,7 @@ export function formatDispatchOutput(
 					? truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER)
 					: "(no assistant text captured in the run result)";
 			return [
-				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${renderFactField(receipt.spend.totalTokens)}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
 				`  ${workerTextLabel(trustStatus)}`,
 				...output.split("\n").map((line) => `  ${line}`),
 				...workerTextNonEvidenceNotices(view, trustStatus, answerText).map((notice) => `  ${notice}`),

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { sumFacts, sumPricing, unobservedRunUsageFacts } from "../../src/core/telemetry/pricing.js";
 import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
 import type { TelemetryReadModel } from "../../src/domains/telemetry/contract.js";
 import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
@@ -24,15 +25,7 @@ test("the island's input counts cache reads, so ↑ plus ↓ is the card's proce
 			lineage: { rootRunId: "run-1", parentRunId: null, attempt: 0, depth: 0 },
 			startedAt: new Date().toISOString(),
 			elapsedMs: 55_000,
-			// The shape the dispatch meter publishes: `input` excludes cache reads.
-			tokens: {
-				input: usage.input,
-				output: usage.output,
-				total: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
-				cacheRead: usage.cacheRead,
-			},
-			costUsd: 0,
-			costProvenance: "unknown",
+			spend: unobservedRunUsageFacts(),
 			node: null,
 		} as DispatchSnapshot["running"][number],
 	];
@@ -41,7 +34,7 @@ test("the island's input counts cache reads, so ↑ plus ↓ is the card's proce
 			({
 				running,
 				retrying: [],
-				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+				totals: { tokens: sumFacts([]), cost: sumPricing([]), runtimeSeconds: 0 },
 			}) as unknown as DispatchSnapshot,
 	});
 	const view = telemetryViewOf("session-1", [], new Map([["run-1", telemetryCall("session-1", { usage })]]));

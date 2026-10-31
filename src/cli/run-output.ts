@@ -1,4 +1,5 @@
 import { parseJsonObjectPayload } from "../core/json-payload.js";
+import { renderFactField } from "../core/telemetry/render.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "../tools/dispatch-event-text.js";
@@ -147,11 +148,12 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 }
 
 function formatResultLine(r: RunResult, notVerified: number): string {
+	const reasoningFact = r.spend.usage.reasoning;
 	const reasoning =
-		typeof r.reasoningTokenCount === "number" && r.reasoningTokenCount > 0 ? ` reasoning=${r.reasoningTokenCount}` : "";
+		reasoningFact.kind === "measured" && reasoningFact.value > 0 ? ` reasoning=${renderFactField(reasoningFact)}` : "";
 	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";
 	const verification = notVerified > 0 ? ` verification=unverified not_verified=${notVerified}` : "";
 	const responseModelIdObservation = runResponseModelIdObservationLabel(r);
 	const gatewayRouting = runGatewayRoutingLabel(r);
-	return `result: ${r.runId} agent=${r.agentId} exit=${r.exitCode}${verification} target=${r.targetId} requested_model_id=${r.wireModelId}${responseModelIdObservation ? ` ${responseModelIdObservation}` : ""}${gatewayRouting ? ` ${gatewayRouting}` : ""} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
+	return `result: ${r.runId} agent=${r.agentId} exit=${r.exitCode}${verification} target=${r.targetId} requested_model_id=${r.wireModelId}${responseModelIdObservation ? ` ${responseModelIdObservation}` : ""}${gatewayRouting ? ` ${gatewayRouting}` : ""} tokens=${renderFactField(r.spend.totalTokens)}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
 }

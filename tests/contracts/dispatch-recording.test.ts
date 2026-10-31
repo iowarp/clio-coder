@@ -254,11 +254,11 @@ it("dispatch preserves the explicit capture option with journal history disabled
 				resultContractOverride: { kind: "provenance-report" },
 			});
 			const receipt = await handle.finalPromise;
-			equal(receipt.tokenCount, 6);
-			equal(receipt.apiCalls, 1);
-			equal(receipt.missingTokenCalls, 1);
-			equal(receipt.costProvenance, "unknown");
-			equal(receipt.cacheReadTokenCount, undefined);
+			// One call reported no usage, so the run's spend is unknown rather than a partial count (#434).
+			equal(receipt.spend.totalTokens.kind, "unknown");
+			deepStrictEqual(receipt.spend.apiCalls, { kind: "measured", value: 1, source: "local-count" });
+			equal(receipt.spend.pricing.usd.kind, "unknown");
+			equal(receipt.spend.usage.cacheRead.kind, "unknown");
 			const journal = await readCallJournal(telemetryRunDirectory(clioStateDir(), handle.runId));
 			equal(journal.damaged, 0);
 			deepStrictEqual(
@@ -376,8 +376,9 @@ it("a worker killed mid-call keeps the calls it settled and settles its open att
 			requestOrigin: "internal",
 		});
 		const receipt = await handle.finalPromise;
-		equal(receipt.apiCalls, 4);
-		equal(receipt.tokenCount, 18);
+		deepStrictEqual(receipt.spend.apiCalls, { kind: "measured", value: 4, source: "local-count" });
+		// The open attempt settled as sent with its spend unknown, so the run's total is unknown, not the settled part.
+		equal(receipt.spend.totalTokens.kind, "unknown");
 		const journal = await readCallJournal(telemetryRunDirectory(clioStateDir(), handle.runId));
 		const records = journal.records.map(({ record }) => record);
 		deepStrictEqual(

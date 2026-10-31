@@ -31,12 +31,14 @@ import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/tel
 import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
+import { type Pricing, sumPricing } from "../../core/telemetry/pricing.js";
 import {
 	renderCount,
 	renderCountSum,
 	renderCoverage,
 	renderDurationSum,
 	renderFact,
+	renderPricingSum,
 	renderTextFact,
 	renderUsdFact,
 	renderUsdLimit,
@@ -2045,83 +2047,32 @@ export function repoCostReport(
 	};
 }
 
-/** One run's token field as a store with no journal fold records it: the count it holds, and whether it is whole. */
-export interface RunTokenField {
-	/** Null when the store holds no count for the field. */
-	known: number | null;
-	/** Some of the run's calls reported no usage, or the store cannot say whether any did. */
-	partial: boolean;
-}
-
 /** A token field over many runs, each run one contribution (#434 §11.3). */
 export interface RunsTotal {
 	/** The known part. */
 	known: number;
-	/** Runs that left the field partial or unknown. */
+	/** Runs that left the field unknown. */
 	unknownRuns: number;
 	display: string;
 }
 
 /**
  * A token field over runs the read model holds no journal fold for, such as the run ledger `fleet status` lists, where
- * reading every run journal costs seconds. A run that left the field partial or unknown counts once, so the total
- * renders as a lower bound beside the number of such runs, never as a sum that took an unknown run for zero.
+ * reading every run journal costs seconds. Each run's fact is one contribution, so an unknown run leaves the total a
+ * lower bound beside the number of such runs, never a sum that took it for zero.
  */
-export function runsTotal(fields: readonly RunTokenField[]): RunsTotal {
-	const sum = sumFactSums(
-		fields.map((field) =>
-			field.known === null
-				? unknownSum(1)
-				: field.partial
-					? sumFactSums([counted(field.known), unknownSum(1)])
-					: counted(field.known),
-		),
-	);
+export function runsTotal(facts: readonly Fact<number>[]): RunsTotal {
+	const sum = foldFacts(facts);
 	return { known: sum.measured + sum.estimated, unknownRuns: sum.unknownCount, display: renderCountSum(sum, "run") };
 }
 
-/** One run's sealed cost as a store with no journal fold records it: its amount and the provenance it was sealed with. */
-export interface RunCostField {
-	/** Null when no receipt holds the run's cost. */
-	usd: number | null;
-	provenance: "known" | "known_free" | "estimated" | "unknown";
-}
-
 /**
- * A cost over runs the read model holds no journal fold for, each run one contribution, worded by the canonical
- * renderer: an estimated run marks the whole `~`, and a run nobody priced leaves it a lower bound (#434 §11.3).
+ * A cost over runs the read model holds no journal fold for, each run's pricing one contribution, worded by the
+ * canonical renderer: an estimated run marks the whole `~`, and a run nobody priced leaves it a lower bound (§11.3).
  */
-export function runsCost(fields: readonly RunCostField[]): { fact: FactSum; display: string } {
-	const fact = foldFacts(
-		fields.map((field): Fact<number> => {
-			if (field.usd === null || !Number.isFinite(field.usd) || field.usd < 0 || field.provenance === "unknown")
-				return unobserved;
-			if (field.provenance === "estimated") return { kind: "estimated", value: field.usd, method: "catalog" };
-			return { kind: "measured", value: field.provenance === "known_free" ? 0 : field.usd, source: "local-count" };
-		}),
-	);
-	const free = fields.length > 0 && fields.every((field) => field.provenance === "known_free");
-	return { fact, display: renderUsdSum(fact, free) };
-}
-
-/**
- * A finished run's token count as its terminal event or sealed receipt states it, worded with its call coverage: calls
- * that reported no usage make it a lower bound beside them, and a run that never recorded its coverage says so, so a
- * partly counted run never reads as whole (#434 §11.3).
- */
-export function runTokenCount(
-	tokens: number,
-	coverage: { apiCalls?: number | undefined; missingTokenCalls?: number | undefined },
-): { fact: FactSum; display: string } {
-	const known = Number.isFinite(tokens) && tokens >= 0 ? tokens : 0;
-	const missing = coverage.missingTokenCalls;
-	if (missing === undefined || coverage.apiCalls === undefined)
-		return {
-			fact: sumFactSums([counted(known), unknownSum(1)]),
-			display: `≥${renderCount(known)} (call coverage not recorded)`,
-		};
-	const fact = missing > 0 ? sumFactSums([counted(known), unknownSum(missing)]) : counted(known);
-	return { fact, display: renderCountSum(fact, "call") };
+export function runsCost(pricings: readonly Pricing[]): { fact: FactSum; display: string } {
+	const sum = sumPricing(pricings);
+	return { fact: sum.usd, display: renderPricingSum(sum) };
 }
 
 /** A repository window's token fields: the session view's token quantities over the `repo` scope (#434 §11.1). */

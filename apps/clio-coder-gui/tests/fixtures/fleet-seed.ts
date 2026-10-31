@@ -9,7 +9,7 @@ import { writeFleetRun } from "../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../src/domains/dispatch/types.js";
 import { openCallJournal } from "../../../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory } from "../../../../src/domains/telemetry/paths.js";
-import { fixtureReceiptDraft } from "../../../../tests/harness/receipt.js";
+import { fixtureReceiptDraft, measuredSpend } from "../../../../tests/harness/receipt.js";
 import { writeSettledRun } from "../../../../tests/harness/settled-run.js";
 
 const state = process.env.CLIO_CODER_STATE_DIR;
@@ -65,8 +65,7 @@ const base: RunEnvelope = {
 	heartbeatAt: null,
 	sessionId: null,
 	cwd: process.argv[2] ?? "",
-	tokenCount: 125,
-	costUsd: 0,
+	spend: measuredSpend({ input: 100, output: 25 }, 0),
 	council: { group: "fixture-council", label: "reviewer", round: 1 },
 };
 const rows: RunEnvelope[] = [

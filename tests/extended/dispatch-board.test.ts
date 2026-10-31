@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchCompletedPayload, DispatchEnqueuedPayload } from "../../src/core/telemetry/live-events.js";
+import { sumFacts, sumPricing } from "../../src/core/telemetry/pricing.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { resolveToolBudgetEnvelope } from "../../src/domains/dispatch/budget-envelope.js";
 import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
@@ -33,7 +34,7 @@ import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { createWorkerStream } from "../../src/session-control/worker-stream.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
-import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { fixtureEnvelope, fixtureReceiptDraft, measuredSpend } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { settledRunTrust, writeSettledRun } from "../harness/settled-run.js";
 import { runUsageOf } from "../harness/telemetry-view.js";
@@ -95,14 +96,11 @@ const IDENTITY: DispatchEnqueuedPayload = {
 const COMPLETED: DispatchCompletedPayload = {
 	...IDENTITY,
 	lineage: { rootRunId: IDENTITY.runId, parentRunId: null, attempt: 0, depth: 0 },
-	tokenCount: 123,
-	inputTokenCount: 80,
-	outputTokenCount: 30,
-	cacheReadTokenCount: 10,
-	cacheWriteTokenCount: 3,
-	reasoningTokenCount: 7,
-	costUsd: 0.25,
-	costProvenance: "estimated",
+	spend: measuredSpend(
+		{ input: 80, output: 30, cacheRead: 10, cacheWrite: 3, reasoning: 7, total: 123 },
+		0.25,
+		"catalog",
+	),
 	durationMs: 1500,
 	exitCode: 0,
 	toolActivity: null,
@@ -359,7 +357,8 @@ describe("dispatch board uses the telemetry projection", () => {
 		strictEqual(row.steerAcknowledgement?.chars, 24);
 		deepStrictEqual(row.writeRecordDowngrade, { reason: "opaque_tool_succeeded", tool: "bash", toolCallId: "call-3" });
 		strictEqual(prior.runs[0]?.status, "running");
-		strictEqual(prior.runs[0]?.tokens.total, 9);
+		// A reply's usage does not accrue into the run's spend; the call fold reaches it through the snapshot (#434).
+		strictEqual(prior.runs[0]?.spend.totalTokens.kind, "unknown");
 		strictEqual(prior.runs[0]?.progress?.currentAction?.tool, "grep");
 		const action = row.progress?.recentActions[0];
 		if (action) action.tool = "mutated snapshot";
@@ -382,14 +381,13 @@ describe("dispatch board uses the telemetry projection", () => {
 			outcome: "failed",
 			reason: "failed",
 			outcomeDetail: null,
-			inputTokenCount: Number.NaN,
-			outputTokenCount: Number.POSITIVE_INFINITY,
+			spend: { totalTokens: Number.NaN } as unknown as DispatchCompletedPayload["spend"],
 		});
 		board.reconcile();
 		strictEqual(board.rows()[0]?.status, "failed");
 		strictEqual(board.rows()[0]?.outcomeDetail, null);
-		strictEqual(projection.snapshot().runs[0]?.tokens.input, 10);
-		strictEqual(projection.snapshot().runs[0]?.tokens.output, 0);
+		// A malformed terminal spend never replaces the run's facts.
+		strictEqual(projection.snapshot().runs[0]?.spend.totalTokens.kind, "unknown");
 		deepStrictEqual(board.rows().map(commonRow), projection.snapshot().runs.map(commonSummary));
 	});
 
@@ -398,7 +396,7 @@ describe("dispatch board uses the telemetry projection", () => {
 			generatedAt: "2026-09-05T00:00:00Z",
 			running: [],
 			retrying: [],
-			totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			totals: { tokens: sumFacts([]), cost: sumPricing([]), runtimeSeconds: 0 },
 		};
 		const { bus, projection, board, start } = setup({ dispatchSnapshot: () => live });
 		start();
@@ -411,13 +409,15 @@ describe("dispatch board uses the telemetry projection", () => {
 			lineage: COMPLETED.lineage,
 			startedAt: live.generatedAt,
 			elapsedMs: 50,
-			tokens: { input: 12, output: 3, total: 15 },
-			costUsd: 0.12,
-			costProvenance: "estimated",
+			spend: measuredSpend({ input: 12, output: 3 }, 0.12, "catalog"),
 			node: null,
 		});
 		board.reconcile();
-		strictEqual(projection.snapshot().runs[0]?.tokens.total, 15);
+		deepStrictEqual(projection.snapshot().runs[0]?.spend.totalTokens, {
+			kind: "measured",
+			value: 15,
+			source: "provider",
+		});
 		live.running = [];
 		bus.emit("run.failed", { ...COMPLETED, outcome: "failed", reason: "failed" });
 		live.retrying.push({
@@ -506,7 +506,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		const canonical = projection.snapshot().runs.find((run) => run.runId === IDENTITY.runId);
 		ok(canonical);
 		ok(canonical.finishedAtMs !== null);
-		strictEqual(canonical.tokens.total, COMPLETED.tokenCount);
+		deepStrictEqual(canonical.spend, COMPLETED.spend);
 		deepStrictEqual(commonRow(terminal), commonSummary(canonical));
 
 		for (let i = 0; i < MAX_PROJECTION_RUNS; i += 1) bus.emit("run.completed", { ...COMPLETED, runId: `later-${i}` });
@@ -520,7 +520,7 @@ describe("dispatch board uses the telemetry projection", () => {
 			generatedAt: "2026-09-05T00:00:00Z",
 			running: [],
 			retrying: [],
-			totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+			totals: { tokens: sumFacts([]), cost: sumPricing([]), runtimeSeconds: 0 },
 		};
 		const { bus, projection, board, start } = setup({ dispatchSnapshot: () => live });
 		start();
@@ -553,7 +553,7 @@ describe("dispatch board uses the telemetry projection", () => {
 				generatedAt: "2026-09-06T00:00:00Z",
 				running: [],
 				retrying: [],
-				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
+				totals: { tokens: sumFacts([]), cost: sumPricing([]), runtimeSeconds: 0 },
 			};
 			const { bus, projection, board } = setup({ dispatchSnapshot: () => live });
 			const identity = { ...IDENTITY, runId: "retry-parent" };

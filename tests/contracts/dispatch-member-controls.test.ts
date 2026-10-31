@@ -617,11 +617,10 @@ describe("dispatch member controls", () => {
 			strictEqual(new Set(outcome.receipts.map((receipt) => receipt.runId)).size, 5);
 			strictEqual(outcome.result.results.get("first")?.terminalRunId, outcome.receipts[1]?.runId);
 			strictEqual(outcome.result.results.get("planner")?.terminalRunId, outcome.receipts[3]?.runId);
-			strictEqual(outcome.totalCost.calls, 5);
-			ok(
-				Math.abs(outcome.totalCost.knownUsd - 15) <= 1e-12,
-				"total cost includes both attempts and the proposal within $1e-12",
-			);
+			// Every receipt is one contribution; these stub workers send no call telemetry, so each run's cost is unknown
+			// and the fleet total stays a lower bound instead of a sum that took them for zero (#434).
+			const { usd } = outcome.totalCost;
+			strictEqual(usd.coverage.measured + usd.coverage.estimated + usd.unknownCount, 5);
 			for (const receipt of outcome.receipts) {
 				const envelope = f.contract.getRun(receipt.runId);
 				ok(envelope);
