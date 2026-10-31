@@ -6,6 +6,8 @@ import type { ExitSummarySnapshot } from "./exit-summary-collector.js";
 import { brandMark, clioTheme, formatCompactMs, frame, innerDivider } from "./theme/index.js";
 
 const count = (value: number): string => value.toLocaleString("en-US");
+const countLabel = (value: number | string, noun: string): string =>
+	`${typeof value === "number" ? count(value) : value} ${noun}${value === 1 || value === "1" ? "" : "s"}`;
 
 const SPEND_NOT_AVAILABLE = "not available";
 
@@ -28,10 +30,8 @@ function modelList(snapshot: ExitSummarySnapshot): Array<{ target: string; model
 function unattendedSummary(snapshot: Pick<ExitSummarySnapshot, "unattended">): string | null {
 	const { questions, permissions } = snapshot.unattended;
 	const parts = [
-		...(questions > 0 ? [`${count(questions)} question${questions === 1 ? "" : "s"} auto-resolved`] : []),
-		...(permissions > 0
-			? [`${count(permissions)} permission ask${permissions === 1 ? "" : "s"} timed out and denied`]
-			: []),
+		...(questions > 0 ? [`${countLabel(questions, "question")} auto-resolved`] : []),
+		...(permissions > 0 ? [`${countLabel(permissions, "permission ask")} timed out and denied`] : []),
 	];
 	return parts.length > 0 ? parts.join(" · ") : null;
 }
@@ -127,7 +127,7 @@ export function renderExitSummary(
 				row(
 					"Model",
 					model
-						? `${model.target} / ${model.model}${models.length > 1 ? ` (+${models.length - 1} others)` : ""}`
+						? `${model.target} / ${model.model}${models.length > 1 ? ` (+${countLabel(models.length - 1, "other")})` : ""}`
 						: "not reported",
 				),
 				room,
@@ -146,7 +146,7 @@ export function renderExitSummary(
 	} else {
 		add(
 			"Activity",
-			`${count(snapshot.turns)} turns${spend.kind === "ready" ? ` · ${count(spend.visitCalls)} calls this visit` : ""} · ${count(snapshot.files.length)} files changed · ${count(snapshot.workers.length)} workers`,
+			`${countLabel(snapshot.turns, "turn")}${spend.kind === "ready" ? ` · ${countLabel(spend.visitCalls, "call")} this visit` : ""} · ${countLabel(snapshot.files.length, "file")} changed · ${countLabel(snapshot.workers.length, "worker")}`,
 		);
 		add(
 			"Time",
@@ -171,7 +171,7 @@ export function renderExitSummary(
 					snapshot.tools
 						.slice(0, 8)
 						.map(({ tool, count: n }) => `${tool} ${count(n)}`)
-						.join(" · ") + (snapshot.tools.length > 8 ? ` · ${snapshot.tools.length - 8} more kinds` : ""),
+						.join(" · ") + (snapshot.tools.length > 8 ? ` · ${countLabel(snapshot.tools.length - 8, "more kind")}` : ""),
 				);
 			}
 			if (snapshot.workers.length > 0) add("Workers", outcomes(snapshot));
@@ -185,15 +185,18 @@ export function renderExitSummary(
 				`Models (${models.length})`,
 				models.flatMap(({ target, model, spend: recorded }) =>
 					recorded
-						? [`${target} / ${model} · ${recorded.calls} calls · ${recorded.cost}`, recorded.breakdown]
+						? [`${target} / ${model} · ${countLabel(recorded.calls, "call")} · ${recorded.cost}`, recorded.breakdown]
 						: [`${target} / ${model} · no call record names it`],
 				),
 			);
 			if (spend.kind === "ready" && spend.byRole.length > 0) section("Calls by agent", [spend.byRole]);
 			section(
-				`Tools (${count(snapshot.tools.reduce((sum, tool) => sum + tool.count, 0))} calls)`,
+				`Tools (${countLabel(
+					snapshot.tools.reduce((sum, tool) => sum + tool.count, 0),
+					"call",
+				)})`,
 				snapshot.tools.map(
-					(tool) => `${tool.tool}: ${count(tool.count)} calls · ${count(tool.failures)} observed failures`,
+					(tool) => `${tool.tool}: ${countLabel(tool.count, "call")} · ${countLabel(tool.failures, "observed failure")}`,
 				),
 			);
 			section(
@@ -213,7 +216,7 @@ export function renderExitSummary(
 				permissions.map(([status, n]) => `${status}: ${count(n)}`),
 			);
 			section(
-				`Timeline${snapshot.timelineOmitted ? ` (${snapshot.timelineOmitted} earlier highlights omitted)` : ""}`,
+				`Timeline${snapshot.timelineOmitted ? ` (${countLabel(snapshot.timelineOmitted, "earlier highlight")} omitted)` : ""}`,
 				snapshot.timeline.map((event) => `${formatCompactMs(event.elapsedMs)} · ${event.text}`),
 			);
 			// One terminal page, capped at 80 rows; reserve resume and an omission row per group.
@@ -235,10 +238,12 @@ export function renderExitSummary(
 				lines.push(truncateToWidth(theme ? theme.fg("heading", group.title) : group.title, room));
 				lines.push(...group.rows.slice(0, group.shown));
 				if (group.shown < group.rows.length)
-					lines.push(truncateToWidth(`… ${count(group.rows.length - group.shown)} more detail lines`, room));
+					lines.push(truncateToWidth(`… ${countLabel(group.rows.length - group.shown, "more detail line")}`, room));
 			}
 			if (active.length < sections.length)
-				lines.push(truncateToWidth(`… ${sections.length - active.length} more sections; resume to inspect`, room));
+				lines.push(
+					truncateToWidth(`… ${countLabel(sections.length - active.length, "more section")}; resume to inspect`, room),
+				);
 		}
 	}
 	divide();
