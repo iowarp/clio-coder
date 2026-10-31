@@ -213,7 +213,7 @@ export function hostCommitIdentity(cwd: string, identity: string): string[] {
 /** What a host commit of a worker's worktree took, and the new files it left out. */
 export interface WorktreeCommit {
 	committed: boolean;
-	/** Untracked files outside the authored set, top-relative and sorted. */
+	/** Files still untracked after the host commit, top-relative and sorted, excluding runtime state. */
 	leftUncommitted: string[];
 }
 
@@ -279,10 +279,9 @@ export function commitWorktreePath(
 		const batch = take.slice(index, index + GIT_PATHSPEC_BATCH);
 		git(path, ["add", "--", ...batch.map((entry) => `:(top,literal)${entry}`)]);
 	}
-	const leftUncommitted = untracked.filter((entry) => !authored.has(entry));
-	if (git(path, ["diff", "--cached", "--name-only", "-z"]).length === 0) return { committed: false, leftUncommitted };
-	git(path, [...hostCommitIdentity(path, identity), "commit", "-m", message, "--no-verify"]);
-	return { committed: true, leftUncommitted };
+	const committed = git(path, ["diff", "--cached", "--name-only", "-z"]).length > 0;
+	if (committed) git(path, [...hostCommitIdentity(path, identity), "commit", "-m", message, "--no-verify"]);
+	return { committed, leftUncommitted: untrackedPaths(path).filter((entry) => !excluded.has(entry)) };
 }
 
 /** The bounded account of new files a host commit left out, or undefined when it left none. */
@@ -884,10 +883,10 @@ export interface TaskWorktreePreview {
  * edits to descendants, so directories prevent destructive cleanup. Ignored
  * files stay out, as they do from every host commit.
  */
-function untrackedState(path: string): { digest: string; directory: string | null } {
+function untrackedState(path: string, paths = untrackedPaths(path)): { digest: string; directory: string | null } {
 	const hash = createHash("sha256");
 	let directory: string | null = null;
-	for (const entry of untrackedPaths(path)) {
+	for (const entry of paths) {
 		let stamp = "gone";
 		try {
 			const stat = lstatSync(join(path, entry), { bigint: true });
@@ -907,11 +906,16 @@ export function previewTaskWorktree(worktree: TaskWorktree, commit: string): Tas
 }
 
 /** How a worktree no longer holds exactly what was previewed, or null when it does. */
-function previewDrift(worktree: TaskWorktree, preview: TaskWorktreePreview, head: string): string | null {
+function previewDrift(
+	worktree: TaskWorktree,
+	preview: TaskWorktreePreview,
+	head: string,
+	paths?: string[],
+): string | null {
 	if (head !== preview.commit) return `is now at ${head}`;
 	if (gitBytes(worktree.path, ["status", "--porcelain", "-z", "--untracked-files=no"]).length > 0)
 		return "has uncommitted changes";
-	const untracked = untrackedState(worktree.path);
+	const untracked = untrackedState(worktree.path, paths);
 	if (untracked.directory !== null) return `has untracked directory ${untracked.directory}; destructive cleanup refused`;
 	if (untracked.digest !== preview.untracked) return "has new or changed untracked files";
 	return null;
@@ -996,7 +1000,7 @@ export function applyTaskWorktree(input: {
 		commit = input.preview.commit;
 		// Nothing is committed now, so every untracked file stays out of this merge.
 		leftUncommitted = untrackedPaths(worktree.path);
-		const found = previewDrift(worktree, input.preview, before.commit);
+		const found = previewDrift(worktree, input.preview, before.commit, leftUncommitted);
 		if (found !== null) {
 			const drift = `${WORKTREE_CHANGED_SINCE_PREVIEW}: task worktree ${worktree.runId} ${found} since commit ${commit} was offered for merge. Nothing was merged; the branch ${worktree.branch} is preserved.`;
 			return {

@@ -204,7 +204,7 @@ describe("task worktree restart recovery", () => {
 		ok(!existsSync(join(root, `${moved.task.runId}.txt`)));
 	});
 
-	it("commits tracked edits, tool-authored and worker-staged new files, and leaves a byproduct out of the merge", () => {
+	it("commits tracked edits, tool-authored and worker-staged new files, and reports byproducts including files created during commit", () => {
 		const task = createTaskWorktree(root, "run-authored", undefined, "merge");
 		writeFileSync(join(task.path, "a.txt"), "fixed\n");
 		writeFileSync(join(task.path, "tool.txt"), "written by edit\n");
@@ -214,11 +214,33 @@ describe("task worktree restart recovery", () => {
 			mkdirSync(join(cwd, "__pycache__"));
 			writeFileSync(join(cwd, "__pycache__", "x.pyc"), `${cwd}\n`);
 		}
-		const receipt = applyTaskWorktree({ worktree: task, apply: "merge", authoredPaths: [join(task.path, "tool.txt")] });
+		writeFileSync(
+			join(root, ".git", "hooks", "post-commit"),
+			`#!${process.execPath}
+if (process.cwd() === ${JSON.stringify(task.path)}) require('node:fs').writeFileSync('late.txt', 'created during commit\\n');
+`,
+			{ mode: 0o755 },
+		);
+		const receipt = applyTaskWorktree({
+			worktree: task,
+			apply: "preserve",
+			authoredPaths: [join(task.path, "tool.txt")],
+		});
 		strictEqual(receipt.reason, undefined, receipt.detail);
-		strictEqual(receipt.applied, true);
+		strictEqual(receipt.applied, false);
 		deepStrictEqual(receipt.changedPaths, ["a.txt", "staged.txt", "tool.txt"]);
-		deepStrictEqual(receipt.leftUncommitted, { count: 1, paths: ["__pycache__/x.pyc"] });
+		deepStrictEqual(receipt.leftUncommitted, { count: 2, paths: ["__pycache__/x.pyc", "late.txt"] });
+		strictEqual(readFileSync(join(task.path, "late.txt"), "utf8"), "created during commit\n");
+		ok(receipt.commit);
+		const applied = applyTaskWorktree({
+			worktree: task,
+			apply: "merge",
+			preview: previewTaskWorktree(task, receipt.commit),
+			authoredPaths: [],
+		});
+		strictEqual(applied.applied, true, applied.detail);
+		deepStrictEqual(applied.leftUncommitted, receipt.leftUncommitted);
+		strictEqual(existsSync(join(root, "late.txt")), false);
 		strictEqual(git(root, "ls-files", "__pycache__"), "");
 		strictEqual(readFileSync(join(root, "a.txt"), "utf8"), "fixed\n");
 	});
