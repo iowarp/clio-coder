@@ -18,8 +18,6 @@ export interface ExitSummarySnapshot {
 	sessionId: string;
 	sessionName: string | null;
 	wallMs: number;
-	modelMs: number;
-	modelTimeIncomplete: boolean;
 	turns: number;
 	models: ReadonlyArray<{ target: string; model: string }>;
 	/** Whole-session spend across every branch, read from the telemetry read model at exit (#434 §11.3). */
@@ -111,6 +109,8 @@ export type ExitSpend =
 			/** Attempts started since this visit began, counted by the read model. */
 			visitCalls: number;
 			byRole: string;
+			/** Generation time, first token to settle, over every call the session paid for, workers included. */
+			modelTime: string;
 			models: ReadonlyArray<{ key: string; calls: string; cost: string; breakdown: string }>;
 	  };
 
@@ -137,6 +137,8 @@ export function exitSpend(view: TelemetryView | null | undefined, visitFrom: str
 		cost: session.totals.usd.display,
 		visitCalls: view.calls({ from: visitFrom, limit: 1 }).matched,
 		byRole: session.byRole.map((row) => `${row.role} ${row.calls.display}`).join(" · "),
+		modelTime:
+			view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "modelTime" }))?.display ?? "unknown",
 		models: view.cost("model").groups.map((group) => ({
 			key: group.key,
 			calls: group.calls.display,
@@ -154,8 +156,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	let baseTurns = deps.getTurns() ?? 0;
 	let priorTurns = 0;
 	let hasModelTurn = deps.session?.current()?.hasModelTurn === true;
-	let modelMs = 0;
-	let timedCalls = 0;
 	let compactions = 0;
 	const models = new Map<string, { target: string; model: string }>();
 	const files = new Map<string, number>();
@@ -178,7 +178,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	const calls = new Map<string, { entry: unknown; cwd: string; tool: string }>();
 	const workers = new Map<string, ExitSummarySnapshot["workers"][number]>();
 	const workerTools = new Map<string, ReadonlyArray<{ tool: string; count: number }>>();
-	const workerStarted = new Map<string, number>();
 	const workerCapabilities = new Map<string, string>();
 	const noteModel = (target: string, model: string): void => {
 		if (target && model) models.set(`${target}\0${model}`, { target, model });
@@ -200,8 +199,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		baseTurns = deps.getTurns() ?? 0;
 		priorTurns = 0;
 		hasModelTurn = deps.session?.current()?.hasModelTurn === true;
-		modelMs = 0;
-		timedCalls = 0;
 		compactions = 0;
 		models.clear();
 		files.clear();
@@ -214,7 +211,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		calls.clear();
 		workers.clear();
 		workerTools.clear();
-		workerStarted.clear();
 		workerCapabilities.clear();
 	};
 	const settled = (run: { runId: string; agentId: string; outcome: string }): void => {
@@ -223,7 +219,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		workers.set(run.runId, { ...worker, outcome: run.outcome });
 		highlight(`${run.agentId} ${run.outcome}`);
 		noteFiles(deps.dispatch.observedRunWrites?.(run.runId) ?? [], process.cwd(), workerPaths.get(run.runId));
-		workerStarted.delete(run.runId);
 	};
 	// Like the git hook line, this account is the process's, never reset with the visit.
 	const internalGit = new Map<
@@ -304,15 +299,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 					highlight(`Worker safety refusal: ${tool}`);
 				}
 			}
-			if (frame.type === "message_start" && frame.message?.role === "assistant") workerStarted.set(runId, now());
-			if (frame.type === "message_end" && frame.message?.role === "assistant") {
-				const start = workerStarted.get(runId);
-				if (start !== undefined) {
-					modelMs += Math.max(0, now() - start);
-					timedCalls += 1;
-					workerStarted.delete(runId);
-				}
-			}
 		}),
 		deps.bus.subscribe("approval.resolved", (event) => {
 			permissions[event.status] += 1;
@@ -340,13 +326,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 					noteModel(model.target, model.model);
 				}
 			}
-			if (event.type === "message_end" && event.message.role === "assistant") {
-				hasModelTurn = true;
-				if (event.modelTimeMs !== undefined) {
-					modelMs += event.modelTimeMs;
-					timedCalls += 1;
-				}
-			}
+			if (event.type === "message_end" && event.message.role === "assistant") hasModelTurn = true;
 			if (event.type === "tool_execution_start") {
 				hasModelTurn = true;
 				const args = event.args as Record<string, unknown> | undefined;
@@ -411,8 +391,6 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				sessionId: session.id,
 				sessionName: session.name ?? null,
 				wallMs: Math.max(0, now() - startedAt),
-				modelMs,
-				modelTimeIncomplete: spend.kind === "ready" && spend.visitCalls > timedCalls,
 				turns: priorTurns + Math.max(0, (deps.getTurns() ?? 0) - baseTurns),
 				models: [...models.values()],
 				spend,

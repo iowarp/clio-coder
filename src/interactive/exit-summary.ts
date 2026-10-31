@@ -150,7 +150,7 @@ export function renderExitSummary(
 		);
 		add(
 			"Time",
-			`${formatCompactMs(snapshot.wallMs)} wall · ${formatCompactMs(snapshot.modelMs)} model${snapshot.modelTimeIncomplete ? " (partly measured)" : ""}`,
+			`${formatCompactMs(snapshot.wallMs)} wall this visit · ${spend.kind === "ready" ? `${spend.modelTime} model across the session` : `model ${SPEND_NOT_AVAILABLE}`}`,
 		);
 		// Session totals cover every branch this session paid for; the visit's own share is its call count.
 		add("Tokens", spend.kind === "ready" ? spend.breakdown : SPEND_NOT_AVAILABLE);
