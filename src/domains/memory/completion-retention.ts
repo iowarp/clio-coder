@@ -101,7 +101,6 @@ export async function retainCompletedTask(input: {
 	timeoutMs: number;
 	signal: AbortSignal;
 	isCurrent(): boolean;
-	onUsage?: (usage: TaskMemoryStepUsage, current: boolean) => void;
 	judge?: MemoryLessonJudge;
 	onProgress?: (status: RetentionStatus) => void;
 	/**
@@ -260,7 +259,6 @@ async function retainWithinDeadline(
 					},
 					onStepUsage: (step) => {
 						usage = step;
-						input.onUsage?.(step, input.isCurrent());
 					},
 					...(observationTracing()
 						? {

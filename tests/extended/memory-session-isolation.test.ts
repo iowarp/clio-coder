@@ -353,11 +353,9 @@ test("shutdown releases the detached policy without awaiting an abort-ignoring m
 	const bank = new TaskMemoryBank();
 	const bus = createTelemetryHub();
 	const completion = deferred<TaskMemoryModelResponse>();
-	const usages: TaskMemoryStepUsage[] = [];
 	const registration = createMemoryInterventionRegistration({
 		bank,
 		getModelClient: () => ({ complete: () => completion.promise }),
-		onStepUsage: (usage) => usages.push(usage),
 	});
 	const dispose = bindTaskMemoryLifecycle(bus, registration);
 	registration.signalLoop();
@@ -369,7 +367,6 @@ test("shutdown releases the detached policy without awaiting an abort-ignoring m
 	completion.resolve(response);
 	await new Promise<void>((resolve) => setImmediate(resolve));
 	assert.equal(bank.snapshot().knowledge.length, 0);
-	assert.equal(usages.length, 1);
 	registration.signalLoop();
 	await registration.evaluateAsync({ hook: "turn_end" });
 	assert.equal(registration.stepInFlight(), false);
@@ -478,7 +475,6 @@ test("operator cancellation revokes a pending memory step without erasing comple
 	let signal: AbortSignal | undefined;
 	let calls = 0;
 	const reminders: string[] = [];
-	const usages: TaskMemoryStepUsage[] = [];
 	const registration = createMemoryInterventionRegistration({
 		bank,
 		getModelClient: () => ({
@@ -488,7 +484,6 @@ test("operator cancellation revokes a pending memory step without erasing comple
 				return pending.promise;
 			},
 		}),
-		onStepUsage: (usage) => usages.push(usage),
 		onDeferredReminder: (message) => reminders.push(message),
 	});
 	registration.signalLoop();
@@ -508,7 +503,6 @@ test("operator cancellation revokes a pending memory step without erasing comple
 		["Completed knowledge"],
 	);
 	assert.deepEqual(reminders, []);
-	assert.deepEqual(usages, [response.usage]);
 	registration.dispose();
 });
 

@@ -50,7 +50,6 @@ import {
 	type TaskMemoryPolicyReason,
 	type TaskMemoryPolicyResult,
 	type TaskMemoryRoute,
-	type TaskMemoryStepUsage,
 	type TaskMemoryTrajectoryStep,
 } from "./task-memory-policy.js";
 import type { TaskMemoryActivityEvent } from "./task-memory-status.js";
@@ -292,11 +291,6 @@ export interface MemoryInterventionDeps {
 	 * A shared gateway URL alone is not evidence that its request slots are full.
 	 */
 	backgroundEndpointBusy?: () => boolean;
-	/**
-	 * Provider-reported spend for one completed model step. The composition root
-	 * routes it to the cost ledger; the middleware never prices anything.
-	 */
-	onStepUsage?: (usage: TaskMemoryStepUsage) => void;
 	/**
 	 * Bank entries an llm-tier reminder cited, once the host reported the
 	 * reminder inside an admitted request. The owner proposes them into the
@@ -1291,7 +1285,6 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						return runTaskMemoryPolicy(deps.bank, selected, {
 							isCurrent,
 							signal: generationController.signal,
-							onStepUsage: (usage) => deps.onStepUsage?.(usage),
 							task: input.task?.trim() || currentTask,
 							trajectory: [...trajectory],
 							workspaceRoot: launchRoot,

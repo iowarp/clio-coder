@@ -468,13 +468,11 @@ test("production runtime fallback calls chat once and keeps failed and fallback 
 	});
 	const callbacks = createBackgroundMemoryRouting(providers, () => settings, bus);
 	const bank = new TaskMemoryBank();
-	const usage: TaskMemoryStepUsage[] = [];
 	const reasons: string[] = [];
 	const routes: Array<string | undefined> = [];
 	const registration = createMemoryInterventionRegistration({
 		bank,
 		...callbacks,
-		onStepUsage: (row) => usage.push(row),
 		telemetry: {
 			record: (row) => {
 				reasons.push(row.reason);
@@ -486,13 +484,6 @@ test("production runtime fallback calls chat once and keeps failed and fallback 
 	assert.equal(result.decision, "injected", JSON.stringify({ result, calls, reasons, notices }));
 	assert.deepEqual(calls, ["memory-model", "chat-model"]);
 	assert.deepEqual(routes, ["memory/memory-model", "chat/chat-model"], "each row names the route that served it");
-	assert.deepEqual(
-		usage.map((row) => [row.targetId, row.attributedModelId, row.totalTokens]),
-		[
-			["memory", "memory-model", 17],
-			["chat", "chat-model", 17],
-		],
-	);
 	assert.deepEqual(reasons, ["client_error", "intervened"]);
 	assert.deepEqual(ended, ["memory", "chat"]);
 	assert.equal(endpointCapacityUsage()["http://gateway.invalid:4000"], undefined, "both per-call holds released");
@@ -548,7 +539,6 @@ test("fallback shares the original deadline and cancellation discards its late c
 	});
 	let fallbackSignal: AbortSignal | undefined;
 	const bank = new TaskMemoryBank();
-	const usage: TaskMemoryStepUsage[] = [];
 	const registration = createMemoryInterventionRegistration({
 		bank,
 		timeoutMs: 50,
@@ -565,7 +555,6 @@ test("fallback shares the original deadline and cancellation discards its late c
 				return response;
 			},
 		}),
-		onStepUsage: (row) => usage.push(row),
 	});
 	const result = registration.runPromptedStep({ deterministicTrigger: true });
 	await new Promise<void>((resolve) => setImmediate(resolve));
@@ -598,7 +587,6 @@ test("fallback shares the original deadline and cancellation discards its late c
 	};
 	release({ text: TEXT, usage: known });
 	await new Promise<void>((resolve) => setImmediate(resolve));
-	assert.deepEqual(usage, [known]);
 	assert.equal(bank.snapshot().knowledge.length, 0);
 });
 
