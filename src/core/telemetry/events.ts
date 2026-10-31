@@ -66,6 +66,11 @@ export interface JournalDefinition<S extends TSchema = TSchema> {
 	readonly cc: ContentClass;
 	/** The research flag that admits a research-tier event; without one, research mode alone admits it (#434). */
 	readonly capture?: CaptureFlag;
+	/**
+	 * The structural facts a journal keeps of a richer live payload. Live subscribers receive the payload as emitted;
+	 * the producer applies this before enqueue, so card text and envelope ids never reach the journal (#434).
+	 */
+	readonly project?: (payload: never) => unknown;
 }
 
 /** The payload exists only in the type system; live events carry no runtime schema. */
@@ -74,10 +79,16 @@ export interface LiveDefinition<P> {
 	readonly payload?: P;
 }
 
-function journal<S extends TSchema, const O extends { tier: Tier; cc: ContentClass; capture?: CaptureFlag }>(
-	schema: S,
-	options: O,
-): { durability: "journal"; version: 1; schema: S } & O {
+function journal<
+	S extends TSchema,
+	const O extends {
+		tier: Tier;
+		cc: ContentClass;
+		capture?: CaptureFlag;
+		// biome-ignore lint/suspicious/noExplicitAny: the projection's own annotation names the live payload type.
+		project?: (payload: any) => Static<S>;
+	},
+>(schema: S, options: O): { durability: "journal"; version: 1; schema: S } & O {
 	return { durability: "journal", version: 1, schema, ...options };
 }
 
@@ -199,17 +210,22 @@ export const EVENTS = {
 
 export type EventName = keyof typeof EVENTS;
 type Definition<N extends EventName> = (typeof EVENTS)[N];
+/** What `emit` takes and subscribers receive: a projected journal event's live payload, else its record data. */
 export type EventPayload<N extends EventName> =
-	Definition<N> extends { durability: "journal"; schema: infer S extends TSchema }
-		? Static<S>
-		: Definition<N> extends LiveDefinition<infer P>
-			? P
-			: never;
+	Definition<N> extends { durability: "journal"; project: (payload: infer P) => unknown }
+		? P
+		: Definition<N> extends { durability: "journal"; schema: infer S extends TSchema }
+			? Static<S>
+			: Definition<N> extends LiveDefinition<infer P>
+				? P
+				: never;
 /** The events a scope journals. */
 export type JournalEventName = {
 	[N in EventName]: Definition<N> extends { durability: "journal" } ? N : never;
 }[EventName];
 export type LiveEventName = Exclude<EventName, JournalEventName>;
+/** The data a journal record of this kind carries, after any projection. */
+export type JournalPayload<N extends JournalEventName> = Static<Definition<N>["schema"]>;
 
 /**
  * Journal events whose content the writer stores in `objects/` and cites as `content`, with its size as `bytes`,
@@ -221,7 +237,7 @@ export const PREIMAGE_SUBJECTS = {
 	"request.captured": "request",
 } as const satisfies Partial<Record<JournalEventName, ObjectRef["subject"]>>;
 export type PreimageEventName = keyof typeof PREIMAGE_SUBJECTS;
-export type PreimageData<N extends PreimageEventName> = Omit<EventPayload<N>, "content" | "bytes">;
+export type PreimageData<N extends PreimageEventName> = Omit<JournalPayload<N>, "content" | "bytes">;
 
 function isEventName(name: string): name is EventName {
 	return Object.hasOwn(EVENTS, name);
@@ -236,7 +252,7 @@ export function journalDefinition(name: JournalEventName): JournalDefinition {
 }
 
 /** Schema validation plus the cross-field invariants that JSON Schema cannot express (#434). */
-export function validPayload<K extends JournalEventName>(kind: K, data: unknown): data is EventPayload<K> {
+export function validPayload<K extends JournalEventName>(kind: K, data: unknown): data is JournalPayload<K> {
 	if (!Value.Check(journalDefinition(kind).schema, data)) return false;
 	if (kind === "prompt.text_captured") {
 		const prompt = data as EventPayload<"prompt.text_captured">;
@@ -247,7 +263,7 @@ export function validPayload<K extends JournalEventName>(kind: K, data: unknown)
 		);
 	}
 	if (Object.hasOwn(PREIMAGE_SUBJECTS, kind)) {
-		const content = (data as EventPayload<PreimageEventName>).content;
+		const content = (data as JournalPayload<PreimageEventName>).content;
 		return content.subject === PREIMAGE_SUBJECTS[kind as PreimageEventName] && content.label === "resolvable";
 	}
 	if (kind === "compaction.settled") {

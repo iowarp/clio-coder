@@ -3,8 +3,8 @@ import type { TelemetryContext } from "./context.js";
 import { telemetryContext, telemetryOwner, withTelemetryContext } from "./context.js";
 import type { FailureCause } from "./enums.js";
 import type { ClockOrigin } from "./envelope.js";
-import type { EventName, EventPayload, JournalEventName } from "./events.js";
-import { isJournalEvent } from "./events.js";
+import type { EventName, JournalEventName, JournalPayload } from "./events.js";
+import { isJournalEvent, journalDefinition } from "./events.js";
 import { attachJournalRoute, telemetryHub } from "./hub.js";
 import { newAttemptId, newCallId } from "./ids.js";
 import type { CallSettled, CallStarted } from "./schemas.js";
@@ -13,7 +13,7 @@ import { DELTA_GAP_BOUNDS_MS } from "./schemas.js";
 export type PendingTelemetry<K extends JournalEventName = JournalEventName> = K extends JournalEventName
 	? {
 			kind: K;
-			data: EventPayload<K>;
+			data: JournalPayload<K>;
 			ctx: TelemetryContext;
 			wallMs: number;
 			mono: number;
@@ -110,6 +110,9 @@ function enqueueTelemetry(
 	try {
 		// Not capturing an event the mode excludes is policy, not a drop: it is neither a gap nor a failure (#434, R10).
 		if (!sinkAdmits(sink, name)) return false;
+		// A projection keeps only a rich live payload's structural facts; it runs only for a record a sink will take (#434).
+		const project = journalDefinition(name).project;
+		if (project) data = project(data as never);
 		// Two literals keep the standard path at its single allocation (#434, §14).
 		return sink.enqueue(
 			(preimage === undefined
@@ -342,7 +345,7 @@ function newGapHistogram() {
 			last = now;
 			deltas += 1;
 		},
-		payload(): EventPayload<"call.timing_captured"> | undefined {
+		payload(): JournalPayload<"call.timing_captured"> | undefined {
 			return deltas === 0 ? undefined : { deltas, gapCounts, maxGapMs: round(maxGapMs), spanMs: round(last - first) };
 		},
 	};

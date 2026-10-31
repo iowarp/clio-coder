@@ -4,7 +4,7 @@ import { Value } from "typebox/value";
 import type { TelemetryContext } from "./context.js";
 import { TelemetryContextSchema } from "./context.js";
 import { ContentClass, Tier, vocabulary } from "./enums.js";
-import type { EventPayload, JournalEventName } from "./events.js";
+import type { JournalEventName, JournalPayload } from "./events.js";
 import { isJournalEvent, journalDefinition, validPayload } from "./events.js";
 import { UUID_V7_PATTERN } from "./id-schemas.js";
 import { newRecordId } from "./ids.js";
@@ -73,13 +73,13 @@ export const EnvelopeSchema = Type.Object(
 	closed,
 );
 export type TelemetryRecord<K extends JournalEventName = JournalEventName> = K extends JournalEventName
-	? Omit<Static<typeof EnvelopeSchema>, "k" | "data"> & { k: K; data: EventPayload<K> }
+	? Omit<Static<typeof EnvelopeSchema>, "k" | "data"> & { k: K; data: JournalPayload<K> }
 	: never;
 
 /** Called by the writer after dequeue; producers do not allocate ids or serialize per record (#434). */
 export function makeTelemetryRecord<K extends JournalEventName>(
 	kind: K,
-	data: EventPayload<K>,
+	data: JournalPayload<K>,
 	ctx: TelemetryContext,
 	clock: { t: string; mono: number },
 ): TelemetryRecord<K> {
@@ -128,7 +128,7 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 		return { kind: "skipped", reason: "invalid-record" };
 	}
 	if (value.k === "call.started" || value.k === "call.settled") {
-		const call = data as EventPayload<"call.started">;
+		const call = data as JournalPayload<"call.started">;
 		if (value.ctx.callId !== call.callId || value.ctx.attemptId !== call.attemptId || value.ctx.label !== call.label) {
 			return { kind: "skipped", reason: "invalid-record" };
 		}
