@@ -77,13 +77,13 @@ describe("external-agent settings reach the session prompt cache", { concurrency
 				const epoch = prompts.inputEpoch();
 				config.update((settings) => {
 					settings.fleet.history.maxRuns = 50;
-				});
+				}, "settings-ui");
 				strictEqual(prompts.inputEpoch(), epoch);
 				strictEqual(await turn.ensureSessionPrompt(runtime), first, "unrelated settings preserve the cached object");
 
 				config.update((settings) => {
 					settings.integrations.externalAgents.entries = [{ id: "catalog-fixture", command: "fixture-one", args: [] }];
-				});
+				}, "settings-ui");
 				ok(agents.getSpec("catalog-fixture"));
 				const added = await turn.ensureSessionPrompt(runtime);
 				match(added?.systemPrompt ?? "", /catalog-fixture.*fixture-one/u);
@@ -94,14 +94,14 @@ describe("external-agent settings reach the session prompt cache", { concurrency
 					const agent = settings.integrations.externalAgents.entries[0];
 					ok(agent);
 					agent.command = "fixture-two";
-				});
+				}, "settings-ui");
 				const edited = await turn.ensureSessionPrompt(runtime);
 				match(edited?.systemPrompt ?? "", /catalog-fixture.*fixture-two/u);
 				doesNotMatch(edited?.systemPrompt ?? "", /fixture-one/u);
 
 				config.update((settings) => {
 					settings.integrations.externalAgents.entries = [];
-				});
+				}, "settings-ui");
 				strictEqual(agents.getSpec("catalog-fixture"), null);
 				const removed = await turn.ensureSessionPrompt(runtime);
 				ok(removed);
@@ -127,7 +127,7 @@ describe("external-agent settings reach the session prompt cache", { concurrency
 				const initial = contract.revision();
 				config.update((settings) => {
 					settings.integrations.externalAgents.entries = [{ id: "catalog-fixture", command: "fixture", args: [] }];
-				});
+				}, "settings-ui");
 				notStrictEqual(contract.revision(), initial);
 			} finally {
 				await agents.extension.stop?.();
@@ -135,7 +135,7 @@ describe("external-agent settings reach the session prompt cache", { concurrency
 			const stopped = contract.revision();
 			config.update((settings) => {
 				settings.integrations.externalAgents.entries = [];
-			});
+			}, "settings-ui");
 			strictEqual(contract.revision(), stopped);
 		} finally {
 			await loaded.stop();

@@ -36,7 +36,7 @@ test("config validates the actual mutation result before publishing or writing i
 							if (mode === "replacement") return collision;
 							settings.integrations.externalAgents.entries = collision.integrations.externalAgents.entries;
 							return undefined;
-						});
+						}, "settings-ui");
 					}, /agent id collision/u);
 					deepStrictEqual(config.get(), initial, mode);
 					strictEqual(readFileSync(settingsPath(), "utf8"), initialDocument, mode);
@@ -57,7 +57,7 @@ test("config validates the actual mutation result before publishing or writing i
 						{ id: "valid-fixture", command: "unstarted-fixture", args: [] },
 					];
 					return replacement;
-				});
+				}, "settings-ui");
 				strictEqual(invocations, 1);
 				strictEqual(publications, 1);
 				strictEqual(config.get().fleet.history.maxRuns, 37);

@@ -18378,6 +18378,9 @@
 			"Enum_388f3739": {
 				"enum": ["provider-omitted", "stream-dropped", "not-observed", "legacy-record", "unsupported", "writer-gap"]
 			},
+			"Enum_3c35908c": {
+				"enum": ["file", "settings-ui", "slash-command", "keybinding", "acp", "gui"]
+			},
 			"Enum_413aacec": {
 				"enum": ["normal", "text-only", "required", "tools-removed", "unknown"]
 			},
@@ -18499,19 +18502,6 @@
 			},
 			"Enum_bd7ae760": {
 				"enum": ["open", "closed", "ended-abnormally", "unverifiable", "unknown"]
-			},
-			"Enum_c8cf9948": {
-				"enum": [
-					"file",
-					"settings-ui",
-					"cli",
-					"session-override",
-					"slash-command",
-					"acp",
-					"gui",
-					"keybinding",
-					"unattributed"
-				]
 			},
 			"Enum_cefb75f3": {
 				"enum": ["verified", "verified-ledger-evicted", "failed", "retired-format", "unavailable"]
@@ -21042,7 +21032,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_at_attemptId_callId_f55ebd12": {
+			"Object_at_attemptId_callId_65e36dde": {
 				"type": "object",
 				"required": [
 					"kind",
@@ -21060,7 +21050,7 @@
 					"raisedBy"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_2b8b3dc8"
+					"$ref": "#/components/schemas/Shape_4b401cec"
 				},
 				"additionalProperties": false
 			},
@@ -24615,49 +24605,6 @@
 					"$ref": "#/components/schemas/Array_de2d36b0"
 				}
 			},
-			"Shape_2b8b3dc8": {
-				"kind": {
-					"type": "string",
-					"const": "budget"
-				},
-				"at": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"event": {
-					"enum": ["crossing", "wait"]
-				},
-				"level": {
-					"enum": ["at", "over"]
-				},
-				"callId": {
-					"$ref": "#/components/schemas/Union_3c066253"
-				},
-				"attemptId": {
-					"$ref": "#/components/schemas/Union_e7cc1cf6"
-				},
-				"spend": {
-					"$ref": "#/components/schemas/Object_display_fact_3986ea75"
-				},
-				"ceiling": {
-					"$ref": "#/components/schemas/Object_display_usd_e86d2907"
-				},
-				"contextTokens": {
-					"$ref": "#/components/schemas/Union_0c2967b5"
-				},
-				"outcome": {
-					"$ref": "#/components/schemas/Union_ee32f0b1"
-				},
-				"waited": {
-					"$ref": "#/components/schemas/Union_0c2967b5"
-				},
-				"raisedTo": {
-					"$ref": "#/components/schemas/Union_f4020539"
-				},
-				"raisedBy": {
-					"$ref": "#/components/schemas/Union_e56cdbfe"
-				}
-			},
 			"Shape_2d5987a6": {
 				"resource": {
 					"type": "string",
@@ -24897,6 +24844,49 @@
 				},
 				"artifact": {
 					"$ref": "#/components/schemas/Object_overview_verdict_bb8c079c"
+				}
+			},
+			"Shape_4b401cec": {
+				"kind": {
+					"type": "string",
+					"const": "budget"
+				},
+				"at": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"event": {
+					"enum": ["crossing", "wait"]
+				},
+				"level": {
+					"enum": ["at", "over"]
+				},
+				"callId": {
+					"$ref": "#/components/schemas/Union_3c066253"
+				},
+				"attemptId": {
+					"$ref": "#/components/schemas/Union_e7cc1cf6"
+				},
+				"spend": {
+					"$ref": "#/components/schemas/Object_display_fact_3986ea75"
+				},
+				"ceiling": {
+					"$ref": "#/components/schemas/Object_display_usd_e86d2907"
+				},
+				"contextTokens": {
+					"$ref": "#/components/schemas/Union_0c2967b5"
+				},
+				"outcome": {
+					"$ref": "#/components/schemas/Union_ee32f0b1"
+				},
+				"waited": {
+					"$ref": "#/components/schemas/Union_0c2967b5"
+				},
+				"raisedTo": {
+					"$ref": "#/components/schemas/Union_f4020539"
+				},
+				"raisedBy": {
+					"$ref": "#/components/schemas/Union_6ab8d6d6"
 				}
 			},
 			"Shape_4cdbb884": {
@@ -27152,7 +27142,7 @@
 											"enum": ["snapshot", "changed"]
 										},
 										"source": {
-											"$ref": "#/components/schemas/Union_e56cdbfe"
+											"$ref": "#/components/schemas/Union_6ab8d6d6"
 										},
 										"paths": {
 											"anyOf": [
@@ -27206,7 +27196,7 @@
 									"additionalProperties": false
 								},
 								{
-									"$ref": "#/components/schemas/Object_at_attemptId_callId_f55ebd12"
+									"$ref": "#/components/schemas/Object_at_attemptId_callId_65e36dde"
 								},
 								{
 									"$ref": "#/components/schemas/Object_at_kind_limitReached_13ddc75a"
@@ -28410,6 +28400,16 @@
 					}
 				]
 			},
+			"Union_6ab8d6d6": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Enum_3c35908c"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_6ef9eef0": {
 				"anyOf": [
 					{
@@ -29215,16 +29215,6 @@
 					}
 				]
 			},
-			"Union_e56cdbfe": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Enum_c8cf9948"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_e5bede14": {
 				"anyOf": [
 					{
@@ -29618,7 +29608,7 @@
 					"budget": {
 						"type": "array",
 						"items": {
-							"$ref": "#/components/schemas/Object_at_attemptId_callId_f55ebd12"
+							"$ref": "#/components/schemas/Object_at_attemptId_callId_65e36dde"
 						}
 					},
 					"quota": {

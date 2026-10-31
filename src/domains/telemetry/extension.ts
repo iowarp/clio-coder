@@ -310,7 +310,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	const settingsChangeData = (
 		payload: ConfigChangePayload,
 	): Omit<EventPayload<"config.changed">, "before" | "after"> => ({
-		source: payload.source ?? "unattributed",
+		source: payload.source,
 		...(payload.scope ? { scope: payload.scope } : {}),
 		paths: {
 			hotReload: [...payload.diff.hotReload],

@@ -181,7 +181,7 @@ export function createConfigBundle(
 				sourcesFor = { snapshot, sources: readLayeredSettings(process.cwd()).sources };
 			return sourcesFor.sources;
 		},
-		update(mutate, source = "unattributed") {
+		update(mutate, source) {
 			if (!snapshot) throw new Error("config domain not started");
 			const previous = snapshot;
 			// Apply the effective-view delta to the user document under one lock,
@@ -196,7 +196,7 @@ export function createConfigBundle(
 			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
 			dispatchChange(previous, normalized, source, "user");
 		},
-		updateProject(mutate, source = "unattributed") {
+		updateProject(mutate, source) {
 			if (!snapshot) throw new Error("config domain not started");
 			const previous = snapshot;
 			const normalized = updateProjectLocalSettings(process.cwd(), (candidate) => {

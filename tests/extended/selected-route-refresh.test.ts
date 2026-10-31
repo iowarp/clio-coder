@@ -108,6 +108,7 @@ it("refreshes the attached serving window after the selected-route TTL without a
 		servingWindow = 131_072;
 		settings.chat.model = "other";
 		bus.emit("config.next_turn_scheduled", {
+			source: "file",
 			diff: { hotReload: [], nextTurn: ["chat.model"], restartRequired: [] },
 			settings,
 		});
@@ -120,6 +121,7 @@ it("refreshes the attached serving window after the selected-route TTL without a
 		servingWindow = 262_144;
 		target.url = "https://another-fixture.invalid";
 		bus.emit("config.next_turn_scheduled", {
+			source: "file",
 			diff: { hotReload: [], nextTurn: ["targets.route.url"], restartRequired: [] },
 			settings,
 		});

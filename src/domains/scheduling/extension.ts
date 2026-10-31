@@ -90,7 +90,7 @@ export function createSchedulingBundle(
 				if (!diff.hotReload.includes("safety.limits.sessionCostUsd")) return;
 				ceilingChange = {
 					ceilingUsd: settings.safety.limits.sessionCostUsd,
-					source: source ?? "unattributed",
+					source,
 					at: performance.now(),
 				};
 			};
@@ -156,7 +156,8 @@ export function createSchedulingBundle(
 						...(block.contextTokens !== undefined ? { contextTokens: block.contextTokens } : {}),
 						outcome,
 						waitedMs: Math.max(0, performance.now() - since),
-						...(raised ? { raisedToUsd: ceilingUsd, raisedBy: by?.source ?? "unattributed" } : {}),
+						// A raise no settings change accounts for keeps no raisedBy rather than a placeholder source (#434, C3).
+						...(raised ? { raisedToUsd: ceilingUsd, ...(by ? { raisedBy: by.source } : {}) } : {}),
 					},
 					telemetry,
 				);

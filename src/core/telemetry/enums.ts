@@ -71,18 +71,11 @@ export const RunTerminalReason = vocabulary([
 ]);
 export type RunTerminalReason = Static<typeof RunTerminalReason>;
 export const RunBoundKind = vocabulary(["turns", "tokens", "cost", "time", "tools"]);
-/** Who changed the settings: the watcher's reload of a file write, or the in-process surface that made the edit (#434). */
-export const ConfigChangeSource = vocabulary([
-	"file",
-	"settings-ui",
-	"cli",
-	"session-override",
-	"slash-command",
-	"acp",
-	"gui",
-	"keybinding",
-	"unattributed",
-]);
+/**
+ * Who changed the settings: the watcher's reload of a file write, or the in-process surface that made the edit. Each
+ * value has a seam that writes it; a surface that writes settings names itself (#434, C3).
+ */
+export const ConfigChangeSource = vocabulary(["file", "settings-ui", "slash-command", "keybinding", "acp", "gui"]);
 /** The layer a settings change landed in (#434). */
 export const ConfigChangeScope = vocabulary(["session", "project", "user"]);
 export type RunBoundKind = Static<typeof RunBoundKind>;

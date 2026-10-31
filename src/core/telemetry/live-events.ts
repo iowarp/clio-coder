@@ -445,16 +445,7 @@ export interface DomainFailedPayload {
  * `settings` is the freshly validated snapshot.
  */
 /** Who changed the settings: a file write the watcher saw, or an in-process edit that named its surface (#434). */
-export type ConfigChangeSource =
-	| "file"
-	| "settings-ui"
-	| "cli"
-	| "session-override"
-	| "slash-command"
-	| "acp"
-	| "gui"
-	| "keybinding"
-	| "unattributed";
+export type ConfigChangeSource = "file" | "settings-ui" | "slash-command" | "keybinding" | "acp" | "gui";
 /** The layer a change landed in: this session only, the workspace's private settings, or the user's (#434). */
 export type ConfigChangeScope = "session" | "project" | "user";
 
@@ -463,7 +454,7 @@ export interface ConfigChangePayload {
 	settings: Readonly<ClioSettings>;
 	/** The settings the change replaced. */
 	previous?: Readonly<ClioSettings>;
-	source?: ConfigChangeSource;
+	source: ConfigChangeSource;
 	/** Absent for a file reload, which cannot tell which layer's file changed. */
 	scope?: ConfigChangeScope;
 }

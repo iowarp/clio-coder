@@ -210,6 +210,7 @@ describe("session prompt source snapshot", { concurrency: false }, () => {
 
 			const beforeInvalidation = prompts.inputEpoch();
 			bus.emit("config.hot_reloaded", {
+				source: "file",
 				diff: { hotReload: ["context.prompt"], nextTurn: [], restartRequired: [] },
 				settings: structuredClone(DEFAULT_SETTINGS),
 			});

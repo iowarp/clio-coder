@@ -21,9 +21,9 @@ export interface ConfigContract {
 	 * two processes patching different fields cannot drop each other's writes.
 	 * Refreshes the in-memory snapshot and dispatches change events.
 	 */
-	update?(mutate: SettingsMutator, source?: ConfigChangeSource): void;
+	update?(mutate: SettingsMutator, source: ConfigChangeSource): void;
 	/** Save an explicit edit to this workspace's trusted private settings layer. */
-	updateProject?(mutate: SettingsMutator, source?: ConfigChangeSource): void;
+	updateProject?(mutate: SettingsMutator, source: ConfigChangeSource): void;
 	/** A change that touches several kinds reaches each with the same payload object. */
 	onChange(
 		kind: ChangeKind,
@@ -31,7 +31,7 @@ export interface ConfigContract {
 			diff: ConfigDiff;
 			settings: Readonly<ClioSettings>;
 			previous?: Readonly<ClioSettings>;
-			source?: ConfigChangeSource;
+			source: ConfigChangeSource;
 			scope?: ConfigChangeScope;
 		}) => void,
 	): () => void;

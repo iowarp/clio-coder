@@ -444,6 +444,7 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			ok(first.includes("Session context:"), first);
 			t.mock.timers.tick(5 * 60_000);
 			bus.emit("config.hot_reloaded", {
+				source: "file",
 				diff: { hotReload: [], nextTurn: [], restartRequired: [] },
 				settings: DEFAULT_SETTINGS,
 			});

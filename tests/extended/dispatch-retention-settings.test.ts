@@ -88,7 +88,7 @@ test("an open dispatch ledger follows config updates and effective session overr
 		await seed.persist();
 		config.update((settings) => {
 			settings.fleet.history.maxRuns = 2;
-		});
+		}, "settings-ui");
 		await dispatch.drain();
 		strictEqual(openLedger().list().length, 2);
 		override = structuredClone(config.get());

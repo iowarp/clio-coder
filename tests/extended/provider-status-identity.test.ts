@@ -52,14 +52,14 @@ test("changing a target's probe identity drops the previous endpoint's health an
 			]) {
 				config.update((settings) => {
 					settings.targets = [target];
-				});
+				}, "settings-ui");
 				const probed: TargetStatus | null = await providers.probeTarget(target.id, { reasoning: false });
 				ok(probed);
 				strictEqual(probed.health.status, "healthy");
 				deepStrictEqual(probed.discoveredModels, ["mock-model"]);
 				config.update((settings) => {
 					settings.targets = [replacement];
-				});
+				}, "settings-ui");
 				const current: TargetStatus | undefined = providers.list()[0];
 				ok(current);
 				strictEqual(current.target.runtime, replacement.runtime);
@@ -77,11 +77,11 @@ test("changing a target's probe identity drops the previous endpoint's health an
 			}
 			config.update((settings) => {
 				settings.targets = [target];
-			});
+			}, "settings-ui");
 			duringReasoning = () =>
 				config.update?.((settings) => {
 					settings.targets = [{ ...target, url: `${fixture.url}/replacement` }];
-				});
+				}, "settings-ui");
 			strictEqual(await providers.probeReasoningForModel(target.id, "mock-model"), null);
 			strictEqual(providers.getDetectedReasoning(target.id, "mock-model"), null);
 		} finally {
@@ -150,7 +150,7 @@ for (const ending of ["retargeted", "removed", "stopped", "overridden"] as const
 											? { ...target, capabilities: { contextWindow: 8192 } }
 											: { ...target, url: `${fixture.url}/replacement` },
 									];
-					});
+					}, "settings-ui");
 				const before = [...providers.list()];
 				release();
 				const result = await pending;
