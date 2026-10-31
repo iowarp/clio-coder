@@ -1,3 +1,4 @@
+import { SETTINGS_FIELD_NAMES } from "../../core/settings-fields.js";
 import type { EVENTS, JournalEventName, JournalPayload } from "../../core/telemetry/events.js";
 
 /**
@@ -9,18 +10,24 @@ import type { EVENTS, JournalEventName, JournalPayload } from "../../core/teleme
  */
 
 /** Identities a share replaces with an anonymous id: stable for one installation, unrecoverable without its key. */
-export type AnonKind = "host" | "user" | "path" | "endpoint" | "config";
+export type AnonKind = "host" | "user" | "path" | "endpoint" | "config" | "model" | "literal";
 /**
  * `keep`: the subtree is structural (ids, vocabularies, numbers, hashes, facts). `withhold`: every string in it is
  * free text and becomes {@link WITHHELD}. `drop`: the optional field is left out. An {@link AnonKind}: every string in
- * it becomes an anonymous id. `json-schema`: a tool's parameter schema keeps its structural keywords. An object
- * applies field by field, and to each element of an array.
+ * it becomes an anonymous id. `model-id`: a model or target identity stays readable unless it carries a path
+ * ({@link carriesPath}), which becomes a `model` anonymous id. `json-schema`: a tool's parameter schema keeps its
+ * structural keywords and anonymizes its literals. `settings`: a settings document keeps its fixed field names and
+ * anonymizes every string value and dictionary key. `settings-path`: a dotted settings key path does the same per
+ * segment. An object applies field by field, and to each element of an array.
  */
 export type FieldProjection =
 	| "keep"
 	| "withhold"
 	| "drop"
+	| "model-id"
 	| "json-schema"
+	| "settings"
+	| "settings-path"
 	| AnonKind
 	| { readonly [field: string]: FieldProjection };
 
@@ -38,7 +45,25 @@ function keep<const K extends string>(...fields: K[]): Record<K, "keep"> {
 	return Object.fromEntries(fields.map((field) => [field, "keep"])) as Record<K, "keep">;
 }
 
-const CALL_FIELDS = ["objects", "callId", "attemptId", "attempt", "target", "roundKind", "toolChoice"] as const;
+/**
+ * Model and target identities, wherever a record names them: a local server can report a model file's path as its id
+ * and discovery accepts provider-returned ids verbatim, so these go through `model-id` rather than `keep`, and one
+ * path anonymizes to the same id in a call's target, a settled route and a route decision (#434).
+ */
+const TARGET = {
+	targetId: "model-id",
+	runtimeId: "keep",
+	api: "keep",
+	requestedModel: "model-id",
+	reportedModel: "model-id",
+} as const satisfies FieldProjection;
+const ROUTE_TUPLE = {
+	...keep("agentId", "executionRole", "runtimeId", "nodeId"),
+	targetId: "model-id",
+	modelId: "model-id",
+} as const satisfies FieldProjection;
+const MEMORY_ROUTE = { targetId: "model-id", modelId: "model-id" } as const satisfies FieldProjection;
+const CALL = { ...keep("objects", "callId", "attemptId", "attempt", "roundKind", "toolChoice"), target: TARGET };
 const SEAL = keep("head", "records", "segments", "objects");
 const LIBRARY = keep(
 	"operationId",
@@ -54,10 +79,10 @@ const LIBRARY = keep(
 
 /** Every shareable event's payload, field by field; the type requires each field to be classified. */
 export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: PayloadProjection<JournalPayload<N>> } = {
-	"call.started": keep(...CALL_FIELDS),
+	"call.started": CALL,
 	"call.settled": {
+		...CALL,
 		...keep(
-			...CALL_FIELDS,
 			"disposition",
 			"usage",
 			"pricing",
@@ -85,9 +110,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			"agentId",
 			"executionRole",
 			"requestOrigin",
-			"route",
 			"node",
-			"routeDecision",
 			"attempt",
 			"phaseTiming",
 			"routingIntent",
@@ -124,11 +147,31 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			"result",
 		),
 		identity: { host: "host", user: "user" },
+		route: { ...keep("runtimeId", "runtimeKind"), targetId: "model-id", wireModelId: "model-id" },
+		routeDecision: {
+			...keep("decisionHash", "mode", "durationMs", "constraintsValid"),
+			executed: {
+				...keep(
+					"agentId",
+					"specFingerprint",
+					"executionRole",
+					"runtimeId",
+					"nodeId",
+					"thinkingLevel",
+					"toolSignature",
+					"promptCompositionHash",
+					"endpointIdentityHash",
+					"settingsFingerprint",
+				),
+				targetId: "model-id",
+				modelId: "model-id",
+			},
+		},
 		// What a run said about itself, its budget wording and its validation claims are the worker's own prose.
 		outcomeDetail: "withhold",
 		failureMessage: "withhold",
 		budget: "withhold",
-		upstream: { responseModelIds: "keep", gatewayRoutes: "withhold" },
+		upstream: { responseModelIds: "model-id", gatewayRoutes: "withhold" },
 		flowRestrictions: {
 			version: "keep",
 			restrictions: { ruleId: "keep", policyHash: "keep", sourceRef: "path", recipients: "keep" },
@@ -142,51 +185,57 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		validationGrounding: { claimed: "keep", grounded: "keep", ungrounded: "withhold", basis: "keep" },
 	},
 	"run.feed_appended": keep("seq", "body"),
-	"run.usage_reported": keep(
-		"source",
-		"scope",
-		"partId",
-		"revision",
-		"coverage",
-		"pricingCoverage",
-		"callCountCoverage",
-		"target",
-		"usage",
-		"totalTokens",
-		"apiCalls",
-		"missingTokenCalls",
-		"pricing",
-	),
+	"run.usage_reported": {
+		...keep(
+			"source",
+			"scope",
+			"partId",
+			"revision",
+			"coverage",
+			"pricingCoverage",
+			"callCountCoverage",
+			"usage",
+			"totalTokens",
+			"apiCalls",
+			"missingTokenCalls",
+			"pricing",
+		),
+		target: TARGET,
+	},
 	"run.linked": keep("runId"),
-	"run.enqueued": keep(
-		"runId",
-		"agentId",
-		"requestOrigin",
-		"targetId",
-		"wireModelId",
-		"runtimeId",
-		"runtimeKind",
-		"node",
-		"endpointLimit",
-		"gate",
-		"rerouteCount",
-	),
+	"run.enqueued": {
+		...keep(
+			"runId",
+			"agentId",
+			"requestOrigin",
+			"runtimeId",
+			"runtimeKind",
+			"node",
+			"endpointLimit",
+			"gate",
+			"rerouteCount",
+		),
+		targetId: "model-id",
+		wireModelId: "model-id",
+	},
 	"run.started": keep("pid", "assignmentId", "attempt"),
-	"route.decided": keep(
-		"policyVersion",
-		"mode",
-		"posture",
-		"decisionHash",
-		"decisionDurationMs",
-		"confidence",
-		"selected",
-		"executed",
-		"fallbacks",
-		"recommendedAgentId",
-		"candidates",
-		"reasons",
-		"verdict",
-	),
+	"route.decided": {
+		...keep(
+			"policyVersion",
+			"mode",
+			"posture",
+			"decisionHash",
+			"decisionDurationMs",
+			"confidence",
+			"recommendedAgentId",
+			"reasons",
+			"verdict",
+		),
+		selected: ROUTE_TUPLE,
+		executed: ROUTE_TUPLE,
+		fallbacks: ROUTE_TUPLE,
+		candidates: { ...keep("rejection", "score", "dominated", "samples", "ready"), route: ROUTE_TUPLE },
+	},
 	"gate.decided": keep(
 		"decisionId",
 		"group",
@@ -218,19 +267,16 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"process.started": {},
 	"process.exited": keep("exitCode"),
 	"process.booted": keep("surface", "node", "platform", "totalMs", "phases", "interactivity"),
-	"prewarm.decided": keep("round", "trigger", "targetId", "model", "ran", "reason", "detail", "durationMs"),
-	"prewarm.settled": keep(
-		"round",
-		"targetId",
-		"model",
-		"trigger",
-		"ttftMs",
-		"apiMs",
-		"promptTokens",
-		"aborted",
-		"detached",
-		"failed",
-	),
+	"prewarm.decided": {
+		...keep("round", "trigger", "ran", "reason", "detail", "durationMs"),
+		targetId: "model-id",
+		model: "model-id",
+	},
+	"prewarm.settled": {
+		...keep("round", "trigger", "ttftMs", "apiMs", "promptTokens", "aborted", "detached", "failed"),
+		targetId: "model-id",
+		model: "model-id",
+	},
 	// Trust axes, finding tags and verdicts are vocabularies and ids; the finding prose is the referenced object (#434).
 	"evidence.assessed": keep(
 		"version",
@@ -251,7 +297,6 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"quota.read": {
 		...keep(
 			"provider",
-			"targetId",
 			"source",
 			"observedAt",
 			"windows",
@@ -263,6 +308,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			"stale",
 			"limitReached",
 		),
+		targetId: "model-id",
 		message: "withhold",
 	},
 	"budget.crossed": keep("level", "spendUsd", "projectedUsd", "ceilingUsd", "contextTokens"),
@@ -279,7 +325,11 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	),
 	"config.snapshotted": keep("settings", "settingsFingerprint"),
 	// Changed settings are named by their key paths, which are structure; the values live in the config objects.
-	"config.changed": keep("source", "scope", "paths", "before", "after", "settingsFingerprint"),
+	// A path's dictionary segments, such as a model id under targets[].lmstudio.models, are the operator's own keys.
+	"config.changed": {
+		...keep("source", "scope", "before", "after", "settingsFingerprint"),
+		paths: "settings-path",
+	},
 	"health.sampled": keep("windowMs", "loopLag", "rssBytes", "writer"),
 	"tool.settled": keep("tool", "outcome", "durationMs", "parkedMs", "resultBytes", "images", "terminate", "blocked"),
 	"tool.decided": keep(
@@ -344,19 +394,21 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		"quality",
 		"verification",
 	),
-	"safety.judged": keep(
-		"tool",
-		"actionClass",
-		"verdict",
-		"latencyMs",
-		"workerRunId",
-		"askRule",
-		"rule",
-		"target",
-		"model",
-		"noVerdict",
-		"operatorMessages",
-	),
+	"safety.judged": {
+		...keep(
+			"tool",
+			"actionClass",
+			"verdict",
+			"latencyMs",
+			"workerRunId",
+			"askRule",
+			"rule",
+			"noVerdict",
+			"operatorMessages",
+		),
+		target: "model-id",
+		model: "model-id",
+	},
 	"prompt.compiled": keep(
 		"structure",
 		"layoutVersion",
@@ -366,23 +418,25 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		"contextWindow",
 		"contextWindowSource",
 	),
-	"context.snapshotted": keep(
-		"snapshotId",
-		"providerId",
-		"runtimeId",
-		"modelId",
-		"promptSegments",
-		"splits",
-		"promptHash",
-		"toolSignature",
-		"messageRange",
-		"divergenceRatio",
-		"categories",
-		"window",
-		"source",
-		"estimatedTokens",
-		"reconciledTokens",
-	),
+	"context.snapshotted": {
+		...keep(
+			"snapshotId",
+			"providerId",
+			"runtimeId",
+			"promptSegments",
+			"splits",
+			"promptHash",
+			"toolSignature",
+			"messageRange",
+			"divergenceRatio",
+			"categories",
+			"window",
+			"source",
+			"estimatedTokens",
+			"reconciledTokens",
+		),
+		modelId: "model-id",
+	},
 	"auth.refreshed": keep(
 		"provider",
 		"trigger",
@@ -455,24 +509,26 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	),
 	"context.recalled": keep("ref", "trigger", "tokensReadmitted", "at"),
 	// An endpoint key is the provider URL, which can name a private host.
-	"memory.step_completed": { endpointKey: "endpoint", targetId: "keep" },
-	"memory.step_decided": keep(
-		"triggerReasons",
-		"tier",
-		"bankDelta",
-		"decision",
-		"reason",
-		"bankOperations",
-		"droppedOperations",
-		"citedEntries",
-		"inputTokens",
-		"outputTokens",
-		"latencyMs",
-		"missingTokenCalls",
-		"calls",
-		"route",
-		"resumeAt",
-	),
+	"memory.step_completed": { endpointKey: "endpoint", targetId: "model-id" },
+	"memory.step_decided": {
+		...keep(
+			"triggerReasons",
+			"tier",
+			"bankDelta",
+			"decision",
+			"reason",
+			"bankOperations",
+			"droppedOperations",
+			"citedEntries",
+			"inputTokens",
+			"outputTokens",
+			"latencyMs",
+			"missingTokenCalls",
+			"calls",
+			"resumeAt",
+		),
+		route: MEMORY_ROUTE,
+	},
 	"memory.observation_recorded": {
 		event: "keep",
 		facts: {
@@ -518,7 +574,6 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 				"proposed",
 				"raw",
 				"durationMs",
-				"route",
 				"outcomes",
 				"offerId",
 				"batchIds",
@@ -530,6 +585,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 				"proven",
 				"window",
 			),
+			route: MEMORY_ROUTE,
 			reason: "withhold",
 		},
 	},
@@ -544,7 +600,8 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
  * The structural objects a `structural` share carries, field by field. A project preload names the handbook files it
  * read by absolute path, and a fragment by its path, so both become anonymous ids; a preload's label and a tool's
  * description are prose. Settings hold whatever an operator typed (paths, hosts, URLs, names), so every string in
- * them becomes an anonymous id and only their shape, switches and numbers stay readable.
+ * them becomes an anonymous id, and so does every dictionary key they hold, such as a model id under
+ * `targets[].lmstudio.models`; only their fixed field names, switches and numbers stay readable.
  */
 export const SHARE_OBJECT_PROJECTIONS: Readonly<Record<string, FieldProjection>> = {
 	"prompt-structure": {
@@ -591,7 +648,7 @@ export const SHARE_OBJECT_PROJECTIONS: Readonly<Record<string, FieldProjection>>
 		},
 	},
 	"tool-schemas": { name: "keep", description: "drop", parameters: "json-schema" },
-	config: "config",
+	config: "settings",
 };
 
 export type Anonymize = (kind: AnonKind, value: string) => string;
@@ -609,14 +666,64 @@ function mapStrings(value: unknown, map: (text: string) => string): unknown {
 	return value;
 }
 
-/** Keywords that say what shape a tool's arguments take; descriptions, titles, examples and defaults are prose. */
-const SCHEMA_KEYWORDS: ReadonlySet<string> = new Set([
-	"type",
+/** Like {@link mapStrings}, and an object's keys are mapped too unless `fixedKey` names them. */
+function mapStringsAndKeys(value: unknown, map: (text: string) => string, fixedKey: (key: string) => boolean): unknown {
+	if (typeof value === "string") return map(value);
+	if (Array.isArray(value)) return value.map((item) => mapStringsAndKeys(item, map, fixedKey));
+	if (value !== null && typeof value === "object")
+		return Object.fromEntries(
+			Object.entries(value).map(([key, item]) => [fixedKey(key) ? key : map(key), mapStringsAndKeys(item, map, fixedKey)]),
+		);
+	return value;
+}
+
+const MODEL_FILE =
+	/\.(?:gguf|ggml|bin|safetensors|pt|pth|ckpt|onnx|tflite|mlmodel|mlpackage|llamafile|h5|npz|pkl|engine)$/iu;
+const HOME_ROOTS: ReadonlySet<string> = new Set(["home", "Users"]);
+
+/**
+ * Whether a model or target identity names a location rather than a provider's model: an absolute, home-relative,
+ * drive or backslash path, any URL, a path that starts after a separator such as `lmstudio:/home/...`, a `.`, `..`,
+ * `~` or empty segment, a home directory root before another segment, or a separator before a model file's name.
+ * `qwen/qwen3-coder`, `openrouter/anthropic/x` and `qwen3:8b` stay readable; `org/repo/model-q4.gguf` does not.
+ */
+function carriesPath(value: string): boolean {
+	if (/^(?:[\\/~]|[A-Za-z]:[\\/]|[A-Za-z][A-Za-z0-9+.-]*:\/\/|file:)/iu.test(value)) return true;
+	if (value.includes("\\") || /[^A-Za-z0-9._-][\\/]/u.test(value)) return true;
+	const segments = value.split("/");
+	if (segments.length < 2) return false;
+	if (
+		segments.some(
+			(segment, index) =>
+				["", ".", "..", "~"].includes(segment) || (HOME_ROOTS.has(segment) && index < segments.length - 1),
+		)
+	)
+		return true;
+	return MODEL_FILE.test(segments[segments.length - 1] ?? "");
+}
+
+const SETTINGS_FIELDS: ReadonlySet<string> = new Set(SETTINGS_FIELD_NAMES);
+const isSettingsField = (key: string) => SETTINGS_FIELDS.has(key);
+
+/** A dotted settings key path, as config.changed names a change: fixed names and list indices stay. */
+function projectSettingsPath(path: string, anonymize: Anonymize): string {
+	if (path === "(root)") return path;
+	return path
+		.split(".")
+		.map((segment) => (isSettingsField(segment) || /^\d+$/u.test(segment) ? segment : anonymize("config", segment)))
+		.join(".");
+}
+
+/**
+ * A tool schema's literal values (enum members, const values, patterns, formats, bounds) are whatever its author wrote,
+ * paths and prose included: numbers, booleans and null stay, every string and every key of a literal object becomes a
+ * `literal` anonymous id. Only keywords whose values are schema structure keep them (#434).
+ */
+const SCHEMA_LITERALS: ReadonlySet<string> = new Set([
 	"enum",
 	"const",
 	"format",
 	"pattern",
-	"required",
 	"minimum",
 	"maximum",
 	"exclusiveMinimum",
@@ -630,18 +737,42 @@ const SCHEMA_KEYWORDS: ReadonlySet<string> = new Set([
 	"minProperties",
 	"maxProperties",
 ]);
+const JSON_TYPES: ReadonlySet<string> = new Set(["string", "number", "integer", "boolean", "object", "array", "null"]);
 const SCHEMA_CHILDREN: ReadonlySet<string> = new Set(["items", "additionalProperties", "not", "contains"]);
 const SCHEMA_LISTS: ReadonlySet<string> = new Set(["anyOf", "oneOf", "allOf", "prefixItems"]);
 
-function projectJsonSchema(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(projectJsonSchema);
+/**
+ * A tool's parameter schema keeps its shape: `type` in the JSON type vocabulary, child schemas, property names and
+ * the `required` entries that name one of them. Descriptions, titles, examples and defaults are dropped and every
+ * other literal is anonymized.
+ */
+function projectJsonSchema(value: unknown, anonymize: Anonymize): unknown {
+	if (Array.isArray(value)) return value.map((item) => projectJsonSchema(item, anonymize));
 	if (value === null || typeof value !== "object") return value;
+	const literal = (text: string) => anonymize("literal", text);
+	const schema = value as Record<string, unknown>;
+	const properties =
+		schema.properties !== null && typeof schema.properties === "object" && !Array.isArray(schema.properties)
+			? (schema.properties as Record<string, unknown>)
+			: undefined;
 	const out: Record<string, unknown> = {};
-	for (const [key, item] of Object.entries(value)) {
-		if (SCHEMA_KEYWORDS.has(key) || SCHEMA_CHILDREN.has(key) || SCHEMA_LISTS.has(key))
-			out[key] = SCHEMA_KEYWORDS.has(key) ? item : projectJsonSchema(item);
-		else if (key === "properties" && item !== null && typeof item === "object" && !Array.isArray(item))
-			out[key] = Object.fromEntries(Object.entries(item).map(([name, child]) => [name, projectJsonSchema(child)]));
+	for (const [key, item] of Object.entries(schema)) {
+		if (key === "type")
+			out[key] = mapStringsAndKeys(
+				item,
+				(text) => (JSON_TYPES.has(text) ? text : literal(text)),
+				() => false,
+			);
+		else if (SCHEMA_LITERALS.has(key)) out[key] = mapStringsAndKeys(item, literal, () => false);
+		else if (SCHEMA_CHILDREN.has(key) || SCHEMA_LISTS.has(key)) out[key] = projectJsonSchema(item, anonymize);
+		else if (key === "properties" && properties)
+			out[key] = Object.fromEntries(
+				Object.entries(properties).map(([name, child]) => [name, projectJsonSchema(child, anonymize)]),
+			);
+		else if (key === "required" && Array.isArray(item))
+			out[key] = item.filter(
+				(name) => typeof name === "string" && properties !== undefined && Object.hasOwn(properties, name),
+			);
 	}
 	return out;
 }
@@ -650,7 +781,11 @@ function projectField(value: unknown, projection: FieldProjection, anonymize: An
 	if (projection === "keep") return value;
 	if (projection === "drop") return DROP;
 	if (projection === "withhold") return mapStrings(value, () => WITHHELD);
-	if (projection === "json-schema") return projectJsonSchema(value);
+	if (projection === "model-id")
+		return mapStrings(value, (text) => (carriesPath(text) ? anonymize("model", text) : text));
+	if (projection === "json-schema") return projectJsonSchema(value, anonymize);
+	if (projection === "settings") return mapStringsAndKeys(value, (text) => anonymize("config", text), isSettingsField);
+	if (projection === "settings-path") return mapStrings(value, (text) => projectSettingsPath(text, anonymize));
 	if (typeof projection === "string") return mapStrings(value, (text) => anonymize(projection, text));
 	if (Array.isArray(value)) return value.map((item) => projectField(item, projection, anonymize));
 	if (typeof value === "string") return WITHHELD;
