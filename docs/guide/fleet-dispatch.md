@@ -586,7 +586,7 @@ A `readOnly` dispatch restriction denies mutation and outside reads; reviewers a
 | Compete | `mode: "compete", candidates: 2..4` | N candidates in scratch worktrees, read-only judge, winner applied or preserved. |
 | Council | `mode: "council", roster: "design"` | Two to five read-only members answer the same task, with optional vote or judge synthesis. An operator starts one with `/council [--roster <name>] [--rounds <n>] [--synthesis judge\|vote\|none] <task>`; without `--roster` the roster named `default` is used. |
 | Agent automation | `agent: "auto"` | Picks the agent from the task shape through a shared classifier: `coder` (write, debug, refactor, config), `tester`, `documenter`, `verifier` (review), `researcher`, `world-knowledge` and `scout` (read, unknown). That baseline is the agent that runs; the router's alternative stays shadow-only unless `fleet.adaptiveRouting.agentRoles` activates the pair. |
-| Scout split | `from_scout: {run_id, receipt_digest}` | Second call of the Scout continuation. A terminal Scout run either settles with findings or proposes at most four typed subtasks; this call compiles the proposal into one approval-gated dependency plan. Pass no other argument. |
+| Scout split | `from_scout: {run_id, run_digest}` | Second call of the Scout continuation. A terminal Scout run either settles with findings or proposes at most four typed subtasks; this call compiles the proposal into one approval-gated dependency plan. Pass no other argument. |
 
 ### Single-writer token
 

@@ -479,7 +479,7 @@ Runs one task or a batch on configured fleet agents. Source: [`src/tools/dispatc
 | Argument | Contract |
 | --- | --- |
 | `list` | Return the agent catalog instead of dispatching. |
-| `from_scout` | `{run_id, receipt_digest}` only; compiles a terminal Scout receipt into an approval-gated dependency plan. |
+| `from_scout` | `{run_id, run_digest}` only; compiles a terminal Scout run's split result into an approval-gated dependency plan. `run_digest` is the sha256 run digest the Scout result names. |
 | `task` / `tasks` | Supply exactly one. `task` is one assignment; `tasks` is an array of strings or task objects. A task object may set `context`, `briefing`, `agent`, `target`, `model`, `node`, `intent`, `gate`, `budget`, `worktree`, or `result_summary_max_bytes`; each overrides the batch default. |
 | `mode` | `parallel` (default), `sequential`, `pipeline` (each task receives prior output), `compete` (candidates run in scratch worktrees for a judge), or `council` (members answer the same task). A singular ordinary task uses the sequential path. |
 | `roster` / `members` | Council only; provide exactly one. `roster` names a configured `fleet.rosters` entry; `members` supplies 2–5 `{label,target,model?,thinking?}` entries. |
