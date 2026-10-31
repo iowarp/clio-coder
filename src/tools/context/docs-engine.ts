@@ -77,7 +77,7 @@ const VOCABULARY_ALIASES: ReadonlyArray<{ triggers: ReadonlyArray<string>; expan
 	},
 	{
 		triggers: ["agent", "agents", "dispatch", "fleet", "worker", "workers", "run"],
-		expansions: ["agent", "dispatch", "fleet", "profile", "worker", "receipt", "run"],
+		expansions: ["agent", "dispatch", "fleet", "profile", "worker", "journal", "run"],
 	},
 	{
 		triggers: ["model", "models", "provider", "runtime", "target", "targets", "endpoint"],
@@ -88,8 +88,8 @@ const VOCABULARY_ALIASES: ReadonlyArray<{ triggers: ReadonlyArray<string>; expan
 		expansions: ["auth", "credential", "login", "oauth", "target", "runtime"],
 	},
 	{
-		triggers: ["memory", "evidence", "receipt", "receipts", "audit", "accountability", "provenance"],
-		expansions: ["accountability", "evidence", "findings", "memory", "receipt", "run", "audit"],
+		triggers: ["memory", "evidence", "telemetry", "journal", "seal", "accountability", "provenance"],
+		expansions: ["accountability", "evidence", "findings", "memory", "seal", "run", "telemetry"],
 	},
 	{
 		triggers: ["validate", "validated", "validation", "verify", "verified", "test", "tests", "rigor"],
