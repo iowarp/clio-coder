@@ -1,8 +1,16 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+// The bundle carries the Clio Coder version it was built from, which /api/meta's `clio` reads from the same file, so
+// an open window can tell when the server it talks to has moved on.
+const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
+	version: string;
+};
+
 export default defineConfig({
+	define: { __CLIO_CODER_BUNDLE_VERSION__: JSON.stringify(version) },
 	logLevel: process.env.CLIO_CODER_BUILD_VERBOSE === "1" ? "info" : "warn",
 	root: fileURLToPath(new URL("./client", import.meta.url)),
 	plugins: [react()],

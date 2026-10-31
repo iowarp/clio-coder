@@ -5,6 +5,7 @@ import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
 import type { SessionSummary } from "../contracts/sessions.js";
 import { useTokenRejected } from "./api/auth-state.js";
+import { BUNDLE_VERSION } from "./api/bundle-version.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { type ConnectionState, subscribe } from "./api/events.js";
 import { lastTokenWasRefused } from "./api/token.js";
@@ -22,6 +23,7 @@ import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
 import { SessionControlNotice, SessionControlsProvider, useSessionCommands } from "./shell/SessionControls.js";
 import { type ShellApi, ShellContext } from "./shell/shell-context.js";
 import { isHeld, isSettingsPath, sessionIdFromPath, taskRows, taskTitle } from "./shell/shell-model.js";
+import { staleBundle } from "./shell/stale-bundle-model.js";
 import { TaskSidebar } from "./shell/TaskSidebar.js";
 import { rememberedWorkspace, rememberWorkspace, useSessionOverview, useTaskActions } from "./shell/tasks.js";
 import { useApplyTheme } from "./shell/theme.js";
@@ -367,12 +369,25 @@ function Workbench({ client }: { client: Client }) {
 			</p>
 		</div>
 	) : null;
+	const stale = staleBundle(BUNDLE_VERSION, meta.data?.clio);
+	const staleNotice = stale ? (
+		<div className="app-update-notice" role="status">
+			<strong>{stale.title}</strong>
+			<p>
+				{stale.detail}{" "}
+				<button type="button" onClick={() => window.location.reload()}>
+					Reload this window
+				</button>
+			</p>
+		</div>
+	) : null;
 	const collapsed = sidebarCollapsed && !phone;
 	const authed = !!client.token && !refused;
 	if (wizardMode !== null && authed && meta.data?.apiVersion === API_VERSION)
 		return (
 			<div className="app-setup">
 				<WindowTitlebar />
+				{staleNotice}
 				{pendingNotice}
 				<Suspense
 					fallback={
@@ -448,6 +463,7 @@ function Workbench({ client }: { client: Client }) {
 					</button>
 				</div>
 				<main id="main" className="wb-main" data-mode={mode} tabIndex={-1}>
+					{staleNotice}
 					{pendingNotice}
 					{authed ? <SessionControlNotice connected={connection === "Connected"} /> : null}
 					{!client.token || refused ? (

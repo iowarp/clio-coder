@@ -340,6 +340,20 @@ try {
 		await check("toolchain");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `toolchain-${width}.png`), fullPage: true });
+		// A window whose bundle was built for another version than the server's says so and offers a reload, which it
+		// never does on its own.
+		await page.route("**/api/meta", async (route) => {
+			const response = await route.fetch();
+			await route.fulfill({ response, json: { ...(await response.json()), clio: "0.0.0-stale" } });
+		});
+		await page.reload();
+		const staleNotice = page.locator(".app-update-notice", { hasText: "the server runs 0.0.0-stale." });
+		await staleNotice.getByRole("button", { name: "Reload this window", exact: true }).waitFor();
+		await check("stale-bundle");
+		await page.unroute("**/api/meta");
+		await page.reload();
+		await page.locator("main").getByRole("article", { name: "herdr", exact: true }).waitFor();
+		assert.equal(await staleNotice.count(), 0, "a matching server still shows the stale-bundle notice");
 		await navigate("Traces");
 		await page.locator('main a[href^="/traces/run-0000"]').waitFor();
 		await check("traces");
