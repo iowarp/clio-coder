@@ -40,7 +40,6 @@ import { type Dirent, readdirSync } from "node:fs";
 import { isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { bashShellPath } from "../../core/bash-shell.js";
-import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } from "../../core/bus-events.js";
 import { taskCommitSubject } from "../../core/commit-message.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { devRootOwnerForWorkers } from "../../core/dev-roots.js";
@@ -69,6 +68,7 @@ import {
 } from "../../core/sandbox/worker-policy.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
+import type { DispatchCompletedPayload, DispatchRunIdentity } from "../../core/telemetry/live-events.js";
 import { isTestFilePath } from "../../core/test-paths.js";
 import { rawDurationMs } from "../../core/timers.js";
 import {
@@ -3803,7 +3803,7 @@ export function createDispatchBundle(
 		const origin = `worker:${record.runId}`;
 		const fallback = grantRunFallbacks.get(record.runId) ?? "deny";
 		const requested = (escalation: boolean): void => {
-			context.bus.emit(BusChannels.PermissionRequested, {
+			context.bus.emit("approval.requested", {
 				tool: record.tool,
 				actionClass: record.actionClass,
 				...(record.ownerSessionId !== null ? { sessionId: record.ownerSessionId } : {}),
@@ -3871,7 +3871,7 @@ export function createDispatchBundle(
 								? "safety-judge"
 								: record.issuer
 						: "worker";
-		context.bus.emit(BusChannels.PermissionResolved, {
+		context.bus.emit("approval.resolved", {
 			status,
 			tool: record.tool,
 			requestId: record.requestId,
@@ -4205,7 +4205,7 @@ export function createDispatchBundle(
 		node: RunNodeIdentity | null,
 	): void {
 		pendingCapacity.set(identity.runId, { identity, timing, node });
-		context.bus.emit(BusChannels.DispatchEnqueued, identity);
+		context.bus.emit("run.enqueued", identity);
 	}
 
 	function publishCapacityAdmissionFailure(
@@ -4219,7 +4219,7 @@ export function createDispatchBundle(
 				: error instanceof AdmissionTimedOutError
 					? "timed_out"
 					: "denied_by_policy";
-		context.bus.emit(BusChannels.DispatchFailed, {
+		context.bus.emit("run.failed", {
 			...identity,
 			outcome,
 			outcomeDetail: detail,
@@ -4647,7 +4647,7 @@ export function createDispatchBundle(
 			timer,
 			settleCanceled,
 		});
-		context.bus.emit(BusChannels.DispatchProgress, {
+		context.bus.emit("run.progressed", {
 			runId: run.runId,
 			agentId: run.agentId,
 			task: run.task,
@@ -4847,7 +4847,7 @@ export function createDispatchBundle(
 				reason,
 			};
 			assignments.attachAttempt(asAssignmentId(run.lineage.rootRunId), handle.events, marker);
-			context.bus.emit(BusChannels.DispatchProgress, {
+			context.bus.emit("run.progressed", {
 				runId: run.lineage.rootRunId,
 				agentId: run.agentId,
 				task: run.task,
@@ -4878,7 +4878,7 @@ export function createDispatchBundle(
 			} catch (finalizationError) {
 				assignments.reject(asAssignmentId(run.lineage.rootRunId), finalizationError);
 			}
-			context.bus.emit(BusChannels.DispatchFailed, {
+			context.bus.emit("run.failed", {
 				runId: run.runId,
 				agentId: run.agentId,
 				task: run.task,
@@ -4948,7 +4948,7 @@ export function createDispatchBundle(
 	}
 
 	function emitHeartbeatStatus(run: ActiveRun, status: HeartbeatStatus): void {
-		context.bus.emit(BusChannels.DispatchProgress, {
+		context.bus.emit("run.progressed", {
 			runId: run.runId,
 			agentId: run.agentId,
 			task: run.task,
@@ -5398,7 +5398,7 @@ export function createDispatchBundle(
 		// on, and every normal dispatch with a "../" token in its prose hit it.
 		const parentTokenNotice = inferredScopeParentTokenNotice(pathScope);
 		if (parentTokenNotice !== null) {
-			context.bus.emit(BusChannels.DispatchScopeNotice, {
+			context.bus.emit("run.scope_notice_raised", {
 				...parentTokenNotice,
 				agentId: req.agentId,
 			});
@@ -5440,7 +5440,7 @@ export function createDispatchBundle(
 			offeredWithheld,
 		);
 		if (message === null) return;
-		context.bus.emit(BusChannels.DispatchScopeNotice, { code: "mcp_sandbox_no_network", level: "warning", message });
+		context.bus.emit("run.scope_notice_raised", { code: "mcp_sandbox_no_network", level: "warning", message });
 	}
 
 	async function resolveLifecycle(
@@ -5567,7 +5567,7 @@ export function createDispatchBundle(
 			req,
 		);
 		if (writeConfined) {
-			context.bus.emit(BusChannels.DispatchScopeNotice, {
+			context.bus.emit("run.scope_notice_raised", {
 				code: "write_roots_checks_withheld",
 				level: "warning",
 				message:
@@ -6164,7 +6164,7 @@ export function createDispatchBundle(
 				const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
 				const reason =
 					typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
-				context.bus.emit(BusChannels.PermissionRequested, {
+				context.bus.emit("approval.requested", {
 					tool: event.payload.tool,
 					actionClass,
 					requestId,
@@ -6173,7 +6173,7 @@ export function createDispatchBundle(
 					requestedBy: runIdForPermissionAudit ?? undefined,
 					rejection: { short: reason, detail: reason, hints: [] },
 				});
-				context.bus.emit(BusChannels.PermissionResolved, {
+				context.bus.emit("approval.resolved", {
 					status: "denied",
 					tool: event.payload.tool,
 					requestId,
@@ -6271,7 +6271,7 @@ export function createDispatchBundle(
 			// A failed write leaves the row dirty for the terminal persist (#428).
 			runningRowPersisted = persistLedgerInBackground(ledgerRef, envelope.id);
 			if (req.lineage !== undefined) {
-				context.bus.emit(BusChannels.DispatchEnqueued, {
+				context.bus.emit("run.enqueued", {
 					runId: envelope.id,
 					sessionId: req.ownerSessionId ?? null,
 					agentId: req.agentId,
@@ -6283,7 +6283,7 @@ export function createDispatchBundle(
 					runtimeKind: "acp-delegation",
 				});
 			}
-			context.bus.emit(BusChannels.DispatchStarted, {
+			context.bus.emit("run.started", {
 				budget: budgetEnvelope,
 				runId: envelope.id,
 				sessionId: req.ownerSessionId ?? null,
@@ -6320,7 +6320,7 @@ export function createDispatchBundle(
 		const eventPump = startDispatchEventPump(acp.events, foldAcpEvent, {
 			onEvent: (event) => {
 				if (isRecord(event) && event.type === "heartbeat") return;
-				context.bus.emit(BusChannels.DispatchProgress, {
+				context.bus.emit("run.progressed", {
 					runId: envelope.id,
 					agentId: req.agentId,
 					task: req.task,
@@ -6585,10 +6585,10 @@ export function createDispatchBundle(
 				...(receipt.safety?.flowRestrictions !== undefined ? { flowRestrictions: receipt.safety.flowRestrictions } : {}),
 			};
 			if (outcome === "succeeded") {
-				context.bus.emit(BusChannels.DispatchCompleted, payload);
+				context.bus.emit("run.completed", payload);
 				return;
 			}
-			context.bus.emit(BusChannels.DispatchFailed, { ...payload, reason: outcome });
+			context.bus.emit("run.failed", { ...payload, reason: outcome });
 		};
 
 		const assessDispatchFinishContract = (): DispatchFinishContractSnapshot | null => {
@@ -6827,7 +6827,7 @@ export function createDispatchBundle(
 				active.delete(envelope.id);
 				settleAssignmentDurablyWithoutReceipt(lineage.rootRunId, envelope.id);
 				recordTargetOutcome(envelope.id, targetId, runtimeId, wireModelId, "failed", 1, "internal");
-				context.bus.emit(BusChannels.DispatchFailed, {
+				context.bus.emit("run.failed", {
 					runId: envelope.id,
 					agentId: req.agentId,
 					task: req.task,
@@ -7519,7 +7519,7 @@ export function createDispatchBundle(
 			onWriteRecordDowngraded(downgrade) {
 				const runId = runIdForPermissionAudit;
 				if (runId === null) return;
-				context.bus.emit(BusChannels.DispatchProgress, {
+				context.bus.emit("run.progressed", {
 					runId,
 					agentId: req.agentId,
 					event: { type: "clio_coder_write_record_downgraded", payload: downgrade },
@@ -7770,7 +7770,7 @@ export function createDispatchBundle(
 				const axis =
 					readStringOrNull(event.payload.axis) ??
 					(ruleId !== null ? `net:${ruleId}` : policyKind === "ask" && reasonCode !== null ? `net:${reasonCode}` : null);
-				context.bus.emit(BusChannels.PermissionRequested, {
+				context.bus.emit("approval.requested", {
 					tool: typeof event.payload.tool === "string" ? event.payload.tool : "unknown",
 					actionClass,
 					...(req.ownerSessionId ? { sessionId: req.ownerSessionId } : {}),
@@ -7929,7 +7929,7 @@ export function createDispatchBundle(
 					requestId &&
 					origin
 				) {
-					context.bus.emit(BusChannels.PermissionRequested, {
+					context.bus.emit("approval.requested", {
 						tool: event.payload.tool,
 						actionClass,
 						requestId,
@@ -7945,7 +7945,7 @@ export function createDispatchBundle(
 				} else if (source === "timeout") {
 					escalationCounts.timedOut += 1;
 				}
-				context.bus.emit(BusChannels.PermissionResolved, {
+				context.bus.emit("approval.resolved", {
 					status: granted ? "granted" : "denied",
 					tool: event.payload.tool,
 					...(requestId !== undefined ? { requestId } : {}),
@@ -8112,7 +8112,7 @@ export function createDispatchBundle(
 					: {}),
 			};
 			if (req.lineage !== undefined) {
-				context.bus.emit(BusChannels.DispatchEnqueued, {
+				context.bus.emit("run.enqueued", {
 					runId: envelope.id,
 					agentId: req.agentId,
 					task: req.task,
@@ -8125,7 +8125,7 @@ export function createDispatchBundle(
 					...fleetIdentity,
 				});
 			}
-			context.bus.emit(BusChannels.DispatchStarted, {
+			context.bus.emit("run.started", {
 				runId: envelope.id,
 				agentId: req.agentId,
 				task: req.task,
@@ -8169,7 +8169,7 @@ export function createDispatchBundle(
 				? { prelude: routeWarnings.map((message) => ({ type: "route_warning", level: "warning", message })) }
 				: {}),
 			onEvent: (event) => {
-				context.bus.emit(BusChannels.DispatchProgress, {
+				context.bus.emit("run.progressed", {
 					runId: envelope.id,
 					agentId: req.agentId,
 					task: req.task,
@@ -8481,10 +8481,10 @@ export function createDispatchBundle(
 				...(receipt.safety?.flowRestrictions !== undefined ? { flowRestrictions: receipt.safety.flowRestrictions } : {}),
 			};
 			if (outcome === "succeeded") {
-				context.bus.emit(BusChannels.DispatchCompleted, payload);
+				context.bus.emit("run.completed", payload);
 				return;
 			}
-			context.bus.emit(BusChannels.DispatchFailed, { ...payload, reason: outcome });
+			context.bus.emit("run.failed", { ...payload, reason: outcome });
 		};
 
 		const assessDispatchFinishContract = (): DispatchFinishContractSnapshot | null => {
@@ -9242,7 +9242,7 @@ export function createDispatchBundle(
 					1,
 					"internal",
 				);
-				context.bus.emit(BusChannels.DispatchFailed, {
+				context.bus.emit("run.failed", {
 					runId: envelope.id,
 					agentId: req.agentId,
 					task: req.task,
@@ -10160,15 +10160,15 @@ export function createDispatchBundle(
 			// lifecycle. The Fleet Runs board and /share are built from these
 			// events, and a council whose synthesis they cannot see is a council
 			// whose verdict the operator cannot read or share.
-			context.bus.emit(BusChannels.DispatchEnqueued, { ...identity, requestOrigin: origin });
-			context.bus.emit(BusChannels.DispatchStarted, {
+			context.bus.emit("run.enqueued", { ...identity, requestOrigin: origin });
+			context.bus.emit("run.started", {
 				...identity,
 				requestOrigin: origin,
 				pid: null,
 				assignmentId: runId,
 				attempt: 0,
 			});
-			context.bus.emit(BusChannels.DispatchCompleted, {
+			context.bus.emit("run.completed", {
 				...identity,
 				requestOrigin: origin,
 				outcome: "succeeded",
@@ -10205,7 +10205,7 @@ export function createDispatchBundle(
 			} catch (ledgerError) {
 				reportDispatchDiagnostic(`persist failed row for run ${runId}`, ledgerError);
 			}
-			context.bus.emit(BusChannels.DispatchFailed, {
+			context.bus.emit("run.failed", {
 				...identity,
 				outcome: "failed",
 				outcomeDetail: detail,
@@ -10252,17 +10252,17 @@ export function createDispatchBundle(
 			// session that parks or ends and a main turn the operator cancels
 			// revoke what they hold; a run's own exit and abort revoke at the run.
 			grantUnsubscribes.push(
-				context.bus.on(BusChannels.SessionParked, (payload) => {
+				context.bus.subscribe("session.parked", (payload) => {
 					grantBroker.revokeSession(
 						payload.sessionId,
 						`the owning session was ${payload.reason === "close" ? "closed" : "parked"}`,
 					);
 				}),
-				context.bus.on(BusChannels.SessionEnd, () => {
+				context.bus.subscribe("session.ended", () => {
 					const sessions = new Set(grantBroker.list({ state: "pending" }).map((record) => record.ownerSessionId));
 					for (const sessionId of sessions) grantBroker.revokeSession(sessionId, "the owning session ended");
 				}),
-				context.bus.on(BusChannels.RunAborted, (payload) => {
+				context.bus.subscribe("run.aborted", (payload) => {
 					if (payload.runId !== null) return;
 					if (payload.source !== "stream_cancel" && payload.source !== "loop_guard") return;
 					const sessionId = options?.getSessionId?.() ?? null;
@@ -10374,7 +10374,7 @@ export function createDispatchBundle(
 		const startedMs = Date.parse(run.startedAt);
 		const at = Date.now();
 		const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, at - startedMs) : null;
-		context.bus.emit(BusChannels.RunAborted, {
+		context.bus.emit("run.aborted", {
 			source,
 			runId: run.runId,
 			startedAt: run.startedAt,
@@ -10496,7 +10496,7 @@ export function createDispatchBundle(
 			if (assignments.get(entry.rootRunId)?.status === "running") {
 				settleAssignmentDurably(asAssignmentId(entry.rootRunId), entry.terminalCandidate, "canceled");
 			}
-			context.bus.emit(BusChannels.DispatchProgress, {
+			context.bus.emit("run.progressed", {
 				runId: finishedRunId,
 				agentId: entry.agentId,
 				task: entry.task,
@@ -10876,12 +10876,12 @@ export function createDispatchBundle(
 		},
 		subscribeChanges(listener) {
 			const unsubscribes = [
-				context.bus.on(BusChannels.DispatchEnqueued, listener),
-				context.bus.on(BusChannels.DispatchStarted, listener),
-				context.bus.on(BusChannels.DispatchCompleted, listener),
-				context.bus.on(BusChannels.DispatchFailed, listener),
-				context.bus.on(BusChannels.PermissionRequested, listener),
-				context.bus.on(BusChannels.PermissionResolved, listener),
+				context.bus.subscribe("run.enqueued", listener),
+				context.bus.subscribe("run.started", listener),
+				context.bus.subscribe("run.completed", listener),
+				context.bus.subscribe("run.failed", listener),
+				context.bus.subscribe("approval.requested", listener),
+				context.bus.subscribe("approval.resolved", listener),
 			];
 			try {
 				unsubscribes.push(subscribeStoredAssignments(listener));
@@ -10955,7 +10955,7 @@ export function createDispatchBundle(
 			const queued = pendingCapacity.get(rootRunId);
 			if (queued !== undefined && capacityAdmission.cancel(rootRunId)) {
 				persistAssignment(cancelStoredAssignment(rootRunId), `${rootRunId}:cancel-queued`);
-				context.bus.emit(BusChannels.RunAborted, {
+				context.bus.emit("run.aborted", {
 					source: "dispatch_abort",
 					runId: rootRunId,
 					startedAt: null,
@@ -10976,14 +10976,14 @@ export function createDispatchBundle(
 				if (retry.rootRunId === rootRunId) {
 					settleAssignmentDurably(asAssignmentId(rootRunId), retry.terminalCandidate, "canceled");
 				}
-				context.bus.emit(BusChannels.RunAborted, {
+				context.bus.emit("run.aborted", {
 					source: "dispatch_abort",
 					runId: finishedRunId,
 					startedAt: null,
 					elapsedMs: null,
 					reason: `scheduled retry ${retry.attempt} canceled by operator`,
 				});
-				context.bus.emit(BusChannels.DispatchProgress, {
+				context.bus.emit("run.progressed", {
 					runId: finishedRunId,
 					agentId: retry.agentId,
 					task: retry.task,

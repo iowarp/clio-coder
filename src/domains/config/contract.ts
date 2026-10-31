@@ -1,6 +1,6 @@
-import type { ConfigChangeScope, ConfigChangeSource } from "../../core/bus-events.js";
 import type { ClioSettings, SettingsMutator } from "../../core/config.js";
 import type { SettingsOrigin } from "../../core/settings-layers.js";
+import type { ConfigChangeScope, ConfigChangeSource } from "../../core/telemetry/live-events.js";
 import type { ChangeKind, ConfigDiff } from "./classify.js";
 
 /**

@@ -1,6 +1,5 @@
-import { BusChannels } from "../core/bus-events.js";
 import type { WorkerRosters } from "../core/defaults.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { getTerminationCoordinator } from "../core/termination.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
@@ -44,7 +43,7 @@ export interface ToolBootstrapDeps extends Omit<CoreToolBootstrapDeps, "mcpCapab
 	dispatch?: DispatchContract;
 	jobTool?: ToolSpec;
 	jobs?: JobOperations;
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	termination?: Pick<ReturnType<typeof getTerminationCoordinator>, "onTerminate">;
 	getAgentCatalog?: () => string;
 	getAgentSpecs?: () => ReadonlyArray<AgentSpec>;
@@ -240,7 +239,7 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 	}
 	assertRegisteredBuiltinTools(registry, registration, Boolean(deps.dispatch), Boolean(deps.panes));
 	for (const diagnostic of registerHarnessExtensionTools(registry, cwd)) {
-		deps.bus?.emit(BusChannels.ExtensionsLoadIssue, { message: diagnostic.message });
+		deps.bus?.emit("extension.load_failed", { message: diagnostic.message });
 	}
 	// Placement is presentation, not authority. Apply it to this registry only:
 	// worker registries still attach the execution tools their recipes admit.
@@ -276,8 +275,8 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		if (typeof disposeTerminate === "function") disposeTerminateHook = disposeTerminate;
 	}
 	if (mcpCapabilities && deps.bus) {
-		disposeCloseListeners.push(deps.bus.on(BusChannels.SessionEnd, close));
-		disposeCloseListeners.push(deps.bus.on(BusChannels.ShutdownRequested, close));
+		disposeCloseListeners.push(deps.bus.subscribe("session.ended", close));
+		disposeCloseListeners.push(deps.bus.subscribe("shutdown.requested", close));
 	}
 	return { mcpCapabilities, close };
 }

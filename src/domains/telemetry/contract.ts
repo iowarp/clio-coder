@@ -118,7 +118,7 @@ export interface TelemetryRunSummary {
 
 /**
  * The evidence-readiness facts an evidence build reports once its bundle lands.
- * It is the `accountability.evidenceReady` payload ACP forwards; the run
+ * It is the `evidence.assessed` payload ACP forwards; the run
  * summary keeps only `evidenceId`.
  */
 export interface TelemetryRunEvidence {

@@ -1,7 +1,6 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
-import { BusChannels } from "../core/bus-events.js";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
 import { loadDomains } from "../core/domain-loader.js";
@@ -9,7 +8,7 @@ import { FileReferenceError, readFileArgsAsync } from "../core/file-references.j
 import { readClioVersion } from "../core/package-root.js";
 import { withRunOverrides } from "../core/run-overrides.js";
 import { readStrictLayeredSettings } from "../core/settings-layers.js";
-import { getSharedBus } from "../core/shared-bus.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
 import { yoloRootRefusal } from "../core/yolo-host.js";
@@ -792,7 +791,7 @@ async function runDispatch(
 	// A dispatch's scope entry can change what the worker may touch without saying
 	// so in the request, so the headless run reports it where an operator would see
 	// it: stderr in text mode, a `dispatch_scope_notice` line in the JSON stream.
-	const unsubscribeScopeNotices = getSharedBus().on(BusChannels.DispatchScopeNotice, (payload) => {
+	const unsubscribeScopeNotices = telemetryHub().subscribe("run.scope_notice_raised", (payload) => {
 		const notice = readDispatchScopeNotice(payload);
 		if (notice === null) return;
 		if (parsed.json) {

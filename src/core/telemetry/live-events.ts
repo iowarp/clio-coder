@@ -1,23 +1,6 @@
-import type { CostAggregate } from "../domains/telemetry/cost.js";
-import type { ContextOperation } from "./context-operation.js";
-import type { JobChangedPayload } from "./job-types.js";
-/**
- * Canonical channel names and payload contracts for the Clio event bus.
- *
- * Add new channels here. Downstream code imports from this file rather than
- * hard-coding string literals so renames are a single edit and typos fail fast.
- *
- * Every channel has a payload type registered in {@link BusPayloadMap}; the
- * shared bus types `emit`/`on` against that map, so payload drift between an
- * emitter and this file is a compile error. The types describe what in-process
- * emitters send; the bus performs no runtime validation, so subscribers that
- * consume data which crossed a process boundary (worker/ACP event streams)
- * must keep validating at runtime.
- */
-
-import type { AgentAudience } from "../domains/agents/spec.js";
-import type { ConfigDiff } from "../domains/config/classify.js";
-import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
+import type { AgentAudience } from "../../domains/agents/spec.js";
+import type { ConfigDiff } from "../../domains/config/classify.js";
+import type { RunToolBudgetEnvelope } from "../../domains/dispatch/budget-envelope.js";
 import type {
 	DispatchRequestOrigin,
 	RunKind,
@@ -25,71 +8,22 @@ import type {
 	RunOutcome,
 	RunOutcomeCode,
 	ToolActivitySummary,
-} from "../domains/dispatch/types.js";
-import type { MiddlewareHook } from "../domains/middleware/types.js";
-import type { TargetStatus } from "../domains/providers/contract.js";
-import type { CostProvenance } from "../domains/providers/index.js";
-import type { TelemetryRunEvidence } from "../domains/telemetry/contract.js";
-import type { ClioSettings } from "./config.js";
-import type { SkillActivation } from "./skill-activation.js";
-import type { TerminationPhase } from "./termination.js";
+} from "../../domains/dispatch/types.js";
+import type { MiddlewareHook } from "../../domains/middleware/types.js";
+import type { TargetStatus } from "../../domains/providers/contract.js";
+import type { CostProvenance } from "../../domains/providers/index.js";
+import type { TelemetryRunEvidence } from "../../domains/telemetry/contract.js";
+import type { CostAggregate } from "../../domains/telemetry/cost.js";
+import type { ClioSettings } from "../config.js";
+import type { ContextOperation } from "../context-operation.js";
+import type { SkillActivation } from "../skill-activation.js";
+import type { TerminationPhase } from "../termination.js";
 
-export const BusChannels = {
-	JobChanged: "job.changed",
-	EggsChanged: "session.eggsChanged",
-	SessionStart: "session.start",
-	SessionEnd: "session.end",
-	SessionOpened: "session.opened",
-	SessionParked: "session.parked",
-	SessionResuming: "session.resuming",
-	SessionResumed: "session.resumed",
-	SessionTurnSwitched: "session.turn_switched",
-	DomainLoaded: "domain.loaded",
-	DomainFailed: "domain.failed",
-	ConfigHotReload: "config.hotReload",
-	ConfigNextTurn: "config.nextTurn",
-	ConfigRestartRequired: "config.restartRequired",
-	ConfigReloadFailed: "config.reloadFailed",
-	ConfigSessionChanged: "config.sessionChanged",
-	PermissionRequested: "permission.requested",
-	PermissionResolved: "permission.resolved",
-	SafetyBlocked: "safety.blocked",
-	LoopBlocked: "safety.loopBlocked",
-	ToolBudgetExceeded: "safety.toolBudgetExceeded",
-	GitHooksChanged: "safety.gitHooksChanged",
-	InternalGitDrift: "safety.internalGitDrift",
-	ProviderHealth: "provider.health",
-	RuntimeNotice: "runtime.notice",
-	ResidencyMutation: "residency.mutation",
-	DispatchScopeNotice: "dispatch.scopeNotice",
-	DispatchEnqueued: "dispatch.enqueued",
-	DispatchStarted: "dispatch.started",
-	DispatchProgress: "dispatch.progress",
-	DispatchCompleted: "dispatch.completed",
-	DispatchFailed: "dispatch.failed",
-	AccountabilityEvidenceReady: "accountability.evidenceReady",
-	CompactionBegin: "compaction.begin",
-	CompactionEnd: "compaction.end",
-	MiddlewareHookFailed: "middleware.hookFailed",
-	PluginsReloaded: "plugins.reloaded",
-	ExtensionsLoadIssue: "extensions.loadIssue",
-	ContextActivity: "context.activity",
-	ContextSourcesChanged: "context.sourcesChanged",
-	ContextWarning: "context.warning",
-	ContextPruned: "context.pruned",
-	ContextRecalled: "context.recalled",
-	MemoryStepCompleted: "memory.stepCompleted",
-	MemoryGuardianChanged: "memory.guardianChanged",
-	AgentStatusChanged: "agent.status.changed",
-	RunAborted: "run.aborted",
-	BudgetAlert: "budget.alert",
-	ShutdownRequested: "shutdown.requested",
-	ShutdownDrained: "shutdown.drained",
-	ShutdownTerminated: "shutdown.terminated",
-	ShutdownPersisted: "shutdown.persisted",
-} as const;
-
-export type BusChannel = (typeof BusChannels)[keyof typeof BusChannels];
+/**
+ * Payload contracts for the live events declared in EVENTS (src/core/telemetry/events.ts). They describe what
+ * in-process emitters send; the hub performs no runtime validation, so subscribers that consume data which crossed
+ * a process boundary (worker/ACP event streams) keep validating at runtime.
+ */
 
 /**
  * Every collision, capacity, or stress category a {@link RuntimeNoticePayload}
@@ -112,7 +46,7 @@ export const RUNTIME_NOTICE_KINDS = [
 export type RuntimeNoticeKind = (typeof RUNTIME_NOTICE_KINDS)[number];
 
 /**
- * Model-residency notice published on {@link BusChannels.RuntimeNotice} by the
+ * Model-residency notice published on `runtime.notice_raised` by the
  * capacity-aware residency reconciler (src/engine/apis/residency.ts). Notices
  * are informational and non-blocking: a notice never cancels a turn. `kind` is
  * the collision or stress category, `detail` carries the numeric capacity and
@@ -141,14 +75,14 @@ declare const declaredRuntimeNotice: unique symbol;
  * A {@link RuntimeNoticePayload} minted by an emitter from
  * declareRuntimeNoticeProducer (src/engine/apis/residency.ts). The brand exists
  * only in the type system and is the payload type of
- * {@link BusChannels.RuntimeNotice}, so a raw notice emitted on the bus outside
+ * `runtime.notice_raised`, so a raw notice emitted on the bus outside
  * a declared producer fails to typecheck.
  */
 export type DeclaredRuntimeNotice = RuntimeNoticePayload & { readonly [declaredRuntimeNotice]: true };
 
 /**
  * One completed proactive-memory model step, published on
- * {@link BusChannels.MemoryStepCompleted}. It carries the endpoint the step
+ * `memory.step_completed`. It carries the endpoint the step
  * called and nothing about what the step decided: the only consumer is the
  * turn context, which stamps an expected-cold reason when a step ran between
  * turns on the endpoint the chat target streams against.
@@ -160,7 +94,7 @@ export interface MemoryStepCompletedPayload {
 
 /**
  * What the always-on memory guardian is doing now, published on
- * {@link BusChannels.MemoryGuardianChanged} when it changes. Operator surfaces
+ * `memory.guardian_changed` when it changes. Operator surfaces
  * (the TUI footer, the ACP memory meta the GUI reads) project this one value.
  */
 export interface MemoryGuardianChangedPayload {
@@ -179,7 +113,7 @@ export interface ResidencyMutationPayload {
 }
 
 /**
- * Window-resolution warning published on {@link BusChannels.ContextWarning}.
+ * Window-resolution warning published on `context.warning_raised`.
  * Emitted on transitions only: `warning` carries the text when a warning
  * appears or changes, and `null` when a prior warning clears.
  */
@@ -273,7 +207,7 @@ export interface ContextActivityPayload {
 export type LoopBlockedDisposition = "block" | "lockout" | "stop";
 
 /**
- * Payload published on {@link BusChannels.LoopBlocked} when the interactive
+ * Payload published on `safety.loop_blocked` when the interactive
  * loop guard blocks a verbatim-repeated tool call before execution. The
  * interactive layer renders a warn notice per block, a distinct notice on
  * `"lockout"`, and cancels the active turn only on `"stop"`. The backend never
@@ -300,7 +234,7 @@ export interface LoopBlockedPayload {
 }
 
 /**
- * Payload published on {@link BusChannels.ToolBudgetExceeded} when the
+ * Payload published on `safety.tool_budget_exceeded` when the
  * orchestrator loop guard observes too many tool calls inside a single user
  * turn. Unlike {@link LoopBlockedPayload}, which fires only on verbatim-repeated
  * calls, this counts every distinct tool-call attempt in the turn so a weak
@@ -325,7 +259,7 @@ export interface ToolBudgetExceededPayload {
 }
 
 /**
- * Payload published on {@link BusChannels.BudgetAlert} when priced session spend
+ * Payload published on `budget.alerted` when priced session spend
  * meets ("at") or crosses ("over") the cost ceiling. Paid requests wait for an
  * operator increase in interactive mode.
  */
@@ -344,7 +278,7 @@ export interface BudgetAlertPayload {
 }
 
 /**
- * Payload published on {@link BusChannels.SafetyBlocked} when the safety
+ * Payload published on `safety.blocked` when the safety
  * policy engine blocks a tool call outright. The transcript already carries
  * the rejection text the model sees; this event carries the policy dimension
  * (which rule and action class fired, from which policy source).
@@ -359,11 +293,11 @@ export interface SafetyBlockedPayload {
 	reasonCode: string;
 }
 
-/** Where a {@link BusChannels.RunAborted} event originated. */
+/** Where a `run.aborted` event originated. */
 export type RunAbortSource = "dispatch_abort" | "dispatch_drain" | "stream_cancel" | "loop_guard";
 
 /**
- * Payload published on {@link BusChannels.RunAborted}. Dispatch emits
+ * Payload published on `run.aborted`. Dispatch emits
  * dispatch_abort/dispatch_drain with run lineage; the chat loop emits
  * stream_cancel for an operator Esc/Ctrl+C and loop_guard when the loop guard
  * stops a runaway turn. Subscribers must not collapse the sources: a drained
@@ -397,7 +331,7 @@ export function isRunAbortedPayload(value: unknown): value is RunAbortedPayload 
 	return true;
 }
 
-/** Payload published on {@link BusChannels.ContextPruned} after projected or summarized context shrinks. */
+/** Payload published on `context.pruned` after projected or summarized context shrinks. */
 export interface ContextPrunedPayload {
 	stage: "mask_observations" | "working_set" | "llm_summary";
 	tokensBefore: number;
@@ -419,7 +353,7 @@ export interface ContextPrunedPayload {
 	evictedItems?: number;
 }
 
-/** Payload published on {@link BusChannels.ContextRecalled} after an exact working-set recall. */
+/** Payload published on `context.recalled` after an exact working-set recall. */
 export interface ContextRecalledPayload {
 	ref: string;
 	trigger: "tool" | "operator" | "reread";
@@ -431,12 +365,12 @@ export interface ContextRecalledPayload {
 // Session and domain lifecycle
 // ---------------------------------------------------------------------------
 
-/** Published on {@link BusChannels.SessionStart} once the orchestrator boots. */
+/** Published on `session.started` once the orchestrator boots. */
 export interface SessionStartPayload {
 	at: number;
 }
 
-/** Published on {@link BusChannels.SessionEnd} just before process.exit. */
+/** Published on `session.ended` just before process.exit. */
 export interface SessionEndPayload {
 	exitCode: number;
 }
@@ -444,7 +378,7 @@ export interface SessionEndPayload {
 export type SessionParkReason = "create_new" | "resume_other" | "fork" | "switch_branch" | "close" | "shutdown";
 export type SessionResumeVia = "resume" | "switch_branch";
 
-/** Published on {@link BusChannels.SessionOpened} when a new session becomes current; a fork records its own lineage. */
+/** Published on `session.created` when a new session becomes current; a fork records its own lineage. */
 export interface SessionOpenedPayload {
 	sessionId: string;
 	/** The session directory's workspace hash, so a journal can be opened for it (#434). */
@@ -452,7 +386,7 @@ export interface SessionOpenedPayload {
 	at: number;
 }
 
-/** Published on {@link BusChannels.SessionParked} when the current session is replaced or closed. */
+/** Published on `session.parked` when the current session is replaced or closed. */
 export interface SessionParkedPayload {
 	sessionId: string;
 	reason: SessionParkReason;
@@ -460,13 +394,13 @@ export interface SessionParkedPayload {
 	cwdHash?: string;
 }
 
-/** Published on {@link BusChannels.SessionResuming} after a load validates, immediately before replacing the current session. */
+/** Published on `session.resume_started` after a load validates, immediately before replacing the current session. */
 export interface SessionResumingPayload {
 	sessionId: string;
 	at: number;
 }
 
-/** Published on {@link BusChannels.SessionResumed} when an existing session is reopened. */
+/** Published on `session.reattached` when an existing session is reopened. */
 export interface SessionResumedPayload {
 	sessionId: string;
 	via: SessionResumeVia;
@@ -475,7 +409,7 @@ export interface SessionResumedPayload {
 }
 
 /**
- * Published on {@link BusChannels.SessionTurnSwitched} when `/tree` moves the
+ * Published on `session.turn_switched` when `/tree` moves the
  * active append point inside the current session without changing which
  * session is open. Nothing else observes that move: unlike resume/fork, the
  * session id in `getSessionId()` callbacks stays the same, so anything keyed
@@ -488,12 +422,12 @@ export interface SessionTurnSwitchedPayload {
 	at: number;
 }
 
-/** Published on {@link BusChannels.DomainLoaded} per successfully started domain. */
+/** Published on `domain.loaded` per successfully started domain. */
 export interface DomainLoadedPayload {
 	name: string;
 }
 
-/** Published on {@link BusChannels.DomainFailed} right before the loader throws. */
+/** Published on `domain.failed` right before the loader throws. */
 export interface DomainFailedPayload {
 	name: string;
 	/** The caught value as-is; loaders catch unknown and rethrow after emitting. */
@@ -505,8 +439,8 @@ export interface DomainFailedPayload {
 // ---------------------------------------------------------------------------
 
 /**
- * Published on {@link BusChannels.ConfigHotReload}, {@link BusChannels.ConfigNextTurn},
- * and {@link BusChannels.ConfigRestartRequired}. One shape for all three: the
+ * Published on `config.hot_reloaded`, `config.next_turn_scheduled`,
+ * and `config.restart_required`. One shape for all three: the
  * channel encodes the change class, the diff says which paths moved, and
  * `settings` is the freshly validated snapshot.
  */
@@ -535,7 +469,7 @@ export interface ConfigChangePayload {
 }
 
 /**
- * Published on {@link BusChannels.ConfigSessionChanged} when an edit moves only the current session's effective
+ * Published on `config.session_changed` when an edit moves only the current session's effective
  * settings. The saved layers did not change, so the config domain's change events do not fire for it (#434).
  */
 export interface ConfigSessionChangePayload extends ConfigChangePayload {
@@ -546,7 +480,7 @@ export interface ConfigSessionChangePayload extends ConfigChangePayload {
 }
 
 /**
- * Published on {@link BusChannels.ConfigReloadFailed} when a settings file
+ * Published on `config.reload_failed` when a settings file
  * change is rejected at runtime and the previous good snapshot stays active.
  * Emitted on transitions only, like {@link ContextWarningPayload}: `message`
  * carries one already-formatted operator line while the failure stands, and
@@ -566,7 +500,7 @@ export interface ConfigReloadFailedPayload {
 // ---------------------------------------------------------------------------
 
 /**
- * Published on {@link BusChannels.PermissionRequested} when policy parks a
+ * Published on `approval.requested` when policy parks a
  * tool call pending operator confirmation.
  */
 export interface PermissionRequestedPayload {
@@ -623,7 +557,7 @@ export interface PermissionGrantFacts {
 }
 
 /**
- * Published on {@link BusChannels.PermissionResolved} when a parked call is
+ * Published on `approval.resolved` when a parked call is
  * granted, denied, or expires internally (operator decision, headless
  * auto-deny, delegated-agent denial, or internal expiry). Only `status` is
  * guaranteed; emitters attach whatever provenance they have.
@@ -650,7 +584,7 @@ export interface PermissionResolvedPayload {
 // Providers
 // ---------------------------------------------------------------------------
 
-/** Published on {@link BusChannels.ProviderHealth} after every target probe/disconnect. */
+/** Published on `provider.health_changed` after every target probe/disconnect. */
 export interface ProviderHealthPayload {
 	id: string;
 	status: TargetStatus;
@@ -694,13 +628,13 @@ export interface DispatchRunIdentity {
 	contextWindow?: number | undefined;
 }
 
-/** Published on {@link BusChannels.DispatchEnqueued} once the ledger row exists. */
+/** Published on `run.enqueued` once the ledger row exists. */
 export interface DispatchEnqueuedPayload extends DispatchRunIdentity {
 	requestOrigin: DispatchRequestOrigin;
 }
 
 /**
- * Published on {@link BusChannels.DispatchStarted} once the child process is
+ * Published on `run.started` once the child process is
  * live.
  *
  * `assignmentId` and `attempt` are required, on the same terms as
@@ -728,7 +662,7 @@ export interface DispatchStartedPayload extends DispatchEnqueuedPayload {
 }
 
 /**
- * Published on {@link BusChannels.DispatchProgress} for every non-heartbeat
+ * Published on `run.progressed` for every non-heartbeat
  * worker/ACP event plus heartbeat status transitions. The dispatch domain
  * owns publication so attached, detached, batched, and retry runs expose the
  * same live stream exactly once. Lightweight contract fakes may still omit
@@ -779,7 +713,7 @@ export interface DispatchTerminalStats {
 	hostVerification?: "verified" | "rejected" | "skipped" | "not_implicated";
 }
 
-/** Published on {@link BusChannels.DispatchCompleted} when a run finalizes as succeeded. */
+/** Published on `run.completed` when a run finalizes as succeeded. */
 export interface DispatchCompletedPayload extends DispatchRunIdentity, DispatchTerminalStats {
 	requestOrigin: DispatchRequestOrigin;
 	outcome: RunOutcome;
@@ -797,7 +731,7 @@ export interface DispatchCompletedPayload extends DispatchRunIdentity, DispatchT
 }
 
 /**
- * Published on {@link BusChannels.DispatchFailed} for every non-succeeded
+ * Published on `run.failed` for every non-succeeded
  * terminal outcome. `reason` carries the resolved outcome (or the synthetic
  * "retry_denied" when a retry never reached admission); the board maps it to
  * a presentation status, so emitters must not collapse the taxonomy.
@@ -821,7 +755,7 @@ export interface DispatchFailedPayload extends DispatchRunIdentity, Partial<Disp
 // ---------------------------------------------------------------------------
 
 /**
- * Published on {@link BusChannels.AccountabilityEvidenceReady} by the
+ * Published on `evidence.assessed` by the
  * telemetry extension once a finalized run's evidence bundle and its
  * sidecar index row have landed. The evidence fields are exactly
  * {@link TelemetryRunEvidence}, the shape the projection already attaches
@@ -838,7 +772,7 @@ export interface AccountabilityEvidenceReadyPayload extends TelemetryRunEvidence
 // Compaction
 // ---------------------------------------------------------------------------
 
-/** Published on {@link BusChannels.CompactionBegin} and {@link BusChannels.CompactionEnd}. */
+/** Published on `compaction.started` and `compaction.ended`. */
 export interface CompactionPayload {
 	trigger: string;
 	at: number;
@@ -868,7 +802,7 @@ export interface ExtensionsLoadIssuePayload {
 // ---------------------------------------------------------------------------
 
 /**
- * Published on {@link BusChannels.MiddlewareHookFailed} when a middleware hook
+ * Published on `middleware.hook_failed` when a middleware hook
  * registration misbehaves: `hook_failed` for a thrown evaluate (its effects
  * are discarded and the turn proceeds), `budget_exceeded` for a soft
  * wall-time overrun (effects still apply), `registration_conflict` when an
@@ -925,7 +859,7 @@ export type StatusPhase =
 
 export type WatchdogTier = 0 | 1 | 2 | 3 | 4;
 
-/** Published on {@link BusChannels.AgentStatusChanged} on every phase transition. */
+/** Published on `agent.status_changed` on every phase transition. */
 export interface AgentStatusChangedPayload {
 	runId: string | null;
 	phase: StatusPhase;
@@ -941,7 +875,7 @@ export interface AgentStatusChangedPayload {
 // ---------------------------------------------------------------------------
 
 /**
- * Published on {@link BusChannels.GitHooksChanged} the first time the git hook
+ * Published on `safety.git_hooks_changed` the first time the git hook
  * drift guard sees a hook file added or changed since the operator's
  * baseline (src/domains/safety/hook-drift.ts). `message` is the notice line.
  */
@@ -958,7 +892,7 @@ export interface GitHooksChangedPayload {
 }
 
 /**
- * Published on {@link BusChannels.InternalGitDrift} when git Clio runs itself
+ * Published on `safety.internal_git_drifted` when git Clio runs itself
  * (a task worktree's `git worktree add`, a merge landing a worker's result)
  * meets hook or executable config drift (src/domains/safety/internal-git-policy.ts).
  * `hardened` is true when it ran with hooks off and the changed config
@@ -976,82 +910,10 @@ export interface InternalGitDriftPayload {
 	changes: ReadonlyArray<{ path: string; kind: "added" | "changed" | "removed"; key?: string }>;
 }
 
-/** Published on {@link BusChannels.ShutdownRequested} as draining begins. */
+/** Published on `shutdown.requested` as draining begins. */
 export interface ShutdownRequestedPayload {
 	phase: TerminationPhase;
 }
 
 /** Channels that mark a phase transition and carry no data. */
 export type EmptyPayload = Record<string, never>;
-
-// ---------------------------------------------------------------------------
-// Payload map
-// ---------------------------------------------------------------------------
-
-/**
- * Per-channel payload contract. {@link SafeEventBus} types `emit`/`on`
- * against this map: emitters get payload checking, handlers get a typed
- * parameter. Compile-time only; see the module doc for the runtime-boundary
- * policy.
- */
-export type BusPayloadMap = {
-	[BusChannels.JobChanged]: JobChangedPayload;
-	[BusChannels.EggsChanged]: { sessionId: string | null; active: readonly string[] };
-	[BusChannels.SessionStart]: SessionStartPayload;
-	[BusChannels.SessionEnd]: SessionEndPayload;
-	[BusChannels.SessionOpened]: SessionOpenedPayload;
-	[BusChannels.SessionParked]: SessionParkedPayload;
-	[BusChannels.SessionResuming]: SessionResumingPayload;
-	[BusChannels.SessionResumed]: SessionResumedPayload;
-	[BusChannels.SessionTurnSwitched]: SessionTurnSwitchedPayload;
-	[BusChannels.DomainLoaded]: DomainLoadedPayload;
-	[BusChannels.DomainFailed]: DomainFailedPayload;
-	[BusChannels.ConfigHotReload]: ConfigChangePayload;
-	[BusChannels.ConfigNextTurn]: ConfigChangePayload;
-	[BusChannels.ConfigRestartRequired]: ConfigChangePayload;
-	[BusChannels.ConfigReloadFailed]: ConfigReloadFailedPayload;
-	[BusChannels.ConfigSessionChanged]: ConfigSessionChangePayload;
-	[BusChannels.PermissionRequested]: PermissionRequestedPayload;
-	[BusChannels.PermissionResolved]: PermissionResolvedPayload;
-	[BusChannels.SafetyBlocked]: SafetyBlockedPayload;
-	[BusChannels.LoopBlocked]: LoopBlockedPayload;
-	[BusChannels.ToolBudgetExceeded]: ToolBudgetExceededPayload;
-	[BusChannels.GitHooksChanged]: GitHooksChangedPayload;
-	[BusChannels.InternalGitDrift]: InternalGitDriftPayload;
-	[BusChannels.ProviderHealth]: ProviderHealthPayload;
-	[BusChannels.RuntimeNotice]: DeclaredRuntimeNotice;
-	[BusChannels.ResidencyMutation]: ResidencyMutationPayload;
-	[BusChannels.DispatchScopeNotice]: DispatchScopeNoticePayload;
-	[BusChannels.DispatchEnqueued]: DispatchEnqueuedPayload;
-	[BusChannels.DispatchStarted]: DispatchStartedPayload;
-	[BusChannels.DispatchProgress]: DispatchProgressPayload;
-	[BusChannels.DispatchCompleted]: DispatchCompletedPayload;
-	[BusChannels.DispatchFailed]: DispatchFailedPayload;
-	[BusChannels.AccountabilityEvidenceReady]: AccountabilityEvidenceReadyPayload;
-	[BusChannels.CompactionBegin]: CompactionPayload;
-	[BusChannels.CompactionEnd]: CompactionPayload;
-	[BusChannels.MiddlewareHookFailed]: MiddlewareHookFailedPayload;
-	[BusChannels.PluginsReloaded]: PluginsReloadedPayload;
-	[BusChannels.ExtensionsLoadIssue]: ExtensionsLoadIssuePayload;
-	[BusChannels.ContextActivity]: ContextActivityPayload;
-	[BusChannels.ContextSourcesChanged]: ContextSourcesChangedPayload;
-	[BusChannels.ContextWarning]: ContextWarningPayload;
-	[BusChannels.ContextPruned]: ContextPrunedPayload;
-	[BusChannels.ContextRecalled]: ContextRecalledPayload;
-	[BusChannels.MemoryStepCompleted]: MemoryStepCompletedPayload;
-	[BusChannels.MemoryGuardianChanged]: MemoryGuardianChangedPayload;
-	[BusChannels.AgentStatusChanged]: AgentStatusChangedPayload;
-	[BusChannels.RunAborted]: RunAbortedPayload;
-	[BusChannels.BudgetAlert]: BudgetAlertPayload;
-	[BusChannels.ShutdownRequested]: ShutdownRequestedPayload;
-	[BusChannels.ShutdownDrained]: EmptyPayload;
-	[BusChannels.ShutdownTerminated]: EmptyPayload;
-	[BusChannels.ShutdownPersisted]: EmptyPayload;
-};
-
-type AssertNever<T extends never> = T;
-/**
- * Compile-time exhaustiveness tripwire: adding a member to BusChannels
- * without registering its payload in BusPayloadMap fails to typecheck here.
- */
-export type BusPayloadMapCoversAllChannels = AssertNever<Exclude<BusChannel, keyof BusPayloadMap>>;

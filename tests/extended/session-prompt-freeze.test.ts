@@ -3,10 +3,9 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { Context, SimpleStreamOptions, StreamOptions } from "@earendil-works/pi-ai";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { TurnConstraints } from "../../src/core/turn-constraints.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
@@ -138,7 +137,7 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 	});
 
 	async function promptsBundle() {
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const config = { get: () => structuredClone(DEFAULT_SETTINGS), onChange: () => () => {} };
 		const agents = { revision: () => 1, listSpecs: () => [] } as unknown as AgentsContract;
 		const domainContext: DomainContext = {
@@ -444,7 +443,7 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			const first = (await turn.ensureSessionPrompt(agentRuntime))?.systemPrompt ?? "";
 			ok(first.includes("Session context:"), first);
 			t.mock.timers.tick(5 * 60_000);
-			bus.emit(BusChannels.ConfigHotReload, {
+			bus.emit("config.hot_reloaded", {
 				diff: { hotReload: [], nextTurn: [], restartRequired: [] },
 				settings: DEFAULT_SETTINGS,
 			});

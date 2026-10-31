@@ -1,13 +1,12 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { createInteractiveEventProjection } from "../../src/interactive/interactive-event-projection.js";
 import { createInteractiveSubscriptions } from "../../src/interactive/interactive-subscriptions.js";
 
 for (const audience of ["internal", "shadow"] as const)
 	test(`${audience} context helpers follow their origin presentation policy`, () => {
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const notices: string[] = [];
 		let islands = 0;
 		const noop = (): void => undefined;
@@ -33,8 +32,8 @@ for (const audience of ["internal", "shadow"] as const)
 			runtimeId: "openai-compat",
 			runtimeKind: "http" as const,
 		};
-		bus.emit(BusChannels.DispatchStarted, { ...identity, pid: null, assignmentId: "helper-1", attempt: 0 });
-		bus.emit(BusChannels.DispatchFailed, {
+		bus.emit("run.started", { ...identity, pid: null, assignmentId: "helper-1", attempt: 0 });
+		bus.emit("run.failed", {
 			...identity,
 			outcome: "failed",
 			outcomeDetail: "Invalid handoff",
@@ -51,12 +50,12 @@ for (const audience of ["internal", "shadow"] as const)
 		);
 		strictEqual(islands, audience === "internal" ? 0 : 2);
 		subscriptions.dispose();
-		bus.emit(BusChannels.DispatchStarted, { ...identity, pid: null, assignmentId: "helper-1", attempt: 0 });
+		bus.emit("run.started", { ...identity, pid: null, assignmentId: "helper-1", attempt: 0 });
 		strictEqual(notices.length, audience === "internal" ? 0 : 2);
 	});
 
 test("S3-01: live hook trust diagnostics reach the footer notice area and unsubscribe on disposal", () => {
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const notices: Array<{ level: string; text: string }> = [];
 	let renders = 0;
 	const noop = (): void => undefined;
@@ -89,12 +88,12 @@ test("S3-01: live hook trust diagnostics reach the footer notice area and unsubs
 		refreshSettingsOverlay: noop,
 	});
 	const message = "/workspace/.clio-coder/hooks.yaml: project hook trust was revoked; hook skipped";
-	bus.emit(BusChannels.ExtensionsLoadIssue, { message });
+	bus.emit("extension.load_failed", { message });
 	deepStrictEqual(notices, [{ level: "warning", text: message }]);
 	strictEqual(renders, 1);
 	// A safety block is the blocked call's row, live and on /resume; the policy
 	// dimension passes through the footer rather than a live-only transcript copy.
-	bus.emit(BusChannels.SafetyBlocked, {
+	bus.emit("safety.blocked", {
 		tool: "bash",
 		actionClass: "system_modify",
 		ruleId: "rm-recursive-or-force",
@@ -108,6 +107,6 @@ test("S3-01: live hook trust diagnostics reach the footer notice area and unsubs
 		"[safety-net] Blocked bash (system_modify): rule rm-recursive-or-force (damage-control:rm-recursive-or-force) via damage-control:base. This gate applies at every autonomy level.",
 	);
 	projection.dispose();
-	bus.emit(BusChannels.ExtensionsLoadIssue, { message });
+	bus.emit("extension.load_failed", { message });
 	strictEqual(notices.length, 2);
 });

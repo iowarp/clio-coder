@@ -7739,7 +7739,7 @@
 												},
 												"activity": {
 													"type": "string",
-													"const": "context.activity"
+													"const": "context.activity_changed"
 												},
 												"invoke": {
 													"type": "string"

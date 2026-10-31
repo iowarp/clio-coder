@@ -1,8 +1,7 @@
 import { strictEqual } from "node:assert/strict";
 import { it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
@@ -83,7 +82,7 @@ it("refreshes the attached serving window after the selected-route TTL without a
 	const actualNow = Date.now;
 	let clock = actualNow();
 	Date.now = () => clock;
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		bus,
@@ -108,7 +107,7 @@ it("refreshes the attached serving window after the selected-route TTL without a
 		strictEqual(loop.liveBudget().effectiveWindow, 65_536);
 		servingWindow = 131_072;
 		settings.chat.model = "other";
-		bus.emit(BusChannels.ConfigNextTurn, {
+		bus.emit("config.next_turn_scheduled", {
 			diff: { hotReload: [], nextTurn: ["chat.model"], restartRequired: [] },
 			settings,
 		});
@@ -120,7 +119,7 @@ it("refreshes the attached serving window after the selected-route TTL without a
 		strictEqual(loop.liveBudget().effectiveWindow, 131_072);
 		servingWindow = 262_144;
 		target.url = "https://another-fixture.invalid";
-		bus.emit(BusChannels.ConfigNextTurn, {
+		bus.emit("config.next_turn_scheduled", {
 			diff: { hotReload: [], nextTurn: ["targets.route.url"], restartRequired: [] },
 			settings,
 		});

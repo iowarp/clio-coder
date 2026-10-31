@@ -1,10 +1,9 @@
-import {
-	BusChannels,
-	type SessionParkReason as ParkReason,
-	type SessionResumeVia as ResumeVia,
-} from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { flushPackageActivities, PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
+import type {
+	SessionParkReason as ParkReason,
+	SessionResumeVia as ResumeVia,
+} from "../../core/telemetry/live-events.js";
 import { cwdHash } from "../../engine/session.js";
 import { performCheckpoint } from "./checkpoint.js";
 import type { DeleteSessionOptions, SessionContract, SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
@@ -58,15 +57,15 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 	};
 
 	function emitPark(sessionId: string, reason: ParkReason, meta?: { cwd?: string; cwdHash?: string }): void {
-		context.bus.emit(BusChannels.SessionParked, { sessionId, reason, at: Date.now(), ...hashOf(meta) });
+		context.bus.emit("session.parked", { sessionId, reason, at: Date.now(), ...hashOf(meta) });
 	}
 
 	function emitResume(sessionId: string, via: ResumeVia, meta?: { cwd?: string; cwdHash?: string }): void {
-		context.bus.emit(BusChannels.SessionResumed, { sessionId, via, at: Date.now(), ...hashOf(meta) });
+		context.bus.emit("session.reattached", { sessionId, via, at: Date.now(), ...hashOf(meta) });
 	}
 
 	function emitTurnSwitched(sessionId: string, turnId: string): void {
-		context.bus.emit(BusChannels.SessionTurnSwitched, { sessionId, turnId, at: Date.now() });
+		context.bus.emit("session.turn_switched", { sessionId, turnId, at: Date.now() });
 	}
 
 	/**
@@ -197,7 +196,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			flushPackageActivities();
 			const opened = hashOf(next.meta).cwdHash;
 			if (opened !== undefined)
-				context.bus.emit(BusChannels.SessionOpened, { sessionId: next.meta.id, cwdHash: opened, at: Date.now() });
+				context.bus.emit("session.created", { sessionId: next.meta.id, cwdHash: opened, at: Date.now() });
 			return next.meta;
 		},
 		append(turn: TurnInput) {
@@ -284,7 +283,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				emitPark(prior.meta.id, "resume_other", prior.meta);
 				void prior.writer.close();
 			}
-			context.bus.emit(BusChannels.SessionResuming, { sessionId, at: Date.now() });
+			context.bus.emit("session.resume_started", { sessionId, at: Date.now() });
 			state = resumed.state;
 			currentTurnId = leafTurnId;
 			emitResume(resumed.state.meta.id, "resume", resumed.state.meta);
@@ -337,7 +336,7 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 				emitPark(prior.meta.id, "switch_branch", prior.meta);
 				void prior.writer.close();
 			}
-			context.bus.emit(BusChannels.SessionResuming, { sessionId, at: Date.now() });
+			context.bus.emit("session.resume_started", { sessionId, at: Date.now() });
 			state = resumed.state;
 			currentTurnId = leafTurnId;
 			emitResume(resumed.state.meta.id, "switch_branch", resumed.state.meta);

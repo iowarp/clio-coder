@@ -9,7 +9,6 @@ import { describe, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { createCliWorkerHooks, workerHookStartupFailure } from "../../src/cli/worker-extension-hooks.js";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
@@ -244,7 +243,7 @@ describe("worker boundary", () => {
 		let aborts = 0;
 		let seals = 0;
 		let reentrantDrain: Promise<void> | undefined;
-		const unsubscribe = ctx.bus.on(BusChannels.DispatchFailed, () => {
+		const unsubscribe = ctx.bus.subscribe("run.failed", () => {
 			seals += 1;
 		});
 		const bundle = makeDispatchBundle(ctx, {

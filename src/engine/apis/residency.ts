@@ -37,18 +37,17 @@
  * unload/load against the same server.
  */
 
-import {
-	BusChannels,
-	type DeclaredRuntimeNotice,
-	type ResidencyMutationPayload,
-	type RuntimeNoticeKind,
-	type RuntimeNoticePayload,
-} from "../../core/bus-events.js";
 import { canonicalEndpointUrl } from "../../core/endpoint-key.js";
-import type { SafeEventBus } from "../../core/event-bus.js";
 import type { ProtectedModelRef, ResidencyRole } from "../../core/residency-protection.js";
 import { residencyTargetKey } from "../../core/residency-target-key.js";
-import { getSharedBus } from "../../core/shared-bus.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
+import type {
+	DeclaredRuntimeNotice,
+	ResidencyMutationPayload,
+	RuntimeNoticeKind,
+	RuntimeNoticePayload,
+} from "../../core/telemetry/live-events.js";
 import { withResidencyLock } from "./residency-lock.js";
 import { type ResidentModelInfo, residentMatchesKeep } from "./resident-models.js";
 
@@ -60,7 +59,7 @@ export type { RuntimeNoticeKind };
 export type ResidencyNoticeSink = (notice: ResidencyNotice) => void;
 
 function busNoticeSink(notice: ResidencyNotice): void {
-	getSharedBus().emit(BusChannels.RuntimeNotice, notice as DeclaredRuntimeNotice);
+	telemetryHub().emit("runtime.notice_raised", notice as DeclaredRuntimeNotice);
 }
 
 let noticeSink: ResidencyNoticeSink = busNoticeSink;
@@ -79,9 +78,9 @@ export function setResidencyNoticeSink(sink: ResidencyNoticeSink | null): void {
  * Deliver one notice through the active sink, or onto `bus` when the producer
  * was handed one explicitly. Never throws into a turn.
  */
-function deliverNotice(notice: ResidencyNotice, bus?: Pick<SafeEventBus, "emit">): void {
+function deliverNotice(notice: ResidencyNotice, bus?: Pick<TelemetryHub, "emit">): void {
 	try {
-		if (bus) bus.emit(BusChannels.RuntimeNotice, notice as DeclaredRuntimeNotice);
+		if (bus) bus.emit("runtime.notice_raised", notice as DeclaredRuntimeNotice);
 		else noticeSink(notice);
 	} catch {
 		// A notice is informational; a sink failure must never escape into a turn.
@@ -99,7 +98,7 @@ const noticeProducers = new Map<string, ReadonlySet<RuntimeNoticeKind>>();
  */
 export type RuntimeNoticeEmitter<K extends RuntimeNoticeKind> = (
 	notice: ResidencyNotice & { kind: K },
-	bus?: Pick<SafeEventBus, "emit">,
+	bus?: Pick<TelemetryHub, "emit">,
 ) => void;
 
 /**
@@ -135,7 +134,7 @@ const emitReconcilerNotice = declareRuntimeNoticeProducer<ReconcilerNoticeKind>(
 
 /** Publish one successful residency mutation to in-process cache telemetry. */
 export function emitResidencyMutation(mutation: Omit<ResidencyMutationPayload, "at">): void {
-	getSharedBus().emit(BusChannels.ResidencyMutation, { ...mutation, at: Date.now() });
+	telemetryHub().emit("residency.mutated", { ...mutation, at: Date.now() });
 }
 
 // --- configured-model protection ---------------------------------------------

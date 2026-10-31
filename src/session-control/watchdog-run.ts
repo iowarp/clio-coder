@@ -9,8 +9,7 @@
  * at all.
  */
 
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { parseVerifierResult } from "../domains/agents/index.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
@@ -22,7 +21,7 @@ export const WATCHDOG_AGENT_ID = "verifier";
 
 export interface WatchdogRunDeps {
 	dispatch: DispatchContract;
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	/** `watchdog.target` when the operator set one; the session's active target otherwise. */
 	target?: string | undefined;
@@ -60,7 +59,7 @@ export async function runWatchdogReview(trigger: WatchdogTrigger, deps: Watchdog
 		for await (const event of handle.events) {
 			const typed = event as { type?: string };
 			if (!typed.type || typed.type === "heartbeat") continue;
-			progressBus?.emit(BusChannels.DispatchProgress, { runId: handle.runId, agentId: WATCHDOG_AGENT_ID, event });
+			progressBus?.emit("run.progressed", { runId: handle.runId, agentId: WATCHDOG_AGENT_ID, event });
 		}
 		const receipt = await handle.finalPromise;
 		const report = parseVerifierResult(receipt.output?.text ?? null);

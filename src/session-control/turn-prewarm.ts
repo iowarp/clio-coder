@@ -12,9 +12,8 @@ import type { CallJournalOptions } from "../domains/telemetry/call-scope.js";
  */
 
 import { createHash } from "node:crypto";
-import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { endpointCapacityUsage } from "../domains/dispatch/index.js";
 import { registerForegroundStream } from "../domains/providers/endpoint-capacity.js";
 import {
@@ -53,7 +52,7 @@ export interface TurnPrewarmDeps {
 	providers: ProvidersContract;
 	session?: SessionContract | undefined;
 	context: TurnContext;
-	bus?: SafeEventBus | undefined;
+	bus?: TelemetryHub | undefined;
 	/**
 	 * True on a surface where a person is about to type the next turn. False for
 	 * headless `run`: the pre-warm buys latency an unattended run never spends.
@@ -171,12 +170,12 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 	// stand-in for #250's per-endpoint slot accounting.
 	let dispatchesInFlight = 0;
 	const unsubscribeDispatch = [
-		deps.bus?.on(BusChannels.DispatchStarted, () => {
+		deps.bus?.subscribe("run.started", () => {
 			dispatchesInFlight += 1;
 		}) ?? null,
-		...[BusChannels.DispatchCompleted, BusChannels.DispatchFailed].map(
+		...(["run.completed", "run.failed"] as const).map(
 			(channel) =>
-				deps.bus?.on(channel, () => {
+				deps.bus?.subscribe(channel, () => {
 					dispatchesInFlight = Math.max(0, dispatchesInFlight - 1);
 				}) ?? null,
 		),
@@ -585,8 +584,8 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
  * `schedule` is what keeps this from firing for the auto-compaction a submit
  * runs on its way to the provider.
  */
-export function subscribePrewarmToCompaction(bus: SafeEventBus | undefined, prewarm: TurnPrewarm): () => void {
-	const unsubscribe = bus?.on(BusChannels.CompactionEnd, () => {
+export function subscribePrewarmToCompaction(bus: TelemetryHub | undefined, prewarm: TurnPrewarm): () => void {
+	const unsubscribe = bus?.subscribe("compaction.ended", () => {
 		prewarm.schedule("compaction");
 	});
 	return () => unsubscribe?.();

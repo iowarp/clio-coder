@@ -1,6 +1,5 @@
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import { normalizeClioCoderEventRecord, normalizeClioCoderEventType } from "../core/naming-events.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import { defaultRunEventJournal, type RunEventJournalSink } from "../domains/dispatch/run-event-journal.js";
@@ -42,12 +41,12 @@ export interface DispatchRunEventRegistry {
 	registerSingle(
 		handle: Awaited<ReturnType<DispatchContract["dispatch"]>>,
 		agentId: string,
-		bus?: SafeEventBus,
+		bus?: TelemetryHub,
 	): RegisteredSingleDispatch;
 	registerBatch(
 		handle: Awaited<ReturnType<DispatchContract["dispatchBatch"]>>,
 		agentIds: ReadonlyArray<string>,
-		bus?: SafeEventBus,
+		bus?: TelemetryHub,
 	): RegisteredBatchDispatch;
 	recordEvent(runId: string, agentId: string, event: unknown): void;
 	eventTail(runId: string): { agentId: string; entries: ReadonlyArray<RunTailEntry> } | null;
@@ -205,7 +204,7 @@ export function createDispatchRunEventRegistry(
 		runId: string,
 		agentId: string,
 		events: AsyncIterableIterator<unknown>,
-		bus: SafeEventBus | undefined,
+		bus: TelemetryHub | undefined,
 	): Promise<DispatchEventSummary> => {
 		const summary: DispatchEventSummary = {
 			count: 0,
@@ -221,7 +220,7 @@ export function createDispatchRunEventRegistry(
 			const text = durableAssistantTextFromEvent(event);
 			if (text.trim().length > 0) summary.lastAssistantText = text;
 			recordRunEvent(runId, agentId, event);
-			if (type !== "heartbeat") bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event });
+			if (type !== "heartbeat") bus?.emit("run.progressed", { runId, agentId, event });
 		}
 		return summary;
 	};
@@ -229,7 +228,7 @@ export function createDispatchRunEventRegistry(
 	const drainBatch = async (
 		batchId: string,
 		events: AsyncIterableIterator<unknown>,
-		bus: SafeEventBus | undefined,
+		bus: TelemetryHub | undefined,
 	): Promise<Map<string, DispatchEventSummary>> => {
 		const summaries = new Map<string, DispatchEventSummary>();
 		for await (const event of events) {
@@ -250,7 +249,7 @@ export function createDispatchRunEventRegistry(
 			if (text.trim().length > 0) summary.lastAssistantText = text;
 			summaries.set(runId, summary);
 			recordRunEvent(runId, agentId, inner);
-			if (type !== "heartbeat") bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event: inner });
+			if (type !== "heartbeat") bus?.emit("run.progressed", { runId, agentId, event: inner });
 		}
 		return summaries;
 	};

@@ -1,5 +1,5 @@
 import type { LoadResult } from "../core/domain-loader.js";
-import { getSharedBus } from "../core/shared-bus.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import type { DispatchBundleOptions } from "../domains/dispatch/extension.js";
 import { type ExtensionsContract, isLoadableExtension } from "../domains/extensions/index.js";
@@ -70,7 +70,7 @@ export function createCliWorkerHooks(command: string): {
 				host = startWorkerHookHost({
 					extensions,
 					middleware,
-					bus: getSharedBus(),
+					bus: telemetryHub(),
 					list,
 					notify,
 					...(config ? { sandboxUnixSockets: () => config.get().safety.sandboxUnixSockets } : {}),

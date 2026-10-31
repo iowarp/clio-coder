@@ -1,6 +1,5 @@
 import { type Dirent, readdirSync } from "node:fs";
 import path from "node:path";
-import type { ContextRecalledPayload } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { PrecomputedRanking } from "../../core/precomputed-rank.js";
 import type { RouteProvenance } from "../../core/route-provenance.js";
@@ -52,6 +51,7 @@ import { runSemanticScope, semanticUnavailable } from "./semantic.js";
 
 export type { ContextSemanticRequest } from "./semantic.js";
 
+import type { ContextRecalledPayload } from "../../core/telemetry/live-events.js";
 import { createContextToolSurface } from "./surface.js";
 
 /**
@@ -84,7 +84,7 @@ export interface ContextSessionDeps {
 	/** Session working directory, so recall by path keys the file the way the path index does; null when unknown. */
 	cwd?: () => string | null;
 	appendEntry(entry: SessionEntryInput): SessionEntry;
-	/** Called after the recall entry is recorded; the orchestrator publishes it as BusChannels.ContextRecalled. */
+	/** Called after the recall entry is recorded; the orchestrator publishes it as "context.recalled". */
 	onRecalled?: (payload: ContextRecalledPayload) => void;
 }
 

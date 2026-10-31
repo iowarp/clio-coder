@@ -1,5 +1,4 @@
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { TaskMemoryStepUsage } from "../domains/memory/task-memory-policy.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import {
@@ -18,7 +17,7 @@ export interface TaskMemoryBankPersistence {
 
 /** Explicit navigation owns memory lifetime; ordinary leaf advances and tree reads do not. */
 export function bindTaskMemoryLifecycle(
-	bus: SafeEventBus,
+	bus: TelemetryHub,
 	memory: Pick<MemoryInterventionRegistration, "reset" | "dispose">,
 	persistence?: TaskMemoryBankPersistence,
 ): () => void {
@@ -30,22 +29,22 @@ export function bindTaskMemoryLifecycle(
 		}
 	};
 	const unsubscribe = [
-		bus.on(BusChannels.SessionParked, (payload) => {
+		bus.subscribe("session.parked", (payload) => {
 			guarded(() => persistence?.save(payload.sessionId));
 			memory.reset();
 		}),
-		bus.on(BusChannels.SessionResumed, (payload) => {
+		bus.subscribe("session.reattached", (payload) => {
 			memory.reset();
 			// A branch switch reopens the same session at another point of its tree,
 			// where the parked bank describes work that branch never did.
 			if (payload.via === "resume") guarded(() => persistence?.restore(payload.sessionId));
 			else guarded(() => persistence?.discard(payload.sessionId));
 		}),
-		bus.on(BusChannels.SessionTurnSwitched, (payload) => {
+		bus.subscribe("session.turn_switched", (payload) => {
 			memory.reset();
 			guarded(() => persistence?.discard(payload.sessionId));
 		}),
-		bus.on(BusChannels.SessionEnd, () => memory.dispose()),
+		bus.subscribe("session.ended", () => memory.dispose()),
 	];
 	return () => {
 		memory.dispose();

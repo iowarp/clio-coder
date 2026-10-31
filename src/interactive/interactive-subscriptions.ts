@@ -1,6 +1,6 @@
-import { BusChannels, type DispatchRunIdentity } from "../core/bus-events.js";
 import type { ContextOperation } from "../core/context-operation.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { DispatchRunIdentity } from "../core/telemetry/live-events.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
 import {
@@ -24,7 +24,7 @@ export type InteractiveNoticeLevel = "info" | "success" | "warning" | "error";
 const WORKER_PAINT_INTERVAL_MS = 16;
 
 export interface InteractiveSubscriptionsDeps {
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	getSessionId?: () => string | null;
 	contextResult?: (operation: ContextOperation) => void;
 	refreshFooter: () => void;
@@ -153,14 +153,14 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 	// A settled operation can reach the bus more than once (replayed progress); its card renders once.
 	const renderedContextResults = new Set<string>();
 	const unsubscribers = [
-		deps.bus.on(BusChannels.DispatchEnqueued, repaint),
+		deps.bus.subscribe("run.enqueued", repaint),
 		// Every attempt writes its own session entry: a failover is history, and
 		// the attempt trail a resumed block shows is that history read back.
-		deps.bus.on(BusChannels.DispatchStarted, (payload) => {
+		deps.bus.subscribe("run.started", (payload) => {
 			helperNotice(payload, "working");
 			folded(workers.started, (change) => deps.recordWorkerRun?.(workerRunEntryFields(change.entry)))(payload);
 		}),
-		deps.bus.on(BusChannels.DispatchProgress, (payload) => {
+		deps.bus.subscribe("run.progressed", (payload) => {
 			const workerEvent = payload.event as { type?: unknown } | null | undefined;
 			if (workerEvent?.type === "clio_coder_steer_received") {
 				deps.notify("success", `steer received by ${payload.agentId} (${payload.runId})`, `steer:${payload.runId}`);
@@ -171,18 +171,18 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		// An abort settles the block provisionally; the terminal event dispatch
 		// publishes for every finalized run seals it, and that event writes the one
 		// settled row. Recording here as well left two rows per aborted run.
-		deps.bus.on(BusChannels.RunAborted, folded(workers.aborted)),
-		deps.bus.on(BusChannels.DispatchCompleted, (payload) => {
+		deps.bus.subscribe("run.aborted", folded(workers.aborted)),
+		deps.bus.subscribe("run.completed", (payload) => {
 			helperNotice(payload, "completed");
 			folded(workers.completed, recordSettled)(payload);
 			deps.onDispatchSettled?.();
 		}),
-		deps.bus.on(BusChannels.DispatchFailed, (payload) => {
+		deps.bus.subscribe("run.failed", (payload) => {
 			helperNotice(payload, "failed");
 			folded(workers.failed, recordSettled)(payload);
 			deps.onDispatchSettled?.();
 		}),
-		deps.bus.on(BusChannels.ContextActivity, (event) => {
+		deps.bus.subscribe("context.activity_changed", (event) => {
 			const operation = event.operation;
 			if (
 				operation &&

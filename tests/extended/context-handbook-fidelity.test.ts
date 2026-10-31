@@ -2,7 +2,7 @@ import { deepStrictEqual, rejects, strictEqual, throws } from "node:assert/stric
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { parseBootstrapModelOutput } from "../../src/domains/context/bootstrap-prompt.js";
 import { loadProjectClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "../../src/domains/context/clio-md.js";
@@ -108,7 +108,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 	] as const) {
 		it(`loads ${name} verbatim through context state and the session compiler`, async () => {
 			writeFileSync(path, source);
-			const context = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+			const context = createContextBundle({ bus: createTelemetryHub(), getContract: () => undefined });
 			strictEqual(context.contract.contextState(cwd).clioMd, "ok");
 			const prompt = renderPromptContext(cwd);
 			deepStrictEqual(prompt.handbookFiles, [path]);
@@ -121,7 +121,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 			}
 			strictEqual(prompt.text.includes(source), true);
 			const bundle = createPromptsBundle({
-				bus: createSafeEventBus(),
+				bus: createTelemetryHub(),
 				getContract(name) {
 					return name === "context" ? (context.contract as never) : undefined;
 				},
@@ -168,9 +168,9 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 			"A later guidance paragraph.\n\n".repeat(450) +
 			"OMITTED_TAIL_SENTINEL\n";
 		writeFileSync(path, source);
-		const context = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+		const context = createContextBundle({ bus: createTelemetryHub(), getContract: () => undefined });
 		const bundle = createPromptsBundle({
-			bus: createSafeEventBus(),
+			bus: createTelemetryHub(),
 			getContract(name) {
 				return name === "context" ? (context.contract as never) : undefined;
 			},
@@ -248,7 +248,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 	it("preserves the rich authored source through the production session prompt compiler", async () => {
 		writeFileSync(path, authored);
 		const bundle = createPromptsBundle({
-			bus: createSafeEventBus(),
+			bus: createTelemetryHub(),
 			getContract(name) {
 				return name === "context" ? ({ renderPromptContext } as never) : undefined;
 			},

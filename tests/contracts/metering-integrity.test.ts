@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import { projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { messageUsageForAccounting, rememberMessageCalls } from "../../src/core/message-accounting.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
@@ -386,7 +386,7 @@ describe("contracts/metering integrity", () => {
 				neverInvokedCalls: 1,
 			});
 		}
-		const { contract: telemetry, extension } = createTelemetryBundle({ bus: createSafeEventBus() } as DomainContext);
+		const { contract: telemetry, extension } = createTelemetryBundle({ bus: createTelemetryHub() } as DomainContext);
 		try {
 			const entries: SessionEntry[] = [];
 			const persistence = createTurnPersistence({

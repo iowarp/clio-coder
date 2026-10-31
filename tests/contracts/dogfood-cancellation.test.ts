@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
@@ -270,7 +269,7 @@ function fixture(initialMode: WireMode, readTurn?: () => void, visionSidecar?: V
 	let wire = transport(initialMode);
 	const events: ChatLoopEvent[] = [];
 	const audit: unknown[] = [];
-	context.bus.on(BusChannels.RunAborted, (event) => {
+	context.bus.subscribe("run.aborted", (event) => {
 		audit.push(event);
 	});
 	// The fixture runs without telemetry; a test that reads the receipt's spend supplies the read model's view.

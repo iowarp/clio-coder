@@ -1,8 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { endpointCapacityUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import {
@@ -326,9 +325,9 @@ for (const stage of ["metadata", "auth"] as const) {
 				occupancy.push(endpointCapacityUsage()[key] ?? 0);
 				return push(...requests);
 			};
-			const bus = createSafeEventBus();
+			const bus = createTelemetryHub();
 			let disturbances = 0;
-			bus.on(BusChannels.MemoryStepCompleted, () => {
+			bus.subscribe("memory.step_completed", () => {
 				disturbances++;
 			});
 			const telemetry: Array<{ decision: string; reason: string }> = [];

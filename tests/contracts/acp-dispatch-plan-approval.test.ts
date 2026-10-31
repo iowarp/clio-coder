@@ -1,8 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { Type } from "typebox";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import {
 	ACP_DISPATCH_PLAN_MAX_TASKS,
@@ -171,7 +170,7 @@ async function forwardWorkerAsk(input: {
 	foreignSession?: boolean;
 	hostileText?: boolean;
 }) {
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const resolved: Array<[string, string, string]> = [];
 	const asks: Array<Record<string, unknown>> = [];
 	const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
@@ -203,7 +202,7 @@ async function forwardWorkerAsk(input: {
 	const chat: AcpServerChat = {
 		submit: async () => {
 			emit({ type: "tool_execution_start", toolCallId: "call-1", toolName: "dispatch", args: { agent: "scout" } });
-			bus.emit(BusChannels.PermissionRequested, {
+			bus.emit("approval.requested", {
 				tool: "bash",
 				actionClass: "execute",
 				requestedBy: "run-7",
@@ -219,7 +218,7 @@ async function forwardWorkerAsk(input: {
 				approvalAuthority: "operator",
 			});
 			if (input.secondAsk)
-				bus.emit(BusChannels.PermissionRequested, {
+				bus.emit("approval.requested", {
 					tool: "bash",
 					actionClass: "execute",
 					requestedBy: "run-7",
@@ -234,7 +233,7 @@ async function forwardWorkerAsk(input: {
 				await new Promise((resolve) => setImmediate(resolve));
 			}
 			if (input.settleElsewhere) {
-				bus.emit(BusChannels.PermissionResolved, { status: "expired", requestId: "req-1", decidedBy: "timeout" });
+				bus.emit("approval.resolved", { status: "expired", requestId: "req-1", decidedBy: "timeout" });
 				await new Promise((resolve) => setTimeout(resolve, 50));
 			}
 			emit({

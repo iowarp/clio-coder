@@ -1,4 +1,4 @@
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
@@ -97,7 +97,7 @@ export interface DispatchToolDeps {
 	/** Synchronous read of the active model-visible history, before admission can park. */
 	captureWorkerContext?: () => WorkerContextSnapshot | null;
 	dispatch: DispatchContract;
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	/** Instance-scoped owner for ordinary tool-owned run streams and monitor tails. */
 	runEvents?: DispatchRunEventRegistry;
 	/** Operator-initiated backgrounding of an attached call. */

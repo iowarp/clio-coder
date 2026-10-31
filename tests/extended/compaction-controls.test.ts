@@ -5,11 +5,14 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
-import type { CompactionPayload } from "../../src/core/bus-events.js";
-import { BusChannels, type ContextActivityPayload, type ContextPrunedPayload } from "../../src/core/bus-events.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, readContextOperation } from "../../src/core/context-operation.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type {
+	CompactionPayload,
+	ContextActivityPayload,
+	ContextPrunedPayload,
+} from "../../src/core/telemetry/live-events.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
@@ -302,13 +305,13 @@ describe("production compaction controls", () => {
 		f.settings.chat.prewarm = false;
 		f.providers.getDetectedReasoning = () => false;
 		const notices: string[] = [];
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const compactionEnds: CompactionPayload[] = [];
 		let compactionBegins = 0;
-		bus.on(BusChannels.CompactionBegin, () => {
+		bus.subscribe("compaction.started", () => {
 			compactionBegins++;
 		});
-		bus.on(BusChannels.CompactionEnd, (event) => {
+		bus.subscribe("compaction.ended", (event) => {
 			compactionEnds.push(event);
 		});
 		const loop = createChatLoop({
@@ -443,18 +446,18 @@ describe("production compaction controls", () => {
 			f.settings.context.workingSet.enabled = false;
 			const submitted: string[] = [];
 			const notices: string[] = [];
-			const bus = createSafeEventBus();
+			const bus = createTelemetryHub();
 			const activity: ContextActivityPayload[] = [];
 			const compactionEnds: CompactionPayload[] = [];
 			let compactionBegins = 0;
-			bus.on(BusChannels.CompactionBegin, (event) => {
+			bus.subscribe("compaction.started", (event) => {
 				compactionBegins++;
 				strictEqual(event.outcome, undefined);
 			});
-			bus.on(BusChannels.CompactionEnd, (event) => {
+			bus.subscribe("compaction.ended", (event) => {
 				compactionEnds.push(event);
 			});
-			bus.on(BusChannels.ContextActivity, (event) => {
+			bus.subscribe("context.activity_changed", (event) => {
 				activity.push(event);
 			});
 			const loop = createChatLoop({
@@ -831,13 +834,13 @@ describe("production compaction controls", () => {
 		let attempts = 0;
 		let failing = true;
 		const notices: string[] = [];
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const compactionEnds: CompactionPayload[] = [];
 		let compactionBegins = 0;
-		bus.on(BusChannels.CompactionBegin, () => {
+		bus.subscribe("compaction.started", () => {
 			compactionBegins++;
 		});
-		bus.on(BusChannels.CompactionEnd, (event) => {
+		bus.subscribe("compaction.ended", (event) => {
 			compactionEnds.push(event);
 		});
 		const context = createTurnContext({
@@ -907,9 +910,9 @@ describe("production compaction controls", () => {
 		state.runtime = runtime;
 		state.activeUserTurnId = f.entries().at(-1)?.turnId ?? null;
 		state.lastTurnId = state.activeUserTurnId;
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const activity: ContextActivityPayload[] = [];
-		bus.on(BusChannels.ContextActivity, (event) => {
+		bus.subscribe("context.activity_changed", (event) => {
 			activity.push(event);
 		});
 		const context = createTurnContext({
@@ -1503,10 +1506,10 @@ describe("production compaction controls", () => {
 			const f = fixture(true);
 			if (!legacy) f.settings.context.compaction.model = "summary-target/summary";
 			const recorded: unknown[][] = [];
-			const bus = createSafeEventBus();
+			const bus = createTelemetryHub();
 			const pruned: ContextPrunedPayload[] = [];
 			const notices: string[] = [];
-			bus.on(BusChannels.ContextPruned, (event) => {
+			bus.subscribe("context.pruned", (event) => {
 				pruned.push(event as ContextPrunedPayload);
 			});
 			const state = createTurnState("off");

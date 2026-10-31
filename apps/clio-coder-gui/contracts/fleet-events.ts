@@ -228,16 +228,16 @@ export const HEALTH_EVENT_TYPES = [
  * drops rather than treating as a broken peer.
  */
 export const ACP_TO_WEB_EVENT = {
-	"safety.loopBlocked": "fleet.loopBlocked",
-	"dispatch.enqueued": "fleet.enqueued",
-	"dispatch.started": "fleet.started",
-	"dispatch.progress": "fleet.progress",
-	"dispatch.completed": "fleet.completed",
-	"dispatch.failed": "fleet.failed",
-	"accountability.evidenceReady": "evidence.ready",
-	"compaction.end": "health.compacted",
-	"context.warning": "health.contextWarning",
-	"safety.toolBudgetExceeded": "health.toolBudget",
-	"provider.health": "health.provider",
-	"dispatch.scopeNotice": "health.scopeNotice",
+	"safety.loop_blocked": "fleet.loopBlocked",
+	"run.enqueued": "fleet.enqueued",
+	"run.started": "fleet.started",
+	"run.progressed": "fleet.progress",
+	"run.completed": "fleet.completed",
+	"run.failed": "fleet.failed",
+	"evidence.assessed": "evidence.ready",
+	"compaction.ended": "health.compacted",
+	"context.warning_raised": "health.contextWarning",
+	"safety.tool_budget_exceeded": "health.toolBudget",
+	"provider.health_changed": "health.provider",
+	"run.scope_notice_raised": "health.scopeNotice",
 } as const;

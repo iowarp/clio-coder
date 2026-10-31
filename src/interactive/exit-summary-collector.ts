@@ -1,9 +1,8 @@
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import type { FactMetric } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { mutatingReceipts } from "../domains/safety/finish-contract.js";
@@ -88,7 +87,7 @@ function autoResolvedQuestions(toolName: string, result: unknown): number {
 }
 
 interface CollectorDeps {
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	telemetry: TelemetryContract;
 	dispatch: Pick<DispatchContract, "observedRunWrites">;
 	session?: Pick<SessionContract, "current">;
@@ -232,7 +231,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		{ operation: string; outcome: string; changes: Map<string, { path: string; kind: string; key?: string }> }
 	>();
 	const unsubscribers = [
-		deps.bus.on(BusChannels.InternalGitDrift, (event) => {
+		deps.bus.subscribe("safety.internal_git_drifted", (event) => {
 			if (typeof event?.operation !== "string" || !Array.isArray(event.changes)) return;
 			const outcome = typeof event.outcome === "string" ? event.outcome : event.hardened === true ? "hooks-off" : "yolo";
 			const id = `${event.operation}\0${outcome}`;
@@ -246,19 +245,19 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			}
 			internalGit.set(id, entry);
 		}),
-		deps.bus.on(BusChannels.SessionResumed, () => {
+		deps.bus.subscribe("session.reattached", () => {
 			baseTurns = deps.getTurns() ?? 0;
 			hasModelTurn ||= deps.session?.current()?.hasModelTurn === true;
 		}),
-		deps.bus.on(BusChannels.SessionParked, () => {
+		deps.bus.subscribe("session.parked", () => {
 			priorTurns += Math.max(0, (deps.getTurns() ?? 0) - baseTurns);
 			baseTurns = deps.getTurns() ?? 0;
 		}),
-		deps.bus.on(BusChannels.ContextPruned, () => {
+		deps.bus.subscribe("context.pruned", () => {
 			compactions += 1;
 			highlight("Context compacted");
 		}),
-		deps.bus.on(BusChannels.DispatchStarted, (run) => {
+		deps.bus.subscribe("run.started", (run) => {
 			hasModelTurn = true;
 			workers.set(run.runId, {
 				runId: run.runId,
@@ -272,7 +271,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			highlight(`${run.agentId} started on ${run.targetId}`);
 			noteModel(run.targetId, run.wireModelId);
 		}),
-		deps.bus.on(BusChannels.DispatchProgress, ({ runId, event }) => {
+		deps.bus.subscribe("run.progressed", ({ runId, event }) => {
 			if (!workers.has(runId) || !event || typeof event !== "object") return;
 			const frame = event as {
 				type?: string;
@@ -315,7 +314,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				}
 			}
 		}),
-		deps.bus.on(BusChannels.PermissionResolved, (event) => {
+		deps.bus.subscribe("approval.resolved", (event) => {
 			permissions[event.status] += 1;
 			if (event.decidedBy === UNATTENDED_DECIDED_BY) {
 				unattended.permissions += 1;
@@ -324,12 +323,12 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			}
 			highlight(`Permission ${event.status}${event.tool ? `: ${event.tool}` : ""}`);
 		}),
-		deps.bus.on(BusChannels.SafetyBlocked, (event) => {
+		deps.bus.subscribe("safety.blocked", (event) => {
 			permissions.blocked += 1;
 			highlight(`Safety refusal: ${event.tool}`);
 		}),
-		deps.bus.on(BusChannels.DispatchCompleted, settled),
-		deps.bus.on(BusChannels.DispatchFailed, settled),
+		deps.bus.subscribe("run.completed", settled),
+		deps.bus.subscribe("run.failed", settled),
 	];
 	return {
 		reset,

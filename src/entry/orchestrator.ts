@@ -9,7 +9,6 @@ import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
 import { startRunOutput, writeRunDiagnostic } from "../cli/run-failure.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
-import { BusChannels, type ConfigChangeSource, type PluginsReloadedPayload } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { codexAccountScope } from "../core/codex-account.js";
@@ -17,7 +16,6 @@ import { type ClioSettings, readSettings, type SettingsMutator, updateSettings }
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
 import { loadDomains } from "../core/domain-loader.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import { detectSupportedImageMimeType, expandInlineFileReferencesAsync } from "../core/file-references.js";
 import { setCommitDecisionRefsProvider, setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
 import { configureGuardrails, guardrailValuesFromSettings } from "../core/guardrails.js";
@@ -61,7 +59,6 @@ import {
 	setAtPath,
 } from "../core/session-routing.js";
 import { settingsSourceFor, updateProjectLocalSettings } from "../core/settings-layers.js";
-import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { captureAdmits, STANDARD_CAPTURE, systemOneDatasetRecording } from "../core/telemetry/capture.js";
@@ -388,6 +385,8 @@ import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-l
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { ConfigChangeSource, PluginsReloadedPayload } from "../core/telemetry/live-events.js";
 import {
 	boundKeyLabel,
 	detectPlatformKeybindingWarnings,
@@ -657,7 +656,7 @@ export function createBackgroundMemoryModelClient(
 	providers: ProvidersContract,
 	settings: Readonly<ClioSettings>,
 	timeoutMs: number,
-	bus: Pick<SafeEventBus, "emit"> | null,
+	bus: Pick<TelemetryHub, "emit"> | null,
 	fallbackOnly = false,
 	admitModelFlow?: AdmitBackgroundModelFlow,
 	sessionSpendUsd?: () => number,
@@ -895,7 +894,7 @@ function prepareBackgroundMemoryRoute(
 	targetId: string,
 	wireModelId: string,
 	timeoutMs: number,
-	bus: Pick<SafeEventBus, "emit"> | null,
+	bus: Pick<TelemetryHub, "emit"> | null,
 	selection: BackgroundMemoryRoute["selection"],
 	targets: ReadonlyArray<TargetDescriptor>,
 	admitModelFlow?: AdmitBackgroundModelFlow,
@@ -1111,7 +1110,7 @@ function memoryRouteFailureCause(error: unknown): string {
 export function createBackgroundMemoryRouting(
 	providers: ProvidersContract,
 	getSettings: () => Readonly<ClioSettings> | undefined,
-	bus: Pick<SafeEventBus, "emit"> | null,
+	bus: Pick<TelemetryHub, "emit"> | null,
 	admitModelFlow?: AdmitBackgroundModelFlow,
 	/** False for a second routing instance whose fallback the first already announces. */
 	announceFallback = true,
@@ -1399,7 +1398,7 @@ function readFlowSessionEntries(sessionId: string): ReadonlyArray<unknown> {
  * is rebuilt only when an eviction event lands (`ContextPruned`) or the
  * session changes, so an ordinary read never re-parses the ledger.
  */
-function createSessionRereadPort(session: SessionContract, bus: SafeEventBus): ReadRecallPort {
+function createSessionRereadPort(session: SessionContract, bus: TelemetryHub): ReadRecallPort {
 	const port = createRereadRecallPort({
 		sessionId: () => session.current()?.id ?? null,
 		readEntries: () => {
@@ -1412,9 +1411,9 @@ function createSessionRereadPort(session: SessionContract, bus: SafeEventBus): R
 		},
 		cwd: () => session.current()?.cwd ?? null,
 		appendEntry: (entry) => session.appendEntry(entry),
-		onRecalled: (payload) => bus.emit(BusChannels.ContextRecalled, payload),
+		onRecalled: (payload) => bus.emit("context.recalled", payload),
 	});
-	bus.on(BusChannels.ContextPruned, () => port.invalidate());
+	bus.subscribe("context.pruned", () => port.invalidate());
 	return port;
 }
 
@@ -2089,7 +2088,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				lease.abortSignal.throwIfAborted();
 			}
 		: undefined;
-	const bus = getSharedBus();
+	const bus = telemetryHub();
 	const termination = getTerminationCoordinator();
 	// Domain loading emits before the config contract exists; the trace asks for the mode on every event (#434).
 	let researchBusTrace: () => ((record: Record<string, unknown>) => void) | null = () => null;
@@ -2348,7 +2347,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (dispatch) {
 		let dispatchDrain: Promise<void> | undefined;
 		const beginDispatchDrain = (): Promise<void> => (dispatchDrain ??= dispatch.drain());
-		unsubscribeDispatchShutdown = bus.on(BusChannels.ShutdownRequested, () => {
+		unsubscribeDispatchShutdown = bus.subscribe("shutdown.requested", () => {
 			// Admission closes before sequential drain hooks can wait on another resource.
 			void beginDispatchDrain().catch(() => {
 				// The awaited drain hook reports this same rejection.
@@ -2374,7 +2373,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		),
 	});
 
-	bus.emit(BusChannels.SessionStart, { at: Date.now() });
+	bus.emit("session.started", { at: Date.now() });
 	timer.mark("session_start fired");
 
 	const acpMode = options.acp !== undefined;
@@ -2498,7 +2497,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (session) {
 		const unbindActivity = bindSessionPackageActivity(session);
 		termination.onDrain(unbindActivity);
-		termination.onDrain(bus.on(BusChannels.SessionResumed, () => flushPackageActivities()));
+		termination.onDrain(bus.subscribe("session.reattached", () => flushPackageActivities()));
 	}
 	// A headless `--session`/`--continue` resolves here, where the session
 	// domain exists. It is a hard requirement rather than a hint: a caller that
@@ -2547,14 +2546,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	// Hook diagnostics ride the typed bus. The domain loader constructed the
 	// bundle with the stderr default; swap in a sink that publishes
-	// middleware.hookFailed (the interactive warn notice consumes it) and keep
+	// middleware.hook_failed (the interactive warn notice consumes it) and keep
 	// stderr for non-interactive runs, which have no notice subscriber.
 	middleware.setDiagnosticSink((diagnostic) => {
 		if (diagnostic.kind === "registration_conflict") {
 			// Registration bookkeeping has no hook occurrence; the affected owner
 			// today declares user hooks, which never run on on_compaction, so the
 			// payload's hook slot carries that as the "no evaluation" marker.
-			bus.emit(BusChannels.MiddlewareHookFailed, {
+			bus.emit("middleware.hook_failed", {
 				kind: "registration_conflict",
 				registrationId: diagnostic.registrationId,
 				hook: "on_compaction",
@@ -2564,7 +2563,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			if (!interactive) writeMiddlewareDiagnosticToStderr(diagnostic);
 			return;
 		}
-		bus.emit(BusChannels.MiddlewareHookFailed, {
+		bus.emit("middleware.hook_failed", {
 			kind: diagnostic.kind,
 			registrationId: diagnostic.registrationId,
 			hook: diagnostic.hook,
@@ -2589,7 +2588,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// headless run has no subscriber, so mirror them to stderr there. Silent
 	// model swaps are exactly the failure mode the residency policy forbids.
 	if (!interactive) {
-		bus.on(BusChannels.RuntimeNotice, (payload: unknown) => {
+		bus.subscribe("runtime.notice_raised", (payload: unknown) => {
 			const notice = payload as { level?: string; message?: string } | undefined;
 			if (typeof notice?.message !== "string") return;
 			process.stderr.write(`[clio-coder:runtime] ${notice.level ?? "info"}: ${notice.message}\n`);
@@ -2653,7 +2652,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(initialProtectedArtifactState !== undefined ? { initialState: initialProtectedArtifactState } : {}),
 		onProtect: (event) => appendProtectedArtifactRegistryEvent(session, event),
 		onDurabilityFailure: (health) => {
-			bus.emit(BusChannels.MiddlewareHookFailed, {
+			bus.emit("middleware.hook_failed", {
 				kind: "hook_failed",
 				registrationId: "guard.protected-artifacts",
 				hook: "before_tool",
@@ -2789,7 +2788,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const state = currentGuardianState();
 		if (state === publishedGuardianState) return;
 		publishedGuardianState = state;
-		bus.emit(BusChannels.MemoryGuardianChanged, { sessionId: session?.current()?.id ?? null, state });
+		bus.emit("memory.guardian_changed", { sessionId: session?.current()?.id ?? null, state });
 	};
 	const memoryIntervention = memoryOwner.createIntervention({
 		telemetry: memoryTelemetry,
@@ -2990,14 +2989,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		captureStepUsage: captureBackgroundMemoryUsage,
 	});
 	const guardedMemory = memoryGuardian;
-	const unsubscribeMemoryLoop = bus.on(BusChannels.LoopBlocked, () => memoryIntervention.signalLoop());
+	const unsubscribeMemoryLoop = bus.subscribe("safety.loop_blocked", () => memoryIntervention.signalLoop());
 	const unsubscribeGuardianWakes = [
-		bus.on(BusChannels.SessionStart, () => guardedMemory.reset()),
-		bus.on(BusChannels.ConfigHotReload, () => {
+		bus.subscribe("session.started", () => guardedMemory.reset()),
+		bus.subscribe("config.hot_reloaded", () => {
 			memoryOwner.settingsChanged();
 			guardedMemory.wake("settings");
 		}),
-		bus.on(BusChannels.ConfigNextTurn, () => {
+		bus.subscribe("config.next_turn_scheduled", () => {
 			memoryOwner.settingsChanged();
 			guardedMemory.wake("settings");
 		}),
@@ -3025,8 +3024,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// consent is per session: a park or a resume clears it. A headless run
 	// denies every ask, so it keeps #377's allow.
 	const sessionCodeConsent = createSessionCodeConsent({ headless: options.headless !== undefined });
-	bus.on(BusChannels.SessionParked, () => sessionCodeConsent.reset());
-	bus.on(BusChannels.SessionResumed, () => sessionCodeConsent.reset());
+	bus.subscribe("session.parked", () => sessionCodeConsent.reset());
+	bus.subscribe("session.reattached", () => sessionCodeConsent.reset());
 	// The codewiki refreshes the written paths when the context domain is loaded.
 	middleware.registerHook(
 		createFileMutationObserver(({ paths }) => {
@@ -3049,7 +3048,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const hookReceipts = hookReceiptLog();
 	let bootHookNotices = true;
 	const reloadPlugins = () =>
-		reloadPluginResourcesAndNotify(process.cwd(), (event) => bus.emit(BusChannels.PluginsReloaded, event));
+		reloadPluginResourcesAndNotify(process.cwd(), (event) => bus.emit("plugin.reloaded", event));
 	const reloadClasses = createReloadClasses({
 		config,
 		bus,
@@ -3073,7 +3072,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			if (reloadClasses.captureIssue(line)) return;
 			if (!interactive) process.stderr.write(`${line}\n`);
 			else if (bootHookNotices) initialNotices.push(line);
-			else bus.emit(BusChannels.ExtensionsLoadIssue, { message: line });
+			else bus.emit("extension.load_failed", { message: line });
 		},
 		onCommitted: () => {
 			if (!reloadClasses.active) reloadPlugins();
@@ -3238,7 +3237,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// The cheap path Clio's own status and diff probes check before each run.
 		config: (dir) => hookFingerprinter.config(dir),
 		onDrift: (changes) =>
-			bus.emit(BusChannels.GitHooksChanged, {
+			bus.emit("safety.git_hooks_changed", {
 				message: gitHookDriftNotice(changes, process.cwd()),
 				changes: changes.map(({ path, kind, key, size, firstLine }) => ({
 					path,
@@ -3259,7 +3258,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			autonomy: resolveEffectiveAutonomy,
 			emptyHooksDir: join(clioStateDir(), "git", "no-hooks"),
 			onDrift: (record) =>
-				bus.emit(BusChannels.InternalGitDrift, {
+				bus.emit("safety.internal_git_drifted", {
 					message: record.message,
 					announce: record.announce,
 					operation: record.operation,
@@ -3346,10 +3345,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(acpMode ? { hostReadOnlySource: "acp-ceiling" as const } : {}),
 	});
 	// Reloaded settings can change what refused a call, so the memory of it goes.
-	bus.on(BusChannels.ConfigHotReload, () => toolRegistry.forgetRefusals());
+	bus.subscribe("config.hot_reloaded", () => toolRegistry.forgetRefusals());
 	const mainPermissionOrigin = acpMode ? "acp-server" : "main";
 	toolRegistry.onPermissionRequired((call, decision, meta) => {
-		bus.emit(BusChannels.PermissionRequested, {
+		bus.emit("approval.requested", {
 			tool: call.tool,
 			actionClass: decision.classification.actionClass,
 			requestId: meta.requestId,
@@ -3419,7 +3418,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// showing the abandoned branch's board (issue #94). SessionTurnSwitched is
 	// the signal that switch actually happened; invalidate() forces the next
 	// read to refold from the now-current leaf.
-	bus.on(BusChannels.SessionTurnSwitched, () => {
+	bus.subscribe("session.turn_switched", () => {
 		taskBoard.invalidate();
 		// The tree switch is the I/O boundary: refold eagerly here so the 250-ms
 		// island ticker remains a cache-only consumer after changing branches.
@@ -3430,7 +3429,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// activeRunIds field: a run is tracked from the moment its child process is
 	// live until it finalizes either way. attach/detach are no-ops when no board
 	// is declared, so an ambient dispatch never forces a board into existence.
-	bus.on(BusChannels.DispatchStarted, (payload) => {
+	bus.subscribe("run.started", (payload) => {
 		if (typeof payload?.runId === "string") taskBoard.attachRun(payload.runId);
 	});
 	// The receipt's flow label is absorbed the moment a run settles, attached or
@@ -3440,13 +3439,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (typeof payload?.runId !== "string" || !isFlowRestrictionSet(payload.flowRestrictions)) return;
 		flowLedger.absorb(payload.flowRestrictions, { tool: "dispatch", toolCallId: payload.runId });
 	};
-	bus.on(BusChannels.DispatchCompleted, (payload) => {
+	bus.subscribe("run.completed", (payload) => {
 		if (typeof payload?.runId !== "string") return;
 		taskBoard.detachRun(payload.runId);
 		absorbDispatchFlow(payload);
 		foldDispatchSkillActivations(session, payload);
 	});
-	bus.on(BusChannels.DispatchFailed, (payload) => {
+	bus.subscribe("run.failed", (payload) => {
 		if (typeof payload?.runId !== "string") return;
 		taskBoard.detachRun(payload.runId);
 		absorbDispatchFlow(payload);
@@ -3689,16 +3688,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// AUD-3 finding 1: resume/branch switches publish after replacement; new
 	// conversations and forks only park, so refresh those after replacement.
 	const unsubscribeConversationOverrides = [
-		bus.on(BusChannels.SessionResuming, ({ sessionId }) => {
+		bus.subscribe("session.resume_started", ({ sessionId }) => {
 			loadingSessionId = sessionId;
 			queueMicrotask(() => {
 				if (loadingSessionId === sessionId) loadingSessionId = null;
 			});
 		}),
-		bus.on(BusChannels.SessionResumed, ({ sessionId }) => {
+		bus.subscribe("session.reattached", ({ sessionId }) => {
 			if (syncConversationOverrides(sessionId)) bumpSessionState();
 		}),
-		bus.on(BusChannels.SessionParked, ({ sessionId, reason }) => {
+		bus.subscribe("session.parked", ({ sessionId, reason }) => {
 			forkParentId = reason === "fork" ? sessionId : null;
 			queueMicrotask(() => getCurrentSettings());
 		}),
@@ -3709,8 +3708,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// The config bundle publishes saved values on reload; session-scoped
 	// overrides must win, so re-derive every process-local projection from the
 	// effective session view after it.
-	const unsubscribeSettingsProjectionSync = [BusChannels.ConfigHotReload, BusChannels.ConfigNextTurn].map((channel) =>
-		bus.on(channel, () => bumpSessionState()),
+	const unsubscribeSettingsProjectionSync = (["config.hot_reloaded", "config.next_turn_scheduled"] as const).map(
+		(channel) => bus.subscribe(channel, () => bumpSessionState()),
 	);
 	termination.onDrain(() => {
 		for (const unsubscribe of unsubscribeSettingsProjectionSync) unsubscribe();
@@ -3893,13 +3892,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// A new operator task supersedes at `readTurn` below. Shutdown aborts every
 	// fill and starts none before System One's settle wait.
 	const unsubscribeRelevanceLifecycle = [
-		bus.on(BusChannels.SessionStart, () => relevanceRanker.release("session started")),
-		bus.on(BusChannels.SessionResumed, () => relevanceRanker.release("session resumed")),
-		bus.on(BusChannels.SessionParked, () => relevanceRanker.release("session parked")),
-		bus.on(BusChannels.SessionTurnSwitched, () => relevanceRanker.release("branch switched")),
-		bus.on(BusChannels.ConfigHotReload, () => relevanceRanker.abortStale()),
-		bus.on(BusChannels.ConfigNextTurn, () => relevanceRanker.abortStale()),
-		bus.on(BusChannels.ShutdownRequested, () => relevanceRanker.dispose()),
+		bus.subscribe("session.started", () => relevanceRanker.release("session started")),
+		bus.subscribe("session.reattached", () => relevanceRanker.release("session resumed")),
+		bus.subscribe("session.parked", () => relevanceRanker.release("session parked")),
+		bus.subscribe("session.turn_switched", () => relevanceRanker.release("branch switched")),
+		bus.subscribe("config.hot_reloaded", () => relevanceRanker.abortStale()),
+		bus.subscribe("config.next_turn_scheduled", () => relevanceRanker.abortStale()),
+		bus.subscribe("shutdown.requested", () => relevanceRanker.dispose()),
 	];
 	termination.onDrain(() => {
 		for (const unsubscribe of unsubscribeRelevanceLifecycle) unsubscribe();
@@ -3960,14 +3959,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// dropped. The emit is synchronous and fires while the session is still current
 	// with its writer open. A fork emits from inside forkFromState, before it closes
 	// the parent's writer, so /fork and ACP session/fork need no flush of their own.
-	bus.on(BusChannels.SessionParked, ({ sessionId }) => {
+	bus.subscribe("session.parked", ({ sessionId }) => {
 		if (session?.current()?.id === sessionId) flushSystemOne();
 		systemOneHost.forgetOperatorTexts();
 	});
 	// A resume or a `/tree` switch can keep the session id and still change which
 	// requests precede the next turn, so the kept texts go and the ledger is read once.
-	bus.on(BusChannels.SessionResumed, () => systemOneHost.forgetOperatorTexts());
-	bus.on(BusChannels.SessionTurnSwitched, () => systemOneHost.forgetOperatorTexts());
+	bus.subscribe("session.reattached", () => systemOneHost.forgetOperatorTexts());
+	bus.subscribe("session.turn_switched", () => systemOneHost.forgetOperatorTexts());
 	const visionSidecar = createVisionSidecar({ getSettings: () => getCurrentSettings(), providers });
 	const jobHost = createJobHost({
 		registry: toolRegistry,
@@ -4083,7 +4082,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						const meta = session.current();
 						return meta ? session.readEntries() : [];
 					},
-					onContextRecalled: (payload) => bus.emit(BusChannels.ContextRecalled, payload),
+					onContextRecalled: (payload) => bus.emit("context.recalled", payload),
 					readRecall: createSessionRereadPort(session, bus),
 				}
 			: {}),
@@ -4219,7 +4218,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const settings = getCurrentSettings();
 		const diff = diffSettings(previous, settings);
 		if (diff.hotReload.length + diff.nextTurn.length + diff.restartRequired.length === 0) return;
-		bus.emit(BusChannels.ConfigSessionChanged, { sessionId, diff, settings, previous, source, scope: "session" });
+		bus.emit("config.session_changed", { sessionId, diff, settings, previous, source, scope: "session" });
 	};
 	const applyRoutingAtScope = (
 		patch: RoutingPatch,
@@ -4461,7 +4460,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// domain, which announces it synchronously before the caller replays the
 	// transcript. A `/tree` branch switch is a different event and keeps the
 	// route the operator is on.
-	const unsubscribeResumedRoute = bus.on(BusChannels.SessionResumed, (payload) => {
+	const unsubscribeResumedRoute = bus.subscribe("session.reattached", (payload) => {
 		const event = payload as { sessionId?: unknown; via?: unknown } | null | undefined;
 		if (event?.via !== "resume" || session?.current()?.id !== event.sessionId) return;
 		const notice = restoreResumedSessionRoute();
@@ -4510,8 +4509,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			session.tree(meta.id).leafId,
 		);
 	};
-	termination.onDrain(bus.on(BusChannels.SessionResumed, reseedUsage));
-	termination.onDrain(bus.on(BusChannels.SessionTurnSwitched, reseedUsage));
+	termination.onDrain(bus.subscribe("session.reattached", reseedUsage));
+	termination.onDrain(bus.subscribe("session.turn_switched", reseedUsage));
 
 	// meta.json usage projects the read model's whole-session totals, every branch and referenced run, as the session
 	// view shows them; the active path filters a view and never the session's spend. The session topic follows each
@@ -4559,7 +4558,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		turnOutcomeCollector.seedClarificationStreak(streak);
 	};
 	seedOutcomeFromSession();
-	const unsubscribeOutcomeResume = bus.on(BusChannels.SessionResumed, seedOutcomeFromSession);
+	const unsubscribeOutcomeResume = bus.subscribe("session.reattached", seedOutcomeFromSession);
 	termination.onDrain(() => unsubscribeOutcomeResume());
 	middleware.registerHook(turnOutcomeCollector);
 
@@ -4647,7 +4646,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		turnControl.seedOrientation(snapshot ?? null);
 	};
 	seedOrientationFromSession();
-	const unsubscribeOrientationResume = bus.on(BusChannels.SessionResumed, seedOrientationFromSession);
+	const unsubscribeOrientationResume = bus.subscribe("session.reattached", seedOrientationFromSession);
 	termination.onDrain(() => unsubscribeOrientationResume());
 	// The opt-in turn-end watchdog. Headless and ACP runs pass `false` for the
 	// surface: neither has an operator reading a transcript, so a notice they
@@ -4967,7 +4966,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		})();
 		return chatSettlement;
 	};
-	const unsubscribeChatShutdown = bus.on(BusChannels.ShutdownRequested, () => {
+	const unsubscribeChatShutdown = bus.subscribe("shutdown.requested", () => {
 		void beginChatSettlement().catch(() => {
 			// The awaited drain hook reports this same rejection.
 		});
@@ -5195,7 +5194,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// ACP is operatorless too: bound a runaway turn with the shared
 		// interrupt->stop subscriber, the same way the headless path does.
 		const unsubscribeAcpLoopGuardStop = subscribeLoopGuardStop(bus, chat);
-		const unsubscribeAcpRoutingNotices = bus.on(BusChannels.ConfigNextTurn, (payload) => {
+		const unsubscribeAcpRoutingNotices = bus.subscribe("config.next_turn_scheduled", (payload) => {
 			const evt = payload as { diff?: { nextTurn?: string[] }; settings?: Readonly<ClioSettings> } | null | undefined;
 			if (!evt?.settings || !Array.isArray(evt.diff?.nextTurn)) return;
 			if (!session?.current()) return;
@@ -5583,7 +5582,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											runContextRecall: async (ref: string): Promise<AcpHostReport> => {
 												const outcome = runOperatorRecall(ref, {
 													getSessionId: () => session.current()?.id ?? null,
-													onActivity: (event) => bus.emit(BusChannels.ContextActivity, event),
+													onActivity: (event) => bus.emit("context.activity_changed", event),
 													hasSession: () => session.current() !== null,
 													readEntries: readCurrentSessionEntries,
 													activeLeafTurnId: () => {
@@ -5591,7 +5590,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 														return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
 													},
 													appendEntry: (entry) => session.appendEntry(entry),
-													onRecalled: (payload) => bus.emit(BusChannels.ContextRecalled, payload),
+													onRecalled: (payload) => bus.emit("context.recalled", payload),
 												});
 												// The body answers the person; like the TUI's replay block it never becomes model context.
 												return outcome.ok
@@ -5774,7 +5773,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					let reloaded: PluginsReloadedPayload | null = null;
 					reloadPluginResourcesAndNotify(process.cwd(), (event) => {
 						reloaded = event;
-						bus.emit(BusChannels.PluginsReloaded, event);
+						bus.emit("plugin.reloaded", event);
 					});
 					const event = reloaded as PluginsReloadedPayload | null;
 					if (event === null) throw new Error("plugin reload reported no generation");
@@ -5975,7 +5974,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// SIGINT while an `@path` in the prompt is read ends the run before any
 			// request; aborting kills poppler, a detached child that would outlive it (#438).
 			const attachmentRead = new AbortController();
-			const stopAttachmentRead = bus.on(BusChannels.ShutdownRequested, () => attachmentRead.abort());
+			const stopAttachmentRead = bus.subscribe("shutdown.requested", () => attachmentRead.abort());
 			const fileExpansion = await expandInlineFileReferencesAsync(
 				promptExpansion?.expanded ? promptExpansion.text : parsedSkillRequest.text,
 				{
@@ -6022,7 +6021,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.headless.failOnNoop === true ? { failOnNoop: true } : {}),
 				...(options.headless.deadline !== undefined ? { deadline: options.headless.deadline } : {}),
 				...(dispatch ? { dispatch } : {}),
-				scopeNotices: (listener) => bus.on(BusChannels.DispatchScopeNotice, listener),
+				scopeNotices: (listener) => bus.subscribe("run.scope_notice_raised", listener),
 				...(telemetry ? { costEntries: () => telemetry.costEntries() } : {}),
 				...(runCostCap !== null ? { costCap: { maxUsd: runCostCap.maxUsd, unpricedRoutes } } : {}),
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
@@ -6059,7 +6058,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			.packages.filter((p) => p.loadable && (p.kind === undefined || p.kind === "plugin"))
 			.map((p) => p.id);
 	let dashboardPlugins = activePluginIds();
-	const unsubscribeDashboardPlugins = bus.on(BusChannels.PluginsReloaded, () => {
+	const unsubscribeDashboardPlugins = bus.subscribe("plugin.reloaded", () => {
 		dashboardPlugins = activePluginIds();
 	});
 	termination.onTerminate(() => unsubscribeDashboardPlugins());

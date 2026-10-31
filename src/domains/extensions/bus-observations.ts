@@ -1,5 +1,4 @@
-import { BusChannels } from "../../core/bus-events.js";
-import type { SafeEventBus } from "../../core/event-bus.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type { ExtensionObservationV2, ExtensionUsage } from "./public-api-v2.js";
 
 /**
@@ -9,7 +8,7 @@ import type { ExtensionObservationV2, ExtensionUsage } from "./public-api-v2.js"
  * filter has nothing to strip from these.
  */
 export function subscribeExtensionObservations(
-	bus: Pick<SafeEventBus, "on">,
+	bus: Pick<TelemetryHub, "subscribe">,
 	observe: (observation: ExtensionObservationV2) => void,
 ): () => void {
 	const send = (observation: ExtensionObservationV2): void => {
@@ -20,13 +19,13 @@ export function subscribeExtensionObservations(
 		}
 	};
 	const unsubscribers = [
-		bus.on(BusChannels.PermissionRequested, (p) => send({ event: "permission_requested", tool: p.tool })),
-		bus.on(BusChannels.PermissionResolved, (p) =>
+		bus.subscribe("approval.requested", (p) => send({ event: "permission_requested", tool: p.tool })),
+		bus.subscribe("approval.resolved", (p) =>
 			send({ event: "permission_resolved", tool: p.tool ?? "", decision: p.status === "granted" ? "allowed" : "denied" }),
 		),
-		bus.on(BusChannels.SafetyBlocked, (p) => send({ event: "safety_blocked", tool: p.tool })),
-		bus.on(BusChannels.DispatchStarted, (p) => send({ event: "dispatch_started", runId: p.runId, agentId: p.agentId })),
-		bus.on(BusChannels.DispatchCompleted, (p) => {
+		bus.subscribe("safety.blocked", (p) => send({ event: "safety_blocked", tool: p.tool })),
+		bus.subscribe("run.started", (p) => send({ event: "dispatch_started", runId: p.runId, agentId: p.agentId })),
+		bus.subscribe("run.completed", (p) => {
 			const usage: ExtensionUsage = {
 				inputTokens: p.inputTokenCount,
 				outputTokens: p.outputTokenCount,
@@ -39,10 +38,10 @@ export function subscribeExtensionObservations(
 			};
 			send({ event: "dispatch_completed", runId: p.runId, agentId: p.agentId, durationMs: p.durationMs, usage });
 		}),
-		bus.on(BusChannels.DispatchFailed, (p) =>
+		bus.subscribe("run.failed", (p) =>
 			send({ event: "dispatch_failed", runId: p.runId, agentId: p.agentId, reason: String(p.reason) }),
 		),
-		bus.on(BusChannels.CompactionEnd, (p) =>
+		bus.subscribe("compaction.ended", (p) =>
 			send({
 				event: "compaction_end",
 				outcome:
@@ -53,7 +52,7 @@ export function subscribeExtensionObservations(
 							: "unknown",
 			}),
 		),
-		bus.on(BusChannels.BudgetAlert, (p) => send({ event: "budget_alert", costUsd: p.currentUsd })),
+		bus.subscribe("budget.alerted", (p) => send({ event: "budget_alert", costUsd: p.currentUsd })),
 	];
 	return () => {
 		for (const unsubscribe of unsubscribers) unsubscribe();

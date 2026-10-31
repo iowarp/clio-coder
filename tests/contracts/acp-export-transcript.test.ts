@@ -3,7 +3,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
@@ -78,7 +78,7 @@ test("export writes the branch the session is on as escaped HTML with no script,
 	await withSession(async (root, contract, sessionId) => {
 		const control = acpCommandControl({
 			dispatch: refuse("dispatch") as AcpCommandHost["dispatch"],
-			bus: createSafeEventBus(),
+			bus: createTelemetryHub(),
 			providers: refuse("providers") as AcpCommandHost["providers"],
 			exportTranscript: (path?: string) =>
 				writeTranscriptExport({

@@ -1,10 +1,9 @@
 import { mcpCommandOutput } from "../cli/mcp.js";
 import { acceptanceFromTaskFlags } from "../cli/tasks.js";
-import { BusChannels } from "../core/bus-events.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import type { SettingsAreaId } from "../core/settings-areas.js";
 import { resolveSettingsArea, SETTINGS_AREAS } from "../core/settings-areas.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import { parseCouncilReport, parseOracleResult } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
@@ -323,11 +322,11 @@ export interface HandleRunDeps {
 	notice: (level: NoticeLevel, text: string) => void;
 	/**
 	 * Optional bus for forwarding per-event worker output. When supplied,
-	 * every non-heartbeat event is re-emitted on `BusChannels.DispatchProgress`
+	 * every non-heartbeat event is re-emitted on `"run.progressed"`
 	 * so UI surfaces (dispatch-board overlay) can update their row as the
 	 * stream arrives instead of waiting for the terminal receipt.
 	 */
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	/**
 	 * Operator-turn sink for `--share`. Absent means the flag has nowhere to put
 	 * the answer, which is reported rather than silently dropped: an operator who
@@ -412,7 +411,7 @@ async function runAttributed(
 		for await (const event of handle.events) {
 			const e = event as { type?: string };
 			if (!e.type || e.type === "heartbeat") continue;
-			progressBus?.emit(BusChannels.DispatchProgress, { runId: handle.runId, agentId: request.agentId, event });
+			progressBus?.emit("run.progressed", { runId: handle.runId, agentId: request.agentId, event });
 		}
 		const receipt = await handle.finalPromise;
 		if (receipt.outcome === "canceled") {
@@ -562,7 +561,7 @@ async function handleOracle(question: string, ctx: SlashCommandContext): Promise
 		for await (const event of handle.events) {
 			const typed = event as { type?: string };
 			if (!typed.type || typed.type === "heartbeat") continue;
-			progressBus?.emit(BusChannels.DispatchProgress, { runId: handle.runId, agentId: ORACLE_AGENT_ID, event });
+			progressBus?.emit("run.progressed", { runId: handle.runId, agentId: ORACLE_AGENT_ID, event });
 		}
 		const receipt = await handle.finalPromise;
 		const parsed = parseOracleResult(receipt.output?.text ?? null);
@@ -717,7 +716,7 @@ export interface SessionCommandContext {
 	notice: (level: NoticeLevel, text: string) => void;
 	dispatch: DispatchContract;
 	getDecisionBoard?: HandleRunDeps["getDecisionBoard"];
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	/** Strict recipe facts used to keep interactive /run role-equivalent with the CLI. */
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	/**

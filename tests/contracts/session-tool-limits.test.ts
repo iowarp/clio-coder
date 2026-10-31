@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { extractGlobalFlags } from "../../src/cli/argv.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { SessionToolLimits } from "../../src/core/tool-limit-flags.js";
 import { turnDelegatesTool } from "../../src/core/turn-constraints.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
@@ -84,7 +84,7 @@ test("a TUI /delegate under --delegate-tools read dispatches a worker limited to
 	const dispatched: DispatchRequest[] = [];
 	const runtime = createInteractiveSlashRuntime({
 		io: { stdout() {}, stderr() {} },
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		chat: loop,
 		chatPanel: { appendReplayBlock() {}, appendUser() {} },
 		requestRender() {},

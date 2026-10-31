@@ -1,6 +1,5 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { installDiagnosticSink } from "../../src/core/diagnostics.js";
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -16,7 +15,7 @@ it("operator bootstrap report: internal schema retries keep scope provenance wit
 	const notices: unknown[] = [];
 	const diagnostics: string[] = [];
 	const removeSink = installDiagnosticSink((text) => diagnostics.push(text));
-	const unsubscribe = context.bus.on(BusChannels.DispatchScopeNotice, (notice) => {
+	const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
 		notices.push(notice);
 	});
 	const bundle = makeDispatchBundle(context);
@@ -86,7 +85,7 @@ it("announces withheld checks for narrow roots without an OS sandbox", async () 
 	settings.safety.sandbox = "off";
 	const context = dispatchStubContext({ settings });
 	const notices: Array<{ code: string; message: string }> = [];
-	const unsubscribe = context.bus.on(BusChannels.DispatchScopeNotice, (notice) => {
+	const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
 		notices.push(notice);
 	});
 	const tools: Array<ReadonlyArray<string>> = [];

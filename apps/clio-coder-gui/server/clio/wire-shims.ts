@@ -1,6 +1,5 @@
 // Browser-safe ACP declarations share the wire contract without evaluating the process transport.
 
-export type { ContextActivityPayload } from "../../../../src/core/bus-events.js";
 export type {
 	ContextOperation,
 	ContextOperationFact,
@@ -36,4 +35,5 @@ export {
 	TELEMETRY_DTO_SCHEMAS,
 	TELEMETRY_TOPICS,
 } from "../../../../src/core/telemetry/dto.js";
+export type { ContextActivityPayload } from "../../../../src/core/telemetry/live-events.js";
 export * from "../../../../src/engine/acp/types.js";

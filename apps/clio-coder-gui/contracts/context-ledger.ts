@@ -6,7 +6,7 @@ export const ContextCapability = Type.Object(
 	{
 		...AcpContextCapability.properties,
 		status: Type.Optional(Type.String()),
-		activity: Type.Optional(Type.Literal("context.activity")),
+		activity: Type.Optional(Type.Literal("context.activity_changed")),
 		invoke: Type.Optional(Type.String()),
 	},
 	{ additionalProperties: false },

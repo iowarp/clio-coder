@@ -1,11 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import { workerMcpNoNetworkNotice } from "../core/sandbox/worker-policy.js";
 import { evaluateSkillToolSurface } from "../core/skill-activation.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsTool } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
@@ -214,7 +213,7 @@ function normalizedAssistantText(summary: EventSummary): string {
 
 type RegisteredDispatchToolDeps = DispatchToolDeps & { runEvents: DispatchRunEventRegistry };
 
-function fallbackProgressBus(deps: DispatchToolDeps): SafeEventBus | undefined {
+function fallbackProgressBus(deps: DispatchToolDeps): TelemetryHub | undefined {
 	return deps.dispatch.ownsProgressBus?.(deps.bus) === true ? undefined : deps.bus;
 }
 
@@ -241,7 +240,7 @@ async function consumeGateSensitiveDispatchEvents(
 		const text = rawAssistantTextFromEvent(event);
 		if (text.trim().length > 0) summary.lastAssistantText = text;
 		deps.runEvents.recordEvent(runId, agentId, event);
-		if (type !== "heartbeat") bus?.emit(BusChannels.DispatchProgress, { runId, agentId, event });
+		if (type !== "heartbeat") bus?.emit("run.progressed", { runId, agentId, event });
 	}
 	return summary;
 }

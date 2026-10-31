@@ -6,7 +6,6 @@ import type { AddressInfo } from "node:net";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { mcpCommandOutput } from "../../src/cli/mcp.js";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { WORKER_SANDBOX_SPEC_VERSION } from "../../src/core/sandbox/types.js";
@@ -297,7 +296,7 @@ describe("native worker MCP capabilities", () => {
 		settings.safety.sandbox = "required";
 		const context = dispatchStubContext({ settings, agentTools: [...TOOLS, ToolNames.Edit, ToolNames.Write] });
 		const notices: Array<{ code: string; message: string }> = [];
-		const unsubscribe = context.bus.on(BusChannels.DispatchScopeNotice, (notice) => {
+		const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
 			notices.push(notice);
 		});
 		const bundle = makeDispatchBundle(context, {
@@ -441,7 +440,7 @@ describe("native worker MCP capabilities", () => {
 			} as unknown as T;
 		};
 		const notices: Array<{ code: string; message: string }> = [];
-		const unsubscribe = context.bus.on(BusChannels.DispatchScopeNotice, (notice) => {
+		const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
 			notices.push(notice);
 		});
 		let spawned: WorkerSpec | undefined;

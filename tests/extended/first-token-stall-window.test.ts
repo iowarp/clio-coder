@@ -2,9 +2,9 @@ import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
-import { type BudgetAlertPayload, BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import type { BudgetAlertPayload } from "../../src/core/telemetry/live-events.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createSchedulingBundle } from "../../src/domains/scheduling/extension.js";
@@ -126,7 +126,7 @@ function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0, budget?: Budget
 	const wire = transport(mode, firstTokenDelayMs);
 	const events: ChatLoopEvent[] = [];
 	const alerts: BudgetAlertPayload[] = [];
-	context.bus.on(BusChannels.BudgetAlert, (payload) => {
+	context.bus.subscribe("budget.alerted", (payload) => {
 		alerts.push(payload);
 	});
 	const spent = { sessionCost: () => budget?.spentUsd ?? 0 } as unknown as TelemetryContract;

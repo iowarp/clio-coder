@@ -3,11 +3,11 @@ import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { it } from "node:test";
-import { BusChannels, type PluginsReloadedPayload } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { PackageActivity } from "../../src/core/package-activity.js";
 import { bindPackageActivitySink, PLUGIN_RESOURCE_USE } from "../../src/core/package-activity.js";
 import { skillActivationFromToolDetails } from "../../src/core/skill-activation.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type { PluginsReloadedPayload } from "../../src/core/telemetry/live-events.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
 import { listPlaybooks, loadPlaybook } from "../../src/domains/agents/playbook.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
@@ -314,7 +314,7 @@ it("refreshes admitted plugin resources after drift and does not bind another ow
 it("publishes plugin generations before refreshing cached recipes and unsubscribes on stop", async () => {
 	const env = await isolateClioEnv("clio-coder-plugin-reload-");
 	const oldCwd = process.cwd();
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const agents = createAgentsBundle({ bus, getContract: () => undefined });
 	try {
 		const cwd = join(env.dir, "workspace");
@@ -333,7 +333,7 @@ it("publishes plugin generations before refreshing cached recipes and unsubscrib
 		const reload = () =>
 			reloadPluginResourcesAndNotify(cwd, (event) => {
 				events.push(event);
-				bus.emit(BusChannels.PluginsReloaded, event);
+				bus.emit("plugin.reloaded", event);
 			});
 		const first = reload();
 		ok(agents.contract.get("materio-researcher"));
@@ -348,7 +348,7 @@ it("publishes plugin generations before refreshing cached recipes and unsubscrib
 		strictEqual(agents.contract.get("materio-researcher"), null);
 		await agents.extension.stop?.();
 		const stoppedRevision = agents.contract.revision();
-		bus.emit(BusChannels.PluginsReloaded, {
+		bus.emit("plugin.reloaded", {
 			generation: 999,
 			previousGeneration: first.generation,
 			changed: true,

@@ -2,10 +2,9 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { updateSettings } from "../../src/core/config.js";
 import { loadDomains } from "../../src/core/domain-loader.js";
-import { getSharedBus } from "../../src/core/shared-bus.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { type ConfigContract, ConfigDomainModule } from "../../src/domains/config/index.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import type { TargetStatus } from "../../src/domains/providers/contract.js";
@@ -128,7 +127,7 @@ for (const ending of ["retargeted", "removed", "stopped", "overridden"] as const
 			const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
 			let pending: Promise<TargetStatus | null> | undefined;
 			let publications = 0;
-			const unsubscribe = getSharedBus().on(BusChannels.ProviderHealth, () => {
+			const unsubscribe = telemetryHub().subscribe("provider.health_changed", () => {
 				publications++;
 			});
 			try {

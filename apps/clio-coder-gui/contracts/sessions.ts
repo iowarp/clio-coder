@@ -288,23 +288,23 @@ export type SessionDelta = {
 }[keyof typeof SessionDeltas];
 /**
  * The `_clio-coder/event` kinds this app opts into at `initialize`. Each is the
- * engine's own `BusChannels` value, never a renamed alias, so the wire frame
+ * engine's own EVENTS name, never a renamed alias, so the wire frame
  * names its producer. The engine intersects this list with its own allowlist,
  * so a kind listed here that it does not forward costs nothing.
  */
 export const ACP_EVENT_KINDS = [
-	"safety.loopBlocked",
-	"dispatch.enqueued",
-	"dispatch.started",
-	"dispatch.progress",
-	"dispatch.completed",
-	"dispatch.failed",
-	"accountability.evidenceReady",
-	"compaction.end",
-	"context.activity",
-	"context.warning",
-	"safety.toolBudgetExceeded",
-	"provider.health",
-	"dispatch.scopeNotice",
+	"safety.loop_blocked",
+	"run.enqueued",
+	"run.started",
+	"run.progressed",
+	"run.completed",
+	"run.failed",
+	"evidence.assessed",
+	"compaction.ended",
+	"context.activity_changed",
+	"context.warning_raised",
+	"safety.tool_budget_exceeded",
+	"provider.health_changed",
+	"run.scope_notice_raised",
 	"job.changed",
 ] as const;

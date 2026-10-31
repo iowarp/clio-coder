@@ -1,4 +1,3 @@
-import { BusChannels } from "../../core/bus-events.js";
 import { type ClioSettings, readSettings } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
@@ -523,7 +522,7 @@ export function createProvidersBundle(
 		if (!desc) {
 			const status = buildStatus(target, null, null, previous);
 			statuses.set(target.id, status);
-			context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
+			context.bus.emit("provider.health_changed", { id: target.id, status });
 			return status;
 		}
 		// A runtime with no probe may still report serving windows. That source is
@@ -547,7 +546,7 @@ export function createProvidersBundle(
 				previous,
 			);
 			statuses.set(target.id, status);
-			context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
+			context.bus.emit("provider.health_changed", { id: target.id, status });
 			return status;
 		}
 		options?.signal?.throwIfAborted();
@@ -666,7 +665,7 @@ export function createProvidersBundle(
 		// instead of the conservative default. Fire and forget: the probe's answer
 		// is already in `statuses`, and a failed write must not fail the probe.
 		void recordEndpointSlotsFromStatus(status);
-		context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
+		context.bus.emit("provider.health_changed", { id: target.id, status });
 		return status;
 	}
 

@@ -1,9 +1,3 @@
-import {
-	BusChannels,
-	type ConfigChangePayload,
-	type ConfigChangeScope,
-	type ConfigChangeSource,
-} from "../../core/bus-events.js";
 import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
@@ -16,6 +10,7 @@ import {
 	updateLayeredSettings,
 	updateProjectLocalSettings,
 } from "../../core/settings-layers.js";
+import type { ConfigChangePayload, ConfigChangeScope, ConfigChangeSource } from "../../core/telemetry/live-events.js";
 import { assertAgentIdNamespace } from "./agent-namespace.js";
 import { type ChangeKind, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
@@ -71,10 +66,10 @@ export function createConfigBundle(
 		const bus = context.bus;
 		const channel =
 			kind === "hotReload"
-				? BusChannels.ConfigHotReload
+				? "config.hot_reloaded"
 				: kind === "nextTurn"
-					? BusChannels.ConfigNextTurn
-					: BusChannels.ConfigRestartRequired;
+					? "config.next_turn_scheduled"
+					: "config.restart_required";
 		bus.emit(channel, payload);
 		for (const listener of listeners.get(kind) ?? []) {
 			try {
@@ -112,7 +107,7 @@ export function createConfigBundle(
 	function publishReloadFailure(message: string | null): void {
 		if (reloadFailure === message) return;
 		reloadFailure = message;
-		context.bus.emit(BusChannels.ConfigReloadFailed, { message });
+		context.bus.emit("config.reload_failed", { message });
 	}
 
 	function onWatcherFire(): void {

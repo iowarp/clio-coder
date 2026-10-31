@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { setImmediate as nextTick } from "node:timers/promises";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
@@ -229,7 +228,7 @@ function listeningPeer(
 	const peer = { token: null as string | null, sessionId: null as string | null, streaming: false };
 	const inbox = createPeerInbox({
 		bus: {
-			on: (channel: string, handler: (payload: { phase: string }) => void) => {
+			subscribe: (channel: string, handler: (payload: { phase: string }) => void) => {
 				const set = handlers.get(channel) ?? new Set();
 				handlers.set(channel, set);
 				set.add(handler);
@@ -286,12 +285,12 @@ function listeningPeer(
 		shown,
 		send,
 		inboxDir: () => join(stateDir, "peer-inbox", peer.token ?? ""),
-		phase: (phase: string) => fire(BusChannels.AgentStatusChanged, { phase }),
+		phase: (phase: string) => fire("agent.status_changed", { phase }),
 		/** `/new`, `/resume`, a fork: the session under the peer was replaced or reopened. */
 		switchSession: (sessionId: string) => {
-			fire(BusChannels.SessionParked);
+			fire("session.parked");
 			peer.sessionId = sessionId;
-			fire(BusChannels.SessionResumed);
+			fire("session.reattached");
 		},
 		close: () => {
 			inbox?.dispose();

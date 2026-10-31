@@ -1,5 +1,5 @@
-import type { ConfigChangeSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
+import type { ConfigChangeSource } from "../core/telemetry/live-events.js";
 import type { AskUserHandler, AskUserQuestion } from "../tools/ask-user.js";
 
 /**

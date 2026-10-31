@@ -7,9 +7,8 @@ import {
 	type AssistantMessageEventStream,
 	createAssistantMessageEventStream,
 } from "@earendil-works/pi-ai";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import {
 	acquireCapacityLease,
 	endpointCapacityUsage,
@@ -156,7 +155,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 			assert.ok(providers);
 			const route = createBackgroundMemoryModelClient(providers, settings, 1000, null);
 			assert.ok(route);
-			const bus = createSafeEventBus();
+			const bus = createTelemetryHub();
 			const { contract: session } = createSessionBundle({ bus, getContract: () => undefined });
 			const origin = session.create({ cwd: env.dir });
 			const journals = createSessionJournals(join(env.dir, "state"), () => {});
@@ -474,13 +473,13 @@ test("production runtime fallback calls chat once and keeps failed and fallback 
 			}));
 		},
 	});
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const notices: string[] = [];
 	const ended: string[] = [];
-	bus.on(BusChannels.RuntimeNotice, (event) => {
+	bus.subscribe("runtime.notice_raised", (event) => {
 		notices.push(event.message);
 	});
-	bus.on(BusChannels.MemoryStepCompleted, (event) => {
+	bus.subscribe("memory.step_completed", (event) => {
 		ended.push(event.targetId);
 	});
 	const callbacks = createBackgroundMemoryRouting(providers, () => settings, bus);

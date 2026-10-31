@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import type { JobOwner, JobRecord } from "../core/job-types.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { captureProjectSurface } from "../core/workspace-trust.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
@@ -19,7 +18,7 @@ import { createJobRuntime, jobAuthorityRefusal } from "./job-runtime.js";
 
 export interface JobHostDeps {
 	registry: ToolRegistry;
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	session?: Pick<SessionContract, "current" | "create" | "readEntries">;
 	/** The current conversation's telemetry view, which a job's spend is read from. */
 	telemetry?(): TelemetryView | null;
@@ -135,7 +134,7 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 		ports: createJobRuntime(runtimeDeps),
 		store: deps.store ?? createJobStore(),
 		onChange(payload) {
-			deps.bus.emit(BusChannels.JobChanged, payload);
+			deps.bus.emit("job.changed", payload);
 			const meta = deps.session?.current();
 			if (meta?.id !== payload.job.owner.sessionId || payload.job.owner.cwd !== cwd) return;
 			for (const listener of [...listeners]) {
@@ -157,16 +156,16 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 		admissionRefusal: (runner, creator, constraints) => jobAuthorityRefusal(runtimeDeps, creator, runner, constraints),
 	});
 	const subscriptions = [
-		deps.bus.on(BusChannels.SessionParked, ({ sessionId, reason }) => {
+		deps.bus.subscribe("session.parked", ({ sessionId, reason }) => {
 			if (current?.sessionId !== sessionId) return;
 			parkedSession = sessionId;
 			retireCurrent(reason);
 		}),
-		deps.bus.on(BusChannels.SessionResumed, () => {
+		deps.bus.subscribe("session.reattached", () => {
 			parkedSession = null;
 			retireCurrent("conversation resumed");
 		}),
-		deps.bus.on(BusChannels.SessionTurnSwitched, () => {
+		deps.bus.subscribe("session.turn_switched", () => {
 			parkedSession = null;
 			retireCurrent("conversation branch changed");
 		}),

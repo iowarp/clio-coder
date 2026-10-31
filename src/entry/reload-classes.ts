@@ -1,6 +1,5 @@
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import { readStrictLayeredSettings } from "../core/settings-layers.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { diffSettings, settingsChangeKind } from "../domains/config/classify.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import type { InstalledExtension } from "../domains/extensions/types.js";
@@ -61,7 +60,7 @@ function summary(label: string, before: Inventory, after: Inventory): string[] {
 
 export interface ReloadClassesDeps {
 	config: ConfigContract | undefined;
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	cwd(): string;
 	library(): PluginSnapshot | undefined;
 	reloadLibrary(): PluginSnapshot;
@@ -75,7 +74,7 @@ export function createReloadClasses(deps: ReloadClassesDeps): ReloadClassesContr
 	let configFailure: string | null = null;
 	const bootSettings = deps.config ? structuredClone(deps.config.get()) : undefined;
 	let reportedSettings = bootSettings;
-	deps.bus.on(BusChannels.ConfigReloadFailed, ({ message }) => {
+	deps.bus.subscribe("config.reload_failed", ({ message }) => {
 		configFailure = message;
 	});
 	return {

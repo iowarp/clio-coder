@@ -40,7 +40,7 @@ import type {
 	DispatchProgressPayload,
 	DispatchStartedPayload,
 	RunAbortedPayload,
-} from "../core/bus-events.js";
+} from "../core/telemetry/live-events.js";
 import type {
 	RunPresentedResultContract,
 	RunReceiptSummary,

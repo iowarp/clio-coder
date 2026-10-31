@@ -1,5 +1,5 @@
-import type { BudgetAlertPayload } from "../../core/bus-events.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
+import type { BudgetAlertPayload } from "../../core/telemetry/live-events.js";
 import type { BudgetSpendPricing, BudgetVerdict, RunCostCap } from "./budget.js";
 import type { FleetRegistry } from "./cluster.js";
 import type { LocalCapacity } from "./local-capacity.js";

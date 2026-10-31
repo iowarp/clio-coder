@@ -1,7 +1,6 @@
-import { BusChannels } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
-import type { SafeEventBus } from "../../core/event-bus.js";
 import { listRecentModels } from "../../core/recent-models.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type {
 	CapabilityFlags,
 	ProviderModelSource,
@@ -86,7 +85,7 @@ export interface OpenModelOverlayDeps {
 	/** Optional live settings resolver so refreshes pick up target/config edits made while the overlay is open. */
 	getSettings?: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	onSelect: (ref: ModelSelection) => void;
 	onToggleFavorite?: (ref: ModelSelection, favorite: boolean) => void;
 	onClose: () => void;
@@ -1060,7 +1059,7 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 		},
 	);
 	if (activeTarget && activeModel) view.setSelectedValue(`${activeTarget}/${activeModel}`);
-	const unsubscribeHealth = deps.bus?.on(BusChannels.ProviderHealth, () => {
+	const unsubscribeHealth = deps.bus?.subscribe("provider.health_changed", () => {
 		if (view.isDisposed()) return;
 		view.replaceItems(build());
 		tui.requestRender();

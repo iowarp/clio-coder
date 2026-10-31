@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
 import type { TelemetryReadModel } from "../../src/domains/telemetry/contract.js";
 import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
@@ -15,7 +14,7 @@ import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 // telemetry read model, which folds them the same way (#434 §11.3).
 test("the island's input counts cache reads, so ↑ plus ↓ is the card's processed total", () => {
 	const usage = { input: 5_900, output: 450, cacheRead: 17_950, cacheWrite: 0 };
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const running: DispatchSnapshot["running"] = [
 		{
 			runId: "run-1",
@@ -58,7 +57,7 @@ test("the island's input counts cache reads, so ↑ plus ↓ is the card's proce
 		telemetry: { live: () => view } as unknown as TelemetryReadModel,
 	});
 	try {
-		bus.emit(BusChannels.DispatchStarted, {
+		bus.emit("run.started", {
 			runId: "run-1",
 			agentId: "coder",
 			targetId: "mini",
@@ -70,7 +69,7 @@ test("the island's input counts cache reads, so ↑ plus ↓ is the card's proce
 			assignmentId: "run-1",
 			attempt: 1,
 		});
-		bus.emit(BusChannels.DispatchProgress, {
+		bus.emit("run.progressed", {
 			runId: "run-1",
 			agentId: "coder",
 			event: { type: "message_end", message: { role: "assistant", usage } },

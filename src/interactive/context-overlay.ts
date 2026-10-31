@@ -1,8 +1,7 @@
 import { homedir } from "node:os";
 import { relative } from "node:path";
-import { BusChannels } from "../core/bus-events.js";
 import { uncachedPrefillTokens } from "../core/cache-telemetry.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
 import { formatContextWindowSlots } from "../domains/providers/index.js";
@@ -323,7 +322,7 @@ function renderContextLedgerLines(
 const STREAMING_FALLBACK_TICK_MS = 1000;
 
 export interface OpenContextOverlayOptions {
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	/**
 	 * Chat event source. When wired, the overlay refreshes as turns settle
 	 * (message_end/agent_end) and runs a slow fallback tick only while a
@@ -427,8 +426,8 @@ export function openContextOverlay(
 
 	const unsubscribes: Array<() => void> = [];
 	if (options?.bus) {
-		unsubscribes.push(options.bus.on(BusChannels.ContextPruned, refresh));
-		unsubscribes.push(options.bus.on(BusChannels.ContextWarning, refresh));
+		unsubscribes.push(options.bus.subscribe("context.pruned", refresh));
+		unsubscribes.push(options.bus.subscribe("context.warning_raised", refresh));
 	}
 	// A settled call's journal batch lands just after its chat event; repaint when it does, at most 10 Hz.
 	if (options?.telemetry) {

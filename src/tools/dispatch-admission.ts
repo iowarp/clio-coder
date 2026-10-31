@@ -1,5 +1,4 @@
 import { isAbsolute, relative, resolve } from "node:path";
-import { BusChannels } from "../core/bus-events.js";
 import { ToolNames } from "../core/tool-names.js";
 import { selectWorkerContext } from "../domains/context/worker/select.js";
 import type {
@@ -237,7 +236,7 @@ function announceDotWriteRoot(deps: DispatchToolDeps, rawIntent: unknown): void 
 	if (!Array.isArray(roots) || !roots.some((entry) => typeof entry === "string" && /^\.\/?$/u.test(entry.trim())))
 		return;
 	dotWriteRootNoticed.add(rawIntent);
-	deps.bus.emit(BusChannels.DispatchScopeNotice, {
+	deps.bus.emit("run.scope_notice_raised", {
 		code: "write_root_dot_unconfined",
 		level: "warning",
 		message:

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { TaskMemoryEntry } from "../../src/domains/memory/task-bank.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryModelResponse } from "../../src/domains/memory/task-memory-policy.js";
@@ -197,7 +196,7 @@ const response: TaskMemoryModelResponse = {
 for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as const) {
 	test(`real session ${transition} invalidates before mutation and preserves originating spend`, async () => {
 		const env = await isolateClioEnv("clio-coder-memory-lifecycle-");
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const { contract: session } = createSessionBundle({ bus, getContract: () => undefined });
 		const bank = new TaskMemoryBank();
 		const pending = [deferred<TaskMemoryModelResponse>(), deferred<TaskMemoryModelResponse>()] as const;
@@ -282,7 +281,7 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 
 test("tree reads, same-session resume, forward turns and compaction preserve memory authority", async () => {
 	const env = await isolateClioEnv("clio-coder-memory-continuity-");
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const { contract: session } = createSessionBundle({ bus, getContract: () => undefined });
 	const bank = new TaskMemoryBank();
 	const completion = deferred<TaskMemoryModelResponse>();
@@ -372,7 +371,7 @@ test("reset clears pending tools, cadence, failures, triggers, activity and comp
 
 test("shutdown releases the detached policy without awaiting an abort-ignoring model", async () => {
 	const bank = new TaskMemoryBank();
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const completion = deferred<TaskMemoryModelResponse>();
 	const usages: TaskMemoryStepUsage[] = [];
 	const registration = createMemoryInterventionRegistration({
@@ -384,7 +383,7 @@ test("shutdown releases the detached policy without awaiting an abort-ignoring m
 	registration.signalLoop();
 	await registration.evaluateAsync({ hook: "turn_end" });
 	const idle = registration.whenIdle();
-	bus.emit(BusChannels.SessionEnd, { exitCode: 0 });
+	bus.emit("session.ended", { exitCode: 0 });
 	await idle;
 	assert.equal(registration.stepInFlight(), false);
 	completion.resolve(response);

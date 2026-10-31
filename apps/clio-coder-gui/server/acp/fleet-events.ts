@@ -50,7 +50,7 @@ export function fleetEvent(value: unknown, sessionId: string, previousSequence: 
 	)
 		throw new AppProblem("upstream_acp", "Invalid or out-of-order ACP event envelope.");
 	const sequence = event.sequence as number;
-	if (kind === "context.activity") {
+	if (kind === "context.activity_changed") {
 		const activity = Value.Clean(ContextActivity, structuredClone(event.payload));
 		if (!Value.Check(ContextActivity, activity) || !activity.operation || activity.operation.sessionId !== sessionId)
 			throw new AppProblem("upstream_acp", "ACP context activity does not identify the bound session.");

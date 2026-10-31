@@ -17,9 +17,9 @@ import { normalizeTokenUsage } from "../../core/token-split.js";
  */
 
 import { performance } from "node:perf_hooks";
-import { BusChannels, type DispatchRunIdentity } from "../../core/bus-events.js";
 import { resolveDispatchFailureStatus } from "../../core/dispatch-outcome.js";
-import type { SafeEventBus } from "../../core/event-bus.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
+import type { DispatchRunIdentity } from "../../core/telemetry/live-events.js";
 import { truncateToWidth } from "../../engine/tui-primitives.js";
 import type { AgentAudience } from "../agents/spec.js";
 import { cloneRunToolBudgetEnvelope, type RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
@@ -275,7 +275,7 @@ function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
 	return running;
 }
 
-export function createTelemetryProjection(bus: SafeEventBus, deps: ProjectionReadModel): TelemetryProjection {
+export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionReadModel): TelemetryProjection {
 	const runs = new Map<string, RunEntry>();
 	// Settlement order is independent of enqueue order: an old active run
 	// becomes the newest history entry when it finally settles.
@@ -524,7 +524,7 @@ export function createTelemetryProjection(bus: SafeEventBus, deps: ProjectionRea
 	}
 
 	const unsubscribes: Array<() => void> = [
-		bus.on(BusChannels.DispatchEnqueued, (raw: unknown) => {
+		bus.subscribe("run.enqueued", (raw: unknown) => {
 			const payload = (raw ?? {}) as Record<string, unknown>;
 			const runId = asRunId(payload.runId);
 			if (!runId) return;
@@ -536,7 +536,7 @@ export function createTelemetryProjection(bus: SafeEventBus, deps: ProjectionRea
 			putRun(runId, summary);
 			markChanged();
 		}),
-		bus.on(BusChannels.DispatchStarted, (raw: unknown) => {
+		bus.subscribe("run.started", (raw: unknown) => {
 			const payload = (raw ?? {}) as Record<string, unknown>;
 			const runId = asRunId(payload.runId);
 			if (!runId) return;
@@ -552,7 +552,7 @@ export function createTelemetryProjection(bus: SafeEventBus, deps: ProjectionRea
 			putRun(runId, summary);
 			markChanged();
 		}),
-		bus.on(BusChannels.DispatchProgress, (raw: unknown) => {
+		bus.subscribe("run.progressed", (raw: unknown) => {
 			const payload = (raw ?? {}) as Record<string, unknown>;
 			const runId = asRunId(payload.runId);
 			if (!runId) return;
@@ -639,7 +639,7 @@ export function createTelemetryProjection(bus: SafeEventBus, deps: ProjectionRea
 			// or publishing snapshots for ignored frames such as thinking repeats (#428).
 			if (changed) scheduleFlush();
 		}),
-		bus.on(BusChannels.DispatchCompleted, (raw: unknown) => {
+		bus.subscribe("run.completed", (raw: unknown) => {
 			const payload = (raw ?? {}) as Record<string, unknown>;
 			const runId = asRunId(payload.runId);
 			if (!runId) return;
@@ -655,7 +655,7 @@ export function createTelemetryProjection(bus: SafeEventBus, deps: ProjectionRea
 			putRun(runId, summary);
 			markChanged();
 		}),
-		bus.on(BusChannels.DispatchFailed, (raw: unknown) => {
+		bus.subscribe("run.failed", (raw: unknown) => {
 			const payload = (raw ?? {}) as Record<string, unknown>;
 			const runId = asRunId(payload.runId);
 			if (!runId) return;
@@ -671,7 +671,7 @@ export function createTelemetryProjection(bus: SafeEventBus, deps: ProjectionRea
 			putRun(runId, summary);
 			markChanged();
 		}),
-		bus.on(BusChannels.RunAborted, (raw) => {
+		bus.subscribe("run.aborted", (raw) => {
 			const runId = asRunId(raw?.runId);
 			const summary = runId ? runs.get(runId) : undefined;
 			if (!summary) return;
@@ -688,7 +688,7 @@ export function createTelemetryProjection(bus: SafeEventBus, deps: ProjectionRea
 			summary.outcomeDetail = typeof raw.reason === "string" ? raw.reason : (summary.outcomeDetail ?? null);
 			markChanged();
 		}),
-		bus.on(BusChannels.AccountabilityEvidenceReady, (payload) => {
+		bus.subscribe("evidence.assessed", (payload) => {
 			const runId = asRunId(payload?.runId);
 			if (runId) evidenceBuildSucceeded(runId, payload);
 		}),

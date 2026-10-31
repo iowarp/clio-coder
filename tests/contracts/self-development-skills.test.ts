@@ -4,8 +4,8 @@ import path from "node:path";
 import { it, type TestContext } from "node:test";
 import { CLIO_SELF_DEVELOPMENT_SKILLS } from "../../src/core/clio-repo.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { agentSkillToolPolicy, withModelSkillActivation } from "../../src/core/skill-activation.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import {
 	clearPluginSnapshots,
 	disablePlugin,
@@ -188,7 +188,7 @@ for (const overridePath of ["clio-coder-dev/SKILL.md", "clio-coder-dev.md", "cus
 
 it("repo guidance tracks actual skill capability, autonomy and turn restrictions without injecting skill bodies", async (t) => {
 	const { cwd } = await fixture(t);
-	const context: DomainContext = { bus: createSafeEventBus(), getContract: () => undefined };
+	const context: DomainContext = { bus: createTelemetryHub(), getContract: () => undefined };
 	const bundle = createPromptsBundle(context);
 	await bundle.extension.start();
 	t.after(() => bundle.extension.stop?.());

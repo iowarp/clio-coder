@@ -22,11 +22,11 @@ import type { SafetyPolicyDecision } from "./policy-engine.js";
  *   - `tool_call`: emitted by safety.evaluate() for every classified tool call.
  *   - `permission`: emitted for one-shot tool/action confirmation requests
  *     and resolutions.
- *   - `abort`: emitted on every BusChannels.RunAborted event so /audit consumers
+ *   - `abort`: emitted on every "run.aborted" event so /audit consumers
  *     can reconstruct who cancelled which run and how long it ran first.
- *   - `session_park`: emitted on every BusChannels.SessionParked event so /audit
+ *   - `session_park`: emitted on every "session.parked" event so /audit
  *     consumers know which session was suspended and why.
- *   - `session_resume`: emitted on every BusChannels.SessionResumed event so
+ *   - `session_resume`: emitted on every "session.reattached" event so
  *     /audit consumers know which session was reopened and how.
  *   - `agent_status_change`: emitted for alarmable agent-status transitions
  *     such as stuck, tool_blocked, retrying, and cancelled turns.

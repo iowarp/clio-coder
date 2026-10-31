@@ -4,8 +4,8 @@
  * name the same operation the same way. It formats facts the harness measured
  * and never derives new ones.
  */
-import type { ContextActivityKind } from "../core/bus-events.js";
 import type { ContextOperation, ContextOperationFact, ContextOperationOutcome } from "../core/context-operation.js";
+import type { ContextActivityKind } from "../core/telemetry/live-events.js";
 import { stripTerminalSequences } from "../engine/tui.js";
 import { footerTokens } from "../session-control/compaction-lines.js";
 import type { TurnPreparationPhase } from "../session-control/turn-state.js";

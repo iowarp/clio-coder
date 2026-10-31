@@ -18,8 +18,7 @@
  */
 
 import { wrapTextWithAnsi } from "../engine/text-wrap.js";
-import { BusChannels } from "./bus-events.js";
-import { getSharedBus } from "./shared-bus.js";
+import { telemetryHub } from "./telemetry/hub.js";
 import { clampTimerDelayMs } from "./timers.js";
 
 export type TerminationPhase = "idle" | "draining" | "terminating" | "persisting" | "exiting";
@@ -191,7 +190,7 @@ class TerminationCoordinator {
 	private async performShutdown(code: number): Promise<void> {
 		this.started = true;
 		this.exitCode = code;
-		const bus = getSharedBus();
+		const bus = telemetryHub();
 		const debug = process.env.CLIO_CODER_DEBUG_SHUTDOWN === "1";
 		const budgetMs = resolveShutdownHookBudgetMs();
 		const mark = debug ? process.hrtime.bigint() : 0n;
@@ -202,28 +201,28 @@ class TerminationCoordinator {
 		};
 
 		this.phase = "draining";
-		bus.emit(BusChannels.ShutdownRequested, { phase: this.phase });
+		bus.emit("shutdown.requested", { phase: this.phase });
 		log("drain:start");
 		await this.runHooks(this.drainHooks, "drain", budgetMs, log);
 		log("drain:end");
 		this.drained = true;
 		this.flushNotices();
-		bus.emit(BusChannels.ShutdownDrained, {});
+		bus.emit("shutdown.drained", {});
 
 		this.phase = "terminating";
 		log("terminate:start");
 		await this.runHooks(this.terminateHooks, "terminate", budgetMs, log);
 		log("terminate:end");
-		bus.emit(BusChannels.ShutdownTerminated, {});
+		bus.emit("shutdown.terminated", {});
 
 		this.phase = "persisting";
 		log("persist:start");
 		await this.runHooks(this.persistHooks, "persist", budgetMs, log);
 		log("persist:end");
-		bus.emit(BusChannels.ShutdownPersisted, {});
+		bus.emit("shutdown.persisted", {});
 
 		this.phase = "exiting";
-		bus.emit(BusChannels.SessionEnd, { exitCode: this.exitCode });
+		bus.emit("session.ended", { exitCode: this.exitCode });
 		if (this.exitHandoff) {
 			// The restarted child owns interactive signals. The handoff supplies the
 			// guardian's forwarding handlers after these shutdown handlers retire.

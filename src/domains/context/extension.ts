@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { BusChannels, type ContextActivityPayload } from "../../core/bus-events.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../core/context-operation.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
+import type { ContextActivityPayload } from "../../core/telemetry/live-events.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/contract.js";
 import { loadMemoryRecordsSync } from "../memory/index.js";
@@ -275,7 +275,7 @@ export function createContextBundle(
 	let unsubscribeSessionStart: (() => void) | null = null;
 	const extension: DomainExtension = {
 		start() {
-			unsubscribeSessionStart = _context.bus.on(BusChannels.SessionStart, onStart);
+			unsubscribeSessionStart = _context.bus.subscribe("session.started", onStart);
 		},
 		async stop() {
 			stopping = true;
@@ -333,7 +333,7 @@ export function createContextBundle(
 		} finally {
 			if (refreshSources || before === null || promptSourceState(workspace) !== before) {
 				contextState.invalidate(workspace);
-				_context.bus.emit(BusChannels.ContextSourcesChanged, { cwd: workspace });
+				_context.bus.emit("context.sources_changed", { cwd: workspace });
 			}
 		}
 	}
@@ -353,7 +353,7 @@ export function createContextBundle(
 			{ kind, cwd, sessionId, origin: "operator", reason: "operator command" },
 			(event) => {
 				if (event.operation?.outcome) activeOperation = null;
-				_context.bus.emit(BusChannels.ContextActivity, event);
+				_context.bus.emit("context.activity_changed", event);
 				if (
 					event.operation?.outcome &&
 					sessionId &&

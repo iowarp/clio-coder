@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { type AcpCommandHost, acpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
@@ -57,7 +57,7 @@ async function peer() {
 	};
 	const commands = acpCommandControl({
 		dispatch: refuse("dispatch") as AcpCommandHost["dispatch"],
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		providers: refuse("providers") as AcpCommandHost["providers"],
 		runDoctor: async () => ({ level: "info", text: "ok" }),
 		listPromptNames: () => ["review-pr", "cheatsheet", "locked"],

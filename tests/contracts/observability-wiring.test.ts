@@ -8,8 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import {
 	createChatTurnUsage,
 	createTurnObservations,
@@ -72,11 +71,11 @@ describe("turn observations", () => {
 
 describe("compaction observations", () => {
 	it("maps terminal outcomes and keeps unreported legacy outcomes unknown", () => {
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const observations: ExtensionObservationV2[] = [];
 		const unsubscribe = subscribeExtensionObservations(bus, (observation) => observations.push(observation));
 		for (const outcome of ["completed", "unchanged", "failed", "cancelled", undefined] as const)
-			bus.emit(BusChannels.CompactionEnd, { trigger: "force", at: 0, ...(outcome === undefined ? {} : { outcome }) });
+			bus.emit("compaction.ended", { trigger: "force", at: 0, ...(outcome === undefined ? {} : { outcome }) });
 		deepStrictEqual(
 			observations.map((observation) => (observation.event === "compaction_end" ? observation.outcome : null)),
 			["ok", "ok", "failed", "failed", "unknown"],
@@ -95,7 +94,7 @@ describe("evidence build failure", () => {
 	}
 
 	it("reaches the dispatch board as a failed proof with its reason", () => {
-		const projection = createTelemetryProjection(createSafeEventBus(), readModel());
+		const projection = createTelemetryProjection(createTelemetryHub(), readModel());
 		projection.evidenceBuildFailed("run-proof", "disk full while writing the bundle");
 		const row: DispatchBoardRow = {
 			runId: "run-proof",

@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/index.js";
 import { createShareBundle } from "../../src/domains/share/extension.js";
 import { archiveCommandHost } from "../../src/domains/share/index.js";
@@ -25,7 +24,7 @@ const refuse = (member: string) =>
 function host(overrides: Partial<AcpCommandHost>): AcpCommandHost {
 	return {
 		dispatch: refuse("dispatch") as AcpCommandHost["dispatch"],
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		providers: refuse("providers") as AcpCommandHost["providers"],
 		...overrides,
 	};
@@ -34,7 +33,7 @@ function host(overrides: Partial<AcpCommandHost>): AcpCommandHost {
 const names = (control: ReturnType<typeof acpCommandControl>) => control.catalog().commands.map((row) => row.name);
 
 test("share hands the most recent finished operator run to the model, from the runs this process watched", async () => {
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const ledger = followWorkerRuns(bus, (runId) =>
 		runId === "run-1" ? { outcome: "succeeded", exitCode: 0, text: "Sample B reads 4.2." } : null,
 	);
@@ -46,7 +45,7 @@ test("share hands the most recent finished operator run to the model, from the r
 	const empty = await control.invoke({ command: "share", argv: [] });
 	assert.equal(empty.level, "error");
 	assert.match(empty.lines.join("\n"), /no finished \/run or \/delegate result to share yet/);
-	bus.emit(BusChannels.DispatchStarted, {
+	bus.emit("run.started", {
 		runId: "run-1",
 		assignmentId: "run-1",
 		attempt: 0,
@@ -58,7 +57,7 @@ test("share hands the most recent finished operator run to the model, from the r
 		runtimeKind: "http",
 		pid: 1,
 	} as never);
-	bus.emit(BusChannels.DispatchCompleted, {
+	bus.emit("run.completed", {
 		runId: "run-1",
 		outcome: "succeeded",
 		outcomeCode: null,

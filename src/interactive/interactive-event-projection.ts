@@ -1,15 +1,14 @@
-import {
-	BusChannels,
-	type ConfigReloadFailedPayload,
-	type ContextWarningPayload,
-	type LoopBlockedPayload,
-	type RuntimeNoticePayload,
-	type ToolBudgetExceededPayload,
-} from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import { readDispatchScopeNotice } from "../core/dispatch-scope-notice.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import { routingChangeNotices } from "../core/session-routing.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type {
+	ConfigReloadFailedPayload,
+	ContextWarningPayload,
+	LoopBlockedPayload,
+	RuntimeNoticePayload,
+	ToolBudgetExceededPayload,
+} from "../core/telemetry/live-events.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { ChatCancelOptions, ChatLoopEvent, QueuedChatMessage } from "../session-control/chat-loop.js";
 import {
@@ -34,7 +33,7 @@ export type InteractiveProjectionNoticeLevel = "info" | "success" | "warning" | 
 export type InteractiveTranscriptNoticeLevel = "info" | "success" | "warn" | "error";
 
 export interface InteractiveEventProjectionDeps {
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	chat: {
 		onEvent(handler: (event: ChatLoopEvent) => void): () => void;
 		cancel(options?: ChatCancelOptions): void;
@@ -233,7 +232,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				deps.onTurnEnded?.();
 			}
 		}),
-		deps.bus.on(BusChannels.RunAborted, () => {
+		deps.bus.subscribe("run.aborted", () => {
 			deps.stopTerminalProgress();
 		}),
 		deps.chat.onEvent((event) => {
@@ -247,7 +246,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.ContextWarning, (payload) => {
+		deps.bus.subscribe("context.warning_raised", (payload) => {
 			const event = payload as ContextWarningPayload | null | undefined;
 			if (event && typeof event === "object" && "warning" in event) {
 				if (event.warning !== null) deps.notify("warning", event.warning, "context-low-warning");
@@ -256,13 +255,13 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.ContextPruned, () => {
+		deps.bus.subscribe("context.pruned", () => {
 			// The compaction producer emits the canonical receipt once; this accounting
 			// event only refreshes the live context counters (flywheel r4/4).
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.RuntimeNotice, (payload) => {
+		deps.bus.subscribe("runtime.notice_raised", (payload) => {
 			const event = payload as RuntimeNoticePayload | null | undefined;
 			if (!event || typeof event !== "object" || typeof event.message !== "string" || typeof event.kind !== "string") {
 				return;
@@ -274,17 +273,17 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 	);
 
 	remainingUnsubscribers.push(
-		deps.bus.on(BusChannels.EggsChanged, () => {
+		deps.bus.subscribe("session.eggs_changed", () => {
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.MemoryGuardianChanged, () => {
+		deps.bus.subscribe("memory.guardian_changed", () => {
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
 		// The first sight of a hook file changed since the operator's baseline:
 		// the next git command Clio runs outside the sandbox asks the operator.
-		deps.bus.on(BusChannels.GitHooksChanged, (payload) => {
+		deps.bus.subscribe("safety.git_hooks_changed", (payload) => {
 			if (typeof payload?.message !== "string" || payload.message.length === 0) return;
 			deps.appendTranscriptNotice("warn", payload.message, "safety");
 			deps.requestRender();
@@ -292,20 +291,20 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		// Git Clio ran itself with hooks off after drift, announced once per set
 		// of changes. At yolo it ran as configured, and only the exit summary
 		// records it.
-		deps.bus.on(BusChannels.InternalGitDrift, (payload) => {
+		deps.bus.subscribe("safety.internal_git_drifted", (payload) => {
 			if (payload?.hardened !== true || payload.announce !== true) return;
 			if (typeof payload.message !== "string" || payload.message.length === 0) return;
 			deps.appendTranscriptNotice("warn", payload.message, "safety");
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.DispatchScopeNotice, (payload) => {
+		deps.bus.subscribe("run.scope_notice_raised", (payload) => {
 			const notice = readDispatchScopeNotice(payload);
 			if (notice === null) return;
 			// Both scope notices are two sentences: what was replaced, then what it does not affect.
 			deps.appendTranscriptNotice("warn", notice.message, "fleet");
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.LoopBlocked, (payload) => {
+		deps.bus.subscribe("safety.loop_blocked", (payload) => {
 			const event = payload as LoopBlockedPayload | null | undefined;
 			if (!event || typeof event !== "object" || typeof event.tool !== "string" || typeof event.repeatCount !== "number") {
 				return;
@@ -329,7 +328,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			}
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.ToolBudgetExceeded, (payload) => {
+		deps.bus.subscribe("safety.tool_budget_exceeded", (payload) => {
 			const event = payload as ToolBudgetExceededPayload | null | undefined;
 			if (
 				!event ||
@@ -353,7 +352,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			}
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.ConfigNextTurn, (payload) => {
+		deps.bus.subscribe("config.next_turn_scheduled", (payload) => {
 			const event = payload as { diff?: { nextTurn?: string[] }; settings?: Readonly<ClioSettings> } | null | undefined;
 			const effective = deps.getSettings?.();
 			if (!effective || !event?.settings || !Array.isArray(event.diff?.nextTurn)) return;
@@ -370,11 +369,11 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.ConfigHotReload, (payload) => {
+		deps.bus.subscribe("config.hot_reloaded", (payload) => {
 			deps.onConfigHotReload?.(payload.settings);
 			deps.refreshSettingsOverlay();
 		}),
-		deps.bus.on(BusChannels.ConfigReloadFailed, (payload) => {
+		deps.bus.subscribe("config.reload_failed", (payload) => {
 			if (deps.isReloadReporting?.()) return;
 			const event = payload as ConfigReloadFailedPayload | null | undefined;
 			if (!event || typeof event !== "object" || !("message" in event)) return;
@@ -388,7 +387,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.ConfigRestartRequired, (payload) => {
+		deps.bus.subscribe("config.restart_required", (payload) => {
 			if (deps.isReloadReporting?.()) return;
 			const text = restartRequiredNotice(payload);
 			if (text === null) return;
@@ -396,7 +395,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.refreshFooter();
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.BudgetAlert, (payload) => {
+		deps.bus.subscribe("budget.alerted", (payload) => {
 			const notice = budgetAlertNotice(payload);
 			if (notice === null) return;
 			deps.appendTranscriptNotice(notice.level, notice.text, notice.source);
@@ -405,7 +404,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		// The blocked call's row states the refusal and its body the rule that
 		// fired, live and on /resume; the policy source and scope pass through
 		// the footer's notice slot rather than a third, live-only transcript copy.
-		deps.bus.on(BusChannels.SafetyBlocked, (payload) => {
+		deps.bus.subscribe("safety.blocked", (payload) => {
 			const notice = safetyBlockedNotice(payload);
 			if (notice === null) return;
 			deps.notify("warning", notice.text, "safety:blocked");
@@ -415,12 +414,12 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 
 	const seenMiddlewareBudgetWarnings = new Set<string>();
 	remainingUnsubscribers.push(
-		deps.bus.on(BusChannels.ExtensionsLoadIssue, (payload) => {
+		deps.bus.subscribe("extension.load_failed", (payload) => {
 			if (typeof payload?.message !== "string" || payload.message.trim().length === 0) return;
 			deps.notify("warning", payload.message, `extension:${payload.message}`);
 			deps.requestRender();
 		}),
-		deps.bus.on(BusChannels.MiddlewareHookFailed, (payload) => {
+		deps.bus.subscribe("middleware.hook_failed", (payload) => {
 			const notice = middlewareHookFailedSessionNotice(payload, seenMiddlewareBudgetWarnings);
 			if (notice === null) return;
 			deps.notify(

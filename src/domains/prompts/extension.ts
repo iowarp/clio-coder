@@ -1,5 +1,4 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { BusChannels } from "../../core/bus-events.js";
 import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import type { ClioSettings } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
@@ -352,17 +351,17 @@ export function createPromptsBundle(
 				writeDiagnostic(`[clio-coder:prompts] initial load failed: ${msg}\n`);
 				table = { byId: new Map(), rootDir: "" };
 			}
-			unsubscribeContextSources = context.bus.on(BusChannels.ContextSourcesChanged, ({ cwd }) => {
+			unsubscribeContextSources = context.bus.subscribe("context.sources_changed", ({ cwd }) => {
 				invalidateSessionSources(cwd);
 			});
-			unsubscribeHotReload = context.bus.on(BusChannels.ConfigHotReload, (payload: unknown) => {
+			unsubscribeHotReload = context.bus.subscribe("config.hot_reloaded", (payload: unknown) => {
 				invalidateSessionSources();
 				const diff = (payload as { diff?: { hotReload?: string[] } } | undefined)?.diff;
 				const paths = diff?.hotReload ?? [];
 				if (!diffTouchesFragments(paths)) return;
 				reload();
 			});
-			unsubscribePluginsReload = context.bus.on(BusChannels.PluginsReloaded, () => reload());
+			unsubscribePluginsReload = context.bus.subscribe("plugin.reloaded", () => reload());
 		},
 		async stop() {
 			unsubscribeContextSources?.();

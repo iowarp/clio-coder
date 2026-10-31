@@ -331,7 +331,7 @@ The graphical application is a separate workspace package, `@iowarp/clio-coder-g
 
 The root checker in `tests/boundaries/check-boundaries.ts` does not scan it. Its own `apps/clio-coder-gui/tests/boundaries.test.ts` allows exactly four ways to reach root `src/`:
 
-- `server/clio/wire-shims.ts` re-exports the browser-safe ACP wire declarations: everything in `src/engine/acp/types.ts`, plus the context-operation types from `src/core/context-operation.ts` and `src/core/bus-events.ts` as type-only exports. It evaluates no process transport.
+- `server/clio/wire-shims.ts` re-exports the browser-safe ACP wire declarations: everything in `src/engine/acp/types.ts`, plus the context-operation types from `src/core/context-operation.ts` and `src/core/telemetry/live-events.ts` as type-only exports. It evaluates no process transport.
 - `server/clio/http-shims.ts` re-exports a fixed allowlist for the HTTP process: the ACP stdio transport, errors, and wire types, the XDG directory helpers, `resolvePackageRoot`, process-identity probes, and `getVersionInfo`. The wire types must be type-only.
 - `server/clio/adapters/*.ts` import an allowlist of root domain and core modules, such as the trace store, evidence index, settings layers, provider registry, and dispatch state types. Adapters are blocking readers, so only the worker entries (`server/worker/reads-main.ts` and `ops-main.ts`) may import them, which keeps their work off the HTTP event loop.
 - `tests/harness` and `tests/fixtures` use a separate test-seam allowlist.

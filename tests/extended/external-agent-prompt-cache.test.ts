@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { loadDomains } from "../../src/core/domain-loader.js";
-import { getSharedBus } from "../../src/core/shared-bus.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { type AgentsContract, AgentsDomainModule } from "../../src/domains/agents/index.js";
 import { type ConfigContract, ConfigDomainModule } from "../../src/domains/config/index.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
@@ -120,7 +120,7 @@ describe("external-agent settings reach the session prompt cache", { concurrency
 		try {
 			const config = loaded.getContract<ConfigContract>("config");
 			ok(config?.update);
-			const agents = await AgentsDomainModule.createExtension({ bus: getSharedBus(), getContract: loaded.getContract });
+			const agents = await AgentsDomainModule.createExtension({ bus: telemetryHub(), getContract: loaded.getContract });
 			const contract = agents.contract as AgentsContract;
 			try {
 				await agents.extension.start();

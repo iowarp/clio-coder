@@ -15,13 +15,6 @@
  */
 
 import {
-	BusChannels,
-	type LoopBlockedDisposition,
-	type LoopBlockedPayload,
-	type ToolBudgetExceededPayload,
-} from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
-import {
 	resolveGuardrail,
 	workerSynthesisReserveBlockReason,
 	workerSynthesisReserveDirective,
@@ -29,6 +22,12 @@ import {
 	workerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
 import { markHostAuthored } from "../core/message-accounting.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type {
+	LoopBlockedDisposition,
+	LoopBlockedPayload,
+	ToolBudgetExceededPayload,
+} from "../core/telemetry/live-events.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
 import { dispatchMutatedParentWorkspace } from "../domains/dispatch/workspace-mutation.js";
@@ -461,7 +460,7 @@ export interface CreateLoopGuardRegistrationOptions {
 	/** Enables returned-read coverage only when the caller supplies its result-shaping cap. */
 	readResultMaxBytes?: number;
 	/** Orchestrator only: LoopBlocked events for the interactive layer. */
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	/** Loop blocks tolerated per turn before the block reason announces a stop. */
 	turnBlockBudget?: number;
 	/**
@@ -937,7 +936,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			at,
 			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 		};
-		options.bus?.emit(BusChannels.LoopBlocked, payload);
+		options.bus?.emit("safety.loop_blocked", payload);
 	};
 
 	const emitBudgetEvent = (
@@ -956,7 +955,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			at,
 			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 		};
-		options.bus?.emit(BusChannels.ToolBudgetExceeded, payload);
+		options.bus?.emit("safety.tool_budget_exceeded", payload);
 	};
 
 	const evaluateTurnBudget = (input: MiddlewareHookInput, now: number): ReadonlyArray<MiddlewareEffect> | null => {

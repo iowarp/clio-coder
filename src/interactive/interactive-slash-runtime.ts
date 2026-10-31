@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { BusChannels, type ConfigChangeSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { ConfigChangeSource } from "../core/telemetry/live-events.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { runOperatorRecall } from "../domains/context/working-set/operator-recall.js";
@@ -104,7 +104,7 @@ export interface InteractiveSlashRuntimeDeps {
 	extensionDev?: SlashCommandContext["extensionDev"];
 	showExtensionOutput?: SlashCommandContext["showExtensionOutput"];
 	io: RunIo;
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	dispatch: DispatchContract;
 	getDecisionBoard?: SlashCommandContext["getDecisionBoard"];
 	providers: ProvidersContract;
@@ -858,7 +858,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 							getSessionId: () => session.current()?.id ?? null,
 							onActivity: (event) => {
 								if (event.operation?.outcome !== undefined) reported = true;
-								deps.bus.emit(BusChannels.ContextActivity, event);
+								deps.bus.emit("context.activity_changed", event);
 							},
 							hasSession: () => session.current() !== null,
 							readEntries: () => {
@@ -870,7 +870,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 								return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
 							},
 							appendEntry: (entry) => session.appendEntry(entry),
-							onRecalled: (payload) => deps.bus.emit(BusChannels.ContextRecalled, payload),
+							onRecalled: (payload) => deps.bus.emit("context.recalled", payload),
 							...(deps.now ? { now: () => (deps.now?.() ?? new Date()).getTime() } : {}),
 						});
 						if (!outcome.ok) {

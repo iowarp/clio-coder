@@ -2,8 +2,7 @@ import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { runContextClear } from "../../src/domains/context/clear.js";
 import {
 	codewikiPath,
@@ -151,7 +150,7 @@ describe("codewiki global freshness", () => {
 				writeFileSync(join(cwd, externalChange === "add" ? "c.ts" : "b.ts"), "export function externalAfterLonger() {}\n");
 			}
 			writeFileSync(join(cwd, "a.ts"), "export function agentAfterLonger() {}\n");
-			const bundle = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+			const bundle = createContextBundle({ bus: createTelemetryHub(), getContract: () => undefined });
 			bundle.contract.noteFileChanges(["a.ts"], cwd);
 			await bundle.extension.stop?.();
 			const indexed = readCodewiki(cwd);
@@ -181,7 +180,7 @@ describe("codewiki global freshness", () => {
 			const previous = readClioState(cwd)?.fingerprint;
 			if (missingState) unlinkSync(join(cwd, ".clio-coder", "state.json"));
 			writeFileSync(join(cwd, "b.ts"), "export function externalAfterLonger() {}\n");
-			const bundle = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+			const bundle = createContextBundle({ bus: createTelemetryHub(), getContract: () => undefined });
 			bundle.contract.noteFileChanges(["a.ts"], cwd);
 			await bundle.extension.stop?.();
 			if (!missingState) deepStrictEqual(readClioState(cwd)?.fingerprint, previous);
@@ -202,7 +201,7 @@ describe("codewiki global freshness", () => {
 		ok((await loadCodewikiForTool(cwd)).ok);
 		const artifactBefore = statSync(codewikiPath(cwd), { bigint: true });
 		const stateBefore = readFileSync(join(cwd, ".clio-coder", "state.json"), "utf8");
-		const bundle = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+		const bundle = createContextBundle({ bus: createTelemetryHub(), getContract: () => undefined });
 		bundle.contract.noteFileChanges(["a.ts", "README.md"], cwd);
 		await bundle.extension.stop?.();
 		strictEqual(statSync(codewikiPath(cwd), { bigint: true }).mtimeNs, artifactBefore.mtimeNs);
@@ -400,7 +399,7 @@ describe("codewiki global freshness", () => {
 	it("fences reset behind in-flight writers and lets nothing resurrect the artifact afterwards", async () => {
 		const cwd = isolated.dir;
 		writeFileSync(join(cwd, "a.ts"), "export const one = 1;\n");
-		const bundle = createContextBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+		const bundle = createContextBundle({ bus: createTelemetryHub(), getContract: () => undefined });
 		// A build admitted before the reset commits first, under the same lease
 		// and queue; the reset then removes what it wrote, and an incremental
 		// queued after the reset is a no-op because there is no artifact to update.
@@ -416,10 +415,10 @@ describe("codewiki global freshness", () => {
 		strictEqual(existsSync(codewikiPath(cwd)), false);
 		strictEqual(existsSync(statePath(cwd)), false);
 		// Session start on a never-indexed directory stays that way too.
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const started = createContextBundle({ bus, getContract: () => undefined });
 		await started.extension.start?.();
-		bus.emit(BusChannels.SessionStart, {} as never);
+		bus.emit("session.started", {} as never);
 		await new Promise((resolve) => setTimeout(resolve, 50));
 		await started.extension.stop?.();
 		strictEqual(existsSync(codewikiPath(cwd)), false);

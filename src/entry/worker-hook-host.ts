@@ -1,4 +1,4 @@
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { createExtensionRuntimeHookBridge, type ExtensionsContract } from "../domains/extensions/index.js";
 import type { MiddlewareContract } from "../domains/middleware/index.js";
 import { type ExtensionHost, type ExtensionHostOptions, startExtensionHost } from "./extension-host.js";
@@ -7,7 +7,7 @@ import { createExtensionReloadCoordinator, extensionHookReceiptSink, hookReceipt
 export interface WorkerHookHostOptions {
 	extensions: ExtensionsContract;
 	middleware: MiddlewareContract;
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	/** The installed packages the host may start: loadable, with an api 2 runtime. */
 	list: ExtensionHostOptions["list"];
 	notify: (line: string) => void;

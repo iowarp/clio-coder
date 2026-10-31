@@ -1,4 +1,4 @@
-import type { PluginsReloadedPayload } from "../core/bus-events.js";
+import type { PluginsReloadedPayload } from "../core/telemetry/live-events.js";
 import { committedPluginSnapshot, type PluginSnapshot, reloadPluginResources } from "../domains/plugins/index.js";
 
 /** Publish data-only plugin resources before asking session caches to refresh. */

@@ -1,4 +1,3 @@
-import type { BudgetAlertPayload } from "../core/bus-events.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, messageUsageForAccounting, rememberMessageCalls } from "../core/message-accounting.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
@@ -38,6 +37,7 @@ import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import { gatewayRoutingObservationFromRecord, gatewayRoutingObservationLabel } from "../core/gateway-routing.js";
 import { attributedModelId } from "../core/response-model-id.js";
+import type { BudgetAlertPayload } from "../core/telemetry/live-events.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import {
 	applyModelCapabilityPatch,

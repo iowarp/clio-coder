@@ -8,8 +8,8 @@
  * call from a hot path: recording never throws.
  */
 
-import { BusChannels, type PermissionResolvedPayload } from "../../core/bus-events.js";
-import type { SafeEventBus } from "../../core/event-bus.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
+import type { PermissionResolvedPayload } from "../../core/telemetry/live-events.js";
 import type { ClassifierCall } from "../safety/action-classifier.js";
 import type { DraftLabel } from "./sites/drafts.js";
 import type { OutcomeRecord } from "./types.js";
@@ -47,7 +47,7 @@ const MAX_OPEN_REQUESTS = 512;
  * policy that answered for them) took.
  */
 export function observePermissionOutcomes(input: {
-	bus: Pick<SafeEventBus, "on">;
+	bus: Pick<TelemetryHub, "subscribe">;
 	registry: PermissionParkSource;
 	record: OutcomeSink;
 	/** Monotonic milliseconds; injected for the clock, not for tests. */
@@ -64,7 +64,7 @@ export function observePermissionOutcomes(input: {
 			if (oldest !== undefined) parkedAt.delete(oldest);
 		}
 	});
-	const unsubscribeResolved = input.bus.on(BusChannels.PermissionResolved, (payload: PermissionResolvedPayload) => {
+	const unsubscribeResolved = input.bus.subscribe("approval.resolved", (payload: PermissionResolvedPayload) => {
 		const requestId = payload.requestId;
 		if (typeof requestId !== "string") return;
 		const started = parkedAt.get(requestId);

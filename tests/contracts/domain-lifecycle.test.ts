@@ -3,10 +3,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { type DomainContext, type DomainModule, loadDomains } from "../../src/core/domain-loader.js";
 import { safeResourceWrite } from "../../src/core/safe-resource-write.js";
-import { getSharedBus } from "../../src/core/shared-bus.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import {
 	getTerminationCoordinator,
 	resolveShutdownHookBudgetMs,
@@ -14,8 +13,8 @@ import {
 } from "../../src/core/termination.js";
 
 test("failed domain startup releases its listeners and earlier dependencies in reverse order", async () => {
-	const bus = getSharedBus();
-	const before = bus.listeners(BusChannels.SessionStart).length;
+	const bus = telemetryHub();
+	const before = bus.listeners("session.started").length;
 	const stopped: string[] = [];
 	let dependencyDuringStop: string | undefined;
 	const failure = new Error("startup failed after subscribing");
@@ -28,7 +27,7 @@ test("failed domain startup releases its listeners and earlier dependencies in r
 					contract: { name },
 					extension: {
 						start() {
-							unsubscribe = context.bus.on(BusChannels.SessionStart, () => {});
+							unsubscribe = context.bus.subscribe("session.started", () => {});
 							if (name === "consumer") throw failure;
 						},
 						stop() {
@@ -44,7 +43,7 @@ test("failed domain startup releases its listeners and earlier dependencies in r
 	await rejects(loadDomains(modules, { diagnostic() {} }), { cause: failure });
 	deepStrictEqual(stopped, ["consumer", "dependency"]);
 	strictEqual(dependencyDuringStop, "dependency");
-	strictEqual(bus.listeners(BusChannels.SessionStart).length, before);
+	strictEqual(bus.listeners("session.started").length, before);
 });
 
 test("a rejected domain factory unwinds started dependencies", async () => {
@@ -128,9 +127,9 @@ test("duplicate domain names reject the composition before either implementation
 });
 
 test("a cancelled load stops the started domains and propagates the cancellation unchanged", async () => {
-	const bus = getSharedBus();
+	const bus = telemetryHub();
 	const failedEvents: unknown[] = [];
-	const unsubscribe = bus.on(BusChannels.DomainFailed, (payload) => {
+	const unsubscribe = bus.subscribe("domain.failed", (payload) => {
 		failedEvents.push(payload);
 	});
 	const created: string[] = [];

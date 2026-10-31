@@ -12,8 +12,8 @@
  * interrupt-to-stop subscriber both surfaces use, so messaging never drifts.
  */
 
-import { BusChannels, type LoopBlockedPayload, type ToolBudgetExceededPayload } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { LoopBlockedPayload, ToolBudgetExceededPayload } from "../core/telemetry/live-events.js";
 import type { ChatCancelOptions } from "./chat-loop.js";
 
 /** Minimal chat surface the loop-guard stop needs: only the cancel entry point. */
@@ -81,8 +81,8 @@ export function toolBudgetAuditReason(evt: ToolBudgetExceededPayload): string {
  * interactive TUI wires the equivalent inline so it can also render the
  * per-block warn notices. Returns an unsubscribe handle.
  */
-export function subscribeLoopGuardStop(bus: SafeEventBus, chat: LoopGuardStoppableChat): () => void {
-	const unsubscribeLoopBlocked = bus.on(BusChannels.LoopBlocked, (payload) => {
+export function subscribeLoopGuardStop(bus: TelemetryHub, chat: LoopGuardStoppableChat): () => void {
+	const unsubscribeLoopBlocked = bus.subscribe("safety.loop_blocked", (payload) => {
 		if (!isLoopBlockedInterrupt(payload)) return;
 		chat.cancel({
 			reason: loopBlockedStopReason(payload),
@@ -90,7 +90,7 @@ export function subscribeLoopGuardStop(bus: SafeEventBus, chat: LoopGuardStoppab
 			auditReason: loopBlockedAuditReason(payload),
 		});
 	});
-	const unsubscribeToolBudget = bus.on(BusChannels.ToolBudgetExceeded, (payload) => {
+	const unsubscribeToolBudget = bus.subscribe("safety.tool_budget_exceeded", (payload) => {
 		if (!isToolBudgetInterrupt(payload)) return;
 		chat.cancel({
 			reason: toolBudgetStopReason(payload),

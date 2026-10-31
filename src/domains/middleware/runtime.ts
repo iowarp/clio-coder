@@ -158,7 +158,7 @@ export function registrationMatchesTool(
  * bundle with. It uses the active terminal diagnostic sink, or stderr headlessly. The composition root
  * (src/entry/orchestrator.ts) replaces it through setDiagnosticSink with a
  * sink that publishes every diagnostic on the typed bus as
- * `middleware.hookFailed`, which the interactive warn notice consumes, and
+ * `middleware.hook_failed`, which the interactive warn notice consumes, and
  * that still calls this writer for non-interactive runs, which have no
  * notice subscriber.
  */

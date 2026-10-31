@@ -1,8 +1,8 @@
 import { bashShellPath } from "../core/bash-shell.js";
-import type { ContextRecalledPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import { semanticUsable } from "../core/config.js";
 import type { RouteProvenance } from "../core/route-provenance.js";
+import type { ContextRecalledPayload } from "../core/telemetry/live-events.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { BudgetProvider } from "../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";

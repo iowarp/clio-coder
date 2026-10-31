@@ -1,5 +1,5 @@
-import { BusChannels, type PermissionRequestedPayload } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { PermissionRequestedPayload } from "../core/telemetry/live-events.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
@@ -77,7 +77,7 @@ interface WorkerEscalationEntry {
 
 export interface OverlayPermissionLifecycleDeps {
 	toolRegistry?: PermissionToolRegistry;
-	bus: Pick<SafeEventBus, "emit" | "on">;
+	bus: Pick<TelemetryHub, "emit" | "subscribe">;
 	dispatch: Pick<DispatchContract, "resolveWorkerPermission">;
 	getAutonomy(): string;
 	getOverlayState(): OverlayState;
@@ -607,7 +607,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			denied = false;
 		}) ?? (() => {});
 
-	const unsubscribeWorker = deps.bus.on(BusChannels.PermissionRequested, (payload) => {
+	const unsubscribeWorker = deps.bus.subscribe("approval.requested", (payload) => {
 		const entry = workerEscalationEntry(payload, deps.getAutonomy());
 		if (!entry) return;
 		if (!markPermissionRequestSurfaced(announcedWorkerRequestIds, entry.requestId)) return;
@@ -615,7 +615,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		workerQueue.push(entry);
 		maybeOpenWorker();
 	});
-	const unsubscribeWorkerResolution = deps.bus.on(BusChannels.PermissionResolved, (payload) => {
+	const unsubscribeWorkerResolution = deps.bus.subscribe("approval.resolved", (payload) => {
 		if (typeof payload.requestId !== "string") return;
 		// A brokered request the owner revoked (turn cancel, session end) leaves
 		// the card the same way an expired one does.
@@ -627,8 +627,8 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 		if (typeof payload.runId !== "string") return;
 		withdrawWorkers((entry) => entry.runId === payload.runId, "terminal");
 	};
-	const unsubscribeWorkerCompleted = deps.bus.on(BusChannels.DispatchCompleted, withdrawTerminalRun);
-	const unsubscribeWorkerFailed = deps.bus.on(BusChannels.DispatchFailed, withdrawTerminalRun);
+	const unsubscribeWorkerCompleted = deps.bus.subscribe("run.completed", withdrawTerminalRun);
+	const unsubscribeWorkerFailed = deps.bus.subscribe("run.failed", withdrawTerminalRun);
 
 	const onPermissionOverlayClosed = (): void => {
 		if (withdrawingWorker) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BusChannels, type DispatchCompletedPayload } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type { DispatchCompletedPayload } from "../../src/core/telemetry/live-events.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import type { TelemetryRunReaders } from "../../src/domains/telemetry/contract.js";
@@ -21,7 +21,7 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 		contract: "pass",
 		contractKind: "debugger-report",
 	};
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const projection = createTelemetryProjection(bus, {
 		readReceipt: () => facts,
 		sessionCostSummary: emptyCostAggregate,
@@ -53,16 +53,16 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 		outcomeDetail: null,
 	};
 	try {
-		bus.emit(BusChannels.DispatchCompleted, event);
+		bus.emit("run.completed", event);
 		assert.deepEqual(projection.snapshot().runs[0]?.resultContract, { kind: "debugger-report", conformance: "pass" });
 		store.reconcile();
 		assert.deepEqual(store.rows()[0]?.resultContract, { kind: "debugger-report", conformance: "pass" });
 		const prior = projection.snapshot();
-		bus.emit(BusChannels.DispatchStarted, { ...event, pid: null, assignmentId: "aa-run", attempt: 1 });
+		bus.emit("run.started", { ...event, pid: null, assignmentId: "aa-run", attempt: 1 });
 		assert.equal(projection.snapshot().runs[0]?.resultContract, undefined);
 		assert.deepEqual(prior.runs[0]?.resultContract, { kind: "debugger-report", conformance: "pass" });
 		facts = { text: "tampered answer", trust: rejected, contract: "pass", contractKind: "debugger-report" };
-		bus.emit(BusChannels.DispatchCompleted, event);
+		bus.emit("run.completed", event);
 		assert.equal(projection.snapshot().runs[0]?.resultContract, undefined);
 		assert.doesNotMatch(projection.snapshot().runs[0]?.progress?.tailText ?? "", /tampered answer/);
 		facts = {
@@ -71,10 +71,10 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 			contract: "fail",
 			contractKind: "debugger-report",
 		};
-		bus.emit(BusChannels.DispatchCompleted, event);
+		bus.emit("run.completed", event);
 		assert.deepEqual(projection.snapshot().runs[0]?.resultContract, { kind: "debugger-report", conformance: "fail" });
 		facts = null;
-		bus.emit(BusChannels.DispatchCompleted, event);
+		bus.emit("run.completed", event);
 		assert.equal(projection.snapshot().runs[0]?.resultContract, undefined);
 	} finally {
 		store.unsubscribe();

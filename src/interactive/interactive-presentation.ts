@@ -1,8 +1,8 @@
 import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import type { JobRecord } from "../core/job-types.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { motionEnabled } from "../core/terminal-preferences.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { isUserVisibleAgent } from "../domains/agents/spec.js";
@@ -102,7 +102,7 @@ export interface InteractivePresentationDeps {
 	/** What an active extension workspace draws in place of the host's parts. */
 	workspaceSurfaces?: WorkspaceSurfaces;
 	getLifecycleHint?: () => string | null;
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	providers: ProvidersContract;
 	dispatch: Pick<DispatchContract, "snapshot">;
 	telemetry: TelemetryContract;

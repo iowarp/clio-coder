@@ -1,8 +1,10 @@
+import { telemetryHub } from "./telemetry/hub.js";
+
 /**
  * Bus tracer (observability scaffolding).
  *
  * When `CLIO_CODER_BUS_TRACE=1` is set in the environment, subscribe once to the
- * shutdown-phase channels, `session.end`, and the domain lifecycle channels
+ * shutdown-phase channels, `session.ended`, and the domain lifecycle channels
  * (`domain.loaded`/`domain.failed`, suffixed with the domain name), emitting a
  * single prefixed line per event to stderr. Off by default; local debugging can
  * spawn the CLI with the env var to observe bus ordering across a subprocess boundary.
@@ -26,17 +28,14 @@
  * handler before calling shutdown(), which is where ShutdownRequested is emitted.
  */
 
-import { BusChannels } from "./bus-events.js";
-import { getSharedBus } from "./shared-bus.js";
-
 const TRACED_CHANNELS = [
-	BusChannels.ShutdownRequested,
-	BusChannels.ShutdownDrained,
-	BusChannels.ShutdownTerminated,
-	BusChannels.ShutdownPersisted,
-	BusChannels.SessionEnd,
-	BusChannels.DomainLoaded,
-	BusChannels.DomainFailed,
+	"shutdown.requested",
+	"shutdown.drained",
+	"shutdown.terminated",
+	"shutdown.persisted",
+	"session.ended",
+	"domain.loaded",
+	"domain.failed",
 ] as const;
 
 function traceSuffix(payload: unknown): string {
@@ -54,9 +53,9 @@ export function installBusTracer(
 	if (installed) return;
 	installed = true;
 	const stderr = process.env.CLIO_CODER_BUS_TRACE === "1";
-	const bus = getSharedBus();
+	const bus = telemetryHub();
 	for (const channel of TRACED_CHANNELS) {
-		bus.on(channel, (payload) => {
+		bus.subscribe(channel, (payload) => {
 			if (stderr) process.stderr.write(`[clio-coder:bus] ${channel}${traceSuffix(payload)}\n`);
 			const write = research();
 			if (write === null) return;

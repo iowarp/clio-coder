@@ -4,18 +4,12 @@ import { readReceiptTextSync } from "../dispatch/receipt-store.js";
 /**
  * Telemetry domain wire-up. Listens to the dispatch bus channels and folds
  * their payloads into the session cost tracker and the projection. Other domains read the snapshot through the contract; the one thing
- * it emits is `accountability.evidenceReady`, once per run whose evidence
+ * it emits is `evidence.assessed`, once per run whose evidence
  * bundle landed.
  */
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import {
-	BusChannels,
-	type ConfigChangePayload,
-	type ConfigSessionChangePayload,
-	type DispatchCompletedPayload,
-} from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
@@ -23,6 +17,11 @@ import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetr
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
+import type {
+	ConfigChangePayload,
+	ConfigSessionChangePayload,
+	DispatchCompletedPayload,
+} from "../../core/telemetry/live-events.js";
 import { telemetryCaptures } from "../../core/telemetry/producer.js";
 import { settingsFingerprintCommitment } from "../../core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
@@ -374,7 +373,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		const build = buildAndIndexEvidence(runId, succeeded, attempt, {
 			onReady: (id, evidence) => {
 				// The projection and ACP consume the same evidence-ready event.
-				context.bus.emit(BusChannels.AccountabilityEvidenceReady, { runId: id, ...evidence });
+				context.bus.emit("evidence.assessed", { runId: id, ...evidence });
 			},
 			onFailed: (id, message) => projection.evidenceBuildFailed(id, message),
 		});
@@ -390,22 +389,22 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 					unsubscribes.push(settings.onChange(kind, recordSettingsChange));
 			}
 			unsubscribes.push(
-				context.bus.on(BusChannels.ConfigSessionChanged, recordSessionSettingsChange),
-				context.bus.on(BusChannels.SessionOpened, ({ sessionId, cwdHash }) => {
+				context.bus.subscribe("config.session_changed", recordSessionSettingsChange),
+				context.bus.subscribe("session.created", ({ sessionId, cwdHash }) => {
 					liveSession = { id: sessionId, cwdHash };
 					recordLifecycle(liveSession, "session.opened", {});
 				}),
-				context.bus.on(BusChannels.SessionResumed, ({ sessionId, cwdHash }) => {
+				context.bus.subscribe("session.reattached", ({ sessionId, cwdHash }) => {
 					liveSession = cwdHash === undefined ? null : { id: sessionId, cwdHash };
 					if (liveSession) recordLifecycle(liveSession, "session.resumed", {});
 				}),
-				context.bus.on(BusChannels.SessionParked, ({ sessionId, cwdHash }) => {
+				context.bus.subscribe("session.parked", ({ sessionId, cwdHash }) => {
 					if (liveSession?.id === sessionId) liveSession = null;
 					if (cwdHash !== undefined) recordLifecycle({ id: sessionId, cwdHash }, "session.closed", { reason: "completed" });
 				}),
 			);
 			unsubscribes.push(
-				context.bus.on(BusChannels.DispatchCompleted, (raw) => {
+				context.bus.subscribe("run.completed", (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
 					recordRun(payload);
 					// Kick off the heavy forensic build without blocking the bus.
@@ -416,7 +415,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 				}),
 			);
 			unsubscribes.push(
-				context.bus.on(BusChannels.DispatchFailed, (raw) => {
+				context.bus.subscribe("run.failed", (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
 					recordRun(payload);
 					// A failed run is never a first-pass success; still build the

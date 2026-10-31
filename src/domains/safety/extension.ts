@@ -1,14 +1,13 @@
-import {
-	type AgentStatusChangedPayload,
-	BusChannels,
-	isRunAbortedPayload,
-	type PermissionRequestedPayload,
-	type PermissionResolvedPayload,
-	type SessionParkedPayload,
-	type SessionResumedPayload,
-} from "../../core/bus-events.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { clearSessionAuthoredFiles } from "../../core/session-authored-files.js";
+import type {
+	AgentStatusChangedPayload,
+	PermissionRequestedPayload,
+	PermissionResolvedPayload,
+	SessionParkedPayload,
+	SessionResumedPayload,
+} from "../../core/telemetry/live-events.js";
+import { isRunAbortedPayload } from "../../core/telemetry/live-events.js";
 import { classify as classifyCall } from "./action-classifier.js";
 import {
 	type AuditRecord,
@@ -153,7 +152,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		async start() {
 			policyEngine = createSafetyPolicyEngine();
 			writer = openAuditWriter();
-			unsubscribePermissionRequested = context.bus.on(BusChannels.PermissionRequested, (payload) => {
+			unsubscribePermissionRequested = context.bus.subscribe("approval.requested", (payload) => {
 				if (!isPermissionRequestedPayload(payload)) return;
 				if (payload.requestId !== undefined) {
 					permissionOrigins.set(payload.requestId, {
@@ -188,7 +187,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 					}),
 				);
 			});
-			unsubscribePermissionResolved = context.bus.on(BusChannels.PermissionResolved, (payload) => {
+			unsubscribePermissionResolved = context.bus.subscribe("approval.resolved", (payload) => {
 				if (!isPermissionResolvedPayload(payload)) return;
 				const origin = payload.requestId !== undefined ? permissionOrigins.get(payload.requestId) : undefined;
 				if (payload.requestId !== undefined) permissionOrigins.delete(payload.requestId);
@@ -220,7 +219,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 					}),
 				);
 			});
-			unsubscribeRunAborted = context.bus.on(BusChannels.RunAborted, (payload) => {
+			unsubscribeRunAborted = context.bus.subscribe("run.aborted", (payload) => {
 				if (!isRunAbortedPayload(payload)) return;
 				const recordInput: Parameters<typeof buildAbortAuditRecord>[0] = {
 					source: payload.source,
@@ -231,17 +230,17 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				if (payload.reason !== undefined) recordInput.reason = payload.reason;
 				writeAudit(buildAbortAuditRecord(recordInput));
 			});
-			unsubscribeSessionParked = context.bus.on(BusChannels.SessionParked, (payload) => {
+			unsubscribeSessionParked = context.bus.subscribe("session.parked", (payload) => {
 				if (!isSessionParkedPayload(payload)) return;
 				// Authorship is per session: the next session asks again for the parked one's outside files.
 				clearSessionAuthoredFiles();
 				writeAudit(buildSessionParkAuditRecord({ sessionId: payload.sessionId, reason: payload.reason }));
 			});
-			unsubscribeSessionResumed = context.bus.on(BusChannels.SessionResumed, (payload) => {
+			unsubscribeSessionResumed = context.bus.subscribe("session.reattached", (payload) => {
 				if (!isSessionResumedPayload(payload)) return;
 				writeAudit(buildSessionResumeAuditRecord({ sessionId: payload.sessionId, via: payload.via }));
 			});
-			unsubscribeAgentStatusChanged = context.bus.on(BusChannels.AgentStatusChanged, (payload) => {
+			unsubscribeAgentStatusChanged = context.bus.subscribe("agent.status_changed", (payload) => {
 				if (!isAgentStatusChangedPayload(payload) || !isAlarmableStatus(payload)) return;
 				writeAudit(
 					buildAgentStatusChangeAuditRecord({
@@ -291,8 +290,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 					}),
 				);
 			};
-			unsubscribeDispatchCompleted = context.bus.on(BusChannels.DispatchCompleted, auditDispatchTerminal);
-			unsubscribeDispatchFailed = context.bus.on(BusChannels.DispatchFailed, auditDispatchTerminal);
+			unsubscribeDispatchCompleted = context.bus.subscribe("run.completed", auditDispatchTerminal);
+			unsubscribeDispatchFailed = context.bus.subscribe("run.failed", auditDispatchTerminal);
 		},
 		async stop() {
 			unsubscribePermissionRequested?.();
@@ -336,7 +335,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				};
 				if (posture !== undefined) auditInput.posture = posture;
 				recordToolCallAudit(auditInput);
-				context.bus.emit(BusChannels.SafetyBlocked, {
+				context.bus.emit("safety.blocked", {
 					tool: call.tool,
 					actionClass: classification.actionClass,
 					ruleId: policy.ruleId,

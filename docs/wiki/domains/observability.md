@@ -237,8 +237,8 @@ first-pass-success rate and failure-cause histogram without re-running `buildEvi
 - `src/domains/evidence/redact.ts` — `createRedactionTally`, `redactSecretsText` (trace store)
 - `src/domains/evidence/trust-projection.ts` — `summarizeTrustStatus`
 - `src/domains/safety/call-target.ts` — `sanitizeCallTargetText`, `CallActionDescriptor`
-- `src/core/bus-events.ts` — `BusChannels`, dispatch payload types
-- `src/core/event-bus.ts` — `SafeEventBus`
+- `src/core/telemetry/live-events.ts` — `BusChannels`, dispatch payload types
+- `src/core/telemetry/hub.ts` — `SafeEventBus`
 - `src/core/xdg.ts` — `clioDataDir`, `clioStateDir`
 
 ## Named focused tests

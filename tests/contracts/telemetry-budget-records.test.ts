@@ -1,10 +1,9 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { it } from "node:test";
-import type { BudgetAlertPayload, ConfigChangePayload } from "../../src/core/bus-events.js";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type { BudgetAlertPayload, ConfigChangePayload } from "../../src/core/telemetry/live-events.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
@@ -30,7 +29,7 @@ it("a held paid request journals one crossing per ceiling and its hold, with the
 		},
 	} as unknown as ConfigContract;
 	const telemetryContract = { sessionCost: () => 1.25 };
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const { contract, extension } = createSchedulingBundle({
 		bus,
 		getContract: (<T>(name: string) =>
@@ -60,7 +59,7 @@ it("a held paid request journals one crossing per ceiling and its hold, with the
 		await new Promise((resolve) => setTimeout(resolve, 20));
 		const beforeSession = structuredClone(settings);
 		settings.safety.limits.sessionCostUsd = 3;
-		bus.emit(BusChannels.ConfigSessionChanged, {
+		bus.emit("config.session_changed", {
 			...change,
 			settings,
 			previous: beforeSession,
@@ -96,7 +95,7 @@ it("a ceiling stop names estimated or partly unpriced spend as it was priced, an
 	const summary = { knownUsd: 1.25, hasEstimated: true, hasUnknown: false, allKnownFree: false, calls: 3 };
 	const telemetryContract = { sessionCost: () => summary.knownUsd, sessionCostSummary: () => ({ ...summary }) };
 	const { contract, extension } = createSchedulingBundle({
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		getContract: (<T>(name: string) =>
 			(name === "config" ? config : name === "telemetry" ? telemetryContract : undefined) as T | undefined) as never,
 	});

@@ -8,8 +8,7 @@
  * their runs started. Nothing is rendered and nothing is persisted here.
  */
 
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { readWorkerReceiptFacts } from "./worker-receipts.js";
 import {
 	createWorkerStream,
@@ -28,7 +27,7 @@ export interface WorkerRunLedger {
 }
 
 export function followWorkerRuns(
-	bus: SafeEventBus,
+	bus: TelemetryHub,
 	readReceipt: WorkerReceiptReader = readWorkerReceiptFacts,
 ): WorkerRunLedger {
 	const stream = createWorkerStream({ readReceipt });
@@ -44,11 +43,11 @@ export function followWorkerRuns(
 		}
 	};
 	const unsubscribers = [
-		bus.on(BusChannels.DispatchStarted, (payload) => keep(stream.started(payload))),
-		bus.on(BusChannels.DispatchProgress, (payload) => keep(stream.progress(payload))),
-		bus.on(BusChannels.DispatchCompleted, (payload) => keep(stream.completed(payload))),
-		bus.on(BusChannels.DispatchFailed, (payload) => keep(stream.failed(payload))),
-		bus.on(BusChannels.RunAborted, (payload) => keep(stream.aborted(payload))),
+		bus.subscribe("run.started", (payload) => keep(stream.started(payload))),
+		bus.subscribe("run.progressed", (payload) => keep(stream.progress(payload))),
+		bus.subscribe("run.completed", (payload) => keep(stream.completed(payload))),
+		bus.subscribe("run.failed", (payload) => keep(stream.failed(payload))),
+		bus.subscribe("run.aborted", (payload) => keep(stream.aborted(payload))),
 	];
 	return {
 		list: () => [...states.values()],

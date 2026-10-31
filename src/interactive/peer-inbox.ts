@@ -24,9 +24,8 @@
 import type { FSWatcher } from "node:fs";
 import { readdirSync, watch } from "node:fs";
 import { join } from "node:path";
-import type { AgentStatusChangedPayload } from "../core/bus-events.js";
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { AgentStatusChangedPayload } from "../core/telemetry/live-events.js";
 import type { MuxContract } from "../domains/mux/index.js";
 import type { PeerReceipt, PeerRefusal } from "../domains/mux/peer-inbox.js";
 import {
@@ -46,7 +45,7 @@ const INBOX_POLL_MS = 250;
 const REQUEST_NAME = /^[0-9a-f-]{36}$/u;
 
 export interface PeerInboxDeps {
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	mux: MuxContract;
 	chat: Pick<
 		ChatLoop,
@@ -270,14 +269,14 @@ export function createPeerInbox(deps: PeerInboxDeps): PeerInbox | null {
 
 	const unsubscribeReset = deps.chat.onSessionReset?.(rotate);
 	const unsubscribers = [
-		deps.bus.on(BusChannels.AgentStatusChanged, (payload) => {
+		deps.bus.subscribe("agent.status_changed", (payload) => {
 			lastPhase = payload.phase;
 		}),
 		// Park/resume invalidate during a switch, before replay finishes. The
 		// shared reset barrier also covers /new before any session exists and
 		// branch navigation, without invalidating ordinary first-turn creation.
-		deps.bus.on(BusChannels.SessionParked, rotate),
-		deps.bus.on(BusChannels.SessionResumed, rotate),
+		deps.bus.subscribe("session.parked", rotate),
+		deps.bus.subscribe("session.reattached", rotate),
 		...(unsubscribeReset ? [unsubscribeReset] : []),
 	];
 

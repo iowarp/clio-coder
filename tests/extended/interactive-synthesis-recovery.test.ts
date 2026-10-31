@@ -1,8 +1,7 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
@@ -15,10 +14,10 @@ const markup = '<tool_call>{"name":"read","arguments":{"path":"never-read.ts"}}<
 for (const outcome of ["recovered", "exhausted", "usable-prose", "cancelled"] as const) {
 	test(`interactive synthesis lock: ${outcome}`, async () => {
 		const env = await isolateClioEnv("interactive-synthesis-");
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const wire = await startGatewayThinkingFixture("lm-studio", "fixture-model", undefined, (_body, index) => {
 			if (index === 0) {
-				bus.emit(BusChannels.LoopBlocked, {
+				bus.emit("safety.loop_blocked", {
 					tool: "read",
 					repeatCount: 4,
 					blocksThisTurn: 2,

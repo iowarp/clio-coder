@@ -1,7 +1,6 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { createNotificationCenter } from "../../src/interactive/footer/notifications.js";
 import { createInteractiveEventProjection } from "../../src/interactive/interactive-event-projection.js";
 import { createInteractiveSubscriptions } from "../../src/interactive/interactive-subscriptions.js";
@@ -18,7 +17,7 @@ const identity = {
 };
 
 function footer() {
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const notifications = createNotificationCenter();
 	const noop = (): void => undefined;
 	const subscriptions = createInteractiveSubscriptions({
@@ -38,8 +37,8 @@ function footer() {
 test("a retried helper leaves the footer on its assignment's terminal state and run", () => {
 	const { bus, shown, dispose } = footer();
 	try {
-		bus.emit(BusChannels.DispatchStarted, { ...identity, runId: "run-a", pid: null, assignmentId: "run-a", attempt: 0 });
-		bus.emit(BusChannels.DispatchFailed, {
+		bus.emit("run.started", { ...identity, runId: "run-a", pid: null, assignmentId: "run-a", attempt: 0 });
+		bus.emit("run.failed", {
 			...identity,
 			runId: "run-a",
 			outcome: "failed",
@@ -47,9 +46,9 @@ test("a retried helper leaves the footer on its assignment's terminal state and 
 			reason: "failed",
 		});
 		deepStrictEqual(shown(), ["warning: Clio-Coder → Scout · failed · run run-a"]);
-		bus.emit(BusChannels.DispatchStarted, { ...identity, runId: "run-b", pid: null, assignmentId: "run-a", attempt: 1 });
+		bus.emit("run.started", { ...identity, runId: "run-b", pid: null, assignmentId: "run-a", attempt: 1 });
 		deepStrictEqual(shown(), ["info: Clio-Coder → Scout · working · run run-b"]);
-		bus.emit(BusChannels.DispatchCompleted, { ...identity, runId: "run-b", outcome: "succeeded" } as never);
+		bus.emit("run.completed", { ...identity, runId: "run-b", outcome: "succeeded" } as never);
 		deepStrictEqual(shown(), ["success: Clio-Coder → Scout · completed · run run-b"]);
 	} finally {
 		dispose();
@@ -60,8 +59,8 @@ test("parallel helpers keep one notice each", () => {
 	const { bus, shown, dispose } = footer();
 	try {
 		for (const runId of ["run-a", "run-c"])
-			bus.emit(BusChannels.DispatchStarted, { ...identity, runId, pid: null, assignmentId: runId, attempt: 0 });
-		bus.emit(BusChannels.DispatchFailed, {
+			bus.emit("run.started", { ...identity, runId, pid: null, assignmentId: runId, attempt: 0 });
+		bus.emit("run.failed", {
 			...identity,
 			runId: "run-c",
 			outcome: "failed",
@@ -80,7 +79,7 @@ test("parallel helpers keep one notice each", () => {
 test("context generators use the composer progress rail without helper notices or transcript blocks", () => {
 	const { bus, shown, dispose } = footer();
 	try {
-		bus.emit(BusChannels.DispatchStarted, {
+		bus.emit("run.started", {
 			...identity,
 			agentId: "context-bootstrap",
 			agentAudience: "internal",
@@ -90,7 +89,7 @@ test("context generators use the composer progress rail without helper notices o
 			assignmentId: "context-run",
 			attempt: 0,
 		});
-		bus.emit(BusChannels.DispatchCompleted, {
+		bus.emit("run.completed", {
 			...identity,
 			agentId: "context-bootstrap",
 			agentAudience: "internal",
@@ -114,7 +113,7 @@ test("context reduction status uses the footer while errors retain transcript ev
 	const footer: string[] = [];
 	let helperDismissals = 0;
 	const projection = createInteractiveEventProjection({
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		chat: {
 			onEvent: (handler) => {
 				handlers.push(handler);

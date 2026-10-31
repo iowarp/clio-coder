@@ -1,4 +1,3 @@
-import { BusChannels } from "../../core/bus-events.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { assertAgentIdNamespace } from "../config/agent-namespace.js";
@@ -85,7 +84,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 					);
 				}
 			};
-			unsubscribePluginsReload = _context.bus.on(BusChannels.PluginsReloaded, onResourceReload);
+			unsubscribePluginsReload = _context.bus.subscribe("plugin.reloaded", onResourceReload);
 		},
 		async stop() {
 			unsubscribePluginsReload?.();

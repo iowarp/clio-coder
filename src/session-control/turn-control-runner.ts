@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import { turnAllowsTool } from "../core/turn-constraints.js";
@@ -76,7 +75,7 @@ export interface TurnControlRunnerDeps {
 		finishedDetachedBatchIds(): ReadonlyArray<string>;
 	};
 	cwd: string;
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	emitNotice(text: string): void;
 	getAgentRoleFacts?: AgentRoleFactsResolver;
 	rememberOrientation?: (turnId: string, runId: string, succeeded: boolean) => void;
@@ -296,7 +295,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 					const typed = event as { type?: string; runId?: string };
 					if (typed.runId) rememberRun(typed.runId);
 					if (!typed.type || typed.type === "heartbeat") continue;
-					progressBus?.emit(BusChannels.DispatchProgress, {
+					progressBus?.emit("run.progressed", {
 						runId: typed.runId ?? runId,
 						agentId: scoutRecipeId ?? "scout",
 						event,

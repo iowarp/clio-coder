@@ -1,4 +1,4 @@
-import type { SafeEventBus } from "../../core/event-bus.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { DeclaredCheckKind } from "../../tools/verify/catalog.js";
 import type { NumericTolerance } from "../../tools/verify/numeric.js";
@@ -397,7 +397,7 @@ export interface DispatchContract {
 	/** True when the domain event pump publishes DispatchProgress itself. */
 	readonly publishesProgress?: boolean;
 	/** Whether `bus` is the same bus already owned by the domain progress pump. */
-	ownsProgressBus?(bus: SafeEventBus | undefined): boolean;
+	ownsProgressBus?(bus: TelemetryHub | undefined): boolean;
 	/**
 	 * Resolve effective agent/target/model/node without launching or acquiring a
 	 * slot. Callers pin this result into the approved request; later placement

@@ -5,10 +5,9 @@ import os, { hostname, tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
@@ -20,7 +19,6 @@ import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { createTurnContext } from "../../src/session-control/turn-context.js";
 import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
-
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function writePromptSources(root: string, version: "ONE" | "TWO" | "THREE", clioRepo: boolean): void {
@@ -122,7 +120,7 @@ describe("session prompt source snapshot", { concurrency: false }, () => {
 	it("freezes real bundle disk inputs across production cache misses and refreshes at explicit boundaries", async () => {
 		const originalCwd = process.cwd();
 		const scratch = mkdtempSync(join(tmpdir(), "clio-coder-prompt-snapshot-"));
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		let sessionId = "snapshot-session-one";
 		let compileCalls = 0;
 		writePromptSources(scratch, "ONE", true);
@@ -211,7 +209,7 @@ describe("session prompt source snapshot", { concurrency: false }, () => {
 			strictEqual(unrelatedMiss?.systemPrompt.includes("HANDBOOK_TWO"), false);
 
 			const beforeInvalidation = prompts.inputEpoch();
-			bus.emit(BusChannels.ConfigHotReload, {
+			bus.emit("config.hot_reloaded", {
 				diff: { hotReload: ["context.prompt"], nextTurn: [], restartRequired: [] },
 				settings: structuredClone(DEFAULT_SETTINGS),
 			});
@@ -250,7 +248,7 @@ async function contextPromptFixture() {
 	writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "fresh-context", type: "module" }));
 	writeFileSync(join(cwd, "src", "index.ts"), "export function freshContext() { return true; }\n");
 	process.chdir(cwd);
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const config = { get: () => structuredClone(DEFAULT_SETTINGS), onChange: () => () => {} };
 	const domainContext: DomainContext = {
 		bus,

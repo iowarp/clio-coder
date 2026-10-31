@@ -4,9 +4,9 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createGitHooksFingerprinter, gitHookDirectories } from "../../src/core/sandbox/git-hooks-fingerprint.js";
 import { resolveWorkerSandboxSpec } from "../../src/core/sandbox/worker-policy.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
@@ -198,7 +198,7 @@ test("an approved git-control-file write refreshes the baseline, and the exit su
 		subscribe: () => () => {},
 	} as unknown as TelemetryContract;
 	const collector = createExitSummaryCollector({
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		telemetry,
 		dispatch: {},
 		session: { current: () => ({ id: "session-1", hasModelTurn: true }) } as unknown as Pick<SessionContract, "current">,

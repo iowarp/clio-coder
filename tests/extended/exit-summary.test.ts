@@ -1,7 +1,6 @@
 import { deepStrictEqual, match, ok } from "node:assert/strict";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
 import { renderExitSummary } from "../../src/interactive/exit-summary.js";
@@ -10,7 +9,7 @@ import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
 test("the session summary counts what Clio answered while the operator was away (#421)", () => {
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const telemetry = {
 		subscribe: () => () => {},
 		telemetry: { live: () => telemetryViewOf("session-1", []), subscribe: () => () => {} },
@@ -24,14 +23,14 @@ test("the session summary counts what Clio answered while the operator was away 
 		getToolCounts: () => new Map(),
 		getModel: () => null,
 	});
-	bus.emit(BusChannels.PermissionResolved, {
+	bus.emit("approval.resolved", {
 		status: "denied",
 		decidedBy: "unattended",
 		origin: "main",
 		tool: "bash",
 		requestId: "apr-1",
 	});
-	bus.emit(BusChannels.PermissionResolved, {
+	bus.emit("approval.resolved", {
 		status: "denied",
 		decidedBy: "operator",
 		tool: "write",

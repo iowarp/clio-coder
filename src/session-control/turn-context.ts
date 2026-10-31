@@ -45,17 +45,6 @@ import {
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import type { ContextActivityPhase } from "../core/bus-events.js";
-import {
-	BusChannels,
-	type CompactionPayload,
-	type ContextActivityStatus,
-	type ContextPrunedPayload,
-	type ContextRecalledPayload,
-	type ContextWarningPayload,
-	type MemoryStepCompletedPayload,
-	type ResidencyMutationPayload,
-} from "../core/bus-events.js";
 import type {
 	BackendCacheVerdict,
 	BackendCompletionTimings,
@@ -65,12 +54,22 @@ import type {
 } from "../core/cache-telemetry.js";
 import { buildCacheCallObservation, firstChangedSection, uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { RouteName, RouteSource } from "../core/route-provenance.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type {
+	CompactionPayload,
+	ContextActivityPhase,
+	ContextActivityStatus,
+	ContextPrunedPayload,
+	ContextRecalledPayload,
+	ContextWarningPayload,
+	MemoryStepCompletedPayload,
+	ResidencyMutationPayload,
+} from "../core/telemetry/live-events.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
 import { isBuiltinToolName, ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
@@ -207,7 +206,7 @@ export interface TurnContextDeps {
 	prompts?: PromptsContract | undefined;
 	toolRegistry?: ToolRegistry | undefined;
 	telemetry?: TelemetryContract | undefined;
-	bus?: SafeEventBus | undefined;
+	bus?: TelemetryHub | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
 	autoCompact?:
 		| ((
@@ -779,28 +778,28 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		noteExpectedCold(nextAssistantColdReasons);
 	};
 	const unsubscribeColdReasonSources = [
-		...[BusChannels.DispatchStarted, BusChannels.DispatchCompleted, BusChannels.DispatchFailed].map(
+		...(["run.started", "run.completed", "run.failed"] as const).map(
 			(channel) =>
-				deps.bus?.on(channel, () => {
+				deps.bus?.subscribe(channel, () => {
 					noteColdReason("dispatch");
 				}) ?? null,
 		),
-		...[BusChannels.CompactionBegin, BusChannels.CompactionEnd].map(
+		...(["compaction.started", "compaction.ended"] as const).map(
 			(channel) =>
-				deps.bus?.on(channel, () => {
+				deps.bus?.subscribe(channel, () => {
 					noteColdReason("compaction");
 				}) ?? null,
 		),
 		// A completed compaction rebuilds the context, so the next compile takes
 		// the live memory section instead of the frozen one (#423).
-		deps.bus?.on(BusChannels.CompactionEnd, (payload: CompactionPayload) => {
+		deps.bus?.subscribe("compaction.ended", (payload: CompactionPayload) => {
 			if (payload.outcome === "completed") {
 				frozenMemorySection = null;
 				resetCacheCallBaseline();
 				frozenRouteSources = undefined;
 			}
 		}) ?? null,
-		deps.bus?.on(BusChannels.ResidencyMutation, (payload: ResidencyMutationPayload) => {
+		deps.bus?.subscribe("residency.mutated", (payload: ResidencyMutationPayload) => {
 			const runtime = state.runtime;
 			const model = runtime?.agent.state.model as { baseUrl?: unknown } | undefined;
 			const baseUrl = typeof model?.baseUrl === "string" ? model.baseUrl : null;
@@ -809,7 +808,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		}) ?? null,
 		// A memory step on another endpoint disturbs nothing here, so the stamp is
 		// gated on the step having called the very server this session streams to.
-		deps.bus?.on(BusChannels.MemoryStepCompleted, (payload: MemoryStepCompletedPayload) => {
+		deps.bus?.subscribe("memory.step_completed", (payload: MemoryStepCompletedPayload) => {
 			const target = state.runtime?.runtimeResolution.target;
 			if (target === undefined) return;
 			// Behind a model-routed gateway only a step on this session's own model shares its backend.
@@ -817,7 +816,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (!own.includes(payload.endpointKey)) return;
 			noteColdReason("background_memory");
 		}) ?? null,
-		deps.bus?.on(BusChannels.ContextRecalled, (payload: ContextRecalledPayload) => {
+		deps.bus?.subscribe("context.recalled", (payload: ContextRecalledPayload) => {
 			middleware.fireCompactionHook("working_set_recall", payload.trigger);
 		}) ?? null,
 	];
@@ -1549,7 +1548,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	): void => {
 		if (status === "started" && !compactionLifecycleStarted) {
 			compactionLifecycleStarted = true;
-			deps.bus?.emit(BusChannels.CompactionBegin, { trigger: compactionLifecycleTrigger, at: Date.now() });
+			deps.bus?.emit("compaction.started", { trigger: compactionLifecycleTrigger, at: Date.now() });
 		}
 		compactionActivityPhase = phase;
 		if (status === "completed" || status === "failed") {
@@ -1753,7 +1752,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					operationCwd !== process.cwd()
 				)
 					return;
-				deps.bus?.emit(BusChannels.ContextActivity, event);
+				deps.bus?.emit("context.activity_changed", event);
 				if (event.operation?.outcome && originSession && deps.session)
 					deps.session.appendEntry({
 						kind: "custom",
@@ -1818,7 +1817,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							tokensAfter: tokensAfterMask,
 							trigger,
 						};
-						deps.bus?.emit(BusChannels.ContextPruned, {
+						deps.bus?.emit("context.pruned", {
 							stage: "mask_observations",
 							pressure: verdict.pressure,
 							tokensBefore: estimate.tokens,
@@ -1937,7 +1936,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								tokensAfter: planned.tokensAfter,
 								trigger,
 							};
-							deps.bus?.emit(BusChannels.ContextPruned, {
+							deps.bus?.emit("context.pruned", {
 								stage: "working_set",
 								pressure: verdict.pressure,
 								tokensBefore: planned.tokensBefore,
@@ -2217,7 +2216,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			tokensAfter,
 			trigger,
 		};
-		deps.bus?.emit(BusChannels.ContextPruned, {
+		deps.bus?.emit("context.pruned", {
 			stage: "llm_summary",
 			tokensBefore,
 			tokensAfter,
@@ -2265,7 +2264,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						...(compactionTokens ? { tokens: compactionTokens } : {}),
 					});
 					if (compactionLifecycleStarted)
-						deps.bus?.emit(BusChannels.CompactionEnd, { trigger: compactionLifecycleTrigger, at: Date.now(), outcome });
+						deps.bus?.emit("compaction.ended", { trigger: compactionLifecycleTrigger, at: Date.now(), outcome });
 					return changed;
 				},
 				(error: unknown) => {
@@ -2276,7 +2275,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						...(compactionTokens ? { tokens: compactionTokens } : {}),
 					});
 					if (compactionLifecycleStarted)
-						deps.bus?.emit(BusChannels.CompactionEnd, { trigger: compactionLifecycleTrigger, at: Date.now(), outcome });
+						deps.bus?.emit("compaction.ended", { trigger: compactionLifecycleTrigger, at: Date.now(), outcome });
 					throw error;
 				},
 			)
@@ -3249,7 +3248,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		emitContextWindowWarningTransition(warning: string | null): void {
 			if (warning === lastContextWindowWarning) return;
 			lastContextWindowWarning = warning;
-			deps.bus?.emit(BusChannels.ContextWarning, { warning } satisfies ContextWarningPayload);
+			deps.bus?.emit("context.warning_raised", { warning } satisfies ContextWarningPayload);
 		},
 
 		noteColdReason,

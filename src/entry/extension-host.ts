@@ -1,5 +1,4 @@
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import {
 	createTurnObservations,
 	observeChatTurns,
@@ -29,7 +28,7 @@ export interface ExtensionHostOptions {
 	/** The installed packages this host may start, as the extensions domain lists them. */
 	list: NonNullable<OperatorExtensionsOptions["list"]>;
 	runtimeHooks: ExtensionRuntimeHookBridge;
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	chat: Pick<ChatLoop, "isStreaming" | "turnPreparation" | "onEvent">;
 	sessionId: () => string | null;
 	targetId: () => string;
@@ -124,13 +123,11 @@ export function startExtensionHost(options: ExtensionHostOptions): ExtensionHost
 		},
 	});
 	const unsubscribers = [
-		...[
-			BusChannels.SessionStart,
-			BusChannels.SessionEnd,
-			BusChannels.SessionParked,
-			BusChannels.SessionResumed,
-			BusChannels.SessionTurnSwitched,
-		].map((channel) => options.bus.on(channel, () => operator.invalidateContext(channel === BusChannels.SessionResumed))),
+		...(
+			["session.started", "session.ended", "session.parked", "session.reattached", "session.turn_switched"] as const
+		).map((channel) =>
+			options.bus.subscribe(channel, () => operator.invalidateContext(channel === "session.reattached")),
+		),
 		subscribeExtensionObservations(options.bus, observeV2),
 		observeChatTurns((handler) => options.chat.onEvent(handler), turns, options.targetId),
 		options.chat.onEvent((event) => {

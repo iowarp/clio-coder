@@ -15,7 +15,7 @@ import type { ClioSettings } from "../../src/core/config.js";
 import { readSettings, updateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { loadDomains } from "../../src/core/domain-loader.js";
-import type { SafeEventBus } from "../../src/core/event-bus.js";
+import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ConfigDomainModule } from "../../src/domains/config/index.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { isOrchestratorEligibleRuntime } from "../../src/domains/providers/eligibility.js";
@@ -219,7 +219,7 @@ describe("provider transport boundary", () => {
 			tui: { requestRender: () => undefined } as TUI,
 			transitions,
 			providers: {} as ProvidersContract,
-			bus: {} as SafeEventBus,
+			bus: {} as TelemetryHub,
 			refreshFooter: () => undefined,
 			notify: () => undefined,
 			closeOverlay,

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createHeadlessJsonProjector, projectHeadlessJsonEvent } from "../../src/cli/modes/json-stream.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { writeTranscriptExport } from "../../src/domains/session/transcript-export.js";
 import { buildTurnPreview } from "../../src/domains/session/tree/preview.js";
@@ -356,7 +356,7 @@ test("footer tallies count the capability a gateway call ran and each settled ch
 	const starts: string[] = [];
 	const ends: Array<[string, string, boolean]> = [];
 	const projection = createInteractiveEventProjection({
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		chat: {
 			onEvent: (handler) => {
 				handlers.push(handler);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import {
 	narrowTurnConstraints,
 	snapshotTurnConstraints,
@@ -238,7 +238,7 @@ test("a slash command under an ACP ceiling runs only as a read or a bounded turn
 				};
 			},
 		} as unknown as AcpCommandHost["dispatch"],
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		providers: {} as ProvidersContract,
 		eggsCommand: () => "No active eggs.",
 		exportTranscript: () => {
@@ -326,7 +326,7 @@ test("a slash command under an ACP ceiling runs only as a read or a bounded turn
 test("a ceiling admits commands that only stop, pause or reshape the session's own context", () => {
 	const control = acpCommandControl({
 		dispatch: {} as AcpCommandHost["dispatch"],
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		providers: {} as ProvidersContract,
 	});
 	const refusal = (command: string, argv: string[]) => control.ceilingRefusal?.(command, argv, { readOnly: true });
@@ -443,7 +443,7 @@ test("a fleet run under an ACP ceiling is refused when the ceiling is read-only 
 test("a read-only ceiling refuses task writes, /oracle, a shell line, a memory proposal and a supersede", async () => {
 	const control = acpCommandControl({
 		dispatch: {} as AcpCommandHost["dispatch"],
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		providers: {} as ProvidersContract,
 	});
 	const refusal = (command: string, argv: string[], limits: TurnConstraints) =>

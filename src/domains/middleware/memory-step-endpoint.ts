@@ -3,7 +3,7 @@
  *
  * A proactive-memory step that runs on the chat target's own endpoint moves
  * that server's prefix cache, so the next turn is cold for a reason Clio caused
- * and can name. The turn context turns {@link BusChannels.MemoryStepCompleted}
+ * and can name. The turn context turns `memory.step_completed`
  * into the `background_memory` expected-cold reason; without it `/context`
  * reports the turn as an unexplained provider re-prefill.
  *
@@ -23,14 +23,13 @@
  * route), because those never call `complete`.
  */
 
-import { BusChannels } from "../../core/bus-events.js";
-import type { SafeEventBus } from "../../core/event-bus.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import { TaskMemoryEndpointBusyError, TaskMemoryEndpointPreemptedError } from "../memory/task-memory-policy.js";
 import { registerBackgroundStream } from "../providers/endpoint-capacity.js";
 
 /** What the announcer needs: somewhere to publish, and the route to name. */
 export interface MemoryStepEndpointAnnouncerDeps {
-	bus: Pick<SafeEventBus, "emit"> | null;
+	bus: Pick<TelemetryHub, "emit"> | null;
 	/** Canonical endpoint the step calls, or null when the route has none. */
 	endpointKey: string | null;
 	targetId: string;
@@ -96,7 +95,7 @@ export function announceMemoryStepEndpoint<Request extends { signal: AbortSignal
 			// must not turn a resolved step into a failed one.
 			if (bus !== null) {
 				try {
-					bus.emit(BusChannels.MemoryStepCompleted, { endpointKey, targetId });
+					bus.emit("memory.step_completed", { endpointKey, targetId });
 				} catch {
 					// The safe bus already contains listener errors; this covers the rest.
 				}

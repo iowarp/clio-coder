@@ -2,8 +2,8 @@ import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:asse
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { BusChannels, type DispatchCompletedPayload, type DispatchEnqueuedPayload } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type { DispatchCompletedPayload, DispatchEnqueuedPayload } from "../../src/core/telemetry/live-events.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { resolveToolBudgetEnvelope } from "../../src/domains/dispatch/budget-envelope.js";
 import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
@@ -27,7 +27,6 @@ import {
 	dispatchStatusPresentation,
 	formatTaskIslandLines,
 } from "../../src/interactive/dispatch-board.js";
-
 import { dispatchSegment } from "../../src/interactive/footer-panel.js";
 import { renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
@@ -119,7 +118,7 @@ afterEach(() => {
 });
 
 function setup(readers: TelemetryRunReaders = {}) {
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const projection = createTelemetryProjection(bus, {
 		...readers,
 		sessionCostSummary: emptyCostAggregate,
@@ -129,9 +128,8 @@ function setup(readers: TelemetryRunReaders = {}) {
 	projections.push(projection);
 	const board = createDispatchBoardStore(projection);
 	const progress = (event: unknown) =>
-		bus.emit(BusChannels.DispatchProgress, { runId: IDENTITY.runId, agentId: IDENTITY.agentId, event });
-	const start = () =>
-		bus.emit(BusChannels.DispatchStarted, { ...IDENTITY, pid: null, assignmentId: IDENTITY.runId, attempt: 0 });
+		bus.emit("run.progressed", { runId: IDENTITY.runId, agentId: IDENTITY.agentId, event });
+	const start = () => bus.emit("run.started", { ...IDENTITY, pid: null, assignmentId: IDENTITY.runId, attempt: 0 });
 	return { bus, projection, board, progress, start };
 }
 
@@ -185,26 +183,26 @@ describe("dispatch board uses the telemetry projection", () => {
 	it("publishes all five dispatch events and evidenceReady through one fold", async () => {
 		const { bus, projection, board, progress, start } = setup();
 		for (const channel of [
-			BusChannels.DispatchEnqueued,
-			BusChannels.DispatchStarted,
-			BusChannels.DispatchProgress,
-			BusChannels.DispatchCompleted,
-			BusChannels.DispatchFailed,
-			BusChannels.AccountabilityEvidenceReady,
-		]) {
+			"run.enqueued",
+			"run.started",
+			"run.progressed",
+			"run.completed",
+			"run.failed",
+			"evidence.assessed",
+		] as const) {
 			strictEqual(bus.listeners(channel).length, 1, `${channel} must have only the projection fold`);
 		}
 		const events = [
-			() => bus.emit(BusChannels.DispatchEnqueued, IDENTITY),
+			() => bus.emit("run.enqueued", IDENTITY),
 			start,
 			() =>
 				progress({
 					type: "message_end",
 					message: { role: "assistant", usage: { input: 4, cacheRead: 2, output: 3, cacheWrite: 1 } },
 				}),
-			() => bus.emit(BusChannels.DispatchCompleted, COMPLETED),
+			() => bus.emit("run.completed", COMPLETED),
 			() =>
-				bus.emit(BusChannels.DispatchFailed, {
+				bus.emit("run.failed", {
 					...COMPLETED,
 					runId: "failed-run",
 					council: undefined,
@@ -213,7 +211,7 @@ describe("dispatch board uses the telemetry projection", () => {
 					outcomeDetail: "check failed",
 				}),
 			() =>
-				bus.emit(BusChannels.AccountabilityEvidenceReady, {
+				bus.emit("evidence.assessed", {
 					runId: IDENTITY.runId,
 					evidenceId: "run-board-run",
 					firstPassSuccess: true,
@@ -251,7 +249,7 @@ describe("dispatch board uses the telemetry projection", () => {
 			"run-board-run",
 		);
 		board.unsubscribe();
-		strictEqual(bus.listeners(BusChannels.DispatchCompleted).length, 1);
+		strictEqual(bus.listeners("run.completed").length, 1);
 	});
 
 	it("preserves every board field through the projection and keeps snapshots immutable", () => {
@@ -263,7 +261,7 @@ describe("dispatch board uses the telemetry projection", () => {
 			readReceipt: () => (receiptAvailable ? { text: "sealed answer", trust } : null),
 		});
 		board.setFleetPhase(IDENTITY.runId, { wave: 3, stepId: "parser" });
-		bus.emit(BusChannels.DispatchEnqueued, IDENTITY);
+		bus.emit("run.enqueued", IDENTITY);
 		start();
 		progress({ type: "attempt_start" });
 		progress({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "working" } });
@@ -280,7 +278,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		strictEqual(board.rows()[0]?.currentTool, "grep");
 		deepStrictEqual(board.rows()[0]?.recentTools, ["read"]);
 		const prior = projection.snapshot();
-		bus.emit(BusChannels.DispatchCompleted, COMPLETED);
+		bus.emit("run.completed", COMPLETED);
 		board.reconcile();
 		const row = board.rows()[0];
 		ok(row);
@@ -350,7 +348,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		if (action) action.tool = "mutated snapshot";
 		ok(!projection.snapshot().runs[0]?.progress?.recentActions.some((action) => action.tool === "mutated snapshot"));
 		receiptAvailable = false;
-		bus.emit(BusChannels.DispatchCompleted, COMPLETED);
+		bus.emit("run.completed", COMPLETED);
 		board.reconcile();
 		strictEqual(board.rows()[0]?.trust, undefined, "a missing receipt must not retain a previous trust verdict");
 	});
@@ -362,7 +360,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		board.reconcile();
 		strictEqual(board.rows()[0]?.status, "running");
 		progress({ type: "heartbeat_status", status: "dead" });
-		bus.emit(BusChannels.DispatchFailed, {
+		bus.emit("run.failed", {
 			...COMPLETED,
 			outcome: "failed",
 			reason: "failed",
@@ -404,7 +402,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		board.reconcile();
 		strictEqual(projection.snapshot().runs[0]?.tokens.total, 15);
 		live.running = [];
-		bus.emit(BusChannels.DispatchFailed, { ...COMPLETED, outcome: "failed", reason: "failed" });
+		bus.emit("run.failed", { ...COMPLETED, outcome: "failed", reason: "failed" });
 		live.retrying.push({
 			runId: IDENTITY.runId,
 			agentId: "coder",
@@ -415,7 +413,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		board.reconcile();
 		strictEqual(projection.snapshot().runs[0]?.status, "retrying");
 		strictEqual(board.activeRows()[0]?.retry?.attempt, 1);
-		bus.emit(BusChannels.RunAborted, {
+		bus.emit("run.aborted", {
 			source: "dispatch_abort",
 			runId: IDENTITY.runId,
 			startedAt: null,
@@ -432,11 +430,11 @@ describe("dispatch board uses the telemetry projection", () => {
 		const { bus, projection, board } = setup();
 		board.unsubscribe();
 		const published = nextPublication(projection);
-		bus.emit(BusChannels.DispatchEnqueued, IDENTITY);
+		bus.emit("run.enqueued", IDENTITY);
 		await published;
 		strictEqual(board.rows().length, 0);
 		strictEqual(projection.snapshot().runs.length, 1);
-		strictEqual(bus.listeners(BusChannels.DispatchEnqueued).length, 1);
+		strictEqual(bus.listeners("run.enqueued").length, 1);
 	});
 
 	it("does not settle worker progress on a rejected receipt's answer", () => {
@@ -447,7 +445,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		const { bus, board, progress, start } = setup({ readReceipt: () => ({ text: "untrusted receipt answer", trust }) });
 		start();
 		progress({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "observed live tail" } });
-		bus.emit(BusChannels.DispatchCompleted, COMPLETED);
+		bus.emit("run.completed", COMPLETED);
 		board.reconcile();
 		strictEqual(board.rows()[0]?.trust?.verdict, "compromised");
 		ok(!board.rows()[0]?.progress?.tailText.includes("untrusted receipt answer"));
@@ -460,8 +458,8 @@ describe("dispatch board uses the telemetry projection", () => {
 		progress({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "still working" } });
 		const published = nextPublication(projection);
 		for (let i = 0; i < MAX_PROJECTION_RUNS + 10; i += 1) {
-			bus.emit(BusChannels.DispatchEnqueued, { ...IDENTITY, runId: `run-${i}` });
-			bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: `run-${i}` });
+			bus.emit("run.enqueued", { ...IDENTITY, runId: `run-${i}` });
+			bus.emit("run.completed", { ...COMPLETED, runId: `run-${i}` });
 		}
 		await published;
 		const active = projection.snapshot().runs.find((run) => run.runId === IDENTITY.runId);
@@ -474,7 +472,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		ok(!board.rows().some((row) => row.runId === "run-0"));
 
 		const settled = nextPublication(projection);
-		bus.emit(BusChannels.DispatchCompleted, COMPLETED);
+		bus.emit("run.completed", COMPLETED);
 		await settled;
 		strictEqual(board.activeRows().length, 0);
 		strictEqual(board.rows().length, MAX_PROJECTION_RUNS);
@@ -490,8 +488,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		strictEqual(canonical.tokens.total, COMPLETED.tokenCount);
 		deepStrictEqual(commonRow(terminal), commonSummary(canonical));
 
-		for (let i = 0; i < MAX_PROJECTION_RUNS; i += 1)
-			bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: `later-${i}` });
+		for (let i = 0; i < MAX_PROJECTION_RUNS; i += 1) bus.emit("run.completed", { ...COMPLETED, runId: `later-${i}` });
 		board.reconcile();
 		strictEqual(board.rows().length, MAX_PROJECTION_RUNS);
 		ok(!board.rows().some((row) => row.runId === IDENTITY.runId), "settled runs eventually age out");
@@ -506,15 +503,15 @@ describe("dispatch board uses the telemetry projection", () => {
 		};
 		const { bus, projection, board, start } = setup({ dispatchSnapshot: () => live });
 		start();
-		bus.emit(BusChannels.DispatchFailed, { ...COMPLETED, outcome: "failed", reason: "failed" });
+		bus.emit("run.failed", { ...COMPLETED, outcome: "failed", reason: "failed" });
 		live.retrying.push({ runId: IDENTITY.runId, agentId: "coder", attempt: 1, dueAt: live.generatedAt, reason: "retry" });
 		board.reconcile();
 		for (let i = 0; i < MAX_PROJECTION_RUNS + 10; i += 1)
-			bus.emit(BusChannels.DispatchFailed, { ...COMPLETED, runId: `failed-${i}`, outcome: "failed", reason: "failed" });
+			bus.emit("run.failed", { ...COMPLETED, runId: `failed-${i}`, outcome: "failed", reason: "failed" });
 		board.reconcile();
 		strictEqual(board.rows().length, MAX_PROJECTION_RUNS + 1);
 		strictEqual(board.activeRows()[0]?.status, "retrying");
-		bus.emit(BusChannels.RunAborted, {
+		bus.emit("run.aborted", {
 			source: "dispatch_abort",
 			runId: IDENTITY.runId,
 			startedAt: null,
@@ -539,8 +536,8 @@ describe("dispatch board uses the telemetry projection", () => {
 			};
 			const { bus, projection, board } = setup({ dispatchSnapshot: () => live });
 			const identity = { ...IDENTITY, runId: "retry-parent" };
-			bus.emit(BusChannels.DispatchStarted, { ...identity, pid: null, assignmentId: identity.runId, attempt: 0 });
-			bus.emit(BusChannels.DispatchFailed, { ...COMPLETED, ...identity, outcome: "failed", reason: "failed" });
+			bus.emit("run.started", { ...identity, pid: null, assignmentId: identity.runId, attempt: 0 });
+			bus.emit("run.failed", { ...COMPLETED, ...identity, outcome: "failed", reason: "failed" });
 			live.retrying.push({
 				runId: identity.runId,
 				agentId: identity.agentId,
@@ -548,14 +545,14 @@ describe("dispatch board uses the telemetry projection", () => {
 				dueAt: live.generatedAt,
 				reason: "transient failure",
 			});
-			bus.emit(BusChannels.DispatchProgress, {
+			bus.emit("run.progressed", {
 				...identity,
 				event: { type: "retry_scheduled", attempt: 1, dueAt: live.generatedAt, reason: "transient failure" },
 			});
 			if (delayedReconcile) {
 				// Other runs settle before the UI's reconciliation tick.
 				for (let i = 0; i < MAX_PROJECTION_RUNS + 10; i += 1)
-					bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: `burst-${i}` });
+					bus.emit("run.completed", { ...COMPLETED, runId: `burst-${i}` });
 				ok(!projection.snapshot().runs.some((run) => run.runId === identity.runId));
 			}
 			board.reconcile();
@@ -565,7 +562,7 @@ describe("dispatch board uses the telemetry projection", () => {
 			strictEqual(board.activeRows().length, 1);
 
 			live.retrying = [];
-			bus.emit(BusChannels.DispatchStarted, {
+			bus.emit("run.started", {
 				...IDENTITY,
 				runId: "retry-child",
 				pid: null,
@@ -573,7 +570,7 @@ describe("dispatch board uses the telemetry projection", () => {
 				attempt: 1,
 			});
 			if (!delayedReconcile) {
-				bus.emit(BusChannels.DispatchProgress, {
+				bus.emit("run.progressed", {
 					...identity,
 					event: {
 						type: "attempt_start",
@@ -592,9 +589,9 @@ describe("dispatch board uses the telemetry projection", () => {
 				board.activeRows().map((run) => run.runId),
 				["retry-child"],
 			);
-			bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: "retry-child" });
+			bus.emit("run.completed", { ...COMPLETED, runId: "retry-child" });
 			for (let i = 0; i < MAX_PROJECTION_RUNS + 10; i += 1)
-				bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, runId: `later-${i}` });
+				bus.emit("run.completed", { ...COMPLETED, runId: `later-${i}` });
 			board.reconcile();
 			strictEqual(board.rows().length, MAX_PROJECTION_RUNS);
 			strictEqual(board.activeRows().length, 0);
@@ -604,8 +601,7 @@ describe("dispatch board uses the telemetry projection", () => {
 
 	it("keeps every queued dispatch even when active work alone exceeds the history limit", () => {
 		const { bus, projection, board } = setup();
-		for (let i = 0; i <= MAX_PROJECTION_RUNS; i += 1)
-			bus.emit(BusChannels.DispatchEnqueued, { ...IDENTITY, runId: `queued-${i}` });
+		for (let i = 0; i <= MAX_PROJECTION_RUNS; i += 1) bus.emit("run.enqueued", { ...IDENTITY, runId: `queued-${i}` });
 		board.reconcile();
 		strictEqual(board.activeRows().length, MAX_PROJECTION_RUNS + 1);
 		strictEqual(projection.snapshot().runs.length, MAX_PROJECTION_RUNS + 1);
@@ -709,7 +705,7 @@ describe("dispatch quality presentation", () => {
 				const { bus, board, start } = setup({ readReceipt: () => ({ trust: inspection.status }) });
 				start();
 				// This is an ordinary parallel dispatch, with no council grouping.
-				bus.emit(BusChannels.DispatchCompleted, { ...COMPLETED, council: undefined });
+				bus.emit("run.completed", { ...COMPLETED, council: undefined });
 				board.reconcile();
 				const row = { ...(board.rows()[0] as DispatchBoardRow) };
 				delete row.council;
@@ -787,7 +783,7 @@ describe("dispatch quality presentation", () => {
 it("keeps shadow runs inspectable while presenting them only as compact helper activity", () => {
 	const { bus, board } = setup();
 	for (let i = 0; i < 4; i++) {
-		bus.emit(BusChannels.DispatchStarted, {
+		bus.emit("run.started", {
 			...IDENTITY,
 			agentId: "scout",
 			agentAudience: "shadow",

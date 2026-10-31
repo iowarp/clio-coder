@@ -11,10 +11,10 @@ import { readToolRounds } from "./types.js";
  * themselves, so no registry is ever built and the sink never fired. The
  * writer had to move to something every dispatch reaches.
  *
- * `BusChannels.DispatchProgress` is that thing. The dispatch domain publishes
+ * `"run.progressed"` is that thing. The dispatch domain publishes
  * it from inside the event pump for every consumer-visible event of every run,
  * "attached, detached, batched, and retry runs, exactly once" (see
- * src/core/bus-events.ts), whether or not anyone iterates the handle. The
+ * src/core/telemetry/live-events.ts), whether or not anyone iterates the handle. The
  * terminal pair `DispatchCompleted`/`DispatchFailed` closes every run the same
  * way. Subscribing here makes the journal a property of dispatching, not of
  * which caller happened to build a registry.
@@ -42,14 +42,13 @@ import { readToolRounds } from "./types.js";
  * (`tool_execution_*`, message and turn boundaries) is not written at all.
  */
 
+import { normalizeClioCoderEventRecord } from "../../core/naming-events.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type {
 	DispatchCompletedPayload,
 	DispatchFailedPayload,
 	DispatchProgressPayload,
-} from "../../core/bus-events.js";
-import { BusChannels } from "../../core/bus-events.js";
-import type { SafeEventBus } from "../../core/event-bus.js";
-import { normalizeClioCoderEventRecord } from "../../core/naming-events.js";
+} from "../../core/telemetry/live-events.js";
 import { normalizeCallUsage } from "../../core/token-split.js";
 import { runTailEntryFromEvent } from "../../tools/dispatch-run-events.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
@@ -268,7 +267,7 @@ interface RunFeedState {
  * do this) never inherits the first one's listeners.
  */
 export function attachRunEventJournalBridge(
-	bus: SafeEventBus,
+	bus: TelemetryHub,
 	options: AttachRunEventJournalBridgeOptions = {},
 ): RunEventJournalBridge {
 	const journal = options.journal ?? defaultRunEventJournal();
@@ -335,7 +334,7 @@ export function attachRunEventJournalBridge(
 	};
 
 	const unsubscribes = [
-		bus.on(BusChannels.DispatchProgress, (payload: DispatchProgressPayload) => {
+		bus.subscribe("run.progressed", (payload: DispatchProgressPayload) => {
 			const identity = runIdentity(payload);
 			if (identity === null || options.acceptRun?.(identity.runId) === false) return;
 			const { runId } = identity;
@@ -386,10 +385,10 @@ export function attachRunEventJournalBridge(
 			const message = isRecord(event) && typeof event.message === "string" ? event.message : undefined;
 			journal.append(runId, entry.detail === undefined && message !== undefined ? { ...entry, detail: message } : entry);
 		}),
-		bus.on(BusChannels.DispatchCompleted, (payload: DispatchCompletedPayload) => {
+		bus.subscribe("run.completed", (payload: DispatchCompletedPayload) => {
 			seal(payload.outcome, payload.outcomeDetail, payload);
 		}),
-		bus.on(BusChannels.DispatchFailed, (payload: DispatchFailedPayload) => {
+		bus.subscribe("run.failed", (payload: DispatchFailedPayload) => {
 			seal(payload.outcome, payload.outcomeDetail, payload);
 		}),
 	];

@@ -5,7 +5,7 @@ sources:
   - "src/core/config.ts"
   - "src/core/defaults.ts"
   - "src/core/settings-layers.ts"
-  - "src/core/bus-events.ts"
+  - "src/core/telemetry/live-events.ts"
   - "src/core/safe-exec.ts"
   - "src/core/settings-controls.ts"
   - "src/core/workspace-files.ts"
@@ -49,7 +49,7 @@ The `src/core/` directory holds the shared foundation modules that every Clio do
 | `src/core/config.ts` | The one strict settings schema: read, validate, write, cross-process lock | `readSettings`, `validateSettings`, `updateSettings`, `applySettingsDelta`, `withSettingsLock` |
 | `src/core/defaults.ts` | Shipped default values and the machine-readable YAML mirror | `DEFAULT_SETTINGS`, `DEFAULT_SETTINGS_YAML`, all `*Settings` interfaces |
 | `src/core/settings-layers.ts` | Four-layer merge (built-in < user < project < project.local < CLI) with credential stripping and trust verification | `readLayeredSettings`, `readStrictLayeredSettings`, `updateLayeredSettings`, `updateProjectLocalSettings` |
-| `src/core/bus-events.ts` | Canonical event-bus channel names and compile-time payload contracts | `BusChannels`, `BusPayloadMap`, `BusPayloadMapCoversAllChannels` |
+| `src/core/telemetry/live-events.ts` | Canonical event-bus channel names and compile-time payload contracts | `BusChannels`, `BusPayloadMap`, `BusPayloadMapCoversAllChannels` |
 | `src/core/safe-exec.ts` | Sandbox subprocess runner with process-group teardown, output capping, UTF-8 boundary handling | `runCommandVector`, `createProcessGroupCleanup`, `buildSafeToolEnv`, `createRetainedStreamWindow` |
 | `src/core/settings-controls.ts` | UI-facing settings catalog with labels, descriptions, and value parsing/validation | `SETTING_CONTROLS`, `applyControlValue`, `settingControl` |
 | `src/core/workspace-files.ts` | Git-first workspace file enumeration with bounded fallback walk | `enumerateWorkspaceFiles`, `enumerateWorkspaceFilesAsync`, `filterWorkspaceFileCandidates` |
@@ -90,7 +90,7 @@ Project layers are committed team configuration and must stay secrets-free. `str
 
 ## Event bus contracts
 
-`src/core/bus-events.ts` is the canonical registry of event-bus channel names and their payload contracts. `BusChannels` is a const object with one key per channel (e.g., `BusChannels.ConfigHotReload = "config.hotReload"`). Downstream code imports from this file rather than hard-coding string literals so renames are a single edit.
+`src/core/telemetry/live-events.ts` is the canonical registry of event-bus channel names and their payload contracts. `BusChannels` is a const object with one key per channel (e.g., `BusChannels.ConfigHotReload = "config.hotReload"`). Downstream code imports from this file rather than hard-coding string literals so renames are a single edit.
 
 `BusPayloadMap` is a type that maps each channel to its payload interface. The shared bus types `emit`/`on` against this map, so payload drift between an emitter and this file is a compile error. The type `BusPayloadMapCoversAllChannels` is an exhaustiveness tripwire: adding a member to `BusChannels` without registering its payload in `BusPayloadMap` fails to typecheck.
 
@@ -177,7 +177,7 @@ Config domain update(mutate)
   -> ConfigContract.update returns effective settings
   -> diffSettings(prev, next)               // src/domains/config/classify.ts
   -> dispatch("hotReload"/"nextTurn"/"restartRequired")
-     -> bus.emit(BusChannels.ConfigHotReload, payload)  // src/core/bus-events.ts
+     -> bus.emit(BusChannels.ConfigHotReload, payload)  // src/core/telemetry/live-events.ts
 ```
 
 ### Session routing flow
@@ -199,7 +199,7 @@ Routing change (e.g., Shift+Tab)
 ## Extension seams
 
 - **Adding a settings key**: Add to `DEFAULT_SETTINGS` in `src/core/defaults.ts`, mirror in `DEFAULT_SETTINGS_YAML`, add to the `unknownKeys` allowlist in `src/core/config.ts`, classify timing in `src/domains/config/classify.ts`, and add rows to the documentation tables.
-- **Adding a bus channel**: Add a member to `BusChannels` in `src/core/bus-events.ts` and register its payload in `BusPayloadMap`. The `BusPayloadMapCoversAllChannels` exhaustiveness check will fail if either is forgotten.
+- **Adding a bus channel**: Add a member to `BusChannels` in `src/core/telemetry/live-events.ts` and register its payload in `BusPayloadMap`. The `BusPayloadMapCoversAllChannels` exhaustiveness check will fail if either is forgotten.
 - **Adding a UI control**: The control catalog in `src/core/settings-controls.ts` is derived from the schema automatically. For custom labels and help, add entries to `SETTINGS_LABELS_BY_ID`, `SETTINGS_DESCRIPTIONS_BY_ID`, and `SETTINGS_HELP_BY_ID`. For structured JSON controls, add the path to the `STRUCTURED` set.
 - **Adding a workspace exclusion**: Add the directory name to `WORKSPACE_EXCLUDED_DIRS` in `src/core/workspace-files.ts`.
 

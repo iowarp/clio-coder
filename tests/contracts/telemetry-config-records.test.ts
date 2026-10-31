@@ -1,12 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
 import { it } from "node:test";
-import type { ConfigChangePayload } from "../../src/core/bus-events.js";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type { ConfigChangePayload } from "../../src/core/telemetry/live-events.js";
 import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
@@ -39,7 +38,7 @@ it("a session writer opens with its settings and journals each change once, with
 		},
 	} as unknown as ConfigContract;
 	const { contract, extension } = createTelemetryBundle({
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		getContract: (name: string) => (name === "config" ? config : undefined),
 	} as DomainContext);
 	const origin = { id: "config-session", cwdHash: "config-repo" };
@@ -91,33 +90,33 @@ it("a session writer opens with its settings and journals each change once, with
 
 it("a session's lifecycle events become session.opened, session.resumed and session.closed records (#434)", async () => {
 	const env = await isolateClioEnv("clio-coder-lifecycle-records-");
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const { extension } = createTelemetryBundle({ bus, getContract: () => undefined } as unknown as DomainContext);
 	const origin = { id: "lifecycle-session", cwdHash: "lifecycle-repo" };
 	try {
 		await extension.start();
-		bus.emit(BusChannels.SessionOpened, { sessionId: origin.id, cwdHash: origin.cwdHash, at: Date.now() });
-		bus.emit(BusChannels.SessionParked, {
+		bus.emit("session.created", { sessionId: origin.id, cwdHash: origin.cwdHash, at: Date.now() });
+		bus.emit("session.parked", {
 			sessionId: origin.id,
 			reason: "resume_other",
 			cwdHash: origin.cwdHash,
 			at: Date.now(),
 		});
-		bus.emit(BusChannels.SessionResumed, {
+		bus.emit("session.reattached", {
 			sessionId: origin.id,
 			via: "resume",
 			cwdHash: origin.cwdHash,
 			at: Date.now(),
 		});
 		// Without the workspace hash there is no journal to name; nothing is recorded and nothing throws.
-		bus.emit(BusChannels.SessionParked, { sessionId: origin.id, reason: "close", at: Date.now() });
+		bus.emit("session.parked", { sessionId: origin.id, reason: "close", at: Date.now() });
 		// Shutdown stops this domain before the session domain parks the live session, so stop() journals its close.
 		const live = { id: "lifecycle-live", cwdHash: origin.cwdHash };
-		bus.emit(BusChannels.SessionOpened, { sessionId: live.id, cwdHash: live.cwdHash, at: Date.now() });
+		bus.emit("session.created", { sessionId: live.id, cwdHash: live.cwdHash, at: Date.now() });
 		// An edit for this session alone is journaled into its journal with the surface and scope that made it.
 		const sessionAfter = structuredClone(DEFAULT_SETTINGS);
 		sessionAfter.chat.thinkingLevel = "high";
-		bus.emit(BusChannels.ConfigSessionChanged, {
+		bus.emit("config.session_changed", {
 			sessionId: live.id,
 			diff: { hotReload: [], nextTurn: ["chat.thinkingLevel"], restartRequired: [] },
 			settings: sessionAfter,

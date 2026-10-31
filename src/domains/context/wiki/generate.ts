@@ -13,7 +13,7 @@ import {
 	writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ContextActivityPayload } from "../../../core/bus-events.js";
+import type { ContextActivityPayload } from "../../../core/telemetry/live-events.js";
 import type { DecisionLedgerEntry } from "../../session/entries.js";
 import { detectProjectType } from "../../session/workspace/project-type.js";
 import type { BootstrapProgressSink } from "../bootstrap.js";

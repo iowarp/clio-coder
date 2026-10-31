@@ -1,10 +1,10 @@
-import { BusChannels, type ConfigChangeSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import { nextOutputStyle } from "../core/defaults.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import { recordHarnessFeature } from "../core/harness-profile.js";
 import { readClioVersion } from "../core/package-root.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { ConfigChangeSource } from "../core/telemetry/live-events.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -136,7 +136,7 @@ export * from "./overlay-lifecycle.js";
 
 export interface InteractiveDeps {
 	getConnections?: () => { mcp: string[]; plugins: string[] };
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	providers: ProvidersContract;
 	dispatch: DispatchContract;
 	agents?: AgentsContract;
@@ -2050,15 +2050,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	});
 
 	const operatorSubscriptions = operatorExtensions
-		? [
-				BusChannels.SessionStart,
-				BusChannels.SessionEnd,
-				BusChannels.SessionParked,
-				BusChannels.SessionResumed,
-				BusChannels.SessionTurnSwitched,
-			]
+		? (["session.started", "session.ended", "session.parked", "session.reattached", "session.turn_switched"] as const)
 				.map((channel) =>
-					deps.bus.on(channel, () => operatorExtensions.invalidateContext(channel === BusChannels.SessionResumed)),
+					deps.bus.subscribe(channel, () => operatorExtensions.invalidateContext(channel === "session.reattached")),
 				)
 				.concat(subscribeExtensionObservations(deps.bus, (observation) => operatorExtensions.observeV2(observation)))
 		: [];

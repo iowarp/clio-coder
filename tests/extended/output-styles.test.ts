@@ -1,9 +1,8 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS, nextOutputStyle, type OutputStyle } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
 import { ScrollView, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
@@ -223,7 +222,7 @@ test("concurrent tools retain their actual running state after a sibling settles
 });
 
 test("background worker lifecycle does not overwrite the main agent phase", () => {
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	let emit: (event: never) => void = () => {};
 	const controller = createStatusController({
 		chat: {
@@ -244,10 +243,10 @@ test("background worker lifecycle does not overwrite the main agent phase", () =
 	try {
 		emit({ type: "agent_start" } as never);
 		emit({ type: "text_delta", delta: "writing" } as never);
-		bus.emit(BusChannels.DispatchStarted, { runId: "one" } as never);
-		bus.emit(BusChannels.DispatchStarted, { runId: "two" } as never);
+		bus.emit("run.started", { runId: "one" } as never);
+		bus.emit("run.started", { runId: "two" } as never);
 		strictEqual(controller.current().phase, "writing");
-		bus.emit(BusChannels.DispatchCompleted, { runId: "one" } as never);
+		bus.emit("run.completed", { runId: "one" } as never);
 		strictEqual(controller.current().phase, "writing");
 	} finally {
 		controller.dispose();

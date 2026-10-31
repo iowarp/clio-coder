@@ -26,7 +26,7 @@ import { renderCostAmount } from "../domains/telemetry/cost.js";
  *     else.
  *   - Task text is operator-supplied and worker-adjacent, so it is sanitized
  *     and bounded before rendering, per the `DispatchRunIdentity` warning in
- *     src/core/bus-events.ts:524. Journal event details cross the same seam and
+ *     src/core/telemetry/live-events.ts. Journal event details cross the same seam and
  *     get the same treatment.
  *
  * Terminal primitives come from src/engine/tui-primitives.ts, never from the

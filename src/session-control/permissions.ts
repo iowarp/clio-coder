@@ -1,6 +1,5 @@
-import type { PermissionResolvedPayload } from "../core/bus-events.js";
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { PermissionResolvedPayload } from "../core/telemetry/live-events.js";
 import type { ActionClass } from "../domains/safety/action-classifier.js";
 import { UNATTENDED_DECIDED_BY } from "../domains/safety/unattended.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -16,12 +15,12 @@ export interface PermissionResolution {
 
 export function resolvePermission(
 	ports: {
-		bus?: Pick<SafeEventBus, "emit">;
+		bus?: Pick<TelemetryHub, "emit">;
 		registry?: Pick<ToolRegistry, "resumeParkedCalls" | "cancelParkedCall" | "cancelParkedCalls">;
 	},
 	resolution: PermissionResolution,
 ): Promise<void> | void {
-	ports.bus?.emit(BusChannels.PermissionResolved, resolution.payload);
+	ports.bus?.emit("approval.resolved", resolution.payload);
 	resolution.beforeRelease?.();
 	const reason = resolution.reason ?? resolution.payload.reason ?? "permission denied";
 	switch (resolution.action) {

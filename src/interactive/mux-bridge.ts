@@ -19,8 +19,8 @@
  * surfaces. Pane ownership policy lives in `pane-policy.ts`.
  */
 
-import { type AgentStatusChangedPayload, BusChannels, type DispatchRunIdentity } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { AgentStatusChangedPayload, DispatchRunIdentity } from "../core/telemetry/live-events.js";
 import type { MuxContract, MuxLog } from "../domains/mux/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 
@@ -42,7 +42,7 @@ export type PanesNotificationsPolicy = "failures" | "all" | "off";
 type BridgeRunOutcome = "succeeded" | "failed" | "canceled" | "timed_out";
 
 export interface MuxBridgeDeps {
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	mux: MuxContract;
 	/** Read live so a `/settings` change takes effect on the next terminal run. */
 	notificationsPolicy: () => PanesNotificationsPolicy;
@@ -169,20 +169,20 @@ export function createMuxBridge(deps: MuxBridgeDeps): MuxBridge {
 	};
 
 	const unsubscribers = [
-		deps.bus.on(BusChannels.DispatchStarted, (payload) => {
+		deps.bus.subscribe("run.started", (payload) => {
 			startedAt.set(payload.runId, now());
 		}),
-		deps.bus.on(BusChannels.DispatchCompleted, (payload) => {
+		deps.bus.subscribe("run.completed", (payload) => {
 			onTerminal(payload, payload.outcome, { durationMs: payload.durationMs, detail: payload.outcomeDetail });
 		}),
-		deps.bus.on(BusChannels.DispatchFailed, (payload) => {
+		deps.bus.subscribe("run.failed", (payload) => {
 			onTerminal(payload, payload.reason, { durationMs: payload.durationMs, detail: payload.outcomeDetail });
 		}),
 		// SA-3. The interactive status machine is the one surface that already
 		// knows when a turn starts, when it ends, and when a tool call is parked
 		// on an approval, so the self-report rides its transitions rather than
 		// growing a second turn-lifecycle listener.
-		deps.bus.on(BusChannels.AgentStatusChanged, (payload) => {
+		deps.bus.subscribe("agent.status_changed", (payload) => {
 			const state = selfStateFor(payload.phase);
 			if (state === reportedSelf && pendingSelf === null) return;
 			pendingSelf = state;

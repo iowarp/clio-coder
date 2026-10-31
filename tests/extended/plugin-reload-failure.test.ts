@@ -3,10 +3,10 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BusChannels, type PluginsReloadedPayload } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type { PluginsReloadedPayload } from "../../src/core/telemetry/live-events.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
 import { clearPluginSnapshots, disablePlugin, installPlugin, removePlugin } from "../../src/domains/plugins/index.js";
@@ -22,7 +22,7 @@ const recipe = readFileSync(
 it("refreshes agent recipes and prompt inputs only on plugin resource reload", async () => {
 	const env = await isolateClioEnv("clio-coder-reload-ownership-");
 	const originalCwd = process.cwd();
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const config: ConfigContract = {
 		get: () => structuredClone(DEFAULT_SETTINGS),
 		onChange: () => () => {},
@@ -51,7 +51,7 @@ it("refreshes agent recipes and prompt inputs only on plugin resource reload", a
 		strictEqual(agents.contract.get("reload-owned-agent"), null);
 		strictEqual(agents.contract.revision(), revision);
 		strictEqual(prompts.contract.inputEpoch(), epoch);
-		bus.emit(BusChannels.PluginsReloaded, generation);
+		bus.emit("plugin.reloaded", generation);
 		ok(agents.contract.get("reload-owned-agent"));
 		ok(agents.contract.revision() > revision);
 		ok(prompts.contract.inputEpoch() !== epoch);
@@ -82,7 +82,7 @@ for (const mutation of ["disable", "remove"] as const) {
 	it(`withdraws ${mutation}d cached package authority after namespace failure and retries an unchanged snapshot`, async () => {
 		const env = await isolateClioEnv(`clio-coder-reload-failure-${mutation}-`);
 		const originalCwd = process.cwd();
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		let delegates = [{ id: "reload-clash", command: "fixture", args: [] }];
 		const config: ConfigContract = {
 			get: () => {
@@ -122,7 +122,7 @@ for (const mutation of ["disable", "remove"] as const) {
 			const reload = () =>
 				reloadPluginResourcesAndNotify(cwd, (event) => {
 					events.push(event);
-					bus.emit(BusChannels.PluginsReloaded, event);
+					bus.emit("plugin.reloaded", event);
 				});
 			reload();
 			strictEqual(agents.contract.get("reload-active-agent"), null);
@@ -150,7 +150,7 @@ for (const mutation of ["disable", "remove"] as const) {
 it("keeps boot recipes across the first reload only when it commits the projection start verified", async () => {
 	const env = await isolateClioEnv("clio-coder-reload-boot-digest-");
 	const originalCwd = process.cwd();
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const config: ConfigContract = { get: () => structuredClone(DEFAULT_SETTINGS), onChange: () => () => {} };
 	const context: DomainContext = { bus, getContract: (() => config) as DomainContext["getContract"] };
 	const events: PluginsReloadedPayload[] = [];
@@ -164,7 +164,7 @@ it("keeps boot recipes across the first reload only when it commits the projecti
 	const reload = (cwd: string) =>
 		reloadPluginResourcesAndNotify(cwd, (event) => {
 			events.push(event);
-			bus.emit(BusChannels.PluginsReloaded, event);
+			bus.emit("plugin.reloaded", event);
 		});
 	try {
 		const cwd = join(env.dir, "workspace");

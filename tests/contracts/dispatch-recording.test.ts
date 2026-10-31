@@ -3,10 +3,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
@@ -36,15 +35,14 @@ const node = { id: "seven", kind: "ssh" as const, host: "fixture.invalid" };
 it("records display events without input, raw tools, reasoning, or worker protocol wrapping", () => {
 	let clock = 0;
 	const journal = createRecordingJournal({ nowMs: () => clock });
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const bridge = attachRunEventJournalBridge(bus, {
 		journal,
 		nowMs: () => clock,
 		acceptRun: (id) => journal.accepts(id),
 	});
 	journal.start("fixture", node);
-	const event = (event: unknown) =>
-		bus.emit(BusChannels.DispatchProgress, { runId: "fixture", agentId: "coder", event });
+	const event = (event: unknown) => bus.emit("run.progressed", { runId: "fixture", agentId: "coder", event });
 	event({ type: "tool_execution_start", args: { password: "raw-tool-secret" } });
 	event({ type: "thinking_delta", delta: "private reasoning must not appear" });
 	event({ type: "text_delta", delta: "warning: password=abcd" });
@@ -354,10 +352,10 @@ it("dispatch preserves the explicit capture option with journal history disabled
 });
 
 it("run event journal keeps the per-call cacheReadReported flag through a write and read", () => {
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const bridge = attachRunEventJournalBridge(bus, {});
 	const send = (usage: Record<string, unknown>) =>
-		bus.emit(BusChannels.DispatchProgress, {
+		bus.emit("run.progressed", {
 			runId: "cache-flag",
 			agentId: "coder",
 			event: { type: "message_end", message: { role: "assistant", usage } },

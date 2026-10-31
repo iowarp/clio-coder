@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { ClioSettings } from "../core/config.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
@@ -80,7 +80,7 @@ export interface OverlayGeneralOpenersDeps {
 	getSessionId?: () => string | null;
 	getContextLedger: () => ContextLedger;
 	contextChat: NonNullable<OpenContextOverlayOptions["chat"]>;
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	onContextClear?: (options: ContextClearCommandOptions) => Promise<void> | void;
 	stderr: (text: string) => void;
 	refreshFooter: () => void;

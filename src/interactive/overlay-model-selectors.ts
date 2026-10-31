@@ -1,6 +1,6 @@
 import type { ClioSettings } from "../core/config.js";
 import type { ThinkingLevel } from "../core/defaults.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { InteropProposal } from "../domains/interop/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
@@ -22,7 +22,7 @@ export interface OverlayModelSelectorsDeps {
 	tui: TUI;
 	transitions: Pick<OverlayTransitions, "state" | "handle">;
 	providers: ProvidersContract;
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	refreshFooter: Pick<FooterDashboardPanel, "refresh">["refresh"];
 	notify: (level: InteractiveNoticeLevel, text: string, key?: string) => void;
 	closeOverlay: () => void;

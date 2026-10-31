@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BusChannels, type PermissionResolvedPayload } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type { PermissionResolvedPayload } from "../../src/core/telemetry/live-events.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { CALL_TARGET_MAX_CHARS, describeCallTarget } from "../../src/domains/safety/call-target.js";
 import { UNATTENDED_ALLOWED_BY } from "../../src/domains/safety/unattended.js";
@@ -247,9 +247,9 @@ function unattendedFixture(windowMs: number) {
 	const clock = manualTimers();
 	const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "default" });
 	registry.register(writeTool);
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const resolved: PermissionResolvedPayload[] = [];
-	bus.on(BusChannels.PermissionResolved, (payload) => {
+	bus.subscribe("approval.resolved", (payload) => {
 		resolved.push(payload);
 	});
 	const notices: string[] = [];

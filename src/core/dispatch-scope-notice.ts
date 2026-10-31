@@ -1,5 +1,5 @@
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import type { DispatchScopeNoticePayload } from "./bus-events.js";
+import type { DispatchScopeNoticePayload } from "./telemetry/live-events.js";
 
 /**
  * The scope notice every operator surface projects. The terminal, the headless

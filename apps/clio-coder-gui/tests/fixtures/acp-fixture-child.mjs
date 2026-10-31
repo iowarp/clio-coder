@@ -456,12 +456,12 @@ const heldWorker = async () => {
 		status: "in_progress",
 		rawInput: { agent: "scout", task: "Survey the fixture" },
 	});
-	event("dispatch.enqueued", identity);
-	event("dispatch.started", identity);
+	event("run.enqueued", identity);
+	event("run.started", identity);
 	const stopped = await new Promise((resolve) => liveRuns.set(runId, resolve));
 	liveRuns.delete(runId);
 	const reason = stopped ? "operator_cancel" : "turn_cancelled";
-	event("dispatch.failed", { runId, agentId: "scout", outcome: "cancelled", reason, durationMs: 25 }, true);
+	event("run.failed", { runId, agentId: "scout", outcome: "cancelled", reason, durationMs: 25 }, true);
 	const message = `dispatch failed: run ${runId} was cancelled (${reason})`;
 	update({
 		sessionUpdate: "tool_call_update",
@@ -492,7 +492,7 @@ const fleet = () => {
 	};
 	for (const [kind, payload] of [
 		[
-			"safety.loopBlocked",
+			"safety.loop_blocked",
 			{
 				toolCallId: null,
 				tool: "read",
@@ -504,11 +504,11 @@ const fleet = () => {
 				shape: null,
 			},
 		],
-		["dispatch.enqueued", identity],
-		["dispatch.started", identity],
-		["dispatch.progress", { runId: "run-1", agentId: "worker-1", progressCount: 1, truncated: false }],
+		["run.enqueued", identity],
+		["run.started", identity],
+		["run.progressed", { runId: "run-1", agentId: "worker-1", progressCount: 1, truncated: false }],
 		[
-			"dispatch.completed",
+			"run.completed",
 			{
 				runId: "run-1",
 				agentId: "worker-1",
@@ -521,20 +521,20 @@ const fleet = () => {
 				tokenDisplay: "23",
 			},
 		],
-		["dispatch.failed", { runId: "run-2", agentId: "worker-2", outcome: "error", reason: "tool_failed", durationMs: 12 }],
+		["run.failed", { runId: "run-2", agentId: "worker-2", outcome: "error", reason: "tool_failed", durationMs: 12 }],
 		[
-			"accountability.evidenceReady",
+			"evidence.assessed",
 			{ runId: "run-1", evidenceId: "evidence-1", firstPassSuccess: true, findingCount: 2, tags: ["fixture"] },
 		],
-		["compaction.end", { trigger: "threshold" }],
-		["context.warning", { warning: "Context window is 85% full." }],
+		["compaction.ended", { trigger: "threshold" }],
+		["context.warning_raised", { warning: "Context window is 85% full." }],
 		[
-			"safety.toolBudgetExceeded",
+			"safety.tool_budget_exceeded",
 			{ tool: "bash", callsThisTurn: 41, softBudget: 40, hardCeiling: 60, interrupted: false },
 		],
-		["provider.health", { targetId: "fixture", status: "degraded", available: true, latencyMs: 5 }],
+		["provider.health_changed", { targetId: "fixture", status: "degraded", available: true, latencyMs: 5 }],
 		[
-			"dispatch.scopeNotice",
+			"run.scope_notice_raised",
 			{ code: "write_root_dot_unconfined", level: "warning", message: "[dispatch scope] a root of '.' set no boundary." },
 		],
 		// Not in ACP_TO_WEB_EVENT. A newer engine's kind must be dropped, not kill
@@ -550,7 +550,7 @@ const fleet = () => {
 				turnId: null,
 				sequence: ++eventSequence,
 				kind,
-				terminal: ["dispatch.completed", "dispatch.failed", "accountability.evidenceReady"].includes(kind),
+				terminal: ["run.completed", "run.failed", "evidence.assessed"].includes(kind),
 				payload: { ...payload, excludedProviderBody: "private" },
 			},
 		});
@@ -570,7 +570,7 @@ async function handle(frame) {
 				if (
 					!Array.isArray(kinds) ||
 					kinds.length !== 14 ||
-					!kinds.includes("context.activity") ||
+					!kinds.includes("context.activity_changed") ||
 					!kinds.includes("job.changed")
 				)
 					throw Error("event_opt_in");
@@ -676,7 +676,7 @@ async function handle(frame) {
 				};
 				if (ROUTE)
 					setTimeout(
-						() => event("provider.health", { targetId: "fixture", status: "healthy", available: true, latencyMs: 5 }),
+						() => event("provider.health_changed", { targetId: "fixture", status: "healthy", available: true, latencyMs: 5 }),
 						50,
 					);
 				break;
@@ -1301,7 +1301,7 @@ async function handle(frame) {
 					settle(true);
 					result = { accepted: true };
 				} else {
-					event("dispatch.progress", { runId, agentId: "scout", progressCount: 1, truncated: false });
+					event("run.progressed", { runId, agentId: "scout", progressCount: 1, truncated: false });
 					result = { accepted: true };
 				}
 				break;

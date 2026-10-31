@@ -1,7 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 
@@ -53,7 +52,12 @@ const chat: AcpServerChat = {
 	getSessionId: () => null,
 };
 
-const HEALTH_KINDS = ["compaction.end", "context.warning", "safety.toolBudgetExceeded", "provider.health"];
+const HEALTH_KINDS = [
+	"compaction.ended",
+	"context.warning_raised",
+	"safety.tool_budget_exceeded",
+	"provider.health_changed",
+];
 
 function eventsOf(peer: ReturnType<typeof fakeTransport>): Array<Record<string, unknown>> {
 	return peer.notifications
@@ -62,7 +66,7 @@ function eventsOf(peer: ReturnType<typeof fakeTransport>): Array<Record<string, 
 }
 
 async function openSession(kinds: ReadonlyArray<string>) {
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const peer = fakeTransport();
 	const served = serveClioAcpAgent({ transport: peer.transport, chat, bus, cwd: process.cwd() });
 	const init = (await peer.call("initialize", {
@@ -80,25 +84,19 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 		strictEqual(announced.length, 14);
 		ok(announced.includes("job.changed"));
 		for (const kind of HEALTH_KINDS) ok(announced.includes(kind), `${kind} is not announced`);
-		// The bus channel table is the vocabulary; a renamed kind would hide the
-		// producer from anyone grepping a captured frame.
-		strictEqual(BusChannels.CompactionEnd, "compaction.end");
-		strictEqual(BusChannels.ContextWarning, "context.warning");
-		strictEqual(BusChannels.ToolBudgetExceeded, "safety.toolBudgetExceeded");
-		strictEqual(BusChannels.ProviderHealth, "provider.health");
 		peer.transport.close();
 		strictEqual(await served, 0);
 	});
 
 	it("forwards compaction and a context warning with its clearing edge intact", async () => {
 		const { bus, peer, served, sessionId } = await openSession(HEALTH_KINDS);
-		bus.emit(BusChannels.CompactionEnd, { trigger: "threshold", at: Date.now() });
-		bus.emit(BusChannels.ContextWarning, { warning: "Context window is 85% full." });
-		bus.emit(BusChannels.ContextWarning, { warning: null });
+		bus.emit("compaction.ended", { trigger: "threshold", at: Date.now() });
+		bus.emit("context.warning_raised", { warning: "Context window is 85% full." });
+		bus.emit("context.warning_raised", { warning: null });
 
 		const events = eventsOf(peer);
 		strictEqual(events.length, 3);
-		strictEqual(events[0]?.kind, "compaction.end");
+		strictEqual(events[0]?.kind, "compaction.ended");
 		strictEqual(events[0]?.sessionId, sessionId);
 		strictEqual(events[0]?.terminal, false);
 		// `at` is a producer timestamp the client would only re-stamp on arrival.
@@ -107,7 +105,7 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 		// The clear has to cross as itself, or a client's banner never comes down.
 		deepStrictEqual(events[2]?.payload, { warning: null });
 		for (const outcome of ["completed", "unchanged", "failed", "cancelled"] as const) {
-			bus.emit(BusChannels.CompactionEnd, { trigger: "threshold", at: Date.now(), outcome });
+			bus.emit("compaction.ended", { trigger: "threshold", at: Date.now(), outcome });
 			deepStrictEqual(eventsOf(peer).at(-1)?.payload, { trigger: "threshold", outcome });
 		}
 		peer.transport.close();
@@ -115,11 +113,10 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 	});
 
 	it("forwards a dispatch scope notice as its code and message, without the path list", async () => {
-		const { bus, peer, served } = await openSession([...HEALTH_KINDS, "dispatch.scopeNotice"]);
-		strictEqual(BusChannels.DispatchScopeNotice, "dispatch.scopeNotice");
+		const { bus, peer, served } = await openSession([...HEALTH_KINDS, "run.scope_notice_raised"]);
 		const message = '[dispatch scope] intent.write_roots "." names the whole workspace, so it sets no write boundary.';
-		bus.emit(BusChannels.DispatchScopeNotice, { code: "write_root_dot_unconfined", level: "warning", message });
-		bus.emit(BusChannels.DispatchScopeNotice, {
+		bus.emit("run.scope_notice_raised", { code: "write_root_dot_unconfined", level: "warning", message });
+		bus.emit("run.scope_notice_raised", {
 			code: "legacy_scope_inferred",
 			level: "warning",
 			agentId: "scout",
@@ -127,10 +124,10 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 			message: "[dispatch scope] a path token was resolved.",
 		});
 		// A payload that is not a scope notice crosses nothing.
-		bus.emit(BusChannels.DispatchScopeNotice, { code: "made_up", level: "warning", message: "x" } as never);
+		bus.emit("run.scope_notice_raised", { code: "made_up", level: "warning", message: "x" } as never);
 		const events = eventsOf(peer);
 		strictEqual(events.length, 2);
-		strictEqual(events[0]?.kind, "dispatch.scopeNotice");
+		strictEqual(events[0]?.kind, "run.scope_notice_raised");
 		deepStrictEqual(events[0]?.payload, { code: "write_root_dot_unconfined", level: "warning", message });
 		deepStrictEqual(events[1]?.payload, {
 			code: "legacy_scope_inferred",
@@ -145,7 +142,7 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 		const { bus, peer, served } = await openSession(HEALTH_KINDS);
 		const budget = { tool: "bash", callsThisTurn: 41, softBudget: 40, hardCeiling: 60, at: Date.now() };
 		// No prompt is running here, and the budget it names is per-turn.
-		bus.emit(BusChannels.ToolBudgetExceeded, { ...budget, interrupted: false });
+		bus.emit("safety.tool_budget_exceeded", { ...budget, interrupted: false });
 		strictEqual(eventsOf(peer).length, 0);
 		peer.transport.close();
 		strictEqual(await served, 0);
@@ -153,7 +150,7 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 
 	it("keeps provider prose behind and forwards only the health taxonomy", async () => {
 		const { bus, peer, served } = await openSession(HEALTH_KINDS);
-		bus.emit(BusChannels.ProviderHealth, {
+		bus.emit("provider.health_changed", {
 			id: "local-lmstudio",
 			status: {
 				available: true,
@@ -175,7 +172,7 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 			latencyMs: 812,
 		});
 		ok(!JSON.stringify(events[0]).includes("sk-must-not-cross"));
-		bus.emit(BusChannels.ProviderHealth, {
+		bus.emit("provider.health_changed", {
 			id: "local-lmstudio",
 			status: {
 				available: false,
@@ -194,10 +191,10 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 	});
 
 	it("sends nothing to a client that opted into the dispatch kinds only", async () => {
-		const { bus, peer, served } = await openSession(["dispatch.completed"]);
-		bus.emit(BusChannels.CompactionEnd, { trigger: "threshold", at: Date.now() });
-		bus.emit(BusChannels.ContextWarning, { warning: "close to full" });
-		bus.emit(BusChannels.ProviderHealth, {
+		const { bus, peer, served } = await openSession(["run.completed"]);
+		bus.emit("compaction.ended", { trigger: "threshold", at: Date.now() });
+		bus.emit("context.warning_raised", { warning: "close to full" });
+		bus.emit("provider.health_changed", {
 			id: "t",
 			status: {
 				available: false,
@@ -212,8 +209,8 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 
 	it("drops a health event whose identity cannot be represented instead of repairing it", async () => {
 		const { bus, peer, served } = await openSession(HEALTH_KINDS);
-		bus.emit(BusChannels.CompactionEnd, { trigger: "thresh\u0007old", at: Date.now() });
-		bus.emit(BusChannels.ProviderHealth, {
+		bus.emit("compaction.ended", { trigger: "thresh\u0007old", at: Date.now() });
+		bus.emit("provider.health_changed", {
 			id: "target",
 			status: {
 				available: true,
@@ -228,9 +225,9 @@ describe("contracts/acp forwards the four session-health kinds", () => {
 });
 
 it("forwards bounded failure codes and reasons for withheld and idle workers", async () => {
-	const { bus, peer, served } = await openSession(["dispatch.failed"]);
+	const { bus, peer, served } = await openSession(["run.failed"]);
 	for (const outcomeCode of ["worker_no_work", "merge_withheld"] as const) {
-		bus.emit(BusChannels.DispatchFailed, {
+		bus.emit("run.failed", {
 			runId: outcomeCode,
 			agentId: "coder",
 			targetId: "fixture",
@@ -259,9 +256,9 @@ it("forwards bounded failure codes and reasons for withheld and idle workers", a
 });
 
 it("words a finished run's tokens with its call coverage, never a partly counted run as whole (#434 §11.3)", async () => {
-	const { bus, peer, served } = await openSession(["dispatch.completed"]);
+	const { bus, peer, served } = await openSession(["run.completed"]);
 	const completed = (runId: string, coverage: Record<string, number>) =>
-		bus.emit(BusChannels.DispatchCompleted, {
+		bus.emit("run.completed", {
 			runId,
 			agentId: "coder",
 			targetId: "fixture",

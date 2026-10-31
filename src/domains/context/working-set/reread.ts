@@ -20,7 +20,7 @@
  * confirm the ref is still evicted on this branch before anything is written.
  */
 
-import type { ContextRecalledPayload } from "../../../core/bus-events.js";
+import type { ContextRecalledPayload } from "../../../core/telemetry/live-events.js";
 import type { SessionEntryInput } from "../../session/contract.js";
 import type { SessionEntry } from "../../session/entries.js";
 import { foldWorkingSet } from "./fold.js";

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import type { ContextActivityKind, ContextActivityPayload, ContextActivityPhase } from "./bus-events.js";
 import { boundedExternalDiagnostic } from "./external-diagnostic.js";
+import type { ContextActivityKind, ContextActivityPayload, ContextActivityPhase } from "./telemetry/live-events.js";
 
 export type ContextOperationOutcome = "completed" | "previewed" | "unchanged" | "cancelled" | "failed";
 export interface ContextOperationFact {
@@ -39,7 +39,7 @@ export interface ContextOperation {
 }
 export const ACP_CONTEXT_STATUS_METHOD = "_clio-coder/context/status";
 /** Invocation reuses commands/invoke with command=context and the existing argv grammar. */
-export const CONTEXT_ACTIVITY_EVENT_KIND = "context.activity";
+export const CONTEXT_ACTIVITY_EVENT_KIND = "context.activity_changed";
 export interface ContextOperationStatus {
 	version: 1;
 	active: ContextActivityPayload | null;

@@ -5,16 +5,11 @@
  */
 
 import { performance } from "node:perf_hooks";
-import {
-	type BudgetAlertPayload,
-	BusChannels,
-	type ConfigChangePayload,
-	type ConfigChangeSource,
-} from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
+import type { BudgetAlertPayload, ConfigChangePayload, ConfigChangeSource } from "../../core/telemetry/live-events.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { TelemetryContract } from "../telemetry/contract.js";
 import {
@@ -102,14 +97,14 @@ export function createSchedulingBundle(
 			// A raise saved to settings, or one made for this session alone, can release a hold (#424, #434).
 			unsubscribes.push(
 				config.onChange("hotReload", noteCeilingChange),
-				context.bus.on(BusChannels.ConfigSessionChanged, noteCeilingChange),
+				context.bus.subscribe("config.session_changed", noteCeilingChange),
 			);
 			unsubscribes.push(
-				context.bus.on(BusChannels.DispatchEnqueued, () => {
+				context.bus.subscribe("run.enqueued", () => {
 					const { verdict, currentUsd } = evaluate();
 					if (verdict !== "under") {
 						const pricing = sessionPricing();
-						context.bus.emit(BusChannels.BudgetAlert, {
+						context.bus.emit("budget.alerted", {
 							level: verdict,
 							currentUsd,
 							ceilingUsd: budget.ceilingUsd,
@@ -190,7 +185,7 @@ export function createSchedulingBundle(
 					};
 					held = { block, since: performance.now() };
 					onBlocked?.(block);
-					context.bus.emit(BusChannels.BudgetAlert, block);
+					context.bus.emit("budget.alerted", block);
 					const crossing = JSON.stringify([telemetry?.sessionId, ceilingUsd]);
 					if (telemetry && !crossings.has(crossing)) {
 						const { currentUsd: spendUsd, pricing: _pricing, ...rest } = block;

@@ -25,15 +25,14 @@ test("saved next-turn settings reach the running guardrail and journal consumers
 				"--eval",
 				`
 				import { existsSync } from "node:fs";
-				import { BusChannels } from ${JSON.stringify(source("core/bus-events.ts"))};
-				import { getSharedBus } from ${JSON.stringify(source("core/shared-bus.ts"))};
+				import { telemetryHub } from ${JSON.stringify(source("core/telemetry/hub.ts"))};
 				import { resolveGuardrail } from ${JSON.stringify(source("core/guardrails.ts"))};
 				import { defaultRunEventJournal, runEventJournalPath } from ${JSON.stringify(source("domains/dispatch/run-event-journal.ts"))};
 				import { createStdioServerTransport } from ${JSON.stringify(source("engine/acp/transport.ts"))};
 				import { bootOrchestrator } from ${JSON.stringify(source("entry/orchestrator.ts"))};
 				const transport = createStdioServerTransport();
 				let observation = 0;
-				getSharedBus().on(BusChannels.ConfigNextTurn, () => {
+				telemetryHub().subscribe("config.next_turn_scheduled", () => {
 					queueMicrotask(() => {
 						const runId = "projection-fixture-" + (++observation);
 						defaultRunEventJournal().open(runId, "fixture");

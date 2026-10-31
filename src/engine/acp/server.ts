@@ -1,4 +1,3 @@
-import type { ContextActivityPayload } from "../../core/bus-events.js";
 import type { ContextOperationStatus } from "../../core/context-operation.js";
 import {
 	ACP_CONTEXT_STATUS_METHOD,
@@ -50,25 +49,25 @@ import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { type BashCommandProgress, combineBashOutput } from "../../core/bash-exec.js";
-import {
-	type AccountabilityEvidenceReadyPayload,
-	type BudgetAlertPayload,
-	BusChannels,
-	type CompactionPayload,
-	type ContextWarningPayload,
-	type DispatchCompletedPayload,
-	type DispatchEnqueuedPayload,
-	type DispatchFailedPayload,
-	type DispatchProgressPayload,
-	type DispatchStartedPayload,
-	type LoopBlockedPayload,
-	type PermissionRequestedPayload,
-	type ProviderHealthPayload,
-	type ToolBudgetExceededPayload,
-} from "../../core/bus-events.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
-import type { SafeEventBus } from "../../core/event-bus.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
+import type {
+	AccountabilityEvidenceReadyPayload,
+	BudgetAlertPayload,
+	CompactionPayload,
+	ContextActivityPayload,
+	ContextWarningPayload,
+	DispatchCompletedPayload,
+	DispatchEnqueuedPayload,
+	DispatchFailedPayload,
+	DispatchProgressPayload,
+	DispatchStartedPayload,
+	LoopBlockedPayload,
+	PermissionRequestedPayload,
+	ProviderHealthPayload,
+	ToolBudgetExceededPayload,
+} from "../../core/telemetry/live-events.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { narrowTurnConstraints, snapshotTurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
@@ -581,7 +580,7 @@ export interface ClioAcpServerOptions {
 	 */
 	hostToolEvents?: { onEvent(handler: (event: AcpServerEvent) => void): () => void };
 	mcpCapabilities?: Pick<McpCapabilitySource, "attachClientServers" | "detachClientServers">;
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	autonomy?: () => AutonomyLevel;
 	/** Shared with the deferred front when the workspace binds after initialize. */
 	handshake?: AcpHandshake;
@@ -1130,10 +1129,10 @@ const ACP_MAX_LIVE_TOOL_CALLS = 128;
  * Bus channels this server is willing to forward over the opt-in
  * `_clio-coder/event` notification. Nothing outside this list is forwardable:
  * the list is the allowlist, and a client's requested kinds are intersected
- * with it rather than trusted. `safety.loopBlocked` was the first member; the
+ * with it rather than trusted. `safety.loop_blocked` was the first member; the
  * dispatch lifecycle joined it so a client can draw a live fleet board from
  * reported facts instead of inferring one from tool titles or timing;
- * `accountability.evidenceReady` follows a run's terminal event once its
+ * `evidence.assessed` follows a run's terminal event once its
  * evidence bundle has landed, so the board can show first-pass success and a
  * finding count without reading Clio's state tree. The last four are the
  * session's own health: without them a client can only infer that context was
@@ -1141,25 +1140,25 @@ const ACP_MAX_LIVE_TOOL_CALLS = 128;
  * turn on volume rather than repetition, or that a target went down, by
  * watching timing and tool titles.
  *
- * Every kind here is the literal `BusChannels` value of the channel it
+ * Every kind here is the literal EVENTS name of the live event it
  * forwards. That is the invariant: a kind is never renamed on the way out, so
  * `grep` finds the producer from the wire frame and a client's kind list and
  * Clio's own channel table cannot drift into two vocabularies.
  */
 const ACP_FORWARDABLE_EVENT_KINDS = [
-	"safety.loopBlocked",
-	"dispatch.enqueued",
-	"dispatch.started",
-	"dispatch.progress",
-	"dispatch.completed",
-	"dispatch.failed",
-	"accountability.evidenceReady",
-	"compaction.end",
-	"context.activity",
-	"context.warning",
-	"safety.toolBudgetExceeded",
-	"provider.health",
-	"dispatch.scopeNotice",
+	"safety.loop_blocked",
+	"run.enqueued",
+	"run.started",
+	"run.progressed",
+	"run.completed",
+	"run.failed",
+	"evidence.assessed",
+	"compaction.ended",
+	"context.activity_changed",
+	"context.warning_raised",
+	"safety.tool_budget_exceeded",
+	"provider.health_changed",
+	"run.scope_notice_raised",
 	"job.changed",
 ] as const;
 
@@ -2599,7 +2598,7 @@ function workerAskAxis(
 function installWorkerAskBridge(
 	input: {
 		transport: AcpJsonRpcPeerTransport;
-		bus?: SafeEventBus;
+		bus?: TelemetryHub;
 		toolCallSnapshot: (wireId: string) => AcpToolCallSnapshot | null;
 		activeSessionId: () => string | null;
 		permissionTimeoutMs: number;
@@ -2618,7 +2617,7 @@ function installWorkerAskBridge(
 	queue.cancelWorkers = () => {
 		for (const settle of waiting.values()) settle();
 	};
-	const unregisterRequested = bus.on(BusChannels.PermissionRequested, (payload: PermissionRequestedPayload) => {
+	const unregisterRequested = bus.subscribe("approval.requested", (payload: PermissionRequestedPayload) => {
 		if (!workers.enabled()) return;
 		const ask = workerAskOf(payload);
 		if (ask === null || waiting.has(ask.requestId)) return;
@@ -2790,7 +2789,7 @@ function installWorkerAskBridge(
 	});
 	// Any resolution of an ask this bridge has not answered itself means the
 	// person's card is stale: the worker timed out, the run ended, or the owner revoked it.
-	const unregisterResolved = bus.on(BusChannels.PermissionResolved, (payload) => {
+	const unregisterResolved = bus.subscribe("approval.resolved", (payload) => {
 		if (typeof payload.requestId === "string") waiting.get(payload.requestId)?.();
 	});
 	return () => {
@@ -2886,7 +2885,7 @@ function decisionMeta(
 function installPermissionBridge(input: {
 	transport: AcpJsonRpcPeerTransport;
 	toolRegistry: ToolRegistry | undefined;
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	activeSessionId: () => string | null;
 	/**
 	 * The wire id of the engine id's most recently opened tool call, or null when
@@ -2974,7 +2973,7 @@ function installPermissionBridge(input: {
 			for (const requestId of queuedRequestIds) {
 				if (requestId === currentRequestId) continue;
 				const details = queuedRequestDetails.get(requestId);
-				input.bus?.emit(BusChannels.PermissionResolved, {
+				input.bus?.emit("approval.resolved", {
 					status: "denied",
 					requestId,
 					origin: "acp-server",
@@ -2988,7 +2987,7 @@ function installPermissionBridge(input: {
 			for (const requestId of queuedRequestIds) {
 				if (requestId === currentRequestId) continue;
 				const details = queuedRequestDetails.get(requestId);
-				input.bus?.emit(BusChannels.PermissionResolved, {
+				input.bus?.emit("approval.resolved", {
 					status: "expired",
 					requestId,
 					origin: "acp-server",
@@ -3737,7 +3736,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 										version: 1,
 										ledger: ACP_CONTEXT_LEDGER_METHOD,
 										status: ACP_CONTEXT_STATUS_METHOD,
-										...(features.bus ? { activity: "context.activity" } : {}),
+										...(features.bus ? { activity: "context.activity_changed" } : {}),
 										...(features.commandsCapability ? { invoke: ACP_COMMANDS_INVOKE_METHOD } : {}),
 									},
 								}
@@ -4152,7 +4151,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	if (options.bus !== undefined) {
 		const bus = options.bus;
 		unsubscribeEvents.push(
-			bus.on(BusChannels.EggsChanged, (payload) => {
+			bus.subscribe("session.eggs_changed", (payload) => {
 				const sessionId = activeSessionId ?? boundSessionId;
 				if (!handshake.initialized || sessionId === null || payload.sessionId !== sessionId) return;
 				options.transport.notify("session/update", {
@@ -4160,7 +4159,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					update: { sessionUpdate: "session_info_update", _meta: { [ACP_EGGS_META_KEY]: payload.active } },
 				});
 			}),
-			bus.on(BusChannels.MemoryGuardianChanged, (payload) => {
+			bus.subscribe("memory.guardian_changed", (payload) => {
 				const sessionId = activeSessionId ?? boundSessionId;
 				if (!handshake.initialized || sessionId === null || payload.sessionId !== sessionId) return;
 				options.transport.notify("session/update", {
@@ -4171,7 +4170,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					},
 				});
 			}),
-			bus.on(BusChannels.BudgetAlert, (payload: BudgetAlertPayload) => {
+			bus.subscribe("budget.alerted", (payload: BudgetAlertPayload) => {
 				// The stop parks the request inside the running prompt, so it crosses
 				// as that prompt's notice chunk, figures beside the text (#424). Between
 				// prompts nothing is parked and the alert has no turn to belong to.
@@ -4182,7 +4181,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				if (frame === null) return;
 				sendUpdate(options.transport, sessionId, active, frame.update, { ...ORCHESTRATOR_UPDATE_META, ...frame.meta });
 			}),
-			bus.on(BusChannels.LoopBlocked, (payload: LoopBlockedPayload) => {
+			bus.subscribe("safety.loop_blocked", (payload: LoopBlockedPayload) => {
 				// Loop blocks describe the turn that is running, so unlike a dispatch
 				// run they are meaningless outside one.
 				if (activePromptState === null) return;
@@ -4200,7 +4199,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				}
 				const tool = safeStoredString(payload.tool, 64).trim();
 				if (tool.length === 0) return;
-				forwardEvent("safety.loopBlocked", safeStoredIdentifier(payload.turnId, ACP_MAX_SESSION_ID_BYTES), false, {
+				forwardEvent("safety.loop_blocked", safeStoredIdentifier(payload.turnId, ACP_MAX_SESSION_ID_BYTES), false, {
 					toolCallId: null,
 					tool,
 					repeatCount: payload.repeatCount,
@@ -4213,11 +4212,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.DispatchEnqueued, (payload: DispatchEnqueuedPayload) => {
+			bus.subscribe("run.enqueued", (payload: DispatchEnqueuedPayload) => {
 				const identity = dispatchIdentity(payload);
 				if (identity === null) return;
 				trackDispatchRun(identity.runId);
-				forwardEvent("dispatch.enqueued", null, false, {
+				forwardEvent("run.enqueued", null, false, {
 					...identity,
 					origin: safeStoredIdentifier(payload.requestOrigin, 64),
 					attempt: null,
@@ -4225,7 +4224,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.DispatchStarted, (payload: DispatchStartedPayload) => {
+			bus.subscribe("run.started", (payload: DispatchStartedPayload) => {
 				const identity = dispatchIdentity(payload);
 				if (identity === null) return;
 				trackDispatchRun(identity.runId);
@@ -4234,7 +4233,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				// segment. Record it and re-announce the call so a client can label
 				// the segment while the worker is still running.
 				attributeRunToToolCall(payload.parentToolCallId, identity);
-				forwardEvent("dispatch.started", null, false, {
+				forwardEvent("run.started", null, false, {
 					...identity,
 					origin: safeStoredIdentifier(payload.requestOrigin, 64),
 					attempt: safeCount(payload.attempt),
@@ -4242,7 +4241,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.DispatchProgress, (payload: DispatchProgressPayload) => {
+			bus.subscribe("run.progressed", (payload: DispatchProgressPayload) => {
 				const identity = dispatchIdentity(payload);
 				if (identity === null) return;
 				const state = trackDispatchRun(identity.runId);
@@ -4253,7 +4252,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				// The worker/ACP event that triggered this crossed a process boundary
 				// and is typed `unknown`; none of it goes on the wire. What a board
 				// needs is that the run is alive and roughly how much it has done.
-				forwardEvent("dispatch.progress", null, false, {
+				forwardEvent("run.progressed", null, false, {
 					runId: identity.runId,
 					agentId: identity.agentId,
 					progressCount: state.count,
@@ -4262,12 +4261,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.DispatchCompleted, (payload: DispatchCompletedPayload) => {
+			bus.subscribe("run.completed", (payload: DispatchCompletedPayload) => {
 				const identity = dispatchIdentity(payload);
 				if (identity === null) return;
 				dispatchProgress.delete(identity.runId);
 				forwardEvent(
-					"dispatch.completed",
+					"run.completed",
 					null,
 					true,
 					{
@@ -4285,12 +4284,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.DispatchFailed, (payload: DispatchFailedPayload) => {
+			bus.subscribe("run.failed", (payload: DispatchFailedPayload) => {
 				const identity = dispatchIdentity(payload);
 				if (identity === null) return;
 				dispatchProgress.delete(identity.runId);
 				forwardEvent(
-					"dispatch.failed",
+					"run.failed",
 					null,
 					true,
 					{
@@ -4310,8 +4309,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.AccountabilityEvidenceReady, (payload: AccountabilityEvidenceReadyPayload) => {
-				// Arrives after dispatch.completed or dispatch.failed for the same run,
+			bus.subscribe("evidence.assessed", (payload: AccountabilityEvidenceReadyPayload) => {
+				// Arrives after run.completed or run.failed for the same run,
 				// so it is terminal too: nothing about that run follows it. The
 				// bundle's prose (findings, overview) stays behind; only the summary
 				// counters the projection itself carries cross, and the tags are
@@ -4323,7 +4322,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					.map((tag) => safeStoredIdentifier(tag, ACP_MAX_EVIDENCE_TAG_BYTES))
 					.filter((tag): tag is string => tag !== null)
 					.slice(0, ACP_MAX_EVIDENCE_TAGS);
-				forwardEvent("accountability.evidenceReady", null, true, {
+				forwardEvent("evidence.assessed", null, true, {
 					runId,
 					evidenceId,
 					firstPassSuccess: payload.firstPassSuccess === true,
@@ -4333,7 +4332,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.ContextActivity, (payload) => {
+			bus.subscribe("context.activity_changed", (payload) => {
 				if (!payload.operation || payload.operation.sessionId !== boundSessionId || payload.operation.cwd !== canonicalCwd)
 					return;
 				const operation = readContextOperation(payload.operation);
@@ -4351,37 +4350,37 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					...(payload.stages === undefined ? {} : { stages: payload.stages }),
 					...(payload.timing === undefined ? {} : { timing: payload.timing }),
 				};
-				forwardEvent("context.activity", null, operation.outcome !== undefined, { ...contextActivity });
+				forwardEvent("context.activity_changed", null, operation.outcome !== undefined, { ...contextActivity });
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.CompactionEnd, (payload: CompactionPayload) => {
+			bus.subscribe("compaction.ended", (payload: CompactionPayload) => {
 				const trigger = safeStoredIdentifier(payload.trigger, 64);
 				if (trigger === null) return;
-				forwardEvent("compaction.end", null, false, {
+				forwardEvent("compaction.ended", null, false, {
 					trigger,
 					...(payload.outcome !== undefined ? { outcome: payload.outcome } : {}),
 				});
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.ContextWarning, (payload: ContextWarningPayload) => {
+			bus.subscribe("context.warning_raised", (payload: ContextWarningPayload) => {
 				// Transition-only upstream, so this is a level edge, not a poll:
 				// `warning: null` is the clear and has to cross as itself rather than
 				// be dropped, or a client's banner never comes down.
 				if (payload.warning !== null && typeof payload.warning !== "string") return;
 				const warning = payload.warning === null ? null : safeStoredString(payload.warning, ACP_MAX_EVENT_TEXT_BYTES);
-				forwardEvent("context.warning", null, false, { warning: warning === "" ? null : warning });
+				forwardEvent("context.warning_raised", null, false, { warning: warning === "" ? null : warning });
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.DispatchScopeNotice, (payload) => {
+			bus.subscribe("run.scope_notice_raised", (payload) => {
 				// The same fields every other surface draws. The message is host-authored
 				// prose about what a dispatch's scope entry did, so it crosses bounded;
 				// the paths a legacy notice lists stay behind.
 				const notice = readDispatchScopeNotice(payload);
 				if (notice === null) return;
-				forwardEvent("dispatch.scopeNotice", null, false, {
+				forwardEvent("run.scope_notice_raised", null, false, {
 					code: notice.code,
 					level: notice.level,
 					message: safeStoredString(notice.message, ACP_MAX_SCOPE_NOTICE_BYTES),
@@ -4389,8 +4388,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.ToolBudgetExceeded, (payload: ToolBudgetExceededPayload) => {
-				// Bound to the turn that is running, like `safety.loopBlocked`: the
+			bus.subscribe("safety.tool_budget_exceeded", (payload: ToolBudgetExceededPayload) => {
+				// Bound to the turn that is running, like `safety.loop_blocked`: the
 				// budget it names is per-turn and means nothing outside one.
 				if (activePromptState === null) return;
 				const callsThisTurn = safeCount(payload.callsThisTurn);
@@ -4399,7 +4398,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				const tool = safeStoredString(payload.tool, 64).trim();
 				if (callsThisTurn === null || softBudget === null || hardCeiling === null || tool.length === 0) return;
 				forwardEvent(
-					"safety.toolBudgetExceeded",
+					"safety.tool_budget_exceeded",
 					safeStoredIdentifier(payload.turnId, ACP_MAX_SESSION_ID_BYTES),
 					payload.interrupted === true,
 					{ tool, callsThisTurn, softBudget, hardCeiling, interrupted: payload.interrupted === true },
@@ -4407,17 +4406,17 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.on(BusChannels.ProviderHealth, (payload: ProviderHealthPayload) => {
+			bus.subscribe("provider.health_changed", (payload: ProviderHealthPayload) => {
 				// `status.lastError` is provider prose that legitimately quotes URLs,
 				// response bodies, and credentials-adjacent detail, so it stays behind
-				// exactly as `dispatch.failed`'s `outcomeDetail` does. What crosses is
+				// exactly as `run.failed`'s `outcomeDetail` does. What crosses is
 				// the taxonomy a retry-visibility row needs.
 				const targetId = safeStoredIdentifier(payload.id, ACP_MAX_TARGET_ID_BYTES);
 				const status = payload.status?.health?.status;
 				if (targetId === null || !(["healthy", "degraded", "unknown", "down"] as ReadonlyArray<unknown>).includes(status)) {
 					return;
 				}
-				forwardEvent("provider.health", null, false, {
+				forwardEvent("provider.health_changed", null, false, {
 					targetId,
 					status,
 					available: payload.status.available === true,
@@ -4442,7 +4441,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	};
 	if (options.bus !== undefined) {
 		unsubscribeEvents.push(
-			options.bus.on(BusChannels.JobChanged, (payload) => {
+			options.bus.subscribe("job.changed", (payload) => {
 				// A job belongs to the session and workspace that created it. The bus is
 				// process-wide, so a frame for any other owner is not this client's.
 				const owner = payload.job?.owner;
@@ -4924,10 +4923,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			// The receipt's call coverage words its token count exactly as the live frame did (#434).
 			const tokens = { tokenCount: safeCount(facts?.tokenCount), ...runTokenCoverage(facts ?? {}) };
 			if (outcome === "succeeded") {
-				forwardEvent("dispatch.completed", null, true, { ...common, ...tokens }, replayMeta);
+				forwardEvent("run.completed", null, true, { ...common, ...tokens }, replayMeta);
 			} else {
 				forwardEvent(
-					"dispatch.failed",
+					"run.failed",
 					null,
 					true,
 					{ ...common, reason: outcome, ...(typeof facts?.tokenCount === "number" ? tokens : {}) },

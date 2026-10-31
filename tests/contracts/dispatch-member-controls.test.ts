@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { setImmediate } from "node:timers/promises";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { runCommandVector } from "../../src/core/safe-exec.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
@@ -246,7 +245,7 @@ describe("dispatch member controls", () => {
 		const timers = holdRetries(context);
 		const f = await fixture(1);
 		const scheduled = deferred<void>();
-		f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
+		f.ctx.bus.subscribe("run.progressed", (event) => {
 			if (!isProgressEvent(event.event)) return;
 			if (event.event.type === "retry_scheduled") scheduled.resolve();
 		});
@@ -272,7 +271,7 @@ describe("dispatch member controls", () => {
 		const f = await fixture(1);
 		const scheduled = deferred<void>();
 		const retryStarted = deferred<string>();
-		f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
+		f.ctx.bus.subscribe("run.progressed", (event) => {
 			if (!isProgressEvent(event.event)) return;
 			if (event.event.type === "retry_scheduled") scheduled.resolve();
 			if (event.event.type === "attempt_start") {
@@ -308,7 +307,7 @@ describe("dispatch member controls", () => {
 		const timers = holdRetries(context);
 		const f = await fixture(1);
 		const retryStarted = deferred<string>();
-		f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
+		f.ctx.bus.subscribe("run.progressed", (event) => {
 			if (!isProgressEvent(event.event)) return;
 			if (event.event.type === "attempt_start") {
 				ok(typeof event.event.runId === "string", "attempt_start must identify its attempt");
@@ -367,7 +366,7 @@ describe("dispatch member controls", () => {
 			if (count === 3) abort();
 		});
 		const scheduled = deferred<void>();
-		f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
+		f.ctx.bus.subscribe("run.progressed", (event) => {
 			if (isProgressEvent(event.event) && event.event.type === "retry_scheduled") scheduled.resolve();
 		});
 		try {
@@ -508,7 +507,7 @@ describe("dispatch member controls", () => {
 			await drainMember(a.runId);
 			strictEqual(timers.callbacks.size, 1);
 			const started = deferred<string>();
-			f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
+			f.ctx.bus.subscribe("run.progressed", (event) => {
 				if (isProgressEvent(event.event) && event.event.type === "attempt_start") {
 					ok(typeof event.event.runId === "string");
 					started.resolve(event.event.runId);
@@ -568,7 +567,7 @@ describe("dispatch member controls", () => {
 					: { exitCode: 0, signal: null },
 			);
 		});
-		f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
+		f.ctx.bus.subscribe("run.progressed", (event) => {
 			if (isProgressEvent(event.event) && event.event.type === "retry_scheduled") timers.runNext();
 		});
 		const plan = compileExecutionPlan({
@@ -809,7 +808,7 @@ describe("dispatch member controls", () => {
 			};
 			const reservations = f.contract.reservations;
 			ok(reservations);
-			f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
+			f.ctx.bus.subscribe("run.progressed", (event) => {
 				if (!isProgressEvent(event.event)) return;
 				if (event.event.type === "retry_scheduled" && phase === "admitting") {
 					timers.runNext();
@@ -937,7 +936,7 @@ describe("dispatch member controls", () => {
 		const timers = holdRetries(context);
 		const f = await fixture(2);
 		const scheduled = deferred<"retry">();
-		f.ctx.bus.on(BusChannels.DispatchProgress, (event) => {
+		f.ctx.bus.subscribe("run.progressed", (event) => {
 			if (isProgressEvent(event.event) && event.event.type === "retry_scheduled") scheduled.resolve("retry");
 		});
 		try {

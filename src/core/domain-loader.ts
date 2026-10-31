@@ -14,9 +14,8 @@
  * Extensions are process-local. Contracts are the cross-domain surface.
  */
 
-import { BusChannels } from "./bus-events.js";
-import type { SafeEventBus } from "./event-bus.js";
-import { getSharedBus } from "./shared-bus.js";
+import type { TelemetryHub } from "./telemetry/hub.js";
+import { telemetryHub } from "./telemetry/hub.js";
 import { resolveShutdownHookBudgetMs, runWithBudget, writeShutdownNotice } from "./termination.js";
 
 export interface DomainManifest {
@@ -51,7 +50,7 @@ export interface DomainBundle<TContract extends DomainContract = DomainContract>
 }
 
 export interface DomainContext {
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	getContract<T extends DomainContract = DomainContract>(name: string): T | undefined;
 }
 
@@ -87,7 +86,7 @@ export async function loadDomains(
 	const extensions = new Map<string, DomainExtension>();
 	const loaded: string[] = [];
 	const failed: Array<{ name: string; error: unknown }> = [];
-	const bus = getSharedBus();
+	const bus = telemetryHub();
 
 	const context: DomainContext = {
 		bus,
@@ -148,10 +147,10 @@ export async function loadDomains(
 			await bundle.extension.start();
 			contracts.set(name, bundle.contract);
 			loaded.push(name);
-			bus.emit(BusChannels.DomainLoaded, { name });
+			bus.emit("domain.loaded", { name });
 		} catch (error) {
 			failed.push({ name, error });
-			bus.emit(BusChannels.DomainFailed, { name, error });
+			bus.emit("domain.failed", { name, error });
 			await stop();
 			const message = error instanceof Error ? error.message : String(error);
 			(options.diagnostic ?? ((text: string) => process.stderr.write(text)))(

@@ -1,10 +1,9 @@
-import type { ContextActivityKind } from "../core/bus-events.js";
-import { BusChannels } from "../core/bus-events.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { ContextActivityKind } from "../core/telemetry/live-events.js";
 import type { ContextClearCommandOptions, InitCommandOptions, RunIo } from "../session-control/slash-commands.js";
 
 export interface ContextCommandHandlers {
-	bus: SafeEventBus;
+	bus: TelemetryHub;
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<unknown>;
 	onContextClear?: (options: ContextClearCommandOptions, io?: RunIo) => Promise<unknown>;
 	onContextRefresh?: (io?: RunIo) => Promise<unknown>;
@@ -18,12 +17,12 @@ export interface ContextCommandHandlers {
  * failure before any operation began still reaches the caller.
  */
 async function reportedByOperation(
-	bus: SafeEventBus,
+	bus: TelemetryHub,
 	kind: ContextActivityKind,
 	run: () => Promise<unknown>,
 ): Promise<unknown> {
 	let reported = false;
-	const stop = bus.on(BusChannels.ContextActivity, (event) => {
+	const stop = bus.subscribe("context.activity_changed", (event) => {
 		if (event.kind === kind && event.operation?.outcome !== undefined) reported = true;
 	});
 	try {

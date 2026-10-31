@@ -2,11 +2,10 @@ import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/str
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { settingsPath, updateSettings } from "../../src/core/config.js";
 import { loadDomains } from "../../src/core/domain-loader.js";
 import { readStrictLayeredSettings } from "../../src/core/settings-layers.js";
-import { getSharedBus } from "../../src/core/shared-bus.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { AgentsDomainModule } from "../../src/domains/agents/index.js";
 import { type ConfigContract, ConfigDomainModule, createConfigDomainModule } from "../../src/domains/config/index.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
@@ -78,9 +77,9 @@ test("config validates the actual mutation result before publishing or writing i
 test("a boot-time hold keeps a watched settings write until the agents namespace can admit it", async () => {
 	const scratch = await isolateClioEnv("clio-coder-config-hold-");
 	const originalCwd = process.cwd();
-	const bus = getSharedBus();
+	const bus = telemetryHub();
 	const failures: unknown[] = [];
-	const unsubscribe = bus.on(BusChannels.ConfigReloadFailed, (payload) => {
+	const unsubscribe = bus.subscribe("config.reload_failed", (payload) => {
 		failures.push(payload);
 	});
 	try {

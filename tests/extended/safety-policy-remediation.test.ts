@@ -149,9 +149,9 @@ test("S1-05 config inspect --json exposes effective compiled metadata", () => {
 });
 test("S1-06 usage report reads permission audit rows and emits measured rate", async () => {
 	const { clioStateDir } = await import("../../src/core/xdg.js");
-	const { createSafeEventBus } = await import("../../src/core/event-bus.js");
+	const { createTelemetryHub } = await import("../../src/core/telemetry/hub.js");
 	const { createSessionBundle } = await import("../../src/domains/session/extension.js");
-	const { contract: session } = createSessionBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+	const { contract: session } = createSessionBundle({ bus: createTelemetryHub(), getContract: () => undefined });
 	const meta = session.create({ cwd: root, target: "chat", model: "chat-model" });
 	session.append({
 		parentId: null,

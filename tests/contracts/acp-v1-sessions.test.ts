@@ -2,9 +2,9 @@ import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus, type SafeEventBus } from "../../src/core/event-bus.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { suggestedSessionCostCeilingUsd } from "../../src/domains/scheduling/budget.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
@@ -23,7 +23,7 @@ function fixture(
 	commands?: AcpCommandControl,
 	saveSettings = false,
 	settlement?: { wait: () => Promise<void>; cancel?: () => void },
-	bus?: SafeEventBus,
+	bus?: TelemetryHub,
 	/** The session's journal as the read model folds it, for a test that reads the usage block (#434 §11.3). */
 	telemetry?: () => readonly TelemetryRecord[],
 ) {
@@ -468,7 +468,7 @@ test("a reloaded session replays a finished run's tokens with its receipt's call
 		await loaded.call("initialize", {
 			protocolVersion: 1,
 			clientCapabilities: {
-				_meta: { "clio-coder/events": { version: 1, kinds: ["dispatch.completed", "dispatch.failed"] } },
+				_meta: { "clio-coder/events": { version: 1, kinds: ["run.completed", "run.failed"] } },
 			},
 		});
 		await loaded.call("session/load", { sessionId: "session-1", cwd: loaded.cwd, mcpServers: [] });
@@ -479,7 +479,7 @@ test("a reloaded session replays a finished run's tokens with its receipt's call
 			}),
 			[
 				{
-					kind: "dispatch.completed",
+					kind: "run.completed",
 					runId: "replay-partial",
 					tokenCount: 1_200,
 					apiCalls: 3,
@@ -487,7 +487,7 @@ test("a reloaded session replays a finished run's tokens with its receipt's call
 					tokenDisplay: "≥1,200 (1 call unknown)",
 				},
 				{
-					kind: "dispatch.failed",
+					kind: "run.failed",
 					runId: "replay-failed",
 					tokenCount: 1_200,
 					apiCalls: 2,
@@ -495,7 +495,7 @@ test("a reloaded session replays a finished run's tokens with its receipt's call
 					tokenDisplay: "1,200",
 				},
 				{
-					kind: "dispatch.completed",
+					kind: "run.completed",
 					runId: "replay-legacy",
 					tokenCount: 1_200,
 					apiCalls: null,
@@ -849,7 +849,7 @@ test("ACP carries a session cost ceiling stop as a notice chunk with its figures
 		((frame.update as { content: { text: string } }).content as { text: string }).text;
 	// Live: the alert the admission wait raises inside a prompt crosses as that prompt's chunk,
 	// with the TUI's exact notice text and the raise a client can apply.
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const live = fixture([], undefined, undefined, false, undefined, bus);
 	const alert = { level: "at" as const, currentUsd: 5.0008, ceilingUsd: 5, contextTokens: 12345.4 };
 	try {
@@ -863,13 +863,13 @@ test("ACP carries a session cost ceiling stop as a notice chunk with its figures
 			setting: "safety.limits.sessionCostUsd",
 			replay: true,
 		});
-		bus.emit(BusChannels.BudgetAlert, alert);
+		bus.emit("budget.alerted", alert);
 		strictEqual(live.updates.length, 0, "an alert outside a prompt has no turn to belong to");
 		const opened = (await live.call("session/new", { cwd: live.cwd, mcpServers: [] })) as { sessionId: string };
 		const prompt = live.call("session/prompt", { sessionId: opened.sessionId, prompt: [{ type: "text", text: "Go" }] });
 		await Promise.resolve();
 		const before = live.updates.length;
-		bus.emit(BusChannels.BudgetAlert, alert);
+		bus.emit("budget.alerted", alert);
 		const frame = live.updates[before];
 		if (frame === undefined) throw new Error("the parked prompt sent no budget frame");
 		strictEqual((frame.update as { sessionUpdate: string }).sessionUpdate, "agent_message_chunk");

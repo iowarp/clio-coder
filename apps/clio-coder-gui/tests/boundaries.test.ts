@@ -174,7 +174,7 @@ function violations(file: string, source: string): string[] {
 			if (name === "server/clio/wire-shims.ts") {
 				const sharedContextTypes = new Map([
 					["src/core/context-operation.ts", new Set(["ContextOperation", "ContextOperationFact", "ContextOperationStatus"])],
-					["src/core/bus-events.ts", new Set(["ContextActivityPayload"])],
+					["src/core/telemetry/live-events.ts", new Set(["ContextActivityPayload"])],
 				]);
 				const contextTypes = sharedContextTypes.get(rootTarget);
 				const dtoNames = rootTarget === "src/core/telemetry/dto.ts" ? wireDtoNames : undefined;

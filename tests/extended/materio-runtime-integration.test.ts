@@ -3,8 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
 import { listPlaybooks, parsePlaybook } from "../../src/domains/agents/playbook.js";
 import { parsePlaybookCommands } from "../../src/domains/agents/playbook-commands.js";
@@ -32,7 +31,7 @@ const source = fileURLToPath(new URL("../../library/plugins/materio/", import.me
 it("reloads the actual materials bundle through the interactive slash runtime and refreshes native bound roles", async () => {
 	const env = await isolateClioEnv("clio-coder-materio-runtime-");
 	const originalCwd = process.cwd();
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const agents = createAgentsBundle({ bus, getContract: () => undefined });
 	try {
 		const cwd = join(env.dir, "workspace");
@@ -58,7 +57,7 @@ it("reloads the actual materials bundle through the interactive slash runtime an
 			requestRender() {},
 			reloadPlugins: () => {
 				reloads++;
-				return reloadPluginResourcesAndNotify(cwd, (event) => bus.emit(BusChannels.PluginsReloaded, event));
+				return reloadPluginResourcesAndNotify(cwd, (event) => bus.emit("plugin.reloaded", event));
 			},
 		} as unknown as InteractiveSlashRuntimeDeps);
 		strictEqual(runtime.dispatchCommand("/library reload"), "accepted");

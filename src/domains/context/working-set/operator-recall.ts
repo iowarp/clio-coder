@@ -1,5 +1,5 @@
-import type { ContextActivityPayload } from "../../../core/bus-events.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../../core/context-operation.js";
+
 /**
  * `/context recall <ref>`: the operator's half of working-set recall.
  *
@@ -14,12 +14,12 @@ import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../../../
  * Everything else is identical to the tool path, deliberately: the same
  * `resolveRecall` over the same fold at the same live leaf, the same
  * `contextRecall` ledger entry (with `trigger: "operator"`), and the same
- * `BusChannels.ContextRecalled` publication. A recall is a churn signal
+ * `"context.recalled"` publication. A recall is a churn signal
  * whoever asked for it, and a policy that keeps evicting something a human
  * keeps reading back is a policy worth changing.
  */
 
-import type { ContextRecalledPayload } from "../../../core/bus-events.js";
+import type { ContextActivityPayload, ContextRecalledPayload } from "../../../core/telemetry/live-events.js";
 import type { SessionEntryInput } from "../../session/contract.js";
 import type { SessionEntry } from "../../session/entries.js";
 import type { EvictedState } from "./contract.js";
@@ -36,7 +36,7 @@ export interface OperatorRecallDeps {
 	/** The live append point (`/tree` pin or tree leaf); undefined lets the fold infer it. */
 	activeLeafTurnId(): string | undefined;
 	appendEntry(entry: SessionEntryInput): SessionEntry;
-	/** Publisher for `BusChannels.ContextRecalled`; the runtime supplies the bus. */
+	/** Publisher for `"context.recalled"`; the runtime supplies the bus. */
 	onRecalled?: (payload: ContextRecalledPayload) => void;
 	now?: () => number;
 }

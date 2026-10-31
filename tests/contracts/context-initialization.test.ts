@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { runCommandVector } from "../../src/core/safe-exec.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { runBootstrap } from "../../src/domains/context/bootstrap.js";
 import {
@@ -148,16 +147,16 @@ it("keeps whole parser recipes and deduplicates prose without conflating code op
 });
 
 it("stage completion stays active; only operation completion closes the dock progress", () => {
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const store = createContextActivityStore(bus);
-	bus.emit(BusChannels.ContextActivity, {
+	bus.emit("context.activity_changed", {
 		kind: "context-init",
 		phase: "scan",
 		status: "started",
 		message: "Scanning",
 		at: 100,
 	});
-	bus.emit(BusChannels.ContextActivity, {
+	bus.emit("context.activity_changed", {
 		kind: "context-init",
 		phase: "codewiki",
 		status: "completed",
@@ -170,7 +169,7 @@ it("stage completion stays active; only operation completion closes the dock pro
 	assert.equal(store.active(10_000), true);
 	const activity = store.current(201);
 	assert.ok(activity);
-	bus.emit(BusChannels.ContextActivity, { ...activity, at: 201, message: null } as never);
+	bus.emit("context.activity_changed", { ...activity, at: 201, message: null } as never);
 	assert.equal(store.current(202)?.message, "Indexed", "malformed process events must not break rail rendering");
 	for (const width of [1, 8, 20, 60, 80, 120, 200]) {
 		const lines = formatContextActivityRailLines(activity, width, 201);
@@ -180,7 +179,7 @@ it("stage completion stays active; only operation completion closes the dock pro
 			`${width} columns`,
 		);
 	}
-	bus.emit(BusChannels.ContextActivity, {
+	bus.emit("context.activity_changed", {
 		kind: "context-init",
 		phase: "done",
 		status: "completed",

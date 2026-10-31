@@ -1,12 +1,11 @@
+import type { ContextOperationOutcome } from "../core/context-operation.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type {
 	ContextActivityKind,
 	ContextActivityPayload,
 	ContextActivityPhase,
 	ContextActivityStatus,
-} from "../core/bus-events.js";
-import { BusChannels } from "../core/bus-events.js";
-import type { ContextOperationOutcome } from "../core/context-operation.js";
-import type { SafeEventBus } from "../core/event-bus.js";
+} from "../core/telemetry/live-events.js";
 import type { Component } from "../engine/tui.js";
 import { visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { CONTEXT_KIND_TITLES, outcomeTone, outcomeWord, plain, unchangedTokenLead } from "./context-operation-view.js";
@@ -182,7 +181,7 @@ export function createContextProgressRail(
  * emitters) share one run per kind.
  */
 export function createContextActivityStore(
-	bus: SafeEventBus,
+	bus: TelemetryHub,
 	getSessionId?: () => string | null,
 ): {
 	current(now?: number): ContextActivitySnapshot | null;
@@ -209,7 +208,7 @@ export function createContextActivityStore(
 		if (!chosen) return null;
 		return { ...chosen, ...(running.length > 1 && chosen === running[0] ? { otherRunning: running.length - 1 } : {}) };
 	};
-	const unsubscribe = bus.on(BusChannels.ContextActivity, (raw: ContextActivityPayload) => {
+	const unsubscribe = bus.subscribe("context.activity_changed", (raw: ContextActivityPayload) => {
 		if (
 			!raw ||
 			!Object.hasOwn(CONTEXT_KIND_TITLES, raw.kind) ||
@@ -270,8 +269,8 @@ export function createContextActivityStore(
 		}
 	});
 	// A switched session or branch owns none of these runs.
-	const clears = [BusChannels.SessionParked, BusChannels.SessionResumed, BusChannels.SessionTurnSwitched].map(
-		(channel) => bus.on(channel, () => runs.clear()),
+	const clears = (["session.parked", "session.reattached", "session.turn_switched"] as const).map((channel) =>
+		bus.subscribe(channel, () => runs.clear()),
 	);
 	return {
 		current: snapshot,

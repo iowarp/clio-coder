@@ -1,7 +1,6 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
@@ -70,20 +69,20 @@ function eventsOf(peer: ReturnType<typeof fakeTransport>): Array<Record<string, 
 
 describe("contracts/acp forwards accountability.evidenceReady only to a client that opted in", () => {
 	it("advertises the kind, forwards the projection's evidence summary verbatim, and marks it terminal", async () => {
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const peer = fakeTransport();
 		const served = serveClioAcpAgent({ transport: peer.transport, chat, bus, cwd: process.cwd() });
 		const init = (await peer.call("initialize", {
 			protocolVersion: 1,
-			clientCapabilities: { _meta: { "clio-coder/events": { version: 1, kinds: ["accountability.evidenceReady"] } } },
+			clientCapabilities: { _meta: { "clio-coder/events": { version: 1, kinds: ["evidence.assessed"] } } },
 		})) as { agentCapabilities: { _meta: Record<string, { kinds: string[] }> } };
-		ok(init.agentCapabilities._meta["clio-coder/events"]?.kinds.includes("accountability.evidenceReady"));
+		ok(init.agentCapabilities._meta["clio-coder/events"]?.kinds.includes("evidence.assessed"));
 		const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
 
-		bus.emit(BusChannels.AccountabilityEvidenceReady, EVIDENCE);
+		bus.emit("evidence.assessed", EVIDENCE);
 		// Tags that are not bounded identifiers (a control character, over 64
 		// bytes) are dropped, never truncated into new ones.
-		bus.emit(BusChannels.AccountabilityEvidenceReady, {
+		bus.emit("evidence.assessed", {
 			...EVIDENCE,
 			runId: "run-8",
 			tags: ["ok", "bad\u0007tag", "x".repeat(65)],
@@ -92,7 +91,7 @@ describe("contracts/acp forwards accountability.evidenceReady only to a client t
 		const events = eventsOf(peer);
 		strictEqual(events.length, 2);
 		const first = events[0] ?? {};
-		strictEqual(first.kind, "accountability.evidenceReady");
+		strictEqual(first.kind, "evidence.assessed");
 		strictEqual(first.sessionId, session.sessionId);
 		strictEqual(first.terminal, true);
 		strictEqual(first.turnId, null);
@@ -105,30 +104,30 @@ describe("contracts/acp forwards accountability.evidenceReady only to a client t
 	});
 
 	it("sends nothing to a client that opted into the dispatch kinds but not this one", async () => {
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const peer = fakeTransport();
 		const served = serveClioAcpAgent({ transport: peer.transport, chat, bus, cwd: process.cwd() });
 		await peer.call("initialize", {
 			protocolVersion: 1,
-			clientCapabilities: { _meta: { "clio-coder/events": { version: 1, kinds: ["dispatch.completed"] } } },
+			clientCapabilities: { _meta: { "clio-coder/events": { version: 1, kinds: ["run.completed"] } } },
 		});
 		await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] });
-		bus.emit(BusChannels.AccountabilityEvidenceReady, EVIDENCE);
+		bus.emit("evidence.assessed", EVIDENCE);
 		strictEqual(eventsOf(peer).length, 0);
 		peer.transport.close();
 		strictEqual(await served, 0);
 	});
 
 	it("drops an event whose run or evidence id cannot be represented instead of repairing it", async () => {
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const peer = fakeTransport();
 		const served = serveClioAcpAgent({ transport: peer.transport, chat, bus, cwd: process.cwd() });
 		await peer.call("initialize", {
 			protocolVersion: 1,
-			clientCapabilities: { _meta: { "clio-coder/events": { version: 1, kinds: ["accountability.evidenceReady"] } } },
+			clientCapabilities: { _meta: { "clio-coder/events": { version: 1, kinds: ["evidence.assessed"] } } },
 		});
 		await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] });
-		bus.emit(BusChannels.AccountabilityEvidenceReady, { ...EVIDENCE, evidenceId: "ev\u001bid" });
+		bus.emit("evidence.assessed", { ...EVIDENCE, evidenceId: "ev\u001bid" });
 		strictEqual(eventsOf(peer).length, 0);
 		peer.transport.close();
 		strictEqual(await served, 0);

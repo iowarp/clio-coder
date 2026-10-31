@@ -3,8 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { startExtensionHost } from "../../src/entry/extension-host.js";
@@ -70,7 +69,7 @@ test("a headless session hosts api 2 runtimes: hooks gate, observations arrive, 
 		mode: "headless",
 		list: (root) => listInstalledExtensions(root, { all: true }),
 		runtimeHooks: bridge,
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		chat: { isStreaming: () => false, turnPreparation: () => ({ phase: "idle", since: 0 }), onEvent: () => () => {} },
 		sessionId: () => "headless-session",
 		targetId: () => "target",
@@ -112,7 +111,7 @@ test("a turn that starts right after a session change still runs the gate on the
 	const previous = process.cwd();
 	process.chdir(cwd);
 	const bridge = createExtensionRuntimeHookBridge();
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const notices: string[] = [];
 	let streaming = false;
 	const host = startExtensionHost({
@@ -132,7 +131,7 @@ test("a turn that starts right after a session change still runs the gate on the
 	});
 	equal((await host.ready).status, "committed", notices.join("\n"));
 	// ACP's session/new parks the current session, and the prompt that follows starts its turn at once.
-	bus.emit(BusChannels.SessionParked, { sessionId: "acp-session", reason: "create_new", at: Date.now() });
+	bus.emit("session.parked", { sessionId: "acp-session", reason: "create_new", at: Date.now() });
 	streaming = true;
 	const executor = bridge.current();
 	ok(executor);
@@ -161,7 +160,7 @@ test("a headless run's last turn_end reaches its runtime before the host dispose
 		mode: "headless",
 		list: (root) => listInstalledExtensions(root, { all: true }),
 		runtimeHooks: createExtensionRuntimeHookBridge(),
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		chat: {
 			isStreaming: () => false,
 			turnPreparation: () => ({ phase: "idle", since: 0 }),
@@ -359,7 +358,7 @@ export default (api) => {
 		mode: "headless",
 		list: (root) => listInstalledExtensions(root, { all: true }),
 		runtimeHooks: bridge,
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		chat: { isStreaming: () => false, turnPreparation: () => ({ phase: "idle", since: 0 }), onEvent: () => () => {} },
 		sessionId: () => "headless-session",
 		targetId: () => "target",
@@ -397,7 +396,7 @@ export default (api) => {
 	const previous = process.cwd();
 	process.chdir(cwd);
 	const bridge = createExtensionRuntimeHookBridge();
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const notices: string[] = [];
 	let sessionId = "old-session";
 	const host = startExtensionHost({
@@ -419,7 +418,7 @@ export default (api) => {
 	ok(executor, "the host binds the hook bridge");
 	executor.observeTurnStart?.("old prompt");
 	// session/new arrives while the startup generation still stages.
-	bus.emit(BusChannels.SessionParked, { sessionId, reason: "create_new", at: Date.now() });
+	bus.emit("session.parked", { sessionId, reason: "create_new", at: Date.now() });
 	sessionId = "new-session";
 	await host.ready;
 	deepStrictEqual(await executor.tool?.("start_probe", "seen", {}), { text: "none" }, notices.join("\n"));
@@ -439,7 +438,7 @@ test("a hook that arrives after a second session change, while the first change'
 	const previous = process.cwd();
 	process.chdir(cwd);
 	const bridge = createExtensionRuntimeHookBridge();
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const notices: string[] = [];
 	const host = startExtensionHost({
 		mode: "acp",
@@ -457,10 +456,10 @@ test("a hook that arrives after a second session change, while the first change'
 		env.restore();
 	});
 	equal((await host.ready).status, "committed", notices.join("\n"));
-	bus.emit(BusChannels.SessionParked, { sessionId: "acp-session", reason: "create_new", at: Date.now() });
+	bus.emit("session.parked", { sessionId: "acp-session", reason: "create_new", at: Date.now() });
 	// The first change's generation starts staging, then a second change rejects it before the hook arrives.
 	const first = host.operator.v2.whenLive();
-	bus.emit(BusChannels.SessionParked, { sessionId: "acp-session", reason: "create_new", at: Date.now() });
+	bus.emit("session.parked", { sessionId: "acp-session", reason: "create_new", at: Date.now() });
 	const executor = bridge.current();
 	ok(executor);
 	const gated = await executor.hook("gate_probe", { point: "before_tool", tool: "write", turnId: null }, 1000);

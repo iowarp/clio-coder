@@ -3,11 +3,10 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import type { ClioSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { rememberMessageCalls } from "../../src/core/message-accounting.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
@@ -651,7 +650,7 @@ test("a replayed act states the age its ledger entry records in /view, not the a
 
 test("an aborted worker writes one settled row, from its terminal event", () => {
 	const noop = (): void => undefined;
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const settled: WorkerSettledFields[] = [];
 	const subscriptions = createInteractiveSubscriptions({
 		bus,
@@ -671,14 +670,14 @@ test("an aborted worker writes one settled row, from its terminal event", () => 
 		runtimeId: "blade",
 		runtimeKind: "http" as const,
 	};
-	bus.emit(BusChannels.DispatchStarted, {
+	bus.emit("run.started", {
 		...identity,
 		runId: "run-a",
 		pid: null,
 		assignmentId: "run-a",
 		attempt: 0,
 	} as never);
-	bus.emit(BusChannels.DispatchProgress, {
+	bus.emit("run.progressed", {
 		...identity,
 		runId: "run-a",
 		event: {
@@ -686,9 +685,9 @@ test("an aborted worker writes one settled row, from its terminal event", () => 
 			message: { role: "assistant", usage: { input: 900, output: 100, cacheRead: 0, cacheWrite: 0 } },
 		},
 	} as never);
-	bus.emit(BusChannels.RunAborted, { source: "dispatch_abort", runId: "run-a", startedAt: null, elapsedMs: 5 });
+	bus.emit("run.aborted", { source: "dispatch_abort", runId: "run-a", startedAt: null, elapsedMs: 5 });
 	assert.deepEqual(settled, []);
-	bus.emit(BusChannels.DispatchFailed, { ...identity, runId: "run-a", reason: "canceled" } as never);
+	bus.emit("run.failed", { ...identity, runId: "run-a", reason: "canceled" } as never);
 	subscriptions.dispose();
 	assert.deepEqual(settled, [{ runId: "run-a", contextTokens: 1_000 }]);
 });
@@ -703,7 +702,7 @@ test("an operator /run resumes with its command above its card, the spend its li
 		text: "Documented the retry options.",
 	};
 	// Live: the host records the run as it starts and what its stream knew as it settles.
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const runs: WorkerRunEntryFields[] = [];
 	const settled: WorkerSettledFields[] = [];
 	let liveState: WorkerEntryState | undefined;
@@ -729,14 +728,14 @@ test("an operator /run resumes with its command above its card, the spend its li
 		runtimeId: "blade",
 		runtimeKind: "http" as const,
 	};
-	bus.emit(BusChannels.DispatchStarted, {
+	bus.emit("run.started", {
 		...identity,
 		runId: "run-d",
 		pid: null,
 		assignmentId: "run-d",
 		attempt: 0,
 	} as never);
-	bus.emit(BusChannels.DispatchProgress, {
+	bus.emit("run.progressed", {
 		...identity,
 		runId: "run-d",
 		event: {
@@ -750,10 +749,10 @@ test("an operator /run resumes with its command above its card, the spend its li
 	];
 	for (const payload of calls) {
 		for (const type of ["clio_coder_tool_start", "clio_coder_tool_finish"]) {
-			bus.emit(BusChannels.DispatchProgress, { ...identity, runId: "run-d", event: { type, payload } } as never);
+			bus.emit("run.progressed", { ...identity, runId: "run-d", event: { type, payload } } as never);
 		}
 	}
-	bus.emit(BusChannels.DispatchCompleted, { ...identity, runId: "run-d", outcome: "succeeded" } as never);
+	bus.emit("run.completed", { ...identity, runId: "run-d", outcome: "succeeded" } as never);
 	subscriptions.dispose();
 	assert.deepEqual(settled, [
 		{

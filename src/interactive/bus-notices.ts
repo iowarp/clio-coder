@@ -9,7 +9,7 @@ import type {
 	MiddlewareHookFailedPayload,
 	PermissionRequestedPayload,
 	SafetyBlockedPayload,
-} from "../core/bus-events.js";
+} from "../core/telemetry/live-events.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { safetyNetRailText } from "../domains/safety/decision-presentation.js";
 import { describeBudgetBlock, readBudgetBlock } from "../domains/scheduling/budget.js";

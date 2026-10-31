@@ -640,7 +640,7 @@ test("an uninterrupted budget breach and a partially reported provider still rea
 			version: 1,
 			sessionId: "session",
 			sequence: 1,
-			kind: "provider.health",
+			kind: "provider.health_changed",
 			payload: { targetId: "beta", status: "unknown", available: false, latencyMs: null },
 		},
 		"session",
@@ -685,12 +685,12 @@ test("a terminal fleet frame forwards the engine's token wording and call covera
 		return projected.item.fact.payload as Record<string, unknown>;
 	};
 	const coverage = { tokenCount: 1200, apiCalls: 3, missingTokenCalls: 1, tokenDisplay: "≥1,200 (1 call unknown)" };
-	const completed = payload("dispatch.completed", { outcomeCode: null, ...coverage });
+	const completed = payload("run.completed", { outcomeCode: null, ...coverage });
 	assert.equal(completed.tokenDisplay, "≥1,200 (1 call unknown)");
 	assert.equal(completed.missingTokenCalls, 1);
-	assert.equal(payload("dispatch.failed", { reason: "tool_failed", ...coverage }).tokenDisplay, coverage.tokenDisplay);
+	assert.equal(payload("run.failed", { reason: "tool_failed", ...coverage }).tokenDisplay, coverage.tokenDisplay);
 	assert.equal(
-		payload("dispatch.completed", { outcomeCode: null, tokenCount: 1200 }).tokenDisplay,
+		payload("run.completed", { outcomeCode: null, tokenCount: 1200 }).tokenDisplay,
 		undefined,
 		"an older engine's bare count is not worded as whole",
 	);
@@ -709,7 +709,7 @@ test("compaction attempts report their outcome without inferring success for leg
 				version: 1,
 				sessionId: "session",
 				sequence: 1,
-				kind: "compaction.end",
+				kind: "compaction.ended",
 				payload: { trigger: "threshold", ...(outcome !== undefined ? { outcome } : {}) },
 			},
 			"session",

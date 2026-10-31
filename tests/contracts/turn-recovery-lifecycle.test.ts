@@ -2,7 +2,6 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { getEventListeners } from "node:events";
 import { performance } from "node:perf_hooks";
 import { test } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { CompiledSessionPrompt } from "../../src/domains/prompts/compiler.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
@@ -299,7 +298,7 @@ test("Stop fences deferred preparation and compaction before model calls or late
 				let compactionSignal: AbortSignal | undefined;
 				let modelCalls = 0;
 				let publishedReductions = 0;
-				context.bus.on(BusChannels.ContextPruned, () => {
+				context.bus.subscribe("context.pruned", () => {
 					publishedReductions++;
 				});
 				const loop = createChatLoop({

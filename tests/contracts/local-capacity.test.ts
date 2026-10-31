@@ -2,7 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/str
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
 import { createSchedulingBundle } from "../../src/domains/scheduling/extension.js";
 import {
@@ -128,7 +128,7 @@ describe("fleet.concurrency auto placement surfaces", () => {
 		const config = { get: () => settings } as unknown as ConfigContract;
 		return createSchedulingBundle(
 			{
-				bus: createSafeEventBus(),
+				bus: createTelemetryHub(),
 				getContract: (<T>(name: string) => (name === "config" ? config : undefined) as T | undefined) as never,
 			},
 			{ localCapacity: { observe: () => host({ cpus: 2 }), monotonicNow: () => 0 } },

@@ -1,6 +1,6 @@
-import { BusChannels, isRunAbortedPayload } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
-import type { SafeEventBus } from "../../core/event-bus.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
+import { isRunAbortedPayload } from "../../core/telemetry/live-events.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
 import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
 import {
@@ -14,7 +14,7 @@ import { TIER_THRESHOLDS_MS } from "./watchdog.js";
 export interface StatusControllerDeps {
 	chat: ChatLoop;
 	providers: ProvidersContract;
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	getSettings?: () => Readonly<ClioSettings>;
 	now?: () => number;
 	setInterval?: (listener: () => void, ms: number) => unknown;
@@ -131,7 +131,7 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			watchdogTier: next.watchdogTier,
 			metadata: statusMetadata(next),
 		};
-		deps.bus?.emit(BusChannels.AgentStatusChanged, payload);
+		deps.bus?.emit("agent.status_changed", payload);
 	};
 
 	const notify = (prev: AgentStatus, next: AgentStatus, force = false): void => {
@@ -206,23 +206,23 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 
 	if (deps.bus) {
 		unsubscribes.push(
-			deps.bus.on(BusChannels.PermissionRequested, () => apply({ type: "overlay_push", overlay: "tool_blocked" }, true)),
-			deps.bus.on(BusChannels.PermissionResolved, () => apply({ type: "overlay_pop", overlay: "tool_blocked" }, true)),
-			deps.bus.on(BusChannels.ContextActivity, (event) => {
+			deps.bus.subscribe("approval.requested", () => apply({ type: "overlay_push", overlay: "tool_blocked" }, true)),
+			deps.bus.subscribe("approval.resolved", () => apply({ type: "overlay_pop", overlay: "tool_blocked" }, true)),
+			deps.bus.subscribe("context.activity_changed", (event) => {
 				if (event.kind !== "compaction" || !event.operation) return;
 				if (event.operation.sessionId !== deps.chat.getSessionId() || event.operation.cwd !== process.cwd()) return;
 				apply({ type: event.operation.outcome ? "overlay_pop" : "overlay_push", overlay: "compacting" }, true);
 			}),
-			deps.bus.on(BusChannels.CompactionBegin, () => apply({ type: "overlay_push", overlay: "compacting" }, true)),
-			deps.bus.on(BusChannels.CompactionEnd, () => apply({ type: "overlay_pop", overlay: "compacting" }, true)),
-			deps.bus.on(BusChannels.DispatchProgress, (payload) => {
+			deps.bus.subscribe("compaction.started", () => apply({ type: "overlay_push", overlay: "compacting" }, true)),
+			deps.bus.subscribe("compaction.ended", () => apply({ type: "overlay_pop", overlay: "compacting" }, true)),
+			deps.bus.subscribe("run.progressed", (payload) => {
 				if (!isWorkerStreamEvidence(payload)) return;
 				const at = now();
 				if (at - lastDispatchProgressAt < DISPATCH_PROGRESS_COALESCE_MS) return;
 				lastDispatchProgressAt = at;
 				apply({ type: "dispatch_progress" });
 			}),
-			deps.bus.on(BusChannels.RunAborted, (payload) => {
+			deps.bus.subscribe("run.aborted", (payload) => {
 				scheduleAbortCeiling();
 				// Carry abort provenance into the summary; a dispatch drain and a
 				// user stream-cancel must not collapse into one hardcoded path.

@@ -8,9 +8,9 @@ import type {
 	AssistantMessageEventStream,
 	Model,
 } from "@earendil-works/pi-ai";
-
-import { BusChannels, RUNTIME_NOTICE_KINDS, type RuntimeNoticePayload } from "../../src/core/bus-events.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type { RuntimeNoticePayload } from "../../src/core/telemetry/live-events.js";
+import { RUNTIME_NOTICE_KINDS } from "../../src/core/telemetry/live-events.js";
 import {
 	createDegradedInferenceStream,
 	runningDegradedInferenceWatchdogs,
@@ -296,16 +296,16 @@ describe("runtime notice producers", () => {
 	});
 
 	it("rejects a notice emitted on the bus outside a declared producer", () => {
-		const bus = createSafeEventBus();
+		const bus = createTelemetryHub();
 		const seen: string[] = [];
-		bus.on(BusChannels.RuntimeNotice, (notice) => {
+		bus.subscribe("runtime.notice_raised", (notice) => {
 			seen.push(notice.kind);
 		});
 		// The typecheck gate enforces this: the channel payload is branded, and
 		// only a declared emitter mints the brand. If the brand is removed, this
 		// directive is unused and typecheck fails.
 		// @ts-expect-error a raw payload is not a DeclaredRuntimeNotice
-		bus.emit(BusChannels.RuntimeNotice, {
+		bus.emit("runtime.notice_raised", {
 			kind: "swap",
 			level: "info",
 			targetId: "t",

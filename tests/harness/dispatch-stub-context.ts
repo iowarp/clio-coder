@@ -8,8 +8,8 @@
 import { join } from "node:path";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
@@ -154,7 +154,7 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 		maxWorkers: () => 4,
 		...options.scheduling,
 	};
-	const bus = createSafeEventBus();
+	const bus = createTelemetryHub();
 	const getContract = ((name: string) => {
 		if (name === "config") return config;
 		if (name === "safety") return safety;

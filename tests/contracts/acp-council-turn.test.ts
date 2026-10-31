@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Type } from "typebox";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { type AcpCommandHost, acpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
@@ -45,7 +45,7 @@ async function councilPeer(answer: "allow-once" | "reject-once") {
 	const hostEvents = createHostToolEvents();
 	const commands = acpCommandControl({
 		dispatch: refuse("dispatch") as AcpCommandHost["dispatch"],
-		bus: createSafeEventBus(),
+		bus: createTelemetryHub(),
 		providers: refuse("providers") as AcpCommandHost["providers"],
 		isTurnInFlight: () => false,
 		getWorkerRosters: () => ({ review: [{ target: "mini", model: "gemma" }] }) as never,

@@ -61,10 +61,8 @@ import { ContinuityController } from "./continuity-controller.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
-import { BusChannels, type RunAbortSource } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import { formatFooterTokens } from "../core/display-units.js";
-import type { SafeEventBus } from "../core/event-bus.js";
 import {
 	armedSkillSurface,
 	evaluateSkillToolSurface,
@@ -77,6 +75,8 @@ import {
 	skillSurfaceNames,
 	withModelSkillActivation,
 } from "../core/skill-activation.js";
+import type { TelemetryHub } from "../core/telemetry/hub.js";
+import type { RunAbortSource } from "../core/telemetry/live-events.js";
 import {
 	narrowTurnConstraints,
 	snapshotTurnConstraints,
@@ -988,13 +988,13 @@ export interface CreateChatLoopDeps {
 		markDegraded(reason: string): void;
 	};
 	/**
-	 * Shared event bus. When wired, `cancel()` fans a `BusChannels.RunAborted`
+	 * Shared event bus. When wired, `cancel()` fans a `"run.aborted"`
 	 * payload with `source: "stream_cancel"` so the safety audit subscriber
 	 * persists a kind: "abort" row for every Esc-on-stream / Ctrl+C cancel.
 	 * Optional so unit tests that drive chat-loop in isolation do not need
 	 * to construct a bus.
 	 */
-	bus?: SafeEventBus;
+	bus?: TelemetryHub;
 	/**
 	 * Build the approved-memory prompt section for the current turn. Returns
 	 * the empty string when no approved, evidence-linked, in-scope memory
@@ -1190,12 +1190,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		notice: (text) => emitNotice(text),
 		changed: (active) =>
-			deps.bus?.emit(BusChannels.EggsChanged, { sessionId: deps.session?.current()?.id ?? null, active }),
+			deps.bus?.emit("session.eggs_changed", { sessionId: deps.session?.current()?.id ?? null, active }),
 	});
 	const toolStartTimes = new Map<string, number>();
 	let lastHistoricalImageNoticeKey: string | null = null;
 
-	const unsubscribeEggSession = deps.bus?.on(BusChannels.SessionParked, () => eggs.reset());
+	const unsubscribeEggSession = deps.bus?.subscribe("session.parked", () => eggs.reset());
 	const preparationListeners = new Set<(phase: TurnPreparationPhase) => void>();
 	/**
 	 * Move the consumed prompt to a new preparation phase and tell everything
@@ -1790,12 +1790,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// recompiled text is byte-identical, nothing changes and no ledger entry
 	// is written.
 	const unsubscribeConfigReload =
-		deps.bus?.on(BusChannels.ConfigHotReload, () => {
+		deps.bus?.subscribe("config.hot_reloaded", () => {
 			context.invalidateSessionPromptCache();
 			void turnRuntime.ensureLiveCapabilitiesForSelectedModel({ silent: true }).catch(() => {});
 		}) ?? null;
 	const unsubscribeConfigNextTurn =
-		deps.bus?.on(BusChannels.ConfigNextTurn, (payload) => {
+		deps.bus?.subscribe("config.next_turn_scheduled", (payload) => {
 			if (
 				!payload.diff.nextTurn.some(
 					(path) => path === "chat" || path.startsWith("chat.") || path === "targets" || path.startsWith("targets."),
@@ -1805,17 +1805,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			void turnRuntime.ensureLiveCapabilitiesForSelectedModel({ silent: true }).catch(() => {});
 		}) ?? null;
 	const unsubscribePluginsReload =
-		deps.bus?.on(BusChannels.PluginsReloaded, () => {
+		deps.bus?.subscribe("plugin.reloaded", () => {
 			context.invalidateSessionPromptCache();
 		}) ?? null;
 
 	const unsubscribeSynthesisLock =
-		deps.bus?.on(BusChannels.LoopBlocked, (payload) => {
+		deps.bus?.subscribe("safety.loop_blocked", (payload) => {
 			const disposition = (payload as { disposition?: unknown } | null)?.disposition;
 			if (disposition === "lockout") state.synthesisToolLock = true;
 		}) ?? null;
 	const unsubscribeToolBudgetLock =
-		deps.bus?.on(BusChannels.ToolBudgetExceeded, () => {
+		deps.bus?.subscribe("safety.tool_budget_exceeded", () => {
 			state.toolBudgetLock = true;
 		}) ?? null;
 
@@ -3690,7 +3690,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					});
 			}
 			if (wasStreaming && deps.bus) {
-				deps.bus.emit(BusChannels.RunAborted, {
+				deps.bus.emit("run.aborted", {
 					source: options?.source ?? "stream_cancel",
 					runId: null,
 					startedAt: null,
@@ -4054,7 +4054,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				},
 				(event) => {
 					if (operationSession !== (deps.session?.current()?.id ?? null) || operationCwd !== process.cwd()) return;
-					deps.bus?.emit(BusChannels.ContextActivity, event);
+					deps.bus?.emit("context.activity_changed", event);
 					if (event.operation?.outcome && operationSession)
 						deps.session?.appendEntry({
 							kind: "custom",

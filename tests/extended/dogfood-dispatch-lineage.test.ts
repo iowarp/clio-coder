@@ -4,7 +4,6 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { type HeadlessShutdownHooks, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
-import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { DispatchPreparationOptions, DispatchRequest } from "../../src/domains/dispatch/contract.js";
@@ -78,7 +77,7 @@ async function fixture(transientFailure = false, spawn?: (spec: WorkerSpec) => S
 	const captured: DispatchRequest[] = [];
 	const preparations: Array<DispatchPreparationOptions | undefined> = [];
 	const completed = new Map<string, RunLineage | undefined>();
-	context.bus.on(BusChannels.DispatchCompleted, (event) => {
+	context.bus.subscribe("run.completed", (event) => {
 		completed.set(event.runId, event.lineage);
 	});
 	let starts = 0;
@@ -526,7 +525,7 @@ it("ACP delegation publishes the same trusted host ancestry on its receipt, enve
 	];
 	const context = dispatchStubContext({ settings });
 	let completed: RunLineage | undefined;
-	context.bus.on(BusChannels.DispatchCompleted, (event) => {
+	context.bus.subscribe("run.completed", (event) => {
 		completed = event.lineage;
 	});
 	const bundle = makeDispatchBundle(context);

@@ -33,7 +33,7 @@ export interface MiddlewareContract {
 	 * Replace the diagnostic sink for hook isolation/budget reports. Exists
 	 * for the same reason as registerHook: the domain loader constructs the
 	 * bundle before the composition root can supply the bus-emitting sink
-	 * (Q1, `middleware.hookFailed`). Until called, diagnostics go to the
+	 * (Q1, `middleware.hook_failed`). Until called, diagnostics go to the
 	 * stderr writer default.
 	 */
 	setDiagnosticSink(sink: MiddlewareDiagnosticSink): void;

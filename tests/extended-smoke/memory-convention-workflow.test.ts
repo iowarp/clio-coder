@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import {
 	loadMemoryRecords,
 	memoryStorePath,
@@ -67,7 +67,7 @@ test("operator promotion persists a convention and only approval admits it into 
 		const beforeFiles = repositoryFiles();
 		const sourceText = sources.map(([path]) => `${path}:1-2\n${readFileSync(join(workspace, path), "utf8")}`).join("\n");
 		const lesson = `${MARKER}: New numerical regressions include a polynomial exactness control and a nonuniform-grid example. Sources: tests/test_coefs.py:1-2; findiff/coefs.py:1-2.`;
-		const { contract: session } = createSessionBundle({ bus: createSafeEventBus(), getContract: () => undefined });
+		const { contract: session } = createSessionBundle({ bus: createTelemetryHub(), getContract: () => undefined });
 		const origin = session.create({ cwd: workspace });
 		const request = session.append({
 			parentId: null,

@@ -549,7 +549,7 @@ describe("gateway MCP capabilities", () => {
 			script,
 			`
 			import { getTerminationCoordinator } from ${moduleUrl("src/core/termination.ts")};
-			import { getSharedBus } from ${moduleUrl("src/core/shared-bus.ts")};
+			import { telemetryHub } from ${moduleUrl("src/core/telemetry/hub.ts")};
 			import { createWorkerSafety } from ${moduleUrl("src/engine/worker-tools.ts")};
 			import { createRegistry } from ${moduleUrl("src/tools/registry.ts")};
 			import { registerAllTools } from ${moduleUrl("src/tools/bootstrap.ts")};
@@ -559,7 +559,7 @@ describe("gateway MCP capabilities", () => {
 			let client;
 			const source = createMcpCapabilitySource({cwd: ${JSON.stringify(scene.project)}, configDir: ${JSON.stringify(scene.configDir)}, registry, clientFactory: (spec, opts) => client = createMcpStdioClient(spec, opts)});
 			const termination = getTerminationCoordinator();
-			registerAllTools(registry, {mcpCapabilities: source, bus: getSharedBus(), termination});
+			registerAllTools(registry, {mcpCapabilities: source, bus: telemetryHub(), termination});
 			await source.list();
 			process.stdout.write(String(client.pid) + "\\n");
 			await termination.shutdown(0);
