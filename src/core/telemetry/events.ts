@@ -97,6 +97,30 @@ function live<P>(): LiveDefinition<P> {
 	return LIVE as LiveDefinition<P>;
 }
 
+/** Admission facts only: the task text, budget and board copy stay on the live payload (#434). */
+function projectRunEnqueued(payload: DispatchEnqueuedPayload): Static<typeof S.RunEnqueuedSchema> {
+	return {
+		runId: payload.runId,
+		agentId: payload.agentId,
+		requestOrigin: payload.requestOrigin ?? null,
+		targetId: payload.targetId,
+		wireModelId: payload.wireModelId,
+		runtimeId: payload.runtimeId,
+		runtimeKind: payload.runtimeKind,
+		...(payload.node !== undefined ? { node: payload.node } : {}),
+		...(payload.endpoint !== undefined && Number.isSafeInteger(payload.endpoint.limit) && payload.endpoint.limit >= 0
+			? { endpointLimit: payload.endpoint.limit }
+			: {}),
+		...(payload.gate !== undefined ? { gate: { role: payload.gate.role, cycle: payload.gate.cycle } } : {}),
+		...(payload.rerouteCount !== undefined ? { rerouteCount: payload.rerouteCount } : {}),
+	};
+}
+
+/** Start facts only: identity the envelope carries and the spawned command stay on the live payload (#434). */
+function projectRunStarted(payload: DispatchStartedPayload): Static<typeof S.RunStartedSchema> {
+	return { pid: payload.pid, assignmentId: payload.assignmentId, attempt: payload.attempt };
+}
+
 /**
  * Names are `subject.past_participle`. Where a live signal and a journal record mark the same moment but carry
  * different facts, they are two events: the live `session.created`, `session.reattached` and `compaction.ended` feed
@@ -119,6 +143,12 @@ export const EVENTS = {
 	"run.feed_appended": journal(S.RunFeedAppendedSchema, { tier: "operational", cc: "structural" }),
 	"run.usage_reported": journal(S.RunUsageSchema, { tier: "accountability", cc: "structural" }),
 	"run.linked": journal(S.RunLinkedSchema, { tier: "accountability", cc: "content-free" }),
+	"run.enqueued": journal(S.RunEnqueuedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		project: projectRunEnqueued,
+	}),
+	"run.started": journal(S.RunStartedSchema, { tier: "accountability", cc: "content-free", project: projectRunStarted }),
 	"route.decided": journal(S.RouteDecidedSchema, { tier: "operational", cc: "content-free" }),
 	"gate.decided": journal(S.GateDecidedSchema, { tier: "accountability", cc: "content-free" }),
 	"code_step.settled": journal(S.CodeStepSettledSchema, { tier: "accountability", cc: "content-free" }),
@@ -184,8 +214,6 @@ export const EVENTS = {
 	"runtime.notice_raised": live<DeclaredRuntimeNotice>(),
 	"residency.mutated": live<ResidencyMutationPayload>(),
 	"run.scope_notice_raised": live<DispatchScopeNoticePayload>(),
-	"run.enqueued": live<DispatchEnqueuedPayload>(),
-	"run.started": live<DispatchStartedPayload>(),
 	"run.progressed": live<DispatchProgressPayload>(),
 	"run.completed": live<DispatchCompletedPayload>(),
 	"run.failed": live<DispatchFailedPayload>(),

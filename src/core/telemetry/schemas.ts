@@ -940,3 +940,33 @@ export const CodeStepSettledSchema = Type.Object(
 	},
 	closed,
 );
+const runtimeKind = vocabulary(["http", "sdk", "subprocess", "acp-delegation"]);
+/**
+ * A run admitted to dispatch. It lands in the run's journal when the run already has one (a retry or fleet step at
+ * spawn), else in the asker's, which is why it names its run (#434).
+ */
+export const RunEnqueuedSchema = Type.Object(
+	{
+		runId: ExistingId,
+		agentId: ExistingId,
+		requestOrigin: Type.Union([vocabulary(["user", "agent", "internal", "harness"]), Type.Null()]),
+		targetId: ExistingId,
+		wireModelId: ExistingId,
+		runtimeId: ExistingId,
+		runtimeKind,
+		node: Type.Optional(ExistingId),
+		endpointLimit: Type.Optional(count),
+		gate: Type.Optional(Type.Object({ role: ExistingId, cycle: count }, closed)),
+		rerouteCount: Type.Optional(count),
+	},
+	closed,
+);
+/** A run's worker is live; the run's journal holds it, so the envelope names the run (#434). */
+export const RunStartedSchema = Type.Object(
+	{
+		pid: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+		assignmentId: ExistingId,
+		attempt: count,
+	},
+	closed,
+);

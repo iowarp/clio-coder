@@ -67,6 +67,7 @@ import {
 	workerSandboxReceipt,
 } from "../../core/sandbox/worker-policy.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
+import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { DispatchCompletedPayload, DispatchRunIdentity } from "../../core/telemetry/live-events.js";
 import { isTestFilePath } from "../../core/test-paths.js";
@@ -6274,7 +6275,26 @@ export function createDispatchBundle(
 			// A failed write leaves the row dirty for the terminal persist (#428).
 			runningRowPersisted = persistLedgerInBackground(ledgerRef, envelope.id);
 			if (req.lineage !== undefined) {
-				context.bus.emit("run.enqueued", {
+				context.bus.emit(
+					"run.enqueued",
+					{
+						runId: envelope.id,
+						sessionId: req.ownerSessionId ?? null,
+						agentId: req.agentId,
+						task: req.task,
+						requestOrigin: lifecycle.requestOrigin,
+						targetId,
+						wireModelId,
+						runtimeId,
+						runtimeKind: "acp-delegation",
+					},
+					runJournal?.context,
+				);
+			}
+			context.bus.emit(
+				"run.started",
+				{
+					budget: budgetEnvelope,
 					runId: envelope.id,
 					sessionId: req.ownerSessionId ?? null,
 					agentId: req.agentId,
@@ -6284,25 +6304,14 @@ export function createDispatchBundle(
 					wireModelId,
 					runtimeId,
 					runtimeKind: "acp-delegation",
-				});
-			}
-			context.bus.emit("run.started", {
-				budget: budgetEnvelope,
-				runId: envelope.id,
-				sessionId: req.ownerSessionId ?? null,
-				agentId: req.agentId,
-				task: req.task,
-				requestOrigin: lifecycle.requestOrigin,
-				targetId,
-				wireModelId,
-				runtimeId,
-				runtimeKind: "acp-delegation",
-				pid: acp.pid,
-				processCommand: JSON.stringify([lifecycle.agentConfig.command, ...(lifecycle.agentConfig.args ?? [])]),
-				assignmentId: lineage.rootRunId,
-				attempt: lineage.attempt,
-				...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
-			});
+					pid: acp.pid,
+					processCommand: JSON.stringify([lifecycle.agentConfig.command, ...(lifecycle.agentConfig.args ?? [])]),
+					assignmentId: lineage.rootRunId,
+					attempt: lineage.attempt,
+					...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
+				},
+				runJournal?.context ?? sinklessRunContext(envelope.id, req.ownerSessionId),
+			);
 		} catch (error) {
 			// A capture started above would otherwise keep its manifest at "recording".
 			if (envelope !== undefined) recordingJournal.terminal(envelope.id, "failed");
@@ -8115,7 +8124,26 @@ export function createDispatchBundle(
 					: {}),
 			};
 			if (req.lineage !== undefined) {
-				context.bus.emit("run.enqueued", {
+				context.bus.emit(
+					"run.enqueued",
+					{
+						runId: envelope.id,
+						agentId: req.agentId,
+						task: req.task,
+						agentAudience: lifecycle.agentAudience,
+						requestOrigin: lifecycle.requestOrigin,
+						targetId: lifecycle.target.target.id,
+						wireModelId: lifecycle.target.wireModelId,
+						runtimeId: lifecycle.target.runtime.id,
+						runtimeKind: lifecycle.runtimeKind,
+						...fleetIdentity,
+					},
+					runJournal?.context,
+				);
+			}
+			context.bus.emit(
+				"run.started",
+				{
 					runId: envelope.id,
 					agentId: req.agentId,
 					task: req.task,
@@ -8125,26 +8153,15 @@ export function createDispatchBundle(
 					wireModelId: lifecycle.target.wireModelId,
 					runtimeId: lifecycle.target.runtime.id,
 					runtimeKind: lifecycle.runtimeKind,
+					pid,
+					...(worker.processCommand !== undefined ? { processCommand: worker.processCommand } : {}),
 					...fleetIdentity,
-				});
-			}
-			context.bus.emit("run.started", {
-				runId: envelope.id,
-				agentId: req.agentId,
-				task: req.task,
-				agentAudience: lifecycle.agentAudience,
-				requestOrigin: lifecycle.requestOrigin,
-				targetId: lifecycle.target.target.id,
-				wireModelId: lifecycle.target.wireModelId,
-				runtimeId: lifecycle.target.runtime.id,
-				runtimeKind: lifecycle.runtimeKind,
-				pid,
-				...(worker.processCommand !== undefined ? { processCommand: worker.processCommand } : {}),
-				...fleetIdentity,
-				assignmentId: lineage.rootRunId,
-				attempt: lineage.attempt,
-				...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
-			});
+					assignmentId: lineage.rootRunId,
+					attempt: lineage.attempt,
+					...(req.parentToolCallId !== undefined ? { parentToolCallId: req.parentToolCallId } : {}),
+				},
+				runJournal?.context ?? sinklessRunContext(envelope.id, req.ownerSessionId),
+			);
 		} catch (error) {
 			// A capture started above would otherwise keep its manifest at "recording".
 			if (envelope !== undefined) recordingJournal.terminal(envelope.id, "failed");
@@ -9955,6 +9972,14 @@ export function createDispatchBundle(
 		return routeObserver.observe(routeObservationInput(req, decision));
 	}
 
+	/**
+	 * A context naming the run alone. A run whose journal is not open has no sink under it, so a run-scoped record is
+	 * counted unowned rather than written into whichever scope the async context names (#434).
+	 */
+	function sinklessRunContext(runId: string, sessionId: string | null | undefined): TelemetryContext {
+		return { sessionId: sessionId ?? null, runId, label: "worker" };
+	}
+
 	/** A fleet step's route belongs to its fleet root; any other dispatch's to the async context that asked (#434). */
 	function routeObservationInput(req: DispatchRequest, decision: RouteDecisionV1) {
 		const ctx =
@@ -10169,13 +10194,12 @@ export function createDispatchBundle(
 			// events, and a council whose synthesis they cannot see is a council
 			// whose verdict the operator cannot read or share.
 			context.bus.emit("run.enqueued", { ...identity, requestOrigin: origin });
-			context.bus.emit("run.started", {
-				...identity,
-				requestOrigin: origin,
-				pid: null,
-				assignmentId: runId,
-				attempt: 0,
-			});
+			context.bus.emit(
+				"run.started",
+				{ ...identity, requestOrigin: origin, pid: null, assignmentId: runId, attempt: 0 },
+				// The synthesis has no run journal; its start is not misfiled into the asker's (#434).
+				sinklessRunContext(runId, identity.sessionId),
+			);
 			context.bus.emit("run.completed", {
 				...identity,
 				requestOrigin: origin,
