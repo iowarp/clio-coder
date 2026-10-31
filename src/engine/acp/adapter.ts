@@ -9,6 +9,7 @@ import {
 } from "../../core/defaults.js";
 import { processBirthToken } from "../../core/process-identity.js";
 import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
+import { withTelemetryContext } from "../../core/telemetry/context.js";
 import { createTelemetryForwarder } from "../../core/telemetry/forwarder.js";
 import type { RunUsage } from "../../core/telemetry/schemas.js";
 import { hasTokenUsageCounts, normalizeTokenUsage } from "../../core/token-split.js";
@@ -465,7 +466,17 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		transport.onNotification("session/update", (params) => {
 			for (const event of mapper.mapUpdate(params)) emit(event);
 		}),
-		transport.onRequest("session/request_permission", (params) => mediator.handle(params)),
+		transport.onRequest("session/request_permission", (params) => {
+			if (!telemetry) return mediator.handle(params);
+			const toolCall = isRecord(params) && isRecord(params.toolCall) ? params.toolCall : undefined;
+			return withTelemetryContext(
+				{
+					...telemetry.context,
+					...(typeof toolCall?.toolCallId === "string" ? { toolCallId: toolCall.toolCallId } : {}),
+				},
+				() => mediator.handle(params),
+			);
+		}),
 		transport.onStderr((chunk) => {
 			if (process.env.CLIO_CODER_INTERACTIVE !== "1") {
 				process.stderr.write(chunk);

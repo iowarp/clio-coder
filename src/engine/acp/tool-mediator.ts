@@ -587,8 +587,10 @@ export class AcpToolMediator {
 		let decision: "approved" | "denied" | "cancelled" = "denied";
 		let reason: string | undefined;
 		let safetyDecision: SafetyDecision | undefined;
+		let governanceRuleId: string | undefined;
 
 		if (mapped.validationError !== undefined) {
+			governanceRuleId = "acp:invalid-mutation-targets";
 			if (this.input.toolGovernance === "clio-coder-policy") {
 				const invalidSafetyDecisions = mapped.evaluations.map((evaluation) =>
 					this.input.safety.evaluate({ tool: evaluation.tool, args: evaluation.args }),
@@ -601,12 +603,15 @@ export class AcpToolMediator {
 			decision = "denied";
 			reason = `invalid ACP mutation targets: ${mapped.validationError}`;
 		} else if (this.input.toolGovernance === "agent-managed") {
+			governanceRuleId = "acp:agent-managed";
 			decision = "approved";
 			reason = "agent-managed governance";
 		} else if (this.input.toolGovernance === "deny-all") {
+			governanceRuleId = "acp:deny-all";
 			decision = "denied";
 			reason = "deny-all governance";
 		} else if (!mapped.known) {
+			governanceRuleId = "acp:unknown-tool";
 			decision = "denied";
 			reason = `unknown ACP tool: ${mapped.displayTool}`;
 		} else {
@@ -625,7 +630,7 @@ export class AcpToolMediator {
 			});
 			decision = admission.kind === "allow" ? "approved" : "denied";
 			if (admission.kind === "deny") {
-				if (admission.code !== "no_effects") safetyDecision = admission.decision;
+				safetyDecision = admission.decision;
 				reason =
 					admission.code === "safety_net"
 						? (admission.decision.policy?.reasonCode ?? admission.decision.kind)
@@ -662,14 +667,19 @@ export class AcpToolMediator {
 		}
 		if (decision === "approved") this.approved += 1;
 		else this.denied += 1;
-		if (safetyDecision !== undefined)
-			this.input.safety.audit.recordToolCall?.({
-				tool: mapped.tool,
-				classification: safetyDecision.classification,
-				decision: decision === "approved" ? "allowed" : "denied",
-				...(safetyDecision.policy !== undefined ? { policy: safetyDecision.policy } : {}),
-				...(decision === "denied" ? { reasonCode: noAllowOnce ? "acp:no-allow-once" : "acp:non-stall-denial" } : {}),
-			});
+		const finalRuleId = noAllowOnce ? "acp:no-allow-once" : governanceRuleId;
+		const reasonCode = finalRuleId ?? (decision === "denied" ? "acp:non-stall-denial" : undefined);
+		// An unmapped tool's name is whatever the peer sent, possibly a path; the journal keeps a fixed id (#434).
+		const recordedTool = mapped.known ? mapped.tool : "unknown";
+		this.input.safety.audit.recordToolCall?.({
+			tool: recordedTool,
+			classification:
+				safetyDecision?.classification ?? this.input.safety.classify({ tool: mapped.tool, args: mapped.args }),
+			decision: decision === "approved" ? "allowed" : "denied",
+			...(safetyDecision?.policy !== undefined ? { policy: safetyDecision.policy } : {}),
+			...(finalRuleId !== undefined ? { ruleId: finalRuleId } : {}),
+			...(reasonCode !== undefined ? { reasonCode } : {}),
+		});
 		const loggedSafety = logSafety(safetyDecision);
 		const callId = toolCall?.toolCallId ?? `permission-${this.requested}`;
 		this.log.push({
@@ -685,7 +695,7 @@ export class AcpToolMediator {
 		if (decision === "denied" && (noAllowOnce || reason?.startsWith("permission_required:"))) {
 			this.input.onPermissionResolved?.({
 				requestId: callId,
-				tool: mapped.tool,
+				tool: recordedTool,
 				actionClass: safetyDecision?.classification.actionClass ?? "unknown",
 				mode: "deny",
 				source: "policy",

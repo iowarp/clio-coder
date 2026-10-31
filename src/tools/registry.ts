@@ -2433,7 +2433,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						hints: ["This approval expires with this Scout run."],
 					},
 				});
-				if (admission.kind !== "ask") return null;
+				if (admission.kind !== "ask") {
+					if (admission.kind === "deny") recordRegistryDisposition(call, admission.decision, "blocked");
+					return null;
+				}
 				const decision: SafetyDecision = {
 					...admission.decision,
 					kind: "ask",
@@ -2536,6 +2539,9 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						});
 						entry.closePark();
 						if (disposition.kind !== "allow") {
+							recordRegistryDisposition(entry.call, disposition.decision, "blocked", {
+								requestId: entry.meta.requestId,
+							});
 							entry.resolve({
 								kind: "blocked",
 								reason: "External read root no longer passes safety admission",
