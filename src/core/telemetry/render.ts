@@ -105,6 +105,15 @@ export function renderCostClaim(cost: CostClaim | null | undefined): string | nu
 	return renderUsd(cost.knownUsd);
 }
 
+/**
+ * What a ceiling leaves after a spend (#434 §6.3). It carries the spend's estimate, and an unpriced part of the spend,
+ * which can only have spent more, makes it an upper bound: `at most`, the mirror of a partial sum's `+?`.
+ */
+export function renderCostRemaining(usd: number, spend: { estimated: boolean; unpriced: boolean }): string {
+	const amount = spend.estimated ? `~${renderUsd(usd)} est` : renderUsd(usd);
+	return spend.unpriced ? `at most ${amount}` : amount;
+}
+
 const plural = (count: number, noun: string) => `${renderCount(count)} ${noun}${count === 1 ? "" : "s"}`;
 
 /** Contributions that carry a value or a gap; an absent contribution (a never-sent call) is neither. */

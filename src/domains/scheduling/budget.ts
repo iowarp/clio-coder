@@ -1,4 +1,4 @@
-import { renderUsdSetting } from "../../core/telemetry/render.js";
+import { renderCostRemaining, renderUsdSetting } from "../../core/telemetry/render.js";
 import { renderCostAmount } from "../observability/cost.js";
 /**
  * Session budget state. Admission checks priced spend before the next paid
@@ -81,16 +81,7 @@ export function budgetRemainingText(
 	spentUsd: number,
 	pricing: BudgetSpendPricing | undefined,
 ): string {
-	const remaining = ceilingUsd - spentUsd;
-	if (!pricing) return renderCostAmount(remaining, "known");
-	const text = renderCostAmount(remaining, undefined, {
-		knownUsd: remaining,
-		hasEstimated: pricing.estimated,
-		hasUnknown: false,
-		allKnownFree: false,
-		calls: 1,
-	});
-	return pricing.unpriced ? `at most ${text}` : text;
+	return renderCostRemaining(ceilingUsd - spentUsd, pricing ?? { estimated: false, unpriced: false });
 }
 
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
