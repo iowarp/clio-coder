@@ -1661,7 +1661,7 @@ try {
 			await page.screenshot({ path: join(output, `context-window-${width}.png`) });
 		}
 		// The session timeline: the journal newest first, every figure in the server's words (#434 §11.3). The fixture
-		// agent journals nothing, so the golden ledger is seeded under this session's id for the cold read to fold.
+		// agent journals nothing, so the golden journal is seeded under this session's id for the cold read to fold.
 		seedGoldenSession(join(h.home.path, "state"), new URL(page.url()).pathname.split("/").at(-1) ?? "");
 		await pane.getByLabel("Inspect task", { exact: true }).selectOption("timeline");
 		const timelinePanel = pane.locator(".timeline-panel");

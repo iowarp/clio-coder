@@ -1,16 +1,10 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
-import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
-import { encodeTelemetryLine } from "../core/telemetry/segment.js";
 import { clioStateDir } from "../core/xdg.js";
-import type { SessionEntry } from "../domains/session/entries.js";
-import { isSessionEntry } from "../domains/session/entries.js";
-import { importLegacySession } from "../domains/session/legacy-import.js";
 import type { BundleContentClass } from "../domains/telemetry/bundle.js";
 import { exportTelemetryBundle, importTelemetryBundle } from "../domains/telemetry/bundle.js";
-import { callJournalHeader } from "../domains/telemetry/call-journal.js";
 import {
 	grantTelemetryConsent,
 	readTelemetryConsent,
@@ -23,22 +17,15 @@ import {
 	telemetrySessionDirectory,
 	telemetrySessionsDirectory,
 } from "../domains/telemetry/index.js";
-import { readOutOfTurnUsageRows } from "../domains/telemetry/out-of-turn-usage.js";
 import { applyTelemetryPrune, DEFAULT_PRUNE_POLICY, planTelemetryPrune } from "../domains/telemetry/retention.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder telemetry import-legacy <session-dir> --out <file>
-clio-coder telemetry consent [--workspace <dir>] [--revoke | --list]
+const HELP = `clio-coder telemetry consent [--workspace <dir>] [--revoke | --list]
 clio-coder telemetry export <session-id> --out <dir> [--content-free | --structural | --research]
 clio-coder telemetry import-bundle <bundle-dir> --out <dir>
 clio-coder telemetry prune [--apply] [--days N] [--max-gib N] [--research-days N] [--research-max-gib N]
 clio-coder telemetry prune --receipts [--apply]
 clio-coder telemetry rebuild [--session <id>] [--apply]
-
-import-legacy rebuilds call facts from a session ledger written before the call
-journal (#434). Each assistant message and out-of-turn row becomes one call with
-the facts the ledger recorded; everything else stays unknown. The journal segment
-is written to --out, never into the session directory.
 
 consent records, for this operator, that research content capture may run in a
 workspace (default: the current directory) and everything under it. Capture also
@@ -411,20 +398,6 @@ function runConsent(argv: ReadonlyArray<string>): number {
 	}
 }
 
-function readLedger(directory: string): SessionEntry[] {
-	const entries: SessionEntry[] = [];
-	for (const line of readFileSync(join(directory, "current.jsonl"), "utf8").split("\n")) {
-		if (line.trim().length === 0) continue;
-		try {
-			const value: unknown = JSON.parse(line);
-			if (isSessionEntry(value)) entries.push(value);
-		} catch {
-			// A torn or foreign line carries no call; the import counts what it can read.
-		}
-	}
-	return entries;
-}
-
 /** The read model's commands; its module, the folds and the session loader load only for them. */
 const READ_COMMANDS = new Set(["inspect", "calls", "cost", "cache", "timeline", "why-stopped", "explain"]);
 
@@ -440,38 +413,7 @@ export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<
 	if (argv[0] === "import-bundle") return runImportBundle(argv.slice(1));
 	if (argv[0] === "prune") return runPrune(argv.slice(1));
 	if (argv[0] === "rebuild") return runRebuild(argv.slice(1));
-	if (argv[0] !== "import-legacy") {
-		if (argv[0] !== undefined) printError(`unknown telemetry command: ${argv[0]}`);
-		process.stderr.write(HELP);
-		return 2;
-	}
-	const outIndex = argv.indexOf("--out");
-	const source = argv[1];
-	const out = outIndex > 0 ? argv[outIndex + 1] : undefined;
-	if (source === undefined || source.startsWith("--") || out === undefined) {
-		process.stderr.write(HELP);
-		return 2;
-	}
-	const directory = resolve(source);
-	const target = resolve(out);
-	if (existsSync(target)) {
-		printError(`refusing to overwrite ${target}`);
-		return 1;
-	}
-	let entries: SessionEntry[];
-	try {
-		entries = readLedger(directory);
-	} catch (error) {
-		printError(`cannot read session ledger: ${error instanceof Error ? error.message : String(error)}`);
-		return 1;
-	}
-	const outOfTurn = readOutOfTurnUsageRows(clioStateDir());
-	const imported = importLegacySession(basename(directory), entries, { outOfTurn: outOfTurn.rows });
-	const header = callJournalHeader(packageWriter());
-	safeResourceWrite(target, Buffer.concat([header, ...imported.records].map(encodeTelemetryLine)), { mode: 0o600 });
-	const calls = imported.records.filter((record) => record.k === "call.settled").length;
-	process.stdout.write(
-		`imported ${calls} call(s) to ${target}; ${imported.aggregates} checkpoint aggregate(s) not split into calls; ${imported.invalid} invalid record(s) skipped; ${outOfTurn.errors.length} out-of-turn usage read error(s)\n`,
-	);
-	return 0;
+	if (argv[0] !== undefined) printError(`unknown telemetry command: ${argv[0]}`);
+	process.stderr.write(HELP);
+	return 2;
 }

@@ -1,7 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { openCallJournal } from "../../../../src/domains/telemetry/call-journal.js";
+import { goldenSessionJournal } from "../../../../tests/harness/telemetry-view.js";
 
 type PendingTelemetry = Parameters<Awaited<ReturnType<typeof openCallJournal>>["enqueue"]>[0];
 type Kind = PendingTelemetry["kind"];
@@ -15,16 +15,17 @@ export {
 } from "../../../../tests/harness/telemetry-view.js";
 
 /**
- * The golden P0 ledger as a session on disk, where the read model's cold loader finds it: a ledger written before
- * the call journal, which the loader imports with derived ids. Returns the session id the routes take.
+ * The golden P0 session on disk under `sessionId`, where the read model's cold loader finds it: its journal under the
+ * telemetry root and a store directory holding an empty ledger, as the session store keeps one. Returns the session id
+ * the routes take.
  */
 export function seedGoldenSession(state: string, sessionId = "golden-p0"): string {
-	const ledger = readFileSync(
-		fileURLToPath(new URL("../../../../tests/fixtures/telemetry/golden/p0/current.jsonl", import.meta.url)),
-	);
-	const directory = join(state, "sessions", "golden-workspace", sessionId);
+	const directory = join(state, "telemetry", "sessions", sessionId);
 	mkdirSync(directory, { recursive: true });
-	writeFileSync(join(directory, "current.jsonl"), ledger);
+	writeFileSync(join(directory, "journal.jsonl"), goldenSessionJournal(sessionId));
+	const store = join(state, "sessions", "golden-workspace", sessionId);
+	mkdirSync(store, { recursive: true });
+	writeFileSync(join(store, "current.jsonl"), "");
 	return sessionId;
 }
 

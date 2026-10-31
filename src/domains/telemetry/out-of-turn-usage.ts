@@ -134,7 +134,7 @@ export function readOutOfTurnUsageRows(stateDir: string): OutOfTurnUsageReadResu
 }
 
 /** The store's text as read by any reader, sync or async; `path` only labels errors. */
-export function parseOutOfTurnUsageRows(raw: string, path: string): OutOfTurnUsageReadResult {
+function parseOutOfTurnUsageRows(raw: string, path: string): OutOfTurnUsageReadResult {
 	const rows: OutOfTurnUsageRow[] = [];
 	const errors: string[] = [];
 	const lines = raw.split("\n");

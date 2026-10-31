@@ -243,7 +243,7 @@ export type CallSettled = Static<typeof CallSettledSchema>;
 /** Aggregate snapshots describe a delegated scope, never an invented provider call (#434). */
 export const RunUsageSchema = Type.Object(
 	{
-		source: vocabulary(["claude-sdk", "external-cli", "acp", "legacy-import"]),
+		source: vocabulary(["claude-sdk", "external-cli", "acp"]),
 		scope: vocabulary(["run", "peer-session"]),
 		/** Disjoint contribution within the scope; omission denotes its whole-scope snapshot (#434). */
 		partId: Type.Optional(text),

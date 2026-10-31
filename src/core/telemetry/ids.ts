@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 declare const telemetryId: unique symbol;
 export type CallId = string & { readonly [telemetryId]: "call" };
@@ -19,21 +19,5 @@ export const newAttemptId = (): AttemptId => `att_${uuidV7()}` as AttemptId;
 export const newRecordId = (): RecordId => `rec_${uuidV7()}` as RecordId;
 /** Minted once per process; names the process journal (#434). */
 export const newProcessId = (): string => `prc_${uuidV7()}`;
-
-/**
- * Stable ids for facts rebuilt from records that already carry identity, such as legacy ledger entries: the same
- * seed always yields the same id, so references to an imported call survive every re-read (#434).
- */
-export function derivedTelemetryIds(seed: string, epochMs: number) {
-	const id = (kind: string) =>
-		uuidV7(Buffer.from(createHash("sha256").update(`${kind}\0${seed}`).digest().subarray(0, 16)), epochMs);
-	return {
-		callId: `cal_${id("call")}` as CallId,
-		attemptId: `att_${id("attempt")}` as AttemptId,
-		startedRecordId: `rec_${id("call.started")}` as RecordId,
-		settledRecordId: `rec_${id("call.settled")}` as RecordId,
-		usageRecordId: `rec_${id("run.usage")}` as RecordId,
-	};
-}
 
 export { UUID_V7_PATTERN } from "./id-schemas.js";

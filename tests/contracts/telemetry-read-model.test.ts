@@ -1,5 +1,5 @@
 /**
- * P3 lie detectors over the read model (#434 §13.1): the golden P0 ledger, imported with stable ids, builds every
+ * P3 lie detectors over the read model (#434 §13.1): the golden P0 session journal builds every
  * session DTO, and every quantity in them must hold L1 (unknown never zero), L2 (never-sent carries nothing), L3 (a
  * partial sum is never a total), L5 (every number resolves through explain to the same fact) and L9 (absent is
  * neither unknown nor zero). Their structure must hold L4 (a cache verdict shows its tokens), L6 (unmeasured never
@@ -37,8 +37,6 @@ import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { applyReceiptPrune, planReceiptPrune } from "../../src/domains/dispatch/receipt-prune.js";
 import { readReceiptTextSync } from "../../src/domains/dispatch/receipt-store.js";
-import { isSessionEntry } from "../../src/domains/session/entries.js";
-import { importLegacySession } from "../../src/domains/session/legacy-import.js";
 import { loadRunTelemetrySource, loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
@@ -68,14 +66,9 @@ import {
 	unparsableRefs,
 	verdictsWithoutTokens,
 } from "../harness/telemetry-lies.js";
-import { telemetryCall } from "../harness/telemetry-view.js";
+import { goldenTelemetryRecords, telemetryCall } from "../harness/telemetry-view.js";
 
-const ledger = readFileSync(new URL("../fixtures/telemetry/golden/p0/current.jsonl", import.meta.url), "utf8")
-	.trim()
-	.split("\n")
-	.map((line) => JSON.parse(line) as unknown)
-	.filter(isSessionEntry);
-const imported = importLegacySession("golden-p0", ledger, { ids: "derived" });
+const imported = { records: goldenTelemetryRecords() };
 const source: SessionSource = {
 	sessionId: "golden-p0",
 	journal: { present: true, records: imported.records, modes: ["standard"], skipped: 0, damaged: 0 },
@@ -100,13 +93,6 @@ test("every DTO matches its published schema", () => {
 	for (const [name, schema, dto] of dtos)
 		ok(Value.Check(schema, dto), `${name}: ${[...Value.Errors(schema, dto)][0]?.message}`);
 	ok(all.length > 100);
-});
-
-test("legacy ids are derived from ledger entries, so references survive a re-read (#434)", () => {
-	deepStrictEqual(
-		importLegacySession("golden-p0", ledger, { ids: "derived" }).records.map((record) => record.id),
-		imported.records.map((record) => record.id),
-	);
 });
 
 test("L5: every quantity names a reference that explains to the same fact and wording", () => {

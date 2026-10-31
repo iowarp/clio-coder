@@ -7,9 +7,8 @@ import type { Fact } from "../../src/core/telemetry/fact.js";
 import { newAttemptId, newCallId, newRecordId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
+import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
-import { isSessionEntry } from "../../src/domains/session/entries.js";
-import { importLegacySession } from "../../src/domains/session/legacy-import.js";
 import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryReadModel, TelemetryView } from "../../src/domains/telemetry/contract.js";
@@ -46,14 +45,20 @@ export function telemetryViewOf(
 	});
 }
 
-/** The golden P0 ledger's calls, imported with stable ids: five calls, one never sent, one with unknown usage. */
+const GOLDEN_JOURNAL = new URL("../fixtures/telemetry/golden/p0/journal.jsonl", import.meta.url);
+
+/** The golden P0 session journal under `sessionId`: five calls, one never sent, one with unknown usage (#434). */
 export function goldenTelemetryRecords(sessionId = "golden-p0"): TelemetryRecord[] {
-	const ledger = readFileSync(new URL("../fixtures/telemetry/golden/p0/current.jsonl", import.meta.url), "utf8")
-		.trim()
-		.split("\n")
-		.map((line) => JSON.parse(line) as unknown)
-		.filter(isSessionEntry);
-	return importLegacySession(sessionId, ledger, { ids: "derived" }).records;
+	return scanTelemetrySegment(readFileSync(GOLDEN_JOURNAL)).rows.flatMap((row) =>
+		row.kind === "record" ? [{ ...row.record, ctx: { ...row.record.ctx, sessionId } } as TelemetryRecord] : [],
+	);
+}
+
+/** The golden P0 journal file's bytes under `sessionId`: its segment header, then its records rekeyed. */
+export function goldenSessionJournal(sessionId = "golden-p0"): Buffer {
+	const header = scanTelemetrySegment(readFileSync(GOLDEN_JOURNAL)).rows.find((row) => row.kind === "header");
+	if (header?.kind !== "header") throw new Error("golden journal header missing");
+	return Buffer.concat([header.header, ...goldenTelemetryRecords(sessionId)].map(encodeTelemetryLine));
 }
 
 export interface TelemetryCallOptions {
