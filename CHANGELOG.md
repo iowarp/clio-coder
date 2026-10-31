@@ -2,6 +2,8 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
 ## 0.6.6 - 2026-10-31
 
 Clio Coder 0.6.6 rebuilds telemetry as one system: one `telemetry` namespace, one event registry and hub, and journals per process, session and run under `<stateDir>/telemetry/` (#434). Every record names the acting agent, every journal is hash-chained, and a sealed scope directory is a self-contained bundle that `clio-coder telemetry verify` can check on another machine. `clio-coder telemetry share` prepares a redacted archive with a content-free, structural or research profile, and `telemetry import` verifies it into a separate namespace. Every TUI, CLI, ACP and desktop app usage figure comes from the same read model, with measured, estimated and unknown values kept distinct. Sealed run records replace receipt files, and journaled assessments replace the evidence directory. A hosted prompt cache stays warm while a turn waits on its tools (#423), a session cost ceiling stop reaches ACP clients and the desktop app with the raise that clears it (#424), and `clio-coder fleet land` lands the task branches a run kept. `@path` references inline only text Clio can bound (#438), workers refresh a rejected OAuth token (#427), gateway memory targets no longer derive a relevance engine (#429), and the ACP registry's auth check passes (#418). The desktop app opens on a desk of every project's sessions, explains usage from the number itself and shows session timelines and run replay. The Pi SDK moves to 1.4.0, and Clio names itself to providers and on its own sign-in pages.
