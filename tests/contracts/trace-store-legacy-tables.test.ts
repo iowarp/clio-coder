@@ -103,3 +103,46 @@ it("creates no envelopes table and no itemized cost columns in a new database", 
 		db.close();
 	}
 });
+
+it("records a gate result as its gate event alone, writing no retired gate_results row (#434)", () => {
+	const path = join(scratch, "gates.sqlite");
+	const store = new TraceStore(path);
+	store.upsertRun(
+		{
+			runId: "run-gate",
+			agentId: "reviewer",
+			targetId: "local",
+			wireModelId: "model",
+			runtimeId: "fixture",
+			runtimeKind: "http",
+			requestOrigin: "internal",
+		},
+		"2026-01-01T00:00:00.000Z",
+	);
+	store.recordGate({
+		runId: "run-gate",
+		phaseId: "run-gate",
+		attempt: 1,
+		gate: "reviewer",
+		passed: false,
+		checks: [{ item: "tests", ok: false, note: "two fail" }],
+		createdAt: "2026-01-01T00:00:01.000Z",
+	});
+	store.close();
+	const db = rawDatabase(path);
+	try {
+		equal((db.prepare("SELECT COUNT(*) AS rows FROM gate_results").get() as { rows: number }).rows, 0);
+		const event = db
+			.prepare("SELECT type, name, payload_json FROM events WHERE event_id=?")
+			.get("run-gate:gate:reviewer:1") as { type: string; name: string; payload_json: string } | undefined;
+		equal(event?.type, "gate_fail");
+		deepStrictEqual(JSON.parse(event?.payload_json ?? "null"), {
+			attempt: 1,
+			passed: false,
+			checks: [{ item: "tests", ok: false, note: "two fail" }],
+			violations: ["tests: two fail"],
+		});
+	} finally {
+		db.close();
+	}
+});

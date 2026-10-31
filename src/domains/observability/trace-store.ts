@@ -496,6 +496,8 @@ CREATE TABLE events (
 CREATE INDEX events_run_rowid ON events(run_id);
 CREATE INDEX events_phase_rowid ON events(phase_id);
 
+-- Retired (#434, P5): nothing reads it, and each gate's gate_pass or gate_fail event carries the same result. The
+-- table stays because older builds sharing this database still write it, and trace sql still reads their rows.
 CREATE TABLE gate_results (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id TEXT NOT NULL REFERENCES runs(run_id),
@@ -873,32 +875,15 @@ export class TraceStore {
 
 	recordGate(input: TraceGateResultInput): void {
 		const violations = input.checks?.filter((check) => !check.ok).map((check) => `${check.item}: ${check.note}`) ?? [];
+		// The gate event is the gate's one record; gate_results is retired (#434, P5).
 		this.transaction(() => {
-			this.prepare("DELETE FROM gate_results WHERE run_id=? AND phase_id=? AND attempt=? AND gate=?").run(
-				input.runId,
-				input.phaseId,
-				input.attempt,
-				input.gate,
-			);
-			this.prepare(`INSERT INTO gate_results
-          (run_id, phase_id, attempt, gate, passed, violations_json, checks_json, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
-				input.runId,
-				input.phaseId,
-				input.attempt,
-				input.gate,
-				input.passed ? 1 : 0,
-				JSON.stringify(violations),
-				input.checks === null ? null : JSON.stringify(input.checks),
-				input.createdAt,
-			);
 			this.insertEventRaw({
 				eventId: `${input.runId}:gate:${input.gate}:${input.attempt}`,
 				runId: input.runId,
 				phaseId: input.phaseId,
 				type: input.passed ? "gate_pass" : "gate_fail",
 				name: input.gate,
-				payload: { attempt: input.attempt, checks: input.checks, violations },
+				payload: { attempt: input.attempt, passed: input.passed, checks: input.checks, violations },
 				startedAt: input.createdAt,
 			});
 		});
