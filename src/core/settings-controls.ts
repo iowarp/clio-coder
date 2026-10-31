@@ -685,15 +685,11 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"telemetry.research.systemOneDataset": [
 		"Research: decision dataset",
-		"In research mode, keep the System One decision dataset. It holds redacted prompts and decision state, so it also needs Research: capture content and consent for the workspace. systemOne.record is a deprecated alias that keeps it without either.",
+		"In research mode, keep the System One decision dataset. It holds redacted prompts and decision state, so it also needs Research: capture content and consent for the workspace.",
 	],
 	"telemetry.research.busTrace": [
 		"Research: bus trace",
 		"In research mode, journal the name of every live event the telemetry hub delivers as a bus.traced record.",
-	],
-	"systemOne.record": [
-		"Save decision examples",
-		"Deprecated alias for research capture of the decision dataset. Keeps local examples of what each decision engine chose and what happened next, without research mode or workspace consent. Secrets are removed before saving. Files stay on this machine until you export them. User settings only; a short session record is kept either way.",
 	],
 	"systemOne.retentionDays": [
 		"Dataset retention",

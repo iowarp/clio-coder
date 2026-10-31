@@ -84,7 +84,7 @@ export interface OwnedRelevanceRanker extends RelevanceRanker {
 export interface RelevanceRankerInput {
 	readonly systemOne: Pick<SystemOne, "run" | "bound" | "shadowed" | "describe"> &
 		Partial<Pick<SystemOne, "limits" | "identity">>;
-	/** Whether the dataset is kept (research capture or `systemOne.record`), the only thing an unfitted ranking produces. */
+	/** Whether the dataset is kept (research capture), the only thing an unfitted ranking produces. */
 	readonly recording: () => boolean;
 	/** Shared pre-turn callers serialize optional inference without delaying their local answer. */
 	readonly maxPending?: number;

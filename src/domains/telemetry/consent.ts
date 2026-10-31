@@ -195,12 +195,8 @@ export function workspaceTelemetryCapture(
 	return { capture: effectiveTelemetryCapture(telemetry, covering !== null), covering, consent };
 }
 
-/** Which switch keeps the System One dataset for a session in `cwd`, the deprecated alias included (#434). */
-export function systemOneRecordingLabel(
-	settings: { systemOne: { record: boolean }; telemetry: TelemetrySettings },
-	cwd: string,
-): string {
-	if (settings.systemOne.record) return "record on (systemOne.record, deprecated alias)";
+/** Whether research capture keeps the System One dataset for a session in `cwd` (#434). */
+export function systemOneRecordingLabel(settings: { telemetry: TelemetrySettings }, cwd: string): string {
 	const { capture } = workspaceTelemetryCapture(settings.telemetry, clioStateDir(), cwd);
-	return systemOneDatasetRecording(settings, capture) ? "record on (research capture)" : "record off";
+	return systemOneDatasetRecording(capture) ? "record on (research capture)" : "record off";
 }

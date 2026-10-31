@@ -1022,6 +1022,7 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	// Written as an empty map by `init` from 0.5.3 through 0.5.7, so most upgraded files carry it.
 	"fleet.decisionProfiles":
 		"System One replaced decision profiles; bind an engine under systemOne.engines and systemOne.sites",
+	"systemOne.record": "research capture keeps the System One dataset: telemetry.research.systemOneDataset with content",
 	"turnControl.interpretation":
 		"the turn site (systemOne.sites.turn) reads the request and nothing falls back to the main model",
 } as const);
@@ -1396,7 +1397,7 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 		issues.add("systemOne", `expected a map, got ${describe(raw)}`);
 		return;
 	}
-	issues.unknownKeys("systemOne", raw, ["engines", "sites", "cuts", "record", "retentionDays", "maxMiB"]);
+	issues.unknownKeys("systemOne", raw, ["engines", "sites", "cuts", "retentionDays", "maxMiB"]);
 	const next = settings.systemOne;
 	if ("engines" in raw) {
 		if (!isPlainObject(raw.engines)) issues.add("systemOne.engines", `expected a map, got ${describe(raw.engines)}`);
@@ -1537,10 +1538,6 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 			}
 			next.cuts = cuts;
 		}
-	}
-	if ("record" in raw) {
-		const parsed = expectBoolean(issues, "systemOne.record", raw.record);
-		if (parsed !== undefined) next.record = parsed;
 	}
 	for (const key of ["retentionDays", "maxMiB"] as const) {
 		if (!(key in raw)) continue;

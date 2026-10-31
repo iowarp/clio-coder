@@ -3746,7 +3746,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const systemOneRecording = (): boolean => {
 		const origin = session?.current();
 		const capture = (origin && telemetry?.telemetryCapture?.(origin)) ?? STANDARD_CAPTURE;
-		return systemOneDatasetRecording(getCurrentSettings(), capture);
+		return systemOneDatasetRecording(capture);
 	};
 	const systemOneRecorder = createRecorder({
 		currentSession: currentSessionId,

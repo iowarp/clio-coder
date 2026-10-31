@@ -727,14 +727,9 @@ function telemetryModeFinding(stateDir: string, cwd: string): DoctorFinding {
 		else parts.push("content requested, but this workspace has no consent (clio-coder telemetry consent)");
 	}
 	if (consent.error) parts.push(`consent store unreadable, so no workspace has consent: ${consent.error}`);
-	// The legacy switches still record, without research mode or consent; each names its replacement (#434).
-	const aliases = [
-		settings.systemOne.record ? "systemOne.record (research.systemOneDataset with content)" : null,
-	].filter((alias): alias is string => alias !== null);
-	if (aliases.length > 0) parts.push(`deprecated aliases recording: ${aliases.join(", ")}`);
 	return {
 		ok: true,
-		level: consent.error || aliases.length > 0 ? "warn" : "info",
+		level: consent.error ? "warn" : "info",
 		name,
 		detail: parts.join("; "),
 	};

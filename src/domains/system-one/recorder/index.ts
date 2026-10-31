@@ -4,7 +4,7 @@
  *
  * The session ledger gets a compact row per call, at the next turn boundary,
  * always. The dataset gets the redacted state and the question specs, only when
- * `systemOne.record` is on. Both start from the same `DecisionRecord` the
+ * research capture keeps it. Both start from the same `DecisionRecord` the
  * runner reports once per call, answered or not.
  */
 
@@ -43,10 +43,10 @@ export interface RecorderDeps {
 	 * session it started in.
 	 */
 	currentSession: () => string | null;
-	/** Read on every call, so `systemOne.record` and the retention limits take effect live. */
+	/** Read on every call, so the retention limits take effect live. */
 	settings: () => Readonly<ClioSettings>;
-	/** Whether to keep the dataset now; defaults to `systemOne.record`. The host adds research capture (#434). */
-	recording?: () => boolean;
+	/** Whether research capture keeps the dataset now; nothing else admits it (#434). */
+	recording: () => boolean;
 	/**
 	 * Where a row goes when its own session is no longer the one draining, so
 	 * `/new` or `/resume` between a call and the next turn cannot lose it or file
@@ -79,7 +79,7 @@ export interface SystemOneRecorder extends DecisionRecorder {
 
 export function createRecorder(deps: RecorderDeps): SystemOneRecorder {
 	let pending: Array<{ session: string | null; row: SessionRow }> = [];
-	const recording = deps.recording ?? ((): boolean => deps.settings().systemOne.record === true);
+	const recording = deps.recording;
 	const writer = createDatasetWriter({
 		limits: () => {
 			const { retentionDays, maxMiB } = deps.settings().systemOne;

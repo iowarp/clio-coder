@@ -1221,7 +1221,7 @@ test("a project layer may lower telemetry capture but never raise it above user 
 	const user = join(home.dir, "config", "settings.yaml");
 	await writeFile(
 		join(workspace, ".clio-coder", "settings.yaml"),
-		"telemetry:\n  mode: research\n  research:\n    content: true\n    busTrace: true\n    deltas: false\nsystemOne:\n  record: true\n",
+		"telemetry:\n  mode: research\n  research:\n    content: true\n    busTrace: true\n    deltas: false\n",
 	);
 	const snapshot = captureProjectSurface(workspace, "settings");
 	ok(snapshot.contentHash);
@@ -1234,25 +1234,17 @@ test("a project layer may lower telemetry capture but never raise it above user 
 	});
 	deepStrictEqual(
 		research.issues.filter((issue) => issue.origin === "project").map((issue) => issue.path),
-		["telemetry.research.content", "telemetry.research.busTrace", "systemOne.record"],
+		["telemetry.research.content", "telemetry.research.busTrace"],
 	);
-	strictEqual(research.settings.systemOne.record, false, "the deprecated dataset alias is the operator's alone");
-	const off = { systemOne: { record: false } };
 	const flags = { content: false, deltas: false, providerHeaders: false, systemOneDataset: true, busTrace: false };
-	strictEqual(
-		systemOneDatasetRecording(off, effectiveTelemetryCapture({ mode: "research", research: flags }, true)),
-		false,
-	);
+	strictEqual(systemOneDatasetRecording(effectiveTelemetryCapture({ mode: "research", research: flags }, true)), false);
 	const content = { ...flags, content: true };
 	strictEqual(
-		systemOneDatasetRecording(off, effectiveTelemetryCapture({ mode: "research", research: content }, false)),
+		systemOneDatasetRecording(effectiveTelemetryCapture({ mode: "research", research: content }, false)),
 		false,
 	);
-	strictEqual(
-		systemOneDatasetRecording(off, effectiveTelemetryCapture({ mode: "research", research: content }, true)),
-		true,
-	);
-	strictEqual(systemOneDatasetRecording({ systemOne: { record: true } }, STANDARD_CAPTURE), true);
+	strictEqual(systemOneDatasetRecording(effectiveTelemetryCapture({ mode: "research", research: content }, true)), true);
+	strictEqual(systemOneDatasetRecording(STANDARD_CAPTURE), false);
 	await writeFile(user, "version: 2\n");
 	const standard = readLayeredSettings(workspace);
 	strictEqual(standard.settings.telemetry.mode, "standard");

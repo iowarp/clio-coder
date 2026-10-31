@@ -32,9 +32,11 @@ afterEach(() => {
 const RISK = yesNo("Is the call risky?", "it destroys data", "it reads or writes something ordinary");
 const KIND = pick("Which kind of call?", { read: "it only reads", other: "anything else" });
 
+// Research capture alone admits the dataset; the host answers it, so each fixture names its answer (#434).
+const recordingFor = new WeakMap<ClioSettings, boolean>();
 function settings(record: boolean): ClioSettings {
 	const next = structuredClone(DEFAULT_SETTINGS) as ClioSettings;
-	next.systemOne.record = record;
+	recordingFor.set(next, record);
 	return next;
 }
 
@@ -64,6 +66,7 @@ function recorderFor(config: ClioSettings, session: () => string | null = () => 
 	const recorder = createRecorder({
 		currentSession: session,
 		settings: () => config,
+		recording: () => recordingFor.get(config) ?? false,
 		appendSessionRow: (sessionId, row) => appended.push([sessionId, row]),
 	});
 	return { recorder, appended };

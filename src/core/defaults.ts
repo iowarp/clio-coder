@@ -107,8 +107,6 @@ export interface SystemOneSettings {
 	sites: Partial<Record<SiteId, SystemOneSiteBinding>>;
 	/** Operator-fitted cuts by answering build, for builds the code table lacks. Keys are `<site>.<key>`. */
 	cuts: Record<string, Record<string, number>>;
-	/** Opt-in: keep every decision and its outcome as a training dataset. */
-	record: boolean;
 	retentionDays: number;
 	maxMiB: number;
 }
@@ -849,7 +847,6 @@ export const DEFAULT_SETTINGS = {
 		engines: {},
 		sites: {},
 		cuts: {},
-		record: false,
 		retentionDays: 30,
 		maxMiB: 64,
 	} as SystemOneSettings,
@@ -1065,7 +1062,6 @@ systemOne:
   engines: {}
   sites: {}
   cuts: {}
-  record: false
   retentionDays: 30
   maxMiB: 64
 

@@ -62,16 +62,9 @@ export function captureAdmits(capture: TelemetryCapture, kind: JournalEventName)
 }
 
 /**
- * The System One dataset keeps redacted decision state and rendered prompts, so under research mode it is
- * content: it needs its flag and content capture. `systemOne.record` stays a deprecated alias that records
- * without either (#434).
+ * The System One dataset keeps redacted decision state and rendered prompts, so it is content: only research mode
+ * with its flag and content capture keeps it, and nothing else admits it (#434).
  */
-export function systemOneDatasetRecording(
-	settings: { systemOne: { record: boolean } },
-	capture: TelemetryCapture,
-): boolean {
-	return (
-		settings.systemOne.record ||
-		(capture.mode === "research" && capture.capture.systemOneDataset && capture.capture.content)
-	);
+export function systemOneDatasetRecording(capture: TelemetryCapture): boolean {
+	return capture.mode === "research" && capture.capture.systemOneDataset && capture.capture.content;
 }
