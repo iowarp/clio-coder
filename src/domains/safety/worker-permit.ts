@@ -510,11 +510,12 @@ export function workerPermitPromptLine(view: {
 			: view.asks;
 	const scope = view.capabilityClass !== undefined ? `${view.capabilityClass}, ` : "";
 	const line = `Permit: ${scope}git ${view.git}, asks ${asks}.${view.executeAutonomy === "yolo" ? " Autonomy: the operator's yolo, for every action; your dispatch scope, sandbox and the yolo floor still apply." : ""}`;
-	// The host commits whatever the task worktree holds when the run settles.
-	// Without this a worker told to commit burns calls on denied `git commit`
-	// attempts and writes stray report files as a substitute.
+	// The host commits the task worktree when the run settles, but only tracked
+	// changes, staged files and the files the run's own edit and write calls
+	// made. Without this a worker told to commit burns calls on denied `git
+	// commit` attempts, and one whose shell made a file it means to ship loses it.
 	const hostCommit =
-		"Clio commits everything left in your task worktree when you finish, so every file you create there ships.";
+		"When you finish, Clio commits your changes to tracked files and the new files you wrote with edit or write; a new file made any other way, such as by a shell command, ships only if you stage it through the git capability.";
 	if (view.git !== "worktree") {
 		return view.taskWorktree === true ? `${line} ${hostCommit} Git mutations need approval.` : line;
 	}
