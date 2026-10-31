@@ -221,9 +221,10 @@ test("S1-06 usage report reads journaled approvals and emits measured rate", asy
 		{ encoding: "utf8" },
 	);
 	assert.equal(child.status, 0, child.stderr);
-	const rows = child.stdout
-		.trim()
-		.split("\n")
-		.map((line) => JSON.parse(line) as Record<string, unknown>);
-	assert.equal(rows.find((row) => row.fact === "permission-approval")?.approvalRate, 0.5);
+	const report = JSON.parse(child.stdout) as {
+		approvals: { rate: { fact: { kind: string; value: number }; display: string } };
+	};
+	assert.equal(report.approvals.rate.fact.kind, "measured");
+	assert.equal(report.approvals.rate.fact.value, 50);
+	assert.equal(report.approvals.rate.display, "50.0%");
 });

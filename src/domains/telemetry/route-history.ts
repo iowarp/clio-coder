@@ -157,7 +157,11 @@ function scopeIdentity(directory: string): string | null {
 		const objects = telemetryObjectsDirectory(directory);
 		paths.push(objects);
 		try {
-			paths.push(...readdirSync(objects).sort().map((name) => join(objects, name)));
+			paths.push(
+				...readdirSync(objects)
+					.sort()
+					.map((name) => join(objects, name)),
+			);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		}

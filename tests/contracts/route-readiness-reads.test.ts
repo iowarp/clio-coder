@@ -190,7 +190,7 @@ describe("contracts/route readiness reads", () => {
 		// Same digest, altered body: a forged bundle claiming a verified identity.
 		const bundlePath = join(telemetryRunDirectory(stateDir, "run-t"), "bundle.json");
 		const forged = { ...JSON.parse(readFileSync(bundlePath, "utf8")), version: 2 };
-		writeRenamed(bundlePath, JSON.stringify(forged));
+		writeFileSync(bundlePath, JSON.stringify(forged));
 		const evidence = window(observer);
 		strictEqual(evidence.observations[0]?.qualityLabel, "unmeasured");
 		strictEqual(evidence.readiness.integrityFailures, 1);

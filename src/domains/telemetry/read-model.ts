@@ -47,6 +47,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { EvidenceOverview } from "../evidence/index.js";
 import type { ContextSnapshot } from "../session/context-accounting.js";
 import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
+import { foldDecisions } from "./fact-folds.js";
 import type { CallJournalFolder, CallTotals, FoldedAttempt, FoldOptions, JournalFold } from "./folds.js";
 import {
 	addCallTotals,
@@ -3315,7 +3316,8 @@ export function usageReport(source: RepoSource, from: number, to: number) {
 	const inWindow = (at: string) => Date.parse(at) >= from && Date.parse(at) <= to + 5_000;
 	const records = accountabilityRecords(journals).filter((record) => inWindow(record.t));
 	const decisions = records.filter((record) => record.k === "tool.decided");
-	const approvals = summarizePermissionDecisions(records);
+	const decided = foldDecisions(records);
+	const approvals = decided.approvals;
 	const runs = new Map<string, JournalSource>(source.runs);
 	for (const session of source.sessions) for (const [id, journal] of session.runs) runs.set(id, journal);
 	const settled = [...runs.values()].filter((journal) =>
@@ -3330,9 +3332,7 @@ export function usageReport(source: RepoSource, from: number, to: number) {
 		runs: shownCount(settled.length),
 		decisions: {
 			total: shownCount(decisions.length),
-			blocked: shownCount(
-				decisions.filter((record) => record.data.decision === "blocked" || record.data.decision === "denied").length,
-			),
+			blocked: shownCount(decided.tools.blocked + decided.tools.denied),
 			tools: [...byTool]
 				.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 				.map(([tool, count]) => ({ tool, count: shownCount(count) })),
@@ -3392,25 +3392,4 @@ export function fleetTotals(runs: readonly RunTelemetryV1[]) {
 			"duration",
 		),
 	};
-}
-
-/** Event-window approval rate. Resolutions can belong to requests outside the window. */
-export function summarizePermissionDecisions(records: ReadonlyArray<AccountabilityRecord>): {
-	requested: number;
-	granted: number;
-	denied: number;
-	expired: number;
-	approvalRate: number | null;
-} {
-	const counts = { requested: 0, granted: 0, denied: 0, expired: 0 };
-	// A forwarded ask republishes its request; one request id is one ask.
-	const asked = new Set<string>();
-	for (const record of records) {
-		if (record.k === "approval.requested") {
-			const id = record.data.requestId;
-			if (id === undefined || !asked.has(id)) counts.requested += 1;
-			if (id !== undefined) asked.add(id);
-		} else if (record.k === "approval.resolved") counts[record.data.status] += 1;
-	}
-	return { ...counts, approvalRate: counts.requested === 0 ? null : counts.granted / counts.requested };
 }
