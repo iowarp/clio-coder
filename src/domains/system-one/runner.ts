@@ -284,6 +284,14 @@ export function createRunner(deps: RunnerDeps): Runner {
 		const cutKeys = new Set<string>();
 		// What this call did to each route's breaker, and the calls its engines opened (#429).
 		const breakerMoves = new Map<RoutePlan, "opened" | "probe" | "closed" | "disabled">();
+		// A probe that dies without the engine's answer, cancelled or never sent, proves nothing about the engine, so its
+		// breaker is half-open again at once instead of reading probing until the probe's deadline (#434).
+		const releaseProbe = (plan: RoutePlan): void => {
+			const breaker = breakers.get(breakerKey(plan.route, site));
+			if (breakerMoves.get(plan) !== "probe" || breaker?.probing !== true) return;
+			breaker.probing = false;
+			breaker.openUntil = performance.now();
+		};
 		const callIds = new Set<string>();
 		const planOf = (task: DecisionTask): RoutePlan =>
 			plans.find((plan, index) => index > 0 && plan.tasks.has(task)) ?? (plans[0] as RoutePlan);
@@ -587,7 +595,12 @@ export function createRunner(deps: RunnerDeps): Runner {
 		// routing and preflight spend the same budget and a routed task never extends it.
 		const remainingMs = deadlineMs - (performance.now() - started);
 		if (remainingMs <= 0) {
-			for (const plan of sending) plan.outcome = "timeout";
+			for (const plan of sending) {
+				// The probe never reached its engine, so this call made no breaker move.
+				releaseProbe(plan);
+				breakerMoves.delete(plan);
+				plan.outcome = "timeout";
+			}
 			finish("timeout", { questions, error: `decision preflight used the ${deadlineMs}ms deadline` });
 			return null;
 		}
@@ -639,13 +652,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 								if (failures >= BREAKER_THRESHOLD) breakerMoves.set(plan, "opened");
 								plan.outcome = "timeout";
 							} else if (upstream?.aborted === true) {
-								// A cancelled probe proves nothing about the engine, so the breaker is half-open again at once
-								// instead of reading probing until the probe's deadline (#434).
-								const breaker = breakers.get(key);
-								if (breakerMoves.get(plan) === "probe" && breaker?.probing === true) {
-									breaker.probing = false;
-									breaker.openUntil = performance.now();
-								}
+								releaseProbe(plan);
 								plan.outcome = "canceled";
 							} else {
 								// An answer or a refusal both prove the engine responds.

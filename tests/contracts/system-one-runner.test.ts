@@ -272,7 +272,7 @@ describe("System One runner", () => {
 		ok(open.remainingMs > 0);
 	});
 
-	it("settles a cancelled probe back to half-open instead of probing until its deadline (#434)", async (t) => {
+	it("settles a cancelled probe, and one its preflight abandoned, back to half-open instead of probing until its deadline (#434)", async (t) => {
 		const { runner, bind, records } = harness();
 		const binding = bind(fakeEngine(hangs));
 		for (let index = 0; index < BREAKER_THRESHOLD; index += 1) await runner.run(binding, site(), "x", {});
@@ -288,6 +288,16 @@ describe("System One runner", () => {
 		cancel.abort();
 		strictEqual(await probe, null);
 		strictEqual(records.at(-1)?.outcome, "canceled");
+		strictEqual(runner.breakers()[0]?.state, "half-open");
+		// A probe whose preflight spent the deadline never reaches the engine and releases the breaker the same way.
+		const late = site({
+			questions: () => {
+				skew += 1_000;
+				return { direct: yesNo("Direct?", "yes", "no") };
+			},
+		});
+		strictEqual(await runner.run(binding, late, "x", {}), null);
+		strictEqual(records.at(-1)?.outcome, "timeout");
 		strictEqual(runner.breakers()[0]?.state, "half-open");
 	});
 
