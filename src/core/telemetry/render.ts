@@ -65,8 +65,6 @@ function renderUnknown(reason: Extract<Fact<unknown>, { kind: "unknown" }>["reas
 			return "unknown (provider omitted)";
 		case "stream-dropped":
 			return "unknown (stream dropped)";
-		case "legacy-record":
-			return "unknown (legacy record)";
 		case "unsupported":
 			return "unknown (unsupported)";
 		case "writer-gap":

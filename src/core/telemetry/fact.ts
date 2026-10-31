@@ -17,7 +17,6 @@ export const UnknownReason = vocabulary([
 	"provider-omitted",
 	"stream-dropped",
 	"not-observed",
-	"legacy-record",
 	"unsupported",
 	"writer-gap",
 ]);
