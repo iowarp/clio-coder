@@ -74,16 +74,11 @@ describe("fleet land", () => {
 		strictEqual(git(root, "status", "--porcelain"), "");
 	});
 
-	it("squashes staged work a kept worktree still holds, only when landing, and leaves an unstaged new file out", () => {
+	it("squashes uncommitted work a kept worktree still holds, only when landing", () => {
 		const task = keptTask("t3", "c.txt", "crashed run\n", false);
-		const unstaged = planTaskLand({ root, ref: "t3", mode: "squash" });
-		strictEqual(unstaged.uncommitted, 0);
-		deepStrictEqual(unstaged.leftUncommitted, ["c.txt"]);
-		git(task.path, "add", "c.txt");
 		const plan = planTaskLand({ root, ref: "t3", mode: "squash" });
 		strictEqual(plan.uncommitted, 1);
-		strictEqual(plan.leftUncommittedCount, 0);
-		strictEqual(git(task.path, "status", "--porcelain"), "A  c.txt");
+		strictEqual(git(task.path, "status", "--porcelain"), "?? c.txt");
 		executeTaskLand(plan, { message: "land the crashed run" });
 		strictEqual(git(root, "log", "-1", "--format=%s"), "land the crashed run");
 		strictEqual(git(root, "rev-list", "--count", "HEAD"), "2");
