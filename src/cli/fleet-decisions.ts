@@ -7,11 +7,10 @@
  * it. This command accepts no identifier, group, or limit, selects a bounded
  * newest-first window itself, and emits the shape of each decision.
  *
- * It is a separate command from `fleet inspect --json` rather than another
- * field on it, on the same reasoning the trace read used. The decisions live in
- * their own directory with their own failure mode, and an installation that has
- * never run a gate has no directory at all, so folding the read in would turn a
- * missing directory into a failure of the run journal.
+ * It is a command of its own rather than a field on another read. The decisions
+ * live in their own directory with their own failure mode, and an installation
+ * that has never run a gate has no directory at all, so folding the read in
+ * would turn a missing directory into a failure of the run journal.
  */
 
 import {

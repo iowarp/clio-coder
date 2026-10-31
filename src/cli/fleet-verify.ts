@@ -1,12 +1,9 @@
 /**
  * Re-authenticate one run's sealed receipt, right now.
  *
- * `fleet inspect --json` already reports receipt trust, but it reports it as of
- * the moment the snapshot was taken. This command reads the receipt and its
- * ledger envelope off disk and runs the integrity check again, which is the
- * only way to learn that a receipt trusted an hour ago no longer verifies.
- * That is the whole difference, and it is why this exists beside the snapshot
- * rather than inside it.
+ * This command reads the receipt and its ledger envelope off disk and runs the
+ * integrity check again, which is the only way to learn that a receipt trusted
+ * an hour ago no longer verifies.
  *
  * Like `evidence inspect --json` it takes an identifier, because an operator
  * names the run. The identifier is validated for shape here; a GUI host that
@@ -21,7 +18,7 @@ import { openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
 import { inspectRunReceiptTrustStatus, TRUST_STATUS_AXES, type TrustStatusAxis } from "../domains/evidence/index.js";
 
-/** Same vocabulary `fleet inspect --json` reports, so the two are comparable. */
+/** A receipt's trust as of this check: still pending, verified, failed, or unreadable. */
 export type FleetVerifyState = "pending" | "verified" | "failed" | "unavailable";
 
 /**

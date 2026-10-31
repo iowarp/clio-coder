@@ -320,7 +320,7 @@ function journalUnavailableReason(): string {
 	return "the journal file is missing; this run's recording settings and any later removal are not recorded.";
 }
 
-export function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}): RunViewModel | null {
+function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}): RunViewModel | null {
 	const run = openLedger().get(runId);
 	if (run === null || (options.scope !== undefined && !options.scope.seesRun(run))) return null;
 	const now = options.now ?? (() => Date.now());
@@ -554,7 +554,7 @@ function stepResultOf(value: unknown): Partial<ExecutionStepResult> {
 	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as ExecutionStepResult) : {};
 }
 
-export function loadFleetRunViewModel(
+function loadFleetRunViewModel(
 	rootId: string,
 	options: { now?: () => number; scope?: ReturnType<typeof fleetInspectionScope> } = {},
 ): FleetRunViewModel | null {

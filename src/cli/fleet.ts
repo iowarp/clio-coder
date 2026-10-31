@@ -3,7 +3,6 @@
  *
  *   clio-coder fleet run <playbook> --var k=v ...  preflight + execute a playbook
  *   clio-coder fleet status [--json] [--all]   runtime snapshot from the durable ledger
- *   clio-coder fleet inspect --json [--all]    bounded recent run and journal projection
  *   clio-coder fleet decisions --json [--all]  bounded sealed review and compete gate verdicts
  *   clio-coder fleet view <runId|fleetRootId>  one run's transcript, or a root's step index
  *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
@@ -107,7 +106,6 @@ Subcommands:
        [--resume <runId>]        replay a completed prefix from a prior run of the same plan
        [--json]                 emit step receipts as JSON
   status [--json] [--all]       show running, retrying, and total dispatch state
-  inspect --json [--all]        emit a bounded recent-run and event-journal projection
   decisions --json [--all]      emit a bounded window of sealed review and compete gate verdicts
   view <runId> [--follow] [--all]  read one run's ledger entry, event journal, and receipt
   view <fleetRootId> [--all]    list a fleet run's steps and the run id to view for each
@@ -892,7 +890,12 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 		case "status":
 			return runStatus(args.slice(1));
 		case "inspect":
-			return (await import("./fleet-inspect.js")).runFleetInspect(args.slice(1));
+			// The callerless host projection was removed at the maintainer's decision; the run board and the read model
+			// serve what it carried (#434 §11.3).
+			process.stderr.write(
+				"fleet inspect was removed: read the run board with `clio-coder fleet status --json [--all]` and one run's telemetry with `clio-coder telemetry inspect --run <runId> --json`\n",
+			);
+			return 2;
 		case "decisions":
 			return (await import("./fleet-decisions.js")).runFleetDecisions(args.slice(1));
 		case "verify":

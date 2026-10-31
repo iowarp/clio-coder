@@ -103,27 +103,11 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 				(row) => row.runId === foreign.id,
 			),
 		);
+		// fleet inspect --json was removed at the maintainer's decision; it points at its replacements (#434).
 		const inspect = run("inspect", "--json");
-		strictEqual(inspect.status, 0, inspect.stderr);
-		const inspectRows = JSON.parse(inspect.stdout) as {
-			runs: Array<{ runId: string }>;
-			roots: Array<{ rootId: string }>;
-		};
-		strictEqual(
-			inspectRows.runs.some((row) => row.runId === foreign.id),
-			false,
-		);
-		strictEqual(
-			inspectRows.roots.some((row) => row.rootId === "fleet-foreign-root"),
-			false,
-		);
-		const globalInspect = run("inspect", "--json", "--all");
-		strictEqual(globalInspect.status, 0, globalInspect.stderr);
-		ok(
-			(JSON.parse(globalInspect.stdout) as { runs: Array<{ runId: string }> }).runs.some(
-				(row) => row.runId === foreign.id,
-			),
-		);
+		strictEqual(inspect.status, 2);
+		ok(inspect.stderr.includes("clio-coder fleet status --json"), inspect.stderr);
+		ok(inspect.stderr.includes("clio-coder telemetry inspect --run <runId> --json"), inspect.stderr);
 		const decisions = run("decisions", "--json");
 		strictEqual(decisions.status, 0, decisions.stderr);
 		const decisionRows = JSON.parse(decisions.stdout) as { decisions: Array<{ subjects: string[] }> };
