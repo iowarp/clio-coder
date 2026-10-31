@@ -59,6 +59,8 @@ export function createProcessJournal(
 					directory: telemetryProcessDirectory(stateDir, context.processId),
 					context,
 					capture,
+					// Opening transfers a full pending queue plus process.started and its pre-open gap (#434).
+					queueCapacity: PENDING_LIMIT + 2,
 					writer: {
 						clioCoderVersion: pkg.version ?? "unknown",
 						piVersion: pkg.dependencies?.["@earendil-works/pi-ai"] ?? "unknown",
