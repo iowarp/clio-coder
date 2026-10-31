@@ -21,7 +21,6 @@ import {
 	callsReport,
 	costReport,
 	explain,
-	parseRepoOwner,
 	runCallsReport,
 	runCostReport,
 	runTelemetry,
@@ -29,6 +28,7 @@ import {
 	timeline,
 	whyStopped,
 } from "../domains/observability/read-model.js";
+import { explainRepoRef, isRepoRef } from "../domains/observability/usage-window.js";
 import {
 	loadRunReceiptEvidence,
 	loadRunTelemetrySource,
@@ -332,21 +332,6 @@ function emit<T>(dto: T, json: boolean, text: (dto: T) => string): number {
 	return 0;
 }
 
-/**
- * A `repo` reference, or an `own` or `runs` one with a repo owner, names a window, not a moment: it is rebuilt the way
- * `usage report` loads it, ending now, so a reference copied from an earlier report folds whatever the window holds
- * today (#434 §11.4).
- */
-async function explainRepo(stateDir: string, ref: string, owner: string): Promise<ExplanationV1 | null> {
-	const window = parseRepoOwner(owner);
-	if (!window) return null;
-	const [{ usageWindow }, { cwdHash }] = await Promise.all([import("./usage.js"), import("../engine/session.js")]);
-	const hash = window.cwdHash;
-	const scope = hash === null ? null : { hash, inRepo: (cwd: string) => cwdHash(cwd) === hash };
-	const { repo } = await usageWindow(stateDir, scope, window.days, Date.now());
-	return explain(ref, { repo });
-}
-
 export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Promise<number> {
 	const args = parse(argv);
 	if (typeof args === "string") {
@@ -367,8 +352,8 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 			const explained =
 				ref.scope === "run"
 					? explain(target as string, { runId: ref.owner, run: loadRunTelemetrySource(stateDir, ref.owner) })
-					: ref.scope === "repo" || ((ref.scope === "own" || ref.scope === "runs") && parseRepoOwner(ref.owner))
-						? await explainRepo(stateDir, target as string, ref.owner)
+					: isRepoRef(ref)
+						? await explainRepoRef(stateDir, target as string, ref.owner)
 						: (() => {
 								const session = loadSessionTelemetrySource(stateDir, ref.owner);
 								return session ? explain(target as string, { session }) : null;

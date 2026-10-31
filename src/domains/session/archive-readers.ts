@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { isSessionEntry, isSessionHeader, type SessionEntry } from "./index.js";
+import { isSessionEntry, isSessionHeader, type SessionEntry } from "./entries.js";
 
 /**
  * Shared read-only readers over the local usage archive: the per-day audit

@@ -1,12 +1,16 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import { readReceiptText } from "../domains/dispatch/receipt-store.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
 import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
 import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
-import type { RepoSource } from "../domains/observability/read-model.js";
-import { cacheReport, repoCostReport, repoOwner, repoTokenQuantities } from "../domains/observability/read-model.js";
+import { cacheReport, repoCostReport, repoTokenQuantities } from "../domains/observability/read-model.js";
+import {
+	emptyUsageDiagnostics,
+	inUsageWindow,
+	type UsageDiagnostics,
+	usageWindow,
+} from "../domains/observability/usage-window.js";
 import { loadSkills } from "../domains/resources/index.js";
 import {
 	foldRecallTelemetry,
@@ -16,7 +20,6 @@ import {
 	type RecallTelemetry,
 	readAuditRows,
 } from "../domains/session/index.js";
-import { loadRepoTelemetrySources } from "../domains/session/telemetry-source.js";
 import { cwdHash } from "../engine/session.js";
 import { displayToolCall } from "../tools/gateway-display.js";
 import { expandChainMessages } from "../tools/surface.js";
@@ -41,7 +44,6 @@ Flags:
 `;
 
 const DEFAULT_WINDOW_DAYS = 30;
-const USAGE_WINDOW_FUTURE_SKEW_MS = 5_000;
 
 /** Linkage/bookkeeping tags that are not failure causes. */
 const NON_FAILURE_TAGS = new Set([
@@ -52,18 +54,6 @@ const NON_FAILURE_TAGS = new Set([
 	"session-missing",
 	"audit-missing",
 ]);
-
-/** What the tool, skill, recipe and opportunity facts read from a receipt; spend is the read model's (#434). */
-interface UsageReceipt {
-	cwd: string | null;
-	runId: string;
-	agentId: string;
-	task: string;
-	endedAt: string;
-	sessionId: string | null;
-	toolStats: Array<{ tool: string; count: number; ok: number; errors: number; blocked: number }>;
-	skillActivations: string[];
-}
 
 interface SessionUsage {
 	harnessActions: number;
@@ -115,14 +105,6 @@ function missingStoreNotes(presence: StorePresence): string[] {
 	if (!presence.sessionsPresent) notes.push(`session store missing at ${presence.sessionsPath}`);
 	if (!presence.receiptsPresent) notes.push(`receipt store missing at ${presence.receiptsPath}`);
 	return notes;
-}
-
-interface Diagnostics {
-	malformedReceipts: number;
-	unreadableSessions: number;
-	malformedSessionLines: number;
-	malformedAuditRows: number;
-	notes: string[];
 }
 
 interface ParsedArgs {
@@ -201,7 +183,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const stateDir = clioStateDir();
 	const now = Date.now();
 	const windowStart = now - parsed.days * 24 * 60 * 60 * 1000;
-	const diagnostics = emptyDiagnostics();
+	const diagnostics = emptyUsageDiagnostics();
 
 	const presence = await readStorePresence(stateDir);
 	const repoPath = parsed.repo === undefined ? undefined : resolve(parsed.repo);
@@ -237,7 +219,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const duplicateDispatches = sessions.reduce((total, session) => total + session.duplicateDispatches, 0);
 	const auditRows = await readAuditRows(stateDir);
 	diagnostics.malformedAuditRows = auditRows.errors.length;
-	const auditInWindow = auditRows.rows.filter((row) => row.ts !== null && inWindow(row.ts, windowStart, now));
+	const auditInWindow = auditRows.rows.filter((row) => row.ts !== null && inUsageWindow(row.ts, windowStart, now));
 	const auditToolCalls = auditInWindow.filter((row) => row.auditKind === "tool_call");
 	const permissions = summarizePermissionDecisions(
 		auditInWindow.filter((row) => row.auditKind === "permission").map((row) => row.row),
@@ -246,7 +228,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		const decision = typeof row.row.decision === "string" ? row.row.decision : "";
 		return decision === "blocked" || decision === "denied";
 	});
-	const evidenceRows = readEvidenceIndex(stateDir).filter((row) => inWindow(row.generatedAt, windowStart, now));
+	const evidenceRows = readEvidenceIndex(stateDir).filter((row) => inUsageWindow(row.generatedAt, windowStart, now));
 	const accountability = summarizeEvidenceIndex(evidenceRows);
 	let memoryRecords: MemoryRecord[] = [];
 	try {
@@ -370,7 +352,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		});
 	}
 
-	// Diagnostics to stderr (both modes)
+	// UsageDiagnostics to stderr (both modes)
 	const diagParts: string[] = [];
 	if (diagnostics.malformedReceipts > 0) diagParts.push(`${diagnostics.malformedReceipts} malformed receipt(s) skipped`);
 	if (diagnostics.unreadableSessions > 0)
@@ -659,137 +641,12 @@ function indent(text: string): string {
 		.join("\n");
 }
 
-function inWindow(iso: string, start: number, end: number): boolean {
-	const value = Date.parse(iso);
-	return Number.isFinite(value) && value >= start && value <= end + USAGE_WINDOW_FUTURE_SKEW_MS;
-}
-
-/**
- * The window `usage report` folds: the repository's sessions (every bucket's without one), and the runs no session
- * references that the run ledger or a window receipt attributes to it, by cwd or by one of its sessions. `telemetry
- * explain` rebuilds a `repo:` reference's window through it, ending at its own now (#434 §11.4).
- */
-export async function usageWindow(
-	stateDir: string,
-	scope: { hash: string; inRepo: (cwd: string) => boolean } | null,
-	days: number,
-	now: number,
-	diagnostics: Diagnostics = emptyDiagnostics(),
-): Promise<{ receipts: UsageReceipt[]; repo: RepoSource }> {
-	const windowStart = now - days * 24 * 60 * 60 * 1000;
-	const repoRunIds = scope === null ? null : await runIdsForCwd(stateDir, scope.inRepo, diagnostics);
-	const repoSessions =
-		scope === null ? null : new Set((await listSessionLedgerRefs(stateDir, scope.hash)).map((ref) => ref.sessionId));
-	const receipts = (await readReceipts(stateDir, windowStart, now, diagnostics)).filter(
-		(receipt) =>
-			scope === null ||
-			(receipt.cwd !== null && scope.inRepo(receipt.cwd)) ||
-			repoRunIds?.has(receipt.runId) ||
-			(receipt.sessionId !== null && repoSessions?.has(receipt.sessionId)),
-	);
-	const telemetry = loadRepoTelemetrySources(stateDir, {
-		cwdHash: scope?.hash ?? null,
-		from: windowStart,
-		to: now + USAGE_WINDOW_FUTURE_SKEW_MS,
-		// A receipt from before run journals may have left the run ledger's ring; its own cwd still attributes it.
-		standaloneRuns: repoRunIds === null ? "all" : new Set([...repoRunIds, ...receipts.map((receipt) => receipt.runId)]),
-	});
-	return { receipts, repo: { owner: repoOwner(scope?.hash ?? null, days), ...telemetry } };
-}
-
-function emptyDiagnostics(): Diagnostics {
-	return { malformedReceipts: 0, unreadableSessions: 0, malformedSessionLines: 0, malformedAuditRows: 0, notes: [] };
-}
-
-async function runIdsForCwd(
-	stateDir: string,
-	inRepo: (cwd: string) => boolean,
-	diagnostics: Diagnostics,
-): Promise<Set<string>> {
-	try {
-		const raw = await readFile(join(stateDir, "runs.json"), "utf8");
-		const parsed = JSON.parse(raw) as unknown;
-		if (!Array.isArray(parsed)) throw new Error("expected array");
-		const ids = new Set<string>();
-		for (const entry of parsed) {
-			if (!isRecord(entry)) continue;
-			if (typeof entry.id === "string" && typeof entry.cwd === "string" && inRepo(entry.cwd)) ids.add(entry.id);
-		}
-		return ids;
-	} catch (error) {
-		diagnostics.notes.push(
-			`run ledger unreadable, --repo run filter skipped: ${error instanceof Error ? error.message : String(error)}`,
-		);
-		return new Set<string>();
-	}
-}
-
-async function readReceipts(
-	stateDir: string,
-	windowStart: number,
-	windowEnd: number,
-	diagnostics: Diagnostics,
-): Promise<UsageReceipt[]> {
-	const root = join(stateDir, "receipts");
-	let files: string[];
-	try {
-		files = (await readdir(root)).filter((name) => name.endsWith(".json"));
-	} catch {
-		return [];
-	}
-
-	const receipts: UsageReceipt[] = [];
-	for (const name of files) {
-		let parsed: unknown;
-		try {
-			// A pruned receipt reads back from its evidence copy, as every receipt reader's does (#434).
-			parsed = JSON.parse(await readReceiptText(join(root, name)));
-		} catch {
-			diagnostics.malformedReceipts += 1;
-			continue;
-		}
-		if (!isRecord(parsed) || typeof parsed.runId !== "string" || typeof parsed.endedAt !== "string") {
-			diagnostics.malformedReceipts += 1;
-			continue;
-		}
-		if (!inWindow(parsed.endedAt, windowStart, windowEnd)) continue;
-		const toolStats = Array.isArray(parsed.toolStats)
-			? parsed.toolStats.flatMap((entry) => {
-					if (!isRecord(entry) || typeof entry.tool !== "string") return [];
-					return [
-						{
-							tool: entry.tool,
-							count: numberOr0(entry.count),
-							ok: numberOr0(entry.ok),
-							errors: numberOr0(entry.errors),
-							blocked: numberOr0(entry.blocked),
-						},
-					];
-				})
-			: [];
-		const skillActivations = Array.isArray(parsed.skillActivations)
-			? parsed.skillActivations.flatMap((entry) => (isRecord(entry) && typeof entry.name === "string" ? [entry.name] : []))
-			: [];
-		receipts.push({
-			runId: parsed.runId,
-			cwd: typeof parsed.cwd === "string" ? parsed.cwd : null,
-			agentId: typeof parsed.agentId === "string" ? parsed.agentId : "unknown",
-			task: typeof parsed.task === "string" ? parsed.task : "",
-			endedAt: parsed.endedAt,
-			sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : null,
-			toolStats,
-			skillActivations,
-		});
-	}
-	return receipts;
-}
-
 async function readSessions(
 	stateDir: string,
 	windowStart: number,
 	windowEnd: number,
 	repoHash: string | undefined,
-	diagnostics: Diagnostics,
+	diagnostics: UsageDiagnostics,
 ): Promise<SessionUsage[]> {
 	const refs = await listSessionLedgerRefs(stateDir, repoHash);
 	const sessions: SessionUsage[] = [];
@@ -813,7 +670,7 @@ async function readSessions(
 		const parsedEntries = parseSessionEntries(raw, ref.path);
 		diagnostics.malformedSessionLines += parsedEntries.errors.length;
 		const accountingEntries = parsedEntries.entries.filter(
-			(entry) => entry.kind === "modelChange" || inWindow(entry.timestamp, windowStart, windowEnd),
+			(entry) => entry.kind === "modelChange" || inUsageWindow(entry.timestamp, windowStart, windowEnd),
 		);
 		const usage: SessionUsage = {
 			harnessActions: 0,
@@ -826,7 +683,7 @@ async function readSessions(
 			recall: foldRecallTelemetry(accountingEntries),
 		};
 		for (const entry of parsedEntries.entries) {
-			if (!inWindow(entry.timestamp, windowStart, windowEnd)) continue;
+			if (!inUsageWindow(entry.timestamp, windowStart, windowEnd)) continue;
 			usage.entriesInWindow += 1;
 			if (entry.kind === "custom" && entry.customType === "turnOutcome" && isRecord(entry.data)) {
 				const harness = entry.data.harness;

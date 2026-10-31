@@ -23,7 +23,7 @@ import { readPiMonoVersion } from "./pi-mono-names.js";
  * It is pure node: fs, path, crypto.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { BigIntStats } from "node:fs";
 import {
 	closeSync,
@@ -45,6 +45,7 @@ import {
 import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { cwdHash } from "../core/cwd-hash.js";
 import { normalizeClioCoderEventTree } from "../core/naming-events.js";
 import { readClioVersion } from "../core/package-root.js";
 import { processBirthToken } from "../core/process-identity.js";
@@ -187,10 +188,7 @@ export interface ClioSessionReader {
 	tree(): ReadonlyArray<SessionTreeNode>;
 }
 
-export function cwdHash(cwd: string): string {
-	const normalized = resolve(cwd);
-	return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
-}
+export { cwdHash };
 
 export function sessionPaths(meta: ClioSessionMeta): ClioSessionFile {
 	const dir = join(clioStateDir(), "sessions", meta.cwdHash, meta.id);
