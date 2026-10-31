@@ -184,6 +184,7 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 				const channel =
 					baseUrl !== null
 						? createHttpChannel({
+								engine: name,
 								target,
 								runtime,
 								model: wireModel,
@@ -193,6 +194,7 @@ export function createLlmEngine(input: LlmEngineInput): DecisionEngine {
 								onAdmissionRefused,
 							})
 						: createOneShotChannel({
+								engine: name,
 								targetId: target.id,
 								model: wireModel,
 								port: input.oneShot as OneShotPort,

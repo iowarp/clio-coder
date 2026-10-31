@@ -209,6 +209,8 @@ function contentOf(data: ChatCompletion): string {
 const schemaRejections = new Set<string>();
 
 export interface HttpChannelInput {
+	/** The engine this channel answers for. */
+	readonly engine: string;
 	readonly target: TargetDescriptor;
 	readonly runtime: RuntimeDescriptor;
 	readonly model: string;
@@ -229,7 +231,7 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 	async function post(body: Record<string, unknown>): Promise<ChatCompletion> {
 		let recordUsage: Awaited<ReturnType<NonNullable<EngineHost["admitLlmRequest"]>>> | undefined;
 		try {
-			recordUsage = await host.admitLlmRequest?.({ targetId: target.id, model, signal });
+			recordUsage = await host.admitLlmRequest?.({ engine: input.engine, targetId: target.id, model, signal });
 		} catch (error) {
 			if (error instanceof LlmAdmissionRefused) input.onAdmissionRefused?.(error);
 			throw error;
@@ -339,6 +341,8 @@ export function createHttpChannel(input: HttpChannelInput): Channel {
 }
 
 export interface OneShotChannelInput {
+	/** The engine this channel answers for. */
+	readonly engine: string;
 	readonly targetId: string;
 	readonly model: string | null;
 	readonly port: OneShotPort;
@@ -357,6 +361,7 @@ export function createOneShotChannel(input: OneShotChannelInput): Channel {
 		async vote(prompt, labelCount) {
 			try {
 				const reply = await port({
+					engine: input.engine,
 					targetId,
 					model,
 					system: prompt.system,

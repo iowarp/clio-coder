@@ -43,6 +43,8 @@ import { SITE_IDS } from "./types.js";
  * is text: an LLM engine behind a port can vote but cannot read logprobs.
  */
 export type OneShotPort = (request: {
+	/** The System One engine asking, passed through to request admission (#434). */
+	engine?: string;
 	targetId: string;
 	model: string | null;
 	system: string;

@@ -802,7 +802,12 @@ function createSystemOneOneShot(providers: ProvidersContract, admitRequest: LlmR
 			signal: request.signal,
 			runtimeId: refined.runtime.id,
 			beforeRequest: async () => {
-				recordUsage = await admitRequest({ targetId: request.targetId, model: wireModelId, signal: request.signal });
+				recordUsage = await admitRequest({
+					...(request.engine !== undefined ? { engine: request.engine } : {}),
+					targetId: request.targetId,
+					model: wireModelId,
+					signal: request.signal,
+				});
 				return recordUsage.withContext ? { withContext: recordUsage.withContext } : undefined;
 			},
 			onUsage: (usage, observation) => recordUsage?.(usage, observation),

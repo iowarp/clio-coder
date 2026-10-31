@@ -33,6 +33,8 @@ export type LlmRequestAccounting = ((usage: LlmRequestUsage | null, observation?
 
 /** Admission captures the originating session and returns its per-request accounting sink. */
 export type LlmRequestAdmission = (request: {
+	/** The System One engine asking, which names the call's agent; absent for a caller that is not an engine (#434). */
+	readonly engine?: string;
 	readonly targetId: string;
 	readonly model: string;
 	readonly signal: AbortSignal;
