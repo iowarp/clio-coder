@@ -71,7 +71,7 @@ Clio Coder divides worker output into two isolated streams to protect control si
 
    The orchestrator adds one frame of its own, `spawn_error`, when the process cannot start.
 
-   The orchestrator reads the bulk lane through a bounded queue of 4096 frames ([worker-protocol.ts](../../src/domains/dispatch/worker-protocol.ts)). At the bound it drops the oldest display-only frame, such as a `message_update`. It never drops a receipt-bearing frame: `message_end`, the tool frames (`tool_execution_start`, `tool_execution_end`, `clio_coder_tool_start`, `clio_coder_tool_finish`), `clio_coder_run_outcome`, `clio_coder_helper_result`, `clio_coder_flow_restrictions`, the permission escalation, resolution, and grant execution frames, `clio_coder_steer_received`, and `spawn_error`. The set is `RECEIPT_BEARING_BULK_TYPES` in [protocol.ts](../../src/worker/protocol.ts). When the queue holds only evidence, it accepts one more receipt-bearing frame past the bound and refuses the new display frame instead. A bulk line over `WORKER_BULK_FRAME_MAX_BYTES` is discarded before parsing and counted as malformed.
+   The orchestrator reads the bulk lane through a bounded queue of 4096 frames ([worker-protocol.ts](../../src/domains/dispatch/worker-protocol.ts)). At the bound it drops the oldest display-only frame, such as a `message_update`. It never drops an evidence-bearing frame: `message_end`, the tool frames (`tool_execution_start`, `tool_execution_end`, `clio_coder_tool_start`, `clio_coder_tool_finish`), `clio_coder_run_outcome`, `clio_coder_helper_result`, `clio_coder_flow_restrictions`, the permission escalation, resolution, and grant execution frames, `clio_coder_steer_received`, and `spawn_error`. The set is `RECEIPT_BEARING_BULK_TYPES` in [protocol.ts](../../src/worker/protocol.ts). When the queue holds only evidence, it accepts one more receipt-bearing frame past the bound and refuses the new display frame instead. A bulk line over `WORKER_BULK_FRAME_MAX_BYTES` is discarded before parsing and counted as malformed.
 
    A trail with a gap cannot seal as a complete run. Two stderr lines name the gap:
 
@@ -413,14 +413,14 @@ Each `run.feed_appended` record carries `seq` (per run, starting at 1) and a `bo
 | `open` | `runId`, `agentId` | Written once per run on its first fed event or at its settlement. A run reopened after a resume appends another `open`. |
 | `event` | `type`, optional `tool`, `callId`, `outcome`, `durationMs` | One feed entry. The only kind that can be dropped. |
 | `journal_truncated` | `reason`, `droppedFromSeq` | Written once, the moment dropping begins. `reason` is `per-run size cap`. |
-| `receipt` | `outcome`, `exitCode`, optional `attemptRunId` | Written when the run settles. `attemptRunId` is present when the terminal attempt is not the logical run. |
+| `result` | `outcome`, `exitCode`, optional `attemptRunId` | Written when the run settles. `attemptRunId` is present when the terminal attempt is not the logical run. |
 | `terminal` | `outcome` | Always the last feed record. Later events for the run are discarded. |
 
 `type` is one of `agent_start`, `agent_end`, `attempt_start`, `message_end`, `thinking`, `route_warning`, `clio_coder_tool_start`, `clio_coder_tool_finish`, `clio_coder_tool_observation`, `clio_coder_permission_escalated`, `clio_coder_permission_resolved`, `clio_coder_run_outcome`, `clio_coder_steer_received`, or `unknown` for any other display type. `callId` pairs a tool start with its finish, and `outcome` is `ok`, `error` or `blocked`. Worker prose, text and thinking deltas, heartbeats, `message_start`, `message_update`, `turn_start`, `turn_end` and the `tool_execution_*` events are never fed, because they carry content or the call's literal arguments.
 
 ### Bounds
 
-The feed is capped at 2 MiB per run (`RUN_EVENT_JOURNAL_CAP_BYTES`). Past the cap `event` records are dropped behind one `journal_truncated` record, while `open`, `receipt`, `terminal` and the marker are always written, so a capped feed still says what the run was and how it ended. A writer failure never reaches the dispatch. The run's telemetry directory is removed when the run leaves the ledger ring.
+The feed is capped at 2 MiB per run (`RUN_EVENT_JOURNAL_CAP_BYTES`). Past the cap `event` records are dropped behind one `journal_truncated` record, while `open`, `result`, `terminal` and the marker are always written, so a capped feed still says what the run was and how it ended. A writer failure never reaches the dispatch. The run's telemetry scope outlives its row in the ledger ring and expires under telemetry [retention](telemetry.md#retention).
 
 ### Readers
 

@@ -57,6 +57,6 @@ code_nav({mode:"wiki",query:"architecture"})
 
 `source=clio` is for navigating the installed Clio Coder implementation. `mode=project` and `mode=wiki` describe the workspace and are unavailable with `source=clio`; use the product docs capability for Clio Coder documentation.
 
-Bounded workers receive up to 2,400 characters of complete codemap/orientation/wiki support fragments, independently of whether a handbook is present. Their existing handbook policy and omission notices remain separate. Receipt provenance includes the orientation message. A worker's task worktree supplies structural/status facts; a source-checkout handbook fallback does not substitute the source checkout's map or status. Workers configured with project-context tier `none` retain that policy.
+Bounded workers receive up to 2,400 characters of complete codemap/orientation/wiki support fragments, independently of whether a handbook is present. Their existing handbook policy and omission notices remain separate. The run's project-context provenance on `run.settled` includes the orientation message. A worker's task worktree supplies structural/status facts; a source-checkout handbook fallback does not substitute the source checkout's map or status. Workers configured with project-context tier `none` retain that policy.
 
 Installed operation needs the executable/worker bundles, vendored grammar assets, prompt/resource files, product Markdown, and the bundled map. Offline source navigation and docs remain supported. Shipped source and docs supply these installed runtime consumers.
