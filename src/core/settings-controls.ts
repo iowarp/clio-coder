@@ -673,15 +673,15 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"telemetry.research.content": [
 		"Research: capture content",
-		"In research mode, also keep the text of each distinct system prompt Clio compiles for a session, and the prompts, replies and facts of its background memory and compaction steps, with secrets removed, in that session's telemetry objects. Takes effect only in a workspace you consented for with clio-coder telemetry consent. Request bodies are not captured.",
+		"In research mode, also keep content in the session's telemetry objects with secrets removed: the text of each distinct system prompt Clio compiles, the body of each provider request (only its first 1 MiB when larger), and the prompts, replies and facts of background memory and compaction steps. Takes effect only in a workspace you consented for with clio-coder telemetry consent.",
 	],
 	"telemetry.research.deltas": [
 		"Research: token timing",
-		"Reserved for per-call token timing in research mode. This build records nothing for it.",
+		"In research mode, record each provider call's streaming timing: how many deltas it produced, a histogram of the gaps between them, the longest gap and the first-to-last span. No streamed text is kept.",
 	],
 	"telemetry.research.providerHeaders": [
 		"Research: provider headers",
-		"Reserved for allow-listed provider response headers in research mode. This build records nothing for it.",
+		"In research mode, record each provider call's response status and its allow-listed response headers: rate-limit and quota windows, request ids and server timing, each value cut to 256 characters. Cookies, auth echoes and every other header are never kept.",
 	],
 	"telemetry.research.systemOneDataset": [
 		"Research: decision dataset",
