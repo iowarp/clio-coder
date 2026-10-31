@@ -342,9 +342,34 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	let sessionId: string | null | undefined;
 	/** With no session bound, this process's own calls are the spend; refreshed off the read path as its journal grows. */
 	let processSpend: SessionSpend = NOTHING_SPENT;
+	/**
+	 * Runs this process dispatched with no session, such as a standalone fleet run's steps. The process owns them, so
+	 * once each finishes its run journal counts in the process's spend; until then its meter does (#434).
+	 */
+	const processRuns = new Set<string>();
+	/** Each owned run's journaled spend as the last refresh read it, the same fold the process spend sums. */
+	const processRunUsd = new Map<string, number>();
 	const refreshProcessSpend = async (): Promise<SessionSpend> => {
-		processSpend = spendOfQuantity(await telemetry.processQuantity?.("usd"));
+		const parts = [spendOfQuantity(await telemetry.processQuantity?.("usd"))];
+		for (const runId of processRuns) {
+			const run = spendOfQuantity((await telemetry.run(runId)).row.usd);
+			processRunUsd.set(runId, run.usd);
+			parts.push(run);
+		}
+		processSpend = {
+			usd: parts.reduce((sum, part) => sum + part.usd, 0),
+			estimated: parts.some((part) => part.estimated),
+			unpriced: parts.some((part) => part.unpriced),
+			ref: parts[0]?.ref ?? null,
+		};
 		return processSpend;
+	};
+	/** A run that ended while no session was bound, and that names none, is this process's own (#434). */
+	const adoptRun = (payload: DispatchTerminalLike): void => {
+		// A dispatch refused before admission never opened a run journal; there is nothing of it to fold.
+		if (sessionId || payload.sessionId || !dispatchHasEvidenceLedger(payload)) return;
+		if (typeof payload.runId !== "string" || payload.runId.length === 0) return;
+		processRuns.add(payload.runId);
 	};
 	/** The budget gate's spend: the read model's whole-session fold, estimated parts and unpriced calls flagged (#434). */
 	const spendOf = (view: TelemetryView | null): SessionSpend => {
@@ -447,6 +472,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			unsubscribes.push(
 				context.bus.subscribe("run.completed", (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
+					adoptRun(payload);
 					// Kick off the heavy forensic build without blocking the bus.
 					// buildAndIndexEvidence swallows all failures; stop() flushes it.
 					if (typeof payload.runId === "string" && payload.runId.length > 0) {
@@ -457,6 +483,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			unsubscribes.push(
 				context.bus.subscribe("run.failed", (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
+					adoptRun(payload);
 					// A failed run is never a first-pass success; still build the
 					// bundle so its failure-cause tags exist for the index.
 					if (typeof payload.runId === "string" && payload.runId.length > 0 && dispatchHasEvidenceLedger(payload)) {
@@ -538,6 +565,8 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			return spendOf(await telemetry.settled());
 		},
 		journaledRunUsd(runId) {
+			// With no session, an owned run counts by the journal the last process refresh folded; any other run by none.
+			if (!sessionId) return processRunUsd.get(runId) ?? 0;
 			// A run this session does not reference resolves to no quantity, so nothing of it is journaled here.
 			const sum = factSumOf(telemetry.live()?.quantity(factRef({ scope: "run", owner: runId, metric: "usd" }))?.fact);
 			return sum ? sum.measured + sum.estimated : 0;
