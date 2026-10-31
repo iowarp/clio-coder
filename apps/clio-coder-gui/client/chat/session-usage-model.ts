@@ -235,6 +235,10 @@ export interface QuotaCard {
 }
 
 type QuotaWindow = QuotaCard["windows"][number];
+
+/** A v1 window's label with its scope, worded as the read model's quota fold words it, so the two match. */
+const windowLabel = (window: { label: string; scope: string | null }) =>
+	window.scope ? `${window.label} (${window.scope})` : window.label;
 type FoldedQuota = NonNullable<SessionUsage["telemetryQuota"]>["providers"][number];
 
 /** A folded window's fill: its share when one is known; an unknown share draws an empty bar beside its words. */
@@ -301,9 +305,9 @@ export function quotaCards(
 						? `${provider.credits.display}${words?.credits ? ` · ${words.credits} used` : ""}`
 						: null,
 					windows: row
-						? foldedWindows(row, (label) => provider.windows.some((window) => window.label === label && window.active))
+						? foldedWindows(row, (label) => provider.windows.some((window) => windowLabel(window) === label && window.active))
 						: provider.windows.map((window, at) => ({
-								label: window.scope ? `${window.label} (${window.scope})` : window.label,
+								label: windowLabel(window),
 								used: words?.windows[at] ?? "share not reported",
 								share: window.usedPct,
 								resetsAt: window.resetsAt,

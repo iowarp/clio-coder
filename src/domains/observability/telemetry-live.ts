@@ -689,7 +689,12 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 								: { kind: "unknown", reason: "unsupported" },
 							resetsAt: window.resetsAt,
 						})),
-						new Map(snapshot.windows.flatMap((window) => (window.label.length > 0 ? [[window.key, window.label]] : []))),
+						// One provider's per-model windows can share a label, so a scoped window names its scope (#434).
+						new Map(
+							snapshot.windows.flatMap((window) =>
+								window.label.length > 0 ? [[window.key, scopedQuotaLabel(window.label, window.scope)]] : [],
+							),
+						),
 					),
 				}));
 			// The session's journaled readings: a resumed session's last sight of an account, and any reading newer than
@@ -770,4 +775,9 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			};
 		},
 	};
+}
+
+/** A quota window's label with its model or product scope, as the v1 usage read's surfaces word it. */
+function scopedQuotaLabel(label: string, scope: string | undefined): string {
+	return scope ? `${label} (${scope})` : label;
 }
