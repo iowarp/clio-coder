@@ -42,6 +42,7 @@ import {
 import { writeDiagnostic } from "./diagnostics.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { SANDBOX_MODES, UNIX_SOCKET_MODES } from "./sandbox/types.js";
+import type { SettingsFieldName } from "./settings-fields.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import { MAX_TIMER_DELAY_MS } from "./timers.js";
 import { clioConfigDir, resolveClioDirs } from "./xdg.js";
@@ -265,8 +266,8 @@ class Issues {
 		this.retired.push({ path, reason });
 	}
 
-	unknownKeys(path: string, raw: Record<string, unknown>, known: ReadonlyArray<string>): void {
-		const knownSet = new Set(known);
+	unknownKeys(path: string, raw: Record<string, unknown>, known: ReadonlyArray<SettingsFieldName>): void {
+		const knownSet = new Set<string>(known);
 		for (const key of Object.keys(raw)) {
 			if (!knownSet.has(key)) this.add(path ? `${path}.${key}` : key, "unknown key");
 		}
@@ -1030,7 +1031,7 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 		"the turn site (systemOne.sites.turn) reads the request and nothing falls back to the main model",
 } as const);
 
-const V1_ONLY_ROOTS = new Set([
+const V1_ONLY_ROOTS = new Set<SettingsFieldName>([
 	"identity",
 	"autonomy",
 	"runtimePlugins",
