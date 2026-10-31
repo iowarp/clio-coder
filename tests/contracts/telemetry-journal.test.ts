@@ -29,7 +29,7 @@ import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
-import { PROCESS_SCOPE, telemetryHub } from "../../src/core/telemetry/hub.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import { registerResearchTraceSink } from "../../src/core/telemetry/research-trace.js";
@@ -879,7 +879,7 @@ test("the process journal receives one health window per process, carrying loop 
 	const health = createHealthWindows({
 		active: () => journals.openSessions().length > 0,
 		writers: () => openCallJournalHealth().map(({ health }) => health),
-		record: (data) => telemetryHub().emit("health.sampled", data, PROCESS_SCOPE),
+		record: (data) => telemetryHub().emit("health.sampled", data),
 		windowMs: 50,
 	});
 	const journals = createSessionJournals(

@@ -1,5 +1,5 @@
 import type { EventPayload } from "../../core/telemetry/events.js";
-import { PROCESS_SCOPE, telemetryHub } from "../../core/telemetry/hub.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { AnthropicResponseObservation, CodexQuotaObservation } from "../../engine/types.js";
 import { parseAnthropicHeaders } from "./anthropic-headers.js";
 import { codexStreamSnapshot } from "./observed.js";
@@ -90,7 +90,7 @@ export function journalAccountQuota(reading: QuotaReading): boolean {
 	const account = JSON.stringify([reading.provider, reading.targetId]);
 	const fingerprint = quotaReadingFingerprint(reading);
 	if (journaledAccounts.get(account) === fingerprint) return false;
-	if (!telemetryHub().emit("quota.read", reading, PROCESS_SCOPE)) return false;
+	if (!telemetryHub().emit("quota.read", reading)) return false;
 	journaledAccounts.set(account, fingerprint);
 	return true;
 }

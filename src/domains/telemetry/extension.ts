@@ -16,7 +16,7 @@ import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/c
 import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
-import { PROCESS_SCOPE, telemetryHub } from "../../core/telemetry/hub.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
 import type {
 	ConfigChangePayload,
 	ConfigSessionChangePayload,
@@ -279,9 +279,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	const healthWindows = createHealthWindows({
 		active: () => journals.openSessions().length > 0,
 		writers: () => openCallJournalHealth().map(({ health }) => health),
-		record: (data) => telemetryHub().emit("health.sampled", data, PROCESS_SCOPE),
-		recordSamples: (data) => telemetryHub().emit("health.samples_captured", data, PROCESS_SCOPE),
-		samplesWanted: () => telemetryCaptures("health.samples_captured", PROCESS_SCOPE),
+		record: (data) => telemetryHub().emit("health.sampled", data),
+		recordSamples: (data) => telemetryHub().emit("health.samples_captured", data),
+		samplesWanted: () => telemetryCaptures("health.samples_captured"),
 	});
 	const journals = createSessionJournals(
 		clioStateDir(),

@@ -1,7 +1,7 @@
 import { publishClioCompileCache } from "../core/compile-cache.js";
 import type { ClioSettings } from "../core/config.js";
 import { canonicalEndpointUrl } from "../core/endpoint-key.js";
-import { PROCESS_SCOPE, telemetryHub } from "../core/telemetry/hub.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import { endpointCapacityUsage } from "../domains/dispatch/index.js";
 import { observeCacheDeployment } from "../domains/providers/cache-deployment.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
@@ -43,11 +43,13 @@ async function warmWorkerTarget(input: StartupPreparation, status: TargetStatus,
 		!deployment.endpoint ||
 		(deployment.warm !== "bounded" && !(deployment.backend === "lmstudio" && deployment.reason === "model-not-loaded"))
 	) {
-		telemetryHub().emit(
-			"prewarm.decided",
-			{ round: "worker", targetId: target.id, model: modelId, ran: false, reason: deployment.reason },
-			PROCESS_SCOPE,
-		);
+		telemetryHub().emit("prewarm.decided", {
+			round: "worker",
+			targetId: target.id,
+			model: modelId,
+			ran: false,
+			reason: deployment.reason,
+		});
 		return;
 	}
 	if (signal.aborted || input.isBusy() || JSON.stringify(input.providers.getTarget(target.id)) !== identity) return;
@@ -76,19 +78,15 @@ async function warmWorkerTarget(input: StartupPreparation, status: TargetStatus,
 		release();
 	}
 	input.recordWarm?.(target.id, modelId, result, costProvenance);
-	telemetryHub().emit(
-		"prewarm.settled",
-		{
-			round: "worker",
-			targetId: target.id,
-			model: modelId,
-			ttftMs: result.timing.ttftMs,
-			apiMs: result.timing.apiMs,
-			aborted: result.aborted,
-			failed: Boolean(result.errorMessage),
-		},
-		PROCESS_SCOPE,
-	);
+	telemetryHub().emit("prewarm.settled", {
+		round: "worker",
+		targetId: target.id,
+		model: modelId,
+		ttftMs: result.timing.ttftMs,
+		apiMs: result.timing.apiMs,
+		aborted: result.aborted,
+		failed: Boolean(result.errorMessage),
+	});
 }
 
 /** Post-paint, bounded work. No model requests unless the target explicitly opts in. */

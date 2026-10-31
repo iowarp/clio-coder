@@ -14,7 +14,7 @@ import type { CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { createHash } from "node:crypto";
 import type { ClioSettings } from "../core/config.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
-import { PROCESS_SCOPE, telemetryHub } from "../core/telemetry/hub.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import { endpointCapacityUsage } from "../domains/dispatch/index.js";
 import { registerForegroundStream } from "../domains/providers/endpoint-capacity.js";
 import {
@@ -294,19 +294,15 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 					canSend,
 				});
 				if (wake.invoked !== false && !wake.callId) deps.recordUsage(runtime, wake.usage, origin);
-				telemetryHub().emit(
-					"prewarm.settled",
-					{
-						round: "model-wake",
-						targetId: target.id,
-						model: selectedModel,
-						ttftMs: wake.timing.ttftMs,
-						apiMs: wake.timing.apiMs,
-						aborted: wake.aborted,
-						failed: Boolean(wake.errorMessage),
-					},
-					PROCESS_SCOPE,
-				);
+				telemetryHub().emit("prewarm.settled", {
+					round: "model-wake",
+					targetId: target.id,
+					model: selectedModel,
+					ttftMs: wake.timing.ttftMs,
+					apiMs: wake.timing.apiMs,
+					aborted: wake.aborted,
+					failed: Boolean(wake.errorMessage),
+				});
 				if (wake.aborted || wake.errorMessage) return { ran: false, reason: "deployment", detail: "wake-incomplete" };
 			} finally {
 				clearTimeout(deadline);
@@ -408,22 +404,18 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			});
 		}
 		if (result.invoked !== false && !result.callId) deps.recordUsage(runtime, result.usage, origin);
-		telemetryHub().emit(
-			"prewarm.settled",
-			{
-				round: "prompt",
-				targetId: runtime.targetId,
-				model: runtime.wireModelId,
-				trigger,
-				ttftMs: result.timing.ttftMs,
-				apiMs: result.timing.apiMs,
-				...(promptTokens === null ? {} : { promptTokens }),
-				aborted: result.aborted,
-				detached: wasDetached,
-				failed: Boolean(result.errorMessage),
-			},
-			PROCESS_SCOPE,
-		);
+		telemetryHub().emit("prewarm.settled", {
+			round: "prompt",
+			targetId: runtime.targetId,
+			model: runtime.wireModelId,
+			trigger,
+			ttftMs: result.timing.ttftMs,
+			apiMs: result.timing.apiMs,
+			...(promptTokens === null ? {} : { promptTokens }),
+			aborted: result.aborted,
+			detached: wasDetached,
+			failed: Boolean(result.errorMessage),
+		});
 
 		try {
 			deps.session?.appendEntry({
@@ -490,20 +482,16 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			.then((outcome) => {
 				if (deps.isLatencySurface()) {
 					const { target, model } = deps.getSettings().chat;
-					telemetryHub().emit(
-						"prewarm.decided",
-						{
-							round: "prompt",
-							trigger,
-							...(target ? { targetId: target } : {}),
-							...(model ? { model } : {}),
-							durationMs: Math.round(performance.now() - diagnosticStart),
-							ran: outcome.ran,
-							...(outcome.ran ? {} : { reason: outcome.reason }),
-							...(!outcome.ran && outcome.detail ? { detail: outcome.detail } : {}),
-						},
-						PROCESS_SCOPE,
-					);
+					telemetryHub().emit("prewarm.decided", {
+						round: "prompt",
+						trigger,
+						...(target ? { targetId: target } : {}),
+						...(model ? { model } : {}),
+						durationMs: Math.round(performance.now() - diagnosticStart),
+						ran: outcome.ran,
+						...(outcome.ran ? {} : { reason: outcome.reason }),
+						...(!outcome.ran && outcome.detail ? { detail: outcome.detail } : {}),
+					});
 				}
 				if (!outcome.ran && deps.getSettings().chat.prewarm && outcome.reason !== "surface") {
 					const key = `${outcome.reason}:${outcome.detail ?? ""}`;
@@ -526,11 +514,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			})
 			.catch(() => {
 				if (deps.isLatencySurface())
-					telemetryHub().emit(
-						"prewarm.decided",
-						{ round: "prompt", trigger, ran: false, reason: "preparation-failed" },
-						PROCESS_SCOPE,
-					);
+					telemetryHub().emit("prewarm.decided", { round: "prompt", trigger, ran: false, reason: "preparation-failed" });
 				return null;
 			})
 			.finally(() => {

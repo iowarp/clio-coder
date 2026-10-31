@@ -5,8 +5,7 @@ import type { FailureCause } from "./enums.js";
 import type { ClockOrigin } from "./envelope.js";
 import type { EventName, JournalEventName, JournalPayload } from "./events.js";
 import { isJournalEvent, journalDefinition } from "./events.js";
-import type { TelemetryScope } from "./hub.js";
-import { attachJournalRoute, PROCESS_SCOPE, telemetryHub } from "./hub.js";
+import { attachJournalRoute, telemetryHub } from "./hub.js";
 import { newAttemptId, newCallId } from "./ids.js";
 import type { CallSettled, CallStarted } from "./schemas.js";
 import { DELTA_GAP_BOUNDS_MS } from "./schemas.js";
@@ -104,12 +103,9 @@ function sinkAdmits(sink: TelemetrySink, kind: JournalEventName): boolean {
  * Whether a record of this kind would be captured under ctx now, so a producer can skip assembling research data
  * the mode drops (#434). It answers for this moment only: the record itself is still filtered when it is enqueued.
  */
-export function telemetryCaptures(
-	kind: JournalEventName,
-	ctx: TelemetryScope | undefined = telemetryContext(),
-): boolean {
-	const processFact = ctx === PROCESS_SCOPE || journalDefinition(kind).scope === "process";
-	const sink = ctx && !processFact ? sinks.get(telemetryOwner(ctx as TelemetryContext)) : processOwner?.sink;
+export function telemetryCaptures(kind: JournalEventName, ctx = telemetryContext()): boolean {
+	// A process fact is captured under the process journal's mode whatever context asks (#434).
+	const sink = ctx && journalDefinition(kind).scope !== "process" ? sinks.get(telemetryOwner(ctx)) : processOwner?.sink;
 	if (!sink) return false;
 	try {
 		return sinkAdmits(sink, kind);
@@ -135,7 +131,7 @@ function enqueueTelemetry(
 	name: EventName,
 	data: unknown,
 	preimage: unknown,
-	given: TelemetryScope | undefined,
+	given: TelemetryContext | undefined,
 ): boolean {
 	if (!isJournalEvent(name)) {
 		// The bus trace is a registry feature: a live event is journaled by name where research mode keeps it (#434).
@@ -143,7 +139,7 @@ function enqueueTelemetry(
 		return false;
 	}
 	const definition = journalDefinition(name);
-	if (definition.scope === "process" || given === PROCESS_SCOPE) {
+	if (definition.scope === "process") {
 		given = processOwner?.context;
 		if (!given) {
 			// A process fact emitted before the telemetry domain opens the process journal, such as the domain.loaded of
@@ -199,10 +195,9 @@ export function enqueueReopenedTelemetry(record: PendingTelemetry): boolean {
 	return false;
 }
 
-function traceLiveEvent(name: EventName, given: TelemetryScope | undefined): void {
-	const scoped = given === PROCESS_SCOPE ? undefined : given;
-	const ctx = scoped ?? processOwner?.context;
-	const sink = scoped ? sinks.get(telemetryOwner(scoped)) : processOwner?.sink;
+function traceLiveEvent(name: EventName, given: TelemetryContext | undefined): void {
+	const ctx = given ?? processOwner?.context;
+	const sink = given ? sinks.get(telemetryOwner(given)) : processOwner?.sink;
 	if (!ctx || !sink) return;
 	try {
 		if (!sinkAdmits(sink, "bus.traced")) return;
