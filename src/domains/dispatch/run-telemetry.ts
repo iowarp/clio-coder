@@ -120,6 +120,7 @@ function clioWriterVersions(): Promise<{ clioCoderVersion: string; piVersion: st
 
 export interface FleetRootTelemetry {
 	readonly context: TelemetryContext;
+	flush(): Promise<void>;
 	close(): Promise<void>;
 }
 
@@ -143,6 +144,12 @@ export async function openFleetRootTelemetry(
 	let closing: Promise<void> | undefined;
 	return {
 		context,
+		async flush() {
+			await writer.flush();
+			const health = writer.health();
+			if (health.writeErrors > 0 || health.invalid > 0 || health.dropped > 0 || health.filtered > 0)
+				throw new Error(`fleet root ${rootId} telemetry journal did not persist its accountability records`);
+		},
 		close() {
 			if (closing) return closing;
 			fleetRoots.delete(rootId);

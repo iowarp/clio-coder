@@ -67,14 +67,17 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 			["own", own.id],
 			["foreign", foreign.id],
 		] as const) {
-			const pending = stagePendingGateDecision({
-				group: `${label}-gate`,
-				topology: "review",
-				cycle: 1,
-				outcome: "pass",
-				subjects: [{ runId, digest: "a".repeat(64) }],
-				createdAt: new Date().toISOString(),
-			});
+			const pending = stagePendingGateDecision(
+				{
+					group: `${label}-gate`,
+					topology: "review",
+					cycle: 1,
+					outcome: "pass",
+					subjects: [{ runId, digest: "a".repeat(64) }],
+					createdAt: new Date().toISOString(),
+				},
+				{ telemetry: { sessionId: null, runId, label: "main" } },
+			);
 			if (pending.record.kind !== "decision") throw new Error("expected a decision artifact");
 			writeFileSync(join(decisionDir, `${label}.json`), JSON.stringify(pending.record.decision));
 		}

@@ -61,6 +61,11 @@ export function registerRunTelemetrySink(runId: string, sink: TelemetrySink): ()
 	return registerSink(`run:${runId}`, sink);
 }
 
+/** Explicit process contexts, including recovery, reach the process journal's sole writer (#434). */
+export function registerProcessJournalSink(processId: string, sink: TelemetrySink): () => void {
+	return registerSink(`process:${processId}`, sink);
+}
+
 export function registerProcessTelemetrySink(context: TelemetryContext, sink: TelemetrySink): () => void {
 	if (processOwner) throw new Error("telemetry already has a process owner");
 	const owner = { context, sink };

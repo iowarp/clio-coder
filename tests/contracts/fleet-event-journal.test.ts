@@ -1,7 +1,7 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -18,6 +18,8 @@ import {
 } from "../../src/domains/dispatch/fleet-event-journal.js";
 import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
 import { readFleetRun, writeFleetRun } from "../../src/domains/dispatch/state.js";
+import { readCallJournalSync } from "../../src/domains/telemetry/call-journal.js";
+import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function git(root: string, ...args: string[]) {
@@ -75,7 +77,12 @@ test("a fleet appends a hash-chained journal whose settled steps name the manife
 			dispatch: {} as Parameters<typeof executeFleetRun>[0]["dispatch"],
 			agents: {} as Parameters<typeof executeFleetRun>[0]["agents"],
 			attributionEnabled: false,
-			onStepSettled: (step) => progress.push(step.stepId),
+			onStepSettled: (step) => {
+				progress.push(step.stepId);
+				const rows = readCallJournalSync(telemetryRunDirectory(clioStateDir(), rootId)).records;
+				ok(rows.some(({ record }) => record.k === "code_step.settled" && record.data.runId === step.terminalRunId));
+				ok(step.recordPath && existsSync(step.recordPath));
+			},
 			onNotice: (text) => notices.push(text),
 			onStepDispatched: (event) => {
 				if (event.stepId === "check") afterStage = readFileSync(recordPath, "utf8");
@@ -351,6 +358,64 @@ test("fleet events --follow stops when the process running the fleet is gone", {
 		strictEqual(code, 4);
 		ok(err.includes(`the process running ${rootId} is gone`), err);
 		strictEqual(out, readFileSync(fleetEventJournalPath(rootId), "utf8"));
+	} finally {
+		env.restore();
+	}
+});
+
+test("a fleet refuses to execute code when its root telemetry journal cannot open", async () => {
+	const env = await isolateClioEnv("clio-coder-fleet-no-telemetry-");
+	try {
+		const root = join(env.dir, "repo");
+		mkdirSync(root);
+		git(root, "init", "-q");
+		const rootId = "fleet-no-telemetry";
+		const directory = telemetryRunDirectory(clioStateDir(), rootId);
+		mkdirSync(dirname(directory), { recursive: true });
+		writeFileSync(directory, "blocks the journal directory");
+		const plan = compileExecutionPlan({
+			topology: "fleet",
+			rootTask: "check",
+			maxWorkers: 1,
+			onFailure: "stop",
+			steps: [{ kind: "code", id: "check", commandId: "check", scope: "readonly", dependencies: [] }],
+		});
+		let started = false;
+		await rejects(
+			executeFleetRun({
+				plan,
+				playbookName: "no-telemetry",
+				workspaceRoot: root,
+				fleetRootId: rootId,
+				commands: {
+					version: 1,
+					path: join(root, "commands.yaml"),
+					commands: new Map([
+						[
+							"check",
+							{
+								id: "check",
+								argv: [process.execPath, "-e", "require('node:fs').writeFileSync('ran','yes')"],
+								cwd: "",
+								timeoutMs: 10000,
+								env: [],
+								description: "check",
+							},
+						],
+					]),
+				},
+				dispatch: {} as Parameters<typeof executeFleetRun>[0]["dispatch"],
+				agents: {} as Parameters<typeof executeFleetRun>[0]["agents"],
+				attributionEnabled: false,
+				onStarted: () => {
+					started = true;
+				},
+			}),
+			/fleet root telemetry journal unavailable/,
+		);
+		strictEqual(started, false);
+		strictEqual(existsSync(join(root, "ran")), false);
+		strictEqual(readFleetRun(rootId), null);
 	} finally {
 		env.restore();
 	}

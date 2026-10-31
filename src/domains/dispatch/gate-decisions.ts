@@ -12,13 +12,15 @@
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { Value } from "typebox/value";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
+import { TelemetryContextSchema, telemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
-import { telemetryHub } from "../../core/telemetry/hub.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { parseVerifierResult, type VerifierCheck, type VerifierResult } from "../agents/result-contract.js";
+import { publishGateDecision } from "../telemetry/index.js";
 import type { GateRouteCorrelation } from "./execution-role.js";
 import type { RunGateSubjectRef } from "./types.js";
 import { normalizeYoloGateOutcome } from "./yolo-ids.js";
@@ -230,6 +232,7 @@ export type GateDecisionVerification = { ok: true } | { ok: false; reason: strin
  * run id is durable but its receipt digest is intentionally not guessed.
  */
 export interface PendingGateOutputDraft {
+	telemetry?: TelemetryContext;
 	group: string;
 	topology: "review" | "compete";
 	cycle: number;
@@ -244,6 +247,7 @@ export interface PendingGateOutputDraft {
 }
 
 export interface PendingGateOutputRecord {
+	telemetry: TelemetryContext;
 	version: 1;
 	kind: "output";
 	id: string;
@@ -265,6 +269,7 @@ export interface PendingGateOutputRecord {
  * after the artifact rename but before pending-file removal.
  */
 export interface PendingGateArtifactRecord {
+	telemetry: TelemetryContext;
 	version: 1;
 	kind: "decision";
 	id: string;
@@ -316,6 +321,7 @@ export interface PendingGateDecisionRecoveryPlan {
 }
 
 export interface StagePendingGateDecisionOptions {
+	telemetry?: TelemetryContext;
 	/** Exact final assistant output, retained until the artifact is durable. */
 	finalOutput?: string;
 	resourceRoot?: string;
@@ -593,7 +599,6 @@ function persistGateDecisionArtifact(
 	artifact: GateDecisionArtifact,
 	stateDir: string,
 	allowIdenticalExisting: boolean,
-	telemetry: TelemetryContext | undefined,
 ): { artifact: GateDecisionArtifact; path: string } {
 	const verification = verifyGateDecisionArtifact(artifact);
 	if (!verification.ok) throw new Error(verification.reason);
@@ -612,7 +617,6 @@ function persistGateDecisionArtifact(
 		throw new Error(`gate decision artifact collision: ${artifact.id}`);
 	}
 	atomicWrite(path, JSON.stringify(artifact, null, 2));
-	telemetryHub().emit("gate.decided", gateDecidedFacts(artifact), telemetry);
 	return { artifact, path };
 }
 
@@ -647,14 +651,12 @@ function cloneGateDecisionArtifact(artifact: GateDecisionArtifact): GateDecision
 	};
 }
 
-function pendingRecordPayload(
-	record: PendingGateRecordWithoutIntegrity,
-	legacyNaming = false,
-): Record<string, unknown> {
+function pendingRecordPayload(record: PendingGateRecordWithoutIntegrity): Record<string, unknown> {
 	if (record.kind === "output") {
 		return {
-			contract: legacyNaming ? "clio.gateDecision.pending" : "clio-coder.gateDecision.pending",
+			contract: "clio-coder.gateDecision.pending",
 			version: record.version,
+			telemetry: { ...record.telemetry },
 			kind: record.kind,
 			id: record.id,
 			group: record.group,
@@ -670,12 +672,13 @@ function pendingRecordPayload(
 	}
 	const decisionWithoutIntegrity = artifactWithoutIntegrity(record.decision);
 	return {
-		contract: legacyNaming ? "clio.gateDecision.pending" : "clio-coder.gateDecision.pending",
+		contract: "clio-coder.gateDecision.pending",
 		version: record.version,
+		telemetry: { ...record.telemetry },
 		kind: record.kind,
 		id: record.id,
 		decision: {
-			...decisionPayload(decisionWithoutIntegrity, legacyNaming),
+			...decisionPayload(decisionWithoutIntegrity),
 			integrity: { ...record.decision.integrity },
 		},
 		...(record.finalOutput !== undefined ? { finalOutput: record.finalOutput } : {}),
@@ -684,9 +687,9 @@ function pendingRecordPayload(
 	};
 }
 
-function pendingRecordDigest(record: PendingGateRecordWithoutIntegrity, legacyNaming = false): string {
+function pendingRecordDigest(record: PendingGateRecordWithoutIntegrity): string {
 	return createHash("sha256")
-		.update(JSON.stringify(pendingRecordPayload(record, legacyNaming)), "utf8")
+		.update(JSON.stringify(pendingRecordPayload(record)), "utf8")
 		.digest("hex");
 }
 
@@ -694,6 +697,7 @@ function pendingRecordWithoutIntegrity(record: PendingGateDecisionRecord): Pendi
 	if (record.kind === "output") {
 		return {
 			version: record.version,
+			telemetry: { ...record.telemetry },
 			kind: record.kind,
 			id: record.id,
 			group: record.group,
@@ -709,6 +713,7 @@ function pendingRecordWithoutIntegrity(record: PendingGateDecisionRecord): Pendi
 	}
 	return {
 		version: record.version,
+		telemetry: { ...record.telemetry },
 		kind: record.kind,
 		id: record.id,
 		decision: cloneGateDecisionArtifact(record.decision),
@@ -721,6 +726,7 @@ function pendingRecordWithoutIntegrity(record: PendingGateDecisionRecord): Pendi
 function pendingSemanticError(value: unknown): string | null {
 	if (!isRecord(value)) return "pending gate decision is not an object";
 	if (value.version !== 1) return "unsupported pending gate decision version";
+	if (!Value.Check(TelemetryContextSchema, value.telemetry)) return "pending gate decision telemetry context invalid";
 	if (!isSafeDecisionId(value.id)) return "pending gate decision id invalid";
 	if (typeof value.createdAt !== "string" || !Number.isFinite(Date.parse(value.createdAt))) {
 		return "pending gate decision timestamp invalid";
@@ -778,8 +784,7 @@ function verifyPendingGateDecisionRecord(record: PendingGateDecisionRecord): Gat
 	const invalid = pendingSemanticError(record);
 	if (invalid !== null) return { ok: false, reason: invalid };
 	const withoutIntegrity = pendingRecordWithoutIntegrity(record);
-	return pendingRecordDigest(withoutIntegrity) === record.integrity.digest ||
-		pendingRecordDigest(withoutIntegrity, true) === record.integrity.digest
+	return pendingRecordDigest(withoutIntegrity) === record.integrity.digest
 		? { ok: true }
 		: { ok: false, reason: "pending gate decision integrity mismatch" };
 }
@@ -867,6 +872,14 @@ function sameSubjectRefs(left: ReadonlyArray<RunGateSubjectRef>, right: Readonly
 	);
 }
 
+/** A decision must retain its original owner across a coordinator crash (#434). */
+function requireGateTelemetry(explicit: TelemetryContext | undefined): TelemetryContext {
+	const context = explicit ?? telemetryContext();
+	if (!context || !Value.Check(TelemetryContextSchema, context))
+		throw new Error("gate decision requires an owning telemetry context at stage time");
+	return { ...context };
+}
+
 /**
  * Cross the output-loss boundary before waiting for the decider receipt. The
  * returned handle is later resolved with that receipt's authenticated digest.
@@ -875,8 +888,10 @@ export function stagePendingGateOutput(
 	draft: PendingGateOutputDraft,
 	stateDir = clioStateDir(),
 ): PendingGateDecisionHandle {
+	const telemetry = requireGateTelemetry(draft.telemetry);
 	const id = newDecisionId(draft.group);
 	const withoutIntegrity: Omit<PendingGateOutputRecord, "integrity"> = {
+		telemetry,
 		version: 1,
 		kind: "output",
 		id,
@@ -903,11 +918,13 @@ export function stagePendingGateDecision(
 	draft: GateDecisionDraft,
 	options: StagePendingGateDecisionOptions = {},
 ): PendingGateDecisionHandle {
+	const telemetry = requireGateTelemetry(options.telemetry);
 	const stateDir = options.stateDir ?? clioStateDir();
 	const id = newDecisionId(draft.group);
 	const createdAt = draft.createdAt ?? new Date().toISOString();
 	const decision = buildGateDecisionArtifact(draft, id, createdAt);
 	const withoutIntegrity: Omit<PendingGateArtifactRecord, "integrity"> = {
+		telemetry,
 		version: 1,
 		kind: "decision",
 		id,
@@ -959,6 +976,7 @@ export function resolvePendingGateDecision(
 	}
 	const decision = buildGateDecisionArtifact(draft, pending.id, pending.createdAt);
 	const withoutIntegrity: Omit<PendingGateArtifactRecord, "integrity"> = {
+		telemetry: { ...pending.telemetry },
 		version: 1,
 		kind: "decision",
 		id: pending.id,
@@ -974,47 +992,34 @@ export function resolvePendingGateDecision(
 	return persistPendingGateDecision(resolvedRecord, loaded.stateDir, true);
 }
 
-/**
- * Write/reuse the reserved final artifact, then durably remove its WAL record. A newly written artifact is journaled
- * as `gate.decided` under `telemetry`, else under the async context (#434).
- */
-export function materializePendingGateDecision(
+/** Keep the WAL until its artifact and owning journal both hold the decision (#434). */
+export async function materializePendingGateDecision(
 	handle: PendingGateDecisionHandle,
-	telemetry?: TelemetryContext,
-): {
-	artifact: GateDecisionArtifact;
-	path: string;
-} {
+): Promise<{ artifact: GateDecisionArtifact; path: string }> {
 	const loaded = loadPendingGateDecision(handle);
-	if (loaded === null) {
-		if (handle.record.kind !== "decision") {
-			throw new Error(`pending gate output is missing before resolution: ${handle.record.id}`);
-		}
-		const path = decisionArtifactPath(handle.record.decision.id, handle.stateDir);
-		if (!existsSync(path)) throw new Error(`pending gate decision and artifact are both missing: ${handle.record.id}`);
-		const artifact = readVerifiedArtifact(path);
-		if (artifact.integrity.digest !== handle.record.decision.integrity.digest) {
-			throw new Error(`gate decision artifact conflicts with completed pending record: ${handle.record.id}`);
-		}
-		return { artifact, path };
+	const record = loaded?.record ?? handle.record;
+	if (record.kind !== "decision") {
+		throw new Error(`pending gate output requires receipt resolution: ${record.id}`);
 	}
-	if (loaded.record.kind !== "decision") {
-		throw new Error(`pending gate output requires receipt resolution: ${loaded.record.id}`);
+	const path = decisionArtifactPath(record.decision.id, handle.stateDir);
+	if (loaded === null && !existsSync(path)) {
+		throw new Error(`pending gate decision and artifact are both missing: ${record.id}`);
 	}
-	const written = persistGateDecisionArtifact(loaded.record.decision, loaded.stateDir, true, telemetry);
+	const written = persistGateDecisionArtifact(record.decision, handle.stateDir, true);
 	const persisted = readVerifiedArtifact(written.path);
-	if (persisted.integrity.digest !== loaded.record.decision.integrity.digest) {
-		throw new Error(`materialized gate decision does not match pending record: ${loaded.record.id}`);
+	if (persisted.integrity.digest !== record.decision.integrity.digest) {
+		throw new Error(`materialized gate decision does not match pending record: ${record.id}`);
 	}
-	clearPendingGateDecision(loaded);
+	await publishGateDecision(handle.stateDir, record.telemetry, gateDecidedFacts(persisted));
+	if (loaded !== null) clearPendingGateDecision(loaded);
 	return { artifact: persisted, path: written.path };
 }
 
 /** Resolve an output-first record, materialize its artifact, and clear the WAL. */
-export function finalizePendingGateDecision(
+export async function finalizePendingGateDecision(
 	handle: PendingGateDecisionHandle,
 	draft: GateDecisionDraft,
-): { artifact: GateDecisionArtifact; path: string } {
+): Promise<{ artifact: GateDecisionArtifact; path: string }> {
 	return materializePendingGateDecision(resolvePendingGateDecision(handle, draft));
 }
 

@@ -186,9 +186,9 @@ describe("evidence tool", () => {
 				subjects: [{ runId: "fixture", digest: "a".repeat(64) }],
 				createdAt: "2026-09-05T00:00:00.000Z",
 			},
-			{ stateDir: clioStateDir() },
+			{ stateDir: clioStateDir(), telemetry: { sessionId: null, runId: "fixture", label: "main" } },
 		);
-		const valid = materializePendingGateDecision(pending).artifact;
+		const valid = (await materializePendingGateDecision(pending)).artifact;
 		await writeFile(
 			join(built.directory, "gate-decisions.json"),
 			JSON.stringify({ version: 1, evidenceId: built.evidenceId, decisions: [valid, { ...valid, outcome: "fail" }] }),

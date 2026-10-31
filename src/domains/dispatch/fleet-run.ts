@@ -390,9 +390,8 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 				telemetryRunDirectory(clioStateDir(), input.fleetRootId),
 			);
 		} catch (error) {
-			// The fleet runs without its journal rather than not at all; its gate files and root record still hold.
 			const message = error instanceof Error ? error.message : String(error);
-			input.onNotice?.(`fleet root telemetry journal unavailable: ${message}`);
+			throw new Error(`fleet root telemetry journal unavailable: ${message}`, { cause: error });
 		}
 		input.onStarted?.();
 		return await runFleetHoldingWorkspace(
@@ -418,7 +417,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 async function runFleetHoldingWorkspace(
 	input: ExecuteFleetRunInput,
 	setEmergencySeal: (seal: () => void) => void,
-	rootTelemetry: FleetRootTelemetry | undefined,
+	rootTelemetry: FleetRootTelemetry,
 ): Promise<FleetRunOutcome> {
 	const { dispatch, agents, fleetRootId, workspaceRoot } = input;
 	const decisionRefs = activeDecisionRefs(input.getDecisionBoard?.() ?? []);
@@ -1135,7 +1134,9 @@ async function runFleetHoldingWorkspace(
 					);
 				}
 				if (step.verification === true) validationFresh = outcome.report.passed;
-				telemetryHub().emit("code_step.settled", codeStepSettledFacts(outcome.record), rootTelemetry?.context);
+				if (!telemetryHub().emit("code_step.settled", codeStepSettledFacts(outcome.record), rootTelemetry.context))
+					throw new Error(`fleet code step '${step.id}' settlement could not be enqueued`);
+				await rootTelemetry.flush();
 				const recordPath = rootJournalPath;
 				if (input.onStepSettled)
 					input.onStepSettled({
@@ -1198,8 +1199,8 @@ async function runFleetHoldingWorkspace(
 				});
 				independentReviewFresh = decided.verdict === "pass" && correlation.independent;
 				if (!replayed.has(step.id)) {
-					const staged = stagePendingGateDecision(decided.draft);
-					const { path: decisionPath } = materializePendingGateDecision(staged, rootTelemetry?.context);
+					const staged = stagePendingGateDecision(decided.draft, { telemetry: rootTelemetry.context });
+					const { path: decisionPath } = await materializePendingGateDecision(staged);
 					notice(
 						`loop ${loop.id} cycle ${attempt}: ${decided.draft.outcome}${decided.draft.detail === undefined ? "" : ` (${decided.draft.detail})`} decision=${decisionPath}`,
 						"gate",

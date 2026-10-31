@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readGateDecisionArtifacts } from "../../src/domains/dispatch/gate-decisions.js";
@@ -223,7 +224,7 @@ for (const agent of ["scout", "coder"] as const) {
 				if (rejected.kind === "error") match(rejected.message, /candidates must be an integer 2\.\.4/u);
 				strictEqual(bundle.contract.listRuns().length, 0);
 			}
-			const result = await tool.run(args);
+			const result = await withTelemetryContext({ sessionId: "compete-contract", label: "main" }, () => tool.run(args));
 			const after = snapshot(root);
 			t.diagnostic(
 				JSON.stringify({ before, candidateBefore, judged, changedPaths, judgeTask, after, resultKind: result.kind }),
@@ -461,17 +462,19 @@ for (const phase of ["candidates", "judge"] as const) {
 					getAgentSpecs: () => specs,
 					getAutonomy: () => "yolo",
 				});
-				const result = await tool.run(
-					{
-						agent: "scout",
-						task: "Explain tracked.txt with a grounded citation.",
-						intent: { read_roots: ["tracked.txt"], write_roots: [], expected_outputs: [] },
-						mode: "compete",
-						candidates: 2,
-						cwd: root,
-						...(stopKind === "timeout" ? { timeout_ms: 1500 } : {}),
-					},
-					{ signal: controller.signal },
+				const result = await withTelemetryContext({ sessionId: "compete-contract", label: "main" }, () =>
+					tool.run(
+						{
+							agent: "scout",
+							task: "Explain tracked.txt with a grounded citation.",
+							intent: { read_roots: ["tracked.txt"], write_roots: [], expected_outputs: [] },
+							mode: "compete",
+							candidates: 2,
+							cwd: root,
+							...(stopKind === "timeout" ? { timeout_ms: 1500 } : {}),
+						},
+						{ signal: controller.signal },
+					),
 				);
 				strictEqual(result.kind, "error");
 				if (result.kind !== "error") throw new Error("expected stopped compete");

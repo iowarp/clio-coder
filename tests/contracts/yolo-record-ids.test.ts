@@ -9,7 +9,6 @@ import {
 	type GateDecisionArtifact,
 	gateDecisionsDirectory,
 	materializePendingGateDecision,
-	preparePendingGateDecisionRecovery,
 	stagePendingGateDecision,
 	verifyGateDecisionArtifact,
 } from "../../src/domains/dispatch/gate-decisions.js";
@@ -63,7 +62,7 @@ test("old and new route authority ids verify in sealed receipts", () => {
 	}
 });
 
-test("old and new gate outcomes verify and project under the yolo names", () => {
+test("old and new gate outcomes verify and project under the yolo names", async () => {
 	const stateDir = mkdtempSync(join(tmpdir(), "clio-yolo-gate-"));
 	try {
 		const subject = { runId: "candidate", digest: "a".repeat(64) };
@@ -77,15 +76,17 @@ test("old and new gate outcomes verify and project under the yolo names", () => 
 			confirmation,
 			detail: "full-auto applied judge",
 		};
-		const newArtifact = materializePendingGateDecision(
-			stagePendingGateDecision(
-				{
-					...base,
-					outcome: "yolo-applied" as const,
-					detail: "yolo applied judge",
-				},
-				{ stateDir },
-			),
+		const newArtifact = (
+			await materializePendingGateDecision(
+				stagePendingGateDecision(
+					{
+						...base,
+						outcome: "yolo-applied" as const,
+						detail: "yolo applied judge",
+					},
+					{ stateDir, telemetry: { sessionId: null, runId: "yolo-gate", label: "main" } },
+				),
+			)
 		).artifact;
 		deepStrictEqual(verifyGateDecisionArtifact(newArtifact), { ok: true });
 		const oldDecision = {
@@ -110,33 +111,9 @@ test("old and new gate outcomes verify and project under the yolo names", () => 
 			},
 		} as unknown as GateDecisionArtifact;
 		deepStrictEqual(verifyGateDecisionArtifact(oldArtifact), { ok: true });
-		const pendingPayload = {
-			contract: "clio-coder.gateDecision.pending",
-			version: 1,
-			kind: "decision",
-			id: oldArtifact.id,
-			decision: { ...oldPayload, integrity: oldArtifact.integrity },
-			createdAt: oldArtifact.createdAt,
-		};
-		const pendingRecord = {
-			version: 1,
-			kind: "decision",
-			id: oldArtifact.id,
-			decision: oldArtifact,
-			createdAt: oldArtifact.createdAt,
-			integrity: {
-				algorithm: "sha256",
-				digest: createHash("sha256").update(JSON.stringify(pendingPayload)).digest("hex"),
-			},
-		};
-		const pendingDir = join(gateDecisionsDirectory(stateDir), "pending");
-		mkdirSync(pendingDir, { recursive: true });
-		writeFileSync(join(pendingDir, `${oldArtifact.id}.json`), JSON.stringify(pendingRecord));
-		const recovered = preparePendingGateDecisionRecovery(stateDir);
-		equal(recovered.ready.length, 1);
-		const ready = recovered.ready[0];
-		if (ready === undefined) throw new Error("pending gate record was not recovered");
-		deepStrictEqual(materializePendingGateDecision(ready).artifact, oldArtifact);
+		const directory = gateDecisionsDirectory(stateDir);
+		mkdirSync(directory, { recursive: true });
+		writeFileSync(join(directory, `${oldArtifact.id}.json`), JSON.stringify(oldArtifact));
 		const projected = gateTopology(stateDir).decisions;
 		equal(projected.length, 2);
 		for (const decision of projected) {

@@ -17,7 +17,11 @@ import type { EventPayload, JournalEventName, PreimageEventName } from "../../co
 import { PREIMAGE_SUBJECTS } from "../../core/telemetry/events.js";
 import { newRecordId } from "../../core/telemetry/ids.js";
 import type { PendingTelemetry, TelemetrySink } from "../../core/telemetry/producer.js";
-import { registerRunTelemetrySink, registerTelemetrySink } from "../../core/telemetry/producer.js";
+import {
+	registerProcessJournalSink,
+	registerRunTelemetrySink,
+	registerTelemetrySink,
+} from "../../core/telemetry/producer.js";
 import type { SegmentScan } from "../../core/telemetry/segment.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
@@ -104,6 +108,12 @@ type PersistedListener = (owner: string, event: PersistedTelemetry) => void;
 const persistedListeners = new Map<string, Set<PersistedListener>>();
 const anyOwnerListeners = new Set<PersistedListener>();
 const openJournalHealth = new Map<string, () => JournalHealth>();
+const openJournals = new Map<string, CallJournal>();
+
+/** Reuse the scope's sole writer for durable coordinator evidence (#434). */
+export function ownedCallJournal(context: TelemetryContext): CallJournal | undefined {
+	return openJournals.get(telemetryOwner(context));
+}
 
 function subscribed(owner: string): boolean {
 	return anyOwnerListeners.size > 0 || persistedListeners.has(owner);
@@ -215,6 +225,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 		release = resolve;
 	});
 	let unregister: (() => void) | undefined;
+	let registered = false;
 	let handle: FileHandle | undefined;
 	const hubOwner = telemetryOwner(options.context);
 	// A mode lookup that throws captures standard only; the segment header must still say what it admits (#434).
@@ -526,19 +537,24 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 					return closing;
 				},
 			};
-			// The process journal's lazy owner holds the producer's process registration itself (process-journal.ts).
-			if ("processId" in options.context) unregister = undefined;
+			// The lazy process owner handles unscoped emits; explicit contexts also route during recovery (#434).
+			if ("processId" in options.context) unregister = registerProcessJournalSink(options.context.processId, journal);
 			else if (options.context.runId !== undefined) unregister = registerRunTelemetrySink(options.context.runId, journal);
 			else if (options.context.sessionId !== null) unregister = registerTelemetrySink(options.context.sessionId, journal);
 			else throw new Error("telemetry journal requires a session or run owner");
 			openJournalHealth.set(hubOwner, health);
+			openJournals.set(hubOwner, journal);
+			registered = true;
 			ready(journal);
 			await lifetime;
 		},
 		{ timeoutMs: 0 },
 	).finally(async () => {
 		unregister?.();
-		openJournalHealth.delete(hubOwner);
+		if (registered) {
+			openJournalHealth.delete(hubOwner);
+			openJournals.delete(hubOwner);
+		}
 		await handle?.close();
 	});
 	void owner.catch(reject);

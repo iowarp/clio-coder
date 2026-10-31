@@ -277,6 +277,7 @@ describe("dispatch session ownership", () => {
 		try {
 			const subject = { runId, digest: "0".repeat(64) };
 			stagePendingGateOutput({
+				telemetry: { sessionId: "session-a", label: "main" },
 				group: "review-a",
 				topology: "review",
 				cycle: 1,
@@ -285,6 +286,7 @@ describe("dispatch session ownership", () => {
 				finalOutput: "{}",
 			});
 			stagePendingGateOutput({
+				telemetry: { sessionId: "session-a", label: "main" },
 				group: "review-unknown",
 				topology: "review",
 				cycle: 1,

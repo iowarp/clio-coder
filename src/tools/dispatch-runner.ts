@@ -905,13 +905,13 @@ async function runReviewGated(
 	const group = newGateGroupId("review");
 	const runs: CompletedRun[] = [];
 	const decisions: Array<{ artifact: GateDecisionArtifact; path: string }> = [];
-	const recordDecision = (
+	const recordDecision = async (
 		draft: GateDecisionDraft,
 		pending?: PendingGateDecisionHandle,
-	): { artifact: GateDecisionArtifact; path: string } => {
+	): Promise<{ artifact: GateDecisionArtifact; path: string }> => {
 		const decision = pending
-			? finalizePendingGateDecision(pending, draft)
-			: materializePendingGateDecision(stagePendingGateDecision(draft));
+			? await finalizePendingGateDecision(pending, draft)
+			: await materializePendingGateDecision(stagePendingGateDecision(draft));
 		decisions.push(decision);
 		return decision;
 	};
@@ -997,7 +997,7 @@ async function runReviewGated(
 				),
 			);
 			if (isPipelineStepFailure(builder.receipt)) {
-				recordDecision({
+				await recordDecision({
 					group,
 					topology: "review",
 					cycle,
@@ -1046,7 +1046,7 @@ async function runReviewGated(
 				),
 			);
 			if (isPipelineStepFailure(reviewer.receipt)) {
-				recordDecision(
+				await recordDecision(
 					{
 						group,
 						topology: "review",
@@ -1076,7 +1076,7 @@ async function runReviewGated(
 				correlation: gateCorrelationOf(builder.receipt, reviewer.receipt),
 				output: normalizedAssistantText(reviewer.summary),
 			});
-			recordDecision(decided.draft, reviewer.pendingGate);
+			await recordDecision(decided.draft, reviewer.pendingGate);
 			if (decided.findings === null) {
 				return {
 					runs,
@@ -1174,7 +1174,7 @@ function gateRunOwnership(deps: DispatchToolDeps): (runId: string) => boolean | 
  * dispatch, so recovering a sibling's records failed this session's dispatch
  * on the sibling's live compete coordinator or its not-yet-sealed receipts.
  */
-function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
+async function recoverPendingGateEvidence(deps: DispatchToolDeps): Promise<void> {
 	const ownsRun = gateRunOwnership(deps);
 	const recovery = preparePendingGateDecisionRecovery(undefined, { ownsRun });
 	const resolved: PendingGateDecisionHandle[] = [];
@@ -1285,7 +1285,7 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 	for (const handle of ready) {
 		if (handle.record.kind !== "decision") continue;
 		settlePendingCompeteResource(handle, handle.record.decision);
-		materializePendingGateDecision(handle);
+		await materializePendingGateDecision(handle);
 	}
 
 	// A process may have died after the final winner artifact was written but
@@ -1393,10 +1393,10 @@ async function runCompete(
 	const worktrees: CandidateWorktree[] = [];
 	const runs: CompletedRun[] = [];
 	const decisions: Array<{ artifact: GateDecisionArtifact; path: string }> = [];
-	const recordDecision = (draft: GateDecisionDraft, pending?: PendingGateDecisionHandle) => {
+	const recordDecision = async (draft: GateDecisionDraft, pending?: PendingGateDecisionHandle) => {
 		const decision = pending
-			? finalizePendingGateDecision(pending, draft)
-			: materializePendingGateDecision(stagePendingGateDecision(draft, { resourceRoot: requestedRoot }));
+			? await finalizePendingGateDecision(pending, draft)
+			: await materializePendingGateDecision(stagePendingGateDecision(draft, { resourceRoot: requestedRoot }));
 		decisions.push(decision);
 		return decision;
 	};
@@ -1604,7 +1604,7 @@ async function runCompete(
 				return candidateDiffStat(root, worktree.branch);
 			});
 			if (candidateRuns.every((run) => isPipelineStepFailure(run.receipt))) {
-				recordDecision({
+				await recordDecision({
 					group,
 					topology: "compete",
 					cycle: 1,
@@ -1687,7 +1687,7 @@ async function runCompete(
 				detail,
 			});
 			if (isPipelineStepFailure(judgeReceipt)) {
-				recordDecision(noWinner(`judge ended ${pipelineFailureReason(judgeReceipt)}`), judgeRun.pendingGate);
+				await recordDecision(noWinner(`judge ended ${pipelineFailureReason(judgeReceipt)}`), judgeRun.pendingGate);
 				return {
 					runs,
 					decisions,
@@ -1698,7 +1698,7 @@ async function runCompete(
 			}
 			const judged = parseCompeteGateResult(normalizedAssistantText(judgeSummary), compete.candidates);
 			if (!judged.ok) {
-				recordDecision(noWinner(judged.reason), judgeRun.pendingGate);
+				await recordDecision(noWinner(judged.reason), judgeRun.pendingGate);
 				return {
 					runs,
 					decisions,
@@ -1711,7 +1711,7 @@ async function runCompete(
 			const pickedWorktree = worktrees.find((worktree) => worktree.index === pick);
 			const pickedRun = candidateRuns[pick - 1];
 			if (!pickedWorktree || pickedRun === undefined || isPipelineStepFailure(pickedRun.receipt)) {
-				recordDecision(noWinner(`judge picked failed or missing candidate ${pick}`), judgeRun.pendingGate);
+				await recordDecision(noWinner(`judge picked failed or missing candidate ${pick}`), judgeRun.pendingGate);
 				return {
 					runs,
 					decisions,
@@ -1722,7 +1722,7 @@ async function runCompete(
 			}
 			const protectedChanges = protectedPathsChangedByCompeteBranch(root, pickedWorktree.branch, protectedPaths);
 			if (protectedChanges.length > 0) {
-				recordDecision(
+				await recordDecision(
 					noWinner(`judge-selected candidate ${pick} changes protected artifact(s): ${protectedChanges.join(", ")}`),
 					judgeRun.pendingGate,
 				);
@@ -1739,7 +1739,7 @@ async function runCompete(
 				subject: subjectRef(pickedRun.receipt),
 				branch: pickedWorktree.branch,
 			};
-			const winnerDecision = recordDecision(
+			const winnerDecision = await recordDecision(
 				{
 					group,
 					topology: "compete",
@@ -1765,7 +1765,7 @@ async function runCompete(
 					};
 				}
 				try {
-					recordDecision({
+					await recordDecision({
 						group,
 						topology: "compete",
 						cycle: 1,
@@ -1867,7 +1867,7 @@ async function runCompete(
  * autonomy parks this call for operator confirmation; the approval IS
  * the winner confirmation. After a successful merge scratch worktrees are cleaned up; candidate recovery refs remain.
  */
-function runApplyWinner(
+async function runApplyWinner(
 	input: { branch: string; cwd: string },
 	planHash: string,
 	authority:
@@ -1876,7 +1876,7 @@ function runApplyWinner(
 		| null,
 	mergeWinner: typeof mergeWinnerBranch = mergeWinnerBranch,
 	protectedPaths: ReadonlyArray<string> = [],
-): ToolResult {
+): Promise<ToolResult> {
 	if (authority === null) {
 		return {
 			kind: "error",
@@ -1938,7 +1938,7 @@ function runApplyWinner(
 			message: `dispatch: winner branch ${branch} changes protected artifact(s) and cannot be merged: ${protectedChanges.join(", ")}`,
 		};
 	}
-	const writeConfirmation = (): { artifact: GateDecisionArtifact; path: string } =>
+	const writeConfirmation = (): Promise<{ artifact: GateDecisionArtifact; path: string }> =>
 		materializePendingGateDecision(
 			stagePendingGateDecision({
 				group,
@@ -1960,7 +1960,7 @@ function runApplyWinner(
 	let confirmation: { artifact: GateDecisionArtifact; path: string } | null = null;
 	if (authority.outcome === "operator-confirmed") {
 		try {
-			confirmation = writeConfirmation();
+			confirmation = await writeConfirmation();
 		} catch (err) {
 			return {
 				kind: "error",
@@ -1980,7 +1980,7 @@ function runApplyWinner(
 	}
 	if (authority.outcome === "yolo-applied") {
 		try {
-			confirmation = writeConfirmation();
+			confirmation = await writeConfirmation();
 		} catch (err) {
 			return {
 				kind: "error",
@@ -2394,7 +2394,7 @@ export async function runDispatchTool(
 		return { kind: "ok", output: catalog };
 	}
 	try {
-		recoverPendingGateEvidence(deps);
+		await recoverPendingGateEvidence(deps);
 	} catch (error) {
 		return {
 			kind: "error",

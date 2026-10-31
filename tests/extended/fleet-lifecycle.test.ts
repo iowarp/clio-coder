@@ -1,11 +1,12 @@
-import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, rejects, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, describe, it, mock } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { readClioVersion } from "../../src/core/package-root.js";
+import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import { capacityDrain, setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
@@ -18,9 +19,11 @@ import {
 } from "../../src/domains/dispatch/fleet-preflight.js";
 import { planFleetResume } from "../../src/domains/dispatch/fleet-run.js";
 import {
+	gateDecisionsDirectory,
 	materializePendingGateDecision,
 	readPendingGateDecisions,
 	stagePendingGateDecision,
+	stagePendingGateOutput,
 	verifyGateDecisionArtifact,
 } from "../../src/domains/dispatch/gate-decisions.js";
 import {
@@ -30,6 +33,8 @@ import {
 import type { FleetRunRecord } from "../../src/domains/dispatch/state.js";
 import { resolveSshTargetLifecycle, type WorkerTransport } from "../../src/domains/dispatch/transport.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
+import { openCallJournal, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { formatBudgetLine } from "../../src/interactive/overlays/fleet-run-approval.js";
 import {
 	claimCompeteGroup,
@@ -221,7 +226,7 @@ describe("fleet lifecycle boundary", () => {
 		});
 	});
 
-	it("writes canonical gate seals and accepts released decision and pending seals", async () => {
+	it("writes canonical gate seals and records their telemetry owner", async () => {
 		scratch = await newScratchClioHome("clio-coder-gate-naming-");
 		const stateDir = join(scratch, "state");
 		const handle = stagePendingGateDecision(
@@ -233,7 +238,7 @@ describe("fleet lifecycle boundary", () => {
 				subjects: [{ runId: "subject-run", digest: "a".repeat(64) }],
 				createdAt: "2026-09-01T00:00:00.000Z",
 			},
-			{ stateDir },
+			{ stateDir, telemetry: { sessionId: null, runId: "naming-contract", label: "main" } },
 		);
 		if (handle.record.kind !== "decision") throw new Error("staged gate record did not contain a decision");
 		const decision = handle.record.decision;
@@ -251,39 +256,104 @@ describe("fleet lifecycle boundary", () => {
 		const sha256 = (value: unknown): string => createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
 		strictEqual(decision.integrity.digest, sha256(decisionPayload("clio-coder.gateDecision.integrity")));
 
-		const legacyDecision = {
-			...decision,
-			integrity: { algorithm: "sha256" as const, digest: sha256(decisionPayload("clio.gateDecision.integrity")) },
-		};
-		deepStrictEqual(verifyGateDecisionArtifact(legacyDecision), { ok: true });
-		const legacyPending = {
-			...handle.record,
-			decision: legacyDecision,
-			integrity: { ...handle.record.integrity },
-		};
-		const pendingPayload = {
-			contract: "clio.gateDecision.pending",
-			version: legacyPending.version,
-			kind: legacyPending.kind,
-			id: legacyPending.id,
-			decision: {
-				...decisionPayload("clio.gateDecision.integrity"),
-				integrity: { ...legacyDecision.integrity },
-			},
-			createdAt: legacyPending.createdAt,
-		};
-		legacyPending.integrity.digest = sha256(pendingPayload);
-		writeFileSync(handle.path, JSON.stringify(legacyPending, null, 2), "utf8");
-		const sealedBytes = readFileSync(handle.path, "utf8");
 		const recovered = readPendingGateDecisions(stateDir);
 		deepStrictEqual(recovered.errors, []);
 		strictEqual(recovered.records.length, 1);
-		strictEqual(readFileSync(handle.path, "utf8"), sealedBytes, "legacy WAL read must not rewrite its seal");
 		const recoveredHandle = recovered.records[0];
-		if (recoveredHandle === undefined) throw new Error("legacy pending gate was not recovered");
-		const materialized = materializePendingGateDecision(recoveredHandle);
-		strictEqual(materialized.artifact.integrity.digest, legacyDecision.integrity.digest);
+		if (recoveredHandle === undefined) throw new Error("pending gate was not recovered");
+		deepStrictEqual(recoveredHandle.record.telemetry, { sessionId: null, runId: "naming-contract", label: "main" });
+		const materialized = await materializePendingGateDecision(recoveredHandle);
+		strictEqual(materialized.artifact.integrity.digest, decision.integrity.digest);
 		deepStrictEqual(verifyGateDecisionArtifact(materialized.artifact), { ok: true });
+	});
+
+	it("recovers an artifact without its event once, in its staged owner, and retains failed publications", async () => {
+		scratch = await newScratchClioHome("clio-coder-gate-publication-");
+		const stateDir = join(scratch, "state");
+		const context = { sessionId: null, runId: "gate-publication", label: "main" } as const;
+		const draft = {
+			group: "publication",
+			topology: "review",
+			cycle: 1,
+			outcome: "pass",
+			subjects: [{ runId: "subject", digest: "a".repeat(64) }],
+		} as const;
+		const staged = withTelemetryContext(context, () =>
+			stagePendingGateDecision({ ...draft, subjects: [...draft.subjects] }, { stateDir }),
+		);
+		if (staged.record.kind !== "decision") throw new Error("expected a decision");
+		const artifact = staged.record.decision;
+		writeFileSync(join(gateDecisionsDirectory(stateDir), `${artifact.id}.json`), JSON.stringify(artifact));
+		const directory = telemetryRunDirectory(stateDir, context.runId);
+		const writer = await openCallJournal({ directory, context, writer: { clioCoderVersion: "test", piVersion: "test" } });
+		try {
+			const failed = mock.method(writer, "enqueue", () => false);
+			await rejects(materializePendingGateDecision(staged), /could not be enqueued/);
+			strictEqual(existsSync(staged.path), true);
+			strictEqual(
+				(await readCallJournal(directory)).records.filter(({ record }) => record.k === "gate.decided").length,
+				0,
+			);
+			failed.mock.restore();
+		} finally {
+			await writer.close();
+		}
+		const recovered = readPendingGateDecisions(stateDir).records[0];
+		if (!recovered) throw new Error("pending gate was lost");
+		await withTelemetryContext({ sessionId: "different-session", label: "main" }, async () => {
+			await Promise.all([materializePendingGateDecision(recovered), materializePendingGateDecision(recovered)]);
+		});
+		strictEqual(existsSync(staged.path), false);
+		await materializePendingGateDecision(staged);
+		const rows = (await readCallJournal(directory)).records.filter(({ record }) => record.k === "gate.decided");
+		strictEqual(rows.length, 1);
+		deepStrictEqual(rows[0]?.record.ctx, context);
+		if (rows[0]?.record.k !== "gate.decided") throw new Error("missing gate event");
+		strictEqual(rows[0].record.data.decisionId, artifact.id);
+		const next = stagePendingGateDecision({ ...draft, subjects: [...draft.subjects] }, { stateDir, telemetry: context });
+		const reopened = await openCallJournal({
+			directory,
+			context,
+			writer: { clioCoderVersion: "test", piVersion: "test" },
+		});
+		try {
+			const health = reopened.health();
+			const failed = mock.method(reopened, "health", () => ({ ...health, writeErrors: 1 }));
+			await rejects(materializePendingGateDecision(next), /not durably written/);
+			strictEqual(existsSync(next.path), true);
+			failed.mock.restore();
+			await materializePendingGateDecision(next);
+			strictEqual(existsSync(next.path), false);
+		} finally {
+			await reopened.close();
+		}
+	});
+
+	it("requires a stage-time owner and rejects pending records without that field", async () => {
+		scratch = await newScratchClioHome("clio-coder-gate-owner-");
+		const stateDir = join(scratch, "state");
+		const draft = {
+			group: "owner",
+			topology: "review" as const,
+			cycle: 1,
+			outcome: "pass" as const,
+			subjects: [{ runId: "subject", digest: "a".repeat(64) }],
+		};
+		throws(() => stagePendingGateDecision(draft, { stateDir }), /owning telemetry context at stage time/);
+		throws(
+			() => stagePendingGateOutput({ ...draft, deciderRunId: "reviewer", finalOutput: "{}" }, stateDir),
+			/owning telemetry context at stage time/,
+		);
+		const explicit = { sessionId: null, runId: "owner", label: "main" } as const;
+		const staged = withTelemetryContext({ sessionId: "ambient", label: "main" }, () =>
+			stagePendingGateDecision(draft, { stateDir, telemetry: explicit }),
+		);
+		deepStrictEqual(staged.record.telemetry, explicit);
+		const { telemetry: _telemetry, ...withoutOwner } = staged.record;
+		writeFileSync(staged.path, JSON.stringify(withoutOwner));
+		const read = readPendingGateDecisions(stateDir);
+		strictEqual(read.records.length, 0);
+		strictEqual(read.errors[0]?.message, "pending gate decision telemetry context invalid");
 	});
 
 	it("creates canonical task and compete refs while retaining exact legacy cleanup ownership", async () => {
