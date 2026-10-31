@@ -70,10 +70,23 @@ process.exit(result.status??1);
 		writeFileSync(join(remotePath, "sum.js"), "export const sum = 0;\n");
 		mkdirSync(join(remotePath, "__pycache__"));
 		writeFileSync(join(remotePath, "__pycache__", "x.pyc"), "byproduct\n");
+		const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+		writeFileSync(
+			join(env.dir, "bin", "git"),
+			`#!/usr/bin/env node
+const fs=require('node:fs'),cp=require('node:child_process');
+const args=process.argv.slice(2),remotePath=${JSON.stringify(remotePath)};
+const result=cp.spawnSync(${JSON.stringify(realGit)},args,{stdio:'inherit'});
+if(result.status===0&&args[args.indexOf('-C')+1]===remotePath&&args.includes('commit'))fs.writeFileSync(remotePath+'/late.txt','created after commit\\n');
+process.exit(result.status??1);
+`,
+			{ mode: 0o755 },
+		);
 		const imported = await importFleetChanges(remote, [join(worktree.path, "sum.js")], [worktree.path], []);
 		const { commit } = imported;
 		strictEqual(git(worktree.path, "show", "--name-only", "--format=", commit), "math.js\nsum.js");
-		deepStrictEqual(imported.leftUncommitted, { count: 1, paths: ["__pycache__/x.pyc"] });
+		deepStrictEqual(imported.leftUncommitted, { count: 2, paths: ["__pycache__/x.pyc", "late.txt"] });
+		strictEqual(readFileSync(join(remotePath, "late.txt"), "utf8"), "created after commit\n");
 		strictEqual(git(client, "rev-parse", "HEAD"), worktree.base);
 		strictEqual(git(worktree.path, "rev-parse", "HEAD"), commit);
 		strictEqual(readFileSync(join(worktree.path, "math.js"), "utf8"), content);
