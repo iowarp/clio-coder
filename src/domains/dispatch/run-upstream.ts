@@ -32,5 +32,25 @@ export function runGatewayRoutingLabel(result: Pick<RunResult, "upstreamResponse
 		.map((response) => gatewayRoutingObservationFromRecord(response as unknown as Record<string, unknown>))
 		.filter((observation) => observation !== null);
 	if (observations.length === 0) return null;
-	return countedLabels(observations.map(gatewayRoutingObservationLabel)).join(" | ");
+	const routes = new Map<string, { count: number; overheadMs?: { min: number; max: number } }>();
+	for (const observation of observations) {
+		const { overheadMs, ...route } = observation;
+		const label = gatewayRoutingObservationLabel(route);
+		const group = routes.get(label) ?? { count: 0 };
+		group.count += 1;
+		if (overheadMs !== undefined) {
+			group.overheadMs = {
+				min: Math.min(group.overheadMs?.min ?? overheadMs, overheadMs),
+				max: Math.max(group.overheadMs?.max ?? overheadMs, overheadMs),
+			};
+		}
+		routes.set(label, group);
+	}
+	return [...routes]
+		.map(([label, group]) => {
+			const overhead = group.overheadMs;
+			const overheadLabel = overhead ? ` overhead_ms=${overhead.min}${group.count > 1 ? `–${overhead.max}` : ""}` : "";
+			return `${label}${overheadLabel}${group.count > 1 ? ` ×${group.count}` : ""}`;
+		})
+		.join(" | ");
 }
