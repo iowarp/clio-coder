@@ -15,7 +15,7 @@ import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integri
 import type { RunResult, RunResultVerification } from "../domains/dispatch/types.js";
 import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
 import { adaptRunResultTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
-import { receiptGatewayRoutingLabel, receiptResponseModelIdObservationLabel } from "./dispatch-event-text.js";
+import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "./dispatch-event-text.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 /** Expose only a completed, sealed handoff. Conformance does not imply evidence quality. */
@@ -207,8 +207,8 @@ export function receiptEvidenceLabels(
 			sections.length > 0 ? ` sections:${[...sections].sort().join(",")}` : ""
 		}${receipt.projectContext.contentHash !== undefined ? ` sha256:${receipt.projectContext.contentHash}` : ""}`;
 	}
-	const responseModelIdObservation = receiptResponseModelIdObservationLabel(receipt);
-	const gatewayRouting = receiptGatewayRoutingLabel(receipt);
+	const responseModelIdObservation = runResponseModelIdObservationLabel(receipt);
+	const gatewayRouting = runGatewayRoutingLabel(receipt);
 	const budget =
 		receipt.budget === undefined
 			? []

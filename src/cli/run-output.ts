@@ -1,7 +1,7 @@
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import { receiptGatewayRoutingLabel, receiptResponseModelIdObservationLabel } from "../tools/dispatch-event-text.js";
+import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "../tools/dispatch-event-text.js";
 
 function strings(value: unknown): string[] {
 	return Array.isArray(value)
@@ -151,7 +151,7 @@ function formatReceipt(r: RunResult, notVerified: number): string {
 		typeof r.reasoningTokenCount === "number" && r.reasoningTokenCount > 0 ? ` reasoning=${r.reasoningTokenCount}` : "";
 	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";
 	const verification = notVerified > 0 ? ` verification=unverified not_verified=${notVerified}` : "";
-	const responseModelIdObservation = receiptResponseModelIdObservationLabel(r);
-	const gatewayRouting = receiptGatewayRoutingLabel(r);
+	const responseModelIdObservation = runResponseModelIdObservationLabel(r);
+	const gatewayRouting = runGatewayRoutingLabel(r);
 	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode}${verification} target=${r.targetId} requested_model_id=${r.wireModelId}${responseModelIdObservation ? ` ${responseModelIdObservation}` : ""}${gatewayRouting ? ` ${gatewayRouting}` : ""} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
 }
