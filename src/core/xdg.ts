@@ -20,8 +20,8 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
  *
  * Role contents: config holds user-authored files (settings, credentials,
  * agents, skills, prompts, extensions, runtimes); data holds durable artifacts
- * (memory, evidence, vendored tools); state holds machine-produced session state
- * (sessions, audit, receipts, runs.json, recent-models.json, install.json,
+ * (memory, vendored tools); state holds machine-produced session state
+ * (sessions, telemetry, runs.json, recent-models.json, install.json,
  * interviews, scratch); cache holds disposable derived files.
  */
 

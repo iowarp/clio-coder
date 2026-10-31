@@ -270,22 +270,15 @@ targets:
 
 	it("doctor counts legacy immutable history without rewriting it", () => {
 		const sessionPath = join(stateDir, "sessions", "cwd", "session", "current.jsonl");
-		const receiptPath = join(stateDir, "receipts", "legacy.json");
 		mkdirSync(join(sessionPath, ".."), { recursive: true });
-		mkdirSync(join(receiptPath, ".."), { recursive: true });
 		writeFileSync(sessionPath, '{"type":"clio_tool_start"}\n', "utf8");
-		writeFileSync(receiptPath, '{"clioVersion":"0.4.0","contract":"clio.runReceipt.integrity"}\n', "utf8");
-		const snapshots = [sessionPath, receiptPath].map((path) => readFileSync(path, "utf8"));
+		const snapshot = readFileSync(sessionPath, "utf8");
 		const finding = namingHistoryFindings({ cwd: scratch.dir }).find(
 			(entry) => entry.name === "naming immutable history",
 		);
 		strictEqual(finding?.level, "warn");
 		ok(finding?.detail.includes("sessions=1"));
-		ok(finding?.detail.includes("receipts=2"));
-		deepStrictEqual(
-			[sessionPath, receiptPath].map((path) => readFileSync(path, "utf8")),
-			snapshots,
-		);
+		strictEqual(readFileSync(sessionPath, "utf8"), snapshot);
 	});
 
 	it("normalizes the released ACP routing-notice custom type only at session read", () => {

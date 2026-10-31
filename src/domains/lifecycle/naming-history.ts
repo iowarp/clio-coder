@@ -21,7 +21,6 @@ const LEGACY_EVENT_TYPES = [
 ] as const;
 const LEGACY_HISTORY_LITERALS = [
 	...LEGACY_EVENT_TYPES,
-	"clio.runReceipt.integrity",
 	"clio.gateDecision.integrity",
 	"clio.gateDecision.pending",
 	"clio.protectedArtifact.pending",
@@ -31,7 +30,7 @@ const LEGACY_HISTORY_LITERALS = [
 	"identity.clio-worker",
 ] as const;
 
-export type NamingHistoryArea = "sessions" | "evidence" | "receipts";
+export type NamingHistoryArea = "sessions";
 
 export interface NamingHistoryCount {
 	area: NamingHistoryArea;
@@ -43,7 +42,6 @@ export interface NamingHistoryCount {
 
 export interface InspectNamingHistoryOptions {
 	stateDir: string;
-	dataDir: string;
 }
 
 function countLegacyHistoryText(text: string): number {
@@ -108,9 +106,5 @@ function inspectTextTree(area: NamingHistoryArea, root: string): NamingHistoryCo
 
 /** Count released legacy identifiers without mutating immutable or sealed history. */
 export function inspectNamingHistory(options: InspectNamingHistoryOptions): NamingHistoryCount[] {
-	return [
-		inspectTextTree("sessions", join(options.stateDir, "sessions")),
-		inspectTextTree("evidence", join(options.dataDir, "evidence")),
-		inspectTextTree("receipts", join(options.stateDir, "receipts")),
-	];
+	return [inspectTextTree("sessions", join(options.stateDir, "sessions"))];
 }

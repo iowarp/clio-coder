@@ -46,7 +46,7 @@ export const COMPLETION_SLOT_NAMES = [
 	"playbook-var-values",
 	"tasks",
 	"context-refs",
-	"receipts",
+	"runs",
 	"pane-runs-agents",
 	"pane-presets",
 	"pane-targets",

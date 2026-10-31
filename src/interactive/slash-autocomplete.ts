@@ -164,7 +164,7 @@ export const COMPLETION_SLOT_MANIFEST: Readonly<Record<string, CompletionSlotNam
 	"tasks/done:pos:id": "tasks",
 	"tasks/drop:pos:id": "tasks",
 	"context/recall:pos:ref": "context-refs",
-	"view/verify:pos:runId": "receipts",
+	"view/verify:pos:runId": "runs",
 	"panes/show:pos:run-or-agent": "pane-runs-agents",
 	"panes/open:pos:preset-or-argv": "pane-presets",
 	"panes/close:pos:target": "pane-targets",
