@@ -107,8 +107,6 @@ export interface SystemOneSettings {
 	sites: Partial<Record<SiteId, SystemOneSiteBinding>>;
 	/** Operator-fitted cuts by answering build, for builds the code table lacks. Keys are `<site>.<key>`. */
 	cuts: Record<string, Record<string, number>>;
-	retentionDays: number;
-	maxMiB: number;
 }
 
 /**
@@ -847,8 +845,6 @@ export const DEFAULT_SETTINGS = {
 		engines: {},
 		sites: {},
 		cuts: {},
-		retentionDays: 30,
-		maxMiB: 64,
 	} as SystemOneSettings,
 	safety: {
 		autonomy: "default" as AutonomyLevel,
@@ -1062,8 +1058,6 @@ systemOne:
   engines: {}
   sites: {}
   cuts: {}
-  retentionDays: 30
-  maxMiB: 64
 
 safety:
   autonomy: default

@@ -3220,8 +3220,6 @@ function formatSettingsValue(path: string, value: string): string {
 	if (path.endsWith("Bytes")) return `${(number / 1024).toLocaleString()} KB`;
 	if (path === "safety.limits.sessionCostUsd" || path === "turnControl.orientation.maxCostUsdPerTurn")
 		return renderCostAmount(number, "known");
-	if (path === "systemOne.retentionDays") return `${number.toLocaleString()} days`;
-	if (path === "systemOne.maxMiB") return `${number.toLocaleString()} MiB`;
 	if (
 		path === "context.compaction.threshold" ||
 		path === "context.workingSet.target" ||

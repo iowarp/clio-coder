@@ -691,14 +691,6 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Research: bus trace",
 		"In research mode, journal the name of every live event the telemetry hub delivers as a bus.traced record.",
 	],
-	"systemOne.retentionDays": [
-		"Dataset retention",
-		"Days of System One dataset files to keep. Older day files are deleted on the first dataset write of a session and at most hourly after.",
-	],
-	"systemOne.maxMiB": [
-		"Maximum dataset size",
-		"Total MiB the System One dataset directory may hold. When it is over, the oldest day files are deleted first; the file being written is never deleted for size.",
-	],
 	"turnControl.workflows": [
 		"Before Clio answers",
 		"Choose whether Clio may explore the project, check recent Git activity, recall earlier work, or collect finished background runs before answering. Project exploration and Git checks (orientation and direction) need a fitted System One turn site, which is experimental.",

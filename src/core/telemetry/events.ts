@@ -262,6 +262,11 @@ export const EVENTS = {
 	"code_step.settled": journal(S.CodeStepSettledSchema, { tier: "accountability", cc: "content-free" }),
 	"process.started": journal(S.EmptySchema, { tier: "accountability", cc: "content-free" }),
 	"process.exited": journal(S.ProcessExitedSchema, { tier: "accountability", cc: "content-free" }),
+	"system_one.sample_captured": journal(S.SystemOneSampleCapturedSchema, {
+		tier: "research",
+		cc: "content-bearing",
+		capture: "systemOneDataset",
+	}),
 	"bus.traced": journal(S.BusTracedSchema, { tier: "research", cc: "structural", capture: "busTrace" }),
 	"process.booted": journal(S.ProcessBootedSchema, { tier: "operational", cc: "structural" }),
 	"prewarm.decided": journal(S.PrewarmDecidedSchema, { tier: "operational", cc: "structural" }),
@@ -499,6 +504,7 @@ export const PREIMAGE_SUBJECTS = {
 	"memory.traced": "memory-trace",
 	"memory.observed": "observation-trace",
 	"request.captured": "request",
+	"system_one.sample_captured": "system-one-sample",
 } as const satisfies Partial<Record<JournalEventName, ObjectRef["subject"]>>;
 export type PreimageEventName = keyof typeof PREIMAGE_SUBJECTS;
 export type PreimageData<N extends PreimageEventName> = Omit<JournalPayload<N>, "content" | "bytes">;

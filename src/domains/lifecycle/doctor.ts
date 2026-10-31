@@ -1336,8 +1336,6 @@ export async function runDoctorModelChecks(
 	return [...findings, ...(await systemOneFindings(registry, findings, observations))];
 }
 
-const MIB = 1024 * 1024;
-
 /** The builds whose cuts cover a site, from a cut table keyed by build identity. */
 function buildsWithCuts(site: string, table: Readonly<Record<string, Readonly<Record<string, number>>>>): string[] {
 	return Object.entries(table)
@@ -1382,7 +1380,7 @@ async function systemOneFindings(
 	// project file binds is live there and must not read as unbound here. An
 	// untrusted project layer contributes nothing, exactly as in a session.
 	const settings = readLayeredSettings(process.cwd()).settings;
-	const { describeBindings, formatDatasetBytes, listDatasetFiles } = await import("../system-one/recorder/index.js");
+	const { describeBindings } = await import("../system-one/recorder/index.js");
 	const { FITTED_CUTS } = await import("../system-one/calibration.js");
 	const profiles = await import("../system-one/profiles.js");
 	const juliaCounted = existsSync((await import("../system-one/julia-tokenizer.js")).juliaTokenizerPath());
@@ -1415,11 +1413,16 @@ async function systemOneFindings(
 		});
 	}
 	rows.push(...systemOneEngineFindings(settings, bindings, runtimes, observations, profiles, juliaCounted));
-	// With nothing bound, recording off and no files, the dataset row would only repeat the off row.
+	// With nothing bound and recording off, the dataset row would only repeat the off row. The samples live in the
+	// session journals, which `clio-coder systemone status` counts (#434).
 	const recording = systemOneRecordingLabel(settings, process.cwd());
-	const quiet = off.length === bindings.length && recording === "record off";
-	const dataset = datasetFinding(settings.systemOne, recording, () => listDatasetFiles(), formatDatasetBytes, quiet);
-	if (dataset !== null) rows.push(dataset);
+	if (off.length !== bindings.length || recording !== "record off")
+		rows.push({
+			ok: true,
+			level: "info",
+			name: "system one dataset",
+			detail: `${recording}; samples are research content in session journals (clio-coder systemone status)`,
+		});
 	return rows;
 }
 
@@ -1498,41 +1501,6 @@ function systemOneEngineFindings(
 		});
 	}
 	return rows;
-}
-
-function datasetFinding(
-	systemOne: ReturnType<typeof readSettings>["systemOne"],
-	record: string,
-	listDatasetFiles: () => ReadonlyArray<{ day: string; bytes: number }>,
-	formatBytes: (bytes: number) => string,
-	quietWhenEmpty: boolean,
-): DoctorFinding | null {
-	const name = "system one dataset";
-	let files: ReadonlyArray<{ day: string; bytes: number }>;
-	try {
-		files = listDatasetFiles();
-	} catch (err) {
-		return {
-			ok: true,
-			level: "warn",
-			name,
-			detail: `${record}; the dataset directory cannot be read: ${err instanceof Error ? err.message : String(err)}`,
-		};
-	}
-	const limits = `retention ${systemOne.retentionDays} days, cap ${systemOne.maxMiB} MiB`;
-	if (files.length === 0)
-		return quietWhenEmpty ? null : { ok: true, level: "info", name, detail: `${record}; no files; ${limits}` };
-	const bytes = files.reduce((sum, file) => sum + file.bytes, 0);
-	const over = bytes > systemOne.maxMiB * MIB;
-	return {
-		ok: true,
-		level: over ? "warn" : "info",
-		name,
-		detail:
-			`${record}; ${files.length} day${files.length === 1 ? "" : "s"} (${files.length === 1 ? files[0]?.day : `${files[0]?.day} to ${files.at(-1)?.day}`}), ` +
-			`${formatBytes(bytes)}; ${limits}` +
-			(over ? "; over the cap, the next write prunes the oldest days" : ""),
-	};
 }
 
 /**

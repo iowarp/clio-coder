@@ -8,30 +8,19 @@
  * runner reports once per call, answered or not.
  */
 
-import type { ClioSettings } from "../../../core/config.js";
 import type { DecisionRecord, DecisionRecorder, OutcomeRecord } from "../types.js";
+import type { DatasetWriterDeps } from "./dataset.js";
 import { createDatasetWriter } from "./dataset.js";
 import type { SessionRow } from "./rows.js";
 import { buildSessionRow, digestOf, serializeState } from "./rows.js";
 
 export type { RuntimeLookup } from "./bindings.js";
 export { describeBindings } from "./bindings.js";
-export type { DatasetDecisionRow, DatasetOutcomeRow, DatasetSpecRow } from "./dataset.js";
-export type { ExportOptions, ExportResult, ExportSummary } from "./export.js";
-export { buildExport, exportToFile, streamExport } from "./export.js";
+export type { DatasetDecisionRow, DatasetOutcomeRow, DatasetSample, SampleData } from "./dataset.js";
+export type { DatasetSummary, ExportOptions, ExportResult, ExportSummary } from "./export.js";
+export { buildExport, exportToFile, isDay, streamExport, summarizeDataset } from "./export.js";
 export type { AnchoredRows, RowAnchorTree, SessionRow } from "./rows.js";
 export { anchorSessionRows, SESSION_ROW_CUSTOM_TYPE } from "./rows.js";
-export type { DatasetFile, DatasetSummary } from "./store.js";
-export {
-	countDatasetRows,
-	DATASET_DIR_NAME,
-	datasetDir,
-	formatDatasetBytes,
-	isDay,
-	listDatasetFiles,
-	pruneDataset,
-	summarizeDataset,
-} from "./store.js";
 
 /** A session that never reaches a drain must not grow the buffer without bound. */
 const MAX_BUFFERED = 256;
@@ -43,18 +32,16 @@ export interface RecorderDeps {
 	 * session it started in.
 	 */
 	currentSession: () => string | null;
-	/** Read on every call, so the retention limits take effect live. */
-	settings: () => Readonly<ClioSettings>;
 	/** Whether research capture keeps the dataset now; nothing else admits it (#434). */
 	recording: () => boolean;
+	/** Hand one dataset sample to its session's journal, which stores the content and cites it (#434). */
+	sample: DatasetWriterDeps["sample"];
 	/**
 	 * Where a row goes when its own session is no longer the one draining, so
 	 * `/new` or `/resume` between a call and the next turn cannot lose it or file
 	 * it under another session. May be a no-op for a session this process cannot write.
 	 */
 	appendSessionRow: (sessionId: string, row: SessionRow) => void;
-	/** One-time notice when a dataset write fails. Defaults to a line on stderr. */
-	warn?: (message: string) => void;
 }
 
 export interface SystemOneRecorder extends DecisionRecorder {
@@ -70,24 +57,14 @@ export interface SystemOneRecorder extends DecisionRecorder {
 	 * compact one, and every other dataset row keeps the session its call started in.
 	 */
 	drain(sessionId: string | null): SessionRow[];
-	/**
-	 * Write the queued dataset rows now. They are otherwise written on the next event-loop turn
-	 * and on process exit. A row still waiting for a session is written with none.
-	 */
+	/** Drop the dataset samples still waiting for a session; the process scope keeps no content. */
 	flush(): void;
 }
 
 export function createRecorder(deps: RecorderDeps): SystemOneRecorder {
 	let pending: Array<{ session: string | null; row: SessionRow }> = [];
 	const recording = deps.recording;
-	const writer = createDatasetWriter({
-		limits: () => {
-			const { retentionDays, maxMiB } = deps.settings().systemOne;
-			return { retentionDays, maxMiB };
-		},
-		recording,
-		warn: deps.warn ?? ((message) => process.stderr.write(`[clio-coder:system-one] ${message}\n`)),
-	});
+	const writer = createDatasetWriter({ recording, currentSession: deps.currentSession, sample: deps.sample });
 
 	return {
 		decision(record: DecisionRecord): void {

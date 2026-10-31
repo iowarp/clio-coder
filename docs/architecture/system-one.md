@@ -131,7 +131,7 @@ Writes are queued (at most 512 rows) and appended on the next event-loop turn wi
 
 The `ref` on a call is the join key for outcomes: the user turn id, a permission request id, a tool call id, a ranking call id or a queue entry id. Outcome sources are `turn` (what the turn did), `turn-tokens` (amends a canceled turn with worker tokens that sealed after it), `next-operator`, `permission` (how a parked approval was answered and how long it took), `follow-up` (whether a ranked skill, capability or memory entry was later used), `draft` (the draft taken, the judge's pick and whether they agreed) and `steer` (what became of a queued message).
 
-`clio-coder systemone status|export` and the doctor rows read the dataset through shared helpers in [store.ts](../../src/domains/system-one/recorder/store.ts) so all three agree on what a dataset file is. Export runs the scrub over every row again on the way out, so a day file written before a scrub fix does not leak through it. The operator workflow for these commands is in the guide's [training dataset](../guide/system-one.md#the-training-dataset) section.
+`clio-coder systemone status|export` read the journaled samples through [export.ts](../../src/domains/system-one/recorder/export.ts). Export runs the scrub over every row again on the way out, so a day file written before a scrub fix does not leak through it. The operator workflow for these commands is in the guide's [training dataset](../guide/system-one.md#the-training-dataset) section.
 
 ## Where sites are read
 

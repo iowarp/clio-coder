@@ -1023,6 +1023,9 @@ export const SETTINGS_V1_RETIRED_PATHS = Object.freeze({
 	"fleet.decisionProfiles":
 		"System One replaced decision profiles; bind an engine under systemOne.engines and systemOne.sites",
 	"systemOne.record": "research capture keeps the System One dataset: telemetry.research.systemOneDataset with content",
+	"systemOne.retentionDays":
+		"System One samples are research content in session journals, which telemetry retention expires",
+	"systemOne.maxMiB": "System One samples are research content in session journals, which telemetry retention bounds",
 	"turnControl.interpretation":
 		"the turn site (systemOne.sites.turn) reads the request and nothing falls back to the main model",
 } as const);
@@ -1397,7 +1400,7 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 		issues.add("systemOne", `expected a map, got ${describe(raw)}`);
 		return;
 	}
-	issues.unknownKeys("systemOne", raw, ["engines", "sites", "cuts", "retentionDays", "maxMiB"]);
+	issues.unknownKeys("systemOne", raw, ["engines", "sites", "cuts"]);
 	const next = settings.systemOne;
 	if ("engines" in raw) {
 		if (!isPlainObject(raw.engines)) issues.add("systemOne.engines", `expected a map, got ${describe(raw.engines)}`);
@@ -1538,11 +1541,6 @@ function validateSystemOne(issues: Issues, raw: unknown, settings: ClioSettings)
 			}
 			next.cuts = cuts;
 		}
-	}
-	for (const key of ["retentionDays", "maxMiB"] as const) {
-		if (!(key in raw)) continue;
-		const parsed = expectInteger(issues, `systemOne.${key}`, raw[key], { min: 1 });
-		if (parsed !== undefined) next[key] = parsed;
 	}
 }
 

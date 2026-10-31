@@ -66,5 +66,5 @@ export function captureAdmits(capture: TelemetryCapture, kind: JournalEventName)
  * with its flag and content capture keeps it, and nothing else admits it (#434).
  */
 export function systemOneDatasetRecording(capture: TelemetryCapture): boolean {
-	return capture.mode === "research" && capture.capture.systemOneDataset && capture.capture.content;
+	return captureAdmits(capture, "system_one.sample_captured");
 }

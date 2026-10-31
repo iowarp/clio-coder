@@ -75,4 +75,6 @@ export {
 	PROJECTION_FLUSH_DEBOUNCE_MS,
 } from "./projection.js";
 export { emptyTaskMemorySpendSummary, foldTaskMemorySpend, type TaskMemorySpendSummary } from "./read-model.js";
+export type { JournaledContent } from "./research-content.js";
+export { readJournaledContent } from "./research-content.js";
 export { readSessionContextSnapshots, readSessionPromptCompiles } from "./session-artifacts.js";

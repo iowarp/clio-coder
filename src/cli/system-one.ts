@@ -1,19 +1,12 @@
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { canonicalizePath } from "../core/path-canonical.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
-import {
-	countDatasetRows,
-	datasetDir,
-	describeBindings,
-	exportToFile,
-	formatDatasetBytes,
-	isDay,
-	listDatasetFiles,
-	summarizeDataset,
-} from "../domains/system-one/recorder/index.js";
+import { clioStateDir } from "../core/xdg.js";
+import { describeBindings, exportToFile, isDay, summarizeDataset } from "../domains/system-one/recorder/index.js";
 import type { SiteId } from "../domains/system-one/types.js";
 import { SITE_IDS } from "../domains/system-one/types.js";
 import { systemOneRecordingLabel } from "../domains/telemetry/consent.js";
+import { telemetryRoot } from "../domains/telemetry/index.js";
 import { formatColumns, printError, printNote } from "./shared.js";
 
 const HELP = `clio-coder systemone status
@@ -22,9 +15,9 @@ clio-coder systemone export --out <file> [--since <YYYY-MM-DD>] [--site <site>]
 System One is experimental. Its decision engines answer typed questions about the
 operator's request, tool calls, tool results and finished turns; sites, keys and
 cuts may change between releases. In research telemetry mode with
-telemetry.research.systemOneDataset and content consent for the workspace, or with
-the deprecated systemOne.record alias on, every call and what followed it is kept
-under the state directory as a redacted local dataset.
+telemetry.research.systemOneDataset and content consent for the workspace, every
+call and what followed it is kept in the session's telemetry journal as redacted
+research content, which telemetry retention expires like any other.
 
 status   whether recording is on, what the dataset holds, and where each site is bound
 export   write one JSON line per decision to a local file, joined with the full text
@@ -32,7 +25,7 @@ export   write one JSON line per decision to a local file, joined with the full 
 
 Flags:
   --out <file>        destination of the export (required, replaced atomically)
-  --since <day>       skip dataset days before this UTC day
+  --since <day>       skip samples recorded before this UTC day
   --site <site>       only this site: ${SITE_IDS.join(", ")}
 `;
 
@@ -91,24 +84,19 @@ function parseArgs(argv: ReadonlyArray<string>): ParsedArgs {
 	return out;
 }
 
-function runStatus(): number {
+async function runStatus(): Promise<number> {
 	const settings = readLayeredSettings(process.cwd()).settings;
 	const { systemOne, targets } = settings;
-	const summary = summarizeDataset();
+	const summary = await summarizeDataset(clioStateDir());
 	const rows: string[][] = [
 		["record", systemOneRecordingLabel(settings, process.cwd()).replace(/^record /, "")],
-		["directory", summary.dir],
-		["files", summary.files === 0 ? "none" : `${summary.files} (${summary.oldest} to ${summary.newest})`],
-		["size", `${formatDatasetBytes(summary.bytes)} of ${systemOne.maxMiB} MiB, kept ${systemOne.retentionDays} days`],
+		[
+			"samples",
+			summary.decisions + summary.outcomes === 0
+				? "none"
+				: `decision ${summary.decisions}, outcome ${summary.outcomes} across ${summary.sessions} session${summary.sessions === 1 ? "" : "s"} (${summary.oldest} to ${summary.newest})`,
+		],
 	];
-	if (summary.files > 0) {
-		const counts = countDatasetRows(listDatasetFiles(summary.dir));
-		rows.push([
-			"rows",
-			`decision ${counts.decision}, spec ${counts.spec}, outcome ${counts.outcome}` +
-				(counts.unrecognized > 0 ? `, unrecognized ${counts.unrecognized}` : ""),
-		]);
-	}
 	process.stdout.write(formatColumns(rows));
 	process.stdout.write("\nsites\n");
 	const sites = describeBindings(settings).map((binding) => {
@@ -127,7 +115,7 @@ function runStatus(): number {
 	return 0;
 }
 
-function runExport(parsed: ParsedArgs): number {
+async function runExport(parsed: ParsedArgs): Promise<number> {
 	if (parsed.out === undefined) {
 		printError("export requires --out <file>");
 		process.stderr.write(HELP);
@@ -135,32 +123,31 @@ function runExport(parsed: ParsedArgs): number {
 	}
 	const destination = resolve(parsed.out);
 	const parent = canonicalizePath(dirname(destination));
-	const dataset = canonicalizePath(datasetDir());
-	if (parent === null || dataset === null) {
-		printError("--out could not be checked against the dataset directory");
+	const telemetry = canonicalizePath(telemetryRoot(clioStateDir())) ?? telemetryRoot(clioStateDir());
+	if (parent === null) {
+		printError("--out could not be checked against the telemetry directory");
 		return 2;
 	}
-	if (parent === dataset) {
-		printError("--out must not point into the dataset directory");
+	if (parent === telemetry || parent.startsWith(`${telemetry}${sep}`)) {
+		printError("--out must not point into the telemetry directory");
 		return 2;
 	}
 	// The file holds redacted state, but redaction is best effort and the operator's own requests are in it.
 	// Rows are streamed to the temp file, so a large dataset is never one string.
-	const result = exportToFile(destination, {
+	const result = await exportToFile(destination, {
+		stateDir: clioStateDir(),
 		...(parsed.since !== undefined ? { since: parsed.since } : {}),
 		...(parsed.site !== undefined ? { site: parsed.site } : {}),
 	});
 	process.stdout.write(
-		`exported ${result.decisions} decision${result.decisions === 1 ? "" : "s"} from ${result.files} day file${result.files === 1 ? "" : "s"} to ${destination}\n`,
+		`exported ${result.decisions} decision${result.decisions === 1 ? "" : "s"} from ${result.sessions} session${result.sessions === 1 ? "" : "s"} to ${destination}\n`,
 	);
 	if (result.decisions === 0) printNote("no decisions matched; the file is empty.");
 	if (result.missingSpecs > 0) {
-		printNote(
-			`${result.missingSpecs} question spec${result.missingSpecs === 1 ? "" : "s"} missing from the selected days.`,
-		);
+		printNote(`${result.missingSpecs} question spec${result.missingSpecs === 1 ? "" : "s"} missing from their samples.`);
 	}
 	if (result.unreadableRows > 0)
-		printNote(`${result.unreadableRows} unreadable row${result.unreadableRows === 1 ? "" : "s"} skipped.`);
+		printNote(`${result.unreadableRows} unreadable sample${result.unreadableRows === 1 ? "" : "s"} skipped.`);
 	return 0;
 }
 
@@ -183,7 +170,7 @@ export async function runSystemOneCommand(argv: ReadonlyArray<string>): Promise<
 		return 2;
 	}
 	try {
-		return parsed.command === "status" ? runStatus() : runExport(parsed);
+		return parsed.command === "status" ? await runStatus() : await runExport(parsed);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;

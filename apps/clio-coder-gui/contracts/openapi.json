@@ -18467,6 +18467,20 @@
 			"Enum_97697bc4": {
 				"enum": ["answered", "failed", "timeout", "canceled", "overflow", "breaker-open", "unsupported", "flow-denied"]
 			},
+			"Enum_9bc06cfd": {
+				"enum": [
+					"prompt-structure",
+					"tool-schemas",
+					"config",
+					"briefing",
+					"steering",
+					"request",
+					"prompt-text",
+					"memory-trace",
+					"observation-trace",
+					"system-one-sample"
+				]
+			},
 			"Enum_a31a8781": {
 				"enum": ["succeeded", "failed", "timed_out", "stalled", "canceled", "denied_by_policy", "spawn_failed", "unknown"]
 			},
@@ -18482,19 +18496,6 @@
 					"handoff",
 					"helper",
 					"safety-judge"
-				]
-			},
-			"Enum_aadf060a": {
-				"enum": [
-					"prompt-structure",
-					"tool-schemas",
-					"config",
-					"briefing",
-					"steering",
-					"request",
-					"prompt-text",
-					"memory-trace",
-					"observation-trace"
 				]
 			},
 			"Enum_b4a9510b": {
@@ -22030,7 +22031,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_canonicalization_function_id_e8effd5d": {
+			"Object_canonicalization_function_id_2b46c13e": {
 				"type": "object",
 				"required": ["label", "function", "canonicalization", "subject", "id"],
 				"properties": {
@@ -22046,7 +22047,7 @@
 						"const": "json-sorted-v1"
 					},
 					"subject": {
-						"$ref": "#/components/schemas/Enum_aadf060a"
+						"$ref": "#/components/schemas/Enum_9bc06cfd"
 					},
 					"id": {
 						"type": "string",
@@ -27181,12 +27182,12 @@
 											]
 										},
 										"settings": {
-											"$ref": "#/components/schemas/Object_canonicalization_function_id_e8effd5d"
+											"$ref": "#/components/schemas/Object_canonicalization_function_id_2b46c13e"
 										},
 										"previous": {
 											"anyOf": [
 												{
-													"$ref": "#/components/schemas/Object_canonicalization_function_id_e8effd5d"
+													"$ref": "#/components/schemas/Object_canonicalization_function_id_2b46c13e"
 												},
 												{
 													"type": "null"
@@ -27386,7 +27387,7 @@
 											"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
 										},
 										"structure": {
-											"$ref": "#/components/schemas/Object_canonicalization_function_id_e8effd5d"
+											"$ref": "#/components/schemas/Object_canonicalization_function_id_2b46c13e"
 										},
 										"layoutVersion": {
 											"type": "integer",

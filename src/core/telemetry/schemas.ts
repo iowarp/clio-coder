@@ -37,6 +37,7 @@ export const ObjectRefSchema = Type.Object(
 			"prompt-text",
 			"memory-trace",
 			"observation-trace",
+			"system-one-sample",
 		]),
 		id: Type.String({ pattern: "^obj_[0-9a-f]{64}$" }),
 	},
@@ -590,6 +591,21 @@ export const ProcessBootedSchema = Type.Object(
 		interactivity: Type.Optional(
 			Type.Object({ stage0Ms: duration, hydratedMs: duration, inputBlockedMaxMs: duration }, closed),
 		),
+	},
+	closed,
+);
+/**
+ * One System One dataset sample: a decision with its redacted state and question specs, or an outcome that followed
+ * one, joined by `ref`. The sample itself is research content in `objects/` (#434).
+ */
+export const SystemOneSampleCapturedSchema = Type.Object(
+	{
+		sample: vocabulary(["decision", "outcome"]),
+		decisionId: Type.Optional(ExistingId),
+		site: Type.Optional(ExistingId),
+		ref: Type.Optional(ExistingId),
+		content: ObjectRefSchema,
+		bytes: count,
 	},
 	closed,
 );

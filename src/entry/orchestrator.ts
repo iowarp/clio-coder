@@ -3750,12 +3750,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	const systemOneRecorder = createRecorder({
 		currentSession: currentSessionId,
-		settings: () => getCurrentSettings(),
 		recording: systemOneRecording,
+		// A sample journals into its own session only while that session is current: a late answer for a session this
+		// process already closed has no journal open to receive it (#434).
+		sample: (sessionId, data, content) => {
+			const origin = session?.current();
+			if (origin?.id === sessionId) telemetry?.recordResearchTrace?.(origin, "system_one.sample_captured", data, content);
+		},
 		// The park flush writes a session's rows before it closes, so a call that
 		// started in a session that is no longer current is a late answer for a ledger
-		// this process has closed; its dataset copy, when recording, is already queued
-		// under the session it started in.
+		// this process has closed.
 		appendSessionRow: () => {},
 	});
 	const decisionUsage = createDecisionUsageTally(systemOneRecorder);

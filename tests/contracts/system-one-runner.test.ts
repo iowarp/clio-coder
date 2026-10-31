@@ -111,7 +111,7 @@ describe("System One runner", () => {
 		const lookups: string[] = [];
 		const records: DecisionRecord[] = [];
 		const so = createSystemOne({
-			settings: () => ({ systemOne: { engines: {}, sites: {}, cuts: {}, retentionDays: 30, maxMiB: 64 } }) as ClioSettings,
+			settings: () => ({ systemOne: { engines: {}, sites: {}, cuts: {} } }) as ClioSettings,
 			providers: {
 				getTarget: (id) => {
 					lookups.push(id);
@@ -138,7 +138,7 @@ describe("System One runner", () => {
 				chat: { target: "chat", model: "chat-model" },
 				context: { memory: { enabled: true, target: "memory", model } },
 				targets: [{ id: "memory", runtime, ...(url === undefined ? {} : { url }) }],
-				systemOne: { engines: {}, sites: {}, cuts: {}, retentionDays: 30, maxMiB: 64 },
+				systemOne: { engines: {}, sites: {}, cuts: {} },
 			}) as unknown as ClioSettings;
 		const derive = (runtime: string, url?: string, model?: string) =>
 			capabilitySettings(settingsFor(runtime, url, model)).systemOne;

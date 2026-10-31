@@ -21,7 +21,8 @@ type StoredSubject =
 	| "request"
 	| "config"
 	| "memory-trace"
-	| "observation-trace";
+	| "observation-trace"
+	| "system-one-sample";
 const hash = Type.String({ pattern: "^[0-9a-f]{64}$" });
 const count = Type.Integer({ minimum: 0 });
 const range = Type.Union([Type.Tuple([Type.Integer({ minimum: 1 }), Type.Integer({ minimum: 1 })]), Type.Null()]);
@@ -202,6 +203,7 @@ const storedSubjects: ReadonlySet<string> = new Set<StoredSubject>([
 	"config",
 	"memory-trace",
 	"observation-trace",
+	"system-one-sample",
 ]);
 
 /**
