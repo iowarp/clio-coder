@@ -1117,7 +1117,7 @@ function recoveredCorrelation(
 ): GateDecisionCorrelation {
 	const first = subjects[0];
 	const subject = first === undefined ? null : readVerifiedGateRun(deps, first.runId);
-	if (subject === null) throw new Error("recovered gate decision has no verified subject receipt for correlation");
+	if (subject === null) throw new Error("recovered gate decision has no verified subject run for correlation");
 	return gateCorrelationOf(subject, decider);
 }
 

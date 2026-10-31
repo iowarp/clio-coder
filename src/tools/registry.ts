@@ -1934,7 +1934,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				short: reason,
 				detail: `${reason}. Host verification runs each declared check as the dispatching agent, so each check must pass the admission its direct call would.`,
 				hints: [
-					"Run the check yourself with verify after the receipt, or declare a check the policy recognizes.",
+					"Run the check yourself with verify after the run settles, or declare a check the policy recognizes.",
 					"Approving the dispatch does not approve the commands its verification runs.",
 				],
 			},

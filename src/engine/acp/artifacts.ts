@@ -34,7 +34,7 @@ import { AcpRequestError } from "./errors.js";
 export const ACP_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"accountability",
 	"evidence",
-	"receipt",
+	"run",
 	"dispatch",
 	"task-ledger",
 	"workspace",

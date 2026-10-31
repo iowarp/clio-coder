@@ -502,8 +502,8 @@ export interface WorkerRunRuntime {
  * Written where the block opens, on DispatchStarted, once per attempt: a
  * failover writes a second entry under the same `assignmentId` so a resumed
  * transcript can rebuild the attempt trail it showed live. The entry holds
- * identity only. The answer lives in the sealed receipt under
- * `receipts/<runId>.json`, which is the terminal truth for it either way, so
+ * identity only. The answer lives in the run's sealed scope under `telemetry/runs/<runId>/`,
+ * which is the terminal truth for it either way, so
  * streamed prose is never persisted here and a session file never grows with
  * worker output.
  *

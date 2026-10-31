@@ -1821,7 +1821,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const interruptRefusalReason = (): string | null => {
 		if (deps.hasAttachedDispatch?.() === true) {
-			return "an attached dispatch is running and the interrupt would kill the worker's run with no receipt; use @<agent> to steer it or Esc to cancel it";
+			return "an attached dispatch is running and the interrupt would kill the worker's run with no run record; use @<agent> to steer it or Esc to cancel it";
 		}
 		if (deps.toolRegistry?.hasParkedCalls() === true) {
 			return "a permission ask is parked and already waiting on you; answer it or press Esc";

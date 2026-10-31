@@ -241,7 +241,7 @@ export interface InteractiveDeps {
 	getTaskMemorySeedOffer?: () => { source: string; count: number } | null;
 	/** Merge the newest structured handoff into the current task bank. */
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
-	/** XDG state dir (clioStateDir()). `/view verify` reads from <stateDir>/receipts/<id>.json. */
+	/** XDG state dir (clioStateDir()). `/view verify` reads the run's sealed scope under it. */
 	stateDir: string;
 	/** XDG data dir (clioDataDir()). `/view` reads durable evidence bundles from <dataDir>/evidence/. */
 	dataDir: string;

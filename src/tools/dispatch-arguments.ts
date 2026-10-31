@@ -266,7 +266,7 @@ function dispatchRequestFromArgs(
 			return {
 				ok: false,
 				message:
-					"gate must be a non-empty declared check id: a check verify() lists, never a shell command; omit gate and run the check yourself after the receipt",
+					"gate must be a non-empty declared check id: a check verify() lists, never a shell command; omit gate and run the check yourself after the run settles",
 			};
 		}
 		rawIntent = { ...(isRecord(rawIntent) ? rawIntent : {}), verification: [{ check: args.gate.trim() }] };

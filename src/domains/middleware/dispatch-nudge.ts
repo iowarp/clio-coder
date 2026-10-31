@@ -264,7 +264,7 @@ export function claimsWorkerResults(text: string | undefined): boolean {
 }
 
 export function buildUnbackedWorkerClaimMessage(): string {
-	return "[Clio Coder] No dispatch ran this turn; worker results named above are not backed by a receipt. Dispatch the work or state plainly that you did it inline.";
+	return "[Clio Coder] No dispatch ran this turn; worker results named above are not backed by a run record. Dispatch the work or state plainly that you did it inline.";
 }
 
 /**

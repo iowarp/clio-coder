@@ -863,7 +863,7 @@ async function runFleetHoldingWorkspace(
 				const attempt = step.loop?.role === "repair" ? step.loop.attempt : 0;
 				const parentReceipt = step.planParentId === undefined ? undefined : receiptsByStep.get(step.planParentId);
 				if (step.planParentId !== undefined && parentReceipt === undefined) {
-					throw new Error(`fleet dynamic step '${step.id}' has no terminal plan-step receipt`);
+					throw new Error(`fleet dynamic step '${step.id}' has no terminal plan-step run`);
 				}
 				// The fleet write boundary is deliberately enforced after the step. The enforcer in
 				// write-boundary-enforcer.ts snapshots and verifies the step window. Pre-emptive
@@ -1254,7 +1254,7 @@ async function runFleetHoldingWorkspace(
 					return {
 						resolved: false,
 						findings: null,
-						needsDecision: `loop '${loop.id}' cycle ${attempt} has no sealed reviewer or subject receipt`,
+						needsDecision: `loop '${loop.id}' cycle ${attempt} has no sealed reviewer or subject run record`,
 					};
 				}
 				const correlation = fleetGateCorrelation(subject, decider);

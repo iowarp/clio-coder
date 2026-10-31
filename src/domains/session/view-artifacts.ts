@@ -53,7 +53,7 @@ export type ViewArtifactCategory =
 	| "transcript"
 	| "accountability"
 	| "evidence"
-	| "receipt"
+	| "run"
 	| "dispatch"
 	| "task-ledger"
 	| "workspace"
@@ -132,7 +132,7 @@ export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 	"transcript",
 	"accountability",
 	"evidence",
-	"receipt",
+	"run",
 	"dispatch",
 	"task-ledger",
 	"workspace",
@@ -812,9 +812,9 @@ function runTitle(env: RunEnvelope): string {
 	return safeTitle(`${env.outcome ?? env.status} · ${env.agentId} · ${env.task}`, env.id);
 }
 
-/** Finished runs by their sealed run record: the `receipt` category, whose id `/view verify` names (#434). */
+/** Finished runs by their sealed run record: the `run` category, whose id `/view verify` names (#434). */
 export class RunRecordArtifactProvider implements ArtifactProvider {
-	readonly category = "receipt" as const;
+	readonly category = "run" as const;
 
 	constructor(private readonly deps: ArtifactProviderDeps) {}
 

@@ -337,10 +337,10 @@ export function normalizeIntentVerification(
 			// The model that hits this most often has put a shell command here
 			// ("git diff src/x.ts"), so the message has to say what an entry is
 			// and offer the move that always works: leave verification out and
-			// run the check after the receipt.
+			// run the check after the run settles.
 			return fail(
 				"verification_check_undeclared",
-				`verification check '${check}' is undeclared: intent.verification takes only check ids that verify() lists (package.json verification scripts or .clio-coder/verifiers.yaml entries), never a shell command; omit verification and run the check yourself after the receipt, or declare the check first`,
+				`verification check '${check}' is undeclared: intent.verification takes only check ids that verify() lists (package.json verification scripts or .clio-coder/verifiers.yaml entries), never a shell command; omit verification and run the check yourself after the run settles, or declare the check first`,
 			);
 		}
 		if (

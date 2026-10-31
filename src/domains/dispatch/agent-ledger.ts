@@ -285,7 +285,7 @@ export function renderAgentLedger(
 	for (;;) {
 		const text = [
 			...(assignments.length > 0 ? ["Assignments:", ...assignments] : []),
-			...(findings.length > 0 ? ["Findings (from receipt):", ...findings] : []),
+			...(findings.length > 0 ? ["Findings (from run record):", ...findings] : []),
 			...(visible.length > 0
 				? [renderAll(visible)]
 				: assignments.length === 0 && findings.length === 0

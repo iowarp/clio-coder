@@ -65,10 +65,10 @@ export interface RehydrateChatPanelOptions {
 	 */
 	unboundedToolBodies?: boolean;
 	/**
-	 * Sealed-receipt reader for the worker blocks a `workerRun` entry names.
-	 * Defaults to `<state>/receipts/<runId>.json`; tests inject their own. This
-	 * is the one place replay reads outside the entry stream, and it swallows
-	 * every failure, so a session whose receipts are gone still replays.
+	 * Run record reader for the worker blocks a `workerRun` entry names.
+	 * Defaults to the run's sealed scope; tests inject their own. This is the
+	 * one place replay reads outside the entry stream, and it swallows every
+	 * failure, so a session whose run records are gone still replays.
 	 */
 	readWorkerReceipt?: WorkerReceiptReader;
 	/**

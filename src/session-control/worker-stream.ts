@@ -90,7 +90,7 @@ export interface WorkerReceiptFacts extends WorkerReceiptSummary {
 	changedPaths?: ReadonlyArray<string>;
 }
 
-/** Reads `receipts/<runId>.json` and projects it; null when it is absent or unreadable. */
+/** Reads the run's sealed record and projects it; null when it is absent or unreadable. */
 export type WorkerReceiptReader = (runId: string) => WorkerReceiptFacts | null;
 
 /** Presentation follows the admitted audience, never a recipe name. */

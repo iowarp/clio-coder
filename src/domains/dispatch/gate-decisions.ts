@@ -560,7 +560,7 @@ function buildGateDecisionArtifact(
 	if (draft.group.trim().length === 0) throw new Error("gate decision group is required");
 	if (!Number.isInteger(draft.cycle) || draft.cycle < 1)
 		throw new Error("gate decision cycle must be a positive integer");
-	if (draft.subjects.length === 0) throw new Error("gate decision requires at least one subject receipt");
+	if (draft.subjects.length === 0) throw new Error("gate decision requires at least one subject run");
 	const withoutIntegrity: Omit<GateDecisionArtifact, "integrity"> = {
 		version: 2,
 		id,
@@ -1019,7 +1019,7 @@ export async function materializePendingGateDecision(
 	const loaded = loadPendingGateDecision(handle);
 	const record = loaded?.record ?? handle.record;
 	if (record.kind !== "decision") {
-		throw new Error(`pending gate output requires receipt resolution: ${record.id}`);
+		throw new Error(`pending gate output requires subject run resolution: ${record.id}`);
 	}
 	const path = decisionArtifactPath(record.decision.id, handle.stateDir);
 	if (loaded === null && !existsSync(path)) {

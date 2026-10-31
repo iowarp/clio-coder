@@ -92,7 +92,7 @@ function cancel(deps: SteerToolDeps, runId: string): ToolResult {
 	deps.dispatch.abort(runId);
 	return {
 		kind: "ok",
-		output: `cancellation signalled for run ${runId}; the run finalizes with outcome=canceled and its receipt records the cancellation.`,
+		output: `cancellation signalled for run ${runId}; the run finalizes with outcome=canceled and its run record notes the cancellation.`,
 		details: { action: "cancel", runId },
 	};
 }

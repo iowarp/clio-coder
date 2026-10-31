@@ -474,7 +474,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			path: dirs.state,
 			bytes: stateSize.bytes,
 			status: stateSize.exists ? "remove" : "absent",
-			detail: stateSize.exists ? "sessions, audit, receipts" : undefined,
+			detail: stateSize.exists ? "sessions, telemetry" : undefined,
 		},
 		{
 			label: "Launcher",
@@ -503,7 +503,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	const keepGuiState = web.unmanaged.length > 0 && existsSync(join(dirs.state, "gui"));
 	if (keepGuiState) {
 		const state = items.find((item) => item.label === "State");
-		if (state) state.detail = "sessions, audit, receipts; gui is kept";
+		if (state) state.detail = "sessions, telemetry; gui is kept";
 	}
 
 	// A login file is reported, never edited; see detectShellRcEdits.

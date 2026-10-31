@@ -105,7 +105,7 @@ for (const scenario of [
 			// contract as a finished run.
 			const sealedCause =
 				scenario.signal === null
-					? /worker loop ended without a receipt-sealed final assistant output/u
+					? /worker loop ended without a sealed final assistant output/u
 					: /terminated by SIGKILL before it finished its output/u;
 			strictEqual(receipt.exitCode, 1);
 			strictEqual(receipt.outcomeCode, scenario.signal === null ? "worker_final_output_missing" : null);

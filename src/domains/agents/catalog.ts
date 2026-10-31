@@ -35,7 +35,7 @@ export const FLEET_REFUSAL_DISCLOSURE =
  * dispatch.
  */
 export const FLEET_ANTI_CHURN_RULE =
-	"Fleet anti-churn guard: do not repeat the same target files and goal while an identical run is pending or after an unresolved identical failure; collect its receipt, address the failure, or change approach. Once earlier runs have settled and the operator merged, discarded, or kept their work, a new operator request may dispatch the same task again. Past session runs alone do not block a new request. If a tool guard blocks a call, report its guard name and the action it requires.";
+	"Fleet anti-churn guard: do not repeat the same target files and goal while an identical run is pending or after an unresolved identical failure; collect its result, address the failure, or change approach. Once earlier runs have settled and the operator merged, discarded, or kept their work, a new operator request may dispatch the same task again. Past session runs alone do not block a new request. If a tool guard blocks a call, report its guard name and the action it requires.";
 
 /**
  * `agent:"auto"` baselines from task text alone and cannot see the shape of a
@@ -43,7 +43,7 @@ export const FLEET_ANTI_CHURN_RULE =
  * directly below this line.
  */
 export const FLEET_SPECIALIST_ROUTING =
-	"Pick by job: supplied URLs, standards, or papers -> researcher; current ecosystems or an open-world second opinion -> world-knowledge; repository recon -> scout; receipts -> provenance; tests -> tester; gates -> verifier.";
+	"Pick by job: supplied URLs, standards, or papers -> researcher; current ecosystems or an open-world second opinion -> world-knowledge; repository recon -> scout; run records -> provenance; tests -> tester; gates -> verifier.";
 
 /**
  * Spec-based roster used when the caller already holds normalized specs.

@@ -1186,7 +1186,7 @@ const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 	"worker_final_output_missing",
 ];
 
-const WORKER_FINAL_OUTPUT_MISSING_DETAIL = "worker loop ended without a receipt-sealed final assistant output";
+const WORKER_FINAL_OUTPUT_MISSING_DETAIL = "worker loop ended without a sealed final assistant output";
 
 function hasDurableFinalOutput(output: RunResultOutput | undefined): boolean {
 	return output?.state === "final" && output.text.trim().length > 0;

@@ -20,7 +20,7 @@ export function renderDispatchIntentRequirements(
 	if (intent.writeRoots.length > 0 && options.shellAvailable !== true) {
 		lines.push(
 			"",
-			"This run is confined to its write roots and has no bash or verify tool, so you cannot run tests, scripts, or the checks below yourself. Write the code and the tests, re-read them, and report what you wrote; the host runs the declared checks after you finish and records the result on the receipt.",
+			"This run is confined to its write roots and has no bash or verify tool, so you cannot run tests, scripts, or the checks below yourself. Write the code and the tests, re-read them, and report what you wrote; the host runs the declared checks after you finish and records the result on the run record.",
 		);
 	}
 	if (intent.expectedOutputs.length > 0) {

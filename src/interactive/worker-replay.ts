@@ -4,7 +4,7 @@
  * A `/run`, a `/delegate`, or a model-driven dispatch draws its block from live
  * bus events, which a resumed session no longer has. What it does still have is
  * two things it wrote at the time: a `workerRun` session entry naming the run,
- * and the sealed receipt under `receipts/<runId>.json` holding the answer. This
+ * and the run's sealed scope under `telemetry/runs/<runId>/` holding the answer. This
  * module is the bridge in both directions. It projects a live entry state onto
  * the session entry going out, and rebuilds the same {@link WorkerEntryState}
  * from entries plus receipts coming back, so replay hands the renderer the

@@ -96,7 +96,7 @@ test("scheduler facts precede receipt findings and oldest posts drop before find
 	const board = renderAgentLedger([], p);
 	assert.match(board, /^Assignments:/u);
 	assert.match(board, /scope undeclared/u);
-	assert.match(board, /Findings \(from receipt\):[\s\S]*Entry \(src\/main.ts:3\)[\s\S]*Uncited \[ungrounded lead\]/u);
+	assert.match(board, /Findings \(from run record\):[\s\S]*Entry \(src\/main.ts:3\)[\s\S]*Uncited \[ungrounded lead\]/u);
 	const bounded = renderAgentLedger([], { ...p, maxChars: board.indexOf("Findings") });
 	assert.match(bounded, /scout-1/u);
 	assert.match(bounded, /scout-2/u);

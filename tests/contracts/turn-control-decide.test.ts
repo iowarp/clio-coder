@@ -267,7 +267,7 @@ it("renders complete cited findings within 4000 characters and bounds the reques
 	match(question, /split of at most 4 subtasks\.$/);
 	strictEqual(
 		renderCollectedBlock("sealed findings"),
-		"[Collected]\nThese detached runs finished and Clio collected them; their sealed receipts are the durable record. Use these results for synthesis and do not call monitor to collect them again.\n\nsealed findings",
+		"[Collected]\nThese detached runs finished and Clio collected them; their sealed run records are the durable record. Use these results for synthesis and do not call monitor to collect them again.\n\nsealed findings",
 	);
 	match(
 		renderDirectionBlock({ cwd: "/repo", git: null, tree: ["src", "tests"], codemap: null }),

@@ -37,10 +37,10 @@ async function open(items: ViewArtifact[], initialFilter = "") {
 }
 
 test("initial text filters global evidence, appends at the end, and clears at any cursor position", async () => {
-	const items = [artifact("DEMO-REPORT.md"), artifact("distant evidence mentions old reports", "receipt")];
+	const items = [artifact("DEMO-REPORT.md"), artifact("distant evidence mentions old reports", "run")];
 	const { view } = await open(items, "DEMO-REPORT");
 	match(plain(view), /List · 1\/2/u);
-	doesNotMatch(plain(view), /Receipts/u);
+	doesNotMatch(plain(view), /Run records/u);
 	view.handleInput(".md");
 	match(plain(view), /> DEMO-REPORT.md/u);
 	view.handleInput("\x01");
@@ -55,9 +55,9 @@ test("initial text filters global evidence, appends at the end, and clears at an
 	view.handleInput("\r");
 	strictEqual(view.keyboardScope, "edit");
 	view.handleInput("\x15");
-	view.handleInput("receipt:");
+	view.handleInput("run:");
 	match(plain(view), /List · 1\/2/u);
-	match(plain(view), /Receipts/u);
+	match(plain(view), /Run records/u);
 });
 
 test("filter persists across preview, back, refresh, and terminal widths", async () => {
@@ -203,7 +203,7 @@ test("refresh retains selected identity after list ordering changes and category
 	const items = [
 		{ ...artifact("first"), timestamp: 2 },
 		{ ...artifact("chosen"), timestamp: 1 },
-		artifact("receipt", "receipt"),
+		artifact("run", "run"),
 	];
 	const { view } = await open(items, "workspace:");
 	view.handleInput("\x1b[B");
@@ -221,7 +221,7 @@ test("refresh retains selected identity after list ordering changes and category
 	view.handleInput("\x1b[C");
 	view.render(92);
 	await settle();
-	match(plain(view), /Body of receipt/u);
+	match(plain(view), /Body of run/u);
 	view.handleInput("\x1b[C");
 	view.render(92);
 	await settle();

@@ -50,7 +50,7 @@ export function peerModeCapabilities(
 				? "Run clio-coder configure --interop"
 				: record.adapter !== "present"
 					? `Install the pinned ${kind.acp?.npmPackage ?? "ACP adapter"} package or review its launch recipe`
-					: `Try /delegate ${kind.id} <task> and verify its receipt`;
+					: `Try /delegate ${kind.id} <task> and verify its run record`;
 		modes.push({
 			mode: "acp",
 			status,
@@ -75,7 +75,7 @@ export function peerModeCapabilities(
 			? `Install ${kind.label} CLI`
 			: targetIds.length === 0
 				? `Configure a target with runtime ${kind.headlessRuntimeId}`
-				: `Try /run --target ${targetIds[0]} <agent> <task> and verify its receipt`;
+				: `Try /run --target ${targetIds[0]} <agent> <task> and verify its run record`;
 		modes.push({
 			mode: "headless",
 			status,

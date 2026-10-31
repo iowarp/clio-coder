@@ -112,7 +112,7 @@ export function createDispatchDedupRegistration(): {
 							kind: "block_tool",
 							reason:
 								`dispatch duplicate blocked: ${summary} already completed successfully in this user turn. ` +
-								`Use the existing dispatch receipt/output to answer instead of repeating the same fleet dispatch.`,
+								`Use the existing dispatch result to answer instead of repeating the same fleet dispatch.`,
 							severity: "hard-block",
 						},
 					];

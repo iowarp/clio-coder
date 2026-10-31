@@ -992,7 +992,7 @@ function formatRunVerificationBlock(runId: string, result: SlashRunVerification)
 	const verdict = result.ok
 		? (result.verificationSummary ?? result.trustSummary ?? "run seal verified; result validation unknown")
 		: `failed. ${result.reason}`;
-	return `Verification for ${runId}: ${verdict}\n/view receipt:${runId} · press i for full details and checks.`;
+	return `Verification for ${runId}: ${verdict}\n/view run:${runId} · press i for full details and checks.`;
 }
 
 /** The verb a command performs, in the order /help lists the groups. */
@@ -2464,7 +2464,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "view",
 		acp: false,
-		description: "Browse session artifacts and verify receipts",
+		description: "Browse session artifacts and verify run records",
 		group: "Inspect",
 		kinds: ["view", "view-verify"],
 		args: {

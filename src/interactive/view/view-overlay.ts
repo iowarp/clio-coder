@@ -105,8 +105,8 @@ function categoryLabel(category: ViewArtifactCategory): string {
 			return "Accountability";
 		case "evidence":
 			return "Evidence bundles";
-		case "receipt":
-			return "Receipts";
+		case "run":
+			return "Run records";
 		case "dispatch":
 			return "Dispatch outputs";
 		case "task-ledger":
@@ -685,7 +685,7 @@ export class ViewOverlayView implements Component {
 					...lines,
 					theme.fg("annotation", "No matching details."),
 					theme.fg("menuDescription", "Ctrl+U clears the filter."),
-					theme.fg("annotation", "Try workspace: or receipt:"),
+					theme.fg("annotation", "Try workspace: or run:"),
 				],
 				width,
 				height,

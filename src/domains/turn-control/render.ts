@@ -88,7 +88,7 @@ export function renderCollectedBlock(rendered: string): string {
 	return block(
 		[
 			"[Collected]",
-			"These detached runs finished and Clio collected them; their sealed receipts are the durable record. Use these results for synthesis and do not call monitor to collect them again.",
+			"These detached runs finished and Clio collected them; their sealed run records are the durable record. Use these results for synthesis and do not call monitor to collect them again.",
 			"",
 		],
 		rendered.split(/\r?\n/),

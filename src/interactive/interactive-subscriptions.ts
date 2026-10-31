@@ -53,7 +53,7 @@ export interface InteractiveSubscriptionsDeps {
 	 * context its last call occupied), so a resumed card states the same spend.
 	 */
 	recordWorkerSettled?: (fields: WorkerSettledFields) => void;
-	/** Sealed-receipt reader, injected by tests. Defaults to `<state>/receipts/<runId>.json`. */
+	/** Run record reader, injected by tests. Defaults to the run's sealed scope. */
 	readWorkerReceipt?: WorkerReceiptReader;
 	/**
 	 * A dispatch run reached a terminal state. The desktop notification uses it
