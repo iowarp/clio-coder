@@ -15,7 +15,7 @@ export const ReceiptFacts = Type.Object(
 		validation: nullableText,
 		tokens: count,
 		/** `tokens` as the server words it; the line shows this and never formats the count. */
-		tokensDisplay: Type.Optional(nullableText),
+		tokensDisplay: nullableText,
 		elapsedMs: count,
 		placement: Type.Union([
 			Type.Object(

@@ -50,6 +50,25 @@ const run: TraceRun = {
 		parentRunId: null,
 		rootRunId: null,
 	},
+	evidence: {
+		v: 1,
+		foldVersion: 1,
+		generatedAt: "2026-10-31T00:00:00.000Z",
+		kind: "run-evidence",
+		runId: "run-0",
+		record: "unsettled",
+		integrity: { state: "unavailable", display: "unavailable", detail: "the run has not settled" },
+		trust: {
+			artifactIntegrity: { state: "absent", display: "absent", authority: null },
+			validationGrounding: { state: "absent", display: "absent", authority: null },
+			independentReview: { state: "absent", display: "absent", authority: null },
+			contextProvenance: { state: "absent", display: "absent", authority: null },
+			completionEvidence: { state: "absent", display: "absent", authority: null },
+			validation: "unmeasured",
+		},
+		sealed: null,
+		evidence: null,
+	},
 	telemetry: journaled("not journaled", "not journaled", "not journaled"),
 };
 const identity = run.identity as NonNullable<TraceRun["identity"]>;

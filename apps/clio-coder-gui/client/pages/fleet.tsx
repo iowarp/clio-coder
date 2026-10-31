@@ -12,7 +12,8 @@ import { DISPATCH_SCOPE, emptyState, PANELS } from "../design/panel-model.js";
 import { InspectionError, InspectionSummary } from "../design/run-inspection.js";
 import { StatusMark, toneForOutcome } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
-import { quantityText } from "../telemetry/quantity-model.js";
+import { Explained } from "../telemetry/Explained.js";
+import { explainable } from "../telemetry/quantity-model.js";
 import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages, retainedLinksLive } from "./artifact-pagination.js";
 import {
 	evidenceDestination,
@@ -349,9 +350,11 @@ export function FleetPage({ client }: { client: Client }) {
 						<p className="panel-note">
 							{run.targetId} / {run.wireModelId}
 						</p>
-						<p className="panel-note">
-							{formatTime(run.startedAt)} · {quantityText(run.telemetry?.tokens)} tokens
-						</p>
+						<p className="panel-note">{run.evidence.integrity.display}</p>
+						<div className="panel-note">
+							{formatTime(run.startedAt)} ·{" "}
+							<Explained client={client} label="Run tokens" {...explainable(run.telemetry?.tokens)} /> tokens
+						</div>
 						<details>
 							<summary>Run identity & lineage</summary>
 							<p className="inspection-id">{run.id}</p>
@@ -401,10 +404,10 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 		queryKey: ["fleet-receipt", id, full],
 		queryFn: () =>
 			client.call(routes.fleetReceipt, { ...emptyInput, params: { id }, query: full ? { include: "full" } : {} }),
-		enabled: dispatch || full,
+		enabled: full,
 		placeholderData: (previous) => previous,
 	});
-	const evidence = dispatch ? receipt.data?.evidence : root.data?.evidence;
+	const evidence = dispatch ? run.data?.evidence : root.data?.evidence;
 	const saved = full && !receipt.isPlaceholderData ? receipt.data?.record : null;
 	return (
 		<section className="run-inspection">
@@ -440,9 +443,10 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 					<h2>
 						{run.data.agentId} · {run.data.outcome ?? run.data.status}
 					</h2>
-					<p>
-						{run.data.targetId} / {run.data.wireModelId} · {quantityText(run.data.telemetry?.tokens)} tokens
-					</p>
+					<div className="panel-note">
+						{run.data.targetId} / {run.data.wireModelId} ·{" "}
+						<Explained client={client} label="Run tokens" {...explainable(run.data.telemetry?.tokens)} /> tokens
+					</div>
 					<div className="inspection-jumps">
 						<Link to={evidenceDestination(run.data.id)}>Collect or recheck evidence</Link>
 						<Link to={`/traces?${new URLSearchParams({ q: run.data.id, source: "dispatch" })}`}>Find its trace</Link>
@@ -540,7 +544,7 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 						</button>
 					) : null}
 				</>
-			) : !(dispatch ? receipt.isPending || receipt.error : root.isPending || root.error) ? (
+			) : !(dispatch ? run.isPending || run.error : root.isPending || root.error) ? (
 				<PanelEmpty>{emptyState.emptyStore("readable receipt", "for this run")}</PanelEmpty>
 			) : null}
 		</section>

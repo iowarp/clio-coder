@@ -32,6 +32,7 @@ export {
 	workspaceHasChanges,
 } from "./code-step.js";
 export type { DispatchContract, DispatchRequest } from "./contract.js";
+export { councilTopologies } from "./council-topology.js";
 export type {
 	DelegationPlan,
 	DelegationPlanReason,
@@ -124,6 +125,7 @@ export {
 	readGateDecisionArtifactsForRunIds,
 	verifyGateDecisionArtifact,
 } from "./gate-decisions.js";
+export { gateTopology } from "./gate-topology.js";
 export { runHostVerification, workspaceFingerprint } from "./host-verification.js";
 export type { DispatchIntent, DispatchIntentVerification } from "./intent.js";
 export {
@@ -159,8 +161,15 @@ export type { RouteQualityLabel, RouteQualityReduction } from "./route-quality.j
 export { reduceRouteQuality } from "./route-quality.js";
 export type { RouteExplanation, RoutingIntent } from "./routing-intent.js";
 export { explainRouteDecision, parseRoutingIntent, routingIntentRejection } from "./routing-intent.js";
+export type { RunResultFacts } from "./run-result-facts.js";
+export {
+	readRunResultFacts,
+	readRunResultFactsForReplay,
+	runEvidenceOf,
+	runResultWireFacts,
+} from "./run-result-facts.js";
 export type { FleetRunRecord } from "./state.js";
-export { readFleetRun, writeFleetRun } from "./state.js";
+export { openLedger, readFleetRun, writeFleetRun } from "./state.js";
 export type {
 	ReceiptVerificationState,
 	RunBriefingProvenance,

@@ -79,6 +79,16 @@ export {
 export type { JournaledContent } from "./research-content.js";
 export { readJournaledContent } from "./research-content.js";
 export { runSettledDigest } from "./run-digest.js";
+export {
+	readDispatchHistory,
+	readFleetHistory,
+	readFleetHistoryRoot,
+	readRunHistoryEntries,
+	readRunHistoryEntry,
+	readRunInspection,
+	runHistoryCouncils,
+	runHistoryGates,
+} from "./run-history.js";
 export type { SettledRunRecord } from "./run-record.js";
 export {
 	readRunRecord,

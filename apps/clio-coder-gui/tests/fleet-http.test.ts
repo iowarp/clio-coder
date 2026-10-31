@@ -34,7 +34,10 @@ test("fleet REST: every durable root paginates once beyond 64 entries, corrupt r
 		assert.equal(run.councils.councils[0]?.roundsPlanned, 2);
 		assert.equal(run.gates.decisions[0]?.outcome, "pass");
 		assert.equal(run.gates.decisions[0]?.id, seeded.gateId);
-		assert.equal((await json(await h.request("/api/fleet/dispatches"), DispatchRuns)).items.length, 3);
+		const dispatches = (await json(await h.request("/api/fleet/dispatches"), DispatchRuns)).items;
+		assert.equal(dispatches.length, 3);
+		assert.equal(dispatches.find((row) => row.id === "member-two")?.evidence.integrity.state, "verified");
+		assert.equal(dispatches.find((row) => row.id === "member-two")?.evidence.sealed?.outcome, "succeeded");
 		assert.equal((await json(await h.request("/api/fleet/councils"), Councils)).councils.length, 1);
 		assert.equal((await json(await h.request("/api/fleet/gates"), FleetGates)).decisions.length, 1);
 		// A run's evidence comes through its seal check; the settled record leaves only when asked for (#434 §11.3).
@@ -44,7 +47,8 @@ test("fleet REST: every durable root paginates once beyond 64 entries, corrupt r
 		assert.equal(brief.evidence.integrity.state, "verified");
 		const full = (path: string) => h.request(`${path}?include=full`);
 		const record = (await json(await full("/api/fleet/receipts/member-two"), FleetReceipt)).record;
-		assert.equal((record?.settled as { agentId?: string } | undefined)?.agentId, "researcher");
+		assert.equal(record?.settled?.agentId, "researcher");
+		assert.equal(record?.seal?.status, "verified");
 		// "escape" is in no listing, so the served-id window refuses it before the
 		// adapter runs; the symlink containment is asserted where it now lives.
 		assert.equal((await h.request("/api/fleet/receipts/escape")).status, 403);

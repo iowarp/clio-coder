@@ -72,6 +72,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		meta: { errorSurface: "inline" },
 		placeholderData: (previous) => previous,
 		queryKey: ["trace-receipt", runId, full],
+		enabled: full,
 		queryFn: () => client.call(routes.traceReceipt, { ...input, query: full ? { include: "full" } : {} }),
 		refetchInterval: liveRefetchMs(status),
 	});
@@ -202,11 +203,14 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				{view === "checks" && (
 					<>
 						{full && receipt.isPlaceholderData && <p role="status">Reading the complete saved receipt…</p>}
-						{receipt.data ? (
+						{trace ? (
 							<ReceiptPanel
-								data={receipt.data}
-								full={full && !receipt.isPlaceholderData}
-								loading={full && receipt.isPlaceholderData}
+								data={{
+									evidence: trace.evidence,
+									record: full && !receipt.isPlaceholderData ? (receipt.data?.record ?? null) : null,
+								}}
+								full={full && !!receipt.data && !receipt.isPlaceholderData}
+								loading={full && (receipt.isPending || receipt.isPlaceholderData)}
 								loadFull={() => setFull(true)}
 							/>
 						) : (

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import type { RunEvidenceV1, RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import { TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
 import type { Fact } from "../../core/telemetry/fact.js";
+import { renderFact } from "../../core/telemetry/render.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { integrityClause, trustStateWord, validationClause } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
@@ -211,6 +212,7 @@ export interface RunResultWireFacts {
 	trust: string | null;
 	validation: string | null;
 	tokens: number | null;
+	tokensDisplay: string | null;
 	elapsedMs: number | null;
 	placement: { mode: "current" | "worktree"; branch?: string; changedPaths?: string[] } | null;
 	unavailable?: true;
@@ -227,6 +229,7 @@ export function runResultWireFacts(runId: string, facts: RunResultFacts | null):
 			trust: null,
 			validation: null,
 			tokens: null,
+			tokensDisplay: null,
 			elapsedMs: null,
 			placement: null,
 			unavailable: true,
@@ -241,6 +244,7 @@ export function runResultWireFacts(runId: string, facts: RunResultFacts | null):
 		trust: facts.trust ? trustStateWord("artifactIntegrity", facts.trust.artifactIntegrity.state) : null,
 		validation: facts.trust ? validationClause(facts.trust) : null,
 		tokens: facts.tokenCount ?? null,
+		tokensDisplay: facts.tokens ? renderFact(facts.tokens) : null,
 		elapsedMs: facts.durationMs ?? null,
 		placement:
 			placement === undefined
@@ -318,7 +322,7 @@ function sealedChecks(run: SettledRun): Sealed {
  * A run's evidence from its run DTO, for every surface that shows what the run's seal vouches for (#434 §11.3). The
  * seal authenticates the record; the checks appear only under a seal that verifies.
  */
-function runEvidenceOf(
+export function runEvidenceOf(
 	runId: string,
 	record: RunTelemetryV1 | null,
 	stateDir = clioStateDir(),

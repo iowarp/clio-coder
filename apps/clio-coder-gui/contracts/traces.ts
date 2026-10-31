@@ -1,7 +1,7 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Id, PageCursor } from "./common.js";
-import { TelemetryRunEvidence, TelemetryRunRow } from "./telemetry.js";
+import { TelemetryRunEvidence, TelemetryRunRecord, TelemetryRunRow } from "./telemetry.js";
 
 /**
  * Trace history is the run journals (#434 §11.3): each run's read-model row, joined to the dispatch ledger's row for
@@ -49,18 +49,18 @@ export const TraceRun = Type.Object(
 		identity: Type.Union([TraceIdentity, Type.Null()]),
 		/** Tokens and spend come from the run journal through the read model (#434). */
 		telemetry: TelemetryRunRow,
+		evidence: TelemetryRunEvidence,
 	},
 	closed,
 );
 export type TraceRun = Static<typeof TraceRun>;
-export const JsonRecord = Type.Record(Type.String(), Type.Unknown());
 /**
  * A finished run as the read model checks it (#434 §11.3): `evidence` states the settled facts only under a seal that
  * verifies, and `record` is the run's run.settled payload and result object, sent only when the full record is asked
  * for.
  */
 export const TraceReceipt = Type.Object(
-	{ evidence: TelemetryRunEvidence, record: Type.Union([JsonRecord, Type.Null()]) },
+	{ evidence: TelemetryRunEvidence, record: Type.Union([TelemetryRunRecord, Type.Null()]) },
 	closed,
 );
 export const TraceRunsQuery = Type.Object(

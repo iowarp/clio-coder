@@ -72,12 +72,8 @@ import type {
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { narrowTurnConstraints, snapshotTurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
-import type { RunResultFacts } from "../../domains/dispatch/run-result-facts.js";
-import {
-	readRunResultFacts,
-	readRunResultFactsForReplay,
-	runResultWireFacts,
-} from "../../domains/dispatch/run-result-facts.js";
+import type { RunResultFacts } from "../../domains/dispatch/index.js";
+import { readRunResultFacts, readRunResultFactsForReplay, runResultWireFacts } from "../../domains/dispatch/index.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import { modelIdsForStatus } from "../../domains/providers/model-discovery.js";

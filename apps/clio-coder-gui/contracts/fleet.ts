@@ -1,6 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id, PageCursor } from "./common.js";
-import { TelemetryRunEvidence, TelemetryRunRow } from "./telemetry.js";
+import { TelemetryRunEvidence, TelemetryRunRecord, TelemetryRunRow } from "./telemetry.js";
 
 const closed = { additionalProperties: false };
 const text = Type.String();
@@ -45,6 +45,7 @@ export const DispatchRun = Type.Object(
 		sessionId: nullable,
 		/** The run's read-model row; null until its journal is read (#434). */
 		telemetry: Type.Union([TelemetryRunRow, Type.Null()]),
+		evidence: TelemetryRunEvidence,
 		parentRunId: nullable,
 		rootRunId: nullable,
 	},
@@ -56,7 +57,7 @@ export const DispatchRuns = Type.Object(
 );
 /** A finished run as the read model checks it; its settled record and result object only when the full record is asked for. */
 export const FleetReceipt = Type.Object(
-	{ evidence: TelemetryRunEvidence, record: Type.Union([Type.Record(text, Type.Unknown()), Type.Null()]) },
+	{ evidence: TelemetryRunEvidence, record: Type.Union([TelemetryRunRecord, Type.Null()]) },
 	closed,
 );
 const memberTurn = Type.Object(

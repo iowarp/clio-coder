@@ -27,6 +27,8 @@ export const TelemetryQuota = TELEMETRY_DTO_SCHEMAS.quota;
 export const TelemetryUpdate = TELEMETRY_DTO_SCHEMAS.update;
 /** A run's sealed receipt through its integrity check: the facts the seal vouches for, never the raw document. */
 export const TelemetryRunEvidence = TELEMETRY_DTO_SCHEMAS.runEvidence;
+/** A full run record always carries the seal verdict beside the settled facts and result (#434 B10). */
+export const TelemetryRunRecord = Type.Pick(TELEMETRY_DTO_SCHEMAS.run, ["settled", "seal", "result"]);
 
 /** Query strings are flat, so list filters arrive comma-separated; the service rebuilds and checks the CallFilter. */
 export const TelemetryCallsQuery = Type.Object(

@@ -22,6 +22,8 @@ test("trace history lists run journals joined to the ledger, with read-model row
 	const first = page.runs[0];
 	assert.equal(first?.identity?.task, "Inspect fixture 0");
 	assert.equal(first?.status, "success");
+	assert.equal(first?.evidence.integrity.state, "verified");
+	assert.equal(first?.evidence.sealed?.validationGrounding?.claimed, 2);
 	assert.equal(page.runs.find((run) => run.runId === "run-0003")?.status, "running");
 	assert.deepEqual(telemetryLies(page.runs.flatMap((run) => quantitiesOf(run.telemetry))), []);
 	assert.ok(!JSON.stringify(page).includes("trace.sqlite"));
@@ -49,7 +51,8 @@ test("trace history lists run journals joined to the ledger, with read-model row
 	assert.equal(brief.record, null);
 	assert.equal(brief.evidence.integrity.state, "verified");
 	assert.equal(brief.evidence.sealed?.validationGrounding?.claimed, 2);
-	assert.equal((full.record?.settled as { agentId?: string } | undefined)?.agentId, "coder");
+	assert.equal(full.record?.settled?.agentId, "coder");
+	assert.equal(full.record?.seal?.status, "verified");
 	assert.equal(brief.evidence.evidence?.evidenceId, "evidence-1");
 	assert.equal((await h.request("/api/traces/runs/missing")).status, 404);
 	assert.equal((await h.post("/api/traces/runs")).status, 405);
