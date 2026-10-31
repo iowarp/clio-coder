@@ -1,4 +1,4 @@
-import { readdirSync, realpathSync, statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { Static } from "typebox";
 import { Type } from "typebox";
@@ -7,7 +7,13 @@ import { clioStateDir } from "../../../../../src/core/xdg.js";
 import { readReceiptTextSync } from "../../../../../src/domains/dispatch/receipt-store.js";
 import { openLedger } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
-import { loadRunReceiptEvidence, loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
+import {
+	listRunTelemetryIds,
+	loadRunReceiptEvidence,
+	loadRunTelemetrySource,
+	runTelemetryDirectoryExists,
+	runTelemetryWrittenMs,
+} from "../../../../../src/domains/session/telemetry-source.js";
 import { runRowTelemetry } from "../../../../../src/domains/telemetry/read-model.js";
 import { Id } from "../../../contracts/common.js";
 import type { TraceIdentity, TraceRequest, TraceRun, TraceRunStatus } from "../../../contracts/traces.js";
@@ -41,25 +47,24 @@ const writeKey = (writtenMs: number | null) => writtenMs ?? -1;
 function newestFirst(a: Entry, b: Entry) {
 	return writeKey(b.writtenMs) - writeKey(a.writtenMs) || (a.runId < b.runId ? 1 : a.runId > b.runId ? -1 : 0);
 }
-function mtime(path: string): number | null {
+/** A run directory whose journal was never written lists last, as unknown coverage (R9). */
+function writtenMs(state: string, runId: string): number | null {
 	try {
-		return statSync(path).mtimeMs;
+		return runTelemetryWrittenMs(state, runId);
 	} catch {
-		// A run directory whose journal was never written lists last, as unknown coverage (R9).
 		return null;
 	}
 }
 function entries(state: string): Entry[] {
 	let names: string[];
 	try {
-		names = readdirSync(join(state, "runs"));
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		names = listRunTelemetryIds(state);
+	} catch {
 		throw new AppProblem("unavailable", "The run journal directory cannot be read.");
 	}
 	return names
 		.filter((name) => Value.Check(Id, name))
-		.map((runId) => ({ runId, writtenMs: mtime(join(state, "runs", runId, "events.ndjson")) }))
+		.map((runId) => ({ runId, writtenMs: writtenMs(state, runId) }))
 		.sort(newestFirst);
 }
 
@@ -164,17 +169,13 @@ export class TraceAdapter {
 			const identity = ledger.get(input.runId) ?? null;
 			const directory = (() => {
 				try {
-					return statSync(join(state, "runs", input.runId)).isDirectory();
+					return runTelemetryDirectoryExists(state, input.runId);
 				} catch {
 					return false;
 				}
 			})();
 			if (!identity && !directory) throw new AppProblem("not_found", "Trace run was not found.");
-			return this.run(
-				state,
-				{ runId: input.runId, writtenMs: mtime(join(state, "runs", input.runId, "events.ndjson")) },
-				identity,
-			);
+			return this.run(state, { runId: input.runId, writtenMs: writtenMs(state, input.runId) }, identity);
 		}
 		const { status, q, limit = 50 } = input.query;
 		const listed = entries(state);

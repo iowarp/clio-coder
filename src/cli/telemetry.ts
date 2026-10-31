@@ -18,6 +18,11 @@ import {
 	revokeTelemetryConsent,
 	workspaceTelemetryCapture,
 } from "../domains/telemetry/consent.js";
+import {
+	telemetryJournalPath,
+	telemetrySessionDirectory,
+	telemetrySessionsDirectory,
+} from "../domains/telemetry/index.js";
 import { readOutOfTurnUsageRows } from "../domains/telemetry/out-of-turn-usage.js";
 import { applyTelemetryPrune, DEFAULT_PRUNE_POLICY, planTelemetryPrune } from "../domains/telemetry/retention.js";
 import { printError } from "./shared.js";
@@ -44,8 +49,8 @@ shows every consent.
 
 export writes one session's telemetry as a bundle directory: bundle.json with
 the capture ceiling, the content class and a sha256 and record count per file,
-calls.jsonl with the journal's kept lines verbatim, each referenced run's
-events.ndjson, and the objects those records reference. --content-free, the
+journal.jsonl with the journal's kept lines verbatim, each referenced run's
+journal.jsonl, and the objects those records reference. --content-free, the
 default, keeps only content-free records and no objects. --structural adds the
 structural records and their objects, such as settings and prompt structure.
 --research adds content records, content objects and the session ledger, and
@@ -216,20 +221,24 @@ async function runRebuild(argv: ReadonlyArray<string>): Promise<number> {
 	return 0;
 }
 
-/** Session directories are named by id under their workspace hash; ids never cross workspaces. */
-function findSession(stateDir: string, sessionId: string): { cwdHash: string; directory: string } | null {
+/**
+ * A session's journal is keyed by its id alone; its store directory, which holds meta.json and the ledger, is
+ * named by id under its workspace hash and is null when no bucket holds it (#434).
+ */
+function findSession(stateDir: string, sessionId: string): { store: string | null } | null {
 	if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) return null;
-	let buckets: string[];
+	if (!existsSync(telemetryJournalPath(telemetrySessionDirectory(stateDir, sessionId)))) return null;
+	let buckets: string[] = [];
 	try {
-		buckets = readdirSync(join(stateDir, "sessions"));
+		buckets = readdirSync(join(stateDir, "sessions")).sort();
 	} catch {
-		return null;
+		// No session store: the journal exports without a ledger.
 	}
-	for (const cwdHash of buckets) {
-		const directory = join(stateDir, "sessions", cwdHash, sessionId);
-		if (existsSync(join(directory, "calls.jsonl"))) return { cwdHash, directory };
+	for (const bucket of buckets) {
+		const directory = join(stateDir, "sessions", bucket, sessionId);
+		if (existsSync(join(directory, "meta.json"))) return { store: directory };
 	}
-	return null;
+	return { store: null };
 }
 
 function packageWriter(): { clioCoderVersion: string; piVersion: string } {
@@ -268,7 +277,7 @@ async function runExport(argv: ReadonlyArray<string>): Promise<number> {
 	const stateDir = clioStateDir();
 	const session = findSession(stateDir, args.positional);
 	if (!session) {
-		printError(`no session ${args.positional} with a call journal under ${join(stateDir, "sessions")}`);
+		printError(`no session ${args.positional} with a call journal under ${telemetrySessionsDirectory(stateDir)}`);
 		return 1;
 	}
 	const contentClass: BundleContentClass = args.flags.has("--research")
@@ -280,7 +289,10 @@ async function runExport(argv: ReadonlyArray<string>): Promise<number> {
 		// Content leaves the journal only as the operator captured it: research mode, the flag and consent (#434, O6).
 		let cwd: unknown;
 		try {
-			cwd = (JSON.parse(readFileSync(join(session.directory, "meta.json"), "utf8")) as { cwd?: unknown }).cwd;
+			cwd =
+				session.store === null
+					? undefined
+					: (JSON.parse(readFileSync(join(session.store, "meta.json"), "utf8")) as { cwd?: unknown }).cwd;
 		} catch {
 			cwd = undefined;
 		}
@@ -297,8 +309,8 @@ async function runExport(argv: ReadonlyArray<string>): Promise<number> {
 	try {
 		const manifest = await exportTelemetryBundle({
 			stateDir,
-			cwdHash: session.cwdHash,
 			sessionId: args.positional,
+			sessionStore: session.store,
 			out: args.out,
 			contentClass,
 			writer: packageWriter(),

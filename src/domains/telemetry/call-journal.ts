@@ -23,6 +23,13 @@ import { encodeTelemetryLine, scanTelemetrySegment } from "../../core/telemetry/
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
 import { canonicalJson } from "../prompts/hash.js";
 import { storeTelemetryObject } from "./objects.js";
+import {
+	TELEMETRY_JOURNAL_FILE,
+	telemetryJournalFiles,
+	telemetryJournalPath,
+	telemetrySegmentFile,
+	telemetrySessionDirectory,
+} from "./paths.js";
 
 export interface JournalHealth {
 	queueDepth: number;
@@ -48,8 +55,8 @@ export interface CallJournal extends TelemetrySink {
 	reserveResearchBytes(bytes: number): boolean;
 }
 export interface CallJournalOptions {
-	sessionDirectory: string;
-	fileName?: JournalFileName;
+	/** The scope directory from `paths.ts`: a session's, a run's or the process's. */
+	directory: string;
 	context: TelemetryContext;
 	writer: SegmentHeader["writer"];
 	queueCapacity?: number;
@@ -70,7 +77,7 @@ function declaredBytes(record: TelemetryRecord): number {
 }
 
 /** Every segment of the journal counts toward the cap; a segment that cannot be read leaves capture at the cap. */
-async function researchBytesOnDisk(directory: string, fileName: JournalFileName, active: SegmentScan): Promise<number> {
+async function researchBytesOnDisk(directory: string, active: SegmentScan): Promise<number> {
 	let total = 0;
 	const count = (scan: SegmentScan) => {
 		for (const row of scan.rows)
@@ -78,13 +85,11 @@ async function researchBytesOnDisk(directory: string, fileName: JournalFileName,
 				total += encodeTelemetryLine(row.record).length + declaredBytes(row.record);
 	};
 	count(active);
-	for (const file of journalFiles(await readdir(directory), fileName)) {
-		if (file !== fileName) count(scanTelemetrySegment(await readFile(join(directory, file))));
+	for (const file of telemetryJournalFiles(await readdir(directory))) {
+		if (file !== TELEMETRY_JOURNAL_FILE) count(scanTelemetrySegment(await readFile(join(directory, file))));
 	}
 	return total;
 }
-
-export type JournalFileName = "calls.jsonl" | "events.ndjson";
 
 /**
  * What one owner's writer made durable, published after fsync so a live fold reads exactly the bytes a cold reader
@@ -146,17 +151,6 @@ export function openCallJournalHealth(): Array<{ owner: string; health: JournalH
 	return [...openJournalHealth].map(([owner, health]) => ({ owner, health: health() }));
 }
 
-function rotatedName(fileName: JournalFileName, id: string): string {
-	return fileName === "calls.jsonl" ? `calls.${id}.jsonl` : `events.${id}.ndjson`;
-}
-
-export function journalFiles(names: string[], fileName: JournalFileName): string[] {
-	const pattern = fileName === "calls.jsonl" ? /^calls\.rec_[0-9a-f-]+\.jsonl$/ : /^events\.rec_[0-9a-f-]+\.ndjson$/;
-	const files = names.filter((name) => pattern.test(name)).sort();
-	if (names.includes(fileName)) files.push(fileName);
-	return files;
-}
-
 /** Fork initialization and live owners use the same segment and clock contract (#434). */
 export function callJournalHeader(
 	writer: SegmentHeader["writer"],
@@ -180,11 +174,11 @@ export function callJournalHeader(
 
 /** Only the newly created child's cold fork path calls this, before any writer can acquire it (#434). */
 export function seedForkCallJournal(
-	directory: string,
+	stateDir: string,
 	sessionId: string,
 	lineage: EventPayload<"session.forked">,
 ): void {
-	const path = join(directory, "calls.jsonl");
+	const path = telemetryJournalPath(telemetrySessionDirectory(stateDir, sessionId));
 	if (existsSync(path)) throw new Error("fork journal already exists");
 	const pkg = JSON.parse(readFileSync(join(resolvePackageRoot(), "package.json"), "utf8")) as {
 		version: string;
@@ -208,8 +202,7 @@ export function seedForkCallJournal(
 
 /** One lease for the writer's lifetime, adjudicated by host, pid and birth token (#434). */
 export async function openCallJournal(options: CallJournalOptions): Promise<CallJournal> {
-	const fileName = options.fileName ?? "calls.jsonl";
-	const path = join(options.sessionDirectory, fileName);
+	const path = telemetryJournalPath(options.directory);
 	await mkdir(dirname(path), { recursive: true });
 	let ready!: (journal: CallJournal) => void;
 	let reject!: (error: unknown) => void;
@@ -260,7 +253,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				reason: "torn-tail" | "writer-drop" | "invalid-record" | "mode-filtered" | "research-cap",
 				count: number,
 			) =>
-				makeTelemetryRecord("journal.gap", { sink: fileName, reason, count }, options.context, {
+				makeTelemetryRecord("journal.gap", { sink: TELEMETRY_JOURNAL_FILE, reason, count }, options.context, {
 					t: new Date().toISOString(),
 					mono: performance.now(),
 				});
@@ -286,7 +279,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				);
 			let size = prefix.length + opening.length;
 			const researchCap = options.researchBytes ?? RESEARCH_SESSION_BYTES;
-			let researchBytes = await researchBytesOnDisk(options.sessionDirectory, fileName, scan).catch(() => researchCap);
+			let researchBytes = await researchBytesOnDisk(options.directory, scan).catch(() => researchCap);
 			let capped = 0;
 			let reportedCapped = 0;
 			const capacity = options.queueCapacity ?? 4096;
@@ -385,7 +378,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 								}
 								researchBytes += bytes;
 								try {
-									const content = await storeTelemetryObject(options.sessionDirectory, subject, pending.preimage);
+									const content = await storeTelemetryObject(options.directory, subject, pending.preimage);
 									data = { ...pending.data, content, bytes } as typeof data;
 								} catch {
 									researchBytes -= bytes;
@@ -448,7 +441,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							await handle.sync();
 							await handle.close();
 							handle = undefined;
-							await rename(path, join(options.sessionDirectory, rotatedName(fileName, newRecordId())));
+							await rename(path, join(options.directory, telemetrySegmentFile(newRecordId())));
 							const opened = encodeTelemetryLine(header);
 							await safeResourceWriteAsync(path, opened, { mode: 0o600 });
 							handle = await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
@@ -570,41 +563,34 @@ export interface CallJournalRead {
 }
 
 /** Read-only readers preserve future records and never repair a writer's file (#434). */
-export async function readCallJournal(
-	sessionDirectory: string,
-	fileName: JournalFileName = "calls.jsonl",
-): Promise<CallJournalRead> {
-	return readCallJournalSnapshot(sessionDirectory, fileName, 3);
+export async function readCallJournal(directory: string): Promise<CallJournalRead> {
+	return readCallJournalSnapshot(directory, 3);
 }
 
-async function readCallJournalSnapshot(
-	sessionDirectory: string,
-	fileName: JournalFileName,
-	retries: number,
-): Promise<CallJournalRead> {
+async function readCallJournalSnapshot(directory: string, retries: number): Promise<CallJournalRead> {
 	const result: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
 	let names: string[];
 	try {
-		names = await readdir(sessionDirectory);
+		names = await readdir(directory);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return result;
 		throw error;
 	}
-	const files = journalFiles(names, fileName);
+	const files = telemetryJournalFiles(names);
 	for (const file of files) {
 		let bytes: Buffer;
 		try {
-			bytes = await readFile(join(sessionDirectory, file));
+			bytes = await readFile(join(directory, file));
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT" && retries > 0)
-				return readCallJournalSnapshot(sessionDirectory, fileName, retries - 1);
+				return readCallJournalSnapshot(directory, retries - 1);
 			throw error;
 		}
 		appendReadSegment(result, bytes);
 	}
-	const after = journalFiles(await readdir(sessionDirectory), fileName).sort();
+	const after = telemetryJournalFiles(await readdir(directory)).sort();
 	if (after.join("\n") !== [...files].sort().join("\n")) {
-		if (retries > 0) return readCallJournalSnapshot(sessionDirectory, fileName, retries - 1);
+		if (retries > 0) return readCallJournalSnapshot(directory, retries - 1);
 		throw new Error("call journal rotated repeatedly during read");
 	}
 	return result;
@@ -635,11 +621,8 @@ function appendReadSegment(result: CallJournalRead, bytes: Buffer, continuing?: 
 }
 
 /** Session switches already read their ledger synchronously; take the journal snapshot in that same cold path (#434). */
-export function readCallJournalSync(
-	sessionDirectory: string,
-	fileName: JournalFileName = "calls.jsonl",
-): CallJournalRead {
-	const names = () => journalFiles(readdirSync(sessionDirectory), fileName);
+export function readCallJournalSync(directory: string): CallJournalRead {
+	const names = () => telemetryJournalFiles(readdirSync(directory));
 	for (let retry = 0; retry < 3; retry += 1) {
 		const result: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
 		let files: string[];
@@ -650,7 +633,7 @@ export function readCallJournalSync(
 			throw error;
 		}
 		try {
-			for (const file of files) appendReadSegment(result, readFileSync(join(sessionDirectory, file)));
+			for (const file of files) appendReadSegment(result, readFileSync(join(directory, file)));
 			if (files.join("\n") === names().join("\n")) return result;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

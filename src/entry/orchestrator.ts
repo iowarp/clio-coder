@@ -4504,7 +4504,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				target: meta.target,
 				model: meta.model,
 				sessionId: meta.id,
-				journalDirectory: join(clioStateDir(), "sessions", meta.cwdHash, meta.id),
+				journalStateDir: clioStateDir(),
 			},
 			session.tree(meta.id).leafId,
 		);
@@ -5047,7 +5047,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							target: resumedMeta.target,
 							model: resumedMeta.model,
 							sessionId: resumedMeta.id,
-							journalDirectory: join(clioStateDir(), "sessions", resumedMeta.cwdHash, resumedMeta.id),
+							journalStateDir: clioStateDir(),
 						},
 						leafTurnId,
 					);

@@ -11,6 +11,7 @@ import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { journalUsageWindow, usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
@@ -171,7 +172,7 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 		};
 		assert.equal((await runOutOfTurnRound(input)).text, "answer");
 		await assert.rejects(runOutOfTurnRound({ ...input, admitFlow: () => "refused" }), /refused/);
-		const records = (await readCallJournal(join(stateDir, "sessions", "repo", "side-session"))).records.map(
+		const records = (await readCallJournal(telemetrySessionDirectory(stateDir, "side-session"))).records.map(
 			({ record }) => record,
 		);
 		const calls = records.filter((record) => record.k === "call.settled");

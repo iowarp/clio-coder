@@ -37,7 +37,7 @@ import { readToolRounds } from "./types.js";
 
 import { createHash, randomBytes } from "node:crypto";
 import { type Dirent, readdirSync } from "node:fs";
-import { isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
+import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { bashShellPath } from "../../core/bash-shell.js";
 import { taskCommitSubject } from "../../core/commit-message.js";
@@ -84,6 +84,7 @@ import {
 	turnScopeGuidance,
 	workerTurnConstraints,
 } from "../../core/turn-constraints.js";
+import { clioStateDir } from "../../core/xdg.js";
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
@@ -224,6 +225,7 @@ import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { TelemetryContract } from "../telemetry/contract.js";
+import { telemetryRunDirectory } from "../telemetry/index.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../telemetry/session-journals.js";
 import {
 	approvedRouteObservation,
@@ -411,7 +413,7 @@ import { reduceRouteQuality } from "./route-quality.js";
 import { defaultRoutingIntent } from "./routing-intent.js";
 import type { RunCallUsage } from "./run-call-usage.js";
 import { createRunCallUsage } from "./run-call-usage.js";
-import { defaultRunEventJournal, runEventJournalRoot } from "./run-event-journal.js";
+import { defaultRunEventJournal } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
@@ -5962,7 +5964,10 @@ export function createDispatchBundle(
 		};
 		if (telemetryContext) {
 			try {
-				runJournal = await openRunTelemetry(telemetryContext, join(runEventJournalRoot(), telemetryContext.runId));
+				runJournal = await openRunTelemetry(
+					telemetryContext,
+					telemetryRunDirectory(clioStateDir(), telemetryContext.runId),
+				);
 				if (req.ownerSessionId && req.ownerSessionCwdHash) {
 					parentJournal = await context
 						.getContract<TelemetryContract>("telemetry")
@@ -7404,7 +7409,7 @@ export function createDispatchBundle(
 				try {
 					runJournal = await openRunTelemetry(
 						spec.telemetryContext,
-						join(runEventJournalRoot(), spec.telemetryContext.runId),
+						telemetryRunDirectory(clioStateDir(), spec.telemetryContext.runId),
 					);
 					if (req.ownerSessionId && req.ownerSessionCwdHash) {
 						parentJournal = await context
@@ -10292,8 +10297,8 @@ export function createDispatchBundle(
 			try {
 				const recovery = recoverOrphanReceipts(ledger);
 				for (const { runId, facts } of recovery.unsettled)
-					void trackDurableWrite(settleOrphanedRunJournal(join(runEventJournalRoot(), runId), facts)).catch((error) =>
-						reportDispatchDiagnostic(`settle the journal of run ${runId}`, error),
+					void trackDurableWrite(settleOrphanedRunJournal(telemetryRunDirectory(clioStateDir(), runId), facts)).catch(
+						(error) => reportDispatchDiagnostic(`settle the journal of run ${runId}`, error),
 					);
 				if (recovery.recovered > 0 || recovery.corrupt > 0 || recovery.abandoned > 0 || recovery.sealed > 0) {
 					await ledger.persist();

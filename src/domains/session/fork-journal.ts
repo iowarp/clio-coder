@@ -1,7 +1,7 @@
-import { dirname, join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import type { CallJournalRead } from "../telemetry/call-journal.js";
 import { readCallJournalSync } from "../telemetry/call-journal.js";
+import { telemetryRunDirectory, telemetrySessionDirectory } from "../telemetry/index.js";
 import type { SessionEntry } from "./entries.js";
 import { journalOwnsSideUsage } from "./journal-usage.js";
 
@@ -11,10 +11,10 @@ export interface SessionCallJournalRead extends CallJournalRead {
 
 /** Resolve immutable ancestor facts; a copied ledger never owns a second copy of its calls (#434). */
 export function readSessionCallJournalSync(
-	directory: string,
+	stateDir: string,
+	sessionId: string,
 	entries: readonly SessionEntry[],
 ): SessionCallJournalRead {
-	const sessionsRoot = dirname(dirname(directory));
 	const runCutoffs = new Map<string, { cutoff: number; sessionId: string | null }>();
 	const linked = new Set(
 		entries.flatMap((entry) => {
@@ -65,10 +65,9 @@ export function readSessionCallJournalSync(
 			const parent = record.data;
 			try {
 				assertSafeId(parent.parentSessionId, "parent session");
-				assertSafeId(parent.parentCwdHash, "parent workspace");
 				const at = Date.parse(parent.parentTurnAt);
 				if (!Number.isFinite(at)) throw new Error("invalid fork boundary timestamp");
-				const inherited = read(join(sessionsRoot, parent.parentCwdHash, parent.parentSessionId), Math.min(cutoff, at));
+				const inherited = read(telemetrySessionDirectory(stateDir, parent.parentSessionId), Math.min(cutoff, at));
 				local.records.push(...inherited.records);
 				local.skipped += inherited.skipped + (inherited.records.length === 0 ? 1 : 0);
 				local.damaged += inherited.damaged;
@@ -79,12 +78,12 @@ export function readSessionCallJournalSync(
 		}
 		return local;
 	};
-	const result = read(directory);
+	const result = read(telemetrySessionDirectory(stateDir, sessionId));
 	const runs: SessionCallJournalRead["runs"] = new Map();
 	for (const [runId, reference] of runCutoffs) {
 		try {
 			assertSafeId(runId, "run");
-			const run = readCallJournalSync(join(dirname(sessionsRoot), "runs", runId), "events.ndjson");
+			const run = readCallJournalSync(telemetryRunDirectory(stateDir, runId));
 			run.records = run.records.filter(
 				({ record }) =>
 					record.ctx.runId === runId &&

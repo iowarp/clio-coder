@@ -49,9 +49,9 @@ export function reseedSessionUsageFromLedger(
 ): void {
 	const scoped = filterEntriesToActivePath(entries, activeLeafTurnId ?? undefined);
 	let journal: SessionCallJournalRead | undefined;
-	if (defaults.journalDirectory) {
+	if (defaults.journalStateDir && defaults.sessionId) {
 		try {
-			journal = readSessionCallJournalSync(defaults.journalDirectory, scoped);
+			journal = readSessionCallJournalSync(defaults.journalStateDir, defaults.sessionId, scoped);
 			if (journal.skipped || journal.damaged)
 				writeDiagnostic("[clio-coder:telemetry] session usage journal has skipped or damaged records\n");
 		} catch {

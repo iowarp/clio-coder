@@ -29,7 +29,7 @@ test("trace history lists run journals joined to the ledger, with read-model row
 	assert.equal(run.telemetry.apiCalls.display, "1");
 	assert.ok(Number.isFinite(Date.parse(run.writtenAt ?? "")));
 	// A standalone run journal the ledger never held lists with its own row and an unknown status until it settles.
-	mkdirSync(join(state, "runs", "standalone-1"));
+	mkdirSync(join(state, "telemetry", "runs", "standalone-1"));
 	const standalone = await json(await h.request("/api/traces/runs/standalone-1"), routes.traceRun.response);
 	assert.equal(standalone.identity, null);
 	assert.equal(standalone.status, "unknown");

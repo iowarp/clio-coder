@@ -12,6 +12,7 @@ import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { streamSimple } from "../../src/engine/ai.js";
@@ -207,7 +208,7 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 		});
 		ok(refused.errorMessage?.includes("token budget"));
 		strictEqual(paths.length, 1, "oversized transformed warm never reaches the server");
-		const records = (await readCallJournal(join(stateDir, "sessions", "repo", "prewarm-session"))).records.map(
+		const records = (await readCallJournal(telemetrySessionDirectory(stateDir, "prewarm-session"))).records.map(
 			({ record }) => record,
 		);
 		const calls = records.filter((record) => record.k === "call.settled");

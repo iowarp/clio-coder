@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { performance } from "node:perf_hooks";
 import { loadDomains } from "../core/domain-loader.js";
 import { asDirectoryPathBoundary } from "../core/path-boundary.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
 import { ALL_TOOL_NAMES, ToolNames } from "../core/tool-names.js";
+import { clioStateDir } from "../core/xdg.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
@@ -32,7 +33,6 @@ import { formatEffectiveBudget } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { declaredScopeIntent } from "../domains/dispatch/intent.js";
-import { runEventJournalPath } from "../domains/dispatch/run-event-journal.js";
 import { callLevelUpstreamResponses, type RunReceipt } from "../domains/dispatch/types.js";
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
@@ -818,7 +818,8 @@ async function runPagePhase(
 		try {
 			if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(authorRunId)) throw new Error("invalid validation run id");
 			safeResourceWrite(
-				join(dirname(runEventJournalPath(authorRunId)), "wiki-validation.json"),
+				// Beside the run's recording, outside the telemetry tree, which only the telemetry domain writes (#434).
+				join(clioStateDir(), "runs", authorRunId, "wiki-validation.json"),
 				`${JSON.stringify(
 					{
 						version: 1,

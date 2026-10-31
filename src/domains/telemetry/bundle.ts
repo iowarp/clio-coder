@@ -7,13 +7,18 @@ import { STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { SegmentHeader } from "../../core/telemetry/envelope.js";
 import { readTelemetryRecord } from "../../core/telemetry/envelope.js";
 import { crc32, scanTelemetrySegment } from "../../core/telemetry/segment.js";
-import type { JournalFileName } from "./call-journal.js";
-import { journalFiles } from "./call-journal.js";
+import {
+	TELEMETRY_JOURNAL_FILE,
+	telemetryJournalFiles,
+	telemetryObjectsDirectory,
+	telemetryRunDirectory,
+	telemetrySessionDirectory,
+} from "./paths.js";
 
 /**
  * A telemetry bundle is the exchange and golden-fixture format for one session's
- * journal (#434, P4): `bundle.json`, `calls.jsonl` with every segment's lines
- * verbatim, `runs/<runId>/events.ndjson` for each run the session references,
+ * journal (#434, P4): `bundle.json`, `journal.jsonl` with every segment's lines
+ * verbatim, `runs/<runId>/journal.jsonl` for each run the session references,
  * only the `objects/` its records reference, and `current.jsonl` only when
  * content was exported under research mode and consent. Its content class
  * bounds what any record carries; a content-free bundle holds no objects.
@@ -55,7 +60,6 @@ export interface BundleManifest {
 	writer: SegmentHeader["writer"];
 	source: {
 		sessionId: string;
-		cwdHash: string;
 		/** Ancestor facts are not copied; a fork's bundle folds its own calls only. */
 		forkedFrom: { parentSessionId: string; parentTurnId: string; lineage: "not-included" } | null;
 		runs: string[];
@@ -184,7 +188,7 @@ async function readRegular(path: string): Promise<Buffer> {
 }
 
 /** Every segment of one journal, oldest first, read as one snapshot across a concurrent rotation. */
-async function readSegments(directory: string, fileName: JournalFileName): Promise<Buffer[] | null> {
+async function readSegments(directory: string): Promise<Buffer[] | null> {
 	for (let attempt = 0; attempt < 3; attempt += 1) {
 		let names: string[];
 		try {
@@ -193,10 +197,10 @@ async function readSegments(directory: string, fileName: JournalFileName): Promi
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
 			throw error;
 		}
-		const files = journalFiles(names, fileName);
+		const files = telemetryJournalFiles(names);
 		try {
 			const segments = await Promise.all(files.map((file) => readRegular(join(directory, file))));
-			if (journalFiles(await readdir(directory), fileName).join("\n") === files.join("\n")) return segments;
+			if (telemetryJournalFiles(await readdir(directory)).join("\n") === files.join("\n")) return segments;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		}
@@ -258,8 +262,9 @@ async function refuseExisting(out: string): Promise<void> {
 
 export interface ExportBundleInput {
 	stateDir: string;
-	cwdHash: string;
 	sessionId: string;
+	/** The session's store directory, whose `current.jsonl` a content-bearing export carries; null when none holds it. */
+	sessionStore: string | null;
 	out: string;
 	/** `content-bearing` adds content records, content objects and the ledger; the caller checked research and consent. */
 	contentClass: BundleContentClass;
@@ -268,14 +273,14 @@ export interface ExportBundleInput {
 
 /** Read-only over the session: a live writer keeps appending, and its unfinished last line is left out (#434). */
 export async function exportTelemetryBundle(input: ExportBundleInput): Promise<BundleManifest> {
-	if (!SAFE_ID.test(input.sessionId) || !SAFE_ID.test(input.cwdHash)) throw new Error("invalid session identity");
+	if (!SAFE_ID.test(input.sessionId)) throw new Error("invalid session identity");
 	await refuseExisting(input.out);
-	const directory = join(input.stateDir, "sessions", input.cwdHash, input.sessionId);
-	const segments = await readSegments(directory, "calls.jsonl");
+	const directory = telemetrySessionDirectory(input.stateDir, input.sessionId);
+	const segments = await readSegments(directory);
 	if (segments === null || segments.length === 0) throw new Error(`session ${input.sessionId} has no call journal`);
 	const content = input.contentClass === "content-bearing";
 	const session = filterJournal(segments, input.contentClass, () => true);
-	const files = new Map<string, Buffer>([["calls.jsonl", session.bytes]]);
+	const files = new Map<string, Buffer>([[TELEMETRY_JOURNAL_FILE, session.bytes]]);
 	const listed: BundleFile[] = [];
 	const headers = [...session.headers];
 	const refs = new Map<string, string>();
@@ -304,15 +309,13 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 			};
 	}
 	listed.push({
-		path: "calls.jsonl",
+		path: TELEMETRY_JOURNAL_FILE,
 		sha256: sha256(session.bytes),
 		bytes: session.bytes.length,
 		records: session.records,
 	});
 	for (const runId of [...runs].sort()) {
-		const runSegments = SAFE_ID.test(runId)
-			? await readSegments(join(input.stateDir, "runs", runId), "events.ndjson")
-			: null;
+		const runSegments = SAFE_ID.test(runId) ? await readSegments(telemetryRunDirectory(input.stateDir, runId)) : null;
 		if (runSegments === null || runSegments.length === 0) {
 			excluded.missingRuns.push(runId);
 			continue;
@@ -328,7 +331,7 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 		excluded.tornTailBytes += run.tornTailBytes;
 		headers.push(...run.headers);
 		for (const record of run.parsed) collectRefs(record.data, refs);
-		const path = `runs/${runId}/events.ndjson`;
+		const path = `runs/${runId}/${TELEMETRY_JOURNAL_FILE}`;
 		files.set(path, run.bytes);
 		listed.push({ path, sha256: sha256(run.bytes), bytes: run.bytes.length, records: run.records });
 	}
@@ -340,7 +343,7 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 		if (CONTENT_SUBJECTS.has(subject) && !content) continue;
 		let bytes: Buffer;
 		try {
-			bytes = await readRegular(join(directory, "objects", `${id}.json`));
+			bytes = await readRegular(join(telemetryObjectsDirectory(directory), `${id}.json`));
 		} catch {
 			excluded.missingObjects.push(id);
 			continue;
@@ -351,9 +354,9 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 		listed.push({ path, sha256: sha256(bytes), bytes: bytes.length, records: 1 });
 	}
 	let ledgerIncluded = false;
-	if (content) {
+	if (content && input.sessionStore !== null) {
 		try {
-			const ledger = await readRegular(join(directory, "current.jsonl"));
+			const ledger = await readRegular(join(input.sessionStore, "current.jsonl"));
 			const complete = ledger.subarray(0, ledger.lastIndexOf(0x0a) + 1);
 			excluded.tornTailBytes += ledger.length - complete.length;
 			files.set("current.jsonl", complete);
@@ -372,7 +375,7 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 		format: BUNDLE_FORMAT,
 		createdAt: new Date().toISOString(),
 		writer: input.writer,
-		source: { sessionId: input.sessionId, cwdHash: input.cwdHash, forkedFrom, runs: [...runs].sort() },
+		source: { sessionId: input.sessionId, forkedFrom, runs: [...runs].sort() },
 		ceiling: ceilingOf(headers, content && contentIncluded),
 		contentClass: input.contentClass,
 		excluded,
@@ -394,8 +397,8 @@ export interface BundleImport {
 
 function isPath(path: unknown): path is string {
 	if (typeof path !== "string") return false;
-	if (path === "calls.jsonl" || path === "current.jsonl") return true;
-	const run = /^runs\/([a-zA-Z0-9_-]+)\/events\.ndjson$/.exec(path);
+	if (path === TELEMETRY_JOURNAL_FILE || path === "current.jsonl") return true;
+	const run = /^runs\/([a-zA-Z0-9_-]+)\/journal\.jsonl$/.exec(path);
 	return run !== null || /^objects\/obj_[0-9a-f]{64}\.json$/.test(path);
 }
 
@@ -403,8 +406,8 @@ function readManifest(value: unknown): BundleManifest {
 	const manifest = value as BundleManifest;
 	if (!manifest || typeof manifest !== "object" || manifest.format !== BUNDLE_FORMAT)
 		throw new Error(`bundle.json is not ${BUNDLE_FORMAT}`);
-	if (!Array.isArray(manifest.files) || !manifest.files.some((file) => file.path === "calls.jsonl"))
-		throw new Error("bundle.json lists no calls.jsonl");
+	if (!Array.isArray(manifest.files) || !manifest.files.some((file) => file.path === TELEMETRY_JOURNAL_FILE))
+		throw new Error(`bundle.json lists no ${TELEMETRY_JOURNAL_FILE}`);
 	const seen = new Set<string>();
 	for (const file of manifest.files) {
 		if (!isPath(file?.path) || seen.has(file.path))

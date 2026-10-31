@@ -27,6 +27,7 @@ import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { readOutOfTurnUsageRows } from "../../src/domains/telemetry/out-of-turn-usage.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { completeEngineText } from "../../src/engine/ai.js";
 import {
@@ -215,7 +216,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				await idle;
 				await new Promise<void>((resolve) => setImmediate(resolve));
 				await journals.flush();
-				const calls = (await readCallJournal(join(env.dir, "state", "sessions", origin.cwdHash, origin.id))).records
+				const calls = (await readCallJournal(telemetrySessionDirectory(join(env.dir, "state"), origin.id))).records
 					.map(({ record }) => record)
 					.filter((record) => record.k === "call.settled");
 				assert.equal(calls.length, 1);

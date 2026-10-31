@@ -12,18 +12,18 @@ import { Value } from "typebox/value";
 import { RunRowSchema } from "../../src/core/telemetry/dto.js";
 import { listRunTelemetrySources, listRunTelemetrySourcesAsync } from "../../src/domains/session/telemetry-source.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetryJournalPath, telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { runRowTelemetry } from "../../src/domains/telemetry/read-model.js";
 
 async function writeRunJournal(stateDir: string, runId: string, writtenAt: Date) {
-	const directory = join(stateDir, "runs", runId);
+	const directory = telemetryRunDirectory(stateDir, runId);
 	const journal = await openCallJournal({
-		sessionDirectory: directory,
-		fileName: "events.ndjson",
+		directory,
 		context: { sessionId: null, runId, label: "worker" },
 		writer: { clioCoderVersion: "test", piVersion: "test" },
 	});
 	await journal.close();
-	utimesSync(join(directory, "events.ndjson"), writtenAt, writtenAt);
+	utimesSync(telemetryJournalPath(directory), writtenAt, writtenAt);
 }
 
 test("run journals list newest write first, page by keyset, and a journal-less run lists last as unknown", async () => {
@@ -31,7 +31,7 @@ test("run journals list newest write first, page by keyset, and a journal-less r
 	await writeRunJournal(stateDir, "run-older", new Date("2026-10-20T10:00:00.000Z"));
 	await writeRunJournal(stateDir, "run-newest", new Date("2026-10-22T10:00:00.000Z"));
 	await writeRunJournal(stateDir, "run-middle", new Date("2026-10-21T10:00:00.000Z"));
-	mkdirSync(join(stateDir, "runs", "run-legacy"), { recursive: true });
+	mkdirSync(telemetryRunDirectory(stateDir, "run-legacy"), { recursive: true });
 
 	const first = listRunTelemetrySources(stateDir, { limit: 2 });
 	deepStrictEqual(

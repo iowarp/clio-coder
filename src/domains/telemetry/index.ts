@@ -50,6 +50,22 @@ export {
 	outOfTurnUsagePath,
 	readOutOfTurnUsageRows,
 } from "./out-of-turn-usage.js";
+export {
+	isTelemetryJournalFile,
+	TELEMETRY_JOURNAL_FILE,
+	telemetryConsentPath,
+	telemetryJournalFiles,
+	telemetryJournalPath,
+	telemetryObjectsDirectory,
+	telemetryProcessDirectory,
+	telemetryProcessesDirectory,
+	telemetryResearchDirectory,
+	telemetryRoot,
+	telemetryRunDirectory,
+	telemetryRunsDirectory,
+	telemetrySessionDirectory,
+	telemetrySessionsDirectory,
+} from "./paths.js";
 export type { ProjectionReadModel, TelemetryProjection } from "./projection.js";
 export {
 	createTelemetryProjection,

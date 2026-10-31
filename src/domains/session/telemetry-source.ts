@@ -11,6 +11,14 @@ import type { ReceiptIntegrityOutcome } from "../evidence/trust-status.js";
 import { verifyReceiptIntegrityOutcome } from "../evidence/trust-status.js";
 import type { CallJournalRead } from "../telemetry/call-journal.js";
 import { readCallJournal, readCallJournalSync } from "../telemetry/call-journal.js";
+import {
+	isTelemetryJournalFile,
+	telemetryJournalPath,
+	telemetryRunDirectory,
+	telemetryRunsDirectory,
+	telemetrySessionDirectory,
+	telemetrySessionsDirectory,
+} from "../telemetry/index.js";
 import type { OutOfTurnUsageRow } from "../telemetry/out-of-turn-usage.js";
 import { outOfTurnUsagePath, parseOutOfTurnUsageRows } from "../telemetry/out-of-turn-usage.js";
 import type { JournalSource, ProcessIdentity, SessionSource } from "../telemetry/read-model.js";
@@ -33,7 +41,7 @@ import { importLegacyReceipt, importLegacySession } from "./legacy-import.js";
 const MAX_LINEAGE = 32;
 
 type Io =
-	| { op: "journal"; directory: string; file: "calls.jsonl" | "events.ndjson" }
+	| { op: "journal"; directory: string }
 	| { op: "text"; path: string }
 	| { op: "list"; path: string }
 	| { op: "exists"; path: string }
@@ -42,8 +50,8 @@ type Io =
 type FileIo = Exclude<Io, { op: "runRow" }>;
 type Load<T> = Generator<Io, T, unknown>;
 
-function* journal(directory: string, file: "calls.jsonl" | "events.ndjson"): Load<CallJournalRead> {
-	return (yield { op: "journal", directory, file }) as CallJournalRead;
+function* journal(directory: string): Load<CallJournalRead> {
+	return (yield { op: "journal", directory }) as CallJournalRead;
 }
 /** Null when the file cannot be read for any reason. */
 function* text(path: string): Load<string | null> {
@@ -68,7 +76,7 @@ function* mtime(path: string): Load<number | null> {
 function performSync(io: FileIo): unknown {
 	switch (io.op) {
 		case "journal":
-			return readCallJournalSync(io.directory, io.file);
+			return readCallJournalSync(io.directory);
 		case "text":
 			try {
 				return readFileSync(io.path, "utf8");
@@ -98,7 +106,7 @@ function performSync(io: FileIo): unknown {
 async function performAsync(io: FileIo): Promise<unknown> {
 	switch (io.op) {
 		case "journal":
-			return readCallJournal(io.directory, io.file);
+			return readCallJournal(io.directory);
 		case "text":
 			return readFile(io.path, "utf8").catch(() => null);
 		case "list":
@@ -179,14 +187,17 @@ async function runAsync<T>(load: Load<T>): Promise<T> {
 	return step.value;
 }
 
-/** Session ids are path components under a workspace bucket; the first bucket holding the id wins. */
+/**
+ * The session's store directory, which holds its ledger and meta.json. Session ids are path components under a
+ * workspace bucket; the first bucket holding the id wins. Its journal lives apart, under the telemetry root (#434).
+ */
 function* findSessionDirectory(stateDir: string, sessionId: string): Load<string | null> {
 	assertSafeId(sessionId, "session");
 	const root = join(stateDir, "sessions");
 	const buckets = (yield* list(root))?.sort() ?? [];
 	for (const bucket of buckets) {
 		const directory = join(root, bucket, sessionId);
-		if ((yield* exists(join(directory, "current.jsonl"))) || (yield* exists(join(directory, "calls.jsonl"))))
+		if ((yield* exists(join(directory, "current.jsonl"))) || (yield* exists(join(directory, "meta.json"))))
 			return directory;
 	}
 	return null;
@@ -276,10 +287,10 @@ function* receiptSeal(stateDir: string, runId: string, value: unknown): Load<Leg
 
 function* loadRun(stateDir: string, runId: string): Load<JournalSource> {
 	assertSafeId(runId, "run");
-	const directory = join(stateDir, "runs", runId);
+	const directory = telemetryRunDirectory(stateDir, runId);
 	try {
-		const read = yield* journal(directory, "events.ndjson");
-		const source = journalSourceFromRead(read, yield* exists(join(directory, "events.ndjson")), runId);
+		const read = yield* journal(directory);
+		const source = journalSourceFromRead(read, yield* exists(telemetryJournalPath(directory)), runId);
 		// A run with no journal keeps its sealed receipt's known totals rather than leaving the report smaller (#434).
 		return source.present ? source : ((yield* receiptSource(stateDir, runId)) ?? source);
 	} catch {
@@ -340,8 +351,9 @@ function* legacyRecords(
 }
 
 /**
- * Null when no session directory holds the id. A missing or unreadable ancestor leaves `parent.source` null, which
- * the lineage fold reports as unknown coverage.
+ * Null when neither a store directory nor a journal holds the id. `given` is the session's store directory, which
+ * holds its ledger and meta.json; its journal is the telemetry root's. A missing or unreadable ancestor leaves
+ * `parent.source` null, which the lineage fold reports as unknown coverage.
  */
 function* loadSession(
 	stateDir: string,
@@ -351,14 +363,13 @@ function* loadSession(
 	ancestors = true,
 ): Load<SessionSource | null> {
 	const directory = given === undefined ? yield* findSessionDirectory(stateDir, sessionId) : given;
-	if (directory === null) return null;
+	const journalDirectory = telemetrySessionDirectory(stateDir, sessionId);
+	const journaled = yield* exists(telemetryJournalPath(journalDirectory));
+	if (directory === null && !journaled) return null;
 	seen.add(sessionId);
-	const own = journalSourceFromRead(
-		yield* journal(directory, "calls.jsonl"),
-		yield* exists(join(directory, "calls.jsonl")),
-	);
-	const { header, entries } = yield* readLedger(directory);
-	const ledger = yield* readLifecycle(directory);
+	const own = journalSourceFromRead(yield* journal(journalDirectory), journaled);
+	const { header, entries } = directory === null ? { header: null, entries: [] } : yield* readLedger(directory);
+	const ledger = directory === null ? undefined : yield* readLifecycle(directory);
 	const forked = own.records.find((record) => record.k === "session.forked");
 	const lineage =
 		forked?.k === "session.forked"
@@ -441,7 +452,7 @@ function newestFirst(a: { runId: string; writtenMs: number | null }, b: { runId:
 }
 
 /**
- * Every run journal under `<state>/runs`, newest write first. Dispatch run ids are random, and ordering by a run's
+ * Every run journal under the telemetry root's `runs/`, newest write first. Dispatch run ids are random, and ordering by a run's
  * first record would read every journal, so the page key is the journal file's write time: one stat per run, and
  * only the page's journals are read. A run directory with no journal lists last, as `present: false`, which the
  * read model reports as unknown coverage rather than leaving the run out (#434 R9).
@@ -450,7 +461,7 @@ function* listRuns(
 	stateDir: string,
 	page: { limit: number; before?: RunListCursor | null },
 ): Load<RunTelemetryListing> {
-	const root = join(stateDir, "runs");
+	const root = telemetryRunsDirectory(stateDir);
 	const entries: Array<{ runId: string; writtenMs: number | null }> = [];
 	for (const name of (yield* list(root)) ?? []) {
 		try {
@@ -459,7 +470,7 @@ function* listRuns(
 			// A name that is not a run id cannot be a run directory.
 			continue;
 		}
-		entries.push({ runId: name, writtenMs: yield* mtime(join(root, name, "events.ndjson")) });
+		entries.push({ runId: name, writtenMs: yield* mtime(telemetryJournalPath(telemetryRunDirectory(stateDir, name))) });
 	}
 	entries.sort(newestFirst);
 	const before = page.before;
@@ -477,6 +488,30 @@ function* listRuns(
 		runs,
 		nextBefore: after.length > window.length && last ? { writtenMs: last.writtenMs, runId: last.runId } : null,
 	};
+}
+
+/** Run ids with a directory under the telemetry root's `runs/`; none when it does not exist, and other errors throw. */
+export function listRunTelemetryIds(stateDir: string): string[] {
+	try {
+		return readdirSync(telemetryRunsDirectory(stateDir));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw error;
+	}
+}
+
+/** Whether the run has a telemetry directory; one whose journal is missing or torn is unknown coverage, not absent. */
+export function runTelemetryDirectoryExists(stateDir: string, runId: string): boolean {
+	assertSafeId(runId, "run");
+	return statSync(telemetryRunDirectory(stateDir, runId), { throwIfNoEntry: false })?.isDirectory() === true;
+}
+
+/** The run journal's last write in epoch ms, the key run listings page by; null when it was never written. */
+export function runTelemetryWrittenMs(stateDir: string, runId: string): number | null {
+	assertSafeId(runId, "run");
+	return (
+		statSync(telemetryJournalPath(telemetryRunDirectory(stateDir, runId)), { throwIfNoEntry: false })?.mtimeMs ?? null
+	);
 }
 
 export function listRunTelemetrySources(
@@ -557,18 +592,17 @@ function windowSession(source: SessionSource, from: number, to: number): Session
 	};
 }
 
-/** Newest write among the files matching `pattern`; +∞ when one vanished mid-scan, since it was just written. */
-function* newestWrite(directory: string, pattern: RegExp): Load<number> {
+/** Newest write among the files `matches` accepts; +∞ when one vanished mid-scan, since it was just written. */
+function* newestWrite(directory: string, matches: (name: string) => boolean): Load<number> {
 	let newest = Number.NEGATIVE_INFINITY;
 	for (const name of (yield* list(directory)) ?? []) {
-		if (!pattern.test(name)) continue;
+		if (!matches(name)) continue;
 		newest = Math.max(newest, (yield* mtime(join(directory, name))) ?? Number.POSITIVE_INFINITY);
 	}
 	return newest;
 }
 
-const SESSION_FILES = /^(?:current\.jsonl|calls(?:\.rec_[0-9a-f-]+)?\.jsonl)$/u;
-const RUN_FILES = /^events(?:\.rec_[0-9a-f-]+)?\.ndjson$/u;
+const isLedger = (name: string) => name === "current.jsonl";
 const safeId = (name: string) => /^[a-zA-Z0-9_-]+$/u.test(name);
 
 function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTelemetrySources> {
@@ -588,15 +622,32 @@ function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTele
 	for (const bucket of buckets)
 		for (const sessionId of ((yield* list(join(root, bucket))) ?? []).filter(safeId).sort()) {
 			const directory = join(root, bucket, sessionId);
-			if ((yield* newestWrite(directory, SESSION_FILES)) < from && !sideCallSessions.has(sessionId)) continue;
+			const written = Math.max(
+				yield* newestWrite(directory, isLedger),
+				yield* newestWrite(telemetrySessionDirectory(stateDir, sessionId), isTelemetryJournalFile),
+			);
+			if (written < from && !sideCallSessions.has(sessionId)) continue;
 			const source = yield* loadSession(stateDir, sessionId, directory, new Set(), false);
 			if (!source) continue;
 			for (const runId of source.runs.keys()) referenced.add(runId);
 			sessions.push(windowSession(source, from, to));
 		}
+	// Every workspace's window also holds a journal whose session no store bucket names; its spend still happened.
+	if (window.cwdHash === null) {
+		const bucketed = new Set(sessions.map((session) => session.sessionId));
+		const journals = telemetrySessionsDirectory(stateDir);
+		for (const sessionId of ((yield* list(journals)) ?? []).filter(safeId).sort()) {
+			if (bucketed.has(sessionId) || (yield* findSessionDirectory(stateDir, sessionId)) !== null) continue;
+			if ((yield* newestWrite(join(journals, sessionId), isTelemetryJournalFile)) < from) continue;
+			const source = yield* loadSession(stateDir, sessionId, null, new Set(), false);
+			if (!source) continue;
+			for (const runId of source.runs.keys()) referenced.add(runId);
+			sessions.push(windowSession(source, from, to));
+		}
+	}
 	sessions.push(...unownedSideCalls(sideCalls, new Set(sessions.map((session) => session.sessionId)), from, to));
 	const runs = new Map<string, JournalSource>();
-	const runsRoot = join(stateDir, "runs");
+	const runsRoot = telemetryRunsDirectory(stateDir);
 	const receiptsRoot = join(stateDir, "receipts");
 	const receipted = ((yield* list(receiptsRoot)) ?? []).flatMap((name) =>
 		name.endsWith(".json") ? [name.slice(0, -".json".length)] : [],
@@ -604,7 +655,7 @@ function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTele
 	const runIds = new Set([...((yield* list(runsRoot)) ?? []), ...receipted]);
 	for (const runId of [...runIds].filter(safeId).sort()) {
 		if (referenced.has(runId) || (window.standaloneRuns !== "all" && !window.standaloneRuns.has(runId))) continue;
-		const journaled = yield* newestWrite(join(runsRoot, runId), RUN_FILES);
+		const journaled = yield* newestWrite(telemetryRunDirectory(stateDir, runId), isTelemetryJournalFile);
 		const receiptOnly = journaled === Number.NEGATIVE_INFINITY;
 		// A receipt is written once, at seal, after the run ended, so an older file cannot hold an in-window run.
 		const written = receiptOnly ? ((yield* mtime(join(receiptsRoot, `${runId}.json`))) ?? journaled) : journaled;

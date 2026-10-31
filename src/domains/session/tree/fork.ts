@@ -1,4 +1,4 @@
-import { dirname } from "node:path";
+import { clioStateDir } from "../../../core/xdg.js";
 import { readSessionFileEntries, type SessionTreeNode, sessionPaths } from "../../../engine/session.js";
 import { seedForkCallJournal } from "../../telemetry/call-journal.js";
 import { collectSessionEntries } from "../compaction/session-entries.js";
@@ -190,7 +190,7 @@ export function forkFromState(input: ForkInput): ForkResult {
 	enrichForkMeta(next.meta, parentMeta.id, input.parentTurnId);
 	const parentTurnAt = branch.entries.find((entry) => entry.turnId === input.parentTurnId)?.timestamp;
 	if (!parentTurnAt) throw new Error("fork boundary timestamp unavailable");
-	seedForkCallJournal(dirname(sessionPaths(next.meta).current), next.meta.id, {
+	seedForkCallJournal(clioStateDir(), next.meta.id, {
 		parentSessionId: parentMeta.id,
 		parentCwdHash: parentMeta.cwdHash,
 		parentTurnId: input.parentTurnId,

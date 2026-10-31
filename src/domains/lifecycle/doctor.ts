@@ -168,9 +168,7 @@ function summarizeSessionDamage(warnings: ReadonlyArray<SessionJsonlWarning>): s
  * Collect every `current.jsonl` under the session store. The layout is
  * `sessions/<cwdHash>/<sessionId>/current.jsonl`, but the walk does not assume
  * a depth. Only that name is a session ledger: its siblings are diagnostics
- * with their own formats, and the telemetry journal `calls.jsonl` frames each
- * record with a `\t#<hash>` suffix the session reader rejects, so every
- * session with a journal read as damaged. Symlinks are not followed
+ * with their own formats. Symlinks are not followed
  * (`Dirent.isDirectory()` is false for them), so the walk cannot loop or
  * wander outside the state root. A directory that cannot be listed is a
  * reported problem, not a silent zero.

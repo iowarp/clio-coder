@@ -312,7 +312,7 @@ export function latestSkillContextState(entries: ReadonlyArray<SessionEntry>): S
 }
 
 export interface CompactionSummaryEntry extends BaseSessionEntry {
-	/** Calls used by this checkpoint; provider outcomes remain in calls.jsonl (#434). */
+	/** Calls used by this checkpoint; provider outcomes remain in the session telemetry journal (#434). */
 	callIds?: string[];
 	providerCheckpoint?: ProviderCheckpointHandle;
 	providerFallbackReason?: string;

@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 
@@ -24,6 +24,7 @@ import type { SessionContract, SessionEntryInput } from "../../src/domains/sessi
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { readCallJournalSync } from "../../src/domains/telemetry/call-journal.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
@@ -218,7 +219,7 @@ describe("continuity through real forks, replay and export", () => {
 		const child = contract.fork("m4");
 		ok(child.id !== parent.sessionId);
 		strictEqual(child.parentSessionId, parent.sessionId);
-		const journal = readCallJournalSync(dirname(sessionPaths(child).current));
+		const journal = readCallJournalSync(telemetrySessionDirectory(clioStatePath(), child.id));
 		strictEqual(journal.records.length, 1);
 		const fork = journal.records[0]?.record;
 		ok(fork?.k === "session.forked");

@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { test } from "node:test";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall } from "../../src/core/telemetry/producer.js";
@@ -19,6 +19,7 @@ import {
 } from "../../src/domains/memory/task-memory-telemetry.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const ZERO = { added: 0, updated: 0, deleted: 0 };
@@ -201,7 +202,7 @@ test("linked memory spend follows late journal settlements and deduplicates repe
 	t.after(home.cleanup);
 	const context = { sessionId: "session", label: "memory" as const };
 	const journal = await openCallJournal({
-		sessionDirectory: join(home.dir, "sessions", "repo", "session"),
+		directory: telemetrySessionDirectory(home.dir, "session"),
 		context,
 		writer: { clioCoderVersion: "fixture", piVersion: "fixture" },
 	});

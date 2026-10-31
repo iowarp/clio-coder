@@ -19,6 +19,7 @@ import { exportEvidenceRecordings } from "../../src/domains/evidence/recordings.
 import { inspectEvidence } from "../../src/domains/evidence/store.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetryRunDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -297,7 +298,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 			equal(receipt.missingTokenCalls, 1);
 			equal(receipt.costProvenance, "unknown");
 			equal(receipt.cacheReadTokenCount, undefined);
-			const journal = await readCallJournal(join(clioStateDir(), "runs", handle.runId), "events.ndjson");
+			const journal = await readCallJournal(telemetryRunDirectory(clioStateDir(), handle.runId));
 			equal(journal.damaged, 0);
 			deepStrictEqual(
 				journal.records.map(({ record }) => record.k),
@@ -318,7 +319,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 					),
 			);
 			deepStrictEqual(readRunEventJournal(handle.runId).lines, [], "disabled display history never suppresses call facts");
-			const session = await readCallJournal(join(clioStateDir(), "sessions", "original-cwd", "original-session"));
+			const session = await readCallJournal(telemetrySessionDirectory(clioStateDir(), "original-session"));
 			const references = session.records.filter(({ record }) => record.k === "call.linked");
 			equal(references.length, 1, "only the parented run adds a reference, once per logical call");
 			if (!placed) {
@@ -436,7 +437,7 @@ it("a worker killed mid-call keeps the calls it settled and settles its open att
 		const receipt = await handle.finalPromise;
 		equal(receipt.apiCalls, 4);
 		equal(receipt.tokenCount, 18);
-		const journal = await readCallJournal(join(clioStateDir(), "runs", handle.runId), "events.ndjson");
+		const journal = await readCallJournal(telemetryRunDirectory(clioStateDir(), handle.runId));
 		const records = journal.records.map(({ record }) => record);
 		deepStrictEqual(
 			records.map((record) => (record.k === "journal.gap" ? `gap:${record.data.reason}` : record.k)),

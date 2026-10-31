@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { telemetryResearchDirectory } from "./paths.js";
 
 /**
  * The process-wide research traces: JSON lines under `<stateDir>/telemetry/research/`, each capped at its byte limit
@@ -13,7 +14,7 @@ export const RESEARCH_TRACE_FILES = {
 export type ResearchTraceFile = keyof typeof RESEARCH_TRACE_FILES;
 
 export function researchTracePath(stateDir: string, file: ResearchTraceFile): string {
-	return join(stateDir, "telemetry", "research", `${file}.jsonl`);
+	return join(telemetryResearchDirectory(stateDir), `${file}.jsonl`);
 }
 
 /**

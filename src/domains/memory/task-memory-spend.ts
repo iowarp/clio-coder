@@ -16,6 +16,7 @@ import { clioStateDir } from "../../core/xdg.js";
 import { readCallJournalSync } from "../telemetry/call-journal.js";
 import type { FoldedAttempt } from "../telemetry/folds.js";
 import { foldCallJournal, foldCalls } from "../telemetry/folds.js";
+import { isTelemetryJournalFile, telemetrySessionDirectory } from "../telemetry/index.js";
 import type { TaskMemoryCallReference } from "./task-memory-policy.js";
 import { parseTaskMemoryTelemetryRecord, TASK_MEMORY_TELEMETRY_FILE } from "./task-memory-telemetry.js";
 
@@ -210,7 +211,8 @@ export function readTaskMemorySpendSummary(stateDir: string = clioStateDir()): T
 			continue; // Invalid lines are counted by the fold below (#434).
 		}
 		for (const reference of calls ?? []) {
-			const directory = join(stateDir, "sessions", reference.repoIdentity, reference.sessionId);
+			const directory = journalDirectory(stateDir, reference.sessionId);
+			if (directory === null) continue;
 			const attempts = referenced.get(directory) ?? new Set<string>();
 			attempts.add(reference.attemptId);
 			referenced.set(directory, attempts);
@@ -219,8 +221,8 @@ export function readTaskMemorySpendSummary(stateDir: string = clioStateDir()): T
 	const directories = [...referenced.keys()].sort();
 	const readable = refreshJournals(directories, referenced);
 	const summary = foldTaskMemorySpend(lines, (reference) => {
-		const directory = join(stateDir, "sessions", reference.repoIdentity, reference.sessionId);
-		const attempt = journalCache.get(directory)?.attempts.get(reference.attemptId);
+		const directory = journalDirectory(stateDir, reference.sessionId);
+		const attempt = directory === null ? undefined : journalCache.get(directory)?.attempts.get(reference.attemptId);
 		return attempt?.started.callId === reference.callId ? attempt : undefined;
 	});
 	for (const directory of directories) {
@@ -323,12 +325,19 @@ export function formatTaskMemorySpend(summary: TaskMemorySpendSummary): string {
 	return `${scope} ${summary.llmSteps} steps · known ${tokens} · ${time} · hit ${summary.injections}/${summary.llmSteps} (${rate})`;
 }
 
+/** The session's telemetry journal directory; null for an id that is no path component, which no journal holds. */
+function journalDirectory(stateDir: string, sessionId: string): string | null {
+	try {
+		return telemetrySessionDirectory(stateDir, sessionId);
+	} catch {
+		return null;
+	}
+}
+
 /** One directory's journal segment identities; null when it exists but cannot be listed (#434). */
 function journalFingerprint(directory: string): string | null {
 	try {
-		const names = readdirSync(directory)
-			.filter((name) => name === "calls.jsonl" || /^calls\.rec_.*\.jsonl$/.test(name))
-			.sort();
+		const names = readdirSync(directory).filter(isTelemetryJournalFile).sort();
 		return names
 			.map((name) => {
 				const stat = statSync(join(directory, name));

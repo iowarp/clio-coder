@@ -16,6 +16,7 @@ import type { SessionContract, TurnInput } from "../../src/domains/session/contr
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
@@ -168,7 +169,7 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 		refuse = true;
 		await loop.submit("refuse this");
 		await journals.flush();
-		const journal = await readCallJournal(join(clioStateDir(), "sessions", "stages-repo", "stages-session"));
+		const journal = await readCallJournal(telemetrySessionDirectory(clioStateDir(), "stages-session"));
 		const calls = journal.records.flatMap(({ record }) => (record.k === "call.settled" ? [record.data] : []));
 		strictEqual(calls.length, 5, JSON.stringify(journal));
 		const [sent, recompiled, written, answered, refused] = calls as [
@@ -309,7 +310,7 @@ it("a side call times its admission gate as its admission stage and names the ce
 		});
 		strictEqual(result.text, "answer");
 		await journals.closeAll();
-		const settled = (await readCallJournal(join(clioStateDir(), "sessions", origin.cwdHash, origin.id))).records.flatMap(
+		const settled = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), origin.id))).records.flatMap(
 			({ record }) => (record.k === "call.settled" ? [record.data] : []),
 		);
 		strictEqual(settled.length, 1);
@@ -525,7 +526,7 @@ it("a main call journals the model change and the Codex transport resets the hos
 		settings.chat.model = "other";
 		await loop.submit("switched");
 		await journals.flush();
-		const journal = await readCallJournal(join(clioStateDir(), "sessions", "cold-repo", "cold-session"));
+		const journal = await readCallJournal(telemetrySessionDirectory(clioStateDir(), "cold-session"));
 		const calls = journal.records.flatMap(({ record }) => (record.k === "call.settled" ? [record.data] : []));
 		deepStrictEqual(
 			calls.map((call) => [call.disposition, [...call.cache.expectedColdReasons].sort()]),

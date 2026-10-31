@@ -41,6 +41,7 @@ import { isSessionEntry } from "../../src/domains/session/entries.js";
 import { importLegacySession } from "../../src/domains/session/legacy-import.js";
 import { loadRunTelemetrySource, loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import type { RepoSource, SessionSource } from "../../src/domains/telemetry/read-model.js";
 import {
 	cacheReport,
@@ -169,7 +170,7 @@ test("live equals CLI: the live model folds exactly the batches a cold read of t
 }, async () => {
 	const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-telemetry-live-"));
 	const writer = await openCallJournal({
-		sessionDirectory: join(stateDir, "sessions", "bucket", "golden-p0"),
+		directory: telemetrySessionDirectory(stateDir, "golden-p0"),
 		context: { sessionId: "golden-p0", label: "main" },
 		writer: { clioCoderVersion: "test", piVersion: "test" },
 	});

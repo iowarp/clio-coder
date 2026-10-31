@@ -93,14 +93,13 @@ export function openRunTelemetry(context: WorkerTelemetryContext, directory: str
  */
 export async function settleOrphanedRunJournal(directory: string, facts: EventPayload<"run.settled">): Promise<void> {
 	const { openCallJournal, readCallJournal } = await import("../telemetry/call-journal.js");
-	const read = await readCallJournal(directory, "events.ndjson");
+	const read = await readCallJournal(directory);
 	if (read.records.some(({ record }) => record.k === "run.settled")) return;
 	const context = read.records.map(({ record }) => record.ctx).find(isWorkerTelemetryContext);
 	if (!context) return;
 	// The run's owner is gone, so this one record gets a writer of its own rather than the run's owned journal.
 	const writer = await openCallJournal({
-		sessionDirectory: directory,
-		fileName: "events.ndjson",
+		directory,
 		context,
 		writer: await clioWriterVersions(),
 	});
@@ -129,14 +128,13 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 	}
 	const { openCallJournal, readCallJournal } = await import("../telemetry/call-journal.js");
 	const versions = await clioWriterVersions();
-	const previous = await readCallJournal(directory, "events.ndjson");
+	const previous = await readCallJournal(directory);
 	let seq = previous.records.reduce(
 		(max, { record }) => (record.k === "run.feed_appended" ? Math.max(max, record.data.seq) : max),
 		0,
 	);
 	const writer: CallJournal = await openCallJournal({
-		sessionDirectory: directory,
-		fileName: "events.ndjson",
+		directory,
 		context,
 		writer: versions,
 	});

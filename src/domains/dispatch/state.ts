@@ -27,10 +27,10 @@ import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resou
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
+import { removeRunTelemetry } from "../telemetry/retention.js";
 import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { computeReceiptFindingsSummary } from "./receipt-findings.js";
 import { withReceiptIntegrity } from "./receipt-integrity.js";
-import { removeRunEventJournals } from "./run-event-journal.js";
 import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
 
 /**
@@ -496,7 +496,11 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				// how much history exists.
 				if (merged.length > capped.length) {
 					const kept = new Set(capped.map((run) => run.id));
-					removeRunEventJournals(merged.filter((run) => !kept.has(run.id)).map((run) => run.id));
+					if (!stateRootRemoved())
+						removeRunTelemetry(
+							clioStateDir(),
+							merged.filter((run) => !kept.has(run.id)).map((run) => run.id),
+						);
 				}
 				// Keep updates made while a Windows rename retry yielded; clear only
 				// the rows written so an old snapshot cannot overwrite a sibling later.

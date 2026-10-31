@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { WikiPlan } from "../../src/domains/context/wiki/plan.js";
 import { readWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
-import { runEventJournalPath } from "../../src/domains/dispatch/run-event-journal.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -412,10 +412,10 @@ it("records the validation sidecar and last failure under the terminal run of a 
 			codewiki: { version: 5, language: "typescript", files: [], symbols: [], edges: [] },
 			generation: { requestedDepth: "simple", depth: "simple", sourceFiles: 1, sourceLines: 1, plan },
 		});
-		const sidecar = join(runEventJournalPath("retry-1").replace(/[^/]+$/u, ""), "wiki-validation.json");
+		const sidecar = join(clioStateDir(), "runs", "retry-1", "wiki-validation.json");
 		assert.ok(existsSync(sidecar), "sidecar lands under the terminal run");
 		assert.equal(JSON.parse(readFileSync(sidecar, "utf8")).runId, "retry-1");
-		assert.ok(!existsSync(join(runEventJournalPath("retry-0").replace(/[^/]+$/u, ""), "wiki-validation.json")));
+		assert.ok(!existsSync(join(clioStateDir(), "runs", "retry-0", "wiki-validation.json")));
 		assert.equal(readWikiPlanFile(outputDir)?.pages[0]?.lastFailure?.runId, "retry-1");
 	} finally {
 		isolated.restore();

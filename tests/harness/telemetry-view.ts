@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLabel, Disposition } from "../../src/core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
@@ -13,6 +13,7 @@ import { importLegacySession } from "../../src/domains/session/legacy-import.js"
 import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryReadModel, TelemetryView } from "../../src/domains/telemetry/contract.js";
+import { telemetryRunDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import type { JournalSource } from "../../src/domains/telemetry/read-model.js";
 import { callsReport, costReport, runsReport, sessionTelemetry } from "../../src/domains/telemetry/read-model.js";
 import { createLiveTelemetryModel, telemetryView } from "../../src/domains/telemetry/telemetry-live.js";
@@ -219,15 +220,9 @@ export async function seedParitySession(stateDir: string): Promise<void> {
 		...telemetryCall(PARITY_SESSION, { label: "worker", usage: { input: 50, output: 10 }, usd: 0.25, at: at(2) }),
 		...telemetryCall(PARITY_SESSION, { label: "worker", usage: { input: 20, output: null }, usd: null, at: at(2) }),
 	].map((record) => ({ ...record, ctx: { ...record.ctx, runId: PARITY_RUN } }) as TelemetryRecord);
-	const write = async (
-		directory: string,
-		fileName: "calls.jsonl" | "events.ndjson",
-		context: TelemetryRecord["ctx"],
-		records: TelemetryRecord[],
-	) => {
+	const write = async (directory: string, context: TelemetryRecord["ctx"], records: TelemetryRecord[]) => {
 		const journal = await openCallJournal({
-			sessionDirectory: directory,
-			fileName,
+			directory,
 			context,
 			writer: { clioCoderVersion: "test", piVersion: "test" },
 		});
@@ -242,15 +237,13 @@ export async function seedParitySession(stateDir: string): Promise<void> {
 			} as PendingTelemetry);
 		await journal.close();
 	};
-	await write(join(stateDir, "sessions", "parity-workspace", PARITY_SESSION), "calls.jsonl", settled.ctx, [
-		...golden,
-		...side,
-		ref,
-		...main,
-	]);
+	// The session's store holds its (empty) ledger; its journal lives under the telemetry root.
+	const store = join(stateDir, "sessions", "parity-workspace", PARITY_SESSION);
+	mkdirSync(store, { recursive: true });
+	writeFileSync(join(store, "current.jsonl"), "");
+	await write(telemetrySessionDirectory(stateDir, PARITY_SESSION), settled.ctx, [...golden, ...side, ref, ...main]);
 	await write(
-		join(stateDir, "runs", PARITY_RUN),
-		"events.ndjson",
+		telemetryRunDirectory(stateDir, PARITY_RUN),
 		{ ...settled.ctx, runId: PARITY_RUN, label: "worker" },
 		worker,
 	);

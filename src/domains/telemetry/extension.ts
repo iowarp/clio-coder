@@ -36,6 +36,7 @@ import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-i
 import { createHealthWindows } from "./health-window.js";
 import { storeTelemetryObject } from "./objects.js";
 import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
+import { telemetrySessionDirectory } from "./paths.js";
 import { createTelemetryProjection } from "./projection.js";
 import type { SessionCapture, TelemetrySessionOrigin } from "./session-journals.js";
 import { createSessionJournals } from "./session-journals.js";
@@ -177,14 +178,16 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	const captures = new Map<string, { settings: TelemetrySettings; consent: boolean; capture: TelemetryCapture }>();
 	const preparing = new Set<string>();
 	const sessionCapture: SessionCapture = {
-		async prepare(origin, directory) {
+		async prepare(origin) {
 			const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
-			if (settings?.mode !== "research" || !settings.research.content) {
+			// The workspace comes from the session's own meta.json, a path built from its cwd hash (#434).
+			if (settings?.mode !== "research" || !settings.research.content || !/^[a-zA-Z0-9_-]+$/.test(origin.cwdHash)) {
 				consented.set(origin.id, false);
 				return;
 			}
 			await consent.refresh();
-			consented.set(origin.id, consent.covers(await consent.sessionWorkspace(directory)));
+			const store = join(clioStateDir(), "sessions", origin.cwdHash, origin.id);
+			consented.set(origin.id, consent.covers(await consent.sessionWorkspace(store)));
 		},
 		current(origin) {
 			const settings = context.getContract<ConfigContract>("config")?.get().telemetry;
@@ -237,12 +240,12 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	const recordSessionSettingsChange = (payload: ConfigSessionChangePayload): void => {
 		const origin = liveSession;
 		if (!origin || origin.id !== payload.sessionId) return;
-		const sessionDirectory = join(clioStateDir(), "sessions", origin.cwdHash, origin.id);
 		const write: Promise<void> = journals
 			.acquire(origin, "main")
 			.then(async (lease) => {
 				try {
 					if (!lease.journaled) return;
+					const sessionDirectory = telemetrySessionDirectory(clioStateDir(), origin.id);
 					const [before, after] = await Promise.all([
 						storeTelemetryObject(sessionDirectory, "config", payload.previous),
 						storeTelemetryObject(sessionDirectory, "config", payload.settings),
@@ -456,10 +459,10 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		acquireTelemetrySession: journals.acquire,
 		telemetryCapture(origin) {
 			// Recorders outside a call ask between leases; the first ask starts the consent read (#434).
-			if (!consented.has(origin.id) && !preparing.has(origin.id) && /^[a-zA-Z0-9_-]+$/.test(origin.cwdHash)) {
+			if (!consented.has(origin.id) && !preparing.has(origin.id)) {
 				preparing.add(origin.id);
 				void sessionCapture
-					.prepare?.(origin, join(clioStateDir(), "sessions", origin.cwdHash, origin.id))
+					.prepare?.(origin)
 					.catch(() => {
 						// No consent is granted by a failed read; the next lease asks again (#434).
 					})

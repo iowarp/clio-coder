@@ -17,6 +17,7 @@ import type { DecisionEngine, DecisionRecord, SiteDefinition } from "../../src/d
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import type { UsageBreakdown } from "../../src/domains/telemetry/cost.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createSystemOneRequestAdmission } from "../../src/entry/system-one-host.js";
 import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
@@ -110,7 +111,7 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 		rows,
 		async calls() {
 			await journals.flush();
-			return (await readCallJournal(join(stateDir, "sessions", "repo", "session-1"))).records
+			return (await readCallJournal(telemetrySessionDirectory(stateDir, "session-1"))).records
 				.map(({ record }) => record)
 				.filter((record) => record.k === "call.settled");
 		},

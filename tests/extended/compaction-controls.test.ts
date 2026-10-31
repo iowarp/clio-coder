@@ -39,6 +39,7 @@ import {
 	outOfTurnUsagePath,
 	readOutOfTurnUsageRows,
 } from "../../src/domains/telemetry/out-of-turn-usage.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
@@ -251,15 +252,15 @@ describe("production compaction controls", () => {
 			session,
 			liveUsage,
 			journal: async () =>
-				(await readCallJournal(join(clioStateDir(), "sessions", state.meta.cwdHash, state.meta.id))).records.map(
+				(await readCallJournal(telemetrySessionDirectory(clioStateDir(), state.meta.id))).records.map(
 					({ record }) => record,
 				),
 			journalOutcomes: async () =>
-				(await readCallJournal(join(clioStateDir(), "sessions", state.meta.cwdHash, state.meta.id))).records
+				(await readCallJournal(telemetrySessionDirectory(clioStateDir(), state.meta.id))).records
 					.map(({ record }) => record)
 					.filter((record) => record.k === "compaction.settled"),
 			journalCalls: async () =>
-				(await readCallJournal(join(clioStateDir(), "sessions", state.meta.cwdHash, state.meta.id))).records
+				(await readCallJournal(telemetrySessionDirectory(clioStateDir(), state.meta.id))).records
 					.map(({ record }) => record)
 					.filter((record) => record.k === "call.settled"),
 			settings,

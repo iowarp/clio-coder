@@ -19,6 +19,7 @@ import { buildContextLedger } from "../../src/domains/session/context-ledger.js"
 import { loadRepoTelemetrySources } from "../../src/domains/session/telemetry-source.js";
 import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
+import { telemetryRunsDirectory } from "../../src/domains/telemetry/paths.js";
 import { repoCostReport, repoOwner, repoTokenQuantities } from "../../src/domains/telemetry/read-model.js";
 import type { LiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
 import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
@@ -230,7 +231,7 @@ test("the usage report folds a window the fixture fills to the session's own tot
 });
 
 test("the CLI fleet board folds a run's tokens from its journal as the run report holds them", () => {
-	const fold = createBoardSource(stateDir, join(stateDir, "runs")).folds.fold(PARITY_RUN);
+	const fold = createBoardSource(stateDir, telemetryRunsDirectory(stateDir)).folds.fold(PARITY_RUN);
 	const row = cold.runs.find((run) => run.runId === PARITY_RUN);
 	ok(row && fold.tokens);
 	deepStrictEqual(fold.tokens, row.tokens.fact);

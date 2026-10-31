@@ -46,7 +46,7 @@ before(async () => {
 	imported = await importTelemetryBundle(FIXTURE, out);
 	const runs = new Map<string, JournalSource>();
 	for (const runId of imported.manifest.source.runs)
-		runs.set(runId, journalSourceFromRead(await readCallJournal(join(out, "runs", runId), "events.ndjson"), true, runId));
+		runs.set(runId, journalSourceFromRead(await readCallJournal(join(out, "runs", runId)), true, runId));
 	source = {
 		sessionId: SESSION,
 		journal: journalSourceFromRead(await readCallJournal(out), true),

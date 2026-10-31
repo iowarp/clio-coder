@@ -7,7 +7,6 @@
   },
   "source": {
     "sessionId": "vccap2ywu7n8",
-    "cwdHash": "00000000000434aa",
     "forkedFrom": null,
     "runs": [
       "21ee9qwrugeq",
@@ -37,25 +36,25 @@
   },
   "files": [
     {
-      "path": "calls.jsonl",
+      "path": "journal.jsonl",
       "sha256": "da5e2fefef45525248ee20e8c8f4a72c601b0d85c54bf4943bdc214dc8308e22",
       "bytes": 279854,
       "records": 165
     },
     {
-      "path": "runs/21ee9qwrugeq/events.ndjson",
+      "path": "runs/21ee9qwrugeq/journal.jsonl",
       "sha256": "bdf516d5f805e8de88df32bce172f7575161f12e437ce6190a489d80b6d1605b",
       "bytes": 6569,
       "records": 4
     },
     {
-      "path": "runs/2s47tzn7p4bz/events.ndjson",
+      "path": "runs/2s47tzn7p4bz/journal.jsonl",
       "sha256": "fb8635bfe246a6976b542fac1955dc84170e69fa783e196904cd17092217929d",
       "bytes": 6623,
       "records": 4
     },
     {
-      "path": "runs/q7unpricedr1/events.ndjson",
+      "path": "runs/q7unpricedr1/journal.jsonl",
       "sha256": "22ce7a61e2b918eaff0f57cc01740e89e627dba4fb6d7d28945558dd43d09cfd",
       "bytes": 4607,
       "records": 3

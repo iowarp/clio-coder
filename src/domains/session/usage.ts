@@ -60,7 +60,8 @@ export interface LedgerUsageCall {
 
 /** The target and model a session ran under before any modelChange row. */
 export interface SessionUsageDefaults {
-	journalDirectory?: string;
+	/** The state root whose telemetry journal holds `sessionId`'s calls; without it the ledger alone folds. */
+	journalStateDir?: string;
 	target?: string | null;
 	model?: string | null;
 	sessionId?: string | null;

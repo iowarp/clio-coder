@@ -1,11 +1,18 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { lstat, readdir, readFile, rm, rmdir } from "node:fs/promises";
 import { join } from "node:path";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { liveSessionOwner } from "../session/live-owner.js";
 import { CONTENT_SUBJECTS, collectRefs } from "./bundle.js";
-import type { JournalFileName } from "./call-journal.js";
-import { journalFiles } from "./call-journal.js";
+import {
+	TELEMETRY_JOURNAL_FILE,
+	telemetryJournalFiles,
+	telemetryObjectsDirectory,
+	telemetryResearchDirectory,
+	telemetryRunDirectory,
+	telemetryRunsDirectory,
+	telemetrySessionsDirectory,
+} from "./paths.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const GIB = 1024 * 1024 * 1024;
@@ -34,7 +41,10 @@ export interface PruneAction {
 	mtimeMs: number;
 	reason: PruneReason;
 	/** The session or run whose ownership is re-checked immediately before the delete. */
-	owner: { kind: "session"; directory: string } | { kind: "run"; directory: string } | { kind: "research" };
+	owner:
+		| { kind: "session"; directory: string; meta: string | null }
+		| { kind: "run"; directory: string }
+		| { kind: "research" };
 }
 
 export interface PruneHold {
@@ -58,6 +68,8 @@ interface FileInfo {
 interface SessionTelemetry {
 	directory: string;
 	sessionId: string;
+	/** The session's `meta.json` in its store, which says whether its owner is alive; null when no store holds it. */
+	meta: string | null;
 	segments: FileInfo[];
 	objects: Map<string, FileInfo>;
 	lastWriteMs: number;
@@ -107,14 +119,41 @@ async function realDirectory(path: string): Promise<boolean> {
 }
 
 /** A writer holds `<journal>.lock` for its whole life; a lock, live or stale, keeps every file of that journal. */
-function locked(directory: string, fileName: JournalFileName): boolean {
-	return existsSync(join(directory, `${fileName}.lock`));
+function locked(directory: string): boolean {
+	return existsSync(join(directory, `${TELEMETRY_JOURNAL_FILE}.lock`));
 }
 
-async function readSessionTelemetry(directory: string, sessionId: string): Promise<SessionTelemetry | null> {
+/** Whether the session's owner may be alive; an unreadable or missing meta cannot rule it out. */
+async function sessionOwnerLive(meta: string | null): Promise<boolean> {
+	if (meta === null) return true;
+	try {
+		return liveSessionOwner(JSON.parse(await readFile(meta, "utf8")) as Parameters<typeof liveSessionOwner>[0]) !== null;
+	} catch {
+		return true;
+	}
+}
+
+/** Each session's `meta.json`, by id, across the session store's workspace buckets; the first bucket wins. */
+async function sessionMetas(stateDir: string): Promise<Map<string, string>> {
+	const metas = new Map<string, string>();
+	const root = join(stateDir, "sessions");
+	for (const bucket of (await names(root)).sort()) {
+		if (!SAFE_ID.test(bucket) || !(await realDirectory(join(root, bucket)))) continue;
+		for (const sessionId of await names(join(root, bucket)))
+			if (SAFE_ID.test(sessionId) && !metas.has(sessionId))
+				metas.set(sessionId, join(root, bucket, sessionId, "meta.json"));
+	}
+	return metas;
+}
+
+async function readSessionTelemetry(
+	directory: string,
+	sessionId: string,
+	meta: string | null,
+): Promise<SessionTelemetry | null> {
 	const entries = await names(directory);
-	const segmentNames = journalFiles(entries, "calls.jsonl");
-	const objectsDirectory = join(directory, "objects");
+	const segmentNames = telemetryJournalFiles(entries);
+	const objectsDirectory = telemetryObjectsDirectory(directory);
 	const objectNames = (await realDirectory(objectsDirectory))
 		? (await names(objectsDirectory)).filter((name) => OBJECT_FILE.test(name))
 		: [];
@@ -122,6 +161,7 @@ async function readSessionTelemetry(directory: string, sessionId: string): Promi
 	const session: SessionTelemetry = {
 		directory,
 		sessionId,
+		meta,
 		segments: [],
 		objects: new Map(),
 		lastWriteMs: 0,
@@ -161,18 +201,17 @@ async function readSessionTelemetry(directory: string, sessionId: string): Promi
 		}
 	}
 	for (const name of objectNames) {
-		const file = await info(join(directory, "objects", name));
+		const file = await info(join(objectsDirectory, name));
 		if (file) session.objects.set(name.slice(0, -".json".length), file);
 	}
 	if (session.lastWriteMs === 0)
 		session.lastWriteMs = Math.max(0, ...[...session.objects.values()].map((file) => file.mtimeMs));
-	if (locked(directory, "calls.jsonl")) session.hold = "live";
+	if (locked(directory)) session.hold = "live";
 	else {
 		try {
-			const meta = JSON.parse(await readFile(join(directory, "meta.json"), "utf8")) as Parameters<
-				typeof liveSessionOwner
-			>[0];
-			if (liveSessionOwner(meta) !== null) session.hold = "live";
+			if (meta === null) throw new Error("no session store holds this session");
+			const owner = JSON.parse(await readFile(meta, "utf8")) as Parameters<typeof liveSessionOwner>[0];
+			if (liveSessionOwner(owner) !== null) session.hold = "live";
 		} catch {
 			// Without its meta the session's owner cannot be ruled out.
 			session.hold ??= "unknown-owner";
@@ -182,8 +221,8 @@ async function readSessionTelemetry(directory: string, sessionId: string): Promi
 }
 
 async function readRunTelemetry(stateDir: string, runId: string): Promise<RunTelemetry | null> {
-	const directory = join(stateDir, "runs", runId);
-	const segmentNames = journalFiles(await names(directory), "events.ndjson");
+	const directory = join(telemetryRunsDirectory(stateDir), runId);
+	const segmentNames = telemetryJournalFiles(await names(directory));
 	if (segmentNames.length === 0) return null;
 	const run: RunTelemetry = { runId, directory, segments: [], lastWriteMs: 0, bytes: 0, hold: null };
 	for (const name of segmentNames) {
@@ -193,7 +232,7 @@ async function readRunTelemetry(stateDir: string, runId: string): Promise<RunTel
 		run.lastWriteMs = Math.max(run.lastWriteMs, file.mtimeMs);
 		run.bytes += file.bytes;
 	}
-	if (locked(directory, "events.ndjson")) run.hold = "live";
+	if (locked(directory)) run.hold = "live";
 	else if (existsSync(join(stateDir, "receipts", `${runId}.json`))) run.hold = "receipt";
 	return run;
 }
@@ -212,25 +251,24 @@ export async function planTelemetryPrune(
 ): Promise<PrunePlan> {
 	const plan: PrunePlan = { remove: [], held: [], standardBytes: 0, researchBytes: 0 };
 	const sessions: SessionTelemetry[] = [];
-	const sessionsRoot = join(stateDir, "sessions");
-	for (const cwdHash of await names(sessionsRoot)) {
-		if (!SAFE_ID.test(cwdHash) || !(await realDirectory(join(sessionsRoot, cwdHash)))) continue;
-		for (const sessionId of await names(join(sessionsRoot, cwdHash))) {
-			if (!SAFE_ID.test(sessionId)) continue;
-			const directory = join(sessionsRoot, cwdHash, sessionId);
-			if (!(await realDirectory(directory))) {
-				plan.held.push({ path: directory, reason: "symlink" });
-				continue;
-			}
-			const session = await readSessionTelemetry(directory, sessionId);
-			if (session) sessions.push(session);
+	const sessionsRoot = telemetrySessionsDirectory(stateDir);
+	const metas = await sessionMetas(stateDir);
+	for (const sessionId of await names(sessionsRoot)) {
+		if (!SAFE_ID.test(sessionId)) continue;
+		const directory = join(sessionsRoot, sessionId);
+		if (!(await realDirectory(directory))) {
+			plan.held.push({ path: directory, reason: "symlink" });
+			continue;
 		}
+		const session = await readSessionTelemetry(directory, sessionId, metas.get(sessionId) ?? null);
+		if (session) sessions.push(session);
 	}
 	const runs: RunTelemetry[] = [];
-	for (const runId of await names(join(stateDir, "runs"))) {
+	const runsRoot = telemetryRunsDirectory(stateDir);
+	for (const runId of await names(runsRoot)) {
 		if (!SAFE_ID.test(runId)) continue;
-		if (!(await realDirectory(join(stateDir, "runs", runId)))) {
-			plan.held.push({ path: join(stateDir, "runs", runId), reason: "symlink" });
+		if (!(await realDirectory(join(runsRoot, runId)))) {
+			plan.held.push({ path: join(runsRoot, runId), reason: "symlink" });
 			continue;
 		}
 		const run = await readRunTelemetry(stateDir, runId);
@@ -272,7 +310,7 @@ export async function planTelemetryPrune(
 	for (const session of sessions) if (session.hold) plan.held.push({ path: session.directory, reason: session.hold });
 	for (const session of [...doomed].sort((a, b) => a.lastWriteMs - b.lastWriteMs)) {
 		const reason: PruneReason = session.lastWriteMs < cutoff ? "expired" : "over-size";
-		const owner = { kind: "session" as const, directory: session.directory };
+		const owner = { kind: "session" as const, directory: session.directory, meta: session.meta };
 		for (const file of [...session.segments, ...session.objects.values()]) plan.remove.push({ ...file, reason, owner });
 	}
 
@@ -300,14 +338,14 @@ export async function planTelemetryPrune(
 			plan.held.push({ path: session.directory, reason: "unreadable" });
 			continue;
 		}
-		const owner = { kind: "session" as const, directory: session.directory };
+		const owner = { kind: "session" as const, directory: session.directory, meta: session.meta };
 		for (const [id, file] of session.objects) {
 			const subject = session.refs.get(id);
 			if (subject === undefined) plan.remove.push({ ...file, reason: "unreferenced-object", owner });
 			else if (CONTENT_SUBJECTS.has(subject)) research.push({ file, owner });
 		}
 	}
-	const traceDirectory = join(stateDir, "telemetry", "research");
+	const traceDirectory = telemetryResearchDirectory(stateDir);
 	for (const name of (await realDirectory(traceDirectory)) ? await names(traceDirectory) : []) {
 		const file = await info(join(traceDirectory, name));
 		if (file) research.push({ file, owner: { kind: "research" } });
@@ -338,20 +376,10 @@ export interface PruneResult {
  */
 export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult> {
 	const result: PruneResult = { removed: [], skipped: [] };
-	const journalOf = (owner: PruneAction["owner"]): JournalFileName =>
-		owner.kind === "run" ? "events.ndjson" : "calls.jsonl";
 	const live = async (owner: PruneAction["owner"]): Promise<boolean> => {
 		if (owner.kind === "research") return false;
-		if (locked(owner.directory, journalOf(owner))) return true;
-		if (owner.kind !== "session") return false;
-		try {
-			const meta = JSON.parse(await readFile(join(owner.directory, "meta.json"), "utf8")) as Parameters<
-				typeof liveSessionOwner
-			>[0];
-			return liveSessionOwner(meta) !== null;
-		} catch {
-			return true;
-		}
+		if (locked(owner.directory)) return true;
+		return owner.kind === "session" && (await sessionOwnerLive(owner.meta));
 	};
 	// One owner's files go together, so the liveness check stays fresh for every file it covers.
 	const batches = new Map<string, PruneAction[]>();
@@ -372,7 +400,7 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 				continue;
 			}
 			// A writer creates its lock before it opens the journal, so a lock seen here means a session just started.
-			if (owner.kind !== "research" && locked(owner.directory, journalOf(owner))) {
+			if (owner.kind !== "research" && locked(owner.directory)) {
 				result.skipped.push({ path: action.path, reason: "became live" });
 				continue;
 			}
@@ -386,11 +414,25 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 	}
 	for (const directory of new Set(
 		result.removed.flatMap((action) =>
-			action.owner.kind === "session" ? [join(action.owner.directory, "objects")] : [],
+			action.owner.kind === "session" ? [telemetryObjectsDirectory(action.owner.directory)] : [],
 		),
 	)) {
 		// Only an emptied objects directory goes; rmdir refuses one that still holds a file.
 		await rmdir(directory).catch(() => {});
 	}
 	return result;
+}
+
+/**
+ * Drop the whole telemetry directory of each run that left the dispatch ledger's ring, whose run has no ledger row
+ * to view any more. Best-effort: retention is bookkeeping and never fails the persist that triggered it.
+ */
+export function removeRunTelemetry(stateDir: string, runIds: Iterable<string>): void {
+	for (const runId of runIds) {
+		try {
+			rmSync(telemetryRunDirectory(stateDir, runId), { recursive: true, force: true });
+		} catch {
+			// An unsafe id resolves to no directory, and one we could not remove is retained, not an error.
+		}
+	}
 }

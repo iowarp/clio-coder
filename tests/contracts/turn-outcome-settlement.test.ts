@@ -13,6 +13,7 @@ import { usageCallsFromJournal } from "../../src/domains/session/journal-usage.j
 import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import type { TurnOutcomeRecord } from "../../src/domains/turn-control/index.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
@@ -164,7 +165,7 @@ for (const continuation of [false, true])
 			});
 			try {
 				await loop.submit("Summarize the fixture", { requestContinuation: continuation });
-				const journal = await readCallJournal(join(clioStateDir(), "sessions", "outcome-repo", "outcome-session"));
+				const journal = await readCallJournal(telemetrySessionDirectory(clioStateDir(), "outcome-session"));
 				const calls = journal.records.filter(({ record }) => record.k === "call.settled");
 				strictEqual(calls.length, 1, JSON.stringify(journal));
 				const replayed: unknown[][] = [];

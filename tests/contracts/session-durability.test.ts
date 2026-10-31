@@ -74,11 +74,11 @@ describe("session durability boundary", () => {
 		mkdirSync(journalDir, { recursive: true });
 		const journalLine =
 			'{"seq":1,"at":"2026-09-01T00:00:00.000Z","kind":"event","type":"clio_tool_finish","detail":"read ok"}\n';
-		writeFileSync(join(journalDir, "events.ndjson"), journalLine, "utf8");
+		writeFileSync(join(journalDir, "journal.jsonl"), journalLine, "utf8");
 		const journal = readRunEventJournal("legacy-run", { root: journalRoot });
 		strictEqual(journal.lines[0]?.kind, "event");
 		strictEqual(journal.lines[0]?.kind === "event" ? journal.lines[0].type : null, "clio_coder_tool_finish");
-		strictEqual(readFileSync(join(journalDir, "events.ndjson"), "utf8"), journalLine);
+		strictEqual(readFileSync(join(journalDir, "journal.jsonl"), "utf8"), journalLine);
 		strictEqual(
 			runTailEntryFromEvent({ type: "clio_tool_finish", payload: { tool: "read", outcome: "ok" } })?.type,
 			"clio_coder_tool_finish",
@@ -232,9 +232,7 @@ describe("session durability boundary", () => {
 		const [unsettled] = recovered.unsettled;
 		strictEqual(unsettled?.runId, run.id);
 		if (unsettled) await settleOrphanedRunJournal(directory, unsettled.facts);
-		const settled = (await readCallJournal(directory, "events.ndjson")).records.filter(
-			({ record }) => record.k === "run.settled",
-		);
+		const settled = (await readCallJournal(directory)).records.filter(({ record }) => record.k === "run.settled");
 		strictEqual(settled.length, 1);
 		strictEqual((settled[0]?.record.data as { terminalReason?: string }).terminalReason, "stalled");
 	});

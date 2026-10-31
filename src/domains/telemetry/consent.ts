@@ -7,6 +7,7 @@ import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
 import { effectiveTelemetryCapture, systemOneDatasetRecording } from "../../core/telemetry/capture.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { telemetryConsentPath } from "./paths.js";
 
 /**
  * Research content capture needs the operator's consent per workspace (#434, O6).
@@ -26,10 +27,6 @@ export interface TelemetryConsentRead {
 }
 
 type ConsentDocument = { version: 1; workspaces: Record<string, Omit<TelemetryConsentEntry, "workspace">> };
-
-function telemetryConsentPath(stateDir: string): string {
-	return join(stateDir, "telemetry", "consent.json");
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);

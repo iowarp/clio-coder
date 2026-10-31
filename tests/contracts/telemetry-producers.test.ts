@@ -14,6 +14,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { listMiddlewareRuleDefinitions } from "../../src/domains/middleware/rules.js";
 import { createHealthWindows } from "../../src/domains/telemetry/health-window.js";
+import { telemetryJournalPath, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { researchCaptureFor } from "../../src/engine/research-capture.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -223,7 +224,7 @@ test("prompt.compiled is recorded once per structure by a writer, under the call
 			);
 		await lease.release();
 		await journals.closeAll();
-		const lines = (await readFile(join(stateDir, "sessions", "cwd", "prompt-compiled", "calls.jsonl"), "utf8"))
+		const lines = (await readFile(telemetryJournalPath(telemetrySessionDirectory(stateDir, "prompt-compiled")), "utf8"))
 			.split("\n")
 			.filter((line) => line.includes('"prompt.compiled"'));
 		strictEqual(lines.length, 1);

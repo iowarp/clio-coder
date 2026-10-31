@@ -10,6 +10,7 @@ import type { ObjectRef } from "../../core/telemetry/schemas.js";
 import { ObjectRefSchema } from "../../core/telemetry/schemas.js";
 import { createRedactionTally, secretRedactingReplacer } from "../evidence/redact.js";
 import { canonicalJson } from "../prompts/hash.js";
+import { telemetryObjectsDirectory } from "./paths.js";
 
 const maximumBytes = 16 * 1024 * 1024;
 type StoredSubject =
@@ -66,8 +67,8 @@ export function telemetryPromptStructure(prompt: {
 	};
 }
 
-async function objectDirectory(sessionDirectory: string, create: boolean): Promise<string | null> {
-	const directory = join(sessionDirectory, "objects");
+async function objectDirectory(scopeDirectory: string, create: boolean): Promise<string | null> {
+	const directory = telemetryObjectsDirectory(scopeDirectory);
 	if (create) await mkdir(directory, { recursive: true, mode: 0o700 });
 	try {
 		const stat = await lstat(directory);
@@ -143,7 +144,7 @@ function withheldSecretMaps(value: unknown, key?: string): unknown {
  * capture for the session stores them. `config` is structure and references once its secret maps are withheld.
  */
 export async function storeTelemetryObject(
-	sessionDirectory: string,
+	scopeDirectory: string,
 	subject: StoredSubject,
 	value: unknown,
 ): Promise<ObjectRef> {
@@ -157,7 +158,7 @@ export async function storeTelemetryObject(
 	const bytes = canonicalJson(redacted);
 	if (Buffer.byteLength(bytes) > maximumBytes) throw new Error("telemetry object exceeds size limit");
 	const ref = reference(subject, bytes, "resolvable");
-	const directory = await objectDirectory(sessionDirectory, true);
+	const directory = await objectDirectory(scopeDirectory, true);
 	if (directory === null) throw new Error("telemetry object directory unavailable");
 	const path = join(directory, `${ref.id}.json`);
 	const existing = await readObjectBytes(path);
@@ -169,10 +170,10 @@ export async function storeTelemetryObject(
 export type TelemetryObjectRead = { kind: "resolved"; value: unknown } | { kind: "commitment" } | { kind: "missing" };
 
 /** Verification never repairs, rewrites, or retires an object another install may own (#434). */
-export async function readTelemetryObject(sessionDirectory: string, ref: ObjectRef): Promise<TelemetryObjectRead> {
+export async function readTelemetryObject(scopeDirectory: string, ref: ObjectRef): Promise<TelemetryObjectRead> {
 	if (!Value.Check(ObjectRefSchema, ref)) throw new Error("invalid telemetry object reference");
 	if (ref.label === "commitment") return { kind: "commitment" };
-	const directory = await objectDirectory(sessionDirectory, false);
+	const directory = await objectDirectory(scopeDirectory, false);
 	const bytes = directory ? await readObjectBytes(join(directory, `${ref.id}.json`)) : null;
 	if (bytes === null) return { kind: "missing" };
 	if (reference(ref.subject, bytes, "resolvable").id !== ref.id) throw new Error("telemetry object digest mismatch");

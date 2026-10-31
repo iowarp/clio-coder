@@ -39,8 +39,7 @@ export async function seedRunJournal(
 ): Promise<string> {
 	const context = { sessionId: null, runId, label: "worker" } as const;
 	const journal = await openCallJournal({
-		sessionDirectory: join(state, "runs", runId),
-		fileName: "events.ndjson",
+		directory: join(state, "telemetry", "runs", runId),
 		context,
 		writer: { clioCoderVersion: "test", piVersion: "test" },
 	});

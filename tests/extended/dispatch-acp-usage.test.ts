@@ -1,6 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
@@ -8,6 +7,7 @@ import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integ
 import { runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -165,7 +165,7 @@ for (const scenario of [
 			deepStrictEqual(persisted, receipt);
 			const stateDir = process.env.CLIO_CODER_STATE_DIR;
 			ok(stateDir);
-			const journal = await readCallJournal(join(stateDir, "runs", run.runId), "events.ndjson");
+			const journal = await readCallJournal(telemetryRunDirectory(stateDir, run.runId));
 			const aggregate = journal.records.find(({ record }) => record.k === "run.usage_reported")?.record;
 			ok(aggregate?.k === "run.usage_reported");
 			strictEqual(aggregate.ctx.sessionId, null);

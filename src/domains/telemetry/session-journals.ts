@@ -12,6 +12,7 @@ import type { CallStarted, ObjectRef } from "../../core/telemetry/schemas.js";
 import type { CallJournal, JournalHealth } from "./call-journal.js";
 import { openCallJournal } from "./call-journal.js";
 import { storeTelemetryObject, telemetryPromptStructure } from "./objects.js";
+import { telemetrySessionDirectory } from "./paths.js";
 
 export interface TelemetrySessionOrigin {
 	id: string;
@@ -44,7 +45,7 @@ export interface TelemetrySessionLease {
 
 /** What a session's writer captures; `prepare` refreshes it on the cold path before each lease (#434). */
 export interface SessionCapture {
-	prepare?(origin: TelemetrySessionOrigin, sessionDirectory: string): Promise<void>;
+	prepare?(origin: TelemetrySessionOrigin): Promise<void>;
 	current(origin: TelemetrySessionOrigin): TelemetryCapture;
 }
 
@@ -118,15 +119,15 @@ export function createSessionJournals(
 		label: CallLabel,
 		turnId?: string,
 	): Promise<TelemetrySessionLease> => {
-		// Session ids and cwd hashes are existing path components; never reinterpret them as paths (#434).
+		// Session ids are existing path components; never reinterpret them as paths (#434).
 		const context: TelemetryContext = { sessionId: origin.id, label, ...(turnId ? { turnId } : {}) };
-		if (!/^[a-zA-Z0-9_-]+$/.test(origin.id) || !/^[a-zA-Z0-9_-]+$/.test(origin.cwdHash)) {
+		if (!/^[a-zA-Z0-9_-]+$/.test(origin.id)) {
 			report();
 			return { context, journaled: false, async release() {} };
 		}
-		const directory = join(stateDir, "sessions", origin.cwdHash, origin.id);
+		const directory = telemetrySessionDirectory(stateDir, origin.id);
 		try {
-			await capture?.prepare?.(origin, directory);
+			await capture?.prepare?.(origin);
 		} catch {
 			// A failed refresh keeps the previous capture; consent is never granted by an error (#434).
 			report();
@@ -146,7 +147,7 @@ export function createSessionJournals(
 					.then(writer)
 					.then((writer) =>
 						openCallJournal({
-							sessionDirectory: directory,
+							directory,
 							context,
 							writer,
 							...(capture ? { capture: () => capture.current(origin) } : {}),
@@ -248,7 +249,7 @@ export function createSessionJournals(
 		openSessions(): Array<{ origin: TelemetrySessionOrigin; sessionDirectory: string; health: JournalHealth }> {
 			return [...entries.values()].flatMap(({ open, origin, writer }) =>
 				open === true && writer
-					? [{ origin, sessionDirectory: join(stateDir, "sessions", origin.cwdHash, origin.id), health: writer.health() }]
+					? [{ origin, sessionDirectory: telemetrySessionDirectory(stateDir, origin.id), health: writer.health() }]
 					: [],
 			);
 		},

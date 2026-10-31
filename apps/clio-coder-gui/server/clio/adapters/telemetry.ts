@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
@@ -9,6 +7,7 @@ import {
 	loadRunReceiptEvidence,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
+	runTelemetryDirectoryExists,
 } from "../../../../../src/domains/session/telemetry-source.js";
 import {
 	cacheReport,
@@ -62,7 +61,8 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 	if (input.kind === "run" || input.kind === "run-timeline" || input.kind === "run-cost") {
 		if (!Value.Check(Id, input.runId)) throw new AppProblem("validation", "Invalid run identifier.");
 		// A run that never had a directory is not found; one whose journal is missing or torn is unknown coverage.
-		if (!existsSync(join(state, "runs", input.runId))) throw new AppProblem("not_found", "No run journal holds that id.");
+		if (!runTelemetryDirectoryExists(state, input.runId))
+			throw new AppProblem("not_found", "No run journal holds that id.");
 		const source = loadRunTelemetrySource(state, input.runId);
 		if (input.kind === "run-cost") return runCostReport(input.runId, source, "model");
 		return input.kind === "run"

@@ -79,7 +79,7 @@ provenance, and the label the route settled with.
   --all        allow inspection across every project (default: this project)
 
 Without --follow the current snapshot is printed and the command exits.
-The transcript comes from <state>/runs/<runId>/events.ndjson, which the
+The transcript comes from <state>/telemetry/runs/<runId>/journal.jsonl, which the
 orchestrator writes when fleet.history.journal is on (the default). A run dispatched
 with the journal off shows its ledger and receipt but no transcript.
 

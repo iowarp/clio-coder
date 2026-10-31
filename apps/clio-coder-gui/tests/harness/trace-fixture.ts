@@ -81,7 +81,7 @@ export async function traceFixture(
 					],
 		);
 		const stamp = new Date(writtenMs(i));
-		utimesSync(join(state, "runs", runId, "events.ndjson"), stamp, stamp);
+		utimesSync(join(state, "telemetry", "runs", runId, "journal.jsonl"), stamp, stamp);
 		rows.push({
 			version: 1,
 			id: runId,

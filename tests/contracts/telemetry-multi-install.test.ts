@@ -18,12 +18,12 @@ import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
 import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import { rebuildUsageProjections } from "../../src/domains/session/usage-projection.js";
+import { callJournalHeader, openCallJournal, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import {
-	callJournalHeader,
-	journalFiles,
-	openCallJournal,
-	readCallJournal,
-} from "../../src/domains/telemetry/call-journal.js";
+	telemetryJournalFiles,
+	telemetryJournalPath,
+	telemetrySessionDirectory,
+} from "../../src/domains/telemetry/paths.js";
 import { callsReport, sessionTelemetry } from "../../src/domains/telemetry/read-model.js";
 import { telemetryCall } from "../harness/telemetry-view.js";
 
@@ -33,7 +33,7 @@ const ctx = { sessionId: SESSION, label: "main" as const };
 /** This build's writer: open the session's journal, settle `records`, close it. */
 async function settle(directory: string, records: readonly TelemetryRecord[]): Promise<void> {
 	const journal = await openCallJournal({
-		sessionDirectory: directory,
+		directory,
 		context: ctx,
 		writer: { clioCoderVersion: "0.6.6", piVersion: "test" },
 	});
@@ -51,13 +51,14 @@ async function settle(directory: string, records: readonly TelemetryRecord[]): P
 
 /** Every journal segment's bytes, oldest first, wherever a writer rotated them. */
 async function journalBytes(directory: string): Promise<Buffer> {
-	const names = journalFiles(await readdir(directory), "calls.jsonl");
+	const names = telemetryJournalFiles(await readdir(directory));
 	return Buffer.concat(await Promise.all(names.map((name) => readFile(join(directory, name)))));
 }
 
 test("two installs append to and read one state dir; neither retires the other's stores, and what one cannot read is skipped and counted", async () => {
 	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-multi-install-"));
-	const directory = join(stateDir, "sessions", "shared-workspace", SESSION);
+	const directory = telemetrySessionDirectory(stateDir, SESSION);
+	const store = join(stateDir, "sessions", "shared-workspace", SESSION);
 	try {
 		await settle(directory, telemetryCall(SESSION, { usd: 0.5, at: "2026-10-30T10:00:00.000Z" }));
 
@@ -70,14 +71,15 @@ test("two installs append to and read one state dir; neither retires the other's
 			encodeTelemetryLine(unknownKind as unknown as TelemetryRecord),
 			encodeTelemetryLine(newerVersion as TelemetryRecord),
 		]);
-		await appendFile(join(directory, "calls.jsonl"), newer);
-		const theirStores = [join(directory, "calls.vnext-index"), join(stateDir, "telemetry", "vnext", "state.json")];
+		await appendFile(telemetryJournalPath(directory), newer);
+		const theirStores = [join(directory, "journal.vnext-index"), join(stateDir, "telemetry", "vnext", "state.json")];
 		await mkdir(join(stateDir, "telemetry", "vnext"), { recursive: true });
 		for (const store of theirStores) await writeFile(store, `kept by 0.7.0 at ${store}`);
 
 		await settle(directory, telemetryCall(SESSION, { usd: 0.125, at: "2026-10-30T10:10:00.000Z" }));
+		await mkdir(store, { recursive: true });
 		await writeFile(
-			join(directory, "meta.json"),
+			join(store, "meta.json"),
 			JSON.stringify({ id: SESSION, endedAt: "2026-10-30T10:11:00.000Z", owner: null }),
 		);
 

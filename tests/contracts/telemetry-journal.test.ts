@@ -83,6 +83,7 @@ import {
 	telemetryPromptStructure,
 } from "../../src/domains/telemetry/objects.js";
 import { appendOutOfTurnUsageRow } from "../../src/domains/telemetry/out-of-turn-usage.js";
+import { telemetryRunDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import type { RepoSource } from "../../src/domains/telemetry/read-model.js";
 import { repoOwner, repoTokenQuantities } from "../../src/domains/telemetry/read-model.js";
 import {
@@ -185,8 +186,7 @@ test("worker forwarding preserves identity and source clocks with bounded deferr
 		strictEqual(readWorkerTelemetryFrame(frames[0], { ...run, sessionId: "different-session" }), null);
 		const directory = await mkdtemp(join(tmpdir(), "telemetry-forwarded-"));
 		const journal = await openCallJournal({
-			sessionDirectory: directory,
-			fileName: "events.ndjson",
+			directory,
 			context: run,
 			writer,
 			segmentBytes: 1,
@@ -198,9 +198,8 @@ test("worker forwarding preserves identity and source clocks with bounded deferr
 				ok(journal.enqueue(pending));
 			}
 			await journal.flush();
-			const saved = await readCallJournal(directory, "events.ndjson");
-			deepStrictEqual(readCallJournalSync(directory, "events.ndjson"), saved);
-			strictEqual((await readCallJournal(directory)).records.length, 0, "standalone runs create no session call store");
+			const saved = await readCallJournal(directory);
+			deepStrictEqual(readCallJournalSync(directory), saved);
 			const forwarded = saved.records.filter((row) => row.origin.host === "remote-worker");
 			deepStrictEqual(
 				forwarded.map(({ record }) => record.id),
@@ -236,8 +235,8 @@ test("overlapping work retains its original session and releases ownership only 
 		telemetryHub().emit("session.resumed", {}, side.context);
 		await next.release();
 		await side.release();
-		const original = await readCallJournal(join(stateDir, "sessions", "repo", "original"));
-		const switched = await readCallJournal(join(stateDir, "sessions", "repo", "next"));
+		const original = await readCallJournal(telemetrySessionDirectory(stateDir, "original"));
+		const switched = await readCallJournal(telemetrySessionDirectory(stateDir, "next"));
 		deepStrictEqual(
 			original.records.map(({ record }) => record.ctx),
 			[side.context],
@@ -262,7 +261,7 @@ test("overlapping work retains its original session and releases ownership only 
 		});
 		ok(objects?.promptStructure);
 		ok(objects.toolSchemas);
-		const directory = join(stateDir, "sessions", "repo", "original");
+		const directory = telemetrySessionDirectory(stateDir, "original");
 		strictEqual((await readTelemetryObject(directory, objects.promptStructure)).kind, "resolved");
 		strictEqual((await readTelemetryObject(directory, objects.toolSchemas)).kind, "resolved");
 		deepStrictEqual(await reopened.storeRequestObjects?.({ tools: { invalid: Number.NaN } }), {});
@@ -298,7 +297,7 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 	const journals = createSessionJournals(stateDir, () => {});
 	const parent = await journals.acquire({ id: "parent", cwdHash: "repo" }, "worker");
 	const context = { sessionId: "parent", runId: "run", label: "worker" as const };
-	const run = await openRunTelemetry(context, join(stateDir, "runs", "run"));
+	const run = await openRunTelemetry(context, telemetryRunDirectory(stateDir, "run"));
 	run.linkSession(parent.context);
 	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
 	const aggregate = (tokens: number, revision: number): RunUsage => ({
@@ -343,12 +342,12 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 			recordTokens: tracker.accumulate,
 			recordRunTokens: (id, _source, ...args) => tracker.replace(id, ...args),
 		};
-		reseedSessionUsageFromLedger(sink, [], { sessionId: "parent", journalDirectory: sessionDirectory });
+		reseedSessionUsageFromLedger(sink, [], { sessionId: "parent", journalStateDir: stateDir });
 		strictEqual(tracker.sessionTokens().totalTokens, 5);
 		strictEqual(tracker.sessionTokens().apiCalls, 0);
 		ok(report(9, 1));
 		await run.flush();
-		const snapshot = readSessionCallJournalSync(sessionDirectory, []);
+		const snapshot = readSessionCallJournalSync(stateDir, "parent", []);
 		strictEqual(snapshot.records.filter(({ record }) => record.k === "run.linked").length, 1);
 		strictEqual(runJournalsInWindow(snapshot, 0, 1).size, 0);
 		const missing = {
@@ -362,6 +361,7 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		strictEqual(tracker.sessionTokens().totalTokens, 9);
 		strictEqual(tracker.entries().length, 1);
 		strictEqual(tracker.sessionCost().unknownCallCoverageRuns, 1);
+		await mkdir(sessionDirectory, { recursive: true });
 		await writeFile(join(sessionDirectory, "current.jsonl"), "");
 		await mkdir(join(stateDir, "receipts"));
 		await writeFile(
@@ -463,7 +463,7 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 		);
 		call.settle(unsent);
 		await journal.close();
-		const saved = await readCallJournal(join(directory, run.runId), "events.ndjson");
+		const saved = await readCallJournal(join(directory, run.runId));
 		strictEqual(saved.damaged, 0);
 		strictEqual(saved.records.filter(({ record }) => record.k === "call.settled").length, 1);
 		const feed = readRunEventJournal(run.runId, { root: directory });
@@ -484,13 +484,13 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 			seq: undefined,
 			at: undefined,
 		});
-		const raw = await readFile(join(directory, run.runId, "events.ndjson"), "utf8");
+		const raw = await readFile(join(directory, run.runId, "journal.jsonl"), "utf8");
 		strictEqual(raw.includes("PRIVATE_"), false, "standard run feed excludes prose, details, reasons and tool arguments");
 		ok(saved.records.every(({ record }) => record.cc !== "content-bearing"));
 		strictEqual((await readdir(directory)).length, 1, "standalone ownership never materializes a session");
-		const before = await readFile(join(directory, run.runId, "events.ndjson"));
+		const before = await readFile(join(directory, run.runId, "journal.jsonl"));
 		display.open(run.runId, "late");
-		deepStrictEqual(await readFile(join(directory, run.runId, "events.ndjson")), before);
+		deepStrictEqual(await readFile(join(directory, run.runId, "journal.jsonl")), before);
 	} finally {
 		await journal.close();
 		await rm(directory, { recursive: true, force: true });
@@ -498,10 +498,11 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 });
 
 test("journal owns a session, flushes call attempts once, and keeps retries linked without shared mutable scope", async () => {
-	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
-	const journal = await openCallJournal({ sessionDirectory, context, writer });
+	const stateRoot = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const sessionDirectory = telemetrySessionDirectory(stateRoot, context.sessionId);
+	const journal = await openCallJournal({ directory: sessionDirectory, context, writer });
 	try {
-		await rejects(openCallJournal({ sessionDirectory, context, writer }), /timed out/);
+		await rejects(openCallJournal({ directory: sessionDirectory, context, writer }), /timed out/);
 		const call = beginCall(
 			{
 				label: "main",
@@ -584,7 +585,7 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 				},
 			},
 			ledger,
-			{ journalDirectory: sessionDirectory },
+			{ sessionId: context.sessionId, journalStateDir: stateRoot },
 		);
 		const liveRecorded: unknown[][] = [];
 		for (const call of live)
@@ -612,13 +613,13 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 		strictEqual(telemetryProducerHealth().unownedRecords, before + 1);
 	} finally {
 		await journal.close();
-		await rm(sessionDirectory, { recursive: true, force: true });
+		await rm(stateRoot, { recursive: true, force: true });
 	}
 });
 
 test("a flush returns only after the batch a sibling flush started behind the one in flight is written (#434)", async () => {
 	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
-	const journal = await openCallJournal({ sessionDirectory, context, writer });
+	const journal = await openCallJournal({ directory: sessionDirectory, context, writer });
 	try {
 		telemetryHub().emit("session.opened", {}, context);
 		const first = journal.flush();
@@ -638,7 +639,13 @@ test("a flush returns only after the batch a sibling flush started behind the on
 
 test("journal overflow and invalid records produce gaps, rotation preserves records, and secrets are redacted", async () => {
 	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
-	const journal = await openCallJournal({ sessionDirectory, context, writer, queueCapacity: 2, segmentBytes: 1 });
+	const journal = await openCallJournal({
+		directory: sessionDirectory,
+		context,
+		writer,
+		queueCapacity: 2,
+		segmentBytes: 1,
+	});
 	try {
 		for (let n = 0; n < 4; n += 1) telemetryHub().emit("session.opened", {}, context);
 		await journal.flush();
@@ -661,8 +668,8 @@ test("journal overflow and invalid records produce gaps, rotation preserves reco
 		deepStrictEqual(
 			rows.filter((row) => row.k === "journal.gap").map((row) => row.data),
 			[
-				{ sink: "calls.jsonl", reason: "writer-drop", count: 2 },
-				{ sink: "calls.jsonl", reason: "invalid-record", count: 1 },
+				{ sink: "journal.jsonl", reason: "writer-drop", count: 2 },
+				{ sink: "journal.jsonl", reason: "invalid-record", count: 1 },
 			],
 		);
 		strictEqual(rows.filter((row) => row.k === "session.opened").length, 2);
@@ -679,7 +686,7 @@ test("journal overflow and invalid records produce gaps, rotation preserves reco
 test("a segment header says what its mode admits, and a mode change opens a new segment in place (#434)", async () => {
 	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
 	let capture = STANDARD_CAPTURE;
-	const journal = await openCallJournal({ sessionDirectory, context, writer, capture: () => capture });
+	const journal = await openCallJournal({ directory: sessionDirectory, context, writer, capture: () => capture });
 	try {
 		telemetryHub().emit("session.opened", {}, context);
 		await journal.flush();
@@ -687,7 +694,7 @@ test("a segment header says what its mode admits, and a mode change opens a new 
 		capture = effectiveTelemetryCapture({ mode: "research", research }, false);
 		telemetryHub().emit("session.resumed", {}, context);
 		await journal.flush();
-		const rows = scanTelemetrySegment(await readFile(join(sessionDirectory, "calls.jsonl"))).rows;
+		const rows = scanTelemetrySegment(await readFile(join(sessionDirectory, "journal.jsonl"))).rows;
 		deepStrictEqual(
 			rows.map((row) =>
 				row.kind === "header" ? `header:${row.header.mode}` : row.kind === "record" ? row.record.k : row.reason,
@@ -708,7 +715,7 @@ test("standard mode writes no content-bearing record; content needs research, th
 	const research = { content: true, deltas: true, providerHeaders: true, systemOneDataset: true, busTrace: false };
 	let capture = STANDARD_CAPTURE;
 	const journal = await openCallJournal({
-		sessionDirectory,
+		directory: sessionDirectory,
 		context,
 		writer,
 		capture: () => capture,
@@ -745,7 +752,7 @@ test("standard mode writes no content-bearing record; content needs research, th
 		await journal.flush();
 		let admitsContent = false;
 		const seen: string[] = [];
-		for (const row of scanTelemetrySegment(await readFile(join(sessionDirectory, "calls.jsonl"))).rows) {
+		for (const row of scanTelemetrySegment(await readFile(join(sessionDirectory, "journal.jsonl"))).rows) {
 			if (row.kind === "header") admitsContent = row.header.capture.content;
 			else if (row.kind === "record") {
 				if (row.record.cc === "content-bearing") ok(admitsContent, "content only under a header that admits it");
@@ -783,7 +790,7 @@ test("a session stores prompt text only under content capture, once per distinct
 			await lease.storeRequestObjects?.({ prompt });
 			await lease.release();
 		}
-		const directory = join(stateDir, "sessions", origin.cwdHash, origin.id);
+		const directory = telemetrySessionDirectory(stateDir, origin.id);
 		const texts = (await readCallJournal(directory)).records.flatMap(({ record }) =>
 			record.k === "prompt.text_captured" ? [record] : [],
 		);
@@ -841,7 +848,7 @@ test("memory and observation traces journal content only under research capture 
 		traceObservation("prepared", { note: secret });
 		memoryTrace.record(envelope);
 		await Promise.all(leases);
-		const directory = join(stateDir, "sessions", origin.cwdHash, origin.id);
+		const directory = telemetrySessionDirectory(stateDir, origin.id);
 		const records = (await readCallJournal(directory)).records.map(({ record }) => record);
 		deepStrictEqual(
 			records.filter((record) => record.cc === "content-bearing").map((record) => record.k),
@@ -886,7 +893,7 @@ test("each open session writer receives health windows carrying loop lag, RSS an
 		await new Promise((resolve) => setTimeout(resolve, 130));
 		await journals.closeAll();
 		for (const origin of origins) {
-			const journal = await readCallJournal(join(stateDir, "sessions", origin.cwdHash, origin.id));
+			const journal = await readCallJournal(telemetrySessionDirectory(stateDir, origin.id));
 			strictEqual(journal.damaged, 0);
 			ok(!journal.records.some(({ record }) => record.k === "journal.gap"), "every window passes its own schema");
 			const windows = journal.records.flatMap(({ record }) => (record.k === "health.sampled" ? [record.data] : []));
@@ -944,8 +951,7 @@ test("a research export round-trips through import-bundle into a fixture with th
 	const runId = "bundlerun";
 	const runContext = { sessionId: origin.id, runId, label: "worker" as const };
 	const run = await openCallJournal({
-		sessionDirectory: join(stateDir, "runs", runId),
-		fileName: "events.ndjson",
+		directory: telemetryRunDirectory(stateDir, runId),
 		context: runContext,
 		writer,
 	});
@@ -963,13 +969,13 @@ test("a research export round-trips through import-bundle into a fixture with th
 		await run.flush();
 		const sources = async (directory: string) => [
 			...(await readCallJournal(directory)).records,
-			...(await readCallJournal(join(directory, "runs", runId), "events.ndjson")).records,
+			...(await readCallJournal(join(directory, "runs", runId))).records,
 		];
-		const sessionDirectory = join(stateDir, "sessions", origin.cwdHash, origin.id);
+		const sessionDirectory = telemetrySessionDirectory(stateDir, origin.id);
 		const source = foldCallJournal(
 			[
 				...(await readCallJournal(sessionDirectory)).records,
-				...(await readCallJournal(join(stateDir, "runs", runId), "events.ndjson")).records,
+				...(await readCallJournal(telemetryRunDirectory(stateDir, runId))).records,
 			].map(({ record }) => record),
 		);
 		strictEqual(source.attempts.length, 2);
@@ -979,7 +985,7 @@ test("a research export round-trips through import-bundle into a fixture with th
 			const fixture = join(root, `fixture-${contentClass}`);
 			await exportTelemetryBundle({
 				stateDir,
-				...{ cwdHash: origin.cwdHash, sessionId: origin.id },
+				...{ sessionId: origin.id, sessionStore: null },
 				out: bundle,
 				contentClass,
 				writer,
@@ -1004,7 +1010,7 @@ test("a research export round-trips through import-bundle into a fixture with th
 			);
 			strictEqual(imported.manifest.excluded.contentBearing, content ? 0 : 1);
 		}
-		await appendFile(join(root, "bundle-structural", "calls.jsonl"), "x");
+		await appendFile(join(root, "bundle-structural", "journal.jsonl"), "x");
 		await rejects(importTelemetryBundle(join(root, "bundle-structural"), join(root, "tampered")), /sha256/);
 	} finally {
 		await run.close();
@@ -1019,8 +1025,10 @@ test("rebuild re-projects a session's meta.json usage from its journal and repor
 	const metaPath = join(directory, "meta.json");
 	try {
 		await mkdir(directory, { recursive: true });
+		const journalDirectory = telemetrySessionDirectory(stateDir, "rebuilt");
+		await mkdir(journalDirectory, { recursive: true });
 		const records = [callJournalHeader(writer), ...telemetryCall("rebuilt", { usd: 2 })];
-		await writeFile(join(directory, "calls.jsonl"), Buffer.concat(records.map(encodeTelemetryLine)));
+		await writeFile(join(journalDirectory, "journal.jsonl"), Buffer.concat(records.map(encodeTelemetryLine)));
 		const legacy = { knownUsd: 9, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 1 };
 		await writeFile(
 			metaPath,
@@ -1053,49 +1061,49 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 	const sessions = join(stateDir, "sessions", "hash");
 	const old = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
 	const ended = JSON.stringify({ endedAt: "2026-01-01T00:00:00.000Z", owner: null });
-	const journal = async (id: string, work: (ctx: TelemetryContext) => void, fileName?: "events.ndjson") => {
-		const directory = fileName ? join(stateDir, "runs", id) : join(sessions, id);
-		const ctx = fileName
+	/** A session's meta.json lives in its store; its journal and objects under the telemetry root. */
+	const endSession = async (id: string) => {
+		await mkdir(join(sessions, id), { recursive: true });
+		await writeFile(join(sessions, id, "meta.json"), ended);
+	};
+	const journal = async (id: string, work: (ctx: TelemetryContext) => void, scope: "session" | "run" = "session") => {
+		const run = scope === "run";
+		const directory = run ? telemetryRunDirectory(stateDir, id) : telemetrySessionDirectory(stateDir, id);
+		const ctx = run
 			? { sessionId: "kept", runId: id, label: "worker" as const }
 			: { sessionId: id, label: "main" as const };
-		const writerJournal = await openCallJournal({
-			sessionDirectory: directory,
-			context: ctx,
-			writer,
-			...(fileName ? { fileName } : {}),
-		});
+		const writerJournal = await openCallJournal({ directory, context: ctx, writer });
 		work(ctx);
 		await writerJournal.close();
-		if (!fileName) await writeFile(join(directory, "meta.json"), ended);
+		if (!run) await endSession(id);
 		return directory;
 	};
 	const age = async (path: string) => utimes(path, old, old);
 	try {
 		const expired = await journal("expired", (ctx) => telemetryHub().emit("session.opened", {}, ctx));
-		await writeFile(join(expired, "current.jsonl"), "{}\n");
+		await writeFile(join(sessions, "expired", "current.jsonl"), "{}\n");
 		await storeTelemetryObject(expired, "tool-schemas", [{ name: "read" }]);
-		await age(join(expired, "calls.jsonl"));
+		await age(join(expired, "journal.jsonl"));
 		const live = await journal("live", (ctx) => telemetryHub().emit("session.opened", {}, ctx));
-		await age(join(live, "calls.jsonl"));
-		await writeFile(join(live, "calls.jsonl.lock"), "{}");
+		await age(join(live, "journal.jsonl"));
+		await writeFile(join(live, "journal.jsonl.lock"), "{}");
 		const parent = await journal("parent", (ctx) => telemetryHub().emit("session.opened", {}, ctx));
-		await age(join(parent, "calls.jsonl"));
-		await mkdir(join(sessions, "child"), { recursive: true });
-		seedForkCallJournal(join(sessions, "child"), "child", {
+		await age(join(parent, "journal.jsonl"));
+		seedForkCallJournal(stateDir, "child", {
 			parentSessionId: "parent",
 			parentCwdHash: "hash",
 			parentTurnId: "t1",
 			parentTurnAt: "2026-01-01T00:00:00.000Z",
 		});
-		await writeFile(join(sessions, "child", "meta.json"), ended);
-		const keptDirectory = join(sessions, "kept");
+		await endSession("child");
+		const keptDirectory = telemetrySessionDirectory(stateDir, "kept");
 		await mkdir(keptDirectory, { recursive: true });
 		const structure = await storeTelemetryObject(keptDirectory, "tool-schemas", [{ name: "kept" }]);
 		const text = await storeTelemetryObject(keptDirectory, "prompt-text", { text: "old prompt" });
 		const orphan = await storeTelemetryObject(keptDirectory, "tool-schemas", [{ name: "orphan" }]);
 		const research = { content: true, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false };
 		const keptJournal = await openCallJournal({
-			sessionDirectory: keptDirectory,
+			directory: keptDirectory,
 			context: { sessionId: "kept", label: "main" },
 			writer,
 			capture: () => effectiveTelemetryCapture({ mode: "research", research }, true),
@@ -1119,11 +1127,11 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		);
 		telemetryHub().emit("run.linked", { runId: "cited" }, keptContext);
 		await keptJournal.close();
-		await writeFile(join(keptDirectory, "meta.json"), ended);
+		await endSession("kept");
 		await age(join(keptDirectory, "objects", `${text.id}.json`));
 		for (const runId of ["unreferenced", "receipted", "cited"]) {
-			const run = await journal(runId, () => {}, "events.ndjson");
-			await age(join(run, "events.ndjson"));
+			const run = await journal(runId, () => {}, "run");
+			await age(join(run, "journal.jsonl"));
 		}
 		await mkdir(join(stateDir, "receipts"), { recursive: true });
 		await writeFile(join(stateDir, "receipts", "receipted.json"), "{}");
@@ -1133,24 +1141,29 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		deepStrictEqual(
 			plan.remove.map((action) => `${relative(action.path)}:${action.reason}`).sort(),
 			[
-				`sessions/hash/expired/calls.jsonl:expired`,
-				`sessions/hash/expired/objects/${(await readdir(join(expired, "objects")))[0]}:expired`,
-				`runs/unreferenced/events.ndjson:expired`,
-				`sessions/hash/kept/objects/${orphan.id}.json:unreferenced-object`,
-				`sessions/hash/kept/objects/${text.id}.json:research-expired`,
+				`telemetry/sessions/expired/journal.jsonl:expired`,
+				`telemetry/sessions/expired/objects/${(await readdir(join(expired, "objects")))[0]}:expired`,
+				`telemetry/runs/unreferenced/journal.jsonl:expired`,
+				`telemetry/sessions/kept/objects/${orphan.id}.json:unreferenced-object`,
+				`telemetry/sessions/kept/objects/${text.id}.json:research-expired`,
 			].sort(),
 		);
 		deepStrictEqual(plan.held.map((hold) => `${relative(hold.path)}:${hold.reason}`).sort(), [
-			"runs/cited:referenced-run",
-			"runs/receipted:receipt",
-			"sessions/hash/live:live",
-			"sessions/hash/parent:fork-parent",
+			"telemetry/runs/cited:referenced-run",
+			"telemetry/runs/receipted:receipt",
+			"telemetry/sessions/live:live",
+			"telemetry/sessions/parent:fork-parent",
 		]);
 		strictEqual((await readdir(join(keptDirectory, "objects"))).length, 3, "a plan removes nothing");
 		const result = await applyTelemetryPrune(plan);
 		deepStrictEqual(result.removed, plan.remove);
 		deepStrictEqual(result.skipped, []);
-		deepStrictEqual(await readdir(expired), ["current.jsonl", "meta.json"], "the ledger is not telemetry");
+		deepStrictEqual(
+			await readdir(join(sessions, "expired")),
+			["current.jsonl", "meta.json"],
+			"the ledger is not telemetry",
+		);
+		deepStrictEqual(await readdir(expired), [], "the expired session keeps no telemetry");
 		deepStrictEqual(await readdir(join(keptDirectory, "objects")), [`${structure.id}.json`]);
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
@@ -1239,8 +1252,8 @@ test("a project layer may lower telemetry capture but never raise it above user 
 
 test("only the next owner repairs torn tails; future records survive reopening and reads do not repair", async () => {
 	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
-	const path = join(sessionDirectory, "calls.jsonl");
-	let journal = await openCallJournal({ sessionDirectory, context, writer });
+	const path = join(sessionDirectory, "journal.jsonl");
+	let journal = await openCallJournal({ directory: sessionDirectory, context, writer });
 	try {
 		telemetryHub().emit("session.opened", {}, context);
 		await journal.close();
@@ -1254,7 +1267,7 @@ test("only the next owner repairs torn tails; future records survive reopening a
 		await appendFile(path, '{"torn":');
 		strictEqual((await readCallJournal(sessionDirectory)).damaged, 1);
 		strictEqual((await readFile(path)).length, prefix.length + 8);
-		journal = await openCallJournal({ sessionDirectory, context, writer });
+		journal = await openCallJournal({ directory: sessionDirectory, context, writer });
 		strictEqual(journal.health().skipped, 1);
 		const repaired = await readFile(path);
 		deepStrictEqual(repaired.subarray(0, prefix.length), prefix);
@@ -1453,12 +1466,12 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 
 test("fork lineage resolves the inherited prefix without copying facts or double-counting shared attempts", async () => {
 	const root = await mkdtemp(join(tmpdir(), "telemetry-fork-"));
-	const parentDirectory = join(root, "workspace", "parent");
-	const childDirectory = join(root, "workspace", "child");
+	const parentDirectory = telemetrySessionDirectory(root, "parent");
+	const childDirectory = telemetrySessionDirectory(root, "child");
 	const at = Date.parse("2026-10-30T12:00:00.000Z");
 	await mkdir(childDirectory, { recursive: true });
 	const parent = await openCallJournal({
-		sessionDirectory: parentDirectory,
+		directory: parentDirectory,
 		context: { sessionId: "parent", label: "main" },
 		writer,
 	});
@@ -1513,15 +1526,15 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 		contribute(parent, "parent", "helper", 7, at - 5);
 		contribute(parent, "parent", "helper", 9, at + 5);
 		await parent.close();
-		const parentBytes = await readFile(join(parentDirectory, "calls.jsonl"));
-		seedForkCallJournal(childDirectory, "child", {
+		const parentBytes = await readFile(join(parentDirectory, "journal.jsonl"));
+		seedForkCallJournal(root, "child", {
 			parentSessionId: "parent",
 			parentCwdHash: "workspace",
 			parentTurnId: "turn",
 			parentTurnAt: new Date(at).toISOString(),
 		});
 		const child = await openCallJournal({
-			sessionDirectory: childDirectory,
+			directory: childDirectory,
 			context: { sessionId: "child", label: "main" },
 			writer,
 		});
@@ -1539,12 +1552,12 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 		const parentCalls = ledgerUsageCalls(
 			entries.slice(0, 1),
 			{},
-			readSessionCallJournalSync(parentDirectory, entries).records.map(({ record }) => record),
+			readSessionCallJournalSync(root, "parent", entries).records.map(({ record }) => record),
 		);
 		const childCalls = ledgerUsageCalls(
 			entries,
 			{},
-			readSessionCallJournalSync(childDirectory, entries).records.map(({ record }) => record),
+			readSessionCallJournalSync(root, "child", entries).records.map(({ record }) => record),
 		);
 		strictEqual(
 			childCalls.reduce((sum, call) => sum + call.totalTokens, 0),
@@ -1557,9 +1570,9 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 			readCallJournalSync(childDirectory).records.filter(({ record }) => record.k === "call.settled").length,
 			1,
 		);
-		deepStrictEqual(await readFile(join(parentDirectory, "calls.jsonl")), parentBytes);
+		deepStrictEqual(await readFile(join(parentDirectory, "journal.jsonl")), parentBytes);
 		await rm(parentDirectory, { recursive: true });
-		const unavailable = readSessionCallJournalSync(childDirectory, entries);
+		const unavailable = readSessionCallJournalSync(root, "child", entries);
 		ok(unavailable.skipped > 0);
 		const remaining = ledgerUsageCalls(
 			entries,
@@ -1710,7 +1723,7 @@ test("usage report discovers a standalone run journal that has no session and no
 	const scratch = await mkdtemp(join(tmpdir(), "telemetry-standalone-report-"));
 	const stateDir = join(scratch, "state");
 	const owner = { sessionId: null, runId: "orphan-run", label: "worker" as const };
-	const run = await openRunTelemetry(owner, join(stateDir, "runs", owner.runId));
+	const run = await openRunTelemetry(owner, telemetryRunDirectory(stateDir, owner.runId));
 	const measured = { kind: "measured" as const, value: 21, source: "provider" as const };
 	const usage: RunUsage = {
 		source: "acp",
@@ -1746,7 +1759,7 @@ test("usage report discovers a standalone run journal that has no session and no
 		await run.close();
 		// Appends never bump the run directory; a run created before the window still settled inside it.
 		const created = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000);
-		await utimes(join(stateDir, "runs", owner.runId), created, created);
+		await utimes(telemetryRunDirectory(stateDir, owner.runId), created, created);
 		const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
 		const report = spawnSync(
 			process.execPath,

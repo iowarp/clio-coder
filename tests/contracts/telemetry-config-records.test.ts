@@ -1,5 +1,4 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
@@ -13,6 +12,7 @@ import { computeSettingsFingerprint } from "../../src/domains/dispatch/settings-
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js";
 import { readTelemetryObject } from "../../src/domains/telemetry/objects.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 it("a session writer opens with its settings and journals each change once, with both documents (#434)", async () => {
@@ -42,7 +42,7 @@ it("a session writer opens with its settings and journals each change once, with
 		getContract: (name: string) => (name === "config" ? config : undefined),
 	} as DomainContext);
 	const origin = { id: "config-session", cwdHash: "config-repo" };
-	const directory = join(clioStateDir(), "sessions", origin.cwdHash, origin.id);
+	const directory = telemetrySessionDirectory(clioStateDir(), origin.id);
 	try {
 		await extension.start();
 		const lease = await contract.acquireTelemetrySession?.(origin, "main");
@@ -125,7 +125,7 @@ it("a session's lifecycle events become session.opened, session.resumed and sess
 			scope: "session",
 		});
 		await extension.stop?.();
-		const records = (await readCallJournal(join(clioStateDir(), "sessions", origin.cwdHash, origin.id))).records.map(
+		const records = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), origin.id))).records.map(
 			({ record }) => record,
 		);
 		deepStrictEqual(records.flatMap((record) => (record.k.startsWith("session.") ? [record.k] : [])).sort(), [
@@ -134,7 +134,7 @@ it("a session's lifecycle events become session.opened, session.resumed and sess
 			"session.resumed",
 		]);
 		ok(records.every((record) => record.ctx.sessionId === origin.id));
-		const liveRecords = (await readCallJournal(join(clioStateDir(), "sessions", live.cwdHash, live.id))).records;
+		const liveRecords = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), live.id))).records;
 		deepStrictEqual(
 			liveRecords.flatMap(({ record }) => (record.k.startsWith("session.") ? [record.k] : [])),
 			["session.opened", "session.closed"],
