@@ -387,6 +387,11 @@ try {
 		await mark("Result format", "Conforms");
 		await mark("Result quality", "Not measured");
 		await mark("Claimed checks", "1 of 2 claims grounded");
+		// The checks stand under the seal the read model verified; the saved document comes only on request (#434 §11.3).
+		await page.locator(".receipt-checks__integrity .status-mark", { hasText: "sealed" }).waitFor();
+		assert.equal(await page.getByRole("heading", { name: "The saved document", exact: true }).count(), 0);
+		await page.getByRole("button", { name: "Load full receipt", exact: true }).click();
+		await page.getByRole("heading", { name: "The saved document", exact: true }).waitFor();
 		await check("trace-run");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `trace-run-${width}.png`), fullPage: true });

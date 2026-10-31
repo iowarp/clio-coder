@@ -28,7 +28,7 @@ test("fleet REST: every durable root paginates once beyond 64 entries, corrupt r
 		assert.equal(visited.at(-1), "fleet-000");
 		const run = await json(await h.request("/api/fleet/runs/fleet-149"), FleetRootDetail);
 		assert.equal(run.steps[0]?.output, "Fixture step passed.");
-		assert.equal(run.receipt?.outcome, "succeeded");
+		assert.equal(run.evidence.runId, "fleet-149");
 		assert.deepEqual(
 			run.councils.councils[0]?.members[0]?.turns.map((turn) => turn.round),
 			[1, 2],
@@ -39,10 +39,12 @@ test("fleet REST: every durable root paginates once beyond 64 entries, corrupt r
 		assert.equal((await json(await h.request("/api/fleet/dispatches"), DispatchRuns)).items.length, 3);
 		assert.equal((await json(await h.request("/api/fleet/councils"), Councils)).councils.length, 1);
 		assert.equal((await json(await h.request("/api/fleet/gates"), FleetGates)).decisions.length, 1);
-		assert.equal(
-			(await json(await h.request("/api/fleet/receipts/member-two"), FleetReceipt)).receipt?.runId,
-			"member-two",
-		);
+		// The receipt is its evidence through the seal check; the saved document leaves only when asked for (#434 §11.3).
+		const brief = await json(await h.request("/api/fleet/receipts/member-two"), FleetReceipt);
+		assert.equal(brief.receipt, null);
+		assert.equal(brief.evidence.runId, "member-two");
+		const full = (path: string) => h.request(`${path}?include=full`);
+		assert.equal((await json(await full("/api/fleet/receipts/member-two"), FleetReceipt)).receipt?.runId, "member-two");
 		// A pruned receipt serves its verified evidence copy, never the tombstone it left; a copy that is gone is none.
 		const receiptPath = join(h.home.path, "state/receipts/member-two.json");
 		const copy = { ...JSON.parse(await readFile(receiptPath, "utf8")), integrity: { digest: "pruned-copy" } };
@@ -59,15 +61,15 @@ test("fleet REST: every durable root paginates once beyond 64 entries, corrupt r
 			prunedAt: "2026-10-30T00:00:00.000Z",
 		};
 		await writeFile(receiptPath, JSON.stringify(tombstone));
-		const pruned = (await json(await h.request("/api/fleet/receipts/member-two"), FleetReceipt)).receipt;
+		const pruned = (await json(await full("/api/fleet/receipts/member-two"), FleetReceipt)).receipt;
 		assert.equal(pruned?.runId, "member-two");
 		assert.deepEqual(pruned?.integrity, { digest: "pruned-copy" });
 		await writeFile(receiptPath, JSON.stringify({ ...tombstone, digest: "another-seal" }));
-		assert.equal((await json(await h.request("/api/fleet/receipts/member-two"), FleetReceipt)).receipt, null);
+		assert.equal((await json(await full("/api/fleet/receipts/member-two"), FleetReceipt)).receipt, null);
 		// "escape" is in no listing, so the served-id window refuses it before the
 		// adapter runs; the symlink containment is asserted where it now lives.
 		assert.equal((await h.request("/api/fleet/receipts/escape")).status, 403);
-		assert.deepEqual(await h.reads.call("fleet.read", { kind: "receipt", id: "escape" }), { receipt: null });
+		await assert.rejects(h.reads.call("fleet.read", { kind: "receipt", id: "escape" }), /outside its storage boundary/);
 		assert.equal((await h.request("/api/fleet/runs/missing")).status, 404);
 		for (const query of ["limit=0", "limit=1.5", "limit=101", "cursor=broken"])
 			assert.equal((await h.request(`/api/fleet/runs?${query}`)).status, 422);

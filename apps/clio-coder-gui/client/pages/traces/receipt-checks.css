@@ -6,6 +6,11 @@
 .receipt-checks > h3 {
 	margin: 0;
 }
+.receipt-checks__integrity {
+	margin: var(--space-1) 0 0;
+	font-size: var(--text-meta);
+	line-height: 1.5;
+}
 .receipt-checks__intro {
 	margin: var(--space-1) 0 var(--space-3);
 	color: var(--ink-muted);

@@ -12,6 +12,7 @@ import {
 } from "../../contracts/fleet-events.js";
 import { ReceiptFacts } from "../../contracts/receipt-facts.js";
 import { ACP_RECEIPT_META_KEY, AcpJob } from "../../contracts/wire.js";
+import { renderCompactCount } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
 import { record } from "./client.js";
 import { projectTelemetryValue } from "./telemetry.js";
@@ -70,7 +71,19 @@ export function fleetEvent(value: unknown, sessionId: string, previousSequence: 
 	if (!Value.Check(schema, fact) || Buffer.byteLength(JSON.stringify(fact)) > 8192)
 		throw new AppProblem("upstream_acp", "ACP event exceeds its public projection contract.");
 	const rawReceipt = record(event._meta)[ACP_RECEIPT_META_KEY];
-	const receipt = rawReceipt === undefined ? undefined : projectTelemetryValue(ReceiptFacts, rawReceipt);
+	const projected = rawReceipt === undefined ? undefined : projectTelemetryValue(ReceiptFacts, rawReceipt);
+	// The receipt's tokens read as the frame words them, through the read model with its call coverage; an engine
+	// that sends no wording has its bare count worded by the canonical renderer (#434).
+	const frameTokens = record(event.payload).tokenDisplay;
+	const receipt = projected && {
+		...projected,
+		tokensDisplay:
+			typeof frameTokens === "string"
+				? frameTokens
+				: projected.tokens === null
+					? null
+					: renderCompactCount({ kind: "measured", value: projected.tokens, source: "provider" }),
+	};
 	if (receipt && receipt.receiptId !== record(event.payload).runId)
 		throw new AppProblem("upstream_acp", "Receipt identifies a different run.");
 	const item = {

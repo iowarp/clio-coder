@@ -7,9 +7,8 @@ import { clioStateDir } from "../../../../../src/core/xdg.js";
 import { readReceiptTextSync } from "../../../../../src/domains/dispatch/receipt-store.js";
 import { openLedger } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
-import { readEvidenceIndex } from "../../../../../src/domains/observability/evidence-index.js";
 import { runRowTelemetry } from "../../../../../src/domains/observability/read-model.js";
-import { loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
+import { loadRunReceiptEvidence, loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
 import { Id } from "../../../contracts/common.js";
 import type { TraceIdentity, TraceRequest, TraceRun, TraceRunStatus } from "../../../contracts/traces.js";
 import { withCostDisplay } from "../../services/cost-display.js";
@@ -199,26 +198,28 @@ export class TraceAdapter {
 		// The cursor keeps the journal's exact write time; an ISO string would round it and reorder same-millisecond runs.
 		return { runs, nextCursor: more && last ? Buffer.from(JSON.stringify(last)).toString("base64url") : null };
 	}
+	/**
+	 * The receipt's evidence through the read model, which checks the seal and states only what a verified seal
+	 * vouches for (#434 §11.3); the saved document itself only when the full receipt is asked for.
+	 */
 	private receipt(state: string, runId: string, full: boolean) {
-		let receipt: Record<string, unknown> | null = null;
-		let evidence: unknown = null;
+		let path: string | null = null;
 		try {
-			const path = contained(state, "receipts", `${runId}.json`);
+			path = contained(state, "receipts", `${runId}.json`);
+		} catch (error) {
+			// A receipt that resolves outside the state directory is refused; one that is not there is missing evidence.
+			if (error instanceof AppProblem) throw error;
+		}
+		const evidence = loadRunReceiptEvidence(state, runId);
+		if (!full || !path) return { evidence, receipt: null };
+		let receipt: Record<string, unknown> | null = null;
+		try {
 			// A pruned receipt's tombstone reads back as its verified evidence copy (#434).
 			const data: unknown = JSON.parse(readReceiptTextSync(path));
 			if (data && typeof data === "object" && !Array.isArray(data)) receipt = data as Record<string, unknown>;
-		} catch (error) {
-			if (error instanceof AppProblem) throw error;
+		} catch {
+			receipt = null;
 		}
-		try {
-			contained(state, ".", "evidence-index.json");
-			evidence = readEvidenceIndex(state).find((row) => row.runId === runId) ?? null;
-		} catch (error) {
-			if (error instanceof AppProblem) throw error;
-		}
-		// Avoid sending the large payload through RPC until explicitly requested. Public policy also lives in the service.
-		if (receipt && !full)
-			for (const key of ["output", "upstreamResponses", "routeDecision", "briefing", "steering"]) delete receipt[key];
-		return { receipt: receipt ? withCostDisplay(receipt) : null, evidence };
+		return { evidence, receipt: receipt ? withCostDisplay(receipt) : null };
 	}
 }

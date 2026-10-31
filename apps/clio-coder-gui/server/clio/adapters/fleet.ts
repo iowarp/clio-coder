@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
@@ -9,7 +9,7 @@ import { readReceiptTextSync } from "../../../../../src/domains/dispatch/receipt
 import { type FleetRunRecord, openLedger, readFleetRun } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
 import { runRowTelemetry } from "../../../../../src/domains/observability/read-model.js";
-import { loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
+import { loadRunReceiptEvidence, loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
 import { Id } from "../../../contracts/common.js";
 import {
 	Councils,
@@ -42,7 +42,27 @@ function dispatchSummary(row: RunEnvelope): DispatchRun {
 		rootRunId: row.lineage?.rootRunId ?? null,
 	});
 }
-function receipt(id: string) {
+/**
+ * The receipt's evidence through the read model, which checks the seal and states only what a verified seal vouches
+ * for (#434 §11.3). A file that resolves outside the state directory or past the size cap is refused, never read.
+ */
+function receiptEvidence(id: string) {
+	const state = clioStateDir();
+	if (!containedFile(state, "receipts", `${id}.json`) && entryExists(join(state, "receipts", `${id}.json`)))
+		throw new AppProblem("unavailable", "The receipt is outside its storage boundary or exceeds 8 MiB.");
+	return loadRunReceiptEvidence(state, id);
+}
+/** Anything at the path, a dangling link included. */
+function entryExists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+/** The saved document as written, sent only when the full receipt is asked for. */
+function savedReceipt(id: string) {
 	const path = containedFile(clioStateDir(), "receipts", `${id}.json`);
 	let raw: unknown = null;
 	try {
@@ -111,7 +131,8 @@ export function readFleet(input: FleetRequest): unknown {
 		}
 		return { ...artifactPage(rows, input.limit, input.cursor), present: true };
 	}
-	if (input.kind === "receipt") return { receipt: receipt(input.id) };
+	if (input.kind === "receipt")
+		return { evidence: receiptEvidence(input.id), receipt: input.full ? savedReceipt(input.id) : null };
 	if (input.kind === "gates") return checked(FleetGates, gateTopology());
 	const ledger = dispatchRows();
 	const rows = ledger.rows.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || b.id.localeCompare(a.id));
@@ -138,7 +159,7 @@ export function readFleet(input: FleetRequest): unknown {
 	const gates = gateTopology();
 	return checked(FleetRootDetail, {
 		run,
-		receipt: receipt(record.id),
+		evidence: receiptEvidence(record.id),
 		councils,
 		gates: {
 			...gates,

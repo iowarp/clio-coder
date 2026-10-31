@@ -1,6 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id, PageCursor } from "./common.js";
-import { TelemetryRunRow } from "./telemetry.js";
+import { TelemetryReceiptEvidence, TelemetryRunRow } from "./telemetry.js";
 
 const closed = { additionalProperties: false };
 const text = Type.String();
@@ -54,8 +54,9 @@ export const DispatchRuns = Type.Object(
 	{ items: Type.Array(DispatchRun), nextCursor: Type.Union([PageCursor, Type.Null()]), present: Type.Boolean() },
 	closed,
 );
+/** The receipt as the read model checks it; the saved document itself only when the full receipt is asked for. */
 export const FleetReceipt = Type.Object(
-	{ receipt: Type.Union([Type.Record(text, Type.Unknown()), Type.Null()]) },
+	{ evidence: TelemetryReceiptEvidence, receipt: Type.Union([Type.Record(text, Type.Unknown()), Type.Null()]) },
 	closed,
 );
 const memberTurn = Type.Object(
@@ -146,7 +147,7 @@ export const FleetRootDetail = Type.Object(
 				closed,
 			),
 		),
-		receipt: FleetReceipt.properties.receipt,
+		evidence: TelemetryReceiptEvidence,
 		councils: Councils,
 		gates: FleetGates,
 	},
@@ -156,5 +157,6 @@ export type FleetRoot = Static<typeof FleetRoot>;
 export type DispatchRun = Static<typeof DispatchRun>;
 export type FleetRequest =
 	| { kind: "roots" | "dispatches"; limit: number; cursor?: string }
-	| { kind: "root" | "dispatch" | "receipt"; id: string }
+	| { kind: "root" | "dispatch"; id: string }
+	| { kind: "receipt"; id: string; full?: boolean }
 	| { kind: "councils" | "gates" };

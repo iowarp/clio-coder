@@ -11,12 +11,9 @@ export class TraceService {
 		// Explicit closed schemas are the public projection: unknown ledger or receipt fields cannot escape.
 		const projected = Value.Clean(schema, raw);
 		if (!Value.Check(schema, projected)) throw new AppProblem("unavailable", "Trace storage returned an invalid record.");
-		if (input.kind === "receipt" && !input.full && projected && typeof projected === "object" && "receipt" in projected) {
-			const receipt = projected.receipt;
-			if (receipt && typeof receipt === "object")
-				for (const key of ["output", "upstreamResponses", "routeDecision", "briefing", "steering"])
-					Reflect.deleteProperty(receipt, key);
-		}
+		// The saved document leaves only when asked for; by default the receipt is its evidence alone.
+		if (input.kind === "receipt" && !input.full && projected && typeof projected === "object" && "receipt" in projected)
+			Reflect.set(projected, "receipt", null);
 		return projected;
 	}
 }

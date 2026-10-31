@@ -344,8 +344,9 @@ export const routes = {
 	fleetReceipt: defineRoute({
 		...get,
 		path: "/api/fleet/receipts/:id",
+		query: Type.Object({ include: Type.Optional(Type.Literal("full")) }, { additionalProperties: false }),
 		response: FleetReceipt,
-		summary: "Full durable receipt by run identifier",
+		summary: "Receipt evidence by run identifier, checked against its seal; the saved document on request",
 		params: operationParams,
 	}),
 	fleetCouncils: defineRoute({
@@ -969,7 +970,7 @@ export const routes = {
 		params: TraceParams,
 		query: Type.Object({ include: Type.Optional(Type.Literal("full")) }, { additionalProperties: false }),
 		response: TraceReceipt,
-		summary: "Receipt and evidence summary; full payload on request",
+		summary: "Receipt evidence checked against its seal; the saved document on request",
 	}),
 	telemetrySession: defineRoute({
 		...get,

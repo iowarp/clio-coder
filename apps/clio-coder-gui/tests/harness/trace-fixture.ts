@@ -1,5 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { withReceiptIntegrity } from "../../../../src/domains/dispatch/receipt-integrity.js";
+import type { RunEnvelope, RunReceiptDraft } from "../../../../src/domains/dispatch/types.js";
+import { fixtureReceiptDraft } from "../../../../tests/harness/receipt.js";
 import { telemetryCall } from "../../../../tests/harness/telemetry-view.js";
 import { seedRunJournal } from "./telemetry-fixture.js";
 
@@ -83,7 +86,7 @@ export async function traceFixture(
 			version: 1,
 			id: runId,
 			agentId: "coder",
-			executionRole: "coder",
+			executionRole: "builder",
 			task: `Inspect fixture ${i}`,
 			targetId: "local",
 			wireModelId: "fixture-model",
@@ -106,43 +109,31 @@ export async function traceFixture(
 	const held: unknown[] = existsSync(ledger) ? (JSON.parse(readFileSync(ledger, "utf8")) as unknown[]) : [];
 	writeFileSync(ledger, JSON.stringify([...held, ...rows]));
 	mkdirSync(join(state, "receipts"), { recursive: true });
-	writeFileSync(
-		join(state, "receipts/run-0000.json"),
-		JSON.stringify({
-			runId: "run-0000",
-			outcome: "success",
-			outcomeCode: "completed",
+	// Sealed against run-0000's own ledger row, so the read model's receipt evidence verifies it (#434 §11.3).
+	const envelope = rows[0] as RunEnvelope;
+	const receipt = withReceiptIntegrity(
+		{
+			...fixtureReceiptDraft(envelope),
+			executionRole: envelope.executionRole,
 			verification: { state: "verified", basis: "validation-tool" },
 			quality: {
 				version: 1,
-				typedValidations: [{ sourceId: "tool:verify", validatorDigest: "fixture-validator-digest", passed: true }],
+				typedValidations: [{ sourceId: "tool:verify", validatorDigest: "1".repeat(64), passed: true }],
 				responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
 				resultContract: {
 					sourceId: "agent-result-contract:mutation-report:fixture-contract",
-					validatorDigest: "fixture-contract-digest",
+					validatorDigest: "2".repeat(64),
 					conformance: "pass",
 					quality: "unmeasured",
 				},
 			},
 			validationGrounding: { claimed: 2, grounded: 1, ungrounded: ["lint"], basis: "unmatched-command" },
-			costUsd: 0.0024,
-			tokenCount: 240,
-			inputTokenCount: 200,
-			outputTokenCount: 40,
 			toolStats: [{ tool: "read", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 15 }],
-			findingsSummary: { tags: [], findingCount: 0, firstPassSuccess: false },
-			integrity: { digest: "fixture-receipt-digest" },
 			clioCoderVersion: "0.4.7",
-			platform: "linux",
-			nodeVersion: "24",
-			lineage: { parentRunId: "parent-1" },
-			output: "Full output",
-			upstreamResponses: ["Response"],
-			routeDecision: { agent: "coder" },
-			briefing: "Full briefing",
-			steering: ["Steer"],
-		}),
+		} satisfies RunReceiptDraft,
+		envelope,
 	);
+	writeFileSync(join(state, "receipts/run-0000.json"), JSON.stringify(receipt));
 	writeFileSync(
 		join(state, "evidence-index.json"),
 		JSON.stringify([

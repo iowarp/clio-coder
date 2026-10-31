@@ -17,6 +17,7 @@ export type {
 	ExplanationV1,
 	FactRef,
 	Quantity,
+	ReceiptEvidenceV1,
 	RunRowV1,
 	RunTelemetryV1,
 	RunTimelineEntry,

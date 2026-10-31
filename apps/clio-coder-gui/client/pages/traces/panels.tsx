@@ -144,6 +144,11 @@ export function EntryRow({ client, entry, start }: { client: Client; entry: RunT
 		</article>
 	);
 }
+/**
+ * The receipt as the read model checks it: the seal's integrity, the checks and outcome it vouches for, and the
+ * evidence bundle that names the run (#434 §11.3). The saved document itself appears only once it is asked for, and
+ * nothing in it is vouched for beyond what the checks say.
+ */
 export function ReceiptPanel({
 	data,
 	loadFull,
@@ -155,127 +160,101 @@ export function ReceiptPanel({
 	full: boolean;
 	loading?: boolean;
 }) {
+	const { evidence } = data;
+	const sealed = evidence.sealed;
 	const r = data.receipt;
 	return (
 		<section className="trace-panel">
 			<div className="page-heading">
 				<h2>Receipt</h2>
-				{r && !full ? (
+				{evidence.receipt !== "missing" && !full ? (
 					<button type="button" disabled={loading} onClick={loadFull}>
 						{loading ? "Reading receipt…" : "Load full receipt"}
 					</button>
 				) : null}
 			</div>
-			{!r ? (
-				<p>No sealed receipt was found for this run.</p>
-			) : (
+			<ReceiptChecks evidence={evidence} />
+			{sealed ? (
 				<>
+					<h3>Outcome</h3>
+					<Facts
+						entries={[
+							["outcome", sealed.outcome],
+							["outcomeCode", sealed.outcomeCode],
+							["exitCode", sealed.exitCode],
+							["failureMessage", sealed.failureMessage],
+						]}
+					/>
+				</>
+			) : null}
+			<h3>Evidence</h3>
+			{evidence.evidence ? (
+				<Facts entries={Object.entries(evidence.evidence)} />
+			) : (
+				<p>No evidence bundle names this run.</p>
+			)}
+			{r ? (
+				<>
+					<h3>The saved document</h3>
 					<p className="trace-receipt__source">
-						Read from the saved receipt. This page does not recheck its seal; <Link to="/evidence">Evidence</Link> does.
+						As written to disk. Only the checks above are vouched for by its seal; <Link to="/evidence">Evidence</Link>{" "}
+						collects and rechecks bundles.
 					</p>
-					<ReceiptChecks receipt={r} />
+					<div className="trace-receipt-grid">
+						<div>
+							<h3>Tools</h3>
+							{Array.isArray(r.toolStats) ? (
+								// biome-ignore lint/a11y/noNoninteractiveTabindex: A table wider than its column scrolls, and a scrolling region must take focus so the keyboard can move it.
+								<section className="table-scroll" tabIndex={0} aria-label="Tool statistics table">
+									<table className="trace-table">
+										<thead>
+											<tr>
+												{["Tool", "Calls", "OK", "Errors", "Blocked", "Time"].map((label) => (
+													<th key={label}>{label}</th>
+												))}
+											</tr>
+										</thead>
+										<tbody>
+											{r.toolStats.map((value, index) => {
+												const stat = object(value);
+												return (
+													<tr key={String(stat.tool ?? index)}>
+														{["tool", "count", "ok", "errors", "blocked"].map((key) => (
+															<td key={key}>{String(stat[key] ?? "not recorded")}</td>
+														))}
+														<td>
+															{typeof stat.totalDurationMs === "number" ? formatDuration(stat.totalDurationMs) : "not recorded"}
+														</td>
+													</tr>
+												);
+											})}
+										</tbody>
+									</table>
+								</section>
+							) : null}
+							<Facts entries={Object.entries(object(r.toolActivity))} />
+						</div>
+						<div>
+							<h3>Safety</h3>
+							{Object.keys(object(r.safety)).length ? (
+								<Facts entries={Object.entries(object(r.safety))} />
+							) : (
+								<p>No safety facts were recorded in this receipt.</p>
+							)}
+						</div>
+						<div>
+							<details>
+								<summary>Execution provenance & runtime facts</summary>
+								<Facts entries={provenanceFacts(r)} />
+							</details>
+						</div>
+					</div>
+					{r.findingsSummary ? <Facts entries={Object.entries(object(r.findingsSummary))} /> : null}
+					<details>
+						<summary>Full receipt payload</summary>
+						<Json value={r} />
+					</details>
 				</>
-			)}
-			{r ? (
-				<div className="trace-receipt-grid">
-					<div>
-						<h3>Outcome</h3>
-						<Facts
-							entries={["outcome", "outcomeCode", "outcomeDetail", "exitCode", "failureMessage"].map((key) => [key, r[key]])}
-						/>
-					</div>
-					<div>
-						<h3>Spend</h3>
-						<Facts
-							entries={[
-								["cost", typeof r.costDisplay === "string" ? r.costDisplay : "not measured"],
-								...[
-									"costProvenance",
-									"tokenCount",
-									"apiCalls",
-									"missingTokenCalls",
-									"inputTokenCount",
-									"outputTokenCount",
-									"cacheReadTokenCount",
-									"cacheWriteTokenCount",
-									"reasoningTokenCount",
-								].map((key) => [key, r[key]] as [string, unknown]),
-							]}
-						/>
-					</div>
-					<div>
-						<h3>Tools</h3>
-						{Array.isArray(r.toolStats) ? (
-							// biome-ignore lint/a11y/noNoninteractiveTabindex: A table wider than its column scrolls, and a scrolling region must take focus so the keyboard can move it.
-							<section className="table-scroll" tabIndex={0} aria-label="Tool statistics table">
-								<table className="trace-table">
-									<thead>
-										<tr>
-											{["Tool", "Calls", "OK", "Errors", "Blocked", "Time"].map((label) => (
-												<th key={label}>{label}</th>
-											))}
-										</tr>
-									</thead>
-									<tbody>
-										{r.toolStats.map((value, index) => {
-											const stat = object(value);
-											return (
-												<tr key={String(stat.tool ?? index)}>
-													{["tool", "count", "ok", "errors", "blocked"].map((key) => (
-														<td key={key}>{String(stat[key] ?? "not recorded")}</td>
-													))}
-													<td>{typeof stat.totalDurationMs === "number" ? formatDuration(stat.totalDurationMs) : "not recorded"}</td>
-												</tr>
-											);
-										})}
-									</tbody>
-								</table>
-							</section>
-						) : null}
-						<Facts entries={Object.entries(object(r.toolActivity))} />
-					</div>
-					<div>
-						<h3>Safety</h3>
-						{Object.keys(object(r.safety)).length ? (
-							<Facts entries={Object.entries(object(r.safety))} />
-						) : (
-							<p>No safety facts were recorded in this receipt.</p>
-						)}
-					</div>
-					<div>
-						<details>
-							<summary>Execution provenance & runtime facts</summary>
-							<Facts entries={provenanceFacts(r)} />
-						</details>
-					</div>
-				</div>
-			) : null}
-			<h3>Findings</h3>
-			{r?.findingsSummary ? (
-				<>
-					<p>Receipt findings</p>
-					<Facts entries={Object.entries(object(r.findingsSummary))} />
-				</>
-			) : null}
-			{data.evidence ? (
-				<>
-					<p>Evidence findings</p>
-					<Facts entries={Object.entries(data.evidence)} />
-				</>
-			) : (
-				<p>No evidence sidecar recorded.</p>
-			)}
-			{r &&
-			data.evidence &&
-			object(r.findingsSummary).firstPassSuccess !== undefined &&
-			object(r.findingsSummary).firstPassSuccess !== data.evidence.firstPassSuccess ? (
-				<p className="trace-warning">Receipt and evidence disagree on first-pass success; both are shown above.</p>
-			) : null}
-			{r ? (
-				<details>
-					<summary>{full ? "Full receipt payload" : "Receipt summary payload"}</summary>
-					<Json value={r} />
-				</details>
 			) : null}
 		</section>
 	);

@@ -1,6 +1,6 @@
 import type { ReceiptFacts } from "../../contracts/receipt-facts.js";
 import type { TimelineItem } from "../../contracts/sessions.js";
-import { compactCount, compactDuration } from "./overview-model.js";
+import { compactDuration } from "./overview-model.js";
 import { presentTool } from "./tool-presentation.js";
 
 export function receiptLine(receipt: ReceiptFacts): string {
@@ -11,7 +11,7 @@ export function receiptLine(receipt: ReceiptFacts): string {
 		receipt.contract ? `conformance ${receipt.contract}` : "conformance not reported",
 		receipt.trust ? `trust: ${receipt.trust}` : "trust not reported",
 		receipt.validation,
-		receipt.tokens === null ? null : `${compactCount(receipt.tokens)} tokens`,
+		receipt.tokensDisplay ? `${receipt.tokensDisplay} tokens` : null,
 		receipt.elapsedMs === null ? null : compactDuration(receipt.elapsedMs),
 		receipt.placement?.mode === "worktree"
 			? `worktree ${receipt.placement.branch ?? ""}`.trim()

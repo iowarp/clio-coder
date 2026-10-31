@@ -3879,7 +3879,7 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["run", "steps", "receipt", "councils", "gates"],
+									"required": ["run", "steps", "evidence", "councils", "gates"],
 									"properties": {
 										"run": {
 											"type": "object",
@@ -3998,8 +3998,8 @@
 												"additionalProperties": false
 											}
 										},
-										"receipt": {
-											"$ref": "#/components/schemas/Union_26181c03"
+										"evidence": {
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_fba7f104"
 										},
 										"councils": {
 											"type": "object",
@@ -4807,7 +4807,7 @@
 		"/api/fleet/receipts/{id}": {
 			"get": {
 				"operationId": "fleetReceipt",
-				"summary": "Full durable receipt by run identifier",
+				"summary": "Receipt evidence by run identifier, checked against its seal; the saved document on request",
 				"security": [
 					{
 						"bearer": []
@@ -4822,6 +4822,15 @@
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 						}
+					},
+					{
+						"name": "include",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"const": "full"
+						}
 					}
 				],
 				"responses": {
@@ -4831,8 +4840,11 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["receipt"],
+									"required": ["evidence", "receipt"],
 									"properties": {
+										"evidence": {
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_fba7f104"
+										},
 										"receipt": {
 											"$ref": "#/components/schemas/Union_26181c03"
 										}
@@ -13949,7 +13961,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_335ae119"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_454e750b"
 								}
 							}
 						},
@@ -14852,7 +14864,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_335ae119"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_454e750b"
 								}
 							}
 						},
@@ -14947,7 +14959,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_335ae119"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_454e750b"
 								}
 							}
 						},
@@ -14997,7 +15009,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_335ae119"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_454e750b"
 									}
 								}
 							}
@@ -15488,7 +15500,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_335ae119"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_454e750b"
 								}
 							}
 						},
@@ -16126,7 +16138,7 @@
 		"/api/traces/runs/{runId}/receipt": {
 			"get": {
 				"operationId": "traceReceipt",
-				"summary": "Receipt and evidence summary; full payload on request",
+				"summary": "Receipt evidence checked against its seal; the saved document on request",
 				"security": [
 					{
 						"bearer": []
@@ -16159,12 +16171,12 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["receipt", "evidence"],
+									"required": ["evidence", "receipt"],
 									"properties": {
-										"receipt": {
-											"$ref": "#/components/schemas/Union_26181c03"
-										},
 										"evidence": {
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_fba7f104"
+										},
+										"receipt": {
 											"$ref": "#/components/schemas/Union_26181c03"
 										}
 									},
@@ -17710,13 +17722,6 @@
 			}
 		},
 		"schemas": {
-			"Array_011f74a4": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_at_fact_id_f4c4a184"
-				},
-				"maxItems": 128
-			},
 			"Array_0608acf6": {
 				"type": "array",
 				"items": {
@@ -17924,6 +17929,13 @@
 				},
 				"maxItems": 9
 			},
+			"Array_943f12e0": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_at_fact_id_c94e45fa"
+				},
+				"maxItems": 128
+			},
 			"Array_972d2468": {
 				"type": "array",
 				"items": {
@@ -17966,6 +17978,12 @@
 					"$ref": "#/components/schemas/Object_enqueuedAt_id_kind_27281a11"
 				},
 				"maxItems": 64
+			},
+			"Array_ac23550c": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_passed_sourceId_validatorDigest_d555b71d"
+				}
 			},
 			"Array_ad017d75": {
 				"type": "array",
@@ -18040,6 +18058,12 @@
 				"type": "array",
 				"items": {
 					"$ref": "#/components/schemas/Object_origin_path_present_1faa671d"
+				}
+			},
+			"Array_f07c1c28": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_check_durationMs_evidenceRunId_e65d9ddf"
 				}
 			},
 			"Array_f176b569": {
@@ -18290,6 +18314,9 @@
 				},
 				"additionalProperties": false
 			},
+			"Enum_2f17e4ad": {
+				"enum": ["verified", "failed", "absent", "unknown", "not_applicable"]
+			},
 			"Enum_388f3739": {
 				"enum": ["provider-omitted", "stream-dropped", "not-observed", "legacy-record", "unsupported", "writer-gap"]
 			},
@@ -18324,6 +18351,18 @@
 			"Enum_5f1647f2": {
 				"enum": ["never_sent", "sent_unsettled", "settled_no_usage", "settled"]
 			},
+			"Enum_6f2ad7b7": {
+				"enum": ["passed", "failed", "inconclusive", "not_independent", "absent", "unknown", "not_applicable"]
+			},
+			"Enum_747bca52": {
+				"enum": [
+					"validation-tool",
+					"read-only-agent",
+					"no-validation-tool",
+					"acp-external-unobserved",
+					"receipt-unavailable"
+				]
+			},
 			"Enum_82e04794": {
 				"enum": [
 					"chars/4",
@@ -18351,6 +18390,12 @@
 					"denied_by_policy",
 					"worker_failed"
 				]
+			},
+			"Enum_8e9d5d1a": {
+				"enum": ["validated", "failed", "ungrounded", "absent", "unknown", "not_applicable"]
+			},
+			"Enum_958565af": {
+				"enum": ["evidenced", "incomplete", "limited", "absent", "unknown", "not_applicable"]
 			},
 			"Enum_96cd94f8": {
 				"enum": ["stop", "toolUse", "length", "error", "aborted", "unknown"]
@@ -18388,6 +18433,9 @@
 					"observation-trace"
 				]
 			},
+			"Enum_b4a9510b": {
+				"enum": ["recorded", "invalid", "absent", "unknown", "not_applicable"]
+			},
 			"Enum_b62c7c0e": {
 				"enum": ["websocket", "sse", "http", "local", "subprocess", "unknown"]
 			},
@@ -18406,6 +18454,9 @@
 					"keybinding",
 					"unattributed"
 				]
+			},
+			"Enum_cefb75f3": {
+				"enum": ["verified", "verified-ledger-evicted", "failed", "retired-format", "unavailable"]
 			},
 			"Enum_d6fd3d9d": {
 				"enum": [
@@ -19212,7 +19263,7 @@
 								"const": "fleet.loopBlocked"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_5bc452b4"
+								"$ref": "#/components/schemas/Object_item_resource_revision_6eb9e850"
 							}
 						}
 					},
@@ -19240,7 +19291,7 @@
 								"const": "fleet.enqueued"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_5bc452b4"
+								"$ref": "#/components/schemas/Object_item_resource_revision_6eb9e850"
 							}
 						}
 					},
@@ -19268,7 +19319,7 @@
 								"const": "fleet.started"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_5bc452b4"
+								"$ref": "#/components/schemas/Object_item_resource_revision_6eb9e850"
 							}
 						}
 					},
@@ -19296,7 +19347,7 @@
 								"const": "fleet.progress"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_5bc452b4"
+								"$ref": "#/components/schemas/Object_item_resource_revision_6eb9e850"
 							}
 						}
 					},
@@ -19324,7 +19375,7 @@
 								"const": "fleet.completed"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_5bc452b4"
+								"$ref": "#/components/schemas/Object_item_resource_revision_6eb9e850"
 							}
 						}
 					},
@@ -19352,7 +19403,7 @@
 								"const": "fleet.failed"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_5bc452b4"
+								"$ref": "#/components/schemas/Object_item_resource_revision_6eb9e850"
 							}
 						}
 					},
@@ -19380,7 +19431,7 @@
 								"const": "evidence.ready"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_5bc452b4"
+								"$ref": "#/components/schemas/Object_item_resource_revision_6eb9e850"
 							}
 						}
 					},
@@ -20886,6 +20937,21 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_artifactIntegrity_completionEvidence_contextProvenance_faf874aa": {
+				"type": "object",
+				"required": [
+					"artifactIntegrity",
+					"validationGrounding",
+					"independentReview",
+					"contextProvenance",
+					"completionEvidence",
+					"validation"
+				],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_40d2c059"
+				},
+				"additionalProperties": false
+			},
 			"Object_artifact_exitCode_id_1d676309": {
 				"type": "object",
 				"required": ["kind", "id", "exitCode", "message", "artifact"],
@@ -21000,19 +21066,19 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_at_fact_id_c94e45fa": {
+				"type": "object",
+				"required": ["id", "at", "sourceSequence", "fact"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_39fbf6ee"
+				},
+				"additionalProperties": false
+			},
 			"Object_at_fact_id_d293cc5a": {
 				"type": "object",
 				"required": ["id", "at", "sourceSequence", "fact"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_92bc19ac"
-				},
-				"additionalProperties": false
-			},
-			"Object_at_fact_id_f4c4a184": {
-				"type": "object",
-				"required": ["id", "at", "sourceSequence", "fact"],
-				"properties": {
-					"$ref": "#/components/schemas/Shape_3caaf212"
 				},
 				"additionalProperties": false
 			},
@@ -21109,6 +21175,126 @@
 				],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_43643112"
+				},
+				"additionalProperties": false
+			},
+			"Object_authority_display_state_4b97d8c4": {
+				"type": "object",
+				"required": ["state", "display", "authority"],
+				"properties": {
+					"state": {
+						"$ref": "#/components/schemas/Enum_958565af"
+					},
+					"display": {
+						"type": "string"
+					},
+					"authority": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 4096
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_authority_display_state_a3058eb8": {
+				"type": "object",
+				"required": ["state", "display", "authority"],
+				"properties": {
+					"state": {
+						"$ref": "#/components/schemas/Enum_2f17e4ad"
+					},
+					"display": {
+						"type": "string"
+					},
+					"authority": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 4096
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_authority_display_state_b40f3648": {
+				"type": "object",
+				"required": ["state", "display", "authority"],
+				"properties": {
+					"state": {
+						"$ref": "#/components/schemas/Enum_b4a9510b"
+					},
+					"display": {
+						"type": "string"
+					},
+					"authority": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 4096
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_authority_display_state_f6c3b8ed": {
+				"type": "object",
+				"required": ["state", "display", "authority"],
+				"properties": {
+					"state": {
+						"$ref": "#/components/schemas/Enum_8e9d5d1a"
+					},
+					"display": {
+						"type": "string"
+					},
+					"authority": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 4096
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_authority_display_state_fa73a860": {
+				"type": "object",
+				"required": ["state", "display", "authority"],
+				"properties": {
+					"state": {
+						"$ref": "#/components/schemas/Enum_6f2ad7b7"
+					},
+					"display": {
+						"type": "string"
+					},
+					"authority": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 4096
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
 				},
 				"additionalProperties": false
 			},
@@ -21275,6 +21461,44 @@
 				"required": ["shellReused", "cacheReadTokens", "cacheWriteTokens", "uncachedInputTokens", "backendVerdict"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_61296a73"
+				},
+				"additionalProperties": false
+			},
+			"Object_basis_claimed_grounded_dfcc92c9": {
+				"type": "object",
+				"required": ["claimed", "grounded", "ungrounded", "basis"],
+				"properties": {
+					"claimed": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"grounded": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"ungrounded": {
+						"type": "array",
+						"items": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					"basis": {
+						"enum": ["no-command-executed", "unmatched-command"]
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_basis_state_14a62309": {
+				"type": "object",
+				"required": ["state", "basis"],
+				"properties": {
+					"state": {
+						"enum": ["verified", "unverified", "not_applicable", "unknown"]
+					},
+					"basis": {
+						"$ref": "#/components/schemas/Enum_747bca52"
+					}
 				},
 				"additionalProperties": false
 			},
@@ -21883,6 +22107,42 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_check_durationMs_evidenceRunId_e65d9ddf": {
+				"type": "object",
+				"required": ["check", "exitCode", "durationMs", "memo", "outputTail", "evidenceRunId"],
+				"properties": {
+					"check": {
+						"type": "string",
+						"maxLength": 4096
+					},
+					"exitCode": {
+						"type": "integer"
+					},
+					"durationMs": {
+						"type": "number",
+						"minimum": 0
+					},
+					"memo": {
+						"type": "boolean"
+					},
+					"outputTail": {
+						"type": "string",
+						"maxLength": 16384
+					},
+					"evidenceRunId": {
+						"$ref": "#/components/schemas/Union_21b008c5"
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_checks_reason_status_0032e68a": {
+				"type": "object",
+				"required": ["status", "reason", "strategy", "checks"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_beb0097e"
+				},
+				"additionalProperties": false
+			},
 			"Object_choices_heading_id_60282576": {
 				"type": "object",
 				"required": ["id", "kind", "heading", "choices", "initial", "searchable"],
@@ -21943,7 +22203,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_335ae119": {
+			"Object_config_contextWork_fleet_454e750b": {
 				"type": "object",
 				"required": [
 					"id",
@@ -21960,7 +22220,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_44b7cc45"
+					"$ref": "#/components/schemas/Shape_f061b671"
 				},
 				"additionalProperties": false
 			},
@@ -22020,6 +22280,38 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_conformance_kind_quality_08b43e96": {
+				"type": "object",
+				"required": ["sourceId", "validatorDigest", "kind", "conformance", "quality"],
+				"properties": {
+					"sourceId": {
+						"type": "string",
+						"maxLength": 4096
+					},
+					"validatorDigest": {
+						"type": "string",
+						"maxLength": 256
+					},
+					"kind": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 4096
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"conformance": {
+						"enum": ["pass", "fail", "not-reached"]
+					},
+					"quality": {
+						"enum": ["pass", "fail", "unmeasured"]
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_connectionReused_continuation_kind_b28e419b": {
 				"type": "object",
 				"required": [
@@ -22075,7 +22367,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_contract_contractKind_elapsedMs_61f91d36": {
+			"Object_contract_contractKind_elapsedMs_9feda9ea": {
 				"type": "object",
 				"required": [
 					"receiptId",
@@ -22089,7 +22381,7 @@
 					"placement"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_e39cbfc3"
+					"$ref": "#/components/schemas/Shape_93302a75"
 				},
 				"additionalProperties": false
 			},
@@ -22159,6 +22451,30 @@
 					"days": {
 						"type": "integer",
 						"minimum": 1
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_detail_display_state_81096136": {
+				"type": "object",
+				"required": ["state", "display", "detail"],
+				"properties": {
+					"state": {
+						"$ref": "#/components/schemas/Enum_cefb75f3"
+					},
+					"display": {
+						"type": "string"
+					},
+					"detail": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 4096
+							},
+							{
+								"type": "null"
+							}
+						]
 					}
 				},
 				"additionalProperties": false
@@ -22303,6 +22619,48 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_enforcementPassed_runtimeEnforceable_schemaDigest_3923e88f": {
+				"type": "object",
+				"required": ["sourceId", "schemaDigest", "runtimeEnforceable", "enforcementPassed"],
+				"properties": {
+					"sourceId": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 4096
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"schemaDigest": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 256
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"runtimeEnforceable": {
+						"type": "boolean"
+					},
+					"enforcementPassed": {
+						"anyOf": [
+							{
+								"type": "boolean"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_enqueuedAt_id_kind_27281a11": {
 				"type": "object",
 				"required": ["id", "kind", "text", "enqueuedAt", "pinned"],
@@ -22355,6 +22713,36 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_evidenceId_filedAt_findingCount_c986a827": {
+				"type": "object",
+				"required": ["evidenceId", "findingCount", "succeeded", "filedAt"],
+				"properties": {
+					"evidenceId": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 512
+					},
+					"findingCount": {
+						"type": "integer",
+						"minimum": 0
+					},
+					"succeeded": {
+						"anyOf": [
+							{
+								"type": "boolean"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"filedAt": {
+						"type": "string",
+						"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_evidenceId_findingCount_firstPassSuccess_9636d862": {
 				"type": "object",
 				"required": ["runId", "evidenceId", "firstPassSuccess", "findingCount", "tags"],
@@ -22384,6 +22772,44 @@
 					"tags": {
 						"$ref": "#/components/schemas/Array_621cce5c"
 					}
+				},
+				"additionalProperties": false
+			},
+			"Object_evidence_foldVersion_generatedAt_fba7f104": {
+				"type": "object",
+				"required": [
+					"v",
+					"foldVersion",
+					"generatedAt",
+					"kind",
+					"runId",
+					"receipt",
+					"integrity",
+					"trust",
+					"sealed",
+					"evidence"
+				],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_0bd2b8bf"
+				},
+				"additionalProperties": false
+			},
+			"Object_exitCode_failureMessage_hostVerification_6a246425": {
+				"type": "object",
+				"required": [
+					"outcome",
+					"outcomeCode",
+					"exitCode",
+					"failureMessage",
+					"verification",
+					"typedValidations",
+					"hostVerification",
+					"resultContract",
+					"responseSchema",
+					"validationGrounding"
+				],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_31ca1c4f"
 				},
 				"additionalProperties": false
 			},
@@ -22572,11 +22998,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_item_resource_revision_5bc452b4": {
+			"Object_item_resource_revision_6eb9e850": {
 				"type": "object",
 				"required": ["resource", "revision", "item"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_3601d44c"
+					"$ref": "#/components/schemas/Shape_2d5987a6"
 				},
 				"additionalProperties": false
 			},
@@ -22971,6 +23397,24 @@
 				"required": ["parent", "totals", "unreadableAncestors"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_6ac547fd"
+				},
+				"additionalProperties": false
+			},
+			"Object_passed_sourceId_validatorDigest_d555b71d": {
+				"type": "object",
+				"required": ["sourceId", "validatorDigest", "passed"],
+				"properties": {
+					"sourceId": {
+						"type": "string",
+						"maxLength": 4096
+					},
+					"validatorDigest": {
+						"type": "string",
+						"maxLength": 256
+					},
+					"passed": {
+						"type": "boolean"
+					}
 				},
 				"additionalProperties": false
 			},
@@ -23458,545 +23902,7 @@
 					"receipt": {
 						"anyOf": [
 							{
-								"type": "object",
-								"required": [
-									"v",
-									"foldVersion",
-									"generatedAt",
-									"kind",
-									"runId",
-									"receipt",
-									"integrity",
-									"trust",
-									"sealed",
-									"evidence"
-								],
-								"properties": {
-									"v": {
-										"type": "number",
-										"const": 1
-									},
-									"foldVersion": {
-										"type": "integer",
-										"minimum": 1
-									},
-									"generatedAt": {
-										"type": "string",
-										"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-									},
-									"kind": {
-										"type": "string",
-										"const": "receipt-evidence"
-									},
-									"runId": {
-										"type": "string",
-										"minLength": 1,
-										"maxLength": 512
-									},
-									"receipt": {
-										"enum": ["sealed", "unsealed", "missing", "unreadable"]
-									},
-									"integrity": {
-										"type": "object",
-										"required": ["state", "display", "detail"],
-										"properties": {
-											"state": {
-												"enum": ["verified", "verified-ledger-evicted", "failed", "retired-format", "unavailable"]
-											},
-											"display": {
-												"type": "string"
-											},
-											"detail": {
-												"anyOf": [
-													{
-														"type": "string",
-														"maxLength": 4096
-													},
-													{
-														"type": "null"
-													}
-												]
-											}
-										},
-										"additionalProperties": false
-									},
-									"trust": {
-										"type": "object",
-										"required": [
-											"artifactIntegrity",
-											"validationGrounding",
-											"independentReview",
-											"contextProvenance",
-											"completionEvidence",
-											"validation"
-										],
-										"properties": {
-											"artifactIntegrity": {
-												"type": "object",
-												"required": ["state", "display", "authority"],
-												"properties": {
-													"state": {
-														"enum": ["verified", "failed", "absent", "unknown", "not_applicable"]
-													},
-													"display": {
-														"type": "string"
-													},
-													"authority": {
-														"anyOf": [
-															{
-																"type": "string",
-																"maxLength": 4096
-															},
-															{
-																"type": "null"
-															}
-														]
-													}
-												},
-												"additionalProperties": false
-											},
-											"validationGrounding": {
-												"type": "object",
-												"required": ["state", "display", "authority"],
-												"properties": {
-													"state": {
-														"enum": ["validated", "failed", "ungrounded", "absent", "unknown", "not_applicable"]
-													},
-													"display": {
-														"type": "string"
-													},
-													"authority": {
-														"anyOf": [
-															{
-																"type": "string",
-																"maxLength": 4096
-															},
-															{
-																"type": "null"
-															}
-														]
-													}
-												},
-												"additionalProperties": false
-											},
-											"independentReview": {
-												"type": "object",
-												"required": ["state", "display", "authority"],
-												"properties": {
-													"state": {
-														"enum": ["passed", "failed", "inconclusive", "not_independent", "absent", "unknown", "not_applicable"]
-													},
-													"display": {
-														"type": "string"
-													},
-													"authority": {
-														"anyOf": [
-															{
-																"type": "string",
-																"maxLength": 4096
-															},
-															{
-																"type": "null"
-															}
-														]
-													}
-												},
-												"additionalProperties": false
-											},
-											"contextProvenance": {
-												"type": "object",
-												"required": ["state", "display", "authority"],
-												"properties": {
-													"state": {
-														"enum": ["recorded", "invalid", "absent", "unknown", "not_applicable"]
-													},
-													"display": {
-														"type": "string"
-													},
-													"authority": {
-														"anyOf": [
-															{
-																"type": "string",
-																"maxLength": 4096
-															},
-															{
-																"type": "null"
-															}
-														]
-													}
-												},
-												"additionalProperties": false
-											},
-											"completionEvidence": {
-												"type": "object",
-												"required": ["state", "display", "authority"],
-												"properties": {
-													"state": {
-														"enum": ["evidenced", "incomplete", "limited", "absent", "unknown", "not_applicable"]
-													},
-													"display": {
-														"type": "string"
-													},
-													"authority": {
-														"anyOf": [
-															{
-																"type": "string",
-																"maxLength": 4096
-															},
-															{
-																"type": "null"
-															}
-														]
-													}
-												},
-												"additionalProperties": false
-											},
-											"validation": {
-												"type": "string"
-											}
-										},
-										"additionalProperties": false
-									},
-									"sealed": {
-										"anyOf": [
-											{
-												"type": "object",
-												"required": [
-													"outcome",
-													"outcomeCode",
-													"exitCode",
-													"failureMessage",
-													"verification",
-													"typedValidations",
-													"hostVerification",
-													"resultContract",
-													"responseSchema",
-													"validationGrounding"
-												],
-												"properties": {
-													"outcome": {
-														"type": "string",
-														"maxLength": 4096
-													},
-													"outcomeCode": {
-														"anyOf": [
-															{
-																"type": "string",
-																"maxLength": 4096
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"exitCode": {
-														"anyOf": [
-															{
-																"type": "integer"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"failureMessage": {
-														"anyOf": [
-															{
-																"type": "string",
-																"maxLength": 4096
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"verification": {
-														"anyOf": [
-															{
-																"type": "object",
-																"required": ["state", "basis"],
-																"properties": {
-																	"state": {
-																		"enum": ["verified", "unverified", "not_applicable", "unknown"]
-																	},
-																	"basis": {
-																		"enum": [
-																			"validation-tool",
-																			"read-only-agent",
-																			"no-validation-tool",
-																			"acp-external-unobserved",
-																			"receipt-unavailable"
-																		]
-																	}
-																},
-																"additionalProperties": false
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"typedValidations": {
-														"anyOf": [
-															{
-																"type": "array",
-																"items": {
-																	"type": "object",
-																	"required": ["sourceId", "validatorDigest", "passed"],
-																	"properties": {
-																		"sourceId": {
-																			"type": "string",
-																			"maxLength": 4096
-																		},
-																		"validatorDigest": {
-																			"type": "string",
-																			"maxLength": 256
-																		},
-																		"passed": {
-																			"type": "boolean"
-																		}
-																	},
-																	"additionalProperties": false
-																}
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"hostVerification": {
-														"anyOf": [
-															{
-																"type": "object",
-																"required": ["status", "reason", "strategy", "checks"],
-																"properties": {
-																	"status": {
-																		"enum": ["verified", "rejected", "skipped", "not_implicated"]
-																	},
-																	"reason": {
-																		"anyOf": [
-																			{
-																				"type": "string",
-																				"maxLength": 4096
-																			},
-																			{
-																				"type": "null"
-																			}
-																		]
-																	},
-																	"strategy": {
-																		"enum": ["single", "batch-settled"]
-																	},
-																	"checks": {
-																		"type": "array",
-																		"items": {
-																			"type": "object",
-																			"required": ["check", "exitCode", "durationMs", "memo", "outputTail", "evidenceRunId"],
-																			"properties": {
-																				"check": {
-																					"type": "string",
-																					"maxLength": 4096
-																				},
-																				"exitCode": {
-																					"type": "integer"
-																				},
-																				"durationMs": {
-																					"type": "number",
-																					"minimum": 0
-																				},
-																				"memo": {
-																					"type": "boolean"
-																				},
-																				"outputTail": {
-																					"type": "string",
-																					"maxLength": 16384
-																				},
-																				"evidenceRunId": {
-																					"$ref": "#/components/schemas/Union_21b008c5"
-																				}
-																			},
-																			"additionalProperties": false
-																		}
-																	}
-																},
-																"additionalProperties": false
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"resultContract": {
-														"anyOf": [
-															{
-																"type": "object",
-																"required": ["sourceId", "validatorDigest", "kind", "conformance", "quality"],
-																"properties": {
-																	"sourceId": {
-																		"type": "string",
-																		"maxLength": 4096
-																	},
-																	"validatorDigest": {
-																		"type": "string",
-																		"maxLength": 256
-																	},
-																	"kind": {
-																		"anyOf": [
-																			{
-																				"type": "string",
-																				"maxLength": 4096
-																			},
-																			{
-																				"type": "null"
-																			}
-																		]
-																	},
-																	"conformance": {
-																		"enum": ["pass", "fail", "not-reached"]
-																	},
-																	"quality": {
-																		"enum": ["pass", "fail", "unmeasured"]
-																	}
-																},
-																"additionalProperties": false
-															},
-															{
-																"type": "string",
-																"const": "unmeasured"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"responseSchema": {
-														"anyOf": [
-															{
-																"type": "object",
-																"required": ["sourceId", "schemaDigest", "runtimeEnforceable", "enforcementPassed"],
-																"properties": {
-																	"sourceId": {
-																		"anyOf": [
-																			{
-																				"type": "string",
-																				"maxLength": 4096
-																			},
-																			{
-																				"type": "null"
-																			}
-																		]
-																	},
-																	"schemaDigest": {
-																		"anyOf": [
-																			{
-																				"type": "string",
-																				"maxLength": 256
-																			},
-																			{
-																				"type": "null"
-																			}
-																		]
-																	},
-																	"runtimeEnforceable": {
-																		"type": "boolean"
-																	},
-																	"enforcementPassed": {
-																		"anyOf": [
-																			{
-																				"type": "boolean"
-																			},
-																			{
-																				"type": "null"
-																			}
-																		]
-																	}
-																},
-																"additionalProperties": false
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"validationGrounding": {
-														"anyOf": [
-															{
-																"type": "object",
-																"required": ["claimed", "grounded", "ungrounded", "basis"],
-																"properties": {
-																	"claimed": {
-																		"type": "integer",
-																		"minimum": 0
-																	},
-																	"grounded": {
-																		"type": "integer",
-																		"minimum": 0
-																	},
-																	"ungrounded": {
-																		"type": "array",
-																		"items": {
-																			"type": "string",
-																			"maxLength": 4096
-																		}
-																	},
-																	"basis": {
-																		"enum": ["no-command-executed", "unmatched-command"]
-																	}
-																},
-																"additionalProperties": false
-															},
-															{
-																"type": "null"
-															}
-														]
-													}
-												},
-												"additionalProperties": false
-											},
-											{
-												"type": "null"
-											}
-										]
-									},
-									"evidence": {
-										"anyOf": [
-											{
-												"type": "object",
-												"required": ["evidenceId", "findingCount", "succeeded", "filedAt"],
-												"properties": {
-													"evidenceId": {
-														"type": "string",
-														"minLength": 1,
-														"maxLength": 512
-													},
-													"findingCount": {
-														"type": "integer",
-														"minimum": 0
-													},
-													"succeeded": {
-														"anyOf": [
-															{
-																"type": "boolean"
-															},
-															{
-																"type": "null"
-															}
-														]
-													},
-													"filedAt": {
-														"type": "string",
-														"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-													}
-												},
-												"additionalProperties": false
-											},
-											{
-												"type": "null"
-											}
-										]
-									}
-								},
-								"additionalProperties": false
+								"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_fba7f104"
 							},
 							{
 								"type": "null"
@@ -24288,6 +24194,44 @@
 				},
 				"permission": {
 					"$ref": "#/components/schemas/Object_canStopTurn_decision_escalateAt_d6c6b544"
+				}
+			},
+			"Shape_0bd2b8bf": {
+				"v": {
+					"type": "number",
+					"const": 1
+				},
+				"foldVersion": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"generatedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"kind": {
+					"type": "string",
+					"const": "receipt-evidence"
+				},
+				"runId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"receipt": {
+					"enum": ["sealed", "unsealed", "missing", "unreadable"]
+				},
+				"integrity": {
+					"$ref": "#/components/schemas/Object_detail_display_state_81096136"
+				},
+				"trust": {
+					"$ref": "#/components/schemas/Object_artifactIntegrity_completionEvidence_contextProvenance_faf874aa"
+				},
+				"sealed": {
+					"$ref": "#/components/schemas/Union_7ef1af01"
+				},
+				"evidence": {
+					"$ref": "#/components/schemas/Union_25037839"
 				}
 			},
 			"Shape_0c7d4ebb": {
@@ -24656,6 +24600,75 @@
 					"$ref": "#/components/schemas/Union_e56cdbfe"
 				}
 			},
+			"Shape_2d5987a6": {
+				"resource": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"item": {
+					"$ref": "#/components/schemas/Object_at_fact_id_c94e45fa"
+				}
+			},
+			"Shape_31ca1c4f": {
+				"outcome": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"outcomeCode": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"exitCode": {
+					"anyOf": [
+						{
+							"type": "integer"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"failureMessage": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"verification": {
+					"$ref": "#/components/schemas/Union_c61ecf2b"
+				},
+				"typedValidations": {
+					"$ref": "#/components/schemas/Union_e5bede14"
+				},
+				"hostVerification": {
+					"$ref": "#/components/schemas/Union_4e8c2c68"
+				},
+				"resultContract": {
+					"$ref": "#/components/schemas/Union_e30716bb"
+				},
+				"responseSchema": {
+					"$ref": "#/components/schemas/Union_64fd39b7"
+				},
+				"validationGrounding": {
+					"$ref": "#/components/schemas/Union_374d0695"
+				}
+			},
 			"Shape_33da2f86": {
 				"firstRecordAt": {
 					"$ref": "#/components/schemas/Union_9d36f13d"
@@ -24670,17 +24683,23 @@
 					"$ref": "#/components/schemas/Union_54e98030"
 				}
 			},
-			"Shape_3601d44c": {
-				"resource": {
+			"Shape_39fbf6ee": {
+				"id": {
 					"type": "string",
 					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 				},
-				"revision": {
+				"at": {
+					"type": "string"
+				},
+				"sourceSequence": {
 					"type": "integer",
 					"minimum": 1
 				},
-				"item": {
-					"$ref": "#/components/schemas/Object_at_fact_id_f4c4a184"
+				"fact": {
+					"$ref": "#/components/schemas/Union_99776b4c"
+				},
+				"receipt": {
+					"$ref": "#/components/schemas/Object_contract_contractKind_elapsedMs_9feda9ea"
 				}
 			},
 			"Shape_39fec1f7": {
@@ -24704,25 +24723,6 @@
 				},
 				"provenance": {
 					"$ref": "#/components/schemas/Array_721a7562"
-				}
-			},
-			"Shape_3caaf212": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"at": {
-					"type": "string"
-				},
-				"sourceSequence": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"fact": {
-					"$ref": "#/components/schemas/Union_99776b4c"
-				},
-				"receipt": {
-					"$ref": "#/components/schemas/Object_contract_contractKind_elapsedMs_61f91d36"
 				}
 			},
 			"Shape_3d21f4f2": {
@@ -24749,6 +24749,26 @@
 				},
 				"incomplete": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_b20aecff"
+				}
+			},
+			"Shape_40d2c059": {
+				"artifactIntegrity": {
+					"$ref": "#/components/schemas/Object_authority_display_state_a3058eb8"
+				},
+				"validationGrounding": {
+					"$ref": "#/components/schemas/Object_authority_display_state_f6c3b8ed"
+				},
+				"independentReview": {
+					"$ref": "#/components/schemas/Object_authority_display_state_fa73a860"
+				},
+				"contextProvenance": {
+					"$ref": "#/components/schemas/Object_authority_display_state_b40f3648"
+				},
+				"completionEvidence": {
+					"$ref": "#/components/schemas/Object_authority_display_state_4b97d8c4"
+				},
+				"validation": {
+					"type": "string"
 				}
 			},
 			"Shape_43643112": {
@@ -24799,66 +24819,6 @@
 				},
 				"wallTimeMs": {
 					"type": "number"
-				}
-			},
-			"Shape_44b7cc45": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_11bb1234"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_ad017d75"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_2e9e6083"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_862a0b3c"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_011f74a4"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_48e336de": {
@@ -25667,6 +25627,107 @@
 					"$ref": "#/components/schemas/Union_afe90f89"
 				}
 			},
+			"Shape_93302a75": {
+				"receiptId": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"outcome": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"contract": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"contractKind": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"trust": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"validation": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"tokens": {
+					"anyOf": [
+						{
+							"type": "number",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"tokensDisplay": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"elapsedMs": {
+					"anyOf": [
+						{
+							"type": "number",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"placement": {
+					"$ref": "#/components/schemas/Union_fe2cccf3"
+				},
+				"unavailable": {
+					"type": "boolean",
+					"const": true
+				}
+			},
 			"Shape_97c11ec5": {
 				"version": {
 					"type": "number",
@@ -26146,6 +26207,28 @@
 					"type": "boolean"
 				}
 			},
+			"Shape_beb0097e": {
+				"status": {
+					"enum": ["verified", "rejected", "skipped", "not_implicated"]
+				},
+				"reason": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"strategy": {
+					"enum": ["single", "batch-settled"]
+				},
+				"checks": {
+					"$ref": "#/components/schemas/Array_f07c1c28"
+				}
+			},
 			"Shape_c0a4f62c": {
 				"fact": {
 					"$ref": "#/components/schemas/Union_5b2eea1c"
@@ -26562,96 +26645,6 @@
 					"type": "boolean"
 				}
 			},
-			"Shape_e39cbfc3": {
-				"receiptId": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"outcome": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"contract": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"contractKind": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"trust": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"validation": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"tokens": {
-					"anyOf": [
-						{
-							"type": "number",
-							"minimum": 0
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"elapsedMs": {
-					"anyOf": [
-						{
-							"type": "number",
-							"minimum": 0
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"placement": {
-					"$ref": "#/components/schemas/Union_fe2cccf3"
-				},
-				"unavailable": {
-					"type": "boolean",
-					"const": true
-				}
-			},
 			"Shape_e5e8cddc": {
 				"id": {
 					"type": "string"
@@ -26798,6 +26791,66 @@
 				"queued": {
 					"type": "boolean",
 					"const": true
+				}
+			},
+			"Shape_f061b671": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_11bb1234"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_ad017d75"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_2e9e6083"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_862a0b3c"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_943f12e0"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_f0cf5df2": {
@@ -27766,6 +27819,16 @@
 					}
 				]
 			},
+			"Union_25037839": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_evidenceId_filedAt_findingCount_c986a827"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_26181c03": {
 				"anyOf": [
 					{
@@ -27889,6 +27952,16 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Object_backend_backendVerdict_cacheReadTokens_bb1d823e"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_374d0695": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_basis_claimed_grounded_dfcc92c9"
 					},
 					{
 						"type": "null"
@@ -28105,6 +28178,16 @@
 					}
 				]
 			},
+			"Union_4e8c2c68": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_checks_reason_status_0032e68a"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_54e98030": {
 				"anyOf": [
 					{
@@ -28177,6 +28260,16 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Object_at_current_detail_a4cc3422"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_64fd39b7": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_enforcementPassed_runtimeEnforceable_schemaDigest_3923e88f"
 					},
 					{
 						"type": "null"
@@ -28332,6 +28425,16 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Object_used_window_03e419ef"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_7ef1af01": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_exitCode_failureMessage_hostVerification_6a246425"
 					},
 					{
 						"type": "null"
@@ -28886,6 +28989,16 @@
 					}
 				]
 			},
+			"Union_c61ecf2b": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_basis_state_14a62309"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_c6270044": {
 				"anyOf": [
 					{
@@ -28987,6 +29100,20 @@
 					}
 				]
 			},
+			"Union_e30716bb": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_conformance_kind_quality_08b43e96"
+					},
+					{
+						"type": "string",
+						"const": "unmeasured"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_e331c0cd": {
 				"anyOf": [
 					{
@@ -29034,6 +29161,16 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Enum_c8cf9948"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_e5bede14": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Array_ac23550c"
 					},
 					{
 						"type": "null"

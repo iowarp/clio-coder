@@ -1,10 +1,13 @@
-// What a sealed run receipt says was checked, one independent fact per row. The receipt reaches the
-// browser as untyped JSON, so every field is read defensively: a shape this build does not know reads
-// as "not recorded", never as a pass. No row summarizes another, because verification, typed checks,
-// host checks, result-contract conformance, contract quality and claim grounding are sealed by
-// different authorities and a quiet pass on one says nothing about the rest.
+// What a sealed run receipt says was checked, one independent fact per row, read from the read model's receipt
+// evidence (#434 §11.3), which states the sealed facts only under a seal that verifies. A state this build does
+// not know reads as "not recorded", never as a pass. No row summarizes another, because verification, typed checks,
+// host checks, result-contract conformance, contract quality and claim grounding are sealed by different
+// authorities and a quiet pass on one says nothing about the rest.
 
+import type { ReceiptEvidenceV1 } from "../../../contracts/wire.js";
 import type { StatusTone } from "../../design/status.js";
+
+type Sealed = NonNullable<ReceiptEvidenceV1["sealed"]>;
 
 export interface CheckItem {
 	/** Position and name; two checks may share a name. */
@@ -74,8 +77,7 @@ const NOT_RECORDED = (key: CheckRow["key"], label: string, source: string, meani
 
 const VERIFICATION_SOURCE = "Sealed by Clio Coder from the run's own tool calls.";
 
-function verification(receipt: Record<string, unknown>): CheckRow {
-	const value = record(receipt.verification);
+function verification(value: Sealed["verification"]): CheckRow {
 	const state = string(value?.state);
 	const basis = string(value?.basis);
 	if (!value || !state)
@@ -112,11 +114,11 @@ function verification(receipt: Record<string, unknown>): CheckRow {
 
 const TYPED_SOURCE = "Observed by Clio Coder from validation tool results. A worker's own report never fills this.";
 
-function typedChecks(quality: Record<string, unknown> | null): CheckRow {
-	if (!quality || !Array.isArray(quality.typedValidations))
+function typedChecks(validations: Sealed["typedValidations"]): CheckRow {
+	if (!Array.isArray(validations))
 		return NOT_RECORDED("typed", "Executed checks", TYPED_SOURCE, "This receipt carries no typed validation list.");
 	const items = keyed(
-		quality.typedValidations.map((entry): Omit<CheckItem, "id"> => {
+		validations.map((entry): Omit<CheckItem, "id"> => {
 			const fact = record(entry);
 			const passed = fact?.passed;
 			return {
@@ -163,8 +165,7 @@ const HOST_REASONS: Record<string, string> = {
 	worker_not_successful: "The worker did not succeed, so the declared checks did not run.",
 };
 
-function hostChecks(receipt: Record<string, unknown>): CheckRow {
-	const value = record(receipt.hostVerification);
+function hostChecks(value: Sealed["hostVerification"]): CheckRow {
 	if (!value)
 		return {
 			key: "host",
@@ -224,14 +225,13 @@ function hostChecks(receipt: Record<string, unknown>): CheckRow {
 const CONTRACT_SOURCE =
 	"Checked by Clio Coder against the agent's declared result contract when the receipt was sealed.";
 
-function contract(quality: Record<string, unknown> | null): CheckRow[] {
-	if (!quality || !("resultContract" in quality))
+function contract(fact: Sealed["resultContract"]): CheckRow[] {
+	if (fact === null)
 		return [
 			NOT_RECORDED("conformance", "Result format", CONTRACT_SOURCE, "This receipt carries no result-contract fact."),
 			NOT_RECORDED("quality", "Result quality", CONTRACT_SOURCE, "This receipt carries no result-contract fact."),
 		];
-	const fact = record(quality.resultContract);
-	if (!fact)
+	if (fact === "unmeasured")
 		return [
 			{
 				key: "conformance",
@@ -302,8 +302,7 @@ function contract(quality: Record<string, unknown> | null): CheckRow[] {
 
 const SCHEMA_SOURCE = "Reported by the model runtime when it enforces a response schema.";
 
-function schema(quality: Record<string, unknown> | null): CheckRow {
-	const fact = record(quality?.responseSchema);
+function schema(fact: Sealed["responseSchema"]): CheckRow {
 	if (!fact)
 		return NOT_RECORDED("schema", "Response schema", SCHEMA_SOURCE, "This receipt carries no response-schema fact.");
 	if (fact.runtimeEnforceable !== true)
@@ -328,8 +327,7 @@ function schema(quality: Record<string, unknown> | null): CheckRow {
 const GROUNDING_SOURCE =
 	"The worker's own claims of passing checks, matched against commands its tool calls show it ran.";
 
-function grounding(receipt: Record<string, unknown>): CheckRow {
-	const value = record(receipt.validationGrounding);
+function grounding(value: Sealed["validationGrounding"]): CheckRow {
 	if (!value)
 		return {
 			key: "grounding",
@@ -380,15 +378,65 @@ function grounding(receipt: Record<string, unknown>): CheckRow {
 	return { key: "grounding", label: "Claimed checks", tone, word, meaning, source: GROUNDING_SOURCE, items };
 }
 
-/** Every row, in the order a reader asks: did it verify, what ran, was the result the right shape, was it good, what was claimed. */
-export function receiptChecks(receipt: Record<string, unknown>): CheckRow[] {
-	const quality = record(receipt.quality);
+/**
+ * Every row, in the order a reader asks: did it verify, what ran, was the result the right shape, was it good, what
+ * was claimed. None when the seal did not verify, since nothing the receipt states can then be vouched for.
+ */
+export function receiptChecks(evidence: ReceiptEvidenceV1): CheckRow[] {
+	const sealed = evidence.sealed;
+	if (!sealed) return [];
 	return [
-		verification(receipt),
-		typedChecks(quality),
-		hostChecks(receipt),
-		...contract(quality),
-		grounding(receipt),
-		schema(quality),
+		verification(sealed.verification),
+		typedChecks(sealed.typedValidations),
+		hostChecks(sealed.hostVerification),
+		...contract(sealed.resultContract),
+		grounding(sealed.validationGrounding),
+		schema(sealed.responseSchema),
 	];
+}
+
+export interface ReceiptIntegrity {
+	tone: StatusTone;
+	/** The read model's integrity word for the seal. */
+	word: string;
+	/** What the state means for the checks below it, with the verifier's own reason when it gave one. */
+	meaning: string;
+}
+
+/** Whether the receipt's seal vouches for its checks, worded by the read model and explained here. */
+export function receiptIntegrity(evidence: ReceiptEvidenceV1): ReceiptIntegrity {
+	const { integrity } = evidence;
+	const detail = integrity.detail ? ` ${integrity.detail}` : "";
+	if (evidence.receipt === "missing")
+		return { tone: "neutral", word: integrity.display, meaning: "No receipt was saved for this run." };
+	if (evidence.receipt === "unreadable")
+		return { tone: "fail", word: integrity.display, meaning: `The saved receipt cannot be read.${detail}` };
+	if (evidence.receipt === "unsealed")
+		return {
+			tone: "unverified",
+			word: integrity.display,
+			meaning: "The receipt carries no seal, so none of its checks can be vouched for.",
+		};
+	switch (integrity.state) {
+		case "verified":
+			return { tone: "success", word: integrity.display, meaning: "The seal verifies against the run's ledger row." };
+		case "verified-ledger-evicted":
+			return {
+				tone: "success",
+				word: integrity.display,
+				meaning: "The seal verifies on its own; the ledger row it was sealed from is no longer kept.",
+			};
+		case "failed":
+			return {
+				tone: "fail",
+				word: integrity.display,
+				meaning: `The seal does not verify, so none of the receipt's checks are shown.${detail}`,
+			};
+		default:
+			return {
+				tone: "unverified",
+				word: integrity.display,
+				meaning: `This build cannot verify the seal, so none of the receipt's checks are shown.${detail}`,
+			};
+	}
 }

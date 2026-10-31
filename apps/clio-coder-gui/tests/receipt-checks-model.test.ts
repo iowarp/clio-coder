@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { contractName, receiptChecks } from "../client/pages/traces/receipt-checks-model.js";
+import { contractName, receiptChecks, receiptIntegrity } from "../client/pages/traces/receipt-checks-model.js";
+import type { ReceiptEvidenceV1 } from "../contracts/wire.js";
 
 // Each fixture restates the check-bearing fields of a real v20 receipt sealed by 0.5.6. Digests are
 // shortened stand-ins; the states, bases and claim names are the ones those receipts carry.
@@ -82,7 +83,37 @@ const scoutPassed = {
 	},
 };
 
-const byKey = (receipt: Record<string, unknown>) => new Map(receiptChecks(receipt).map((row) => [row.key, row]));
+/**
+ * A fixture as the read model states it under a seal that verifies: the receipt's quality block flattens into the
+ * sealed facts, and a quality block with no result contract reads `unmeasured` (#434 §11.3).
+ */
+function sealedEvidence(raw: Record<string, unknown>): ReceiptEvidenceV1 {
+	const quality = raw.quality && typeof raw.quality === "object" ? (raw.quality as Record<string, unknown>) : null;
+	return {
+		v: 1,
+		foldVersion: 1,
+		generatedAt: "2026-10-30T00:00:00.000Z",
+		kind: "receipt-evidence",
+		runId: "run-1",
+		receipt: "sealed",
+		integrity: { state: "verified", display: "verified", detail: null },
+		sealed: {
+			outcome: "succeeded",
+			outcomeCode: null,
+			exitCode: 0,
+			failureMessage: null,
+			verification: raw.verification ?? null,
+			typedValidations: quality ? (quality.typedValidations ?? null) : null,
+			hostVerification: raw.hostVerification ?? null,
+			resultContract: quality ? (quality.resultContract ?? "unmeasured") : null,
+			responseSchema: quality?.responseSchema ?? null,
+			validationGrounding: raw.validationGrounding ?? null,
+		},
+		evidence: null,
+	} as unknown as ReceiptEvidenceV1;
+}
+const byKey = (receipt: Record<string, unknown>) =>
+	new Map(receiptChecks(sealedEvidence(receipt)).map((row) => [row.key, row]));
 
 test("a verify-tool pass is a verified run with one passed check, and nothing else is promoted", () => {
 	const rows = byKey(verifiedTool);
@@ -226,7 +257,7 @@ test("absent or unfamiliar fields never read as success", () => {
 		{ verification: { state: "trusted" }, hostVerification: { status: "fine", checks: [{ check: "x" }] } },
 	];
 	for (const shape of shapes)
-		for (const row of receiptChecks(shape)) {
+		for (const row of receiptChecks(sealedEvidence(shape))) {
 			assert.notEqual(row.tone, "success", `${JSON.stringify(shape)} promoted ${row.key}`);
 			for (const item of row.items)
 				assert.notEqual(item.tone, "success", `${JSON.stringify(shape)} promoted ${item.name}`);
@@ -236,6 +267,22 @@ test("absent or unfamiliar fields never read as success", () => {
 	assert.equal(empty.get("typed")?.word, "Not recorded");
 	assert.equal(empty.get("conformance")?.word, "Not recorded");
 	assert.equal(empty.get("quality")?.word, "Not recorded");
+});
+
+test("a seal that does not verify shows no check, only the read model's integrity word and why", () => {
+	const tampered = {
+		...sealedEvidence(verifiedTool),
+		integrity: { state: "failed", display: "seal failed", detail: "digest mismatch" },
+		sealed: null,
+	} as ReceiptEvidenceV1;
+	assert.deepEqual(receiptChecks(tampered), []);
+	assert.deepEqual(receiptIntegrity(tampered), {
+		tone: "fail",
+		word: "seal failed",
+		meaning: "The seal does not verify, so none of the receipt's checks are shown. digest mismatch",
+	});
+	assert.equal(receiptIntegrity({ ...tampered, receipt: "missing" }).meaning, "No receipt was saved for this run.");
+	assert.equal(receiptIntegrity(sealedEvidence(verifiedTool)).tone, "success");
 });
 
 test("contract names come from the source id's kind segment", () => {

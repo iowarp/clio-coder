@@ -45,11 +45,12 @@ test("trace history lists run journals joined to the ledger, with read-model row
 		await h.request("/api/traces/runs/run-0000/receipt?include=full"),
 		routes.traceReceipt.response,
 	);
-	for (const key of ["output", "upstreamResponses", "routeDecision", "briefing", "steering"]) {
-		assert.ok(!(key in (brief.receipt ?? {})));
-		assert.ok(key in (full.receipt ?? {}));
-	}
-	assert.equal(brief.evidence?.evidenceId, "evidence-1");
+	// The receipt is its evidence through the seal check; the saved document leaves only when asked for (#434 §11.3).
+	assert.equal(brief.receipt, null);
+	assert.equal(brief.evidence.integrity.state, "verified");
+	assert.equal(brief.evidence.sealed?.validationGrounding?.claimed, 2);
+	assert.equal(full.receipt?.runId, "run-0000");
+	assert.equal(brief.evidence.evidence?.evidenceId, "evidence-1");
 	// A pruned receipt reads back from its verified evidence copy, never as the tombstone it left (#434).
 	const sealed = readFileSync(join(state, "receipts/run-0000.json"), "utf8");
 	mkdirSync(join(h.home.path, "data/evidence/evidence-1"), { recursive: true });
@@ -63,7 +64,7 @@ test("trace history lists run journals joined to the ledger, with read-model row
 			format: "clio-receipt-tombstone/1",
 			runId: "run-0000",
 			evidenceId: "evidence-1",
-			digest: "fixture-receipt-digest",
+			digest: (JSON.parse(sealed) as { integrity: { digest: string } }).integrity.digest,
 			prunedAt: "2026-10-30T00:00:00.000Z",
 		}),
 	);
@@ -72,6 +73,7 @@ test("trace history lists run journals joined to the ledger, with read-model row
 		routes.traceReceipt.response,
 	);
 	assert.deepEqual(pruned.receipt, full.receipt);
+	assert.equal(pruned.evidence.integrity.state, "verified");
 	writeFileSync(join(state, "receipts/run-0000.json"), sealed);
 	assert.equal((await h.request("/api/traces/runs/missing")).status, 404);
 	assert.equal((await h.post("/api/traces/runs")).status, 405);
@@ -83,14 +85,18 @@ test("trace history lists run journals joined to the ledger, with read-model row
 		assert.ok([404, 422].includes(response.status), `${id}: ${response.status}`);
 	}
 	const empty = await json(await h.request("/api/traces/runs/absent/receipt"), routes.traceReceipt.response);
-	assert.deepEqual(empty, { receipt: null, evidence: null });
+	assert.equal(empty.receipt, null);
+	assert.equal(empty.evidence.receipt, "missing");
 	for (const malformed of ["{bad", "[]", "null"]) {
 		writeFileSync(join(state, "receipts/run-0000.json"), malformed);
 		writeFileSync(join(state, "evidence-index.json"), malformed);
-		assert.deepEqual(await json(await h.request("/api/traces/runs/run-0000/receipt"), routes.traceReceipt.response), {
-			receipt: null,
-			evidence: null,
-		});
+		const unreadable = await json(
+			await h.request("/api/traces/runs/run-0000/receipt?include=full"),
+			routes.traceReceipt.response,
+		);
+		assert.equal(unreadable.receipt, null);
+		assert.equal(unreadable.evidence.receipt, "unreadable");
+		assert.equal(unreadable.evidence.sealed, null);
 	}
 	rmSync(join(state, "receipts/run-0000.json"));
 	const outside = join(h.home.path, "outside.json");

@@ -19,6 +19,7 @@ import { explainRepoRef, isRepoRef } from "../../../../../src/domains/observabil
 import type { RunListCursor } from "../../../../../src/domains/session/telemetry-source.js";
 import {
 	listRunTelemetrySources,
+	loadRunReceiptEvidence,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
 } from "../../../../../src/domains/session/telemetry-source.js";
@@ -62,7 +63,9 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 		// A run that never had a directory is not found; one whose journal is missing or torn is unknown coverage.
 		if (!existsSync(join(state, "runs", input.runId))) throw new AppProblem("not_found", "No run journal holds that id.");
 		const source = loadRunTelemetrySource(state, input.runId);
-		return input.kind === "run" ? runTelemetry(input.runId, source) : runTimeline(input.runId, source);
+		return input.kind === "run"
+			? runTelemetry(input.runId, source, {}, loadRunReceiptEvidence(state, input.runId))
+			: runTimeline(input.runId, source);
 	}
 	if (!Value.Check(Id, input.sessionId)) throw new AppProblem("validation", "Invalid session identifier.");
 	if (!preflightLedger() && !input.knownSession) throw notFound();

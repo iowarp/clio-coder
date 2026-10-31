@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import type { Static } from "typebox";
 import type { Councils, FleetGates } from "../../contracts/fleet.js";
@@ -393,13 +394,18 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 		queryFn: () => client.call(routes.dispatchRun, { ...emptyInput, params: { id } }),
 		enabled: dispatch,
 	});
+	// The saved document is read only once asked for; until then the receipt is its evidence alone (#434 §11.3).
+	const [full, setFull] = useState(false);
 	const receipt = useQuery({
 		meta: { errorSurface: "inline" },
-		queryKey: ["fleet-receipt", id],
-		queryFn: () => client.call(routes.fleetReceipt, { ...emptyInput, params: { id } }),
-		enabled: dispatch,
+		queryKey: ["fleet-receipt", id, full],
+		queryFn: () =>
+			client.call(routes.fleetReceipt, { ...emptyInput, params: { id }, query: full ? { include: "full" } : {} }),
+		enabled: dispatch || full,
+		placeholderData: (previous) => previous,
 	});
-	const artifact = dispatch ? receipt.data?.receipt : root.data?.receipt;
+	const evidence = dispatch ? receipt.data?.evidence : root.data?.evidence;
+	const saved = full && !receipt.isPlaceholderData ? receipt.data?.receipt : null;
 	return (
 		<section className="run-inspection">
 			<Link to={back}>← Fleet history</Link>
@@ -520,13 +526,19 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 			)}
 			<h2>Saved receipt</h2>
 			{dispatch && receipt.isPending && <p>Reading receipt…</p>}
-			{artifact ? (
+			{evidence ? (
 				<>
-					<ReceiptChecks receipt={artifact} />
-					<details>
-						<summary>Every receipt field</summary>
-						<Facts value={artifact} hide={["version"]} />
-					</details>
+					<ReceiptChecks evidence={evidence} />
+					{saved ? (
+						<details>
+							<summary>Every receipt field, as saved</summary>
+							<Facts value={saved} hide={["version"]} />
+						</details>
+					) : evidence.receipt !== "missing" ? (
+						<button type="button" disabled={full && receipt.isFetching} onClick={() => setFull(true)}>
+							{full && receipt.isFetching ? "Reading receipt…" : "Load full receipt"}
+						</button>
+					) : null}
 				</>
 			) : !(dispatch ? receipt.isPending || receipt.error : root.isPending || root.error) ? (
 				<PanelEmpty>{emptyState.emptyStore("readable receipt", "for this run")}</PanelEmpty>
