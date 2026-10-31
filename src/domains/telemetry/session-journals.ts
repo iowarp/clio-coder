@@ -121,8 +121,10 @@ export function createSessionJournals(
 		entry.open = false;
 		entry.closing ??= entry.journal.then(async (journal) => {
 			try {
-				if (seal && journal && !(await journal.seal())) report();
-				await journal?.close();
+				// Sealing and closing are one writer operation, so a held lease cannot append or store in between (#434).
+				if (seal && journal) {
+					if (!(await journal.sealAndClose())) report();
+				} else await journal?.close();
 			} catch {
 				report();
 			} finally {

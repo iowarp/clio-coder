@@ -136,8 +136,7 @@ export function createProcessJournal(
 				const health = journal.health();
 				// The seal must cover a durable process.exited; without one the exit status is lost, so nothing seals.
 				const exited = queued && health.writeErrors === 0 && health.persisted > persisted;
-				const sealed = exited && (await journal.seal());
-				await journal.close();
+				const sealed = exited ? await journal.sealAndClose() : (await journal.close(), false);
 				if (!sealed) unavailable();
 				return sealed;
 			})();

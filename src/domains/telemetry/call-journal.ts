@@ -73,6 +73,11 @@ export interface CallJournal extends TelemetrySink {
 	admits(kind: JournalEventName): boolean;
 	flush(): Promise<void>;
 	close(): Promise<void>;
+	/**
+	 * Seal and close as one operation: appends and object stores are refused from the first moment, accepted work
+	 * drains, then the seal lands and the writer closes. False when the seal did not land (#434).
+	 */
+	sealAndClose(): Promise<boolean>;
 	health(): JournalHealth;
 	/**
 	 * Reserve research-capture bytes for a preimage before storing it. False at the cap: the caller stores
@@ -381,7 +386,6 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			let failed = false;
 			let scheduled: NodeJS.Immediate | undefined;
 			let flushing: Promise<void> | undefined;
-			let closing: Promise<void> | undefined;
 			const skipped = scan.rows.filter((row) => row.kind === "skipped").length;
 			const health = (): JournalHealth => ({
 				queueDepth: count,
@@ -672,6 +676,26 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 					return false;
 				}
 			};
+			let finishing: Promise<boolean> | undefined;
+			/**
+			 * Close the writer, sealing first when asked. One operation: new appends and object stores are refused at
+			 * once, then the work already accepted drains, then the seal lands and the writer closes, so nothing can
+			 * slip in between the seal and the close (#434). A second call shares the first one's result.
+			 */
+			const finish = (sealing: boolean): Promise<boolean> => {
+				if (finishing) return finishing;
+				closed = true;
+				unregister?.();
+				finishing = (async () => {
+					// Closing a writer never seals by itself: sealing follows the scope's lifecycle (#434).
+					const sealed = await exclusively(() => holdingBatches(async () => (sealing ? sealNow() : false)));
+					if (scheduled) clearImmediate(scheduled);
+					release();
+					await owner;
+					return sealed;
+				})();
+				return finishing;
+			};
 			const journal: CallJournal = {
 				seal() {
 					if (closed) return Promise.resolve(false);
@@ -714,17 +738,10 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				flush,
 				health,
 				close() {
-					if (closing) return closing;
-					closed = true;
-					unregister?.();
-					closing = (async () => {
-						// Closing a writer never seals: sealing follows the scope's lifecycle, never writer disposal (#434).
-						await exclusively(() => holdingBatches(async () => {}));
-						if (scheduled) clearImmediate(scheduled);
-						release();
-						await owner;
-					})();
-					return closing;
+					return finish(false).then(() => undefined);
+				},
+				sealAndClose() {
+					return finish(true);
 				},
 			};
 			// The lazy process owner handles unscoped emits; explicit contexts also route during recovery (#434).
