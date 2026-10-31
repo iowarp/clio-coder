@@ -6,6 +6,7 @@ import { liveSessionOwner } from "../session/live-owner.js";
 import { CONTENT_SUBJECTS, collectRefs } from "./bundle.js";
 import {
 	TELEMETRY_JOURNAL_FILE,
+	telemetryBundlePath,
 	telemetryJournalFiles,
 	telemetryObjectsDirectory,
 	telemetryRunDirectory,
@@ -45,7 +46,7 @@ export interface PruneAction {
 
 export interface PruneHold {
 	path: string;
-	reason: "live" | "unknown-owner" | "fork-parent" | "referenced-run" | "receipt" | "unreadable" | "symlink";
+	reason: "live" | "unknown-owner" | "fork-parent" | "referenced-run" | "unreadable" | "symlink";
 }
 
 export interface PrunePlan {
@@ -81,7 +82,7 @@ interface SessionTelemetry {
 interface RunTelemetry {
 	runId: string;
 	directory: string;
-	segments: FileInfo[];
+	files: FileInfo[];
 	lastWriteMs: number;
 	bytes: number;
 	hold: PruneHold["reason"] | null;
@@ -219,24 +220,32 @@ async function readSessionTelemetry(
 async function readRunTelemetry(stateDir: string, runId: string): Promise<RunTelemetry | null> {
 	const directory = join(telemetryRunsDirectory(stateDir), runId);
 	const segmentNames = telemetryJournalFiles(await names(directory));
-	if (segmentNames.length === 0) return null;
-	const run: RunTelemetry = { runId, directory, segments: [], lastWriteMs: 0, bytes: 0, hold: null };
-	for (const name of segmentNames) {
-		const file = await info(join(directory, name));
+	const objectsDirectory = telemetryObjectsDirectory(directory);
+	const objectNames = (await realDirectory(objectsDirectory))
+		? (await names(objectsDirectory)).filter((name) => OBJECT_FILE.test(name))
+		: [];
+	const paths = [
+		...segmentNames.map((name) => join(directory, name)),
+		telemetryBundlePath(directory),
+		...objectNames.map((name) => join(objectsDirectory, name)),
+	];
+	const run: RunTelemetry = { runId, directory, files: [], lastWriteMs: 0, bytes: 0, hold: null };
+	for (const path of paths) {
+		const file = await info(path);
 		if (!file) continue;
-		run.segments.push(file);
+		run.files.push(file);
 		run.lastWriteMs = Math.max(run.lastWriteMs, file.mtimeMs);
 		run.bytes += file.bytes;
 	}
+	if (run.files.length === 0) return null;
 	if (locked(directory)) run.hold = "live";
-	else if (existsSync(join(stateDir, "receipts", `${runId}.json`))) run.hold = "receipt";
 	return run;
 }
 
 /**
  * Read-only: what a prune under `policy` would remove and what it must keep (#434). A live or
- * unreadable session keeps every file; a fork parent with a kept child, a run a kept journal or a
- * receipt references, and an object a kept record cites are never collected. Research retention is
+ * unreadable session keeps every file; a fork parent with a kept child, a run a kept journal
+ * references, and an object a kept record cites are never collected. Research retention is
  * the one exception by decision (O5): content preimages expire after their research window while the
  * records citing them stay, and those references then read as missing.
  */
@@ -270,7 +279,7 @@ export async function planTelemetryPrune(
 		const run = await readRunTelemetry(stateDir, runId);
 		if (run) runs.push(run);
 	}
-	// Content preimages count toward the research budget, everything else in a journal toward the standard one.
+	// Session content preimages count toward research; sealed runs stay whole in the standard budget (#434).
 	const sessionBytes = (session: SessionTelemetry) =>
 		[...session.objects].reduce(
 			(sum, [id, file]) => sum + (CONTENT_SUBJECTS.has(session.refs.get(id) ?? "") ? 0 : file.bytes),
@@ -310,7 +319,7 @@ export async function planTelemetryPrune(
 		for (const file of [...session.segments, ...session.objects.values()]) plan.remove.push({ ...file, reason, owner });
 	}
 
-	// Runs: only unreferenced ones, never one a receipt or a kept session journal cites.
+	// A run's sealed bundle and objects expire with its journal so retained evidence stays complete (#434).
 	const cited = new Set(sessions.filter((session) => !doomed.has(session)).flatMap((session) => [...session.runs]));
 	for (const run of runs.sort((a, b) => a.lastWriteMs - b.lastWriteMs)) {
 		const hold = run.hold ?? (cited.has(run.runId) ? "referenced-run" : null);
@@ -321,8 +330,7 @@ export async function planTelemetryPrune(
 		if (run.lastWriteMs >= cutoff && standing <= policy.maxBytes) continue;
 		standing -= run.bytes;
 		const reason: PruneReason = run.lastWriteMs < cutoff ? "expired" : "over-size";
-		for (const file of run.segments)
-			plan.remove.push({ ...file, reason, owner: { kind: "run", directory: run.directory } });
+		for (const file of run.files) plan.remove.push({ ...file, reason, owner: { kind: "run", directory: run.directory } });
 	}
 
 	// Kept, readable, idle sessions: research content past its window, then objects no record cites.
@@ -402,11 +410,7 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 			}
 		}
 	}
-	for (const directory of new Set(
-		result.removed.flatMap((action) =>
-			action.owner.kind === "session" ? [telemetryObjectsDirectory(action.owner.directory)] : [],
-		),
-	)) {
+	for (const directory of new Set(result.removed.map((action) => telemetryObjectsDirectory(action.owner.directory)))) {
 		// Only an emptied objects directory goes; rmdir refuses one that still holds a file.
 		await rmdir(directory).catch(() => {});
 	}

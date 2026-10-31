@@ -1306,7 +1306,9 @@ async function runFleetHoldingWorkspace(
 					terminalRunId: stepResult.terminalRunId,
 					receiptDigest: stepResult.receiptDigest ?? null,
 					recordPath:
-						step.kind === "code" ? rootJournalPath : join(clioStateDir(), "receipts", `${stepResult.terminalRunId}.json`),
+						step.kind === "code"
+							? rootJournalPath
+							: telemetryJournalPath(telemetryRunDirectory(clioStateDir(), stepResult.terminalRunId)),
 					...(stepResult.failureReason !== undefined ? { failureReason: stepResult.failureReason } : {}),
 					stepEntryDigest: fleetStepEntryDigest(entry),
 					manifestStepCount,

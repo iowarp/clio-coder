@@ -3,11 +3,11 @@
  *
  * Dispatch admission asks the route observer for a readiness window on every
  * dispatch, and the window needs every settled run plus every gate decision
- * artifact. This cache stats each run's sealed bundle and each gate artifact
- * and re-reads only the ones whose identity changed, so a dispatch pays for the
- * runs sealed since the previous one (#434).
+ * artifact. This cache stats every file in each run's sealed scope and each gate
+ * artifact and re-reads only the ones whose identity changed, so a dispatch pays
+ * for the scopes changed since the previous one (#434).
  *
- * A file's identity is its inode, size and mtime. A run scope's `bundle.json`,
+ * A file's identity is its inode, size, mtime and ctime. A run scope's `bundle.json`,
  * `runs.json` and gate artifacts are all written by tmp-and-rename, so every
  * rewrite lands on a new inode even inside one mtime tick. An unchanged file
  * keeps returning the same object, which is what lets the object-keyed gate
@@ -15,10 +15,16 @@
  * yields a fresh object and is verified again.
  */
 
-import { existsSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { join } from "node:path";
 import type { SettledRunRecord } from "../telemetry/index.js";
-import { readVerifiedRun, telemetryRunDirectory } from "../telemetry/index.js";
+import {
+	readVerifiedRun,
+	telemetryBundlePath,
+	telemetryJournalFiles,
+	telemetryObjectsDirectory,
+	telemetryRunDirectory,
+} from "../telemetry/index.js";
 import { type GateDecisionArtifact, gateDecisionsDirectory, verifyGateDecisionArtifact } from "./gate-decisions.js";
 import type { RouteQualityRun } from "./route-quality.js";
 import type { RunEnvelope } from "./types.js";
@@ -48,14 +54,42 @@ interface FileIdentity {
 	ino: number;
 	size: number;
 	mtimeMs: number;
+	ctimeMs: number;
 }
 
 function identityOf(stats: Stats): FileIdentity {
-	return { ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs };
+	return { ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs, ctimeMs: stats.ctimeMs };
 }
 
 function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
-	return left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs;
+	return (
+		left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
+	);
+}
+
+/** A seal covers every segment and object, so any changed or missing file invalidates the cached verdict (#434). */
+function runIdentity(directory: string): string | null {
+	try {
+		const paths = [
+			telemetryBundlePath(directory),
+			...telemetryJournalFiles(readdirSync(directory)).map((name) => join(directory, name)),
+		];
+		const objects = telemetryObjectsDirectory(directory);
+		try {
+			paths.push(
+				objects,
+				...readdirSync(objects)
+					.sort()
+					.map((name) => join(objects, name)),
+			);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
+		return JSON.stringify(paths.map((path) => [path, identityOf(lstatSync(path))]));
+	} catch {
+		// An incomplete or unreadable scope cannot contribute trusted evidence (#434).
+		return null;
+	}
 }
 
 function statOrNull(path: string): Stats | null {
@@ -71,7 +105,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 interface RunEntry {
-	identity: FileIdentity;
+	identity: string;
 	/** The envelope the cached source was paired with, serialized for comparison. */
 	envelopeJson: string;
 	source: DurableRunSource | null;
@@ -140,20 +174,18 @@ export function createDurableQualitySourceCache(
 		const seen = new Set<string>();
 		const sources: DurableRunSource[] = [];
 		for (const envelope of envelopes) {
-			// A scope's bundle.json is written when it seals, so its identity changes exactly when the seal does.
-			const path = join(telemetryRunDirectory(options.stateDir, envelope.id), "bundle.json");
+			const path = telemetryRunDirectory(options.stateDir, envelope.id);
 			seen.add(path);
-			const stats = statOrNull(path);
-			if (stats === null) {
+			const identity = runIdentity(path);
+			if (identity === null) {
 				if (runs.delete(path)) changed = true;
 				continue;
 			}
-			const identity = identityOf(stats);
 			const cached = runs.get(path);
 			// An unchanged runs.json hands back the same envelope objects, so the
 			// pairing can only have moved when the ledger itself was re-read.
 			const envelopeJson = envelopesChanged || cached === undefined ? JSON.stringify(envelope) : cached.envelopeJson;
-			if (cached !== undefined && sameIdentity(cached.identity, identity) && cached.envelopeJson === envelopeJson) {
+			if (cached !== undefined && cached.identity === identity && cached.envelopeJson === envelopeJson) {
 				if (cached.source !== null) sources.push(cached.source);
 				continue;
 			}

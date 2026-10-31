@@ -477,6 +477,8 @@ export interface RepoTelemetrySources {
 
 const isCall = (record: TelemetryRecord) => record.k === "call.started" || record.k === "call.settled";
 const accounting = (record: TelemetryRecord) => record.k === "run.usage_reported" || isCall(record);
+// A run may settle before any call starts; its outcome and tool facts still belong in reports (#434).
+const reportableRun = (record: TelemetryRecord) => accounting(record) || record.k === "run.settled";
 
 /**
  * An attempt counts in the window its settlement falls in, or its start while it has none; any other record counts by
@@ -495,8 +497,8 @@ function windowRecords(records: readonly TelemetryRecord[], from: number, to: nu
 }
 
 /**
- * A session as the window sees it: its in-window records, the runs with in-window accounting (or none at all but an
- * in-window reference), and no ancestor, since an ancestor in the window is one of the window's own sessions.
+ * A session as the window sees it: its in-window records, the runs with in-window accounting or settlement (or no
+ * accounting but an in-window reference), and no ancestor, since an ancestor in the window is one of its own sessions.
  */
 function windowSession(source: SessionSource, from: number, to: number): SessionSource {
 	const records = windowRecords(source.journal.records, from, to);
@@ -506,7 +508,7 @@ function windowSession(source: SessionSource, from: number, to: number): Session
 	const runs = new Map<string, JournalSource>();
 	for (const [runId, run] of source.runs) {
 		const windowed = { ...run, records: windowRecords(run.records, from, to) };
-		if (windowed.records.some(accounting) || (!run.records.some(accounting) && referenced.has(runId)))
+		if (windowed.records.some(reportableRun) || (!run.records.some(accounting) && referenced.has(runId)))
 			runs.set(runId, windowed);
 	}
 	return {
@@ -589,7 +591,7 @@ function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTele
 		// A run a session owns belongs to that session's accounting, in or out of this window (#434).
 		if (source.records.some((record) => record.ctx.sessionId !== null)) continue;
 		const windowed = { ...source, records: windowRecords(source.records, from, to) };
-		if (windowed.records.some(accounting) || !source.present) runs.set(runId, windowed);
+		if (windowed.records.some(reportableRun) || !source.present) runs.set(runId, windowed);
 	}
 	return { sessions, runs };
 }
