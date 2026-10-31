@@ -10,7 +10,7 @@ import type { ClioSettings } from "../core/config.js";
 import { messageUsageForAccounting } from "../core/message-accounting.js";
 import type { PackageIdentity } from "../core/package-identity.js";
 import type { FactSum } from "../core/telemetry/fact.js";
-import { sumFacts } from "../core/telemetry/pricing.js";
+import { sumFactSums, sumFacts } from "../core/telemetry/pricing.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import { noteAnthropicStreamQuota, noteCodexStreamQuota } from "../domains/quota/index.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
@@ -18,7 +18,6 @@ import type { BudgetBlockData, SessionEntry } from "../domains/session/entries.j
 import { BUDGET_BLOCK_ENTRY } from "../domains/session/entries.js";
 import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
-import { sumFactSums } from "../domains/telemetry/folds.js";
 import type { TurnTokens } from "../domains/turn-control/index.js";
 import { replaceEngineMessages, setEngineCodexUserTurn } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";

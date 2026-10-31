@@ -31,7 +31,7 @@ import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/tel
 import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
-import { type Pricing, sumPricing } from "../../core/telemetry/pricing.js";
+import { type PricingSum, sumFactSums } from "../../core/telemetry/pricing.js";
 import {
 	renderCount,
 	renderCountSum,
@@ -61,7 +61,6 @@ import {
 	foldCalls,
 	foldFacts,
 	foldRunJournal,
-	sumFactSums,
 	TELEMETRY_FOLD_VERSION,
 } from "./folds.js";
 import type { telemetryPromptStructure } from "./objects.js";
@@ -2047,31 +2046,34 @@ export function repoCostReport(
 	};
 }
 
-/** A token field over many runs, each run one contribution (#434 §11.3). */
+/** A token field over many runs, each run's calls its contributions (#434 §11.3). */
 export interface RunsTotal {
 	/** The known part. */
 	known: number;
-	/** Runs that left the field unknown. */
+	/** Contributions that left the field unknown. */
 	unknownRuns: number;
 	display: string;
 }
 
 /**
  * A token field over runs the read model holds no journal fold for, such as the run ledger `fleet status` lists, where
- * reading every run journal costs seconds. Each run's fact is one contribution, so an unknown run leaves the total a
- * lower bound beside the number of such runs, never a sum that took it for zero.
+ * reading every run journal costs seconds. Each run's sum over its calls is added as it is, so an unknown call leaves
+ * the total a lower bound beside the count of such contributions, never a sum that took it for zero.
  */
-export function runsTotal(facts: readonly Fact<number>[]): RunsTotal {
-	const sum = foldFacts(facts);
+export function runsTotal(sums: readonly FactSum[]): RunsTotal {
+	const sum = sumFactSums(sums);
 	return { known: sum.measured + sum.estimated, unknownRuns: sum.unknownCount, display: renderCountSum(sum, "run") };
 }
 
 /**
- * A cost over runs the read model holds no journal fold for, each run's pricing one contribution, worded by the
- * canonical renderer: an estimated run marks the whole `~`, and a run nobody priced leaves it a lower bound (§11.3).
+ * A cost over runs the read model holds no journal fold for, each run's priced sum added as it is, worded by the
+ * canonical renderer: an estimated part marks the whole `~`, and an unpriced call leaves it a lower bound (§11.3).
  */
-export function runsCost(pricings: readonly Pricing[]): { fact: FactSum; display: string } {
-	const sum = sumPricing(pricings);
+export function runsCost(pricings: readonly PricingSum[]): { fact: FactSum; display: string } {
+	const sum: PricingSum = {
+		usd: sumFactSums(pricings.map((pricing) => pricing.usd)),
+		free: pricings.length > 0 && pricings.every((pricing) => pricing.free),
+	};
 	return { fact: sum.usd, display: renderPricingSum(sum) };
 }
 

@@ -94,7 +94,7 @@ import {
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { isReceiptBearingFrame } from "../../src/worker/protocol.js";
 import { checkTelemetryProducer, checkTelemetryWrites } from "../boundaries/check-boundaries.js";
-import { measuredSpend } from "../harness/receipt.js";
+import { measuredRunSpend } from "../harness/receipt.js";
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
 const context = { sessionId: "journal-session", agent: { role: "main" as const, id: "journal-session" } };
@@ -1579,7 +1579,7 @@ test("fleet status reads unknown journal facts even when the ledger holds token 
 		startedAt: "2026-10-30T00:00:00.000Z",
 		endedAt: "2026-10-30T00:01:00.000Z",
 		pid: 1,
-		spend: measuredSpend({ input: 70, output: 30 }, 0.12),
+		...measuredRunSpend({ input: 70, output: 30 }, 0.12),
 		runtimeKind: "native",
 		cwd: scratch,
 	});

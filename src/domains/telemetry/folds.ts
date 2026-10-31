@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { TelemetryAgent } from "../../core/telemetry/context.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
-import { sumFacts } from "../../core/telemetry/pricing.js";
+import { sumFactSums, sumFacts } from "../../core/telemetry/pricing.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
 
 /** Stamped on every read-model DTO; bump when a fold rule changes what a sum means (#434, R4). */
@@ -368,18 +368,6 @@ function componentSubtotal(components: readonly FactSum[]): FactSum {
 		result.absentCount = Math.max(result.absentCount, sum.absentCount);
 		for (const kind of ["measured", "estimated", "unknown"] as const)
 			result.coverage[kind] = Math.max(result.coverage[kind], sum.coverage[kind]);
-	}
-	return result;
-}
-
-export function sumFactSums(sums: readonly FactSum[]): FactSum {
-	const result = emptyFactSum();
-	for (const sum of sums) {
-		result.measured += sum.measured;
-		result.estimated += sum.estimated;
-		result.unknownCount += sum.unknownCount;
-		result.absentCount += sum.absentCount;
-		for (const kind of ["measured", "estimated", "unknown"] as const) result.coverage[kind] += sum.coverage[kind];
 	}
 	return result;
 }

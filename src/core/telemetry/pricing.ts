@@ -1,7 +1,7 @@
 import type { Fact, FactSum } from "./fact.js";
-import type { PricedBy, Pricing, RunUsageFacts } from "./schemas.js";
+import type { PricedBy, Pricing, RunSpendSums, RunUsageFacts } from "./schemas.js";
 
-export type { PricedBy, Pricing };
+export type { PricedBy, Pricing, RunSpendSums };
 
 const notObserved: Fact<number> = { kind: "unknown", reason: "not-observed" };
 
@@ -62,6 +62,52 @@ export function sumPricing(pricings: Iterable<Pricing>): PricingSum {
 		usd: sumFacts(list.map((pricing) => pricing.usd)),
 		free: list.length > 0 && list.every((pricing) => pricing.pricedBy === "free"),
 	};
+}
+
+/** The sums of a run with no call fold behind it: each settled fact is the run's one contribution. */
+export function spendSumsOf(facts: RunUsageFacts): RunSpendSums {
+	const usage = facts.usage;
+	return {
+		usage: {
+			input: sumFacts([usage.input]),
+			cacheRead: sumFacts([usage.cacheRead]),
+			cacheWrite: sumFacts([usage.cacheWrite]),
+			cacheWrite1h: sumFacts([usage.cacheWrite1h]),
+			output: sumFacts([usage.output]),
+			reasoning: sumFacts([usage.reasoning]),
+		},
+		totalTokens: sumFacts([facts.totalTokens]),
+		apiCalls: sumFacts([facts.apiCalls]),
+		usd: sumFacts([facts.pricing.usd]),
+	};
+}
+
+/** Several runs' spend as one priced sum; free holds only when every run was priced free. */
+export function sumRunSpend(runs: Iterable<{ spend: RunUsageFacts; spendSums: RunSpendSums }>): PricingSum {
+	const list = [...runs];
+	return {
+		usd: sumFactSums(list.map((run) => run.spendSums.usd)),
+		free: list.length > 0 && list.every((run) => run.spend.pricing.pricedBy === "free"),
+	};
+}
+
+/** Sums added as they are; each keeps its known subtotal and its unknown contributions (#434). */
+export function sumFactSums(sums: Iterable<FactSum>): FactSum {
+	const result: FactSum = {
+		measured: 0,
+		estimated: 0,
+		unknownCount: 0,
+		absentCount: 0,
+		coverage: { measured: 0, estimated: 0, unknown: 0 },
+	};
+	for (const sum of sums) {
+		result.measured += sum.measured;
+		result.estimated += sum.estimated;
+		result.unknownCount += sum.unknownCount;
+		result.absentCount += sum.absentCount;
+		for (const kind of ["measured", "estimated", "unknown"] as const) result.coverage[kind] += sum.coverage[kind];
+	}
+	return result;
 }
 
 /** A run with no call telemetry: every quantity unknown, never zero (R1, #434). */

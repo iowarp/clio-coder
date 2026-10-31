@@ -15,7 +15,7 @@ import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { mainAgentTerminalReason, runStatusForOutcome } from "../../domains/dispatch/outcome.js";
-import { type RunCallUsage, runUsageFactsFromCalls } from "../../domains/dispatch/run-call-usage.js";
+import { type RunCallUsage, runUsageFromCalls } from "../../domains/dispatch/run-call-usage.js";
 import {
 	createRunResultQuality,
 	deriveRunVerification,
@@ -178,7 +178,7 @@ interface HeadlessMainAgentRunStats {
 	verifyCalls: VerifyCallOutcome[];
 	skillActivations: SkillActivation[];
 	/** Every call the run made, as its settlement states it; the run's spend folds these (#434). */
-	calls: Parameters<typeof runUsageFactsFromCalls>[0][number][];
+	calls: Parameters<typeof runUsageFromCalls>[0][number][];
 	/** Journal attempts already counted, so a call two messages carry counts once. */
 	seenAttempts: Set<string>;
 	/** The decision axis, counted the way a worker's settled run counts it. */
@@ -614,7 +614,7 @@ async function recordHeadlessMainAgentRun(input: {
 	if (!snapshot) return;
 	if (!isMainAgentRunKind(snapshot.runtimeKind)) return;
 	// The read model's fold of the run's session calls is its spend; the run's own calls stand without one (#434).
-	const spend = input.calls?.facts ?? runUsageFactsFromCalls(input.stats.calls);
+	const { facts: spend, sums: spendSums } = input.calls ?? runUsageFromCalls(input.stats.calls);
 	const { exitCode, outcome, status } = input.terminal;
 	const outcomeDetail = input.terminal.outcomeDetail ?? input.terminal.failureMessage;
 	const outcomeCode = outcome === "failed" ? snapshot.outcomeCode : undefined;
@@ -649,6 +649,7 @@ async function recordHeadlessMainAgentRun(input: {
 		lineage,
 		exitCode,
 		spend,
+		spendSums,
 		...(input.stats.toolRounds.length > 0 ? { toolRounds: input.stats.toolRounds } : {}),
 		promptSignature: snapshot.promptSignature,
 		toolSignature: snapshot.toolSignature,
@@ -687,6 +688,7 @@ async function recordHeadlessMainAgentRun(input: {
 		exitCode,
 		...(input.terminal.failureMessage !== null ? { failureMessage: input.terminal.failureMessage } : {}),
 		spend,
+		spendSums,
 		...(input.stats.toolRounds.length > 0 ? { toolRounds: input.stats.toolRounds } : {}),
 		compiledPromptHash: snapshot.compiledPromptHash,
 		staticCompositionHash: snapshot.staticCompositionHash,

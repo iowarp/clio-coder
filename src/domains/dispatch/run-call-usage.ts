@@ -4,7 +4,7 @@ import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EstimateMethod, Fact, FactSum } from "../../core/telemetry/fact.js";
 import { readWorkerTelemetryRecord } from "../../core/telemetry/forwarder.js";
-import { unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
+import { type RunSpendSums, sumFacts, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
 import { abandonedSettlement } from "../../core/telemetry/producer.js";
 import type { CallSettled, RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { CallTotals, FoldOptions } from "../telemetry/folds.js";
@@ -17,7 +17,7 @@ export interface RunCallUsage {
 	/** The journal may hold calls this fold could not count: a gap, an unclosed attempt or an unresolved reference. */
 	coverageUnknown: boolean;
 	/** The run's spend as sums over its calls, so a budget counts the priced part of a partly priced run (#434). */
-	sums: { usd: FactSum; totalTokens: FactSum; apiCalls: FactSum };
+	sums: RunSpendSums;
 	/** The same fold as one fact per quantity, as run.settled records it (#434). */
 	facts: RunUsageFacts;
 }
@@ -135,14 +135,15 @@ function runUsageFacts(records: readonly TelemetryRecord[], folded: ReturnType<t
 export type CallSpend = Pick<CallSettled, "disposition" | "usage" | "pricing">;
 
 /** A run's spend from settlements a host holds outside a run journal, such as a headless main agent's calls (#434). */
-export function runUsageFactsFromCalls(calls: readonly CallSpend[]): RunUsageFacts {
+export function runUsageFromCalls(calls: readonly CallSpend[]): { facts: RunUsageFacts; sums: RunSpendSums } {
 	const totals = emptyCallTotals();
 	for (const call of calls) addCallTotals(totals, call);
 	const provenance = provenanceOf(calls);
 	const field = (key: string, sum: FactSum, fallback: MeasuredSource = "provider") =>
 		collapse(sum, provenance.get(key), fallback);
 	const sent = calls.filter((call) => call.disposition !== "never_sent");
-	return {
+	const apiCalls: Fact<number> = { kind: "measured", value: sent.length, source: "local-count" };
+	const facts: RunUsageFacts = {
 		usage: {
 			input: field("input", totals.usage.input),
 			cacheRead: field("cacheRead", totals.usage.cacheRead),
@@ -152,11 +153,15 @@ export function runUsageFactsFromCalls(calls: readonly CallSpend[]): RunUsageFac
 			reasoning: field("reasoning", totals.usage.reasoning),
 		},
 		totalTokens: field("total", totals.totalTokens),
-		apiCalls: { kind: "measured", value: sent.length, source: "local-count" },
+		apiCalls,
 		pricing: {
 			usd: field("usd", totals.usd, "local-count"),
 			pricedBy: weakestPricedBy(new Set(sent.map((call) => call.pricing.pricedBy))),
 		},
+	};
+	return {
+		facts,
+		sums: { usage: totals.usage, totalTokens: totals.totalTokens, apiCalls: sumFacts([apiCalls]), usd: totals.usd },
 	};
 }
 
@@ -169,7 +174,7 @@ export function runUsageFromCallRecords(input: Iterable<TelemetryRecord>, option
 		callFacts: folded.calls.totals,
 		usageFacts: folded.usage,
 		coverageUnknown: folded.unknownCoverage,
-		sums: { usd: folded.usd, totalTokens: folded.totalTokens, apiCalls: folded.apiCalls },
+		sums: { usage: folded.usage, totalTokens: folded.totalTokens, apiCalls: folded.apiCalls, usd: folded.usd },
 		facts: runUsageFacts(records, folded),
 	};
 }

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import { measuredSpend } from "../harness/receipt.js";
+import { measuredRunSpend } from "../harness/receipt.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("dispatch run ledger state", () => {
@@ -38,7 +38,7 @@ describe("dispatch run ledger state", () => {
 			heartbeatAt: null,
 			sessionId: "session-1",
 			cwd: "/workspace",
-			spend: measuredSpend({ input: 20, output: 22 }, 0.01),
+			...measuredRunSpend({ input: 20, output: 22 }, 0.01),
 		};
 		writeFileSync(runsPath, JSON.stringify([row], null, 2), "utf8");
 		strictEqual(openLedger().get("run-v1")?.id, "run-v1");

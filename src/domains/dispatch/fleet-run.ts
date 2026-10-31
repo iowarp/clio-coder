@@ -19,7 +19,7 @@ import { attributeCommitMessage } from "../../core/commit-attribution.js";
 import { telemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
-import { type PricingSum, sumFacts, sumPricing } from "../../core/telemetry/pricing.js";
+import { type PricingSum, sumFacts, sumPricing, sumRunSpend } from "../../core/telemetry/pricing.js";
 import { renderPricing } from "../../core/telemetry/render.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
@@ -315,7 +315,7 @@ function stepRunOf(result: RunResult): StepRun {
 		runtimeId: result.runtimeId,
 		nodeId: result.node?.id ?? "local",
 		changedPaths: [...(result.worktree?.changedPaths ?? []), ...(result.checkoutChanges?.changedPaths ?? [])],
-		pricing: sumPricing([result.spend.pricing]),
+		pricing: sumRunSpend([result]),
 	};
 }
 
@@ -1042,7 +1042,7 @@ async function runFleetHoldingWorkspace(
 							agentId: step.agentId,
 							succeeded: stepSucceeded,
 							terminalRunId: receipt.runId,
-							pricing: sumPricing([receipt.spend.pricing]),
+							pricing: sumRunSpend([receipt]),
 							run: receipt,
 							...(failureReason !== undefined ? { failureReason } : {}),
 						});
@@ -1373,7 +1373,7 @@ async function runFleetHoldingWorkspace(
 		planHash: input.plan.hash,
 		result,
 		receipts,
-		totalCost: sumPricing(receipts.map((receipt) => receipt.spend.pricing)),
+		totalCost: sumRunSpend(receipts),
 		requiredStepCount: required.length,
 		succeededStepCount,
 		resolvedLoopCount: result.loops.length - failedLoops.length,

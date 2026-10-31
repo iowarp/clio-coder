@@ -3,7 +3,13 @@ import { claudeAuthEnvironment, withClaudeCredential } from "../../core/claude-e
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
-import { noCallRunUsageFacts, sumFacts, sumPricing } from "../../core/telemetry/pricing.js";
+import {
+	noCallRunUsageFacts,
+	type RunSpendSums,
+	spendSumsOf,
+	sumFactSums,
+	sumRunSpend,
+} from "../../core/telemetry/pricing.js";
 import { renderUsdEstimate, renderUsdLimit } from "../../core/telemetry/render.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { ToolRoundRecord } from "../../engine/types.js";
@@ -526,6 +532,11 @@ function meterSpend(meter: RunTokenMeter): RunUsageFacts {
 	return meter.usage?.facts ?? unobservedRunUsageFacts();
 }
 
+/** The same spend as sums over the meter's calls, so a total across runs keeps a partly priced run's subtotal. */
+function meterSums(meter: RunTokenMeter): RunSpendSums {
+	return meter.usage?.sums ?? spendSumsOf(unobservedRunUsageFacts());
+}
+
 /** The priced part of a running worker's spend; a budget counts it even while other calls are unpriced. */
 function meterKnownUsd(meter: RunTokenMeter): number {
 	return meter.usage ? factKnownValue(meter.usage.sums.usd) : 0;
@@ -771,12 +782,13 @@ async function settleRunResult(
 function runSettlementReceiptFields(
 	terminal: ResolvedTerminalReason,
 	usage: RunCallUsage | undefined,
-): Pick<RunResultDraft, "terminalReason" | "callIds" | "spend"> {
+): Pick<RunResultDraft, "terminalReason" | "callIds" | "spend" | "spendSums"> {
 	// The receipt's spend is the call fold at settlement, the same facts run.settled records (#434).
 	return {
 		terminalReason: terminal.terminalReason,
 		...(usage ? { callIds: [...usage.callIds] } : {}),
 		spend: usage?.facts ?? unobservedRunUsageFacts(),
+		spendSums: usage?.sums ?? spendSumsOf(unobservedRunUsageFacts()),
 	};
 }
 
@@ -4279,7 +4291,7 @@ export function createDispatchBundle(
 
 	/** Session-scope totals for the operator snapshot; finalized runs only. */
 	let finalizedRuntimeSeconds = 0;
-	const finalizedSpends: RunUsageFacts[] = [];
+	const finalizedSpends: Array<Pick<RunResult, "spend" | "spendSums">> = [];
 
 	function workersMaxRetries(settings: EffectiveSettings = getEffectiveSettings()): number {
 		const value = settings?.fleet?.retry.maxRetries;
@@ -4333,7 +4345,7 @@ export function createDispatchBundle(
 	}
 
 	function accumulateFinalizedTotals(receipt: RunResult): void {
-		finalizedSpends.push(receipt.spend);
+		finalizedSpends.push({ spend: receipt.spend, spendSums: receipt.spendSums });
 		const startMs = Date.parse(receipt.startedAt);
 		const endMs = Date.parse(receipt.endedAt);
 		if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
@@ -4896,8 +4908,9 @@ export function createDispatchBundle(
 			// Finalizers keep active entries while persisting their sealed receipt.
 			if (!row || row.endedAt !== null) continue;
 			const spend = meterSpend(run.meter);
-			if (!isDeepStrictEqual(row.spend, spend)) {
-				ledger.update(run.runId, { spend });
+			const spendSums = meterSums(run.meter);
+			if (!isDeepStrictEqual(row.spend, spend) || !isDeepStrictEqual(row.spendSums, spendSums)) {
+				ledger.update(run.runId, { spend, spendSums });
 				liveUsageDirty = true;
 			}
 			if (run.awaitingOperator === true) {
@@ -6281,7 +6294,9 @@ export function createDispatchBundle(
 		): RunResultDraft => {
 			// The peer's own reports reach the run journal as run.usage_reported, so the call fold is the run's spend;
 			// a run whose telemetry never arrived stays unknown (#434).
-			const spend = callUsage?.snapshot()?.facts ?? unobservedRunUsageFacts();
+			const usage = callUsage?.snapshot();
+			const spend = usage?.facts ?? unobservedRunUsageFacts();
+			const spendSums = usage?.sums ?? spendSumsOf(spend);
 			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const init = result.delegation.initialize;
 			const agentInfo = init?.agentInfo;
@@ -6327,6 +6342,7 @@ export function createDispatchBundle(
 						: result.exitCode,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				spend,
+				spendSums,
 				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
@@ -6590,6 +6606,7 @@ export function createDispatchBundle(
 					exitCode: receiptDraft.exitCode,
 					sessionId: receiptDraft.sessionId,
 					spend: receiptDraft.spend,
+					spendSums: receiptDraft.spendSums,
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
 					heartbeatAt: heartbeatIso(acp.heartbeatAt),
@@ -6814,7 +6831,7 @@ export function createDispatchBundle(
 						qualityLabel: quality.label,
 						firstPass: outcome === "succeeded" && (receipt.lineage?.attempt ?? 0) === 0,
 						attempt: receipt.lineage?.attempt ?? 0,
-						costUsd: factKnownValue(receipt.spend.pricing.usd),
+						costUsd: factKnownValue(receipt.spendSums.usd),
 						endToEndMs: phases?.totalEndToEndMs ?? 0,
 						receipt,
 						quality,
@@ -8177,6 +8194,7 @@ export function createDispatchBundle(
 				outcomeDetail: finalOutcomeDetail,
 				...(finalFailureMessage !== undefined ? { failureMessage: finalFailureMessage } : {}),
 				spend: meterSpend(tokenMeter),
+				spendSums: meterSums(tokenMeter),
 				...(tokenMeter.toolRounds ? { toolRounds: tokenMeter.toolRounds } : {}),
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
@@ -8892,6 +8910,7 @@ export function createDispatchBundle(
 					endedAt,
 					exitCode: receiptDraft.exitCode,
 					spend: receiptDraft.spend,
+					spendSums: receiptDraft.spendSums,
 					sessionShellHash: receiptDraft.sessionShellHash ?? null,
 					dynamicHash: receiptDraft.dynamicHash ?? null,
 					...(activeRun.heartbeatAt ? { heartbeatAt: heartbeatIso(activeRun.heartbeatAt) } : {}),
@@ -9955,6 +9974,7 @@ export function createDispatchBundle(
 						outcomeDetail: null,
 						exitCode: 0,
 						spend: noCallRunUsageFacts(),
+						spendSums: spendSumsOf(noCallRunUsageFacts()),
 						output: { state: "final", text: input.text, bytes: Buffer.byteLength(input.text, "utf8"), truncated: false },
 						compiledPromptHash: null,
 						staticCompositionHash: null,
@@ -10270,7 +10290,7 @@ export function createDispatchBundle(
 				spend,
 				node: run.node !== null ? { ...run.node } : null,
 			});
-			spends.push(spend);
+			spends.push({ spend, spendSums: meterSums(run.meter) });
 			runtimeSeconds += elapsedMs / 1000;
 		}
 		const retrying = [...retryQueue.values()].map((entry) => ({
@@ -10286,8 +10306,8 @@ export function createDispatchBundle(
 			running,
 			retrying,
 			totals: {
-				tokens: sumFacts(spends.map((spend) => spend.totalTokens)),
-				cost: sumPricing(spends.map((spend) => spend.pricing)),
+				tokens: sumFactSums(spends.map((run) => run.spendSums.totalTokens)),
+				cost: sumRunSpend(spends),
 				runtimeSeconds,
 			},
 		};

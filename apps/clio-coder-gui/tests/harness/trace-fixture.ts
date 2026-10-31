@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RunEnvelope, RunResultDraft } from "../../../../src/domains/dispatch/types.js";
-import { fixtureReceiptDraft, measuredSpend } from "../../../../tests/harness/receipt.js";
+import { fixtureReceiptDraft, measuredRunSpend } from "../../../../tests/harness/receipt.js";
 import { writeSettledRun } from "../../../../tests/harness/settled-run.js";
 import { telemetryCall } from "../../../../tests/harness/telemetry-view.js";
 import { seedRunJournal } from "./telemetry-fixture.js";
@@ -101,7 +101,7 @@ export async function traceFixture(
 			heartbeatAt: null,
 			sessionId: null,
 			cwd: state,
-			spend: measuredSpend({}, 0),
+			...measuredRunSpend({}, 0),
 		};
 		rows.push(row);
 		await seedRunJournal(state, runId, i === 0 ? fullJournal(runId) : [{ kind: "process.started", data: {}, at: at(0) }]);

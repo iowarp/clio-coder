@@ -1,7 +1,7 @@
 /** Run envelope and result draft fixtures for settlement (#434). */
 
 import type { PricedBy } from "../../src/core/telemetry/pricing.js";
-import { pricedUsd } from "../../src/core/telemetry/pricing.js";
+import { pricedUsd, spendSumsOf } from "../../src/core/telemetry/pricing.js";
 import type { RunUsageFacts } from "../../src/core/telemetry/schemas.js";
 import type { RunEnvelope, RunResultDraft } from "../../src/domains/dispatch/types.js";
 
@@ -40,6 +40,12 @@ export function measuredSpend(
 	};
 }
 
+/** The same measured spend in both shapes a run row and a receipt carry: its facts and the sums a total adds. */
+export function measuredRunSpend(...args: Parameters<typeof measuredSpend>): Pick<RunEnvelope, "spend" | "spendSums"> {
+	const spend = measuredSpend(...args);
+	return { spend, spendSums: spendSumsOf(spend) };
+}
+
 export function fixtureEnvelope(runId = "run-1"): RunEnvelope {
 	return {
 		version: 1,
@@ -61,7 +67,7 @@ export function fixtureEnvelope(runId = "run-1"): RunEnvelope {
 		heartbeatAt: null,
 		sessionId: "session-1",
 		cwd: "/workspace",
-		spend: measuredSpend({ input: 20, output: 22 }, 0.01),
+		...measuredRunSpend({ input: 20, output: 22 }, 0.01),
 		sessionShellHash: null,
 		dynamicHash: null,
 	};
@@ -99,6 +105,7 @@ export function fixtureReceiptDraft(envelope: RunEnvelope): RunResultDraft {
 		outcomeDetail: null,
 		exitCode: 0,
 		spend: envelope.spend,
+		spendSums: spendSumsOf(envelope.spend),
 		compiledPromptHash: null,
 		staticCompositionHash: null,
 		sessionShellHash: null,

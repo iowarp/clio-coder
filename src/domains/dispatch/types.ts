@@ -15,6 +15,7 @@ import type { ResponseModelIdObservation } from "../../core/response-model-id.js
 import type { WorkerSandboxReceipt } from "../../core/sandbox/worker-policy.js";
 import type { SkillActivation } from "../../core/skill-activation.js";
 import type { RunTerminalReason } from "../../core/telemetry/enums.js";
+import type { RunSpendSums } from "../../core/telemetry/pricing.js";
 import type { RunOutcome, RunOutcomeCode } from "../../core/telemetry/run-vocabulary.js";
 import { RUN_OUTCOME_CODES } from "../../core/telemetry/run-vocabulary.js";
 import type { CallUsage, RunUsageFacts } from "../../core/telemetry/schemas.js";
@@ -478,6 +479,8 @@ export interface RunEnvelope {
 	cwd: string;
 	/** The run's spend so far, one fact per quantity; it becomes the run.settled spend when the run ends (#434). */
 	spend: RunUsageFacts;
+	/** The same spend as sums over the run's calls, what a total across runs adds (#434). */
+	spendSums: RunSpendSums;
 	/** Effective forced routing attempts, including any recovery (#426). */
 	toolRounds?: ToolRoundRecord[];
 	/**
@@ -1006,6 +1009,8 @@ export interface RunResult {
 	failureMessage?: string;
 	/** The run's spend, one fact per quantity, as run.settled states it (#434). */
 	spend: RunUsageFacts;
+	/** The same spend as sums over the run's calls, what a total across runs adds (#434). */
+	spendSums: RunSpendSums;
 	/** Effective forced routing attempts, including any recovery (#426). */
 	toolRounds?: ToolRoundRecord[];
 	upstreamResponses?: RunResultUpstreamResponse[];

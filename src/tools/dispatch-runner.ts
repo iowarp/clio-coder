@@ -5,7 +5,7 @@ import { evaluateSkillToolSurface } from "../core/skill-activation.js";
 import type { TelemetryContext } from "../core/telemetry/context.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
-import { sumPricing } from "../core/telemetry/pricing.js";
+import { sumRunSpend } from "../core/telemetry/pricing.js";
 import { renderFactField, renderPricingSum } from "../core/telemetry/render.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsTool } from "../core/turn-constraints.js";
@@ -579,7 +579,7 @@ export function dispatchBatchSummary(runs: ReadonlyArray<CompletedRun>): {
 	return {
 		observedToolCalls: observable.reduce((total, receipt) => total + receipt.toolCalls, 0),
 		unobservableToolRuns: trusted.length - observable.length,
-		cost: renderPricingSum(sumPricing(trusted.map((receipt) => receipt.spend.pricing))),
+		cost: renderPricingSum(sumRunSpend(trusted)),
 	};
 }
 

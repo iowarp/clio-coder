@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { modelWikiGenerate } from "../../src/cli/wiki-generate.js";
+import { spendSumsOf } from "../../src/core/telemetry/pricing.js";
+import type { RunUsageFacts } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { WikiPlan } from "../../src/domains/context/wiki/plan.js";
 import { readWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
@@ -12,6 +14,9 @@ import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { measuredSpend } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+/** A fixture run's spend in both shapes a receipt carries: its facts and the sums a total adds. */
+const spent = (spend: RunUsageFacts) => ({ spend, spendSums: spendSumsOf(spend) });
 
 it("reports incomplete publications and fails wiki generation with pending pages, including no-op updates", () => {
 	for (const command of ["wiki", "refresh", "retry"]) {
@@ -84,11 +89,11 @@ it("separates known, estimated and unknown run costs and reports missing usage",
 			pricing: { usd: unknown, pricedBy: "none" as const },
 		};
 		const counts = { input: 30, output: 10, cacheRead: 5, cacheWrite: 5 };
-		const receipts: Array<Pick<RunResult, "exitCode" | "spend"> | undefined> = [
-			{ exitCode: 0, spend: measuredSpend({ input: 60, output: 20, cacheRead: 10, cacheWrite: 10 }, 1.25) },
-			{ exitCode: 0, spend: measuredSpend(counts, 0.75, "catalog") },
-			{ exitCode: 0, spend: measuredSpend(counts) },
-			{ exitCode: 0, spend: unknownSpend },
+		const receipts: Array<Pick<RunResult, "exitCode" | "spend" | "spendSums"> | undefined> = [
+			{ exitCode: 0, ...spent(measuredSpend({ input: 60, output: 20, cacheRead: 10, cacheWrite: 10 }, 1.25)) },
+			{ exitCode: 0, ...spent(measuredSpend(counts, 0.75, "catalog")) },
+			{ exitCode: 0, ...spent(measuredSpend(counts)) },
+			{ exitCode: 0, ...spent(unknownSpend) },
 			undefined,
 		];
 		let dispatched = 0;
@@ -163,9 +168,11 @@ async function runCacheReportingFixture(
 		const receipt = {
 			exitCode: 0,
 			// A run whose every tracked call omitted the field folds to an unknown cache read.
-			spend: flags?.every((reported) => !reported)
-				? { ...spend, usage: { ...spend.usage, cacheRead: cacheRead(false) } }
-				: spend,
+			...spent(
+				flags?.every((reported) => !reported)
+					? { ...spend, usage: { ...spend.usage, cacheRead: cacheRead(false) } }
+					: spend,
+			),
 			...(flags
 				? {
 						upstreamResponses: flags.map((reported) => ({
@@ -251,7 +258,7 @@ it("counts every attempt of a transiently retried dispatch and pairs each run id
 		const terminal = {
 			runId: "retry-1",
 			exitCode: 1,
-			spend: measuredSpend({ input: 300, output: 100, cacheRead: 50, cacheWrite: 50 }, 2),
+			...spent(measuredSpend({ input: 300, output: 100, cacheRead: 50, cacheWrite: 50 }, 2)),
 		};
 		const earlierSpend = measuredSpend({ input: 60, output: 20, cacheRead: 10, cacheWrite: 10 }, 0.5);
 		// The earlier attempt had a call that reported no usage, so its total is unknown.
@@ -260,7 +267,7 @@ it("counts every attempt of a transiently retried dispatch and pairs each run id
 			status: "failed",
 			endedAt: "2026-01-01T00:00:00.000Z",
 			lineage: { parentRunId: null, rootRunId: "retry-0", attempt: 0, depth: 0 },
-			spend: { ...earlierSpend, totalTokens: { kind: "unknown", reason: "provider-omitted" } },
+			...spent({ ...earlierSpend, totalTokens: { kind: "unknown", reason: "provider-omitted" } }),
 		};
 		const dispatch = {
 			abort() {},
@@ -347,7 +354,7 @@ it("records the validation sidecar and last failure under the terminal run of a 
 		const terminal = {
 			runId: "retry-1",
 			exitCode: 0,
-			spend: measuredSpend({ input: 5, output: 5 }, 0),
+			...spent(measuredSpend({ input: 5, output: 5 }, 0)),
 		};
 		const dispatch = {
 			abort() {},
@@ -408,7 +415,7 @@ it("flags usage as incomplete when the attempt ledger cannot be read", async () 
 		const terminal = {
 			runId: "ledger-0",
 			exitCode: 1,
-			spend: measuredSpend({ input: 5, output: 5 }, 0),
+			...spent(measuredSpend({ input: 5, output: 5 }, 0)),
 		};
 		const dispatch = {
 			abort() {},

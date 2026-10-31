@@ -91,6 +91,30 @@ export const RunUsageFactsSchema = Type.Object(
 	closed,
 );
 export type RunUsageFacts = Static<typeof RunUsageFactsSchema>;
+/**
+ * A run's spend as sums over its calls, what a total across runs adds: a run with one unpriced call keeps the priced
+ * subtotal of the others, which its one fact per quantity cannot state (#434).
+ */
+export const RunSpendSumsSchema = Type.Object(
+	{
+		usage: Type.Object(
+			{
+				input: FactSumSchema,
+				cacheRead: FactSumSchema,
+				cacheWrite: FactSumSchema,
+				cacheWrite1h: FactSumSchema,
+				output: FactSumSchema,
+				reasoning: FactSumSchema,
+			},
+			closed,
+		),
+		totalTokens: FactSumSchema,
+		apiCalls: FactSumSchema,
+		usd: FactSumSchema,
+	},
+	closed,
+);
+export type RunSpendSums = Static<typeof RunSpendSumsSchema>;
 const target = Type.Object(
 	{
 		targetId: ExistingId,
@@ -266,17 +290,6 @@ export const CallSettledSchema = Type.Object(
 );
 export type CallSettled = Static<typeof CallSettledSchema>;
 
-const usageSums = Type.Object(
-	{
-		input: FactSumSchema,
-		cacheRead: FactSumSchema,
-		cacheWrite: FactSumSchema,
-		cacheWrite1h: FactSumSchema,
-		output: FactSumSchema,
-		reasoning: FactSumSchema,
-	},
-	closed,
-);
 /**
  * Aggregate snapshots describe a delegated scope, never an invented provider call (#434). Each quantity is a sum with
  * its coverage, so a scope with one unpriced or unreported call keeps the known subtotal of the others.
@@ -290,7 +303,7 @@ export const RunUsageSchema = Type.Object(
 		revision: count,
 		coverage: vocabulary(["complete", "partial", "unknown"]),
 		target,
-		usage: usageSums,
+		usage: RunSpendSumsSchema.properties.usage,
 		totalTokens: FactSumSchema,
 		apiCalls: FactSumSchema,
 		unmeteredCalls: FactSumSchema,

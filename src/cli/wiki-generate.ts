@@ -5,8 +5,15 @@ import { performance } from "node:perf_hooks";
 import { loadDomains } from "../core/domain-loader.js";
 import { asDirectoryPathBoundary } from "../core/path-boundary.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
-import type { Fact } from "../core/telemetry/fact.js";
-import { type Pricing, unobservedRunUsageFacts } from "../core/telemetry/pricing.js";
+import type { Fact, FactSum } from "../core/telemetry/fact.js";
+import {
+	type PricingSum,
+	type RunSpendSums,
+	spendSumsOf,
+	sumFacts,
+	sumRunSpend,
+	unobservedRunUsageFacts,
+} from "../core/telemetry/pricing.js";
 import { renderFactField, renderPricing } from "../core/telemetry/render.js";
 import type { RunUsageFacts } from "../core/telemetry/schemas.js";
 import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
@@ -199,7 +206,7 @@ function summaryDetail(summary: DispatchSummary, startedAtClock: number, attempt
 }
 
 /** Usage and cost facts of one attempt, from its receipt or its finalized ledger envelope. */
-type WikiRunUsage = Pick<RunResult, "spend"> & Partial<Pick<RunResult, "budget" | "upstreamResponses">>;
+type WikiRunUsage = Pick<RunResult, "spend" | "spendSums"> & Partial<Pick<RunResult, "budget" | "upstreamResponses">>;
 
 interface WikiEarlierAttempt {
 	runId: string;
@@ -258,7 +265,7 @@ function collectWikiAttempts(
 			earlier.push({
 				runId: ref.runId,
 				outcome: ref.outcome,
-				usage: finalized ? { spend: run.spend } : undefined,
+				usage: finalized ? { spend: run.spend, spendSums: run.spendSums } : undefined,
 			});
 		}
 		return { terminalRunId, count: earlier.length + 1, earlier };
@@ -270,7 +277,9 @@ function collectWikiAttempts(
 }
 
 type UsageKey = "total" | "input" | "output" | "cacheRead" | "cacheWrite";
-const USAGE_FIELDS: ReadonlyArray<readonly [UsageKey, string, (spend: RunUsageFacts) => Fact<number>]> = [
+/** Run spend as one fact per quantity or as sums over its calls: the same fields in either shape. */
+type SpendShape<T> = { usage: Record<"input" | "output" | "cacheRead" | "cacheWrite", T>; totalTokens: T };
+const USAGE_FIELDS: ReadonlyArray<readonly [UsageKey, string, <T>(spend: SpendShape<T>) => T]> = [
 	["total", "total", (spend) => spend.totalTokens],
 	["input", "input", (spend) => spend.usage.input],
 	["output", "output", (spend) => spend.usage.output],
@@ -364,6 +373,8 @@ function cacheReadText(spend: RunUsageFacts, cache: CacheReadSummary): string | 
 
 const notObserved: Fact<number> = { kind: "unknown", reason: "not-observed" };
 const spendOf = (usage: Partial<WikiRunUsage>): RunUsageFacts => usage.spend ?? unobservedRunUsageFacts();
+const sumsOf = (usage: Partial<WikiRunUsage>): RunSpendSums =>
+	usage.spendSums ?? spendSumsOf(unobservedRunUsageFacts());
 
 /**
  * One run's field as the read model folds it over runs: unknown when no receipt holds it, and an attempt ledger that
@@ -371,10 +382,11 @@ const spendOf = (usage: Partial<WikiRunUsage>): RunUsageFacts => usage.spend ?? 
  */
 function runField(
 	usage: WikiRunUsage | undefined,
-	read: (spend: RunUsageFacts) => Fact<number>,
+	read: (spend: RunSpendSums) => FactSum,
 	unrecovered = false,
-): Fact<number>[] {
-	return [usage ? read(spendOf(usage)) : notObserved, ...(unrecovered ? [notObserved] : [])];
+): FactSum[] {
+	const unknown = sumFacts([notObserved]);
+	return [usage ? read(sumsOf(usage)) : unknown, ...(unrecovered ? [unknown] : [])];
 }
 
 function attemptsBreakdown(attempts: WikiAttempts, terminal: WikiRunUsage | undefined): string {
@@ -407,10 +419,10 @@ function invocationUsage(receipts: WikiReceipts): string {
 		: partial > 0
 			? `${totals.cacheRead} (unreported on ${partial} runs)`
 			: undefined;
-	const unpriced: Pricing = { usd: notObserved, pricedBy: "none" };
+	const unpriced: PricingSum = { usd: sumFacts([notObserved]), free: false };
 	const cost = runsCost(
 		receipts.flatMap((run) => [
-			run.receipt ? spendOf(run.receipt).pricing : unpriced,
+			run.receipt ? sumRunSpend([{ spend: spendOf(run.receipt), spendSums: sumsOf(run.receipt) }]) : unpriced,
 			// An attempt ledger that could not be read may hide earlier attempts nobody priced.
 			...(run.unrecoveredAttempts ? [unpriced] : []),
 		]),
