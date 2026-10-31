@@ -59,7 +59,7 @@ function activityOverlay(view: TelemetryView): string {
 	} as unknown as TUI;
 	const telemetry = {
 		subscribe: () => () => {},
-		read: { live: () => view, subscribe: () => () => {} },
+		read: { live: () => view, quota: () => ({ providers: [] }), subscribe: () => () => {} },
 	} as unknown as TelemetryContract;
 	const handle = openUsageOverlay(tui, telemetry, { now: () => new Date(2026, 8, 26, 12).getTime() });
 	try {

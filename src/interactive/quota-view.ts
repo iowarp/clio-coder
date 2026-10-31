@@ -61,8 +61,35 @@ export function renderQuotaAccounts(
 	if (!providers.length) return [theme.fg("annotation", "Subscriptions · no journaled quota readings")];
 	const out: string[] = [];
 	for (const account of providers) {
-		const title = clean(`${account.stale ? "STALE · " : ""}${account.provider}`);
+		const title = clean(
+			`${account.stale ? "STALE · " : ""}${account.displayName}${account.plan ? ` · ${account.plan}` : ""}`,
+		);
 		if (!options.compact) out.push(theme.style("sectionHeading", title, { bold: true }));
+		if (account.status !== "ok" || account.message) {
+			const status = {
+				expired: "Credentials expired · refresh credentials",
+				no_credentials: "Credentials unavailable",
+				error: "Quota read failed",
+				loading: "Loading quota",
+				ok: "Provider notice",
+			}[account.status];
+			out.push(
+				theme.fg(
+					"warning",
+					clean(
+						`${options.compact ? `${title} · ` : ""}${status}${account.message ? ` · ${account.message}` : ""}${account.retryAfter ? ` · retry after ${account.retryAfter.display}` : ""}`,
+					),
+				),
+			);
+		}
+		if (account.credits) {
+			const pct = account.credits.usedPct;
+			out.push(
+				clean(
+					`${options.compact ? `${title} · ` : ""}Credits ${account.credits.display}${pct.fact.kind === "measured" || pct.fact.kind === "estimated" ? ` · ${pct.display} used` : ""}`,
+				),
+			);
+		}
 		for (const window of [...account.windows].sort(
 			(a, b) => factKnownValue(b.usedPct.fact) - factKnownValue(a.usedPct.fact),
 		)) {
@@ -72,7 +99,8 @@ export function renderQuotaAccounts(
 			if (!options.compact)
 				out.push(theme.fg("annotation", quotaResetLabel(window.resetsAt, options.now, options.timeZone)));
 		}
-		if (!account.windows.length) out.push(theme.fg("annotation", `${title} · no windows reported`));
+		if (!account.windows.length && !account.credits && account.status === "ok")
+			out.push(theme.fg("annotation", `${title} · no windows reported`));
 	}
 	return out.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
 }
@@ -88,7 +116,7 @@ function routeAccount(route: Pick<DispatchBoardRow, "runtimeId" | "node">, provi
 			"antigravity-code": "antigravity",
 		} as Record<string, string>
 	)[route.runtimeId];
-	return providers.find((item) => item.provider === provider);
+	return providers.find((item) => provider !== undefined && item.credentials.includes(provider));
 }
 
 export function routeWeeklyQuota(
@@ -109,7 +137,7 @@ export function routeWeeklyQuota(
 					? label.includes("gpt")
 					: false;
 	});
-	if (!account || weekly?.length !== 1) return null;
+	if (account?.status !== "ok" || weekly?.length !== 1) return null;
 	const window = weekly[0];
 	if (!window) return null;
 	return {

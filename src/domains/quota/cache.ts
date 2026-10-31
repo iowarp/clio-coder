@@ -76,7 +76,19 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 
 			const snapshot = await provider.fetch();
 			noteQuotaRead(snapshot, ttlMs, now());
-			journalPolledQuota(snapshot);
+			journalPolledQuota(
+				snapshot.status !== "ok" && cached
+					? {
+							...cached.snapshot,
+							...snapshot,
+							windows: cached.snapshot.windows,
+							credits: cached.snapshot.credits ?? null,
+							plan: cached.snapshot.plan ?? null,
+							stale: true,
+						}
+					: snapshot,
+				now(),
+			);
 			if (snapshot.status === "ok") {
 				entries.set(provider.id, { snapshot, storedAtMs: now() });
 				return snapshot;

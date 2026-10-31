@@ -513,6 +513,7 @@ function windowSession(source: SessionSource, from: number, to: number): Session
 	}
 	return {
 		sessionId: source.sessionId,
+		...(source.processId === undefined ? {} : { processId: source.processId }),
 		journal: {
 			...source.journal,
 			// A reference to a run the window leaves out would read as an unreadable run.
@@ -578,7 +579,7 @@ function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTele
 			if ((yield* newestWrite(join(processes, processId), isTelemetryJournalFile)) < from) continue;
 			const journal = yield* loadProcess(stateDir, processId);
 			if (!journal.records.some(isCall)) continue;
-			const source: SessionSource = { sessionId: processId, journal, runs: new Map(), parent: null };
+			const source: SessionSource = { sessionId: processId, processId, journal, runs: new Map(), parent: null };
 			sessions.push(windowSession(source, from, to));
 		}
 	}

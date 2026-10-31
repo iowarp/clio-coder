@@ -16,6 +16,7 @@ import { formatPlan } from "./types.js";
 interface ObservedEntry {
 	/** Last successful read, or null when every read so far failed. */
 	snapshot: UsageSnapshot | null;
+	latest?: UsageSnapshot;
 	storedAtMs: number;
 	/** Freshness window of the cache that made the read. */
 	ttlMs: number;
@@ -42,13 +43,16 @@ export function noteQuotaRead(snapshot: UsageSnapshot, ttlMs: number, nowMs: num
 		return;
 	}
 	const retryAfterSeconds = snapshot.retryAfterSeconds;
-	if (retryAfterSeconds === null || retryAfterSeconds === undefined || !Number.isFinite(retryAfterSeconds)) return;
 	const readAtMs = snapshot.fetchedAt === null ? Number.NaN : Date.parse(snapshot.fetchedAt);
 	observed.set(snapshot.providerId, {
 		snapshot: previous?.snapshot ?? null,
+		latest: snapshot,
 		storedAtMs: previous?.storedAtMs ?? nowMs,
 		ttlMs: previous?.ttlMs ?? ttlMs,
-		retryUntilMs: (Number.isFinite(readAtMs) ? readAtMs : nowMs) + retryAfterSeconds * 1000,
+		retryUntilMs:
+			retryAfterSeconds !== null && retryAfterSeconds !== undefined && Number.isFinite(retryAfterSeconds)
+				? (Number.isFinite(readAtMs) ? readAtMs : nowMs) + retryAfterSeconds * 1000
+				: null,
 	});
 }
 
@@ -226,15 +230,29 @@ export function observedQuotaReadings(nowMs = Date.now()): ObservedQuotaReading[
 	const codexKeys = new Map([...codexTargets].map(([targetId, key]) => [key, targetId]));
 	return [...observed.keys()].flatMap((key): ObservedQuotaReading[] => {
 		const reading = readObserved(key, nowMs);
-		if (!reading?.snapshot) return [];
+		const latest = observed.get(key)?.latest;
+		if (!reading || (!reading.snapshot && !latest)) return [];
+		const snapshot = latest
+			? {
+					...latest,
+					windows: reading.snapshot?.windows ?? latest.windows,
+					credits: reading.snapshot?.credits ?? latest.credits ?? null,
+					plan: reading.snapshot?.plan ?? latest.plan ?? null,
+					stale: reading.snapshot !== null,
+				}
+			: (reading.snapshot as UsageSnapshot);
 		const codexTarget = codexKeys.get(key);
 		return codexTarget === undefined
 			? [
-					{ snapshot: reading.snapshot, stale: reading.stale, source: anthropicKeys.has(key) ? "response-headers" : "poll" },
+					{
+						snapshot,
+						stale: snapshot.stale === true || reading.stale,
+						source: anthropicKeys.has(key) ? "response-headers" : "poll",
+					},
 				]
 			: [
 					{
-						snapshot: { ...reading.snapshot, providerId: `codex:${codexTarget}` },
+						snapshot: { ...snapshot, providerId: `codex:${codexTarget}` },
 						stale: reading.stale,
 						source: "stream-event",
 					},

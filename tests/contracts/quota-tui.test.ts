@@ -6,9 +6,11 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { localQuotaSnapshot } from "../../src/domains/quota/presentation.js";
+import { quotaReadingFromSnapshot } from "../../src/domains/quota/reading.js";
 import { createQuotaSummaryFeed } from "../../src/domains/quota/summary-feed.js";
 import type { UsageSnapshot } from "../../src/domains/quota/types.js";
 import type { TelemetryContract, TelemetrySnapshot } from "../../src/domains/telemetry/index.js";
+import { quotaAccountDetails } from "../../src/domains/telemetry/read-model.js";
 import type { Component, OverlayOptions, TUI } from "../../src/engine/tui.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { dockTop } from "../../src/interactive/dock.js";
@@ -164,10 +166,12 @@ test("footer keeps unassociated accounts out of compact rows and supplies all ac
 		footer.toggleExpanded();
 		footer.toggleExpanded();
 		footer.toggleExpanded();
-		const status = plain(footer.view.render(160));
-		match(status, /claude-code.*Weekly 9%/);
-		match(status, /codex.*Weekly 76%/);
-		match(status, /antigravity.*Weekly 73%/);
+		const pages = [footer.view.render(160)];
+		for (let page = 0; page < 20 && footer.scroll(8); page++) pages.push(footer.view.render(160));
+		const status = plain(pages.flat());
+		match(status, /Claude Code.*Weekly 9%/);
+		match(status, /Codex.*Weekly 76%/);
+		match(status, /Antigravity.*Weekly 73%/);
 		doesNotMatch(status, /not reported by provider|\/cost/);
 	} finally {
 		footer.dispose();
@@ -283,19 +287,19 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		match(render(), /Less .* More · last 182 days/);
 		frame?.handleInput?.("2");
 		const text = scrolled();
-		match(text, /claude-code/);
+		match(text, /Claude Code · Max/);
 		match(text, /Weekly 9% used/);
 		match(text, /76% used/);
 		doesNotMatch(text, /remaining/);
 
-		const codex = text.slice(text.indexOf("codex"), text.indexOf("antigravity"));
+		const codex = text.slice(text.indexOf("Codex"), text.indexOf("Antigravity"));
 		// The row label, not any "5h": a weekly reset rendered as "4d 15h" also contains it.
 		doesNotMatch(codex, /│ 5h · /);
 		quota = accounts().map((entry) =>
 			entry.providerId === "codex" ? { ...entry, stale: true, message: "refresh failed", retryAfterSeconds: 30 } : entry,
 		);
-		match(scrolled(), /STALE · codex/);
-		doesNotMatch(scrolled(), /Retry after/);
+		match(scrolled(), /STALE · Codex/);
+		match(scrolled(), /retry after 30.0s/);
 		const before = renders;
 		listener?.(snapshot);
 		ok(renders > before);
@@ -362,7 +366,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 			},
 		];
 		frame?.handleInput?.("2");
-		match(render(), /no journaled quota readings/);
+		match(render(), /Credentials expired.*run agy/);
 		frame?.handleInput?.("5");
 		match(render(), /No worker invocations/);
 		frame?.handleInput?.("\t");
@@ -413,18 +417,18 @@ test("footer producer follows selected runtime changes instead of picking the bu
 function quotaRows(
 	snapshots: readonly UsageSnapshot[],
 ): import("../../src/core/telemetry/dto.js").QuotaStateV1["providers"] {
-	return snapshots
-		.filter((snapshot) => snapshot.status === "ok")
-		.map((snapshot) => ({
-			provider: snapshot.providerId,
-			source: "poll",
-			observedAt: snapshot.fetchedAt,
-			stale: snapshot.stale ?? false,
-			windows: snapshot.windows.map((window) => ({
-				key: window.key,
-				label: `${window.scope ? `${window.scope} ` : ""}${window.label}`,
-				usedPct: { fact: { kind: "measured", value: window.usedPct, source: "provider" }, display: `${window.usedPct}%` },
-				resetsAt: window.resetsAt,
-			})),
-		}));
+	return snapshots.map((snapshot) => ({
+		provider: snapshot.providerId,
+		...quotaAccountDetails(quotaReadingFromSnapshot(snapshot, snapshot.fetchedAt ?? new Date(0).toISOString())),
+		source: "poll",
+		observedAt: snapshot.fetchedAt,
+		stale: snapshot.stale ?? false,
+		windows: snapshot.windows.map((window) => ({
+			key: window.key,
+			scope: window.scope ?? null,
+			label: `${window.scope ? `${window.scope} ` : ""}${window.label}`,
+			usedPct: { fact: { kind: "measured", value: window.usedPct, source: "provider" }, display: `${window.usedPct}%` },
+			resetsAt: window.resetsAt,
+		})),
+	}));
 }

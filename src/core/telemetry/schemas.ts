@@ -135,6 +135,8 @@ export function settingsFingerprintCommitment(hash: string): SettingsFingerprint
 const QuotaWindowSchema = Type.Object(
 	{
 		key: ExistingId,
+		label: Type.Optional(text),
+		scope: Type.Optional(text),
 		usedPct: factSchema(Type.Number({ minimum: 0, maximum: 100 })),
 		resetsAt: Type.Optional(utc),
 	},
@@ -1062,7 +1064,16 @@ export const QuotaReadSchema = Type.Object(
 		source: quotaSource,
 		/** When the provider took the reading, which can precede the record by a stream's length. */
 		observedAt: utc,
-		windows: Type.Array(QuotaWindowSchema, { minItems: 1 }),
+		windows: Type.Array(QuotaWindowSchema),
+		displayName: text,
+		status: vocabulary(["ok", "no_credentials", "expired", "error", "loading"]),
+		plan: Type.Optional(text),
+		credits: Type.Optional(
+			Type.Object({ display: text, usedPct: factSchema(Type.Number({ minimum: 0, maximum: 100 })) }, closed),
+		),
+		message: Type.Optional(text),
+		retryAfterSeconds: Type.Optional(duration),
+		stale: Type.Optional(Type.Boolean()),
 		/** The provider reported that this account cannot send now. */
 		limitReached: Type.Optional(Type.Boolean()),
 	},

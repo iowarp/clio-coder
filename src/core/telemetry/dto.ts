@@ -1269,6 +1269,28 @@ export const QuotaStateSchema = Type.Object(
 			Type.Object(
 				{
 					provider: ExistingId,
+					credentials: Type.Array(ExistingId),
+					displayName: text,
+					status: vocabulary(["ok", "no_credentials", "expired", "error", "loading"]),
+					plan: Type.Union([text, Type.Null()]),
+					credits: Type.Union([
+						Type.Object(
+							{
+								display: text,
+								usedPct: Type.Object(
+									{ fact: factSchema(Type.Number({ minimum: 0, maximum: 100 })), display: Type.String() },
+									closed,
+								),
+							},
+							closed,
+						),
+						Type.Null(),
+					]),
+					message: Type.Union([text, Type.Null()]),
+					retryAfter: Type.Union([
+						Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed),
+						Type.Null(),
+					]),
 					source: vocabulary(["response-headers", "stream-event", "poll", "unknown"]),
 					observedAt: Type.Union([UtcSchema, Type.Null()]),
 					stale: Type.Boolean(),
@@ -1276,6 +1298,7 @@ export const QuotaStateSchema = Type.Object(
 						Type.Object(
 							{
 								key: ExistingId,
+								scope: Type.Union([text, Type.Null()]),
 								label: Type.Union([text, Type.Null()]),
 								usedPct: Type.Object(
 									{ fact: factSchema(Type.Number({ minimum: 0, maximum: 100 })), display: Type.String() },

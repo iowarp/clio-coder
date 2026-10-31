@@ -1,7 +1,9 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { foldDuplicateAccounts, footerQuotaSegment, primaryWindow } from "../../src/domains/quota/presentation.js";
+import { quotaReadingFromSnapshot } from "../../src/domains/quota/reading.js";
 import type { UsageSnapshot } from "../../src/domains/quota/types.js";
+import { quotaAccountDetails } from "../../src/domains/telemetry/read-model.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { type DispatchBoardRow, formatTaskIslandLines } from "../../src/interactive/dispatch-board.js";
 import {
@@ -217,18 +219,18 @@ test("weekly badges select the model's own group and never infer another account
 function quotaRows(
 	snapshots: readonly UsageSnapshot[],
 ): import("../../src/core/telemetry/dto.js").QuotaStateV1["providers"] {
-	return snapshots
-		.filter((snapshot) => snapshot.status === "ok")
-		.map((snapshot) => ({
-			provider: snapshot.providerId,
-			source: "poll",
-			observedAt: snapshot.fetchedAt,
-			stale: snapshot.stale ?? false,
-			windows: snapshot.windows.map((window) => ({
-				key: window.key,
-				label: `${window.scope ? `${window.scope} ` : ""}${window.label}`,
-				usedPct: { fact: { kind: "measured", value: window.usedPct, source: "provider" }, display: `${window.usedPct}%` },
-				resetsAt: window.resetsAt,
-			})),
-		}));
+	return snapshots.map((snapshot) => ({
+		provider: snapshot.providerId,
+		...quotaAccountDetails(quotaReadingFromSnapshot(snapshot, snapshot.fetchedAt ?? new Date(0).toISOString())),
+		source: "poll",
+		observedAt: snapshot.fetchedAt,
+		stale: snapshot.stale ?? false,
+		windows: snapshot.windows.map((window) => ({
+			key: window.key,
+			scope: window.scope ?? null,
+			label: `${window.scope ? `${window.scope} ` : ""}${window.label}`,
+			usedPct: { fact: { kind: "measured", value: window.usedPct, source: "provider" }, display: `${window.usedPct}%` },
+			resetsAt: window.resetsAt,
+		})),
+	}));
 }

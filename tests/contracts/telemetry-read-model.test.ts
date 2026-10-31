@@ -304,6 +304,8 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 			"quota.read",
 			{
 				provider: "codex",
+				displayName: "Codex",
+				status: "ok",
 				targetId: "fixture",
 				source: "stream-event",
 				observedAt: "2026-10-30T00:00:05.000Z",

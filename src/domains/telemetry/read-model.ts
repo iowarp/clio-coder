@@ -16,6 +16,7 @@ import type {
 	FactRef,
 	ParsedFactRef,
 	Quantity,
+	QuotaStateV1,
 	RunRowV1,
 	RunTelemetryV1,
 	RunTimelineEntry,
@@ -95,6 +96,8 @@ export interface ProcessIdentity {
 }
 export interface SessionSource {
 	sessionId: string;
+	/** Process sources contribute calls and spend without counting as sessions (#434). */
+	processId?: string;
 	journal: JournalSource;
 	/** Run journals this session's own records reference, keyed by run id. */
 	runs: ReadonlyMap<string, JournalSource>;
@@ -2285,6 +2288,79 @@ type QuotaReading = Extract<TelemetryRecord, { k: "quota.read" }>["data"];
 export const quotaAccount = (reading: QuotaReading): string =>
 	reading.provider === "codex" && reading.source !== "poll" ? `codex:${reading.targetId}` : reading.provider;
 
+/** Account identity and outcomes survive projection, including failed reads with no windows (#434). */
+export function quotaAccountDetails(reading: QuotaReading) {
+	const creditPct = reading.credits?.usedPct;
+	const retry: Fact<number> | null =
+		reading.retryAfterSeconds === undefined
+			? null
+			: {
+					kind: "measured",
+					value: reading.retryAfterSeconds * 1000,
+					source: "provider",
+				};
+	return {
+		credentials: [quotaAccount(reading)],
+		displayName: reading.displayName,
+		status: reading.status,
+		plan: reading.plan ?? null,
+		message: reading.message ?? null,
+		credits:
+			reading.credits && creditPct
+				? {
+						display: reading.credits.display,
+						usedPct: { fact: creditPct, display: renderFact(creditPct, "percent") },
+					}
+				: null,
+		retryAfter: retry ? { fact: retry, display: renderFact(retry, "duration") } : null,
+	};
+}
+
+/** Matching Anthropic credentials share one allowance; their route associations survive the fold (#434, #423). */
+export function reconcileQuotaAccounts(rows: QuotaStateV1["providers"]): QuotaStateV1["providers"] {
+	const kept: QuotaStateV1["providers"] = [];
+	const anthropic = new Set(["anthropic-max", "claude-code"]);
+	for (const row of rows) {
+		const twin = kept.findIndex(
+			(other) =>
+				row.status === "ok" &&
+				other.status === "ok" &&
+				row.provider !== other.provider &&
+				anthropic.has(row.provider) &&
+				anthropic.has(other.provider) &&
+				row.windows.length > 0 &&
+				row.windows.length === other.windows.length &&
+				row.windows.every((window) => {
+					const match = other.windows.find((candidate) => candidate.key === window.key && candidate.scope === window.scope);
+					return (
+						match !== undefined &&
+						window.usedPct.fact.kind === "measured" &&
+						match.usedPct.fact.kind === "measured" &&
+						Math.abs(window.usedPct.fact.value - match.usedPct.fact.value) < 0.5 &&
+						(window.resetsAt === match.resetsAt ||
+							(window.resetsAt !== null &&
+								match.resetsAt !== null &&
+								Math.abs(Date.parse(window.resetsAt) - Date.parse(match.resetsAt)) < 1000))
+					);
+				}),
+		);
+		const prior = kept[twin];
+		if (!prior) {
+			kept.push(row);
+			continue;
+		}
+		const chosen =
+			row.source === "response-headers" || (prior.source !== "response-headers" && !prior.plan && row.plan) ? row : prior;
+		kept[twin] = {
+			...chosen,
+			credentials: [...new Set([...prior.credentials, ...row.credentials])].sort(),
+			plan: chosen.plan ?? prior.plan ?? row.plan,
+			credits: chosen.credits ?? prior.credits ?? row.credits,
+		};
+	}
+	return kept;
+}
+
 /** A provider reports a window's reset with drift between readings; a reset that moved further began a new window. */
 const QUOTA_RESET_DRIFT_MS = 5 * 60_000;
 function sameQuotaWindow(a: string | undefined, b: string | undefined): boolean {
@@ -2794,7 +2870,9 @@ function runResultOf(settled: Run["settled"], scope: TelemetryScopeFiles | null)
 /** Live and settled run quantities, from journal clocks and tool settlements (#434). */
 function runActivity(run: Run, options: ReadOptions): RunTelemetryV1["activity"] {
 	const started = run.settled?.data.startedAt ?? run.firstAt;
-	const ended = run.settled?.data.endedAt ?? (options.now ?? new Date()).toISOString();
+	const terminal = run.source.records.at(-1);
+	const sealedAt = terminal?.k === "run.sealed" || terminal?.k === "share.sealed" ? terminal.t : null;
+	const ended = run.settled?.data.endedAt ?? sealedAt ?? (options.now ?? new Date()).toISOString();
 	const elapsed = started === null ? unobserved : localClock(Math.max(0, Date.parse(ended) - Date.parse(started)));
 	const toolIds = new Set<string>();
 	for (const record of run.source.records) {
@@ -2808,7 +2886,9 @@ function runActivity(run: Run, options: ReadOptions): RunTelemetryV1["activity"]
 	}
 	const tools = run.settled
 		? localCount(run.settled.data.toolCalls)
-		: run.source.present && run.gap === 0
+		: run.source.present &&
+				run.gap === 0 &&
+				!run.source.records.some((record) => record.k === "journal.gap" && !POLICY_GAPS.has(record.data.reason))
 			? localCount(toolIds.size)
 			: unobserved;
 	const output = quantity({ run }, { scope: "run", owner: run.runId, metric: "output" }).fact;
@@ -3328,7 +3408,7 @@ export function usageReport(source: RepoSource, from: number, to: number) {
 	const rate: Fact<number> =
 		approvals.requested === 0 ? notApplicable : localCount((100 * approvals.granted) / approvals.requested);
 	return {
-		sessions: shownCount(source.sessions.length),
+		sessions: shownCount(source.sessions.filter((session) => session.processId === undefined).length),
 		runs: shownCount(settled.length),
 		decisions: {
 			total: shownCount(decisions.length),

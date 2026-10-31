@@ -1,6 +1,8 @@
 import type { EventPayload } from "../../core/telemetry/events.js";
+import type { Fact } from "../../core/telemetry/fact.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { AnthropicResponseObservation, CodexQuotaObservation } from "../../engine/types.js";
+import { redactSecretString } from "../safety/redaction.js";
 import { parseAnthropicHeaders } from "./anthropic-headers.js";
 import { codexStreamSnapshot } from "./observed.js";
 import type { UsageSnapshot, UsageWindow } from "./types.js";
@@ -15,6 +17,8 @@ function readingWindows(windows: ReadonlyArray<UsageWindow>): QuotaReading["wind
 			? [
 					{
 						key: window.key,
+						label: redactSecretString(window.label),
+						...(window.scope ? { scope: redactSecretString(window.scope) } : {}),
 						usedPct: { kind: "measured", value: window.usedPct, source: "provider" } as const,
 						...(window.resetsAt !== null && utc.test(window.resetsAt) ? { resetsAt: window.resetsAt } : {}),
 					},
@@ -23,18 +27,41 @@ function readingWindows(windows: ReadonlyArray<UsageWindow>): QuotaReading["wind
 	);
 }
 
-/** Provider polling reads an adapter's credential account, independently of any configured target (#434). */
-export function journalPolledQuota(snapshot: UsageSnapshot): boolean {
-	if (snapshot.status !== "ok" || snapshot.fetchedAt === null || !utc.test(snapshot.fetchedAt)) return false;
-	const windows = readingWindows(snapshot.windows);
-	if (windows.length === 0) return false;
-	return journalAccountQuota({
+/** Structural account facts retained for both live and journaled quota views (#434). */
+export function quotaReadingFromSnapshot(snapshot: UsageSnapshot, observedAt: string): QuotaReading {
+	const usedPct = snapshot.credits?.usedPct;
+	const creditPct: Fact<number> =
+		usedPct !== null && usedPct !== undefined && Number.isFinite(usedPct) && usedPct >= 0 && usedPct <= 100
+			? { kind: "measured", value: usedPct, source: "provider" }
+			: { kind: "unknown", reason: "not-observed" };
+	return {
 		provider: snapshot.providerId,
 		targetId: snapshot.providerId,
 		source: "poll",
-		observedAt: snapshot.fetchedAt,
-		windows,
-	});
+		observedAt,
+		windows: readingWindows(snapshot.windows),
+		displayName: redactSecretString(snapshot.displayName),
+		status: snapshot.status,
+		...(snapshot.plan ? { plan: redactSecretString(snapshot.plan) } : {}),
+		...(snapshot.credits
+			? { credits: { display: redactSecretString(snapshot.credits.display), usedPct: creditPct } }
+			: {}),
+		...(snapshot.message ? { message: redactSecretString(snapshot.message) } : {}),
+		...(snapshot.retryAfterSeconds !== null &&
+		snapshot.retryAfterSeconds !== undefined &&
+		Number.isFinite(snapshot.retryAfterSeconds) &&
+		snapshot.retryAfterSeconds >= 0
+			? { retryAfterSeconds: snapshot.retryAfterSeconds }
+			: {}),
+		...(snapshot.stale === undefined ? {} : { stale: snapshot.stale }),
+	};
+}
+
+/** Failed polls are account observations too, even before the first successful reading (#434). */
+export function journalPolledQuota(snapshot: UsageSnapshot, nowMs = Date.now()): boolean {
+	const observedAt =
+		snapshot.fetchedAt !== null && utc.test(snapshot.fetchedAt) ? snapshot.fetchedAt : new Date(nowMs).toISOString();
+	return journalAccountQuota(quotaReadingFromSnapshot(snapshot, observedAt));
 }
 
 /**
@@ -57,11 +84,10 @@ export function quotaReadingFromMessage(message: unknown, runtimeId: string, tar
 					? false
 					: undefined;
 		reading = {
+			...quotaReadingFromSnapshot(codexStreamSnapshot(observation), observation.observedAt),
 			provider: "codex",
 			targetId,
 			source: "stream-event",
-			observedAt: observation.observedAt,
-			windows: readingWindows(codexStreamSnapshot(observation).windows),
 			...(limited === undefined ? {} : { limitReached: limited }),
 		};
 	} else if (runtimeId === "anthropic-max" && raw.anthropicResponse) {
@@ -69,11 +95,9 @@ export function quotaReadingFromMessage(message: unknown, runtimeId: string, tar
 		const status = raw.anthropicResponse.rateLimit.status;
 		if (snapshot) {
 			reading = {
-				provider: snapshot.providerId,
+				...quotaReadingFromSnapshot(snapshot, raw.anthropicResponse.observedAt),
 				targetId,
 				source: "response-headers",
-				observedAt: raw.anthropicResponse.observedAt,
-				windows: readingWindows(snapshot.windows),
 				...(status === undefined ? {} : { limitReached: status === "rejected" }),
 			};
 		}
@@ -86,6 +110,12 @@ export function quotaReadingFingerprint(reading: QuotaReading): string {
 	return JSON.stringify([
 		...(reading.source === "poll" ? [reading.observedAt] : []),
 		reading.limitReached ?? null,
+		reading.status,
+		reading.plan,
+		reading.credits,
+		reading.message,
+		reading.retryAfterSeconds,
+		reading.stale,
 		reading.windows.map((window) => [
 			window.key,
 			window.usedPct.kind === "measured" ? window.usedPct.value : null,

@@ -433,11 +433,19 @@ test("worker cards and Status distinguish shared account limits from recorded se
 	snapshot.quota = [
 		{
 			provider: "claude-code",
+			credentials: ["claude-code"],
+			displayName: "claude-code",
+			status: "ok",
+			plan: null,
+			credits: null,
+			message: null,
+			retryAfter: null,
 			source: "poll",
 			stale: false,
 			windows: [
 				{
 					key: "weekly",
+					scope: null,
 					label: "Weekly",
 					usedPct: { fact: { kind: "measured", value: 91, source: "provider" }, display: "91%" },
 					resetsAt: null,
@@ -466,18 +474,27 @@ test("compact quota stays beside the selected model while workspace and rotating
 	snapshot.quota = [
 		{
 			provider: "claude-code",
+			credentials: ["claude-code"],
+			displayName: "claude-code",
+			status: "ok",
+			plan: null,
+			credits: null,
+			message: null,
+			retryAfter: null,
 			source: "poll",
 			stale: false,
 			observedAt: null,
 			windows: [
 				{
 					key: "session",
+					scope: null,
 					label: "5h",
 					usedPct: { fact: { kind: "measured", value: 7, source: "provider" }, display: "7%" },
 					resetsAt: null,
 				},
 				{
 					key: "weekly",
+					scope: null,
 					label: "Weekly",
 					usedPct: { fact: { kind: "measured", value: 9, source: "provider" }, display: "9%" },
 					resetsAt: null,
@@ -486,12 +503,20 @@ test("compact quota stays beside the selected model while workspace and rotating
 		},
 		{
 			provider: "codex",
+			credentials: ["codex"],
+			displayName: "codex",
+			status: "ok",
+			plan: null,
+			credits: null,
+			message: null,
+			retryAfter: null,
 			source: "poll",
 			stale: false,
 			observedAt: null,
 			windows: [
 				{
 					key: "weekly",
+					scope: null,
 					label: "Weekly",
 					usedPct: { fact: { kind: "measured", value: 77, source: "provider" }, display: "77%" },
 					resetsAt: null,

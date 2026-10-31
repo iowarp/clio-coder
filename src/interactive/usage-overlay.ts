@@ -2,6 +2,7 @@ import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import { factKnownValue } from "../core/telemetry/known.js";
+import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { RecallTelemetry, SessionEntry } from "../domains/session/index.js";
 import { foldRecallTelemetry, formatRecallTelemetry, hasRecallTelemetry } from "../domains/session/index.js";
 import type { GitChanges } from "../domains/session/workspace/git-probe.js";
@@ -381,13 +382,17 @@ export function openUsageOverlay(
 ): OverlayHandle {
 	const sessionId = options?.sessionId ?? null;
 	const readModel = telemetry.read;
+	const quotaFeed = createQuotaSummaryFeed({ onUpdate: () => tui.requestRender() });
 	const readRecall = () => (options?.getSessionEntries ? foldRecallTelemetry(options.getSessionEntries()) : null);
 	let recall = readRecall();
 	const now = options?.now ?? (() => Date.now());
 	const sessions = options?.listSessions?.() ?? [];
 	const body = new UsageOverlayBody(
 		() => ({ view: readModel?.live() ?? null, recall }),
-		() => readModel?.quota().providers ?? [],
+		() => {
+			quotaFeed.peekSnapshots();
+			return readModel?.quota().providers ?? [];
+		},
 		options?.getDispatchRows ?? (() => []),
 		() => tui.requestRender(),
 		{
@@ -434,6 +439,7 @@ export function openUsageOverlay(
 	return {
 		...handle,
 		hide(): void {
+			quotaFeed.dispose();
 			unsubscribe();
 			for (const off of offs) off();
 			handle.hide();

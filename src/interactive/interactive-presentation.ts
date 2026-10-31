@@ -469,7 +469,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getTokenThroughput: () => (liveGeneration ? currentLiveThroughput() : null),
-		getQuotaSnapshots: () => deps.telemetry.read?.quota().providers ?? [],
+		getQuotaSnapshots: () => {
+			quotaSummary.peekSnapshots();
+			return deps.telemetry.read?.quota().providers ?? [];
+		},
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
@@ -754,7 +757,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			pending,
 			fleet: createFleetDock({
 				getRows: () => dispatchBoardStore.activeRows(),
-				getQuotaSnapshots: () => deps.telemetry.read?.quota().providers ?? [],
+				getQuotaSnapshots: () => {
+					quotaSummary.peekSnapshots();
+					return deps.telemetry.read?.quota().providers ?? [];
+				},
 			}),
 			editor,
 			contextProgress: createContextProgressRail(
@@ -886,7 +892,10 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		changeOutputStyle: (mutation) =>
 			chatRenderer.mutate(() => preserveTranscriptScroll(transcriptView, deps.terminal.columns, mutation), "output-style"),
 		announceSettingChanges,
-		getQuotaSnapshots: () => deps.telemetry.read?.quota().providers ?? [],
+		getQuotaSnapshots: () => {
+			quotaSummary.peekSnapshots();
+			return deps.telemetry.read?.quota().providers ?? [];
+		},
 		recordChatEvent,
 		recordToolStart: (toolCallId, toolName) => {
 			footerActiveTools.add(toolCallId);

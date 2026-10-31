@@ -12,6 +12,7 @@ import type { Fact } from "../../core/telemetry/fact.js";
 import { telemetryProducerHealth } from "../../core/telemetry/producer.js";
 import { renderFact } from "../../core/telemetry/render.js";
 import { observedQuotaReadings, STREAM_QUOTA_TTL_MS } from "../quota/observed.js";
+import { quotaReadingFromSnapshot } from "../quota/reading.js";
 import type { CallJournalRead, PersistedTelemetry } from "./call-journal.js";
 import {
 	appendPersistedTelemetry,
@@ -36,6 +37,8 @@ import {
 	prepareSource,
 	processQuantity,
 	quantityOf,
+	quotaAccountDetails,
+	reconcileQuotaAccounts,
 	runsReport,
 	runTelemetry,
 	sessionAccountQuotaWindow,
@@ -728,7 +731,13 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			const now = Date.now();
 			const accounts = journaledAccounts();
 			const windows = (
-				readings: ReadonlyArray<{ key: string; usedPct: Fact<number>; resetsAt?: string | null }>,
+				readings: ReadonlyArray<{
+					key: string;
+					label?: string;
+					scope?: string;
+					usedPct: Fact<number>;
+					resetsAt?: string | null;
+				}>,
 				labels: ReadonlyMap<string, string>,
 				consumed: ReadonlyMap<string, Fact<number>> | undefined,
 			): QuotaRow["windows"] =>
@@ -741,41 +750,41 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 					const delta = consumed?.get(window.key);
 					return {
 						key: window.key,
-						label: labels.get(window.key) ?? null,
+						label: window.label ? scopedQuotaLabel(window.label, window.scope) : (labels.get(window.key) ?? null),
+						scope: window.scope ?? null,
 						usedPct: { fact, display: renderFact(fact, "percent") },
 						resetsAt: utc(window.resetsAt),
 						...(delta ? { consumedPct: { fact: delta, display: renderFact(delta, "percent") } } : {}),
 					};
 				});
 			// The process's own readings: every quota cache reports here, and stream observations land here (#423).
-			let rows: QuotaRow[] = observedQuotaReadings(now)
-				.filter((reading) => provider === undefined || reading.snapshot.providerId === provider)
-				.map(({ snapshot, stale, source }) => ({
-					provider: snapshot.providerId,
-					source,
-					observedAt: utc(snapshot.fetchedAt),
-					stale,
-					windows: windows(
-						snapshot.windows.map((window) => ({
-							key: window.key,
-							usedPct: Number.isFinite(window.usedPct)
-								? { kind: "measured", value: window.usedPct, source: "provider" }
-								: { kind: "unknown", reason: "unsupported" },
-							resetsAt: window.resetsAt,
-						})),
-						// One provider's per-model windows can share a label, so a scoped window names its scope (#434).
-						new Map(
-							snapshot.windows.flatMap((window) =>
-								window.label.length > 0 ? [[window.key, scopedQuotaLabel(window.label, window.scope)]] : [],
-							),
+			let rows: QuotaRow[] = observedQuotaReadings(now).map(({ snapshot, stale, source }) => ({
+				provider: snapshot.providerId,
+				...quotaAccountDetails(quotaReadingFromSnapshot(snapshot, utc(snapshot.fetchedAt) ?? new Date(now).toISOString())),
+				source,
+				observedAt: utc(snapshot.fetchedAt),
+				stale,
+				windows: windows(
+					snapshot.windows.map((window) => ({
+						key: window.key,
+						...(window.scope ? { scope: window.scope } : {}),
+						usedPct: Number.isFinite(window.usedPct)
+							? { kind: "measured", value: window.usedPct, source: "provider" }
+							: { kind: "unknown", reason: "unsupported" },
+						resetsAt: window.resetsAt,
+					})),
+					// One provider's per-model windows can share a label, so a scoped window names its scope (#434).
+					new Map(
+						snapshot.windows.flatMap((window) =>
+							window.label.length > 0 ? [[window.key, scopedQuotaLabel(window.label, window.scope)]] : [],
 						),
-						accounts.get(snapshot.providerId)?.consumed,
 					),
-				}));
+					accounts.get(snapshot.providerId)?.consumed,
+				),
+			}));
 			// This host's journaled readings: an earlier process's last sight of an account, and any reading newer than
 			// what this process holds. The newer observation of an account wins (#434).
 			for (const [account, { reading, consumed }] of accounts) {
-				if (provider !== undefined && account !== provider) continue;
 				const observedAt = utc(reading.observedAt);
 				const held = rows.filter((row) => row.provider === account);
 				if (observedAt === null || held.some((row) => row.observedAt !== null && row.observedAt >= observedAt)) continue;
@@ -786,9 +795,10 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 					...rows.filter((row) => row.provider !== account),
 					{
 						provider: account,
+						...quotaAccountDetails(reading),
 						source: reading.source,
 						observedAt,
-						stale: now - Date.parse(observedAt) >= STREAM_QUOTA_TTL_MS,
+						stale: reading.stale === true || now - Date.parse(observedAt) >= STREAM_QUOTA_TTL_MS,
 						windows: windows(reading.windows, labels, consumed),
 					},
 				];
@@ -798,7 +808,9 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 				foldVersion: TELEMETRY_FOLD_VERSION,
 				generatedAt: new Date(now).toISOString(),
 				kind: "quota",
-				providers: rows.sort((a, b) => a.provider.localeCompare(b.provider) || a.source.localeCompare(b.source)),
+				providers: reconcileQuotaAccounts(rows.sort((a, b) => a.provider.localeCompare(b.provider)))
+					.filter((row) => row.status !== "no_credentials" && (provider === undefined || row.credentials.includes(provider)))
+					.sort((a, b) => a.provider.localeCompare(b.provider) || a.source.localeCompare(b.source)),
 			} satisfies QuotaStateV1;
 		},
 		health() {
