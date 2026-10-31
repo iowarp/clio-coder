@@ -1,9 +1,20 @@
-import { lstat, readFile } from "node:fs/promises";
+import { lstatSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { clioStateDir } from "../core/xdg.js";
+import {
+	telemetryImportedStateDir,
+	telemetryRunDirectory,
+	telemetrySessionDirectory,
+} from "../domains/telemetry/paths.js";
 import { seal } from "../domains/telemetry/read-model.js";
 import type { SealVerdict } from "../domains/telemetry/seal.js";
 import { describeSealMismatch, readTelemetryScopeFiles } from "../domains/telemetry/seal.js";
 import { printError } from "./shared.js";
+
+const HELP = `clio-coder telemetry verify <session | scope-dir | archive> [--imported <install-id>] [--json]
+clio-coder telemetry verify --run <run-id> [--imported <install-id>] [--json]
+`;
 
 function describe(path: string, verdict: SealVerdict): string {
 	if (verdict.status === "unsealed")
@@ -33,19 +44,54 @@ async function verifyArchive(path: string, json: boolean): Promise<number> {
 	return check.failure === null ? 0 : 1;
 }
 
-/** `telemetry verify <path> [--json]`: exit 0 verified, 1 failed or unsealed, 2 on usage errors (#434). */
+/** Exit 0 verified, 1 failed or unsealed, 2 on usage errors (#434). */
 export async function runTelemetryVerify(argv: ReadonlyArray<string>): Promise<number> {
-	const json = argv.includes("--json");
-	const paths = argv.filter((arg) => arg !== "--json");
-	if (paths.length !== 1 || paths[0]?.startsWith("-")) {
-		printError("usage: clio-coder telemetry verify <scope-dir | archive> [--json]");
+	if (argv.includes("--help") || argv.includes("-h")) {
+		process.stdout.write(HELP);
+		return 0;
+	}
+	let json = false;
+	let target: string | undefined;
+	const values = new Map<string, string>();
+	for (let index = 0; index < argv.length; index += 1) {
+		const arg = argv[index] as string;
+		if (arg === "--json") json = true;
+		else if (
+			(arg === "--run" || arg === "--imported") &&
+			!values.has(arg) &&
+			argv[index + 1] !== undefined &&
+			!argv[index + 1]?.startsWith("-")
+		) {
+			values.set(arg, argv[index + 1] as string);
+			index += 1;
+		} else if (!arg.startsWith("-") && target === undefined) target = arg;
+		else {
+			process.stderr.write(HELP);
+			return 2;
+		}
+	}
+	const runId = values.get("--run");
+	if ((target === undefined) === (runId === undefined)) {
+		process.stderr.write(HELP);
 		return 2;
 	}
-	const path = resolve(paths[0] as string);
+	let path: string;
 	try {
-		if ((await lstat(path)).isFile()) return await verifyArchive(path, json);
+		const imported = values.get("--imported");
+		const stateDir = imported === undefined ? clioStateDir() : telemetryImportedStateDir(clioStateDir(), imported);
+		path = runId === undefined ? resolve(target as string) : telemetryRunDirectory(stateDir, runId);
+		let info = lstatSync(path, { throwIfNoEntry: false });
+		if (!info && runId === undefined && !target?.includes("/") && !target?.includes("\\")) {
+			path = telemetrySessionDirectory(stateDir, target as string);
+			info = lstatSync(path, { throwIfNoEntry: false });
+		}
+		if (!info) {
+			printError(`no telemetry scope for ${runId ?? target} at ${path}`);
+			return 2;
+		}
+		if (runId === undefined && info.isFile()) return await verifyArchive(path, json);
 	} catch (error) {
-		printError(`cannot read ${path}: ${error instanceof Error ? error.message : String(error)}`);
+		printError(`cannot read telemetry ${runId ?? target}: ${error instanceof Error ? error.message : String(error)}`);
 		return 2;
 	}
 	let verdict: SealVerdict;

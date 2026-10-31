@@ -12,7 +12,8 @@ import { printError } from "./shared.js";
 
 const HELP = `clio-coder telemetry consent [--workspace <dir>] [--revoke | --list]
 clio-coder telemetry prune [--apply] [--days N] [--max-gib N] [--research-days N] [--research-max-gib N]
-clio-coder telemetry verify <scope-dir | archive> [--json]
+clio-coder telemetry verify <session | scope-dir | archive> [--imported <install-id>] [--json]
+clio-coder telemetry verify --run <run-id> [--imported <install-id>] [--json]
 clio-coder telemetry doctor [--json]
 
 consent records, for this operator, that research content capture may run in a
