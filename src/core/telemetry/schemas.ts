@@ -206,7 +206,6 @@ export const CallSettledSchema = Type.Object(
 		),
 		cache: Type.Object(
 			{
-				promptManifestRef: Type.Optional(ObjectRefSchema),
 				/**
 				 * Where this request first departs from the previous one on its cache key: a compiled prompt section id,
 				 * "system-prompt" when no section can be named, "tools" or "messages". Null when it only extends it (#434).
