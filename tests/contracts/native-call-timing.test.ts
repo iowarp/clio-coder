@@ -14,22 +14,22 @@ test("throughput sums generation spans without tool, approval, worker or retry w
 	timing.record({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "" } }, 150);
 	strictEqual(timing.snapshot(150), null, "empty deltas do not establish TTFT");
 	timing.record(delta, 200);
-	deepStrictEqual(timing.snapshot(1200), { durationMs: 1000, ttftMs: 200 });
+	deepStrictEqual(timing.snapshot(1200), { durationMs: 1000 });
 	timing.record({ type: "message_end", message: assistant }, 2200);
 	timing.record({ type: "tool_execution_start" }, 2200);
-	deepStrictEqual(timing.snapshot(82200), { durationMs: 2000, ttftMs: 200 }, "wait must not decay Tk/s");
+	deepStrictEqual(timing.snapshot(82200), { durationMs: 2000 }, "wait must not decay Tk/s");
 	timing.record({ type: "tool_execution_end" }, 82200);
 	// A failed empty attempt and its retry prefill contribute no generation.
 	timing.record({ type: "message_start", message: assistant }, 83000);
 	timing.record({ type: "message_end", message: assistant }, 84000);
 	timing.record({ type: "message_start", message: assistant }, 90000);
-	deepStrictEqual(timing.snapshot(91000), { durationMs: 2000, ttftMs: 200 });
+	deepStrictEqual(timing.snapshot(91000), { durationMs: 2000 });
 	timing.record({ type: "message_update", assistantMessageEvent: { type: "toolcall_start" } }, 92000);
 	timing.record(delta, 93000);
-	deepStrictEqual(timing.snapshot(94000), { durationMs: 4000, ttftMs: 200 });
+	deepStrictEqual(timing.snapshot(94000), { durationMs: 4000 });
 	timing.record({ type: "message_end", message: assistant }, 95000);
 	timing.record({ type: "agent_end" }, 100000);
-	deepStrictEqual(timing.snapshot(110000), { durationMs: 5000, ttftMs: 200 }, "agent_end cannot count a span twice");
+	deepStrictEqual(timing.snapshot(110000), { durationMs: 5000 }, "agent_end cannot count a span twice");
 	timing.record({ type: "agent_start" }, 120000);
 	strictEqual(timing.snapshot(120000), null, "only a new run resets the accumulator");
 });
@@ -69,11 +69,7 @@ test("live argument estimates are replaced by authoritative output and survive a
 	);
 	timing.record({ type: "agent_end" }, 12_000);
 	deepStrictEqual(timing.output(), { outputTokens: 4042, estimated: true }, "settlement charges each call once");
-	deepStrictEqual(
-		timing.snapshot(22_000),
-		{ durationMs: 2000, ttftMs: 200 },
-		"tool and idle waits stay outside the rate",
-	);
+	deepStrictEqual(timing.snapshot(22_000), { durationMs: 2000 }, "tool and idle waits stay outside the rate");
 	timing.record({ type: "agent_start" }, 23_000);
 	timing.record({ type: "message_start", message: partial }, 23_100);
 	timing.record(

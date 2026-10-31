@@ -79,12 +79,10 @@ export function createAssistantGenerationTiming() {
 		output(): { outputTokens: number; estimated: boolean } {
 			return { outputTokens: settledOutput + partialOutput, estimated: estimatedOutput || partialOutput > 0 };
 		},
-		snapshot(at: number): { durationMs: number; ttftMs: number } | null {
+		/** Null until the first delta. A call's TTFT is the read model's, from send to first token (#434). */
+		snapshot(at: number): { durationMs: number } | null {
 			if (startedAt === null || firstDeltaAt === null) return null;
-			return {
-				durationMs: Math.max(1, settledMs + (activeSince === null ? 0 : Math.max(0, at - activeSince))),
-				ttftMs: Math.max(0, firstDeltaAt - startedAt),
-			};
+			return { durationMs: Math.max(1, settledMs + (activeSince === null ? 0 : Math.max(0, at - activeSince))) };
 		},
 	};
 }

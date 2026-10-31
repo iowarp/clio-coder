@@ -28,7 +28,7 @@ export function footerState(): FooterDashboardRenderState {
 		status: "running" as const,
 		elapsedMs: 12000,
 		usage: runUsageOf("scout-run", [{ usage: { input: 68000, output: 2000 }, usd: null }]),
-		ttftMs: 300,
+		ttft: "300ms",
 		lastContextTokens: 17000,
 		contextWindow: 262144,
 	};

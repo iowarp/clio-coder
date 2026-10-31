@@ -15,9 +15,7 @@ import { dispatchHasEvidenceLedger } from "../../src/domains/telemetry/extension
 import { createTelemetryProjection, type ProjectionReadModel } from "../../src/domains/telemetry/projection.js";
 
 function stubReadModel(): ProjectionReadModel {
-	return {
-		latestThroughput: () => null,
-	};
+	return {};
 }
 
 function baseFailedPayload(overrides: Partial<DispatchFailedPayload> = {}): DispatchFailedPayload {

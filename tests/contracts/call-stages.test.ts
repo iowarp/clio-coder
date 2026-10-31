@@ -142,7 +142,6 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 		},
 		telemetry: {
 			acquireTelemetrySession: journals.acquire,
-			recordTokenThroughput() {},
 		} as unknown as TelemetryContract,
 		prompts: {
 			inputEpoch: () => (memory === "one" ? 0 : 1),
@@ -502,7 +501,6 @@ it("a main call journals the model change and the Codex transport resets the hos
 		knownTargets: () => new Set([target.id]),
 		telemetry: {
 			acquireTelemetrySession: journals.acquire,
-			recordTokenThroughput() {},
 		} as unknown as TelemetryContract,
 		prompts: {
 			inputEpoch: () => 0,

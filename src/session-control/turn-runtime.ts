@@ -67,7 +67,6 @@ import { applyToolRounds, streamToolRound } from "../engine/provider-payload.js"
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { effectiveToolCall } from "../tools/surface.js";
-import { createAssistantGenerationTiming } from "./assistant-generation-timing.js";
 import {
 	type AssistantCallTiming,
 	type BackendCacheVerdict,
@@ -1386,7 +1385,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			return true;
 		};
 
-		const generationTiming = createAssistantGenerationTiming();
 		// First call of the run is the one whose verdict says whether the
 		// backend reused the session prefix; later calls in a tool loop are
 		// trivially warm.
@@ -1569,7 +1567,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					ttftMs: apiCallFirstDeltaAt === null ? null : Math.round(Math.max(0, apiCallFirstDeltaAt - apiCallStartedAt)),
 				} as typeof publicEvent;
 			}
-			if (publicEvent) generationTiming.record(publicEvent, eventClock);
 			if (publicEvent?.type === "agent_start") {
 				turnEndFiredFor = null;
 				state.pendingInRunContinuation = false;
@@ -1618,19 +1615,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					completed.costUsd > 0
 				) {
 					unsettledSpendUsd += completed.costUsd;
-				}
-			}
-			if (enrichedEvent.type === "agent_end" && deps.telemetry) {
-				const timing = generationTiming.snapshot(eventClock);
-				const generated = generationTiming.output();
-				if (generated.outputTokens > 0 && timing) {
-					const durationMs = Math.round(timing.durationMs);
-					deps.telemetry.recordTokenThroughput({
-						tokensPerSecond: generated.outputTokens / (durationMs / 1000),
-						...generated,
-						durationMs,
-						ttftMs: Math.round(timing.ttftMs),
-					});
 				}
 			}
 			if (enrichedEvent.type === "agent_end") unsettledSpendUsd = 0;

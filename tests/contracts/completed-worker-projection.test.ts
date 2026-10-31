@@ -23,7 +23,6 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 	const bus = createTelemetryHub();
 	const projection = createTelemetryProjection(bus, {
 		readReceipt: () => facts,
-		latestThroughput: () => null,
 	});
 	const store = createDispatchBoardStore(projection);
 	const event: DispatchCompletedPayload = {

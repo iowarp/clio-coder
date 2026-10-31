@@ -411,14 +411,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		if (!timing) return null;
 		const { outputTokens, estimated } = generationTiming.output();
 		if (outputTokens <= 0) return null;
-		const { durationMs, ttftMs } = timing;
-		return {
-			tokensPerSecond: outputTokens / (durationMs / 1000),
-			outputTokens,
-			estimated,
-			durationMs,
-			ttftMs,
-		};
+		const { durationMs } = timing;
+		return { tokensPerSecond: outputTokens / (durationMs / 1000), outputTokens, estimated, durationMs };
 	};
 	let footer: FooterDashboardPanel;
 	const notifications = factories.createNotificationCenter({
@@ -474,7 +468,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			if (setDockFooterRows(deps.tui, rows)) requestRender();
 		},
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
-		getTokenThroughput: () => (liveGeneration ? currentLiveThroughput() : telemetrySnapshot.session.latestThroughput),
+		getTokenThroughput: () => (liveGeneration ? currentLiveThroughput() : null),
 		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),

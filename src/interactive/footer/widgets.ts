@@ -472,16 +472,24 @@ function defaultIdleStatus(): AgentStatus {
 	};
 }
 
-function formattedThroughput(theme: ClioTheme, throughput: TokenThroughputSnapshot | null | undefined): string | null {
-	const tps = finiteNonNegative(throughput?.tokensPerSecond);
-	if (tps <= 0) return null;
+/** The streaming turn's live rate, or else the newest settled main call's rate and TTFT from the read model (#434). */
+function formattedThroughput(
+	theme: ClioTheme,
+	throughput: TokenThroughputSnapshot | null | undefined,
+	telemetry: FooterTelemetry | undefined,
+): string | null {
+	const settled = throughput ? null : telemetry?.kind === "ready" ? telemetry.speed : null;
+	const tps = finiteNonNegative(throughput ? throughput.tokensPerSecond : settled?.tokensPerSecond);
+	const estimated = throughput ? throughput.estimated === true : settled?.estimated === true;
 	const rounded = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10;
 	const parts = [
-		`${theme.fg("metricValue", `${GLYPH.speed}${throughput?.estimated ? "≈" : ""}${rounded}`)} ${theme.fg("metricUnit", "Tk/s")}`,
+		tps > 0
+			? `${theme.fg("metricValue", `${GLYPH.speed}${estimated ? "≈" : ""}${rounded}`)} ${theme.fg("metricUnit", "Tk/s")}`
+			: null,
+		settled?.ttft ? `${theme.fg("fieldName", "ttft")} ${theme.fg("counter", settled.ttft)}` : null,
 	];
-	const ttft = finiteNonNegative(throughput?.ttftMs);
-	if (ttft > 0) parts.push(`${theme.fg("fieldName", "ttft")} ${theme.fg("counter", formatCompactMs(ttft))}`);
-	return joinChips(theme, parts);
+	const joined = joinChips(theme, parts);
+	return joined.length > 0 ? joined : null;
 }
 
 /**
@@ -596,12 +604,12 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	}
 	if (isStreaming && facts.statusText) rows.push(kv("state", facts.statusText, "activity"));
 	if (isStreaming) {
-		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput)));
+		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput, undefined)));
 		rows.push(styledKv("live", liveTokenValue(theme, options.throughput, options.telemetry, options.contextUsed)));
 	} else if (facts.lastTurn) {
 		rows.push(styledKv("last", lastTurnOutcome(theme, facts.lastTurn)));
 		rows.push(styledKv("turn", lastTurnDetails(theme, facts.lastTurn, options.telemetry)));
-		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput)));
+		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput, options.telemetry)));
 	}
 	const totals = totalsValue(options.telemetry);
 	rows.push(totals === null ? statusRow(null) : styledKv("totals", theme.fg("counter", totals)));

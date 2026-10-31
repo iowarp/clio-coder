@@ -86,7 +86,8 @@ export interface DispatchBoardRow {
 	elapsedMs: number;
 	/** Tokens and cost from the telemetry read model; never the projection's own tally (#434 §11.3). */
 	usage: DispatchRunUsage;
-	ttftMs: number | null;
+	/** The run's first call's TTFT as the read model displays it; null before that call settles (#434). */
+	ttft: string | null;
 	outcomeDetail?: string | null;
 	/** Fleet node id; absent renders as the local node. */
 	node?: string;
@@ -671,7 +672,7 @@ function renderDispatchCard(
 	// The function phase is orange, while identity, cost and TTFT keep their own roles.
 	const statusStr = `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
 
-	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? `waiting${GLYPH.ellipsis}` : "n/a";
+	const ttft = row.ttft ?? (row.status === "running" ? `waiting${GLYPH.ellipsis}` : "n/a");
 
 	// The agent label is the frame title and can be arbitrarily long (agent ids
 	// are user data); clamp it so the title plus the elapsed meta never pushes
@@ -1277,7 +1278,12 @@ function isTerminalStatus(status: DispatchBoardStatus): boolean {
 	return status === "completed" || status === "failed" || status === "aborted" || status === "dead";
 }
 
-function toRow(entry: TelemetryRunSummary, now: number, usage: DispatchRunUsage): DispatchBoardRow {
+function toRow(
+	entry: TelemetryRunSummary,
+	now: number,
+	usage: DispatchRunUsage,
+	ttft: string | null,
+): DispatchBoardRow {
 	const retry = entry.retry;
 	const progress = entry.progress;
 	return {
@@ -1297,7 +1303,7 @@ function toRow(entry: TelemetryRunSummary, now: number, usage: DispatchRunUsage)
 		status: entry.status,
 		elapsedMs: entry.durationMs ?? Math.max(0, (entry.finishedAtMs ?? now) - entry.startedAtMs),
 		usage,
-		ttftMs: entry.ttftMs ?? null,
+		ttft,
 		...(entry.outcomeDetail !== undefined ? { outcomeDetail: entry.outcomeDetail } : {}),
 		...(entry.node !== undefined ? { node: entry.node } : {}),
 		...(entry.gate !== undefined ? { gate: { ...entry.gate } } : {}),
@@ -1342,6 +1348,27 @@ function runUsagesOf(view: TelemetryView): Map<string, DispatchRunUsage> {
 	return usages;
 }
 
+const runTtfts = new WeakMap<TelemetryView, Map<string, string | null>>();
+
+/**
+ * The run's first call's TTFT, send to first token, as its journal records it: the one TTFT every surface shows,
+ * never an orchestrator clock that also counts the worker's startup (#434). Null until that call settles with one.
+ */
+function dispatchRunTtft(view: TelemetryView | null | undefined, runId: string): string | null {
+	if (!view) return null;
+	let ttfts = runTtfts.get(view);
+	if (!ttfts) {
+		ttfts = new Map();
+		runTtfts.set(view, ttfts);
+	}
+	if (ttfts.has(runId)) return ttfts.get(runId) ?? null;
+	const first = view.calls({ runId }).calls[0];
+	const kind = first && "kind" in first.timing.ttft.fact ? first.timing.ttft.fact.kind : null;
+	const ttft = first && (kind === "measured" || kind === "estimated") ? first.timing.ttft.display : null;
+	ttfts.set(runId, ttft);
+	return ttft;
+}
+
 /** A run's usage in one telemetry view: unavailable without a view, pending until the view's session references it. */
 export function dispatchRunUsage(view: TelemetryView | null | undefined, runId: string): DispatchRunUsage {
 	return view ? (runUsagesOf(view).get(runId) ?? PENDING) : UNAVAILABLE;
@@ -1370,7 +1397,7 @@ export function createDispatchBoardStore(
 					STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
 					(b.finishedAtMs ?? b.startedAtMs) - (a.finishedAtMs ?? a.startedAtMs),
 			)
-			.map((run) => toRow(run, current.generatedAt, dispatchRunUsage(view, run.runId)))
+			.map((run) => toRow(run, current.generatedAt, dispatchRunUsage(view, run.runId), dispatchRunTtft(view, run.runId)))
 			.filter((row) => !activeOnly || !isTerminalStatus(row.status));
 	};
 	return {

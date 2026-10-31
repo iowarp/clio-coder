@@ -16,7 +16,6 @@ import { normalizeTokenUsage } from "../../core/token-split.js";
  * - Terminal history and notices are bounded; active runs remain until settlement.
  */
 
-import { performance } from "node:perf_hooks";
 import { resolveDispatchFailureStatus } from "../../core/dispatch-outcome.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type { DispatchRunIdentity } from "../../core/telemetry/live-events.js";
@@ -35,7 +34,6 @@ import type {
 	TelemetryRunReaders,
 	TelemetryRunSummary,
 	TelemetrySnapshot,
-	TokenThroughputSnapshot,
 } from "./contract.js";
 import type { CostAggregate } from "./cost.js";
 import { createWorkerProgressFold, type WorkerProgressFold } from "./worker-progress.js";
@@ -48,14 +46,10 @@ export const MAX_PROJECTION_NOTICES = 100;
 export const PROJECTION_FLUSH_DEBOUNCE_MS = 16;
 
 /**
- * Read model the projection folds session-local state from. The extension owns
- * the latest-throughput register; the projection reads it at snapshot-build time
- * so ordering with the extension's own bus handlers never matters. Session spend
- * and tokens are the telemetry read model's, never the projection's (#434).
+ * What the projection reads beside the bus: the dispatch and receipt readers. Session spend, tokens and timing are
+ * the telemetry read model's, never the projection's (#434).
  */
-export interface ProjectionReadModel extends TelemetryRunReaders {
-	latestThroughput(): TokenThroughputSnapshot | null;
-}
+export type ProjectionReadModel = TelemetryRunReaders;
 
 export interface TelemetryProjection extends TelemetryRunProjection {
 	snapshot(): TelemetrySnapshot;
@@ -103,7 +97,6 @@ function makeRef(parts: Record<string, unknown>): TelemetryNotice["ref"] | undef
 
 interface RunEntry extends TelemetryRunSummary {
 	progressFold: WorkerProgressFold;
-	startedAtClockMs: number | null;
 }
 
 const TASK_SUMMARY_MAX_WIDTH = 240;
@@ -289,13 +282,10 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 	function buildSnapshot(): TelemetrySnapshot {
 		return {
 			generatedAt: Date.now(),
-			session: {
-				latestThroughput: deps.latestThroughput(),
-			},
 			// Newest-first: Map preserves first-seen (enqueue) order, so reversing
 			// surfaces the most recently started runs at the head of the list.
 			runs: [...runs.values()].reverse().map((entry) => {
-				const { progressFold, startedAtClockMs: _clock, ...summary } = entry;
+				const { progressFold, ...summary } = entry;
 				return structuredClone({
 					...summary,
 					status: entry.retry ? "retrying" : entry.status,
@@ -360,8 +350,6 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			agentId: "-",
 			runtimeKind: "http",
 			progressFold: createWorkerProgressFold(),
-			startedAtClockMs: null,
-			ttftMs: null,
 			...(phase !== undefined ? { phase: { ...phase } } : {}),
 			status: "enqueued",
 			startedAtMs: now,
@@ -541,7 +529,6 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			applyIdentity(summary, payload as Partial<DispatchRunIdentity>);
 			summary.status = "running";
 			summary.startedAtMs = now;
-			summary.startedAtClockMs = performance.now();
 			delete summary.retry;
 			summary.finishedAtMs = null;
 			summary.durationMs = null;
@@ -582,20 +569,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 				markChanged();
 				return;
 			}
-			// Agent startup provides the monotonic origin for TTFT. Lifecycle
-			// timestamps remain owned by DispatchStarted.
-			if (type === "agent_start") summary.startedAtClockMs = performance.now();
 			let changed = false;
-			if (type === "message_update") {
-				const assistantEvent = (event.assistantMessageEvent ?? {}) as Record<string, unknown>;
-				const hasDelta = ["text_delta", "thinking_delta", "toolcall_start", "toolcall_delta"].includes(
-					String(assistantEvent.type),
-				);
-				if (hasDelta && summary.ttftMs === null && summary.startedAtClockMs !== null) {
-					summary.ttftMs = Math.round(performance.now() - summary.startedAtClockMs);
-					changed = true;
-				}
-			}
 			if (type === "clio_coder_write_record_downgraded") {
 				const detail = (event.payload ?? {}) as Record<string, unknown>;
 				const tool = parseNonEmptyString(detail.tool);

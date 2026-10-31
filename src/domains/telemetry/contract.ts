@@ -32,14 +32,16 @@ import type { TurnsSum } from "./read-model.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "./session-journals.js";
 import type { WorkerProgressSnapshot } from "./worker-progress.js";
 
-/** The footer speed row reads every field: rate, generation time, TTFT and output count. */
+/**
+ * The streaming turn's live rate and output count, for the footer while the turn runs. A settled call's rate and TTFT
+ * are the read model's (#434).
+ */
 export interface TokenThroughputSnapshot {
 	tokensPerSecond: number;
 	outputTokens: number;
 	/** True when any output in this rate is derived from characters rather than provider usage. */
 	estimated?: boolean;
 	durationMs: number;
-	ttftMs?: number;
 }
 
 /**
@@ -81,7 +83,6 @@ export interface TelemetryRunSummary {
 	endpoint?: { key: string; label: string; limit: number };
 	taskSummary?: string;
 	budget?: RunToolBudgetEnvelope;
-	ttftMs?: number | null;
 	node?: string;
 	gate?: { role: string; cycle: number };
 	council?: { group: string; label: string; color?: string; round: number };
@@ -129,14 +130,11 @@ export interface TelemetryRunEvidence {
 
 /**
  * Single product-facing projection of the telemetry domain: run lifecycle and evidence notices folded from the event
- * bus, plus the latest throughput. Spend and tokens are read from the read model (`read`), never from here (#434).
- * `generatedAt` is the wall-clock time the snapshot object was assembled.
+ * bus. Spend, tokens and timing are read from the read model (`read`), never from here (#434). `generatedAt` is the
+ * wall-clock time the snapshot object was assembled.
  */
 export interface TelemetrySnapshot {
 	generatedAt: number;
-	session: {
-		latestThroughput: TokenThroughputSnapshot | null;
-	};
 	runs: readonly TelemetryRunSummary[];
 	notices: readonly TelemetryNotice[];
 	pendingEvidenceBuildRunIds: readonly string[];
@@ -253,8 +251,6 @@ export interface TelemetryContract extends TelemetryRunProjection {
 		data: PreimageData<K>,
 		preimage: unknown,
 	): void;
-	/** Record final output token throughput for one completed assistant stream. */
-	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;
 	/**
 	 * Current product-facing projection. Cheap to call: it folds in-memory state
 	 * (active runs, bounded terminal history/notices and the latest throughput)

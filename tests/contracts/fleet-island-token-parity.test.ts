@@ -43,7 +43,6 @@ test("the island's input counts cache reads, so ↑ plus ↓ is the card's proce
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}) as unknown as DispatchSnapshot,
-		latestThroughput: () => null,
 	});
 	const view = telemetryViewOf("session-1", [], new Map([["run-1", telemetryCall("session-1", { usage })]]));
 	const store = createDispatchBoardStore({

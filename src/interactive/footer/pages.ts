@@ -73,7 +73,7 @@ function agentCard(
 		workload.push(`${row.progress.toolCalls} tool ${row.progress.toolCalls === 1 ? "call" : "calls"}`);
 	if (workload.length) lines.push(...field("Work", workload.join(" · ")));
 	const timing: string[] = [];
-	if (row.ttftMs !== null) timing.push(`first token ${formatCompactMs(row.ttftMs)}`);
+	if (row.ttft !== null) timing.push(`first token ${row.ttft}`);
 	if (row.usage.kind === "ready") timing.push(usage.cost);
 	if (!compact && timing.length) lines.push(...field("Timing", timing.join(" · ")));
 	if (!compact && row.budget)
@@ -315,14 +315,13 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		theme.base("counter", truncateToWidth(text, Math.max(1, room), GLYPH.ellipsis, true));
 	const separator = theme.fg("border", " · ");
 	const counter = compactContextUsage(state.context, theme, Math.floor(w * 0.4));
-	const rate = state.throughput?.tokensPerSecond;
+	// The streaming turn's live rate, else the newest settled main call's from the read model (#434).
+	const settled = state.throughput ? null : state.telemetry.kind === "ready" ? state.telemetry.speed : null;
+	const rate = state.throughput ? state.throughput.tokensPerSecond : settled?.tokensPerSecond;
+	const estimated = state.throughput ? state.throughput.estimated === true : settled?.estimated === true;
 	const speed =
 		typeof rate === "number" && Number.isFinite(rate) && rate > 0
-			? metricText(
-					theme,
-					`${state.throughput?.estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`,
-					"tps",
-				)
+			? metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tps")
 			: "";
 	const metrics = [counter, speed].filter(Boolean).join(theme.fg("border", " | "));
 	const statsCap = Math.floor(w * 0.4);

@@ -36,13 +36,7 @@ import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
 import type { CallJournal } from "./call-journal.js";
 import { openCallJournalHealth } from "./call-journal.js";
 import { createConsentView } from "./consent.js";
-import type {
-	SessionSpend,
-	TelemetryContract,
-	TelemetryRunEvidence,
-	TelemetryView,
-	TokenThroughputSnapshot,
-} from "./contract.js";
+import type { SessionSpend, TelemetryContract, TelemetryRunEvidence, TelemetryView } from "./contract.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
 import { foldFacts } from "./folds.js";
 import { createHealthWindows } from "./health-window.js";
@@ -379,13 +373,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		return spendOfQuantity(view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "usd" })));
 	};
 	const unsubscribes: Array<() => void> = [];
-	let latestThroughput: TokenThroughputSnapshot | null = null;
 
-	// The product-facing projection folds the bus channels into a single bounded snapshot. It reads the throughput
-	// at snapshot-build time, so it always observes the latest state regardless of bus-handler ordering.
-	const projection = createTelemetryProjection(context.bus, {
-		latestThroughput: () => latestThroughput,
-	});
+	// The product-facing projection folds the bus channels into a single bounded snapshot.
+	const projection = createTelemetryProjection(context.bus, {});
 
 	// In-flight forensic builds. The terminal event is emitted after the receipt
 	// and ledger are persisted (dispatch finalizers persist before emit), so a
@@ -575,15 +565,10 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		resetSession(nextSessionId) {
 			sessionId = nextSessionId;
 			telemetry.bind(nextSessionId ?? null);
-			latestThroughput = null;
 			if (!nextSessionId)
 				void refreshProcessSpend().catch(() => {
 					// An unreadable process journal leaves the last known spend; the next admission reads it again (#434).
 				});
-			projection.refresh();
-		},
-		recordTokenThroughput(snapshot) {
-			latestThroughput = snapshot;
 			projection.refresh();
 		},
 		bindRunReaders: (readers) => projection.bindRunReaders(readers),

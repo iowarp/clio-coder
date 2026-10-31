@@ -120,7 +120,6 @@ function setup(readers: TelemetryRunReaders = {}) {
 	const bus = createTelemetryHub();
 	const projection = createTelemetryProjection(bus, {
 		...readers,
-		latestThroughput: () => null,
 	});
 	projections.push(projection);
 	const board = createDispatchBoardStore(projection);
@@ -333,7 +332,8 @@ describe("dispatch board uses the telemetry projection", () => {
 		deepStrictEqual(row.budget, IDENTITY.budget);
 		ok(row.taskSummary?.includes("parser"));
 		ok(!row.taskSummary?.includes("\u001b"));
-		ok(row.ttftMs !== null && row.ttftMs >= 0);
+		// Without a read model the board has no journaled TTFT to show (#434).
+		strictEqual(row.ttft, null);
 		strictEqual(row.progress?.tailText, "sealed answer");
 		deepStrictEqual(row.trust, projection.snapshot().runs[0]?.trust);
 		strictEqual(row.steerAcknowledgement?.chars, 24);

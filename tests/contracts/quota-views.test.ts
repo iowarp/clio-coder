@@ -126,7 +126,7 @@ test("worker quota joins only known local credential owners and does not claim a
 		elapsedMs: 1000,
 		usage: runUsageOf("run", [{ usage: { input: 1000, output: 234 }, usd: null }]),
 		lastContextTokens: null,
-		ttftMs: null,
+		ttft: null,
 	};
 	const text = plain(renderWorkerUsage([row], [account], 100));
 	match(text, /1.2k recorded tokens/);
@@ -190,7 +190,7 @@ test("weekly badges select the model's own group and never infer another account
 		elapsedMs: 1000,
 		usage: { kind: "pending" },
 		lastContextTokens: null,
-		ttftMs: null,
+		ttft: null,
 	};
 	const island = formatTaskIslandLines([row], 1, [account]);
 	match(plain(island), /Shared account.*weekly 27% left/);

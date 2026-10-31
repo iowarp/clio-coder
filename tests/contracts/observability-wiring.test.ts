@@ -83,9 +83,7 @@ describe("compaction observations", () => {
 
 describe("evidence build failure", () => {
 	function readModel(): ProjectionReadModel {
-		return {
-			latestThroughput: () => null,
-		};
+		return {};
 	}
 
 	it("reaches the dispatch board as a failed proof with its reason", () => {
@@ -102,7 +100,7 @@ describe("evidence build failure", () => {
 			elapsedMs: 0,
 			usage: { kind: "pending" },
 			lastContextTokens: null,
-			ttftMs: null,
+			ttft: null,
 		};
 		const board = createDispatchBoardView(
 			() => [row],

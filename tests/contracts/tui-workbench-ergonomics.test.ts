@@ -61,7 +61,7 @@ function boardRow(id: string): DispatchBoardRow {
 		elapsedMs: 1000,
 		usage: { kind: "pending" },
 		lastContextTokens: null,
-		ttftMs: null,
+		ttft: null,
 		taskSummary: "Inspect 研究 paths",
 	};
 }

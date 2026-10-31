@@ -1,4 +1,4 @@
-import type { FactMetric, Quantity } from "../../core/telemetry/dto.js";
+import type { CallRowV1, FactMetric, Quantity } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
 import { renderCompactCount, renderCount } from "../../core/telemetry/render.js";
 import type { TelemetryView } from "../../domains/telemetry/contract.js";
@@ -20,6 +20,18 @@ export interface FooterSpend {
 	turn: { input: string; output: string; cacheRead: string; cacheWrite: string; reasoning: ReasoningUsageView } | null;
 	/** The newest main call's prompt-cache split and verdict. */
 	promptCache: { read: string; write: string; uncached: string; verdict: string } | null;
+	/** The newest main call's speed once it settles; the streaming turn's live rate is the footer's own. */
+	speed: FooterSpeed | null;
+}
+/**
+ * Output over the call's generation time (first token to settle) and its TTFT (send to first token), both journaled
+ * facts of one call (#434). The rate is null unless both facts are known and the generation took time.
+ */
+export interface FooterSpeed {
+	tokensPerSecond: number | null;
+	estimated: boolean;
+	/** The read model's TTFT display; null when the call has none to show. */
+	ttft: string | null;
 }
 /** `unavailable` means no read model; `reading` means the live view is still merging its cold read. */
 export type FooterTelemetry = { kind: "unavailable" } | { kind: "reading" } | ({ kind: "ready" } & FooterSpend);
@@ -34,6 +46,22 @@ const zero = (quantity: Quantity): boolean =>
 		: quantity.fact.unknownCount === 0 && quantity.fact.measured + quantity.fact.estimated === 0;
 
 const spends = new WeakMap<TelemetryView, FooterTelemetry>();
+
+const knownValue = (quantity: Quantity): { value: number; estimated: boolean } | null =>
+	"kind" in quantity.fact && (quantity.fact.kind === "measured" || quantity.fact.kind === "estimated")
+		? { value: quantity.fact.value, estimated: quantity.fact.kind === "estimated" }
+		: null;
+
+function footerSpeed(call: CallRowV1): FooterSpeed {
+	const output = call.usage ? knownValue(call.usage.output) : null;
+	const generation = knownValue(call.timing.modelTime);
+	const ttft = knownValue(call.timing.ttft);
+	return {
+		tokensPerSecond: output && generation && generation.value > 0 ? output.value / (generation.value / 1000) : null,
+		estimated: output?.estimated === true || generation?.estimated === true,
+		ttft: ttft ? call.timing.ttft.display : null,
+	};
+}
 
 export function footerTelemetry(view: TelemetryView | null | undefined): FooterTelemetry {
 	if (!view) return { kind: "unavailable" };
@@ -78,6 +106,7 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 					verdict: main.cache.verdict,
 				}
 			: null,
+		speed: main ? footerSpeed(main) : null,
 	};
 	spends.set(view, spend);
 	return spend;

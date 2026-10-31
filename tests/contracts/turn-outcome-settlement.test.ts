@@ -116,7 +116,6 @@ for (const continuation of [false, true])
 					: {}),
 				telemetry: {
 					acquireTelemetrySession: journals.acquire,
-					recordTokenThroughput() {},
 				} as unknown as TelemetryContract,
 				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
 					// The generic dispatch stub omits the API; a journal target needs the scripted protocol (#434).

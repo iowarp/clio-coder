@@ -215,7 +215,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 	let renders = 0;
 	const titles: string[] = [];
 	let quota = accounts();
-	const snapshot = { session: {} } as TelemetrySnapshot;
+	const snapshot = {} as TelemetrySnapshot;
 	let calls: TelemetryRecord[] = [];
 	let view = telemetryViewOf("usage-session", calls);
 	const updates = new Set<() => void>();
