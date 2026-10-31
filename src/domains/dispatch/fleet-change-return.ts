@@ -22,7 +22,7 @@ const input=JSON.parse(fs.readFileSync(0,'utf8')),w=input.worktree,NUL=String.fr
 function raw(cwd,...args){const r=cp.spawnSync('git',['-C',cwd,'-c','core.hooksPath=/dev/null',...args],{encoding:'utf8',timeout:30000,maxBuffer:16*1024*1024});if(r.status!==0)throw Error(r.stderr||'remote git failed');return r.stdout;}
 function git(cwd,...args){return raw(cwd,...args).trim();}
 function untracked(){return raw(w.path,'ls-files','--others','--exclude-standard','-z').split(NUL).filter(Boolean);}
-function untrackedState(){const paths=untracked(),h=crypto.createHash('sha256');for(const p of paths){let s='gone';try{const t=fs.lstatSync(path.join(w.path,p),{bigint:true});s=[t.mode,t.ino,t.size,t.mtimeNs,t.ctimeNs].join(':');}catch{}h.update(p+NUL+s+NUL);}return {paths,digest:h.digest('hex')};}
+function untrackedState(){const paths=untracked(),h=crypto.createHash('sha256');let directory=null;for(const p of paths){let s='gone';try{const t=fs.lstatSync(path.join(w.path,p),{bigint:true});if(t.isDirectory())directory??=p;s=[t.mode,t.ino,t.size,t.mtimeNs,t.ctimeNs].join(':');}catch{}h.update(p+NUL+s+NUL);}return {paths,digest:h.digest('hex'),directory};}
 function authoredSet(){if(input.authored===null)return null;const roots=[w.path];try{roots.push(fs.realpathSync(w.path));}catch{}const set=new Set();for(const p of input.authored)for(const r of roots){const x=path.relative(r,path.resolve(p));if(x&&x!=='..'&&!x.startsWith('..'+path.sep)&&!path.isAbsolute(x))set.add(x.split(path.sep).join('/'));}return set;}
 let out;
 function safeParent(){const rel=path.relative(w.root,w.path);if(!rel||rel.startsWith('..')||path.isAbsolute(rel))throw Error('remote worktree must be inside project');let current=w.root;for(const part of rel.split(path.sep).slice(0,-1)){current=path.join(current,part);if(fs.existsSync(current)){if(fs.lstatSync(current).isSymbolicLink()||!fs.statSync(current).isDirectory())throw Error('unsafe worktree parent');}else fs.mkdirSync(current,{mode:448});}}
@@ -48,7 +48,9 @@ try {
    const remaining=untrackedState();
    out={commit:git(w.path,'rev-parse','HEAD'),untracked:remaining.digest,left:remaining.paths.slice(0,input.listLimit),leftCount:remaining.paths.length};
   }else if(input.op==='cleanup'){
-   if(git(w.path,'rev-parse','HEAD')!==input.commit||git(w.path,'status','--porcelain','--untracked-files=no')||untrackedState().digest!==input.untracked)throw Error('remote worktree changed after import; preserved');
+   const remaining=untrackedState();
+   if(remaining.directory!==null)throw Error('remote worktree has untracked directory '+remaining.directory+'; destructive cleanup refused; preserved');
+   if(git(w.path,'rev-parse','HEAD')!==input.commit||git(w.path,'status','--porcelain','--untracked-files=no')||remaining.digest!==input.untracked)throw Error('remote worktree changed after import; preserved');
    git(w.root,'worktree','remove','--force',w.path);git(w.root,'branch','-D',w.branch);fs.unlinkSync(owner);
    out={commit:input.commit};
   }else throw Error('unknown remote operation');

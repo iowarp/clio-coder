@@ -880,27 +880,30 @@ export interface TaskWorktreePreview {
 /**
  * A digest of each untracked file's path and inode stamp. ctime moves on every
  * write, rename and chmod and cannot be set back, so an equal digest means no
- * untracked file appeared, vanished or changed. Ignored files stay out, as they
- * do from every host commit.
+ * untracked file appeared, vanished or changed. Directory stamps cannot detect
+ * edits to descendants, so directories prevent destructive cleanup. Ignored
+ * files stay out, as they do from every host commit.
  */
-function untrackedState(path: string): string {
+function untrackedState(path: string): { digest: string; directory: string | null } {
 	const hash = createHash("sha256");
+	let directory: string | null = null;
 	for (const entry of untrackedPaths(path)) {
 		let stamp = "gone";
 		try {
 			const stat = lstatSync(join(path, entry), { bigint: true });
+			if (stat.isDirectory()) directory ??= entry;
 			stamp = `${stat.mode}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 		} catch {
 			// A file removed between the listing and the stat still names its path.
 		}
 		hash.update(entry).update("\0").update(stamp).update("\0");
 	}
-	return hash.digest("hex");
+	return { digest: hash.digest("hex"), directory };
 }
 
 /** Record what an operator is about to be shown for `commit`, before the card that shows it. */
 export function previewTaskWorktree(worktree: TaskWorktree, commit: string): TaskWorktreePreview {
-	return { commit, untracked: untrackedState(worktree.path) };
+	return { commit, untracked: untrackedState(worktree.path).digest };
 }
 
 /** How a worktree no longer holds exactly what was previewed, or null when it does. */
@@ -908,7 +911,9 @@ function previewDrift(worktree: TaskWorktree, preview: TaskWorktreePreview, head
 	if (head !== preview.commit) return `is now at ${head}`;
 	if (gitBytes(worktree.path, ["status", "--porcelain", "-z", "--untracked-files=no"]).length > 0)
 		return "has uncommitted changes";
-	if (untrackedState(worktree.path) !== preview.untracked) return "has new or changed untracked files";
+	const untracked = untrackedState(worktree.path);
+	if (untracked.directory !== null) return `has untracked directory ${untracked.directory}; destructive cleanup refused`;
+	if (untracked.digest !== preview.untracked) return "has new or changed untracked files";
 	return null;
 }
 

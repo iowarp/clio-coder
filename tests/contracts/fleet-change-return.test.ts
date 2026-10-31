@@ -124,5 +124,22 @@ process.exit(result.status??1);
 		ok(existsSync(remotePath));
 		strictEqual(git(server, "branch", "--list", "--format=%(refname:short)", worktree.branch), worktree.branch);
 		strictEqual(readFileSync(join(remotePath, "outside.txt"), "utf8"), "preserve this rejected change\n");
+		const vendor = join(remotePath, "vendor");
+		git(remotePath, "clone", "-q", server, vendor);
+		mkdirSync(join(vendor, "src"));
+		writeFileSync(join(vendor, "src", "worker.txt"), "before preview\n");
+		const imported = await importFleetChanges(remote, [], [worktree.path], []);
+		deepStrictEqual(imported.leftUncommitted, { count: 1, paths: ["vendor/"] });
+		await rejects(
+			cleanupFleetChangeReturn(remote, imported),
+			/untracked directory vendor\/; destructive cleanup refused/,
+		);
+		writeFileSync(join(vendor, "src", "worker.txt"), "after preview\n");
+		await rejects(
+			cleanupFleetChangeReturn(remote, imported),
+			/untracked directory vendor\/; destructive cleanup refused/,
+		);
+		strictEqual(readFileSync(join(vendor, "src", "worker.txt"), "utf8"), "after preview\n");
+		strictEqual(git(server, "branch", "--list", "--format=%(refname:short)", worktree.branch), worktree.branch);
 	});
 });

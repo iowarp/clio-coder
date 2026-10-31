@@ -15,6 +15,7 @@ import {
 	recoverTaskWorktrees,
 	settleTaskWorktree,
 	type TaskWorktree,
+	taskWorktreePreviewDrift,
 } from "../../src/tools/task-worktree.js";
 
 /**
@@ -157,6 +158,20 @@ describe("task worktree restart recovery", () => {
 		strictEqual(landed.applied, true);
 		match(landed.detail ?? "", /^merged [a-f0-9]{7} onto /);
 		strictEqual(landed.commit, clean.commit);
+		const vendor = join(clean.task.path, "vendor");
+		git(clean.task.path, "clone", "-q", root, vendor);
+		mkdirSync(join(vendor, "src"));
+		writeFileSync(join(vendor, "src", "worker.txt"), "before preview\n");
+		const directoryPreview = previewTaskWorktree(clean.task, clean.commit);
+		match(taskWorktreePreviewDrift(clean.task, directoryPreview) ?? "", /untracked directory vendor\//u);
+		writeFileSync(join(vendor, "src", "worker.txt"), "after preview\n");
+		strictEqual(previewTaskWorktree(clean.task, clean.commit).untracked, directoryPreview.untracked);
+		match(taskWorktreePreviewDrift(clean.task, directoryPreview) ?? "", /untracked directory vendor\//u);
+		const directoryDiscard = discardTaskWorktree(clean.task, directoryPreview);
+		strictEqual(directoryDiscard.outcome, "changed");
+		match(directoryDiscard.outcome === "changed" ? directoryDiscard.detail : "", /untracked directory vendor\//u);
+		strictEqual(readFileSync(join(vendor, "src", "worker.txt"), "utf8"), "after preview\n");
+		ok(existsSync(markerPath(clean.task)) && branches().includes(clean.task.branch));
 
 		const dirty = prepare("run-pinned-dirty");
 		writeFileSync(join(dirty.task.path, "late.txt"), "late\n");
