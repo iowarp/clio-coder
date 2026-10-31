@@ -16,6 +16,8 @@ import type {
 import { withClaudeCredential } from "../../core/claude-environment.js";
 import { watchCredentialExpiry } from "../../core/credential-expiry.js";
 import { readClioVersion } from "../../core/package-root.js";
+import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
+import { withTelemetryContext } from "../../core/telemetry/context.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import { resolveClaudeLaunchCredential } from "../../domains/providers/auth/index.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
@@ -341,6 +343,7 @@ function emitTextDelta(
 }
 
 interface PermissionGateInput {
+	telemetryContext?: WorkerTelemetryContext;
 	workerExecuteAutonomy?: "yolo";
 	readOnly?: boolean;
 	safety: ReturnType<typeof createWorkerSafety>;
@@ -490,20 +493,25 @@ function decideToolUse(
 	toolName: string,
 	toolInput: unknown,
 ): ClaudeToolPermissionDecision {
-	return emitClaudeToolPermissionDecision({
-		toolName,
-		...(toolCallId !== undefined ? { toolCallId } : {}),
-		input: coerceToolInput(toolInput),
-		safety: input.safety,
-		cwd: input.cwd,
-		...(input.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: input.workerExecuteAutonomy } : {}),
-		...(input.readOnly === true ? { readOnly: true } : {}),
-		onPermission: input.onPermission,
-		...(input.mainGrantsUnavailable === true ? { mainGrantsUnavailable: true } : {}),
-		emit: input.emit,
-		allowedTools: input.allowedTools,
-		...(input.budgetGate ? { budgetGate: input.budgetGate } : {}),
-	});
+	const decide = () =>
+		emitClaudeToolPermissionDecision({
+			toolName,
+			...(toolCallId !== undefined ? { toolCallId } : {}),
+			input: coerceToolInput(toolInput),
+			safety: input.safety,
+			cwd: input.cwd,
+			...(input.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: input.workerExecuteAutonomy } : {}),
+			...(input.readOnly === true ? { readOnly: true } : {}),
+			onPermission: input.onPermission,
+			...(input.mainGrantsUnavailable === true ? { mainGrantsUnavailable: true } : {}),
+			emit: input.emit,
+			allowedTools: input.allowedTools,
+			...(input.budgetGate ? { budgetGate: input.budgetGate } : {}),
+		});
+	// SDK callbacks run outside the native worker's async scope; bind the actual tool use before auditing (#434).
+	return input.telemetryContext
+		? withTelemetryContext({ ...input.telemetryContext, ...(toolCallId !== undefined ? { toolCallId } : {}) }, decide)
+		: decide();
 }
 
 function buildPostToolUseHook(emit: WorkerEventEmit, cwd: string): HookCallback {
@@ -665,6 +673,7 @@ export function startClaudeSdkWorkerRun(input: WorkerRunInput, emit: WorkerEvent
 			)
 		: undefined;
 	const permissionGate: PermissionGateInput = {
+		...(input.telemetryContext !== undefined ? { telemetryContext: input.telemetryContext } : {}),
 		...(input.permitAllowance?.executeAutonomy !== undefined
 			? { workerExecuteAutonomy: input.permitAllowance.executeAutonomy }
 			: {}),

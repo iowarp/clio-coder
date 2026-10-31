@@ -1,4 +1,4 @@
-import { ownerTelemetryContext } from "./context.js";
+import { ownerTelemetryContext, workerAgent } from "./context.js";
 import type { TelemetryHub } from "./hub.js";
 import type { PermissionRequestedPayload, PermissionResolvedPayload } from "./live-events.js";
 
@@ -14,5 +14,10 @@ export function emitApproval(
 ): boolean {
 	const ctx = ownerTelemetryContext({ sessionId: payload.sessionId, turnId: payload.turnId });
 	if (!hub) return false;
-	return name === "approval.requested" ? hub.emit(name, payload, ctx) : hub.emit(name, payload, ctx);
+	if (name === "approval.requested") {
+		// The requester acts in the session's journal; its run must not become the journal owner (#434).
+		const actorContext = ctx && payload.requestedBy ? { ...ctx, agent: workerAgent(payload.requestedBy) } : ctx;
+		return hub.emit(name, payload, actorContext);
+	}
+	return hub.emit(name, payload, ctx);
 }
