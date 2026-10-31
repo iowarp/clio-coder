@@ -103,6 +103,42 @@ const call = {
 };
 const span = { start: duration, end: duration };
 const sha256Hex = Type.String({ pattern: "^[0-9a-f]{64}$" });
+
+/**
+ * The settings digest worker specs and route decisions carry, declared as R7 asks and as the receipt hash set declares
+ * it. A commitment: it confirms the settings document a config record's object reference stores, but resolves through
+ * no store of its own, because that copy is canonicalized without the domain prefix this digest covers (#434).
+ */
+export const SettingsFingerprintSchema = Type.Object(
+	{
+		label: Type.Literal("commitment"),
+		function: Type.Literal("sha256"),
+		/** `clio-coder.settings:` followed by the sorted-key JSON of the effective settings (settings-fingerprint.ts). */
+		canonicalization: Type.Literal("json-sorted-prefixed-v1"),
+		subject: Type.Literal("settings"),
+		hash: sha256Hex,
+	},
+	closed,
+);
+export type SettingsFingerprint = Static<typeof SettingsFingerprintSchema>;
+
+export function settingsFingerprintCommitment(hash: string): SettingsFingerprint {
+	return {
+		label: "commitment",
+		function: "sha256",
+		canonicalization: "json-sorted-prefixed-v1",
+		subject: "settings",
+		hash,
+	};
+}
+
+/** Version 1 config records carried the bare digest; reading one labels it as version 2 writes it. */
+function labelSettingsFingerprint(data: unknown): unknown {
+	const record = data as { settingsFingerprint?: unknown } | null;
+	return record && typeof record.settingsFingerprint === "string"
+		? { ...record, settingsFingerprint: settingsFingerprintCommitment(record.settingsFingerprint) }
+		: data;
+}
 const QuotaWindowSchema = Type.Object(
 	{
 		key: ExistingId,
@@ -551,14 +587,15 @@ export const KIND_REGISTRY = {
 	),
 	// The effective settings when a session's writer opens, so every later record reads against known settings (#434).
 	"config.snapshot": {
-		version: 1,
+		version: 2,
 		tier: "operational",
 		cc: "structural",
-		schema: Type.Object({ settings: ObjectRefSchema, settingsFingerprint: sha256Hex }, closed),
+		schema: Type.Object({ settings: ObjectRefSchema, settingsFingerprint: SettingsFingerprintSchema }, closed),
+		upcast: { 1: labelSettingsFingerprint },
 	},
 	// One settings change: the paths it touched by when they take effect, and both documents (#434).
 	"config.changed": {
-		version: 1,
+		version: 2,
 		tier: "operational",
 		cc: "structural",
 		schema: Type.Object(
@@ -577,10 +614,11 @@ export const KIND_REGISTRY = {
 				before: ObjectRefSchema,
 				after: ObjectRefSchema,
 				/** The digest a worker spec and route decision carry for the new settings, so they resolve here. */
-				settingsFingerprint: sha256Hex,
+				settingsFingerprint: SettingsFingerprintSchema,
 			},
 			closed,
 		),
+		upcast: { 1: labelSettingsFingerprint },
 	},
 	/** A task-memory step's prompt and reply beside its content-free step row; replaces CLIO_CODER_MEMORY_TRACE (#434). */
 	"memory.trace": {

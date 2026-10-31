@@ -660,7 +660,6 @@ export const TimelineEntrySchema = Type.Union([
 			]),
 			settings: ObjectRefSchema,
 			previous: Type.Union([ObjectRefSchema, Type.Null()]),
-			settingsFingerprint: text,
 		},
 		closed,
 	),

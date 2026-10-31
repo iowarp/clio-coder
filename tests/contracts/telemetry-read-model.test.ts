@@ -30,6 +30,7 @@ import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { FactSum } from "../../src/core/telemetry/fact.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
+import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioDataDir } from "../../src/core/xdg.js";
 import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js";
@@ -365,7 +366,7 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 	const records: TelemetryRecord[] = [
 		makeTelemetryRecord(
 			"config.snapshot",
-			{ settings: object, settingsFingerprint: "f".repeat(64) },
+			{ settings: object, settingsFingerprint: settingsFingerprintCommitment("f".repeat(64)) },
 			ctx,
 			clock("2026-10-30T00:00:00.000Z"),
 		),

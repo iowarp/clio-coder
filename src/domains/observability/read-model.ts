@@ -2048,7 +2048,6 @@ export function timeline(
 					paths: null,
 					settings: record.data.settings,
 					previous: null,
-					settingsFingerprint: record.data.settingsFingerprint,
 				});
 				break;
 			case "config.changed":
@@ -2060,7 +2059,6 @@ export function timeline(
 					paths: record.data.paths,
 					settings: record.data.after,
 					previous: record.data.before,
-					settingsFingerprint: record.data.settingsFingerprint,
 				});
 				break;
 			case "budget.crossing":

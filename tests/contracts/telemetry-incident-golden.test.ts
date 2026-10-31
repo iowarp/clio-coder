@@ -25,6 +25,7 @@ import {
 	journalSourceFromRead,
 	runsReport,
 	sessionTelemetry,
+	timeline,
 	whyStopped,
 } from "../../src/domains/observability/read-model.js";
 import { dtoLies } from "../harness/telemetry-lies.js";
@@ -253,6 +254,8 @@ test("no DTO over the golden tells a lie the detectors know (§13.1)", () => {
 		cache: cacheReport(source),
 		whyStopped: whyStopped(source),
 		runs: runsReport(source),
+		// Its config records are version 1, so their bare settings digest reads labelled (R7).
+		timeline: timeline(source),
 	})) {
 		deepStrictEqual(dtoLies(dto), [], name);
 	}

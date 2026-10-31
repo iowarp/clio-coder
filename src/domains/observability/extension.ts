@@ -24,6 +24,7 @@ import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetr
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import { recordTelemetry, recordTelemetryContent, telemetryCaptures } from "../../core/telemetry/producer.js";
 import type { Payload } from "../../core/telemetry/schemas.js";
+import { settingsFingerprintCommitment } from "../../core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/index.js";
 import { computeSettingsFingerprint } from "../dispatch/settings-fingerprint.js";
@@ -294,7 +295,7 @@ export function createObservabilityBundle(
 			const stored = storeTelemetryObject(sessionDirectory, "config", settings).then((ref) => {
 				recordTelemetry(
 					"config.snapshot",
-					{ settings: ref, settingsFingerprint: computeSettingsFingerprint(settings) },
+					{ settings: ref, settingsFingerprint: settingsFingerprintCommitment(computeSettingsFingerprint(settings)) },
 					sessionContext(origin.id),
 				);
 			});
@@ -317,7 +318,7 @@ export function createObservabilityBundle(
 			nextTurn: [...payload.diff.nextTurn],
 			restartRequired: [...payload.diff.restartRequired],
 		},
-		settingsFingerprint: computeSettingsFingerprint(payload.settings),
+		settingsFingerprint: settingsFingerprintCommitment(computeSettingsFingerprint(payload.settings)),
 	});
 	const recordSettingsChange = (payload: ConfigChangePayload): void => {
 		const previous = payload.previous;

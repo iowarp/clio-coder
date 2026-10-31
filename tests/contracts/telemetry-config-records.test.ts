@@ -6,7 +6,9 @@ import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { Payload } from "../../src/core/telemetry/schemas.js";
+import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
 import { computeSettingsFingerprint } from "../../src/domains/dispatch/settings-fingerprint.js";
@@ -65,7 +67,13 @@ it("a session writer opens with its settings and journals each change once, with
 		const snapshots = records.flatMap((record) => (record.k === "config.snapshot" ? [record.data] : []));
 		const changes = records.flatMap((record) => (record.k === "config.changed" ? [record.data] : []));
 		strictEqual(snapshots.length, 1);
-		strictEqual(snapshots[0]?.settingsFingerprint, computeSettingsFingerprint(before));
+		// The digest a route decision carries, labelled as R7 asks; a version 1 record's bare digest reads labelled too.
+		deepStrictEqual(snapshots[0]?.settingsFingerprint, settingsFingerprintCommitment(computeSettingsFingerprint(before)));
+		const v1 = { ...records.find((record) => record.k === "config.snapshot"), kv: 1 } as Record<string, unknown>;
+		const bare = { ...(v1.data as object), settingsFingerprint: computeSettingsFingerprint(before) };
+		const upcast = readTelemetryRecord({ ...v1, data: bare });
+		ok(upcast.kind === "record" && upcast.record.k === "config.snapshot");
+		deepStrictEqual(upcast.record.data.settingsFingerprint, snapshots[0]?.settingsFingerprint);
 		const [opened] = snapshots as [Payload<"config.snapshot">];
 		const stored = await readTelemetryObject(directory, opened.settings);
 		ok(stored.kind === "resolved");
@@ -76,7 +84,7 @@ it("a session writer opens with its settings and journals each change once, with
 		const [changed] = changes as [Payload<"config.changed">];
 		strictEqual(changed.source, "settings-ui");
 		deepStrictEqual(changed.paths.hotReload, ["safety.limits.sessionCostUsd"]);
-		strictEqual(changed.settingsFingerprint, computeSettingsFingerprint(after));
+		strictEqual(changed.settingsFingerprint.hash, computeSettingsFingerprint(after));
 		deepStrictEqual(changed.before, snapshots[0]?.settings);
 		const resolved = await readTelemetryObject(directory, changed.after);
 		ok(resolved.kind === "resolved");

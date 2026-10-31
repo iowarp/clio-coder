@@ -26909,7 +26909,7 @@
 								},
 								{
 									"type": "object",
-									"required": ["kind", "at", "event", "source", "paths", "settings", "previous", "settingsFingerprint"],
+									"required": ["kind", "at", "event", "source", "paths", "settings", "previous"],
 									"properties": {
 										"kind": {
 											"type": "string",
@@ -26972,10 +26972,6 @@
 													"type": "null"
 												}
 											]
-										},
-										"settingsFingerprint": {
-											"type": "string",
-											"maxLength": 4096
 										}
 									},
 									"additionalProperties": false
