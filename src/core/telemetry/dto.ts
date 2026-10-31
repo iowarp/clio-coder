@@ -1159,6 +1159,13 @@ export const QuotaStateSchema = Type.Object(
 									closed,
 								),
 								resetsAt: Type.Union([UtcSchema, Type.Null()]),
+								/**
+								 * What the shared account window gained between its two newest journaled readings, estimated
+								 * because other devices draw from the same window (#434 §12.5).
+								 */
+								consumedPct: Type.Optional(
+									Type.Object({ fact: factSchema(Type.Number({ minimum: 0, maximum: 100 })), display: Type.String() }, closed),
+								),
 							},
 							closed,
 						),

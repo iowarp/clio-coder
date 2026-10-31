@@ -372,6 +372,9 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 			ctx,
 			clock("2026-10-30T00:00:04.000Z"),
 		),
+	];
+	// A quota window belongs to the account, so the process journal keeps the reading the session reads (#434).
+	const accountQuota: TelemetryRecord[] = [
 		makeTelemetryRecord(
 			"quota.read",
 			{
@@ -382,11 +385,16 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 				windows: [{ key: "primary", usedPct: { kind: "measured", value: 42, source: "provider" } }],
 				limitReached: true,
 			},
-			ctx,
+			{ sessionId: null, processId: "prc_fixture", label: "main" },
 			clock("2026-10-30T00:00:05.000Z"),
 		),
 	];
-	const recorded: SessionSource = { ...source, sessionId: "timeline-records", journal: { ...source.journal, records } };
+	const recorded: SessionSource = {
+		...source,
+		sessionId: "timeline-records",
+		journal: { ...source.journal, records },
+		accountQuota,
+	};
 	const dto = timeline(recorded, null, now);
 	ok(Value.Check(TimelineSchema, dto), [...Value.Errors(TimelineSchema, dto)][0]?.message);
 	deepStrictEqual(

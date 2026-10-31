@@ -1,4 +1,5 @@
 import type { EventPayload } from "../../core/telemetry/events.js";
+import { PROCESS_SCOPE, telemetryHub } from "../../core/telemetry/hub.js";
 import type { AnthropicResponseObservation, CodexQuotaObservation } from "../../engine/types.js";
 import { parseAnthropicHeaders } from "./anthropic-headers.js";
 import { codexStreamSnapshot } from "./observed.js";
@@ -76,4 +77,20 @@ export function quotaReadingFingerprint(reading: QuotaReading): string {
 			window.resetsAt?.slice(0, 16) ?? null,
 		]),
 	]);
+}
+
+/** The last reading the process journal holds per account, so an unchanged window is never journaled twice (#434). */
+const journaledAccounts = new Map<string, string>();
+
+/**
+ * Journal a provider's quota reading in the process journal when its account's windows changed. A quota window
+ * belongs to the account, not to the session whose call happened to see it, and other devices draw from it too (#434).
+ */
+export function journalAccountQuota(reading: QuotaReading): boolean {
+	const account = JSON.stringify([reading.provider, reading.targetId]);
+	const fingerprint = quotaReadingFingerprint(reading);
+	if (journaledAccounts.get(account) === fingerprint) return false;
+	if (!telemetryHub().emit("quota.read", reading, PROCESS_SCOPE)) return false;
+	journaledAccounts.set(account, fingerprint);
+	return true;
 }

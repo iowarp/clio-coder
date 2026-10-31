@@ -10914,6 +10914,9 @@
 																		},
 																		"resetsAt": {
 																			"$ref": "#/components/schemas/Union_9d36f13d"
+																		},
+																		"consumedPct": {
+																			"$ref": "#/components/schemas/Object_display_fact_6fc3c8f8"
 																		}
 																	},
 																	"additionalProperties": false

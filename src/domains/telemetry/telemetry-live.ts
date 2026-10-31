@@ -23,13 +23,14 @@ import {
 import type { TelemetryReadModel, TelemetryView } from "./contract.js";
 import { TELEMETRY_FOLD_VERSION } from "./folds.js";
 import { telemetryProcessId } from "./process-journal.js";
-import type { JournalSource, SessionSource } from "./read-model.js";
+import type { AccountQuota, JournalSource, SessionSource } from "./read-model.js";
 import {
 	cacheReport,
 	callsReport,
 	continueSource,
 	costReport,
 	explain,
+	foldAccountQuota,
 	journalSourceFromRead,
 	prepareSource,
 	quantityOf,
@@ -56,6 +57,8 @@ interface TelemetrySourceLoader {
 	loadRunTelemetrySourceAsync(stateDir: string, runId: string): Promise<JournalSource>;
 	/** The run's sealed receipt through its integrity check; absent from a loader that does not read receipts. */
 	loadRunReceiptEvidence?(stateDir: string, runId: string): ReceiptEvidenceV1;
+	/** This host's journaled quota readings across its process journals; absent from a loader that reads none. */
+	loadHostQuotaRecordsAsync?(stateDir: string): Promise<TelemetryRecord[]>;
 }
 export interface LiveTelemetryOptions {
 	stateDir: () => string;
@@ -145,24 +148,16 @@ interface Binding {
 	off: Array<() => void>;
 	version: number;
 	view?: { version: number; view: LocalView };
-	quota: QuotaCursor;
 }
 
-type QuotaReading = EventPayload<"quota.read">;
 type QuotaRow = QuotaStateV1["providers"][number];
-/** The newest journaled reading per account, scanned forward as the session's journal grows (#434). */
-interface QuotaCursor {
-	records: readonly TelemetryRecord[] | null;
-	scanned: number;
-	latest: Map<string, QuotaReading>;
-}
-/** The account a reading names, as the process's own observations key it: Codex readings are per target. */
-const quotaAccount = (reading: QuotaReading) =>
-	reading.provider === "codex" ? `codex:${reading.targetId}` : reading.provider;
 /** The newest health window this process journaled, while a reader follows its process journal (#434 §14). */
 interface ProcessFollow {
 	off: () => void;
 	health: { at: string; data: EventPayload<"health.sampled"> } | null;
+	/** Quota readings by record id: this host's process journals as the seed read them, then this process's appends. */
+	quota: Map<string, TelemetryRecord>;
+	accounts: { size: number; folded: Map<string, AccountQuota> } | null;
 }
 
 function owned(owner: string): Owned {
@@ -260,8 +255,7 @@ function topicsFor(owner: string, root: string, records: readonly TelemetryRecor
 		else if (record.k === "journal.gap") {
 			topics.add("session");
 			topics.add("health");
-		} else if (record.k === "quota.read") topics.add("quota");
-		else {
+		} else {
 			topics.add("session");
 			topics.add("timeline");
 		}
@@ -498,7 +492,6 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			nodes: new Map(),
 			off: [],
 			version: 0,
-			quota: { records: null, scanned: 0, latest: new Map() },
 		};
 		current = binding;
 		binding.off.push(subscribeAllPersistedTelemetry(onEvent(binding)));
@@ -556,28 +549,6 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		};
 	};
 
-	/** Never a cold read: only records the bound session's journal already holds, scanned once each. */
-	const journaledQuota = (): ReadonlyMap<string, QuotaReading> => {
-		const binding = current;
-		const records = binding?.owners.get(sessionOwner(binding.sessionId))?.records;
-		if (!binding || !records) return new Map();
-		const cursor = binding.quota;
-		// The seed's merge replaces the record list; anything else only appends to it.
-		if (cursor.records !== records) {
-			cursor.records = records;
-			cursor.scanned = 0;
-			cursor.latest = new Map();
-		}
-		for (; cursor.scanned < records.length; cursor.scanned += 1) {
-			const record = records[cursor.scanned];
-			if (record?.k !== "quota.read") continue;
-			const account = quotaAccount(record.data);
-			const prior = cursor.latest.get(account);
-			if (!prior || record.data.observedAt > prior.observedAt) cursor.latest.set(account, record.data);
-		}
-		return cursor.latest;
-	};
-
 	/**
 	 * This process's own journal, followed from its persisted batches once a reader asks: health is a process fact,
 	 * so the newest window is the process's, never one session's (#434 §14).
@@ -585,19 +556,42 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	let processFollow: ProcessFollow | null = null;
 	const followProcess = (): ProcessFollow => {
 		if (processFollow) return processFollow;
-		const follow: ProcessFollow = { off: () => {}, health: null };
+		const follow: ProcessFollow = { off: () => {}, health: null, quota: new Map(), accounts: null };
 		follow.off = subscribePersistedTelemetry(`process:${telemetryProcessId()}`, (_owner, event) => {
 			if (event.kind !== "appended") return;
 			const read: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
 			appendPersistedTelemetry(read, event);
 			for (const { record } of read.records) {
-				if (record.k !== "health.sampled") continue;
-				if (!follow.health || record.t >= follow.health.at) follow.health = { at: record.t, data: record.data };
-				markDirty(["health"]);
+				if (record.k === "quota.read") {
+					follow.quota.set(record.id, record);
+					markDirty(["quota"]);
+				} else if (record.k === "health.sampled") {
+					if (!follow.health || record.t >= follow.health.at) follow.health = { at: record.t, data: record.data };
+					markDirty(["health"]);
+				}
 			}
 		});
 		processFollow = follow;
+		// Earlier processes on this host saw the account too; their readings are the baseline a delta needs (#434).
+		void load()
+			.then((loader) => loader.loadHostQuotaRecordsAsync?.(options.stateDir()))
+			.then((records) => {
+				if (processFollow !== follow || !records) return;
+				for (const record of records) follow.quota.set(record.id, record);
+				markDirty(["quota"]);
+			})
+			.catch(() => {
+				// An unreadable process journal leaves the process's own observations, which quota() always shows.
+			});
 		return follow;
+	};
+
+	/** Each account's newest journaled reading and its window deltas, refolded only when a reading arrived. */
+	const journaledAccounts = (): Map<string, AccountQuota> => {
+		const follow = followProcess();
+		if (follow.accounts?.size !== follow.quota.size)
+			follow.accounts = { size: follow.quota.size, folded: foldAccountQuota([...follow.quota.values()]) };
+		return follow.accounts.folded;
 	};
 
 	const live = (): LocalView | null => {
@@ -657,9 +651,11 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		},
 		quota(provider) {
 			const now = Date.now();
+			const accounts = journaledAccounts();
 			const windows = (
 				readings: ReadonlyArray<{ key: string; usedPct: Fact<number>; resetsAt?: string | null }>,
 				labels: ReadonlyMap<string, string>,
+				consumed: ReadonlyMap<string, Fact<number>> | undefined,
 			): QuotaRow["windows"] =>
 				readings.map((window) => {
 					const value = "value" in window.usedPct ? window.usedPct.value : 0;
@@ -667,11 +663,13 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 						Number.isFinite(value) && value >= 0 && value <= 100
 							? window.usedPct
 							: { kind: "unknown", reason: "unsupported" };
+					const delta = consumed?.get(window.key);
 					return {
 						key: window.key,
 						label: labels.get(window.key) ?? null,
 						usedPct: { fact, display: renderFact(fact, "percent") },
 						resetsAt: utc(window.resetsAt),
+						...(delta ? { consumedPct: { fact: delta, display: renderFact(delta, "percent") } } : {}),
 					};
 				});
 			// The process's own readings: every quota cache reports here, and stream observations land here (#423).
@@ -696,11 +694,12 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 								window.label.length > 0 ? [[window.key, scopedQuotaLabel(window.label, window.scope)]] : [],
 							),
 						),
+						accounts.get(snapshot.providerId)?.consumed,
 					),
 				}));
-			// The session's journaled readings: a resumed session's last sight of an account, and any reading newer than
+			// This host's journaled readings: an earlier process's last sight of an account, and any reading newer than
 			// what this process holds. The newer observation of an account wins (#434).
-			for (const [account, reading] of journaledQuota()) {
+			for (const [account, { reading, consumed }] of accounts) {
 				if (provider !== undefined && account !== provider) continue;
 				const observedAt = utc(reading.observedAt);
 				const held = rows.filter((row) => row.provider === account);
@@ -715,7 +714,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 						source: reading.source,
 						observedAt,
 						stale: now - Date.parse(observedAt) >= STREAM_QUOTA_TTL_MS,
-						windows: windows(reading.windows, labels),
+						windows: windows(reading.windows, labels, consumed),
 					},
 				];
 			}

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { access, readdir, readFile, stat } from "node:fs/promises";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import type { ReceiptEvidenceV1 } from "../../core/telemetry/dto.js";
@@ -10,6 +11,8 @@ import { readCallJournal, readCallJournalSync } from "../telemetry/call-journal.
 import {
 	isTelemetryJournalFile,
 	telemetryJournalPath,
+	telemetryProcessDirectory,
+	telemetryProcessesDirectory,
 	telemetryRunDirectory,
 	telemetryRunsDirectory,
 	telemetrySessionDirectory,
@@ -242,6 +245,54 @@ function* loadSession(
 	};
 }
 
+const PROCESS_ID = /^prc_[0-9a-f-]+$/u;
+
+/**
+ * The quota readings this host's process journals hold, oldest journal first. A quota window belongs to the account,
+ * so the process that saw it journals it; `since` skips a journal last written before it (#434).
+ */
+function* hostQuotaRecords(stateDir: string, since: number | null): Load<TelemetryRecord[]> {
+	const host = hostname();
+	const records: TelemetryRecord[] = [];
+	for (const name of ((yield* list(telemetryProcessesDirectory(stateDir))) ?? []).sort()) {
+		if (!PROCESS_ID.test(name)) continue;
+		const directory = telemetryProcessDirectory(stateDir, name);
+		if (since !== null) {
+			const written = yield* mtime(telemetryJournalPath(directory));
+			if (written === null || written < since) continue;
+		}
+		for (const { record, origin } of (yield* journal(directory)).records)
+			if (record.k === "quota.read" && origin.host === host) records.push(record);
+	}
+	return records;
+}
+
+/** The account readings recorded while the session ran: from its first record to its close, or until now (#434). */
+function* withAccountQuota(stateDir: string, load: Load<SessionSource | null>): Load<SessionSource | null> {
+	const source = yield* load;
+	const records = source?.journal.records ?? [];
+	if (!source || records.length === 0) return source;
+	let from = Number.POSITIVE_INFINITY;
+	let last: TelemetryRecord | undefined;
+	for (const record of records) {
+		const at = Date.parse(record.t);
+		if (Number.isFinite(at) && at < from) from = at;
+		if (!last || record.t >= last.t) last = record;
+	}
+	if (!Number.isFinite(from)) return source;
+	const to = last?.k === "session.closed" ? Date.parse(last.t) : Number.POSITIVE_INFINITY;
+	const accountQuota = (yield* hostQuotaRecords(stateDir, from)).filter((record) => {
+		const at = Date.parse(record.t);
+		return at >= from && at <= to;
+	});
+	return accountQuota.length > 0 ? { ...source, accountQuota } : source;
+}
+
+/** This host's journaled quota readings, for the live quota view's seed (#434). */
+export function loadHostQuotaRecordsAsync(stateDir: string): Promise<TelemetryRecord[]> {
+	return runAsync(hostQuotaRecords(stateDir, null));
+}
+
 export function loadRunTelemetrySource(stateDir: string, runId: string): JournalSource {
 	return runSync(loadRun(stateDir, runId));
 }
@@ -262,11 +313,11 @@ export function loadSessionTelemetrySource(
 	sessionId: string,
 	directory?: string | null,
 ): SessionSource | null {
-	return runSync(loadSession(stateDir, sessionId, directory, new Set()));
+	return runSync(withAccountQuota(stateDir, loadSession(stateDir, sessionId, directory, new Set())));
 }
 
 export function loadSessionTelemetrySourceAsync(stateDir: string, sessionId: string): Promise<SessionSource | null> {
-	return runAsync(loadSession(stateDir, sessionId, undefined, new Set()));
+	return runAsync(withAccountQuota(stateDir, loadSession(stateDir, sessionId, undefined, new Set())));
 }
 
 /** The keyset after a page of run journals: the last row's write time and id. */

@@ -97,6 +97,11 @@ export interface SessionSource {
 	 * journal, and every session until the journal records its own close, end only here (#434 §6.1).
 	 */
 	ledger?: { endedAt: string | null; owner: ProcessIdentity | null };
+	/**
+	 * The quota readings this host's process journals recorded while the session ran. A quota window belongs to the
+	 * account, so the process journal keeps it, and a session reads the account's state from there (#434).
+	 */
+	accountQuota?: readonly TelemetryRecord[];
 }
 /** Several sessions read as one scope: a repository's sessions over a window, already windowed by the loader (#434). */
 export interface RepoSource {
@@ -1981,6 +1986,60 @@ function quotaEntry(record: Extract<TelemetryRecord, { k: "quota.read" }>): Quot
 	};
 }
 
+type QuotaReading = Extract<TelemetryRecord, { k: "quota.read" }>["data"];
+/** The account a reading names, as the process's own observations key it: Codex readings are per target. */
+export const quotaAccount = (reading: QuotaReading): string =>
+	reading.provider === "codex" ? `codex:${reading.targetId}` : reading.provider;
+
+/** A provider reports a window's reset with drift between readings; a reset that moved further began a new window. */
+const QUOTA_RESET_DRIFT_MS = 5 * 60_000;
+function sameQuotaWindow(a: string | undefined, b: string | undefined): boolean {
+	if (a === undefined || b === undefined) return a === b;
+	return Math.abs(Date.parse(a) - Date.parse(b)) <= QUOTA_RESET_DRIFT_MS;
+}
+
+export interface AccountQuota {
+	reading: QuotaReading;
+	/** Per window key, what the window gained since the account's previous reading of the same window. */
+	consumed: ReadonlyMap<string, Fact<number>>;
+}
+
+/**
+ * Each account's newest journaled reading and the window consumption between it and the reading before it (#434
+ * §12.5, C2). Consumption is estimated, never measured: other devices draw from the same shared window, so the delta
+ * is the account's, not this host's. A window whose reset moved, or whose share fell, restarted between the two
+ * readings and has no delta.
+ */
+export function foldAccountQuota(records: readonly TelemetryRecord[]): Map<string, AccountQuota> {
+	const byAccount = new Map<string, QuotaReading[]>();
+	for (const record of records) {
+		if (record.k !== "quota.read") continue;
+		const account = quotaAccount(record.data);
+		byAccount.set(account, [...(byAccount.get(account) ?? []), record.data]);
+	}
+	const folded = new Map<string, AccountQuota>();
+	for (const [account, readings] of byAccount) {
+		readings.sort((a, b) => (a.observedAt < b.observedAt ? -1 : a.observedAt > b.observedAt ? 1 : 0));
+		const reading = readings.at(-1) as QuotaReading;
+		const previous = readings.length > 1 ? readings.at(-2) : undefined;
+		const consumed = new Map<string, Fact<number>>();
+		for (const window of reading.windows) {
+			const prior = previous?.windows.find((candidate) => candidate.key === window.key);
+			if (prior?.usedPct.kind !== "measured" || window.usedPct.kind !== "measured") continue;
+			if (!sameQuotaWindow(prior.resetsAt, window.resetsAt)) continue;
+			const delta = window.usedPct.value - prior.usedPct.value;
+			if (delta < 0) continue;
+			consumed.set(window.key, {
+				kind: "estimated",
+				value: Math.round(delta * 1000) / 1000,
+				method: "shared-account-window-delta",
+			});
+		}
+		folded.set(account, { reading, consumed });
+	}
+	return folded;
+}
+
 function gapEntry(record: Extract<TelemetryRecord, { k: "journal.gap" }>): Extract<TimelineEntry, { kind: "gap" }> {
 	const { sink, reason, count } = record.data;
 	return { kind: "gap", at: record.t, sink, reason, count, countShown: shownCount(count) };
@@ -2006,6 +2065,7 @@ export function timeline(
 	const analysis = analyze(source);
 	const id = source.sessionId;
 	const entries: TimelineEntry[] = analysis.attempts.map((attempt) => callEntry(view, "own", id, attempt));
+	for (const record of source.accountQuota ?? []) if (record.k === "quota.read") entries.push(quotaEntry(record));
 	for (const record of source.journal.records) {
 		const at = record.t;
 		switch (record.k) {
@@ -2076,9 +2136,6 @@ export function timeline(
 			case "budget.crossed":
 			case "budget.held":
 				entries.push(budgetEntry(analysis, record));
-				break;
-			case "quota.read":
-				entries.push(quotaEntry(record));
 				break;
 			case "tool.settled": {
 				const data = record.data;
@@ -2441,6 +2498,8 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	for (const record of source.journal.records) {
 		if (record.k === "turn.settled" && (!last || record.t >= last.at)) last = { at: record.t, record };
 		if (record.k === "budget.crossed" || record.k === "budget.held") budget.push(budgetEntry(analysis, record));
+	}
+	for (const record of source.accountQuota ?? []) {
 		if (record.k === "quota.read") {
 			const account = `${record.data.provider}\u0000${record.data.targetId}`;
 			const entry = quotaEntry(record);

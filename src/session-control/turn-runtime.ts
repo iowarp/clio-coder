@@ -8,8 +8,7 @@ import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { observationTracing, traceObservation } from "../domains/memory/observation-events.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
-import type { QuotaReading } from "../domains/quota/index.js";
-import { quotaReadingFingerprint, quotaReadingFromMessage } from "../domains/quota/index.js";
+import { journalAccountQuota, quotaReadingFromMessage } from "../domains/quota/index.js";
 import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
 import { PROMPT_MANIFEST_VERSION } from "../domains/session/prompt-manifest.js";
 import { recordUsageCall } from "../domains/session/usage-record.js";
@@ -338,23 +337,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	// Disturbances owed to the next request that leaves: those taken for one that never left, and a Codex auth reset
 	// that closed the socket after its call, so the next call sends the recovery frame (#434).
 	let carriedColdReasons: ExpectedColdReason[] = [];
-	// The last quota reading journaled per provider and target. A reading is journaled at its turn's first sight of it
-	// and whenever it changes, never once per call (#434).
-	const journaledQuota = new Map<string, { fingerprint: string; turnId: string | undefined }>();
-	const recordQuotaReading = (
-		reading: QuotaReading,
-		owner: TelemetrySessionLease["context"] | undefined,
-		facts: CallSettled,
-	): void => {
-		if (!owner) return;
-		const key = JSON.stringify([reading.provider, reading.targetId]);
-		const fingerprint = quotaReadingFingerprint(reading);
-		const previous = journaledQuota.get(key);
-		if (previous?.fingerprint === fingerprint && previous.turnId === owner.turnId) return;
-		if (telemetryHub().emit("quota.read", reading, { ...owner, callId: facts.callId, attemptId: facts.attemptId }))
-			journaledQuota.set(key, { fingerprint, turnId: owner.turnId });
-	};
-
 	const readTarget = (): ChatLoopTarget | null => {
 		const settings = deps.getSettings();
 		const targetId = settings.chat.target?.trim();
@@ -805,7 +787,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				);
 				carryRelabelledReasons(settlement, facts);
 				recordSettledCall(facts, lease?.context);
-				if (quota && facts) recordQuotaReading(quota, lease?.context, facts);
+				if (quota && facts) journalAccountQuota(quota);
 				rememberMessageCalls(message, settledAttempts);
 			}
 			await lease?.release();
