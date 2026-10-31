@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import { workerMcpNoNetworkNotice } from "../core/sandbox/worker-policy.js";
 import { evaluateSkillToolSurface } from "../core/skill-activation.js";
+import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsTool } from "../core/turn-constraints.js";
@@ -2366,6 +2367,25 @@ function councilResult(deps: DispatchToolDeps, outcome: Awaited<ReturnType<typeo
 }
 
 export async function runDispatchTool(
+	inputDeps: DispatchToolDeps,
+	admissionState: DispatchAdmissionState,
+	args: Record<string, unknown>,
+	options?: ToolInvokeOptions,
+): Promise<ToolResult> {
+	// Gate staging retains the dispatching host's scope across worker settlement and recovery (#434).
+	const runId = options?.hostRun?.runId ?? options?.runId;
+	const sessionId = options?.sessionId ?? telemetryContext()?.sessionId;
+	return withToolTelemetryContext(
+		{
+			...options,
+			...(runId === undefined ? {} : { runId }),
+			...(sessionId == null ? {} : { sessionId }),
+		},
+		() => runDispatchToolInContext(inputDeps, admissionState, args, options),
+	);
+}
+
+async function runDispatchToolInContext(
 	inputDeps: DispatchToolDeps,
 	admissionState: DispatchAdmissionState,
 	args: Record<string, unknown>,
