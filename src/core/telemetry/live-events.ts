@@ -378,7 +378,7 @@ export interface SessionEndPayload {
 export type SessionParkReason = "create_new" | "resume_other" | "fork" | "switch_branch" | "close" | "shutdown";
 export type SessionResumeVia = "resume" | "switch_branch";
 
-/** Published on `session.created` when a new session becomes current; a fork records its own lineage. */
+/** Published on `session.created` when a new or forked session becomes current; a fork's lineage is its journal's session.forked. */
 export interface SessionOpenedPayload {
 	sessionId: string;
 	/** The session directory's workspace hash, so a journal can be opened for it (#434). */

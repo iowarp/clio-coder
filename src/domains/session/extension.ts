@@ -309,6 +309,11 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 			});
 			state = next;
 			currentTurnId = computeLeafId(nodes);
+			// The child opens its own telemetry scope after the seeded session.forked record, so its settings changes
+			// and its close at exit are journaled like any created session's (#434, A9).
+			const opened = hashOf(next.meta).cwdHash;
+			if (opened !== undefined)
+				context.bus.emit("session.created", { sessionId: next.meta.id, cwdHash: opened, at: Date.now() });
 			return next.meta;
 		},
 		tree(sessionId) {
