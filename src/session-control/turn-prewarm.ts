@@ -14,6 +14,7 @@ import type { CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { createHash } from "node:crypto";
 import type { ClioSettings } from "../core/config.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
+import { PROCESS_SCOPE, telemetryHub } from "../core/telemetry/hub.js";
 import { endpointCapacityUsage } from "../domains/dispatch/index.js";
 import { registerForegroundStream } from "../domains/providers/endpoint-capacity.js";
 import {
@@ -24,7 +25,6 @@ import {
 import type { SessionContract } from "../domains/session/contract.js";
 import type { Usage } from "../engine/types.js";
 import { type PrewarmTrigger, prewarmPromptTokens, runPrewarmRound } from "./prewarm.js";
-import { recordStartupDiagnostic } from "./startup-diagnostics.js";
 import type { TurnContext } from "./turn-context.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
@@ -294,15 +294,19 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 					canSend,
 				});
 				if (wake.invoked !== false && !wake.callId) deps.recordUsage(runtime, wake.usage, origin);
-				recordStartupDiagnostic({
-					kind: "model-wake",
-					target: target.id,
-					model: selectedModel,
-					timing: wake.timing,
-					usage: wake.usage,
-					aborted: wake.aborted,
-					failed: Boolean(wake.errorMessage),
-				});
+				telemetryHub().emit(
+					"prewarm.settled",
+					{
+						round: "model-wake",
+						targetId: target.id,
+						model: selectedModel,
+						ttftMs: wake.timing.ttftMs,
+						apiMs: wake.timing.apiMs,
+						aborted: wake.aborted,
+						failed: Boolean(wake.errorMessage),
+					},
+					PROCESS_SCOPE,
+				);
 				if (wake.aborted || wake.errorMessage) return { ran: false, reason: "deployment", detail: "wake-incomplete" };
 			} finally {
 				clearTimeout(deadline);
@@ -404,17 +408,22 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			});
 		}
 		if (result.invoked !== false && !result.callId) deps.recordUsage(runtime, result.usage, origin);
-		recordStartupDiagnostic({
-			kind: "prompt-warm",
-			target: runtime.targetId,
-			model: runtime.wireModelId,
-			trigger,
-			timing: result.timing,
-			promptTokens,
-			aborted: result.aborted,
-			detached: wasDetached,
-			failed: Boolean(result.errorMessage),
-		});
+		telemetryHub().emit(
+			"prewarm.settled",
+			{
+				round: "prompt",
+				targetId: runtime.targetId,
+				model: runtime.wireModelId,
+				trigger,
+				ttftMs: result.timing.ttftMs,
+				apiMs: result.timing.apiMs,
+				...(promptTokens === null ? {} : { promptTokens }),
+				aborted: result.aborted,
+				detached: wasDetached,
+				failed: Boolean(result.errorMessage),
+			},
+			PROCESS_SCOPE,
+		);
 
 		try {
 			deps.session?.appendEntry({
@@ -479,15 +488,23 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				: runOnce(trigger, controller)
 		)
 			.then((outcome) => {
-				if (deps.isLatencySurface())
-					recordStartupDiagnostic({
-						kind: "warm-admission",
-						trigger,
-						target: deps.getSettings().chat.target,
-						model: deps.getSettings().chat.model,
-						durationMs: Math.round(performance.now() - diagnosticStart),
-						...outcome,
-					});
+				if (deps.isLatencySurface()) {
+					const { target, model } = deps.getSettings().chat;
+					telemetryHub().emit(
+						"prewarm.decided",
+						{
+							round: "prompt",
+							trigger,
+							...(target ? { targetId: target } : {}),
+							...(model ? { model } : {}),
+							durationMs: Math.round(performance.now() - diagnosticStart),
+							ran: outcome.ran,
+							...(outcome.ran ? {} : { reason: outcome.reason }),
+							...(!outcome.ran && outcome.detail ? { detail: outcome.detail } : {}),
+						},
+						PROCESS_SCOPE,
+					);
+				}
 				if (!outcome.ran && deps.getSettings().chat.prewarm && outcome.reason !== "surface") {
 					const key = `${outcome.reason}:${outcome.detail ?? ""}`;
 					if (lastSkip !== key) {
@@ -509,7 +526,11 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			})
 			.catch(() => {
 				if (deps.isLatencySurface())
-					recordStartupDiagnostic({ kind: "warm-admission", trigger, ran: false, reason: "preparation-failed" });
+					telemetryHub().emit(
+						"prewarm.decided",
+						{ round: "prompt", trigger, ran: false, reason: "preparation-failed" },
+						PROCESS_SCOPE,
+					);
 				return null;
 			})
 			.finally(() => {

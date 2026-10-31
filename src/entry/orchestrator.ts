@@ -65,7 +65,7 @@ import { captureAdmits, STANDARD_CAPTURE, systemOneDatasetRecording } from "../c
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { EventPayload } from "../core/telemetry/events.js";
-import { telemetryHub } from "../core/telemetry/hub.js";
+import { PROCESS_SCOPE, telemetryHub } from "../core/telemetry/hub.js";
 import { registerResearchTraceSink } from "../core/telemetry/research-trace.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
@@ -2077,6 +2077,37 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}
 			: undefined,
 	);
+	/**
+	 * The boot timer's phases as process.booted, once, when the surface first answers: the numbers
+	 * CLIO_CODER_TRACE_BOOT prints are the ones the process journal keeps (#434).
+	 */
+	let bootRecorded = false;
+	const recordBoot = (interactivity?: BootInteractivity): void => {
+		if (bootRecorded) return;
+		bootRecorded = true;
+		const tenth = (ms: number) => Math.max(0, Math.round(ms * 10) / 10);
+		const snapshot = timer.snapshot();
+		telemetryHub().emit(
+			"process.booted",
+			{
+				surface: bootSurface,
+				node: process.version,
+				platform: `${process.platform}-${process.arch}`,
+				totalMs: tenth(snapshot.totalMs),
+				phases: snapshot.marks.slice(0, 64).map((mark) => ({ name: mark.name, atMs: tenth(mark.at) })),
+				...(interactivity
+					? {
+							interactivity: {
+								stage0Ms: tenth(interactivity.stage0Ms),
+								hydratedMs: tenth(interactivity.hydratedMs),
+								inputBlockedMaxMs: tenth(interactivity.inputBlockedMaxMs),
+							},
+						}
+					: {}),
+			},
+			PROCESS_SCOPE,
+		);
+	};
 	// The Stage 0 shell answers the terminal only when the event loop turns.
 	// Boot yields at each phase boundary, so typing, submits, Ctrl+C, resize and
 	// signals are handled while Stage 1 hydrates. Once Ctrl+C or a signal closes
@@ -5184,6 +5215,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 
 	if (options.acp) {
+		recordBoot();
 		// ACP-served sessions get the same routing isolation as interactive
 		// ones, but ACP v1 has no channel for agent-initiated advisory text:
 		// the session/update union (agent_message_chunk, agent_thought_chunk,
@@ -5882,6 +5914,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	if (options.headless) {
+		recordBoot();
 		// Operatorless: there is no TUI subscriber to turn a loop-guard interrupt
 		// into a run stop, so a degenerate local model would spin until an
 		// external timeout (each call blocked, the agent loop never aborted). Wire
@@ -6090,12 +6123,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						timer.mark("Stage 1 hydration", frameId === null ? undefined : `frameId=${frameId}`);
 						const line = formatBootTrace("Stage 0 input blocked", `max=${interactivity.inputBlockedMaxMs.toFixed(1)}ms`);
 						if (line) options.terminalLease?.deferDiagnostic("stderr", line);
+						recordBoot(interactivity);
 						// Every reload subscriber exists now; a settings write held
 						// during hydration reloads here.
 						config?.releaseReloads?.();
 					},
 				}
-			: { onFirstFrameCommit: () => timer.mark("first TUI paint") }),
+			: {
+					onFirstFrameCommit: () => {
+						timer.mark("first TUI paint");
+						recordBoot();
+					},
+				}),
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
 		yoloRefusal,
 		...(yoloHeldAtBoot ? { yoloHeldAtBoot: true } : {}),

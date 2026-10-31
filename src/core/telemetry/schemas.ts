@@ -574,6 +574,59 @@ export const RunFeedAppendedSchema = Type.Object(
 );
 export const RunLinkedSchema = Type.Object({ runId: ExistingId }, closed);
 export const ProcessExitedSchema = Type.Object({ exitCode: Type.Integer() }, closed);
+/**
+ * One boot, once its surface answers: the boot timer's phases as offsets from the timer's start, and on the TUI how
+ * long the Stage 0 shell could not answer input. The writer header already names the build (#434).
+ */
+export const ProcessBootedSchema = Type.Object(
+	{
+		surface: vocabulary(["tui", "run", "acp"]),
+		node: Type.String({ minLength: 1, maxLength: 64 }),
+		platform: Type.String({ minLength: 1, maxLength: 64 }),
+		totalMs: duration,
+		phases: Type.Array(Type.Object({ name: Type.String({ minLength: 1, maxLength: 128 }), atMs: duration }, closed), {
+			maxItems: 64,
+		}),
+		interactivity: Type.Optional(
+			Type.Object({ stage0Ms: duration, hydratedMs: duration, inputBlockedMaxMs: duration }, closed),
+		),
+	},
+	closed,
+);
+const prewarmLabel = Type.String({ minLength: 1, maxLength: 128 });
+/**
+ * Whether a cache pre-warm was admitted: the chat route's prompt warm on a latency surface, or a startup worker warm
+ * that its deployment refused. A run that went ahead settles as prewarm.settled (#434).
+ */
+export const PrewarmDecidedSchema = Type.Object(
+	{
+		round: vocabulary(["prompt", "worker"]),
+		trigger: Type.Optional(prewarmLabel),
+		targetId: Type.Optional(ExistingId),
+		model: Type.Optional(ExistingId),
+		ran: Type.Boolean(),
+		reason: Type.Optional(prewarmLabel),
+		detail: Type.Optional(prewarmLabel),
+		durationMs: Type.Optional(duration),
+	},
+	closed,
+);
+/** One pre-warm round that reached its provider; its spend, when any, is the call it journaled (#434). */
+export const PrewarmSettledSchema = Type.Object(
+	{
+		round: vocabulary(["prompt", "model-wake", "worker"]),
+		targetId: ExistingId,
+		model: ExistingId,
+		trigger: Type.Optional(prewarmLabel),
+		ttftMs: Type.Union([duration, Type.Null()]),
+		apiMs: duration,
+		promptTokens: Type.Optional(count),
+		aborted: Type.Boolean(),
+		detached: Type.Optional(Type.Boolean()),
+		failed: Type.Boolean(),
+	},
+	closed,
+);
 /** The compiled system prompt's redacted text, linked to calls by the structure ref they carry (#434). */
 export const PromptTextCapturedSchema = Type.Object(
 	{ structure: Type.Optional(ObjectRefSchema), text: ObjectRefSchema, bytes: count },

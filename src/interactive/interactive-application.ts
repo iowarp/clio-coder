@@ -52,7 +52,6 @@ import type {
 	SlashCommandContext,
 	TaskMemorySeedCommandResult,
 } from "../session-control/slash-commands.js";
-import { recordStartupDiagnostic } from "../session-control/startup-diagnostics.js";
 import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import { runParkedInterview } from "../tools/extension-interview.js";
@@ -2084,17 +2083,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			editorChrome: presentation.editorChrome,
 			admitSubmission: (submission) => editorSubmit.admitCapturedText(submission.rawText, lease.abortSignal),
 			onHydratedFrame: (frameId, interactivity) => {
-				// One record per interactive boot, so real sessions report how long
-				// the Stage 0 editor could not answer input, by build and platform.
-				recordStartupDiagnostic({
-					kind: "boot-interactivity",
-					version: readClioVersion(),
-					node: process.version,
-					platform: `${process.platform}-${process.arch}`,
-					stage0Ms: Math.round(interactivity.stage0Ms),
-					hydratedMs: Math.round(interactivity.hydratedMs),
-					inputBlockedMaxMs: Math.round(interactivity.inputBlockedMaxMs),
-				});
 				deps.onHydratedFrameCommit?.(frameId, interactivity);
 			},
 		});
