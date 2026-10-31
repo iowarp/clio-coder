@@ -600,7 +600,11 @@ export const RunSettledSchema = Type.Object(
 			closed,
 		),
 		node: nullable(Type.Object({ id: ExistingId, kind: vocabulary(["local", "ssh"]) }, closed)),
-		/** The route decision the run executed under, as route readiness reads it; null when none was observed. */
+		/**
+		 * The route decision the run executed under, as route history and readiness fold it; null when none was observed.
+		 * `executed` is the executed route's whole identity, hashes only, so the fold keys and drift-checks it from this
+		 * record alone (#434).
+		 */
 		routeDecision: nullable(
 			Type.Object(
 				{
@@ -608,10 +612,31 @@ export const RunSettledSchema = Type.Object(
 					mode: vocabulary(["fixed", "shadow", "active"]),
 					durationMs: duration,
 					constraintsValid: Type.Boolean(),
+					executed: Type.Object(
+						{
+							agentId: ExistingId,
+							specFingerprint: digest,
+							executionRole: vocabulary(["builder", "reviewer", "judge", "researcher", "verifier", "recovery"]),
+							targetId: ExistingId,
+							modelId: ExistingId,
+							runtimeId: ExistingId,
+							nodeId: ExistingId,
+							thinkingLevel: nullable(ExistingId),
+							toolSignature: digest,
+							promptCompositionHash: digest,
+							endpointIdentityHash: digest,
+							settingsFingerprint: digest,
+						},
+						closed,
+					),
 				},
 				closed,
 			),
 		),
+		/** The run's retry attempt within its assignment, 0 for the first (`RunLineage.attempt`). */
+		attempt: count,
+		/** Queue wait and user-observed end-to-end time from the run's phase marks; null where a mark is missing. */
+		phaseTiming: Type.Object({ queueWaitMs: nullable(duration), totalEndToEndMs: nullable(duration) }, closed),
 		/** The routing request the run was admitted under, which a continuation it seeds inherits. */
 		routingIntent: Type.Object(
 			{

@@ -1,53 +1,49 @@
 /**
  * Durable route-quality sources, read incrementally.
  *
- * Dispatch admission asks the route observer for a readiness window on every
- * dispatch, and the window needs every settled run plus every gate decision
- * artifact. This cache stats every file in each run's sealed scope and each gate
- * artifact and re-reads only the ones whose identity changed, so a dispatch pays
- * for the scopes changed since the previous one (#434).
+ * Dispatch admission asks the route observer for a readiness window on every dispatch, and the window needs this
+ * host's route history, every settled run and every gate decision artifact. Runs come from the telemetry domain's
+ * route history fold, which re-reads only scopes whose files moved; gate artifacts are stat-checked here the same way
+ * (#434).
  *
- * A file's identity is its inode, size, mtime and ctime. A run scope's `bundle.json`,
- * `runs.json` and gate artifacts are all written by tmp-and-rename, so every
- * rewrite lands on a new inode even inside one mtime tick. An unchanged file
- * keeps returning the same object, which is what lets the object-keyed gate
- * verdicts in `route-quality.ts` stay warm across dispatches. A changed file
- * yields a fresh object and is verified again.
+ * A file's identity is its inode, size, mtime and ctime. Gate artifacts are written by tmp-and-rename, so every rewrite lands
+ * on a new inode even inside one mtime tick. An unchanged run or artifact keeps returning the same object, which is
+ * what lets the object-keyed gate verdicts in `route-quality.ts` stay warm across dispatches. A changed one yields a
+ * fresh object and is verified again.
  */
 
-import { existsSync, lstatSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { join } from "node:path";
-import type { SettledRunRecord } from "../telemetry/index.js";
-import {
-	readVerifiedRun,
-	telemetryBundlePath,
-	telemetryJournalFiles,
-	telemetryObjectsDirectory,
-	telemetryRunDirectory,
-} from "../telemetry/index.js";
+import type { RouteHistoryEntry, RouteHistoryFold, SettledRunFacts } from "../telemetry/index.js";
+import { createRouteHistoryFold } from "../telemetry/index.js";
 import { type GateDecisionArtifact, gateDecisionsDirectory, verifyGateDecisionArtifact } from "./gate-decisions.js";
 import type { RouteQualityRun } from "./route-quality.js";
-import type { RunEnvelope } from "./types.js";
 
-/** A run sealed under a verified seal, as route quality and route readiness read it. */
+/** A run sealed under a verified seal, as route quality reads it. */
 export interface DurableRunSource extends RouteQualityRun {
-	settled: SettledRunRecord["settled"];
-	envelope: RunEnvelope;
+	settled: SettledRunFacts["facts"];
 }
 
 export interface DurableQualitySources {
+	/** This host's route history, verified or not; an unverified entry is an integrity failure. */
+	history: ReadonlyArray<RouteHistoryEntry>;
+	/** Verified runs only, by digest. */
 	runs: ReadonlyArray<DurableRunSource>;
 	gates: ReadonlyArray<GateDecisionArtifact>;
-	/** Changes whenever any source file was added, rewritten or removed since the last read. */
+	/** Changes whenever any source was added, rewritten or removed since the last read. */
 	version: number;
 }
 
 export interface DurableQualitySourceCache {
 	read(): DurableQualitySources;
+	/** The verified source for a settled run, the same object across reads while the run is unchanged. */
+	sourceOf(run: SettledRunFacts): DurableRunSource | null;
 }
 
 export interface CreateDurableQualitySourceCacheOptions {
 	stateDir: string;
+	/** The route history fold to read; one over `stateDir` when absent. */
+	history?: RouteHistoryFold;
 }
 
 interface FileIdentity {
@@ -67,31 +63,6 @@ function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
 	);
 }
 
-/** A seal covers every segment and object, so any changed or missing file invalidates the cached verdict (#434). */
-function runIdentity(directory: string): string | null {
-	try {
-		const paths = [
-			telemetryBundlePath(directory),
-			...telemetryJournalFiles(readdirSync(directory)).map((name) => join(directory, name)),
-		];
-		const objects = telemetryObjectsDirectory(directory);
-		try {
-			paths.push(
-				objects,
-				...readdirSync(objects)
-					.sort()
-					.map((name) => join(objects, name)),
-			);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-		}
-		return JSON.stringify(paths.map((path) => [path, identityOf(lstatSync(path))]));
-	} catch {
-		// An incomplete or unreadable scope cannot contribute trusted evidence (#434).
-		return null;
-	}
-}
-
 function statOrNull(path: string): Stats | null {
 	try {
 		return statSync(path);
@@ -100,21 +71,11 @@ function statOrNull(path: string): Stats | null {
 	}
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-interface RunEntry {
-	identity: string;
-	/** The envelope the cached source was paired with, serialized for comparison. */
-	envelopeJson: string;
-	source: DurableRunSource | null;
-}
-
-function durableRun(settled: SettledRunRecord["settled"], envelope: RunEnvelope): DurableRunSource {
+function durableRun(run: SettledRunFacts): DurableRunSource {
+	const settled = run.facts;
 	return {
-		runId: envelope.id,
-		digest: settled.digest,
+		runId: run.runId,
+		digest: run.digest,
 		agentId: settled.agentId,
 		route: {
 			targetId: settled.route.targetId,
@@ -124,7 +85,6 @@ function durableRun(settled: SettledRunRecord["settled"], envelope: RunEnvelope)
 		node: settled.node ? { id: settled.node.id } : null,
 		quality: settled.quality,
 		settled,
-		envelope,
 	};
 }
 
@@ -136,77 +96,22 @@ interface GateEntry {
 export function createDurableQualitySourceCache(
 	options: CreateDurableQualitySourceCacheOptions,
 ): DurableQualitySourceCache {
-	const readFile = (path: string): string => readFileSync(path, "utf8");
-	const runsPath = join(options.stateDir, "runs.json");
+	const fold = options.history ?? createRouteHistoryFold({ stateDir: options.stateDir });
 	const gatesDir = gateDecisionsDirectory(options.stateDir);
-	let ledger: { identity: FileIdentity; envelopes: RunEnvelope[] } | null = null;
-	const runs = new Map<string, RunEntry>();
+	const sources = new WeakMap<SettledRunFacts, DurableRunSource>();
 	const gates = new Map<string, GateEntry>();
+	let historyVersion = -1;
 	let version = 0;
 	let last: DurableQualitySources | null = null;
 
-	const readEnvelopes = (): { envelopes: RunEnvelope[]; changed: boolean } => {
-		const stats = statOrNull(runsPath);
-		if (stats === null) {
-			const changed = ledger !== null;
-			ledger = null;
-			return { envelopes: [], changed };
+	const sourceOf = (run: SettledRunFacts): DurableRunSource | null => {
+		if (!run.sealVerified) return null;
+		let source = sources.get(run);
+		if (source === undefined) {
+			source = durableRun(run);
+			sources.set(run, source);
 		}
-		const identity = identityOf(stats);
-		if (ledger !== null && sameIdentity(ledger.identity, identity))
-			return { envelopes: ledger.envelopes, changed: false };
-		let envelopes: RunEnvelope[] = [];
-		try {
-			const parsed = JSON.parse(readFile(runsPath)) as unknown;
-			if (Array.isArray(parsed)) envelopes = parsed.filter(isObject) as unknown as RunEnvelope[];
-		} catch {
-			envelopes = [];
-		}
-		ledger = { identity, envelopes };
-		return { envelopes, changed: true };
-	};
-
-	const readRuns = (
-		envelopes: ReadonlyArray<RunEnvelope>,
-		envelopesChanged: boolean,
-	): { sources: DurableRunSource[]; changed: boolean } => {
-		let changed = false;
-		const seen = new Set<string>();
-		const sources: DurableRunSource[] = [];
-		for (const envelope of envelopes) {
-			const path = telemetryRunDirectory(options.stateDir, envelope.id);
-			seen.add(path);
-			const identity = runIdentity(path);
-			if (identity === null) {
-				if (runs.delete(path)) changed = true;
-				continue;
-			}
-			const cached = runs.get(path);
-			// An unchanged runs.json hands back the same envelope objects, so the
-			// pairing can only have moved when the ledger itself was re-read.
-			const envelopeJson = envelopesChanged || cached === undefined ? JSON.stringify(envelope) : cached.envelopeJson;
-			if (cached !== undefined && cached.identity === identity && cached.envelopeJson === envelopeJson) {
-				if (cached.source !== null) sources.push(cached.source);
-				continue;
-			}
-			changed = true;
-			let source: DurableRunSource | null = null;
-			try {
-				const record = readVerifiedRun(options.stateDir, envelope.id);
-				source = record === null ? null : durableRun(record.settled, envelope);
-			} catch {
-				// An unreadable run scope contributes no evidence.
-				source = null;
-			}
-			runs.set(path, { identity, envelopeJson, source });
-			if (source !== null) sources.push(source);
-		}
-		for (const path of [...runs.keys()]) {
-			if (seen.has(path)) continue;
-			runs.delete(path);
-			changed = true;
-		}
-		return { sources, changed };
+		return source;
 	};
 
 	const readGates = (): { artifacts: GateDecisionArtifact[]; changed: boolean } => {
@@ -232,7 +137,7 @@ export function createDurableQualitySourceCache(
 			changed = true;
 			let artifact: GateDecisionArtifact | null = null;
 			try {
-				const parsed = JSON.parse(readFile(path)) as GateDecisionArtifact;
+				const parsed = JSON.parse(readFileSync(path, "utf8")) as GateDecisionArtifact;
 				// Read APIs ignore malformed or unverifiable artifacts, exactly as
 				// `readGateDecisionArtifacts` does.
 				if (verifyGateDecisionArtifact(parsed).ok) artifact = parsed;
@@ -251,13 +156,19 @@ export function createDurableQualitySourceCache(
 	};
 
 	return {
+		sourceOf,
 		read() {
-			const current = readEnvelopes();
-			const runRead = readRuns(current.envelopes, current.changed);
+			const history = fold.read();
 			const gateRead = readGates();
-			if (last !== null && !runRead.changed && !gateRead.changed) return last;
+			if (last !== null && history.version === historyVersion && !gateRead.changed) return last;
+			historyVersion = history.version;
 			version += 1;
-			last = { runs: runRead.sources, gates: gateRead.artifacts, version };
+			const runs: DurableRunSource[] = [];
+			for (const run of history.runs) {
+				const source = sourceOf(run);
+				if (source !== null) runs.push(source);
+			}
+			last = { history: history.entries, runs, gates: gateRead.artifacts, version };
 			return last;
 		},
 	};

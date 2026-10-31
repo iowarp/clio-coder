@@ -39,7 +39,6 @@ import { readSettings } from "../core/config.js";
 import type { RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { clioStateDir, resetXdgCache } from "../core/xdg.js";
 import type { ExecutionStepResult } from "../domains/dispatch/execution-scheduler.js";
-import { routeSettledLabel } from "../domains/dispatch/route-history.js";
 import {
 	type RunEventJournalLine,
 	readRunEventJournal,
@@ -53,6 +52,7 @@ import { inspectRunTrustStatus } from "../domains/evidence/trust-status.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { loadRunRecord, loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
 import type { SettledRunRecord } from "../domains/telemetry/index.js";
+import { routeSettledLabel } from "../domains/telemetry/index.js";
 import { runTelemetry } from "../domains/telemetry/read-model.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui-primitives.js";
 import { fleetInspectionScope, resolveFleetRootId } from "./fleet-project-scope.js";

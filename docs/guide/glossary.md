@@ -260,7 +260,7 @@ This document defines the core architectural concepts and terminology used throu
 
 ### 64. Settled
 - **Definition**: The outcome label every route history record carries, from `routeSettledLabel`: `success`, else the receipt's most specific outcome code, else `permission_required`, else `failure` or the receipt outcome. The route observer backfills older records. Adaptive routing reads quality labels and reliability and does not read `settled`.
-- **Owning Type**: `routeSettledLabel` in [route-history.ts](../../src/domains/dispatch/route-history.ts); backfilled by [route-observer.ts](../../src/domains/dispatch/route-observer.ts).
+- **Owning Type**: `routeSettledLabel` in [route-history.ts](../../src/domains/telemetry/route-history.ts); backfilled by [route-observer.ts](../../src/domains/dispatch/route-observer.ts).
 
 ### 65. Operator Notes
 - **Definition**: The `<operator-notes>` block of a compaction summary, a bounded list of things the operator asked Clio to keep. Each compaction collects the notes already in earlier summaries, sentences in the operator's own messages that open with `remember`, `keep in mind` or `don't forget`, and the instructions given to `/compact`. Instructions to `/compact` also bind the summarizer through an `<operator-instructions>` block and are kept verbatim in the notes. A note is clipped to 400 characters, the block keeps the latest 30, and notes are XML-escaped inside it.

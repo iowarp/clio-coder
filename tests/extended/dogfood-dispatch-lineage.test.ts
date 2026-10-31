@@ -1,6 +1,6 @@
 import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { type HeadlessShutdownHooks, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
@@ -484,31 +484,6 @@ it("detached siblings keep distinct assignments; canceling a completed first att
 		}
 	} finally {
 		for (const worker of workers) worker.finish({ exitCode: 0, signal: null });
-		await f.bundle.extension.stop?.();
-	}
-});
-
-it("hosted sibling route-history rows retain their own logical assignment links", async () => {
-	const f = await fixture();
-	try {
-		const result = await f.tool.run(
-			{ agent: "scout", tasks: ["Inspect first input.txt", "Inspect second input.txt"], cwd: process.cwd() },
-			{ hostRun },
-		);
-		strictEqual(result.kind, "ok");
-		await f.bundle.contract.assignments?.flushWrites?.();
-		const journal = readRunJournal(join(env.dir, "state"));
-		ok(journal);
-		const history = JSON.parse(readFileSync(join(env.dir, "state/route-history.json"), "utf8")) as {
-			records: Array<{ receiptDigest: string; assignmentId: string }>;
-		};
-		strictEqual(history.records.length, 2, "digest upserts retain both sibling rows");
-		for (const receipt of journal.runs) {
-			const row = history.records.find((row) => row.receiptDigest === receipt.settled.digest);
-			ok(row);
-			strictEqual(row.assignmentId, f.bundle.contract.assignments?.getStored(receipt.row.runId)?.assignmentId);
-		}
-	} finally {
 		await f.bundle.extension.stop?.();
 	}
 });

@@ -1,21 +1,16 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import fs, { mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import fs, { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { gateDecisionsDirectory } from "../../src/domains/dispatch/gate-decisions.js";
-import type { RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
-import {
-	createRouteHistoryStore,
-	ROUTE_HISTORY_VERSION,
-	routeSettledLabel,
-} from "../../src/domains/dispatch/route-history.js";
-import { createRouteObserver } from "../../src/domains/dispatch/route-observer.js";
+import { fixedRouteDecision, type RouteCandidate } from "../../src/domains/dispatch/route-decision.js";
+import { createRouteObserver, type RouteObserver } from "../../src/domains/dispatch/route-observer.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import type { RunEnvelope, RunResult } from "../../src/domains/dispatch/types.js";
-import { telemetryRunDirectory } from "../../src/domains/telemetry/index.js";
+import { createRouteHistoryFold, routeSettledLabel, telemetryRunDirectory } from "../../src/domains/telemetry/index.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { writeSettledRun } from "../harness/settled-run.js";
 
@@ -47,6 +42,7 @@ function writeRenamed(path: string, body: string): void {
 function sealed(runId: string, passed: boolean): { envelope: RunEnvelope; receipt: RunResult } {
 	const envelope = fixtureEnvelope(runId);
 	const draft = fixtureReceiptDraft(envelope);
+	draft.routeDecision = fixedRouteDecision(ROUTE, "test-fixed-route");
 	draft.quality.typedValidations = [{ sourceId: "typed", validatorDigest: hash("validator"), passed }];
 	return {
 		envelope,
@@ -64,12 +60,15 @@ async function ledger(
 	runs: ReadonlyArray<{ envelope: RunEnvelope; receipt: RunResult }>,
 ): Promise<void> {
 	for (const run of runs) await writeSettledRun(stateDir, run.receipt);
-	writeRenamed(join(stateDir, "runs.json"), JSON.stringify(runs.map((run) => run.envelope)));
+}
+
+function window(observer: RouteObserver) {
+	return observer.readinessWindow().forRoute(ROUTE, { costUpperBoundUsd: null, factsFresh: true });
 }
 
 /**
- * Count real `readFileSync` calls under the state directory's ledger, receipt
- * and gate paths. Patching the module object and re-syncing the builtin's ESM
+ * Count real `readFileSync` calls under the state directory's run bundle and
+ * gate paths. Patching the module object and re-syncing the builtin's ESM
  * bindings reaches every importer, so the count holds for any implementation.
  */
 function countLedgerReads(stateDir: string): { reads: string[]; restore: () => void } {
@@ -79,7 +78,7 @@ function countLedgerReads(stateDir: string): { reads: string[]; restore: () => v
 	const tracked = (path: unknown): boolean =>
 		typeof path === "string" &&
 		path.startsWith(stateDir) &&
-		(path.endsWith("runs.json") || path.endsWith("/bundle.json") || path.includes("/gate-decisions/"));
+		(path.endsWith("/bundle.json") || path.includes("/gate-decisions/"));
 	fs.readFileSync = ((path: unknown, ...rest: unknown[]) => {
 		if (tracked(path) && !(path as string).endsWith("/bundle.json")) reads.push(path as string);
 		return (original as (...args: unknown[]) => unknown)(path, ...rest);
@@ -112,7 +111,7 @@ describe("contracts/route readiness reads", () => {
 		const drain = (): string[] => reads.splice(0).sort();
 
 		observer.readinessWindow();
-		strictEqual(drain().length, 13, "the first window reads runs.json and all twelve run bundles");
+		strictEqual(drain().length, 12, "the first window reads all twelve run bundles");
 
 		observer.readinessWindow();
 		observer.readinessWindow();
@@ -121,12 +120,8 @@ describe("contracts/route readiness reads", () => {
 		const added = sealed("run-12", true);
 		runs.push(added);
 		await writeSettledRun(stateDir, added.receipt);
-		writeRenamed(join(stateDir, "runs.json"), JSON.stringify(runs.map((run) => run.envelope)));
 		observer.readinessWindow();
-		deepStrictEqual(
-			drain(),
-			[join(telemetryRunDirectory(stateDir, "run-12"), "bundle.json"), join(stateDir, "runs.json")].sort(),
-		);
+		deepStrictEqual(drain(), [join(telemetryRunDirectory(stateDir, "run-12"), "bundle.json")]);
 
 		// A rewrite of an existing bundle lands on a new inode and is read again.
 		const bundlePath = join(telemetryRunDirectory(stateDir, "run-3"), "bundle.json");
@@ -143,43 +138,22 @@ describe("contracts/route readiness reads", () => {
 		deepStrictEqual(drain(), [], "a rejected gate artifact is not re-read either");
 	});
 
-	it("an unchanged ledger leaves route history untouched after reconciliation", async () => {
+	it("route history folds each sealed run.settled under its executed route", async () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-history-"));
-		const run = sealed("run-a", true);
-		await ledger(stateDir, [run]);
-		createRouteHistoryStore({ stateDir }).upsert({
-			version: ROUTE_HISTORY_VERSION,
-			receiptDigest: run.receipt.digest,
-			assignmentId: "assignment-a",
-			route: ROUTE,
-			executionRole: "builder",
-			qualityLabel: "unmeasured",
-			reliability: "success",
-			firstPass: true,
-			completedCostUsd: 0.01,
-			completedPhaseTiming: null,
-			cacheRead: false,
-			pricedCoverage: "complete",
-			sourceDigests: [run.receipt.digest],
-			settledAt: "2026-06-25T12:00:05.000Z",
-		});
-		const historyPath = join(stateDir, "route-history.json");
-		const observer = createRouteObserver({ stateDir });
-
-		observer.readinessWindow();
-		const reconciled = statSync(historyPath);
-		strictEqual(createRouteHistoryStore({ stateDir }).all()[0]?.qualityLabel, "pass");
-		observer.readinessWindow();
-		observer.readinessWindow();
-		const after = statSync(historyPath);
-		deepStrictEqual([after.ino, after.mtimeMs], [reconciled.ino, reconciled.mtimeMs], "no rewrite without new evidence");
+		await ledger(stateDir, [sealed("run-a", true)]);
+		const evidence = window(createRouteObserver({ stateDir }));
+		strictEqual(evidence.observations.length, 1);
+		strictEqual(evidence.observations[0]?.qualityLabel, "pass");
+		strictEqual(evidence.readiness.integrityFailures, 0);
+		strictEqual(window(createRouteObserver({ stateDir })).observations.length, 1, "a restart folds the same history");
 	});
 
-	it("every settled route carries its receipt's outcome label, backfilled on older records", async () => {
+	it("every settled route carries its run's outcome label", async () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-settled-"));
 		const ok = sealed("run-ok", true);
 		const capped = fixtureEnvelope("run-cap");
 		const cappedDraft = fixtureReceiptDraft(capped);
+		cappedDraft.routeDecision = fixedRouteDecision(ROUTE, "test-fixed-route");
 		cappedDraft.outcome = "failed";
 		cappedDraft.outcomeCode = "worker_tool_call_cap_exhausted";
 		const failed = {
@@ -192,33 +166,10 @@ describe("contracts/route readiness reads", () => {
 			}).result,
 		};
 		await ledger(stateDir, [ok, failed]);
-		const store = createRouteHistoryStore({ stateDir });
-		for (const [run, reliability] of [
-			[ok, "success"],
-			[failed, "failure"],
-		] as const) {
-			store.upsert({
-				version: ROUTE_HISTORY_VERSION,
-				receiptDigest: run.receipt.digest,
-				assignmentId: run.envelope.id,
-				route: ROUTE,
-				executionRole: "builder",
-				qualityLabel: "unmeasured",
-				reliability,
-				firstPass: true,
-				completedCostUsd: null,
-				completedPhaseTiming: null,
-				cacheRead: false,
-				pricedCoverage: "complete",
-				sourceDigests: [run.receipt.digest],
-				settledAt: "2026-06-25T12:00:05.000Z",
-			});
-		}
-		createRouteObserver({ stateDir }).readinessWindow();
 		deepStrictEqual(
-			createRouteHistoryStore({ stateDir })
-				.all()
-				.map((record) => record.settled)
+			createRouteHistoryFold({ stateDir })
+				.read()
+				.entries.map((entry) => entry.settled)
 				.sort(),
 			["success", "worker_tool_call_cap_exhausted"],
 		);
@@ -232,33 +183,16 @@ describe("contracts/route readiness reads", () => {
 
 	it("a bundle rewritten in place is verified again, never trusted from the cache", async () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-readiness-tamper-"));
-		const run = sealed("run-t", true);
-		await ledger(stateDir, [run]);
-		createRouteHistoryStore({ stateDir }).upsert({
-			version: ROUTE_HISTORY_VERSION,
-			receiptDigest: run.receipt.digest,
-			assignmentId: "assignment-t",
-			route: ROUTE,
-			executionRole: "builder",
-			qualityLabel: "unmeasured",
-			reliability: "success",
-			firstPass: true,
-			completedCostUsd: 0.01,
-			completedPhaseTiming: null,
-			cacheRead: false,
-			pricedCoverage: "complete",
-			sourceDigests: [run.receipt.digest],
-			settledAt: "2026-06-25T12:00:05.000Z",
-		});
+		await ledger(stateDir, [sealed("run-t", true)]);
 		const observer = createRouteObserver({ stateDir });
-		observer.readinessWindow();
-		strictEqual(createRouteHistoryStore({ stateDir }).all()[0]?.qualityLabel, "pass");
+		strictEqual(window(observer).observations[0]?.qualityLabel, "pass");
 
 		// Same digest, altered body: a forged bundle claiming a verified identity.
 		const bundlePath = join(telemetryRunDirectory(stateDir, "run-t"), "bundle.json");
 		const forged = { ...JSON.parse(readFileSync(bundlePath, "utf8")), version: 2 };
 		writeRenamed(bundlePath, JSON.stringify(forged));
-		observer.readinessWindow();
-		strictEqual(createRouteHistoryStore({ stateDir }).all()[0]?.qualityLabel, "unmeasured");
+		const evidence = window(observer);
+		strictEqual(evidence.observations[0]?.qualityLabel, "unmeasured");
+		strictEqual(evidence.readiness.integrityFailures, 1);
 	});
 });

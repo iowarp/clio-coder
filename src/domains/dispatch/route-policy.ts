@@ -5,7 +5,6 @@
  */
 
 import type { AgentLatencyClass } from "../agents/spec.js";
-import type { LegacyRouteHistoryRecord, RouteHistoryRecord } from "./route-history.js";
 import type { RouteQualityLabel } from "./route-quality.js";
 
 export const ROUTE_POLICY_VERSION = "route-policy/4";
@@ -96,7 +95,7 @@ export function routePriorForLatencyClass(latencyClass: AgentLatencyClass): Rout
 	return { ...LATENCY_CLASS_ROUTE_PRIORS[latencyClass] };
 }
 
-/** The estimator projection of one durable route-history record. */
+/** The estimator projection of one route history entry. */
 export interface RouteObservation {
 	qualityLabel: RouteQualityLabel;
 	reliability: "success" | "failure" | "neutral";
@@ -105,19 +104,6 @@ export interface RouteObservation {
 	completedEndToEndMs: number | null;
 	cacheRead: boolean | null;
 	queueWaitMs: number | null;
-}
-
-export function routeObservationFromHistory(record: RouteHistoryRecord | LegacyRouteHistoryRecord): RouteObservation {
-	return {
-		qualityLabel: record.qualityLabel,
-		reliability: record.reliability,
-		firstPass: record.firstPass,
-		completedCostUsd: record.completedCostUsd,
-		completedEndToEndMs: record.completedPhaseTiming?.totalEndToEndMs ?? null,
-		// v3 conflates missing cache measurements with misses; v4 separates them (#434).
-		cacheRead: record.version === 3 ? (record.cacheRead ? true : null) : record.cacheRead,
-		queueWaitMs: record.completedPhaseTiming?.queueWaitMs ?? null,
-	};
 }
 
 export const ROUTE_ESTIMATE_SHRINKAGE = 5;

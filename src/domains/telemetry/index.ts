@@ -79,6 +79,15 @@ export {
 } from "./read-model.js";
 export type { JournaledContent } from "./research-content.js";
 export { readJournaledContent } from "./research-content.js";
+export type {
+	RouteHistoryEntry,
+	RouteHistoryFold,
+	RouteHistoryIdentity,
+	RouteHistoryRead,
+	RouteReliabilityOutcome,
+	SettledRunFacts,
+} from "./route-history.js";
+export { createRouteHistoryFold, routeHistoryEntry, routeSettledLabel } from "./route-history.js";
 export { runSettledDigest } from "./run-digest.js";
 export {
 	readDispatchHistory,

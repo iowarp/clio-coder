@@ -18,14 +18,15 @@ import {
 	formatEffectiveBudget,
 } from "./budget-envelope.js";
 import type { ResolvedTerminalReason } from "./outcome.js";
+import { deriveEnvelopePhaseDurations } from "./phase-timing.js";
 import { computeReceiptFindingsSummary } from "./receipt-findings.js";
 import { labelledRunHashes, undeclaredReceiptHashes } from "./receipt-hashes.js";
-import { routeConstraintValidity } from "./route-decision.js";
+import { type RouteDecisionV1, routeConstraintValidity } from "./route-decision.js";
 import { defaultRoutingIntent, type RoutingIntent } from "./routing-intent.js";
 import type { RunUsageFacts } from "./run-call-usage.js";
 import { unobservedRunUsageFacts } from "./run-call-usage.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "./run-upstream.js";
-import type { RunEnvelope, RunOutcome, RunResult, RunResultDraft } from "./types.js";
+import type { RunEnvelope, RunOutcome, RunPhaseDurations, RunResult, RunResultDraft } from "./types.js";
 
 /** The facts and the object a run settles with; the journal adds the object's reference as `result`. */
 export interface RunSettlement {
@@ -47,6 +48,34 @@ function repairRounds(terminal: ResolvedTerminalReason | undefined): RunSettled[
 		? { kind: "measured", value: RESULT_CONTRACT_REPAIR_LIMIT, source: "local-count" }
 		: { kind: "unknown", reason: "not-observed" };
 }
+
+/** The decision as run.settled records it, with the executed route's whole identity for the route history fold. */
+function routeDecisionOf(decision: RouteDecisionV1 | undefined): RunSettled["routeDecision"] {
+	if (decision === undefined) return null;
+	const executed = decision.executedRoute;
+	return {
+		decisionHash: decision.decisionHash,
+		mode: decision.mode,
+		durationMs: decision.decisionDurationMs,
+		constraintsValid: routeConstraintValidity(decision).valid,
+		executed: {
+			agentId: executed.agentId,
+			specFingerprint: executed.specFingerprint,
+			executionRole: executed.executionRole,
+			targetId: executed.targetId,
+			modelId: executed.modelId,
+			runtimeId: executed.runtimeId,
+			nodeId: executed.nodeId,
+			thinkingLevel: executed.thinkingLevel ?? null,
+			toolSignature: executed.toolSignature,
+			promptCompositionHash: executed.promptCompositionHash,
+			endpointIdentityHash: executed.endpointIdentityHash,
+			settingsFingerprint: executed.settingsFingerprint,
+		},
+	};
+}
+
+const UNMARKED_PHASES: RunPhaseDurations = { queueWaitMs: null, totalEndToEndMs: null };
 
 function routeOf(
 	run: Pick<RunEnvelope, "targetId" | "wireModelId" | "runtimeId" | "runtimeKind">,
@@ -112,6 +141,8 @@ export function settleFinishedRun(
 		processExitCode: number | null;
 		frameType: string | null;
 		usage: RunUsageFacts | undefined;
+		/** From the ledger row's phase marks; a producer settling without its row records them unmarked. */
+		phaseTiming?: RunPhaseDurations;
 	},
 ): RunSettlement {
 	const usage = input.usage ?? unobservedRunUsageFacts();
@@ -125,14 +156,9 @@ export function settleFinishedRun(
 			identity: identityOf(receipt),
 			route: routeOf(receipt),
 			node: nodeOf(receipt),
-			routeDecision: receipt.routeDecision
-				? {
-						decisionHash: receipt.routeDecision.decisionHash,
-						mode: receipt.routeDecision.mode,
-						durationMs: receipt.routeDecision.decisionDurationMs,
-						constraintsValid: routeConstraintValidity(receipt.routeDecision).valid,
-					}
-				: null,
+			routeDecision: routeDecisionOf(receipt.routeDecision),
+			attempt: receipt.lineage?.attempt ?? 0,
+			phaseTiming: input.phaseTiming ?? UNMARKED_PHASES,
 			routingIntent: routingIntentOf(receipt.routingIntent ?? defaultRoutingIntent({})),
 			startedAt: receipt.startedAt,
 			endedAt: receipt.endedAt,
@@ -304,6 +330,8 @@ export function settleUnfinishedRun(
 			route: routeOf(run),
 			node: nodeOf(run),
 			routeDecision: null,
+			attempt: run.lineage?.attempt ?? 0,
+			phaseTiming: deriveEnvelopePhaseDurations(run, input.endedAt),
 			routingIntent: routingIntentOf(defaultRoutingIntent({})),
 			startedAt: run.startedAt,
 			endedAt: input.endedAt,
@@ -394,7 +422,10 @@ export function finishRunResult(
 		draft.findingsSummary === undefined
 			? { ...draft, findingsSummary: computeReceiptFindingsSummary(draft, row) }
 			: draft;
-	const settlement = settleFinishedRun(sealed, input);
+	const settlement = settleFinishedRun(sealed, {
+		...input,
+		phaseTiming: deriveEnvelopePhaseDurations(row, row.endedAt ?? draft.endedAt),
+	});
 	const record = runSettledRecord(settlement, telemetryObjectRef("run-result", settlement.result));
 	return {
 		result: { ...sealed, routingIntent: draft.routingIntent, digest: runSettledDigest(record) },

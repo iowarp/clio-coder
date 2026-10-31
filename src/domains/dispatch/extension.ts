@@ -6988,11 +6988,9 @@ export function createDispatchBundle(
 					const phases = envelope ? deriveEnvelopePhaseDurations(envelope) : undefined;
 					if (envelope === null || envelope === undefined) return;
 					const outcome = receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed");
-					const assignmentId = assignmentRootFor(receipt.runId);
 					const run = routeQualityRun(receipt);
 					const quality = reduceRouteQuality({ subject: run, runs: [run] });
 					routeObserver.recordOutcome(observation.id, {
-						assignmentId,
 						route: observation.decision.executedRoute,
 						outcome,
 						qualityLabel: quality.label,
@@ -7001,7 +6999,6 @@ export function createDispatchBundle(
 						costUsd: receipt.costUsd,
 						endToEndMs: phases?.totalEndToEndMs ?? 0,
 						receipt,
-						envelope,
 						quality,
 						phaseTiming: phases,
 					});

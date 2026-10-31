@@ -3,9 +3,11 @@
  *
  * The observer watches every dispatch, receives the shared RouteDecisionV1
  * the policy would have produced, journals it as `route.decided` in the
- * journal of the session or run that asked (#434), and folds the realized
- * outcome into route history. Selection belongs to the resolver; this module
- * only records the route that shadow or active admission sealed.
+ * journal of the session or run that asked (#434). Route history is the
+ * telemetry domain's fold over this host's run.settled records, which carry
+ * the executed route; the observer reduces its quality and serves readiness
+ * from it. Selection belongs to the resolver; this module only records the
+ * route that shadow or active admission sealed.
  *
  * What it measures is deliberately not "did Clio dispatch to the agent it was
  * asked for". That comparison was true by construction, because the actual
@@ -22,12 +24,12 @@ import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import { ROUTE_HARD_FILTERS, ROUTE_REASONS } from "../../core/telemetry/schemas.js";
 import { clioStateDir } from "../../core/xdg.js";
+import type { RouteHistoryEntry, RouteHistoryFold } from "../telemetry/index.js";
 import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
 import {
 	createDurableQualitySourceCache,
 	type DurableQualitySourceCache,
 	type DurableQualitySources,
-	type DurableRunSource,
 } from "./durable-quality-sources.js";
 import {
 	evaluateRouteDecision,
@@ -37,11 +39,13 @@ import {
 	type RouteEvaluation,
 	type RouteRealizedOutcome,
 	routeCandidateKey,
+	routeCapabilityKey,
+	routeDriftGuard,
+	routeDriftInvalidates,
 } from "./route-decision.js";
-import { createRouteHistoryStore, type RouteHistoryStore, routeSettledLabel } from "./route-history.js";
-import { type RouteObservation, routeObservationFromHistory } from "./route-policy.js";
-import { type RouteQualityReduction, reduceRouteQuality } from "./route-quality.js";
-import type { RunEnvelope, RunResult } from "./types.js";
+import type { RouteObservation } from "./route-policy.js";
+import { type RouteQualityLabel, type RouteQualityReduction, reduceRouteQuality } from "./route-quality.js";
+import type { RunResult } from "./types.js";
 
 function receiptHasUnknownCost(receipt: RunResult): boolean {
 	return (
@@ -49,24 +53,37 @@ function receiptHasUnknownCost(receipt: RunResult): boolean {
 	);
 }
 
-function receiptPricedCoverage(receipt: RunResult): "complete" | "partial" | "unknown" {
-	if (!receiptHasUnknownCost(receipt)) return "complete";
-	return (receipt.costSummary?.knownUsd ?? 0) > 0 ? "partial" : "unknown";
-}
-
-/** A settled run's priced spend, or null when any part of it went unpriced: route cost never reads unknown as free. */
-function settledPricedCostUsd(settled: DurableRunSource["settled"]): number | null {
-	const usd = settled.pricing.usd;
-	return usd.kind === "measured" || usd.kind === "estimated" ? usd.value : null;
-}
-
 // ---------------------------------------------------------------------------
 // Route-history projection
 // ---------------------------------------------------------------------------
 
+/** The route identity a history entry was settled under, as the policy's candidate shape. */
+function entryCandidate(entry: RouteHistoryEntry): RouteCandidate {
+	const { thinkingLevel, ...rest } = entry.route;
+	return { ...rest, ...(thinkingLevel !== null ? { thinkingLevel } : {}) };
+}
+
 /**
- * Test-only estimator seam. Production always reads the durable route-history
- * store, so process restart cannot erase the policy's evidence window.
+ * The estimator projection of one history entry. Only a verified, completed, non-quality-failed run contributes
+ * cost or timing; an unverified run keeps its reliability and first-pass facts but no quality label (#434).
+ */
+function routeObservationFromEntry(entry: RouteHistoryEntry, qualityLabel: RouteQualityLabel): RouteObservation {
+	const completed = entry.sealVerified && entry.reliability === "success" && qualityLabel !== "fail";
+	const cost = entry.pricedCostUsd;
+	return {
+		qualityLabel,
+		reliability: entry.reliability,
+		firstPass: entry.firstPass,
+		completedCostUsd: completed && (cost.kind === "measured" || cost.kind === "estimated") ? cost.value : null,
+		completedEndToEndMs: completed ? entry.phaseTiming.totalEndToEndMs : null,
+		cacheRead: entry.cacheRead,
+		queueWaitMs: completed ? entry.phaseTiming.queueWaitMs : null,
+	};
+}
+
+/**
+ * Test-only estimator seam. Production always reads the route history fold
+ * over run journals, so process restart cannot erase the policy's evidence window.
  */
 export interface RouteSampleStore {
 	samplesFor(candidate: RouteCandidate): ReadonlyArray<RouteObservation>;
@@ -187,10 +204,7 @@ export interface RouteObservationHandle {
 }
 
 export interface RouteObservedOutcome extends RouteRealizedOutcome {
-	/** Host lifecycle assignment identity, separate from the published ancestry root. */
-	assignmentId?: string;
 	receipt: RunResult;
-	envelope: RunEnvelope;
 	quality: RouteQualityReduction;
 	phaseTiming: { totalEndToEndMs: number | null; queueWaitMs: number | null } | undefined;
 }
@@ -200,7 +214,7 @@ export interface RouteObserver {
 	observe(input: RouteObserveInput): RouteObservationHandle;
 	/** Immutable evidence snapshot shared by every tuple in one joint resolution. */
 	readinessWindow(): RouteReadinessEvidenceWindow;
-	/** Reduce and durably record the real terminal route outcome. */
+	/** Evaluate the real terminal route outcome; the run's own run.settled is its durable record. */
 	recordOutcome(observationId: string, outcome: RouteObservedOutcome): void;
 	summary(): RouteObserverSummary;
 }
@@ -224,8 +238,8 @@ export interface RouteReadinessEvidenceWindow {
 }
 
 export interface CreateRouteObserverOptions {
-	/** Durable production source for route estimation. */
-	history?: RouteHistoryStore;
+	/** The route history fold to read; one over the state directory when absent. */
+	history?: RouteHistoryFold;
 	/** Test-only estimator input seam. Production does not use this store. */
 	samples?: RouteSampleStore;
 	/** Durable source directory override, primarily for restart/replay tests. */
@@ -233,7 +247,7 @@ export interface CreateRouteObserverOptions {
 }
 
 /**
- * Identity of everything a history record's quality reduction can read beyond
+ * Identity of everything a history entry's quality reduction can read beyond
  * its own run. Gates are the only path by which another run matters,
  * so with no gate artifacts the key is empty and a reduction depends on the
  * subject alone.
@@ -324,17 +338,18 @@ function percentile95(values: ReadonlyArray<number>): number {
 
 export function createRouteObserver(options: CreateRouteObserverOptions): RouteObserver {
 	const learner = createRouteLearner();
-	const history =
-		options.history ?? createRouteHistoryStore(options.stateDir === undefined ? {} : { stateDir: options.stateDir });
 	const samples = options.samples;
 	const pending = new Map<string, { decision: RouteDecisionV1; taskType: AgentTaskType }>();
 	const PENDING_LIMIT = 512;
 	let totalObservations = 0;
 	let sequence = 0;
 	let qualitySources: DurableQualitySourceCache | undefined;
-	const readSources = (): DurableQualitySources => {
-		qualitySources ??= createDurableQualitySourceCache({ stateDir: options.stateDir ?? clioStateDir() });
-		return qualitySources.read();
+	const sourceCache = (): DurableQualitySourceCache => {
+		qualitySources ??= createDurableQualitySourceCache({
+			stateDir: options.stateDir ?? clioStateDir(),
+			...(options.history !== undefined ? { history: options.history } : {}),
+		});
+		return qualitySources;
 	};
 	const serials = new WeakMap<object, number>();
 	let nextSerial = 0;
@@ -347,93 +362,47 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 		}
 		return serial;
 	};
-	// Per run digest: the inputs of the last reconciliation and the record it
-	// left behind. Matching inputs and an unchanged record skip the reduction and
-	// the locked history write, so a dispatch pays only for new evidence.
-	const reconciled = new Map<string, { subject: DurableRunSource; gateKey: string; recordJson: string }>();
-	let indexed: { version: number; byDigest: Map<string, DurableRunSource> } | null = null;
-	const digestIndex = (sources: DurableQualitySources): Map<string, DurableRunSource> => {
-		if (indexed?.version !== sources.version) {
-			indexed = {
-				version: sources.version,
-				byDigest: new Map(sources.runs.map((source) => [source.digest, source])),
-			};
-		}
-		return indexed.byDigest;
-	};
-	const reconcileHistory = (sources: DurableQualitySources): void => {
-		const byDigest = digestIndex(sources);
-		const gateKey = gateEvidenceKey(sources, serialOf);
-		for (const record of history.all()) {
-			const subject = byDigest.get(record.receiptDigest);
-			if (subject === undefined) {
-				// A missing or damaged run scope cannot keep a formerly verified quality label (#434).
-				reconciled.delete(record.receiptDigest);
-				if (record.qualityLabel !== "unmeasured" || record.completedCostUsd !== null || record.sourceDigests.length > 0)
-					history.upsert({
-						...record,
-						qualityLabel: "unmeasured",
-						completedCostUsd: null,
-						completedPhaseTiming: null,
-						pricedCoverage: "unknown",
-						sourceDigests: [],
-					});
-				continue;
-			}
-			const recordJson = JSON.stringify(record);
-			const previous = reconciled.get(record.receiptDigest);
-			if (
-				previous !== undefined &&
-				previous.subject === subject &&
-				previous.gateKey === gateKey &&
-				previous.recordJson === recordJson
-			) {
-				continue;
-			}
-			const quality = reduceRouteQuality({
-				subject,
-				runs: sources.runs,
-				gateArtifacts: sources.gates,
-			});
-			const completed = record.reliability === "success" && quality.label !== "fail";
-			const pricedUsd = settledPricedCostUsd(subject.settled);
-			const next = {
-				...record,
-				settled: record.settled ?? routeSettledLabel(subject.settled),
-				qualityLabel: quality.label,
-				completedCostUsd: completed ? pricedUsd : null,
-				pricedCoverage: pricedUsd === null ? ("unknown" as const) : ("complete" as const),
-				completedPhaseTiming: completed ? record.completedPhaseTiming : null,
-				sourceDigests: quality.sourceDigests,
-			};
-			const nextJson = JSON.stringify(next);
-			if (nextJson !== recordJson) history.upsert(next);
-			reconciled.set(record.receiptDigest, { subject, gateKey, recordJson: nextJson });
-		}
+	// Per history entry: the gate evidence its quality was last reduced under. An unchanged entry keeps its object,
+	// so matching evidence skips the reduction and a dispatch pays only for new evidence.
+	const reduced = new WeakMap<RouteHistoryEntry, { gateKey: string; label: RouteQualityLabel }>();
+	const qualityOf = (entry: RouteHistoryEntry, sources: DurableQualitySources, gateKey: string): RouteQualityLabel => {
+		const subject = sourceCache().sourceOf(entry);
+		// A run whose seal does not verify cannot keep a quality label (#434).
+		if (subject === null) return "unmeasured";
+		const previous = reduced.get(entry);
+		if (previous !== undefined && previous.gateKey === gateKey) return previous.label;
+		const label = reduceRouteQuality({ subject, runs: sources.runs, gateArtifacts: sources.gates }).label;
+		reduced.set(entry, { gateKey, label });
+		return label;
 	};
 	const readinessWindow = (): RouteReadinessEvidenceWindow => {
-		const sources = readSources();
-		reconcileHistory(sources);
-		const byDigest = digestIndex(sources);
+		const sources = sourceCache().read();
+		const gateKey = gateEvidenceKey(sources, serialOf);
 		return {
 			forRoute(candidate, current) {
-				const records = history.recordsFor(candidate);
+				const key = routeCapabilityKey(candidate);
+				const guard = routeDriftGuard(candidate);
+				const entries = sources.history.filter((entry) => {
+					const route = entryCandidate(entry);
+					return routeCapabilityKey(route) === key && !routeDriftInvalidates(routeDriftGuard(route), guard);
+				});
 				let integrityFailures = 0;
 				let validConstraints = 0;
 				const durations: number[] = [];
-				for (const record of records) {
-					const decision = byDigest.get(record.receiptDigest)?.settled.routeDecision ?? null;
-					if (decision === null) {
+				const observations: RouteObservation[] = [];
+				for (const entry of entries) {
+					observations.push(routeObservationFromEntry(entry, qualityOf(entry, sources, gateKey)));
+					if (!entry.sealVerified) {
 						integrityFailures += 1;
 						continue;
 					}
-					if (decision.constraintsValid) validConstraints += 1;
-					durations.push(decision.durationMs);
+					if (entry.decision.constraintsValid) validConstraints += 1;
+					durations.push(entry.decision.durationMs);
 				}
 				return {
-					observations: records.map(routeObservationFromHistory),
+					observations,
 					readiness: {
-						hardConstraintValidity: records.length === 0 ? 0 : validConstraints / records.length,
+						hardConstraintValidity: entries.length === 0 ? 0 : validConstraints / entries.length,
 						integrityFailures,
 						costUpperBoundUsd: current.costUpperBoundUsd,
 						factsFresh: current.factsFresh,
@@ -498,44 +467,15 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 							? "success"
 							: "failure";
 				const completed = realized.outcome === "succeeded" && outcome.quality.label !== "fail";
-				// 141 of 142 operator route records carried no outcome label because
-				// quality waits on independent evidence; the receipt's own verdict is
-				// always available.
-				const settled = routeSettledLabel(outcome.receipt);
 				const unpriced = receiptHasUnknownCost(outcome.receipt);
-				const cacheRead = outcome.receipt.cacheReadTokenCount == null ? null : outcome.receipt.cacheReadTokenCount > 0;
-				const sample: RouteObservation = {
+				samples?.record(realized.route, {
 					qualityLabel: outcome.quality.label,
 					reliability,
 					firstPass: realized.firstPass,
 					completedCostUsd: completed && !unpriced ? realized.costUsd : null,
 					completedEndToEndMs: completed ? realized.endToEndMs : null,
-					cacheRead,
+					cacheRead: outcome.receipt.cacheReadTokenCount == null ? null : outcome.receipt.cacheReadTokenCount > 0,
 					queueWaitMs: completed ? (outcome.phaseTiming?.queueWaitMs ?? null) : null,
-				};
-				samples?.record(realized.route, sample);
-				history.upsert({
-					version: 4,
-					receiptDigest: outcome.receipt.digest,
-					assignmentId: outcome.assignmentId ?? outcome.receipt.lineage?.rootRunId ?? outcome.receipt.runId,
-					route: realized.route,
-					executionRole: realized.route.executionRole,
-					qualityLabel: outcome.quality.label,
-					reliability,
-					settled,
-					firstPass: realized.firstPass,
-					completedCostUsd: sample.completedCostUsd,
-					completedPhaseTiming:
-						completed && outcome.phaseTiming !== undefined
-							? {
-									queueWaitMs: outcome.phaseTiming.queueWaitMs,
-									totalEndToEndMs: outcome.phaseTiming.totalEndToEndMs,
-								}
-							: null,
-					cacheRead: sample.cacheRead,
-					pricedCoverage: receiptPricedCoverage(outcome.receipt),
-					sourceDigests: outcome.quality.sourceDigests,
-					settledAt: outcome.receipt.endedAt,
 				});
 			} catch {
 				// Observation must never disturb dispatch.

@@ -156,7 +156,6 @@ export {
 export { DispatchManifest } from "./manifest.js";
 export type { RecordingManifest, RecordingReference } from "./recording.js";
 export { parseRecordingManifest, readRunRecording } from "./recording.js";
-export { createRouteHistoryStore } from "./route-history.js";
 export type { RouteQualityLabel, RouteQualityReduction } from "./route-quality.js";
 export { reduceRouteQuality } from "./route-quality.js";
 export type { RouteExplanation, RoutingIntent } from "./routing-intent.js";

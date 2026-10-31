@@ -450,7 +450,7 @@ The ledger gives a card its identity, route, budget and lifecycle, and the seale
 
 ## Route history settled labels
 
-Every route history record carries a `settled` label from `routeSettledLabel` in [route-history.ts](../../src/domains/dispatch/route-history.ts). The label states how the run settled in the receipt's own words, whether or not independent evidence ever grades it. The route observer ([route-observer.ts](../../src/domains/dispatch/route-observer.ts)) writes it when a run settles and backfills it later.
+Every route history record carries a `settled` label from `routeSettledLabel` in [route-history.ts](../../src/domains/telemetry/route-history.ts). The label states how the run settled in the receipt's own words, whether or not independent evidence ever grades it. The route observer ([route-observer.ts](../../src/domains/dispatch/route-observer.ts)) writes it when a run settles and backfills it later.
 
 The store is `<stateDir>/route-history.json`: `{ version: 3, records: [...] }`, at most 4096 records, one record per terminal receipt digest. A record has this shape:
 
