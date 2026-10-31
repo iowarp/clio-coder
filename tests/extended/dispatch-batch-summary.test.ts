@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok } from "node:assert/strict";
 import { test } from "node:test";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { dispatchBatchSummary, formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
@@ -25,12 +25,8 @@ function run(
 		};
 	}
 	const receipt = withReceiptIntegrity(draft, envelope);
-	const integrity = verifyReceiptIntegrity(receipt, envelope);
-	ok(integrity.ok);
 	return {
 		receipt,
-		receiptPath: null,
-		integrity,
 		summary: { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: id },
 	};
 }
@@ -44,11 +40,7 @@ test("the coordinator receives the landing fact for automatic and operator merge
 		const draft = fixtureReceiptDraft(envelope);
 		draft.worktree = { path: "/workspace/task", branch: "task", apply: "merge", applied: true, diffHash: "hash", detail };
 		const receipt = withReceiptIntegrity(draft, envelope);
-		const output = formatDispatchOutput(
-			"parallel",
-			[{ ...run("run-merged", 0, "known", 1), receipt, integrity: verifyReceiptIntegrity(receipt, envelope) }],
-			16384,
-		);
+		const output = formatDispatchOutput("parallel", [{ ...run("run-merged", 0, "known", 1), receipt }], 16384);
 		match(output, /merged abc1234 onto main/);
 	}
 });
@@ -57,24 +49,16 @@ test("dispatch batch shows sealed tool calls and provenance-aware cost without i
 	const first = run("run-a", 0.1, "known", 3);
 	const second = run("run-b", 0.2, "estimated", 4);
 	const opaque = run("run-c", 0, "unknown", 0, true);
-	const fourth = run("run-d", 1, "known", 99);
-	const tamperedReceipt = { ...fourth.receipt, task: "tampered" };
-	const tampered = {
-		...fourth,
-		receipt: tamperedReceipt,
-		integrity: verifyReceiptIntegrity(tamperedReceipt, { ...fixtureEnvelope("run-d"), costUsd: 1 }),
-	};
-	const runs = [first, second, opaque, tampered];
+	const runs = [first, second, opaque];
 	deepStrictEqual(dispatchBatchSummary(runs), {
 		observedToolCalls: 7,
 		unobservableToolRuns: 1,
-		excludedUntrustedRuns: 1,
 		// run-b is estimated, so the partly unknown total is approximate too (5996f82c6).
 		cost: "~$0.30 +?",
 	});
 	match(
 		formatDispatchOutput("parallel", runs, 16_384),
-		/batch observed_tool_calls=7 cost=~\$0\.30 \+\? unobservable_tool_runs=1 excluded_untrusted_runs=1/u,
+		/batch observed_tool_calls=7 cost=~\$0\.30 \+\? unobservable_tool_runs=1/u,
 	);
 });
 

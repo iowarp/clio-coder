@@ -222,6 +222,28 @@ function withheldSecretMaps(value: unknown, key?: string): unknown {
 	return Object.fromEntries(entries.map(([name, item]) => [name, withheldSecretMaps(item, name)]));
 }
 
+/** The redacted canonical bytes an object stores and the reference they hash to; no I/O. */
+function storedPreimage(subject: StoredSubject, value: unknown): { ref: ObjectRef; bytes: string } {
+	if (!storedSubjects.has(subject)) throw new Error("telemetry object subject is not enabled for capture");
+	const shape = contentSchemas[subject];
+	if (shape !== undefined && !Value.Check(shape, value))
+		throw new Error(`telemetry ${subject} object contains unsupported fields`);
+	// Validate before JSON's replacer could silently convert non-finite numbers to null (#434).
+	const canonical = canonicalJson(subject === "config" ? withheldSecretMaps(value) : value);
+	const redacted = JSON.parse(canonical, secretRedactingReplacer(createRedactionTally()));
+	const bytes = canonicalJson(redacted);
+	if (Buffer.byteLength(bytes) > maximumBytes) throw new Error("telemetry object exceeds size limit");
+	return { ref: reference(subject, bytes, "resolvable"), bytes };
+}
+
+/**
+ * The reference an object will store under, computed without storing it: a producer that must name the object before
+ * its writer stores it, such as a run's result, cites the same id the store writes (#434).
+ */
+export function telemetryObjectRef(subject: StoredSubject, value: unknown): ObjectRef {
+	return storedPreimage(subject, value).ref;
+}
+
 /**
  * Cold-path storage only. A reference becomes resolvable only after its redacted preimage is durable (#434).
  * `prompt-text`, `memory-trace` and `observation-trace` are content: only a caller holding research content
@@ -233,16 +255,7 @@ export async function storeTelemetryObject(
 	subject: StoredSubject,
 	value: unknown,
 ): Promise<ObjectRef> {
-	if (!storedSubjects.has(subject)) throw new Error("telemetry object subject is not enabled for capture");
-	const shape = contentSchemas[subject];
-	if (shape !== undefined && !Value.Check(shape, value))
-		throw new Error(`telemetry ${subject} object contains unsupported fields`);
-	// Validate before JSON's replacer could silently convert non-finite numbers to null (#434).
-	const canonical = canonicalJson(subject === "config" ? withheldSecretMaps(value) : value);
-	const redacted = JSON.parse(canonical, secretRedactingReplacer(createRedactionTally()));
-	const bytes = canonicalJson(redacted);
-	if (Buffer.byteLength(bytes) > maximumBytes) throw new Error("telemetry object exceeds size limit");
-	const ref = reference(subject, bytes, "resolvable");
+	const { ref, bytes } = storedPreimage(subject, value);
 	const directory = await objectDirectory(scopeDirectory, true);
 	if (directory === null) throw new Error("telemetry object directory unavailable");
 	const path = join(directory, `${ref.id}.json`);

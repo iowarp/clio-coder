@@ -8,10 +8,17 @@ import type { RunResultObject, RunSettled } from "../../core/telemetry/schemas.j
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../agents/result-contract.js";
 import { runContextProvenance } from "../evidence/trust-status.js";
 import { redactSecretString } from "../safety/redaction.js";
+import {
+	formatBudgetPolicy,
+	formatBudgetReasons,
+	formatBudgetRequest,
+	formatEffectiveBudget,
+} from "./budget-envelope.js";
 import type { ResolvedTerminalReason } from "./outcome.js";
 import { labelledRunHashes } from "./receipt-hashes.js";
 import type { RunUsageFacts } from "./run-call-usage.js";
 import { unobservedRunUsageFacts } from "./run-call-usage.js";
+import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "./run-upstream.js";
 import type { RunEnvelope, RunOutcome, RunResultDraft } from "./types.js";
 
 /** The facts and the object a run settles with; the journal adds the object's reference as `result`. */
@@ -52,6 +59,28 @@ function nodeOf(run: Pick<RunEnvelope, "node">): RunSettled["node"] {
 
 function identityOf(run: Pick<RunEnvelope, "identity">): RunSettled["identity"] {
 	return run.identity ? { host: run.identity.host, user: run.identity.user } : null;
+}
+
+function contextOf(
+	run: Pick<RunResultDraft, "briefing" | "workerContext"> & Partial<Pick<RunResultDraft, "projectContext">>,
+): RunSettled["context"] {
+	return {
+		briefingBytes: run.briefing?.bytes ?? null,
+		worker: run.workerContext
+			? {
+					mode: run.workerContext.mode,
+					estimatedTokens: run.workerContext.estimatedTokens,
+					omittedMessages: run.workerContext.omittedMessages,
+				}
+			: null,
+		project: run.projectContext
+			? {
+					tier: run.projectContext.tier,
+					chars: run.projectContext.chars ?? null,
+					sections: [...(run.projectContext.sections ?? [])],
+				}
+			: null,
+	};
 }
 
 function escalationsOf(safety: RunResultDraft["safety"]): RunSettled["escalations"] {
@@ -108,8 +137,50 @@ export function settleFinishedRun(
 				errors: stat.errors,
 				blocked: stat.blocked,
 			})),
-			skills: (receipt.skillActivations ?? []).slice(0, 256).map((skill) => skill.name),
+			skills: (receipt.skillActivations ?? [])
+				.slice(0, 256)
+				.map((skill) => ({ name: skill.name, requestSource: skill.requestSource ?? null })),
+			toolActivity: receipt.toolActivity ? { ...receipt.toolActivity } : null,
+			capabilityMismatch: receipt.capabilityMismatch
+				? {
+						agentId: receipt.capabilityMismatch.agentId,
+						capabilityClass: receipt.capabilityMismatch.capabilityClass,
+						taskType: receipt.capabilityMismatch.taskType,
+						suggestedAgentId: receipt.capabilityMismatch.suggestedAgentId,
+					}
+				: null,
+			budget: receipt.budget
+				? {
+						policy: diagnostic(formatBudgetPolicy(receipt.budget)) ?? "",
+						requested: diagnostic(formatBudgetRequest(receipt.budget)) ?? "",
+						effective: diagnostic(formatEffectiveBudget(receipt.budget)) ?? "",
+						reasons: diagnostic(formatBudgetReasons(receipt.budget)) ?? "",
+					}
+				: null,
+			context: contextOf(receipt),
+			upstream: {
+				responseModelIds: diagnostic(runResponseModelIdObservationLabel(receipt)),
+				gatewayRoutes: diagnostic(runGatewayRoutingLabel(receipt)),
+			},
+			blockedAttempts: (receipt.safety?.blockedAttempts ?? []).slice(0, 64).map((attempt) => ({
+				tool: attempt.tool,
+				actionClass: attempt.actionClass ?? null,
+				ruleId: attempt.ruleId ?? null,
+				reasonCode: attempt.reasonCode ?? null,
+			})),
 			escalations: escalationsOf(receipt.safety),
+			flowRestrictions: receipt.safety?.flowRestrictions
+				? {
+						version: 1,
+						restrictions: receipt.safety.flowRestrictions.restrictions.map((entry) => ({
+							ruleId: entry.ruleId,
+							policyHash: entry.policyHash,
+							sourceRef: entry.sourceRef,
+							recipients: [...entry.recipients],
+						})),
+						...(receipt.safety.flowRestrictions.advisory ? { advisory: [...receipt.safety.flowRestrictions.advisory] } : {}),
+					}
+				: null,
 			toolGovernance: receipt.delegation?.toolGovernance ?? null,
 			verification: { state: receipt.verification.state, basis: receipt.verification.basis },
 			quality: {
@@ -182,6 +253,7 @@ export function settleFinishedRun(
 							memo: check.memo,
 							outputTail: check.outputTail,
 							evidenceRunId: check.evidenceRunId ?? null,
+							baseComparison: check.baseComparison ? { ...check.baseComparison } : null,
 						})),
 					}
 				: null,
@@ -229,7 +301,14 @@ export function settleUnfinishedRun(
 			toolCalls: 0,
 			tools: [],
 			skills: [],
+			toolActivity: null,
+			capabilityMismatch: null,
+			budget: null,
+			context: contextOf(run),
+			upstream: { responseModelIds: null, gatewayRoutes: null },
+			blockedAttempts: [],
 			escalations: null,
+			flowRestrictions: null,
 			toolGovernance: null,
 			verification: { state: "unknown", basis: "receipt-unavailable" },
 			quality: null,

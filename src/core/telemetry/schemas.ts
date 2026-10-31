@@ -626,10 +626,86 @@ export const RunSettledSchema = Type.Object(
 		tools: Type.Array(Type.Object({ tool: ExistingId, calls: count, ok: count, errors: count, blocked: count }, closed), {
 			maxItems: 256,
 		}),
-		/** Names of the skills the run activated, in activation order. */
-		skills: Type.Array(ExistingId, { maxItems: 256 }),
+		/** The skills the run loaded, in activation order, and who asked for each; never a skill's path or body. */
+		skills: Type.Array(
+			Type.Object({ name: ExistingId, requestSource: nullable(vocabulary(["recipe", "model", "operator"])) }, closed),
+			{ maxItems: 256 },
+		),
+		/** The run's tool calls as the finalizer classified them; null for a run with no tool telemetry. */
+		toolActivity: nullable(
+			Type.Object(
+				{ calls: count, succeeded: count, failed: count, blocked: count, mutatingSucceeded: Type.Boolean() },
+				closed,
+			),
+		),
+		/** A read-only recipe admitted against a task that needs a write; null when the pairing was sound. */
+		capabilityMismatch: nullable(
+			Type.Object(
+				{ agentId: ExistingId, capabilityClass: ExistingId, taskType: ExistingId, suggestedAgentId: nullable(ExistingId) },
+				closed,
+			),
+		),
+		/** The tool budget the run ran under, worded as dispatch words it; null when it had none. */
+		budget: nullable(Type.Object({ policy: text, requested: text, effective: text, reasons: text }, closed)),
+		/** What context the run was sent, by size; the hashes are in `hashes`, the content is never kept. */
+		context: Type.Object(
+			{
+				briefingBytes: nullable(count),
+				worker: nullable(
+					Type.Object({ mode: vocabulary(["fork", "splice"]), estimatedTokens: count, omittedMessages: count }, closed),
+				),
+				project: nullable(
+					Type.Object(
+						{
+							tier: vocabulary(["none", "bounded"]),
+							chars: nullable(count),
+							sections: Type.Array(ExistingId, { maxItems: 64 }),
+						},
+						closed,
+					),
+				),
+			},
+			closed,
+		),
+		/** What the provider reported about the model and gateway route of the run's calls, each distinct one once. */
+		upstream: Type.Object({ responseModelIds: nullable(text), gatewayRoutes: nullable(text) }, closed),
+		/** Tool calls safety refused, by tool, class and rule; the call's arguments and reason prose are not kept. */
+		blockedAttempts: Type.Array(
+			Type.Object(
+				{
+					tool: ExistingId,
+					actionClass: nullable(ExistingId),
+					ruleId: nullable(ExistingId),
+					reasonCode: nullable(ExistingId),
+				},
+				closed,
+			),
+			{ maxItems: 64 },
+		),
 		/** Permission escalations the run asked for and how they ended; null when none was asked. */
 		escalations: nullable(Type.Object({ requested: count, approved: count, denied: count, timedOut: count }, closed)),
+		/** Information-flow restrictions the run's context carried, which its consumers must keep (`flow-restrictions.ts`). */
+		flowRestrictions: nullable(
+			Type.Object(
+				{
+					version: Type.Literal(1),
+					restrictions: Type.Array(
+						Type.Object(
+							{
+								ruleId: ExistingId,
+								policyHash: Type.String({ maxLength: 256 }),
+								sourceRef: text,
+								recipients: Type.Array(ExistingId, { maxItems: 256 }),
+							},
+							closed,
+						),
+						{ maxItems: 256 },
+					),
+					advisory: Type.Optional(Type.Array(text, { maxItems: 64 })),
+				},
+				closed,
+			),
+		),
 		/** Who governed an external peer's tools; null for a run Clio's own tool loop drove. */
 		toolGovernance: nullable(vocabulary(["clio-coder-policy", "agent-managed", "deny-all"])),
 		verification: Type.Object(
@@ -794,6 +870,18 @@ export const RunResultObjectSchema = Type.Object(
 								memo: Type.Boolean(),
 								outputTail: Type.String(),
 								evidenceRunId: nullable(Type.String()),
+								/** The same check replayed on the task base; null when it was not compared. */
+								baseComparison: nullable(
+									Type.Object(
+										{
+											status: vocabulary(["passed", "failed", "not_compared"]),
+											base: Type.Optional(Type.String()),
+											exitCode: Type.Optional(Type.Integer()),
+											reason: Type.Optional(Type.String()),
+										},
+										closed,
+									),
+								),
 							},
 							closed,
 						),

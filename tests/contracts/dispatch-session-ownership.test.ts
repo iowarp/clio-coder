@@ -146,8 +146,8 @@ describe("dispatch session ownership", () => {
 			strictEqual(receipt.sessionId, "session-a");
 			strictEqual(a.contract.getRun(runId)?.sessionId, "session-a");
 			deepStrictEqual(a.contract.owner?.(), { sessionId: "session-a", cwd: process.cwd() });
-			const read = okResult(await a.call(ToolNames.Monitor, { mode: "receipt", run_id: runId }));
-			strictEqual((read.details?.receiptIntegrity as { ok: boolean }).ok, true, "the stamp is inside the seal");
+			const read = okResult(await a.call(ToolNames.Monitor, { mode: "record", run_id: runId }));
+			strictEqual((read.details?.runIntegrity as { state: string }).state, "verified", "the stamp is inside the seal");
 		} finally {
 			await a.stop();
 		}
@@ -192,7 +192,7 @@ describe("dispatch session ownership", () => {
 			const own = okResult(await a.call(ToolNames.Monitor, { mode: "list" }));
 			deepStrictEqual(own.details?.runs, [{ runId, agentId: "scout", state: "succeeded" }]);
 
-			for (const mode of ["status", "receipt", "tools", "peek", "wait"]) {
+			for (const mode of ["status", "record", "tools", "peek", "wait"]) {
 				match(
 					errorMessage(await b.call(ToolNames.Monitor, { mode, run_id: runId, timeout_ms: 5 })),
 					new RegExp(`run '${runId}' belongs to another project`),
@@ -214,7 +214,7 @@ describe("dispatch session ownership", () => {
 		const sibling = await openSession(scratch, "session-sibling", process.cwd());
 		try {
 			okResult(await sibling.call(ToolNames.Monitor, { mode: "status", run_id: runId }));
-			okResult(await sibling.call(ToolNames.Monitor, { mode: "receipt", run_id: runId }));
+			okResult(await sibling.call(ToolNames.Monitor, { mode: "record", run_id: runId }));
 			strictEqual(
 				okResult(await sibling.call(ToolNames.Monitor, { mode: "list" })).output,
 				"No dispatched runs recorded for this session.",

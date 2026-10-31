@@ -12,7 +12,6 @@ import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.
 import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
-import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import type {
@@ -34,7 +33,7 @@ import { loadVerifiedScoutSource, prepareScoutContinuation } from "../tools/disp
 import type { MonitorToolDeps } from "../tools/monitor.js";
 import { collectDetachedBatch } from "../tools/monitor-collect.js";
 import type { ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
-import { receiptHelperResult } from "../tools/worker-evidence.js";
+import { finishedRun, PRODUCER_INTEGRITY, runHelperResult } from "../tools/worker-evidence.js";
 import { observeWorkspace } from "./direction-observations.js";
 import { workspaceFingerprint } from "./workspace-fingerprint.js";
 
@@ -81,14 +80,10 @@ export interface TurnControlRunnerDeps {
 	rememberOrientation?: (turnId: string, runId: string, succeeded: boolean) => void;
 }
 
-function receiptFindings(
-	receipt: RunResult,
-	dispatch: DispatchContract,
-): Pick<OrientationBlockInput, "findings" | "ungrounded"> {
+function receiptFindings(receipt: RunResult): Pick<OrientationBlockInput, "findings" | "ungrounded"> {
 	const strict = parseScoutResult(receipt.output?.text ?? "");
 	if (strict) return { findings: strict.findings, ungrounded: [] };
-	const envelope = dispatch.getRun(receipt.runId);
-	const helper = envelope === null ? null : receiptHelperResult(receipt, verifyReceiptIntegrity(receipt, envelope));
+	const helper = runHelperResult(finishedRun(receipt), PRODUCER_INTEGRITY);
 	const data =
 		helper?.kind === "scout-report"
 			? helper.data
@@ -411,8 +406,8 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 							splitRefusal = message;
 						}
 					}
-					const findings = results.flatMap((item) => receiptFindings(item, dispatch).findings);
-					const ungrounded = results.flatMap((item) => receiptFindings(item, dispatch).ungrounded);
+					const findings = results.flatMap((item) => receiptFindings(item).findings);
+					const ungrounded = results.flatMap((item) => receiptFindings(item).ungrounded);
 					const grounding = results.flatMap((item) =>
 						item.validationGrounding
 							? [

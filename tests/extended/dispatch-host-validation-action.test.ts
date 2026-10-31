@@ -1,4 +1,4 @@
-import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { formatDispatchOutput, nextHostValidationAction } from "../../src/tools/dispatch-runner.js";
@@ -51,21 +51,21 @@ describe("dispatch host validation action", () => {
 
 	it("names the declared verifier id instead of guessing a shell command", () => {
 		const run = ungroundedRun("test");
-		match(nextHostValidationAction(run.receipt, run.integrity) ?? "", /run verify\(check="test"\) in the host workspace/);
+		match(nextHostValidationAction(run.receipt) ?? "", /run verify\(check="test"\) in the host workspace/);
 		match(
 			formatDispatchOutput("parallel", [run], 16_384),
 			/next host validation for run-unchecked: run verify\(check="test"\)/,
 		);
 	});
 
-	it("does not request another host check after verified host evidence or from an invalid seal", () => {
+	it("does not request another host check after host evidence", () => {
 		const run = ungroundedRun("test");
 		const envelope = fixtureEnvelope("run-unchecked");
 		const verified = withReceiptIntegrity(
 			{ ...run.receipt, hostVerification: { status: "verified", checks: [] } },
 			envelope,
 		);
-		strictEqual(nextHostValidationAction(verified, verifyReceiptIntegrity(verified, envelope)), null);
+		strictEqual(nextHostValidationAction(verified), null);
 		const rejected = withReceiptIntegrity(
 			{
 				...run.receipt,
@@ -86,14 +86,6 @@ describe("dispatch host validation action", () => {
 			},
 			envelope,
 		);
-		strictEqual(nextHostValidationAction(rejected, verifyReceiptIntegrity(rejected, envelope)), null);
-		const tampered = { ...run.receipt, task: "tampered" };
-		const failedIntegrity = verifyReceiptIntegrity(tampered, fixtureEnvelope("run-unchecked"));
-		strictEqual(failedIntegrity.ok, false);
-		strictEqual(nextHostValidationAction(tampered, failedIntegrity), null);
-		doesNotMatch(
-			formatDispatchOutput("parallel", [{ ...run, receipt: tampered, integrity: failedIntegrity }], 16_384),
-			/next host validation/,
-		);
+		strictEqual(nextHostValidationAction(rejected), null);
 	});
 });

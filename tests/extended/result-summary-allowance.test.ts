@@ -27,7 +27,7 @@ import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integ
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
-import { receiptEvidenceLabels } from "../../src/tools/worker-evidence.js";
+import { finishedRun, PRODUCER_INTEGRITY, runEvidenceLabels } from "../../src/tools/worker-evidence.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -357,7 +357,7 @@ it("round-trips a 1200-word cited Coder explanation through dispatch, the receip
 		const collected = await monitor.run({ mode: "collect", run_ids: [run.id] }, {});
 		strictEqual(collected.kind, "ok");
 		if (collected.kind !== "ok") return;
-		match(collected.output, /preview clipped at 2000 bytes; the complete sealed text is output\.text in .*\.json/u);
+		match(collected.output, /preview clipped at 2000 bytes; the complete captured text is output\.text in .*\.json/u);
 		ok(!collected.output.includes("stored output truncated"));
 	} finally {
 		await bundle.extension.stop?.();
@@ -473,7 +473,7 @@ it("labels a Documenter summary above the default allowance as the inline delive
 		strictEqual(result.kind, "ok");
 		const receipt = sealedReceipt(bundle, output);
 		strictEqual(receipt.quality.resultContract?.conformance, "pass");
-		const labels = receiptEvidenceLabels(receipt, receipt.verification, { ok: true });
+		const labels = runEvidenceLabels(finishedRun(receipt), PRODUCER_INTEGRITY);
 		ok(
 			labels.some((label) => label.includes("the inline deliverable or limitation is in output.text JSON field summary")),
 		);

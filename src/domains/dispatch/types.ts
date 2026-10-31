@@ -36,20 +36,6 @@ import type { DispatchFailoverMode } from "./validation.js";
 
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "interrupted" | "stale" | "dead";
 
-/** Read the former read-only receipt level only when a receipt predates the autonomy field. */
-export function isLegacyReadOnlyReceipt(value: unknown): boolean {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-	const receipt = value as Record<string, unknown>;
-	if (receipt.autonomy !== undefined) return false;
-	const legacy = receipt.autonomyEnforcement;
-	return (
-		typeof legacy === "object" &&
-		legacy !== null &&
-		!Array.isArray(legacy) &&
-		(legacy as Record<string, unknown>).autonomy === "read-only"
-	);
-}
-
 /**
  * Terminal outcome taxonomy. Every run that reaches finalization gets exactly
  * one outcome, resolved at the single finalization point in extension.ts via

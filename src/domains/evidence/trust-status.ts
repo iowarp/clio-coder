@@ -1096,7 +1096,7 @@ function runContextStatus(facts: RunTrustFacts): ContextProvenanceStatus {
  * A finished run's trust status from its settled facts. Only an authenticated record's claims are read: a run whose
  * seal is open or failed keeps the integrity verdict and reads nothing else (#434).
  */
-function adaptRunTrustStatus(facts: RunTrustFacts | null, integrity: RunIntegrity): CanonicalTrustStatus {
+export function adaptRunTrustStatus(facts: RunTrustFacts | null, integrity: RunIntegrity): CanonicalTrustStatus {
 	if (facts === null)
 		return composeTrustStatus({
 			artifactIntegrity: absentTrustStatus("artifact_missing"),

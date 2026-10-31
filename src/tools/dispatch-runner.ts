@@ -55,8 +55,7 @@ import {
 import { narrowDispatchIntentToReadOnly } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
-import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
-import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
+import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
 import { newRunId } from "../domains/dispatch/state.js";
@@ -67,11 +66,10 @@ import type {
 	RunPlanProvenance,
 	RunResult,
 } from "../domains/dispatch/types.js";
-import { isLegacyReadOnlyReceipt } from "../domains/dispatch/types.js";
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
-import { adaptRunResultTrustStatus } from "../domains/evidence/trust-status.js";
+import { adaptRunTrustStatus } from "../domains/evidence/trust-status.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
@@ -121,8 +119,11 @@ import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
 	compactHelperResultLines,
-	receiptEvidenceLabels,
-	receiptHelperResult,
+	finishedRun,
+	PRODUCER_INTEGRITY,
+	runEvidenceLabels,
+	runHelperResult,
+	runResultPath,
 	SPOT_CHECK_GUIDANCE,
 	workerTextLabel,
 	workerTextNonEvidenceNotices,
@@ -442,7 +443,7 @@ async function backgroundedDispatchResult(
 				];
 	if (converted.settled.length > 0) {
 		lines.push(
-			`${converted.settled.length} earlier ${mode} step(s) had already finished and are not in this batch: ${converted.settled.map((run) => run.receipt.runId).join(", ")}. Read them with monitor(mode="receipt", run_id=<id>).`,
+			`${converted.settled.length} earlier ${mode} step(s) had already finished and are not in this batch: ${converted.settled.map((run) => run.receipt.runId).join(", ")}. Read them with monitor(mode="record", run_id=<id>).`,
 		);
 	}
 	if (converted.undispatched.length > 0) {
@@ -487,21 +488,14 @@ interface CompletedRun {
 	recording?: import("../domains/dispatch/index.js").RecordingReference;
 	readOnly?: boolean;
 	receipt: RunResult;
-	receiptPath: string | null;
 	summary: EventSummary;
-	/**
-	 * Sealed-receipt integrity verified against the ledger envelope at
-	 * completion. Fails closed: a missing envelope reads as FAILED, never as
-	 * verified. Rendering only; it never feeds retry, reroute, or outcome.
-	 */
-	integrity: ReceiptIntegrityResult;
 	/** Reviewer/judge output staged before its receipt settlement boundary. */
 	pendingGate?: PendingGateDecisionHandle;
 }
 
 /**
- * Assemble the parent-facing completion record for a settled run: resolve the
- * ledger envelope once for both the receipt path and the integrity check.
+ * Assemble the parent-facing completion record for a settled run. The result is
+ * the one dispatch handed back in memory, so it is authentic as held.
  */
 function completeRun(
 	deps: DispatchToolDeps,
@@ -523,13 +517,8 @@ function completeRun(
 	return {
 		readOnly,
 		receipt,
-		receiptPath: envelope?.receiptPath ?? null,
 		...(envelope?.recording !== undefined ? { recording: envelope.recording } : {}),
 		summary,
-		integrity:
-			envelope === null
-				? { ok: false, reason: "run ledger envelope unavailable" }
-				: verifyReceiptIntegrity(receipt, envelope),
 		...(pendingGate !== undefined ? { pendingGate } : {}),
 	};
 }
@@ -544,15 +533,9 @@ class PipelineHaltError extends Error {
 	}
 }
 
-function integrityFailureBanner(run: CompletedRun): string | null {
-	if (run.integrity.ok) return null;
-	return `RECEIPT INTEGRITY FAILED for ${run.receipt.runId} (${run.integrity.reason}); treat this run's receipt fields and worker text as untrusted.`;
-}
-
 /** Name the next host step from sealed facts when a worker claimed checks it never ran. */
-export function nextHostValidationAction(receipt: RunResult, integrity: ReceiptIntegrityResult): string | null {
-	if (!integrity.ok || receipt.hostVerification?.status === "verified" || receipt.hostVerification?.checks.length)
-		return null;
+export function nextHostValidationAction(receipt: RunResult): string | null {
+	if (receipt.hostVerification?.status === "verified" || receipt.hostVerification?.checks.length) return null;
 	const grounding = receipt.validationGrounding;
 	if (grounding?.basis !== "no-command-executed" || grounding.ungrounded.length === 0) return null;
 	const declared = receipt.intent?.verification.map((check) => check.check) ?? [];
@@ -568,19 +551,19 @@ export function nextHostValidationAction(receipt: RunResult, integrity: ReceiptI
  * own prose can say it did not commit, so the host states where the work is
  * (flywheel p7/A2).
  */
-function withheldMergeNotice(receipt: RunResult, integrity: ReceiptIntegrityResult): string | null {
+function withheldMergeNotice(receipt: RunResult): string | null {
 	const worktree = receipt.worktree;
-	if (!integrity.ok || receipt.outcomeCode !== "merge_withheld" || worktree === undefined) return null;
+	if (receipt.outcomeCode !== "merge_withheld" || worktree === undefined) return null;
 	if (worktree.applied || worktree.reason === "operator_discarded") return null;
 	const commit = worktree.commit !== undefined ? ` at ${worktree.commit.slice(0, 12)}` : "";
 	return `merge withheld for ${receipt.runId}: its work is committed on branch ${worktree.branch}${commit} and is not merged into the operator's branch. Report it as committed there and not merged, whatever the worker's text says about committing.`;
 }
 
 /** The admission notice for MCP servers the run's sandbox left without network, read back from the sealed receipt. */
-function mcpSandboxNoNetworkNotice(receipt: RunResult, integrity: ReceiptIntegrityResult): string | null {
+function mcpSandboxNoNetworkNotice(receipt: RunResult): string | null {
 	const sandbox = receipt.safety?.sandbox;
 	const ceiling = receipt.safety?.permit?.ceiling;
-	if (!integrity.ok || sandbox === undefined || ceiling?.mcp === undefined) return null;
+	if (sandbox === undefined || ceiling?.mcp === undefined) return null;
 	const offered = ceiling.mcp.tools.filter((entry) => ceiling.tools.includes(`mcp_${entry.serverId}__${entry.tool}`));
 	const withheld = (ceiling.mcp.networkWithheld ?? []).filter((entry) =>
 		offered.some((server) => server.serverId === entry.serverId),
@@ -588,19 +571,17 @@ function mcpSandboxNoNetworkNotice(receipt: RunResult, integrity: ReceiptIntegri
 	return workerMcpNoNetworkNotice(sandbox, offered, withheld);
 }
 
-/** Totals from integrity-checked receipts, with opaque external tool use kept separate. */
+/** Totals from the batch's run results, with opaque external tool use kept separate. */
 export function dispatchBatchSummary(runs: ReadonlyArray<CompletedRun>): {
 	observedToolCalls: number;
 	unobservableToolRuns: number;
-	excludedUntrustedRuns: number;
 	cost: string;
 } {
-	const trusted = runs.filter((run) => run.integrity.ok).map((run) => run.receipt);
+	const trusted = runs.map((run) => run.receipt);
 	const observable = trusted.filter((receipt) => receipt.externalTelemetry?.toolTelemetry !== "unavailable");
 	return {
 		observedToolCalls: observable.reduce((total, receipt) => total + receipt.toolCalls, 0),
 		unobservableToolRuns: trusted.length - observable.length,
-		excludedUntrustedRuns: runs.length - trusted.length,
 		cost: renderCostAggregate(
 			aggregateCostAmounts(trusted.map((receipt) => ({ usd: receipt.costUsd, provenance: receipt.costProvenance }))),
 		),
@@ -629,16 +610,13 @@ export function formatDispatchOutput(
 	// Integrity failures and the spot-check reminder lead the summary: the
 	// truncation below keeps the head and drops the tail, and neither warning
 	// may be hidden behind a successful process outcome or a long answer.
-	const integrityBanners = runs
-		.map((run) => integrityFailureBanner(run))
-		.filter((banner): banner is string => banner !== null);
 	const hostActions = [
 		...new Set(
 			runs
 				.flatMap((run) => [
-					nextHostValidationAction(run.receipt, run.integrity),
-					withheldMergeNotice(run.receipt, run.integrity),
-					mcpSandboxNoNetworkNotice(run.receipt, run.integrity),
+					nextHostValidationAction(run.receipt),
+					withheldMergeNotice(run.receipt),
+					mcpSandboxNoNetworkNotice(run.receipt),
 				])
 				.filter((action): action is string => action !== null),
 		),
@@ -646,21 +624,23 @@ export function formatDispatchOutput(
 	const batch = dispatchBatchSummary(runs);
 
 	const needsSpotCheck = runs.some((run) => {
-		if (receiptHelperResult(run.receipt, run.integrity) !== null) return false;
-		const state = adaptRunResultTrustStatus(run.receipt, { integrity: run.integrity }).validationGrounding.state;
+		const view = finishedRun(run.receipt);
+		if (runHelperResult(view, PRODUCER_INTEGRITY) !== null) return false;
+		const state = adaptRunTrustStatus({ ...view.facts, runId: view.runId, digest: null }, PRODUCER_INTEGRITY)
+			.validationGrounding.state;
 		return state === "absent" || state === "unknown" || state === "ungrounded";
 	});
 	const lines = [
 		`dispatch (${mode}) total=${runs.length} failed=${failed.length}`,
 		`runs=${runs.map((run) => run.receipt.runId).join(", ")}`,
-		`batch observed_tool_calls=${batch.observedToolCalls} cost=${batch.cost}${batch.unobservableToolRuns > 0 ? ` unobservable_tool_runs=${batch.unobservableToolRuns}` : ""}${batch.excludedUntrustedRuns > 0 ? ` excluded_untrusted_runs=${batch.excludedUntrustedRuns}` : ""}`,
-		...integrityBanners,
+		`batch observed_tool_calls=${batch.observedToolCalls} cost=${batch.cost}${batch.unobservableToolRuns > 0 ? ` unobservable_tool_runs=${batch.unobservableToolRuns}` : ""}`,
 		...hostActions,
 		...(needsSpotCheck ? [SPOT_CHECK_GUIDANCE] : []),
 		"",
 		...runs.flatMap((run, index) => {
-			const { receipt, receiptPath } = run;
-			const helperLines = compactHelperResultLines(receipt, run.integrity, perRunOutputBytes);
+			const { receipt } = run;
+			const view = finishedRun(receipt);
+			const helperLines = compactHelperResultLines(view, PRODUCER_INTEGRITY, perRunOutputBytes);
 			if (helperLines !== null) return helperLines;
 			const note = successNote(receipt);
 			const noteSuffix = note !== null ? ` note=${note}` : "";
@@ -676,16 +656,11 @@ export function formatDispatchOutput(
 			// Provenance suffix is empty when a run carries no
 			// pipeline/persona/escalation fields, so the line format is unchanged.
 			const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
-			// Evidence confidence comes from the sealed receipt. A receipt that fails
-			// integrity cannot be read as evidence at all.
-			const verification = run.integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION;
-			const trustStatus = adaptRunResultTrustStatus(
-				{ ...receipt, verification: verification },
-				{ integrity: run.integrity },
-			);
-			const evidenceSuffix = ` ${receiptEvidenceLabels(receipt, verification, run.integrity).join(" ")}`;
+			// Evidence confidence comes from the run's settled facts, the same ones its run.settled records.
+			const trustStatus = adaptRunTrustStatus({ ...view.facts, runId: view.runId, digest: null }, PRODUCER_INTEGRITY);
+			const evidenceSuffix = ` ${runEvidenceLabels(view, PRODUCER_INTEGRITY).join(" ")}`;
 			const routingSuffix =
-				run.integrity.ok && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
+				receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
 					? ` route_decision=${receipt.routeDecision.decisionHash} route_mode=${receipt.routeDecision.mode}`
 					: "";
 			const external = receipt.runtimeKind === "subprocess" || receipt.delegation !== undefined;
@@ -694,31 +669,27 @@ export function formatDispatchOutput(
 				receipt.worktree || receipt.checkoutChanges
 					? ` changed=${JSON.stringify(changedPaths.slice(0, 20))}${changedPaths.length > 20 ? `(+${changedPaths.length - 20} more)` : ""}`
 					: "";
-			const placementSuffix =
-				!run.integrity.ok || !external
-					? ""
-					: receipt.worktree
-						? ` placement=worktree cwd=${JSON.stringify(receipt.worktree.path)} branch=${JSON.stringify(receipt.worktree.branch)} apply=${receipt.worktree.apply}${receipt.worktree.applied && receipt.worktree.detail ? ` merge=${JSON.stringify(receipt.worktree.detail)}` : ""} diff=${receipt.worktree.diffHash}${changedSuffix}`
-						: ` placement=current cwd=${JSON.stringify(receipt.reproducibility?.cwd ?? "unknown")}${changedSuffix}${receipt.checkoutChanges ? " change_attribution=observed-delta" : ""}`;
-			// The sealed receipt is authoritative. Live summaries remain useful for
+			const placementSuffix = !external
+				? ""
+				: receipt.worktree
+					? ` placement=worktree cwd=${JSON.stringify(receipt.worktree.path)} branch=${JSON.stringify(receipt.worktree.branch)} apply=${receipt.worktree.apply}${receipt.worktree.applied && receipt.worktree.detail ? ` merge=${JSON.stringify(receipt.worktree.detail)}` : ""} diff=${receipt.worktree.diffHash}${changedSuffix}`
+					: ` placement=current cwd=${JSON.stringify(receipt.reproducibility?.cwd ?? "unknown")}${changedSuffix}${receipt.checkoutChanges ? " change_attribution=observed-delta" : ""}`;
+			// The run's result is authoritative. Live summaries remain useful for
 			// monitoring but can contain transient tool-use prose and never override
-			// a missing, partial, or integrity-invalid durable answer.
+			// a missing or partial durable answer.
 			const answerText =
-				run.integrity.ok &&
-				(receipt.output?.state === "final" || (receipt.outcome !== undefined && receipt.outcome !== "succeeded"))
+				receipt.output?.state === "final" || (receipt.outcome !== undefined && receipt.outcome !== "succeeded")
 					? (receipt.output?.text ?? "")
 					: "";
 			const output =
 				answerText.length > 0
 					? truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER)
-					: run.integrity.ok
-						? "(no receipt-sealed assistant text captured)"
-						: "(worker text withheld because receipt integrity failed)";
+					: "(no assistant text captured in the run result)";
 			return [
-				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
 				`  ${workerTextLabel(trustStatus)}`,
 				...output.split("\n").map((line) => `  ${line}`),
-				...workerTextNonEvidenceNotices(receipt, trustStatus, answerText).map((notice) => `  ${notice}`),
+				...workerTextNonEvidenceNotices(view, trustStatus, answerText).map((notice) => `  ${notice}`),
 			];
 		}),
 	];
@@ -728,8 +699,10 @@ export function formatDispatchOutput(
 }
 
 /** The union of what the collected runs' contexts carried, for the parent ledger to absorb. */
-export function flowRestrictionsOfRuns(receipts: ReadonlyArray<RunResult | null>): FlowRestrictionSet | null {
-	return mergeFlowRestrictions(...receipts.map((receipt) => receipt?.safety?.flowRestrictions ?? null));
+export function flowRestrictionsOfRuns(
+	sets: ReadonlyArray<FlowRestrictionSet | null | undefined>,
+): FlowRestrictionSet | null {
+	return mergeFlowRestrictions(...sets);
 }
 
 function dispatchDetails(
@@ -741,7 +714,7 @@ function dispatchDetails(
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
 	const batch = dispatchBatchSummary(runs);
 	const carried = mergeFlowRestrictions(
-		flowRestrictionsOfRuns(runs.map((run) => run.receipt)),
+		flowRestrictionsOfRuns(runs.map((run) => run.receipt.safety?.flowRestrictions)),
 		...(board === null
 			? []
 			: runs.flatMap((run) => {
@@ -753,7 +726,7 @@ function dispatchDetails(
 	for (const run of runs) {
 		const envelope = deps.dispatch.getRun(run.receipt.runId);
 		const candidate =
-			run.integrity.ok && envelope !== null
+			envelope !== null
 				? scoutTransitionDetail({ receipt: run.receipt, envelope, agentSpecs: deps.getAgentSpecs() })
 				: null;
 		if (candidate === null) continue;
@@ -780,27 +753,24 @@ function dispatchDetails(
 		// renders details can show the board without re-reading the store.
 		...(board !== null ? { agentLedgerBoard: board } : {}),
 		...(transition !== null ? { scoutTransition: transition } : {}),
-		runs: runs.map(({ receipt, receiptPath, summary, integrity, readOnly, recording }) => {
-			// Additive provenance keys only; folded in when the receipt carries the
+		runs: runs.map(({ receipt, summary, readOnly, recording }) => {
+			// Additive provenance keys only; folded in when the result carries the
 			// field so a run entry without them keeps its exact shape.
 			const provenance = extractRunProvenance(receipt);
-			const trustStatus = adaptRunResultTrustStatus(receipt, { integrity });
-			const helperResult = receiptHelperResult(receipt, integrity);
+			const view = finishedRun(receipt);
+			const trustStatus = adaptRunTrustStatus({ ...view.facts, runId: view.runId, digest: null }, PRODUCER_INTEGRITY);
+			const helperResult = runHelperResult(view, PRODUCER_INTEGRITY);
 			return {
 				...(helperResult !== null ? { helperResult } : {}),
 				runId: receipt.runId,
 				agentId: receipt.agentId,
 				exitCode: receipt.exitCode,
-				receiptPath,
 				...(recording !== undefined ? { recording } : {}),
 				eventCount: summary.count,
-				// The dispatch restriction is visible beside the receipt integrity
-				// result. Historical receipts may still encode read-only as a level.
-				verification: integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION,
-				hostVerification: integrity.ok ? (receipt.hostVerification ?? null) : null,
-				receiptIntegrity: integrity,
-				readOnly: readOnly || (integrity.ok && isLegacyReadOnlyReceipt(receipt)),
-				...(integrity.ok && receipt.toolActivity !== undefined ? { toolActivity: receipt.toolActivity } : {}),
+				verification: receipt.verification,
+				hostVerification: receipt.hostVerification ?? null,
+				readOnly: readOnly === true,
+				...(receipt.toolActivity !== undefined ? { toolActivity: receipt.toolActivity } : {}),
 				trustStatus,
 				// The bounded projection sits shallow and flat on purpose: a
 				// depth-capped wire (ACP rawOutput) keeps it whole while the
@@ -809,11 +779,10 @@ function dispatchDetails(
 				...(receipt.outcome !== undefined && receipt.outcome !== "succeeded"
 					? { outcome: receipt.outcome, outcomeDetail: receipt.outcomeDetail ?? null }
 					: {}),
-				...(integrity.ok &&
-				(receipt.worktree !== undefined ||
-					receipt.checkoutChanges !== undefined ||
-					receipt.runtimeKind === "subprocess" ||
-					receipt.delegation !== undefined)
+				...(receipt.worktree !== undefined ||
+				receipt.checkoutChanges !== undefined ||
+				receipt.runtimeKind === "subprocess" ||
+				receipt.delegation !== undefined
 					? {
 							placement: receipt.worktree
 								? { mode: "worktree" as const, ...receipt.worktree }
@@ -829,7 +798,7 @@ function dispatchDetails(
 				...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
 				...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),
 				...(provenance.escalation !== undefined ? { escalation: provenance.escalation } : {}),
-				...(integrity.ok && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
+				...(receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
 					? { routing: explainRouteDecision(receipt.routeDecision, receipt.routingIntent) }
 					: {}),
 			};
@@ -1605,9 +1574,7 @@ async function runCompete(
 				const receipt = candidateRuns[index]?.receipt;
 				const failed = receipt !== undefined && isPipelineStepFailure(receipt);
 				if (failed) return "builder failed";
-				// Current dispatches carry the read-only restriction directly; older
-				// receipts may still record it as a legacy autonomy level.
-				if (candidateRuns[index]?.readOnly !== true && !isLegacyReadOnlyReceipt(receipt)) {
+				if (candidateRuns[index]?.readOnly !== true) {
 					commitCandidateWork(worktree, `clio-coder compete ${group} candidate ${worktree.index}`);
 				}
 				return candidateDiffStat(root, worktree.branch);
@@ -1632,7 +1599,7 @@ async function runCompete(
 					base.task,
 					worktrees,
 					stats,
-					candidateRuns,
+					candidateRuns.map((run) => ({ receipt: run.receipt, resultPath: runResultPath(run.receipt) })),
 					competePresentationOrder(group, worktrees.length),
 				),
 				// Candidate prose and receipt locators are evidence, not inferred authority.
@@ -2716,7 +2683,7 @@ export async function runDispatchTool(
 						deps.runEvents.registerSingle(handle, agentId, fallbackProgressBus(deps)).completion,
 					complete: (receipt, summary) => {
 						const completed = completeRun(deps, receipt, summary);
-						return { value: completed, integrityValid: completed.integrity.ok };
+						return { value: completed, integrityValid: true };
 					},
 				});
 				const output = formatDispatchOutput("fleet", outcome.runs, maxOutputBytes);

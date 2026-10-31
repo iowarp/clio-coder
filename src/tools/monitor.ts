@@ -1,3 +1,4 @@
+import { clioStateDir } from "../core/xdg.js";
 import {
 	formatBudgetPolicy,
 	formatBudgetReasons,
@@ -6,15 +7,10 @@ import {
 } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { type DispatchOwnership, dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
-import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
-import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
-import { isTerminalRunEnvelope, type RunEnvelope, type RunResult } from "../domains/dispatch/types.js";
+import { isTerminalRunEnvelope, type RunEnvelope } from "../domains/dispatch/types.js";
 import { summarizeTrustStatus, trustStateWord } from "../domains/evidence/trust-projection.js";
-import {
-	adaptRunResultTrustStatus,
-	type CanonicalTrustStatus,
-	inspectRunResultTrustStatus,
-} from "../domains/evidence/trust-status.js";
+import { inspectRunTrustStatus } from "../domains/evidence/trust-status.js";
+import { loadRunRecord } from "../domains/session/telemetry-source.js";
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/index.js";
 import type { DispatchRunEventRegistry } from "./dispatch.js";
 import { grantRequestLines, pendingRequestsFor, requestsAwaitingMain } from "./grant-request-text.js";
@@ -24,6 +20,7 @@ import { listJobMonitor, runJobMonitor } from "./monitor-jobs.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
+import type { FinishedRun } from "./worker-evidence.js";
 
 /**
  * The monitor tool: read-only visibility into known synchronous and detached
@@ -33,13 +30,13 @@ import { truncateUtf8 } from "./truncate-utf8.js";
  * enumerates this session's runs, status reports one run's state and progress counters, peek
  * returns the bounded tail of a run's recent events buffered in this process,
  * tools answers what a run executed (its tool calls with outcomes, plus the
- * receipt's per-tool totals),
- * receipt returns the stored receipt, wait observes one run for a bounded
+ * per-tool totals it settled),
+ * record returns the run's settled record and seal verdict, wait observes one run for a bounded
  * time until it is terminal or the timeout fires (it never cancels anything;
  * steer action=cancel stops a run), collect is the batch barrier: a pending
  * snapshot while runs are in flight, full results once every run is terminal.
  * Built strictly on the dispatch domain's ledger, live snapshot, durable
- * batch records, and integrity-verified receipts, so wait and collect work
+ * batch records, and sealed run records, so wait and collect work
  * across session resume.
  *
  * Those stores are machine-wide, so every mode checks the row against this
@@ -51,7 +48,7 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 
 const LIST_LIMIT = 20;
 const PEEK_MAX_BYTES = 8 * 1024;
-const RECEIPT_MAX_BYTES = 14 * 1024;
+const RECORD_MAX_BYTES = 14 * 1024;
 const WAIT_DEFAULT_TIMEOUT_MS = 60_000;
 const WAIT_MAX_TIMEOUT_MS = 10 * 60_000;
 /**
@@ -114,8 +111,7 @@ function observeDispatchChanges(dispatch: DispatchContract): {
 
 function runLine(run: RunEnvelope): string {
 	const state = run.outcome ?? run.status;
-	const receipt = run.receiptPath ?? "n/a";
-	return `- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} started=${run.startedAt} tokens=${run.tokenCount} receipt=${receipt}`;
+	return `- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} started=${run.startedAt} tokens=${run.tokenCount}`;
 }
 
 function ownershipFor(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined): DispatchOwnership {
@@ -156,7 +152,10 @@ function listRuns(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined)
 	}
 	const lines = [`dispatched runs (this session, newest first, ${shown.length} of ${scoped.length}):`];
 	for (const run of shown) lines.push(runLine(run));
-	lines.push("", 'Use monitor(run_id=<id>) for state, mode="peek" for recent output, mode="receipt" for the receipt.');
+	lines.push(
+		"",
+		'Use monitor(run_id=<id>) for state, mode="peek" for recent output, mode="record" for the settled run record.',
+	);
 	return {
 		kind: "ok",
 		output: lines.join("\n"),
@@ -200,7 +199,7 @@ function runStatus(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 		`state: ${run.status}${run.outcome ? ` outcome=${run.outcome}` : ""}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 		`target=${run.targetId} model=${run.wireModelId} runtime=${run.runtimeKind} node=${run.node?.id ?? "local"}${reroutes}`,
 		`started=${run.startedAt} ended=${run.endedAt ?? "n/a"} exit=${run.exitCode ?? "n/a"}`,
-		`tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance, run.costSummary)) ?? COST_NOT_MEASURED} receipt=${run.receiptPath ?? "n/a"}`,
+		`tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance, run.costSummary)) ?? COST_NOT_MEASURED}`,
 	];
 	if (run.council !== undefined || run.gate?.role === "synthesis") {
 		lines.push(
@@ -263,7 +262,6 @@ function runStatus(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 						},
 					}
 				: {}),
-			receiptPath: run.receiptPath,
 			running: live !== null,
 			...(pendingPermissions.length > 0 ? { pendingPermissions: pendingPermissions.map((view) => ({ ...view })) } : {}),
 		},
@@ -279,7 +277,7 @@ function runPeek(deps: MonitorToolDeps, runId: string, ownership: DispatchOwners
 		if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
 		return {
 			kind: "ok",
-			output: `No buffered events for run ${runId} in this process. Use mode="receipt" for the stored receipt or mode="status" for run state.`,
+			output: `No buffered events for run ${runId} in this process. Use mode="record" for the settled run record or mode="status" for run state.`,
 			details: { mode: "peek", runId, eventCount: 0 },
 		};
 	}
@@ -304,7 +302,6 @@ function runPeek(deps: MonitorToolDeps, runId: string, ownership: DispatchOwners
 
 const TOOLS_MAX_CALL_LINES = 60;
 const TOOLS_MAX_BYTES = 8 * 1024;
-const TOOLS_ARGUMENTS_CHARS = 160;
 
 /**
  * Tail event types that describe one tool call. `clio_coder_tool_finish` is the
@@ -329,38 +326,26 @@ function toolCallLines(entries: ReadonlyArray<{ at: string; type: string; detail
 	return lines;
 }
 
-function receiptToolLines(receipt: RunResult): string[] {
+function settledToolLines(facts: FinishedRun["facts"]): string[] {
 	const lines: string[] = [];
-	const activity = receipt.toolActivity;
+	const activity = facts.toolActivity;
 	if (activity) {
 		lines.push(
 			`  totals: calls=${activity.calls} succeeded=${activity.succeeded} failed=${activity.failed} blocked=${activity.blocked} mutating_succeeded=${activity.mutatingSucceeded}`,
 		);
 	} else {
-		lines.push(`  totals: calls=${receipt.toolCalls}`);
+		lines.push(`  totals: calls=${facts.toolCalls}`);
 	}
-	for (const stat of receipt.toolStats) {
-		lines.push(
-			`  ${stat.tool}: count=${stat.count} ok=${stat.ok} errors=${stat.errors} blocked=${stat.blocked} total_ms=${stat.totalDurationMs}`,
-		);
-	}
-	for (const attempt of receipt.safety?.blockedAttempts ?? []) {
+	for (const stat of facts.tools)
+		lines.push(`  ${stat.tool}: count=${stat.calls} ok=${stat.ok} errors=${stat.errors} blocked=${stat.blocked}`);
+	for (const attempt of facts.blockedAttempts) {
 		const parts = [
 			`  blocked: ${attempt.tool}`,
-			attempt.actionClass !== undefined ? `class=${attempt.actionClass}` : "",
-			attempt.ruleId !== undefined ? `rule=${attempt.ruleId}` : "",
-			attempt.reasonCode !== undefined ? `reason_code=${attempt.reasonCode}` : "",
+			attempt.actionClass !== null ? `class=${attempt.actionClass}` : "",
+			attempt.ruleId !== null ? `rule=${attempt.ruleId}` : "",
+			attempt.reasonCode !== null ? `reason_code=${attempt.reasonCode}` : "",
 		].filter((part) => part.length > 0);
 		lines.push(parts.join(" "));
-	}
-	for (const entry of receipt.delegation?.toolCallLog ?? []) {
-		let rendered: string;
-		try {
-			rendered = truncateUtf8(JSON.stringify(entry.arguments), TOOLS_ARGUMENTS_CHARS, "…");
-		} catch {
-			rendered = "(arguments not serializable)";
-		}
-		lines.push(`  ${entry.timestamp} ${entry.tool} ${entry.decision} args=${rendered}`);
 	}
 	return lines;
 }
@@ -369,11 +354,11 @@ function receiptToolLines(receipt: RunResult): string[] {
  * What a run actually executed, call by call. It exists because the question
  * "did this run really run the validation it claims" had no in-session answer:
  * an orchestrator checking a worker's claimed `npm run typecheck` had to crawl
- * dozens of unrelated calls to find out, and the receipt's `toolCalls` is an
+ * dozens of unrelated calls to find out, and the settled `toolCalls` is an
  * integer (REPORT-dispatch-drive-1.md R2).
  *
  * Two sources, both already in this process's hands: the same bounded event
- * tail `mode="peek"` reads, and the run's integrity-verified receipt. Neither
+ * tail `mode="peek"` reads, and the run's sealed settled record. Neither
  * carries a command line for an ordinary worker call, so this mode does not
  * pretend to: it reports tool name and outcome per call, aggregates per tool,
  * and the arguments only where the source actually recorded them, which today
@@ -390,7 +375,7 @@ function runTools(deps: MonitorToolDeps, runId: string, ownership: DispatchOwner
 	const tail = deps.runEvents?.eventTail(resolvedRunId) ?? null;
 	const callLines = tail ? toolCallLines(tail.entries) : [];
 	const evidence = durableRunEvidence(run);
-	const receiptLines = evidence.receipt !== null ? receiptToolLines(evidence.receipt) : [];
+	const settledLines = evidence.run !== null ? settledToolLines(evidence.run.facts) : [];
 
 	const lines = [`tool calls for run ${resolvedRunId}${run ? ` (${run.agentId})` : ""}:`];
 	let omitted = 0;
@@ -410,10 +395,10 @@ function runTools(deps: MonitorToolDeps, runId: string, ownership: DispatchOwner
 				: "executed calls: the event buffer holds no tool-call events for this run.",
 		);
 	}
-	if (receiptLines.length > 0) {
-		lines.push("receipt totals (integrity verified):", ...receiptLines);
+	if (settledLines.length > 0) {
+		lines.push("settled totals (run seal verified):", ...settledLines);
 	} else if (evidence.integrityNote !== null) {
-		lines.push(`receipt totals: unavailable. ${evidence.integrityNote}`);
+		lines.push(`settled totals: unavailable. ${evidence.integrityNote}`);
 	}
 	lines.push(
 		"note: the event buffer records tool name and outcome, not command arguments; absent argv is not evidence that no command ran.",
@@ -428,70 +413,57 @@ function runTools(deps: MonitorToolDeps, runId: string, ownership: DispatchOwner
 			callCount: callLines.length,
 			omitted,
 			bufferAvailable: tail !== null,
-			receiptAvailable: evidence.receipt !== null,
-			...(evidence.receipt !== null
+			settledAvailable: evidence.run !== null,
+			...(evidence.run !== null
 				? {
-						toolCalls: evidence.receipt.toolCalls,
-						toolActivity: evidence.receipt.toolActivity ?? null,
-						toolStats: evidence.receipt.toolStats,
+						toolCalls: evidence.run.facts.toolCalls,
+						toolActivity: evidence.run.facts.toolActivity,
+						tools: evidence.run.facts.tools,
 					}
 				: {}),
 		},
 	};
 }
 
-function runReceipt(deps: MonitorToolDeps, runId: string, ownership: DispatchOwnership): ToolResult {
+function runRecord(deps: MonitorToolDeps, runId: string, ownership: DispatchOwnership): ToolResult {
 	const run = deps.dispatch.getRun(runId);
 	if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
 	const unseen = unseenRunError(ownership, runId, run);
 	if (unseen !== null) return unseen;
-	if (!run.receiptPath) {
+	const record = loadRunRecord(clioStateDir(), run.id);
+	if (record?.settled == null) {
 		return {
 			kind: "error",
-			message: `monitor: run '${runId}' has no stored receipt (state=${run.outcome ?? run.status}); try mode="status" or mode="peek"`,
+			message: `monitor: run '${runId}' has not settled (state=${run.outcome ?? run.status}); try mode="status" or mode="peek"`,
 		};
 	}
-	let raw: string;
-	try {
-		raw = readReceiptTextSync(run.receiptPath);
-	} catch (err) {
-		return {
-			kind: "error",
-			message: `monitor: cannot read receipt ${run.receiptPath}: ${err instanceof Error ? err.message : String(err)}`,
-		};
-	}
-	const body = truncateUtf8(raw, RECEIPT_MAX_BYTES, `\n[receipt truncated; read ${run.receiptPath} for the rest]`);
-	let receipt: RunResult | null = null;
-	let receiptIntegrity: ReceiptIntegrityResult;
-	let trustStatus: CanonicalTrustStatus;
-	try {
-		receipt = JSON.parse(raw) as RunResult;
-		const inspection = inspectRunResultTrustStatus(receipt, run);
-		receiptIntegrity = inspection.integrity;
-		trustStatus = inspection.status;
-	} catch (err) {
-		receiptIntegrity = {
-			ok: false,
-			reason: `receipt invalid: ${err instanceof Error ? err.message : String(err)}`,
-		};
-		trustStatus = adaptRunResultTrustStatus(null, { integrity: receiptIntegrity });
-	}
+	const inspection = inspectRunTrustStatus(record);
+	const verified = inspection.integrity.state === "verified";
+	const shown = {
+		seal: record.seal,
+		settled: record.settled,
+		// The deliverable is shown only under a seal that verifies; an open or failed seal vouches for none of it.
+		result: verified ? record.result : null,
+	};
+	const body = truncateUtf8(
+		JSON.stringify(shown, null, 2),
+		RECORD_MAX_BYTES,
+		`\n[run record truncated; mode="record" shows the first ${RECORD_MAX_BYTES} bytes]`,
+	);
 	return {
 		kind: "ok",
 		output: body,
 		details: {
-			mode: "receipt",
+			mode: "record",
 			runId,
-			receiptPath: run.receiptPath,
-			receiptIntegrity,
-			trustStatus,
-			trust: summarizeTrustStatus(trustStatus),
-			...(receipt !== null && receiptIntegrity.ok
+			runIntegrity: inspection.integrity,
+			trustStatus: inspection.status,
+			trust: summarizeTrustStatus(inspection.status),
+			...(verified
 				? {
-						evidenceVerification: receipt.verification,
-						hostVerification: receipt.hostVerification ?? null,
-						briefing: receipt.briefing ?? null,
-						projectContext: receipt.projectContext ?? null,
+						evidenceVerification: record.settled.verification,
+						hostVerification: record.settled.hostVerification,
+						context: record.settled.context,
 					}
 				: {}),
 		},
@@ -662,7 +634,7 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 			if (
 				mode !== "status" &&
 				mode !== "peek" &&
-				mode !== "receipt" &&
+				mode !== "record" &&
 				mode !== "list" &&
 				mode !== "wait" &&
 				mode !== "collect" &&
@@ -670,7 +642,7 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 			) {
 				return {
 					kind: "error",
-					message: `monitor: mode must be status, peek, receipt, list, wait, collect, or tools; got '${mode}'`,
+					message: `monitor: mode must be status, peek, record, list, wait, collect, or tools; got '${mode}'`,
 				};
 			}
 			if (mode === "list") {
@@ -724,7 +696,7 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 			if (mode === "status") return runStatus(deps, runId, ownership);
 			if (mode === "peek") return runPeek(deps, runId, ownership);
 			if (mode === "tools") return runTools(deps, runId, ownership);
-			return runReceipt(deps, runId, ownership);
+			return runRecord(deps, runId, ownership);
 		},
 	};
 }

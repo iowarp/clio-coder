@@ -213,8 +213,8 @@ describe("loop guard identical-call epoch", () => {
 				name: "failed dispatch with one applied worktree change",
 				details: {
 					runs: [
-						{ receiptIntegrity: { ok: true }, placement: { mode: "worktree", applied: true, changedPaths: ["fix.ts"] } },
-						{ receiptIntegrity: { ok: true }, placement: { mode: "current", changedPaths: [] } },
+						{ placement: { mode: "worktree", applied: true, changedPaths: ["fix.ts"] } },
+						{ placement: { mode: "current", changedPaths: [] } },
 					],
 				},
 				restarts: true,
@@ -222,13 +222,13 @@ describe("loop guard identical-call epoch", () => {
 			{
 				name: "failed subprocess with an observed current-workspace change",
 				details: {
-					runs: [{ receiptIntegrity: { ok: true }, placement: { mode: "current", changedPaths: ["fix.ts"] } }],
+					runs: [{ placement: { mode: "current", changedPaths: ["fix.ts"] } }],
 				},
 				restarts: true,
 			},
 			{
 				name: "failed in-process worker with a successful mutating call",
-				details: { runs: [{ receiptIntegrity: { ok: true }, toolActivity: { mutatingSucceeded: true } }] },
+				details: { runs: [{ toolActivity: { mutatingSucceeded: true } }] },
 				restarts: true,
 			},
 			{
@@ -236,7 +236,6 @@ describe("loop guard identical-call epoch", () => {
 				details: {
 					runs: [
 						{
-							receiptIntegrity: { ok: true },
 							readOnly: true,
 							placement: { mode: "current", changedPaths: ["fix.ts"] },
 							toolActivity: { mutatingSucceeded: true },
@@ -246,31 +245,10 @@ describe("loop guard identical-call epoch", () => {
 				restarts: false,
 			},
 			{
-				name: "legacy read-only receipt",
-				details: {
-					runs: [
-						{
-							receiptIntegrity: { ok: true },
-							autonomyEnforcement: { autonomy: "read-only" },
-							placement: { mode: "current", changedPaths: ["fix.ts"] },
-						},
-					],
-				},
-				restarts: false,
-			},
-			{
-				name: "integrity-invalid receipt",
-				details: {
-					runs: [{ receiptIntegrity: { ok: false }, placement: { mode: "current", changedPaths: ["fix.ts"] } }],
-				},
-				restarts: false,
-			},
-			{
 				name: "unapplied worktree",
 				details: {
 					runs: [
 						{
-							receiptIntegrity: { ok: true },
 							placement: { mode: "worktree", applied: false, changedPaths: ["fix.ts"] },
 							toolActivity: { mutatingSucceeded: true },
 						},
@@ -281,7 +259,7 @@ describe("loop guard identical-call epoch", () => {
 			{
 				name: "applied worktree without changed paths",
 				details: {
-					runs: [{ receiptIntegrity: { ok: true }, placement: { mode: "worktree", applied: true, changedPaths: [] } }],
+					runs: [{ placement: { mode: "worktree", applied: true, changedPaths: [] } }],
 				},
 				restarts: false,
 			},
@@ -290,7 +268,6 @@ describe("loop guard identical-call epoch", () => {
 				details: {
 					runs: [
 						{
-							receiptIntegrity: { ok: true },
 							placement: { mode: "current", changedPaths: [] },
 							toolActivity: { mutatingSucceeded: true },
 						},

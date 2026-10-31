@@ -140,17 +140,13 @@ for (const agent of ["scout", "coder"] as const) {
 							});
 							for (const line of spec.task.split("\n\n").filter((entry) => entry.startsWith('{"candidate":'))) {
 								const evidence = JSON.parse(line);
-								const call = { tool: ToolNames.Read, args: { path: evidence.receiptPath } };
+								const call = { tool: ToolNames.Read, args: { path: evidence.resultPath } };
 								const decision = policy.evaluate(call);
 								strictEqual(decision.kind, "allow");
 								strictEqual(mapAutonomy("default", policy.classify(call).actionClass), "allow");
 								const read = await readTool.run(call.args);
 								strictEqual(read.kind, "ok");
-								if (read.kind === "ok") {
-									const receipt = JSON.parse(read.output);
-									strictEqual(receipt.runId, evidence.runId);
-									strictEqual(receipt.output.text, evidence.output.text);
-								}
+								if (read.kind === "ok") strictEqual(JSON.parse(read.output).output.text, evidence.output.text);
 							}
 						}
 						if (writer && !judge) {
@@ -250,12 +246,10 @@ for (const agent of ["scout", "coder"] as const) {
 				const receipt = receipts.find((entry) => entry.runId === evidence.runId);
 				ok(receipt);
 				strictEqual(evidence.output.text, receipt.output?.text);
-				strictEqual(evidence.digest, receipt.integrity?.digest);
-				strictEqual(evidence.receiptIntegrity, true);
 				strictEqual(evidence.worktree, receipt.gate?.worktree?.path);
 				strictEqual(evidence.branch, receipt.gate?.worktree?.branch);
 				strictEqual(evidence.candidate, candidatePaths.indexOf(evidence.worktree) + 1);
-				strictEqual(JSON.parse(readFileSync(evidence.receiptPath, "utf8")).runId, receipt.runId);
+				strictEqual(JSON.parse(readFileSync(evidence.resultPath, "utf8")).output.text, receipt.output?.text);
 			}
 
 			strictEqual(new Set(receipts.map((receipt) => receipt.runId)).size, 2);
@@ -496,7 +490,6 @@ for (const phase of ["candidates", "judge"] as const) {
 					if (interrupted)
 						match(receipt.outcomeDetail ?? "", stopKind === "timeout" ? /timed out after 1500ms/u : /operator abort/u);
 					ok(result.message.includes(run.id), "stopped tool output must retain each terminal run identity");
-					ok(result.message.includes(run.receiptPath), "stopped tool output must locate each receipt");
 				}
 				strictEqual(result.details?.receiptCount, runs.length);
 				deepStrictEqual((result.details?.terminalRunIds as string[]).slice().sort(), runs.map((run) => run.id).sort());

@@ -14,7 +14,7 @@ import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integ
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
-import { receiptEvidenceLabels } from "../../src/tools/worker-evidence.js";
+import { finishedRun, runEvidenceLabels } from "../../src/tools/worker-evidence.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -93,7 +93,7 @@ it("gives the parent a bounded exit for an unchanged terminal Documenter report 
 		const collected = await monitor.run({ mode: "collect", run_ids: [run.id] }, {});
 		strictEqual(collected.kind, "ok");
 		if (collected.kind === "ok") match(collected.output, /do not repeatedly read/u);
-		const failedIntegrityLabels = receiptEvidenceLabels(receipt, receipt.verification, { ok: false, reason: "tampered" });
+		const failedIntegrityLabels = runEvidenceLabels(finishedRun(receipt), { state: "failed", reason: "tampered" });
 		doesNotMatch(failedIntegrityLabels.join(" "), /terminal Documenter result/u);
 	} finally {
 		await bundle.extension.stop?.();

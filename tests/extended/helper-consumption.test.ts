@@ -1,14 +1,16 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import {
 	compactHelperResultLines,
-	receiptEvidenceLabels,
-	receiptHelperResult,
+	finishedRun,
+	PRODUCER_INTEGRITY,
+	runEvidenceLabels,
+	runHelperResult,
 } from "../../src/tools/worker-evidence.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
-test("compact helper consumption preserves unmeasured quality and withholds failed or altered handoffs", () => {
+test("compact helper consumption preserves unmeasured quality and withholds failed or unauthenticated handoffs", () => {
 	const envelope = fixtureEnvelope("helper-consumption");
 	const draft = fixtureReceiptDraft(envelope);
 	ok(draft.quality);
@@ -34,31 +36,24 @@ test("compact helper consumption preserves unmeasured quality and withholds fail
 		},
 		envelope,
 	);
-	const integrity = verifyReceiptIntegrity(receipt, envelope);
-	deepStrictEqual(receiptHelperResult(receipt, integrity), structured);
-	const lines = compactHelperResultLines(receipt, integrity, 1024);
+	deepStrictEqual(runHelperResult(finishedRun(receipt), PRODUCER_INTEGRITY), structured);
+	const lines = compactHelperResultLines(finishedRun(receipt), PRODUCER_INTEGRITY, 1024);
 	ok(lines);
 	ok(receipt.output);
 	match(lines.join("\n"), /quality=unmeasured/);
 	match(lines.join("\n"), /No validation receipt/);
 	match(lines.join("\n"), /factual accuracy is unmeasured/);
 	strictEqual(lines.length, 4);
-	const altered = {
-		...receipt,
-		output: { ...receipt.output, structured: { ...structured, data: { confirmedFacts: ["invented"] } } },
-	};
-	strictEqual(receiptHelperResult(altered, verifyReceiptIntegrity(altered, envelope)), null);
+	strictEqual(runHelperResult(finishedRun(receipt), { state: "failed", reason: "run seal failed" }), null);
 	for (const patch of [
 		{ exitCode: 1 },
 		{ outcome: "failed" as const },
 		{ output: { ...receipt.output, state: "partial" as const } },
 		{ output: { ...receipt.output, truncated: true } },
 	]) {
-		const failed = withReceiptIntegrity({ ...receipt, ...patch }, envelope);
-		strictEqual(receiptHelperResult(failed, verifyReceiptIntegrity(failed, envelope)), null);
+		strictEqual(runHelperResult(finishedRun({ ...receipt, ...patch }), PRODUCER_INTEGRITY), null);
 	}
-	const legacy = withReceiptIntegrity(draft, envelope);
-	strictEqual(receiptHelperResult(legacy, verifyReceiptIntegrity(legacy, envelope)), null);
+	strictEqual(runHelperResult(finishedRun(draft), PRODUCER_INTEGRITY), null);
 });
 
 test("host check labels distinguish actual execution from reused evidence and worker claims", () => {
@@ -76,10 +71,9 @@ test("host check labels distinguish actual execution from reused evidence and wo
 			},
 			envelope,
 		);
-		const labels = receiptEvidenceLabels(
-			receipt,
-			{ state: "verified", basis: "validation-tool" },
-			verifyReceiptIntegrity(receipt, envelope),
+		const labels = runEvidenceLabels(
+			finishedRun({ ...receipt, verification: { state: "verified", basis: "validation-tool" } }),
+			PRODUCER_INTEGRITY,
 		).join("\n");
 		match(labels, /Host check evidence is separate from the worker report/);
 		match(labels, memo ? /reused prior host result; exit 0/ : /executed after the worker; exit 0/);

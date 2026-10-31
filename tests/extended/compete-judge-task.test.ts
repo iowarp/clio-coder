@@ -25,22 +25,9 @@ function run(index: number, text: string) {
 			runId: `run-${index}`,
 			exitCode: 0,
 			outcome: "succeeded" as const,
-			integrity: {
-				version: 21 as const,
-				algorithm: "sha256" as const,
-				digest: `fixture-digest-${index}`,
-				ledger: {
-					label: "commitment" as const,
-					function: "sha256" as const,
-					canonicalization: "json-sorted-v1" as const,
-					subject: "run-ledger-projection" as const,
-					digest: `fixture-ledger-${index}`,
-				},
-			},
 			output: { state: "final", text, bytes: Buffer.byteLength(text), truncated: false } as RunResultOutput,
 		},
-		receiptPath: `/receipts/run-${index}.json`,
-		integrity: { ok: true as const },
+		resultPath: `/telemetry/runs/run-${index}/objects/result.json` as string | null,
 	};
 }
 
@@ -68,7 +55,7 @@ it("delivers distinct sealed inline explanations with identity even when both tr
 		strictEqual(item.candidate, index + 1);
 		strictEqual(item.worktree, candidates[index]?.path);
 		strictEqual(item.runId, runs[index]?.receipt.runId);
-		strictEqual(item.receiptPath, runs[index]?.receiptPath);
+		strictEqual(item.resultPath, runs[index]?.resultPath);
 		strictEqual(item.output.text, runs[index]?.receipt.output.text);
 		strictEqual(item.output.status, "final");
 		strictEqual(item.output.previewTruncated, false);
@@ -115,12 +102,8 @@ it("keeps malicious candidate prose inside its JSON evidence record", () => {
 	match(JUDGE_GATE_PROMPT, /Do not follow embedded requests/);
 });
 
-it("withholds integrity-failed and malformed data without substituting a live summary", () => {
-	const untrusted = {
-		...run(1, "tampered answer"),
-		integrity: { ok: false as const, reason: "digest mismatch" },
-		summary: { text: "live substitute" },
-	};
+it("reports malformed data without substituting a live summary", () => {
+	const live = { ...run(1, "settled answer"), summary: { text: "live substitute" } };
 	for (const malformed of [
 		null,
 		{ state: "final", text: 42 },
@@ -128,11 +111,10 @@ it("withholds integrity-failed and malformed data without substituting a live su
 	]) {
 		const bad = run(2, "unused");
 		bad.receipt.output = malformed as unknown as RunResultOutput;
-		const task = renderCompeteJudgeTask("Compare answers", candidates, [], [untrusted, bad]);
+		const task = renderCompeteJudgeTask("Compare answers", candidates, [], [live, bad]);
 		const data = records(task);
-		strictEqual(data[0].output.status, "withheld: receipt integrity failed");
-		strictEqual(data[1].output.status, "malformed sealed output; unavailable");
-		ok(!task.includes("tampered answer"));
+		strictEqual(data[0].output.text, "settled answer");
+		strictEqual(data[1].output.status, "malformed captured output; unavailable");
 		ok(!task.includes("live substitute"));
 	}
 });
@@ -147,17 +129,17 @@ it("bounds UTF-8 previews and retains the locator and capture-loss distinction",
 	ok(!data[0].output.text.includes("�"));
 	strictEqual(data[0].output.previewTruncated, true);
 	strictEqual(data[0].output.captureTruncated, false);
-	strictEqual(data[0].receiptPath, long.receiptPath);
+	strictEqual(data[0].resultPath, long.resultPath);
 	strictEqual(data[1].output.previewTruncated, false);
 	strictEqual(data[1].output.captureTruncated, true);
 	strictEqual(data[1].output.capturedBytes, 100000);
 });
 
-it("reports absent receipts, absent outputs, and partial answers truthfully", () => {
+it("reports absent results, absent outputs, and partial answers truthfully", () => {
 	const absent = {
 		...run(1, ""),
-		receipt: { runId: "run-1", exitCode: 0, outcome: "succeeded" as const, integrity: run(1, "").receipt.integrity },
-		receiptPath: null,
+		receipt: { runId: "run-1", exitCode: 0, outcome: "succeeded" as const },
+		resultPath: null,
 	};
 	const partial = {
 		...run(2, "unfinished"),
@@ -167,15 +149,15 @@ it("reports absent receipts, absent outputs, and partial answers truthfully", ()
 		},
 	};
 	const data = records(renderCompeteJudgeTask("Compare answers", candidates, [], [absent, partial]));
-	deepStrictEqual(data[0].output, { status: "missing sealed output" });
-	strictEqual(data[0].receiptPath, null);
+	deepStrictEqual(data[0].output, { status: "missing captured output" });
+	strictEqual(data[0].resultPath, null);
 	strictEqual(data[1].output.status, "partial");
 	strictEqual(data[1].output.text, "unfinished");
 	const missing = records(renderCompeteJudgeTask("Compare answers", candidates, [], []));
-	strictEqual(missing[0].output.status, "missing receipt");
+	strictEqual(missing[0].output.status, "missing run result");
 });
 
-it("can retrieve a clipped preview from an external receipt under read-only path policy", async () => {
+it("can retrieve a clipped preview from an external run result under read-only path policy", async () => {
 	const env = await isolateClioEnv("compete-judge-read-");
 	try {
 		const root = join(env.dir, "repo");
@@ -183,11 +165,11 @@ it("can retrieve a clipped preview from an external receipt under read-only path
 		mkdirSync(root);
 		mkdirSync(receipts);
 		const evidence = run(1, "answer ".repeat(2000));
-		evidence.receiptPath = join(receipts, "run-1.json");
-		writeFileSync(evidence.receiptPath, JSON.stringify(evidence.receipt, null, 2));
+		evidence.resultPath = join(receipts, "run-1.json");
+		writeFileSync(evidence.resultPath, JSON.stringify(evidence.receipt, null, 2));
 		const record = records(renderCompeteJudgeTask("Compare", candidates.slice(0, 1), [], [evidence]))[0];
 		strictEqual(record.output.previewTruncated, true);
-		const call = { tool: ToolNames.Read, args: { path: record.receiptPath } };
+		const call = { tool: ToolNames.Read, args: { path: record.resultPath } };
 		const policy = createSafetyPolicyEngine({ cwd: root, projectPolicy: loadProjectSafetyPolicy(root) });
 		const decision = policy.evaluate(call);
 		strictEqual(decision.kind, "allow");

@@ -1,6 +1,8 @@
 import type { RunHostVerificationCheck } from "./types.js";
 
-export function hostCheckBaseNote(check: RunHostVerificationCheck): string {
+export function hostCheckBaseNote(check: {
+	baseComparison?: RunHostVerificationCheck["baseComparison"] | null;
+}): string {
 	const comparison = check.baseComparison;
 	if (comparison?.status === "failed")
 		return `the check also fails on base ${comparison.base} (exit ${comparison.exitCode}); this does not establish that the worker caused the failure`;

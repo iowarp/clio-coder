@@ -95,7 +95,7 @@ export async function usageWindow(
 				errors: tool.errors,
 				blocked: tool.blocked,
 			})),
-			skillActivations: [...settled.skills],
+			skillActivations: settled.skills.map((skill) => skill.name),
 		});
 	}
 	return {

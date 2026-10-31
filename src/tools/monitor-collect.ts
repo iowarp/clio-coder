@@ -1,22 +1,24 @@
+import { join } from "node:path";
+import type { RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { clioStateDir } from "../core/xdg.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { readAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
 import type { DispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
-import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
-import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
-import type { RunEnvelope, RunResult, RunResultVerification } from "../domains/dispatch/types.js";
+import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { isTerminalRunEnvelope } from "../domains/dispatch/types.js";
 import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
-import { adaptRunResultTrustStatus, inspectRunResultTrustStatus } from "../domains/evidence/trust-status.js";
+import { inspectRunTrustStatus, type RunIntegrity } from "../domains/evidence/trust-status.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
+import { loadRunRecord } from "../domains/session/telemetry-source.js";
 import {
 	COST_NOT_MEASURED,
 	costAggregateForAmount,
 	formatCostAggregate,
 	readVerifiedRun,
 } from "../domains/telemetry/index.js";
+import { telemetryObjectsDirectory, telemetryRunDirectory } from "../domains/telemetry/paths.js";
 import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
 import type { MonitorToolDeps } from "./monitor.js";
 import type { ToolResult } from "./registry.js";
@@ -24,8 +26,9 @@ import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
 	compactHelperResultLines,
-	receiptEvidenceLabels,
-	receiptHelperResult,
+	type FinishedRun,
+	runEvidenceLabels,
+	runHelperResult,
 	workerTextLabel,
 	workerTextNonEvidenceNotices,
 } from "./worker-evidence.js";
@@ -43,87 +46,65 @@ export async function collectDetachedBatch(
 }
 
 export interface DurableRunEvidence {
-	receipt: RunResult | null;
-	output: RunResult["output"] | null;
-	verification: RunResultVerification;
-	integrity: ReceiptIntegrityResult;
+	/** The run's settled facts and result object, present only when its seal verifies. */
+	run: FinishedRun | null;
+	integrity: RunIntegrity;
 	trustStatus: CanonicalTrustStatus;
+	/** Why the record cannot be read as evidence; null when it can. */
 	integrityNote: string | null;
 	integrityFailure: boolean;
-}
-
-function unavailableRunEvidence(reason: string, note: string, integrityFailure = false): DurableRunEvidence {
-	return {
-		receipt: null,
-		output: null,
-		verification: UNVERIFIABLE_RECEIPT_VERIFICATION,
-		integrity: { ok: false, reason },
-		trustStatus: adaptRunResultTrustStatus(null, { integrity: { ok: false, reason } }),
-		integrityNote: note,
-		integrityFailure,
-	};
+	/** The result object's file in the run scope, which holds the full captured answer. */
+	resultPath: string | null;
 }
 
 /**
- * Read one terminal run's durable evidence boundary exactly once. Receipt
- * fields and worker text become renderable only after the existing integrity
- * check succeeds against the ledger envelope. Every failure returns unknown
- * verification plus an explicit note; unauthenticated prose is withheld.
+ * Read one terminal run's durable evidence boundary exactly once, from its sealed run scope. Settled facts and worker
+ * text become renderable only under a seal that verifies. Every other state returns unknown verification plus an
+ * explicit note; unauthenticated prose is withheld (#434).
  */
-export function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence {
-	if (!run) {
-		return unavailableRunEvidence(
-			"run ledger envelope unavailable",
-			"receipt integrity unavailable: the run ledger envelope is missing; worker text cannot be authenticated.",
-		);
-	}
-	if (!run.receiptPath) {
-		return unavailableRunEvidence(
-			"receipt unavailable",
-			"receipt integrity unavailable: no stored receipt; worker text is unavailable and validation is unknown.",
-		);
-	}
-	let receipt: RunResult;
-	try {
-		receipt = JSON.parse(readReceiptTextSync(run.receiptPath)) as RunResult;
-	} catch (err) {
-		const detail = err instanceof Error ? err.message : String(err);
-		return unavailableRunEvidence(
-			`receipt unreadable: ${detail}`,
-			`receipt integrity unavailable: cannot read or parse ${run.receiptPath} (${detail}); worker text is unavailable and validation is unknown.`,
-		);
-	}
-	const inspection = inspectRunResultTrustStatus(receipt, run);
-	const integrity = inspection.integrity;
-	if (!integrity.ok) {
-		// A retired seal is set aside unread, as a missing receipt is. It is
-		// not a failed one, so it never reads as tampering here either.
-		if (integrity.retired !== undefined) {
-			return {
-				...unavailableRunEvidence(
-					integrity.reason,
-					`${integrity.reason}; worker text is unavailable and validation is unknown.`,
-				),
-				trustStatus: inspection.status,
-			};
+export function durableRunEvidence(envelope: RunEnvelope | null): DurableRunEvidence {
+	let record: RunTelemetryV1 | null = null;
+	if (envelope !== null) {
+		try {
+			record = loadRunRecord(clioStateDir(), envelope.id);
+		} catch {
+			// An unreadable run scope reads as a run with no record.
+			record = null;
 		}
+	}
+	const inspection = inspectRunTrustStatus(record);
+	const integrity = inspection.integrity;
+	const settled = record?.settled ?? null;
+	if (record === null || settled === null || integrity.state !== "verified") {
+		const reason =
+			envelope === null
+				? "run ledger envelope unavailable"
+				: integrity.state === "verified"
+					? "the run has not settled"
+					: integrity.reason;
 		return {
-			...unavailableRunEvidence(
-				integrity.reason,
-				`receipt integrity failed: ${integrity.reason}; worker text is withheld as untrusted and validation is unknown.`,
-				true,
-			),
+			run: null,
+			integrity: integrity.state === "verified" ? { state: "unsealed", reason } : integrity,
 			trustStatus: inspection.status,
+			integrityNote: `run record unavailable as evidence: ${reason}; worker text is ${integrity.state === "failed" ? "withheld as untrusted" : "unavailable"} and validation is unknown.`,
+			integrityFailure: integrity.state === "failed",
+			resultPath: null,
 		};
 	}
 	return {
-		receipt,
-		output: receipt.output ?? null,
-		verification: receipt.verification,
+		run: {
+			runId: record.row.runId,
+			facts: settled,
+			delivered: record.result?.state === "resolved" ? record.result.value : null,
+		},
 		integrity,
 		trustStatus: inspection.status,
 		integrityNote: null,
 		integrityFailure: false,
+		resultPath: join(
+			telemetryObjectsDirectory(telemetryRunDirectory(clioStateDir(), record.row.runId)),
+			`${settled.result.id}.json`,
+		),
 	};
 }
 
@@ -141,61 +122,53 @@ interface CollectedRunRow extends CollectRow {
 	evidence: DurableRunEvidence;
 }
 
-function failedIntegrityReason(integrity: ReceiptIntegrityResult): string {
-	return integrity.ok ? "verification result unavailable" : integrity.reason;
-}
-
 function collectRunLine(row: CollectedRunRow): string[] {
-	if (row.evidence.receipt !== null) {
-		const helperLines = compactHelperResultLines(row.evidence.receipt, row.evidence.integrity, COLLECT_TEXT_BYTES);
+	if (row.evidence.run !== null) {
+		const helperLines = compactHelperResultLines(row.evidence.run, row.evidence.integrity, COLLECT_TEXT_BYTES);
 		if (helperLines !== null) return helperLines;
 	}
 	const run = row.run;
 	const lines = run
 		? [
-				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance, run.costSummary)) ?? COST_NOT_MEASURED} receipt=${run.receiptPath ?? "n/a"}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
+				`- ${run.id} agent=${run.agentId} state=${run.outcome ?? run.status} node=${run.node?.id ?? "local"} exit=${run.exitCode ?? "n/a"} tokens=${run.tokenCount} cost=${formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance, run.costSummary)) ?? COST_NOT_MEASURED}${run.outcomeDetail ? ` detail=${run.outcomeDetail}` : ""}`,
 			]
-		: [`- ${row.runId} agent=${row.agentId} state=missing (ledger row pruned; receipt may still exist)`];
+		: [`- ${row.runId} agent=${row.agentId} state=missing (ledger row pruned; its run journal may still exist)`];
 	if (row.assignmentId !== null) {
 		lines.unshift(
 			`- assignment=${row.assignmentId} status=${row.assignmentStatus ?? "unknown"} terminal=${row.runId}`,
 			`  attempts=${row.attemptRunIds.join(",") || "none"}`,
 		);
 	}
-	if (row.evidence.receipt !== null) {
-		lines.push(
-			...receiptEvidenceLabels(row.evidence.receipt, row.evidence.verification, row.evidence.integrity).map(
-				(label) => `  ${label}`,
-			),
-		);
+	if (row.evidence.run !== null) {
+		lines.push(...runEvidenceLabels(row.evidence.run, row.evidence.integrity).map((label) => `  ${label}`));
 	} else {
-		const reason = failedIntegrityReason(row.evidence.integrity);
+		const reason = row.evidence.integrity.state === "verified" ? "no settled record" : row.evidence.integrity.reason;
 		lines.push(
 			row.evidence.integrityFailure
-				? `  RECEIPT INTEGRITY FAILED for ${row.runId} (${reason}); stored receipt fields and worker text are untrusted.`
-				: `  receipt_integrity=unavailable reason=${JSON.stringify(reason)}`,
+				? `  RUN SEAL FAILED for ${row.runId} (${reason}); its settled facts and worker text are untrusted.`
+				: `  run_integrity=unavailable reason=${JSON.stringify(reason)}`,
 		);
 	}
 	if (row.evidence.integrityNote) lines.push(`  ${row.evidence.integrityNote}`);
 	lines.push(`  ${workerTextLabel(row.evidence.trustStatus)}`);
-	const output = row.evidence.output;
+	const output = row.evidence.run?.delivered?.output ?? null;
 	if (output) {
 		const capped = truncateUtf8(
 			output.text,
 			COLLECT_TEXT_BYTES,
-			`\n[preview clipped at ${COLLECT_TEXT_BYTES} bytes; the complete sealed text is output.text in ${row.run?.receiptPath ?? "the receipt"}]`,
+			`\n[preview clipped at ${COLLECT_TEXT_BYTES} bytes; the complete captured text is output.text in ${row.evidence.resultPath ?? "the run's result object"}]`,
 		);
 		const qualifier = output.state === "partial" ? " (partial; the run did not complete this message)" : "";
 		const truncatedNote = output.truncated ? ` (stored output truncated; full text was ${output.bytes} bytes)` : "";
 		lines.push(`  agent output${qualifier}${truncatedNote}:`, ...capped.split("\n").map((line) => `  ${line}`));
-		if (row.evidence.receipt) {
+		if (row.evidence.run) {
 			lines.push(
-				...workerTextNonEvidenceNotices(row.evidence.receipt, row.evidence.trustStatus, output.text).map(
+				...workerTextNonEvidenceNotices(row.evidence.run, row.evidence.trustStatus, output.text).map(
 					(notice) => `  ${notice}`,
 				),
 			);
 		}
-	} else if (row.evidence.integrity.ok) {
+	} else if (row.evidence.run !== null) {
 		lines.push("  (no assistant text captured)");
 	}
 	return lines;
@@ -343,7 +316,7 @@ export async function collectRuns(
 			mode: "collect",
 			...(() => {
 				const carried = mergeFlowRestrictions(
-					flowRestrictionsOfRuns(collectedRows.map((row) => row.evidence.receipt)),
+					flowRestrictionsOfRuns(collectedRows.map((row) => row.evidence.run?.facts.flowRestrictions ?? null)),
 					...(ledgerId ? (readAgentLedger(ledgerId)?.entries ?? []).map((entry) => entry.flowRestrictions) : []),
 				);
 				return carried !== null ? { [FLOW_RESTRICTIONS_DETAIL]: carried } : {};
@@ -354,9 +327,9 @@ export async function collectRuns(
 			runCount: rows.length,
 			failedCount: failed.length,
 			runs: collectedRows.map((row) => {
-				const output = row.evidence.output;
-				const helperResult =
-					row.evidence.receipt === null ? null : receiptHelperResult(row.evidence.receipt, row.evidence.integrity);
+				const evidenceRun = row.evidence.run;
+				const output = evidenceRun?.delivered?.output ?? null;
+				const helperResult = evidenceRun === null ? null : runHelperResult(evidenceRun, row.evidence.integrity);
 				return {
 					...(helperResult !== null ? { helperResult } : {}),
 					runId: row.runId,
@@ -371,13 +344,11 @@ export async function collectRuns(
 					agentId: row.agentId,
 					state: row.run === null ? "missing" : (row.run.outcome ?? row.run.status),
 					exitCode: row.run?.exitCode ?? null,
-					receiptPath: row.run?.receiptPath ?? null,
-					receiptIntegrity: row.evidence.integrity,
+					runIntegrity: row.evidence.integrity,
 					trustStatus: row.evidence.trustStatus,
-					evidenceVerification: row.evidence.verification,
-					hostVerification: row.evidence.receipt?.hostVerification ?? null,
-					briefing: row.evidence.receipt?.briefing ?? null,
-					projectContext: row.evidence.receipt?.projectContext ?? null,
+					evidenceVerification: evidenceRun?.facts.verification ?? UNVERIFIABLE_RECEIPT_VERIFICATION,
+					hostVerification: evidenceRun?.facts.hostVerification ?? null,
+					context: evidenceRun?.facts.context ?? null,
 					...(output ? { output: { state: output.state, bytes: output.bytes, truncated: output.truncated } } : {}),
 				};
 			}),

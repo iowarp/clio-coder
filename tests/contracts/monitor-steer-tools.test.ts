@@ -174,7 +174,7 @@ describe("monitor tool", () => {
 	});
 	afterEach(() => scratch.restore());
 
-	it("lists, reports, waits on, and collects one run from dispatch to its sealed receipt", async () => {
+	it("lists, reports, waits on, and collects one run from dispatch to its sealed run record", async () => {
 		const f = await fixture(scratch);
 		try {
 			const empty = okResult(await f.call(ToolNames.Monitor, {}));
@@ -199,10 +199,7 @@ describe("monitor tool", () => {
 			strictEqual(pending.details?.complete, false);
 			deepStrictEqual(pending.details?.pendingRunIds, [handle.runId]);
 
-			match(
-				errorMessage(await f.call(ToolNames.Monitor, { mode: "receipt", run_id: handle.runId })),
-				/has no stored receipt/,
-			);
+			match(errorMessage(await f.call(ToolNames.Monitor, { mode: "record", run_id: handle.runId })), /has not settled/);
 
 			f.workers[0]?.finish();
 			strictEqual((await handle.finalPromise).outcome, "succeeded");
@@ -215,12 +212,12 @@ describe("monitor tool", () => {
 			);
 			strictEqual(collected.details?.complete, true);
 			strictEqual(collected.details?.failedCount, 0);
-			const [row] = collected.details?.runs as Array<{ runId: string; state: string; receiptIntegrity: { ok: boolean } }>;
+			const [row] = collected.details?.runs as Array<{ runId: string; state: string; runIntegrity: { state: string } }>;
 			strictEqual(row?.runId, handle.runId);
 			strictEqual(row?.state, "succeeded");
-			strictEqual(row?.receiptIntegrity.ok, true, "collect reads the sealed receipt back through its integrity check");
+			strictEqual(row?.runIntegrity.state, "verified", "collect reads the run record back through its seal");
 
-			const receipt = okResult(await f.call(ToolNames.Monitor, { mode: "receipt", run_id: handle.runId }));
+			const receipt = okResult(await f.call(ToolNames.Monitor, { mode: "record", run_id: handle.runId }));
 			match(receipt.output, new RegExp(handle.runId));
 			okResult(await f.call(ToolNames.Monitor, { mode: "tools", run_id: handle.runId }));
 			okResult(await f.call(ToolNames.Monitor, { mode: "peek", run_id: handle.runId }));
@@ -260,14 +257,14 @@ describe("monitor tool", () => {
 		const f = await fixture(scratch);
 		try {
 			const cases: Array<[Record<string, unknown>, RegExp]> = [
-				[{ mode: "follow" }, /mode must be status, peek, receipt, list, wait, collect, or tools; got 'follow'/],
+				[{ mode: "follow" }, /mode must be status, peek, record, list, wait, collect, or tools; got 'follow'/],
 				[{ mode: "status" }, /needs run_id; call monitor\(mode="list"\) first/],
 				[{ mode: "peek", run_ids: ["a", "b"] }, /observes one run; got run_ids with 2 entries/],
 				[{ mode: "collect" }, /requires batch_id or a non-empty run_ids array/],
 				[{ mode: "collect", batch_id: "no-such-batch" }, /unknown batch 'no-such-batch'/],
 				[{ run_id: "no-such-run" }, /unknown run or assignment 'no-such-run'/],
 				[{ mode: "wait", run_id: "no-such-run" }, /unknown run 'no-such-run'/],
-				[{ mode: "receipt", run_id: "no-such-run" }, /unknown run 'no-such-run'/],
+				[{ mode: "record", run_id: "no-such-run" }, /unknown run 'no-such-run'/],
 			];
 			for (const [args, expected] of cases) {
 				match(errorMessage(await f.call(ToolNames.Monitor, args)), expected, JSON.stringify(args));

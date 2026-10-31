@@ -1,51 +1,81 @@
+import { join } from "node:path";
 import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
+import type { RunResultObject, RunSettled } from "../core/telemetry/schemas.js";
+import { clioStateDir } from "../core/xdg.js";
 import {
 	RESULT_SUMMARY_MAX_BYTES_CEILING,
 	resultContractAuthorship,
 	type StructuredHelperResult,
 } from "../domains/agents/result-contract.js";
-import {
-	formatBudgetPolicy,
-	formatBudgetReasons,
-	formatBudgetRequest,
-	formatEffectiveBudget,
-} from "../domains/dispatch/budget-envelope.js";
 import { hostCheckBaseNote } from "../domains/dispatch/host-verification-note.js";
-import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
-import type { RunResult, RunResultVerification } from "../domains/dispatch/types.js";
+import { settleFinishedRun } from "../domains/dispatch/run-settlement.js";
+import type { RunResultDraft } from "../domains/dispatch/types.js";
 import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
-import { adaptRunResultTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
-import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "./dispatch-event-text.js";
+import { adaptRunTrustStatus, type CanonicalTrustStatus, type RunIntegrity } from "../domains/evidence/trust-status.js";
+import { telemetryObjectRef } from "../domains/telemetry/objects.js";
+import { telemetryObjectsDirectory, telemetryRunDirectory } from "../domains/telemetry/paths.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
-/** Expose only a completed, sealed handoff. Conformance does not imply evidence quality. */
-export function receiptHelperResult(
-	receipt: RunResult,
-	integrity: ReceiptIntegrityResult,
-): StructuredHelperResult | null {
-	const output = receipt.output;
-	if (
-		!integrity.ok ||
-		receipt.exitCode !== 0 ||
-		receipt.outcome !== "succeeded" ||
-		output?.state !== "final" ||
-		output.truncated ||
-		receipt.quality?.resultContract?.conformance !== "pass"
-	)
-		return null;
-	return output.structured ?? null;
+/**
+ * A finished run as worker evidence reads it: the facts its run.settled records and the result object it delivered,
+ * whether the producing process holds them in memory or a reader loaded them from the sealed run scope (#434).
+ */
+export interface FinishedRun {
+	runId: string;
+	facts: Pick<
+		RunSettled,
+		| "agentId"
+		| "executionRole"
+		| "outcome"
+		| "outcomeCode"
+		| "exitCode"
+		| "outcomeDetail"
+		| "failureMessage"
+		| "verification"
+		| "quality"
+		| "validationGrounding"
+		| "hostVerification"
+		| "toolActivity"
+		| "capabilityMismatch"
+		| "budget"
+		| "context"
+		| "upstream"
+		| "skills"
+		| "findings"
+		| "contextProvenance"
+		| "hashes"
+		| "flowRestrictions"
+		| "toolCalls"
+		| "tools"
+		| "blockedAttempts"
+	>;
+	delivered: RunResultObject | null;
 }
 
-export function compactHelperResultLines(
-	receipt: RunResult,
-	integrity: ReceiptIntegrityResult,
-	maxBytes: number,
-): string[] | null {
-	const result = receiptHelperResult(receipt, integrity);
+const authenticated = (integrity: RunIntegrity) => integrity.state === "verified";
+
+/** Expose only a completed, sealed handoff. Conformance does not imply evidence quality. */
+export function runHelperResult(run: FinishedRun, integrity: RunIntegrity): StructuredHelperResult | null {
+	const output = run.delivered?.output;
+	if (
+		!authenticated(integrity) ||
+		run.facts.exitCode !== 0 ||
+		run.facts.outcome !== "succeeded" ||
+		output?.state !== "final" ||
+		output.truncated ||
+		run.facts.quality?.resultContract?.conformance !== "pass"
+	)
+		return null;
+	// The kind was validated against the contract before the run settled.
+	return (output.structured as StructuredHelperResult | undefined) ?? null;
+}
+
+export function compactHelperResultLines(run: FinishedRun, integrity: RunIntegrity, maxBytes: number): string[] | null {
+	const result = runHelperResult(run, integrity);
 	if (result === null) return null;
-	const quality = receipt.quality?.resultContract?.quality ?? "unmeasured";
+	const quality = run.facts.quality?.resultContract?.quality ?? "unmeasured";
 	return [
-		`- ${receipt.agentId} · run ${receipt.runId} · ${result.kind} · quality=${quality}`,
+		`- ${run.facts.agentId} · run ${run.runId} · ${result.kind} · quality=${quality}`,
 		...(quality !== "pass"
 			? [
 					result.kind === "scout-report"
@@ -53,9 +83,9 @@ export function compactHelperResultLines(
 						: "  Content is contract-valid; its factual accuracy is unmeasured.",
 				]
 			: []),
-		`  ${truncateUtf8(JSON.stringify(result.data), maxBytes, "\n[helper result preview truncated; inspect the receipt for the full result]")}`,
-		`  Receipt available on demand: monitor(mode="receipt", run_id=${JSON.stringify(receipt.runId)}).`,
-		...receiptSkillLoadLabels(receipt).map((label) => `  ${label}`),
+		`  ${truncateUtf8(JSON.stringify(result.data), maxBytes, "\n[helper result preview truncated; inspect the run record for the full result]")}`,
+		`  Run record available on demand: monitor(mode="record", run_id=${JSON.stringify(run.runId)}).`,
+		...skillLoadLabels(run).map((label) => `  ${label}`),
 	];
 }
 
@@ -91,12 +121,12 @@ export { FLEET_EVIDENCE_GUIDANCE as SPOT_CHECK_GUIDANCE } from "../domains/agent
  * keeps its own role, so this is deliberately narrow; the activity and
  * first-pass labels below carry the honest signal for every other class.
  */
-function isMutationClassRun(receipt: RunResult, status: CanonicalTrustStatus): boolean {
-	// A read-only agent seals `not_applicable`; recon that changes nothing is
+function isMutationClassRun(run: FinishedRun, status: CanonicalTrustStatus): boolean {
+	// A read-only agent settles `not_applicable`; recon that changes nothing is
 	// the expected outcome there, not a missing effect.
 	if (status.validationGrounding.state === "not_applicable") return false;
-	if (receipt.executionRole === "builder" || receipt.executionRole === "recovery") return true;
-	return receipt.quality?.resultContract?.sourceId?.startsWith("agent-result-contract:mutation-report") === true;
+	if (run.facts.executionRole === "builder" || run.facts.executionRole === "recovery") return true;
+	return run.facts.quality?.resultContract?.sourceId?.startsWith("agent-result-contract:mutation-report") === true;
 }
 
 /**
@@ -107,18 +137,18 @@ function isMutationClassRun(receipt: RunResult, status: CanonicalTrustStatus): b
  * fabricated `npm run typecheck` for a script that does not exist, and neither
  * honest signal reached the line the orchestrator reads.
  */
-function receiptAdmissionLabels(receipt: RunResult): string[] {
+function admissionLabels(run: FinishedRun): string[] {
 	const labels: string[] = [];
-	const mismatch = receipt.capabilityMismatch;
-	if (mismatch !== undefined) {
+	const mismatch = run.facts.capabilityMismatch;
+	if (mismatch !== null) {
 		labels.push(
 			`capability_mismatch=${mismatch.capabilityClass}/${mismatch.taskType}${
 				mismatch.suggestedAgentId === null ? "" : ` suggested:${mismatch.suggestedAgentId}`
 			}`,
 		);
 	}
-	const grounding = receipt.validationGrounding;
-	if (grounding !== undefined) {
+	const grounding = run.facts.validationGrounding;
+	if (grounding !== null) {
 		labels.push(
 			`validations=claimed:${grounding.claimed} grounded:${grounding.grounded}${
 				grounding.ungrounded.length > 0
@@ -139,10 +169,10 @@ function receiptAdmissionLabels(receipt: RunResult): string[] {
  * fixed the file. These labels are the receipt's own counters, so the parent
  * sees the shape of the run before it reads the worker's account of it.
  */
-function receiptActivityLabels(receipt: RunResult, status: CanonicalTrustStatus): string[] {
+function activityLabels(run: FinishedRun, status: CanonicalTrustStatus): string[] {
 	const labels: string[] = [];
-	const activity = receipt.toolActivity;
-	if (activity !== undefined) {
+	const activity = run.facts.toolActivity;
+	if (activity !== null) {
 		labels.push(
 			`work=calls:${activity.calls} ok:${activity.succeeded} failed:${activity.failed} blocked:${activity.blocked} mutations:${
 				activity.mutatingSucceeded ? "yes" : "no"
@@ -150,26 +180,26 @@ function receiptActivityLabels(receipt: RunResult, status: CanonicalTrustStatus)
 		);
 		// The case this whole label set exists for: the task was to change
 		// something and nothing changed, under an exit code that says success.
-		if (!activity.mutatingSucceeded && isMutationClassRun(receipt, status)) labels.push("mutation_effect=none");
+		if (!activity.mutatingSucceeded && isMutationClassRun(run, status)) labels.push("mutation_effect=none");
 	}
-	const findings = receipt.findingsSummary;
-	if (findings !== undefined) {
+	const findings = run.facts.findings;
+	if (findings !== null) {
 		if (!findings.firstPassSuccess) labels.push("first_pass=false");
 		if (findings.tags.length > 0) labels.push(`findings=${[...findings.tags].sort().join(",")}`);
 	}
 	return labels;
 }
 
-/** Receipt-sealed load provenance, bounded by count and name without exposing skill paths or bodies. */
-function receiptSkillLoadLabels(receipt: RunResult): string[] {
-	const activations = receipt.skillActivations ?? [];
+/** Settled load provenance, bounded by count and name without exposing skill paths or bodies. */
+function skillLoadLabels(run: FinishedRun): string[] {
+	const activations = run.facts.skills;
 	if (activations.length === 0) return [];
 	const shown = activations.slice(0, 6).map((activation) => {
 		const name = activation.name.length > 64 ? `${activation.name.slice(0, 63)}…` : activation.name;
 		const origin =
 			activation.requestSource === "recipe"
 				? "recipe-bound"
-				: activation.requestSource === undefined
+				: activation.requestSource === null
 					? "binding unrecorded"
 					: activation.requestSource;
 		return `${JSON.stringify(name)} (${origin})`;
@@ -180,57 +210,52 @@ function receiptSkillLoadLabels(receipt: RunResult): string[] {
 	];
 }
 
+/** A context hash the run settled, by the field it was computed for. */
+function settledHash(run: FinishedRun, field: string): string | undefined {
+	return run.facts.hashes.find((entry) => entry.field === field)?.hash;
+}
+
 /**
- * Model-facing receipt facts. The positive integrity label is reachable only
- * when the caller supplies the result of a successful integrity verification;
- * an embedded digest by itself is never described as verified. Briefing and
- * project context stay separate, and neither line includes prompt prose.
+ * Model-facing run facts. The positive integrity label is reachable only when the run's record is authenticated: held
+ * by the process that settled it, or read back under a seal that verifies. Briefing and project context stay
+ * separate, and neither line includes prompt prose.
  */
-export function receiptEvidenceLabels(
-	receipt: RunResult,
-	verification: RunResultVerification,
-	integrity: ReceiptIntegrityResult,
-): string[] {
-	const status = adaptRunResultTrustStatus({ ...receipt, verification: verification }, { integrity });
+export function runEvidenceLabels(run: FinishedRun, integrity: RunIntegrity): string[] {
+	const status = adaptRunTrustStatus({ ...run.facts, runId: run.runId, digest: null }, integrity);
 	const canonical = canonicalTrustLabels(status);
-	if (!integrity.ok) {
-		return [...canonical, `receipt_integrity=FAILED reason=${JSON.stringify(integrity.reason)}`];
-	}
+	if (integrity.state !== "verified")
+		return [...canonical, `run_integrity=${integrity.state.toUpperCase()} reason=${JSON.stringify(integrity.reason)}`];
+	const facts = run.facts;
+	const briefingHash = settledHash(run, "briefing.contentHash");
 	const briefing =
-		receipt.briefing === undefined
+		facts.context.briefingBytes === null
 			? "briefing=none"
-			: `briefing=bytes:${receipt.briefing.bytes} sha256:${receipt.briefing.contentHash}`;
-	let projectContext = "project_context=absent";
-	if (receipt.projectContext !== undefined) {
-		const sections = receipt.projectContext.sections ?? [];
-		projectContext = `project_context=${receipt.projectContext.tier} chars:${receipt.projectContext.chars ?? 0}${
-			sections.length > 0 ? ` sections:${[...sections].sort().join(",")}` : ""
-		}${receipt.projectContext.contentHash !== undefined ? ` sha256:${receipt.projectContext.contentHash}` : ""}`;
-	}
-	const responseModelIdObservation = runResponseModelIdObservationLabel(receipt);
-	const gatewayRouting = runGatewayRoutingLabel(receipt);
-	const budget =
-		receipt.budget === undefined
-			? []
-			: [
-					`budget_recipe_policy=${JSON.stringify(formatBudgetPolicy(receipt.budget))}`,
-					`budget_requested=${JSON.stringify(formatBudgetRequest(receipt.budget))}`,
-					`budget_effective=${JSON.stringify(formatEffectiveBudget(receipt.budget))}`,
-					`budget_reason=${JSON.stringify(formatBudgetReasons(receipt.budget))}`,
-				];
+			: `briefing=bytes:${facts.context.briefingBytes}${briefingHash ? ` sha256:${briefingHash}` : ""}`;
+	const project = facts.context.project;
+	const projectHash = settledHash(run, "projectContext.contentHash");
+	const projectContext =
+		project === null
+			? "project_context=absent"
+			: `project_context=${project.tier} chars:${project.chars ?? 0}${
+					project.sections.length > 0 ? ` sections:${[...project.sections].sort().join(",")}` : ""
+				}${projectHash !== undefined ? ` sha256:${projectHash}` : ""}`;
+	const worker = facts.context.worker;
+	const workerHash = settledHash(run, "workerContext.contentHash");
+	const host = facts.hostVerification;
+	const checks = run.delivered?.hostVerification?.checks ?? [];
 	return [
 		...canonical,
-		`receipt_integrity=verified/v${receipt.integrity.version}/${receipt.integrity.algorithm}`,
-		...documenterDeliveryLabels(receipt),
-		`evidence_verification=${verification.state}/${verification.basis}`,
-		`host_verification=${receipt.hostVerification?.status ?? "not_requested"}`,
-		...(receipt.hostVerification?.checks.length
+		`run_integrity=verified/${integrity.by}`,
+		...documenterDeliveryLabels(run),
+		`evidence_verification=${facts.verification.state}/${facts.verification.basis}`,
+		`host_verification=${host?.status ?? "not_requested"}`,
+		...(checks.length > 0
 			? [
-					`Host check evidence is separate from the worker report: ${receipt.hostVerification.checks
+					`Host check evidence is separate from the worker report: ${checks
 						.map((check) => {
 							const source = check.memo
 								? "reused prior host result"
-								: receipt.hostVerification?.strategy === "batch-settled"
+								: host?.strategy === "batch-settled"
 									? "executed after the worker batch"
 									: "executed after the worker";
 							return `${JSON.stringify(check.check)} (${source}; exit ${check.exitCode}${check.exitCode !== 0 ? `; ${hostCheckBaseNote(check)}` : ""})`;
@@ -238,16 +263,23 @@ export function receiptEvidenceLabels(
 						.join(", ")}.`,
 				]
 			: []),
-		...(responseModelIdObservation ? [responseModelIdObservation] : []),
-		...(gatewayRouting ? [gatewayRouting] : []),
-		...budget,
-		...receiptAdmissionLabels(receipt),
-		...receiptActivityLabels(receipt, status),
-		...receiptSkillLoadLabels(receipt),
+		...(facts.upstream.responseModelIds ? [facts.upstream.responseModelIds] : []),
+		...(facts.upstream.gatewayRoutes ? [facts.upstream.gatewayRoutes] : []),
+		...(facts.budget === null
+			? []
+			: [
+					`budget_recipe_policy=${JSON.stringify(facts.budget.policy)}`,
+					`budget_requested=${JSON.stringify(facts.budget.requested)}`,
+					`budget_effective=${JSON.stringify(facts.budget.effective)}`,
+					`budget_reason=${JSON.stringify(facts.budget.reasons)}`,
+				]),
+		...admissionLabels(run),
+		...activityLabels(run, status),
+		...skillLoadLabels(run),
 		briefing,
-		...(receipt.workerContext
+		...(worker
 			? [
-					`context=${receipt.workerContext.mode} tokens:${receipt.workerContext.estimatedTokens} omitted:${receipt.workerContext.omittedMessages} sha256:${receipt.workerContext.contentHash}`,
+					`context=${worker.mode} tokens:${worker.estimatedTokens} omitted:${worker.omittedMessages}${workerHash ? ` sha256:${workerHash}` : ""}`,
 				]
 			: []),
 		projectContext,
@@ -255,13 +287,13 @@ export function receiptEvidenceLabels(
 }
 
 /** Delivery guidance uses only an authenticated, terminal mutation report. */
-function documenterDeliveryLabels(receipt: RunResult): string[] {
+function documenterDeliveryLabels(run: FinishedRun): string[] {
 	if (
-		receipt.agentId !== "documenter" ||
-		!receipt.quality.resultContract?.sourceId.startsWith("agent-result-contract:mutation-report:")
+		run.facts.agentId !== "documenter" ||
+		!run.facts.quality?.resultContract?.sourceId.startsWith("agent-result-contract:mutation-report:")
 	)
 		return [];
-	const output = receipt.output;
+	const output = run.delivered?.output;
 	// Read at the ceiling: the receipt already sealed conformance under the
 	// run's own allowance, which this reader does not know; any conforming
 	// summary is within the ceiling, and a reader that re-applied the default
@@ -289,7 +321,7 @@ function canonicalTrustLabels(status: CanonicalTrustStatus): string[] {
 }
 
 /**
- * Header for delegated worker text, keyed only on integrity-checked receipt
+ * Header for delegated worker text, keyed only on the authenticated run's
  * verification. The string is shared by dispatch and monitor so detached
  * collection cannot silently assign a different evidence meaning.
  */
@@ -316,17 +348,20 @@ export function workerTextLabel(status: CanonicalTrustStatus): string {
 
 /**
  * Deterministic framing for text that must not be consumed as results. Every
- * trigger reads sealed receipt fields or machine-written guard diagnostics,
+ * trigger reads settled run facts or machine-written guard diagnostics,
  * never the worker's claims.
  */
 export function workerTextNonEvidenceNotices(
-	receipt: RunResult,
+	run: FinishedRun,
 	status: CanonicalTrustStatus,
 	answerText: string,
 ): string[] {
 	const notices: string[] = [];
-	const failedRun = receipt.exitCode !== 0 || (receipt.outcome !== undefined && receipt.outcome !== "succeeded");
-	if (mentionsWorkerToolCallCap(receipt.failureMessage) || mentionsWorkerToolCallCap(receipt.outcomeDetail)) {
+	const facts = run.facts;
+	const failedRun = facts.exitCode !== 0 || facts.outcome !== "succeeded";
+	const failureMessage = run.delivered?.failureMessage ?? facts.failureMessage ?? undefined;
+	const outcomeDetail = run.delivered?.outcomeDetail ?? facts.outcomeDetail ?? undefined;
+	if (mentionsWorkerToolCallCap(failureMessage) || mentionsWorkerToolCallCap(outcomeDetail)) {
 		notices.push(
 			answerText.length > 0
 				? "non-evidence: the worker exhausted its tool-call cap; the text above is a partial synthesis, not verified results."
@@ -337,9 +372,9 @@ export function workerTextNonEvidenceNotices(
 			"non-evidence: this run did not succeed; treat the text above as an unsubstantiated report, not results.",
 		);
 	}
-	if (receipt.toolActivity !== undefined && receipt.toolActivity.succeeded === 0) {
+	if (facts.toolActivity !== null && facts.toolActivity.succeeded === 0) {
 		notices.push("non-evidence: no tool call succeeded in this run; the text above was written without observed work.");
-	} else if (receipt.toolActivity?.mutatingSucceeded === false && isMutationClassRun(receipt, status)) {
+	} else if (facts.toolActivity?.mutatingSucceeded === false && isMutationClassRun(run, status)) {
 		// A live verifier run returned {"verdict":"pass"} for a check it never
 		// ran, on a script that does not exist, at exit 0. The parent recovered
 		// only because it independently diffed the tree; say so on the line.
@@ -347,8 +382,8 @@ export function workerTextNonEvidenceNotices(
 			"non-evidence: this run was dispatched as work that changes the tree, but no mutating tool call succeeded. Nothing was written. Confirm with a diff before repeating any claim that something was fixed.",
 		);
 	}
-	const grounding = receipt.validationGrounding;
-	if (grounding !== undefined && grounding.ungrounded.length > 0) {
+	const grounding = facts.validationGrounding;
+	if (grounding !== null && grounding.ungrounded.length > 0) {
 		const named = grounding.ungrounded.map((name) => JSON.stringify(name)).join(", ");
 		notices.push(
 			grounding.basis === "no-command-executed"
@@ -356,9 +391,9 @@ export function workerTextNonEvidenceNotices(
 				: `non-evidence: this run reported ${named} as passing through a command the harness cannot identify as that check. Re-run it before repeating the claim.`,
 		);
 	}
-	if (receipt.capabilityMismatch !== undefined) {
+	if (facts.capabilityMismatch !== null) {
 		notices.push(
-			`non-evidence: '${receipt.capabilityMismatch.agentId}' is a ${receipt.capabilityMismatch.capabilityClass} recipe and cannot write to the workspace, but this task classified as ${receipt.capabilityMismatch.taskType}. Nothing it reports as changed can have been changed by it.`,
+			`non-evidence: '${facts.capabilityMismatch.agentId}' is a ${facts.capabilityMismatch.capabilityClass} recipe and cannot write to the workspace, but this task classified as ${facts.capabilityMismatch.taskType}. Nothing it reports as changed can have been changed by it.`,
 		);
 	}
 	if (
@@ -372,4 +407,24 @@ export function workerTextNonEvidenceNotices(
 		);
 	}
 	return notices;
+}
+
+/** The producing process's view of a run it just settled: the same facts and result object its run.settled holds. */
+export function finishedRun(result: RunResultDraft): FinishedRun {
+	const settlement = settleFinishedRun(result, {
+		terminal: { terminalReason: result.terminalReason ?? "worker_failed" },
+		processExitCode: result.exitCode,
+		frameType: null,
+		usage: undefined,
+	});
+	return { runId: result.runId, facts: settlement.facts, delivered: settlement.result };
+}
+
+/** A run its producer holds in memory is authentic by construction; nothing about it was read back. */
+export const PRODUCER_INTEGRITY: RunIntegrity = { state: "verified", by: "producer" };
+
+/** Where the run's result object lives in its run scope: a worker given the path reads the full captured answer. */
+export function runResultPath(result: RunResultDraft): string {
+	const ref = telemetryObjectRef("run-result", finishedRun(result).delivered);
+	return join(telemetryObjectsDirectory(telemetryRunDirectory(clioStateDir(), result.runId)), `${ref.id}.json`);
 }

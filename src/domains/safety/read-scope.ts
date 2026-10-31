@@ -5,6 +5,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, clioStateDir } from "../../core/xdg.js";
 import { expandPath, readPathVariants } from "../../tools/path-utils.js";
 import { INTEROP_AGENT_KINDS, interopUserRoot } from "../interop/registry.js";
+import { telemetryRunsDirectory } from "../telemetry/paths.js";
 import { isSameOrDescendant } from "./path-policy.js";
 
 /**
@@ -34,7 +35,7 @@ export interface ReadScopeExemptRoot {
  * Trees outside the workspace that Clio itself points the model at: installed
  * skills, plugins, and extensions (a loaded SKILL.md names sibling files), the
  * user skill roots of the agents Clio interoperates with, the offload scratch
- * a truncation stub names, dispatch receipts, and the installed package's own
+ * a truncation stub names, dispatch run scopes whose result objects a judge reads, and the installed package's own
  * documentation and source, which the system prompt names for questions about
  * Clio itself. They are operator-owned, shipped with the package, or
  * Clio-written, the model cannot author them, and zero-access entries still
@@ -50,7 +51,7 @@ export function readScopeExemptRoots(): ReadScopeExemptRoot[] {
 		}
 		const state = clioStateDir();
 		roots.push({ path: path.join(state, "scratch"), operatorOwned: false });
-		roots.push({ path: path.join(state, "receipts"), operatorOwned: false });
+		roots.push({ path: telemetryRunsDirectory(state), operatorOwned: false });
 	} catch {
 		// An unresolvable Clio home exempts nothing.
 	}

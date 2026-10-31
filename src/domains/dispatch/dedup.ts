@@ -86,7 +86,6 @@ export function createDispatchDedupRegistration(): {
 							const row = asRecord(run);
 							return (
 								row?.outcome === "failed" &&
-								asRecord(row.receiptIntegrity)?.ok === true &&
 								typeof row.outcomeDetail === "string" &&
 								/^permission_required(?:;|$)/u.test(row.outcomeDetail)
 							);

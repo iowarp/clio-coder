@@ -1,8 +1,13 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isSkillActivation, skillActivationFromToolDetails } from "../../src/core/skill-activation.js";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { compactHelperResultLines, receiptEvidenceLabels } from "../../src/tools/worker-evidence.js";
+import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import {
+	compactHelperResultLines,
+	finishedRun,
+	PRODUCER_INTEGRITY,
+	runEvidenceLabels,
+} from "../../src/tools/worker-evidence.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 function activation(name: string, source?: "recipe" | "model" | "operator") {
@@ -24,19 +29,10 @@ describe("worker receipt skill load summary", () => {
 		draft.skillActivations = [activation("fix-issue", "recipe"), activation("ship", "recipe")];
 		strictEqual(draft.skillActivations[0]?.requestSource, "recipe");
 		const receipt = withReceiptIntegrity(draft, envelope);
-		const integrity = verifyReceiptIntegrity(receipt, envelope);
-		ok(integrity.ok);
-		const summary = receiptEvidenceLabels(receipt, receipt.verification, integrity).join("\n");
+		const summary = runEvidenceLabels(finishedRun(receipt), PRODUCER_INTEGRITY).join("\n");
 		match(summary, /skill loads \(2\): "fix-issue" \(recipe-bound\), "ship" \(recipe-bound\)/);
 		match(summary, /Activation records a load, not execution of the skill workflow or a commit/);
 		ok(!summary.includes("/private/skills/"), "receipt summary must not disclose skill paths");
-		const loads = receipt.skillActivations;
-		ok(loads);
-		const forgedOrigin = {
-			...receipt,
-			skillActivations: loads.map((item) => ({ ...item, requestSource: "operator" as const })),
-		};
-		strictEqual(verifyReceiptIntegrity(forgedOrigin, envelope).ok, false);
 	});
 
 	it("bounds names and marks old receipts without binding provenance as unknown", () => {
@@ -49,14 +45,13 @@ describe("worker receipt skill load summary", () => {
 			...Array.from({ length: 100 }, (_, i) => activation(`long-${i}-${"x".repeat(100)}`, "recipe")),
 		];
 		const receipt = withReceiptIntegrity(draft, envelope);
-		const labels = receiptEvidenceLabels(receipt, receipt.verification, verifyReceiptIntegrity(receipt, envelope));
+		const labels = runEvidenceLabels(finishedRun(receipt), PRODUCER_INTEGRITY);
 		const line = labels.find((item) => item.startsWith("skill loads"));
 		ok(line);
 		match(line, /"ship" \(binding unrecorded\)/);
 		match(line, /and 95 more/);
 		ok(Buffer.byteLength(line, "utf8") < 700, `summary was ${Buffer.byteLength(line, "utf8")} bytes`);
-		const tampered = { ...receipt, task: "forged" };
-		const invalid = receiptEvidenceLabels(tampered, tampered.verification, verifyReceiptIntegrity(tampered, envelope));
+		const invalid = runEvidenceLabels(finishedRun(receipt), { state: "failed", reason: "run seal failed" });
 		ok(!invalid.some((item) => item.startsWith("skill loads")), "untrusted activations must be withheld");
 	});
 
@@ -78,7 +73,7 @@ describe("worker receipt skill load summary", () => {
 		};
 		draft.skillActivations = [activation("ship", "recipe")];
 		const receipt = withReceiptIntegrity(draft, envelope);
-		const lines = compactHelperResultLines(receipt, verifyReceiptIntegrity(receipt, envelope), 1024);
+		const lines = compactHelperResultLines(finishedRun(receipt), PRODUCER_INTEGRITY, 1024);
 		ok(lines);
 		match(lines.join("\n"), /skill loads \(1\): "ship" \(recipe-bound\).*not execution.*or a commit/);
 	});

@@ -1,5 +1,4 @@
 import type { MiddlewareHookInput } from "../middleware/types.js";
-import { isLegacyReadOnlyReceipt } from "./types.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -13,8 +12,7 @@ function hasChangedPaths(value: unknown): boolean {
 export function dispatchMutatedParentWorkspace(details: MiddlewareHookInput["toolResultDetails"]): boolean {
 	if (!Array.isArray(details?.runs)) return false;
 	return details.runs.some((value: unknown) => {
-		if (!isRecord(value) || !isRecord(value.receiptIntegrity) || value.receiptIntegrity.ok !== true) return false;
-		if (value.readOnly === true || isLegacyReadOnlyReceipt(value)) return false;
+		if (!isRecord(value) || value.readOnly === true) return false;
 		const mutatingSucceeded = isRecord(value.toolActivity) && value.toolActivity.mutatingSucceeded === true;
 		const placement = value.placement;
 		if (placement === undefined) return mutatingSucceeded;
