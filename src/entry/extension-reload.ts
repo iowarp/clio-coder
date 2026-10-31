@@ -26,6 +26,7 @@
  * exists for a caller that re-enters from a callback.
  */
 
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { recordPackageActivity } from "../core/package-activity.js";
@@ -165,7 +166,7 @@ function recordHookRan(receipt: HookReceipt, sessionId: string | undefined): voi
 			{
 				hookId: receipt.hookId,
 				origin: receipt.origin,
-				sourcePath: receipt.sourcePath.slice(0, 4096),
+				sourceId: `sha256:${createHash("sha256").update(receipt.sourcePath).digest("hex")}`,
 				hash: receipt.hash,
 				hook: receipt.hook,
 				kind: receipt.kind,

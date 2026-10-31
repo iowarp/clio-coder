@@ -1,6 +1,8 @@
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import { ownerTelemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
+import type { TelemetryHub } from "../../core/telemetry/hub.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { QualityFinding } from "../../tools/verify/quality-policy.js";
 import type { FinishContractReason, FinishContractVerificationScope } from "./finish-contract.js";
 import type { SafetyPolicyDecision } from "./policy-engine.js";
@@ -43,6 +45,11 @@ export function toolDecidedPayload(input: ToolDecisionInput): EventPayload<"tool
 		...(input.policy?.policySource !== undefined ? { policySource: input.policy.policySource } : {}),
 		...(input.policy?.policyHash !== undefined ? { policyHash: input.policy.policyHash } : {}),
 	};
+}
+
+/** Tool decisions use the host call context and the same structural payload in every runtime (#434). */
+export function recordToolDecision(input: ToolDecisionInput, hub: TelemetryHub = telemetryHub()): boolean {
+	return hub.emit("tool.decided", toolDecidedPayload(input));
 }
 
 export interface CompletionEvaluationInput {

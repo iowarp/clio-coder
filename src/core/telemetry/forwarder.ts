@@ -18,6 +18,7 @@ const workerKinds = new Set([
 	"process.started",
 	"process.exited",
 	"tool.settled",
+	"tool.decided",
 	"middleware.fired",
 	"auth.refreshed",
 ]);

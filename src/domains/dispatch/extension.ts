@@ -6614,6 +6614,7 @@ export function createDispatchBundle(
 			});
 			try {
 				safety.audit.recordCompletionContract?.({
+					...(req.ownerSessionId ? { sessionId: req.ownerSessionId } : {}),
 					runId: envelope.id,
 					turnId: finishContractAssistantTurnId,
 					decision: assessment.kind,
@@ -8518,6 +8519,7 @@ export function createDispatchBundle(
 			});
 			try {
 				safety.audit.recordCompletionContract?.({
+					...(req.ownerSessionId ? { sessionId: req.ownerSessionId } : {}),
 					runId: envelope.id,
 					turnId: finishContractAssistantTurnId,
 					decision: assessment.kind,

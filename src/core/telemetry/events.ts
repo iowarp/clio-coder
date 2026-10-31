@@ -277,10 +277,11 @@ export const EVENTS = {
 	"health.sampled": journal(S.HealthSampledSchema, { tier: "operational", cc: "content-free" }),
 	"health.samples_captured": journal(S.HealthSamplesCapturedSchema, { tier: "research", cc: "content-free" }),
 	"tool.settled": journal(S.ToolSettledSchema, { tier: "operational", cc: "content-free" }),
-	"tool.decided": journal(S.ToolDecidedSchema, { tier: "accountability", cc: "content-free" }),
+	"tool.decided": journal(S.ToolDecidedSchema, { tier: "accountability", cc: "content-free", scope: "session" }),
 	"approval.requested": journal(S.ApprovalRequestedSchema, {
 		tier: "accountability",
 		cc: "content-free",
+		scope: "session",
 		project: (p: PermissionRequestedPayload) =>
 			pick(p, [
 				"tool",
@@ -304,6 +305,7 @@ export const EVENTS = {
 	"approval.resolved": journal(S.ApprovalResolvedSchema, {
 		tier: "accountability",
 		cc: "content-free",
+		scope: "session",
 		project: (p: PermissionResolvedPayload) => ({
 			...pick(p, ["status", "requestId", "origin", "decidedBy", "tool", "actionClass", "requestedBy", "fallback"]),
 			...(p.grant ? { grant: pick(p.grant, ["attempt", "authority", "issuer", "execution", "state"]) } : {}),
@@ -317,11 +319,13 @@ export const EVENTS = {
 	"turn.aborted": journal(S.TurnAbortedSchema, {
 		tier: "accountability",
 		cc: "content-free",
+		scope: "session",
 		project: (p: TurnAbortedPayload) => ({ source: p.source }),
 	}),
 	"agent.status_changed": journal(S.AgentStatusChangedSchema, {
 		tier: "accountability",
 		cc: "content-free",
+		scope: "session",
 		project: (p: AgentStatusChangedPayload) => ({
 			...pick(p, ["phase", "prevPhase", "watchdogTier"]),
 			elapsedFromStart: Math.max(0, p.elapsedFromStart),
@@ -331,8 +335,12 @@ export const EVENTS = {
 			...(p.metadata?.reason !== undefined ? { stopReason: p.metadata.reason } : {}),
 		}),
 	}),
-	"completion.evaluated": journal(S.CompletionEvaluatedSchema, { tier: "accountability", cc: "content-free" }),
-	"safety.judged": journal(S.SafetyJudgedSchema, { tier: "accountability", cc: "content-free" }),
+	"completion.evaluated": journal(S.CompletionEvaluatedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		scope: "session",
+	}),
+	"safety.judged": journal(S.SafetyJudgedSchema, { tier: "accountability", cc: "content-free", scope: "session" }),
 	"prompt.compiled": journal(S.PromptCompiledSchema, { tier: "operational", cc: "structural" }),
 	"context.snapshotted": journal(S.ContextSnapshottedSchema, { tier: "operational", cc: "content-free" }),
 	"call.timing_captured": journal(S.CallTimingCapturedSchema, {
@@ -373,7 +381,12 @@ export const EVENTS = {
 	"session.started": live<SessionStartPayload>(),
 	"session.ended": live<SessionEndPayload>(),
 	"session.created": live<SessionOpenedPayload>(),
-	"session.parked": live<SessionParkedPayload>(),
+	"session.parked": journal(S.SessionClosedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		scope: "session",
+		project: (p: SessionParkedPayload) => ({ reason: p.reason }),
+	}),
 	"session.resume_started": live<SessionResumingPayload>(),
 	"session.reattached": live<SessionResumedPayload>(),
 	"session.turn_switched": live<SessionTurnSwitchedPayload>(),

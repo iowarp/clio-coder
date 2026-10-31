@@ -402,7 +402,7 @@ export const HookRanSchema = Type.Object(
 	{
 		hookId: ExistingId,
 		origin: vocabulary(["extension", "user", "project", "project.local"]),
-		sourcePath: text,
+		sourceId: Type.String({ pattern: "^sha256:[0-9a-f]{64}$" }),
 		hash: ExistingId,
 		hook: vocabulary(["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction", "prompt_submit"]),
 		kind: vocabulary(["command", "prompt", "effect", "runtime"]),
@@ -446,7 +446,7 @@ export const LibraryLifecycleSchema = Type.Object(
 		contentDigest: Type.Union([ExistingId, Type.Null()]),
 		envelopeDigest: Type.Union([ExistingId, Type.Null()]),
 		scope: ExistingId,
-		source: text,
+		sourceId: Type.String({ pattern: "^sha256:[0-9a-f]{64}$" }),
 		actor: vocabulary(["operator", "model-confirmed", "upgrade"]),
 	},
 	closed,

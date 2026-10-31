@@ -230,10 +230,17 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			getTurnConstraints: () => ({ mode: "proposal", allowedTools: ["read", "edit"] }),
 			recordDecision: (input) => audits.push(input),
 		});
-		const effects = await normal.evaluate({ hook: "turn_end", text: "Done." });
+		const effects = await normal.evaluate({
+			hook: "turn_end",
+			text: "Done.",
+			sessionId: "finish-session",
+			turnId: "finish-turn",
+		});
 		deepStrictEqual(effects, [
 			{ kind: "inject_reminder", severity: "warn", message: FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE },
 		]);
+		strictEqual(audits[0]?.sessionId, "finish-session");
+		strictEqual(audits[0]?.turnId, "finish-turn");
 		strictEqual(audits[0]?.decision, "ok");
 		deepStrictEqual(audits[0]?.verificationScope?.acceptance, [
 			{ check: "test", state: "passed" },

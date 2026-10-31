@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { startedUnderClioAgent } from "./agent-environment.js";
@@ -93,8 +93,11 @@ export function recordLifecycleReceipt(
 	// The receipt file is state, the latest provenance per package that /library shows; the journal keeps the
 	// operation itself (#434).
 	try {
-		const { operation, at: _at, ...facts } = receipt;
-		telemetryHub().emit(LIFECYCLE_EVENTS[operation], facts);
+		const { operation, at: _at, source, ...facts } = receipt;
+		telemetryHub().emit(LIFECYCLE_EVENTS[operation], {
+			...facts,
+			sourceId: `sha256:${createHash("sha256").update(source).digest("hex")}`,
+		});
 	} catch {
 		// Recording follows the committed mutation and cannot roll back installed bytes.
 	}

@@ -1,5 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
+import { writeDiagnostic } from "../core/diagnostics.js";
+import { clioStateDir } from "../core/xdg.js";
 import { ENVELOPE_SEAT_BELT, envelopeLines } from "../domains/extensions/envelope-review.js";
 import { pluginLocalPath } from "../domains/plugins/catalog.js";
 import { type PluginScope, reloadPluginResources } from "../domains/plugins/index.js";
@@ -36,6 +38,7 @@ import {
 } from "../domains/resources/library-packages.js";
 import { describeLibraryPair } from "../domains/resources/library-pairing.js";
 import { isLibraryComponentKind, isLibraryKind, type LibraryEntryKind } from "../domains/resources/library-types.js";
+import { createProcessJournal } from "../domains/telemetry/process-journal.js";
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder library <command>
@@ -251,6 +254,22 @@ function printDrift(
 }
 
 export async function runLibraryCommand(
+	args: ReadonlyArray<string>,
+	discoveryOptions: { catalog?: string } = {},
+): Promise<number> {
+	const journal = createProcessJournal(clioStateDir(), () =>
+		writeDiagnostic("[clio-coder:telemetry] process journal unavailable; coverage is incomplete\n"),
+	);
+	let exitCode = 1;
+	try {
+		exitCode = await executeLibraryCommand(args, discoveryOptions);
+		return exitCode;
+	} finally {
+		await journal.close(exitCode);
+	}
+}
+
+async function executeLibraryCommand(
 	args: ReadonlyArray<string>,
 	discoveryOptions: { catalog?: string } = {},
 ): Promise<number> {

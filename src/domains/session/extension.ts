@@ -1,5 +1,6 @@
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { flushPackageActivities, PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
+import { sessionTelemetryContext } from "../../core/telemetry/context.js";
 import type {
 	SessionParkReason as ParkReason,
 	SessionResumeVia as ResumeVia,
@@ -57,7 +58,11 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 	};
 
 	function emitPark(sessionId: string, reason: ParkReason, meta?: { cwd?: string; cwdHash?: string }): void {
-		context.bus.emit("session.parked", { sessionId, reason, at: Date.now(), ...hashOf(meta) });
+		context.bus.emit(
+			"session.parked",
+			{ sessionId, reason, at: Date.now(), ...hashOf(meta) },
+			sessionTelemetryContext(sessionId),
+		);
 	}
 
 	function emitResume(sessionId: string, via: ResumeVia, meta?: { cwd?: string; cwdHash?: string }): void {

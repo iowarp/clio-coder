@@ -75,16 +75,16 @@ export function ownerTelemetryContext(owner: {
 		...(owner.toolCallId ? { toolCallId: owner.toolCallId } : {}),
 	};
 	if (owner.runId) {
-		if (current?.runId === owner.runId) return current;
+		if (current?.runId === owner.runId) return { ...current, ...ids };
 		return owner.sessionId
-			? { sessionId: owner.sessionId, runId: owner.runId, label: "worker" }
-			: { sessionId: null, runId: owner.runId, label: "worker" };
+			? { sessionId: owner.sessionId, runId: owner.runId, label: "worker", ...ids }
+			: { sessionId: null, runId: owner.runId, label: "worker", ...ids };
 	}
 	if (owner.sessionId) {
-		if (current && current.sessionId === owner.sessionId && current.runId === undefined) return current;
+		if (current && current.sessionId === owner.sessionId && current.runId === undefined) return { ...current, ...ids };
 		return { sessionId: owner.sessionId, label: "main", ...ids };
 	}
-	return current;
+	return current ? { ...current, ...ids } : undefined;
 }
 
 /** Tool admission uses host identities, never ids supplied in model arguments (#434). */

@@ -19,6 +19,8 @@ import { classify as classifyAction } from "../domains/safety/action-classifier.
 import type { AdmissionGitContext } from "../domains/safety/admission.js";
 import { DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../domains/safety/contract.js";
+import type { ToolDecisionInput } from "../domains/safety/decision-events.js";
+import { recordToolDecision as emitToolDecision } from "../domains/safety/decision-events.js";
 import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
 import { compileWorkerFlowPolicy, flowRestrictionsForCall } from "../domains/safety/information-flow.js";
 import {
@@ -49,7 +51,7 @@ export const INTERNAL_HELPER_RESULT_TOOL = "clio_submit_result";
  * Build a worker-local SafetyContract that owns its own loop-detector state.
  * The state is per-worker-run (one subprocess per run) so two concurrent
  * workers do not share counts. The detector matches the orchestrator's
- * behaviour but skips audit-record bookkeeping which the worker does not own.
+ * behaviour and forwards structural tool decisions to the run journal (#434).
  */
 export interface WorkerSafetyOptions {
 	cwd?: string;
@@ -65,6 +67,10 @@ export interface WorkerSafetyOptions {
 
 export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyContract {
 	let loopState: LoopDetectorState = createLoopState();
+	let recordCount = 0;
+	const recordToolDecision = (input: ToolDecisionInput): void => {
+		if (emitToolDecision(input)) recordCount += 1;
+	};
 	const policyEngine = createSafetyPolicyEngine({
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 		...(options.writeRoots !== undefined ? { writeRoots: options.writeRoots } : {}),
@@ -103,11 +109,30 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 					rejection,
 					...(posture !== undefined ? { posture } : {}),
 				};
+				recordToolDecision({
+					tool: call.tool,
+					classification,
+					decision: "blocked",
+					policy,
+					...(posture !== undefined ? { posture } : {}),
+				});
 				return { kind: "block", classification, rejection, policy };
 			}
 			// A permit that inherited the operator's yolo is judged the true yolo way (#407).
 			const policy = policyEngine.evaluate(call, posture, scope);
 			const classification = policy.classification;
+			recordToolDecision({
+				tool: call.tool,
+				classification,
+				decision:
+					policy.kind === "block"
+						? "blocked"
+						: policy.kind === "allow" && posture === "confirmed"
+							? "allowed"
+							: "classified",
+				policy,
+				...(posture !== undefined ? { posture } : {}),
+			});
 			if (policy.kind === "block") {
 				const decision: SafetyDecision = {
 					kind: "block",
@@ -150,7 +175,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 			allowsObservationPath: (path) =>
 				policyEngine.evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths",
 		},
-		audit: { recordCount: () => 0 },
+		audit: { recordCount: () => recordCount, recordToolCall: recordToolDecision },
 	};
 }
 

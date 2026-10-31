@@ -188,7 +188,7 @@ export function createFinishContractRegistration(
 				...(activeAcceptance ? { activeAcceptance } : {}),
 				assistantTurnId: input.turnId ?? null,
 			});
-			recordDecision(options, input.turnId ?? null, assessment, rigor);
+			recordDecision(options, input, assessment, rigor);
 			if (assessment.kind === "ok")
 				return assessment.advisory ? [{ kind: "inject_reminder", message: assessment.advisory, severity: "warn" }] : [];
 			if (rigor === "high") {
@@ -241,7 +241,7 @@ function isHardBlockEffect(effect: MiddlewareEffect): boolean {
 
 function recordDecision(
 	options: CreateFinishContractRegistrationOptions,
-	turnId: string | null,
+	input: MiddlewareHookInput,
 	assessment: FinishContractAssessment,
 	rigor: Rigor,
 ): void {
@@ -249,7 +249,8 @@ function recordDecision(
 	const evidenceKinds = Array.from(new Set(assessment.evidence.map((item) => item.kind)));
 	try {
 		options.recordDecision({
-			turnId,
+			...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+			turnId: input.turnId ?? null,
 			decision: assessment.kind,
 			reason: assessment.reason,
 			rigor,

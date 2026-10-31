@@ -6,11 +6,11 @@ import {
 	type CompletionEvaluationInput,
 	completionContext,
 	completionEvaluatedPayload,
+	recordToolDecision as emitToolDecision,
 	type SafetyJudgementInput,
 	safetyJudgedPayload,
 	safetyJudgementContext,
 	type ToolDecisionInput,
-	toolDecidedPayload,
 } from "./decision-events.js";
 import { mergeFlowRestrictions } from "./information-flow.js";
 import { createLoopState, type LoopDetectorState, observe as observeLoop } from "./loop-detector.js";
@@ -30,7 +30,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 
 	// Tool decisions run inside the call's async context, so the scope comes from there (#434).
 	function recordToolDecision(input: ToolDecisionInput): void {
-		if (context.bus.emit("tool.decided", toolDecidedPayload(input))) recordCount += 1;
+		if (emitToolDecision(input, context.bus)) recordCount += 1;
 	}
 
 	function recordCompletionEvaluation(input: CompletionEvaluationInput): void {

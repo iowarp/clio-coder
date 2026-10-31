@@ -88,7 +88,7 @@ it("a session writer opens with its settings and journals each change once, with
 	}
 });
 
-it("a session's lifecycle events become session.opened, session.resumed and session.closed records (#434)", async () => {
+it("a session's lifecycle events journal opening, resuming, parking and closing (#434)", async () => {
 	const env = await isolateClioEnv("clio-coder-lifecycle-records-");
 	const bus = createTelemetryHub();
 	const { extension } = createTelemetryBundle({ bus, getContract: () => undefined } as unknown as DomainContext);
@@ -96,20 +96,23 @@ it("a session's lifecycle events become session.opened, session.resumed and sess
 	try {
 		await extension.start();
 		bus.emit("session.created", { sessionId: origin.id, cwdHash: origin.cwdHash, at: Date.now() });
-		bus.emit("session.parked", {
-			sessionId: origin.id,
-			reason: "resume_other",
-			cwdHash: origin.cwdHash,
-			at: Date.now(),
-		});
+		bus.emit(
+			"session.parked",
+			{ sessionId: origin.id, reason: "resume_other", cwdHash: origin.cwdHash, at: Date.now() },
+			{ sessionId: origin.id, label: "main" },
+		);
 		bus.emit("session.reattached", {
 			sessionId: origin.id,
 			via: "resume",
 			cwdHash: origin.cwdHash,
 			at: Date.now(),
 		});
-		// Without the workspace hash there is no journal to name; nothing is recorded and nothing throws.
-		bus.emit("session.parked", { sessionId: origin.id, reason: "close", at: Date.now() });
+		// A known session can journal its park from its explicit owner without a workspace hash (#434).
+		bus.emit(
+			"session.parked",
+			{ sessionId: origin.id, reason: "close", at: Date.now() },
+			{ sessionId: origin.id, label: "main" },
+		);
 		// Shutdown stops this domain before the session domain parks the live session, so stop() journals its close.
 		const live = { id: "lifecycle-live", cwdHash: origin.cwdHash };
 		bus.emit("session.created", { sessionId: live.id, cwdHash: live.cwdHash, at: Date.now() });
@@ -131,6 +134,8 @@ it("a session's lifecycle events become session.opened, session.resumed and sess
 		deepStrictEqual(records.flatMap((record) => (record.k.startsWith("session.") ? [record.k] : [])).sort(), [
 			"session.closed",
 			"session.opened",
+			"session.parked",
+			"session.parked",
 			"session.resumed",
 		]);
 		ok(records.every((record) => record.ctx.sessionId === origin.id));
