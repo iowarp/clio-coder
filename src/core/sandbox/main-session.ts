@@ -622,10 +622,28 @@ function sweepMainSandboxGitFiles(absent: ReadonlyArray<string>): string[] {
 
 const WRITE_REFUSED = /\b(?:EROFS|EACCES|EPERM)\b|Read-only file system|Permission denied|Operation not permitted/u;
 
+function displayWritableRoots(roots: ReadonlyArray<string>): string {
+	const rootSet = new Set(roots);
+	const worktrees = new Map<string, number>();
+	for (const root of roots) {
+		const parent = path.dirname(root);
+		if (path.basename(parent) === "worktrees" && rootSet.has(parent) && rootSet.has(path.dirname(parent))) {
+			worktrees.set(parent, (worktrees.get(parent) ?? 0) + 1);
+		}
+	}
+	return roots
+		.filter((root) => !worktrees.has(path.dirname(root)))
+		.map((root) => {
+			const count = worktrees.get(root);
+			return count === undefined ? root : `${root} (${count} worktree${count === 1 ? "" : "s"})`;
+		})
+		.join(", ");
+}
+
 /** One line for a failed contained command whose output shows a refused write, else null. */
 export function mainSandboxWriteHint(output: string, policy: MainSandboxPolicy): string | null {
 	if (!WRITE_REFUSED.test(output)) return null;
-	return `sandbox: this command could write only to ${policy.writableRoots.join(", ")} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden). If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request; a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
+	return `sandbox: this command could write only to ${displayWritableRoots(policy.writableRoots)} (git hooks and config, scratch roots' .git and .clio-coder read-only; credentials, credential variables and secret files hidden). If it failed because of the sandbox, rerun it with unsandboxed: true and it is reviewed against the operator's request; a directory scripts should always write belongs in safety.scratchRoots in the user settings.`;
 }
 
 /** One line for doctor: how the main session's shell calls run on this host, and where a contained one can write. */
@@ -644,15 +662,23 @@ export function mainSandboxLine(
 				? `yolo refuses scripts: safety.sandbox is required and no sandbox is available (${availability.reason ?? "no backend"})`
 				: "yolo runs unsandboxed";
 	if (mainShellContained(mode, availability)) {
+		const warnings: string[] = [];
+		const details = [
+			`default-autonomy shell commands run in the ${availability.backend} sandbox`,
+			`writable roots: ${displayWritableRoots(writableRoots)}`,
+		];
 		const masked =
 			secretFiles === undefined
 				? ""
 				: secretFiles.capped
-					? `; ${secretFiles.count} secret files in the workspace and scratch roots are masked, and the search stopped at its limit, so others stay readable`
-					: `; ${secretFiles.count} secret files in the workspace and scratch roots are masked`;
-		const sockets = unixSocketStateLine(unixSocketHostState(unixSockets, availability));
-		return `default-autonomy shell commands run in the ${availability.backend} sandbox; writable roots: ${writableRoots.join(", ")}${masked}; ${sockets}; ${yoloLine}`;
+					? `${secretFiles.count} secret files in the workspace and scratch roots are masked, and the search stopped at its limit, so others stay readable`
+					: `${secretFiles.count} secret files in the workspace and scratch roots are masked`;
+		if (masked) (secretFiles?.capped ? warnings : details).push(masked);
+		const socketState = unixSocketHostState(unixSockets, availability);
+		(socketState.kind === "masks" ? warnings : details).push(unixSocketStateLine(socketState));
+		(yolo === "refused" ? warnings : details).push(yoloLine);
+		return [...warnings, ...details].join("; ");
 	}
 	const why = mode === "off" ? "safety.sandbox is off" : (availability.reason ?? "no sandbox backend");
-	return `default-autonomy shell commands run uncontained and keep the approval rails (${why}); ${yoloLine}`;
+	return `${why}; ${yoloLine}; default-autonomy shell commands run uncontained and keep the approval rails`;
 }
