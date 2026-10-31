@@ -1,11 +1,10 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cwdHash } from "../../core/cwd-hash.js";
 import type { ExplanationV1, ParsedFactRef } from "../../core/telemetry/dto.js";
-import { readReceiptText } from "../dispatch/receipt-store.js";
-import { listSessionLedgerRefs } from "../session/archive-readers.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { loadRepoTelemetrySources } from "../session/telemetry-source.js";
-import { explain, parseRepoOwner, type RepoSource, repoOwner } from "./read-model.js";
+import { explain, type JournalSource, parseRepoOwner, type RepoSource, repoOwner } from "./read-model.js";
 
 /**
  * The window `usage report` folds and `telemetry explain` rebuilds for a repository reference (#434 §11.1, §11.4).
@@ -15,8 +14,11 @@ import { explain, parseRepoOwner, type RepoSource, repoOwner } from "./read-mode
 
 const USAGE_WINDOW_FUTURE_SKEW_MS = 5_000;
 
-/** What the tool, skill, recipe and opportunity facts read from a receipt; spend is the read model's (#434). */
-export interface UsageReceipt {
+/**
+ * What the tool, skill, recipe and opportunity facts read from a finished run: its run.settled, with its cwd and task
+ * from the run ledger row while the ring keeps it. Spend is the read model's (#434).
+ */
+export interface UsageRun {
 	cwd: string | null;
 	runId: string;
 	agentId: string;
@@ -29,14 +31,13 @@ export interface UsageReceipt {
 
 /** What the window read could not use, counted and named so a report says so instead of reading it as quiet. */
 export interface UsageDiagnostics {
-	malformedReceipts: number;
 	unreadableSessions: number;
 	malformedSessionLines: number;
 	notes: string[];
 }
 
 export function emptyUsageDiagnostics(): UsageDiagnostics {
-	return { malformedReceipts: 0, unreadableSessions: 0, malformedSessionLines: 0, notes: [] };
+	return { unreadableSessions: 0, malformedSessionLines: 0, notes: [] };
 }
 
 /** Whether a timestamp falls in a window, allowing a writer clock a few seconds ahead. */
@@ -47,8 +48,8 @@ export function inUsageWindow(iso: string, start: number, end: number): boolean 
 
 /**
  * The window `usage report` folds: the repository's sessions (every bucket's without one), and the runs no session
- * references that the run ledger or a window receipt attributes to it, by cwd or by one of its sessions. `telemetry
- * explain` rebuilds a `repo:` reference's window through it, ending at its own now (#434 §11.4).
+ * references that the run ledger attributes to it by cwd. `telemetry explain` rebuilds a `repo:` reference's window
+ * through it, ending at its own now (#434 §11.4).
  */
 export async function usageWindow(
 	stateDir: string,
@@ -56,109 +57,77 @@ export async function usageWindow(
 	days: number,
 	now: number,
 	diagnostics: UsageDiagnostics = emptyUsageDiagnostics(),
-): Promise<{ receipts: UsageReceipt[]; repo: RepoSource }> {
+): Promise<{ runs: UsageRun[]; repo: RepoSource }> {
 	const windowStart = now - days * 24 * 60 * 60 * 1000;
-	const repoRunIds = scope === null ? null : await runIdsForCwd(stateDir, scope.inRepo, diagnostics);
-	const repoSessions =
-		scope === null ? null : new Set((await listSessionLedgerRefs(stateDir, scope.hash)).map((ref) => ref.sessionId));
-	const receipts = (await readReceipts(stateDir, windowStart, now, diagnostics)).filter(
-		(receipt) =>
-			scope === null ||
-			(receipt.cwd !== null && scope.inRepo(receipt.cwd)) ||
-			repoRunIds?.has(receipt.runId) ||
-			(receipt.sessionId !== null && repoSessions?.has(receipt.sessionId)),
-	);
+	const ledger = await readLedgerRows(stateDir, diagnostics);
+	const repoRunIds =
+		scope === null
+			? null
+			: new Set([...ledger].flatMap(([id, row]) => (row.cwd !== null && scope.inRepo(row.cwd) ? [id] : [])));
 	const telemetry = loadRepoTelemetrySources(stateDir, {
 		cwdHash: scope?.hash ?? null,
 		from: windowStart,
 		to: now + USAGE_WINDOW_FUTURE_SKEW_MS,
-		// A receipt from before run journals may have left the run ledger's ring; its own cwd still attributes it.
-		standaloneRuns: repoRunIds === null ? "all" : new Set([...repoRunIds, ...receipts.map((receipt) => receipt.runId)]),
+		standaloneRuns: repoRunIds ?? "all",
 	});
-	return { receipts, repo: { owner: repoOwner(scope?.hash ?? null, days), ...telemetry } };
-}
-
-async function runIdsForCwd(
-	stateDir: string,
-	inRepo: (cwd: string) => boolean,
-	diagnostics: UsageDiagnostics,
-): Promise<Set<string>> {
-	try {
-		const raw = await readFile(join(stateDir, "runs.json"), "utf8");
-		const parsed = JSON.parse(raw) as unknown;
-		if (!Array.isArray(parsed)) throw new Error("expected array");
-		const ids = new Set<string>();
-		for (const entry of parsed) {
-			if (!isRecord(entry)) continue;
-			if (typeof entry.id === "string" && typeof entry.cwd === "string" && inRepo(entry.cwd)) ids.add(entry.id);
-		}
-		return ids;
-	} catch (error) {
-		diagnostics.notes.push(
-			`run ledger unreadable, --repo run filter skipped: ${error instanceof Error ? error.message : String(error)}`,
-		);
-		return new Set<string>();
-	}
-}
-
-async function readReceipts(
-	stateDir: string,
-	windowStart: number,
-	windowEnd: number,
-	diagnostics: UsageDiagnostics,
-): Promise<UsageReceipt[]> {
-	const root = join(stateDir, "receipts");
-	let files: string[];
-	try {
-		files = (await readdir(root)).filter((name) => name.endsWith(".json"));
-	} catch {
-		return [];
-	}
-
-	const receipts: UsageReceipt[] = [];
-	for (const name of files) {
-		let parsed: unknown;
-		try {
-			// A pruned receipt reads back from its evidence copy, as every receipt reader's does (#434).
-			parsed = JSON.parse(await readReceiptText(join(root, name)));
-		} catch {
-			diagnostics.malformedReceipts += 1;
-			continue;
-		}
-		if (!isRecord(parsed) || typeof parsed.runId !== "string" || typeof parsed.endedAt !== "string") {
-			diagnostics.malformedReceipts += 1;
-			continue;
-		}
-		if (!inUsageWindow(parsed.endedAt, windowStart, windowEnd)) continue;
-		const toolStats = Array.isArray(parsed.toolStats)
-			? parsed.toolStats.flatMap((entry) => {
-					if (!isRecord(entry) || typeof entry.tool !== "string") return [];
-					return [
-						{
-							tool: entry.tool,
-							count: numberOr0(entry.count),
-							ok: numberOr0(entry.ok),
-							errors: numberOr0(entry.errors),
-							blocked: numberOr0(entry.blocked),
-						},
-					];
-				})
-			: [];
-		const skillActivations = Array.isArray(parsed.skillActivations)
-			? parsed.skillActivations.flatMap((entry) => (isRecord(entry) && typeof entry.name === "string" ? [entry.name] : []))
-			: [];
-		receipts.push({
-			runId: parsed.runId,
-			cwd: typeof parsed.cwd === "string" ? parsed.cwd : null,
-			agentId: typeof parsed.agentId === "string" ? parsed.agentId : "unknown",
-			task: typeof parsed.task === "string" ? parsed.task : "",
-			endedAt: parsed.endedAt,
-			sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : null,
-			toolStats,
-			skillActivations,
+	const sources = new Map<string, JournalSource>(telemetry.runs);
+	for (const session of telemetry.sessions) for (const [runId, source] of session.runs) sources.set(runId, source);
+	const runs: UsageRun[] = [];
+	for (const [runId, source] of sources) {
+		const record = [...source.records]
+			.reverse()
+			.find((entry): entry is TelemetryRecord<"run.settled"> => entry.k === "run.settled");
+		if (record === undefined) continue;
+		const settled = record.data;
+		if (!inUsageWindow(settled.endedAt, windowStart, now)) continue;
+		const row = ledger.get(runId);
+		runs.push({
+			runId,
+			cwd: row?.cwd ?? null,
+			agentId: settled.agentId,
+			task: row?.task ?? "",
+			endedAt: settled.endedAt,
+			sessionId: record.ctx.sessionId,
+			toolStats: settled.tools.map((tool) => ({
+				tool: tool.tool,
+				count: tool.calls,
+				ok: tool.ok,
+				errors: tool.errors,
+				blocked: tool.blocked,
+			})),
+			skillActivations: [...settled.skills],
 		});
 	}
-	return receipts;
+	return {
+		runs: runs.sort((a, b) => a.endedAt.localeCompare(b.endedAt)),
+		repo: { owner: repoOwner(scope?.hash ?? null, days), ...telemetry },
+	};
+}
+
+/** The run ledger's cwd and task per run, while the ring keeps its row. */
+async function readLedgerRows(
+	stateDir: string,
+	diagnostics: UsageDiagnostics,
+): Promise<Map<string, { cwd: string | null; task: string | null }>> {
+	const rows = new Map<string, { cwd: string | null; task: string | null }>();
+	try {
+		const parsed = JSON.parse(await readFile(join(stateDir, "runs.json"), "utf8")) as unknown;
+		if (!Array.isArray(parsed)) throw new Error("expected array");
+		for (const entry of parsed) {
+			if (!isRecord(entry) || typeof entry.id !== "string") continue;
+			rows.set(entry.id, {
+				cwd: typeof entry.cwd === "string" ? entry.cwd : null,
+				task: typeof entry.task === "string" ? entry.task : null,
+			});
+		}
+	} catch (error) {
+		// No ledger is no run filter; a ledger that does not parse says so.
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+			diagnostics.notes.push(
+				`run ledger unreadable, --repo run filter skipped: ${error instanceof Error ? error.message : String(error)}`,
+			);
+	}
+	return rows;
 }
 
 /** Whether a reference names a repository window: a `repo` one, or an `own` or `runs` one whose owner is a window. */
@@ -177,10 +146,6 @@ export async function explainRepoRef(stateDir: string, ref: string, owner: strin
 	const scope = hash === null ? null : { hash, inRepo: (cwd: string) => cwdHash(cwd) === hash };
 	const { repo } = await usageWindow(stateDir, scope, window.days, Date.now());
 	return explain(ref, { repo });
-}
-
-function numberOr0(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

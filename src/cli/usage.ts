@@ -12,6 +12,7 @@ import {
 } from "../domains/session/index.js";
 import { summarizeEvidenceIndex } from "../domains/telemetry/accountability.js";
 import { readEvidenceIndex } from "../domains/telemetry/evidence-index.js";
+import { telemetryRunsDirectory } from "../domains/telemetry/paths.js";
 import {
 	type AccountabilityRecord,
 	accountabilityRecords,
@@ -82,8 +83,8 @@ interface SessionUsage {
 interface StorePresence {
 	sessionsPath: string;
 	sessionsPresent: boolean;
-	receiptsPath: string;
-	receiptsPresent: boolean;
+	runsPath: string;
+	runsPresent: boolean;
 }
 
 async function isDirectory(path: string): Promise<boolean> {
@@ -96,19 +97,19 @@ async function isDirectory(path: string): Promise<boolean> {
 
 async function readStorePresence(stateDir: string): Promise<StorePresence> {
 	const sessionsPath = join(stateDir, "sessions");
-	const receiptsPath = join(stateDir, "receipts");
+	const runsPath = telemetryRunsDirectory(stateDir);
 	return {
 		sessionsPath,
 		sessionsPresent: await isDirectory(sessionsPath),
-		receiptsPath,
-		receiptsPresent: await isDirectory(receiptsPath),
+		runsPath,
+		runsPresent: await isDirectory(runsPath),
 	};
 }
 
 function missingStoreNotes(presence: StorePresence): string[] {
 	const notes: string[] = [];
 	if (!presence.sessionsPresent) notes.push(`session store missing at ${presence.sessionsPath}`);
-	if (!presence.receiptsPresent) notes.push(`receipt store missing at ${presence.receiptsPath}`);
+	if (!presence.runsPresent) notes.push(`run journal store missing at ${presence.runsPath}`);
 	return notes;
 }
 
@@ -197,7 +198,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const sessions = await readSessions(stateDir, windowStart, now, repoHash, diagnostics);
 	// Every token and cost figure is the read model's: one window over the sessions and the runs they reference, plus
 	// standalone runs, folded once and worded by the canonical renderer, so nothing here sums spend (#434 §11.3).
-	const { receipts, repo } = await usageWindow(
+	const { runs, repo } = await usageWindow(
 		stateDir,
 		repoPath === undefined ? null : { hash: cwdHash(repoPath), inRepo: (cwd) => cwd === repoPath },
 		parsed.days,
@@ -243,8 +244,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 
 	// Aggregations
 	const toolTotals = new Map<string, { count: number; ok: number; errors: number; blocked: number }>();
-	for (const receipt of receipts) {
-		for (const statRow of receipt.toolStats) {
+	for (const run of runs) {
+		for (const statRow of run.toolStats) {
 			const entry = toolTotals.get(statRow.tool) ?? { count: 0, ok: 0, errors: 0, blocked: 0 };
 			entry.count += statRow.count;
 			entry.ok += statRow.ok;
@@ -273,16 +274,16 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 			activatedSkills.set(name, (activatedSkills.get(name) ?? 0) + 1);
 		}
 	}
-	for (const receipt of receipts) {
-		for (const name of receipt.skillActivations) {
+	for (const run of runs) {
+		for (const name of run.skillActivations) {
 			activatedSkills.set(name, (activatedSkills.get(name) ?? 0) + 1);
 		}
 	}
 	const neverActivated = installedSkills.filter((name) => !activatedSkills.has(name)).sort();
 
 	const recipeRuns = new Map<string, number>();
-	for (const receipt of receipts) {
-		recipeRuns.set(receipt.agentId, (recipeRuns.get(receipt.agentId) ?? 0) + 1);
+	for (const run of runs) {
+		recipeRuns.set(run.agentId, (recipeRuns.get(run.agentId) ?? 0) + 1);
 	}
 
 	const tagCounts = new Map<string, { count: number; latestEvidenceId: string; latestAt: string }>();
@@ -330,11 +331,11 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		});
 	}
 	const taskPrefixGroups = new Map<string, string[]>();
-	for (const receipt of receipts) {
-		const prefix = receipt.task.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 64);
+	for (const run of runs) {
+		const prefix = run.task.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 64);
 		if (prefix.length === 0) continue;
 		const group = taskPrefixGroups.get(prefix) ?? [];
-		group.push(receipt.runId);
+		group.push(run.runId);
 		taskPrefixGroups.set(prefix, group);
 	}
 	for (const [prefix, runIds] of [...taskPrefixGroups.entries()].sort((a, b) => b[1].length - a[1].length)) {
@@ -357,7 +358,6 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 
 	// Diagnostics to stderr (both modes)
 	const diagParts: string[] = [];
-	if (diagnostics.malformedReceipts > 0) diagParts.push(`${diagnostics.malformedReceipts} malformed receipt(s) skipped`);
 	if (diagnostics.unreadableSessions > 0)
 		diagParts.push(`${diagnostics.unreadableSessions} unreadable session ledger(s)`);
 	if (diagnostics.malformedSessionLines > 0)
@@ -378,8 +378,8 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		// is a measurement and there was nothing to measure.
 		if (presence.sessionsPresent) emit({ kind: "fact", fact: "sessions", value: sessions.length });
 		else emit({ kind: "fact", fact: "session-store-missing", path: presence.sessionsPath });
-		if (presence.receiptsPresent) emit({ kind: "fact", fact: "dispatch-runs", value: receipts.length });
-		else emit({ kind: "fact", fact: "receipt-store-missing", path: presence.receiptsPath });
+		if (presence.runsPresent) emit({ kind: "fact", fact: "dispatch-runs", value: runs.length });
+		else emit({ kind: "fact", fact: "run-store-missing", path: presence.runsPath });
 		emit({ kind: "fact", fact: "unverified-successes", value: accountability.unverifiedSuccesses });
 		emit({ kind: "fact", fact: "harness-actions", value: harnessActions });
 		emit({ kind: "fact", fact: "duplicate-dispatches", value: duplicateDispatches });
@@ -445,10 +445,10 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	} else {
 		out(`  session store missing at ${presence.sessionsPath}`);
 	}
-	if (presence.receiptsPresent) {
-		out(`  dispatch runs (receipts) in window: ${receipts.length}`);
+	if (presence.runsPresent) {
+		out(`  dispatch runs in window: ${runs.length}`);
 	} else {
-		out(`  receipt store missing at ${presence.receiptsPath}`);
+		out(`  run journal store missing at ${presence.runsPath}`);
 	}
 	out(
 		`  permission decisions: ${permissions.requested} requested, ${permissions.granted} granted, ${permissions.denied} denied, ${permissions.expired} expired; approval rate ${permissions.approvalRate === null ? "n/a" : `${(permissions.approvalRate * 100).toFixed(1)}%`}`,
@@ -540,7 +540,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	}
 	if (topTools.length > 0) {
 		out("");
-		out("  top tools (from receipt toolStats)");
+		out("  top tools (from settled runs)");
 		process.stdout.write(
 			indent(
 				formatColumns([

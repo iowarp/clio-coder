@@ -622,8 +622,12 @@ export const RunSettledSchema = Type.Object(
 		apiCalls: factSchema(count),
 		pricing: PricingSchema,
 		toolCalls: count,
-		/** Calls per tool, by tool name; a tool's arguments and results are never kept here. */
-		tools: Type.Array(Type.Object({ tool: ExistingId, calls: count }, closed), { maxItems: 256 }),
+		/** Calls per tool and how they ended, by tool name; a tool's arguments and results are never kept here. */
+		tools: Type.Array(Type.Object({ tool: ExistingId, calls: count, ok: count, errors: count, blocked: count }, closed), {
+			maxItems: 256,
+		}),
+		/** Names of the skills the run activated, in activation order. */
+		skills: Type.Array(ExistingId, { maxItems: 256 }),
 		verification: Type.Object(
 			{
 				state: vocabulary(["verified", "unverified", "not_applicable", "unknown"]),

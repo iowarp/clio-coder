@@ -90,7 +90,14 @@ export function settleFinishedRun(
 			frameType: input.frameType,
 			...usage,
 			toolCalls: receipt.toolCalls,
-			tools: receipt.toolStats.slice(0, 256).map((stat) => ({ tool: stat.tool, calls: stat.count })),
+			tools: receipt.toolStats.slice(0, 256).map((stat) => ({
+				tool: stat.tool,
+				calls: stat.count,
+				ok: stat.ok,
+				errors: stat.errors,
+				blocked: stat.blocked,
+			})),
+			skills: (receipt.skillActivations ?? []).slice(0, 256).map((skill) => skill.name),
 			verification: { state: receipt.verification.state, basis: receipt.verification.basis },
 			quality: {
 				typedValidations: receipt.quality.typedValidations.map((fact) => ({ ...fact })),
@@ -208,6 +215,7 @@ export function settleUnfinishedRun(
 			...unobservedRunUsageFacts(),
 			toolCalls: 0,
 			tools: [],
+			skills: [],
 			verification: { state: "unknown", basis: "receipt-unavailable" },
 			quality: null,
 			validationGrounding: null,

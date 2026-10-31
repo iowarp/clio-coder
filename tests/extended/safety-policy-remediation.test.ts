@@ -204,50 +204,6 @@ test("S1-06 usage report reads journaled approvals and emits measured rate", asy
 			),
 		]),
 	);
-	const receipts = join(clioStateDir(), "receipts");
-	mkdirSync(receipts, { recursive: true });
-	for (const [name, usage] of [
-		[
-			"measured",
-			{
-				tokenCount: 130,
-				inputTokenCount: 100,
-				outputTokenCount: 20,
-				cacheReadTokenCount: 10,
-				cacheWriteTokenCount: 0,
-				costUsd: 0.02,
-				costProvenance: "known",
-			},
-		],
-		["missing", { tokenCount: 0, costUsd: 0, costProvenance: "unknown", externalTelemetry: { tokenUsage: "missing" } }],
-		["measured-zero", { tokenCount: 0, apiCalls: 1, missingTokenCalls: 0, costUsd: 0, costProvenance: "known_free" }],
-	] as const) {
-		writeFileSync(
-			join(receipts, `${name}.json`),
-			JSON.stringify({
-				runId: name,
-				endedAt: new Date().toISOString(),
-				targetId: "worker-target",
-				wireModelId: "worker-model",
-				agentAudience: name === "measured" ? "shadow" : "internal",
-				...usage,
-			}),
-		);
-	}
-	writeFileSync(
-		join(receipts, "main-mirror.json"),
-		JSON.stringify({
-			runId: "main-mirror",
-			agentId: "main-agent",
-			sessionId: meta.id,
-			endedAt: new Date().toISOString(),
-			targetId: "chat",
-			wireModelId: "chat-model",
-			tokenCount: 150,
-			costUsd: 0.03,
-			costProvenance: "known",
-		}),
-	);
 	const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
 	const child = spawnSync(
 		process.execPath,
@@ -266,12 +222,4 @@ test("S1-06 usage report reads journaled approvals and emits measured rate", asy
 		.split("\n")
 		.map((line) => JSON.parse(line) as Record<string, unknown>);
 	assert.equal(rows.find((row) => row.fact === "permission-approval")?.approvalRate, 0.5);
-	// Spend is the read model's: the ledger's call, plus each receipt with no run journal at its sealed totals with
-	// unknown call coverage, so the totals read as lower bounds. The main-agent mirror is the session's own spend (#434).
-	const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "role")?.report as
-		| { total: Record<"calls" | "tokens" | "usd", { display: string }> }
-		| undefined;
-	assert.equal(cost?.total.tokens.display, "≥280 (1 call unknown)");
-	assert.equal(cost?.total.usd.display, "$0.05 +?");
-	assert.equal(cost?.total.calls.display, "≥2 (3 calls unknown)");
 });

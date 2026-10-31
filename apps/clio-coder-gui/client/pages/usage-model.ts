@@ -100,7 +100,7 @@ const CLAIMED = new Set([
 	"sessions",
 	"dispatch-runs",
 	"session-store-missing",
-	"receipt-store-missing",
+	"run-store-missing",
 	"skill-activated",
 	"skill-never-activated",
 ]);
@@ -218,7 +218,7 @@ export function usageView(report: UsageReport): UsageView {
 	const missingStores: string[] = [];
 	for (const [name, subject] of [
 		["session-store-missing", "session history"],
-		["receipt-store-missing", "dispatch receipt"],
+		["run-store-missing", "dispatch receipt"],
 	] as const) {
 		const row = first(name);
 		if (row) missingStores.push(emptyState.missingStore(subject, text(row.path)));
@@ -240,7 +240,7 @@ export function usageView(report: UsageReport): UsageView {
 			? { label: "Cost", ...explainable(total.usd), note: costNote(total) }
 			: { label: "Cost", value: "not measured", note: "No spend was measured in this window", factRef: null },
 		store("sessions", "session-store-missing", "Sessions"),
-		store("dispatch-runs", "receipt-store-missing", "Dispatch runs"),
+		store("dispatch-runs", "run-store-missing", "Dispatch runs"),
 	];
 
 	const tokens = tokenQuantitiesOf(report);
