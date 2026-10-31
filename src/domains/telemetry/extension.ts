@@ -297,6 +297,17 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	// The product-facing projection folds the bus channels into a single bounded snapshot.
 	const projection = createTelemetryProjection(context.bus, {});
 
+	/** Points spend, the live read model and the projection at one session, or at this process when there is none. */
+	const resetSession = (nextSessionId?: string | null): void => {
+		sessionId = nextSessionId;
+		telemetry.bind(nextSessionId ?? null);
+		if (!nextSessionId)
+			void refreshProcessSpend().catch(() => {
+				// An unreadable process journal leaves the last known spend; the next admission reads it again (#434).
+			});
+		projection.refresh();
+	};
+
 	// The status the host named before stopping its domains; every host that exits through them names one (#434).
 	let exitStatus: number | undefined;
 	const processExitStatus = (): number => exitStatus ?? (typeof process.exitCode === "number" ? process.exitCode : 0);
@@ -347,6 +358,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 				context.bus.subscribe("session.created", ({ sessionId, cwdHash }) => {
 					liveSession = { id: sessionId, cwdHash };
 					recordLifecycle(liveSession, "session.opened", {});
+					// The session that becomes current binds here for every creator. A TUI creates it lazily on the first
+					// submit, long after boot bound nothing, and /new, fork and ACP session/new create the same way.
+					resetSession(sessionId);
 				}),
 				context.bus.subscribe("session.reattached", ({ sessionId, cwdHash, via }) => {
 					liveSession = cwdHash === undefined ? null : { id: sessionId, cwdHash };
@@ -435,15 +449,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			const sum = factSumOf(telemetry.live()?.quantity(factRef({ scope: "run", owner: runId, metric: "usd" }))?.fact);
 			return sum ? sum.measured + sum.estimated : 0;
 		},
-		resetSession(nextSessionId) {
-			sessionId = nextSessionId;
-			telemetry.bind(nextSessionId ?? null);
-			if (!nextSessionId)
-				void refreshProcessSpend().catch(() => {
-					// An unreadable process journal leaves the last known spend; the next admission reads it again (#434).
-				});
-			projection.refresh();
-		},
+		resetSession,
 		bindRunReaders: (readers) => projection.bindRunReaders(readers),
 		reconcileRuns: () => projection.reconcileRuns(),
 		setFleetPhase: (runId, phase) => projection.setFleetPhase(runId, phase),

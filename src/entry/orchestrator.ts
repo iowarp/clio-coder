@@ -5386,7 +5386,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										...(settings.chat.model ? { model: settings.chat.model } : {}),
 									});
 									persistCurrentThinkingLevel();
-									telemetry?.resetSession(session.current()?.id ?? null);
 									taskBoard.snapshot();
 								},
 								getDecisionBoard: () => decisionBoard.snapshot(),
@@ -6268,7 +6267,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						if (settings.chat.model) input.model = settings.chat.model;
 						session.create(input);
 						persistCurrentThinkingLevel();
-						telemetry?.resetSession(session.current()?.id ?? null);
 						taskBoard.snapshot();
 					},
 					onForkSession: (parentTurnId) => {

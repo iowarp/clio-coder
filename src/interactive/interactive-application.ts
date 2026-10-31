@@ -1560,7 +1560,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		if (settlement) await settlement;
 		unsent.push(...deps.chat.clearQueuedFollowUps());
 		deps.onNewSession();
-		deps.telemetry.resetSession(deps.session?.current()?.id ?? null);
 		presentation.resetForNewSession();
 		exitSummary.reset();
 		resetTranscript();
