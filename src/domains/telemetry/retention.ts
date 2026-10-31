@@ -9,6 +9,7 @@ import {
 	telemetryBundlePath,
 	telemetryJournalFiles,
 	telemetryObjectsDirectory,
+	telemetryProcessesDirectory,
 	telemetryRunDirectory,
 	telemetryRunsDirectory,
 	telemetrySessionsDirectory,
@@ -40,8 +41,11 @@ export interface PruneAction {
 	bytes: number;
 	mtimeMs: number;
 	reason: PruneReason;
-	/** The session or run whose ownership is re-checked immediately before the delete. */
-	owner: { kind: "session"; directory: string; meta: string | null } | { kind: "run"; directory: string };
+	/** The session, run or process whose ownership is re-checked immediately before the delete. */
+	owner:
+		| { kind: "session"; directory: string; meta: string | null }
+		| { kind: "run"; directory: string }
+		| { kind: "process"; directory: string };
 }
 
 export interface PruneHold {
@@ -79,8 +83,9 @@ interface SessionTelemetry {
 	partial: boolean;
 }
 
-interface RunTelemetry {
-	runId: string;
+/** A run or process scope: its journal, sealed bundle and objects, kept or removed whole. */
+interface ScopeTelemetry {
+	id: string;
 	directory: string;
 	files: FileInfo[];
 	lastWriteMs: number;
@@ -217,8 +222,7 @@ async function readSessionTelemetry(
 	return session;
 }
 
-async function readRunTelemetry(stateDir: string, runId: string): Promise<RunTelemetry | null> {
-	const directory = join(telemetryRunsDirectory(stateDir), runId);
+async function readScopeTelemetry(directory: string, id: string): Promise<ScopeTelemetry | null> {
 	const segmentNames = telemetryJournalFiles(await names(directory));
 	const objectsDirectory = telemetryObjectsDirectory(directory);
 	const objectNames = (await realDirectory(objectsDirectory))
@@ -229,17 +233,17 @@ async function readRunTelemetry(stateDir: string, runId: string): Promise<RunTel
 		telemetryBundlePath(directory),
 		...objectNames.map((name) => join(objectsDirectory, name)),
 	];
-	const run: RunTelemetry = { runId, directory, files: [], lastWriteMs: 0, bytes: 0, hold: null };
+	const scope: ScopeTelemetry = { id, directory, files: [], lastWriteMs: 0, bytes: 0, hold: null };
 	for (const path of paths) {
 		const file = await info(path);
 		if (!file) continue;
-		run.files.push(file);
-		run.lastWriteMs = Math.max(run.lastWriteMs, file.mtimeMs);
-		run.bytes += file.bytes;
+		scope.files.push(file);
+		scope.lastWriteMs = Math.max(scope.lastWriteMs, file.mtimeMs);
+		scope.bytes += file.bytes;
 	}
-	if (run.files.length === 0) return null;
-	if (locked(directory)) run.hold = "live";
-	return run;
+	if (scope.files.length === 0) return null;
+	if (locked(directory)) scope.hold = "live";
+	return scope;
 }
 
 /**
@@ -268,25 +272,31 @@ export async function planTelemetryPrune(
 		const session = await readSessionTelemetry(directory, sessionId, metas.get(sessionId) ?? null);
 		if (session) sessions.push(session);
 	}
-	const runs: RunTelemetry[] = [];
-	const runsRoot = telemetryRunsDirectory(stateDir);
-	for (const runId of await names(runsRoot)) {
-		if (!SAFE_ID.test(runId)) continue;
-		if (!(await realDirectory(join(runsRoot, runId)))) {
-			plan.held.push({ path: join(runsRoot, runId), reason: "symlink" });
-			continue;
+	const scopes = async (root: string): Promise<ScopeTelemetry[]> => {
+		const found: ScopeTelemetry[] = [];
+		for (const id of await names(root)) {
+			if (!SAFE_ID.test(id)) continue;
+			if (!(await realDirectory(join(root, id)))) {
+				plan.held.push({ path: join(root, id), reason: "symlink" });
+				continue;
+			}
+			const scope = await readScopeTelemetry(join(root, id), id);
+			if (scope) found.push(scope);
 		}
-		const run = await readRunTelemetry(stateDir, runId);
-		if (run) runs.push(run);
-	}
-	// Session content preimages count toward research; sealed runs stay whole in the standard budget (#434).
+		return found;
+	};
+	const runs = await scopes(telemetryRunsDirectory(stateDir));
+	// Every process opens its own journal, so they accumulate one per process like runs do (#434).
+	const processes = await scopes(telemetryProcessesDirectory(stateDir));
+	// Session content preimages count toward research; sealed runs and processes stay whole in the standard budget.
 	const sessionBytes = (session: SessionTelemetry) =>
 		[...session.objects].reduce(
 			(sum, [id, file]) => sum + (CONTENT_SUBJECTS.has(session.refs.get(id) ?? "") ? 0 : file.bytes),
 			session.bytes,
 		);
 	plan.standardBytes =
-		sessions.reduce((sum, session) => sum + sessionBytes(session), 0) + runs.reduce((sum, run) => sum + run.bytes, 0);
+		sessions.reduce((sum, session) => sum + sessionBytes(session), 0) +
+		[...runs, ...processes].reduce((sum, scope) => sum + scope.bytes, 0);
 
 	// Standard retention: whole session journals, oldest first; age first, then size.
 	const doomed = new Set<SessionTelemetry>();
@@ -320,17 +330,22 @@ export async function planTelemetryPrune(
 	}
 
 	// A run's sealed bundle and objects expire with its journal so retained evidence stays complete (#434).
+	// Process journals expire and yield to the size budget the same way; a live process holds its lock (#434).
 	const cited = new Set(sessions.filter((session) => !doomed.has(session)).flatMap((session) => [...session.runs]));
-	for (const run of runs.sort((a, b) => a.lastWriteMs - b.lastWriteMs)) {
-		const hold = run.hold ?? (cited.has(run.runId) ? "referenced-run" : null);
+	const sealedScopes = [
+		...runs.map((scope) => ({ scope, kind: "run" as const })),
+		...processes.map((scope) => ({ scope, kind: "process" as const })),
+	];
+	for (const { scope, kind } of sealedScopes.sort((a, b) => a.scope.lastWriteMs - b.scope.lastWriteMs)) {
+		const hold = scope.hold ?? (kind === "run" && cited.has(scope.id) ? "referenced-run" : null);
 		if (hold) {
-			plan.held.push({ path: run.directory, reason: hold });
+			plan.held.push({ path: scope.directory, reason: hold });
 			continue;
 		}
-		if (run.lastWriteMs >= cutoff && standing <= policy.maxBytes) continue;
-		standing -= run.bytes;
-		const reason: PruneReason = run.lastWriteMs < cutoff ? "expired" : "over-size";
-		for (const file of run.files) plan.remove.push({ ...file, reason, owner: { kind: "run", directory: run.directory } });
+		if (scope.lastWriteMs >= cutoff && standing <= policy.maxBytes) continue;
+		standing -= scope.bytes;
+		const reason: PruneReason = scope.lastWriteMs < cutoff ? "expired" : "over-size";
+		for (const file of scope.files) plan.remove.push({ ...file, reason, owner: { kind, directory: scope.directory } });
 	}
 
 	// Kept, readable, idle sessions: research content past its window, then objects no record cites.
@@ -369,7 +384,7 @@ export interface PruneResult {
 }
 
 /**
- * Ownership is re-checked per session or run immediately before its files go, and the journal's lock file again
+ * Ownership is re-checked per session, run or process immediately before its files go, and the journal's lock file again
  * before every unlink, so a session that starts between the plan and its turn is skipped whole. Prune never takes
  * the journal lock itself: a writer that found it held would fail its open and lose the session's journal (#434).
  */
