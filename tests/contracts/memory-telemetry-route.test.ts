@@ -42,7 +42,7 @@ test("a step journals the resolved route, call references and its owning context
 		createTaskMemoryTelemetrySink().record({ ...STEP, route, calls: [call] });
 		const row = records[0];
 		ok(row?.kind === "memory.step_decided");
-		deepStrictEqual(row.ctx, { sessionId: "original", label: "memory" });
+		deepStrictEqual(row.ctx, { sessionId: "original", agent: { role: "memory", id: "original" } });
 		deepStrictEqual(row.data.route, route);
 		deepStrictEqual(row.data.calls, [{ callId: call.callId, attemptId: call.attemptId }]);
 		strictEqual(validPayload(row.kind, row.data), true);
@@ -73,7 +73,11 @@ test("rules and model steps retain their launching owner without inventing a pro
 		await registration.runPromptedStep({ deterministicTrigger: true });
 		strictEqual(rows.length > 0, true);
 		ok(rows[0]);
-		deepStrictEqual(rows[0].context, { sessionId: "session-a", turnId: "turn-a", label: "memory" });
+		deepStrictEqual(rows[0].context, {
+			sessionId: "session-a",
+			turnId: "turn-a",
+			agent: { role: "memory", id: "session-a" },
+		});
 		strictEqual(rows[0].calls, undefined);
 		registration.reset();
 		rows.length = 0;
@@ -91,7 +95,7 @@ test("rules and model steps retain their launching owner without inventing a pro
 test("linked memory spend follows late journal settlements and deduplicates repeated step references", async (t) => {
 	const home = makeScratchHome("clio-coder-memory-journal-");
 	t.after(home.cleanup);
-	const context = { sessionId: "session", label: "memory" as const };
+	const context = { sessionId: "session", agent: { role: "memory" as const, id: "session" } };
 	const journal = await openCallJournal({
 		directory: telemetrySessionDirectory(home.dir, "session"),
 		context,
@@ -100,7 +104,6 @@ test("linked memory spend follows late journal settlements and deduplicates repe
 	try {
 		const call = beginCall(
 			{
-				label: "memory",
 				roundKind: "tools-removed",
 				toolChoice: "none",
 				target: {

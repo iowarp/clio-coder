@@ -22,7 +22,7 @@ const call = {
 	endAt: "2026-10-30T10:00:03.000Z",
 	callId: "call-1",
 	attemptId: "attempt-1",
-	label: "main",
+	agent: { role: "main", id: "session-1" },
 	turnId: "turn-1",
 	runId: null,
 	disposition: "settled",

@@ -71,7 +71,7 @@ const mainCalls = () => {
 	const records = source.journal.records;
 	for (const record of records) if (record.k === "call.settled") settledAt.set(record.data.attemptId, record.t);
 	return foldCallJournal(records)
-		.attempts.filter((attempt) => attempt.started.label === "main")
+		.attempts.filter((attempt) => attempt.agent.role === "main")
 		.map((attempt) => {
 			ok(attempt.settled, `attempt ${attempt.started.attemptId} settled`);
 			return { settled: attempt.settled, at: settledAt.get(attempt.started.attemptId) ?? "" };
@@ -129,7 +129,7 @@ test("main-loop dispositions come from recorded facts: 131 invoked of 136 starte
 
 test("Σ settled main-loop provider tokens is 26,987,154, beside the two invoked calls that reported none", () => {
 	const fold = foldCallJournal(source.journal.records);
-	const main = foldCalls(fold.attempts.filter((attempt) => attempt.started.label === "main"));
+	const main = foldCalls(fold.attempts.filter((attempt) => attempt.agent.role === "main"));
 	strictEqual(main.totalTokens.measured, 26_987_154);
 	strictEqual(main.totalTokens.estimated, 0);
 	strictEqual(main.totalTokens.unknownCount, 2, "L3: the 401 and the dropped stream leave the sum a lower bound");

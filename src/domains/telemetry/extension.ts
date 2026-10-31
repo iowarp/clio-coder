@@ -13,6 +13,7 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
 import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
+import { mainAgent } from "../../core/telemetry/context.js";
 import { factRef, type Quantity } from "../../core/telemetry/dto.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
@@ -192,7 +193,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		},
 	};
 	const config = () => context.getContract<ConfigContract>("config");
-	const sessionContext = (sessionId: string): TelemetryContext => ({ sessionId, label: "main" });
+	const sessionContext = (sessionId: string): TelemetryContext => ({ sessionId, agent: mainAgent(sessionId) });
 	const settingsUnavailable = () =>
 		writeDiagnostic("[clio-coder:telemetry] settings record unavailable; coverage is incomplete\n");
 	// Records still on their way to a writer: lifecycle, settings changes and reopened ambient facts. Shutdown waits for
@@ -208,7 +209,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		data: EventPayload<K>,
 	): void => {
 		const write = journals
-			.acquire(origin, "main")
+			.acquire(origin, mainAgent(origin.id))
 			.then(async (lease) => {
 				try {
 					// A session seals at every close, once its last lease drains; a resume continues the chain (#434).
@@ -239,7 +240,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		const origin = liveSession;
 		if (!origin || origin.id !== payload.sessionId) return;
 		const write: Promise<void> = journals
-			.acquire(origin, "main")
+			.acquire(origin, mainAgent(origin.id))
 			.then(async (lease) => {
 				try {
 					if (!lease.journaled || !lease.storeObject) return;
@@ -439,7 +440,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 					const origin = id === null || stopping ? undefined : journals.knownOrigin(id);
 					if (!origin) return false;
 					const write = journals
-						.acquire(origin, "main")
+						.acquire(origin, mainAgent(origin.id))
 						.then(async (lease) => {
 							try {
 								if (lease.journaled) enqueueReopenedTelemetry(record);
@@ -545,7 +546,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 				return;
 			}
 			void journals
-				.acquire(origin, "memory")
+				.acquire(origin, { role: "memory", id: origin.id })
 				.then(async (lease) => {
 					try {
 						telemetryHub().emitContent(kind, owned.data, owned.preimage, lease.context);

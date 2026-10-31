@@ -94,7 +94,7 @@ for (const id of ["fleet-149", "member-two"])
 		join(state, "receipts", `${id}.json`),
 		JSON.stringify({ version: 1, runId: id, outcome: "succeeded", output: { text: "Fixture receipt output" } }),
 	);
-const context = { sessionId: null, runId: "fixture-gate", label: "main" } as const;
+const context = { sessionId: null, runId: "fixture-gate", agent: { role: "coordinator", id: "fixture-gate" } } as const;
 const journal = await openCallJournal({
 	directory: telemetryRunDirectory(state, context.runId),
 	context,

@@ -2121,7 +2121,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 							return {
 								origin: startupSession ?? null,
 								acquire,
-								label: "prewarm",
+								role: "prewarm",
 								targetId,
 								runtimeId,
 								costProvenance,

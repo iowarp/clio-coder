@@ -1,5 +1,6 @@
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
+import { mainAgent } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall, telemetryCaptures } from "../core/telemetry/producer.js";
@@ -803,7 +804,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const openModelCall = async (): Promise<void> => {
 			const origin = deps.sessionOrigin?.();
 			if (!origin || !deps.telemetry?.acquireTelemetrySession) return;
-			journalLease = await deps.telemetry.acquireTelemetrySession(origin, "main", state.activeUserTurnId ?? undefined);
+			journalLease = await deps.telemetry.acquireTelemetrySession(
+				origin,
+				mainAgent(origin.id),
+				state.activeUserTurnId ?? undefined,
+			);
 			const compiled = context.compiledSessionPrompt?.();
 			const compile = context.promptCompileRecord?.();
 			const objects = await journalLease.storeRequestObjects?.({
@@ -818,7 +823,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			const textOnly = state.synthesisToolLock || choice.kind === "none";
 			modelCall = beginCall(
 				{
-					label: "main",
 					...(objects && Object.keys(objects).length > 0 ? { objects } : {}),
 					target: {
 						targetId: localRuntime.targetId,

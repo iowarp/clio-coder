@@ -91,7 +91,7 @@ import { isReceiptBearingFrame } from "../../src/worker/protocol.js";
 import { checkTelemetryProducer, checkTelemetryWrites } from "../boundaries/check-boundaries.js";
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
-const context = { sessionId: "journal-session", label: "main" as const };
+const context = { sessionId: "journal-session", agent: { role: "main" as const, id: "journal-session" } };
 const writer = { clioCoderVersion: "fixture", piVersion: "fixture" };
 const unknown = { kind: "unknown", reason: "not-observed" } as const;
 const unsent = {
@@ -138,14 +138,13 @@ test("rule11 keeps writes under the telemetry root inside the telemetry domain",
 });
 
 test("worker forwarding preserves identity and source clocks with bounded deferred delivery", async () => {
-	const run = { sessionId: null, runId: "standalone-run", label: "worker" as const };
+	const run = { sessionId: null, runId: "standalone-run", agent: { role: "worker" as const, id: "standalone-run" } };
 	const origin = { host: "remote-worker", pid: 17, birthToken: "worker-birth", monoEpochWallMs: 1000 };
 	const frames: WorkerTelemetryFrame[] = [];
 	const forwarder = createTelemetryForwarder(run, origin, (frame) => frames.push(frame), 2);
 	try {
 		const call = beginCall(
 			{
-				label: "worker",
 				target: { targetId: "test", runtimeId: "test", api: "test", requestedModel: "test", reportedModel: unknown },
 				roundKind: "normal",
 				toolChoice: "auto",
@@ -222,10 +221,10 @@ test("overlapping work retains its original session and releases ownership only 
 	});
 	try {
 		const origin = { id: "original", cwdHash: "repo" };
-		const main = await journals.acquire(origin, "main", "turn-a");
-		const side = await journals.acquire(origin, "memory", "turn-a");
+		const main = await journals.acquire(origin, { role: "main", id: origin.id }, "turn-a");
+		const side = await journals.acquire(origin, { role: "memory", id: origin.id }, "turn-a");
 		await main.release();
-		const next = await journals.acquire({ ...origin, id: "next" }, "main", "turn-b");
+		const next = await journals.acquire({ ...origin, id: "next" }, { role: "main", id: "next" }, "turn-b");
 		telemetryHub().emit("session.opened", {}, next.context);
 		telemetryHub().emit("session.resumed", { via: "resume" }, side.context);
 		await next.release();
@@ -240,7 +239,7 @@ test("overlapping work retains its original session and releases ownership only 
 			switched.records.map(({ record }) => record.ctx),
 			[next.context],
 		);
-		const reopened = await journals.acquire(origin, "main");
+		const reopened = await journals.acquire(origin, { role: "main", id: origin.id });
 		const objects = await reopened.storeRequestObjects?.({
 			prompt: {
 				sections: [{ id: "identity", tokenEstimate: 3, contentHash: "a".repeat(64) }],
@@ -262,7 +261,6 @@ test("overlapping work retains its original session and releases ownership only 
 		deepStrictEqual(await reopened.storeRequestObjects?.({ tools: { invalid: Number.NaN } }), {});
 		const request = beginCall(
 			{
-				label: "main",
 				target: { targetId: "t", runtimeId: "r", api: "a", requestedModel: "m", reportedModel: unknown },
 				roundKind: "normal",
 				toolChoice: "auto",
@@ -290,8 +288,8 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 	const stateDir = join(scratch, "state");
 	const sessionDirectory = join(stateDir, "sessions", "repo", "parent");
 	const journals = createSessionJournals(stateDir, () => {});
-	const parent = await journals.acquire({ id: "parent", cwdHash: "repo" }, "worker");
-	const context = { sessionId: "parent", runId: "run", label: "worker" as const };
+	const parent = await journals.acquire({ id: "parent", cwdHash: "repo" }, { role: "worker", id: "run" });
+	const context = { sessionId: "parent", runId: "run", agent: { role: "worker" as const, id: "run" } };
 	const run = await openRunTelemetry(context, telemetryRunDirectory(stateDir, "run"));
 	run.linkSession(parent.context);
 	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
@@ -378,10 +376,10 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 			.split("\n")
 			.map((line) => JSON.parse(line) as Record<string, unknown>);
 		// The report reads the run's aggregate through the read model; the receipt's own 99 tokens are not a second source.
-		const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "label")?.report as
+		const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "role")?.report as
 			| CostReportV1
 			| undefined;
-		ok(cost, "the report carries the read model's cost by origin");
+		ok(cost, "the report carries the read model's cost by agent role");
 		deepStrictEqual(cost.scope, { repo: "all", days: 30 });
 		const tokens = cost.total.tokens.fact;
 		strictEqual("kind" in tokens ? Number.NaN : tokens.measured, 9);
@@ -404,7 +402,7 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 
 test("a standalone run shares one envelope writer for calls and bounded display history", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "telemetry-run-"));
-	const run = { sessionId: null, runId: "standalone-run", label: "worker" as const };
+	const run = { sessionId: null, runId: "standalone-run", agent: { role: "worker" as const, id: "standalone-run" } };
 	const journal = await openRunTelemetry(run, join(directory, run.runId));
 	try {
 		const display = defaultRunEventJournal();
@@ -430,7 +428,6 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 		display.append(run.runId, { at: new Date().toISOString(), type: "late-display" });
 		const call = beginCall(
 			{
-				label: "worker",
 				target: {
 					targetId: "fixture",
 					runtimeId: "fixture",
@@ -487,7 +484,6 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 		await rejects(openCallJournal({ directory: sessionDirectory, context, writer }), /timed out/);
 		const call = beginCall(
 			{
-				label: "main",
 				target: { targetId: "test", runtimeId: "test", api: "test", requestedModel: "test", reportedModel: unknown },
 				roundKind: "normal",
 				toolChoice: "auto",
@@ -606,7 +602,6 @@ test("journal overflow and invalid records produce gaps, rotation preserves reco
 		strictEqual(journal.health().invalid, 1);
 		const call = beginCall(
 			{
-				label: "main",
 				target: { targetId: "test", runtimeId: "test", api: "test", requestedModel: "test", reportedModel: unknown },
 				roundKind: "normal",
 				toolChoice: "auto",
@@ -732,12 +727,12 @@ test("a session stores prompt text only under content capture, once per distinct
 		systemPrompt: `you are a fixture; api_key=${"secret".repeat(4)}`,
 	};
 	try {
-		const standard = await journals.acquire(origin, "main");
+		const standard = await journals.acquire(origin, { role: "main", id: origin.id });
 		await standard.storeRequestObjects?.({ prompt });
 		await standard.release();
 		capture = effectiveTelemetryCapture({ mode: "research", research }, true);
 		for (let n = 0; n < 2; n += 1) {
-			const lease = await journals.acquire(origin, "main");
+			const lease = await journals.acquire(origin, { role: "main", id: origin.id });
 			await lease.storeRequestObjects?.({ prompt });
 			await lease.release();
 		}
@@ -766,7 +761,7 @@ test("memory and observation traces journal content only under research capture 
 		admits: (kind) => captureAdmits(capture, kind),
 		record(kind, data, preimage) {
 			leases.push(
-				journals.acquire(origin, "memory").then(async (lease) => {
+				journals.acquire(origin, { role: "memory", id: origin.id }).then(async (lease) => {
 					telemetryHub().emitContent(kind, data, preimage, lease.context);
 					await lease.release();
 				}),
@@ -842,7 +837,7 @@ test("the process journal receives one health window per process, carrying loop 
 		{ id: "health-b", cwdHash: "healthhash" },
 	];
 	try {
-		for (const origin of origins) await (await journals.acquire(origin, "main")).release();
+		for (const origin of origins) await (await journals.acquire(origin, { role: "main", id: origin.id })).release();
 		await new Promise((resolve) => setTimeout(resolve, 130));
 		await journals.closeAll();
 		await processJournal.close(0);
@@ -895,10 +890,9 @@ test("a research export round-trips through import-bundle into a fixture with th
 			pricedBy: "target-rates" as const,
 		},
 	};
-	const call = (label: "main" | "worker", ctx: Parameters<typeof beginCall>[1], objects?: CallStarted["objects"]) =>
+	const call = (ctx: Parameters<typeof beginCall>[1], objects?: CallStarted["objects"]) =>
 		beginCall(
 			{
-				label,
 				...(objects ? { objects } : {}),
 				target: { targetId: "t", runtimeId: "r", api: "a", requestedModel: "m", reportedModel: unknown },
 				roundKind: "normal",
@@ -907,20 +901,20 @@ test("a research export round-trips through import-bundle into a fixture with th
 			ctx,
 		);
 	const runId = "bundlerun";
-	const runContext = { sessionId: origin.id, runId, label: "worker" as const };
+	const runContext = { sessionId: origin.id, runId, agent: { role: "worker" as const, id: runId } };
 	const run = await openCallJournal({
 		directory: telemetryRunDirectory(stateDir, runId),
 		context: runContext,
 		writer,
 	});
 	try {
-		const lease = await journals.acquire(origin, "main");
+		const lease = await journals.acquire(origin, { role: "main", id: origin.id });
 		const objects = await lease.storeRequestObjects?.({
 			prompt: { sections: [{ id: "s", tokenEstimate: 1 }], fragmentManifest: [], systemPrompt: "fixture prompt" },
 			tools: [{ name: "read" }],
 		});
-		call("main", lease.context, objects).settle(settled);
-		const worker = call("worker", runContext);
+		call(lease.context, objects).settle(settled);
+		const worker = call(runContext);
 		worker.settle(settled);
 		telemetryHub().emit("call.linked", { runId, callId: worker.callId }, lease.context);
 		await lease.release();
@@ -991,8 +985,8 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		const run = scope === "run";
 		const directory = run ? telemetryRunDirectory(stateDir, id) : telemetrySessionDirectory(stateDir, id);
 		const ctx = run
-			? { sessionId: "kept", runId: id, label: "worker" as const }
-			: { sessionId: id, label: "main" as const };
+			? { sessionId: "kept", runId: id, agent: { role: "worker" as const, id } }
+			: { sessionId: id, agent: { role: "main" as const, id } };
 		const writerJournal = await openCallJournal({ directory, context: ctx, writer });
 		work(ctx);
 		await writerJournal.close();
@@ -1025,11 +1019,11 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		const research = { content: true, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false };
 		const keptJournal = await openCallJournal({
 			directory: keptDirectory,
-			context: { sessionId: "kept", label: "main" },
+			context: { sessionId: "kept", agent: { role: "main", id: "kept" } },
 			writer,
 			capture: () => effectiveTelemetryCapture({ mode: "research", research }, true),
 		});
-		const keptContext = { sessionId: "kept", label: "main" as const };
+		const keptContext = { sessionId: "kept", agent: { role: "main" as const, id: "kept" } };
 		telemetryHub().emit(
 			"prompt.text_captured",
 			{ structure: { ...structure, subject: "prompt-structure" }, text, bytes: 10 },
@@ -1038,7 +1032,7 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		telemetryHub().emit(
 			"call.started",
 			{
-				...{ callId: newCallId(), attemptId: newAttemptId(), attempt: 0, label: "main" },
+				...{ callId: newCallId(), attemptId: newAttemptId(), attempt: 0 },
 				objects: { toolSchemas: structure },
 				target: { targetId: "t", runtimeId: "r", api: "a", requestedModel: "m", reportedModel: unknown },
 				roundKind: "normal",
@@ -1200,7 +1194,6 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		callId: newCallId(),
 		attemptId: newAttemptId(),
 		attempt: 0,
-		label: "main",
 		target: { targetId: "target", runtimeId: "fixture", api: "fixture", requestedModel: "model", reportedModel: unknown },
 		roundKind: "normal",
 		toolChoice: "auto",
@@ -1292,7 +1285,7 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	const aggregateRecord = makeTelemetryRecord(
 		"run.usage_reported",
 		aggregate,
-		{ sessionId: "session", runId: "run", label: "worker" },
+		{ sessionId: "session", runId: "run", agent: { role: "worker", id: "run" } },
 		clock,
 	);
 	const aggregateOnly = runUsageFromCallRecords([aggregateRecord]);
@@ -1385,13 +1378,13 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 	await mkdir(childDirectory, { recursive: true });
 	const parent = await openCallJournal({
 		directory: parentDirectory,
-		context: { sessionId: "parent", label: "main" },
+		context: { sessionId: "parent", agent: { role: "main", id: "parent" } },
 		writer,
 	});
 	const contribute = (
 		journal: typeof parent,
 		sessionId: string,
-		label: "main" | "helper",
+		role: "main" | "helper",
 		tokens: number,
 		wallMs: number,
 	) => {
@@ -1399,7 +1392,7 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 		const attemptId = newAttemptId();
 		journal.enqueue({
 			kind: "call.settled",
-			ctx: { sessionId, label, callId, attemptId },
+			ctx: { sessionId, agent: { role, id: sessionId }, callId, attemptId },
 			wallMs,
 			mono: 1,
 			data: {
@@ -1419,7 +1412,6 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 				callId,
 				attemptId,
 				attempt: 0,
-				label,
 				stages: { settle: 1 },
 				roundKind: "normal",
 				toolChoice: "auto",
@@ -1448,7 +1440,7 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 		});
 		const child = await openCallJournal({
 			directory: childDirectory,
-			context: { sessionId: "child", label: "main" },
+			context: { sessionId: "child", agent: { role: "main", id: "child" } },
 			writer,
 		});
 		const childId = contribute(child, "child", "main", 11, at + 10);
@@ -1552,7 +1544,6 @@ test("a crash-orphaned main call counts only when its user turn is on the active
 	const owner = { ...context, turnId: "user-1" };
 	const call = beginCall(
 		{
-			label: "main",
 			target: { targetId: "test", runtimeId: "test", api: "test", requestedModel: "test", reportedModel: unknown },
 			roundKind: "normal",
 			toolChoice: "auto",
@@ -1567,14 +1558,9 @@ test("a crash-orphaned main call counts only when its user turn is on the active
 	ok(facts);
 	const scope = { ...owner, callId: facts.callId, attemptId: facts.attemptId };
 	const clock = { t: new Date().toISOString(), mono: 1 };
-	const { callId, attemptId, attempt, label, target, roundKind, toolChoice } = facts;
+	const { callId, attemptId, attempt, target, roundKind, toolChoice } = facts;
 	const rows = [
-		makeTelemetryRecord(
-			"call.started",
-			{ callId, attemptId, attempt, label, target, roundKind, toolChoice },
-			scope,
-			clock,
-		),
+		makeTelemetryRecord("call.started", { callId, attemptId, attempt, target, roundKind, toolChoice }, scope, clock),
 		makeTelemetryRecord("call.settled", facts, scope, clock),
 	];
 	const user = (turnId: string): SessionEntry => ({
@@ -1596,7 +1582,7 @@ test("a crash-orphaned main call counts only when its user turn is on the active
 test("usage report discovers a standalone run journal that has no session and no receipt (#434)", async () => {
 	const scratch = await mkdtemp(join(tmpdir(), "telemetry-standalone-report-"));
 	const stateDir = join(scratch, "state");
-	const owner = { sessionId: null, runId: "orphan-run", label: "worker" as const };
+	const owner = { sessionId: null, runId: "orphan-run", agent: { role: "worker" as const, id: "orphan-run" } };
 	const run = await openRunTelemetry(owner, telemetryRunDirectory(stateDir, owner.runId));
 	const measured = { kind: "measured" as const, value: 21, source: "provider" as const };
 	const usage: RunUsage = {
@@ -1651,7 +1637,7 @@ test("usage report discovers a standalone run journal that has no session and no
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line) as Record<string, unknown>);
-		const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "label")?.report as
+		const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "role")?.report as
 			| CostReportV1
 			| undefined;
 		strictEqual(cost?.total.tokens.display, "21");

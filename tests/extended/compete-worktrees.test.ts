@@ -224,7 +224,10 @@ for (const agent of ["scout", "coder"] as const) {
 				if (rejected.kind === "error") match(rejected.message, /candidates must be an integer 2\.\.4/u);
 				strictEqual(bundle.contract.listRuns().length, 0);
 			}
-			const result = await withTelemetryContext({ sessionId: "compete-contract", label: "main" }, () => tool.run(args));
+			const result = await withTelemetryContext(
+				{ sessionId: "compete-contract", agent: { role: "main", id: "compete-contract" } },
+				() => tool.run(args),
+			);
 			const after = snapshot(root);
 			t.diagnostic(
 				JSON.stringify({ before, candidateBefore, judged, changedPaths, judgeTask, after, resultKind: result.kind }),
@@ -462,19 +465,21 @@ for (const phase of ["candidates", "judge"] as const) {
 					getAgentSpecs: () => specs,
 					getAutonomy: () => "yolo",
 				});
-				const result = await withTelemetryContext({ sessionId: "compete-contract", label: "main" }, () =>
-					tool.run(
-						{
-							agent: "scout",
-							task: "Explain tracked.txt with a grounded citation.",
-							intent: { read_roots: ["tracked.txt"], write_roots: [], expected_outputs: [] },
-							mode: "compete",
-							candidates: 2,
-							cwd: root,
-							...(stopKind === "timeout" ? { timeout_ms: 1500 } : {}),
-						},
-						{ signal: controller.signal },
-					),
+				const result = await withTelemetryContext(
+					{ sessionId: "compete-contract", agent: { role: "main", id: "compete-contract" } },
+					() =>
+						tool.run(
+							{
+								agent: "scout",
+								task: "Explain tracked.txt with a grounded citation.",
+								intent: { read_roots: ["tracked.txt"], write_roots: [], expected_outputs: [] },
+								mode: "compete",
+								candidates: 2,
+								cwd: root,
+								...(stopKind === "timeout" ? { timeout_ms: 1500 } : {}),
+							},
+							{ signal: controller.signal },
+						),
 				);
 				strictEqual(result.kind, "error");
 				if (result.kind !== "error") throw new Error("expected stopped compete");

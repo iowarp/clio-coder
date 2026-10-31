@@ -224,7 +224,6 @@ it("dispatch preserves the explicit capture option with journal history disabled
 					callId: newCallId(),
 					attemptId: newAttemptId(),
 					attempt: 0,
-					label: "worker",
 					roundKind: "normal",
 					toolChoice: "auto",
 					target: {
@@ -385,7 +384,6 @@ it("a worker killed mid-call keeps the calls it settled and settles its open att
 					callId: newCallId(),
 					attemptId: newAttemptId(),
 					attempt: 0,
-					label: "worker",
 					roundKind: "normal",
 					toolChoice: "auto",
 					target: {

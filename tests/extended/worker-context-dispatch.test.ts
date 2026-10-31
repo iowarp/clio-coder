@@ -88,11 +88,15 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			deepStrictEqual(parseWorkerSpec(JSON.parse(JSON.stringify(spec))).telemetryContext, spec.telemetryContext);
 			equal(spec.telemetryContext.sessionId, null, "a history seed does not manufacture a parent session owner");
 			throws(
-				() => parseWorkerSpec({ ...spec, telemetryContext: { sessionId: null, label: "worker" } }),
+				() => parseWorkerSpec({ ...spec, telemetryContext: { sessionId: null, agent: { role: "worker", id: "run" } } }),
 				/telemetryContext/,
 			);
 			throws(
-				() => parseWorkerSpec({ ...spec, telemetryContext: { ...spec.telemetryContext, label: "main" } }),
+				() =>
+					parseWorkerSpec({
+						...spec,
+						telemetryContext: { ...spec.telemetryContext, agent: { role: "main", id: "session" } },
+					}),
 				/telemetryContext/,
 			);
 			const input = { ...spec, runtime: litellm, cwd: env.dir };
@@ -106,11 +110,11 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			const telemetryContext = spec.telemetryContext;
 			const callFacts = events.flatMap((event) => {
 				const record = readWorkerTelemetryFrame(event, telemetryContext);
-				return record?.kind === "call.settled" ? [record.data] : [];
+				return record?.kind === "call.settled" ? [{ ...record.data, role: record.ctx.agent.role }] : [];
 			});
 			equal(callFacts.length, 1);
 			equal(callFacts[0]?.disposition, "settled");
-			equal(callFacts[0]?.label, "worker");
+			equal(callFacts[0]?.role, "worker");
 			// A parent-supplied key leaves no auth stage; every other stage the worker passed is journaled (#434).
 			deepStrictEqual(Object.keys(callFacts[0]?.stages ?? {}).sort(), [
 				"admission",

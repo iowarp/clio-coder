@@ -122,13 +122,17 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 	}
 	if (value.k === "call.started" || value.k === "call.settled") {
 		const call = data as JournalPayload<"call.started">;
-		if (value.ctx.callId !== call.callId || value.ctx.attemptId !== call.attemptId || value.ctx.label !== call.label) {
+		if (value.ctx.callId !== call.callId || value.ctx.attemptId !== call.attemptId) {
 			return { kind: "skipped", reason: "invalid-record" };
 		}
 	}
 	if (
 		value.k === "run.usage_reported" &&
-		(!value.ctx.runId || value.ctx.label !== "worker" || value.ctx.callId || value.ctx.attemptId)
+		(!value.ctx.runId ||
+			value.ctx.agent.role !== "worker" ||
+			value.ctx.agent.id !== value.ctx.runId ||
+			value.ctx.callId ||
+			value.ctx.attemptId)
 	)
 		return { kind: "skipped", reason: "invalid-record" };
 	return { kind: "record", record: value as TelemetryRecord };

@@ -206,7 +206,7 @@ describe("contracts/context lifecycle", () => {
 		const otherModel = snapshot("turn-2", "loaded", 200_000, "local", "other-model");
 		const latest = snapshot("turn-3", "probe", 262_144);
 		const journals = createSessionJournals(clioStateDir(), () => {});
-		const lease = await journals.acquire(meta, "main");
+		const lease = await journals.acquire(meta, { role: "main", id: meta.id });
 		try {
 			for (const value of [first, otherModel, latest])
 				telemetryHub().emit(

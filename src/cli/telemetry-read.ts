@@ -14,7 +14,7 @@ import type {
 	WhyStoppedV1,
 } from "../core/telemetry/dto.js";
 import { parseFactRef } from "../core/telemetry/dto.js";
-import { CallLabel, Disposition } from "../core/telemetry/enums.js";
+import { AgentRole, Disposition } from "../core/telemetry/enums.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	loadRunReceiptEvidence,
@@ -46,10 +46,10 @@ import { formatColumns, printError } from "./shared.js";
 
 export const READ_HELP = `clio-coder telemetry inspect <session> [--json]
 clio-coder telemetry inspect --run <run-id> [--json]
-clio-coder telemetry calls <session> [--run <run-id>] [--label <l,..>] [--disposition <d,..>]
+clio-coder telemetry calls <session> [--run <run-id>] [--role <r,..>] [--disposition <d,..>]
                            [--turn <id,..>] [--from <iso>] [--to <iso>] [--limit <n>] [--json]
-clio-coder telemetry cost <session> | --run <run-id> [--by label|model|turn] [--json]
-clio-coder telemetry cost [--repo <path>] --days <n> [--by label|model|turn] [--json]
+clio-coder telemetry cost <session> | --run <run-id> [--by role|model|turn] [--json]
+clio-coder telemetry cost [--repo <path>] --days <n> [--by role|model|turn] [--json]
 clio-coder telemetry cache <session> [--json]
 clio-coder telemetry timeline <session> [--from <iso> --to <iso>] [--json]
 clio-coder telemetry why-stopped <session> [--json]
@@ -71,7 +71,7 @@ interface Args {
 	json: boolean;
 }
 
-const VALUE_FLAGS = new Set(["run", "label", "disposition", "turn", "from", "to", "limit", "by", "repo", "days"]);
+const VALUE_FLAGS = new Set(["run", "role", "disposition", "turn", "from", "to", "limit", "by", "repo", "days"]);
 
 function parse(argv: ReadonlyArray<string>): Args | string {
 	const [command = "", ...rest] = argv;
@@ -171,12 +171,12 @@ function printSession(dto: SessionTelemetryV1): string {
 				dto.transport.pinReason ? ` (${dto.transport.pinReason})` : ""
 			} · WebSocket failures ${show(dto.transport.websocketFailures)} · SSE fallbacks ${show(dto.transport.sseFallbacks)}`,
 		);
-	if (dto.byLabel.length > 0) {
-		lines.push("", "by label");
+	if (dto.byRole.length > 0) {
+		lines.push("", "by agent role");
 		lines.push(
 			formatColumns([
-				["label", "calls", "tokens", "cost"],
-				...dto.byLabel.map((row) => [row.label, show(row.calls), show(row.tokens), show(row.usd)]),
+				["role", "calls", "tokens", "cost"],
+				...dto.byRole.map((row) => [row.role, show(row.calls), show(row.tokens), show(row.usd)]),
 			]).trimEnd(),
 		);
 	}
@@ -207,7 +207,7 @@ function printRun(dto: RunTelemetryV1): string {
 function printCalls(dto: CallsReportV1): string {
 	const rows = dto.calls.map((call) => [
 		call.startedAt,
-		call.label,
+		call.agent.role,
 		call.disposition,
 		`${call.target.targetId}/${call.target.requestedModel}`,
 		call.usage ? show(call.usage.total) : "none",
@@ -215,7 +215,7 @@ function printCalls(dto: CallsReportV1): string {
 		show(call.timing.ttft),
 		call.stop?.failure ?? "",
 	]);
-	const header = ["started", "label", "disposition", "target/model", "tokens", "cost", "ttft", "failure"];
+	const header = ["started", "role", "disposition", "target/model", "tokens", "cost", "ttft", "failure"];
 	const shown =
 		dto.matched > dto.calls.length ? `\n${dto.calls.length} of ${dto.matched} matching attempts shown\n` : "";
 	return rows.length === 0 ? "no matching attempts\n" : `${formatColumns([header, ...rows])}${shown}`;
@@ -273,7 +273,7 @@ function printTimeline(dto: TimelineV1): string {
 	const lines = dto.entries.map((entry) => {
 		switch (entry.kind) {
 			case "call":
-				return `${entry.at}  call     ${entry.label} ${entry.disposition}${entry.failure ? ` (${entry.failure})` : ""} · ${show(entry.tokens)} tokens · ${show(entry.usd)} · cache ${entry.cacheVerdict}`;
+				return `${entry.at}  call     ${entry.agent.role} ${entry.disposition}${entry.failure ? ` (${entry.failure})` : ""} · ${show(entry.tokens)} tokens · ${show(entry.usd)} · cache ${entry.cacheVerdict}`;
 			case "turn":
 				return `${entry.at}  turn     ${entry.stopReason}${entry.cause ? ` on ${entry.cause}` : ""}${entry.stage ? ` at ${entry.stage}` : ""} · ${entry.callIds.length} call(s), ${entry.retries} retries`;
 			case "run":
@@ -383,7 +383,7 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 				return emit(runTelemetry(runId, run, {}, loadRunReceiptEvidence(stateDir, runId)), args.json, printRun);
 			if (args.command === "cost") {
 				const by = args.values.get("by") ?? "model";
-				if (by !== "label" && by !== "model" && by !== "turn") {
+				if (by !== "role" && by !== "model" && by !== "turn") {
 					printError(`--by does not accept ${by}`);
 					return 2;
 				}
@@ -401,8 +401,8 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 				printError("a repository window needs --days <n>, a positive whole number of days");
 				return 2;
 			}
-			const by = args.values.get("by") ?? "label";
-			if (by !== "label" && by !== "model" && by !== "turn") {
+			const by = args.values.get("by") ?? "role";
+			if (by !== "role" && by !== "model" && by !== "turn") {
 				printError(`--by does not accept ${by}`);
 				return 2;
 			}
@@ -450,8 +450,8 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 			case "calls":
 				return emit(callsReport(session, filter), args.json, printCalls);
 			case "cost": {
-				const by = args.values.get("by") ?? "label";
-				if (by !== "label" && by !== "model" && by !== "turn") {
+				const by = args.values.get("by") ?? "role";
+				if (by !== "role" && by !== "model" && by !== "turn") {
 					printError(`--by does not accept ${by}`);
 					return 2;
 				}
@@ -484,9 +484,9 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 }
 
 function callFilter(args: Args): CallFilter | string {
-	const labels = list(args.values.get("label"), CallLabel.enum, "label");
+	const roles = list(args.values.get("role"), AgentRole.enum, "role");
 	const dispositions = list(args.values.get("disposition"), [...Disposition.enum, "incomplete"] as const, "disposition");
-	if (typeof labels === "string") return labels;
+	if (typeof roles === "string") return roles;
 	if (typeof dispositions === "string") return dispositions;
 	const from = isoArg(args.values.get("from"), "from");
 	const to = isoArg(args.values.get("to"), "to");
@@ -500,7 +500,7 @@ function callFilter(args: Args): CallFilter | string {
 		?.split(",")
 		.filter((turn) => turn.length > 0);
 	const filter: CallFilter = {
-		...(labels ? { labels } : {}),
+		...(roles ? { roles } : {}),
 		...(dispositions ? { dispositions } : {}),
 		...(turns ? { turnIds: turns } : {}),
 		...(args.values.get("run") !== undefined && args.positional[0] !== undefined

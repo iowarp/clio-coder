@@ -164,8 +164,10 @@ export async function openFleetRootTelemetry(
 ): Promise<FleetRootTelemetry> {
 	if (fleetRoots.has(rootId)) throw new Error(`fleet root ${rootId} already owns its journal`);
 	const { openCallJournal } = await import("../telemetry/call-journal.js");
+	// The fleet root is the coordinator driving its steps; its own records act for it (#434).
+	const agent = { role: "coordinator", id: rootId } as const;
 	const context: TelemetryContext =
-		sessionId === null ? { sessionId: null, runId: rootId, label: "main" } : { sessionId, runId: rootId, label: "main" };
+		sessionId === null ? { sessionId: null, runId: rootId, agent } : { sessionId, runId: rootId, agent };
 	const writer = await openCallJournal({ directory, context, writer: await clioWriterVersions() });
 	fleetRoots.set(rootId, context);
 	let closing: Promise<void> | undefined;

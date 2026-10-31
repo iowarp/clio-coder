@@ -173,20 +173,3 @@ export interface UsageBreakdown {
 	/** Persisted assistant calls that never reached the provider (#430). */
 	neverSentCalls?: number;
 }
-
-/**
- * What produced a priced call, when it was not an ordinary turn. `/usage` and
- * the usage surfaces separate these out so an operator can see that money was
- * spent beside the session rather than inside it.
- */
-export type CostEntryLabel =
-	| "helper"
-	| "side-question"
-	| "handoff"
-	| "prewarm"
-	| "background-memory"
-	| "failed-compaction"
-	| "system-one"
-	| "safety-judge"
-	| "worker"
-	| "compaction";

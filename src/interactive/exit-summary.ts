@@ -189,7 +189,7 @@ export function renderExitSummary(
 						: [`${target} / ${model} · no call record names it`],
 				),
 			);
-			if (spend.kind === "ready" && spend.byLabel.length > 0) section("Calls by label", [spend.byLabel]);
+			if (spend.kind === "ready" && spend.byRole.length > 0) section("Calls by agent", [spend.byRole]);
 			section(
 				`Tools (${count(snapshot.tools.reduce((sum, tool) => sum + tool.count, 0))} calls)`,
 				snapshot.tools.map(

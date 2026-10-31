@@ -110,7 +110,7 @@ export type ExitSpend =
 			cost: string;
 			/** Attempts started since this visit began, counted by the read model. */
 			visitCalls: number;
-			byLabel: string;
+			byRole: string;
 			models: ReadonlyArray<{ key: string; calls: string; cost: string; breakdown: string }>;
 	  };
 
@@ -136,7 +136,7 @@ export function exitSpend(view: TelemetryView | null | undefined, visitFrom: str
 		breakdown: tokenBreakdown(view),
 		cost: session.totals.usd.display,
 		visitCalls: view.calls({ from: visitFrom, limit: 1 }).matched,
-		byLabel: session.byLabel.map((label) => `${label.label} ${label.calls.display}`).join(" · "),
+		byRole: session.byRole.map((row) => `${row.role} ${row.calls.display}`).join(" · "),
 		models: view.cost("model").groups.map((group) => ({
 			key: group.key,
 			calls: group.calls.display,

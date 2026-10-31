@@ -21,7 +21,7 @@ async function flipByte(path: string, offset: number): Promise<Buffer> {
 test("a sealed session scope verifies from its own files and fails on one flipped byte (#434)", async () => {
 	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-seal-"));
 	const directory = telemetrySessionDirectory(stateDir, "ses_seal");
-	const context: TelemetryContext = { sessionId: "ses_seal", label: "main" };
+	const context: TelemetryContext = { sessionId: "ses_seal", agent: { role: "main", id: "ses_seal" } };
 	// A one-byte segment cap rotates on every batch, so the sealed chain crosses rotated segments.
 	const journal = await openCallJournal({
 		directory,

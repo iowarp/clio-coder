@@ -24,7 +24,7 @@ import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 
-const context = { sessionId: "existing-session-id", label: "main" as const };
+const context = { sessionId: "existing-session-id", agent: { role: "main" as const, id: "existing-session-id" } };
 const header: SegmentHeader = {
 	v: 1,
 	k: "segment.open",
@@ -48,15 +48,23 @@ test("telemetry keeps existing ids, mints namespaced UUIDv7 ids, and isolates co
 				await Promise.resolve();
 				strictEqual(telemetryContext()?.sessionId, context.sessionId);
 				strictEqual(telemetryContext()?.turnId, turnId);
-				withTelemetryContext({ ...context, label: "memory" }, () => strictEqual(telemetryContext()?.label, "memory"));
-				strictEqual(telemetryContext()?.label, "main");
+				withTelemetryContext({ ...context, agent: { role: "memory", id: context.sessionId } }, () =>
+					strictEqual(telemetryContext()?.agent.role, "memory"),
+				);
+				strictEqual(telemetryContext()?.agent.role, "main");
 			}),
 		),
 	);
 	strictEqual(telemetryContext(), undefined);
-	strictEqual(Value.Check(TelemetryContextSchema, { sessionId: null, runId: "run", label: "worker" }), true);
-	strictEqual(Value.Check(TelemetryContextSchema, { sessionId: null, label: "worker" }), false);
-	strictEqual(Value.Check(TelemetryContextSchema, { sessionId: null, runId: "", label: "worker" }), false);
+	strictEqual(
+		Value.Check(TelemetryContextSchema, { sessionId: null, runId: "run", agent: { role: "worker", id: "run" } }),
+		true,
+	);
+	strictEqual(Value.Check(TelemetryContextSchema, { sessionId: null, agent: { role: "worker", id: "run" } }), false);
+	strictEqual(
+		Value.Check(TelemetryContextSchema, { sessionId: null, runId: "", agent: { role: "worker", id: "run" } }),
+		false,
+	);
 });
 
 test("tool contexts retain provider attribution only within the same owner and turn", () => {
@@ -90,7 +98,6 @@ test("an abandoned attempt settles once, as never sent before its send stage and
 	const release = registerTelemetrySink("abandon-session", { enqueue: (record) => Boolean(records.push(record)) });
 	try {
 		const started = {
-			label: "main" as const,
 			target: {
 				targetId: "target",
 				runtimeId: "runtime",
@@ -101,7 +108,7 @@ test("an abandoned attempt settles once, as never sent before its send stage and
 			roundKind: "normal" as const,
 			toolChoice: "auto" as const,
 		};
-		const ctx = { sessionId: "abandon-session", label: "main" as const };
+		const ctx = { sessionId: "abandon-session", agent: { role: "main" as const, id: "abandon-session" } };
 		const unsent = beginCall(started, ctx);
 		strictEqual(unsent.abandon("internal")?.disposition, "never_sent");
 		strictEqual(unsent.abandon("internal"), undefined, "a settled attempt is never settled twice");
@@ -135,7 +142,6 @@ test("an aborted message cannot claim a send its attempt's stages never reached 
 	const release = registerTelemetrySink("unsent-session", { enqueue: (record) => Boolean(records.push(record)) });
 	try {
 		const started = {
-			label: "memory" as const,
 			target: {
 				targetId: "target",
 				runtimeId: "runtime",
@@ -146,7 +152,7 @@ test("an aborted message cannot claim a send its attempt's stages never reached 
 			roundKind: "normal" as const,
 			toolChoice: "auto" as const,
 		};
-		const ctx = { sessionId: "unsent-session", label: "memory" as const };
+		const ctx = { sessionId: "unsent-session", agent: { role: "memory" as const, id: "unsent-session" } };
 		const aborted = callSettlementFromMessage({ stopReason: "aborted", usage: { input: 0, output: 0 } }, "known");
 		strictEqual(aborted.disposition, "sent_unsettled");
 		const atAuth = beginCall(started, ctx);
@@ -176,10 +182,24 @@ test("run owners stay separate from session owners, including standalone runs", 
 	const releaseSession = registerTelemetrySink("same-id", { enqueue: (record) => Boolean(session.push(record)) });
 	const releaseRun = registerRunTelemetrySink("same-id", { enqueue: (record) => Boolean(run.push(record)) });
 	try {
-		strictEqual(telemetryHub().emit("session.opened", {}, { sessionId: "same-id", label: "main" }), true);
-		strictEqual(telemetryHub().emit("process.started", {}, { sessionId: null, runId: "same-id", label: "worker" }), true);
 		strictEqual(
-			telemetryHub().emit("process.started", {}, { sessionId: "same-id", runId: "same-id", label: "worker" }),
+			telemetryHub().emit("session.opened", {}, { sessionId: "same-id", agent: { role: "main", id: "same-id" } }),
+			true,
+		);
+		strictEqual(
+			telemetryHub().emit(
+				"process.started",
+				{},
+				{ sessionId: null, runId: "same-id", agent: { role: "worker", id: "same-id" } },
+			),
+			true,
+		);
+		strictEqual(
+			telemetryHub().emit(
+				"process.started",
+				{},
+				{ sessionId: "same-id", runId: "same-id", agent: { role: "worker", id: "same-id" } },
+			),
 			true,
 		);
 		strictEqual(session.length, 1);
@@ -189,7 +209,11 @@ test("run owners stay separate from session owners, including standalone runs", 
 		);
 		releaseRun();
 		strictEqual(
-			telemetryHub().emit("process.started", {}, { sessionId: "same-id", runId: "same-id", label: "worker" }),
+			telemetryHub().emit(
+				"process.started",
+				{},
+				{ sessionId: "same-id", runId: "same-id", agent: { role: "worker", id: "same-id" } },
+			),
 			false,
 		);
 		strictEqual(session.length, 1, "a missing run writer never falls back to the parent session");
@@ -206,7 +230,6 @@ test("call schemas distinguish measured zero, unknown, absent, and never sent", 
 		callId: newCallId(),
 		attemptId: newAttemptId(),
 		attempt: 0,
-		label: "main",
 		target: { targetId: "test", runtimeId: "test", api: "test", requestedModel: "test", reportedModel: unknown },
 		roundKind: "normal",
 		toolChoice: "auto",

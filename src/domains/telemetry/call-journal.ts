@@ -12,7 +12,7 @@ import { withStateFileLock } from "../../core/state-file-lock.js";
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import { captureAdmits, STANDARD_CAPTURE, sameTelemetryCapture } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
-import { telemetryOwner } from "../../core/telemetry/context.js";
+import { mainAgent, telemetryOwner } from "../../core/telemetry/context.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { makeTelemetryRecord, readTelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload, JournalEventName, PreimageEventName } from "../../core/telemetry/events.js";
@@ -242,7 +242,7 @@ export function seedForkCallJournal(
 	const row = makeTelemetryRecord(
 		"session.forked",
 		lineage,
-		{ sessionId, label: "main" },
+		{ sessionId, agent: mainAgent(sessionId) },
 		{
 			t: new Date().toISOString(),
 			mono: performance.now(),

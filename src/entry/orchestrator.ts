@@ -1545,7 +1545,7 @@ async function runCompactionFlow(
 	const entries = withProviderCheckpointMeasurements(filterEntriesToActivePath(session.readEntries(), activeLeafTurnId));
 	if (entries.length === 0) return null;
 	// Keep this owner alive through checkpoint publication, after individual streams close (#434).
-	const lease = await telemetry?.acquireTelemetrySession?.(meta, "compaction");
+	const lease = await telemetry?.acquireTelemetrySession?.(meta, { role: "compaction", id: meta.id });
 	const callIds = new Set<string>();
 	const closure: EventPayload<"compaction.settled"> = { callIds: [], outcome: "failed", checkpointTurnId: null };
 	try {
@@ -1628,7 +1628,7 @@ async function runCompactionFlow(
 							telemetry: {
 								origin: meta,
 								acquire: telemetry.acquireTelemetrySession,
-								label: "compaction",
+								role: "compaction",
 								targetId: resolved.targetId,
 								runtimeId: resolved.runtimeId,
 								costProvenance: resolved.costProvenance,
@@ -2673,7 +2673,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return {
 			origin: origin ?? null,
 			acquire,
-			label: "memory",
+			role: "memory",
 			targetId,
 			runtimeId: runtime.id,
 			costProvenance: resolveEffectivePricing(target, runtime, modelId).provenance,
@@ -2734,7 +2734,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (state === publishedGuardianState) return;
 		publishedGuardianState = state;
 		const sessionId = session?.current()?.id ?? null;
-		bus.emit("memory.guardian_changed", { sessionId, state }, sessionId ? { sessionId, label: "memory" } : undefined);
+		bus.emit(
+			"memory.guardian_changed",
+			{ sessionId, state },
+			sessionId ? { sessionId, agent: { role: "memory", id: sessionId } } : undefined,
+		);
 	};
 	const memoryIntervention = memoryOwner.createIntervention({
 		telemetry: memoryTelemetry,
@@ -3719,7 +3723,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const admitSystemOneRequest = createSystemOneRequestAdmission(systemOneAdmissionDeps);
 	const safetyJudgeOneShot = createSystemOneOneShot(
 		providers,
-		createSystemOneRequestAdmission({ ...systemOneAdmissionDeps, label: "safety-judge" }),
+		createSystemOneRequestAdmission({ ...systemOneAdmissionDeps, role: "safety-judge" }),
 	);
 	const systemOneEndpointCapacity = (targetId: string): number => {
 		const target = providers.getTarget(targetId);
@@ -5953,7 +5957,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							compactionCalls: async (from: string) => {
 								// Every queued settlement is written and the live fold seeded before the calls are read (#434).
 								await telemetry.settledSessionSpend();
-								return telemetry.read?.live()?.calls({ labels: ["compaction"], from }).calls ?? [];
+								return telemetry.read?.live()?.calls({ roles: ["compaction"], from }).calls ?? [];
 							},
 						}
 					: {}),

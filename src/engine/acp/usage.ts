@@ -110,23 +110,23 @@ const EMPTY_SESSION_USAGE = {
 	truncated: false,
 };
 
-/** The side labels a v1 row counts beside its calls, keyed as the cost report keys the row's target and model. */
+/** The side agent roles a v1 row counts beside its calls, keyed as the cost report keys the row's target and model. */
 type Beside = Record<
 	"btw" | "handoff" | "prewarm" | "memory" | "system-one" | "compaction" | "failedCompaction",
 	number
 >;
-const BESIDE_LABELS = ["btw", "handoff", "prewarm", "memory", "system-one", "compaction"] as const;
+const BESIDE_ROLES = ["btw", "handoff", "prewarm", "memory", "system-one", "compaction"] as const;
 
 function modelKey(row: CallRowV1): string {
 	const reported = row.target.reportedModel.fact;
 	return `${row.target.targetId}/${reported.kind === "measured" ? reported.value : row.target.requestedModel}`;
 }
 
-/** Each target and model's side calls by label, a call counted once across its attempts and never if never sent. */
+/** Each target and model's side calls by agent role, a call counted once across its attempts and never if never sent. */
 function besideCounts(view: TelemetryView): Map<string, Beside> {
 	const counts = new Map<string, Beside>();
 	const seen = new Set<string>();
-	for (const row of view.calls({ labels: [...BESIDE_LABELS], limit: 100_000 }).calls) {
+	for (const row of view.calls({ roles: [...BESIDE_ROLES], limit: 100_000 }).calls) {
 		if (row.disposition === "never_sent" || seen.has(row.callId)) continue;
 		seen.add(row.callId);
 		const key = modelKey(row);
@@ -139,8 +139,9 @@ function besideCounts(view: TelemetryView): Map<string, Beside> {
 			compaction: 0,
 			failedCompaction: 0,
 		};
-		if (row.label === "compaction" && row.stop?.failure) beside.failedCompaction += 1;
-		else if (row.label in beside) beside[row.label as keyof Beside] += 1;
+		const role = row.agent.role;
+		if (role === "compaction" && row.stop?.failure) beside.failedCompaction += 1;
+		else if (role in beside) beside[role as keyof Beside] += 1;
 		counts.set(key, beside);
 	}
 	return counts;

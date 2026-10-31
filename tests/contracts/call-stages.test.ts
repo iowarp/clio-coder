@@ -290,7 +290,7 @@ it("a side call times its admission gate as its admission stage and names the ce
 			telemetry: {
 				origin,
 				acquire: journals.acquire,
-				label: "btw",
+				role: "btw",
 				targetId: "side-target",
 				runtimeId: "fixture",
 				costProvenance: "known",
@@ -365,7 +365,7 @@ it("a side call whose session writer cannot open settles no call id, so its spen
 			telemetry: {
 				origin: { id: "side-unjournaled", cwdHash: "sidehash" },
 				acquire: journals.acquire,
-				label: "btw",
+				role: "btw",
 				targetId: "side-target",
 				runtimeId: "fixture",
 				costProvenance: "known",

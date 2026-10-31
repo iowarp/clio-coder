@@ -19,7 +19,7 @@ test("usage JSON Lines bridge reports exact canonical workspace usage and distin
 		const report = await json(await h.request(path), UsageReport);
 		assert.equal(report.facts.find((row) => row.name === "sessions")?.values.value, 1);
 		// Spend is the read model's, worded by the canonical renderer; the server only checked each row's shape (#434).
-		const spend = report.facts.find((row) => row.name === "telemetry-cost" && row.values.groupBy === "label")?.values
+		const spend = report.facts.find((row) => row.name === "telemetry-cost" && row.values.groupBy === "role")?.values
 			.report as { total: Record<"calls" | "tokens" | "usd", { display: string }> } | undefined;
 		assert.deepEqual(
 			[spend?.total.calls.display, spend?.total.tokens.display, spend?.total.usd.display],

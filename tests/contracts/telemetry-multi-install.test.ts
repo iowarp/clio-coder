@@ -27,7 +27,7 @@ import { callsReport, sessionTelemetry } from "../../src/domains/telemetry/read-
 import { telemetryCall } from "../harness/telemetry-view.js";
 
 const SESSION = "shared-session";
-const ctx = { sessionId: SESSION, label: "main" as const };
+const ctx = { sessionId: SESSION, agent: { role: "main" as const, id: SESSION } };
 
 /** This build's writer: open the session's journal, settle `records`, close it. */
 async function settle(directory: string, records: readonly TelemetryRecord[]): Promise<void> {

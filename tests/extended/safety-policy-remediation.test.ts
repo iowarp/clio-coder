@@ -188,7 +188,7 @@ test("S1-06 usage report reads journaled approvals and emits measured rate", asy
 	const { telemetryJournalPath, telemetrySessionDirectory } = await import("../../src/domains/telemetry/paths.js");
 	const journalDirectory = telemetrySessionDirectory(clioStateDir(), meta.id);
 	mkdirSync(journalDirectory, { recursive: true });
-	const ctx = { sessionId: meta.id, label: "main" } as const;
+	const ctx = { sessionId: meta.id, agent: { role: "main", id: meta.id } } as const;
 	const clock = (mono: number) => ({ t: new Date().toISOString(), mono });
 	writeFileSync(
 		telemetryJournalPath(journalDirectory),
@@ -268,7 +268,7 @@ test("S1-06 usage report reads journaled approvals and emits measured rate", asy
 	assert.equal(rows.find((row) => row.fact === "permission-approval")?.approvalRate, 0.5);
 	// Spend is the read model's: the ledger's call, plus each receipt with no run journal at its sealed totals with
 	// unknown call coverage, so the totals read as lower bounds. The main-agent mirror is the session's own spend (#434).
-	const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "label")?.report as
+	const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "role")?.report as
 		| { total: Record<"calls" | "tokens" | "usd", { display: string }> }
 		| undefined;
 	assert.equal(cost?.total.tokens.display, "≥280 (1 call unknown)");

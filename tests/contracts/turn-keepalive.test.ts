@@ -180,11 +180,11 @@ test("a journaled refresh carries its call identity so legacy accounting skips i
 			callJournal: () => ({
 				origin: { id: "keepalive-session", cwdHash: "fixture" },
 				acquire: async () => ({
-					context: { sessionId: "keepalive-session", label: "prewarm" },
+					context: { sessionId: "keepalive-session", agent: { role: "prewarm", id: "keepalive-session" } },
 					journaled: true,
 					release: async () => {},
 				}),
-				label: "prewarm",
+				role: "prewarm",
 				targetId: "fixture-target",
 				runtimeId: "fixture-runtime",
 				costProvenance: "estimated",
@@ -196,7 +196,7 @@ test("a journaled refresh carries its call identity so legacy accounting skips i
 		const call = run.refreshes[0]?.call;
 		ok(call);
 		deepStrictEqual(
-			records.map((record) => [record.kind, record.ctx.callId, record.ctx.label]),
+			records.map((record) => [record.kind, record.ctx.callId, record.ctx.agent.role]),
 			[
 				["call.started", call.callId, "prewarm"],
 				["call.settled", call.callId, "prewarm"],

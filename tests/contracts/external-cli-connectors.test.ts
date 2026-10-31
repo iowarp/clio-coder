@@ -209,7 +209,7 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 			},
 		]);
 		const run = input(root, codexCliRuntime);
-		run.telemetryContext = { sessionId: null, runId: "codex-test", label: "worker" };
+		run.telemetryContext = { sessionId: null, runId: "codex-test", agent: { role: "worker", id: "codex-test" } };
 		run.target = { ...run.target, pricing: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } };
 		const frames: WorkerTelemetryFrame[] = [];
 		const events: string[] = [];
@@ -327,7 +327,7 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		]);
 		const run = input(root, piCliRuntime, {
 			readOnly: true,
-			telemetryContext: { sessionId: null, runId: "pi-parts", label: "worker" },
+			telemetryContext: { sessionId: null, runId: "pi-parts", agent: { role: "worker", id: "pi-parts" } },
 		});
 		const frames: WorkerTelemetryFrame[] = [];
 		const result = await observeExternalWorkerRun(

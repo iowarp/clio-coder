@@ -8,7 +8,7 @@ import type { ResponseModelIdObservation } from "../../core/response-model-id.js
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
-import type { CostAggregate, CostEntryLabel } from "../telemetry/cost.js";
+import type { CostAggregate } from "../telemetry/cost.js";
 import type { CallTotals } from "../telemetry/folds.js";
 import { foldCallJournal, foldCalls } from "../telemetry/folds.js";
 import type { SessionEntry } from "./entries.js";
@@ -46,7 +46,6 @@ export interface LedgerUsageCall {
 	/** API calls this row accounts for. Absent means one, which is every message row. */
 	apiCalls?: number;
 	missingTokenCalls?: number;
-	label?: CostEntryLabel;
 	costProvenance?: CostProvenance;
 }
 
@@ -86,7 +85,7 @@ export function ledgerUsageCalls(
 	};
 	for (const id of linkedCallIds(entries)) if (journalCalls.has(id)) project(id);
 	for (const row of journal)
-		if ((row.k === "call.started" || row.k === "call.settled") && journalOwnsSideUsage(row.data.label))
+		if ((row.k === "call.started" || row.k === "call.settled") && journalOwnsSideUsage(row.ctx.agent.role))
 			project(row.data.callId);
 	for (const id of orphanMainCallIds(entries, journal)) project(id);
 	return calls;
@@ -121,7 +120,7 @@ function orphanMainCallIds(entries: ReadonlyArray<SessionEntry>, journal: Readon
 	for (const row of journal)
 		if (
 			(row.k === "call.started" || row.k === "call.settled") &&
-			row.data.label === "main" &&
+			row.ctx.agent.role === "main" &&
 			row.ctx.turnId !== undefined &&
 			turns.has(row.ctx.turnId) &&
 			!linked.has(row.data.callId)
@@ -138,7 +137,7 @@ export function ledgerCallFailureCounts(
 ) {
 	const linked = new Set(linkedCallIds(entries));
 	for (const row of journal) {
-		if ((row.k === "call.started" || row.k === "call.settled") && journalOwnsSideUsage(row.data.label))
+		if ((row.k === "call.started" || row.k === "call.settled") && journalOwnsSideUsage(row.ctx.agent.role))
 			linked.add(row.data.callId);
 	}
 	for (const id of orphanMainCallIds(entries, journal)) linked.add(id);

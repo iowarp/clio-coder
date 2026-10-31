@@ -45,7 +45,8 @@ export function createProcessJournal(
 	unavailable: () => void,
 	capture: () => TelemetryCapture = () => STANDARD_CAPTURE,
 ): ProcessJournal {
-	const context: TelemetryContext = { sessionId: null, processId: telemetryProcessId(), label: "main" };
+	const processId = telemetryProcessId();
+	const context: TelemetryContext = { sessionId: null, processId, agent: { role: "main", id: processId } };
 	const pending: PendingTelemetry[] = [];
 	let dropped = 0;
 	let writer: Promise<CallJournal | null> | undefined;

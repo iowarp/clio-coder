@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
-import { observedToolCallOrigin, ownerTelemetryContext, telemetryContext } from "../core/telemetry/context.js";
+import {
+	mainAgent,
+	observedToolCallOrigin,
+	ownerTelemetryContext,
+	telemetryContext,
+} from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
@@ -638,7 +643,7 @@ export interface HandoffRoundOptions extends SideQuestionOptions {
 	/**
 	 * Run the second and last extraction round, quoting the parser's complaint
 	 * and what the first round returned. Both rounds are journaled calls under
-	 * the handoff label (issue #223, #434).
+	 * the handoff agent role (issue #223, #434).
 	 */
 	repair?: HandoffRepairInput;
 }
@@ -1955,7 +1960,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		runtime:
 			| AgentRuntime
 			| { targetId: string; runtimeId: string; costProvenance: AgentRuntime["runtimeResolution"]["costProvenance"] },
-		label: CallJournalOptions["label"],
+		role: CallJournalOptions["role"],
 		origin: ReturnType<SessionContract["current"]>,
 	): { telemetry?: CallJournalOptions } => {
 		const acquire = deps.telemetry?.acquireTelemetrySession;
@@ -1964,7 +1969,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					telemetry: {
 						origin,
 						acquire,
-						label,
+						role,
 						targetId: runtime.targetId,
 						runtimeId: runtime.runtimeId,
 						costProvenance:
@@ -2078,7 +2083,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const acquire = deps.telemetry?.acquireTelemetrySession;
 		if (!origin || !acquire) return;
 		try {
-			const lease = await acquire(origin, "main", userTurnId);
+			const lease = await acquire(origin, mainAgent(origin.id), userTurnId);
 			try {
 				telemetryHub().emit(
 					"turn.settled",
@@ -2586,7 +2591,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const turnOrigin = deps.session?.current();
 				if (turnOrigin && deps.telemetry?.acquireTelemetrySession) {
 					try {
-						turnLease = await deps.telemetry.acquireTelemetrySession(turnOrigin, "main");
+						turnLease = await deps.telemetry.acquireTelemetrySession(turnOrigin, mainAgent(turnOrigin.id));
 					} catch {
 						// The writer reports its own failures; a turn never waits on telemetry.
 					}
@@ -3080,7 +3085,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const landedSession = deps.session?.current();
 				if (!turnLease && landedSession && deps.telemetry?.acquireTelemetrySession) {
 					try {
-						turnLease = await deps.telemetry.acquireTelemetrySession(landedSession, "main");
+						turnLease = await deps.telemetry.acquireTelemetrySession(landedSession, mainAgent(landedSession.id));
 					} catch {
 						// The writer reports its own failure; telemetry cannot abort a submitted turn (#434).
 					}

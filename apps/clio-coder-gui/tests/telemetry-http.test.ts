@@ -64,14 +64,14 @@ test("the GUI serves the parity fixture's DTOs as the CLI reads them, and none t
 		JSON.parse(JSON.stringify(dto, (key, value: unknown) => (key === "generatedAt" ? undefined : value))) as unknown;
 	const session = await json(await h.request(base), routes.telemetrySession.response);
 	const byModel = await json(await h.request(`${base}/cost?by=model`), routes.telemetryCost.response);
-	const byLabel = await json(await h.request(`${base}/cost?by=label`), routes.telemetryCost.response);
+	const byRole = await json(await h.request(`${base}/cost?by=role`), routes.telemetryCost.response);
 	assert.deepEqual(timeless(session), timeless(cold.session));
 	assert.deepEqual(timeless(byModel), timeless(cold.costByModel));
-	assert.deepEqual(timeless(byLabel), timeless(cold.costByLabel));
+	assert.deepEqual(timeless(byRole), timeless(cold.costByRole));
 	const served = [
 		session,
 		byModel,
-		byLabel,
+		byRole,
 		await json(await h.request(`${base}/calls`), routes.telemetryCalls.response),
 		await json(await h.request(`${base}/cache`), routes.telemetryCache.response),
 		await json(await h.request(`${base}/timeline`), routes.telemetryTimeline.response),
@@ -107,7 +107,7 @@ test("telemetry routes refuse what the journals cannot answer with problems, nev
 	const base = `/api/telemetry/sessions/${id}`;
 	assert.equal((await h.request("/api/telemetry/sessions/absent-session")).status, 404);
 	assert.equal((await h.request(`${base}/calls?dispositions=bogus`)).status, 422);
-	assert.equal((await h.request(`${base}/calls?labels=main,worker&limit=1`)).status, 200);
+	assert.equal((await h.request(`${base}/calls?roles=main,worker&limit=1`)).status, 200);
 	assert.equal((await h.request(`${base}/timeline?from=2026-10-19T00:00:00.000Z`)).status, 422);
 	assert.equal((await h.request(`${base}/cost?by=weekday`)).status, 422);
 	assert.equal((await h.request("/api/telemetry/explain?ref=own:golden-p0%23nothing")).status, 422);

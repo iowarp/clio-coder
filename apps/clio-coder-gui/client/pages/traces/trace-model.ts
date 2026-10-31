@@ -197,7 +197,7 @@ export function entryLabel(entry: RunTimelineEntry): { kind: string; title: stri
 		case "call":
 			return {
 				kind: "call",
-				title: `${entry.label} call · ${entry.disposition.replaceAll("_", " ")}${entry.failure ? ` (${entry.failure})` : ""}`,
+				title: `${entry.agent.role} call · ${entry.disposition.replaceAll("_", " ")}${entry.failure ? ` (${entry.failure})` : ""}`,
 				tone: entry.failure || entry.disposition === "settled_no_usage" ? "fail" : "neutral",
 			};
 		case "feed": {

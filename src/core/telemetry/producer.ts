@@ -368,7 +368,7 @@ export function beginCall(
 	const callId = newCallId();
 	const attempt = (number: number, request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): TelemetryCall => {
 		const attemptId = newAttemptId();
-		const scope = ctx ? { ...ctx, callId, attemptId, label: input.label } : undefined;
+		const scope = ctx ? { ...ctx, callId, attemptId } : undefined;
 		const start = performance.now();
 		const starts: Partial<Record<Stage, number>> = {};
 		const stages: CallSettled["stages"] = { settle: 0 };

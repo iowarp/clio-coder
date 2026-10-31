@@ -238,7 +238,10 @@ describe("fleet lifecycle boundary", () => {
 				subjects: [{ runId: "subject-run", digest: "a".repeat(64) }],
 				createdAt: "2026-09-01T00:00:00.000Z",
 			},
-			{ stateDir, telemetry: { sessionId: null, runId: "naming-contract", label: "main" } },
+			{
+				stateDir,
+				telemetry: { sessionId: null, runId: "naming-contract", agent: { role: "coordinator", id: "naming-contract" } },
+			},
 		);
 		if (handle.record.kind !== "decision") throw new Error("staged gate record did not contain a decision");
 		const decision = handle.record.decision;
@@ -261,7 +264,11 @@ describe("fleet lifecycle boundary", () => {
 		strictEqual(recovered.records.length, 1);
 		const recoveredHandle = recovered.records[0];
 		if (recoveredHandle === undefined) throw new Error("pending gate was not recovered");
-		deepStrictEqual(recoveredHandle.record.telemetry, { sessionId: null, runId: "naming-contract", label: "main" });
+		deepStrictEqual(recoveredHandle.record.telemetry, {
+			sessionId: null,
+			runId: "naming-contract",
+			agent: { role: "coordinator", id: "naming-contract" },
+		});
 		const materialized = await materializePendingGateDecision(recoveredHandle);
 		strictEqual(materialized.artifact.integrity.digest, decision.integrity.digest);
 		deepStrictEqual(verifyGateDecisionArtifact(materialized.artifact), { ok: true });
@@ -270,7 +277,11 @@ describe("fleet lifecycle boundary", () => {
 	it("recovers an artifact without its event once, in its staged owner, and retains failed publications", async () => {
 		scratch = await newScratchClioHome("clio-coder-gate-publication-");
 		const stateDir = join(scratch, "state");
-		const context = { sessionId: null, runId: "gate-publication", label: "main" } as const;
+		const context = {
+			sessionId: null,
+			runId: "gate-publication",
+			agent: { role: "coordinator", id: "gate-publication" },
+		} as const;
 		const draft = {
 			group: "publication",
 			topology: "review",
@@ -300,9 +311,12 @@ describe("fleet lifecycle boundary", () => {
 		}
 		const recovered = readPendingGateDecisions(stateDir).records[0];
 		if (!recovered) throw new Error("pending gate was lost");
-		await withTelemetryContext({ sessionId: "different-session", label: "main" }, async () => {
-			await Promise.all([materializePendingGateDecision(recovered), materializePendingGateDecision(recovered)]);
-		});
+		await withTelemetryContext(
+			{ sessionId: "different-session", agent: { role: "main", id: "different-session" } },
+			async () => {
+				await Promise.all([materializePendingGateDecision(recovered), materializePendingGateDecision(recovered)]);
+			},
+		);
 		strictEqual(existsSync(staged.path), false);
 		await materializePendingGateDecision(staged);
 		const rows = (await readCallJournal(directory)).records.filter(({ record }) => record.k === "gate.decided");
@@ -344,8 +358,8 @@ describe("fleet lifecycle boundary", () => {
 			() => stagePendingGateOutput({ ...draft, deciderRunId: "reviewer", finalOutput: "{}" }, stateDir),
 			/owning telemetry context at stage time/,
 		);
-		const explicit = { sessionId: null, runId: "owner", label: "main" } as const;
-		const staged = withTelemetryContext({ sessionId: "ambient", label: "main" }, () =>
+		const explicit = { sessionId: null, runId: "owner", agent: { role: "coordinator", id: "owner" } } as const;
+		const staged = withTelemetryContext({ sessionId: "ambient", agent: { role: "main", id: "ambient" } }, () =>
 			stagePendingGateDecision(draft, { stateDir, telemetry: explicit }),
 		);
 		deepStrictEqual(staged.record.telemetry, explicit);

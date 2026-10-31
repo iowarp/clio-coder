@@ -364,13 +364,12 @@ describe("production compaction controls", () => {
 			const calls = ledgerUsageCalls(f.entries(), journal);
 			strictEqual(calls.length, f.calls.length);
 			ok(calls.every((call) => call.facts && call.compactionOutcome === outcome));
-			ok(calls.every((call) => call.label === (outcome === "committed" ? "compaction" : "failed-compaction")));
 			if (outcome === "committed") {
 				const incomplete = ledgerUsageCalls(
 					f.entries(),
 					journal.filter((row) => row.k !== "compaction.settled"),
 				);
-				ok(incomplete.every((call) => call.compactionOutcome === "unknown" && call.label === "compaction"));
+				ok(incomplete.every((call) => call.compactionOutcome === "unknown"));
 			}
 		});
 	}
@@ -1168,13 +1167,13 @@ describe("production compaction controls", () => {
 		);
 		strictEqual(journalCalls[0]?.data.disposition, "settled");
 		strictEqual(journalCalls[1]?.data.disposition, "sent_unsettled");
-		ok(journalCalls.every((record) => record.data.label === "compaction"));
+		ok(journalCalls.every((record) => record.ctx.agent.role === "compaction"));
 		deepStrictEqual(
 			(await f.journalOutcomes()).map((row) => row.data),
 			[{ callIds: journalCalls.map((row) => row.data.callId), outcome: "failed", checkpointTurnId: null }],
 		);
 		const calls = ledgerUsageCalls(f.entries(), await f.journal());
-		ok(calls.every((call) => call.providerId === "summary-target" && call.label === "failed-compaction"));
+		ok(calls.every((call) => call.providerId === "summary-target" && call.compactionOutcome === "failed"));
 	});
 	it("keeps ambiguous zero failed usage null and reports it as unknown in the built CLI", async () => {
 		const f = fixture(true, true, true);
@@ -1200,13 +1199,13 @@ describe("production compaction controls", () => {
 			.map((line) => JSON.parse(line));
 		// The failed stream's placeholder zeros measured nothing: its call counts, its tokens and cost stay unknown (#434).
 		const cost = (groupBy: string) => facts.find((fact) => fact.fact === "telemetry-cost" && fact.groupBy === groupBy);
-		const byLabel = cost("label")?.report;
-		ok(byLabel);
-		strictEqual(byLabel.total.calls.display, "1");
-		strictEqual(byLabel.total.tokens.display, "unknown (1 call unknown)");
-		strictEqual(byLabel.total.usd.display, "not measured");
+		const byRole = cost("role")?.report;
+		ok(byRole);
+		strictEqual(byRole.total.calls.display, "1");
+		strictEqual(byRole.total.tokens.display, "unknown (1 call unknown)");
+		strictEqual(byRole.total.usd.display, "not measured");
 		deepStrictEqual(
-			byLabel.groups.map((group: { key: string; tokens: { display: string } }) => [group.key, group.tokens.display]),
+			byRole.groups.map((group: { key: string; tokens: { display: string } }) => [group.key, group.tokens.display]),
 			[["compaction", "unknown (1 call unknown)"]],
 		);
 		strictEqual(cost("model")?.report.groups[0]?.usd.display, "not measured");
@@ -1303,7 +1302,7 @@ describe("production compaction controls", () => {
 		it(`reports a successful compaction through ${legacy ? "the legacy chat fallback" : "the selected summary route"}`, async () => {
 			const f = fixture(true);
 			const snapshotJournals = createSessionJournals(clioStateDir(), () => {});
-			await snapshotJournals.acquire(f.state.meta, "main");
+			await snapshotJournals.acquire(f.state.meta, { role: "main", id: f.state.meta.id });
 			if (!legacy) f.settings.context.compaction.model = "summary-target/summary";
 			const bus = createTelemetryHub();
 			const pruned: ContextPrunedPayload[] = [];

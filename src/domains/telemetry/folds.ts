@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import type { TelemetryAgent } from "../../core/telemetry/context.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
@@ -41,6 +42,8 @@ export function foldFacts(facts: Iterable<Fact<number>>): FactSum {
 }
 
 export interface FoldedAttempt {
+	/** The agent that made the call, from its records' context (#434). */
+	agent: TelemetryAgent;
 	started: CallStarted;
 	/** Null means no trustworthy settlement; it does not assert that a request was sent (#434). */
 	settled: CallSettled | null;
@@ -106,7 +109,7 @@ export function addCallTotals(totals: CallTotals, settled: CallSettled | null): 
 }
 
 /** All projections use these definitions: reasoning is included in output; cacheWrite1h is a cacheWrite subfield (#434). */
-export function foldCalls(attempts: readonly FoldedAttempt[]): CallTotals {
+export function foldCalls(attempts: readonly Pick<FoldedAttempt, "started" | "settled">[]): CallTotals {
 	const totals = emptyCallTotals();
 	totals.logicalCalls = new Set(attempts.map(({ started }) => started.callId)).size;
 	// Stable order makes independent consumers sum floating-point costs identically (#434).
@@ -174,7 +177,7 @@ function withInterruptedEstimate(settled: CallSettled): CallSettled {
 
 export function callJournalFolder(callIds?: ReadonlySet<string>, options: FoldOptions = {}): CallJournalFolder {
 	const seen = new Map<string, TelemetryRecord>();
-	const starts = new Map<string, CallStarted>();
+	const starts = new Map<string, { agent: TelemetryAgent; started: CallStarted }>();
 	const settlements = new Map<string, CallSettled>();
 	const conflicts = new Set<string>();
 	const references = new Set<string>();
@@ -185,11 +188,16 @@ export function callJournalFolder(callIds?: ReadonlySet<string>, options: FoldOp
 		gapRecords: 0,
 		droppedRecords: 0,
 	};
-	const attempt = (started: CallStarted): FoldedAttempt => {
+	const attempt = ({ agent, started }: { agent: TelemetryAgent; started: CallStarted }): FoldedAttempt => {
 		const settled = conflicts.has(started.attemptId) ? null : (settlements.get(started.attemptId) ?? null);
-		return { started, settled: settled && options.interruptedEstimates ? withInterruptedEstimate(settled) : settled };
+		return {
+			agent,
+			started,
+			settled: settled && options.interruptedEstimates ? withInterruptedEstimate(settled) : settled,
+		};
 	};
-	const ordered = () => [...starts.values()].sort((a, b) => a.attemptId.localeCompare(b.attemptId)).map(attempt);
+	const ordered = () =>
+		[...starts.values()].sort((a, b) => a.started.attemptId.localeCompare(b.started.attemptId)).map(attempt);
 	return {
 		coverage,
 		add(record) {
@@ -224,15 +232,17 @@ export function callJournalFolder(callIds?: ReadonlySet<string>, options: FoldOp
 			const data = record.data;
 			if (callIds && !callIds.has(data.callId)) return touched;
 			touched.push(data.attemptId);
-			const started: CallStarted = {
-				callId: data.callId,
-				attemptId: data.attemptId,
-				attempt: data.attempt,
-				label: data.label,
-				// A response model is learned at settlement; it is not part of the request identity (#434).
-				target: { ...data.target, reportedModel: { kind: "unknown", reason: "not-observed" } },
-				roundKind: data.roundKind,
-				toolChoice: data.toolChoice,
+			const started = {
+				agent: record.ctx.agent,
+				started: {
+					callId: data.callId,
+					attemptId: data.attemptId,
+					attempt: data.attempt,
+					// A response model is learned at settlement; it is not part of the request identity (#434).
+					target: { ...data.target, reportedModel: { kind: "unknown", reason: "not-observed" } },
+					roundKind: data.roundKind,
+					toolChoice: data.toolChoice,
+				} satisfies CallStarted,
 			};
 			const priorStart = starts.get(data.attemptId);
 			if (priorStart && !isDeepStrictEqual(priorStart, started)) {

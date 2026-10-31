@@ -38,7 +38,7 @@ export async function seedRunJournal(
 	runId: string,
 	records: ReadonlyArray<{ kind: Kind; data: unknown; at: string; ctx?: Record<string, string> }> = [],
 ): Promise<string> {
-	const context = { sessionId: null, runId, label: "worker" } as const;
+	const context = { sessionId: null, runId, agent: { role: "worker", id: runId } } as const;
 	const journal = await openCallJournal({
 		directory: join(state, "telemetry", "runs", runId),
 		context,

@@ -146,7 +146,7 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 		},
 		origin: { id: "prewarm-session", cwdHash: "repo" },
 		acquire: journals.acquire,
-		label: "prewarm" as const,
+		role: "prewarm" as const,
 		targetId: "local",
 		runtimeId: "llamacpp",
 		costProvenance: "known_free" as const,
@@ -225,7 +225,7 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 		strictEqual(calls[0]?.data.disposition, "settled");
 		strictEqual(calls[1]?.data.disposition, "never_sent");
 		strictEqual(calls[1]?.data.usage, null);
-		ok(calls.every((record) => record.data.label === "prewarm"));
+		ok(calls.every((record) => record.ctx.agent.role === "prewarm"));
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 		await journals.flush();

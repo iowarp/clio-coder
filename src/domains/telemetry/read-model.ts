@@ -825,8 +825,8 @@ function coldKeys(attempt: Attempt): string[] {
 function attemptInGroup(attempt: Attempt, group: { by: FactGroup; key: string }): boolean {
 	const settled = attempt.settled;
 	switch (group.by) {
-		case "label":
-			return attempt.started.label === group.key;
+		case "role":
+			return attempt.agent.role === group.key;
 		case "model":
 			return modelKey(settled?.target ?? attempt.started.target) === group.key;
 		case "turn":
@@ -843,7 +843,7 @@ function attemptInGroup(attempt: Attempt, group: { by: FactGroup; key: string })
 }
 function runInGroup(run: Run, group: { by: FactGroup; key: string }): boolean {
 	switch (group.by) {
-		case "label":
+		case "role":
 			return group.key === "worker";
 		case "model":
 			return runModelKey(run) === group.key;
@@ -904,7 +904,7 @@ function select(view: View, ref: ParsedFactRef): Selection | null {
 			const attempt = run.byAttempt.get(ref.attemptId);
 			return attempt ? { parts: [{ attempts: [attempt], gap: 0 }], attempt, describe: "one run attempt" } : null;
 		}
-		if (!group || (group.by === "label" && group.key === "worker"))
+		if (!group || (group.by === "role" && group.key === "worker"))
 			return { parts: [{ run, gap: runGap(run) }], describe: "the run's journal fold (calls, or its reported aggregate)" };
 		// An aggregate-only run cannot be split by group; its share stays unknown (#434).
 		const aggregate = run.fold.source === "calls" ? 0 : 1;
@@ -1137,7 +1137,7 @@ function attemptFact(attempt: Attempt, metric: FactMetric): Fact<number> {
  */
 function roundTrip(attempt: Attempt, metric: "bookkeepingRounds" | "roundTripTax"): Fact<number> {
 	const settled = attempt.settled;
-	if (attempt.started.label !== "main" || !settled) return notApplicable;
+	if (attempt.agent.role !== "main" || !settled) return notApplicable;
 	if (settled.stop.reason !== "toolUse") return localCount(0);
 	if (!attempt.tools) return unobserved;
 	if (!attempt.tools.bookkeepingOnly) return localCount(0);
@@ -1469,12 +1469,12 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 		if (firstAt === null || record.t < firstAt) firstAt = record.t;
 		if (lastAt === null || record.t > lastAt) lastAt = record.t;
 	}
-	const labels = new Set(analysis.attempts.map((attempt) => attempt.started.label));
-	if (analysis.runs.size > 0) labels.add("worker");
+	const roles = new Set(analysis.attempts.map((attempt) => attempt.agent.role));
+	if (analysis.runs.size > 0) roles.add("worker");
 	let latest: Attempt | null = null;
 	for (const attempt of analysis.attempts)
 		if (
-			attempt.started.label === "main" &&
+			attempt.agent.role === "main" &&
 			invoked(attempt) &&
 			attempt.settledAt !== null &&
 			(!latest || attempt.settledAt >= (latest.settledAt ?? ""))
@@ -1482,7 +1482,7 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 			latest = attempt;
 	const session = (metric: FactMetric, extra: Partial<ParsedFactRef> = {}) =>
 		quantity(view, { scope: "session", owner: id, metric, ...extra });
-	const mainLoop = (metric: FactMetric) => quantity(view, own(id, metric, { group: { by: "label", key: "main" } }));
+	const mainLoop = (metric: FactMetric) => quantity(view, own(id, metric, { group: { by: "role", key: "main" } }));
 	return {
 		...header(options),
 		kind: "session",
@@ -1505,11 +1505,11 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 			tokens: tokenQuantities(view, { scope: "own", owner: id }),
 			cost: { usd: quantity(view, own(id, "usd")), pricedBy: pricedByCounts(ownSelection?.parts ?? []) },
 		},
-		byLabel: [...labels].sort().map((label) => ({
-			label,
-			calls: session("calls", { group: { by: "label", key: label } }),
-			tokens: session("total", { group: { by: "label", key: label } }),
-			usd: session("usd", { group: { by: "label", key: label } }),
+		byRole: [...roles].sort().map((role) => ({
+			role,
+			calls: session("calls", { group: { by: "role", key: role } }),
+			tokens: session("total", { group: { by: "role", key: role } }),
+			usd: session("usd", { group: { by: "role", key: role } }),
 		})),
 		runs: {
 			count: analysis.runs.size,
@@ -1537,8 +1537,8 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 					sessionPinnedToSse: textFact(latest.settled.transport.sessionPinnedToSse),
 					pinReason: latest.settled.transport.pinReason ?? null,
 					recovery: latest.settled.transport.recovery ?? null,
-					websocketFailures: quantity(view, own(id, "websocketFailures", { group: { by: "label", key: "main" } })),
-					sseFallbacks: quantity(view, own(id, "sseFallbacks", { group: { by: "label", key: "main" } })),
+					websocketFailures: quantity(view, own(id, "websocketFailures", { group: { by: "role", key: "main" } })),
+					sseFallbacks: quantity(view, own(id, "sseFallbacks", { group: { by: "role", key: "main" } })),
 				}
 			: null,
 	};
@@ -1583,7 +1583,7 @@ function callRow(view: View, scope: "own" | "run", owner: string, attempt: Attem
 		callId: attempt.started.callId as CallRowV1["callId"],
 		attemptId: attempt.started.attemptId as CallRowV1["attemptId"],
 		attempt: attempt.started.attempt,
-		label: attempt.started.label,
+		agent: attempt.agent,
 		owner: {
 			sessionId: attempt.ctx?.sessionId ?? null,
 			...(attempt.ctx?.runId !== undefined ? { runId: attempt.ctx.runId } : {}),
@@ -1644,7 +1644,7 @@ function callRow(view: View, scope: "own" | "run", owner: string, attempt: Attem
 }
 
 function matches(attempt: Attempt, filter: CallFilter): boolean {
-	if (filter.labels && !filter.labels.includes(attempt.started.label)) return false;
+	if (filter.roles && !filter.roles.includes(attempt.agent.role)) return false;
 	if (filter.dispositions && !filter.dispositions.includes(attempt.settled?.disposition ?? "incomplete")) return false;
 	if (filter.turnIds && !filter.turnIds.includes(attempt.ctx?.turnId ?? "")) return false;
 	if (filter.from && attempt.startedAt < filter.from) return false;
@@ -1700,19 +1700,19 @@ function groupKeys(runs: readonly Run[], attempts: readonly Attempt[], by: Group
 	const keys = new Set<string>();
 	for (const attempt of attempts)
 		keys.add(
-			by === "label"
-				? attempt.started.label
+			by === "role"
+				? attempt.agent.role
 				: by === "model"
 					? modelKey(attempt.settled?.target ?? attempt.started.target)
 					: (attempt.ctx?.turnId ?? "-"),
 		);
-	for (const run of runs) keys.add(by === "label" ? "worker" : by === "model" ? runModelKey(run) : (run.turnId ?? "-"));
+	for (const run of runs) keys.add(by === "role" ? "worker" : by === "model" ? runModelKey(run) : (run.turnId ?? "-"));
 	return [...keys].sort();
 }
 
 function costGroups(view: View, base: Omit<ParsedFactRef, "metric">, keys: readonly string[], by: GroupBy) {
 	// A session or repository window splits into its own calls and its worker runs; one run is all worker spend.
-	const split = by !== "label" && (base.scope === "session" || base.scope === "repo");
+	const split = by !== "role" && (base.scope === "session" || base.scope === "repo");
 	return keys.map((key) => {
 		const ref = (metric: FactMetric, scope = base.scope): ParsedFactRef => ({
 			...base,
@@ -1736,7 +1736,7 @@ function costGroups(view: View, base: Omit<ParsedFactRef, "metric">, keys: reado
 	});
 }
 
-export function costReport(source: SessionSource, groupBy: GroupBy = "label", options: ReadOptions = {}): CostReportV1 {
+export function costReport(source: SessionSource, groupBy: GroupBy = "role", options: ReadOptions = {}): CostReportV1 {
 	const view: View = { session: source };
 	const analysis = analyze(source);
 	const base = { scope: "session" as const, owner: source.sessionId };
@@ -1759,7 +1759,7 @@ export function costReport(source: SessionSource, groupBy: GroupBy = "label", op
 export function repoCostReport(
 	repo: RepoSource,
 	scope: { repo: string; days: number },
-	groupBy: GroupBy = "label",
+	groupBy: GroupBy = "role",
 	options: ReadOptions = {},
 ): CostReportV1 {
 	const view: View = { repo };
@@ -1888,8 +1888,8 @@ export function runCostReport(
 	const keys = new Set<string>();
 	for (const attempt of run.attempts)
 		keys.add(
-			groupBy === "label"
-				? attempt.started.label
+			groupBy === "role"
+				? attempt.agent.role
 				: groupBy === "model"
 					? modelKey(attempt.settled?.target ?? attempt.started.target)
 					: (attempt.ctx?.turnId ?? "-"),
@@ -2360,7 +2360,7 @@ function callEntry(
 		endAt: attempt.settledAt,
 		callId: attempt.started.callId as CallRowV1["callId"],
 		attemptId: attempt.started.attemptId as CallRowV1["attemptId"],
-		label: attempt.started.label,
+		agent: attempt.agent,
 		turnId: attempt.ctx?.turnId ?? null,
 		runId: attempt.ctx?.runId ?? null,
 		disposition: attempt.settled?.disposition ?? "incomplete",
@@ -2599,7 +2599,7 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 		rePrefilled: quantity(view, own(id, "rePrefilled")),
 		breakUsd: quantity(view, own(id, "breakUsd")),
 	};
-	const main = { group: { by: "label" as const, key: "main" } };
+	const main = { group: { by: "role" as const, key: "main" } };
 	const roundTrips = {
 		rounds: quantity(view, own(id, "bookkeepingRounds", main)),
 		tax: quantity(view, own(id, "roundTripTax", main)),

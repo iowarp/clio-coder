@@ -232,7 +232,6 @@ export function observeExternalWorkerRun(
 							callId,
 							attemptId,
 							attempt: 0,
-							label: "worker",
 							target: { ...target, reportedModel: reportedModelFromMessage(payload) },
 							roundKind: "unknown",
 							toolChoice: "unknown",

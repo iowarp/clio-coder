@@ -1,25 +1,13 @@
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import { attributedModelId } from "../../core/response-model-id.js";
-import type { CallLabel } from "../../core/telemetry/enums.js";
+import type { AgentRole } from "../../core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { FactSum } from "../../core/telemetry/fact.js";
-import type { CostAggregate, CostEntryLabel } from "../telemetry/cost.js";
+import type { CostAggregate } from "../telemetry/cost.js";
 import type { FoldedAttempt } from "../telemetry/folds.js";
 import { foldCallJournal, foldCalls } from "../telemetry/folds.js";
 import type { LedgerUsageCall } from "./usage.js";
 
-const labels: Record<CallLabel, CostEntryLabel | undefined> = {
-	main: undefined,
-	worker: "worker",
-	compaction: "compaction",
-	memory: "background-memory",
-	"system-one": "system-one",
-	prewarm: "prewarm",
-	btw: "side-question",
-	handoff: "handoff",
-	helper: "helper",
-	"safety-judge": "safety-judge",
-};
 const known = (sum: FactSum) => sum.measured + sum.estimated;
 
 /** A report spanning parent and child sessions counts a shared attempt once (#434). */
@@ -55,28 +43,20 @@ export function usageCallsFromJournal(
 			outcomes.set(id, previous !== undefined && previous !== row.data.outcome ? "unknown" : row.data.outcome);
 		}
 	}
-	return usageCallsFromAttempts(foldCallJournal(rows, callIds).attempts).map((call) =>
-		call.label === "compaction" ? withCompactionOutcome(call, outcomes.get(call.callId ?? "") ?? "unknown") : call,
+	// A completed provider call can still fail to produce a checkpoint; absence alone proves neither outcome (#434).
+	return foldCallJournal(rows, callIds).attempts.flatMap((attempt) =>
+		usageCallsFromAttempts([attempt]).map((call) =>
+			attempt.agent.role === "compaction"
+				? { ...call, compactionOutcome: outcomes.get(attempt.started.callId) ?? "unknown" }
+				: call,
+		),
 	);
 }
 
-/** A completed provider call can still fail to produce a checkpoint; absence alone proves neither outcome (#434). */
-function withCompactionOutcome(
-	call: LedgerUsageCall,
-	outcome: NonNullable<LedgerUsageCall["compactionOutcome"]>,
-): LedgerUsageCall {
-	return {
-		...call,
-		compactionOutcome: outcome,
-		label:
-			outcome === "failed" || outcome === "discarded" || call.callOutcome === "error" || call.callOutcome === "aborted"
-				? "failed-compaction"
-				: "compaction",
-	};
-}
-
 /** Live settlement and durable replay share the same projection (#434). */
-export function usageCallsFromAttempts(attempts: readonly FoldedAttempt[]): LedgerUsageCall[] {
+export function usageCallsFromAttempts(
+	attempts: readonly Pick<FoldedAttempt, "started" | "settled">[],
+): LedgerUsageCall[] {
 	return attempts.flatMap((attempt) => {
 		const { started, settled } = attempt;
 		if (settled?.disposition === "never_sent") return [];
@@ -97,7 +77,6 @@ export function usageCallsFromAttempts(attempts: readonly FoldedAttempt[]): Ledg
 			calls: settled === null ? 0 : 1,
 			...(settled === null ? { unknownCallCoverageRuns: 1 } : {}),
 		};
-		const label = labels[started.label];
 		return [
 			{
 				callId: started.callId,
@@ -136,23 +115,22 @@ export function usageCallsFromAttempts(attempts: readonly FoldedAttempt[]): Ledg
 						: costSummary.allKnownFree
 							? "known_free"
 							: "known",
-				...(label ? { label } : {}),
 			},
 		];
 	});
 }
 
-/** Labels whose journal owns usage even without a transcript or checkpoint row (#434). */
-export function journalOwnsSideUsage(label: CallLabel): boolean {
+/** Agent roles whose journal owns usage even without a transcript or checkpoint row (#434). */
+export function journalOwnsSideUsage(role: AgentRole): boolean {
 	return (
-		label === "btw" ||
-		label === "helper" ||
-		label === "handoff" ||
-		label === "prewarm" ||
-		label === "system-one" ||
-		label === "safety-judge" ||
-		label === "memory" ||
-		label === "compaction"
+		role === "btw" ||
+		role === "helper" ||
+		role === "handoff" ||
+		role === "prewarm" ||
+		role === "system-one" ||
+		role === "safety-judge" ||
+		role === "memory" ||
+		role === "compaction"
 	);
 }
 
@@ -160,7 +138,7 @@ export function journalOwnsSideUsage(label: CallLabel): boolean {
 export function journalUsageWindow(records: readonly TelemetryRecord[], from: number, to: number): TelemetryRecord[] {
 	const selected = new Map<string, boolean>();
 	for (const row of records) {
-		if ((row.k !== "call.started" && row.k !== "call.settled") || !journalOwnsSideUsage(row.data.label)) continue;
+		if ((row.k !== "call.started" && row.k !== "call.settled") || !journalOwnsSideUsage(row.ctx.agent.role)) continue;
 		if (row.k === "call.settled" || !selected.has(row.data.attemptId)) {
 			const t = Date.parse(row.t);
 			selected.set(row.data.attemptId, t >= from && t <= to);
@@ -169,7 +147,7 @@ export function journalUsageWindow(records: readonly TelemetryRecord[], from: nu
 	return records.filter(
 		(row) =>
 			(row.k !== "call.started" && row.k !== "call.settled") ||
-			!journalOwnsSideUsage(row.data.label) ||
+			!journalOwnsSideUsage(row.ctx.agent.role) ||
 			selected.get(row.data.attemptId),
 	);
 }

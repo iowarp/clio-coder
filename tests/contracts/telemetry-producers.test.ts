@@ -145,8 +145,8 @@ test("call.timing.deltas is a gap histogram recorded only where delta capture is
 		} as const;
 		for (const sessionId of ["producer-deltas-standard", "producer-deltas-research"]) {
 			const call = beginCall(
-				{ label: "main", target, roundKind: "normal", toolChoice: "auto" },
-				{ sessionId, label: "main" },
+				{ target, roundKind: "normal", toolChoice: "auto" },
+				{ sessionId, agent: { role: "main", id: sessionId } },
 			);
 			strictEqual(call.delta === undefined, sessionId.endsWith("standard"));
 			for (let index = 0; index < 4; index++) call.delta?.();
@@ -214,7 +214,10 @@ test("prompt.compiled is recorded once per structure by a writer, under the call
 	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-prompt-compiled-"));
 	try {
 		const journals = createSessionJournals(stateDir, () => {});
-		const lease = await journals.acquire({ id: "prompt-compiled", cwdHash: "cwd" }, "main");
+		const lease = await journals.acquire(
+			{ id: "prompt-compiled", cwdHash: "cwd" },
+			{ role: "main", id: "prompt-compiled" },
+		);
 		const compile = {
 			version: 4,
 			at: "2026-10-31T12:00:00.000Z",
@@ -263,8 +266,11 @@ test("research capture keeps a request body and only allowlisted headers, and st
 			requestedModel: "m",
 			reportedModel: { kind: "unknown", reason: "not-observed" },
 		} as const;
-		const ctx = { sessionId: "producer-capture-research", label: "main" } as const;
-		const call = beginCall({ label: "main", target, roundKind: "normal", toolChoice: "auto" }, ctx);
+		const ctx = {
+			sessionId: "producer-capture-research",
+			agent: { role: "main", id: "producer-capture-research" },
+		} as const;
+		const call = beginCall({ target, roundKind: "normal", toolChoice: "auto" }, ctx);
 		call.observeResponse?.({
 			status: 200,
 			headers: { "X-Codex-Primary-Used-Percent": "12", "set-cookie": "session=secret", "x-request-id": "req_1" },
@@ -282,8 +288,8 @@ test("research capture keeps a request body and only allowlisted headers, and st
 			headers: { "x-codex-primary-used-percent": "12", "x-request-id": "req_1" },
 		});
 		const plain = beginCall(
-			{ label: "main", target, roundKind: "normal", toolChoice: "auto" },
-			{ sessionId: "producer-capture-standard", label: "main" },
+			{ target, roundKind: "normal", toolChoice: "auto" },
+			{ sessionId: "producer-capture-standard", agent: { role: "main", id: "producer-capture-standard" } },
 		);
 		strictEqual(
 			researchCaptureFor(
@@ -304,7 +310,6 @@ test("research capture keeps a request body and only allowlisted headers, and st
 test("an attempt whose stages never reached its send keeps no interrupted-call estimate or cold reasons (R2, L2)", () => {
 	const call = beginCall(
 		{
-			label: "main",
 			target: {
 				targetId: "t",
 				runtimeId: "r",
@@ -315,7 +320,7 @@ test("an attempt whose stages never reached its send keeps no interrupted-call e
 			roundKind: "normal",
 			toolChoice: "auto",
 		},
-		{ sessionId: "unsent-estimate", label: "main" },
+		{ sessionId: "unsent-estimate", agent: { role: "main", id: "unsent-estimate" } },
 	);
 	call.stage("admission", "start");
 	const abandoned = abandonedSettlement(true, "operator_cancel");

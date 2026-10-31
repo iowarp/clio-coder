@@ -42,7 +42,7 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 	if (cached) return cached;
 	const session = view.session();
 	const neverSent = session.own.counts.dispositions.neverSent;
-	const main = view.calls({ labels: ["main"], limit: 1 }).calls[0];
+	const main = view.calls({ roles: ["main"], limit: 1 }).calls[0];
 	const turnId = main?.owner.turnId;
 	const turnQuantity = (metric: FactMetric): Quantity | null =>
 		turnId === undefined

@@ -76,7 +76,7 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 					subjects: [{ runId, digest: "a".repeat(64) }],
 					createdAt: new Date().toISOString(),
 				},
-				{ telemetry: { sessionId: null, runId, label: "main" } },
+				{ telemetry: { sessionId: null, runId, agent: { role: "coordinator", id: runId } } },
 			);
 			if (pending.record.kind !== "decision") throw new Error("expected a decision artifact");
 			writeFileSync(join(decisionDir, `${label}.json`), JSON.stringify(pending.record.decision));

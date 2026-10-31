@@ -41,7 +41,7 @@ const tokens = {
 		},
 	},
 };
-const cost = (groupBy: "label" | "model", total: Record<string, unknown>, groups: Record<string, unknown>[] = []) => ({
+const cost = (groupBy: "role" | "model", total: Record<string, unknown>, groups: Record<string, unknown>[] = []) => ({
 	name: "telemetry-cost",
 	values: { groupBy, report: { kind: "cost", scope: { repo: "all", days: 30 }, groupBy, total, groups } },
 });
@@ -108,7 +108,7 @@ test("a field with nothing observed shows the server's word, and a lower bound d
 test("the headline reads the read model's window totals and names an unpriced remainder", () => {
 	const view = usageView(
 		report([
-			cost("label", {
+			cost("role", {
 				calls: quantity("≥14 (1 call unknown)", 14, 1),
 				tokens: quantity("≥2,850 (1 call unknown)", 2850, 1),
 				usd: quantity("$0.03 +?", 0.03, 1),
@@ -122,7 +122,7 @@ test("the headline reads the read model's window totals and names an unpriced re
 	assert.equal(by.get("Cost")?.value, "$0.03 +?");
 	assert.equal(by.get("Cost")?.note, "Known subtotal; some calls are unpriced");
 	assert.match(view.knownSubtotals ?? "", /known subtotals/u);
-	assert.equal(usageView(report([cost("label", exactTotal)])).knownSubtotals, null);
+	assert.equal(usageView(report([cost("role", exactTotal)])).knownSubtotals, null);
 });
 
 test("a missing store reads as a dash and says what a dash means", () => {
@@ -145,7 +145,7 @@ test("call origins are the label report's groups, in the server's words", () => 
 	assert.match(usageView(report([])).originsNote, /were not recorded/u);
 	const view = usageView(
 		report([
-			cost("label", exactTotal, [
+			cost("role", exactTotal, [
 				{ key: "btw", calls: quantity("1", 1), tokens: quantity("40", 40), usd: quantity("$0.00", 0), pricedBy },
 				{ key: "main", calls: quantity("9", 9), tokens: quantity("2,000", 2000), usd: quantity("$0.02", 0.02), pricedBy },
 				{
@@ -169,7 +169,7 @@ test("skills keep the report's order, the read model's rows are claimed, and not
 	const view = usageView(
 		report([
 			tokens,
-			cost("label", exactTotal),
+			cost("role", exactTotal),
 			cost("model", exactTotal),
 			{ name: "skill-activated", values: { skill: "map-codebase", activations: 2 } },
 			{ name: "skill-never-activated", values: { skill: "slurm-jobs" } },

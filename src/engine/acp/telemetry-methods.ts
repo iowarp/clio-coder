@@ -17,7 +17,7 @@ export { ACP_TELEMETRY_META_KEY, ACP_TELEMETRY_METHODS, ACP_TELEMETRY_UPDATE_NOT
 /** A calls report bigger than this is cut to its newest rows; `matched` still counts every match. */
 const MAX_CALLS = 1000;
 const DEFAULT_CALLS = 200;
-const GROUP_BY: ReadonlySet<CostReportV1["groupBy"]> = new Set(["label", "model", "turn"]);
+const GROUP_BY: ReadonlySet<CostReportV1["groupBy"]> = new Set(["role", "model", "turn"]);
 
 export interface AcpTelemetryRequestDeps {
 	model: TelemetryReadModel;
@@ -64,8 +64,8 @@ export function telemetryRequestHandlers(
 			return session.calls({ ...filter, limit });
 		}),
 		[ACP_TELEMETRY_METHODS.cost]: sessionScoped(["groupBy"], (session, request) => {
-			const groupBy = request.groupBy ?? "label";
-			if (!GROUP_BY.has(groupBy as CostReportV1["groupBy"])) throw invalid("groupBy is label, model or turn");
+			const groupBy = request.groupBy ?? "role";
+			if (!GROUP_BY.has(groupBy as CostReportV1["groupBy"])) throw invalid("groupBy is role, model or turn");
 			return session.cost(groupBy as CostReportV1["groupBy"]);
 		}),
 		[ACP_TELEMETRY_METHODS.cache]: sessionScoped([], (session) => session.cache()),

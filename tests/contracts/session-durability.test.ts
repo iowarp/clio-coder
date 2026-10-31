@@ -207,7 +207,10 @@ describe("session durability boundary", () => {
 		ledger.update(run.id, { status: "running", pid: 999_999, heartbeatAt: run.startedAt });
 		await ledger.persist();
 		const directory = join(runEventJournalRoot(), run.id);
-		const journal = await openRunTelemetry({ sessionId: null, runId: run.id, label: "worker" }, directory);
+		const journal = await openRunTelemetry(
+			{ sessionId: null, runId: run.id, agent: { role: "worker", id: run.id } },
+			directory,
+		);
 		journal.feed({ kind: "open", runId: run.id, agentId: "coder" }, 1_000_000);
 		await journal.close();
 

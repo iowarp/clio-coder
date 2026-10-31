@@ -61,7 +61,6 @@ interface Charge {
 	costUsd: number | undefined;
 	breakdown: Partial<UsageBreakdown> | undefined;
 	provenance: string | undefined;
-	label: string | undefined;
 }
 
 /** The host admission over a target priced at {@link PRICING}; `gate` runs inside each paid admission, numbered from 1. */
@@ -113,7 +112,6 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 					missingTokenCalls: call.missingTokenCalls ?? 0,
 				},
 				provenance: call.costProvenance,
-				label: call.label,
 			}));
 		},
 	};
@@ -131,7 +129,6 @@ function assertCharged(charge: Charge | undefined): void {
 	);
 	// Declared target rates read as known, as in 0.6.5 (#434).
 	strictEqual(charge.provenance, "known");
-	strictEqual(charge.label, "system-one");
 }
 
 /**
@@ -145,7 +142,6 @@ function assertUnmetered(charge: Charge | undefined): void {
 	strictEqual(charge.breakdown?.apiCalls, 1);
 	strictEqual(charge.breakdown?.missingTokenCalls, 1);
 	strictEqual(charge.provenance, "unknown");
-	strictEqual(charge.label, "system-one");
 }
 
 function json(status: number, body: unknown): Response {
@@ -229,7 +225,7 @@ describe("System One paid requests: admission and accounting", () => {
 		strictEqual(settled.length, bodies.length);
 		strictEqual(settled.filter((row) => row.data.disposition === "settled_no_usage").length, 1);
 		strictEqual(settled.filter((row) => row.data.disposition === "settled").length, 5);
-		ok(settled.every((row) => row.ctx.sessionId === "session-1" && row.data.label === "system-one"));
+		ok(settled.every((row) => row.ctx.sessionId === "session-1" && row.ctx.agent.role === "system-one"));
 	});
 
 	it("admits each one-shot attempt, the schema retry included, and charges the answer's usage", async () => {

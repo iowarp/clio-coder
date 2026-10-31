@@ -36,7 +36,7 @@ export function readSessionCallJournalSync(
 		// unsettled call (#434).
 		const sideCallStarts = new Map<string, number>();
 		for (const { record } of rows) {
-			if ((record.k !== "call.started" && record.k !== "call.settled") || !journalOwnsSideUsage(record.data.label))
+			if ((record.k !== "call.started" && record.k !== "call.settled") || !journalOwnsSideUsage(record.ctx.agent.role))
 				continue;
 			const at = Date.parse(record.t);
 			sideCallStarts.set(record.data.callId, Math.min(at, sideCallStarts.get(record.data.callId) ?? at));

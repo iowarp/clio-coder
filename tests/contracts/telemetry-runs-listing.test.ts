@@ -19,7 +19,7 @@ async function writeRunJournal(stateDir: string, runId: string, writtenAt: Date)
 	const directory = telemetryRunDirectory(stateDir, runId);
 	const journal = await openCallJournal({
 		directory,
-		context: { sessionId: null, runId, label: "worker" },
+		context: { sessionId: null, runId, agent: { role: "worker", id: runId } },
 		writer: { clioCoderVersion: "test", piVersion: "test" },
 	});
 	await journal.close();

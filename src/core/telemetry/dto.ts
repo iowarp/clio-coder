@@ -1,7 +1,7 @@
 import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
 import {
-	CallLabel,
+	AgentRole,
 	ConfigChangeSource,
 	Disposition,
 	FailureCause,
@@ -13,7 +13,7 @@ import {
 	vocabulary,
 } from "./enums.js";
 import { factSchema } from "./fact.js";
-import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
+import { AttemptIdSchema, CallIdSchema, ExistingId, TelemetryAgentSchema } from "./id-schemas.js";
 import {
 	CallSettledSchema,
 	MIDDLEWARE_EFFECTS,
@@ -100,7 +100,7 @@ export const FACT_METRICS = [
 ] as const;
 export type FactMetric = (typeof FACT_METRICS)[number];
 /** `cause` selects a closed failure cause, `wait` an admission hold, `cold` an expected cold reason. */
-export const FACT_GROUPS = ["label", "model", "turn", "run", "cause", "wait", "cold"] as const;
+export const FACT_GROUPS = ["role", "model", "turn", "run", "cause", "wait", "cold"] as const;
 export type FactGroup = (typeof FACT_GROUPS)[number];
 export const FACT_SCOPES = ["own", "runs", "session", "lineage", "run", "repo", "process"] as const;
 export type FactScope = (typeof FACT_SCOPES)[number];
@@ -234,8 +234,8 @@ export const RunRowSchema = Type.Object(
 );
 export type RunRowV1 = Static<typeof RunRowSchema>;
 
-const labelRow = Type.Object(
-	{ label: CallLabel, calls: QuantitySchema, tokens: QuantitySchema, usd: QuantitySchema },
+const roleRow = Type.Object(
+	{ role: AgentRole, calls: QuantitySchema, tokens: QuantitySchema, usd: QuantitySchema },
 	closed,
 );
 const totals = Type.Object({ tokens: QuantitySchema, usd: QuantitySchema }, closed);
@@ -277,7 +277,7 @@ export const SessionTelemetrySchema = Type.Object(
 		),
 		/** Calls this session's journal owns: main loop and side calls, every branch (decision A, #434). */
 		own: Type.Object({ counts: callCounts, tokens, cost }, closed),
-		byLabel: Type.Array(labelRow),
+		byRole: Type.Array(roleRow),
 		runs: Type.Object(
 			{ count: count, unresolved: count, apiCalls: QuantitySchema, tokens: QuantitySchema, usd: QuantitySchema },
 			closed,
@@ -331,7 +331,7 @@ export const CallRowSchema = Type.Object(
 		callId: CallIdSchema,
 		attemptId: AttemptIdSchema,
 		attempt: count,
-		label: CallLabel,
+		agent: TelemetryAgentSchema,
 		owner: Type.Object(
 			{
 				sessionId: Type.Union([ExistingId, Type.Null()]),
@@ -417,7 +417,7 @@ export type CallRowV1 = Static<typeof CallRowSchema>;
 
 export const CallFilterSchema = Type.Object(
 	{
-		labels: Type.Optional(Type.Array(CallLabel)),
+		roles: Type.Optional(Type.Array(AgentRole)),
 		dispositions: Type.Optional(Type.Array(Type.Union([Disposition, Type.Literal("incomplete")]))),
 		/** The active path's user turns, for a branch view; whole-session spend ignores branches (#434). */
 		turnIds: Type.Optional(Type.Array(ExistingId)),
@@ -455,7 +455,7 @@ const costGroup = Type.Object(
 		pricedBy,
 		/**
 		 * The group split by who spent it: the sessions' own calls (`own` refs) and the worker runs (`runs` refs). Null
-		 * when grouped by label, whose `worker` row already is the split, and for one run, which is all worker spend.
+		 * when grouped by agent role, whose `worker` row already is the split, and for one run, which is all worker spend.
 		 */
 		audience: Type.Union([Type.Object({ session: audienceShare, worker: audienceShare }, closed), Type.Null()]),
 	},
@@ -470,7 +470,7 @@ export const CostReportSchema = Type.Object(
 			Type.Object({ runId: ExistingId }, closed),
 			Type.Object({ repo: text, days: Type.Integer({ minimum: 1 }) }, closed),
 		]),
-		groupBy: vocabulary(["label", "model", "turn"]),
+		groupBy: vocabulary(["role", "model", "turn"]),
 		total: Type.Object({ calls: QuantitySchema, tokens: QuantitySchema, usd: QuantitySchema, pricedBy }, closed),
 		groups: Type.Array(costGroup),
 	},
@@ -528,7 +528,7 @@ const callEntry = Type.Object(
 		endAt: Type.Union([UtcSchema, Type.Null()]),
 		callId: CallIdSchema,
 		attemptId: AttemptIdSchema,
-		label: CallLabel,
+		agent: TelemetryAgentSchema,
 		turnId: Type.Union([ExistingId, Type.Null()]),
 		runId: Type.Union([ExistingId, Type.Null()]),
 		disposition: Type.Union([Disposition, Type.Literal("incomplete")]),

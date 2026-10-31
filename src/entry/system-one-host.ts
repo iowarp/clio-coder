@@ -1,7 +1,7 @@
 import type { CallObservation } from "../core/call-failure.js";
+import type { AgentRole } from "../core/telemetry/enums.js";
 import { beginCall, processTelemetryContext } from "../core/telemetry/producer.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
-import type { CostEntryLabel } from "../domains/telemetry/cost.js";
 /**
  * What the composition root keeps between System One calls.
  *
@@ -61,10 +61,10 @@ export function createSystemOneRequestAdmission(deps: {
 	getCeilingUsd: () => number;
 	currentSession: () => string | null;
 	repoIdentity: () => string | null;
-	label?: Extract<CostEntryLabel, "system-one" | "safety-judge">;
+	role?: Extract<AgentRole, "system-one" | "safety-judge">;
 }): LlmRequestAdmission {
-	const label = deps.label ?? "system-one";
-	return async ({ targetId, model, signal }) => {
+	const role = deps.role ?? "system-one";
+	return async ({ engine, targetId, model, signal }) => {
 		const session = deps.currentSession();
 		const repoIdentity = deps.repoIdentity();
 		const target = deps.providers.getTarget(targetId);
@@ -76,15 +76,22 @@ export function createSystemOneRequestAdmission(deps: {
 		);
 		const lease =
 			session && repoIdentity
-				? await deps.telemetry?.acquireTelemetrySession?.({ id: session, cwdHash: repoIdentity }, label)
+				? await deps.telemetry?.acquireTelemetrySession?.(
+						{ id: session, cwdHash: repoIdentity },
+						{ role, id: engine ?? session },
+					)
 				: undefined;
 		// A decision outside a session is the process's own call; a session whose writer failed to open mints none and
-		// its journal records the gap (#434).
-		const owner = session && repoIdentity ? (lease?.journaled ? lease.context : undefined) : processTelemetryContext();
+		// its journal records the gap (#434). An engine names its own calls; the safety judge is named by its scope.
+		const processContext = session && repoIdentity ? undefined : processTelemetryContext();
+		const owner = processContext
+			? { ...processContext, agent: { role, id: engine ?? processContext.agent.id } }
+			: lease?.journaled
+				? lease.context
+				: undefined;
 		const call = owner
 			? beginCall(
 					{
-						label,
 						target: {
 							targetId,
 							runtimeId: target.runtime,

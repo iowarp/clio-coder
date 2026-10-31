@@ -433,7 +433,8 @@ export function createRunner(deps: RunnerDeps): Runner {
 						routes,
 						callIds: [...callIds],
 					},
-					{ sessionId: session, label: "system-one" },
+					// The decision acts for the site's own engine, which routes list first; the routes name every engine asked.
+					{ sessionId: session, agent: { role: "system-one", id: plans[0]?.route.name ?? site.id } },
 				);
 			} catch {
 				// The decision's record never changes the decision (#434).

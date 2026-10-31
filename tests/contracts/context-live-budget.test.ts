@@ -286,7 +286,7 @@ describe("live budget adapter", () => {
 	beforeEach(async () => {
 		isolated = await isolateClioEnv("clio-coder-live-budget-");
 		journals = createSessionJournals(clioStateDir(), () => {});
-		await journals.acquire({ id: "budget-session", cwdHash: "budget-fixture" }, "main");
+		await journals.acquire({ id: "budget-session", cwdHash: "budget-fixture" }, { role: "main", id: "budget-session" });
 	});
 	afterEach(async () => {
 		await journals.closeAll();

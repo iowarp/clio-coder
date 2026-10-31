@@ -241,7 +241,7 @@ describe("contracts/auth OAuth refresh", () => {
 		const recovered = await run(stream(null, rejected), async () => stream("retried"));
 		const frames: WorkerTelemetryFrame[] = [];
 		const telemetry = createWorkerCallTelemetry(
-			{ sessionId: null, runId: "auth-retry", label: "worker" },
+			{ sessionId: null, runId: "auth-retry", agent: { role: "worker", id: "auth-retry" } },
 			{
 				targetId: "fixture",
 				runtimeId: "fixture",
@@ -350,7 +350,7 @@ describe("contracts/auth OAuth refresh", () => {
 		const records: PendingTelemetry[] = [];
 		const release = registerTelemetrySink("auth-events", { enqueue: (record) => Boolean(records.push(record)) });
 		try {
-			await withTelemetryContext({ sessionId: "auth-events", label: "main" }, () =>
+			await withTelemetryContext({ sessionId: "auth-events", agent: { role: "main", id: "auth-events" } }, () =>
 				Promise.all([open().resolveApiKey("alcf"), open().resolveApiKey("alcf")]),
 			);
 		} finally {
@@ -373,7 +373,7 @@ describe("contracts/auth OAuth refresh", () => {
 		seed(-1000);
 		const processRecords: PendingTelemetry[] = [];
 		const releaseProcess = registerProcessTelemetrySink(
-			{ sessionId: null, processId: "prc_auth-events", label: "main" },
+			{ sessionId: null, processId: "prc_auth-events", agent: { role: "main", id: "prc_auth-events" } },
 			{ enqueue: (record) => Boolean(processRecords.push(record)) },
 		);
 		try {

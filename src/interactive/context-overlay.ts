@@ -237,7 +237,7 @@ function renderContextLedgerLines(
 	// never 0. The session shell hash and the serving backend's timings are Clio's own and stay on the ledger. A server
 	// that omits cache reads from its usage but reports cache_n in its timings shows that read, labelled the server's.
 	const cache = ledger.promptCache;
-	const call = telemetry?.calls({ labels: ["main"], limit: 1 }).calls[0] ?? null;
+	const call = telemetry?.calls({ roles: ["main"], limit: 1 }).calls[0] ?? null;
 	if (cache || call) {
 		const shell = cache ? (cache.shellReused ? "shell reused" : "shell recompiled") : "shell n/a";
 		if (!hasTelemetry) lines.push(theme.fg("annotation", `prompt cache: ${shell} · cache facts not available`));

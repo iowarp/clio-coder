@@ -31,7 +31,7 @@ export const TelemetryReceiptEvidence = TELEMETRY_DTO_SCHEMAS.receiptEvidence;
 /** Query strings are flat, so list filters arrive comma-separated; the service rebuilds and checks the CallFilter. */
 export const TelemetryCallsQuery = Type.Object(
 	{
-		labels: commaList("[a-z-]{1,32}", 256),
+		roles: commaList("[a-z-]{1,32}", 256),
 		dispositions: commaList("[a-z_]{1,32}", 256),
 		turnIds: commaList("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", 4096),
 		runId: Type.Optional(Id),
@@ -43,7 +43,7 @@ export const TelemetryCallsQuery = Type.Object(
 );
 export type TelemetryCallsQuery = Static<typeof TelemetryCallsQuery>;
 export const TelemetryCostQuery = Type.Object(
-	{ by: Type.Optional(Type.Union([Type.Literal("label"), Type.Literal("model"), Type.Literal("turn")])) },
+	{ by: Type.Optional(Type.Union([Type.Literal("role"), Type.Literal("model"), Type.Literal("turn")])) },
 	closed,
 );
 export const TelemetryRangeQuery = Type.Object({ from: Type.Optional(utc), to: Type.Optional(utc) }, closed);
@@ -60,7 +60,7 @@ interface SessionRead {
 export type TelemetryRequest =
 	| ({ kind: "session" | "cache" | "why-stopped" } & SessionRead)
 	| ({ kind: "calls"; filter: CallFilter } & SessionRead)
-	| ({ kind: "cost"; by: "label" | "model" | "turn" } & SessionRead)
+	| ({ kind: "cost"; by: "role" | "model" | "turn" } & SessionRead)
 	| ({ kind: "timeline"; range: { from: string; to: string } | null } & SessionRead)
 	| { kind: "runs"; limit: number; cursor?: string }
 	| { kind: "run"; runId: string }

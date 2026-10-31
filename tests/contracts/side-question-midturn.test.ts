@@ -143,7 +143,7 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 		},
 		origin: { id: "side-session", cwdHash: "repo" },
 		acquire: journals.acquire,
-		label: "btw" as const,
+		role: "btw" as const,
 		targetId: "fixture",
 		runtimeId: "llamacpp",
 		costProvenance: "unknown" as const,
@@ -211,7 +211,7 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 		// The engine seam times a side call's handoff and first token; a refused call never reaches it (#434).
 		assert.ok(calls[1]?.data.stages.send && calls[1].data.stages.firstToken !== undefined, JSON.stringify(calls[1]));
 		assert.equal(calls[2]?.data.stages.send, undefined);
-		assert.ok(calls.every((record) => record.ctx.sessionId === "side-session" && record.data.label === "btw"));
+		assert.ok(calls.every((record) => record.ctx.sessionId === "side-session" && record.ctx.agent.role === "btw"));
 	} finally {
 		provider.unregister();
 		await journals.flush();

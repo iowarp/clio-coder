@@ -1,7 +1,6 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import {
-	CallLabel,
 	ConfigChangeScope,
 	ConfigChangeSource,
 	Disposition,
@@ -91,7 +90,6 @@ const call = {
 	callId: CallIdSchema,
 	attemptId: AttemptIdSchema,
 	attempt: count,
-	label: CallLabel,
 	target,
 	roundKind: RoundKind,
 	toolChoice: Type.Union([

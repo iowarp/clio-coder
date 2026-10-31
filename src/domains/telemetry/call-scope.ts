@@ -1,4 +1,6 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import { asSideAgent } from "../../core/telemetry/context.js";
+import type { AgentRole } from "../../core/telemetry/enums.js";
 import type { TelemetryCall } from "../../core/telemetry/producer.js";
 import { beginCall, processTelemetryContext } from "../../core/telemetry/producer.js";
 import type { CallSettled, CallStarted } from "../../core/telemetry/schemas.js";
@@ -11,7 +13,8 @@ export interface CallJournalOptions {
 	/** Null for a call no session owns, such as a startup warm: it is the process's own call (#434). */
 	origin: TelemetrySessionOrigin | null;
 	acquire: NonNullable<TelemetryContract["acquireTelemetrySession"]>;
-	label: CallStarted["label"];
+	/** The side agent making the call, named by the session it serves or, with no session, by the process (#434). */
+	role: AgentRole;
 	targetId: string;
 	runtimeId: string;
 	costProvenance: CostProvenance;
@@ -25,11 +28,14 @@ export interface AdmissionHold {
 
 /** One logical helper call retains its originating writer across schema and auth retries (#434). */
 export async function openCallScope(options: CallJournalOptions | undefined, model: { api: string; id: string }) {
-	const acquired = options?.origin ? await options.acquire(options.origin, options.label) : undefined;
+	const acquired = options?.origin
+		? await options.acquire(options.origin, { role: options.role, id: options.origin.id })
+		: undefined;
 	// A session writer that failed to open owns no call; its journal records the gap (#434). A call with no session is
 	// the process journal's.
 	const lease = acquired?.journaled ? acquired : undefined;
-	const owner = options?.origin === null ? processTelemetryContext() : lease?.context;
+	const processContext = options?.origin === null ? processTelemetryContext() : undefined;
+	const owner = options && processContext ? asSideAgent(processContext, options.role) : lease?.context;
 	let call: TelemetryCall | undefined;
 	let settledIdentity: { callId: string; attemptId: string } | undefined;
 	const settled = (facts: CallSettled | undefined): CallSettled | undefined => {
@@ -54,7 +60,6 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 				? (call.nextAttempt(request) ?? call)
 				: beginCall(
 						{
-							label: options.label,
 							target: {
 								targetId: options.targetId,
 								runtimeId: options.runtimeId,

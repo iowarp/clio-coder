@@ -77,11 +77,11 @@ test("usage reads the session's spend per target and model from the read model, 
 			usage: { input: 3000, output: 800, cacheRead: 150, cacheWrite: 50 },
 			usd: 0.25,
 		}),
-		...telemetryCall(sessionId, { ...at, label: "btw", usage: { input: 500, output: 100 }, usd: 0.125 }),
-		...telemetryCall(sessionId, { ...at, label: "system-one", usage: { input: null, output: null }, usd: null }),
+		...telemetryCall(sessionId, { ...at, role: "btw", usage: { input: 500, output: 100 }, usd: 0.125 }),
+		...telemetryCall(sessionId, { ...at, role: "system-one", usage: { input: null, output: null }, usd: null }),
 	];
 	// One worker run on the same model.
-	const worker = telemetryCall("worker", { ...at, label: "worker", usage: { input: 500, output: 100 }, usd: 0.125 });
+	const worker = telemetryCall("worker", { ...at, role: "worker", usage: { input: 500, output: 100 }, usd: 0.125 });
 	const ownRecords = own("usage-session");
 	const agent = await peer(
 		{

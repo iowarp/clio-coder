@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { CallLabel, Disposition } from "../../src/core/telemetry/enums.js";
+import type { AgentRole, Disposition } from "../../src/core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { Fact } from "../../src/core/telemetry/fact.js";
@@ -50,7 +50,14 @@ const GOLDEN_JOURNAL = new URL("../fixtures/telemetry/golden/p0/journal.jsonl", 
 /** The golden P0 session journal under `sessionId`: five calls, one never sent, one with unknown usage (#434). */
 export function goldenTelemetryRecords(sessionId = "golden-p0"): TelemetryRecord[] {
 	return scanTelemetrySegment(readFileSync(GOLDEN_JOURNAL)).rows.flatMap((row) =>
-		row.kind === "record" ? [{ ...row.record, ctx: { ...row.record.ctx, sessionId } } as TelemetryRecord] : [],
+		row.kind === "record"
+			? [
+					{
+						...row.record,
+						ctx: { ...row.record.ctx, sessionId, agent: { ...row.record.ctx.agent, id: sessionId } },
+					} as TelemetryRecord,
+				]
+			: [],
 	);
 }
 
@@ -62,7 +69,8 @@ export function goldenSessionJournal(sessionId = "golden-p0"): Buffer {
 }
 
 export interface TelemetryCallOptions {
-	label?: CallLabel;
+	/** The calling agent's role; its id is the session, or the run once a caller rekeys the record to one. */
+	role?: AgentRole;
 	targetId?: string;
 	/** The model the provider reported; it names the call's `target/model` group. */
 	model?: string;
@@ -89,11 +97,17 @@ export function telemetryCall(sessionId: string, options: TelemetryCallOptions =
 	if (started?.k !== "call.started") throw new Error("golden started call missing");
 	// The golden call's reported total describes its own counts, not the ones given here.
 	const { total: _total, ...base } = settled.data.usage;
-	const label = options.label ?? "main";
+	const role = options.role ?? "main";
 	const callId = newCallId();
 	const attemptId = newAttemptId();
 	const at = options.at ?? settled.t;
-	const ctx = { ...settled.ctx, label, callId, attemptId, ...(options.turnId ? { turnId: options.turnId } : {}) };
+	const ctx = {
+		...settled.ctx,
+		agent: { role, id: sessionId },
+		callId,
+		attemptId,
+		...(options.turnId ? { turnId: options.turnId } : {}),
+	};
 	const model = options.model ?? "fixture-model";
 	const target = {
 		...started.data.target,
@@ -114,7 +128,7 @@ export function telemetryCall(sessionId: string, options: TelemetryCallOptions =
 				: { kind: "measured", value: options.usd ?? 0, source: "local-count" };
 	const usage = options.usage ?? {};
 	return [
-		{ ...started, id: newRecordId(), t: at, ctx, data: { ...started.data, callId, attemptId, label, target } },
+		{ ...started, id: newRecordId(), t: at, ctx, data: { ...started.data, callId, attemptId, target } },
 		{
 			...settled,
 			id: newRecordId(),
@@ -124,7 +138,6 @@ export function telemetryCall(sessionId: string, options: TelemetryCallOptions =
 				...settled.data,
 				callId,
 				attemptId,
-				label,
 				target,
 				disposition: options.disposition ?? "settled",
 				usage: {
@@ -192,7 +205,7 @@ export async function seedParitySession(stateDir: string): Promise<void> {
 	const last = Math.max(...golden.map((record) => Date.parse(record.t)));
 	const at = (minutes: number) => new Date(last + minutes * 60_000).toISOString();
 	const side = telemetryCall(PARITY_SESSION, {
-		label: "memory",
+		role: "memory",
 		usage: { input: 120, output: 30 },
 		usd: 0.002,
 		pricedBy: "catalog",
@@ -221,9 +234,15 @@ export async function seedParitySession(stateDir: string): Promise<void> {
 	};
 	const ref = makeTelemetryRecord("run.linked", { runId: PARITY_RUN }, settled.ctx, { t: at(2), mono: 0 });
 	const worker = [
-		...telemetryCall(PARITY_SESSION, { label: "worker", usage: { input: 50, output: 10 }, usd: 0.25, at: at(2) }),
-		...telemetryCall(PARITY_SESSION, { label: "worker", usage: { input: 20, output: null }, usd: null, at: at(2) }),
-	].map((record) => ({ ...record, ctx: { ...record.ctx, runId: PARITY_RUN } }) as TelemetryRecord);
+		...telemetryCall(PARITY_SESSION, { role: "worker", usage: { input: 50, output: 10 }, usd: 0.25, at: at(2) }),
+		...telemetryCall(PARITY_SESSION, { role: "worker", usage: { input: 20, output: null }, usd: null, at: at(2) }),
+	].map(
+		(record) =>
+			({
+				...record,
+				ctx: { ...record.ctx, runId: PARITY_RUN, agent: { role: "worker", id: PARITY_RUN } },
+			}) as TelemetryRecord,
+	);
 	const write = async (directory: string, context: TelemetryRecord["ctx"], records: TelemetryRecord[]) => {
 		const journal = await openCallJournal({
 			directory,
@@ -248,7 +267,7 @@ export async function seedParitySession(stateDir: string): Promise<void> {
 	await write(telemetrySessionDirectory(stateDir, PARITY_SESSION), settled.ctx, [...golden, ...side, ref, ...main]);
 	await write(
 		telemetryRunDirectory(stateDir, PARITY_RUN),
-		{ ...settled.ctx, runId: PARITY_RUN, label: "worker" },
+		{ ...settled.ctx, runId: PARITY_RUN, agent: { role: "worker", id: PARITY_RUN } },
 		worker,
 	);
 }
@@ -261,7 +280,7 @@ export function coldParityDtos(stateDir: string) {
 		source,
 		session: sessionTelemetry(source),
 		costByModel: costReport(source, "model"),
-		costByLabel: costReport(source, "label"),
+		costByRole: costReport(source, "role"),
 		costByTurn: costReport(source, "turn"),
 		calls: callsReport(source),
 		runs: runsReport(source),

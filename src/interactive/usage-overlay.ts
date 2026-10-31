@@ -1,5 +1,6 @@
 import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
+import type { AgentRole } from "../core/telemetry/enums.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
 import type { RecallTelemetry, SessionEntry } from "../domains/session/index.js";
 import { foldRecallTelemetry, formatRecallTelemetry, hasRecallTelemetry } from "../domains/session/index.js";
@@ -18,9 +19,10 @@ const DEFAULT_CONTENT_WIDTH = 104;
 
 export const USAGE_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
-/** What each call label's count reads as; a label added later still shows, under its own name. */
-const LABEL_CAPTION: Readonly<Record<string, string>> = {
+/** What each agent role's count reads as; a role added later still shows, under its own name. */
+const ROLE_CAPTION: Readonly<Record<AgentRole, string>> = {
 	main: "conversation calls",
+	coordinator: "coordinator calls",
 	worker: "worker calls",
 	compaction: "compaction calls",
 	memory: "memory steps",
@@ -111,23 +113,25 @@ function tokenRows(view: TelemetryView, model?: string): Array<readonly [string,
  */
 function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null): string[] {
 	const session = view.session();
-	const byLabel = view.cost("label");
+	const byRole = view.cost("role");
 	const cache = view.cache();
 	const missing = view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "missingTokenCalls" }));
 	const neverSent = session.own.counts.dispositions.neverSent;
-	const groups = [...byLabel.groups].sort((a, b) =>
+	const groups = [...byRole.groups].sort((a, b) =>
 		a.key === "main" ? -1 : b.key === "main" ? 1 : a.key.localeCompare(b.key),
 	);
 	const cached = nonZero(cache.cacheRead) || nonZero(cache.cacheWrite) || nonZero(cache.rePrefilled);
 	const v = cache.verdicts;
 	return kvBlock([
-		...groups.map((group) => [LABEL_CAPTION[group.key] ?? `${group.key} calls`, group.calls.display] as const),
-		["model calls", byLabel.total.calls.display],
+		...groups.map(
+			(group) => [ROLE_CAPTION[group.key as AgentRole] ?? `${group.key} calls`, group.calls.display] as const,
+		),
+		["model calls", byRole.total.calls.display],
 		...(nonZero(missing)
 			? [["unknown token usage", `${missing.display} calls`, "token amounts are lower bounds"] as const]
 			: []),
 		...(nonZero(neverSent) ? [["never sent", `${neverSent.display} calls`] as const] : []),
-		...(contributed(byLabel.total.usd) ? [["cost", byLabel.total.usd.display] as const] : []),
+		...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
 		...tokenRows(view),
 		...(cached
 			? [
@@ -337,7 +341,7 @@ class UsageOverlayBody implements Component {
 				"",
 				rule(theme, contentWidth),
 				theme.fg("annotation", "Session tokens cannot be converted to subscription percentages."),
-				...(data.view && !nonZero(data.view.cost("label").total.calls) ? ["no calls recorded for this session"] : []),
+				...(data.view && !nonZero(data.view.cost("role").total.calls) ? ["no calls recorded for this session"] : []),
 			];
 		else if (this.tab === 3) {
 			body = [

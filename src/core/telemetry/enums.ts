@@ -5,19 +5,24 @@ export function vocabulary<const T extends readonly string[]>(values: T): TEnum<
 	return Type.Enum<T[number][]>([...values]);
 }
 
-export const CallLabel = vocabulary([
+/**
+ * The role of the agent an event acts for. `main` is a session's own agent, `coordinator` a fleet root driving its
+ * steps, `worker` a dispatched run; the rest are the side agents a session or process runs beside them (#434).
+ */
+export const AgentRole = vocabulary([
 	"main",
+	"coordinator",
 	"worker",
 	"compaction",
 	"memory",
 	"system-one",
+	"safety-judge",
 	"prewarm",
 	"btw",
 	"handoff",
 	"helper",
-	"safety-judge",
 ]);
-export type CallLabel = Static<typeof CallLabel>;
+export type AgentRole = Static<typeof AgentRole>;
 /**
  * never_sent carries no usage. sent_unsettled usage is a lower bound: counts the provider reported before the
  * response ended are measured, the rest unknown, and folds mark its sums partial. settled_no_usage is a terminal

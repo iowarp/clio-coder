@@ -72,7 +72,10 @@ describe("native budget inspection through the registered context tool", () => {
 	beforeEach(async () => {
 		env = await isolateClioEnv("clio-coder-budget-surface-");
 		journals = createSessionJournals(clioStateDir(), () => {});
-		await journals.acquire({ id: "surface-session", cwdHash: "surface-fixture" }, "main");
+		await journals.acquire(
+			{ id: "surface-session", cwdHash: "surface-fixture" },
+			{ role: "main", id: "surface-session" },
+		);
 	});
 	afterEach(async () => {
 		await journals.closeAll();

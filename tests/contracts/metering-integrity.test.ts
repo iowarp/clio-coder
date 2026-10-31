@@ -80,7 +80,6 @@ describe("contracts/metering integrity", () => {
 			callId: "call-fixture",
 			attemptId: `attempt-${attempt}`,
 			attempt,
-			label: "main",
 			roundKind: "normal",
 			toolChoice: "auto",
 			target: {

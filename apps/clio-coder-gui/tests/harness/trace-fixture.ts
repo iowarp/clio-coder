@@ -13,7 +13,7 @@ const at = (seconds: number) => new Date(Date.parse(startedAt) + seconds * 1000)
 /** The journal of run-0000: the worker's process, a tool event, one priced call and the settlement. */
 function fullJournal(runId: string) {
 	const call = telemetryCall("fixture-session", {
-		label: "worker",
+		role: "worker",
 		at: at(2),
 		usage: { input: 200, output: 40 },
 		usd: 0.0024,

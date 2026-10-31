@@ -61,7 +61,6 @@ export function usageCallsFromRunJournals(runs: Readonly<SessionCallJournalRead[
 				runCutoff: journal.throughMs,
 				usageFacts: usage.usageFacts,
 				tokenUsageMissing: usage.tokenUsageMissing || incomplete,
-				label: "worker",
 				providerId: target?.targetId ?? "unknown",
 				requestedModelId: target?.requestedModel ?? "unknown",
 				attributedModelId: target?.requestedModel ?? "unknown",

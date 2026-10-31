@@ -69,6 +69,7 @@ import {
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { emitApproval } from "../../core/telemetry/approvals.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
+import { workerAgent } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { DispatchCompletedPayload, DispatchRunIdentity } from "../../core/telemetry/live-events.js";
 import { isTestFilePath } from "../../core/test-paths.js";
@@ -3063,7 +3064,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 					telemetryContext: {
 						sessionId: input.req.ownerSessionId ?? null,
 						runId: input.req.runIdHint,
-						label: "worker" as const,
+						agent: workerAgent(input.req.runIdHint),
 						...(input.req.lineage?.parentRunId ? { parentRunId: input.req.lineage.parentRunId } : {}),
 					},
 				}
@@ -5947,7 +5948,7 @@ export function createDispatchBundle(
 			? {
 					sessionId: req.ownerSessionId ?? null,
 					runId: req.runIdHint,
-					label: "worker" as const,
+					agent: workerAgent(req.runIdHint),
 					...(req.lineage?.parentRunId ? { parentRunId: req.lineage.parentRunId } : {}),
 				}
 			: undefined;
@@ -5972,7 +5973,7 @@ export function createDispatchBundle(
 				if (req.ownerSessionId && req.ownerSessionCwdHash) {
 					parentJournal = await context
 						.getContract<TelemetryContract>("telemetry")
-						?.acquireTelemetrySession?.({ id: req.ownerSessionId, cwdHash: req.ownerSessionCwdHash }, "worker");
+						?.acquireTelemetrySession?.({ id: req.ownerSessionId, cwdHash: req.ownerSessionCwdHash }, telemetryContext.agent);
 					if (parentJournal) runJournal.linkSession(parentJournal.context);
 				}
 			} catch (error) {
@@ -7428,7 +7429,10 @@ export function createDispatchBundle(
 					if (req.ownerSessionId && req.ownerSessionCwdHash) {
 						parentJournal = await context
 							.getContract<TelemetryContract>("telemetry")
-							?.acquireTelemetrySession?.({ id: req.ownerSessionId, cwdHash: req.ownerSessionCwdHash }, "worker");
+							?.acquireTelemetrySession?.(
+								{ id: req.ownerSessionId, cwdHash: req.ownerSessionCwdHash },
+								spec.telemetryContext.agent,
+							);
 						if (parentJournal) runJournal.linkSession(parentJournal.context);
 					}
 				} catch (error) {
@@ -9989,7 +9993,7 @@ export function createDispatchBundle(
 	 * counted unowned rather than written into whichever scope the async context names (#434).
 	 */
 	function sinklessRunContext(runId: string, sessionId: string | null | undefined): TelemetryContext {
-		return { sessionId: sessionId ?? null, runId, label: "worker" };
+		return { sessionId: sessionId ?? null, runId, agent: workerAgent(runId) };
 	}
 
 	/** A fleet step's route belongs to its fleet root; any other dispatch's to the async context that asked (#434). */

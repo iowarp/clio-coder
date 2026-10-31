@@ -604,7 +604,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			commitScope = { ...scope };
 			commitState = new MemoryCommitState(scope, generation);
 			observedSessionId = scope.sessionId;
-			stepContext = { sessionId: scope.sessionId, label: "memory" };
+			stepContext = { sessionId: scope.sessionId, agent: { role: "memory", id: scope.sessionId } };
 		},
 		notifyContextCommitted(input) {
 			return commitState?.notifyContextCommitted(input, generation);
@@ -1111,7 +1111,11 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				: { sessionId: null, runId: input.runId as string };
 		const sameOwner = stepContext?.sessionId === owner.sessionId && stepContext?.runId === owner.runId;
 		const turnId = input.turnId ?? (sameOwner ? stepContext?.turnId : undefined);
-		stepContext = { ...owner, label: "memory", ...(turnId === undefined ? {} : { turnId }) };
+		stepContext = {
+			...owner,
+			agent: { role: "memory", id: owner.sessionId ?? (input.runId as string) },
+			...(turnId === undefined ? {} : { turnId }),
+		};
 	}
 
 	function cancelStoppedTurn(): void {

@@ -44,12 +44,12 @@ export function createWorkerCallTelemetry(
 	};
 	return {
 		begin(request: Request): void {
-			call = beginCall({ ...request, label: "worker", target }, context);
+			call = beginCall({ ...request, target }, context);
 			// Pi converts the conversation before it resolves the key; getApiKey closes this stage (#434).
 			call.stage("transform", "start");
 		},
 		attempt(request: Request): void {
-			call = call ? (call.nextAttempt(request) ?? call) : beginCall({ ...request, label: "worker", target }, context);
+			call = call ? (call.nextAttempt(request) ?? call) : beginCall({ ...request, target }, context);
 			call.stage("send", "start");
 		},
 		/** Stage facts for the live attempt; a settled attempt ignores them (#434). */

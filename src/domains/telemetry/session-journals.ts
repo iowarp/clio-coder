@@ -3,8 +3,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
-import type { TelemetryContext } from "../../core/telemetry/context.js";
-import type { CallLabel } from "../../core/telemetry/enums.js";
+import type { TelemetryAgent, TelemetryContext } from "../../core/telemetry/context.js";
+import { mainAgent } from "../../core/telemetry/context.js";
 import type { SegmentHeader } from "../../core/telemetry/envelope.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
@@ -135,11 +135,11 @@ export function createSessionJournals(
 	};
 	const acquire = async (
 		origin: TelemetrySessionOrigin,
-		label: CallLabel,
+		agent: TelemetryAgent,
 		turnId?: string,
 	): Promise<TelemetrySessionLease> => {
 		// Session ids are existing path components; never reinterpret them as paths (#434).
-		const context: TelemetryContext = { sessionId: origin.id, label, ...(turnId ? { turnId } : {}) };
+		const context: TelemetryContext = { sessionId: origin.id, agent, ...(turnId ? { turnId } : {}) };
 		if (!/^[a-zA-Z0-9_-]+$/.test(origin.id)) {
 			report();
 			return { context, journaled: false, async release() {} };
@@ -157,7 +157,7 @@ export function createSessionJournals(
 		let entry = entries.get(origin.id);
 		if (entry?.closing) {
 			await entry.closing;
-			return acquire(origin, label, turnId);
+			return acquire(origin, agent, turnId);
 		}
 		if (!entry) {
 			const created: Entry = {
@@ -170,7 +170,8 @@ export function createSessionJournals(
 					.then((writer) =>
 						openCallJournal({
 							directory,
-							context,
+							// The journal's own records (gaps, segment closes) are the session's, whoever opened it (#434).
+							context: { sessionId: origin.id, agent: mainAgent(origin.id) },
 							writer,
 							...(capture ? { capture: () => capture.current(origin) } : {}),
 						}),

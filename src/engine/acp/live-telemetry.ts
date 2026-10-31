@@ -207,7 +207,7 @@ function provenanceOf(cost: AcpCostAggregate): CostProvenance {
  */
 export function sessionUsageTotals(view: TelemetryView): SessionTotals {
 	const read = (metric: FactMetric) => view.quantity(factRef({ scope: "session", owner: view.sessionId, metric }));
-	const total = view.cost("label").total;
+	const total = view.cost("role").total;
 	const usd = total.usd;
 	const fact = usd.fact;
 	const summary: AcpCostAggregate = {

@@ -11,7 +11,7 @@ import { parse, register } from "./validate.js";
 function callFilter(query: TelemetryCallsQuery) {
 	const list = (value: string | undefined) => value?.split(",");
 	return parse(CallFilterSchema, {
-		...(query.labels !== undefined ? { labels: list(query.labels) } : {}),
+		...(query.roles !== undefined ? { roles: list(query.roles) } : {}),
 		...(query.dispositions !== undefined ? { dispositions: list(query.dispositions) } : {}),
 		...(query.turnIds !== undefined ? { turnIds: list(query.turnIds) } : {}),
 		...(query.runId !== undefined ? { runId: query.runId } : {}),
@@ -29,7 +29,7 @@ export function telemetryRoutes(app: Hono, hub: EventHub, telemetry: TelemetrySe
 		telemetry.read({ kind: "calls", sessionId: params.id, filter: callFilter(query) }, routes.telemetryCalls.response),
 	);
 	register(app, hub, routes.telemetryCost, ({ params, query }) =>
-		telemetry.read({ kind: "cost", sessionId: params.id, by: query.by ?? "label" }, routes.telemetryCost.response),
+		telemetry.read({ kind: "cost", sessionId: params.id, by: query.by ?? "role" }, routes.telemetryCost.response),
 	);
 	register(app, hub, routes.telemetryCache, ({ params }) =>
 		telemetry.read({ kind: "cache", sessionId: params.id }, routes.telemetryCache.response),

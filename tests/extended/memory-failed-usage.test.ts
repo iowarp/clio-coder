@@ -170,7 +170,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				(targetId) => ({
 					origin: session.current() ?? origin,
 					acquire: journals.acquire,
-					label: "memory",
+					role: "memory",
 					targetId,
 					runtimeId: "openai-compat",
 					costProvenance: "unknown",
@@ -209,7 +209,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 					.filter((record) => record.k === "call.settled");
 				assert.equal(calls.length, 1);
 				assert.equal(calls[0]?.ctx.sessionId, origin.id);
-				assert.equal(calls[0]?.data.label, "memory");
+				assert.equal(calls[0]?.ctx.agent.role, "memory");
 				assert.equal(calls[0]?.data.disposition, ending === "stop" && !switched ? "settled" : "sent_unsettled");
 				if (!switched) {
 					const steps = (await readCallJournal(telemetrySessionDirectory(join(env.dir, "state"), origin.id))).records
@@ -643,7 +643,11 @@ test("the history guardian retains an explicit missing-usage observation in its 
 	t.after(() => hold.release());
 	const stateDir = join(env.dir, "state");
 	const sink = createTaskMemoryTelemetrySink();
-	const context = { sessionId: null, processId: "history-process", label: "memory" } as const;
+	const context = {
+		sessionId: null,
+		processId: "history-process",
+		agent: { role: "memory", id: "history-process" },
+	} as const;
 	const journal = await openCallJournal({
 		directory: telemetryProcessDirectory(stateDir, "history-process"),
 		context,

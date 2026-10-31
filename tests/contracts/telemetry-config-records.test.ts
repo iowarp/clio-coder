@@ -45,7 +45,7 @@ it("a session writer opens with its settings and journals each change once, with
 	const directory = telemetrySessionDirectory(clioStateDir(), origin.id);
 	try {
 		await extension.start();
-		const lease = await contract.acquireTelemetrySession?.(origin, "main");
+		const lease = await contract.acquireTelemetrySession?.(origin, { role: "main", id: origin.id });
 		ok(lease);
 		current = after;
 		const change: ConfigChangePayload = {
@@ -99,7 +99,7 @@ it("a session's lifecycle events journal opening, resuming, parking and closing 
 		bus.emit(
 			"session.parked",
 			{ sessionId: origin.id, reason: "resume_other", cwdHash: origin.cwdHash, at: Date.now() },
-			{ sessionId: origin.id, label: "main" },
+			{ sessionId: origin.id, agent: { role: "main", id: origin.id } },
 		);
 		bus.emit("session.reattached", {
 			sessionId: origin.id,
@@ -111,7 +111,7 @@ it("a session's lifecycle events journal opening, resuming, parking and closing 
 		bus.emit(
 			"session.parked",
 			{ sessionId: origin.id, reason: "close", at: Date.now() },
-			{ sessionId: origin.id, label: "main" },
+			{ sessionId: origin.id, agent: { role: "main", id: origin.id } },
 		);
 		// Shutdown stops this domain before the session domain parks the live session, so stop() journals its close.
 		const live = { id: "lifecycle-live", cwdHash: origin.cwdHash };

@@ -2,10 +2,12 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { CallLabel } from "./enums.js";
-import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
+import type { AgentRole } from "./enums.js";
+import type { TelemetryAgent } from "./id-schemas.js";
+import { AttemptIdSchema, CallIdSchema, ExistingId, TelemetryAgentSchema } from "./id-schemas.js";
 
-export { AttemptIdSchema, CallIdSchema, ExistingId };
+export type { TelemetryAgent };
+export { AttemptIdSchema, CallIdSchema, ExistingId, TelemetryAgentSchema };
 
 const contextFields = {
 	toolCallId: Type.Optional(ExistingId),
@@ -14,7 +16,7 @@ const contextFields = {
 	parentRunId: Type.Optional(ExistingId),
 	callId: Type.Optional(CallIdSchema),
 	attemptId: Type.Optional(AttemptIdSchema),
-	label: CallLabel,
+	agent: TelemetryAgentSchema,
 };
 // Standalone runs have no session; their real run id owns the journal (#434).
 export const TelemetryContextSchema = Type.Union([
@@ -30,14 +32,37 @@ export const TelemetryContextSchema = Type.Union([
 	),
 ]);
 export type TelemetryContext = Readonly<Static<typeof TelemetryContextSchema>>;
-export type WorkerTelemetryContext = TelemetryContext & { readonly runId: string; readonly label: "worker" };
+export type WorkerTelemetryContext = TelemetryContext & {
+	readonly runId: string;
+	readonly agent: { readonly role: "worker"; readonly id: string };
+};
+
+/** A session's own agent, named by its session (#434). */
+export function mainAgent(sessionId: string): TelemetryAgent {
+	return { role: "main", id: sessionId };
+}
+
+/** A dispatched run's agent, named by its run (#434). */
+export function workerAgent(runId: string): { role: "worker"; id: string } {
+	return { role: "worker", id: runId };
+}
+
+/**
+ * The context with a side agent acting in it. The agent is named by the scope it serves: the session, else the run,
+ * else the process (#434).
+ */
+export function asSideAgent(context: TelemetryContext, role: AgentRole): TelemetryContext {
+	const id = "processId" in context ? context.processId : (context.sessionId ?? context.runId);
+	return { ...context, agent: { role, id } };
+}
 
 /** A parent passes run identity; each worker request mints its own call and attempt ids (#434). */
 export function isWorkerTelemetryContext(value: unknown): value is WorkerTelemetryContext {
 	return (
 		Value.Check(TelemetryContextSchema, value) &&
 		value.runId !== undefined &&
-		value.label === "worker" &&
+		value.agent.role === "worker" &&
+		value.agent.id === value.runId &&
 		value.callId === undefined &&
 		value.attemptId === undefined
 	);
@@ -77,12 +102,12 @@ export function ownerTelemetryContext(owner: {
 	if (owner.runId) {
 		if (current?.runId === owner.runId) return { ...current, ...ids };
 		return owner.sessionId
-			? { sessionId: owner.sessionId, runId: owner.runId, label: "worker", ...ids }
-			: { sessionId: null, runId: owner.runId, label: "worker", ...ids };
+			? { sessionId: owner.sessionId, runId: owner.runId, agent: workerAgent(owner.runId), ...ids }
+			: { sessionId: null, runId: owner.runId, agent: workerAgent(owner.runId), ...ids };
 	}
 	if (owner.sessionId) {
 		if (current && current.sessionId === owner.sessionId && current.runId === undefined) return { ...current, ...ids };
-		return { sessionId: owner.sessionId, label: "main", ...ids };
+		return { sessionId: owner.sessionId, agent: mainAgent(owner.sessionId), ...ids };
 	}
 	return current ? { ...current, ...ids } : undefined;
 }
@@ -110,10 +135,10 @@ export function withToolTelemetryContext<T>(
 			? {
 					sessionId: identity.sessionId,
 					...(identity.runId === undefined ? {} : { runId: identity.runId }),
-					label: identity.runId === undefined ? "main" : "worker",
+					agent: identity.runId === undefined ? mainAgent(identity.sessionId) : workerAgent(identity.runId),
 				}
 			: identity.runId !== undefined
-				? { sessionId: null, runId: identity.runId, label: "worker" }
+				? { sessionId: null, runId: identity.runId, agent: workerAgent(identity.runId) }
 				: undefined);
 	if (!owner) return work();
 	// A new turn cannot inherit the preceding request's provider attribution (#434).

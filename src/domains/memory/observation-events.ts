@@ -1,4 +1,4 @@
-import { telemetryContext } from "../../core/telemetry/context.js";
+import { asSideAgent, telemetryContext } from "../../core/telemetry/context.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import { recordResearchTrace, researchTraceAdmits } from "../../core/telemetry/research-trace.js";
 import type { MemoryObservationRecorded } from "../../core/telemetry/schemas.js";
@@ -14,8 +14,8 @@ export function observationEvent(
 	const active = telemetryContext();
 	const context =
 		sessionId && active?.sessionId !== sessionId
-			? { sessionId, label: "memory" as const }
-			: active && { ...active, label: "memory" as const };
+			? { sessionId, agent: { role: "memory" as const, id: sessionId } }
+			: active && asSideAgent(active, "memory");
 	telemetryHub().emit("memory.observation_recorded", { event, facts }, context);
 }
 

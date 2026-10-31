@@ -186,7 +186,10 @@ describe("evidence tool", () => {
 				subjects: [{ runId: "fixture", digest: "a".repeat(64) }],
 				createdAt: "2026-09-05T00:00:00.000Z",
 			},
-			{ stateDir: clioStateDir(), telemetry: { sessionId: null, runId: "fixture", label: "main" } },
+			{
+				stateDir: clioStateDir(),
+				telemetry: { sessionId: null, runId: "fixture", agent: { role: "coordinator", id: "fixture" } },
+			},
 		);
 		const valid = (await materializePendingGateDecision(pending)).artifact;
 		await writeFile(

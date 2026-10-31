@@ -38,7 +38,12 @@ it("a held paid request journals one crossing per ceiling and its hold, with the
 	});
 	const records: PendingTelemetry[] = [];
 	const release = registerTelemetrySink("budget-session", { enqueue: (record) => Boolean(records.push(record)) });
-	const telemetry = { sessionId: "budget-session", label: "main" as const, callId: "cal_held", attemptId: "att_held" };
+	const telemetry = {
+		sessionId: "budget-session",
+		agent: { role: "main" as const, id: "budget-session" },
+		callId: "cal_held",
+		attemptId: "att_held",
+	};
 	try {
 		await extension.start?.();
 		const held = contract.admitPaidRequest?.({ waitForRaise: true, contextTokens: 900, telemetry });
@@ -110,7 +115,7 @@ it("a ceiling stop names estimated or partly unpriced spend as it was priced, an
 	const release = registerTelemetrySink("priced-session", { enqueue: (record) => Boolean(records.push(record)) });
 	const telemetry = {
 		sessionId: "priced-session",
-		label: "main" as const,
+		agent: { role: "main" as const, id: "priced-session" },
 		callId: "cal_priced",
 		attemptId: "att_priced",
 	};

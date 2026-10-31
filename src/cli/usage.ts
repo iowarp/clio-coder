@@ -205,7 +205,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		diagnostics,
 	);
 	const scope = { repo: repoPath ?? "all", days: parsed.days };
-	const costReports = (["label", "model"] as const).map((groupBy) => repoCostReport(repo, scope, groupBy));
+	const costReports = (["role", "model"] as const).map((groupBy) => repoCostReport(repo, scope, groupBy));
 	const tokens = repoTokenQuantities(repo);
 	const cacheReports = repo.sessions
 		.map((source) => cacheReport(source))
@@ -465,14 +465,14 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		);
 	for (const report of spendMeasurable ? costReports : []) {
 		if (report.groups.length === 0) continue;
-		const subject = report.groupBy === "label" ? "origin" : "target/model";
+		const subject = report.groupBy === "role" ? "agent" : "target/model";
 		out("");
 		out(`  spend by ${subject}`);
 		process.stdout.write(
 			indent(
 				formatColumns([
 					// A model's row splits its cost between the sessions' own calls and the worker runs (#434 §11.3).
-					[subject, "calls", "tokens", "cost", ...(report.groupBy === "label" ? [] : ["session cost", "worker cost"])],
+					[subject, "calls", "tokens", "cost", ...(report.groupBy === "role" ? [] : ["session cost", "worker cost"])],
 					...report.groups.map((group) => [
 						group.key,
 						group.calls.display,

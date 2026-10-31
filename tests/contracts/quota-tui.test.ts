@@ -320,21 +320,21 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		doesNotMatch(live, /no calls recorded/);
 		addCalls(
 			telemetryCall("usage-session", {
-				label: "worker",
+				role: "worker",
 				model: "model-a",
 				usage: { input: 50 },
 				usd: 0.005,
 				pricedBy: "catalog",
 			}),
 			telemetryCall("usage-session", {
-				label: "worker",
+				role: "worker",
 				model: "model-a",
 				usage: { input: 50 },
 				usd: 0.005,
 				pricedBy: "catalog",
 			}),
 			telemetryCall("usage-session", {
-				label: "system-one",
+				role: "system-one",
 				model: "model-a",
 				// A gateway that settles with usage but omits the cache read, as litellm did in the battle test.
 				usage: { input: null, output: null, cacheRead: null },

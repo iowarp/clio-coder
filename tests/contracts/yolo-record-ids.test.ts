@@ -84,7 +84,7 @@ test("old and new gate outcomes verify and project under the yolo names", async 
 						outcome: "yolo-applied" as const,
 						detail: "yolo applied judge",
 					},
-					{ stateDir, telemetry: { sessionId: null, runId: "yolo-gate", label: "main" } },
+					{ stateDir, telemetry: { sessionId: null, runId: "yolo-gate", agent: { role: "coordinator", id: "yolo-gate" } } },
 				),
 			)
 		).artifact;

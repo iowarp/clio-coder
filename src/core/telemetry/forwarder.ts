@@ -39,7 +39,8 @@ export function readWorkerTelemetryRecord(value: unknown, expected: WorkerTeleme
 	if (
 		!workerKinds.has(record.k) ||
 		!record.origin ||
-		record.ctx.label !== "worker" ||
+		record.ctx.agent.role !== "worker" ||
+		record.ctx.agent.id !== expected.runId ||
 		record.ctx.runId !== expected.runId ||
 		record.ctx.sessionId !== expected.sessionId ||
 		record.ctx.parentRunId !== expected.parentRunId ||

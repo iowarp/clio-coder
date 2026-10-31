@@ -79,7 +79,7 @@ const now = { now: new Date("2026-10-30T00:00:00.000Z") };
 const dtos: Array<[string, TSchema, unknown]> = [
 	["session", SessionTelemetrySchema, sessionTelemetry(source, now)],
 	["calls", CallsReportSchema, callsReport(source, {}, now)],
-	["cost by label", CostReportSchema, costReport(source, "label", now)],
+	["cost by role", CostReportSchema, costReport(source, "role", now)],
 	["cost by model", CostReportSchema, costReport(source, "model", now)],
 	["cost by turn", CostReportSchema, costReport(source, "turn", now)],
 	["cache", CacheReportSchema, cacheReport(source, now)],
@@ -156,7 +156,7 @@ test("live equals CLI: the live model folds exactly the batches a cold read of t
 	const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-telemetry-live-"));
 	const writer = await openCallJournal({
 		directory: telemetrySessionDirectory(stateDir, "golden-p0"),
-		context: { sessionId: "golden-p0", label: "main" },
+		context: { sessionId: "golden-p0", agent: { role: "main", id: "golden-p0" } },
 		writer: { clioCoderVersion: "test", piVersion: "test" },
 	});
 	const write = async (records: readonly TelemetryRecord[]) => {
@@ -210,7 +210,7 @@ test("live equals CLI: the live model folds exactly the batches a cold read of t
 		// The live fold extends per batch: one record per batch, read between batches, with a later side call settling
 		// before the main call it overlapped, still folds to the cold read's exact sums and order (#434 §11).
 		const main = telemetryCall("golden-p0", { turnId: "turn-late", usage: { input: 7, output: null }, usd: 0.0137 });
-		const side = telemetryCall("golden-p0", { label: "memory", turnId: "turn-late", usd: 0.0021 });
+		const side = telemetryCall("golden-p0", { role: "memory", turnId: "turn-late", usd: 0.0021 });
 		// The main call's tool settles after it, so the call's tool time and round-trip facts move on a later batch.
 		const golden = main[1] as Extract<TelemetryRecord, { k: "call.settled" }>;
 		const settledMain: TelemetryRecord = { ...golden, data: { ...golden.data, stop: { reason: "toolUse" } } };
@@ -332,7 +332,7 @@ test("a run's receipt evidence carries sealed checks only under a seal that veri
 });
 
 test("the timeline and why-stopped carry config, budget and quota records, spend marked as its calls were priced (#434 §8, §12.6)", () => {
-	const ctx = { sessionId: "timeline-records", label: "main" as const };
+	const ctx = { sessionId: "timeline-records", agent: { role: "main" as const, id: "timeline-records" } };
 	const clock = (t: string) => ({ t, mono: 0 });
 	const object = {
 		label: "resolvable" as const,
@@ -385,7 +385,7 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 				windows: [{ key: "primary", usedPct: { kind: "measured", value: 42, source: "provider" } }],
 				limitReached: true,
 			},
-			{ sessionId: null, processId: "prc_fixture", label: "main" },
+			{ sessionId: null, processId: "prc_fixture", agent: { role: "main", id: "prc_fixture" } },
 			clock("2026-10-30T00:00:05.000Z"),
 		),
 	];
@@ -425,7 +425,11 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 });
 
 test("the timeline carries tool, middleware, auth, prompt, context, System One and worker channel records (#434 §8)", () => {
-	const ctx = { sessionId: "timeline-signals", label: "main" as const, turnId: "turn-1" };
+	const ctx = {
+		sessionId: "timeline-signals",
+		agent: { role: "main" as const, id: "timeline-signals" },
+		turnId: "turn-1",
+	};
 	const clock = (second: number) => ({ t: `2026-10-30T00:00:0${second}.000Z`, mono: 0 });
 	const structure = {
 		label: "resolvable" as const,
@@ -513,7 +517,7 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 		makeTelemetryRecord(
 			"worker.channel_failed",
 			{ lane: "stdin", frameType: "steer", errno: "EPIPE", afterExit: true, failure: "write-failed" },
-			{ sessionId: "timeline-signals", runId: "run-signals", label: "worker" },
+			{ sessionId: "timeline-signals", runId: "run-signals", agent: { role: "worker", id: "run-signals" } },
 			clock(8),
 		),
 	];
@@ -598,7 +602,7 @@ test("a model's cost splits into the sessions' own calls and the worker runs, in
 	const ref = makeTelemetryRecord(
 		"run.linked",
 		{ runId: "run-owned" },
-		main[0]?.ctx ?? { sessionId: "split-session", label: "main" },
+		main[0]?.ctx ?? { sessionId: "split-session", agent: { role: "main", id: "split-session" } },
 		{
 			t: main[0]?.t ?? now.now.toISOString(),
 			mono: 0,
@@ -611,13 +615,13 @@ test("a model's cost splits into the sessions' own calls and the worker runs, in
 		runs: new Map([
 			[
 				"run-owned",
-				journal(inRun("run-owned", telemetryCall("split-session", { label: "worker", model: "shared", usd: 0.25 }))),
+				journal(inRun("run-owned", telemetryCall("split-session", { role: "worker", model: "shared", usd: 0.25 }))),
 			],
 		]),
 	};
 	const standalone = inRun(
 		"run-standalone",
-		telemetryCall("split-session", { label: "worker", model: "shared", usd: 0.125 }),
+		telemetryCall("split-session", { role: "worker", model: "shared", usd: 0.125 }),
 	);
 	const repo: RepoSource = {
 		owner: repoOwner(null, 30),
@@ -641,7 +645,7 @@ test("a model's cost splits into the sessions' own calls and the worker runs, in
 	};
 	check(costReport(session, "model", now), 0.5, 0.25, { session });
 	check(repoCostReport(repo, { repo: "all", days: 30 }, "model", now), 0.5, 0.375, { repo });
-	ok(repoCostReport(repo, { repo: "all", days: 30 }, "label", now).groups.every((group) => group.audience === null));
+	ok(repoCostReport(repo, { repo: "all", days: 30 }, "role", now).groups.every((group) => group.audience === null));
 });
 
 test("a cache break re-prefills past the shared band, or an unknown amount on a missed cache, never a boundary loss (#423, #434 §13.2)", () => {

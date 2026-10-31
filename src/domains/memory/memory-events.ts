@@ -85,7 +85,9 @@ export function createTaskMemoryTelemetrySink(): TaskMemoryTelemetrySink {
 			const context =
 				step.context ??
 				telemetryContext() ??
-				(step.calls?.[0] ? { sessionId: step.calls[0].sessionId, label: "memory" as const } : undefined);
+				(step.calls?.[0]
+					? { sessionId: step.calls[0].sessionId, agent: { role: "memory" as const, id: step.calls[0].sessionId } }
+					: undefined);
 			telemetryHub().emit(
 				"memory.step_decided",
 				{

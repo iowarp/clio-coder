@@ -68,7 +68,7 @@ function describe(entry: TimelineEntry, breaks: ReadonlyMap<string, CacheBreak>)
 		case "call": {
 			const cacheBreak = breaks.get(entry.attemptId);
 			return {
-				title: `${entry.label} call · ${words(entry.disposition)}${entry.failure ? ` (${words(entry.failure)})` : ""}${cacheBreak ? " · cache break" : ""}`,
+				title: `${entry.agent.role} call · ${words(entry.disposition)}${entry.failure ? ` (${words(entry.failure)})` : ""}${cacheBreak ? " · cache break" : ""}`,
 				tone: entry.failure || entry.disposition === "settled_no_usage" ? "fail" : cacheBreak ? "warn" : "neutral",
 				details: [
 					{ label: "Tokens", ...explainable(entry.tokens) },

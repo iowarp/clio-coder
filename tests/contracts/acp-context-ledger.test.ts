@@ -195,8 +195,8 @@ test("a long turn streams usage_update per model response with the meter rising 
 					used += 4000;
 					main();
 					if (text === "two") {
-						land({ label: "system-one", usage: { input: 40, output: 20 }, usd: 0.25, pricedBy: "catalog" });
-						land({ label: "memory", usage: { input: null, output: null }, usd: null });
+						land({ role: "system-one", usage: { input: 40, output: 20 }, usd: 0.25, pricedBy: "catalog" });
+						land({ role: "memory", usage: { input: null, output: null }, usd: null });
 					}
 					onEvent({ type: "message_end", message: response(text) });
 					await new Promise((resolve) => setImmediate(resolve));

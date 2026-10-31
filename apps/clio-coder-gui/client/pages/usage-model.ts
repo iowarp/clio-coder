@@ -77,9 +77,10 @@ const TOKEN_BARS: ReadonlyArray<readonly [keyof TokenQuantities, string]> = [
 	["reasoning", "Reasoning"],
 ];
 
-/** The read model's call labels in the operator's words; a label added later reads through the humanizer. */
+/** The read model's agent roles in the operator's words; a role added later reads through the humanizer. */
 const ORIGINS: Readonly<Record<string, string>> = {
 	main: "Conversation calls",
+	coordinator: "Coordinator calls",
 	compaction: "Compaction calls",
 	btw: "Side questions",
 	handoff: "Handoffs",
@@ -108,7 +109,7 @@ const CLAIMED = new Set([
  * The report's spend for one group-by: the read model's cost report over the window, every figure carrying the
  * canonical renderer's display. The server checked its shape (#434 §11.3).
  */
-export function costReportOf(report: UsageReport, groupBy: "label" | "model"): CostReportV1 | null {
+export function costReportOf(report: UsageReport, groupBy: "role" | "model"): CostReportV1 | null {
 	const fact = report.facts.find((item) => item.name === "telemetry-cost" && item.values.groupBy === groupBy);
 	const value = fact?.values.report as CostReportV1 | undefined;
 	return value?.kind === "cost" ? value : null;
@@ -212,7 +213,7 @@ export function usageView(report: UsageReport): UsageView {
 	}));
 	const first = (name: string) => rows.find((row) => row.name === name)?.values;
 	const all = (name: string) => rows.filter((row) => row.name === name);
-	const byOrigin = costReportOf(report, "label");
+	const byOrigin = costReportOf(report, "role");
 
 	const missingStores: string[] = [];
 	for (const [name, subject] of [

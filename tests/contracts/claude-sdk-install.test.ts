@@ -131,7 +131,7 @@ test("SDK steering uses one open input lane, keeps Clio mediation, and closes af
 	const handle = startWorkerRun(
 		{
 			...workerInput(env.dir),
-			telemetryContext: { sessionId: null, runId: "sdk-test", label: "worker" },
+			telemetryContext: { sessionId: null, runId: "sdk-test", agent: { role: "worker", id: "sdk-test" } },
 			authProfile: "anthropic-max",
 			apiKey: "sk-ant-oat01-stale",
 		},

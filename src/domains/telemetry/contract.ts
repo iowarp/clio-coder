@@ -1,4 +1,5 @@
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
+import type { TelemetryAgent } from "../../core/telemetry/context.js";
 import type {
 	CacheReportV1,
 	CallFilter,
@@ -18,7 +19,6 @@ import type {
 	TimelineV1,
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
-import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { PreimageData, PreimageEventName } from "../../core/telemetry/events.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
@@ -237,7 +237,7 @@ export interface TelemetryContract extends TelemetryRunProjection {
 	/** Hold the journal for this work's original session, including work surviving a UI switch (#434). */
 	acquireTelemetrySession?(
 		origin: TelemetrySessionOrigin,
-		label: CallLabel,
+		agent: TelemetryAgent,
 		turnId?: string,
 	): Promise<TelemetrySessionLease>;
 	/** What the session's telemetry captures now, for recorders that write outside the call journal (#434). */

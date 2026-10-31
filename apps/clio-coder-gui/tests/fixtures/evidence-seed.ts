@@ -35,7 +35,11 @@ for (const envelope of envelopes) {
 	await writeFile(join(stateDir, "receipts", `${envelope.id}.json`), JSON.stringify(receipt));
 }
 const built = await buildEvidence({ dataDir, stateDir, runId: "evidence-source" });
-const context = { sessionId: null, runId: "evidence-gate", label: "main" } as const;
+const context = {
+	sessionId: null,
+	runId: "evidence-gate",
+	agent: { role: "coordinator", id: "evidence-gate" },
+} as const;
 const journal = await openCallJournal({
 	directory: telemetryRunDirectory(stateDir, context.runId),
 	context,

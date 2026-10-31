@@ -96,7 +96,7 @@ test("the CLI's --json and the GUI's DTOs are the live view's DTOs, byte for byt
 	deepStrictEqual(JSON.parse(JSON.stringify(cold.session)), cold.session, "the JSON a surface serves loses nothing");
 	// The session total and the cost report's total are one fact under one reference.
 	deepStrictEqual(cold.costByModel.total.usd, cold.session.totals.usd);
-	deepStrictEqual(cold.costByLabel.total.usd, cold.session.totals.usd);
+	deepStrictEqual(cold.costByRole.total.usd, cold.session.totals.usd);
 	deepStrictEqual(cold.costByModel.total.tokens, cold.session.totals.tokens);
 });
 
@@ -147,7 +147,7 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 	const context = openContextOverlay(tui, ledger, { telemetry });
 	try {
 		const text = stripTerminalSequences(dockTop(tui)?.frame.renderDockBody(200, 60).join("\n") ?? "");
-		const [newest] = cold.calls.calls.filter((call) => call.label === "main").slice(-1);
+		const [newest] = cold.calls.calls.filter((call) => call.agent.role === "main").slice(-1);
 		ok(newest?.usage, "the newest main call settled with usage");
 		ok(text.includes(`cache read ${newest.usage.cacheRead.display}`), text);
 		ok(text.includes(`uncached prefill ${newest.cache.uncachedPrefill.display}`), text);
@@ -216,7 +216,7 @@ test("the usage report folds a window the fixture fills to the session's own tot
 	const said = (quantity: Quantity) => ({ fact: quantity.fact, display: quantity.display });
 	for (const [groupBy, session] of [
 		["model", cold.costByModel],
-		["label", cold.costByLabel],
+		["role", cold.costByRole],
 	] as const) {
 		const report = repoCostReport(repo, { repo: "all", days }, groupBy);
 		deepStrictEqual(said(report.total.usd), said(session.total.usd), groupBy);
@@ -243,7 +243,7 @@ test("no DTO the surfaces read tells a lie the detectors know (§13.1)", () => {
 		session: view.session(),
 		calls: view.calls(),
 		costByModel: view.cost("model"),
-		costByLabel: view.cost("label"),
+		costByRole: view.cost("role"),
 		costByTurn: view.cost("turn"),
 		cache: view.cache(),
 		timeline: view.timeline(),

@@ -4,7 +4,7 @@ import type { ContextOperationFact } from "../core/context-operation.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { isHostPolicyMessage } from "../core/host-policy-message.js";
 import { providerCheckpointFromMessage, providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
-import { sessionTelemetryContext } from "../core/telemetry/context.js";
+import { mainAgent, sessionTelemetryContext } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
@@ -541,7 +541,7 @@ function recordContextSnapshot(sessionId: string, snapshot: ContextSnapshot): vo
 		},
 		{
 			sessionId,
-			label: "main",
+			agent: mainAgent(sessionId),
 			...(snapshot.turnId ? { turnId: snapshot.turnId } : {}),
 			...(snapshot.callId && snapshot.attemptId ? { callId: snapshot.callId, attemptId: snapshot.attemptId } : {}),
 		},
