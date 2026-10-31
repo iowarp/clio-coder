@@ -25,7 +25,7 @@ export const CliCommand = Type.Union([
 ]);
 export type CliCommand = Static<typeof CliCommand>;
 /** The only admitted CLI argv. There is no generic command or extra-arguments escape hatch. */
-export function commandPlan(input: unknown, cwd?: string): { argv: string[]; output: "json" | "jsonl" | "exit" } {
+export function commandPlan(input: unknown, cwd?: string): { argv: string[]; output: "json" | "exit" } {
 	if (!Value.Check(CliCommand, input))
 		throw new AppProblem("validation", "CLI command is outside the supported command table.");
 	switch (input.kind) {
@@ -60,7 +60,7 @@ export function commandPlan(input: unknown, cwd?: string): { argv: string[]; out
 			return { argv: ["verifiers", "inspect", "--json"], output: "json" };
 		case "usage.report":
 			if (!cwd) throw new AppProblem("validation", "A canonical workspace is required for usage.");
-			return { argv: ["usage", "report", "--repo", cwd, "--days", "30", "--json"], output: "jsonl" };
+			return { argv: ["usage", "report", "--repo", cwd, "--days", "30", "--json"], output: "json" };
 		case "receipt.verify":
 			return { argv: ["fleet", "verify", input.id, "--json"], output: "json" };
 		case "targets.list":

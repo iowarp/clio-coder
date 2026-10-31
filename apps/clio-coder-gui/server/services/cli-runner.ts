@@ -34,7 +34,7 @@ export class CliRunner {
 	private async execute(
 		command: CliCommand,
 		cwd: string,
-		output: "json" | "jsonl" | "exit",
+		output: "json" | "exit",
 		signal: AbortSignal,
 	): Promise<unknown> {
 		const { child, birthToken } = await runClioCommand(command, cwd, this.env);
@@ -95,14 +95,7 @@ export class CliRunner {
 				}
 				try {
 					const decoded = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
-					resolve(
-						output === "jsonl"
-							? decoded
-									.trim()
-									.split(/\r?\n/)
-									.map((line) => JSON.parse(line))
-							: JSON.parse(decoded),
-					);
+					resolve(JSON.parse(decoded));
 				} catch {
 					reject(new AppProblem("operation_failed", "CLI command returned invalid UTF-8 or JSON."));
 				}

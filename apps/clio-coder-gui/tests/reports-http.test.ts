@@ -7,17 +7,16 @@ import { reportCostDisplays } from "../server/services/cost-display.js";
 import { harness, json } from "./harness/app.js";
 import { seedReports } from "./harness/reports-fixture.js";
 
-test("usage JSON Lines bridge reports exact canonical workspace usage and distinguishes a missing store", async () => {
+test("usage DTO bridge reports canonical workspace usage and an empty workspace", async () => {
 	const h = await harness();
 	try {
 		const workspace = await h.workspaces.open(h.home.path);
 		const path = `/api/workspaces/${workspace.id}/usage`;
 		const empty = await json(await h.request(path), UsageReport);
-		assert.ok(empty.facts.some((row) => row.name === "session-store-missing"));
-		assert.ok(!empty.facts.some((row) => row.name.startsWith("telemetry-")));
+		assert.equal(empty.facts.find((row) => row.name === "sessions")?.values.display, "0");
 		await seedReports(h.home.path, h.home.env);
 		const report = await json(await h.request(path), UsageReport);
-		assert.equal(report.facts.find((row) => row.name === "sessions")?.values.value, 1);
+		assert.equal(report.facts.find((row) => row.name === "sessions")?.values.display, "1");
 		// Spend is the read model's, worded by the canonical renderer; the server only checked each row's shape (#434).
 		const spend = report.facts.find((row) => row.name === "telemetry-cost" && row.values.groupBy === "role")?.values
 			.report as { total: Record<"calls" | "tokens" | "usd", { display: string }> } | undefined;
@@ -36,7 +35,7 @@ test("usage JSON Lines bridge reports exact canonical workspace usage and distin
 		await mkdir(foreign);
 		const other = await h.workspaces.open(foreign);
 		const isolated = await json(await h.request(`/api/workspaces/${other.id}/usage`), UsageReport);
-		assert.equal(isolated.facts.find((row) => row.name === "sessions")?.values.value, 0);
+		assert.equal(isolated.facts.find((row) => row.name === "sessions")?.values.display, "0");
 		assert.equal((await h.request(`${path}?repo=/arbitrary`)).status, 422);
 		assert.equal((await h.request(`${path}?days=1`)).status, 422);
 		assert.equal(h.cli.activeCount, 0);

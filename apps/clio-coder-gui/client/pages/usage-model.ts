@@ -7,7 +7,6 @@ import type { UsageReport } from "../../contracts/reports.js";
 import type { CacheReportV1, CostReportV1, SessionTelemetryV1 } from "../../contracts/wire.js";
 import { formatDay } from "../api/clock.js";
 import { humanizeKey, scalarText } from "../design/facts-model.js";
-import { emptyState } from "../design/panel-model.js";
 import { countText, type Explainable, explainable, quantityParts } from "../telemetry/quantity-model.js";
 
 export interface UsageFigure extends Explainable {
@@ -55,7 +54,6 @@ export interface UsageView {
 	knownSubtotals: string | null;
 	origins: UsageFigure[];
 	originsNote: string;
-	missingStores: string[];
 	skillsActivated: UsageGroup[];
 	skillsDormant: string[];
 	/** Facts recorded once, shown as a card each. */
@@ -99,8 +97,6 @@ const CLAIMED = new Set([
 	"telemetry-tokens",
 	"sessions",
 	"dispatch-runs",
-	"session-store-missing",
-	"run-store-missing",
 	"skill-activated",
 	"skill-never-activated",
 ]);
@@ -215,20 +211,9 @@ export function usageView(report: UsageReport): UsageView {
 	const all = (name: string) => rows.filter((row) => row.name === name);
 	const byOrigin = costReportOf(report, "role");
 
-	const missingStores: string[] = [];
-	for (const [name, subject] of [
-		["session-store-missing", "session history"],
-		["run-store-missing", "dispatch receipt"],
-	] as const) {
-		const row = first(name);
-		if (row) missingStores.push(emptyState.missingStore(subject, text(row.path)));
-	}
-
-	const store = (name: string, missing: string, label: string): UsageFigure => {
-		const row = first(name);
-		const count = number(row?.value);
-		if (first(missing) || count === null) return { label, value: "—", note: emptyState.dash(), factRef: null };
-		return { label, value: countText(count), factRef: null };
+	const store = (name: string, label: string): UsageFigure => {
+		const display = text(first(name)?.display);
+		return { label, ...explainable(display === null ? null : { display }) };
 	};
 
 	const total = byOrigin?.total;
@@ -239,8 +224,8 @@ export function usageView(report: UsageReport): UsageView {
 		total
 			? { label: "Cost", ...explainable(total.usd), note: costNote(total) }
 			: { label: "Cost", value: "not measured", note: "No spend was measured in this window", factRef: null },
-		store("sessions", "session-store-missing", "Sessions"),
-		store("dispatch-runs", "run-store-missing", "Dispatch runs"),
+		store("sessions", "Sessions"),
+		store("dispatch-runs", "Dispatch runs"),
 	];
 
 	const tokens = tokenQuantitiesOf(report);
@@ -279,7 +264,6 @@ export function usageView(report: UsageReport): UsageView {
 			: byOrigin
 				? "No call was recorded in this window."
 				: "Call origins were not recorded in this window.",
-		missingStores,
 		skillsActivated: all("skill-activated"),
 		skillsDormant: all("skill-never-activated").flatMap((row) => {
 			const name = text(row.values.skill);

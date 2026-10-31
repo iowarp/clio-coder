@@ -6,6 +6,7 @@ import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { Client } from "../client/api/client.js";
+import type { DispatchRun } from "../contracts/fleet.js";
 
 // Page modules import their stylesheets, which only Vite can load, and tsx
 // compiles client files outside this tsconfig with the classic JSX runtime. Stub
@@ -20,6 +21,26 @@ const { EvidencePage } = await import("../client/pages/evidence.js");
 const { FleetPage } = await import("../client/pages/fleet.js");
 
 const client = { token: "t", call: () => new Promise(() => {}) } as unknown as Client;
+
+const liveEvidence = (runId: string): DispatchRun["evidence"] => ({
+	v: 1,
+	foldVersion: 1,
+	generatedAt: "2026-10-31T00:00:00.000Z",
+	kind: "run-evidence",
+	runId,
+	record: "unsettled",
+	integrity: { state: "unavailable", display: "unavailable", detail: "the run has not settled" },
+	trust: {
+		artifactIntegrity: { state: "absent", display: "absent", authority: null },
+		validationGrounding: { state: "absent", display: "absent", authority: null },
+		independentReview: { state: "absent", display: "absent", authority: null },
+		contextProvenance: { state: "absent", display: "absent", authority: null },
+		completionEvidence: { state: "absent", display: "absent", authority: null },
+		validation: "unmeasured",
+	},
+	sealed: null,
+	evidence: null,
+});
 
 function render(queries: QueryClient, node: ReactNode, entry = "/") {
 	return renderToStaticMarkup(
@@ -85,6 +106,7 @@ test("both fleet lists offer links only while settled, and render nothing after 
 			["fleet-dispatches"],
 			page({
 				id: "run-1",
+				evidence: liveEvidence("run-1"),
 				agentId: "worker",
 				outcome: null,
 				status: "running",
@@ -165,6 +187,7 @@ test("Fleet filters search only loaded records and preserve their destination", 
 				items: [
 					{
 						id: "dispatch-1",
+						evidence: liveEvidence("dispatch-1"),
 						agentId: "worker",
 						task: "Inspect models",
 						outcome: null,

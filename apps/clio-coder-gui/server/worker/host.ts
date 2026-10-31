@@ -216,6 +216,11 @@ export class WorkerHost {
 		this.lanes = [];
 		await Promise.all(
 			lanes.map(async (lane) => {
+				// An unready lane has admitted no calls and owns no children to drain (#434).
+				if (!lane.ready) {
+					await lane.worker.terminate();
+					return;
+				}
 				// Let worker-owned CLI children stop before terminating their parent thread.
 				await new Promise<void>((resolve) => {
 					const done = () => {

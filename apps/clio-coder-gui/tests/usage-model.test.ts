@@ -125,20 +125,16 @@ test("the headline reads the read model's window totals and names an unpriced re
 	assert.equal(usageView(report([cost("role", exactTotal)])).knownSubtotals, null);
 });
 
-test("a missing store reads as a dash and says what a dash means", () => {
+test("session and run counts retain the read model's canonical display", () => {
 	const view = usageView(
 		report([
-			{ name: "session-store-missing", values: { path: "/home/clio/state/sessions" } },
-			{ name: "dispatch-runs", values: { value: 3 } },
+			{ name: "sessions", values: { fact: { kind: "measured", value: 1000, source: "local-count" }, display: "1,000" } },
+			{ name: "dispatch-runs", values: { fact: { kind: "measured", value: 0, source: "local-count" }, display: "0" } },
 		]),
 	);
 	const by = new Map(view.headline.map((figure) => [figure.label, figure]));
-	assert.equal(by.get("Sessions")?.value, "—");
-	assert.match(String(by.get("Sessions")?.note), /does not mean zero activity/u);
-	assert.equal(by.get("Dispatch runs")?.value, "3");
-	assert.equal(view.missingStores.length, 1);
-	assert.match(view.missingStores[0] as string, /no session history store at all/u);
-	assert.match(view.missingStores[0] as string, /\/home\/clio\/state\/sessions/u);
+	assert.equal(by.get("Sessions")?.value, "1,000");
+	assert.equal(by.get("Dispatch runs")?.value, "0");
 });
 
 test("call origins are the label report's groups, in the server's words", () => {

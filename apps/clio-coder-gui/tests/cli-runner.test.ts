@@ -117,15 +117,16 @@ test("CLI runner: cancellation observes SIGTERM, reaps the child, and closes adm
 	}
 });
 
-test("usage bridge admits only canonical cwd arguments and rejects a malformed JSON Lines row", async () => {
+test("usage bridge admits only canonical cwd arguments and rejects malformed JSON", async () => {
 	const h = await scratchHome();
 	const runner = new CliRunner({
 		...h.env,
 		CLIO_CODER_WEB_CLI: fixture,
-		CLIO_CODER_WEB_COMMAND_SCENARIO: "jsonl-invalid",
+		CLIO_CODER_WEB_COMMAND_SCENARIO: "json",
 	});
 	try {
 		assert.throws(() => commandPlan({ kind: "usage.report", repo: "/foreign" }, h.path), AppProblem);
+		assert.equal(commandPlan({ kind: "usage.report" }, h.path).output, "json");
 		assert.deepEqual(commandPlan({ kind: "usage.report" }, h.path).argv, [
 			"usage",
 			"report",

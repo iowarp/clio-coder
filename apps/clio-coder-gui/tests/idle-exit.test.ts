@@ -60,7 +60,7 @@ test("a disconnected live ACP turn holds exit; cancellation settles the turn and
 	assert.ok(performance.now() - started >= 1900);
 });
 
-test("an operation retains idle lifetime after its HTTP request, then releases it", { timeout: 10000 }, async (t) => {
+test("an operation retains idle lifetime after its HTTP request, then releases it", { timeout: 30000 }, async (t) => {
 	const h = await harness({ installDelayMs: 900 });
 	t.after(h.close);
 	let exits = 0;

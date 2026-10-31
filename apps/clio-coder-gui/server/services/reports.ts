@@ -1,18 +1,29 @@
-import type { TSchema } from "typebox";
+import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { UsageReport } from "../../contracts/reports.js";
+import type { UsageReport } from "../../contracts/reports.js";
 import { TelemetryCache, TelemetryCost, TelemetrySession } from "../../contracts/telemetry.js";
 import type { CliRunner } from "./cli-runner.js";
-import { reportCostDisplays } from "./cost-display.js";
 import { AppProblem } from "./problem.js";
 import type { WorkspaceService } from "./workspaces.js";
 
-/** Read-model rows of the usage report and the field holding each one's DTO (#434 §11.3). */
-const TELEMETRY_ROWS: Readonly<Record<string, { field: string; schema: TSchema }>> = {
-	"telemetry-cost": { field: "report", schema: TelemetryCost },
-	"telemetry-cache": { field: "report", schema: TelemetryCache },
-	"telemetry-tokens": { field: "tokens", schema: TelemetrySession.properties.own.properties.tokens },
-};
+const closed = { additionalProperties: false };
+const shown = Type.Omit(TelemetrySession.properties.own.properties.tokens.properties.input, ["ref"]);
+/** The usage command emits one read-model DTO; the GUI arranges its facts without rewording them (#434). */
+const UsageDto = Type.Object(
+	{
+		sessions: shown,
+		runs: shown,
+		decisions: Type.Object(
+			{ total: shown, blocked: shown, tools: Type.Array(Type.Object({ tool: Type.String(), count: shown }, closed)) },
+			closed,
+		),
+		approvals: Type.Object({ requested: shown, granted: shown, denied: shown, expired: shown, rate: shown }, closed),
+		tokens: TelemetrySession.properties.own.properties.tokens,
+		cost: Type.Array(TelemetryCost),
+		cache: Type.Array(TelemetryCache),
+	},
+	closed,
+);
 
 export class ReportsService {
 	constructor(
@@ -21,56 +32,28 @@ export class ReportsService {
 	) {}
 	async usage(workspaceId: string): Promise<UsageReport> {
 		const workspace = await this.workspaces.get(workspaceId);
-		const rows = await this.runner.run({ kind: "usage.report" }, workspace.path);
-		if (!Array.isArray(rows) || !rows.length) throw new AppProblem("unavailable", "Usage returned no report rows.");
-		const facts: UsageReport["facts"] = [],
-			opportunities: UsageReport["opportunities"] = [];
-		let from: string | undefined, to: string | undefined;
-		for (const value of rows as unknown[]) {
-			if (!value || typeof value !== "object" || Array.isArray(value))
-				throw new AppProblem("unavailable", "Usage returned an invalid row.");
-			const {
-				schema,
-				windowDays,
-				from: start,
-				to: end,
-				kind,
-				fact,
-				opportunity,
-				suggestion,
-				evidence,
-				...values
-			} = value as Record<string, unknown>;
-			if (
-				schema !== "experimental" ||
-				windowDays !== 30 ||
-				typeof start !== "string" ||
-				typeof end !== "string" ||
-				(from && from !== start) ||
-				(to && to !== end)
-			)
-				throw new AppProblem("unavailable", "Usage report windows do not agree.");
-			from = start;
-			to = end;
-			const telemetry = typeof fact === "string" && Object.hasOwn(TELEMETRY_ROWS, fact) ? TELEMETRY_ROWS[fact] : undefined;
-			if (kind === "fact" && telemetry) {
-				// The read model's rows arrive already worded by the canonical renderer; the client trusts their shape (#434).
-				if (!Value.Check(telemetry.schema, values[telemetry.field]))
-					throw new AppProblem("unavailable", `Usage returned an invalid ${fact} row.`);
-				facts.push({ name: fact as string, values });
-			} else if (kind === "fact" && typeof fact === "string")
-				facts.push({ name: fact, values: reportCostDisplays(values) as Record<string, unknown> });
-			else if (
-				kind === "opportunity" &&
-				typeof opportunity === "string" &&
-				typeof suggestion === "string" &&
-				typeof evidence === "string"
-			)
-				opportunities.push({ kind: opportunity, suggestion, evidence });
-			else throw new AppProblem("unavailable", "Usage returned an unsupported row kind.");
-		}
-		const result = { schema: "experimental", workspaceId, windowDays: 30, from, to, facts, opportunities };
-		if (!Value.Check(UsageReport, result)) throw new AppProblem("unavailable", "Usage returned an invalid report.");
-		return result;
+		const now = Date.now();
+		const report = await this.runner.run({ kind: "usage.report" }, workspace.path);
+		if (!Value.Check(UsageDto, report)) throw new AppProblem("unavailable", "Usage returned an invalid report DTO.");
+		return {
+			schema: "experimental",
+			workspaceId,
+			windowDays: 30,
+			from: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString(),
+			to: new Date(now).toISOString(),
+			facts: [
+				{ name: "sessions", values: report.sessions },
+				{ name: "dispatch-runs", values: report.runs },
+				{ name: "tool-decisions", values: report.decisions },
+				{ name: "permission-decisions", values: report.approvals },
+				{ name: "telemetry-tokens", values: { tokens: report.tokens } },
+				...report.cost.map((cost) => ({ name: "telemetry-cost", values: { groupBy: cost.groupBy, report: cost } })),
+				...report.cache.map((cache) => ({
+					name: "telemetry-cache",
+					values: { sessionId: cache.sessionId, report: cache },
+				})),
+			],
+			opportunities: [],
+		};
 	}
 }

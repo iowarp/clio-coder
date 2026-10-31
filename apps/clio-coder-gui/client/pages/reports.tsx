@@ -82,12 +82,6 @@ export function UsagePage({ client }: { client: Client }) {
 							</article>
 						))}
 					</section>
-					{view.missingStores.map((sentence) => (
-						<p className="usage-coverage-note" key={sentence}>
-							<Icon name="unverified" />
-							{sentence}
-						</p>
-					))}
 					{view.knownSubtotals && (
 						<p className="usage-coverage-note">
 							<Icon name="unverified" />
