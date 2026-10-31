@@ -344,7 +344,7 @@ export interface MemoryInterventionDeps {
 	telemetry?: TaskMemoryTelemetrySink;
 	/**
 	 * Opt-in raw-envelope observer. Content-bearing: it records only under
-	 * research capture with consent or the deprecated trace-file alias (#434).
+	 * research capture with consent (#434).
 	 */
 	onEnvelope?: (envelope: TaskMemoryEnvelope) => void;
 	/** Asked per step before an envelope is built; absent means `onEnvelope` always wants one. */
