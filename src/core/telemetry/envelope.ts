@@ -137,21 +137,3 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 		return { kind: "skipped", reason: "invalid-record" };
 	return { kind: "record", record: value as TelemetryRecord };
 }
-
-/** A monotonic value only has meaning under its own segment origin (#434). */
-export function monotonicSpan(
-	start: { origin: ClockOrigin; mono: number },
-	end: { origin: ClockOrigin; mono: number },
-): number | null {
-	if (
-		start.origin.host !== end.origin.host ||
-		start.origin.pid !== end.origin.pid ||
-		start.origin.birthToken !== end.origin.birthToken ||
-		start.origin.monoEpochWallMs !== end.origin.monoEpochWallMs ||
-		!Number.isFinite(start.mono) ||
-		!Number.isFinite(end.mono) ||
-		end.mono < start.mono
-	)
-		return null;
-	return end.mono - start.mono;
-}

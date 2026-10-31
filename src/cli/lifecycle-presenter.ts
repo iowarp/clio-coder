@@ -48,7 +48,7 @@ export interface LifecycleReport {
  * gigabytes before agreeing to delete it, not its third significant figure.
  *
  * Not the engine's `formatSize`, which this otherwise matches. That one
- * stops at megabytes, so a data root holding evidence and vendored tools reads
+ * stops at megabytes, so a data root holding memory and vendored tools reads
  * as `4300.8MB` where the question being asked is whether it is gigabytes; and
  * it writes no space before the unit, which is fine inside a tool observation
  * and wrong in a column of paths a person is scanning.

@@ -9,7 +9,7 @@ import {
 	withToolTelemetryContext,
 } from "../../src/core/telemetry/context.js";
 import type { SegmentHeader, TelemetryRecord } from "../../src/core/telemetry/envelope.js";
-import { makeTelemetryRecord, monotonicSpan, readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { makeTelemetryRecord, readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { EVENTS, validPayload } from "../../src/core/telemetry/events.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId, newRecordId, UUID_V7_PATTERN } from "../../src/core/telemetry/ids.js";
@@ -328,15 +328,6 @@ test("segment readers preserve future records and distinguish a torn tail from i
 	strictEqual(validPayload("compaction.settled", { ...outcome, checkpointTurnId: null }), false);
 	strictEqual(validPayload("compaction.settled", { ...outcome, callIds: [callId, callId] }), false);
 	strictEqual(validPayload("compaction.settled", { ...outcome, outcome: "failed", checkpointTurnId: null }), true);
-});
-
-test("monotonic spans never cross a process or segment origin", () => {
-	const start = { origin: header.clockOrigin, mono: 5 };
-	strictEqual(monotonicSpan(start, { ...start, mono: 10 }), 5);
-	strictEqual(monotonicSpan(start, { ...start, mono: 4 }), null);
-	for (const changed of [{ pid: 2 }, { host: "other" }, { birthToken: "another" }, { monoEpochWallMs: 2000 }]) {
-		strictEqual(monotonicSpan(start, { origin: { ...start.origin, ...changed }, mono: 10 }), null);
-	}
 });
 
 test("a settled breakdown keeps its measured zeros beside a larger total; only a total-only row loses them (#434)", () => {

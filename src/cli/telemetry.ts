@@ -7,6 +7,7 @@ import {
 	revokeTelemetryConsent,
 } from "../domains/telemetry/consent.js";
 import { applyTelemetryPrune, DEFAULT_PRUNE_POLICY, planTelemetryPrune } from "../domains/telemetry/retention.js";
+import { formatBytes } from "./lifecycle-presenter.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder telemetry consent [--workspace <dir>] [--revoke | --list]
@@ -49,10 +50,6 @@ scope: a scope with bundle.json is verified as verify does, any other counts as
 unsealed. It exits 1 when a seal fails, the consent store is unreadable or the
 newest journal has damaged lines.
 `;
-
-function formatBytes(bytes: number): string {
-	return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MiB` : `${bytes} B`;
-}
 
 async function runPrune(argv: ReadonlyArray<string>): Promise<number> {
 	const policy = { ...DEFAULT_PRUNE_POLICY };

@@ -16,6 +16,7 @@ import {
 	telemetryShareSource,
 	writeShare,
 } from "../domains/telemetry/share.js";
+import { formatBytes } from "./lifecycle-presenter.js";
 import { canSelect, promptMultiSelect, promptSelect } from "./select.js";
 import { printError } from "./shared.js";
 
@@ -51,12 +52,6 @@ function packageWriter(): SegmentHeader["writer"] {
 		dependencies: Record<string, string>;
 	};
 	return { clioCoderVersion: pkg.version, piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown" };
-}
-
-function formatBytes(bytes: number): string {
-	if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-	if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-	return `${bytes} B`;
 }
 
 function tally(counts: Record<string, number>): string {

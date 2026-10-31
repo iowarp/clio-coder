@@ -65,7 +65,7 @@ import {
 	resolveConsentWorkspace,
 	revokeTelemetryConsent,
 } from "../../src/domains/telemetry/consent.js";
-import { foldCallJournal, foldCallsBy, foldFacts } from "../../src/domains/telemetry/folds.js";
+import { foldCallJournal, foldFacts } from "../../src/domains/telemetry/folds.js";
 import { createHealthWindows } from "../../src/domains/telemetry/health-window.js";
 import {
 	readTelemetryObject,
@@ -1129,7 +1129,6 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	deepStrictEqual(fold.unresolvedCallIds, [missingCall]);
 	strictEqual(fold.coverage.duplicateRecords, 1);
 	strictEqual(fold.coverage.duplicateAttempts, 1);
-	deepStrictEqual(foldCallsBy(fold.attempts, (call) => call.started.target.targetId).get("target"), fold.totals);
 	strictEqual(foldCallJournal(rows, new Set([first.callId])).totals.attempts, 2);
 	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
 	const aggregate: RunUsage = {

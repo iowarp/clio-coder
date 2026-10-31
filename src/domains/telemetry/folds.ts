@@ -287,23 +287,6 @@ export function foldCallJournal(
 	return folder.fold();
 }
 
-/** Grouping selects attempts only; every group's arithmetic remains the same fold (#434). */
-export function foldCallsBy(
-	attempts: readonly FoldedAttempt[],
-	key: (attempt: FoldedAttempt) => string,
-): Map<string, CallTotals> {
-	const groups = new Map<string, FoldedAttempt[]>();
-	for (const attempt of attempts) {
-		const name = key(attempt);
-		const group = groups.get(name) ?? [];
-		group.push(attempt);
-		groups.set(name, group);
-	}
-	return new Map(
-		[...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([name, group]) => [name, foldCalls(group)]),
-	);
-}
-
 /** A run snapshot includes its constituent calls. Pick one accounting source, independent of replay order (#434). */
 function foldRunScope(records: Iterable<TelemetryRecord>, options: FoldOptions) {
 	const rows = [...records];
