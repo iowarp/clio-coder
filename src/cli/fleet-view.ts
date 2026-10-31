@@ -1,6 +1,4 @@
 import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
-import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
-import { renderCostAmount } from "../domains/telemetry/cost.js";
 /**
  * `clio-coder fleet view <runId|fleetRootId> [--follow]`.
  *
@@ -38,7 +36,8 @@ import { renderCostAmount } from "../domains/telemetry/cost.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readSettings } from "../core/config.js";
-import { responseModelIdObservationFromRecord } from "../core/response-model-id.js";
+import type { RunTelemetryV1 } from "../core/telemetry/dto.js";
+import { renderUsdFact } from "../core/telemetry/render.js";
 import { clioStateDir, resetXdgCache } from "../core/xdg.js";
 import type { ExecutionStepResult } from "../domains/dispatch/execution-scheduler.js";
 import { routeSettledLabel } from "../domains/dispatch/route-history.js";
@@ -48,11 +47,13 @@ import {
 	runEventJournalPath,
 } from "../domains/dispatch/run-event-journal.js";
 import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
-import { callLevelUpstreamResponses, type RunEnvelope, type RunResult } from "../domains/dispatch/types.js";
+import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { formatTrustSummaryLine } from "../domains/evidence/trust-projection.js";
-import { inspectRunResultTrustStatus } from "../domains/evidence/trust-status.js";
+import { inspectRunTrustStatus } from "../domains/evidence/trust-status.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import { loadRunRecord } from "../domains/session/telemetry-source.js";
+import type { SettledRunRecord } from "../domains/telemetry/index.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui-primitives.js";
 import { fleetInspectionScope, resolveFleetRootId } from "./fleet-project-scope.js";
 
@@ -61,14 +62,13 @@ clio-coder fleet view <runId> --json [--all]
 clio-coder fleet view --watch <selection-file> [--dock-taps <file>] [--all]
 
 Follow one dispatched run from its durable state: the run ledger entry, the
-run event journal, and the sealed receipt once it exists.
+run event journal, and the run's sealed record once it settles.
 
-Once the receipt authenticates, the snapshot also names the model the run
-requested next to the model the provider reported on each call ("not
-observed" when Clio did not capture one), the cost with its pricing
+Once the run's seal verifies, the snapshot also names the model the run
+requested next to the models the providers reported, the cost with its pricing
 provenance, and the label the route settled with.
 
-  --json       print the snapshot and the authenticated receipt as JSON
+  --json       print the snapshot and the sealed run record as JSON
   --follow     keep tailing until the run's terminal line, then stay open (q exits)
   --watch      the workers dashboard: a board of this session's workers, and a
                live takeover of one (Enter, Esc back). The selection file asks
@@ -81,7 +81,7 @@ provenance, and the label the route settled with.
 Without --follow the current snapshot is printed and the command exits.
 The transcript comes from <state>/telemetry/runs/<runId>/journal.jsonl, which the
 orchestrator writes when fleet.history.journal is on (the default). A run dispatched
-with the journal off shows its ledger and receipt but no transcript.
+with the journal off shows its ledger and run record but no transcript.
 
 Given the fleet root id that \`fleet run\` prints (fleet-<hex>), this prints the
 run's step index instead: one line per step with its run id and outcome. Pass
@@ -129,11 +129,10 @@ export interface RunViewModel {
 	journalPresent: boolean;
 	journalUnavailableReason?: string;
 	journalPath: string;
-	/** Authenticated receipt status line, or the reason there is not one. */
+	/** The run record's trust line, or the reason there is not one. */
 	evidence: string;
-	receiptPath: string | null;
-	/** Present only when the receipt authenticated against its ledger row. */
-	receipt?: RunResult;
+	/** Present only when the run settled under a seal that verifies. */
+	record?: SettledRunRecord;
 	outcome: string | null;
 	outcomeDetail: string | null;
 	/** True once the journal carries its terminal line or the ledger row ended. */
@@ -153,72 +152,43 @@ function truncatePlain(value: string, width: number): string {
 	return truncateToWidth(value, width, "…", false).replaceAll("\u001B[0m", "");
 }
 
-function receiptPathFor(run: RunEnvelope): string {
-	return run.receiptPath ?? join(clioStateDir(), "receipts", `${run.id}.json`);
-}
-
 /**
- * Authenticate the receipt, then reduce it to one status line in the shared
- * trust vocabulary. Nothing from an unauthenticated receipt reaches the line
- * beyond the reason it could not be trusted.
+ * Read the run's record and reduce it to one status line in the shared trust vocabulary. Nothing from a record whose
+ * seal does not verify reaches the line beyond the reason it could not be trusted (#434).
  */
-function evidenceLine(run: RunEnvelope): { text: string; receiptPath: string | null; receipt?: RunResult } {
-	if (run.receiptPath === null && run.endedAt === null) {
-		return { text: "receipt pending; the run has not finalized", receiptPath: null };
-	}
-	const path = receiptPathFor(run);
-	let receipt: RunResult;
+function evidenceLine(run: RunEnvelope): { text: string; record?: SettledRunRecord } {
+	let record: RunTelemetryV1 | null = null;
 	try {
-		receipt = JSON.parse(readReceiptTextSync(path)) as RunResult;
+		record = loadRunRecord(clioStateDir(), run.id);
 	} catch (error) {
-		return {
-			text: `receipt unavailable: cannot read ${path} (${error instanceof Error ? error.message : String(error)})`,
-			receiptPath: null,
-		};
+		return { text: `run record unavailable: ${error instanceof Error ? error.message : String(error)}` };
 	}
-	const inspection = inspectRunResultTrustStatus(receipt, run);
-	if (!inspection.integrity.ok) {
+	if (record?.settled == null)
 		return {
-			text: `RECEIPT INTEGRITY FAILED: ${inspection.integrity.reason}; stored receipt fields are untrusted`,
-			receiptPath: path,
+			text: run.endedAt === null ? "run pending; it has not settled" : "run record unavailable; it never settled",
 		};
-	}
-	return { text: formatTrustSummaryLine(inspection.status), receiptPath: path, receipt };
+	const inspection = inspectRunTrustStatus(record);
+	if (inspection.integrity.state === "failed")
+		return { text: `RUN SEAL FAILED: ${inspection.integrity.reason}; its settled facts are untrusted` };
+	if (inspection.integrity.state === "unsealed")
+		return { text: `run record unsealed: ${inspection.integrity.reason}; its settled facts are not yet vouched for` };
+	return { text: formatTrustSummaryLine(inspection.status), record: record as SettledRunRecord };
 }
 
 /**
- * The requested model next to what the provider reported, call by call. The
- * route a run was dispatched on is configuration; only `upstreamResponses`
- * records what a provider said about its own response, and a call whose
- * report Clio did not capture reads "not observed", never the requested id.
+ * The requested model next to what the provider reported on the run's calls, each distinct report once. The route a
+ * run was dispatched on is configuration; only the providers' responses say what served it.
  */
-function modelObservationText(receipt: RunResult): string {
-	const requested = `requested ${sanitizeBounded(receipt.wireModelId ?? "not recorded", 128)}`;
-	const responses = callLevelUpstreamResponses(receipt.upstreamResponses ?? []);
-	if (responses.length === 0) return `${requested} · no provider response recorded`;
-	const counts = new Map<string, number>();
-	for (const response of responses) {
-		const observation = responseModelIdObservationFromRecord(
-			response as unknown as Record<string, unknown>,
-			"legacy-difference-only",
-		);
-		const label =
-			observation.state === "reported"
-				? `reported ${observation.reportedModelId}`
-				: observation.state === "not-reported"
-					? "no model id in the response"
-					: observation.state === "not-observed"
-						? "not observed"
-						: `legacy record, differing id ${observation.differingModelId ?? "unknown"}`;
-		counts.set(label, (counts.get(label) ?? 0) + 1);
-	}
-	const observed = [...counts].map(([label, count]) => `${sanitizeBounded(label, 128)} (${count}/${responses.length})`);
-	return `${requested} · provider ${observed.join(", ")}`;
+function modelObservationText(settled: SettledRunRecord["settled"]): string {
+	const requested = `requested ${sanitizeBounded(settled.route.wireModelId, 128)}`;
+	const reported = settled.upstream.responseModelIds;
+	return reported === null
+		? `${requested} · no provider response recorded`
+		: `${requested} · provider ${sanitizeBounded(reported, 512)}`;
 }
 
-function costText(receipt: RunResult): string {
-	const cost = typeof receipt.costUsd === "number" && Number.isFinite(receipt.costUsd) ? receipt.costUsd : null;
-	return renderCostAmount(cost ?? 0, receipt.costProvenance, receipt.costSummary);
+function costText(settled: SettledRunRecord["settled"]): string {
+	return renderUsdFact(settled.pricing.usd, settled.pricing.pricedBy);
 }
 
 /**
@@ -348,8 +318,7 @@ function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}): RunV
 		...(!journal.present ? { journalUnavailableReason: journalUnavailableReason() } : {}),
 		journalPath: runEventJournalPath(runId, options.journalRoot === undefined ? undefined : options.journalRoot),
 		evidence: evidence.text,
-		receiptPath: evidence.receiptPath,
-		...(evidence.receipt === undefined ? {} : { receipt: evidence.receipt }),
+		...(evidence.record === undefined ? {} : { record: evidence.record }),
 		...(run.projection?.ledgerId
 			? { agentLedgerBoard: renderAgentLedgerBoard(run.projection.ledgerId) ?? "No peer contributions yet." }
 			: {}),
@@ -429,13 +398,11 @@ function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH): stri
 			lines.push(...wrapTextWithAnsi(sanitizeBounded(line, TASK_MAX_WIDTH), columns));
 		}
 	}
-	if (model.receipt !== undefined) {
-		lines.push(...wrapViewerValue("model     ", modelObservationText(model.receipt), columns));
-		lines.push(truncatePlain(`cost      ${costText(model.receipt)}`, columns));
-		lines.push(truncatePlain(`settled   ${sanitizeBounded(routeSettledLabel(model.receipt), 64)}`, columns));
-	}
-	if (model.receiptPath !== null) {
-		lines.push(truncatePlain(`receipt   ${model.receiptPath}`, columns));
+	if (model.record !== undefined) {
+		const settled = model.record.settled;
+		lines.push(...wrapViewerValue("model     ", modelObservationText(settled), columns));
+		lines.push(truncatePlain(`cost      ${costText(settled)}`, columns));
+		lines.push(truncatePlain(`settled   ${sanitizeBounded(routeSettledLabel(settled), 64)}`, columns));
 	}
 	const outcome =
 		model.outcome === null

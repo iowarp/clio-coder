@@ -16,9 +16,9 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { join } from "node:path";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
+import type { Fact } from "../core/telemetry/fact.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -58,10 +58,9 @@ import {
 	planFleetResume,
 	readFleetRun,
 } from "../domains/dispatch/index.js";
-import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { openLedger } from "../domains/dispatch/state.js";
-import type { RunEnvelope, RunResult } from "../domains/dispatch/types.js";
+import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
@@ -89,6 +88,7 @@ import {
 	TelemetryDomainModule,
 } from "../domains/telemetry/index.js";
 import { type RunTokenField, runsTotal } from "../domains/telemetry/read-model.js";
+import { readSettledRun } from "../domains/telemetry/run-record.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
 import { createFleetReporter } from "./fleet-reporting.js";
@@ -789,7 +789,7 @@ function rowTokenFields(row: RunEnvelope): Record<"input" | "output" | "total", 
 		row.inputTokenCount !== undefined || row.outputTokenCount !== undefined
 			? { input: countOrNull(row.inputTokenCount), output: countOrNull(row.outputTokenCount) }
 			: row.endedAt !== null
-				? receiptTokenFields(row)
+				? settledTokenFields(row)
 				: { input: null, output: null };
 	return {
 		input: { known: split.input, partial },
@@ -798,12 +798,16 @@ function rowTokenFields(row: RunEnvelope): Record<"input" | "output" | "total", 
 	};
 }
 
-function receiptTokenFields(row: RunEnvelope): { input: number | null; output: number | null } {
-	const path = row.receiptPath ?? join(clioStateDir(), "receipts", `${row.id}.json`);
+/** The token split a settled run recorded, for a ledger row that carries none; null where it is not known. */
+function settledTokenFields(row: RunEnvelope): { input: number | null; output: number | null } {
+	const known = (fact: Fact<number>) => (fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null);
 	try {
-		const parsed = JSON.parse(readReceiptTextSync(path)) as Partial<RunResult>;
-		return { input: countOrNull(parsed.inputTokenCount), output: countOrNull(parsed.outputTokenCount) };
+		const settled = readSettledRun(clioStateDir(), row.id)?.settled;
+		return settled
+			? { input: known(settled.usage.input), output: known(settled.usage.output) }
+			: { input: null, output: null };
 	} catch {
+		// An unreadable run scope states no split.
 		return { input: null, output: null };
 	}
 }
