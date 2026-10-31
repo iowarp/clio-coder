@@ -18,7 +18,7 @@ Code that writes, folds or renders telemetry follows these rules.
 | R8 One clock convention | Every record carries wall-clock UTC `t` and monotonic `mono` under its segment's clock origin. Monotonic values from different origins are never subtracted ([Time Conventions](time-conventions.md)). |
 | R9 Gaps are recorded | Telemetry never changes an outcome. A dropped, torn, refused or skipped record leaves a `gap` record or a live counter, never silence. |
 | R10 Mode honesty | A field the mode did not capture is `absent: not-captured-in-mode`, never unknown or zero. |
-| R11 Same number everywhere | One fact shows one value and provenance on every surface. The read model ([read-model.ts](../../src/domains/observability/read-model.ts)) gives each quantity one DTO with its fact, display string and explain reference, and `clio-coder telemetry` prints it. The TUI footer, `/usage`, `/context`, `/health`, the exit card and the dispatch board, the ACP `_clio-coder/telemetry/*` methods, the GUI's spend and telemetry views and `clio-coder usage report` read the same DTOs. The boundary check `rule14` fails any other token or cost sum on the TUI, ACP and CLI surfaces, except the functions its exemption list names with a reason, such as the ACP v1 usage counts that retire with the cost tracker. |
+| R11 Same number everywhere | One fact shows one value and provenance on every surface. The read model ([read-model.ts](../../src/domains/observability/read-model.ts)) gives each quantity one DTO with its fact, display string and explain reference, and `clio-coder telemetry` prints it. The TUI footer, `/usage`, `/context`, `/health`, the exit card and the dispatch board, the ACP `_clio-coder/telemetry/*` methods, the GUI's spend, telemetry and session timeline views and `clio-coder usage report` read the same DTOs. The boundary check `rule14` fails any other token or cost sum on the TUI, ACP and CLI surfaces, except the functions its exemption list names with a reason, such as the ACP v1 usage counts that retire with the cost tracker. |
 | R12 Readers tolerate | A reader skips and counts a record kind or version it does not know, and never renames or deletes a store another version wrote. `route-history.json` is the one documented exception: a file older than version 3 is set aside ([Artifact Versions](artifact-versions.md)). |
 | R13 The emit path is cheap | Recording a fact is one allocation and a ring-buffer push, with no filesystem access, serialization or locks. The writer batches, redacts and writes later. The boundary check `checkTelemetryProducer` enforces this for [producer.ts](../../src/core/telemetry/producer.ts). |
 
@@ -59,6 +59,8 @@ Every other line is a record envelope ([envelope.ts](../../src/core/telemetry/en
 One process owns a journal at a time, through a lease adjudicated by host, pid and birth token. The next owner truncates a torn tail and appends `gap{torn-tail}`. A segment whose header this build does not support is never truncated or rewritten. A mode change closes the segment in place with `segment.closed{mode-change}` and writes a new header at the journal's next write. Rotation writes `segment.closed{rotation}`.
 
 Gap reasons are `torn-tail`, `writer-drop`, `writer-error`, `unknown-kind`, `unknown-version`, `invalid-record`, `rotation`, `mode-filtered` and `research-cap`. The read model treats `mode-filtered` and `research-cap` as policy: they do not make accountability totals partial.
+
+Startup diagnostics stay in their own `startup/<date>.jsonl` file; they are not journal records.
 
 ## Identity
 
@@ -169,11 +171,3 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 | Usage `observed: false` | `disposition: settled_no_usage` or `sent_unsettled`, with unknown counts |
 | A ledger message without a call id | A call rebuilt by the importer, its unrecorded facts `unknown: legacy-record` |
 | Evidence `totals.tokens` | The verified receipts' sealed token total, a lower bound when `tokenCoverage` names unmeasured calls or runs |
-
-## Planned
-
-These parts of the design are not in this build yet:
-
-- The GUI timeline view.
-
-Startup diagnostics stay in their own `startup/<date>.jsonl` file; they are not journal records.

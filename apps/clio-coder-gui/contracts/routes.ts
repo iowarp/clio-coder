@@ -1008,7 +1008,8 @@ export const routes = {
 		params: operationParams,
 		query: TelemetryRangeQuery,
 		response: TelemetryTimeline,
-		summary: "Calls with stage offsets, turns, runs, compactions and gaps in time order",
+		summary:
+			"Every journaled kind in time order: calls with stage offsets, turns, runs, tools, settings, budget, quota, context and gaps",
 	}),
 	telemetryWhyStopped: defineRoute({
 		...get,

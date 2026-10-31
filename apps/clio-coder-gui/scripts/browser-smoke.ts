@@ -14,6 +14,7 @@ import { seedFleet } from "../tests/harness/fleet-fixture.js";
 import { seedLibrary } from "../tests/harness/library-fixture.js";
 import { seedReports } from "../tests/harness/reports-fixture.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
+import { seedGoldenSession } from "../tests/harness/telemetry-fixture.js";
 import { traceFixture } from "../tests/harness/trace-fixture.js";
 
 const { values } = parseArgs({
@@ -1619,6 +1620,28 @@ try {
 			await contextPanel.scrollIntoViewIfNeeded();
 			await page.screenshot({ path: join(output, `context-window-${width}.png`) });
 		}
+		// The session timeline: the journal newest first, every figure in the server's words (#434 §11.3). The fixture
+		// agent journals nothing, so the golden ledger is seeded under this session's id for the cold read to fold.
+		seedGoldenSession(join(h.home.path, "state"), new URL(page.url()).pathname.split("/").at(-1) ?? "");
+		await pane.getByLabel("Inspect task", { exact: true }).selectOption("timeline");
+		const timelinePanel = pane.locator(".timeline-panel");
+		const timelineCall = timelinePanel.locator(".timeline-panel__rows > li", { hasText: / call · / }).first();
+		await timelineCall.waitFor();
+		await timelinePanel.getByRole("combobox", { name: /^Entry kind/ }).selectOption("Model call");
+		assert.equal(
+			await timelinePanel.locator(".timeline-panel__rows > li", { hasNotText: / call · / }).count(),
+			0,
+			"the kind filter left another kind in the timeline",
+		);
+		const callTokens = timelineCall.locator("details.explain").first();
+		await callTokens.locator("summary").click();
+		await callTokens.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
+		await check("session-timeline");
+		if (width === 1600 || width === 390) {
+			await timelinePanel.scrollIntoViewIfNeeded();
+			await page.screenshot({ path: join(output, `session-timeline-${width}.png`) });
+		}
+		await callTokens.locator("summary").click();
 		await closePane();
 		// Branches: continuing from an earlier reply replays only that branch; forking moves the
 		// conversation to a new session and says the project's files were left alone.

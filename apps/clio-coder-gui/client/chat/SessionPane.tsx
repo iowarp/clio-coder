@@ -39,6 +39,7 @@ const ChangesView = lazy(() => import("./ChangesView.js").then((view) => ({ defa
 const ContextPanel = lazy(() => import("./ContextPanel.js").then((view) => ({ default: view.ContextPanel })));
 const SessionBoardPanel = lazy(() => import("./SessionBoard.js").then((view) => ({ default: view.SessionBoardPanel })));
 const SessionOverview = lazy(() => import("./SessionOverview.js").then((view) => ({ default: view.SessionOverview })));
+const TimelinePanel = lazy(() => import("./TimelinePanel.js").then((view) => ({ default: view.TimelinePanel })));
 const UsagePanel = lazy(() => import("./UsagePanel.js").then((view) => ({ default: view.UsagePanel })));
 const WorkerGraph = lazy(() => import("./WorkerGraph.js").then((view) => ({ default: view.WorkerGraph })));
 
@@ -259,6 +260,8 @@ export const SessionPane = memo(function SessionPane({
 				);
 			case "changes":
 				return <ChangesView session={pane} workspaceRoot={workspaceRoot} />;
+			case "timeline":
+				return <TimelinePanel client={client} sessionId={pane.id} active={open && view === "timeline"} />;
 			case "agents":
 				return legacy ? <WorkerGraph client={client} session={legacy} /> : null;
 			case "context":

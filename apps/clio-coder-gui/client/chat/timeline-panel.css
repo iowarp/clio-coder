@@ -1,0 +1,48 @@
+/* Timeline: one journal entry per row, its mark, title and the server's figures as short label and value pairs.
+   A call carries its recorded stages as a thin bar under its title, the trace page's stage colours. */
+.timeline-panel__rows > li {
+	grid-template-columns: minmax(5.5rem, auto) minmax(0, 1fr) auto;
+}
+.timeline-panel__title {
+	font-weight: 500;
+}
+.timeline-panel__at {
+	font-size: 12px;
+	color: var(--ink-muted);
+	white-space: nowrap;
+}
+.timeline-panel__stages {
+	position: relative;
+	display: block;
+	height: 4px;
+	margin-block: 2px;
+	border-radius: 2px;
+	background: var(--line);
+	overflow: hidden;
+}
+.timeline-panel__details {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px var(--space-3);
+	margin: 0;
+	font-size: 12px;
+	line-height: 1.45;
+}
+.timeline-panel__details > div {
+	display: flex;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.timeline-panel__details dt {
+	color: var(--ink-muted);
+}
+.timeline-panel__details dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.timeline-panel__more {
+	justify-self: start;
+	font-size: var(--text-instrument);
+	padding: var(--space-1) var(--space-3);
+	min-height: 32px;
+}

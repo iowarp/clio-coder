@@ -10,6 +10,7 @@ export const PANE_VIEWS = [
 	{ id: "session", label: "Session", icon: "sessions" },
 	{ id: "context", label: "Context window", icon: "layers" },
 	{ id: "usage", label: "Usage and quota", icon: "usage" },
+	{ id: "timeline", label: "Timeline", icon: "clock" },
 	{ id: "board", label: "Tasks and decisions", icon: "listChecks" },
 	{ id: "artifacts", label: "Artifacts", icon: "artifacts" },
 	{ id: "changes", label: "Changes", icon: "fileDiff" },
@@ -82,7 +83,7 @@ export function selectPaneSession(session: SessionSnapshot): PaneSession {
 export const PANE_GROUPS: readonly { label: string; views: readonly PaneView[] }[] = [
 	{ label: "Overview", views: ["session"] },
 	{ label: "Work", views: ["changes", "board", "agents"] },
-	{ label: "Resources", views: ["artifacts", "context", "usage", "extensions"] },
+	{ label: "Resources", views: ["artifacts", "context", "usage", "timeline", "extensions"] },
 	{ label: "Continue", views: ["branches", "handoff"] },
 ];
 
@@ -94,6 +95,7 @@ export const PANE_DESCRIPTIONS: Record<PaneView, string> = {
 	artifacts: "Saved artifacts exposed by this task's connection.",
 	context: "Recorded window use, instructions and context management.",
 	usage: "This task's accounting and reported provider limits.",
+	timeline: "Every call, turn, tool and setting this task's journal recorded, newest first.",
 	branches: "Choose where the next request continues, or fork a conversation.",
 	handoff: "Review a handoff before starting a new conversation.",
 	extensions: "Tools and hooks loaded by this task's running session.",
