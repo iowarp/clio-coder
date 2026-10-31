@@ -9,14 +9,13 @@ import {
 	validateStructuredHelperResult,
 } from "../../src/domains/agents/result-contract.js";
 import { createWorkerOutputCapture } from "../../src/domains/dispatch/event-pump.js";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import { summarizeToolActivity, workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
 import { approvedIdentityForSpec } from "../../src/domains/dispatch/worker-protocol.js";
 import { attestedToolSignature } from "../../src/engine/worker-tools.js";
 import { parseWorkerSpec } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
-import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const evidence = {
@@ -215,29 +214,6 @@ test("only admitted validated terminal events seal a helper result, retaining ca
 	);
 });
 
-test("existing receipt digest covers structured data while receipts without it remain valid", () => {
-	const envelope = fixtureEnvelope("helper-integrity");
-	const text = JSON.stringify(samples["provenance-report"]);
-	const output = { state: "final" as const, text, bytes: Buffer.byteLength(text), truncated: false };
-	const legacy = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), output }, envelope);
-	strictEqual(verifyReceiptIntegrity(legacy, envelope).ok, true);
-	const receipt = withReceiptIntegrity(
-		{
-			...fixtureReceiptDraft(envelope),
-			output: { ...output, structured: { version: 1, kind: "provenance-report", data: samples["provenance-report"] } },
-		},
-		envelope,
-	);
-	strictEqual(receipt.integrity.version, legacy.integrity.version);
-	strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true);
-	const tampered = structuredClone(receipt);
-	ok(tampered.output?.structured);
-	tampered.output.structured.data.confirmedFacts = ["invented fact"];
-	strictEqual(verifyReceiptIntegrity(tampered, envelope).ok, false);
-	delete tampered.output.structured;
-	strictEqual(verifyReceiptIntegrity(tampered, envelope).ok, false);
-});
-
 test("dispatch selects helper mode from trusted audience and seals its validated terminal handoff", async () => {
 	const env = await isolateClioEnv("clio-helper-result-");
 	const bundle = makeDispatchBundle(dispatchStubContext(), {
@@ -298,7 +274,6 @@ test("dispatch selects helper mode from trusted audience and seals its validated
 		strictEqual(receipt.quality.resultContract?.quality, "unmeasured");
 		const envelope = bundle.contract.getRun(run.runId);
 		ok(envelope);
-		strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true);
 	} finally {
 		await bundle.extension.stop?.();
 		env.restore();
@@ -377,7 +352,7 @@ test("headless human output exposes a sealed coder limitation between narration 
 		strictEqual(receipt.exitCode, 0);
 		deepStrictEqual(receipt.output?.structured?.data.declaredChecks, [limitation]);
 		const human = formatDispatchHumanOutput(answer, receipt);
-		ok(human.startsWith(`${answer}\n\nNot verified:\n- ${limitation}\nreceipt:`), human);
+		ok(human.startsWith(`${answer}\n\nNot verified:\n- ${limitation}\nresult:`), human);
 		ok(human.includes("exit=0 verification=unverified not_verified=1"), human);
 		t.diagnostic(human.trim());
 	} finally {

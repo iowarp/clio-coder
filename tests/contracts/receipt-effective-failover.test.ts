@@ -1,6 +1,6 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { RECEIPT_INTEGRITY_FIELD_COVERAGE } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import { effectiveFailoverMode } from "../../src/domains/dispatch/recovery-candidates.js";
 import { defaultRoutingIntent } from "../../src/domains/dispatch/routing-intent.js";
 
@@ -34,8 +34,4 @@ test("the recorded intent and the governing mode can legitimately differ", () =>
 	const intent = defaultRoutingIntent({});
 	strictEqual(intent.failover, "none");
 	strictEqual(effectiveFailoverMode({}), "automatic");
-});
-
-test("the receipt field is covered by integrity", () => {
-	ok(Object.hasOwn(RECEIPT_INTEGRITY_FIELD_COVERAGE, "effectiveFailover"));
 });

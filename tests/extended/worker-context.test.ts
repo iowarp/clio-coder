@@ -7,8 +7,7 @@ import { createWorkerObservationStore } from "../../src/domains/context/worker/r
 import { selectWorkerContext } from "../../src/domains/context/worker/select.js";
 import { captureWorkerContext, completeHistoryLength, contextHash } from "../../src/domains/context/worker/snapshot.js";
 import { persistWorkerContextSeed } from "../../src/domains/context/worker/store.js";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { adaptRunResultContextStatus } from "../../src/domains/evidence/trust-status.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
@@ -18,6 +17,7 @@ import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT } from "../../src/tools/dispat
 import { parseWorkerContextSeed, seededWorkerMessages } from "../../src/worker/context-seed.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { settledRunTrust } from "../harness/settled-run.js";
 
 const source = { sessionId: "parent", leafTurnId: "leaf", cwd: "/repo" };
 function user(text: string): AgentMessage {
@@ -319,17 +319,16 @@ test("splice preserves failures and refuses to discard required images", () => {
 test("receipt integrity binds inherited context and reports it as context provenance, not validation", () => {
 	const provenance = selectWorkerContext(captureWorkerContext(source, history()), { mode: "fork" }).provenance;
 	const envelope = { ...fixtureEnvelope(), workerContext: provenance };
-	const receipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), workerContext: provenance }, envelope);
-	deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+	const receipt = finishRunResult({ ...fixtureReceiptDraft(envelope), workerContext: provenance }, envelope, {
+		terminal: { terminalReason: "completed" },
+		processExitCode: envelope.exitCode,
+		frameType: null,
+		usage: undefined,
+	}).result;
+
+	equal(settledRunTrust(receipt).contextProvenance.state, "recorded");
 	equal(
-		verifyReceiptIntegrity({ ...receipt, workerContext: { ...provenance, omittedMessages: 90 } }, envelope).ok,
-		false,
-	);
-	const { workerContext: _context, ...withoutContext } = envelope;
-	equal(verifyReceiptIntegrity(receipt, withoutContext).ok, false);
-	equal(adaptRunResultContextStatus(receipt).state, "recorded");
-	equal(
-		adaptRunResultContextStatus({ ...receipt, workerContext: { ...provenance, contentHash: "bad" } }).state,
+		settledRunTrust({ ...receipt, workerContext: { ...provenance, contentHash: "bad" } }).contextProvenance.state,
 		"invalid",
 	);
 });

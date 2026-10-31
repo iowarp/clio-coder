@@ -7,7 +7,7 @@ import { selectWorkerContext } from "../../src/domains/context/worker/select.js"
 import { captureWorkerContext } from "../../src/domains/context/worker/snapshot.js";
 import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
@@ -237,7 +237,7 @@ require("node:readline").createInterface({input: process.stdin}).on("line", (lin
 		deepStrictEqual(receipt.workerContext, seed.provenance);
 		const envelope = bundle.contract.getRun(run.runId);
 		ok(envelope);
-		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+
 		await rejects(
 			bundle.contract.dispatch({
 				...request,

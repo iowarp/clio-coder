@@ -2,6 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/str
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import {
 	parseResultContract,
@@ -23,14 +24,15 @@ import {
 	workerOutputCaptureBytes,
 } from "../../src/domains/dispatch/event-pump.js";
 import { dispatchResultContract } from "../../src/domains/dispatch/execution-role.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunResult } from "../../src/domains/dispatch/types.js";
+import type { SettledRunRecord } from "../../src/domains/telemetry/index.js";
+import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
-import { finishedRun, PRODUCER_INTEGRITY, runEvidenceLabels } from "../../src/tools/worker-evidence.js";
+import { PRODUCER_INTEGRITY, runEvidenceLabels } from "../../src/tools/worker-evidence.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { resolvedRunResult } from "../harness/settled-run.js";
 
 beforeEach(() => isolateDispatchState());
 afterEach(() => restoreDispatchState());
@@ -315,12 +317,12 @@ function setup(outputs: readonly string[]) {
 const intent = { read_roots: ["."], write_roots: [] };
 
 /** The integrity-verified receipt whose sealed output is exactly `text`. */
-function sealedReceipt(bundle: ReturnType<typeof setup>["bundle"], text: string): RunResult {
+function sealedReceipt(bundle: ReturnType<typeof setup>["bundle"], text: string): SettledRunRecord {
 	for (const run of bundle.contract.listRuns()) {
-		if (!run.receiptPath) continue;
-		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
-		if (receipt.output?.text !== text) continue;
-		ok(verifyReceiptIntegrity(receipt, run).ok);
+		if (!readVerifiedRun(clioStateDir(), run.id)) continue;
+		const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+		if (resolvedRunResult(receipt).output?.text !== text) continue;
+
 		return receipt;
 	}
 	throw new Error("no sealed receipt carries the expected output");
@@ -337,18 +339,18 @@ it("round-trips a 1200-word cited Coder explanation through dispatch, the receip
 		strictEqual(result.kind, "ok");
 		deepStrictEqual(specs[0]?.resultContract, MUTATION);
 		const receipt = sealedReceipt(bundle, output);
-		strictEqual(receipt.outcome, "succeeded");
-		strictEqual(receipt.exitCode, 0);
-		strictEqual(receipt.quality.resultContract?.conformance, "pass");
-		strictEqual(receipt.quality.resultContract?.sourceId, resultContractSourceId(MUTATION));
-		deepStrictEqual(receipt.output, {
+		strictEqual(receipt.settled.outcome, "succeeded");
+		strictEqual(receipt.settled.exitCode, 0);
+		strictEqual(receipt.settled.quality?.resultContract?.conformance, "pass");
+		strictEqual(receipt.settled.quality?.resultContract?.sourceId, resultContractSourceId(MUTATION));
+		deepStrictEqual(resolvedRunResult(receipt).output, {
 			state: "final",
 			text: output,
 			bytes: Buffer.byteLength(output, "utf8"),
 			truncated: false,
 		});
-		strictEqual(JSON.parse(receipt.output?.text ?? "{}").summary, EXPLANATION);
-		strictEqual(receipt.toolActivity?.mutatingSucceeded, false);
+		strictEqual(JSON.parse(resolvedRunResult(receipt).output?.text ?? "{}").summary, EXPLANATION);
+		strictEqual(receipt.settled.toolActivity?.mutatingSucceeded, false);
 		if (result.kind !== "ok") return;
 		// The dispatch return carries the whole report under the default preview limit.
 		ok(result.output.includes("Stencil note 10."));
@@ -377,17 +379,17 @@ it("applies a per-dispatch allowance to the worker spec, the seal, and its ident
 		strictEqual(failed.kind, "error");
 		deepStrictEqual(specs[0]?.resultContract, narrow);
 		const failedReceipt = sealedReceipt(bundle, over);
-		strictEqual(failedReceipt.outcome, "failed");
-		strictEqual(failedReceipt.outcomeCode, "result_contract_invalid");
-		match(failedReceipt.outcomeDetail ?? "", /summary must be at most 512 UTF-8 bytes \(600 given\)/u);
-		strictEqual(failedReceipt.quality.resultContract?.conformance, "fail");
-		strictEqual(failedReceipt.quality.resultContract?.sourceId, resultContractSourceId(narrow));
+		strictEqual(failedReceipt.settled.outcome, "failed");
+		strictEqual(failedReceipt.settled.outcomeCode, "result_contract_invalid");
+		match(failedReceipt.settled.outcomeDetail ?? "", /summary must be at most 512 UTF-8 bytes \(600 given\)/u);
+		strictEqual(failedReceipt.settled.quality?.resultContract?.conformance, "fail");
+		strictEqual(failedReceipt.settled.quality?.resultContract?.sourceId, resultContractSourceId(narrow));
 		const passed = await dispatch.run({ agent: "coder", task: fixture.task, intent, result_summary_max_bytes: 512 }, {});
 		strictEqual(passed.kind, "ok");
 		const passedReceipt = sealedReceipt(bundle, within);
-		strictEqual(passedReceipt.outcome, "succeeded");
-		strictEqual(passedReceipt.quality.resultContract?.conformance, "pass");
-		strictEqual(passedReceipt.quality.resultContract?.sourceId, resultContractSourceId(narrow));
+		strictEqual(passedReceipt.settled.outcome, "succeeded");
+		strictEqual(passedReceipt.settled.quality?.resultContract?.conformance, "pass");
+		strictEqual(passedReceipt.settled.quality?.resultContract?.sourceId, resultContractSourceId(narrow));
 	} finally {
 		await bundle.extension.stop?.();
 	}
@@ -414,7 +416,7 @@ it("rejects an invalid allowance at the tool boundary and an explicit allowance 
 			match(scout.message, /applies only to a mutation-report result contract; agent 'scout' declares scout-report/u);
 		strictEqual(specs.length, 0);
 		deepStrictEqual(
-			bundle.contract.listRuns().filter((run) => run.receiptPath !== undefined),
+			bundle.contract.listRuns().filter((run) => readVerifiedRun(clioStateDir(), run.id) !== null),
 			[],
 		);
 	} finally {
@@ -472,8 +474,16 @@ it("labels a Documenter summary above the default allowance as the inline delive
 		);
 		strictEqual(result.kind, "ok");
 		const receipt = sealedReceipt(bundle, output);
-		strictEqual(receipt.quality.resultContract?.conformance, "pass");
-		const labels = runEvidenceLabels(finishedRun(receipt), PRODUCER_INTEGRITY);
+		strictEqual(receipt.settled.quality?.resultContract?.conformance, "pass");
+		const labels = runEvidenceLabels(
+			{
+				runId: receipt.row.runId,
+				digest: receipt.settled.digest,
+				facts: receipt.settled,
+				delivered: resolvedRunResult(receipt),
+			},
+			PRODUCER_INTEGRITY,
+		);
 		ok(
 			labels.some((label) => label.includes("the inline deliverable or limitation is in output.text JSON field summary")),
 		);

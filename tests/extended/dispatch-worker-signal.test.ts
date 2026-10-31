@@ -4,7 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import {
 	approvedIdentityForSpec,
 	CONTROL_FRAME_PREFIX,
@@ -138,11 +138,6 @@ for (const scenario of [
 			if (scenario.signal !== null) {
 				match(receipt.outcomeDetail ?? "", /worker process signal: SIGKILL/u);
 				match(receipt.failureMessage ?? "", /worker process signal: SIGKILL/u);
-				strictEqual(
-					verifyReceiptIntegrity({ ...receipt, outcomeDetail: "exit code 1" }, envelope).ok,
-					false,
-					"removing the observed cause must invalidate the receipt seal",
-				);
 			}
 		} finally {
 			worker?.abort();

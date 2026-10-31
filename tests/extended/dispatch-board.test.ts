@@ -1,5 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
@@ -7,11 +7,11 @@ import type { DispatchCompletedPayload, DispatchEnqueuedPayload } from "../../sr
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { resolveToolBudgetEnvelope } from "../../src/domains/dispatch/budget-envelope.js";
 import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { buildEvidence } from "../../src/domains/evidence/index.js";
 import { summarizeTrustStatus } from "../../src/domains/evidence/trust-projection.js";
-import { inspectRunResultTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import type { TelemetryRunReaders, TelemetryRunSummary } from "../../src/domains/telemetry/contract.js";
+import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import {
 	createTelemetryProjection,
 	MAX_PROJECTION_RUNS,
@@ -35,6 +35,7 @@ import { createWorkerStream } from "../../src/session-control/worker-stream.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { settledRunTrust, writeSettledRun } from "../harness/settled-run.js";
 import { runUsageOf } from "../harness/telemetry-view.js";
 
 it("gives running Fleet work the dispatch tone with an activity glyph and leaves queued work in body text", () => {
@@ -250,8 +251,13 @@ describe("dispatch board uses the telemetry projection", () => {
 
 	it("preserves every board field through the projection and keeps snapshots immutable", () => {
 		const envelope = fixtureEnvelope(IDENTITY.runId);
-		const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
-		const trust = inspectRunResultTrustStatus(receipt, envelope).status;
+		const receipt = finishRunResult(fixtureReceiptDraft(envelope), envelope, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
+		const trust = settledRunTrust(receipt);
 		let receiptAvailable = true;
 		const { bus, projection, board, progress, start } = setup({
 			readReceipt: () => (receiptAvailable ? { text: "sealed answer", trust } : null),
@@ -436,9 +442,13 @@ describe("dispatch board uses the telemetry projection", () => {
 
 	it("does not settle worker progress on a rejected receipt's answer", () => {
 		const envelope = fixtureEnvelope(IDENTITY.runId);
-		const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
-		receipt.task = "tampered";
-		const trust = inspectRunResultTrustStatus(receipt, envelope).status;
+		const receipt = finishRunResult(fixtureReceiptDraft(envelope), envelope, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
+		const trust = settledRunTrust(receipt, { state: "failed", reason: "run seal failed" });
 		const { bus, board, progress, start } = setup({ readReceipt: () => ({ text: "untrusted receipt answer", trust }) });
 		start();
 		progress({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "observed live tail" } });
@@ -616,7 +626,16 @@ describe("dispatch quality presentation", () => {
 				conformance: "pass",
 				quality,
 			};
-			return summarizeTrustStatus(inspectRunResultTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status);
+			return summarizeTrustStatus(
+				settledRunTrust(
+					finishRunResult(draft, envelope, {
+						terminal: { terminalReason: draft.terminalReason ?? "completed" },
+						processExitCode: envelope.exitCode,
+						frameType: null,
+						usage: undefined,
+					}).result,
+				),
+			);
 		});
 		const finished = {
 			toolCallId: "dispatch",
@@ -670,7 +689,6 @@ describe("dispatch quality presentation", () => {
 				// Monitor reads only runs from this project; the shared receipt fixture
 				// defaults to /workspace, which is unrelated to this isolated test.
 				envelope.cwd = process.cwd();
-				envelope.receiptPath = join(clioStateDir(), "receipts", `${envelope.id}.json`);
 				const draft = fixtureReceiptDraft(envelope);
 				// Exact failed-quality fact from retained S3 receipt 26ekyn85239m:
 				// conformance passes for its honest report that the output write failed.
@@ -690,13 +708,17 @@ describe("dispatch quality presentation", () => {
 						ungrounded: ["output write"],
 						basis: "no-command-executed",
 					};
-				const receipt = withReceiptIntegrity(draft, envelope);
-				const bytes = JSON.stringify(receipt);
-				await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
-				await writeFile(envelope.receiptPath, bytes);
+				const receipt = finishRunResult(draft, envelope, {
+					terminal: { terminalReason: draft.terminalReason ?? "completed" },
+					processExitCode: envelope.exitCode,
+					frameType: null,
+					usage: undefined,
+				}).result;
+				await writeSettledRun(clioStateDir(), receipt);
+				const bytes = JSON.stringify(readVerifiedRun(clioStateDir(), envelope.id)?.settled);
 				await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
-				const inspection = inspectRunResultTrustStatus(receipt, envelope);
-				strictEqual(inspection.integrity.ok, true);
+				const inspection = { status: settledRunTrust(receipt) };
+				strictEqual(inspection.status.artifactIntegrity.state, "verified");
 				strictEqual(inspection.status.validationGrounding.state, state);
 				const trust = summarizeTrustStatus(inspection.status);
 				const { bus, board, start } = setup({ readReceipt: () => ({ trust: inspection.status }) });
@@ -767,8 +789,8 @@ describe("dispatch quality presentation", () => {
 				deepStrictEqual(summarizeTrustStatus(evidence), trust);
 				const findings = await readFile(join(built.directory, "findings.md"), "utf8");
 				ok(findings.includes(wording), findings);
-				strictEqual(await readFile(envelope.receiptPath, "utf8"), bytes);
-				strictEqual(inspectRunResultTrustStatus(receipt, envelope).integrity.ok, true);
+				strictEqual(JSON.stringify(readVerifiedRun(clioStateDir(), envelope.id)?.settled), bytes);
+				strictEqual(readVerifiedRun(clioStateDir(), envelope.id)?.seal?.status, "verified");
 				if (quality === "unknown") doesNotMatch(plain(collapsed), /validation failed/u);
 			} finally {
 				env.restore();

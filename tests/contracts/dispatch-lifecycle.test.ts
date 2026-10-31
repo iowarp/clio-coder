@@ -10,7 +10,8 @@ import {
 	registerAssignment,
 	settleStoredAssignment,
 } from "../../src/domains/dispatch/assignment-store.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { clearScratchClioHome, newScratchClioHome } from "../harness/scratch-env.js";
 
@@ -51,7 +52,12 @@ describe("dispatch assignment lifecycle", () => {
 			retryReason: null,
 		});
 		const envelope = fixtureEnvelope("run-retry");
-		const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
+		const receipt = finishRunResult(fixtureReceiptDraft(envelope), envelope, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
 		registry.settle(opened.id, receipt, "succeeded");
 		strictEqual((await opened.terminal).runId, "run-retry");
 		const final = registry.get(opened.id);

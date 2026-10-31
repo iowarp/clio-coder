@@ -1,12 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
-import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -157,12 +156,12 @@ for (const scenario of [
 			});
 			const receipt = await run.finalPromise;
 			const envelope = bundle.contract.getRun(run.runId);
-			ok(envelope?.receiptPath);
+			ok(envelope);
 			strictEqual(envelope.budget?.effective.mode, "advisory");
 			strictEqual(receipt.budget?.enforcement.perTool, "unobserved-not-enforced");
 			strictEqual(receipt.budget?.effective.toolCalls, 1000);
-			const persisted = JSON.parse(readFileSync(envelope.receiptPath, "utf8")) as RunResult;
-			deepStrictEqual(persisted, receipt);
+			const persisted = readVerifiedRun(clioStateDir(), envelope.id)!;
+			strictEqual(persisted.settled.digest, receipt.digest);
 			const stateDir = process.env.CLIO_CODER_STATE_DIR;
 			ok(stateDir);
 			const journal = await readCallJournal(telemetryRunDirectory(stateDir, run.runId));
@@ -227,8 +226,7 @@ for (const scenario of [
 			strictEqual(envelope.tokenCount, receipt.tokenCount);
 			strictEqual(envelope.costUsd, receipt.costUsd);
 			strictEqual(envelope.costProvenance, receipt.costProvenance);
-			strictEqual(verifyReceiptIntegrity({ ...receipt, tokenCount: receipt.tokenCount + 1 }, envelope).ok, false);
-			strictEqual(verifyReceiptIntegrity({ ...receipt, costUsd: receipt.costUsd + 1 }, envelope).ok, false);
+
 			deepStrictEqual(bundle.contract.snapshot().running, []);
 			deepStrictEqual(bundle.contract.snapshot().retrying, []);
 			strictEqual(capacityLeaseUsage().global, 0);

@@ -1,3 +1,8 @@
+import type { RunResultObject } from "../../src/core/telemetry/schemas.js";
+import type { RunIntegrity } from "../../src/domains/evidence/trust-status.js";
+import { adaptRunTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import type { SettledRunRecord } from "../../src/domains/telemetry/index.js";
+import { fixtureEnvelope } from "./receipt.js";
 /**
  * Write a finished run the way dispatch records one (#434): a sealed run scope whose journal holds run.settled and
  * whose objects hold the result it names, built from a result draft through the same settlement dispatch uses.
@@ -5,7 +10,7 @@
 
 import type { WorkerTelemetryContext } from "../../src/core/telemetry/context.js";
 import type { RunUsageFacts } from "../../src/domains/dispatch/run-call-usage.js";
-import { runSettledRecord, settleFinishedRun } from "../../src/domains/dispatch/run-settlement.js";
+import { finishRunResult, runSettledRecord, settleFinishedRun } from "../../src/domains/dispatch/run-settlement.js";
 import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
@@ -21,12 +26,17 @@ export async function writeSettledRun(stateDir: string, draft: RunResultDraft, u
 		writer: { clioCoderVersion: "test", piVersion: "test" },
 	});
 	try {
-		const settlement = settleFinishedRun(draft, {
-			terminal: { terminalReason: draft.terminalReason ?? "completed" },
-			processExitCode: draft.exitCode,
-			frameType: null,
-			usage,
-		});
+		const { digest: _digest, ...inputDraft } = draft as RunResultDraft & { digest?: string };
+		const settlement = finishRunResult(
+			inputDraft,
+			{ ...fixtureEnvelope(draft.runId), ...draft },
+			{
+				terminal: { terminalReason: draft.terminalReason ?? "completed" },
+				processExitCode: draft.exitCode,
+				frameType: null,
+				usage,
+			},
+		).settlement;
 		const result = await writer.storeObject("run-result", settlement.result);
 		writer.enqueue({
 			kind: "run.settled",
@@ -39,4 +49,24 @@ export async function writeSettledRun(stateDir: string, draft: RunResultDraft, u
 	} finally {
 		await writer.close();
 	}
+}
+
+/** Project the same settled facts the producer supplies to trust consumers (#434). */
+export function settledRunTrust(
+	draft: RunResultDraft,
+	integrity: RunIntegrity = { state: "verified", by: "producer" },
+) {
+	const settlement = settleFinishedRun(draft, {
+		terminal: { terminalReason: draft.terminalReason ?? "completed" },
+		processExitCode: draft.exitCode,
+		frameType: null,
+		usage: undefined,
+	});
+	return adaptRunTrustStatus({ ...settlement.facts, runId: draft.runId, digest: null }, integrity);
+}
+
+/** A sealed fixture must resolve the result object named by its settled record (#434). */
+export function resolvedRunResult(run: SettledRunRecord): RunResultObject {
+	if (run.result?.state !== "resolved") throw new Error(`run ${run.row.runId} has no resolved result object`);
+	return run.result.value;
 }

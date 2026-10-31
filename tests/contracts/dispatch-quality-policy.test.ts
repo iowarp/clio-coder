@@ -6,7 +6,7 @@ import { it } from "node:test";
 import { stringify } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
@@ -169,7 +169,6 @@ for (const mode of ["missing", "passed", "normal"] as const) {
 				deepStrictEqual(controls, [], "the completion gate must not issue tool execution or recovery authority");
 				const stored = bundle.contract.getRun(run.runId);
 				ok(stored);
-				deepStrictEqual(verifyReceiptIntegrity(receipt, stored), { ok: true });
 			} finally {
 				await bundle.extension.stop?.();
 			}

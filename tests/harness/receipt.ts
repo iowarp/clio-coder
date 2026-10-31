@@ -1,11 +1,4 @@
-/**
- * Shared receipt fixtures.
- *
- * The integrity digest covers every receipt field, so more than one contract
- * suite needs a complete, valid envelope and draft to seal and then tamper
- * with. Keeping one copy means a new required field breaks every suite at once
- * rather than letting one drift into asserting against a stale shape.
- */
+/** Run envelope and result draft fixtures for settlement (#434). */
 
 import type { RunEnvelope, RunResultDraft } from "../../src/domains/dispatch/types.js";
 
@@ -28,7 +21,6 @@ export function fixtureEnvelope(runId = "run-1"): RunEnvelope {
 		exitCode: 0,
 		pid: null,
 		heartbeatAt: null,
-		receiptPath: null,
 		sessionId: "session-1",
 		cwd: "/workspace",
 		tokenCount: 42,

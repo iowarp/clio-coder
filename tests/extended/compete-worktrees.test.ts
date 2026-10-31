@@ -7,10 +7,11 @@ import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readGateDecisionArtifacts } from "../../src/domains/dispatch/gate-decisions.js";
-import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
+import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import {
 	candidateDiffStat,
@@ -27,6 +28,7 @@ import { readTool } from "../../src/tools/read.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { resolvedRunResult } from "../harness/settled-run.js";
 
 function git(root: string, ...args: string[]): string {
 	return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -233,8 +235,8 @@ for (const agent of ["scout", "coder"] as const) {
 				.listRuns()
 				.filter((run) => run.agentId === agent)
 				.map((run) => {
-					ok(run.receiptPath);
-					return JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
+					ok(run);
+					return readVerifiedRun(clioStateDir(), run.id)!;
 				});
 			strictEqual(receipts.length, 2);
 			const candidateEvidence = judgeTask
@@ -243,31 +245,37 @@ for (const agent of ["scout", "coder"] as const) {
 				.map((line) => JSON.parse(line));
 			strictEqual(candidateEvidence.length, 2);
 			for (const evidence of candidateEvidence) {
-				const receipt = receipts.find((entry) => entry.runId === evidence.runId);
+				const receipt = receipts.find((entry) => entry.row.runId === evidence.runId);
 				ok(receipt);
-				strictEqual(evidence.output.text, receipt.output?.text);
-				strictEqual(evidence.worktree, receipt.gate?.worktree?.path);
-				strictEqual(evidence.branch, receipt.gate?.worktree?.branch);
+				strictEqual(evidence.output.text, resolvedRunResult(receipt).output?.text);
+				strictEqual(evidence.worktree, bundle.contract.getRun(receipt.row.runId)?.gate?.worktree?.path);
+				strictEqual(evidence.branch, bundle.contract.getRun(receipt.row.runId)?.gate?.worktree?.branch);
 				strictEqual(evidence.candidate, candidatePaths.indexOf(evidence.worktree) + 1);
-				strictEqual(JSON.parse(readFileSync(evidence.resultPath, "utf8")).output.text, receipt.output?.text);
+				strictEqual(
+					JSON.parse(readFileSync(evidence.resultPath, "utf8")).output.text,
+					resolvedRunResult(receipt).output?.text,
+				);
 			}
 
-			strictEqual(new Set(receipts.map((receipt) => receipt.runId)).size, 2);
+			strictEqual(new Set(receipts.map((receipt) => receipt.row.runId)).size, 2);
 			strictEqual(new Set(candidatePaths).size, 2);
 			const allRuns = bundle.contract.listRuns();
 			strictEqual(allRuns.length, 3, "exactly two candidate executions plus one judge; no council substitution");
 			const judgeRun = allRuns.find((run) => run.gate?.role === "judge");
-			ok(judgeRun?.receiptPath);
-			const judgeReceipt = JSON.parse(readFileSync(judgeRun.receiptPath, "utf8")) as RunResult;
-			strictEqual(judgeReceipt.outcome, "succeeded");
-			strictEqual(judgeReceipt.autonomy, "default");
+			ok(judgeRun);
+			const judgeReceipt = readVerifiedRun(clioStateDir(), judgeRun.id)!;
+			strictEqual(judgeReceipt.settled.outcome, "succeeded");
+
 			deepStrictEqual(
-				judgeReceipt.gate?.subjects?.map((subject) => subject.runId).sort(),
-				receipts.map((receipt) => receipt.runId).sort(),
+				bundle.contract
+					.getRun(judgeReceipt.row.runId)
+					?.gate?.subjects?.map((subject) => subject.runId)
+					.sort(),
+				receipts.map((receipt) => receipt.row.runId).sort(),
 			);
 			for (const receipt of [...receipts, judgeReceipt]) {
-				strictEqual(receipt.targetId, "only-route");
-				strictEqual(receipt.wireModelId, "fixture-model");
+				strictEqual(receipt.settled.route.targetId, "only-route");
+				strictEqual(receipt.settled.route.wireModelId, "fixture-model");
 			}
 			strictEqual(result.details?.mode, "compete");
 			strictEqual(result.details?.receiptCount, 3);
@@ -275,29 +283,32 @@ for (const agent of ["scout", "coder"] as const) {
 			const winner = readGateDecisionArtifacts().find(({ artifact }) => artifact.outcome === "winner")?.artifact;
 			ok(winner);
 			strictEqual(winner.topology, "compete");
-			strictEqual(winner.decider?.runId, judgeReceipt.runId);
+			strictEqual(winner.decider?.runId, judgeReceipt.row.runId);
 			strictEqual(winner.subjects.length, 2);
 			strictEqual(winner.winner?.index, 1);
 			strictEqual(winner.correlation?.independent, false, "same-route judging must retain its correlation");
 			deepStrictEqual(
 				winner.subjects.map((subject) => subject.runId).sort(),
-				receipts.map((receipt) => receipt.runId).sort(),
+				receipts.map((receipt) => receipt.row.runId).sort(),
 			);
-			strictEqual(winner.winner?.subject.runId, receipts.find((receipt) => receipt.gate?.cycle === 1)?.runId);
+			strictEqual(
+				winner.winner?.subject.runId,
+				receipts.find((receipt) => bundle.contract.getRun(receipt.row.runId)?.gate?.cycle === 1)?.row.runId,
+			);
 			t.diagnostic(
 				JSON.stringify({
 					mode: result.details?.mode,
-					candidateIds: receipts.map((receipt) => receipt.runId),
-					judgeId: judgeReceipt.runId,
+					candidateIds: receipts.map((receipt) => receipt.row.runId),
+					judgeId: judgeReceipt.row.runId,
 					receiptCount: result.details?.receiptCount,
 					winner,
 				}),
 			);
 			for (const receipt of receipts) {
-				strictEqual(receipt.gate?.role, "candidate");
-				strictEqual(receipt.outcome, "succeeded");
-				strictEqual(receipt.autonomy, "default");
-				if (!writer) deepStrictEqual(receipt.intent?.writeRoots, []);
+				strictEqual(bundle.contract.getRun(receipt.row.runId)?.gate?.role, "candidate");
+				strictEqual(receipt.settled.outcome, "succeeded");
+
+				if (!writer) strictEqual(receipt.settled.toolActivity?.mutatingSucceeded, false);
 			}
 			strictEqual(candidateBefore.length, 2);
 			strictEqual(judged.length, 2);
@@ -483,12 +494,15 @@ for (const phase of ["candidates", "judge"] as const) {
 				const runs = bundle.contract.listRuns();
 				strictEqual(runs.length, phase === "judge" ? 3 : 2);
 				for (const run of runs) {
-					ok(run.receiptPath);
-					const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
-					const interrupted = phase === "candidates" || receipt.gate?.role === "judge";
-					strictEqual(receipt.outcome, interrupted ? "canceled" : "succeeded");
+					ok(run);
+					const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+					const interrupted = phase === "candidates" || bundle.contract.getRun(receipt.row.runId)?.gate?.role === "judge";
+					strictEqual(receipt.settled.outcome, interrupted ? "canceled" : "succeeded");
 					if (interrupted)
-						match(receipt.outcomeDetail ?? "", stopKind === "timeout" ? /timed out after 1500ms/u : /operator abort/u);
+						match(
+							receipt.settled.outcomeDetail ?? "",
+							stopKind === "timeout" ? /timed out after 1500ms/u : /operator abort/u,
+						);
 					ok(result.message.includes(run.id), "stopped tool output must retain each terminal run identity");
 				}
 				strictEqual(result.details?.receiptCount, runs.length);

@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { type HeadlessShutdownHooks, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { DispatchPreparationOptions, DispatchRequest } from "../../src/domains/dispatch/contract.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import type { RunLineage } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
@@ -207,16 +208,22 @@ it("a worker admitted during main submit points to its eventual receipt; indepen
 			strictEqual(code, interrupted ? 143 : 0);
 			const journal = readRunJournal(join(env.dir, "state"));
 			ok(journal);
-			const mains = journal.receipts.filter((receipt) => receipt.agentId === "main-agent");
+			const mains = [...journal.envelopes.values()].filter((run) => run.agentId === "main-agent");
 			strictEqual(mains.length, ids.length + 1, "drain and completion seal the same identity once");
-			const main = mains.find((receipt) => !ids.includes(receipt.runId));
+			const main = mains.find((receipt) => !ids.includes(receipt.id));
 			ok(main);
-			const worker = journal.receipts.find((receipt) => receipt.agentId === "scout" && !workerIds.includes(receipt.runId));
+			const worker = journal.runs.find(
+				(receipt) => receipt.settled.agentId === "scout" && !workerIds.includes(receipt.row.runId),
+			);
 			ok(worker);
-			deepStrictEqual(worker.lineage, { parentRunId: main.runId, rootRunId: main.runId, depth: 1, attempt: 0 });
-			deepStrictEqual(journal.envelopes.get(worker.runId)?.lineage, worker.lineage);
-			ids.push(main.runId);
-			workerIds.push(worker.runId);
+			deepStrictEqual(journal.envelopes.get(worker.row.runId)?.lineage, {
+				parentRunId: main.id,
+				rootRunId: main.id,
+				depth: 1,
+				attempt: 0,
+			});
+			ids.push(main.id);
+			workerIds.push(worker.row.runId);
 		}
 		notStrictEqual(ids[0], ids[1]);
 		duringSubmit = undefined;
@@ -282,7 +289,9 @@ for (const mode of ["single", "parallel", "review", "compete", "council"] as con
 				lineage: { parentRunId: "forged", rootRunId: "forged", depth: 99, attempt: 99 },
 			};
 			// Tool options are supplied by the host, independently of model args.
-			const result = await f.tool.run(args, { hostRun, toolCallId: "call-trusted" } as ToolInvokeOptions);
+			const result = await withTelemetryContext({ sessionId: "lineage-test", label: "main" }, () =>
+				f.tool.run(args, { hostRun, toolCallId: "call-trusted" } as ToolInvokeOptions),
+			);
 			strictEqual(result.kind, "ok", JSON.stringify(result).slice(0, 1200));
 			strictEqual(f.captured.length, mode === "single" ? 1 : mode === "parallel" || mode === "review" ? 2 : 3);
 			for (const request of f.captured)
@@ -294,13 +303,12 @@ for (const mode of ["single", "parallel", "review", "compete", "council"] as con
 			for (const preparation of f.preparations) deepStrictEqual(preparation?.hostRun, hostRun);
 			const journal = readRunJournal(join(env.dir, "state"));
 			ok(journal);
-			for (const receipt of journal.receipts) {
-				const envelope = journal.envelopes.get(receipt.runId);
+			for (const receipt of journal.runs) {
+				const envelope = journal.envelopes.get(receipt.row.runId);
 				ok(envelope);
-				strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true, receipt.agentId);
-				deepStrictEqual(receipt.lineage, childLineage, receipt.agentId);
-				deepStrictEqual(journal.envelopes.get(receipt.runId)?.lineage, childLineage, receipt.agentId);
-				deepStrictEqual(f.completed.get(receipt.runId), childLineage, receipt.agentId);
+
+				deepStrictEqual(journal.envelopes.get(receipt.row.runId)?.lineage, childLineage, receipt.settled.agentId);
+				deepStrictEqual(f.completed.get(receipt.row.runId), childLineage, receipt.settled.agentId);
 			}
 		} finally {
 			await f.bundle.extension.stop?.();
@@ -349,17 +357,21 @@ for (const hosted of [false, true]) {
 			strictEqual(result.kind, "ok", JSON.stringify(result).slice(0, 1000));
 			const journal = readRunJournal(join(env.dir, "state"));
 			ok(journal);
-			const attempts = journal.receipts
-				.filter((receipt) => receipt.agentId === "scout")
-				.sort((a, b) => (a.lineage?.attempt ?? 0) - (b.lineage?.attempt ?? 0));
+			const attempts = journal.runs
+				.filter((receipt) => receipt.settled.agentId === "scout")
+				.sort(
+					(a, b) =>
+						(journal.envelopes.get(a.row.runId)?.lineage?.attempt ?? 0) -
+						(journal.envelopes.get(b.row.runId)?.lineage?.attempt ?? 0),
+				);
 			strictEqual(attempts.length, 2, "the tool waits for both attempts");
-			strictEqual(attempts[0]?.outcome, "failed");
-			strictEqual(attempts[1]?.outcome, "succeeded");
+			strictEqual(attempts[0]?.settled.outcome, "failed");
+			strictEqual(attempts[1]?.settled.outcome, "succeeded");
 			const first = attempts[0];
 			ok(first);
-			deepStrictEqual(attempts[1]?.lineage, {
-				parentRunId: first.runId,
-				rootRunId: hosted ? hostRun.lineage.rootRunId : first.runId,
+			deepStrictEqual(journal.envelopes.get(attempts[1]!.row.runId)?.lineage, {
+				parentRunId: first.row.runId,
+				rootRunId: hosted ? hostRun.lineage.rootRunId : first.row.runId,
 				depth: hosted ? 4 : 0,
 				attempt: 1,
 			});
@@ -490,10 +502,10 @@ it("hosted sibling route-history rows retain their own logical assignment links"
 			records: Array<{ receiptDigest: string; assignmentId: string }>;
 		};
 		strictEqual(history.records.length, 2, "digest upserts retain both sibling rows");
-		for (const receipt of journal.receipts) {
-			const row = history.records.find((row) => row.receiptDigest === receipt.integrity.digest);
+		for (const receipt of journal.runs) {
+			const row = history.records.find((row) => row.receiptDigest === receipt.settled.digest);
 			ok(row);
-			strictEqual(row.assignmentId, f.bundle.contract.assignments?.getStored(receipt.runId)?.assignmentId);
+			strictEqual(row.assignmentId, f.bundle.contract.assignments?.getStored(receipt.row.runId)?.assignmentId);
 		}
 	} finally {
 		await f.bundle.extension.stop?.();
@@ -548,24 +560,15 @@ it("ACP delegation publishes the same trusted host ancestry on its receipt, enve
 		strictEqual(result.kind, "ok", JSON.stringify(result).slice(0, 1000));
 		const journal = readRunJournal(join(env.dir, "state"));
 		ok(journal);
-		strictEqual(journal.receipts.length, 1);
-		const receipt = journal.receipts[0];
+		strictEqual(journal.runs.length, 1);
+		const receipt = journal.runs[0];
 		ok(receipt);
-		strictEqual(receipt.runtimeKind, "acp-delegation");
-		strictEqual(receipt.autonomy, "default");
-		strictEqual(receipt.safety?.toolTelemetry?.workspaceMutationPossible, true);
+		strictEqual(receipt.settled.route.runtimeKind, "acp-delegation");
 		// Clio cannot hold a peer to a permit, so the sealed one is marked record-only.
-		deepStrictEqual(receipt.safety?.permit?.recordOnly, {
-			mediation: "peer-asks-only",
-			toolGovernance: "clio-coder-policy",
-		});
-		strictEqual(receipt.safety?.permit?.capabilityClass, "workspace-edit");
-		strictEqual(receipt.safety?.permit?.asks, "deny");
-		strictEqual(receipt.safety?.permit?.ceiling?.enforcement.perCallMediation, false);
-		deepStrictEqual(receipt.lineage, childLineage);
-		deepStrictEqual(journal.envelopes.get(receipt.runId)?.lineage, childLineage);
+		deepStrictEqual(journal.envelopes.get(receipt.row.runId)?.lineage, childLineage);
+		deepStrictEqual(journal.envelopes.get(receipt.row.runId)?.lineage, childLineage);
 		deepStrictEqual(completed, childLineage);
-		strictEqual(bundle.contract.assignments?.getStored(receipt.runId)?.assignmentId, receipt.runId);
+		strictEqual(bundle.contract.assignments?.getStored(receipt.row.runId)?.assignmentId, receipt.row.runId);
 	} finally {
 		await bundle.extension.stop?.();
 	}

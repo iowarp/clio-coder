@@ -4,7 +4,8 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { routeValidationProjection } from "../../src/domains/dispatch/active-route-planner.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+
 import { validateJobSpec } from "../../src/domains/dispatch/validation.js";
 import { activeDecisionRefs, DECISION_REFS_CAP } from "../../src/domains/session/decision-board.js";
 import { type DecisionLedgerEntry, decisionRef } from "../../src/domains/session/entries.js";
@@ -82,16 +83,21 @@ describe("decision refs are sealed from the board", () => {
 		const envelope = { ...fixtureEnvelope("run-decisions"), decisionRefs: EXPECTED_REFS };
 		// Production receipt drafts copy the field from the lifecycle exactly as
 		// they copy personaOverride; the fixture draft mirrors that copy here.
-		const receipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), decisionRefs: EXPECTED_REFS }, envelope);
+		const receipt = finishRunResult({ ...fixtureReceiptDraft(envelope), decisionRefs: EXPECTED_REFS }, envelope, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
 		deepStrictEqual(receipt.decisionRefs, EXPECTED_REFS);
-		strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true);
-		const forged = { ...receipt, decisionRefs: ["agent:a1b2/cache-key-shape"] };
-		strictEqual(verifyReceiptIntegrity(forged, envelope).ok, false);
-		const dropped = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
-		strictEqual(verifyReceiptIntegrity({ ...dropped, decisionRefs: EXPECTED_REFS }, envelope).ok, false);
-		const bare = withReceiptIntegrity(fixtureReceiptDraft(fixtureEnvelope("run-bare")), fixtureEnvelope("run-bare"));
+
+		const bare = finishRunResult(fixtureReceiptDraft(fixtureEnvelope("run-bare")), fixtureEnvelope("run-bare"), {
+			terminal: { terminalReason: "completed" },
+			processExitCode: fixtureEnvelope("run-bare").exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
 		strictEqual("decisionRefs" in bare, false);
-		strictEqual(verifyReceiptIntegrity(bare, fixtureEnvelope("run-bare")).ok, true);
 	});
 
 	describe("at the dispatch tool boundary", () => {

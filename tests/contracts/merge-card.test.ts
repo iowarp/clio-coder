@@ -2,8 +2,9 @@ import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { askMergeCard } from "../../src/domains/dispatch/merge-card.js";
 import { validationClause } from "../../src/domains/evidence/trust-projection.js";
-import { adaptRunResultValidationStatus } from "../../src/domains/evidence/trust-status.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { settledRunTrust } from "../harness/settled-run.js";
 
 const INPUT = { branch: "clio/task-1", changedPaths: ["src/a.ts"], reason: "the report claims no check" };
 
@@ -106,33 +107,39 @@ test("a host failure also observed on the base leaves quality unknown, not faile
 		outputTail: "failure",
 	};
 	const status = (baseComparison: { status: "passed" | "failed"; base: string; exitCode: number }) =>
-		adaptRunResultValidationStatus({
-			runId: "run-1",
-			hostVerification: { status: "rejected", checks: [{ ...check, baseComparison }] },
-		}).state;
+		settledRunTrust({
+			...fixtureReceiptDraft(fixtureEnvelope()),
+			...{
+				runId: "run-1",
+				hostVerification: { status: "rejected", checks: [{ ...check, baseComparison }] },
+			},
+		}).validationGrounding.state;
 	strictEqual(status({ status: "failed", base: "base-sha", exitCode: 1 }), "unknown");
 	strictEqual(status({ status: "passed", base: "base-sha", exitCode: 0 }), "failed");
 });
 
 test("a confirmed baseline failure is explained by the shared validation projection", () => {
-	const validationGrounding = adaptRunResultValidationStatus({
-		runId: "baseline-run",
-		hostVerification: {
-			status: "rejected",
-			checks: [
-				{
-					check: "test",
-					argv: ["npm", "test"],
-					cwd: ".",
-					exitCode: 1,
-					durationMs: 10,
-					memo: false,
-					outputTail: "failure",
-					baseComparison: { status: "failed", base: "base-sha", exitCode: 1 },
-				},
-			],
+	const validationGrounding = settledRunTrust({
+		...fixtureReceiptDraft(fixtureEnvelope()),
+		...{
+			runId: "baseline-run",
+			hostVerification: {
+				status: "rejected",
+				checks: [
+					{
+						check: "test",
+						argv: ["npm", "test"],
+						cwd: ".",
+						exitCode: 1,
+						durationMs: 10,
+						memo: false,
+						outputTail: "failure",
+						baseComparison: { status: "failed", base: "base-sha", exitCode: 1 },
+					},
+				],
+			},
 		},
-	});
+	}).validationGrounding;
 	strictEqual(validationGrounding.state, "unknown");
 	match(validationClause({ validationGrounding }), /also failed on task base; change validation unknown/);
 });

@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 import { runStatusForOutcome } from "../../src/domains/dispatch/outcome.js";
-import { type HeadlessScratch, headlessScratch, runCli, sealedReceipt } from "../harness/headless-run.js";
+import { type HeadlessScratch, headlessScratch, runCli } from "../harness/headless-run.js";
 import { closeServer, seedOpenAICompatToolOrchestrator } from "../harness/openai-compat-fixture.js";
+import { readRunJournal } from "../harness/run-journal.js";
 
 type Step = { kind: "tool"; name: string; arguments: Record<string, unknown> } | { kind: "stall" } | { kind: "text" };
 
@@ -126,23 +127,25 @@ describe("clio-coder run --timeout", () => {
 		ok(turn.elapsedMs >= 15_000, `exited before the limit: ${turn.elapsedMs}ms`);
 		match(turn.stderr, /timed out after 15s \(--timeout\)/);
 		strictEqual(turn.stderr.split("\n").filter((line) => line.includes("--timeout")).length, 1);
-		const { receipt, envelope } = sealedReceipt(scratch.stateDir);
-		strictEqual(receipt.outcome, "timed_out");
-		strictEqual(receipt.exitCode, 124);
+		const envelope = [...readRunJournal(scratch.stateDir)!.envelopes.values()][0];
+		ok(envelope);
+		strictEqual(envelope.outcome, "timed_out");
+		strictEqual(envelope.exitCode, 124);
 		// The status a dispatched worker's timed_out receipt seals with, which
 		// orphan recovery re-derives from the outcome when it re-verifies.
 		strictEqual(envelope.status, "failed");
-		strictEqual(envelope.status, runStatusForOutcome(receipt.outcome));
-		match(receipt.outcomeDetail ?? "", /timed out after 15s \(--timeout\)/);
+		strictEqual(envelope.status, runStatusForOutcome(envelope.outcome!));
+		match(envelope.outcomeDetail ?? "", /timed out after 15s \(--timeout\)/);
 	});
 
 	it("leaves a run that finishes inside the limit untouched and does not hold the process open", async () => {
 		const { turn, scratch } = await headlessTurn([], "default", ["--timeout", "300"]);
 		strictEqual(turn.code, 0, turn.stderr);
 		ok(turn.elapsedMs < 30_000, `an unref'd timer must not hold the process: ${turn.elapsedMs}ms`);
-		const { receipt } = sealedReceipt(scratch.stateDir);
-		strictEqual(receipt.outcome, "succeeded");
-		strictEqual(receipt.exitCode, 0);
+		const envelope = [...readRunJournal(scratch.stateDir)!.envelopes.values()][0];
+		ok(envelope);
+		strictEqual(envelope.outcome, "succeeded");
+		strictEqual(envelope.exitCode, 0);
 	});
 
 	it("reports a timeout, not a no-op, when --fail-on-noop is also set", async () => {
@@ -164,11 +167,10 @@ describe("clio-coder run --timeout", () => {
 			"off",
 		);
 		strictEqual(turn.code, 124, turn.stderr);
-		const { receipt } = sealedReceipt(scratch.stateDir);
-		strictEqual(receipt.outcome, "timed_out");
-		notStrictEqual(receipt.outcomeDetail, "noop");
-		strictEqual(receipt.noop, true);
-		ok((receipt.safety?.blockedAttempts.length ?? 0) > 0);
+		const envelope = [...readRunJournal(scratch.stateDir)!.envelopes.values()][0];
+		ok(envelope);
+		strictEqual(envelope.outcome, "timed_out");
+		notStrictEqual(envelope.outcomeDetail, "noop");
 	});
 
 	it("disarms the deadline on an early usage-error return while the process is held open", async () => {

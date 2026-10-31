@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { withStateFileLock } from "../../src/core/state-file-lock.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
+import { readSettledRun, readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -112,7 +113,7 @@ it("keeps parallel receipts sealed while heartbeat ticks during contended final 
 		});
 		await waitFor(() => locked);
 		for (const worker of workers) worker.finish();
-		await waitFor(() => runIds.every((id) => existsSync(join(stateDir, "receipts", `${id}.json`))));
+		await waitFor(() => runIds.every((id) => readSettledRun(stateDir, id) !== null));
 		const statuses = [];
 		for (const age of [0, 15, 25]) {
 			monotonic = age;
@@ -122,6 +123,7 @@ it("keeps parallel receipts sealed while heartbeat ticks during contended final 
 		releaseLock?.();
 		await lock;
 		const receipts = await batch.finalPromise;
+		for (const id of runIds) ok(readVerifiedRun(stateDir, id));
 		strictEqual(readFileSync(checkLog, "utf8"), "checked\n", "batch check actually ran once");
 		for (const receipt of receipts) {
 			strictEqual(receipt.outcome, "succeeded");

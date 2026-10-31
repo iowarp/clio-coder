@@ -33,7 +33,7 @@ function receipt(data: unknown = report): RunResult {
 		exitCode: 0,
 		toolCalls: 3,
 		output: { state: "final", text: JSON.stringify(data) },
-		integrity: { digest: "a".repeat(64) },
+		digest: "a".repeat(64),
 	} as RunResult;
 }
 function harness(overrides: Partial<TurnControlRunnerDeps> = {}, receiptData: unknown = report) {

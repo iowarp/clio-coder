@@ -1,12 +1,11 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import { attributeEvidenceFailure, type EvidenceFailureFacts } from "../../src/domains/evidence/failure-attribution.js";
 import { admitRunProvenance, runProvenanceFromUnknown } from "../../src/domains/evidence/provenance.js";
 import { createRedactionTally, redactSecretsDeep } from "../../src/domains/evidence/redact.js";
 import { evidenceDirectory } from "../../src/domains/evidence/store.js";
 import { createProtectedArtifactsRegistration } from "../../src/domains/safety/protected-artifacts-registration.js";
-import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 const FAILURE: EvidenceFailureFacts = {
 	outcome: "failed",
@@ -53,20 +52,6 @@ describe("evidence integrity boundary", () => {
 		ok(!JSON.stringify(redacted).includes("ghp_abcdefghijklmnopqrstuvwxyz012345"));
 		ok(!JSON.stringify(redacted).includes("hunter2hunter2hunter2"));
 		strictEqual(tally.count, 2);
-	});
-
-	it("binds a receipt to its run and rejects post-seal tampering", () => {
-		const envelope = fixtureEnvelope("run-integrity");
-		const receipt = withReceiptIntegrity(
-			{
-				...fixtureReceiptDraft(envelope),
-				pipeline: { fromRunId: "run-parent", position: 1, inputBytes: 512, inputTruncated: false },
-			},
-			envelope,
-		);
-		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
-		strictEqual(verifyReceiptIntegrity({ ...receipt, task: "substituted task" }, envelope).ok, false);
-		strictEqual(verifyReceiptIntegrity(receipt, { ...envelope, id: "different-run" }).ok, false);
 	});
 
 	it("attributes failures from typed facts before bounded diagnostics", () => {

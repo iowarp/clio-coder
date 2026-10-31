@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { inspectRunResultTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { WORKER_LIVE_TAIL_MAX_BYTES } from "../../src/domains/telemetry/worker-progress.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { createWorkerStream, type WorkerReceiptFacts } from "../../src/session-control/worker-stream.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { settledRunTrust } from "../harness/settled-run.js";
 
 /**
  * BT-011: a coder run ended with its mutation report, one JSON line of about
@@ -30,7 +30,14 @@ function verifiedFacts(runId: string): WorkerReceiptFacts {
 	const envelope = fixtureEnvelope(runId);
 	const draft = fixtureReceiptDraft(envelope);
 	draft.output = { text, truncated: false, state: "final", bytes: Buffer.byteLength(text) };
-	const trust = inspectRunResultTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status;
+	const trust = settledRunTrust(
+		finishRunResult(draft, envelope, {
+			terminal: { terminalReason: draft.terminalReason ?? "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result,
+	);
 	return { trust, outcome: "succeeded", exitCode: 0, text, mergeDetail: "merged abc1234 onto main" };
 }
 

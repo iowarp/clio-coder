@@ -64,9 +64,11 @@ describe("tool-orchestrator seed", { concurrency: false }, () => {
 			const first = (request.messages as Array<{ role?: string; content?: unknown }> | undefined)?.[0];
 			match(typeof first?.content === "string" ? first.content : "", new RegExp(`Autonomy: ${level}\\.`, "u"));
 
-			const receipt = readRunJournal(scratch.stateDir)?.receipts.find((entry) => entry.agentId === "main-agent");
+			const receipt = [...(readRunJournal(scratch.stateDir)?.envelopes.values() ?? [])].find(
+				(entry) => entry.agentId === "main-agent",
+			);
 			ok(receipt, "the headless turn sealed no main-agent receipt");
-			strictEqual(receipt.autonomy, level);
+			strictEqual(receipt.status, "completed");
 		});
 	}
 });

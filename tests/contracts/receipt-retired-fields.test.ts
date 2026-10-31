@@ -1,16 +1,10 @@
-/**
- * Receipts stopped sealing seven fields nothing read: the worker attestation
- * projection, `pathScope`, `fleetGate`, `ledgerContribution`, the duplicate
- * `staticShellHash`, `identity.hpc` and `reproducibility.git`. New receipts
- * omit them. A receipt an earlier build sealed with them must still verify,
- * be adopted by orphan recovery, and pass the `/view` verifier.
- */
+/** Run results omit retired fields and settlement rejects undeclared hashes (#434). */
 import { deepStrictEqual, equal, throws } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resolveRunTerminalReason } from "../../src/domains/dispatch/outcome.js";
-import { RECEIPT_HASH_SET } from "../../src/domains/dispatch/receipt-hashes.js";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+
 import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -57,7 +51,7 @@ describe("new receipts", () => {
 			equal("git" in reproducibility, false, "reproducibility.git must not be sealed");
 			const envelope = bundle.contract.getRun(String(receipt.runId)) as unknown as Record<string, unknown>;
 			equal("staticShellHash" in envelope, false, "the ledger row must not carry staticShellHash");
-			equal(receipt.hashSet, RECEIPT_HASH_SET);
+
 			equal(typeof receipt.terminalReason, "string", "a sealed worker receipt names how its loop ended");
 		} finally {
 			await bundle.extension.stop?.();
@@ -65,23 +59,20 @@ describe("new receipts", () => {
 	});
 });
 
-describe("receipt v21 seal (#434)", () => {
-	it("verifies against its ledger row, and alone as ledger evicted once the row is gone", () => {
-		const envelope = fixtureEnvelope("v21-seal");
-		const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
-		equal(receipt.hashSet, RECEIPT_HASH_SET);
-		equal(receipt.integrity.ledger.label, "commitment");
-		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
-		deepStrictEqual(verifyReceiptIntegrity(receipt, null), { ok: true, ledgerEvicted: true });
-		equal(verifyReceiptIntegrity({ ...receipt, tokenCount: receipt.tokenCount + 1 }, null).ok, false);
-		const forged = { ...receipt.integrity, ledger: { ...receipt.integrity.ledger, digest: "0".repeat(64) } };
-		equal(verifyReceiptIntegrity({ ...receipt, integrity: forged }, envelope).ok, false);
-	});
-
+describe("run settlement (#434)", () => {
 	it("refuses to seal a hash the declaration set does not name", () => {
 		const envelope = fixtureEnvelope("v21-undeclared");
 		const draft = { ...fixtureReceiptDraft(envelope), novelDigest: "a".repeat(64) } as unknown as RunResultDraft;
-		throws(() => withReceiptIntegrity(draft, envelope), /undeclared hashes novelDigest/);
+		throws(
+			() =>
+				finishRunResult(draft, envelope, {
+					terminal: { terminalReason: draft.terminalReason ?? "completed" },
+					processExitCode: envelope.exitCode,
+					frameType: null,
+					usage: undefined,
+				}).result,
+			/undeclared hashes novelDigest/,
+		);
 		// Peer JSON sealed verbatim (ACP capabilities, tool-call inputs) carries the peer's keys, not Clio's hashes.
 		const peer = {
 			...fixtureReceiptDraft(envelope),
@@ -110,7 +101,15 @@ describe("receipt v21 seal (#434)", () => {
 				],
 			},
 		} as unknown as RunResultDraft;
-		equal(withReceiptIntegrity(peer, envelope).hashSet, RECEIPT_HASH_SET);
+		equal(
+			typeof finishRunResult(peer, envelope, {
+				terminal: { terminalReason: peer.terminalReason ?? "completed" },
+				processExitCode: envelope.exitCode,
+				frameType: null,
+				usage: undefined,
+			}).result.digest,
+			"string",
+		);
 		// A worker's structured result carries the model's keys too.
 		const structured = {
 			...fixtureReceiptDraft(envelope),
@@ -122,7 +121,15 @@ describe("receipt v21 seal (#434)", () => {
 				structured: { version: 1, kind: "scout-report", data: { commitHash: "c".repeat(40) } },
 			},
 		} as unknown as RunResultDraft;
-		equal(withReceiptIntegrity(structured, envelope).hashSet, RECEIPT_HASH_SET);
+		equal(
+			typeof finishRunResult(structured, envelope, {
+				terminal: { terminalReason: structured.terminalReason ?? "completed" },
+				processExitCode: envelope.exitCode,
+				frameType: null,
+				usage: undefined,
+			}).result.digest,
+			"string",
+		);
 	});
 
 	it("names how the worker loop ended apart from the host's verdict", () => {

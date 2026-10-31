@@ -14,7 +14,7 @@ import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { verifyCheckIdentity } from "../../src/domains/dispatch/receipt-findings.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -117,7 +117,7 @@ async function sealedReceipt(calls: VerifyCall[]): Promise<RunResult> {
 		const receipt = await run.finalPromise;
 		const stored = bundle.contract.getRun(run.runId);
 		ok(stored);
-		deepStrictEqual(verifyReceiptIntegrity(receipt, stored), { ok: true });
+
 		return receipt;
 	} finally {
 		await bundle.extension.stop?.();

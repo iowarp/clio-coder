@@ -1,8 +1,10 @@
 import { deepStrictEqual, match, ok } from "node:assert/strict";
 import { test } from "node:test";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { clioStateDir } from "../../src/core/xdg.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { dispatchBatchSummary, formatDispatchOutput } from "../../src/tools/dispatch-runner.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
 function run(
 	id: string,
@@ -24,7 +26,12 @@ function run(
 			toolTelemetry: "unavailable",
 		};
 	}
-	const receipt = withReceiptIntegrity(draft, envelope);
+	const receipt = finishRunResult(draft, envelope, {
+		terminal: { terminalReason: draft.terminalReason ?? "completed" },
+		processExitCode: envelope.exitCode,
+		frameType: null,
+		usage: undefined,
+	}).result;
 	return {
 		receipt,
 		summary: { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: id },
@@ -39,7 +46,12 @@ test("the coordinator receives the landing fact for automatic and operator merge
 		const envelope = fixtureEnvelope("run-merged");
 		const draft = fixtureReceiptDraft(envelope);
 		draft.worktree = { path: "/workspace/task", branch: "task", apply: "merge", applied: true, diffHash: "hash", detail };
-		const receipt = withReceiptIntegrity(draft, envelope);
+		const receipt = finishRunResult(draft, envelope, {
+			terminal: { terminalReason: draft.terminalReason ?? "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
 		const output = formatDispatchOutput("parallel", [{ ...run("run-merged", 0, "known", 1), receipt }], 16384);
 		match(output, /merged abc1234 onto main/);
 	}
@@ -63,8 +75,6 @@ test("dispatch batch shows sealed tool calls and provenance-aware cost without i
 });
 
 test("parallel dispatch returns scheduler assignments on a board with no worker posts", async () => {
-	const { writeFileSync } = await import("node:fs");
-	const { join } = await import("node:path");
 	const { isolateClioEnv } = await import("../harness/scratch-env.js");
 	const { runDispatchTool } = await import("../../src/tools/dispatch-runner.js");
 	const { describeDispatchPlan } = await import("../../src/tools/dispatch-plan.js");
@@ -78,25 +88,31 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 		const envelopes: ReturnType<typeof fixtureEnvelope>[] = [];
 		const dispatch = {
 			async dispatchBatch(ledgered: ReadonlyArray<import("../../src/domains/dispatch/contract.js").DispatchRequest>) {
-				const receipts = ledgered.map((request, index) => {
-					const run = {
-						...fixtureEnvelope(`board-${index}`),
-						agentId: request.agentId,
-						task: request.task,
-						receiptPath: join(env.dir, `receipt-${index}.json`),
-						projection: {
-							version: 1 as const,
-							ledgerId: request.ledger?.id ?? null,
-							readRoots: [],
-							writeRoots: [],
-							scopeSource: "none" as const,
-						},
-					};
-					const receipt = withReceiptIntegrity(fixtureReceiptDraft(run), run);
-					envelopes.push(run);
-					writeFileSync(run.receiptPath, JSON.stringify(receipt));
-					return receipt;
-				});
+				const receipts = await Promise.all(
+					ledgered.map(async (request, index) => {
+						const run = {
+							...fixtureEnvelope(`board-${index}`),
+							agentId: request.agentId,
+							task: request.task,
+							projection: {
+								version: 1 as const,
+								ledgerId: request.ledger?.id ?? null,
+								readRoots: [],
+								writeRoots: [],
+								scopeSource: "none" as const,
+							},
+						};
+						const receipt = finishRunResult(fixtureReceiptDraft(run), run, {
+							terminal: { terminalReason: "completed" },
+							processExitCode: run.exitCode,
+							frameType: null,
+							usage: undefined,
+						}).result;
+						envelopes.push(run);
+						await writeSettledRun(clioStateDir(), receipt);
+						return receipt;
+					}),
+				);
 				return {
 					batchId: "attached",
 					assignmentIds: envelopes.map((run) => run.id),

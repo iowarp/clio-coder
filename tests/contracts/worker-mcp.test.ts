@@ -17,7 +17,8 @@ import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+
 import type { RunResultSafetySummary } from "../../src/domains/dispatch/types.js";
 import {
 	resolveWorkerMcpAdmission,
@@ -353,21 +354,27 @@ describe("native worker MCP capabilities", () => {
 			sandbox,
 		};
 		draft.safety = safety;
-		const receipt = withReceiptIntegrity(draft, envelope);
+		const receipt = finishRunResult(draft, envelope, {
+			terminal: { terminalReason: draft.terminalReason ?? "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
 		const summary = { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: receipt.runId };
 		match(
 			formatDispatchOutput("single", [{ receipt, summary }], 16_384),
 			/MCP server 'fake' starts .*no network.*safety\.sandboxNetwork/,
 		);
-		const networked = withReceiptIntegrity(
+		const networked = finishRunResult(
 			{ ...draft, safety: { ...safety, sandbox: { ...sandbox, network: true } } },
 			envelope,
-		);
+			{ terminal: { terminalReason: "completed" }, processExitCode: envelope.exitCode, frameType: null, usage: undefined },
+		).result;
 		ok(!formatDispatchOutput("single", [{ receipt: networked, summary }], 16_384).includes("safety.sandboxNetwork"));
 
 		// A grant the run's write roots voided reads back as withheld, not as never granted.
 		const reason = `this run's write root ${project} overlaps its launch cwd ${project}`;
-		const withheld = withReceiptIntegrity(
+		const withheld = finishRunResult(
 			{
 				...draft,
 				safety: {
@@ -379,7 +386,8 @@ describe("native worker MCP capabilities", () => {
 				},
 			},
 			envelope,
-		);
+			{ terminal: { terminalReason: "completed" }, processExitCode: envelope.exitCode, frameType: null, usage: undefined },
+		).result;
 		const withheldOutput = formatDispatchOutput("single", [{ receipt: withheld, summary }], 16_384);
 		match(withheldOutput, /MCP server 'fake' starts without its network grant because this run's write root/);
 		doesNotMatch(withheldOutput, /--network/);

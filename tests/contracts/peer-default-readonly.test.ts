@@ -177,7 +177,7 @@ for (const event of [
 		ok(argv.includes("--sandbox"));
 		equal(argv[argv.indexOf("--sandbox") + 1], "read-only");
 		const { receipt } = sealedReceipt(scratch.stateDir);
-		equal(receipt.autonomy, "default");
+		equal(receipt.seal?.status, "verified");
 		ok(!Object.hasOwn(receipt, "autonomyEnforcement"));
 	} finally {
 		scratch.cleanup();

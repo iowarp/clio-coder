@@ -13,8 +13,7 @@ import {
 	renderAgentLedgerBoard,
 } from "../../src/domains/dispatch/agent-ledger-store.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { settleFinishedRun } from "../../src/domains/dispatch/run-settlement.js";
+import { finishRunResult, settleFinishedRun } from "../../src/domains/dispatch/run-settlement.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type { SettledRunRecord } from "../../src/domains/telemetry/index.js";
 import { parseAgentLedgerEntry } from "../../src/worker/protocol.js";
@@ -39,7 +38,6 @@ function projection() {
 		agentId: "scout",
 		status: "running" as const,
 		outcome: null,
-		receiptPath: null,
 	};
 	const draft = fixtureReceiptDraft(sealed);
 	draft.toolCalls = 7;
@@ -61,7 +59,12 @@ function projection() {
 			data: { findings: [{ claim: "Entry", path: "src/main.ts", line: 3 }, { claim: "Uncited" }] },
 		},
 	};
-	const receipt = withReceiptIntegrity(draft, sealed);
+	const receipt = finishRunResult(draft, sealed, {
+		terminal: { terminalReason: draft.terminalReason ?? "completed" },
+		processExitCode: sealed.exitCode,
+		frameType: null,
+		usage: undefined,
+	}).result;
 	const settlement = settleFinishedRun(receipt, {
 		terminal: { terminalReason: "completed" },
 		processExitCode: 0,
@@ -98,10 +101,6 @@ test("scheduler facts precede receipt findings and oldest posts drop before find
 	assert.match(bounded, /scout-1/u);
 	assert.match(bounded, /scout-2/u);
 	assert.doesNotMatch(bounded, /Findings/u);
-	assert.equal(
-		verifyReceiptIntegrity(p.receipt, { ...p.sealed, projection: { ...p.sealed.projection, readRoots: ["changed"] } }).ok,
-		true,
-	);
 });
 
 test("projection survives run-row resume and renders an empty board and worker snapshot without a claim prerequisite", async () => {

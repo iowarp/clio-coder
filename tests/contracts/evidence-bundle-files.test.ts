@@ -6,11 +6,11 @@
  * still reads through every store accessor.
  */
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { buildEvidence } from "../../src/domains/evidence/build.js";
 import {
 	EVIDENCE_FILES,
@@ -21,6 +21,7 @@ import {
 } from "../../src/domains/evidence/store.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
 const RETIRED = ["trace.raw.jsonl", "trace.cleaned.jsonl", "audit-linked.jsonl", "protected-artifacts.json"];
 
@@ -28,10 +29,14 @@ let env: Awaited<ReturnType<typeof isolateClioEnv>>;
 beforeEach(async () => {
 	env = await isolateClioEnv("clio-coder-evidence-files-");
 	const envelope = fixtureEnvelope("fixture");
-	const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
-	await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
+	const receipt = finishRunResult(fixtureReceiptDraft(envelope), envelope, {
+		terminal: { terminalReason: "completed" },
+		processExitCode: envelope.exitCode,
+		frameType: null,
+		usage: undefined,
+	}).result;
 	await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
-	await writeFile(join(clioStateDir(), "receipts", "fixture.json"), JSON.stringify(receipt));
+	await writeSettledRun(clioStateDir(), receipt);
 });
 afterEach(() => env.restore());
 

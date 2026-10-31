@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import { evidenceDirectory } from "../../src/domains/evidence/store.js";
 import { readEvidenceIndex } from "../../src/domains/telemetry/evidence-index.js";
 import {
@@ -140,14 +140,12 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 			// authenticate against its ledger row and agree with the exit status.
 			const journal = readRunJournal(join(scratch.dir, "state"));
 			ok(journal);
-			strictEqual(journal.receipts.length, 1);
-			const receipt = journal.receipts[0];
-			ok(receipt);
-			const envelope = journal.envelopes.get(receipt.runId);
+			strictEqual(journal.envelopes.size, 1);
+			const envelope = [...journal.envelopes.values()][0];
 			ok(envelope);
-			ok(verifyReceiptIntegrity(receipt, envelope).ok);
-			strictEqual(receipt.exitCode, direct.code);
-			strictEqual(receipt.outcome, succeeded ? "succeeded" : "failed");
+
+			strictEqual(envelope.exitCode, direct.code);
+			strictEqual(envelope.outcome, succeeded ? "succeeded" : "failed");
 		} finally {
 			await closeServer(fixture.server);
 			scratch.cleanup();
@@ -216,11 +214,11 @@ test("built headless artifact: a completed dispatch builds its evidence under a 
 		ok(streaming.filter((request) => hasTool(request, "dispatch")).every((request) => hasTool(request, "gateway")));
 		const journal = readRunJournal(stateDir);
 		ok(journal);
-		const dispatched = journal.receipts.filter((receipt) => receipt.agentId === "wiki-writer");
+		const dispatched = journal.runs.filter((receipt) => receipt.settled.agentId === "wiki-writer");
 		strictEqual(dispatched.length, 1);
-		strictEqual(dispatched[0]?.outcome, "succeeded");
-		strictEqual(journal.receipts.filter((receipt) => receipt.agentId === "main-agent").length, 1);
-		const rows = readEvidenceIndex(stateDir).filter((row) => row.runId === dispatched[0]?.runId);
+		strictEqual(dispatched[0]?.settled.outcome, "succeeded");
+		strictEqual([...journal.envelopes.values()].filter((run) => run.agentId === "main-agent").length, 1);
+		const rows = readEvidenceIndex(stateDir).filter((row) => row.runId === dispatched[0]?.row.runId);
 		strictEqual(rows.length, 1, JSON.stringify(readEvidenceIndex(stateDir)));
 		strictEqual(rows[0]?.succeeded, true);
 		ok(existsSync(join(evidenceDirectory(join(scratch.dir, "data"), rows[0]?.evidenceId ?? ""), "overview.json")));

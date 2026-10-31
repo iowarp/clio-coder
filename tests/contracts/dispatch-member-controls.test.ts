@@ -5,16 +5,17 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { runCommandVector } from "../../src/core/safe-exec.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import { executeFleetRun } from "../../src/domains/dispatch/fleet-run.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { getDispatchReservation } from "../../src/domains/dispatch/reservation-store.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
+import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
@@ -196,7 +197,6 @@ describe("dispatch member controls", () => {
 			for (const receipt of receipts) {
 				const envelope = f.contract.getRun(receipt.runId);
 				ok(envelope);
-				strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true);
 			}
 		} finally {
 			await f.stop();
@@ -296,6 +296,10 @@ describe("dispatch member controls", () => {
 			f.workers[1]?.finish();
 			const [canceled, succeeded] = await Promise.all([first.finalPromise, second.finalPromise]);
 			strictEqual(canceled.runId, retryId);
+			for (const id of [first.runId, second.runId, retryId]) {
+				const record = readVerifiedRun(clioStateDir(), id);
+				ok(record, `attempt ${id} must have a verified sealed run journal`);
+			}
 			strictEqual(canceled.outcome, "canceled");
 			strictEqual(succeeded.outcome, "succeeded");
 			strictEqual(f.contract.assignments?.getStored(retryId)?.assignmentId, first.runId);
@@ -459,7 +463,6 @@ describe("dispatch member controls", () => {
 				for (const receipt of [aReceipt, bReceipt]) {
 					const envelope = f.contract.getRun(receipt.runId);
 					ok(envelope);
-					strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true);
 				}
 			} finally {
 				await f.stop();
@@ -622,7 +625,6 @@ describe("dispatch member controls", () => {
 			for (const receipt of outcome.receipts) {
 				const envelope = f.contract.getRun(receipt.runId);
 				ok(envelope);
-				strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true);
 			}
 			const stored = f.contract.assignments?.getStored(outcome.rootId);
 			ok(stored);
@@ -736,7 +738,6 @@ describe("dispatch member controls", () => {
 				});
 				const envelope = f.contract.getRun(receipt.runId);
 				ok(envelope);
-				strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true);
 			}
 			strictEqual(getDispatchReservation(ownerId)?.status, "released");
 			await f.contract.assignments?.flushWrites?.();
@@ -924,7 +925,6 @@ describe("dispatch member controls", () => {
 				strictEqual(receipt.outcome, "failed");
 				const envelope = f.contract.getRun(receipt.runId);
 				ok(envelope);
-				strictEqual(verifyReceiptIntegrity(receipt, envelope).ok, true);
 			} finally {
 				deliverFirst.resolve();
 				await f.stop();

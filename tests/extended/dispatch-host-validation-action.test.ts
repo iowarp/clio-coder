@@ -1,6 +1,7 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+
 import { formatDispatchOutput, nextHostValidationAction } from "../../src/tools/dispatch-runner.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
@@ -25,12 +26,16 @@ function ungroundedRun(declaredCheck?: string) {
 			verification: [{ check: declaredCheck, timeoutMs: 60_000 }],
 		};
 	}
-	const receipt = withReceiptIntegrity(draft, envelope);
-	const integrity = verifyReceiptIntegrity(receipt, envelope);
-	ok(integrity.ok);
+	const receipt = finishRunResult(draft, envelope, {
+		terminal: { terminalReason: draft.terminalReason ?? "completed" },
+		processExitCode: envelope.exitCode,
+		frameType: null,
+		usage: undefined,
+	}).result;
+	const integrity = { state: "verified" as const, by: "producer" as const };
+
 	return {
 		receipt,
-		receiptPath: null,
 		integrity,
 		summary: { count: 0, types: [], lastAssistantText: "", terminalAttemptRunId: receipt.runId },
 	};
@@ -61,14 +66,17 @@ describe("dispatch host validation action", () => {
 	it("does not request another host check after host evidence", () => {
 		const run = ungroundedRun("test");
 		const envelope = fixtureEnvelope("run-unchecked");
-		const verified = withReceiptIntegrity(
-			{ ...run.receipt, hostVerification: { status: "verified", checks: [] } },
-			envelope,
-		);
+		const { digest: _digest, ...draft } = run.receipt;
+		const verified = finishRunResult({ ...draft, hostVerification: { status: "verified", checks: [] } }, envelope, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
 		strictEqual(nextHostValidationAction(verified), null);
-		const rejected = withReceiptIntegrity(
+		const rejected = finishRunResult(
 			{
-				...run.receipt,
+				...draft,
 				hostVerification: {
 					status: "rejected",
 					checks: [
@@ -85,7 +93,8 @@ describe("dispatch host validation action", () => {
 				},
 			},
 			envelope,
-		);
+			{ terminal: { terminalReason: "completed" }, processExitCode: envelope.exitCode, frameType: null, usage: undefined },
+		).result;
 		strictEqual(nextHostValidationAction(rejected), null);
 	});
 });

@@ -1,8 +1,7 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { OutputStyle } from "../../src/core/defaults.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { inspectRunResultTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import type { WorkerRunEntry } from "../../src/domains/session/index.js";
 import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
@@ -66,8 +65,8 @@ import {
 	type WorkerEntryState,
 	type WorkerReceiptFacts,
 } from "../../src/session-control/worker-stream.js";
-
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { settledRunTrust } from "../harness/settled-run.js";
 import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
 function plainRender(panel: ChatPanel, width = 120): string {
@@ -581,7 +580,12 @@ describe("worker rendering invariants", () => {
 			conformance: "pass",
 			quality: "fail",
 		};
-		const receipt = withReceiptIntegrity(draft, envelope);
+		const receipt = finishRunResult(draft, envelope, {
+			terminal: { terminalReason: draft.terminalReason ?? "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
 		const entry: WorkerEntryState = {
 			assignmentId: envelope.id,
 			runId: envelope.id,
@@ -593,7 +597,7 @@ describe("worker rendering invariants", () => {
 			tools: [],
 			attempts: [],
 			pending: false,
-			receipt: { outcome: "succeeded", durationMs: 21000, trust: inspectRunResultTrustStatus(receipt, envelope).status },
+			receipt: { outcome: "succeeded", durationMs: 21000, trust: settledRunTrust(receipt) },
 		};
 		for (const width of [24, 44, 76]) {
 			const lines = renderWorkerEntryLines(entry, width, {});

@@ -343,21 +343,6 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		strictEqual(unresolved[0]?.costSummary?.unknownCallCoverageRuns, 1);
 		await mkdir(sessionDirectory, { recursive: true });
 		await writeFile(join(sessionDirectory, "current.jsonl"), "");
-		await mkdir(join(stateDir, "receipts"));
-		await writeFile(
-			join(stateDir, "receipts", "run.json"),
-			JSON.stringify({
-				runId: "run",
-				sessionId: "parent",
-				endedAt: new Date().toISOString(),
-				tokenCount: 99,
-				apiCalls: 4,
-				missingTokenCalls: 0,
-				costUsd: 0,
-				costProvenance: "known_free",
-				agentAudience: "shadow",
-			}),
-		);
 		const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
 		const cliReport = spawnSync(
 			process.execPath,
@@ -1044,12 +1029,10 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		await keptJournal.close();
 		await endSession("kept");
 		await age(join(keptDirectory, "objects", `${text.id}.json`));
-		for (const runId of ["unreferenced", "receipted", "cited"]) {
+		for (const runId of ["unreferenced", "cited"]) {
 			const run = await journal(runId, () => {}, "run");
 			await age(join(run, "journal.jsonl"));
 		}
-		await mkdir(join(stateDir, "receipts"), { recursive: true });
-		await writeFile(join(stateDir, "receipts", "receipted.json"), "{}");
 
 		const plan = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY);
 		const relative = (path: string) => path.slice(stateDir.length + 1);
@@ -1065,7 +1048,6 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		);
 		deepStrictEqual(plan.held.map((hold) => `${relative(hold.path)}:${hold.reason}`).sort(), [
 			"telemetry/runs/cited:referenced-run",
-			"telemetry/runs/receipted:receipt",
 			"telemetry/sessions/live:live",
 			"telemetry/sessions/parent:fork-parent",
 		]);

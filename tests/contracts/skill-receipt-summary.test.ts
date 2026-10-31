@@ -1,7 +1,8 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isSkillActivation, skillActivationFromToolDetails } from "../../src/core/skill-activation.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+
 import {
 	compactHelperResultLines,
 	finishedRun,
@@ -28,7 +29,12 @@ describe("worker receipt skill load summary", () => {
 		const draft = fixtureReceiptDraft(envelope);
 		draft.skillActivations = [activation("fix-issue", "recipe"), activation("ship", "recipe")];
 		strictEqual(draft.skillActivations[0]?.requestSource, "recipe");
-		const receipt = withReceiptIntegrity(draft, envelope);
+		const receipt = finishRunResult(draft, envelope, {
+			terminal: { terminalReason: draft.terminalReason ?? "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
 		const summary = runEvidenceLabels(finishedRun(receipt), PRODUCER_INTEGRITY).join("\n");
 		match(summary, /skill loads \(2\): "fix-issue" \(recipe-bound\), "ship" \(recipe-bound\)/);
 		match(summary, /Activation records a load, not execution of the skill workflow or a commit/);
@@ -44,7 +50,12 @@ describe("worker receipt skill load summary", () => {
 			legacy,
 			...Array.from({ length: 100 }, (_, i) => activation(`long-${i}-${"x".repeat(100)}`, "recipe")),
 		];
-		const receipt = withReceiptIntegrity(draft, envelope);
+		const receipt = finishRunResult(draft, envelope, {
+			terminal: { terminalReason: draft.terminalReason ?? "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
 		const labels = runEvidenceLabels(finishedRun(receipt), PRODUCER_INTEGRITY);
 		const line = labels.find((item) => item.startsWith("skill loads"));
 		ok(line);
@@ -72,7 +83,12 @@ describe("worker receipt skill load summary", () => {
 			quality: "unmeasured",
 		};
 		draft.skillActivations = [activation("ship", "recipe")];
-		const receipt = withReceiptIntegrity(draft, envelope);
+		const receipt = finishRunResult(draft, envelope, {
+			terminal: { terminalReason: draft.terminalReason ?? "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
 		const lines = compactHelperResultLines(finishedRun(receipt), PRODUCER_INTEGRITY, 1024);
 		ok(lines);
 		match(lines.join("\n"), /skill loads \(1\): "ship" \(recipe-bound\).*not execution.*or a commit/);

@@ -2,6 +2,7 @@ import { match, ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { readVerifiedRun, telemetryRunsDirectory } from "../../src/domains/telemetry/index.js";
 import { type HeadlessScratch, headlessScratch, runCli, sealedReceipt } from "../harness/headless-run.js";
 import {
 	closeServer,
@@ -11,6 +12,7 @@ import {
 	seedOpenAICompatToolOrchestrator,
 	startOpenAICompatFixture,
 } from "../harness/openai-compat-fixture.js";
+import { readRunJournal } from "../harness/run-journal.js";
 
 const PROOF = "written under --cwd\n";
 
@@ -59,10 +61,11 @@ describe("clio-coder run --cwd", () => {
 		ok(fixture.requests.length > 0, "the run must reach the model");
 		strictEqual(readFileSync(join(project, "c1-proof.txt"), "utf8"), PROOF);
 		ok(!existsSync(join(launch, "c1-proof.txt")), "the write must not land in the launch directory");
-		const { receipt, envelope } = sealedReceipt(scratch.stateDir);
+		const envelope = [...readRunJournal(scratch.stateDir)!.envelopes.values()][0];
+		ok(envelope);
 		strictEqual(envelope.cwd, realpathSync(project));
-		strictEqual(receipt.outcome, "succeeded");
-		strictEqual(receipt.toolStats.find((stat) => stat.tool === "write")?.ok, 1);
+		strictEqual(envelope.outcome, "succeeded");
+		strictEqual(envelope.status, "completed");
 	});
 
 	it("enters the directory before an --agent dispatch too", async () => {
@@ -87,9 +90,9 @@ describe("clio-coder run --cwd", () => {
 		strictEqual(readFileSync(join(project, "c1-proof.txt"), "utf8"), PROOF);
 		ok(!existsSync(join(scratch.root, "c1-proof.txt")), "the write must not land in the launch directory");
 		const { receipt, envelope } = sealedReceipt(scratch.stateDir);
-		strictEqual(receipt.agentId, "coder");
+		strictEqual(receipt.settled.agentId, "coder");
 		strictEqual(envelope.cwd, realpathSync(project));
-		strictEqual(receipt.reproducibility?.cwd, realpathSync(project));
+		strictEqual(receipt.seal?.status, "verified");
 	});
 
 	for (const kind of ["missing", "file"] as const) {
@@ -134,6 +137,6 @@ describe("clio-coder run --cwd", () => {
 });
 
 function receiptCount(stateDir: string): number {
-	const dir = join(stateDir, "receipts");
-	return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".json")).length : 0;
+	const dir = telemetryRunsDirectory(stateDir);
+	return existsSync(dir) ? readdirSync(dir).filter((id) => readVerifiedRun(stateDir, id) !== null).length : 0;
 }

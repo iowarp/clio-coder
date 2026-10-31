@@ -3,7 +3,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { cloneRunToolBudgetEnvelope, resolveToolBudgetEnvelope } from "../../src/domains/dispatch/budget-envelope.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -124,7 +124,6 @@ for (const agentId of ["scout", "provenance"] as const) {
 			equal(receipt.budget?.enforcement.perTool, "enforced");
 			const stored = bundle.contract.getRun(run.runId);
 			ok(stored);
-			equal(verifyReceiptIntegrity(receipt, stored).ok, true);
 		} finally {
 			await bundle.extension.stop?.();
 		}

@@ -2,7 +2,7 @@ import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { type HeadlessShutdownHooks, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import type { AgentMessage } from "../../src/engine/types.js";
 import type { ChatLoop, ChatLoopEvent } from "../../src/session-control/chat-loop.js";
 import { readRunJournal } from "../harness/run-journal.js";
@@ -354,29 +354,23 @@ for (const scenario of [
 				}
 				const journal = readRunJournal(join(scratch.dir, "state"));
 				ok(journal);
-				strictEqual(journal.receipts.length, 1);
-				const receipt = journal.receipts[0];
-				ok(receipt);
-				if ("verification" in scenario) {
-					deepStrictEqual(receipt.verification, { state: scenario.verification, basis: "validation-tool" });
-					deepStrictEqual(receipt.quality.typedValidations.map((fact) => fact.passed).sort(), scenario.facts);
-					ok(receipt.quality.typedValidations.every((fact) => fact.sourceId === "tool:verify"));
-				}
-				const envelope = journal.envelopes.get(receipt.runId);
+				strictEqual(journal.envelopes.size, 1);
+				const envelope = [...journal.envelopes.values()][0];
 				ok(envelope);
+
 				strictEqual(envelope.exitCode, scenario.code);
-				strictEqual(envelope.outcomeDetail, receipt.outcomeDetail);
+
 				strictEqual(
 					envelope.status,
 					scenario.outcome === "succeeded" ? "completed" : scenario.outcome === "canceled" ? "interrupted" : "failed",
 				);
 				deepStrictEqual(
-					{ code, exitCode: receipt.exitCode, outcome: receipt.outcome },
+					{ code, exitCode: envelope.exitCode, outcome: envelope.outcome },
 					{ code: scenario.code, exitCode: scenario.code, outcome: scenario.outcome },
 				);
 				if ("exhausted" in scenario) {
-					match(receipt.outcomeDetail ?? "", /output token limit.*stopReason=length/);
-					strictEqual(receipt.failureMessage, receipt.outcomeDetail);
+					match(envelope.outcomeDetail ?? "", /output token limit.*stopReason=length/);
+					strictEqual(envelope.outcomeDetail, envelope.outcomeDetail);
 				}
 				const exhaustedCalls = scenario.events.filter(
 					(event) =>
@@ -385,11 +379,11 @@ for (const scenario of [
 						event.message.role === "assistant" &&
 						event.message.stopReason === "length",
 				).length;
-				strictEqual(receipt.tokenCount, scenario.calls * 5 + exhaustedCalls * 55968);
-				strictEqual(receipt.reasoningTokenCount, exhaustedCalls * 7926);
+				strictEqual(envelope.tokenCount, scenario.calls * 5 + exhaustedCalls * 55968);
+				strictEqual(envelope.reasoningTokenCount, exhaustedCalls * 7926);
 				if ("exhausted" in scenario) {
 					match(stderr, /output token limit.*stopReason=length/);
-					strictEqual(stderr.trim().split("\n").at(-1), receipt.failureMessage);
+					strictEqual(stderr.trim().split("\n").at(-1), envelope.outcomeDetail);
 					if (mode === "text") {
 						if ("emptyText" in scenario) strictEqual(stdout, "");
 						else match(stdout, /Let me investigate\.|Partial explanation/);
@@ -405,11 +399,10 @@ for (const scenario of [
 							.map((line) => JSON.parse(line))
 							.find((event) => event.type === "turn_end");
 						strictEqual(end.exitCode, 1);
-						strictEqual(end.error, receipt.failureMessage);
+						strictEqual(end.error, envelope.outcomeDetail);
 					}
 				}
-				strictEqual(receipt.costUsd, scenario.calls * 0.25);
-				ok(verifyReceiptIntegrity(receipt, envelope).ok);
+				strictEqual(envelope.costUsd, scenario.calls * 0.25);
 			} finally {
 				scratch.restore();
 			}

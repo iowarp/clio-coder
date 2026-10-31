@@ -13,9 +13,9 @@ import {
 	verifyGateDecisionArtifact,
 } from "../../src/domains/dispatch/gate-decisions.js";
 import { gateTopology } from "../../src/domains/dispatch/gate-topology.js";
-import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { fixedRouteDecision, isRouteDecisionAgentSelection } from "../../src/domains/dispatch/route-decision.js";
 import { explainRouteDecision } from "../../src/domains/dispatch/routing-intent.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import type { RunPlanProvenance } from "../../src/domains/dispatch/types.js";
 import {
 	adaptGateDecisionReviewStatus,
@@ -55,8 +55,13 @@ test("old and new route authority ids verify in sealed receipts", () => {
 			basis: basis as "yolo-policy",
 		};
 		equal(isRouteDecisionAgentSelection(decision.agentSelection), true);
-		const receipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), routeDecision: decision }, envelope);
-		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
+		const receipt = finishRunResult({ ...fixtureReceiptDraft(envelope), routeDecision: decision }, envelope, {
+			terminal: { terminalReason: "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result;
+
 		if (receipt.routingIntent === undefined) throw new Error("routing intent unexpectedly absent");
 		equal(explainRouteDecision(decision, receipt.routingIntent).agentSelection.authorityTransition?.basis, newBasis);
 	}

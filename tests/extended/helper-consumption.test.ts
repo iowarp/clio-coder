@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+
 import {
 	compactHelperResultLines,
 	finishedRun,
@@ -20,7 +21,7 @@ test("compact helper consumption preserves unmeasured quality and withholds fail
 		data: { confirmedFacts: [], missingEvidence: ["No validation receipt"], nextInspections: [] },
 	};
 	const text = JSON.stringify(structured.data);
-	const receipt = withReceiptIntegrity(
+	const receipt = finishRunResult(
 		{
 			...draft,
 			quality: {
@@ -35,7 +36,8 @@ test("compact helper consumption preserves unmeasured quality and withholds fail
 			output: { state: "final", text, bytes: Buffer.byteLength(text), truncated: false, structured },
 		},
 		envelope,
-	);
+		{ terminal: { terminalReason: "completed" }, processExitCode: envelope.exitCode, frameType: null, usage: undefined },
+	).result;
 	deepStrictEqual(runHelperResult(finishedRun(receipt), PRODUCER_INTEGRITY), structured);
 	const lines = compactHelperResultLines(finishedRun(receipt), PRODUCER_INTEGRITY, 1024);
 	ok(lines);
@@ -59,7 +61,7 @@ test("compact helper consumption preserves unmeasured quality and withholds fail
 test("host check labels distinguish actual execution from reused evidence and worker claims", () => {
 	const envelope = fixtureEnvelope("host-check-labels");
 	for (const memo of [false, true]) {
-		const receipt = withReceiptIntegrity(
+		const receipt = finishRunResult(
 			{
 				...fixtureReceiptDraft(envelope),
 				hostVerification: {
@@ -70,7 +72,8 @@ test("host check labels distinguish actual execution from reused evidence and wo
 				},
 			},
 			envelope,
-		);
+			{ terminal: { terminalReason: "completed" }, processExitCode: envelope.exitCode, frameType: null, usage: undefined },
+		).result;
 		const labels = runEvidenceLabels(
 			finishedRun({ ...receipt, verification: { state: "verified", basis: "validation-tool" } }),
 			PRODUCER_INTEGRITY,

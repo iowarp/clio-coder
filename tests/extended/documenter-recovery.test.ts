@@ -2,6 +2,7 @@ import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:asse
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import {
 	RESULT_COMMIT_MESSAGE_MAX_BYTES,
@@ -10,14 +11,14 @@ import {
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunResult } from "../../src/domains/dispatch/types.js";
+import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
-import { finishedRun, runEvidenceLabels } from "../../src/tools/worker-evidence.js";
+import { runEvidenceLabels } from "../../src/tools/worker-evidence.js";
 import type { WorkerSpec } from "../../src/worker/spec-contract.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { resolvedRunResult } from "../harness/settled-run.js";
 
 beforeEach(() => isolateDispatchState());
 afterEach(() => restoreDispatchState());
@@ -81,11 +82,11 @@ it("gives the parent a bounded exit for an unchanged terminal Documenter report 
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") return;
 		const run = bundle.contract.listRuns()[0];
-		ok(run?.receiptPath);
-		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
-		strictEqual(receipt.outcome, "succeeded");
-		strictEqual(receipt.output?.text, report());
-		strictEqual(receipt.quality.resultContract?.conformance, "pass");
+		ok(run);
+		const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+		strictEqual(receipt.settled.outcome, "succeeded");
+		strictEqual(resolvedRunResult(receipt).output?.text, report());
+		strictEqual(receipt.settled.quality?.resultContract?.conformance, "pass");
 		match(result.output, /terminal Documenter result/u);
 		match(result.output, /summary/u);
 		match(result.output, /do not repeatedly read/u);
@@ -93,7 +94,15 @@ it("gives the parent a bounded exit for an unchanged terminal Documenter report 
 		const collected = await monitor.run({ mode: "collect", run_ids: [run.id] }, {});
 		strictEqual(collected.kind, "ok");
 		if (collected.kind === "ok") match(collected.output, /do not repeatedly read/u);
-		const failedIntegrityLabels = runEvidenceLabels(finishedRun(receipt), { state: "failed", reason: "tampered" });
+		const failedIntegrityLabels = runEvidenceLabels(
+			{
+				runId: receipt.row.runId,
+				digest: receipt.settled.digest,
+				facts: receipt.settled,
+				delivered: resolvedRunResult(receipt),
+			},
+			{ state: "failed", reason: "tampered" },
+		);
 		doesNotMatch(failedIntegrityLabels.join(" "), /terminal Documenter result/u);
 	} finally {
 		await bundle.extension.stop?.();
@@ -146,12 +155,12 @@ it("does not advance a dependent step after a conforming Documenter report with 
 		strictEqual(result.kind, "error");
 		if (result.kind === "error") match(result.message, /result quality=fail.*skipped 1/u);
 		const run = bundle.contract.listRuns()[0];
-		ok(run?.receiptPath);
-		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
-		strictEqual(receipt.outcome, "succeeded", "execution and quality remain distinct");
-		strictEqual(receipt.quality.resultContract?.conformance, "pass");
-		strictEqual(receipt.quality.resultContract?.quality, "fail");
-		ok(verifyReceiptIntegrity(receipt, run).ok);
+		ok(run);
+		const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+		strictEqual(receipt.settled.outcome, "succeeded", "execution and quality remain distinct");
+		strictEqual(receipt.settled.quality?.resultContract?.conformance, "pass");
+		strictEqual(receipt.settled.quality?.resultContract?.quality, "fail");
+
 		deepStrictEqual(bundle.contract.snapshot().running, []);
 		strictEqual(capacityLeaseUsage().global, 0);
 	} finally {
@@ -180,22 +189,22 @@ it("continues passing Scout quality into the intended Documenter and delivers it
 			["scout", "documenter"],
 		);
 		const receipts = bundle.contract.listRuns().map((run) => {
-			ok(run.receiptPath);
-			const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
-			ok(verifyReceiptIntegrity(receipt, run).ok);
+			ok(run);
+			const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+
 			return receipt;
 		});
-		const first = receipts.find((r) => r.agentId === "scout");
-		const dependent = receipts.find((r) => r.agentId === "documenter");
-		strictEqual(first?.outcome, "succeeded");
-		strictEqual(first?.quality.resultContract?.conformance, "pass");
-		strictEqual(first?.quality.resultContract?.quality, "pass");
-		strictEqual(dependent?.outcome, "succeeded");
-		strictEqual(dependent?.quality.resultContract?.conformance, "pass");
+		const first = receipts.find((r) => r.settled.agentId === "scout");
+		const dependent = receipts.find((r) => r.settled.agentId === "documenter");
+		strictEqual(first?.settled.outcome, "succeeded");
+		strictEqual(first?.settled.quality?.resultContract?.conformance, "pass");
+		strictEqual(first?.settled.quality?.resultContract?.quality, "pass");
+		strictEqual(dependent?.settled.outcome, "succeeded");
+		strictEqual(dependent?.settled.quality?.resultContract?.conformance, "pass");
 		// A conforming report does not turn unobserved validation claims into measured quality.
-		strictEqual(dependent?.quality.resultContract?.quality, "unmeasured");
-		strictEqual(dependent?.pipeline?.fromRunId, first?.runId);
-		strictEqual(dependent?.output?.text, report(DELIVERED));
+		strictEqual(dependent?.settled.quality?.resultContract?.quality, "unmeasured");
+		strictEqual(bundle.contract.getRun(dependent!.row.runId)?.pipeline?.fromRunId, first?.row.runId);
+		strictEqual(resolvedRunResult(dependent).output?.text, report(DELIVERED));
 		deepStrictEqual(bundle.contract.snapshot().running, []);
 		strictEqual(capacityLeaseUsage().global, 0);
 	} finally {
@@ -234,13 +243,17 @@ it("preserves explicit Coder and delivers its bounded explanation through the co
 		match(prompt, /without claiming delivery/u);
 		match(prompt, /`commitMessage` 1000/u);
 		for (const run of bundle.contract.listRuns()) {
-			ok(run.receiptPath);
-			const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
-			ok(verifyReceiptIntegrity(receipt, run).ok);
-			strictEqual(receipt.agentId, "coder");
-			strictEqual(receipt.quality.resultContract?.conformance, "pass");
-			strictEqual(receipt.output?.truncated, false);
-			ok([fixture.shortExplanation, explanation].includes(JSON.parse(receipt.output?.text ?? "{}").summary));
+			ok(run);
+			const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+
+			strictEqual(receipt.settled.agentId, "coder");
+			strictEqual(receipt.settled.quality?.resultContract?.conformance, "pass");
+			strictEqual(resolvedRunResult(receipt).output?.truncated, false);
+			ok(
+				[fixture.shortExplanation, explanation].includes(
+					JSON.parse(resolvedRunResult(receipt).output?.text ?? "{}").summary,
+				),
+			);
 		}
 	} finally {
 		await bundle.extension.stop?.();
@@ -257,15 +270,15 @@ it("keeps failed Coder JSON sealed failed independently of terminal dispatch lif
 		strictEqual(result.kind, "error");
 		strictEqual(specs.length, 1);
 		const run = bundle.contract.listRuns()[0];
-		ok(run?.receiptPath);
-		const original = readFileSync(run.receiptPath, "utf8");
-		const receipt = JSON.parse(original) as RunResult;
-		strictEqual(receipt.outcome, "failed");
-		strictEqual(receipt.outcomeCode, "result_contract_invalid");
-		strictEqual(receipt.quality.resultContract?.conformance, "fail");
-		ok(verifyReceiptIntegrity(receipt, run).ok);
+		ok(run);
+		const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+		const original = JSON.stringify(receipt.settled);
+		strictEqual(receipt.settled.outcome, "failed");
+		strictEqual(receipt.settled.outcomeCode, "result_contract_invalid");
+		strictEqual(receipt.settled.quality?.resultContract?.conformance, "fail");
+
 		await monitor.run({ mode: "collect", run_ids: [run.id] }, {});
-		strictEqual(readFileSync(run.receiptPath, "utf8"), original);
+		strictEqual(JSON.stringify(readVerifiedRun(clioStateDir(), run.id)?.settled), original);
 		deepStrictEqual(bundle.contract.snapshot().running, []);
 		deepStrictEqual(bundle.contract.snapshot().retrying, []);
 		strictEqual(capacityLeaseUsage().global, 0);

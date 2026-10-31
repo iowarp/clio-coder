@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { inspectRunResultTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+import { telemetryRunDirectory } from "../../src/domains/telemetry/index.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
@@ -14,6 +14,7 @@ import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { readWorkerReceiptFactsForReplay } from "../../src/session-control/worker-receipts.js";
 import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { settledRunTrust, writeSettledRun } from "../harness/settled-run.js";
 
 function worker(
 	text: string,
@@ -28,7 +29,14 @@ function worker(
 		conformance: "pass",
 		quality: "unmeasured",
 	};
-	const trust = inspectRunResultTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status;
+	const trust = settledRunTrust(
+		finishRunResult(draft, envelope, {
+			terminal: { terminalReason: draft.terminalReason ?? "completed" },
+			processExitCode: envelope.exitCode,
+			frameType: null,
+			usage: undefined,
+		}).result,
+	);
 	return {
 		assignmentId: "a",
 		runId: "aa-run",
@@ -226,11 +234,10 @@ test("recognized verifier, research, world knowledge and scout reports retain li
 	}
 });
 
-for (const mode of ["verified", "tampered", "missing-ledger", "retired"] as const) {
-	test(`receipt reader to production replay admits only verified summaries: ${mode}`, () => {
+for (const mode of ["verified", "tampered", "missing-ledger", "unsealed"] as const) {
+	test(`receipt reader to production replay admits only verified summaries: ${mode}`, async () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "aa2-receipt-"));
 		try {
-			mkdirSync(join(stateDir, "receipts"));
 			const envelope = fixtureEnvelope("aa2");
 			const draft = fixtureReceiptDraft(envelope);
 			draft.output = {
@@ -245,21 +252,19 @@ for (const mode of ["verified", "tampered", "missing-ledger", "retired"] as cons
 				conformance: "pass",
 				quality: "unmeasured",
 			};
-			const receipt = withReceiptIntegrity(draft, envelope);
-			const stored = mode === "retired" ? { ...receipt, integrity: { ...receipt.integrity, version: 1 } } : receipt;
-			if (mode === "tampered") {
-				assert.ok(stored.output);
-				stored.output.text = stored.output.text.replace("Recorded", "Altered");
-			}
-			const receiptPath = join(stateDir, "receipts", "aa2.json");
-			const bytes = JSON.stringify(stored);
-			writeFileSync(receiptPath, bytes);
+			await writeSettledRun(stateDir, draft);
+			const bundlePath = join(telemetryRunDirectory(stateDir, "aa2"), "bundle.json");
+			if (mode === "tampered")
+				writeFileSync(bundlePath, JSON.stringify({ ...JSON.parse(readFileSync(bundlePath, "utf8")), version: 2 }));
+			if (mode === "unsealed") rmSync(bundlePath);
+			const bytes = mode === "unsealed" ? null : readFileSync(bundlePath, "utf8");
+
 			if (mode !== "missing-ledger") writeFileSync(join(stateDir, "runs.json"), JSON.stringify([envelope]));
 			const facts = readWorkerReceiptFactsForReplay("aa2", stateDir);
 			assert.ok(facts);
 			assert.equal(
 				facts.trust?.artifactIntegrity.state,
-				mode === "verified" ? "verified" : mode === "tampered" ? "failed" : mode === "retired" ? "unknown" : undefined,
+				mode === "tampered" ? "failed" : mode === "unsealed" ? "unknown" : "verified",
 			);
 			for (const style of ["compact", "standard", "detailed"] as const) {
 				const panel = createChatPanel({ getOutputStyle: () => style });
@@ -281,14 +286,11 @@ for (const mode of ["verified", "tampered", "missing-ledger", "retired"] as cons
 					{ readWorkerReceipt: (id) => readWorkerReceiptFactsForReplay(id, stateDir) },
 				);
 				const output = plain(panel.render(120));
-				if (mode === "verified") assert.match(output, /reproduction reproduced/);
+				if (mode === "verified" || mode === "missing-ledger") assert.match(output, /reproduction reproduced/);
 				else {
 					assert.doesNotMatch(output, /reproduction reproduced/);
 					assert.match(output, /raw output, not admitted as evidence/);
-					assert.match(
-						output,
-						mode === "retired" ? /seal retired/ : mode === "tampered" ? /seal broken/ : /integrity unavailable/,
-					);
+					assert.match(output, mode === "tampered" ? /seal broken/ : /seal unchecked/);
 				}
 			}
 			const exported = createChatPanel({ unboundedToolBodies: true });
@@ -310,7 +312,7 @@ for (const mode of ["verified", "tampered", "missing-ledger", "retired"] as cons
 				{ readWorkerReceipt: (id) => readWorkerReceiptFactsForReplay(id, stateDir), unboundedToolBodies: true },
 			);
 			assert.match(plain(exported.render(120)), /"diagnosis"/);
-			assert.equal(readFileSync(receiptPath, "utf8"), bytes);
+			if (bytes !== null) assert.equal(readFileSync(bundlePath, "utf8"), bytes);
 		} finally {
 			rmSync(stateDir, { recursive: true, force: true });
 		}

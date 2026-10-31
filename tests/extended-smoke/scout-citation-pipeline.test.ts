@@ -13,6 +13,7 @@ import {
 } from "../harness/openai-compat-fixture.js";
 import { readRunJournal } from "../harness/run-journal.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
+import { resolvedRunResult } from "../harness/settled-run.js";
 
 const CLI = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
 const fixture = JSON.parse(
@@ -192,14 +193,14 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			}
 			const journal = readRunJournal(join(scratch.dir, "state"));
 			ok(journal);
-			const scouts = journal.receipts.filter((receipt) => receipt.agentId === "scout");
-			const dependents = journal.receipts.filter((receipt) => receipt.agentId === "documenter");
+			const scouts = journal.runs.filter((receipt) => receipt.settled.agentId === "scout");
+			const dependents = journal.runs.filter((receipt) => receipt.settled.agentId === "documenter");
 			strictEqual(scouts.length, 1, "no replacement Scout run may disguise failed repair");
 			const scout = scouts[0];
 			ok(scout);
 			const succeeded = scenario !== "exhausted";
-			strictEqual(scout.outcome, succeeded ? "succeeded" : "failed");
-			strictEqual(scout.exitCode, succeeded ? 0 : 1);
+			strictEqual(scout.settled.outcome, succeeded ? "succeeded" : "failed");
+			strictEqual(scout.settled.exitCode, succeeded ? 0 : 1);
 			strictEqual(dependents.length, succeeded ? 1 : 0);
 			const dependentRequests = requests.filter((request) => !isMain(request) && !isScout(request));
 			strictEqual(
@@ -208,21 +209,21 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 				"dependent must really execute only after successful Scout validation",
 			);
 			if (succeeded) {
-				strictEqual(scout.quality.resultContract?.conformance, "pass");
-				strictEqual(scout.output?.text, report());
+				strictEqual(scout.settled.quality?.resultContract?.conformance, "pass");
+				strictEqual(resolvedRunResult(scout).output?.text, report());
 				const dependent = dependents[0];
 				ok(dependent);
-				strictEqual(dependent.outcome, "succeeded");
-				strictEqual(dependent.exitCode, 0);
-				strictEqual(JSON.parse(dependent.output?.text ?? "{}").summary, fixture.dependentExplanation);
+				strictEqual(dependent.settled.outcome, "succeeded");
+				strictEqual(dependent.settled.exitCode, 0);
+				strictEqual(JSON.parse(resolvedRunResult(dependent).output?.text ?? "{}").summary, fixture.dependentExplanation);
 				ok(
 					JSON.stringify(dependentRequests[0]?.messages).includes(JSON.stringify(report()).slice(1, -1)),
 					"dependent receives validated Scout output",
 				);
-				ok(JSON.stringify(dependentRequests[0]?.messages).includes(scout.runId), "handoff names the actual source run");
+				ok(JSON.stringify(dependentRequests[0]?.messages).includes(scout.row.runId), "handoff names the actual source run");
 				doesNotMatch(result.stdout, /pipeline dispatch halted/u);
 			} else {
-				strictEqual(scout.outcomeCode, "result_contract_exhausted");
+				strictEqual(scout.settled.outcomeCode, "result_contract_exhausted");
 				match(result.stdout, /pipeline dispatch halted at step 1\/2.*skipped 1 later step/u);
 			}
 			for (const [path, content] of Object.entries(fixture.files))
@@ -231,11 +232,11 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 				JSON.stringify({
 					scenario,
 					repairs: feedback.length,
-					scoutRunId: scout.runId,
-					scoutOutcome: scout.outcome,
+					scoutRunId: scout.row.runId,
+					scoutOutcome: scout.settled.outcome,
 					dependentExecutions: dependentRequests.length,
-					dependentRunIds: dependents.map((receipt) => receipt.runId),
-					pipelineCompleted: succeeded && dependents[0]?.outcome === "succeeded",
+					dependentRunIds: dependents.map((receipt) => receipt.row.runId),
+					pipelineCompleted: succeeded && dependents[0]?.settled.outcome === "succeeded",
 				}),
 			);
 		} finally {

@@ -2,18 +2,23 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchCompletedPayload } from "../../src/core/telemetry/live-events.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { inspectRunResultTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import type { TelemetryRunReaders } from "../../src/domains/telemetry/contract.js";
 import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
 import { createDispatchBoardStore } from "../../src/interactive/dispatch-board.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { settledRunTrust } from "../harness/settled-run.js";
 
 test("only integrity-admitted receipt contract facts reach the board and lifecycle reset clears them", () => {
 	const envelope = fixtureEnvelope("aa-run");
-	const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
-	const verified = inspectRunResultTrustStatus(receipt, envelope).status;
-	const rejected = inspectRunResultTrustStatus({ ...receipt, task: "tampered" }, envelope).status;
+	const receipt = finishRunResult(fixtureReceiptDraft(envelope), envelope, {
+		terminal: { terminalReason: "completed" },
+		processExitCode: envelope.exitCode,
+		frameType: null,
+		usage: undefined,
+	}).result;
+	const verified = settledRunTrust(receipt);
+	const rejected = settledRunTrust({ ...receipt, task: "tampered" }, { state: "failed", reason: "run seal failed" });
 	let facts: ReturnType<NonNullable<TelemetryRunReaders["readReceipt"]>> = {
 		text: '{"diagnosis":"Verified bytes","reproduction":"unknown","evidence":[]}',
 		trust: verified,

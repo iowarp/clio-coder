@@ -7,7 +7,7 @@ import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { CallRowV1 } from "../../src/core/telemetry/dto.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import type { RunResult } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope } from "../../src/domains/dispatch/types.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -876,7 +876,7 @@ it("headless reports a stable image error before opening a turn", { timeout: 15_
 		strictEqual(f.wire().calls(), 0);
 		match(notices[0] ?? "", /IMAGE_INPUT_UNSUPPORTED/u);
 		const journal = readRunJournal(join(env.dir, "state"));
-		strictEqual(journal?.receipts.length ?? 0, 0);
+		strictEqual(journal?.runs.length ?? 0, 0);
 	} finally {
 		await f.close();
 	}
@@ -950,14 +950,15 @@ it("headless shutdown retains its cancelled receipt and exit 143 without route a
 		strictEqual(code, 143);
 		const journal = readRunJournal(join(env.dir, "state"));
 		ok(journal);
-		strictEqual(journal.receipts.length, 1);
-		deepStrictEqual([journal.receipts[0]?.outcome, journal.receipts[0]?.exitCode], ["canceled", 143]);
+		strictEqual(journal.envelopes.size, 1);
+		const envelope = [...journal.envelopes.values()][0];
+		deepStrictEqual([envelope?.outcome, envelope?.exitCode], ["canceled", 143]);
 	} finally {
 		await f.close();
 	}
 });
 
-it("a headless receipt counts the compaction calls its run made, once", { timeout: 15_000 }, async () => {
+it("a headless run ledger counts the compaction calls its run made, once", { timeout: 15_000 }, async () => {
 	const measured = (value: number) => ({
 		fact: { kind: "measured" as const, value, source: "provider" as const },
 		display: String(value),
@@ -980,8 +981,10 @@ it("a headless receipt counts the compaction calls its run made, once", { timeou
 		},
 	} as unknown as CallRowV1;
 	// One run without a compaction is the baseline the same turn with one is measured against.
-	const sealedRun = async (row: CallRowV1 | null): Promise<RunResult> => {
-		const before = new Set(readRunJournal(join(env.dir, "state"))?.receipts.map((receipt) => receipt.runId) ?? []);
+	const sealedRun = async (row: CallRowV1 | null): Promise<RunEnvelope> => {
+		const before = new Set(
+			[...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])].map((run) => run.id) ?? [],
+		);
 		const f = fixture("success");
 		// Compaction journals its own call in the session's journal, outside the turn's events.
 		const compactionCalls = async () => (row === null ? [] : [row]);
@@ -990,7 +993,9 @@ it("a headless receipt counts the compaction calls its run made, once", { timeou
 		} finally {
 			await f.close();
 		}
-		const receipt = readRunJournal(join(env.dir, "state"))?.receipts.find((entry) => !before.has(entry.runId));
+		const receipt = [...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])].find(
+			(entry) => !before.has(entry.id),
+		);
 		ok(receipt);
 		return receipt;
 	};

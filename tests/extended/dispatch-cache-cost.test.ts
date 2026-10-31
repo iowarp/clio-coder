@@ -2,7 +2,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -108,9 +108,6 @@ for (const priced of [true, false]) {
 			const envelope = bundle.contract.getRun(run.runId);
 			ok(envelope);
 			strictEqual(envelope.costUsd, expected);
-			ok(verifyReceiptIntegrity(receipt, envelope).ok);
-			ok(!verifyReceiptIntegrity({ ...receipt, cacheWrite1hTokenCount: 0 }, envelope).ok);
-			ok(!verifyReceiptIntegrity({ ...receipt, apiCalls: 1 }, envelope).ok);
 		} finally {
 			release();
 			await bundle.extension.stop?.();

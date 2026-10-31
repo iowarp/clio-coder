@@ -9,8 +9,8 @@ import { execFileSync, spawn } from "node:child_process";
 import { copyFileSync, cpSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunEnvelope, RunResult } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope } from "../../src/domains/dispatch/types.js";
+import type { SettledRunRecord } from "../../src/domains/telemetry/index.js";
 import { readRunJournal } from "./run-journal.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -122,16 +122,14 @@ export function runCli(
 	});
 }
 
-/** The run's single receipt and ledger row, after checking the integrity seal binds them. */
-export function sealedReceipt(stateDir: string): { receipt: RunResult; envelope: RunEnvelope } {
+/** The worker's settled run and ledger row, after verifying the run scope's seal (#434). */
+export function sealedReceipt(stateDir: string): { receipt: SettledRunRecord; envelope: RunEnvelope } {
 	const journal = readRunJournal(stateDir);
 	ok(journal, `no run journal under ${stateDir}`);
-	strictEqual(journal.receipts.length, 1, `expected one receipt, found ${journal.receipts.length}`);
-	const receipt = journal.receipts[0];
+	strictEqual(journal.runs.length, 1, `expected one sealed worker run, found ${journal.runs.length}`);
+	const receipt = journal.runs[0];
 	ok(receipt);
-	const envelope = journal.envelopes.get(receipt.runId);
-	ok(envelope, `no ledger row for ${receipt.runId}`);
-	const integrity = verifyReceiptIntegrity(receipt, envelope);
-	ok(integrity.ok, integrity.ok ? "" : integrity.reason);
+	const envelope = journal.envelopes.get(receipt.row.runId);
+	ok(envelope, `no ledger row for ${receipt.row.runId}`);
 	return { receipt, envelope };
 }

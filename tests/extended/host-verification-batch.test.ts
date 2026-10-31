@@ -16,11 +16,11 @@ import {
 } from "../../src/domains/dispatch/host-verification.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import type { RunHostVerification } from "../../src/domains/dispatch/types.js";
-import { adaptRunResultValidationStatus } from "../../src/domains/evidence/trust-status.js";
-
 import { loadProjectVerifierCatalog } from "../../src/tools/verify/catalog.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, runProjectCheck } from "../../src/tools/verify/scripts.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { settledRunTrust } from "../harness/settled-run.js";
 
 type ResolvedCheck = NonNullable<DispatchRequest["resolvedVerification"]>[number];
 
@@ -391,8 +391,16 @@ describe("batch-settled host verification", () => {
 		strictEqual(hostVerificationRejection(a), null);
 		strictEqual(hostVerificationRejection(b)?.outcomeCode, "host_verification_rejected");
 		// The trust surface must not certify a run whose declared check exited 1.
-		strictEqual(adaptRunResultValidationStatus({ runId: "run-a", hostVerification: a }).state, "unknown");
-		strictEqual(adaptRunResultValidationStatus({ runId: "run-b", hostVerification: b }).state, "failed");
+		strictEqual(
+			settledRunTrust({ ...fixtureReceiptDraft(fixtureEnvelope()), ...{ runId: "run-a", hostVerification: a } })
+				.validationGrounding.state,
+			"unknown",
+		);
+		strictEqual(
+			settledRunTrust({ ...fixtureReceiptDraft(fixtureEnvelope()), ...{ runId: "run-b", hostVerification: b } })
+				.validationGrounding.state,
+			"failed",
+		);
 	});
 
 	it("charges a declaring worker that ran unconfined even when a sibling's write roots are implicated", async () => {

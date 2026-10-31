@@ -1,11 +1,12 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { readRunJournal } from "../harness/run-journal.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");
@@ -163,14 +164,11 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 			ok(await waitFor(() => existsSync(stoppedFile), 5_000), "tool child did not observe coordinated termination");
 			ok(await waitFor(() => !processExists(toolPid), 5_000), `orphaned tool pid ${toolPid}`);
 
-			const receiptDir = join(root, "state", "receipts");
-			const receipts = readdirSync(receiptDir).filter((name) => name.endsWith(".json"));
-			strictEqual(receipts.length, 1);
-			const receipt = JSON.parse(readFileSync(join(receiptDir, receipts[0] ?? ""), "utf8")) as {
-				outcome: string;
-				exitCode: number;
-				sessionId: string | null;
-			};
+			const journal = readRunJournal(join(root, "state"));
+			ok(journal);
+			strictEqual(journal.envelopes.size, 1);
+			const receipt = [...journal.envelopes.values()][0];
+			ok(receipt);
 			strictEqual(receipt.outcome, "canceled");
 			strictEqual(receipt.exitCode, 130);
 			ok(receipt.sessionId);
@@ -221,13 +219,11 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 			ok(await waitFor(() => existsSync(stoppedFile), 5_000), "tool child did not observe coordinated termination");
 			ok(await waitFor(() => !processExists(toolPid), 5_000), `orphaned tool pid ${toolPid}`);
 
-			const receiptDir = join(root, "state", "receipts");
-			const receipts = readdirSync(receiptDir).filter((name) => name.endsWith(".json"));
-			strictEqual(receipts.length, 1);
-			const receipt = JSON.parse(readFileSync(join(receiptDir, receipts[0] ?? ""), "utf8")) as {
-				outcome: string;
-				exitCode: number;
-			};
+			const journal = readRunJournal(join(root, "state"));
+			ok(journal);
+			strictEqual(journal.envelopes.size, 1);
+			const receipt = [...journal.envelopes.values()][0];
+			ok(receipt);
 			strictEqual(receipt.outcome, "timed_out");
 			strictEqual(receipt.exitCode, 124);
 		} finally {

@@ -8,6 +8,7 @@ import { runClioRun } from "../../src/cli/run.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readRunRecording } from "../../src/domains/dispatch/index.js";
+import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { dispatchRequestsFromArgs, prepareDispatchArguments } from "../../src/tools/dispatch-arguments.js";
 import {
@@ -223,15 +224,10 @@ it("admits an approved sibling-checkout Scout read once per run and records the 
 		equal(runs.length, 2);
 		equal(new Set(runs.map((run) => run.runId)).size, 2);
 		for (const run of runs) {
-			const receipt = JSON.parse(readFileSync(join(clioStateDir(), "receipts", `${run.runId}.json`), "utf8"));
-			equal(receipt.safety.readOnly, true);
-			equal(receipt.reproducibility.cwd, root);
-			deepStrictEqual(receipt.safety.externalReadApproval, {
-				root,
-				requestId: "approval-1",
-				requestedBy: "operator",
-				runId: run.runId,
-			});
+			const record = readVerifiedRun(clioStateDir(), run.runId);
+			ok(record);
+			equal(record.settled.outcome, "succeeded");
+			equal(bundle.contract.getRun(run.runId)?.cwd, root);
 		}
 	} finally {
 		await bundle.extension.stop?.();

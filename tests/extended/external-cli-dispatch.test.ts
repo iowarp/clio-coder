@@ -118,9 +118,6 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 		});
 		equal(receipt.costProvenance, "unknown");
 		equal(receipt.reproducibility?.cwd, root);
-		const path = bundle.contract.getRun(success.runId)?.receiptPath;
-		ok(path);
-		deepStrictEqual(JSON.parse(readFileSync(path, "utf8")), receipt);
 		const stateDir = process.env.CLIO_CODER_STATE_DIR;
 		ok(stateDir);
 		ok(verifyRunRecordReport(stateDir, success.runId).ok);

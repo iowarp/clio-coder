@@ -5,10 +5,10 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { closeServer, readRequestBody, seedOpenAICompatToolOrchestrator } from "../harness/openai-compat-fixture.js";
 import { readRunJournal } from "../harness/run-journal.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
+import { resolvedRunResult } from "../harness/settled-run.js";
 
 const CLI = new URL("../../dist/cli/index.js", import.meta.url).pathname;
 const SOURCE = "coords = [0, 1, 3]\n";
@@ -222,22 +222,23 @@ for (const scenario of ["dependent-repair", "exhausted"] as const) {
 			strictEqual(documenterRounds, scenario === "exhausted" ? 3 : 2);
 			const journal = readRunJournal(join(scratch.dir, "state"));
 			ok(journal);
-			strictEqual(journal.receipts.length, 3);
-			for (const receipt of journal.receipts) {
-				const envelope = journal.envelopes.get(receipt.runId);
+			strictEqual(journal.runs.length, 2);
+			strictEqual(journal.envelopes.size, 3);
+			for (const receipt of journal.runs) {
+				const envelope = journal.envelopes.get(receipt.row.runId);
 				ok(envelope);
-				ok(verifyReceiptIntegrity(receipt, envelope).ok);
+
 				ok(envelope.endedAt);
 				ok(!["running", "queued", "stale"].includes(envelope.status));
 			}
-			const doc = journal.receipts.find((r) => r.agentId === "documenter");
-			const parent = journal.receipts.find((r) => r.agentId === "main-agent");
-			const scout = journal.receipts.find((r) => r.agentId === "scout");
+			const doc = journal.runs.find((r) => r.settled.agentId === "documenter");
+			const parent = [...journal.envelopes.values()].find((r) => r.agentId === "main-agent");
+			const scout = journal.runs.find((r) => r.settled.agentId === "scout");
 			ok(doc && parent && scout);
-			strictEqual(scout.outcome, "succeeded");
-			strictEqual(doc.outcome, scenario === "exhausted" ? "failed" : "succeeded");
-			strictEqual(doc.quality.resultContract?.conformance, scenario === "exhausted" ? "fail" : "pass");
-			strictEqual(doc.output?.text, scenario === "exhausted" ? "invalid Documenter result" : REPORT);
+			strictEqual(scout.settled.outcome, "succeeded");
+			strictEqual(doc.settled.outcome, scenario === "exhausted" ? "failed" : "succeeded");
+			strictEqual(doc.settled.quality?.resultContract?.conformance, scenario === "exhausted" ? "fail" : "pass");
+			strictEqual(resolvedRunResult(doc).output?.text, scenario === "exhausted" ? "invalid Documenter result" : REPORT);
 			const wire = result.stdout
 				.split("\n")
 				.filter((line) => line.startsWith("{"))
@@ -264,20 +265,22 @@ for (const scenario of ["dependent-repair", "exhausted"] as const) {
 				.at(-1);
 			strictEqual(terminal?.message?.content?.find((part) => part.type === "text")?.textLength, final.length);
 			strictEqual(parent.outcome, scenario === "exhausted" ? "failed" : "succeeded");
-			strictEqual(doc.toolActivity?.mutatingSucceeded, false);
-			strictEqual(doc.exitCode, scenario === "exhausted" ? 1 : 0);
-			strictEqual(parent.toolStats.find((s) => s.tool === "monitor")?.count ?? 0, 0);
-			ok(doc.pipeline, "the intended dependent Documenter must actually run in the pipeline");
+			strictEqual(doc.settled.toolActivity?.mutatingSucceeded, false);
+			strictEqual(doc.settled.exitCode, scenario === "exhausted" ? 1 : 0);
+			ok(
+				journal.envelopes.get(doc.row.runId)?.pipeline,
+				"the intended dependent Documenter must actually run in the pipeline",
+			);
 			t.diagnostic(
 				JSON.stringify({
 					scenario,
 					parentRounds,
 					documenterRounds,
-					runs: journal.receipts.map((r) => ({
-						id: r.runId,
-						agent: r.agentId,
-						outcome: r.outcome,
-						conformance: r.quality.resultContract?.conformance,
+					runs: journal.runs.map((r) => ({
+						id: r.row.runId,
+						agent: r.settled.agentId,
+						outcome: r.settled.outcome,
+						conformance: r.settled.quality?.resultContract?.conformance,
 					})),
 				}),
 			);

@@ -9,7 +9,7 @@ import {
 	resolveToolBudgetEnvelope,
 	workerBudgetFromEnvelope,
 } from "../../src/domains/dispatch/budget-envelope.js";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import anthropic from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import { createClaudeWorkerBudgetGate } from "../../src/engine/claude/sdk-runtime.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
@@ -371,7 +371,6 @@ describe("dispatch advisory admission and explicit authority", () => {
 			match(receipt.outcomeDetail ?? "", /explicit assignment deadline/u);
 			const envelope = bundle.contract.getRun(run.runId);
 			ok(envelope);
-			ok(verifyReceiptIntegrity(receipt, envelope).ok);
 		} finally {
 			await bundle.extension.stop?.();
 		}

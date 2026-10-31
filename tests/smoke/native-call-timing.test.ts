@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+
 import {
 	closeServer,
 	seedOpenAICompatToolOrchestrator,
@@ -80,14 +80,12 @@ test("built native timing includes delayed response headers", async () => {
 		strictEqual(fixture.requests.filter((request) => request.stream !== false).length, 2);
 		const journal = readRunJournal(join(scratch.dir, "state"));
 		ok(journal);
-		strictEqual(journal.receipts.length, 1);
-		const receipt = journal.receipts[0];
-		ok(receipt);
-		const envelope = journal.envelopes.get(receipt.runId);
+		strictEqual(journal.envelopes.size, 1);
+		const envelope = [...journal.envelopes.values()][0];
 		ok(envelope);
-		ok(verifyReceiptIntegrity(receipt, envelope).ok);
-		strictEqual(receipt.exitCode, direct.code);
-		strictEqual(receipt.outcome, "succeeded");
+		strictEqual(envelope.exitCode, direct.code);
+		strictEqual(envelope.outcome, "succeeded");
+
 		const entries = await readSessionLedgerEntries(join(scratch.dir, "state"));
 		const calls = entries.flatMap((entry) => {
 			if (entry.kind !== "message" || entry.role !== "assistant") return [];

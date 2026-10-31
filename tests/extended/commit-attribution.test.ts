@@ -81,7 +81,7 @@ describe("fleet commit seam", () => {
 		});
 		deepStrictEqual(evidence.decisions, REFS);
 		strictEqual(evidence.materiallyAuthored, true);
-		strictEqual(evidence.receipt?.digest, digest);
+		strictEqual(evidence.run?.digest, digest);
 		const bare = deriveFleetCommitAttribution({
 			plan,
 			step: commitStep,

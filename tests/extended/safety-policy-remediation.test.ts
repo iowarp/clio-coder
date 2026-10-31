@@ -8,6 +8,7 @@ import { clioConfigDir } from "../../src/core/xdg.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
+import { telemetryCall } from "../harness/telemetry-view.js";
 
 const root = mkdtempSync(join(tmpdir(), "s1-policy-"));
 mkdirSync(join(root, ".clio-coder"));
@@ -194,6 +195,9 @@ test("S1-06 usage report reads journaled approvals and emits measured rate", asy
 		telemetryJournalPath(journalDirectory),
 		Buffer.concat([
 			encodeTelemetryLine(callJournalHeader({ clioCoderVersion: "test", piVersion: "test" })),
+			...telemetryCall(meta.id, { at: new Date().toISOString(), usage: { input: 100, output: 50 }, usd: 0.03 }).map(
+				encodeTelemetryLine,
+			),
 			...["s1-0", "s1-1"].map((requestId, index) =>
 				encodeTelemetryLine(
 					makeTelemetryRecord("approval.requested", { tool: "bash", actionClass: "execute", requestId }, ctx, clock(index)),

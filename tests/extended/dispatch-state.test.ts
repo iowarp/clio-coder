@@ -34,7 +34,6 @@ describe("dispatch run ledger state", () => {
 			exitCode: 0,
 			pid: null,
 			heartbeatAt: null,
-			receiptPath: null,
 			sessionId: "session-1",
 			cwd: "/workspace",
 			tokenCount: 42,
