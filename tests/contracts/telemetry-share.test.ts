@@ -39,6 +39,12 @@ const CLAIM = "Validated confidential Project Nightingale acquisition customer m
 const USER = "private-operator";
 const PRIVATE_PATH = `/home/${USER}/customer-acquisition/CLIO-CODER.md`;
 const PASSWORD = "correct horse battery staple";
+// A local server's model file as its model id, a path and prose in a tool schema's literals, and a model file as a
+// settings dictionary key: identities, literals and keys carry operator data too (#434).
+const MODEL_PATH = "/srv/models/ledger-forecast-q4.gguf";
+const ENUM_PATH = "/srv/vault/ledger-root";
+const CONST_PROSE = "Quarterly Nightingale churn forecast";
+const CONFIG_KEY = "/srv/lmstudio/ledger-private.gguf";
 const GOLDEN_RUN = new URL(
 	"../fixtures/telemetry/golden/vccap2ywu7n8/runs/21ee9qwrugeq/journal.jsonl",
 	import.meta.url,
@@ -66,7 +72,11 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 			"config.changed",
 			{
 				source: "file",
-				paths: { hotReload: [`providers.key=${SECRET}`], nextTurn: [], restartRequired: [] },
+				paths: {
+					hotReload: [`providers.key=${SECRET}`],
+					nextTurn: [`targets.0.lmstudio.models.${CONFIG_KEY}.load`],
+					restartRequired: [],
+				},
 				before: telemetryCommitment("config", { before: true }),
 				after: telemetryCommitment("config", { after: true }),
 				settingsFingerprint: settingsFingerprintCommitment("0".repeat(64)),
@@ -122,18 +132,39 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 		const settings = await plantObject("config", {
 			providers: { local: { password: PASSWORD } },
 			workspace: PRIVATE_PATH,
+			targets: [{ id: "local", lmstudio: { models: { [CONFIG_KEY]: { load: { contextLength: 4096 } } } } }],
 		});
+		const toolSchemas = await plantObject("tool-schemas", [
+			{
+				name: "ledger",
+				description: "Reads the ledger",
+				parameters: {
+					type: "object",
+					properties: {
+						root: { type: "string", enum: [ENUM_PATH] },
+						mode: { const: { note: CONST_PROSE } },
+					},
+					required: ["root"],
+				},
+			},
+		]);
+		const goldenCall = scanTelemetrySegment(
+			await readFile(new URL("../fixtures/telemetry/golden/p0/journal.jsonl", import.meta.url)),
+		).rows.find((row) => row.kind === "record" && row.record.k === "call.started");
 		const golden = scanTelemetrySegment(await readFile(GOLDEN_RUN)).rows.find(
 			(row) => row.kind === "record" && row.record.k === "run.settled",
 		);
 		ok(golden?.kind === "record");
+		ok(goldenCall?.kind === "record");
 		const at = { t: new Date().toISOString(), mono: 2 };
+		const call = goldenCall.record.data as EventPayload<"call.started">;
 		const records = [
 			makeTelemetryRecord(
 				"run.settled",
 				{
 					...(golden.record.data as EventPayload<"run.settled">),
 					identity: { host: HOST, user: USER },
+					route: { ...(golden.record.data as EventPayload<"run.settled">).route, wireModelId: MODEL_PATH },
 					outcomeDetail: `could not read ${PRIVATE_PATH}`,
 					validationGrounding: { claimed: 1, grounded: 0, ungrounded: [CLAIM], basis: "unmatched-command" },
 				},
@@ -141,6 +172,12 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 				at,
 			),
 			makeTelemetryRecord("prompt.compiled", { structure, layoutVersion: 1, tokenEstimate: 10, sections: 1 }, context, at),
+			makeTelemetryRecord(
+				"call.started",
+				{ ...call, objects: { toolSchemas }, target: { ...call.target, requestedModel: MODEL_PATH } },
+				{ ...context, callId: call.callId, attemptId: call.attemptId },
+				at,
+			),
 			makeTelemetryRecord(
 				"config.snapshotted",
 				{ settings, settingsFingerprint: settingsFingerprintCommitment("0".repeat(64)) },
@@ -181,7 +218,10 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 		ok(!unpacked.includes(HOST), "the source hostname left in the archive");
 		ok(unpacked.includes("config.changed"));
 		ok(unpacked.includes("run.settled"));
-		for (const leak of [CLAIM, USER, PRIVATE_PATH]) ok(!unpacked.includes(leak), `${leak} left in the archive`);
+		for (const leak of [CLAIM, USER, PRIVATE_PATH, MODEL_PATH, "ledger-private"])
+			ok(!unpacked.includes(leak), `${leak} left in the archive`);
+		// A provider's plain model id is no path and stays readable.
+		ok(unpacked.includes((golden.record.data as EventPayload<"run.settled">).route.targetId));
 		const check = verifyShareArchive(archive);
 		strictEqual(check.failure, null);
 		strictEqual(check.manifest?.installId, installId);
@@ -203,12 +243,24 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 
 		// A structural share carries the prompt structure and settings, projected before their ids are computed.
 		const structural = planShare({ scopes, skipped, profile: "structural", source, writer });
-		strictEqual(structural.scopes[0]?.objects.length, 2);
+		strictEqual(structural.scopes[0]?.objects.length, 3);
 		const structuralPath = join(root, "structural.tar.gz");
 		await writeShare(structural, structuralPath);
 		const structuralArchive = await readFile(structuralPath);
 		const structuralBytes = gunzipSync(structuralArchive).toString("utf8");
-		for (const leak of [SECRET, HOST, CLAIM, USER, PRIVATE_PATH, PASSWORD, "horse"])
+		for (const leak of [
+			SECRET,
+			HOST,
+			CLAIM,
+			USER,
+			PRIVATE_PATH,
+			PASSWORD,
+			"horse",
+			MODEL_PATH,
+			ENUM_PATH,
+			CONST_PROSE,
+			"ledger-private",
+		])
 			ok(!structuralBytes.includes(leak), `${leak} left in the structural archive`);
 		strictEqual(verifyShareArchive(structuralArchive).failure, null);
 
