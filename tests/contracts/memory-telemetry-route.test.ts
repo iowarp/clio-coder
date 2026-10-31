@@ -136,7 +136,7 @@ test("linked memory spend follows late journal settlements and deduplicates repe
 					stopReason: "stop",
 					usage: { input: 4, output: 2, cacheRead: 1, cacheWrite: 0, clioExternal: { tokenUsage: "provider-reported" } },
 				},
-				"unknown",
+				"none",
 			),
 		);
 		await journal.flush();

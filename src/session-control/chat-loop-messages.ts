@@ -1,6 +1,6 @@
 import { classifyCallFailure, readCallFailure } from "../core/call-failure.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
-import { resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
+import { costProvenanceOf } from "../domains/providers/types/cost-provenance.js";
 import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
 import type { InterruptedUsageEstimate } from "../domains/telemetry/call-facts.js";
 import type { CostAggregate, CostAmount } from "../domains/telemetry/cost.js";
@@ -554,7 +554,12 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 			summary.costUsd += total;
 		costAmounts.push({
 			usd: typeof total === "number" && Number.isFinite(total) ? total : 0,
-			provenance: usage.estimated === true ? "unknown" : resolveCostProvenance(usage.costProvenance, "unknown"),
+			provenance:
+				usage.estimated === true
+					? "unknown"
+					: costProvenanceOf(
+							typeof usage.pricedBy === "string" ? (usage.pricedBy as Parameters<typeof costProvenanceOf>[0]) : "none",
+						),
 			missingTokenCalls: reported.observed ? 0 : 1,
 		});
 	}

@@ -2,9 +2,10 @@ import { responseModelIdObservationFromRecord } from "../../core/response-model-
 import type { FailureCause } from "../../core/telemetry/enums.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact } from "../../core/telemetry/fact.js";
+import { pricedUsd } from "../../core/telemetry/pricing.js";
 import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
 import { ceilChars, normalizeTokenUsage } from "../../core/token-split.js";
-import type { CostProvenance } from "../providers/types/cost-provenance.js";
+import type { EffectivePricing } from "../providers/catalog.js";
 
 const unknown = { kind: "unknown", reason: "provider-omitted" } as const;
 const unobserved = { kind: "unknown", reason: "not-observed" } as const;
@@ -110,7 +111,7 @@ export interface InterruptedUsageEstimate {
 
 export function callSettlementFromMessage(
 	message: unknown,
-	costProvenance: CostProvenance,
+	pricedBy: EffectivePricing["pricedBy"],
 	cause?: FailureCause,
 	interrupted?: InterruptedUsageEstimate | null,
 ): Omit<CallSettled, keyof CallStarted | "stages"> {
@@ -167,17 +168,12 @@ export function callSettlementFromMessage(
 	const usd = amount(record(usage.cost).total);
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };
 	if (neverSent) pricing = { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" };
-	else if (costProvenance === "known_free")
-		pricing = { usd: { kind: "measured", value: 0, source: "local-count" }, pricedBy: "free" };
+	else if (pricedBy === "free") pricing = pricedUsd("free", 0);
 	else if (usd !== null && observed) {
-		if (external.cost === "provider-reported")
-			pricing = { usd: { kind: "measured", value: usd, source: "provider" }, pricedBy: "provider" };
-		// Declared target rates price measured tokens exactly as 0.6.5 did: known, ranked only below a provider's own
-		// cost. The Pi catalog rate is a guess at someone else's price list and stays estimated (#434).
-		else if (costProvenance === "known")
-			pricing = { usd: { kind: "measured", value: usd, source: "local-count" }, pricedBy: "target-rates" };
-		else if (costProvenance === "estimated")
-			pricing = { usd: { kind: "estimated", value: usd, method: "catalog" }, pricedBy: "catalog" };
+		// Declared target rates price measured tokens as measured, ranked only below a provider's own cost. The Pi
+		// catalog rate is a guess at someone else's price list and stays estimated (#434).
+		if (external.cost === "provider-reported") pricing = pricedUsd("provider", usd);
+		else if (pricedBy !== "none") pricing = pricedUsd(pricedBy, usd);
 	}
 	// The estimate an interrupted call gets when the provider reported nothing; the journal keeps it beside the
 	// measured usage, never inside it, so a resumed transcript reads as the live one did (#430, #434).

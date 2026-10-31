@@ -335,7 +335,7 @@ it("captures stream quota without a request and keeps target/account evidence di
 	assert.equal(observedCodexQuota("weekly-test", account, NOW.getTime())?.snapshot?.windows[0]?.key, "weekly");
 	const background = (reading: ReturnType<typeof observedCodexQuota>) =>
 		decideBackgroundStep({
-			route: { provenance: "estimated", rates: null, runtime: { auth: "oauth", tier: "cloud" }, quotaProviderId: "codex" },
+			route: { pricedBy: "catalog", rates: null, runtime: { auth: "oauth", tier: "cloud" }, quotaProviderId: "codex" },
 			inputTokens: 100,
 			maxOutputTokens: 10,
 			timeoutCapMs: 1000,

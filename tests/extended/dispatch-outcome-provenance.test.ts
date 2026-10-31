@@ -63,7 +63,7 @@ describe("resolveEffectivePricing", () => {
 			const pricing = resolveEffectivePricing(target, litellm, modelId);
 			deepStrictEqual(pricing, {
 				rates: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				provenance: "known_free",
+				pricedBy: "free",
 			});
 			deepStrictEqual(litellm.synthesizeModel(target, modelId, null).cost, pricing.rates);
 		}
@@ -72,12 +72,12 @@ describe("resolveEffectivePricing", () => {
 	it("leaves an undeclared proxy unknown and honors explicit rates", () => {
 		const target = { id: "proxy", runtime: "litellm" };
 		const modelId = "dynamo/qwopus3.8-27b-flash@q5_k_m";
-		deepStrictEqual(resolveEffectivePricing(target, litellm, modelId), { rates: null, provenance: "unknown" });
+		deepStrictEqual(resolveEffectivePricing(target, litellm, modelId), { rates: null, pricedBy: "none" });
 		const priced = { ...target, pricing: { input: 1, output: 2 } };
 		const pricing = resolveEffectivePricing(priced, litellm, modelId);
 		deepStrictEqual(pricing, {
 			rates: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
-			provenance: "known",
+			pricedBy: "target-rates",
 		});
 		deepStrictEqual(litellm.synthesizeModel(priced, modelId, null).cost, pricing.rates);
 	});
@@ -85,13 +85,10 @@ describe("resolveEffectivePricing", () => {
 	it("prices an unpriced local-native runtime as free and leaves an unpriced proxy unknown", () => {
 		const target = (runtime: string) => ({ id: "t", runtime, defaultModel: "qwen" });
 		const local = resolveEffectivePricing(target("lmstudio"), { id: "lmstudio", tier: "local-native" }, "qwen");
-		strictEqual(local.provenance, "known_free");
+		strictEqual(local.pricedBy, "free");
 		deepStrictEqual(local.rates, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-		strictEqual(
-			resolveEffectivePricing(target("litellm"), { id: "litellm", tier: "protocol" }, "qwen").provenance,
-			"unknown",
-		);
+		strictEqual(resolveEffectivePricing(target("litellm"), { id: "litellm", tier: "protocol" }, "qwen").pricedBy, "none");
 		const priced = { ...target("litellm"), pricing: { input: 1, output: 2 } };
-		strictEqual(resolveEffectivePricing(priced, { id: "litellm", tier: "protocol" }, "qwen").provenance, "known");
+		strictEqual(resolveEffectivePricing(priced, { id: "litellm", tier: "protocol" }, "qwen").pricedBy, "target-rates");
 	});
 });

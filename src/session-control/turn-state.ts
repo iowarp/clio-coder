@@ -14,7 +14,6 @@ import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type {
 	AuthResolution,
-	CostProvenance,
 	ResolvedRuntimeTarget,
 	RuntimeDescriptor,
 	RuntimeTargetSnapshot,
@@ -51,7 +50,7 @@ export interface ChatLoopRunSnapshot {
 	runtimeKind: RuntimeDescriptor["kind"];
 	wireModelId: string;
 	autonomy: ClioSettings["safety"]["autonomy"];
-	costProvenance?: CostProvenance;
+	pricedBy?: ResolvedRuntimeTarget["pricedBy"];
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
 	promptSignature: string | null;

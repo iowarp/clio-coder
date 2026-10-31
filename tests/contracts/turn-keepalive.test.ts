@@ -51,7 +51,7 @@ function harness(overrides: Partial<TurnKeepaliveDeps> = {}) {
 	let clock = 0;
 	const pending: Array<{ at: number; fire: () => void }> = [];
 	const refreshes: KeepaliveRefresh[] = [];
-	const runtime = { runtimeResolution: { costProvenance: "estimated" } } as unknown as AgentRuntime;
+	const runtime = { runtimeResolution: { pricedBy: "catalog" } } as unknown as AgentRuntime;
 	const keepalive = createTurnKeepalive({
 		enabled: () => true,
 		isTurnActive: () => true,
@@ -187,7 +187,7 @@ test("a journaled refresh carries its call identity so legacy accounting skips i
 				role: "prewarm",
 				targetId: "fixture-target",
 				runtimeId: "fixture-runtime",
-				costProvenance: "estimated",
+				pricedBy: "catalog",
 			}),
 		});
 		await run.follow(claude);

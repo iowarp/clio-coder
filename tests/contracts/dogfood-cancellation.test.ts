@@ -526,7 +526,7 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			ok(message);
 			const settlement = callSettlementFromMessage(
 				message,
-				"unknown",
+				"none",
 				undefined,
 				estimatedUsageForInterruptedTurn(message, 1_000),
 			);

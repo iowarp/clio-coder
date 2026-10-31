@@ -492,7 +492,7 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 				clioExternal: { tokenUsage: "provider-reported" },
 			},
 		};
-		const liveFacts = retry.settle(callSettlementFromMessage(message, "known"), reportedModelFromMessage(message));
+		const liveFacts = retry.settle(callSettlementFromMessage(message, "target-rates"), reportedModelFromMessage(message));
 		ok(liveFacts);
 		strictEqual(journal.health().queueDepth, 4);
 		await journal.flush();
@@ -1069,7 +1069,7 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		toolChoice: "auto",
 	});
 	const first = started();
-	const settle = (start: CallStarted, message: unknown, pricing: "known" | "unknown" = "unknown") =>
+	const settle = (start: CallStarted, message: unknown, pricing: "target-rates" | "none" = "none") =>
 		makeTelemetryRecord(
 			"call.settled",
 			{ ...start, ...callSettlementFromMessage(message, pricing), stages: { settle: 1 } },
@@ -1082,7 +1082,7 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 			stopReason: "stop",
 			usage: { input: 10, output: 4, cacheRead: 6, cacheWrite: 2, cacheWrite1h: 1, reasoning: 2, cost: { total: 0.125 } },
 		},
-		"known",
+		"target-rates",
 	);
 	const zero = settle(
 		{ ...first, attemptId: newAttemptId(), attempt: 1 },
@@ -1276,7 +1276,7 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 							clioExternal: { tokenUsage: "provider-reported" },
 						},
 					},
-					"unknown",
+					"none",
 				),
 				callId,
 				attemptId,
@@ -1423,7 +1423,7 @@ test("a crash-orphaned main call counts only when its user turn is on the active
 		stopReason: "stop",
 		usage: { input: 5, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
 	};
-	const facts = call.settle(callSettlementFromMessage(message, "unknown"));
+	const facts = call.settle(callSettlementFromMessage(message, "none"));
 	ok(facts);
 	const scope = { ...owner, callId: facts.callId, attemptId: facts.attemptId };
 	const clock = { t: new Date().toISOString(), mono: 1 };

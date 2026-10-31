@@ -2113,7 +2113,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 						providers: deps.providers,
 						signal: startupAbort.signal,
 						isBusy,
-						callJournal: (targetId, runtimeId, costProvenance) => {
+						callJournal: (targetId, runtimeId, pricedBy) => {
 							const acquire = deps.telemetry.acquireTelemetrySession;
 							if (!acquire) return undefined;
 							return {
@@ -2122,7 +2122,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 								role: "prewarm",
 								targetId,
 								runtimeId,
-								costProvenance,
+								pricedBy,
 							};
 						},
 					}),

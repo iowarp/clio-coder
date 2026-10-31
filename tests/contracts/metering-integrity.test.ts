@@ -91,7 +91,7 @@ describe("contracts/metering integrity", () => {
 				reportedModel: { kind: "measured", value: "served", source: "provider" },
 			},
 			stages: { settle: 1 },
-			...callSettlementFromMessage(message, "known", undefined, interrupted),
+			...callSettlementFromMessage(message, "target-rates", undefined, interrupted),
 		});
 		const first = settled(0, { stopReason: "stop", usage });
 		// Thinking the provider counted no reasoning for is estimated at chars/4, never above the measured output.
@@ -139,7 +139,7 @@ describe("contracts/metering integrity", () => {
 				callId: "call-fixture",
 				attemptId: "attempt-fixture",
 				callInvoked: true,
-				callAccounting: { usageObserved: reported.totalTokens > 0, targetId: "selected-target", costProvenance: "unknown" },
+				callAccounting: { usageObserved: reported.totalTokens > 0, targetId: "selected-target", pricedBy: "none" },
 			} as unknown as AgentMessage;
 			const payload = assistantSessionPayload(message, terminalFailureFromAssistantMessage(message));
 			strictEqual(payload.usage, usage);

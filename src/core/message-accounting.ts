@@ -33,7 +33,7 @@ export function messageUsageForAccounting(message: unknown): Record<string, unkn
 	if (!raw || !usage) return null;
 	const accounting = record(raw.callAccounting);
 	const result = { ...usage };
-	for (const key of ["usageObserved", "costProvenance", "targetId"] as const) {
+	for (const key of ["usageObserved", "pricedBy", "targetId"] as const) {
 		if (accounting?.[key] !== undefined) result[key] = accounting[key];
 	}
 	if (typeof raw.callInvoked === "boolean") result.callInvoked = raw.callInvoked;

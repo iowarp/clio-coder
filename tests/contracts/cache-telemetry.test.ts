@@ -81,7 +81,7 @@ test("the journal names the first divergence in request order and leaves an unre
 		cacheWrite1h: measured(0),
 		reasoning: measured(0),
 	});
-	const pricing = { rates: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 }, provenance: "known" } as const;
+	const pricing = { rates: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 }, pricedBy: "target-rates" } as const;
 	const previous = { structure, promptTokens: 10_000 };
 	const broke = cachePhysics({
 		settlement: { disposition: "settled", usage: usage(measured(7_000)) },
@@ -117,7 +117,7 @@ test("a server whose usage omits cache reads is judged by its own cache_n, and i
 			stopReason: "stop",
 			usage: { input: 10_000, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 10_005, cacheReadReported: false },
 		},
-		"known_free",
+		"free",
 	);
 	// The usage's input is the whole prompt, so it is no uncached prefill without a measured read beside it.
 	deepStrictEqual(settlement.usage?.input, { kind: "measured", value: 10_000, source: "provider" });
@@ -141,7 +141,7 @@ test("a server whose usage omits cache reads is judged by its own cache_n, and i
 		settlement: { ...settlement, usage: timed ?? null },
 		structure,
 		previous: { structure, promptTokens: 9_000 },
-		pricing: { rates: null, provenance: "known_free" },
+		pricing: { rates: null, pricedBy: "free" },
 	});
 	deepStrictEqual(physics.cache.rePrefilledTokens, { kind: "measured", value: 3_000, source: "local-count" });
 	strictEqual(physics.baseline?.promptTokens, 10_000);

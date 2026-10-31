@@ -9,7 +9,7 @@ import { telemetryHub } from "../core/telemetry/hub.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall } from "../core/telemetry/producer.js";
 import type { CallStarted } from "../core/telemetry/schemas.js";
-import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
+import type { EffectivePricing } from "../domains/providers/catalog.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
 import { hasAssistantGenerationDelta } from "./generation-delta.js";
 
@@ -19,7 +19,7 @@ type Request = Pick<CallStarted, "roundKind" | "toolChoice">;
 export function createWorkerCallTelemetry(
 	context: WorkerTelemetryContext,
 	target: CallStarted["target"],
-	pricing: CostProvenance,
+	pricing: EffectivePricing["pricedBy"],
 	emit: (frame: WorkerTelemetryFrame) => void,
 ) {
 	const forwarder = createTelemetryForwarder(

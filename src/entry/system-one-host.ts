@@ -2,6 +2,7 @@ import type { CallObservation } from "../core/call-failure.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import { beginCall, processTelemetryContext } from "../core/telemetry/producer.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
+
 /**
  * What the composition root keeps between System One calls.
  *
@@ -21,6 +22,7 @@ import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/
  * keeps its own answer.
  */
 
+import { pricesCalls } from "../core/telemetry/pricing.js";
 import type { DecisionHintLines } from "../domains/middleware/decision-hints.js";
 import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
@@ -111,14 +113,14 @@ export function createSystemOneRequestAdmission(deps: {
 			if (settled) return;
 			settled = true;
 			try {
-				call?.settle(callSettlementFromMessage(message, pricing.provenance), reportedModelFromMessage(message));
+				call?.settle(callSettlementFromMessage(message, pricing.pricedBy), reportedModelFromMessage(message));
 			} finally {
 				void lease?.release();
 			}
 		};
 		try {
 			signal.throwIfAborted();
-			if (pricing.provenance === "known" || pricing.provenance === "estimated") {
+			if (pricesCalls(pricing.pricedBy)) {
 				if (deps.scheduling?.admitPaidRequest) {
 					await deps.scheduling.admitPaidRequest({ waitForRaise: false, getCeilingUsd: deps.getCeilingUsd, signal });
 				} else {

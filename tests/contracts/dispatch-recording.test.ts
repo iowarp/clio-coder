@@ -226,7 +226,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 							{
 								...call,
 								stages: { settle: 1 },
-								...callSettlementFromMessage({ stopReason: "stop", usage: { input: 5, output: 1 } }, "unknown"),
+								...callSettlementFromMessage({ stopReason: "stop", usage: { input: 5, output: 1 } }, "none"),
 							},
 							owner,
 							{ t: new Date().toISOString(), mono: 1 },
@@ -360,7 +360,7 @@ it("a worker killed mid-call keeps the calls it settled and settles its open att
 				if (index === 3) return;
 				yield frame("call.settled", call, {
 					stages: { settle: 1 },
-					...callSettlementFromMessage({ stopReason: "toolUse", usage: { input: 5, output: 1 } }, "unknown"),
+					...callSettlementFromMessage({ stopReason: "toolUse", usage: { input: 5, output: 1 } }, "none"),
 				});
 			}
 		})(),

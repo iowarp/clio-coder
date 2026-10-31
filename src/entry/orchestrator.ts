@@ -65,6 +65,7 @@ import { captureAdmits, effectiveTelemetryCapture, systemOneDatasetRecording } f
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { EventPayload } from "../core/telemetry/events.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
+import { pricesCalls } from "../core/telemetry/pricing.js";
 import { registerResearchTraceSink } from "../core/telemetry/research-trace.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
@@ -177,7 +178,12 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
-import type { CostProvenance, ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
+import type {
+	ProvidersContract,
+	ResolvedRuntimeTarget,
+	TargetDescriptor,
+	ThinkingLevel,
+} from "../domains/providers/index.js";
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	applyModelCapabilityPatch,
@@ -189,7 +195,6 @@ import {
 	isOrchestratorEligibleRuntime,
 	modelEndpointKey,
 	modelStreamUsage,
-	normalizeCostProvenance,
 	probeCapabilitiesForModel,
 	recordEndpointThroughput,
 	refineRuntimeTargetWithModelHints,
@@ -208,6 +213,7 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
+import { costProvenanceOf } from "../domains/providers/types/cost-provenance.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
 import {
 	anthropicQuotaNotice,
@@ -482,7 +488,7 @@ function applyHeadlessSettingsOverlay(
 
 interface CompactionResolution extends SideCallAuth {
 	model: EngineModel;
-	costProvenance: CostProvenance;
+	pricedBy: ResolvedRuntimeTarget["pricedBy"];
 	targetId: string;
 	runtimeId: string;
 	endpointKey: string | null;
@@ -530,7 +536,7 @@ function unpricedRunRoutes(settings: Readonly<ClioSettings>, providers: Provider
 		const runtime = target ? providers.getRuntime(target.runtime) : null;
 		const model = route.model ?? target?.defaultModel;
 		if (!target || !runtime || !model) continue;
-		if (resolveEffectivePricing(target, runtime, model).provenance === "unknown") unpriced.add(`${target.id}/${model}`);
+		if (resolveEffectivePricing(target, runtime, model).pricedBy === "none") unpriced.add(`${target.id}/${model}`);
 	}
 	return [...unpriced];
 }
@@ -628,7 +634,7 @@ function backgroundRouteFacts(
 ): BackgroundRouteFacts {
 	const pricing = resolveEffectivePricing(refined.target, refined.runtime, refined.wireModelId);
 	return {
-		provenance: pricing.provenance,
+		pricedBy: pricing.pricedBy,
 		rates: pricing.rates,
 		runtime: refined.runtime,
 		quotaProviderId: quotaProviderIdForRuntime(refined.runtimeId),
@@ -980,7 +986,7 @@ function prepareBackgroundMemoryRoute(
 						if (!(model.contextWindow > 0) || inputTokens + request.maxTokens + 64 > model.contextWindow)
 							throw new TaskMemoryBudgetSkipError("time_budget");
 					}
-					const costProvenance = normalizeCostProvenance(refined.costProvenance);
+					const costProvenance = costProvenanceOf(refined.pricedBy);
 					const sideAuth = await resolveSideCallAuth(
 						providers.auth,
 						refined.target,
@@ -1359,7 +1365,7 @@ async function resolveCompactionModel(
 	}
 	return {
 		model,
-		costProvenance: route.costProvenance,
+		pricedBy: route.pricedBy,
 		targetId: route.targetId,
 		runtimeId: route.runtime.id,
 		wireModelId: route.wireModelId,
@@ -1609,7 +1615,7 @@ async function runCompactionFlow(
 		const admitSummary = async (hold: AdmissionHold): Promise<void> => {
 			if (admission?.summaryAdmitted) return;
 			await budget?.beforeSummaryCall?.(hold);
-			if (resolved.costProvenance === "known" || resolved.costProvenance === "estimated") {
+			if (pricesCalls(resolved.pricedBy)) {
 				await admission?.scheduling?.admitPaidRequest?.({
 					waitForRaise: admission.headless !== true,
 					...(admission.getCeilingUsd ? { getCeilingUsd: admission.getCeilingUsd } : {}),
@@ -1633,7 +1639,7 @@ async function runCompactionFlow(
 								role: "compaction",
 								targetId: resolved.targetId,
 								runtimeId: resolved.runtimeId,
-								costProvenance: resolved.costProvenance,
+								pricedBy: resolved.pricedBy,
 								onSettled: (facts) => {
 									callIds.add(facts.callId);
 								},
@@ -1728,7 +1734,7 @@ async function runCompactionFlow(
 				...result.usage,
 				targetId: resolved.targetId,
 				modelId: resolved.wireModelId,
-				costProvenance: resolved.costProvenance,
+				costProvenance: costProvenanceOf(resolved.pricedBy),
 			};
 		const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
 			kind: "compactionSummary",
@@ -2678,7 +2684,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			role: "memory",
 			targetId,
 			runtimeId: runtime.id,
-			costProvenance: resolveEffectivePricing(target, runtime, modelId).provenance,
+			pricedBy: resolveEffectivePricing(target, runtime, modelId).pricedBy,
 		};
 	};
 	// Lesson gate decisions reach the operator through the transcript notice

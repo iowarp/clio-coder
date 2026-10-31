@@ -79,6 +79,9 @@ export const PricingSchema = Type.Object(
 	},
 	closed,
 );
+/** One priced amount: the USD fact and who priced it. Every cost Clio carries has this shape (#434). */
+export type Pricing = Static<typeof PricingSchema>;
+export type PricedBy = Pricing["pricedBy"];
 const target = Type.Object(
 	{
 		targetId: ExistingId,

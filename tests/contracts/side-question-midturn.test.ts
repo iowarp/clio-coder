@@ -146,7 +146,7 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 		role: "btw" as const,
 		targetId: "fixture",
 		runtimeId: "llamacpp",
-		costProvenance: "unknown" as const,
+		pricedBy: "none" as const,
 	};
 	try {
 		provider.setResponses([

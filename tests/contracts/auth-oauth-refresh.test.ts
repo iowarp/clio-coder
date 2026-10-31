@@ -249,7 +249,7 @@ describe("contracts/auth OAuth refresh", () => {
 				requestedModel: base.model,
 				reportedModel: { kind: "unknown", reason: "not-observed" },
 			},
-			"unknown",
+			"none",
 			(frame) => frames.push(frame),
 		);
 		strictEqual(frames[0]?.record.k, "process.started", "announce canonical accounting before requests start");

@@ -1,9 +1,9 @@
+import type { PricedBy } from "../../core/telemetry/schemas.js";
 import { createEngineAi, getEngineSupportedThinkingLevels } from "../../engine/ai.js";
 import type { Api, KnownProvider, Model, Usage } from "../../engine/types.js";
 import { hintCapabilities, mergeCapabilities } from "./capabilities.js";
 import { acceptsImageInput } from "./image-input.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
-import type { CostProvenance } from "./types/cost-provenance.js";
 import type { KnowledgeBaseHit } from "./types/knowledge-base.js";
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
@@ -78,9 +78,10 @@ export function listCatalogModelsForRuntime(runtimeId: string): Model<Api>[] {
 	}
 }
 
+/** The rates a target prices calls at and who stands behind them; `none` has no rates (#434). */
 export interface EffectivePricing {
 	rates: Model<Api>["cost"] | null;
-	provenance: CostProvenance;
+	pricedBy: Exclude<PricedBy, "provider">;
 }
 
 export function calculatePricingCostUsd(
@@ -154,7 +155,7 @@ export type PricingRuntime = Pick<RuntimeDescriptor, "id" | "tier">;
 
 const FREE_RATES = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
 
-/** Resolve rates and provenance together so callers cannot price from a different source. */
+/** Resolve rates and who priced them together so callers cannot price from a different source. */
 export function resolveEffectivePricing(
 	target: TargetDescriptor,
 	runtime: PricingRuntime,
@@ -169,30 +170,21 @@ export function resolveEffectivePricing(
 		};
 		return {
 			rates,
-			provenance: Object.values(rates).every((rate) => rate === 0) ? "known_free" : "known",
+			pricedBy: Object.values(rates).every((rate) => rate === 0) ? "free" : "target-rates",
 		};
 	}
-	if (target.pricing === "free") return { rates: { ...FREE_RATES }, provenance: "known_free" };
+	if (target.pricing === "free") return { rates: { ...FREE_RATES }, pricedBy: "free" };
 	// A runtime that is local by kind (LM Studio, llama.cpp, Ollama, vLLM, SGLang,
 	// Lemonade) bills nothing: 109 of 142 campaign receipts read "unknown" only
 	// because those targets declare no price. Proxies such as LiteLLM are protocol
 	// tier and can front paid cloud models, so they stay unknown until priced.
-	if (runtime.tier === "local-native") return { rates: { ...FREE_RATES }, provenance: "known_free" };
+	if (runtime.tier === "local-native") return { rates: { ...FREE_RATES }, pricedBy: "free" };
 	const catalogModel = getCatalogModelForRuntime(runtime.id, wireModelId);
-	if (!catalogModel) return { rates: null, provenance: "unknown" };
+	if (!catalogModel) return { rates: null, pricedBy: "none" };
 	return {
 		rates: structuredClone(catalogModel.cost),
-		provenance: "estimated",
+		pricedBy: "catalog",
 	};
-}
-
-/** Resolve pricing truth from the same fallback chain used for model synthesis. */
-export function resolveCostProvenance(
-	target: TargetDescriptor,
-	runtime: PricingRuntime,
-	wireModelId: string,
-): CostProvenance {
-	return resolveEffectivePricing(target, runtime, wireModelId).provenance;
 }
 
 export function getCatalogModelForRuntime(runtimeId: string, wireModelId: string): Model<Api> | undefined {

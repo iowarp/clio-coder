@@ -211,7 +211,7 @@ export function observeExternalWorkerRun(
 					const attemptId = newAttemptId();
 					const settlement = callSettlementFromMessage(
 						{ stopReason: "stop", usage: { ...observed.usage, clioExternal: { tokenUsage: "provider-reported" } } },
-						"unknown",
+						"none",
 					);
 					telemetryHub().emit(
 						"call.settled",

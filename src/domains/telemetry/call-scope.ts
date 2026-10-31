@@ -4,7 +4,7 @@ import type { AgentRole } from "../../core/telemetry/enums.js";
 import type { TelemetryCall } from "../../core/telemetry/producer.js";
 import { beginCall, processTelemetryContext } from "../../core/telemetry/producer.js";
 import type { CallSettled, CallStarted } from "../../core/telemetry/schemas.js";
-import type { CostProvenance } from "../providers/types/cost-provenance.js";
+import type { EffectivePricing } from "../providers/catalog.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "./call-facts.js";
 import type { TelemetryContract } from "./contract.js";
 import type { TelemetrySessionOrigin } from "./session-journals.js";
@@ -17,7 +17,7 @@ export interface CallJournalOptions {
 	role: AgentRole;
 	targetId: string;
 	runtimeId: string;
-	costProvenance: CostProvenance;
+	pricedBy: EffectivePricing["pricedBy"];
 	onSettled?: (facts: CallSettled) => void;
 }
 
@@ -78,9 +78,7 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 		},
 		settle(message: unknown): CallSettled | undefined {
 			if (!call || !options) return undefined;
-			return settled(
-				call.settle(callSettlementFromMessage(message, options.costProvenance), reportedModelFromMessage(message)),
-			);
+			return settled(call.settle(callSettlementFromMessage(message, options.pricedBy), reportedModelFromMessage(message)));
 		},
 		/** Time a gate as the current attempt's admission stage, so a wait reads as admission and never as a stall. */
 		async admit<T>(gate: (hold: AdmissionHold) => T | Promise<T>): Promise<T> {

@@ -173,7 +173,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 					role: "memory",
 					targetId,
 					runtimeId: "openai-compat",
-					costProvenance: "unknown",
+					pricedBy: "none",
 					onSettled: (facts) => {
 						if (session.current()?.id === origin.id) {
 							for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) live.push(call.totalTokens);

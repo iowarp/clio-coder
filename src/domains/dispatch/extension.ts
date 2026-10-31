@@ -13,6 +13,7 @@ import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
 import type { CapabilityGate } from "../middleware/capability-gate.js";
 import { isBuiltinClaudeAcp, resolveClaudeLaunchCredential } from "../providers/auth/index.js";
+import { type CostProvenance, costProvenanceOf } from "../providers/types/cost-provenance.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import {
 	compileWorkerFlowPolicy,
@@ -537,11 +538,7 @@ interface RunTokenMeter {
  * priced external CLI that reported none books $0, and calling that `known`
  * would claim a free run.
  */
-function meterCostProvenance(
-	meter: RunTokenMeter,
-	base: EffectivePricing["provenance"],
-	costUsd: number,
-): EffectivePricing["provenance"] {
+function meterCostProvenance(meter: RunTokenMeter, base: CostProvenance, costUsd: number): CostProvenance {
 	if (meter.costProvenance !== undefined) return meter.costProvenance;
 	if (base === "known_free") return base;
 	if (meter.tokenUsageMissing === true && costUsd === 0) return "unknown";
@@ -882,7 +879,7 @@ function conservativeRouteAdmissionEstimateUsd(
 	req: DispatchRequest,
 	prompt?: Pick<DispatchLifecycleStage, "systemPrompt" | "dynamicPromptMessages">,
 ): number {
-	if (pricing.provenance === "known_free") return 0;
+	if (pricing.pricedBy === "free") return 0;
 	if (pricing.rates === null) return UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD;
 	const messages = prompt?.dynamicPromptMessages ?? buildDynamicPromptMessages(req);
 	const inputTokens = Math.max(
@@ -5899,7 +5896,7 @@ export function createDispatchBundle(
 		assertTargetNotCoolingDown(req, targetId, runtimeId, wireModelId, probeClaims);
 
 		if (req.contextSeed) persistWorkerContextSeed(req.contextSeed);
-		await assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings, lifecycle);
+		await assertBudgetAdmitsRoute(req, { rates: null, pricedBy: "none" }, settings, lifecycle);
 
 		const queuedIdentity =
 			req.lineage === undefined && req.runIdHint !== undefined
@@ -8269,7 +8266,7 @@ export function createDispatchBundle(
 			heartbeatAt,
 			heartbeatStatus: "alive",
 			meter: tokenMeter,
-			costProvenance: lifecycle.target.effectivePricing.provenance,
+			costProvenance: costProvenanceOf(lifecycle.target.effectivePricing.pricedBy),
 			finalPromise,
 		};
 
@@ -8395,7 +8392,7 @@ export function createDispatchBundle(
 					callUsage?.snapshot()?.costProvenance ??
 					(externalTelemetry?.cost === "provider-reported"
 						? "known"
-						: meterCostProvenance(tokenMeter, lifecycle.target.effectivePricing.provenance, costUsd)),
+						: meterCostProvenance(tokenMeter, costProvenanceOf(lifecycle.target.effectivePricing.pricedBy), costUsd)),
 				...(externalTelemetry ? { externalTelemetry } : {}),
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
@@ -9779,7 +9776,7 @@ export function createDispatchBundle(
 				admissionMaxOutputTokens(settings),
 				req,
 			),
-			costUpperBoundKnown: target.effectivePricing.provenance !== "unknown",
+			costUpperBoundKnown: target.effectivePricing.pricedBy !== "none",
 			routeApproval: null,
 		};
 		return {

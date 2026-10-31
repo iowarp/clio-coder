@@ -1,6 +1,7 @@
 import type { BackendCompletionTimings, CacheRequestStructure } from "../../core/cache-telemetry.js";
 import { firstChangedSection, uncachedPrefillTokens } from "../../core/cache-telemetry.js";
 import type { Fact } from "../../core/telemetry/fact.js";
+import { pricedUsd } from "../../core/telemetry/pricing.js";
 import type { CallSettled } from "../../core/telemetry/schemas.js";
 import type { EffectivePricing } from "../providers/catalog.js";
 import { calculatePricingCostUsd } from "../providers/catalog.js";
@@ -63,8 +64,8 @@ function bill(
 	usage: { uncached: number | null; cacheRead: number | null; cacheWrite: number | null },
 ): NonNullable<CachePhysics["bill"]> {
 	if (rePrefilled.kind !== "measured") return { usd: rePrefilled, pricedBy: "none" };
-	if (pricing.provenance === "known_free") return { usd: counted(0), pricedBy: "free" };
-	if (pricing.rates === null || pricing.provenance === "unknown" || usage.uncached === null || usage.cacheRead === null)
+	if (pricing.pricedBy === "free") return { usd: counted(0), pricedBy: "free" };
+	if (pricing.rates === null || pricing.pricedBy === "none" || usage.uncached === null || usage.cacheRead === null)
 		return { usd: { kind: "unknown", reason: "provider-omitted" }, pricedBy: "none" };
 	// Moving the re-prefilled tokens to the cache-read rate keeps the prompt size, so a tiered rate map prices both
 	// sides on one tier and the difference is exactly tokens × (input rate − cache-read rate).
@@ -74,9 +75,7 @@ function bill(
 		0,
 		calculatePricingCostUsd(pricing.rates, actual) - calculatePricingCostUsd(pricing.rates, cached),
 	);
-	return pricing.provenance === "known"
-		? { usd: counted(usd), pricedBy: "target-rates" }
-		: { usd: { kind: "estimated", value: usd, method: "catalog" }, pricedBy: "catalog" };
+	return pricedUsd(pricing.pricedBy, usd);
 }
 
 /**

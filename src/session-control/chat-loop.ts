@@ -10,6 +10,7 @@ import {
 } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
+import { pricesCalls } from "../core/telemetry/pricing.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
@@ -1874,7 +1875,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!agentRuntime) return { ok: false, reason: notConfiguredNotice(deps.getSettings().chat) };
 		const resolution = agentRuntime.runtimeResolution;
 		try {
-			if (admitHere && (resolution.costProvenance === "known" || resolution.costProvenance === "estimated")) {
+			if (admitHere && pricesCalls(resolution.pricedBy)) {
 				await deps.scheduling?.admitPaidRequest?.({
 					waitForRaise: deps.headless !== true,
 					getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
@@ -1905,8 +1906,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const sideCallAdmission =
 		(runtime: AgentRuntime, origin: ReturnType<SessionContract["current"]>, slot: EndpointSlot, signal?: AbortSignal) =>
 		async (hold: AdmissionHold): Promise<void> => {
-			const provenance = runtime.runtimeResolution.costProvenance;
-			if (provenance === "known" || provenance === "estimated") {
+			if (pricesCalls(runtime.runtimeResolution.pricedBy)) {
 				const telemetry = telemetryContext();
 				await deps.scheduling?.admitPaidRequest?.({
 					waitForRaise: deps.headless !== true,
@@ -1955,7 +1955,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const sideCallJournal = (
 		runtime:
 			| AgentRuntime
-			| { targetId: string; runtimeId: string; costProvenance: AgentRuntime["runtimeResolution"]["costProvenance"] },
+			| { targetId: string; runtimeId: string; pricedBy: AgentRuntime["runtimeResolution"]["pricedBy"] },
 		role: CallJournalOptions["role"],
 		origin: ReturnType<SessionContract["current"]>,
 	): { telemetry?: CallJournalOptions } => {
@@ -1968,8 +1968,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						role,
 						targetId: runtime.targetId,
 						runtimeId: runtime.runtimeId,
-						costProvenance:
-							"runtimeResolution" in runtime ? runtime.runtimeResolution.costProvenance : runtime.costProvenance,
+						pricedBy: "runtimeResolution" in runtime ? runtime.runtimeResolution.pricedBy : runtime.pricedBy,
 					},
 				}
 			: {};
@@ -2275,7 +2274,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		targetId: string;
 		runtimeId: string;
 		wireModelId: string;
-		costProvenance: AgentRuntime["runtimeResolution"]["costProvenance"];
+		pricedBy: AgentRuntime["runtimeResolution"]["pricedBy"];
 		apiKey: string | undefined;
 	};
 
@@ -2299,7 +2298,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				targetId: runtime.targetId,
 				runtimeId: resolution.runtime.id,
 				wireModelId: runtime.wireModelId,
-				costProvenance: resolution.costProvenance,
+				pricedBy: resolution.pricedBy,
 				apiKey: sideAuth.apiKey,
 				...sideAuth,
 			};
@@ -2328,7 +2327,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			targetId: route.targetId,
 			runtimeId: route.runtimeId,
 			wireModelId: route.wireModelId,
-			costProvenance: route.costProvenance,
+			pricedBy: route.pricedBy,
 			apiKey: sideAuth.apiKey,
 			...sideAuth,
 		};
@@ -3150,7 +3149,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					runtimeKind: agentRuntime.runtimeResolution.runtimeKind,
 					wireModelId: agentRuntime.wireModelId,
 					autonomy: deps.getSettings().safety.autonomy,
-					costProvenance: agentRuntime.runtimeResolution.costProvenance,
+					pricedBy: agentRuntime.runtimeResolution.pricedBy,
 					compiledPromptHash: promptHash,
 					staticCompositionHash: promptHash,
 					promptSignature: promptHash,
@@ -3494,7 +3493,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							...(finalMessage ? { text: extractText(finalMessage) } : {}),
 							usage: {
 								tokens: usage.tokens,
-								costUsd: usage.hadUsage && agentRuntime.runtimeResolution.costProvenance !== "unknown" ? usage.costUsd : null,
+								costUsd: usage.hadUsage && agentRuntime.runtimeResolution.pricedBy !== "none" ? usage.costUsd : null,
 							},
 						});
 					}

@@ -149,7 +149,7 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 		role: "prewarm" as const,
 		targetId: "local",
 		runtimeId: "llamacpp",
-		costProvenance: "known_free" as const,
+		pricedBy: "free" as const,
 	};
 
 	const paths: string[] = [];

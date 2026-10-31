@@ -16,7 +16,6 @@
 
 import type { EffectivePricing } from "../providers/catalog.js";
 import { calculatePricingCostUsd } from "../providers/catalog.js";
-import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import type { RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import { primaryWindow, windowAtWarning } from "../quota/severity.js";
 import type { UsageSnapshot } from "../quota/types.js";
@@ -51,8 +50,8 @@ export const BACKGROUND_SKIP_REASONS: ReadonlySet<BackgroundSkipReason> = new Se
 ]);
 
 export interface BackgroundRouteFacts {
-	/** Provenance of the resolved pricing (`resolveEffectivePricing`). */
-	provenance: CostProvenance;
+	/** Who priced the route (`resolveEffectivePricing`). */
+	pricedBy: EffectivePricing["pricedBy"];
 	/** Resolved USD rates per million tokens, or null when nothing priced the route. */
 	rates: Pick<NonNullable<EffectivePricing["rates"]>, "input" | "output" | "tiers"> | null;
 	runtime: Pick<RuntimeDescriptor, "auth" | "tier">;
@@ -64,10 +63,10 @@ export function backgroundRouteKind(route: BackgroundRouteFacts): BackgroundRout
 	const subscription =
 		route.runtime.auth === "oauth" || route.runtime.auth === "claude-cli" || route.runtime.tier === "subscription";
 	if (subscription && route.quotaProviderId !== null) return "quota";
-	if (route.provenance === "known_free") return "local";
+	if (route.pricedBy === "free") return "local";
 	// Chat and System One admission treat a Pi catalog estimate as paid, so an
 	// api-key cloud target without declared pricing is metered here too.
-	const priced = route.provenance === "known" || route.provenance === "estimated";
+	const priced = route.pricedBy === "target-rates" || route.pricedBy === "catalog";
 	if (priced && route.rates !== null && (route.rates.input > 0 || route.rates.output > 0)) return "metered";
 	return "unpriced";
 }

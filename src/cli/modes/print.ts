@@ -14,6 +14,7 @@ import {
 } from "../../core/skill-activation.js";
 import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import { mainAgent } from "../../core/telemetry/context.js";
+import type { PricedBy } from "../../core/telemetry/pricing.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
@@ -44,7 +45,7 @@ import type {
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
-import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
+import { costProvenanceOf } from "../../domains/providers/types/cost-provenance.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import type { CostAmount } from "../../domains/telemetry/cost.js";
@@ -1098,7 +1099,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 					provenance:
 						rawUsage.estimated === true
 							? "unknown"
-							: resolveCostProvenance(rawUsage.costProvenance, chat.lastRunSnapshot?.()?.costProvenance ?? "unknown"),
+							: costProvenanceOf(
+									((typeof rawUsage.pricedBy === "string" ? rawUsage.pricedBy : undefined) as PricedBy | undefined) ??
+										chat.lastRunSnapshot?.()?.pricedBy ??
+										"none",
+								),
 					missingTokenCalls: usageSummary.missingTokenCalls ?? 0,
 				});
 				runStats.usage = runStats.usage === null ? usageSummary : addRunUsage(runStats.usage, usageSummary);

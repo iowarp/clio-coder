@@ -24,3 +24,14 @@ const COST_PROVENANCE_VALUES: ReadonlySet<string> = new Set<CostProvenance>([
 export function resolveCostProvenance(value: unknown, fallback: CostProvenance): CostProvenance {
 	return typeof value === "string" && COST_PROVENANCE_VALUES.has(value) ? (value as CostProvenance) : fallback;
 }
+
+/** Temporary seam while consumers move to `PricedBy` (#434); removed with this module. */
+export function costProvenanceOf(pricedBy: "provider" | "target-rates" | "catalog" | "free" | "none"): CostProvenance {
+	return pricedBy === "free"
+		? "known_free"
+		: pricedBy === "catalog"
+			? "estimated"
+			: pricedBy === "none"
+				? "unknown"
+				: "known";
+}

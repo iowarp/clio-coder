@@ -137,25 +137,25 @@ describe("memory guardian gate", () => {
 		const nowMs = Date.parse("2026-10-06T12:00:00.000Z");
 		const resetsAt = "2026-10-08T00:00:00.000Z";
 		const metered = {
-			provenance: "known",
+			pricedBy: "target-rates",
 			rates: { input: 3, output: 15 },
 			runtime: { auth: "api-key", tier: "cloud" },
 			quotaProviderId: null,
 		} as const;
 		const quota = {
-			provenance: "estimated",
+			pricedBy: "catalog",
 			rates: { input: 3, output: 15 },
 			runtime: { auth: "oauth", tier: "cloud" },
 			quotaProviderId: "codex",
 		} as const;
 		const local = {
-			provenance: "known_free",
+			pricedBy: "free",
 			rates: { input: 0, output: 0 },
 			runtime: { auth: "api-key", tier: "local-native" },
 			quotaProviderId: null,
 		} as const;
 		const unpriced = {
-			provenance: "unknown",
+			pricedBy: "none",
 			rates: null,
 			runtime: { auth: "api-key", tier: "protocol" },
 			quotaProviderId: null,

@@ -4,10 +4,9 @@ import { canonicalEndpointUrl } from "../core/endpoint-key.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { endpointCapacityUsage } from "../domains/dispatch/index.js";
 import { observeCacheDeployment } from "../domains/providers/cache-deployment.js";
-import { resolveEffectivePricing } from "../domains/providers/catalog.js";
+import { type EffectivePricing, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../domains/providers/endpoint-capacity.js";
-import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
 import type { CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { type PrewarmRoundResult, runPrewarmRound } from "../engine/prewarm.js";
 
@@ -17,7 +16,11 @@ interface StartupPreparation {
 	signal: AbortSignal;
 	isBusy: () => boolean;
 	/** The session journal that owns each warm's call facts, as a turn prewarm's does (#434). */
-	callJournal?: (target: string, runtime: string, costProvenance: CostProvenance) => CallJournalOptions | undefined;
+	callJournal?: (
+		target: string,
+		runtime: string,
+		pricedBy: EffectivePricing["pricedBy"],
+	) => CallJournalOptions | undefined;
 	/** Test seams; production always uses the normal engine and deployment checks. */
 	observe?: typeof observeCacheDeployment;
 	warm?: typeof runPrewarmRound;
@@ -59,8 +62,11 @@ async function warmWorkerTarget(input: StartupPreparation, status: TargetStatus,
 		input.providers.knowledgeBase?.lookup(modelId, runtime.id) ?? null,
 	);
 	const release = registerForegroundStream(deployment.endpoint);
-	const costProvenance = resolveEffectivePricing(target, runtime, modelId).provenance;
-	const telemetry = input.callJournal?.(target.id, runtime.id, costProvenance);
+	const telemetry = input.callJournal?.(
+		target.id,
+		runtime.id,
+		resolveEffectivePricing(target, runtime, modelId).pricedBy,
+	);
 	let result: PrewarmRoundResult;
 	try {
 		result = await (input.warm ?? runPrewarmRound)({

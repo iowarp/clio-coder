@@ -153,7 +153,7 @@ test("an aborted message cannot claim a send its attempt's stages never reached 
 			toolChoice: "auto" as const,
 		};
 		const ctx = { sessionId: "unsent-session", agent: { role: "memory" as const, id: "unsent-session" } };
-		const aborted = callSettlementFromMessage({ stopReason: "aborted", usage: { input: 0, output: 0 } }, "known");
+		const aborted = callSettlementFromMessage({ stopReason: "aborted", usage: { input: 0, output: 0 } }, "target-rates");
 		strictEqual(aborted.disposition, "sent_unsettled");
 		const atAuth = beginCall(started, ctx);
 		atAuth.stage("auth", "start");
@@ -166,7 +166,7 @@ test("an aborted message cannot claim a send its attempt's stages never reached 
 		strictEqual(sent.settle(aborted)?.disposition, "sent_unsettled");
 		// A path that marks no stage at all cannot tell, so the message's word stands.
 		strictEqual(beginCall(started, ctx).settle(aborted)?.disposition, "sent_unsettled");
-		const counted = callSettlementFromMessage({ stopReason: "aborted", usage: { input: 40, output: 0 } }, "known");
+		const counted = callSettlementFromMessage({ stopReason: "aborted", usage: { input: 40, output: 0 } }, "target-rates");
 		const reported = beginCall(started, ctx);
 		reported.stage("auth", "start");
 		strictEqual(reported.settle(counted)?.disposition, "sent_unsettled", "a provider's count is evidence of a send");
@@ -334,13 +334,13 @@ test("a settled breakdown keeps its measured zeros beside a larger total; only a
 	// Gemini's total also counts tool-use prompt tokens that Pi maps to no breakdown field.
 	const gemini = callSettlementFromMessage(
 		{ stopReason: "stop", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, totalTokens: 180 } },
-		"unknown",
+		"none",
 	);
 	deepStrictEqual(gemini.usage?.cacheRead, { kind: "measured", value: 0, source: "provider" });
 	deepStrictEqual(gemini.usage?.total, { kind: "measured", value: 180, source: "provider" });
 	const totalOnly = callSettlementFromMessage(
 		{ stopReason: "stop", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 500 } },
-		"unknown",
+		"none",
 	);
 	strictEqual(totalOnly.usage?.input.kind, "unknown");
 	deepStrictEqual(totalOnly.usage?.total, { kind: "measured", value: 500, source: "provider" });
@@ -348,12 +348,12 @@ test("a settled breakdown keeps its measured zeros beside a larger total; only a
 
 test("message facts preserve unknown placeholders, explicit zero, terminal errors and unsent calls", () => {
 	const usage = { input: 0, output: 0, cacheRead: 0, cost: { total: 0 } };
-	const omitted = callSettlementFromMessage({ stopReason: "stop", usage }, "unknown");
+	const omitted = callSettlementFromMessage({ stopReason: "stop", usage }, "none");
 	strictEqual(omitted.disposition, "settled_no_usage");
 	strictEqual(omitted.usage?.input.kind, "unknown");
 	const unverified = callSettlementFromMessage(
 		{ stopReason: "stop", usage: { input: 123, clioExternal: { tokenUsage: "unverified" } } },
-		"unknown",
+		"none",
 	);
 	strictEqual(unverified.usage?.input.kind, "unknown");
 	const zero = callSettlementFromMessage(
@@ -361,26 +361,26 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 			stopReason: "stop",
 			usage: { ...usage, clioExternal: { tokenUsage: "provider-reported", cost: "provider-reported" } },
 		},
-		"known",
+		"target-rates",
 	);
 	strictEqual(zero.disposition, "settled");
 	deepStrictEqual(zero.usage?.input, { kind: "measured", value: 0, source: "provider" });
 	deepStrictEqual(zero.pricing.usd, { kind: "measured", value: 0, source: "provider" });
 	for (const marker of [{ callInvoked: false }, { failure: { invoked: false } }, { usage: { callInvoked: false } }]) {
-		const unsent = callSettlementFromMessage({ stopReason: "aborted", usage, ...marker }, "known_free");
+		const unsent = callSettlementFromMessage({ stopReason: "aborted", usage, ...marker }, "free");
 		strictEqual(unsent.disposition, "never_sent");
 		strictEqual(unsent.usage, null);
 		strictEqual(unsent.pricing.usd.kind, "absent");
 	}
 	const error = callSettlementFromMessage(
 		{ stopReason: "error", failure: { httpStatus: 429 }, usage: { input: 5 } },
-		"unknown",
+		"none",
 	);
 	strictEqual(error.disposition, "settled");
 	strictEqual(error.stop.failure, "rate_limited");
 	const dropped = callSettlementFromMessage(
 		{ stopReason: "aborted", responseId: "response", usage: { input: 5 } },
-		"known",
+		"target-rates",
 	);
 	strictEqual(dropped.disposition, "sent_unsettled");
 	// What the provider reported before the stream ended is a measured lower bound; its zeros stay unknown.
@@ -412,7 +412,7 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 					fallbackActive: false,
 				},
 			},
-			"unknown",
+			"none",
 		).transport;
 	// Pi's per-session counters attribute continuation and reuse to one exclusive call; a delta frame's bytes are not
 	// the payload's, and an overlapping stream proves nothing about either (#434).
@@ -449,7 +449,7 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 				cooldownMs: 30000,
 			},
 		},
-		"unknown",
+		"none",
 	).transport;
 	deepStrictEqual(
 		[pinned.kind, pinned.sessionPinnedToSse, pinned.websocketFailures, pinned.sseFallbacks, pinned.pinReason],
@@ -465,7 +465,7 @@ test("message facts preserve unknown placeholders, explicit zero, terminal error
 	strictEqual(
 		callSettlementFromMessage(
 			{ stopReason: "error", failure: { stage: "provider", errorClass: "provider_error" } },
-			"unknown",
+			"none",
 		).disposition,
 		"sent_unsettled",
 		"a legacy prose classifier is not proof of a terminal provider response",

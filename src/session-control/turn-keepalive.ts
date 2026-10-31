@@ -15,6 +15,7 @@
  * call, and recorded on the session ledger with its economics.
  */
 
+import { pricesCalls } from "../core/telemetry/pricing.js";
 import type { CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
 import {
@@ -155,8 +156,7 @@ export function createTurnKeepalive(deps: TurnKeepaliveDeps): TurnKeepalive {
 		const phase: KeepalivePhase = deps.hasAttachedDispatch() ? "fleet" : "tools";
 		const horizon = phase === "fleet" ? KEEPALIVE_FLEET_HORIZON_MS : KEEPALIVE_TOOL_HORIZON_MS;
 		if (now() - current.startedAt > horizon) return stop("horizon");
-		const provenance = current.runtime.runtimeResolution.costProvenance;
-		if (provenance !== "known" && provenance !== "estimated") return stop("economics-unavailable");
+		if (!pricesCalls(current.runtime.runtimeResolution.pricedBy)) return stop("economics-unavailable");
 		// The turn is waiting on its own tools, so its next request is certain; only its timing is not.
 		const economics = cacheKeepaliveEconomics(current.request.model, current.promptTokens, current.outputTokens, 1);
 		if (!economics.available) return stop("economics-unavailable");

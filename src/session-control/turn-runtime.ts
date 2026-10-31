@@ -2,6 +2,7 @@ import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
 import { mainAgent } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
+import { pricesCalls } from "../core/telemetry/pricing.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall, telemetryCaptures } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
@@ -766,7 +767,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const settlement = withCachePhysics(
 					callSettlementFromMessage(
 						message,
-						localRuntime.runtimeResolution.costProvenance,
+						localRuntime.runtimeResolution.pricedBy,
 						message.role === "assistant" && message.stopReason === "aborted" && state.activeInterruptByOperator
 							? "operator_cancel"
 							: undefined,
@@ -985,7 +986,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const settlement = withCachePhysics(
 							callSettlementFromMessage(
 								{ ...message, ...(failure ? { failure } : {}) },
-								localRuntime.runtimeResolution.costProvenance,
+								localRuntime.runtimeResolution.pricedBy,
 							),
 							message,
 						);
@@ -1050,11 +1051,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						block: true,
 						reason: `Context window exceeded: input ${input} + output ${output}, window ${view.effectiveWindow ?? "unknown"}.`,
 					};
-				if (
-					deps.scheduling &&
-					(localRuntime.runtimeResolution.costProvenance === "known" ||
-						localRuntime.runtimeResolution.costProvenance === "estimated")
-				) {
+				if (deps.scheduling && pricesCalls(localRuntime.runtimeResolution.pricedBy)) {
 					const recordBlock = (block: BudgetAlertPayload): void => {
 						hold.waitedOn = "budget";
 						persistence.appendBudgetBlock({
@@ -1537,13 +1534,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				} else {
 					Object.assign(message, { callInvoked: apiCallStartedAt !== null || responseObserved });
 				}
-				const costProvenance = !observed
-					? "unknown"
+				const pricedBy = !observed
+					? "none"
 					: (usage.clioExternal as { cost?: string } | undefined)?.cost === "provider-reported"
-						? "known"
-						: localRuntime.runtimeResolution.costProvenance;
+						? "provider"
+						: localRuntime.runtimeResolution.pricedBy;
 				Object.assign(message, {
-					callAccounting: { usageObserved: observed, costProvenance, targetId: localRuntime.targetId },
+					callAccounting: { usageObserved: observed, pricedBy, targetId: localRuntime.targetId },
 				});
 				const gatewayRouting = gatewayRoutingObservationFromRecord(
 					enrichedEvent.message as unknown as Record<string, unknown>,
