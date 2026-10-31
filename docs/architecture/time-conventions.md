@@ -125,7 +125,7 @@ structured logs, session records, and receipts bypass these formatters.
 ## 3. Receipt and audit integrity
 
 Persisted receipt fields such as `startedAt` and `endedAt` participate in the
-integrity digest owned by [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts). Timestamp
+integrity digest owned by [seal.ts](../../src/domains/telemetry/seal.ts). Timestamp
 normalization and duration derivation must finish before sealing. A sealed
 receipt must not be rewritten merely to make its clocks look tidier.
 

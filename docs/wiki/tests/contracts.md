@@ -196,7 +196,7 @@ The receipt system provides a durable, tamper-evident account of every dispatch 
 - **`tests/harness/run-journal.ts`**: provides `readRunJournal(stateDir)` which reads the run ledger (`runs.json`) and the receipts directory under `stateDir`, returning a `RunJournal` with envelopes keyed by run id and all parsed receipts.
 - **`tests/harness/headless-run.ts`**: provides `headlessScratch(prefix)` which creates a scratch home initialized by `doctor --fix`, `runCli(args, options)` which spawns the built CLI with a timeout, and `sealedReceipt(stateDir)` which reads the run journal, finds the single receipt, verifies its integrity against the ledger row, and returns both.
 
-The receipt integrity check is performed by `verifyReceiptIntegrity(receipt, envelope)` from `src/domains/dispatch/receipt-integrity.ts`. The test `tests/contracts/acp-receipt-tool-truth.test.ts` demonstrates the receipt capture flow: it dispatches a run against an ACP peer that emits tool call and tool result frames, and asserts that the sealed receipt records the tool kinds (`edit`, `execute`), completed spans, mutations, and safety decisions.
+The receipt integrity check is performed by `verifyReceiptIntegrity(receipt, envelope)` from `src/domains/telemetry/seal.ts`. The test `tests/contracts/acp-receipt-tool-truth.test.ts` demonstrates the receipt capture flow: it dispatches a run against an ACP peer that emits tool call and tool result frames, and asserts that the sealed receipt records the tool kinds (`edit`, `execute`), completed spans, mutations, and safety decisions.
 
 ## Boundary enforcement
 

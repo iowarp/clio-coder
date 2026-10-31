@@ -385,7 +385,7 @@ Clio Coder uses in-process event buses for status and audit surfaces, but safety
 - [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Playbook step write boundaries are detect-and-rollback mechanisms (change tracking and rollbacks) with no OS-level confinement. The policy engine blocks writes outside dispatch `write_roots`.
 - The OS sandbox (`safety.sandbox`, `src/core/sandbox/`) contains shell commands in two places. A dispatched worker's own `bash`, `run_script` and verification commands run in the worker sandbox, bound to its write roots. At autonomy `default` the main session's `bash` and `run_script` also run contained in the main-session sandbox, which writes the workspace, the temp roots and `safety.scratchRoots`. Credential variables and secret files are hidden inside either sandbox, and `safety.sandboxUnixSockets: block` refuses new Unix-domain sockets.
 - [registry.ts](../../src/tools/registry.ts) is the admission point for every tool invocation.
-- [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts) and related dispatch files persist receipts used by evidence and cost surfaces.
+- [seal.ts](../../src/domains/telemetry/seal.ts) and related dispatch files persist receipts used by evidence and cost surfaces.
 
 ## Interactive render transactions
 

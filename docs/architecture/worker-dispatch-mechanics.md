@@ -312,7 +312,7 @@ A provider context overflow is `deterministic-task`, but it earns one reversible
 
 ### 5.2 Canonical Receipt Integrity Serialization
 
-Receipts carry the current integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 21`). Verification computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts)). The digest covers the receipt fields and a labelled commitment to the run-ledger projection, so a receipt whose ledger row the ring evicted still verifies and reports verified (ledger evicted). A pre-v21 receipt is retired and cannot be read as current evidence; a malformed or digest-mismatched v21 receipt is invalid.
+Receipts carry the current integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 21`). Verification computes a cryptographic SHA-256 digest over a strictly sorted, canonical JSON representation (`serializeCanonical` in [seal.ts](../../src/domains/telemetry/seal.ts)). The digest covers the receipt fields and a labelled commitment to the run-ledger projection, so a receipt whose ledger row the ring evicted still verifies and reports verified (ledger evicted). A pre-v21 receipt is retired and cannot be read as current evidence; a malformed or digest-mismatched v21 receipt is invalid.
 
 - **Object Key Sorting**: Keys are sorted lexicographically before serialization (`Object.keys(obj).sort()`).
 - **Strict Primitive Handling**: `undefined` object properties are omitted; non-finite numbers (`NaN`, `Infinity`) or `bigint` throw an explicit serialization error.

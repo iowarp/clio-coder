@@ -98,7 +98,7 @@ A call to `dispatch(req)` follows this path:
 
 5. **Event pump.** `startDispatchEventPump` in `src/domains/dispatch/event-pump.ts` reads the worker's NDJSON stdout stream. The pump folds events into the `RunEnvelope` (token meters, tool stats, steering provenance, finish-contract entries) and collects tool-call statistics via `recordToolStart`/`recordToolFinish` in `tool-stats.ts`.
 
-6. **Finalization.** `resolveRunOutcome` in `src/domains/dispatch/outcome.ts` resolves the terminal `RunOutcome` from the worker's exit code, heartbeat status, and termination evidence. The receipt is sealed via `withReceiptIntegrity` in `src/domains/dispatch/receipt-integrity.ts`, which computes the sha256 digest over the receipt's canonical JSON payload.
+6. **Finalization.** `resolveRunOutcome` in `src/domains/dispatch/outcome.ts` resolves the terminal `RunOutcome` from the worker's exit code, heartbeat status, and termination evidence. The receipt is sealed via `withReceiptIntegrity` in `src/domains/telemetry/seal.ts`, which computes the sha256 digest over the receipt's canonical JSON payload.
 
 7. **Ledger write.** `writeFleetRun` in `src/domains/dispatch/state.ts` appends the `RunEnvelope` to the `runs.json` ledger and writes the sealed `RunReceipt` to `receipts/<runId>.json`.
 

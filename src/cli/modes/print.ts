@@ -1119,9 +1119,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			safety: {
 				decisions: { ...runStats.decisions },
 				blockedAttempts: [...runStats.blockedAttempts],
-				...(runStats.blockedAttemptsTruncated > 0
-					? { blockedAttemptsTruncated: runStats.blockedAttemptsTruncated }
-					: {}),
+				...(runStats.blockedAttemptsTruncated > 0 ? { blockedAttemptsTruncated: runStats.blockedAttemptsTruncated } : {}),
 			},
 		});
 	}

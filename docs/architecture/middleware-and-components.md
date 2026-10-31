@@ -44,7 +44,7 @@ Each `HarnessComponent` has `id` (`<kind>:<path>`), `kind`, `path` (repository-r
 | `safety-rule-pack` | one component per pack in `damage-control-rules.yaml`, id `safety-rule-pack:<pack id>`; a version 1 file is the single pack `base` | enforcing | `restart-required` |
 | `config-schema` | [defaults.ts](../../src/core/defaults.ts), [config.ts](../../src/core/config.ts) | runtime-critical | `restart-required` |
 | `session-schema` | [entries.ts](../../src/domains/session/entries.ts), [contract.ts](../../src/domains/session/contract.ts), [session.ts](../../src/engine/session.ts) | runtime-critical | `restart-required` |
-| `receipt-schema` | [types.ts](../../src/domains/dispatch/types.ts), [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts) | runtime-critical | `restart-required` |
+| `receipt-schema` | [types.ts](../../src/domains/dispatch/types.ts), [seal.ts](../../src/domains/telemetry/seal.ts) | runtime-critical | `restart-required` |
 | `context-file` | `CLIO-CODER.md`, `CONTRIBUTING.md`, `SECURITY.md` at the root | advisory | `hot` |
 | `doc-spec` | `docs/specs/**/*.md` | descriptive | `static` |
 | `middleware` | reserved, never emitted | enforcing | `restart-required` |

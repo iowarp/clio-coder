@@ -8,6 +8,8 @@ import type { RunResultObject, RunSettled } from "../../core/telemetry/schemas.j
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../agents/result-contract.js";
 import { runContextProvenance } from "../evidence/trust-status.js";
 import { redactSecretString } from "../safety/redaction.js";
+import { telemetryObjectRef } from "../telemetry/objects.js";
+import { runSettledDigest } from "../telemetry/run-digest.js";
 import {
 	formatBudgetPolicy,
 	formatBudgetReasons,
@@ -15,16 +17,14 @@ import {
 	formatEffectiveBudget,
 } from "./budget-envelope.js";
 import type { ResolvedTerminalReason } from "./outcome.js";
+import { computeReceiptFindingsSummary } from "./receipt-findings.js";
+import { labelledRunHashes, undeclaredReceiptHashes } from "./receipt-hashes.js";
+import { routeConstraintValidity } from "./route-decision.js";
+import { defaultRoutingIntent, type RoutingIntent } from "./routing-intent.js";
 import type { RunUsageFacts } from "./run-call-usage.js";
 import { unobservedRunUsageFacts } from "./run-call-usage.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "./run-upstream.js";
-import { routeConstraintValidity } from "./route-decision.js";
-import { defaultRoutingIntent, type RoutingIntent } from "./routing-intent.js";
 import type { RunEnvelope, RunOutcome, RunResult, RunResultDraft } from "./types.js";
-import { computeReceiptFindingsSummary } from "./receipt-findings.js";
-import { labelledRunHashes, undeclaredReceiptHashes } from "./receipt-hashes.js";
-import { telemetryObjectRef } from "../telemetry/objects.js";
-import { runSettledDigest } from "../telemetry/run-digest.js";
 
 /** The facts and the object a run settles with; the journal adds the object's reference as `result`. */
 export interface RunSettlement {
@@ -382,7 +382,9 @@ export function finishRunResult(
 	const undeclared = undeclaredReceiptHashes(draft, draft.agentId);
 	if (undeclared.length > 0) throw new Error(`run ${draft.runId} carries undeclared hashes ${undeclared.join(", ")}`);
 	const sealed: RunResultDraft =
-		draft.findingsSummary === undefined ? { ...draft, findingsSummary: computeReceiptFindingsSummary(draft, row) } : draft;
+		draft.findingsSummary === undefined
+			? { ...draft, findingsSummary: computeReceiptFindingsSummary(draft, row) }
+			: draft;
 	const settlement = settleFinishedRun(sealed, input);
 	const record = runSettledRecord(settlement, telemetryObjectRef("run-result", settlement.result));
 	return {

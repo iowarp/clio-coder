@@ -165,23 +165,3 @@ export function resolveRunTerminalReason(
 	if (evidence.permissionFailure || evidence.exitCode !== 0) return { terminalReason: "worker_failed" };
 	return { terminalReason: "completed" };
 }
-
-/** A main-agent run has no worker loop evidence beyond its resolved outcome (#434). */
-export function terminalReasonForOutcome(outcome: RunOutcome): RunTerminalReason {
-	switch (outcome) {
-		case "succeeded":
-			return "completed";
-		case "canceled":
-			return "cancelled_by_operator";
-		case "timed_out":
-			return "bound_reached";
-		case "stalled":
-			return "stalled";
-		case "denied_by_policy":
-			return "denied_by_policy";
-		case "spawn_failed":
-			return "spawn_error";
-		case "failed":
-			return "worker_failed";
-	}
-}
