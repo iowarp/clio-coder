@@ -224,7 +224,7 @@ function costText(receipt: RunReceipt): string {
 /**
  * A feed line in words. The structured facts the workers dashboard reads say
  * the same thing here in one line: a call as its tool and descriptor with its
- * outcome, coalesced prose as the assistant's, a model call as its tokens.
+ * outcome, coalesced prose as the assistant's.
  */
 function eventTranscriptLine(line: Extract<RunEventJournalLine, { kind: "event" }>): RunViewTranscriptLine {
 	const detail = line.detail === undefined ? undefined : sanitizeBounded(line.detail, DETAIL_MAX_WIDTH);
@@ -248,11 +248,6 @@ function eventTranscriptLine(line: Extract<RunEventJournalLine, { kind: "event" 
 				detail: `${call}${reason}` || undefined,
 			};
 		}
-		case "message_end":
-			if (line.tokens !== undefined) {
-				return { at: line.at, label: `model call (${line.tokens} tokens)`, detail };
-			}
-			break;
 	}
 	return { at: line.at, label: sanitizeBounded(line.type, 64), detail };
 }

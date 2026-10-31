@@ -1,5 +1,4 @@
 import type { ToolRoundRecord } from "../../engine/types.js";
-import { readToolRounds } from "./types.js";
 /**
  * Run event journal: the display feed in a run's telemetry journal.
  *
@@ -36,11 +35,9 @@ import { readToolRounds } from "./types.js";
 
 import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { normalizeClioCoderEventType } from "../../core/naming-events.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import type { CallUsage } from "../../core/token-split.js";
-import { normalizeCallUsage } from "../../core/token-split.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { ToolAuditFacts } from "../../tools/agent-tools.js";
 import { TELEMETRY_JOURNAL_FILE, telemetryJournalFiles, telemetryRunsDirectory } from "../telemetry/index.js";
@@ -307,119 +304,28 @@ export function parseToolAuditFacts(value: unknown): ToolAuditFacts | undefined 
 	return audit;
 }
 
-function journalFacts(record: Record<string, unknown>): RunEventJournalFacts {
-	const text = (value: unknown): value is string => typeof value === "string" && value.length > 0;
-	const count = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
-	const outcome = record.outcome;
-	const toolRounds = readToolRounds(record);
-	const audit = parseToolAuditFacts(record.audit);
-	const usage =
-		record.usage && typeof record.usage === "object" && !Array.isArray(record.usage)
-			? (record.usage as Record<string, unknown>)
-			: undefined;
-	return {
-		...(audit ? { audit } : {}),
-		...(toolRounds.length > 0 ? { toolRounds } : {}),
-		...(count(record.callIndex) && Number.isSafeInteger(record.callIndex) && record.callIndex > 0
-			? { callIndex: record.callIndex }
-			: {}),
-		...(usage
-			? { usage: normalizeCallUsage({ ...usage, estimated: usage.estimated === true || usage.observed === false }) }
-			: {}),
-		...(record.usageScope === "call" || record.usageScope === "run-aggregate" ? { usageScope: record.usageScope } : {}),
-		...(text(record.tool) ? { tool: record.tool } : {}),
-		...(text(record.callId) ? { callId: record.callId } : {}),
-		...(text(record.verb) ? { verb: record.verb } : {}),
-		...(outcome === "ok" || outcome === "error" || outcome === "blocked" ? { outcome } : {}),
-		...(count(record.durationMs) ? { durationMs: record.durationMs } : {}),
-		...(text(record.reason) ? { reason: record.reason } : {}),
-		...(count(record.tokens) ? { tokens: record.tokens } : {}),
-	};
-}
+const UNREADABLE = { line: null, record: null } as const;
 
 /** One journal line, read defensively: null for anything malformed or of an unknown kind. */
 function parseRunEventJournalLine(raw: string): RunEventJournalLine | null {
 	return readRunEventJournalLine(raw).line;
 }
 
-const UNREADABLE = { line: null, record: null } as const;
-
 /**
  * One journal line, scanned once: the feed line it holds, or the telemetry record beside the feed, such as a call's
- * start or settlement, that is no feed line. Both are null for anything malformed (#434).
+ * start or settlement, that is no feed line. Both are null for anything malformed or not framed (#434).
  */
 export function readRunEventJournalLine(raw: string): {
 	line: RunEventJournalLine | null;
 	record: TelemetryRecord | null;
 } {
-	let parsed: unknown;
 	try {
-		if (raw.includes("\t#")) {
-			const row = scanTelemetrySegment(Buffer.from(`${raw}\n`)).rows[0];
-			if (row?.kind !== "record") return UNREADABLE;
-			if (row.record.k !== "run.feed_appended") return { line: null, record: row.record };
-			parsed = { ...row.record.data.body, seq: row.record.data.seq, at: row.record.t };
-		} else parsed = JSON.parse(raw);
+		const row = scanTelemetrySegment(Buffer.from(`${raw}\n`)).rows[0];
+		if (row?.kind !== "record") return UNREADABLE;
+		if (row.record.k !== "run.feed_appended") return { line: null, record: row.record };
+		return { line: { ...row.record.data.body, seq: row.record.data.seq, at: row.record.t }, record: null };
 	} catch {
 		return UNREADABLE;
-	}
-	return { line: feedLine(parsed), record: null };
-}
-
-function feedLine(parsed: unknown): RunEventJournalLine | null {
-	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-	const record = parsed as Record<string, unknown>;
-	if (typeof record.seq !== "number" || typeof record.at !== "string" || typeof record.kind !== "string") return null;
-	switch (record.kind) {
-		case "open":
-			if (typeof record.runId !== "string" || typeof record.agentId !== "string") return null;
-			return { seq: record.seq, at: record.at, kind: "open", runId: record.runId, agentId: record.agentId };
-		case "event": {
-			if (typeof record.type !== "string") return null;
-			const detail = typeof record.detail === "string" ? record.detail : undefined;
-			return {
-				seq: record.seq,
-				at: record.at,
-				kind: "event",
-				type: normalizeClioCoderEventType(record.type),
-				...(detail === undefined ? {} : { detail }),
-				...journalFacts(record),
-			};
-		}
-		case "journal_truncated":
-			return {
-				seq: record.seq,
-				at: record.at,
-				kind: "journal_truncated",
-				reason: typeof record.reason === "string" ? record.reason : "unknown",
-				droppedFromSeq: typeof record.droppedFromSeq === "number" ? record.droppedFromSeq : record.seq,
-			};
-		case "receipt": {
-			if (typeof record.outcome !== "string") return null;
-			return {
-				seq: record.seq,
-				at: record.at,
-				kind: "receipt",
-				outcome: record.outcome,
-				exitCode: typeof record.exitCode === "number" ? record.exitCode : null,
-				...(typeof record.digest === "string" ? { digest: record.digest } : {}),
-				...(typeof record.receiptPath === "string" ? { receiptPath: record.receiptPath } : {}),
-				...(typeof record.attemptRunId === "string" ? { attemptRunId: record.attemptRunId } : {}),
-			};
-		}
-		case "terminal": {
-			if (typeof record.outcome !== "string") return null;
-			const detail = typeof record.detail === "string" ? record.detail : undefined;
-			return {
-				seq: record.seq,
-				at: record.at,
-				kind: "terminal",
-				outcome: record.outcome,
-				...(detail === undefined ? {} : { detail }),
-			};
-		}
-		default:
-			return null;
 	}
 }
 

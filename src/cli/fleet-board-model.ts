@@ -34,7 +34,7 @@ import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { trustStateWord, trustVerdictWord, validationClause } from "../domains/evidence/trust-projection.js";
 import { retiredIntegrityVersionOf } from "../domains/evidence/trust-status.js";
 import { costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/cost.js";
-import { addGroup, emptyFactSum, foldFacts, foldRunJournal, sumFactSums } from "../domains/telemetry/folds.js";
+import { foldFacts, foldRunJournal, sumFactSums } from "../domains/telemetry/folds.js";
 import { READ_MODEL_FOLD, runTokenCount } from "../domains/telemetry/read-model.js";
 
 /** Lines the feed's writer dropped or this reader skipped: calls whose tokens the fold never saw. */
@@ -158,8 +158,6 @@ interface FoldCursor {
 	paragraphBreak: boolean;
 	/** The journal's call and run-usage records, which the read model folds into the run's tokens. */
 	callRecords: TelemetryRecord[];
-	/** The feed's model calls, read only when the journal holds no call records. */
-	feedTokens: FactSum | undefined;
 	fold: RunFold;
 }
 
@@ -198,7 +196,6 @@ function newCursor(path: string): FoldCursor {
 		pendingById: new Map(),
 		paragraphBreak: true,
 		callRecords: [],
-		feedTokens: undefined,
 		fold: emptyFold(),
 	};
 }
@@ -280,14 +277,8 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunEventJournalLine, { kin
 		}
 		case "clio_coder_tool_finish": {
 			cursor.paragraphBreak = true;
-			// Journals written before the feed carried facts spell the finish as
-			// `<tool> <outcome>` in the detail and nothing else.
-			const legacy = line.tool === undefined ? detail.split(" ") : null;
-			const tool = line.tool ?? legacy?.[0] ?? "tool";
-			const legacyOutcome = legacy?.[1];
-			const outcome =
-				line.outcome ??
-				(legacyOutcome === "ok" || legacyOutcome === "error" || legacyOutcome === "blocked" ? legacyOutcome : undefined);
+			const tool = line.tool ?? "tool";
+			const outcome = line.outcome;
 			let row = line.callId !== undefined ? cursor.pendingById.get(line.callId) : undefined;
 			if (line.callId !== undefined) cursor.pendingById.delete(line.callId);
 			row ??= lastPendingFor(fold, tool);
@@ -296,7 +287,7 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunEventJournalLine, { kin
 				row = pushRow(cursor, {
 					at: line.at,
 					kind: "tool",
-					text: legacy === null ? detail : "",
+					text: detail,
 					tool,
 					...(line.verb !== undefined ? { verb: line.verb } : {}),
 				});
@@ -312,17 +303,7 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunEventJournalLine, { kin
 		}
 		case "message_end":
 			cursor.paragraphBreak = true;
-			// A model call's end carries its usage; its tokens only when the provider reported them.
-			if (line.tokens !== undefined || line.usage !== undefined) {
-				cursor.feedTokens ??= emptyFactSum();
-				addGroup(cursor.feedTokens, [
-					line.tokens !== undefined
-						? { kind: "measured", value: line.tokens, source: "provider" }
-						: { kind: "unknown", reason: "provider-omitted" },
-				]);
-			}
-			// Only a message that streamed no prose carries its text here (an ACP
-			// peer, or a journal from before the feed coalesced deltas).
+			// Only a message that streamed no prose carries its text here (an ACP peer).
 			if (detail.length > 0) {
 				appendText(cursor, line.at, detail);
 				cursor.paragraphBreak = true;
@@ -354,15 +335,6 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunEventJournalLine, { kin
 		case "agent_end":
 			fold.current = null;
 			fold.phase = "waiting";
-			return;
-		// Written by journals from before the feed; the richer lines cover them.
-		case "tool_execution_start":
-		case "tool_execution_update":
-		case "tool_execution_end":
-		case "message_start":
-		case "turn_start":
-		case "turn_end":
-		case "text_delta":
 			return;
 		default:
 			if (detail.length > 0) pushRow(cursor, { at: line.at, kind: "note", text: `${line.type}: ${detail}` });
@@ -448,7 +420,6 @@ function advance(cursor: FoldCursor): FoldCursor {
 	}
 	if (current.callRecords.length > recordsBefore)
 		current.fold.tokens = foldRunJournal(current.callRecords, READ_MODEL_FOLD).totalTokens;
-	else if (current.callRecords.length === 0) current.fold.tokens = current.feedTokens;
 	return current;
 }
 

@@ -1,11 +1,11 @@
 import { ok, strictEqual, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
-import { readRunEventJournal, runEventJournalRoot } from "../../src/domains/dispatch/run-event-journal.js";
+import { runEventJournalRoot } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry, settleOrphanedRunJournal } from "../../src/domains/dispatch/run-telemetry.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import { appendTurn, persistSessionMeta, resumeSessionState, startSession } from "../../src/domains/session/manager.js";
@@ -61,24 +61,13 @@ describe("session durability boundary", () => {
 		strictEqual((entries[2] as { turnId?: string }).turnId, "t2");
 	});
 
-	it("normalizes released event ids while leaving session and journal history unchanged", () => {
+	it("normalizes released event ids while leaving session history unchanged", () => {
 		const sessionPath = join(scratch.dir, "legacy-session.jsonl");
 		const sessionLine = '{"type":"event","event":{"type":"clio_tool_start","payload":{"tool":"read"}}}\n';
 		writeFileSync(sessionPath, sessionLine, "utf8");
 		const [sessionEntry] = readSessionFileEntries(sessionPath) as Array<{ event?: { type?: string } }>;
 		strictEqual(sessionEntry?.event?.type, "clio_coder_tool_start");
 		strictEqual(readFileSync(sessionPath, "utf8"), sessionLine);
-
-		const journalRoot = join(scratch.dir, "runs");
-		const journalDir = join(journalRoot, "legacy-run");
-		mkdirSync(journalDir, { recursive: true });
-		const journalLine =
-			'{"seq":1,"at":"2026-09-01T00:00:00.000Z","kind":"event","type":"clio_tool_finish","detail":"read ok"}\n';
-		writeFileSync(join(journalDir, "journal.jsonl"), journalLine, "utf8");
-		const journal = readRunEventJournal("legacy-run", { root: journalRoot });
-		strictEqual(journal.lines[0]?.kind, "event");
-		strictEqual(journal.lines[0]?.kind === "event" ? journal.lines[0].type : null, "clio_coder_tool_finish");
-		strictEqual(readFileSync(join(journalDir, "journal.jsonl"), "utf8"), journalLine);
 		strictEqual(
 			runTailEntryFromEvent({ type: "clio_tool_finish", payload: { tool: "read", outcome: "ok" } })?.type,
 			"clio_coder_tool_finish",
