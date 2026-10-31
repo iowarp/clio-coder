@@ -6,15 +6,15 @@ import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.j
  * index section below for why a root cannot be rendered as a run.
  *
  * A read-only viewer for one dispatched run, built from durable state only:
- * the run ledger envelope, the run event journal
- * (src/domains/dispatch/run-event-journal.ts), and the run's sealed record once
+ * the run ledger envelope, the run's display feed
+ * (src/domains/dispatch/run-feed.ts), and the run's sealed record once
  * it settles. It shares no memory with the orchestrator, has zero dependency on any
  * pane host, and works over a plain SSH session.
  *
  * Everything the viewer prints comes from `renderRunView`, a pure function over
  * a `RunViewModel`. `--follow` paints that same output into an alternate screen
- * and re-polls the journal at the monitor tool's `WAIT_POLL_MS` cadence until
- * the journal's terminal line lands; it then stays open until `q`. Without
+ * and re-polls the feed at the monitor tool's `WAIT_POLL_MS` cadence until
+ * the feed's terminal line lands; it then stays open until `q`. Without
  * `--follow` the snapshot goes to stdout and the process exits.
  *
  * Trust rules the render obeys:
@@ -38,11 +38,7 @@ import { readSettings } from "../core/config.js";
 import type { RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { clioStateDir, resetXdgCache } from "../core/xdg.js";
 import type { ExecutionStepResult } from "../domains/dispatch/execution-scheduler.js";
-import {
-	type RunEventJournalLine,
-	readRunEventJournal,
-	runEventJournalPath,
-} from "../domains/dispatch/run-event-journal.js";
+import { type RunFeedLine, readRunFeed, runFeedPath } from "../domains/dispatch/run-feed.js";
 import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
@@ -61,7 +57,7 @@ clio-coder fleet view <runId> --json [--all]
 clio-coder fleet view --watch <selection-file> [--dock-taps <file>] [--all]
 
 Follow one dispatched run from its durable state: the run ledger entry, the
-run event journal, and the run's sealed record once it settles.
+run's display feed, and the run's sealed record once it settles.
 
 Once the run's seal verifies, the snapshot also names the model the run
 requested next to the models the providers reported, the cost with its pricing
@@ -78,9 +74,9 @@ provenance, and the label the route settled with.
   --all        allow inspection across every project (default: this project)
 
 Without --follow the current snapshot is printed and the command exits.
-The transcript comes from <state>/telemetry/runs/<runId>/journal.jsonl, which the
-orchestrator writes when fleet.history.journal is on (the default). A run dispatched
-with the journal off shows its ledger and run record but no transcript.
+The transcript comes from <state>/runs/<runId>/feed.jsonl, which the orchestrator
+writes when fleet.history.journal is on (the default). A run dispatched with it
+off shows its ledger and run record but no transcript.
 
 Given the fleet root id that \`fleet run\` prints (fleet-<hex>), this prints the
 run's step index instead: one line per step with its run id and outcome. Pass
@@ -93,7 +89,7 @@ const POLL_MS = 250;
 const TRANSCRIPT_LIMIT = 400;
 /** Visible width cap for one sanitized task line before the renderer wraps it. */
 const TASK_MAX_WIDTH = 400;
-/** Visible width cap for one sanitized journal detail. */
+/** Visible width cap for one sanitized feed detail. */
 const DETAIL_MAX_WIDTH = 200;
 const DEFAULT_WIDTH = 100;
 const MIN_WIDTH = 40;
@@ -134,7 +130,7 @@ export interface RunViewModel {
 	record?: SettledRunRecord;
 	outcome: string | null;
 	outcomeDetail: string | null;
-	/** True once the journal carries its terminal line or the ledger row ended. */
+	/** True once the feed carries its terminal line or the ledger row ended. */
 	terminal: boolean;
 }
 
@@ -191,7 +187,7 @@ function modelObservationText(settled: SettledRunRecord["settled"]): string {
  * the same thing here in one line: a call as its tool and descriptor with its
  * outcome, coalesced prose as the assistant's.
  */
-function eventTranscriptLine(line: Extract<RunEventJournalLine, { kind: "event" }>): RunViewTranscriptLine {
+function eventTranscriptLine(line: Extract<RunFeedLine, { kind: "event" }>): RunViewTranscriptLine {
 	const detail = line.detail === undefined ? undefined : sanitizeBounded(line.detail, DETAIL_MAX_WIDTH);
 	const tool = line.tool === undefined ? "" : sanitizeBounded(line.tool, 64);
 	const call = [line.verb === undefined ? "" : sanitizeBounded(line.verb, 32), detail ?? ""].filter(Boolean).join(" ");
@@ -217,7 +213,7 @@ function eventTranscriptLine(line: Extract<RunEventJournalLine, { kind: "event" 
 	return { at: line.at, label: sanitizeBounded(line.type, 64), detail };
 }
 
-function transcriptLine(line: RunEventJournalLine): RunViewTranscriptLine | null {
+function transcriptLine(line: RunFeedLine): RunViewTranscriptLine | null {
 	switch (line.kind) {
 		case "open":
 			return { at: line.at, label: `run opened (${sanitizeBounded(line.agentId, 64)})`, detail: undefined };
@@ -243,8 +239,6 @@ function transcriptLine(line: RunEventJournalLine): RunViewTranscriptLine | null
 }
 
 export interface LoadRunViewOptions {
-	/** Journal root override; defaults to `<state>/runs`. */
-	journalRoot?: string;
 	now?: () => number;
 	scope?: ReturnType<typeof fleetInspectionScope>;
 }
@@ -277,17 +271,14 @@ function journalUnavailableReason(): string {
 	} catch {
 		// A settings read failure cannot establish why a historical file is missing.
 	}
-	return "the journal file is missing; this run's recording settings and any later removal are not recorded.";
+	return "the feed file is missing; this run's recording settings and any later removal are not recorded.";
 }
 
 function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}): RunViewModel | null {
 	const run = openLedger().get(runId);
 	if (run === null || (options.scope !== undefined && !options.scope.seesRun(run))) return null;
 	const now = options.now ?? (() => Date.now());
-	const journal = readRunEventJournal(runId, {
-		maxLines: TRANSCRIPT_LIMIT,
-		...(options.journalRoot === undefined ? {} : { root: options.journalRoot }),
-	});
+	const journal = readRunFeed(runId, { maxLines: TRANSCRIPT_LIMIT });
 	const transcript: RunViewTranscriptLine[] = [];
 	for (const line of journal.lines) {
 		const rendered = transcriptLine(line);
@@ -310,7 +301,7 @@ function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}): RunV
 		transcriptTruncated: journal.truncated,
 		journalPresent: journal.present,
 		...(!journal.present ? { journalUnavailableReason: journalUnavailableReason() } : {}),
-		journalPath: runEventJournalPath(runId, options.journalRoot === undefined ? undefined : options.journalRoot),
+		journalPath: runFeedPath(runId),
 		evidence: evidence.text,
 		...(evidence.record === undefined ? {} : { record: evidence.record }),
 		...(run.projection?.ledgerId
@@ -363,13 +354,13 @@ function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH): stri
 	}
 	lines.push(rule);
 	if (!model.journalPresent) {
-		lines.push("no event journal was recorded or retained for this run.");
-		lines.push(...wrapViewerValue("", model.journalUnavailableReason ?? "the journal file is missing.", columns));
+		lines.push("no display feed was recorded or retained for this run.");
+		lines.push(...wrapViewerValue("", model.journalUnavailableReason ?? "the feed file is missing.", columns));
 		lines.push(...wrapViewerValue("expected ", model.journalPath, columns));
 	} else if (model.transcript.length === 0) {
-		lines.push("journal is empty; no events recorded yet.");
+		lines.push("feed is empty; no events recorded yet.");
 	} else {
-		if (model.transcriptTruncated) lines.push("… earlier events dropped (journal truncated)");
+		if (model.transcriptTruncated) lines.push("… earlier events dropped (feed truncated)");
 		for (const entry of model.transcript) {
 			const head = `${clockOf(entry.at)} ${entry.label}`;
 			if (entry.detail === undefined) lines.push(truncatePlain(head, columns));

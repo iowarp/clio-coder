@@ -55,12 +55,8 @@ import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { redactSecretString } from "../safety/redaction.js";
 import { isThinkingEvent, workerTextDelta } from "../telemetry/worker-progress.js";
-import {
-	defaultRunEventJournal,
-	parseToolCallFacts,
-	type RunEventJournalEntry,
-	type RunEventJournalSink,
-} from "./run-event-journal.js";
+import { defaultRunEventJournal, type RunEventJournalEntry, type RunEventJournalSink } from "./run-event-journal.js";
+import { parseToolCallFacts } from "./run-feed.js";
 
 /** Window one coalesced prose line covers. A viewer polls at the same cadence. */
 export const TEXT_COALESCE_MS = 250;
@@ -316,7 +312,7 @@ export function attachRunEventJournalBridge(
 	};
 
 	/**
-	 * Write the receipt facts and close the run. Read defensively for the same
+	 * Write the result facts and close the run. Read defensively for the same
 	 * reason the registry's seal is: a terminal payload that is missing a field
 	 * it is typed to have must degrade the transcript, never throw back into the
 	 * finalizer that emitted it.

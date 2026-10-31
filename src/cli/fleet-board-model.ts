@@ -8,11 +8,11 @@ import { runTelemetry } from "../domains/telemetry/read-model.js";
  * The dashboard runs in its own process inside the workers dock (and works the
  * same over SSH), so it shares nothing with the orchestrator's heap. Three
  * sources feed it: the run ledger (`runs.json`) for identity, route, budget and
- * lifecycle; each run's event journal (src/domains/dispatch/run-event-journal.ts)
+ * lifecycle; each run's display feed (src/domains/dispatch/run-feed.ts)
  * for the live stream; and the sealed receipt, authenticated against its
  * ledger row, for a finished worker's outcome, conformance and trust.
  *
- * Journals are folded incrementally: a run's fold remembers how many bytes it
+ * Feeds are folded incrementally: a run's fold remembers how many bytes it
  * consumed and reads only what was appended since, so polling four live
  * workers at the monitor cadence costs four small reads rather than four
  * whole files. Everything kept is bounded, and nothing is sanitized here:
@@ -24,11 +24,11 @@ import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { clioStateDir } from "../core/xdg.js";
 import {
-	RUN_EVENT_JOURNAL_READ_TAIL_BYTES,
-	type RunEventJournalLine,
-	readRunEventJournalLine,
-	runEventJournalPath,
-} from "../domains/dispatch/run-event-journal.js";
+	RUN_FEED_READ_TAIL_BYTES,
+	type RunFeedLine,
+	readRunFeedLine,
+	runFeedPath,
+} from "../domains/dispatch/run-feed.js";
 import { readRunResultFacts } from "../domains/dispatch/run-result-facts.js";
 import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
@@ -40,7 +40,7 @@ import type { fleetInspectionScope } from "./fleet-project-scope.js";
 const STREAM_ROW_LIMIT = 600;
 /** Characters one prose row keeps of a long answer; the newest text wins. */
 const TEXT_ROW_MAX_CHARS = 8000;
-/** Bytes one poll folds from a single journal, so a huge backlog cannot stall a frame. */
+/** Bytes one poll folds from a single feed, so a huge backlog cannot stall a frame. */
 const FOLD_READ_MAX_BYTES = 512 * 1024;
 /** Finished workers the board lists after the running ones. */
 const FINISHED_CARD_LIMIT = 24;
@@ -217,7 +217,7 @@ function appendText(cursor: FoldCursor, at: string, text: string): void {
 	fold.phase = "writing";
 }
 
-function applyEvent(cursor: FoldCursor, line: Extract<RunEventJournalLine, { kind: "event" }>): void {
+function applyEvent(cursor: FoldCursor, line: Extract<RunFeedLine, { kind: "event" }>): void {
 	const fold = cursor.fold;
 	const detail = line.detail ?? "";
 	switch (line.type) {
@@ -312,7 +312,7 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunEventJournalLine, { kin
 	}
 }
 
-function applyLine(cursor: FoldCursor, line: RunEventJournalLine): void {
+function applyLine(cursor: FoldCursor, line: RunFeedLine): void {
 	const fold = cursor.fold;
 	switch (line.kind) {
 		case "open":
@@ -323,7 +323,7 @@ function applyLine(cursor: FoldCursor, line: RunEventJournalLine): void {
 		case "journal_truncated":
 			fold.truncated = true;
 			fold.eventsUnread = true;
-			pushRow(cursor, { at: line.at, kind: "note", text: "the journal reached its size cap; later events were dropped" });
+			pushRow(cursor, { at: line.at, kind: "note", text: "the feed reached its size cap; later events were dropped" });
 			return;
 		case "result":
 			return;
@@ -340,9 +340,9 @@ function applyLine(cursor: FoldCursor, line: RunEventJournalLine): void {
 }
 
 /**
- * Fold what was appended to a run's journal since the last call. A file that
+ * Fold what was appended to a run's feed since the last call. A file that
  * shrank was replaced, and its fold starts over; a first read of a large file
- * starts at the reader tail like `readRunEventJournal` does.
+ * starts at the reader tail like `readRunFeed` does.
  */
 function advance(cursor: FoldCursor): FoldCursor {
 	let size: number;
@@ -356,8 +356,8 @@ function advance(cursor: FoldCursor): FoldCursor {
 	if (size < current.offset) current = newCursor(current.path);
 	current.fold.present = true;
 	if (size === current.offset) return current;
-	if (current.offset === 0 && size > RUN_EVENT_JOURNAL_READ_TAIL_BYTES) {
-		current.offset = size - RUN_EVENT_JOURNAL_READ_TAIL_BYTES;
+	if (current.offset === 0 && size > RUN_FEED_READ_TAIL_BYTES) {
+		current.offset = size - RUN_FEED_READ_TAIL_BYTES;
 		current.skipFirst = true;
 		current.fold.truncated = true;
 		current.fold.eventsUnread = true;
@@ -384,7 +384,7 @@ function advance(cursor: FoldCursor): FoldCursor {
 	}
 	for (const raw of lines) {
 		if (raw.length === 0) continue;
-		const { line } = readRunEventJournalLine(raw);
+		const line = readRunFeedLine(raw);
 		if (line !== null) applyLine(current, line);
 	}
 	return current;
@@ -397,11 +397,11 @@ export interface RunFoldCache {
 	retain(runIds: ReadonlySet<string>): void;
 }
 
-function createRunFoldCache(journalRoot?: string): RunFoldCache {
+function createRunFoldCache(stateDir: string): RunFoldCache {
 	const cursors = new Map<string, FoldCursor>();
 	return {
 		fold(runId: string): RunFold {
-			const cursor = cursors.get(runId) ?? newCursor(runEventJournalPath(runId, journalRoot));
+			const cursor = cursors.get(runId) ?? newCursor(runFeedPath(runId, stateDir));
 			const advanced = advance(cursor);
 			cursors.set(runId, advanced);
 			return advanced.fold;
@@ -527,8 +527,8 @@ export interface BoardSource {
 	ledger: { mtimeMs: number; size: number; runs: ReadonlyArray<RunEnvelope> } | null;
 }
 
-export function createBoardSource(stateDir: string = clioStateDir(), journalRoot?: string): BoardSource {
-	return { stateDir, folds: createRunFoldCache(journalRoot), receipts: new Map(), ledger: null };
+export function createBoardSource(stateDir: string = clioStateDir()): BoardSource {
+	return { stateDir, folds: createRunFoldCache(stateDir), receipts: new Map(), ledger: null };
 }
 
 /** The ledger rows, re-read only when `runs.json` changed. A torn or failed read keeps the last good copy. */

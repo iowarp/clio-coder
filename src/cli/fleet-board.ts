@@ -52,7 +52,7 @@ import {
 } from "./fleet-board-model.js";
 import type { fleetInspectionScope } from "./fleet-project-scope.js";
 
-/** Poll cadence, matching the monitor tool and the journal's coalescing window. */
+/** Poll cadence, matching the monitor tool and the feed's coalescing window. */
 const POLL_MS = 250;
 const MIN_WIDTH = 24;
 const TIMER_WIDTH = 7;
@@ -599,7 +599,7 @@ function renderTakeover(
 	const stream: string[] = [];
 	if (!model.fold.present) {
 		stream.push(
-			cut(` ${paint.fg("emptyState", "no event journal for this run (fleet.history.journal may be off)")}`, columns),
+			cut(` ${paint.fg("emptyState", "no display feed for this run (fleet.history.journal may be off)")}`, columns),
 		);
 	} else if (model.fold.droppedRows > 0 || model.fold.truncated) {
 		stream.push(cut(paint.fg("toolMetadata", "   … earlier events are not shown"), columns));

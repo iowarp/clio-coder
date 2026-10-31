@@ -10,8 +10,8 @@ import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { createRecordingJournal, parseRecordingCast, readRunRecording } from "../../src/domains/dispatch/recording.js";
-import { readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
+import { readRunFeed } from "../../src/domains/dispatch/run-feed.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
@@ -279,7 +279,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 							origin.host === (placed ? "remote-worker" : "local-worker"),
 					),
 			);
-			deepStrictEqual(readRunEventJournal(handle.runId).lines, [], "disabled display history never suppresses call facts");
+			deepStrictEqual(readRunFeed(handle.runId).lines, [], "disabled display history never suppresses call facts");
 			const session = await readCallJournal(telemetrySessionDirectory(clioStateDir(), "original-session"));
 			const references = session.records.filter(({ record }) => record.k === "call.linked");
 			equal(references.length, 1, "only the parented run adds a reference, once per logical call");

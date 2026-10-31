@@ -37,7 +37,7 @@ import type { CallStarted, RunUsage } from "../../src/core/telemetry/schemas.js"
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
-import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
+import { defaultRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
 import { observationTracing, traceObservation } from "../../src/domains/memory/observation-events.js";
 import { createTaskMemoryTrace } from "../../src/domains/memory/task-memory-trace.js";
@@ -426,23 +426,22 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 		const saved = await readCallJournal(join(directory, run.runId));
 		strictEqual(saved.damaged, 0);
 		strictEqual(saved.records.filter(({ record }) => record.k === "call.settled").length, 1);
-		const feed = readRunEventJournal(run.runId, { root: directory });
+		const feed = saved.records.flatMap(({ record }) => (record.k === "run.feed_appended" ? [record.data.body] : []));
 		deepStrictEqual(
-			feed.lines.map((line) => line.kind),
+			feed.map((line) => line.kind),
 			["open", "event", "journal_truncated", "result", "terminal"],
 		);
-		strictEqual(feed.terminal?.outcome, "succeeded");
-		strictEqual(feed.truncated, true);
-		strictEqual(feed.agentId, "scout");
-		deepStrictEqual(feed.lines[1] && { ...feed.lines[1], seq: undefined, at: undefined }, {
+		const terminal = feed[4];
+		strictEqual(terminal?.kind === "terminal" ? terminal.outcome : null, "succeeded");
+		const opened = feed[0];
+		strictEqual(opened?.kind === "open" ? opened.agentId : null, "scout");
+		deepStrictEqual(feed[1], {
 			kind: "event",
 			type: "clio_coder_tool_finish",
 			tool: "read",
 			callId: "tool-1",
 			outcome: "ok",
 			durationMs: 12,
-			seq: undefined,
-			at: undefined,
 		});
 		const raw = await readFile(join(directory, run.runId, "journal.jsonl"), "utf8");
 		strictEqual(raw.includes("PRIVATE_"), false, "standard run feed excludes prose, details, reasons and tool arguments");
