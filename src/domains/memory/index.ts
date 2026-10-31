@@ -210,8 +210,6 @@ export {
 export {
 	createTaskMemoryTrace,
 	type TaskMemoryTrace,
-	type TaskMemoryTraceRow,
-	taskMemoryTracePath,
 } from "./task-memory-trace.js";
 export type {
 	MemoryAgentIdentity,

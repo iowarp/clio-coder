@@ -130,7 +130,6 @@ import {
 	type TaskMemoryStepUsage,
 	taskMemoryBankSize,
 	taskMemoryHandoffSeedOffer,
-	taskMemoryTracePath,
 } from "../domains/memory/index.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { createMemoryRelevance } from "../domains/memory/relevance-source.js";
@@ -2696,10 +2695,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// the transcript-notice path rather than the reminder buffer. Bound late for
 	// the same reason: the chat loop that owns the transcript is composed below.
 	let deferredWatchdogNoticeSink: ((text: string) => void) | null = null;
-	// Content-bearing, so it records only under research capture with consent or
-	// the deprecated trace-file alias. The telemetry row says which silence
+	// Content-bearing, so it records only under research capture with consent.
+	// The telemetry row says which silence
 	// happened; this says what the model wrote (#434).
-	const memoryTrace = createTaskMemoryTrace(taskMemoryTracePath());
+	const memoryTrace = createTaskMemoryTrace();
 	// The route the last resolved memory client would call, kept so the endpoint
 	// check and the cost row read the same resolution the step itself used.
 	// Journal settlements own memory spend; legacy clients retain the captured usage fallback (#434).

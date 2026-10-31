@@ -731,8 +731,6 @@ function telemetryModeFinding(stateDir: string, cwd: string): DoctorFinding {
 	const aliases = [
 		settings.systemOne.record ? "systemOne.record (research.systemOneDataset with content)" : null,
 		process.env.CLIO_CODER_BUS_TRACE === "1" ? "CLIO_CODER_BUS_TRACE (research.busTrace)" : null,
-		process.env.CLIO_CODER_MEMORY_TRACE?.trim() ? "CLIO_CODER_MEMORY_TRACE (research.content)" : null,
-		process.env.CLIO_CODER_OBSERVATION_TRACE?.trim() ? "CLIO_CODER_OBSERVATION_TRACE (research.content)" : null,
 	].filter((alias): alias is string => alias !== null);
 	if (aliases.length > 0) parts.push(`deprecated aliases recording: ${aliases.join(", ")}`);
 	return {

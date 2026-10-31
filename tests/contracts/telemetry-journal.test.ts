@@ -821,7 +821,7 @@ test("memory and observation traces journal content only under research capture 
 			);
 		},
 	});
-	const memoryTrace = createTaskMemoryTrace(null);
+	const memoryTrace = createTaskMemoryTrace();
 	const secret = `api_key=${"secret".repeat(4)}`;
 	const envelope = {
 		systemPrompt: "system",

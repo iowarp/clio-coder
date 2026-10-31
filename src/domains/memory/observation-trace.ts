@@ -8,18 +8,13 @@ export function observationEvent(stateDir: string, event: string, facts: Record<
 	appendBounded(join(stateDir, "memory", "observation-events.jsonl"), { at: new Date().toISOString(), event, ...facts });
 }
 
-/**
- * Whether anything records observation traces now. Callers ask before building facts, so standard mode
- * without the deprecated CLIO_CODER_OBSERVATION_TRACE alias builds nothing (#434).
- */
+/** Ask before building content that consented research capture refuses (#434). */
 export function observationTracing(): boolean {
-	return Boolean(process.env.CLIO_CODER_OBSERVATION_TRACE?.trim()) || researchTraceAdmits("memory.observed");
+	return researchTraceAdmits("memory.observed");
 }
 
-/** Research content: journaled as `memory.observed` under research capture with consent; the alias keeps its file. */
+/** Raw observation content belongs only to consented research objects (#434). */
 export function traceObservation(event: string, facts: Record<string, unknown>): void {
-	const path = process.env.CLIO_CODER_OBSERVATION_TRACE?.trim();
-	if (path) appendBounded(path, { at: new Date().toISOString(), event, ...facts });
 	if (researchTraceAdmits("memory.observed")) recordResearchTrace("memory.observed", { event }, { event, facts });
 }
 
