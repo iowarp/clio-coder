@@ -96,6 +96,7 @@ import {
 	createDispatchDomainModule,
 	executeFleetRun,
 	fleetRouteResolver,
+	runUsageFromCallRecords,
 } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
@@ -302,7 +303,7 @@ import { TURN_SITE } from "../domains/system-one/sites/turn.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
-import { TelemetryDomainModule, workspaceTelemetryCapture } from "../domains/telemetry/index.js";
+import { READ_MODEL_FOLD, TelemetryDomainModule, workspaceTelemetryCapture } from "../domains/telemetry/index.js";
 import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
@@ -5962,10 +5963,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				scopeNotices: (listener) => bus.subscribe("run.scope_notice_raised", listener),
 				...(telemetry
 					? {
-							compactionCalls: async (from: string) => {
+							runUsage: async (from: string) => {
 								// Every queued settlement is written and the live fold seeded before the calls are read (#434).
 								await telemetry.settledSessionSpend();
-								return telemetry.read?.live()?.calls({ roles: ["compaction"], from }).calls ?? [];
+								const view = telemetry.read?.live();
+								// The run's own turn calls and the compactions it ran, folded as the read model folds them.
+								return view
+									? runUsageFromCallRecords(view.callRecords({ roles: ["main", "compaction"], from }), READ_MODEL_FOLD)
+									: null;
 							},
 							segmentUsage: async (messages) => {
 								// The segment's calls are journaled and the live fold seeded before they are read (#434).

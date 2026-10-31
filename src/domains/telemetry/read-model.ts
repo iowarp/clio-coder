@@ -1893,6 +1893,17 @@ function matches(attempt: Attempt, filter: CallFilter): boolean {
 	return true;
 }
 
+/**
+ * The journal records of the session's own attempts the filter matches, for a fold that needs each fact's provenance
+ * rather than its quantity, such as the run.settled of a headless main-agent run (#434). `runId` and `limit` are ignored.
+ */
+export function callRecords(source: SessionSource, filter: CallFilter = {}): TelemetryRecord[] {
+	const ids = new Set(
+		analyze(source).attempts.flatMap((attempt) => (matches(attempt, filter) ? attempt.recordIds : [])),
+	);
+	return source.journal.records.filter((record) => ids.has(record.id));
+}
+
 /** A session's own attempts, or one referenced run's with `filter.runId`; `limit` keeps the newest rows. */
 export function callsReport(source: SessionSource, filter: CallFilter = {}, options: ReadOptions = {}): CallsReportV1 {
 	const view: View = { session: source };

@@ -14,8 +14,6 @@ import {
 } from "../../core/skill-activation.js";
 import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import { mainAgent } from "../../core/telemetry/context.js";
-import type { CallRowV1, Quantity } from "../../core/telemetry/dto.js";
-import { factKnownValue } from "../../core/telemetry/known.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
@@ -30,6 +28,7 @@ import {
 	type VerifyCallOutcome,
 	verifyCheckIdentity,
 } from "../../domains/dispatch/receipt-findings.js";
+import type { RunCallUsage } from "../../domains/dispatch/run-call-usage.js";
 import { finishRunResult } from "../../domains/dispatch/run-settlement.js";
 import { openRunTelemetry } from "../../domains/dispatch/run-telemetry.js";
 import { newRunId, openLedger } from "../../domains/dispatch/state.js";
@@ -128,10 +127,11 @@ export interface HeadlessMainAgentOptions {
 	 */
 	scopeNotices?: (listener: (payload: unknown) => void) => () => void;
 	/**
-	 * The session's compaction calls the read model holds from `from` on. Compaction runs its own model calls outside
-	 * the turn's event stream, so the ones journaled during the run are folded into its accounting from here (#434).
+	 * The run's usage as the read model folds the session calls it made from `from` on: its turn's calls and the
+	 * compactions it ran, which happen outside the turn's event stream. run.settled and the ledger row both settle
+	 * from it, so they agree; null when no read model is bound, and the message fold stands for the row (#434).
 	 */
-	compactionCalls?: (from: string) => Promise<readonly CallRowV1[]>;
+	runUsage?: (from: string) => Promise<RunCallUsage | null>;
 	/**
 	 * One agent segment's usage as the read model folds its calls once they are journaled, an interrupted call's
 	 * estimate included; null when the read model has none, and the message fold stands (#434).
@@ -139,51 +139,6 @@ export interface HeadlessMainAgentOptions {
 	segmentUsage?: (messages: ReadonlyArray<AgentMessage>) => Promise<RunJsonSegmentUsage | null>;
 	/** `clio-coder run --max-cost-usd`: the cap the run ran under. */
 	costCap?: RunResultCostCap;
-}
-
-/** A quantity's known amount: measured plus estimated parts, nothing for an unknown one. */
-function knownAmount(quantity: Quantity): number {
-	return factKnownValue(quantity.fact);
-}
-
-const PROVENANCE_BY_PRICER: Record<CallRowV1["pricedBy"], CostAmount["provenance"]> = {
-	provider: "known",
-	"target-rates": "known",
-	catalog: "estimated",
-	free: "known_free",
-	none: "unknown",
-};
-
-/** Folds the compaction calls the run made, as the read model holds them, into its accounting (#434). */
-function foldRunOwnedCosts(stats: HeadlessMainAgentRunStats, calls: readonly CallRowV1[]): void {
-	for (const call of calls) {
-		if (call.disposition === "never_sent") continue;
-		const usd = knownAmount(call.usd);
-		const total = call.usage?.total.fact;
-		const unknown = total === undefined || ("unknownCount" in total ? total.unknownCount > 0 : total.kind === "unknown");
-		const missingTokenCalls = unknown ? 1 : 0;
-		stats.costAmounts.push({ usd, provenance: PROVENANCE_BY_PRICER[call.pricedBy], apiCalls: 1, missingTokenCalls });
-		const tokens = call.usage;
-		const reasoning = tokens ? knownAmount(tokens.reasoning) : 0;
-		const usage: RunUsageSummary = {
-			tokens: tokens ? knownAmount(tokens.total) : 0,
-			costUsd: usd,
-			input: tokens ? knownAmount(tokens.input) : 0,
-			output: tokens ? knownAmount(tokens.output) : 0,
-			cacheRead: tokens ? knownAmount(tokens.cacheRead) : 0,
-			cacheWrite: tokens ? knownAmount(tokens.cacheWrite) : 0,
-			reasoning,
-			apiCalls: 1,
-			missingTokenCalls,
-			hadReasoning: reasoning > 0,
-			hadUsage: tokens !== null,
-			responseModelIdObservationCounts: emptyResponseModelIdObservationCounts(),
-			// The response-model facts stay the turn's own; a compaction call reports none here.
-			lastResponseModelIdObservation: stats.usage?.lastResponseModelIdObservation ?? { state: "not-observed" },
-			lastDifferingResponseModelId: stats.usage?.lastDifferingResponseModelId ?? null,
-		};
-		stats.usage = stats.usage === null ? usage : addRunUsage(stats.usage, usage);
-	}
 }
 
 interface HeadlessMainAgentResult {
@@ -670,6 +625,49 @@ function countToolStats(stats: Map<string, ToolCallStat>): number {
 }
 
 /**
+ * The run's spend for its ledger row and result: the read model's fold of its session calls, which run.settled also
+ * carries, else the fold of the assistant messages the run saw when no read model is bound (#434).
+ */
+function runTotals(calls: RunCallUsage | null, stats: HeadlessMainAgentRunStats) {
+	if (calls !== null)
+		return {
+			tokenCount: calls.totalTokens,
+			inputTokenCount: calls.inputTokens,
+			outputTokenCount: calls.outputTokens,
+			cacheReadTokenCount: calls.cacheReadTokens,
+			cacheWriteTokenCount: calls.cacheWriteTokens,
+			reasoningTokenCount: calls.reasoningTokens,
+			costUsd: calls.costUsd,
+			cost: calls.costSummary,
+			costProvenance: calls.costProvenance,
+			apiCalls: calls.apiCalls,
+			missingTokenCalls: calls.missingTokenCalls,
+		};
+	const usage = stats.usage;
+	const cost = aggregateCostAmounts(stats.costAmounts);
+	return {
+		tokenCount: usage?.tokens ?? 0,
+		inputTokenCount: usage?.input ?? 0,
+		outputTokenCount: usage?.output ?? 0,
+		cacheReadTokenCount: usage?.cacheRead ?? 0,
+		cacheWriteTokenCount: usage?.cacheWrite ?? 0,
+		reasoningTokenCount: usage?.reasoning ?? 0,
+		costUsd: usage?.costUsd ?? 0,
+		cost,
+		costProvenance:
+			cost.calls === 0 || cost.hasUnknown
+				? ("unknown" as const)
+				: cost.hasEstimated
+					? ("estimated" as const)
+					: cost.allKnownFree
+						? ("known_free" as const)
+						: ("known" as const),
+		apiCalls: usage?.apiCalls ?? 0,
+		missingTokenCalls: usage?.missingTokenCalls ?? 0,
+	};
+}
+
+/**
  * Settle the main-agent run the way dispatch settles a worker (#434): one result built with its run.settled, the
  * record made durable and the run scope sealed, and only then the ledger row published terminal, so `fleet verify`
  * and `fleet view` read a finished run the same way whoever ran it. A settlement that does not land publishes the row
@@ -683,28 +681,27 @@ async function recordHeadlessMainAgentRun(input: {
 	endedAt: string;
 	terminal: HeadlessTerminalOutcome;
 	stats: HeadlessMainAgentRunStats;
+	/** The read model's fold of the session calls the run made; null without one. */
+	calls: RunCallUsage | null;
 	costCap?: RunResultCostCap;
 }): Promise<void> {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
 	if (!isMainAgentRunKind(snapshot.runtimeKind)) return;
-	const usage = input.stats.usage;
-	const tokenCount = usage?.tokens ?? 0;
-	const inputTokenCount = usage?.input ?? 0;
-	const outputTokenCount = usage?.output ?? 0;
-	const cacheReadTokenCount = usage?.cacheRead ?? 0;
-	const cacheWriteTokenCount = usage?.cacheWrite ?? 0;
-	const reasoningTokenCount = usage?.reasoning ?? 0;
-	const costUsd = usage?.costUsd ?? 0;
-	const cost = aggregateCostAmounts(input.stats.costAmounts);
-	const costProvenance =
-		cost.calls === 0 || cost.hasUnknown
-			? "unknown"
-			: cost.hasEstimated
-				? "estimated"
-				: cost.allKnownFree
-					? "known_free"
-					: "known";
+	const totals = runTotals(input.calls, input.stats);
+	const {
+		tokenCount,
+		inputTokenCount,
+		outputTokenCount,
+		cacheReadTokenCount,
+		cacheWriteTokenCount,
+		reasoningTokenCount,
+		costUsd,
+		cost,
+		costProvenance,
+		apiCalls,
+		missingTokenCalls,
+	} = totals;
 	const { exitCode, outcome, status } = input.terminal;
 	const outcomeDetail = input.terminal.outcomeDetail ?? input.terminal.failureMessage;
 	const outcomeCode = outcome === "failed" ? snapshot.outcomeCode : undefined;
@@ -739,9 +736,9 @@ async function recordHeadlessMainAgentRun(input: {
 		lineage,
 		exitCode,
 		tokenCount,
-		apiCalls: usage?.apiCalls ?? 0,
+		apiCalls,
 		...(input.stats.toolRounds.length > 0 ? { toolRounds: input.stats.toolRounds } : {}),
-		missingTokenCalls: usage?.missingTokenCalls ?? 0,
+		missingTokenCalls,
 		costSummary: cost,
 		inputTokenCount,
 		outputTokenCount,
@@ -787,9 +784,9 @@ async function recordHeadlessMainAgentRun(input: {
 		exitCode,
 		...(input.terminal.failureMessage !== null ? { failureMessage: input.terminal.failureMessage } : {}),
 		tokenCount,
-		apiCalls: usage?.apiCalls ?? 0,
+		apiCalls,
 		...(input.stats.toolRounds.length > 0 ? { toolRounds: input.stats.toolRounds } : {}),
-		missingTokenCalls: usage?.missingTokenCalls ?? 0,
+		missingTokenCalls,
 		costSummary: cost,
 		inputTokenCount,
 		outputTokenCount,
@@ -823,6 +820,7 @@ async function recordHeadlessMainAgentRun(input: {
 		...(snapshot.runtimeResolution ? { runtimeResolution: snapshot.runtimeResolution } : {}),
 		terminalReason: mainAgentTerminalReason(outcome).terminalReason,
 		sessionId,
+		...(input.calls ? { callIds: input.calls.callIds } : {}),
 	};
 	try {
 		// The run's model calls are journaled in its session; its run scope holds the terminal record and the seal. The
@@ -836,7 +834,13 @@ async function recordHeadlessMainAgentRun(input: {
 			const finished = finishRunResult(
 				draft,
 				{ ...envelope, ...terminalPatch },
-				{ terminal: mainAgentTerminalReason(outcome), processExitCode: null, frameType: null, usage: undefined },
+				{
+					terminal: mainAgentTerminalReason(outcome),
+					processExitCode: null,
+					frameType: null,
+					// The run's calls live in its session, so its usage facts are the read model's fold of them (#434).
+					usage: input.calls?.facts,
+				},
 			);
 			await journal.settle(finished.settlement);
 		} finally {
@@ -905,7 +909,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		if (sealed !== null) return sealed;
 		const endedAt = new Date().toISOString();
 		sealed = (async () => {
-			foldRunOwnedCosts(runStats, (await options.compactionCalls?.(startedAt)) ?? []);
+			// A read model that cannot answer leaves the message fold for the row; the run still settles (#434).
+			const calls = (await options.runUsage?.(startedAt).catch(() => null)) ?? null;
 			await recordHeadlessMainAgentRun({
 				runId,
 				chat,
@@ -914,6 +919,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 				endedAt,
 				terminal,
 				stats: runStats,
+				calls,
 				...(options.costCap !== undefined ? { costCap: options.costCap } : {}),
 			});
 		})().catch((error: unknown) => {

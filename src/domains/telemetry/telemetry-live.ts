@@ -26,6 +26,7 @@ import type { AccountQuota, JournalSource, SessionSource } from "./read-model.js
 import {
 	attemptsTotal,
 	cacheReport,
+	callRecords,
 	callsReport,
 	continueSource,
 	costReport,
@@ -104,6 +105,7 @@ export function telemetryView(
 		seeding: source.journal.seeding === true,
 		session: () => (session ??= sessionTelemetry(source)),
 		calls: (filter) => callsReport(source, filter),
+		callRecords: (filter) => callRecords(source, filter),
 		cost: (groupBy) => costReport(source, groupBy),
 		cache: () => cacheReport(source),
 		timeline: (range) => timeline(source, range ?? null),

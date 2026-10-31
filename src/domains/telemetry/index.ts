@@ -67,6 +67,7 @@ export {
 	evidenceQuantities,
 	explain,
 	foldTaskMemorySpend,
+	READ_MODEL_FOLD,
 	runCostReport,
 	runRowTelemetry,
 	runTelemetry,

@@ -161,6 +161,8 @@ export type { RouteQualityLabel, RouteQualityReduction } from "./route-quality.j
 export { reduceRouteQuality } from "./route-quality.js";
 export type { RouteExplanation, RoutingIntent } from "./routing-intent.js";
 export { explainRouteDecision, parseRoutingIntent, routingIntentRejection } from "./routing-intent.js";
+export type { RunCallUsage } from "./run-call-usage.js";
+export { runUsageFromCallRecords } from "./run-call-usage.js";
 export type { RunResultFacts } from "./run-result-facts.js";
 export {
 	readRunResultFacts,

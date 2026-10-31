@@ -19,6 +19,7 @@ import type {
 	TimelineV1,
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { PreimageData, PreimageEventName } from "../../core/telemetry/events.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
@@ -165,6 +166,8 @@ export interface TelemetryView {
 	readonly seeding: boolean;
 	session(): SessionTelemetryV1;
 	calls(filter?: CallFilter): CallsReportV1;
+	/** The journal records behind the session's own attempts the filter matches, for a fold that keeps provenance. */
+	callRecords(filter?: CallFilter): TelemetryRecord[];
 	cost(groupBy?: CostReportV1["groupBy"]): CostReportV1;
 	cache(): CacheReportV1;
 	timeline(range?: { from: string; to: string } | null): TimelineV1;

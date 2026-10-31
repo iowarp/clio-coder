@@ -8,7 +8,7 @@ import { abandonedSettlement } from "../../core/telemetry/producer.js";
 import type { RunSettled } from "../../core/telemetry/schemas.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import type { CostAggregate } from "../telemetry/cost.js";
-import type { CallTotals } from "../telemetry/folds.js";
+import type { CallTotals, FoldOptions } from "../telemetry/folds.js";
 import { foldRunJournal } from "../telemetry/folds.js";
 
 export interface RunCallUsage {
@@ -146,9 +146,9 @@ function runUsageFacts(records: readonly TelemetryRecord[], folded: ReturnType<t
 const subtotal = (sum: FactSum) => sum.measured + sum.estimated;
 
 /** Live meters and receipts project the same fold as session replay; unknown facts retain coverage (#434). */
-export function runUsageFromCallRecords(input: Iterable<TelemetryRecord>): RunCallUsage {
+export function runUsageFromCallRecords(input: Iterable<TelemetryRecord>, options: FoldOptions = {}): RunCallUsage {
 	const records = [...input];
-	const folded = foldRunJournal(records);
+	const folded = foldRunJournal(records, options);
 	const facts = folded;
 	const apiCalls = subtotal(folded.apiCalls);
 	const unknownCoverage = folded.unknownCoverage;
