@@ -11,7 +11,11 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract, RouteBreakerView } from "../domains/dispatch/contract.js";
-import { createTurnObservations, subscribeExtensionObservations } from "../domains/extensions/bus-observations.js";
+import {
+	createChatTurnUsage,
+	createTurnObservations,
+	subscribeExtensionObservations,
+} from "../domains/extensions/bus-observations.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
 import type { ExtensionRuntimeHookBridge } from "../domains/extensions/runtime-hook-bridge.js";
@@ -660,6 +664,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const turnObservations = operatorExtensions
 		? createTurnObservations((observation) => operatorExtensions.observeV2(observation))
 		: undefined;
+	// A turn_end carries the provider-reported usage every session host folds alike; the turn summary says how it ended.
+	const turnUsage = turnObservations ? createChatTurnUsage() : undefined;
 	// The dev scope is a terminal concept: only this surface sets the overlay,
 	// so headless runs, ACP and workers never load a package under development.
 	const devSession: ExtensionDevSession | undefined =
@@ -1003,6 +1009,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		getTerminalColumns: () => terminal.columns,
 		onChatEventIngress: (event) => {
+			turnUsage?.observe(event);
 			exitSummary.observeChat(event);
 			recordChatEventIngress(event);
 			presentation.recordChatEvent(event);
@@ -1022,7 +1029,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		},
 		setLastTurnSummary: (summary) => {
 			presentation.setLastTurnSummary(summary);
-			if (summary) turnObservations?.turnEnd(summary);
+			if (summary && turnUsage)
+				turnObservations?.turnEnd({
+					...turnUsage.current(),
+					modelId: summary.modelId,
+					targetId: summary.targetId,
+					stopReason: summary.stopReason,
+				});
 		},
 		startTerminalProgress: () => agentProgress.start(),
 		stopTerminalProgress: () => agentProgress.stop(),

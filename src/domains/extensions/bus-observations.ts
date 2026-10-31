@@ -60,7 +60,7 @@ export function subscribeExtensionObservations(
 	};
 }
 
-/** The part of a finished turn's summary an observation carries; the TUI's turn summary has this shape. */
+/** The part of a finished turn an observation carries: its token counts as the provider reported them. */
 export interface ObservedTurnSummary {
 	inputTokens: number;
 	outputTokens: number;
@@ -69,6 +69,47 @@ export interface ObservedTurnSummary {
 	modelId: string;
 	targetId: string;
 	stopReason: string;
+}
+
+/**
+ * The provider-reported usage of the run in flight, folded from its chat events: reset by `agent_start`, added to by
+ * each assistant `message_end`. Every session host reads a turn's `turn_end` usage from here, so the terminal,
+ * headless runs and ACP report the same counts for the same turn.
+ */
+export function createChatTurnUsage(): {
+	observe(event: unknown): void;
+	/** The usage so far, with the model and stop reason the run's last assistant message reported. */
+	current(): Omit<ObservedTurnSummary, "targetId">;
+} {
+	const fresh = () => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
+	let usage = fresh();
+	let modelId = "";
+	let stopReason = "completed";
+	const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+	return {
+		observe(raw) {
+			const event = raw as {
+				type?: unknown;
+				message?: { role?: unknown; model?: unknown; stopReason?: unknown; usage?: Record<string, unknown> };
+			};
+			if (event.type === "agent_start") {
+				usage = fresh();
+				modelId = "";
+				stopReason = "completed";
+			} else if (event.type === "message_end" && event.message?.role === "assistant") {
+				const reported = event.message.usage ?? {};
+				usage = {
+					inputTokens: usage.inputTokens + count(reported.input),
+					outputTokens: usage.outputTokens + count(reported.output),
+					cacheReadTokens: usage.cacheReadTokens + count(reported.cacheRead),
+					cacheWriteTokens: usage.cacheWriteTokens + count(reported.cacheWrite),
+				};
+				if (typeof event.message.model === "string") modelId = event.message.model;
+				if (typeof event.message.stopReason === "string") stopReason = event.message.stopReason;
+			}
+		},
+		current: () => ({ ...usage, modelId, stopReason }),
+	};
 }
 
 /**
@@ -144,39 +185,16 @@ export function observeChatTurns(
 	turns: ReturnType<typeof createTurnObservations>,
 	targetId: () => string,
 ): () => void {
-	const fresh = () => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 });
-	let usage = fresh();
-	let modelId = "";
-	let stopReason = "completed";
-	const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+	const usage = createChatTurnUsage();
 	return onEvent((raw) => {
-		const event = raw as {
-			type?: unknown;
-			toolCallId?: unknown;
-			toolName?: unknown;
-			isError?: unknown;
-			message?: { role?: unknown; model?: unknown; stopReason?: unknown; usage?: Record<string, unknown> };
-		};
-		if (event.type === "agent_start") {
-			usage = fresh();
-			modelId = "";
-			stopReason = "completed";
-		} else if (event.type === "tool_execution_start" && typeof event.toolCallId === "string") {
+		usage.observe(raw);
+		const event = raw as { type?: unknown; toolCallId?: unknown; toolName?: unknown; isError?: unknown };
+		if (event.type === "tool_execution_start" && typeof event.toolCallId === "string") {
 			turns.toolStart(event.toolCallId);
 		} else if (event.type === "tool_execution_end" && typeof event.toolCallId === "string") {
 			turns.toolEnd(typeof event.toolName === "string" ? event.toolName : "", event.toolCallId, event.isError === true);
-		} else if (event.type === "message_end" && event.message?.role === "assistant") {
-			const reported = event.message.usage ?? {};
-			usage = {
-				inputTokens: usage.inputTokens + count(reported.input),
-				outputTokens: usage.outputTokens + count(reported.output),
-				cacheReadTokens: usage.cacheReadTokens + count(reported.cacheRead),
-				cacheWriteTokens: usage.cacheWriteTokens + count(reported.cacheWrite),
-			};
-			if (typeof event.message.model === "string") modelId = event.message.model;
-			if (typeof event.message.stopReason === "string") stopReason = event.message.stopReason;
 		} else if (event.type === "agent_end") {
-			turns.turnEnd({ ...usage, modelId, targetId: targetId(), stopReason });
+			turns.turnEnd({ ...usage.current(), targetId: targetId() });
 		}
 	});
 }

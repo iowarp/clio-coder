@@ -31,16 +31,10 @@ export interface DispatchOverlay {
 
 export interface TurnSummary {
 	elapsedMs: number;
-	/** At least one call's usage was estimated from streamed content. */
-	estimated?: boolean;
 	modelId: string;
 	/** Direct response model-id observation for the last API call in the turn. */
 	responseModelIdObservation: ResponseModelIdObservation;
 	targetId: string;
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
 	toolCount: number;
 	toolErrorCount: number;
 	stopReason: TurnStopReason;
@@ -56,20 +50,15 @@ export interface TurnSummary {
 }
 
 /**
- * Usage folded in as the run's messages settle, so a run that never reaches
- * `agent_end` can still report what it spent.
+ * The run's messages folded in as they settle, so a run that never reaches
+ * `agent_end` can still report its tool calls.
  *
  * The engine replaces an aborted run's message window with one synthetic
  * zero-usage failure message, and the cancel path built its summary from
- * nothing at all. A cancelled turn therefore reported no tokens and no tool
- * calls even when the session total moved by 64k in the same footer line.
+ * nothing at all. A cancelled turn therefore reported no tool calls even when
+ * it ran several. Its spend is the read model's, never this tally's.
  */
 export interface RunTally {
-	estimated?: boolean;
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
 	/** Assistant and tool-result messages folded, which says whether this tally saw more of the run than a rebuild. */
 	settledMessages: number;
 	toolCount: number;

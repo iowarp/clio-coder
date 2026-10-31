@@ -20,7 +20,6 @@ import {
 } from "../../src/engine/apis/output-budget.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { reseedSessionUsageFromLedger } from "../../src/interactive/session-usage-reseed.js";
-import { emptyRunTally, foldMessageIntoRunTally } from "../../src/interactive/status/summary.js";
 import {
 	assistantSessionPayload,
 	estimatedUsageForInterruptedTurn,
@@ -131,9 +130,6 @@ describe("contracts/metering integrity", () => {
 			const display = sumRunUsage([message], { includeEstimates: true });
 			strictEqual(display.tokens, invoked ? 33 : 10);
 			strictEqual(display.costUsd, 0.25);
-			const tally = foldMessageIntoRunTally(emptyRunTally(), message);
-			strictEqual(tally.inputTokens, display.input);
-			strictEqual(tally.outputTokens, display.output);
 			strictEqual((message as unknown as { usage: unknown }).usage, zeroUsage);
 		}
 	});

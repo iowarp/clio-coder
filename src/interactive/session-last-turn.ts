@@ -8,12 +8,12 @@
  * footer, two branches, no way to tell which line belonged to which.
  *
  * The fold reads the same lineage the reseed does, through
- * `filterEntriesToActivePath`, and reports only what the ledger recorded:
- * provider usage, the persisted stop reason, the tool result rows the turn
- * produced, and the wall time between the user message that opened the turn and
- * the last row it wrote. Fields the ledger does not carry are left at their
- * neutral value rather than reconstructed: the watchdog peak is zero. The
- * reasoning chip reads the turn's journaled reasoning, not this summary.
+ * `filterEntriesToActivePath`, and reports only what the ledger recorded: the
+ * persisted stop reason, the tool result rows the turn produced, and the wall
+ * time between the user message that opened the turn and the last row it wrote.
+ * Fields the ledger does not carry are left at their neutral value rather than
+ * reconstructed: the watchdog peak is zero. The turn's tokens and reasoning are
+ * the read model's, which the footer reads beside this line.
  */
 
 import { type ResponseModelIdObservation, responseModelIdObservationFromRecord } from "../core/response-model-id.js";
@@ -24,10 +24,6 @@ import type { TurnStopReason, TurnSummary } from "./status/index.js";
 
 function payloadRecord(value: unknown): Record<string, unknown> | null {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function positiveNumber(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function nonEmptyString(source: Record<string, unknown>, ...keys: string[]): string | null {
@@ -122,10 +118,6 @@ export function lastTurnSummaryFromLedger(
 
 	let sawAssistant = false;
 	let stopReason: TurnStopReason = "stop";
-	let inputTokens = 0;
-	let outputTokens = 0;
-	let cacheReadTokens = 0;
-	let cacheWriteTokens = 0;
 	let toolCount = 0;
 	let toolErrorCount = 0;
 	let targetId = turn.targetId;
@@ -151,12 +143,6 @@ export function lastTurnSummaryFromLedger(
 		targetId = targetId ?? nonEmptyString(record, "provider", "api");
 		modelId = modelId ?? nonEmptyString(record, "model");
 		responseModelIdObservation = responseModelIdObservationFromRecord(record, "legacy-difference-only");
-		const usage = payloadRecord(record.usage);
-		if (!usage) continue;
-		inputTokens += positiveNumber(usage.input);
-		outputTokens += positiveNumber(usage.output);
-		cacheReadTokens += positiveNumber(usage.cacheRead);
-		cacheWriteTokens += positiveNumber(usage.cacheWrite);
 	}
 	if (!sawAssistant) return null;
 
@@ -165,10 +151,6 @@ export function lastTurnSummaryFromLedger(
 		elapsedMs: lastRow ? millisBetween(turn.startedAt, lastRow.timestamp) : 0,
 		modelId: modelId ?? "unknown",
 		targetId: targetId ?? "unknown",
-		inputTokens,
-		outputTokens,
-		cacheReadTokens,
-		cacheWriteTokens,
 		toolCount,
 		toolErrorCount,
 		stopReason,

@@ -382,17 +382,6 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 		reason: "the producer side of a delegated run: it folds the peer's reported deltas into the run's run.usage snapshot",
 	},
 	{
-		file: "src/interactive/status/summary.ts",
-		functions: ["foldMessageIntoRunTally"],
-		reason:
-			"the run's token counts the extension bus sends as turn_end usage, a payload no surface displays; every token and reasoning display reads the read model",
-	},
-	{
-		file: "src/interactive/session-last-turn.ts",
-		functions: ["lastTurnSummaryFromLedger"],
-		reason: "rebuilds that same summary from the ledger on resume, whose token fields nothing displays",
-	},
-	{
 		file: "src/cli/modes/print.ts",
 		functions: ["addRunUsage"],
 		reason:
