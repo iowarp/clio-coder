@@ -111,16 +111,16 @@ export interface SpendTotal extends Explainable {
 }
 
 function spendTotals(spend: Spend, unknownCallCoverageRuns = 0): SpendTotal[] {
-	if (spend.source === "none") return spend.cost ? [{ label: "Cost", value: spend.cost, ref: null }] : [];
+	if (spend.source === "none") return spend.cost ? [{ label: "Cost", value: spend.cost, factRef: null }] : [];
 	return [
-		{ label: "Cost", value: spend.cost ?? "not measured", ref: spend.refs.cost },
-		{ label: "Tokens", value: spend.tokens ?? "not recorded", ref: spend.refs.tokens },
-		...(spend.calls === null ? [] : [{ label: "Model calls", value: spend.calls, ref: spend.refs.calls }]),
+		{ label: "Cost", value: spend.cost ?? "not measured", factRef: spend.refs.cost },
+		{ label: "Tokens", value: spend.tokens ?? "not recorded", factRef: spend.refs.tokens },
+		...(spend.calls === null ? [] : [{ label: "Model calls", value: spend.calls, factRef: spend.refs.calls }]),
 		...(spend.missingTokenCalls
-			? [{ label: "Calls missing usage", value: countText(spend.missingTokenCalls), ref: null }]
+			? [{ label: "Calls missing usage", value: countText(spend.missingTokenCalls), factRef: null }]
 			: []),
 		...(unknownCallCoverageRuns > 0
-			? [{ label: "Runs with unknown call coverage", value: countText(unknownCallCoverageRuns), ref: null }]
+			? [{ label: "Runs with unknown call coverage", value: countText(unknownCallCoverageRuns), factRef: null }]
 			: []),
 	];
 }

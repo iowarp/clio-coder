@@ -20,19 +20,19 @@ function placePanel(details: HTMLDetailsElement): void {
  * A displayed quantity that opens explain() for its reference (#434 §11.4): what it counts, its coverage and where
  * it came from. A value with no reference is plain text, because nothing would resolve it.
  */
-export function Explained({ client, label, value, ref }: Explainable & { client: Client; label: string }) {
+export function Explained({ client, label, value, factRef }: Explainable & { client: Client; label: string }) {
 	const panel = useRef<HTMLDetailsElement>(null);
 	const [open, setOpen] = useState(false);
 	useDetailsDismiss(panel, open);
 	const explanation = useQuery({
 		meta: { errorSurface: "inline" },
 		// Under "telemetry", so a live update that moves the number re-reads its explanation too.
-		queryKey: ["telemetry", "explain", ref],
-		queryFn: () => client.call(routes.telemetryExplain, { params: {}, query: { ref: ref ?? "" }, body: {} }),
-		enabled: open && ref !== null,
+		queryKey: ["telemetry", "explain", factRef],
+		queryFn: () => client.call(routes.telemetryExplain, { params: {}, query: { ref: factRef ?? "" }, body: {} }),
+		enabled: open && factRef !== null,
 		retry: false,
 	});
-	if (ref === null) return <>{value}</>;
+	if (factRef === null) return <>{value}</>;
 	const view = explanation.data ? explanationView(explanation.data) : null;
 	return (
 		<details

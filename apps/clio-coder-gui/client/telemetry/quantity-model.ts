@@ -17,7 +17,7 @@ export function quantityText(quantity: QuantityLike | null | undefined): string 
 /** A figure as a surface carries it: the server's words, and the reference explain() resolves when it has one. */
 export interface Explainable {
 	readonly value: string;
-	readonly ref: string | null;
+	readonly factRef: string | null;
 }
 
 /** A read-model quantity for a surface; an absent one reads `absent` and has nothing to explain. */
@@ -25,7 +25,7 @@ export function explainable(
 	quantity: { readonly display: string; readonly ref?: string } | null | undefined,
 	absent = NOT_JOURNALED,
 ): Explainable {
-	return quantity ? { value: quantity.display, ref: quantity.ref ?? null } : { value: absent, ref: null };
+	return quantity ? { value: quantity.display, factRef: quantity.ref ?? null } : { value: absent, factRef: null };
 }
 
 export interface ExplanationView {

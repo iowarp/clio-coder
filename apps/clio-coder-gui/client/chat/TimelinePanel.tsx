@@ -116,7 +116,7 @@ export const TimelinePanel = memo(function TimelinePanel({
 															client={client}
 															label={`${detail.label}, ${row.title}`}
 															value={detail.value}
-															ref={detail.ref}
+															factRef={detail.factRef}
 														/>
 													</dd>
 												</div>

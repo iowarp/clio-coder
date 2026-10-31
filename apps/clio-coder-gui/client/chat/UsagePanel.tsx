@@ -111,12 +111,12 @@ export const UsagePanel = memo(function UsagePanel({
 										<span className="drill__main">
 											<span className="usage-panel__route">{row.route}</span>
 											<small className="drill__num">
-												<Explained client={client} label={`Tokens, ${row.route}`} value={row.tokens} ref={row.refs.tokens} />
+												<Explained client={client} label={`Tokens, ${row.route}`} value={row.tokens} factRef={row.refs.tokens} />
 											</small>
 											{row.beside ? <small>Call details: {row.beside}</small> : null}
 										</span>
 										<span className="drill__num usage-panel__cost">
-											<Explained client={client} label={`Cost, ${row.route}`} value={row.cost} ref={row.refs.cost} />
+											<Explained client={client} label={`Cost, ${row.route}`} value={row.cost} factRef={row.refs.cost} />
 										</span>
 									</li>
 								))}

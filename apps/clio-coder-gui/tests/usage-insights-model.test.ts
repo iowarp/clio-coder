@@ -148,7 +148,7 @@ test("a model row splits by who spent it, each side the server's fold with its o
 	};
 	const [row] = usageModelInsights(report([byModel(quantity("12", 12), [split])]));
 	assert.deepEqual(
-		row?.audience?.map((audience) => [audience.label, audience.measures.calls.value, audience.measures.calls.ref]),
+		row?.audience?.map((audience) => [audience.label, audience.measures.calls.value, audience.measures.calls.factRef]),
 		[
 			["Sessions' own calls", "9", "repo:all-30d:own#calls"],
 			["Worker runs", "3", "repo:all-30d:runs#calls"],

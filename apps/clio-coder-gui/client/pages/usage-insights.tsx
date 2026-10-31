@@ -164,7 +164,7 @@ export function UsageInsights({ client, report }: { client: Client; report: Usag
 											client={client}
 											label={`${item.label}, ${selected.model}`}
 											value={usageAmountText(selected[item.id])}
-											ref={selected[item.id].ref}
+											factRef={selected[item.id].factRef}
 										/>
 										<small>{selected[item.id].label}</small>
 									</dd>

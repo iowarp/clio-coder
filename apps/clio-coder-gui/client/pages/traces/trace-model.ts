@@ -57,8 +57,8 @@ export function runTotals(run: TraceRun, detail: RunTelemetryV1 | undefined, now
 		{ label: "Tokens", ...explainable(detail?.tokens.total ?? run.telemetry.tokens) },
 		{ label: "Cost", ...explainable(run.telemetry.usd) },
 		{ label: "Model calls", ...explainable(detail?.counts.calls ?? run.telemetry.apiCalls) },
-		{ label: "Wall time", value: span ? formatDuration(span.end - span.start) : "not recorded", ref: null },
-		{ label: "Runtime", value: run.identity?.runtimeId || "not recorded", ref: null },
+		{ label: "Wall time", value: span ? formatDuration(span.end - span.start) : "not recorded", factRef: null },
+		{ label: "Runtime", value: run.identity?.runtimeId || "not recorded", factRef: null },
 	];
 }
 

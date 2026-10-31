@@ -566,14 +566,19 @@ export function SessionOverview({
 									<div>
 										<dt>Tokens</dt>
 										<dd>
-											<Explained client={client} label="Tokens" value={spend.tokens ?? "not recorded"} ref={spend.refs.tokens} />
+											<Explained
+												client={client}
+												label="Tokens"
+												value={spend.tokens ?? "not recorded"}
+												factRef={spend.refs.tokens}
+											/>
 											{spend.missingTokenCalls ? ` (${spend.missingTokenCalls} missing usage)` : ""}
 										</dd>
 									</div>
 									<div>
 										<dt>Cost</dt>
 										<dd>
-											<Explained client={client} label="Cost" value={spend.cost ?? "Unpriced"} ref={spend.refs.cost} />
+											<Explained client={client} label="Cost" value={spend.cost ?? "Unpriced"} factRef={spend.refs.cost} />
 										</dd>
 									</div>
 								</dl>

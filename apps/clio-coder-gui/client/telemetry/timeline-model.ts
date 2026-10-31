@@ -44,9 +44,9 @@ export const TIMELINE_KINDS: Readonly<Record<TimelineEntry["kind"], string>> = {
 
 const words = (value: string) => value.replaceAll("_", " ").replaceAll("-", " ");
 const shown = (label: string, value: { readonly display: string } | null): TimelineDetail[] =>
-	value ? [{ label, value: value.display, ref: null }] : [];
+	value ? [{ label, value: value.display, factRef: null }] : [];
 const said = (label: string, value: string | null | undefined): TimelineDetail[] =>
-	value ? [{ label, value, ref: null }] : [];
+	value ? [{ label, value, factRef: null }] : [];
 
 type Described = Pick<TimelineRow, "title" | "tone" | "details">;
 export type CacheBreak = CacheReportV1["breaks"][number];
@@ -75,7 +75,7 @@ function describe(entry: TimelineEntry, breaks: ReadonlyMap<string, CacheBreak>)
 					{ label: "Cost", ...explainable(entry.usd) },
 					{ label: "First token", ...explainable(entry.timing.ttft) },
 					{ label: "Model time", ...explainable(entry.timing.modelTime) },
-					{ label: "Cache", value: words(entry.cacheVerdict), ref: null },
+					{ label: "Cache", value: words(entry.cacheVerdict), factRef: null },
 					...breakDetails(cacheBreak),
 				],
 			};
@@ -149,7 +149,7 @@ function describe(entry: TimelineEntry, breaks: ReadonlyMap<string, CacheBreak>)
 				title: `Quota reading for ${entry.provider}${entry.limitReached ? ": limit reached" : ""}`,
 				tone: entry.limitReached ? "fail" : "neutral",
 				details: [
-					...entry.windows.map((window) => ({ label: words(window.key), value: window.usedPct.display, ref: null })),
+					...entry.windows.map((window) => ({ label: words(window.key), value: window.usedPct.display, factRef: null })),
 					...said("Read from", words(entry.source)),
 				],
 			};
@@ -195,9 +195,9 @@ function describe(entry: TimelineEntry, breaks: ReadonlyMap<string, CacheBreak>)
 				title: `Context snapshot, ${entry.source}`,
 				tone: "neutral",
 				details: [
-					{ label: "Window", value: entry.window.display.effective, ref: null },
+					{ label: "Window", value: entry.window.display.effective, factRef: null },
 					...(entry.window.desired !== entry.window.effective
-						? [{ label: "Window asked for", value: entry.window.display.desired, ref: null }]
+						? [{ label: "Window asked for", value: entry.window.display.desired, factRef: null }]
 						: []),
 					...said("Window from", words(entry.window.source)),
 					...shown("Estimated", entry.estimated),
@@ -214,7 +214,7 @@ function describe(entry: TimelineEntry, breaks: ReadonlyMap<string, CacheBreak>)
 					...entry.routes.map((route) => ({
 						label: `${route.engine} (${words(route.kind)})`,
 						value: `${words(route.outcome)}${route.roundTrip ? ` in ${route.roundTrip.display}` : ""}${route.breaker ? `, breaker ${route.breaker}` : ""}`,
-						ref: null,
+						factRef: null,
 					})),
 				],
 			};

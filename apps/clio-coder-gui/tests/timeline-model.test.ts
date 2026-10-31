@@ -94,8 +94,8 @@ test("a timeline row carries the server's words for every figure, and a call's q
 	);
 	const [, model, context, gap, , turn] = rows;
 	assert.deepEqual(model?.details.slice(0, 2), [
-		{ label: "Tokens", value: "~5,050 (chars/4)", ref: "session:s#tokens" },
-		{ label: "Cost", value: "not measured", ref: "session:s#usd" },
+		{ label: "Tokens", value: "~5,050 (chars/4)", factRef: "session:s#tokens" },
+		{ label: "Cost", value: "not measured", factRef: "session:s#usd" },
 	]);
 	assert.deepEqual(
 		model?.stages.map((bar) => bar.stage),
@@ -110,9 +110,9 @@ test("a timeline row carries the server's words for every figure, and a call's q
 			["Provider count", "9,342"],
 		],
 	);
-	assert.deepEqual(gap?.details, [{ label: "Records lost", value: "3", ref: null }]);
+	assert.deepEqual(gap?.details, [{ label: "Records lost", value: "3", factRef: null }]);
 	assert.equal(turn?.tone, "fail");
-	assert.deepEqual(turn?.details.at(-1), { label: "Retries", value: "2", ref: null });
+	assert.deepEqual(turn?.details.at(-1), { label: "Retries", value: "2", factRef: null });
 	// Two entries of a kind at one instant keep distinct keys.
 	assert.equal(new Set(rows.map((row) => row.key)).size, rows.length);
 });
@@ -133,10 +133,10 @@ test("a call the cache report lists as a break names its bill and where its pref
 	assert.equal(model?.tone, "warn");
 	assert.match(model?.title ?? "", / · cache break$/);
 	assert.deepEqual(model?.details.slice(-4), [
-		{ label: "Re-prefilled", value: "4,000", ref: "session:s#rePrefilled" },
-		{ label: "Break cost", value: "$0.0120", ref: "session:s#breakUsd" },
-		{ label: "Diverged at", value: "memory", ref: null },
-		{ label: "Expected cold", value: "prompt recompiled", ref: null },
+		{ label: "Re-prefilled", value: "4,000", factRef: "session:s#rePrefilled" },
+		{ label: "Break cost", value: "$0.0120", factRef: "session:s#breakUsd" },
+		{ label: "Diverged at", value: "memory", factRef: null },
+		{ label: "Expected cold", value: "prompt recompiled", factRef: null },
 	]);
 });
 

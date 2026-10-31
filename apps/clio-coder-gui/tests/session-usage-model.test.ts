@@ -121,10 +121,10 @@ const usage: SessionUsage = {
 
 test("legacy v1 totals and rows read the agent's counts without a sum or a suffix the client invents", () => {
 	assert.deepEqual(usageTotals(usage), [
-		{ label: "Cost", value: "$0.42", ref: null },
-		{ label: "Tokens", value: "5,200", ref: null },
-		{ label: "Model calls", value: "7", ref: null },
-		{ label: "Calls missing usage", value: "1", ref: null },
+		{ label: "Cost", value: "$0.42", factRef: null },
+		{ label: "Tokens", value: "5,200", factRef: null },
+		{ label: "Model calls", value: "7", factRef: null },
+		{ label: "Calls missing usage", value: "1", factRef: null },
 	]);
 	assert.deepEqual(usageRows(usage), [
 		{
@@ -184,9 +184,9 @@ test("the read model's displays win over the v1 counts wherever the usage read c
 		refs: { tokens: "session:s1#total", cost: "session:s1#usd", calls: null },
 	});
 	assert.deepEqual(usageTotals(withTelemetry), [
-		{ label: "Cost", value: "$0.42 +?", ref: "session:s1#usd" },
-		{ label: "Tokens", value: "≥5,120 (1 call unknown)", ref: "session:s1#total" },
-		{ label: "Model calls", value: "7", ref: null },
+		{ label: "Cost", value: "$0.42 +?", factRef: "session:s1#usd" },
+		{ label: "Tokens", value: "≥5,120 (1 call unknown)", factRef: "session:s1#total" },
+		{ label: "Model calls", value: "7", factRef: null },
 	]);
 	assert.deepEqual(usageRows(withTelemetry), [
 		{
@@ -317,8 +317,8 @@ test("parked usage shows recorded totals without exposing live model details or 
 	};
 	const parked = usageSummary(false, usage, recorded);
 	assert.deepEqual(parked.totals, [
-		{ label: "Cost", value: "~$0.03 est", ref: null },
-		{ label: "Tokens", value: "1,284,413", ref: null },
+		{ label: "Cost", value: "~$0.03 est", factRef: null },
+		{ label: "Tokens", value: "1,284,413", factRef: null },
 	]);
 	assert.match(parked.note, /^Last recorded totals\./);
 	assert.equal(parked.details, false);

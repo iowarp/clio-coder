@@ -186,8 +186,8 @@ export function SpendPanel({
 function CallSpend({ client, call }: { client: Client; call: CallEntry }) {
 	return (
 		<>
-			<Explained client={client} label="Call tokens" value={tokensText(call.tokens.display)} ref={call.tokens.ref} /> ·{" "}
-			<Explained client={client} label="Call cost" value={call.usd.display} ref={call.usd.ref} />
+			<Explained client={client} label="Call tokens" value={tokensText(call.tokens.display)} factRef={call.tokens.ref} /> ·{" "}
+			<Explained client={client} label="Call cost" value={call.usd.display} factRef={call.usd.ref} />
 		</>
 	);
 }

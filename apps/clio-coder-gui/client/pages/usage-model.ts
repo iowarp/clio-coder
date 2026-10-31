@@ -226,18 +226,18 @@ export function usageView(report: UsageReport): UsageView {
 	const store = (name: string, missing: string, label: string): UsageFigure => {
 		const row = first(name);
 		const count = number(row?.value);
-		if (first(missing) || count === null) return { label, value: "—", note: emptyState.dash(), ref: null };
-		return { label, value: countText(count), ref: null };
+		if (first(missing) || count === null) return { label, value: "—", note: emptyState.dash(), factRef: null };
+		return { label, value: countText(count), factRef: null };
 	};
 
 	const total = byOrigin?.total;
 	const headline: UsageFigure[] = [
 		total
 			? { label: "Tokens", ...explainable(total.tokens), note: `API calls: ${total.calls.display}` }
-			: { label: "Tokens", value: countText(null), ref: null },
+			: { label: "Tokens", value: countText(null), factRef: null },
 		total
 			? { label: "Cost", ...explainable(total.usd), note: costNote(total) }
-			: { label: "Cost", value: "not measured", note: "No spend was measured in this window", ref: null },
+			: { label: "Cost", value: "not measured", note: "No spend was measured in this window", factRef: null },
 		store("sessions", "session-store-missing", "Sessions"),
 		store("dispatch-runs", "receipt-store-missing", "Dispatch runs"),
 	];

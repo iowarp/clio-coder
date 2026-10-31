@@ -107,7 +107,7 @@ export function UsagePage({ client }: { client: Client }) {
 											<i style={{ width: `${bar.share * 100}%` }} />
 										</span>
 										<span className="usage-bar__value">
-											<Explained client={client} label={`${bar.label} tokens`} value={bar.value} ref={bar.ref} />
+											<Explained client={client} label={`${bar.label} tokens`} value={bar.value} factRef={bar.factRef} />
 										</span>
 									</li>
 								))}
@@ -123,7 +123,7 @@ export function UsagePage({ client }: { client: Client }) {
 										<div key={origin.label}>
 											<dt>{origin.label}</dt>
 											<dd>
-												<Explained client={client} label={`${origin.label} calls`} value={origin.value} ref={origin.ref} />
+												<Explained client={client} label={`${origin.label} calls`} value={origin.value} factRef={origin.factRef} />
 											</dd>
 										</div>
 									))}
