@@ -33,6 +33,15 @@ export {
 } from "./cost.js";
 export type { EvidenceIndexRow } from "./evidence-index.js";
 export { EVIDENCE_INDEX_FILE, MAX_EVIDENCE_INDEX_ROWS, readEvidenceIndex } from "./evidence-index.js";
+export type {
+	DecisionRow,
+	DecisionsFold,
+	GateVerdictRow,
+	MemoryStepRow,
+	MemoryStepsFold,
+	ProcessHealthFold,
+} from "./fact-folds.js";
+export { decisionRow, foldDecisions, foldGateVerdicts, foldMemorySteps, foldProcessHealth } from "./fact-folds.js";
 export { publishGateDecision } from "./gate-publication.js";
 export { TelemetryManifest } from "./manifest.js";
 export { readTaskMemorySpendSummary } from "./memory-spend.js";
