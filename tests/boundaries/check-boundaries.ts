@@ -382,11 +382,6 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 		reason: "an ACP prompt's output tokens over its generation time make its tok/s rate, a division over measured facts",
 	},
 	{
-		file: "src/engine/acp/adapter.ts",
-		functions: ["peerFact", "clioPeerUsageFacts"],
-		reason: "the producer side of a delegated run: it reads a Clio peer's own fact sums back as the run's one fact each",
-	},
-	{
 		file: "src/engine/acp/live-telemetry.ts",
 		functions: ["plainCost"],
 		reason: "ACP's spec `cost` field is a plain amount; it is sent only when the session's spend has no unknown part",

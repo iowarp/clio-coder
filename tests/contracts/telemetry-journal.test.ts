@@ -27,6 +27,7 @@ import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import type { CostReportV1, ExplanationV1 } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import type { Fact } from "../../src/core/telemetry/fact.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
@@ -298,26 +299,25 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 	const run = await openRunTelemetry(context, telemetryRunDirectory(stateDir, "run"));
 	run.linkSession(parent.context);
 	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
+	const none = sumFacts([unknown]);
 	const aggregate = (tokens: number, revision: number): RunUsage => ({
 		source: "acp",
 		scope: "run",
 		revision,
 		coverage: "complete",
-		pricingCoverage: "unknown",
-		callCountCoverage: "complete",
 		target: { targetId: "target", runtimeId: "acp", api: "acp", requestedModel: "model", reportedModel: unknown },
 		usage: {
-			input: unknown,
-			output: unknown,
-			cacheRead: unknown,
-			cacheWrite: unknown,
-			cacheWrite1h: unknown,
-			reasoning: unknown,
+			input: none,
+			output: none,
+			cacheRead: none,
+			cacheWrite: none,
+			cacheWrite1h: none,
+			reasoning: none,
 		},
-		totalTokens: measured(tokens),
-		apiCalls: unknown,
-		unmeteredCalls: unknown,
-		pricing: { usd: unknown, pricedBy: "none" },
+		totalTokens: sumFacts([measured(tokens)]),
+		apiCalls: none,
+		unmeteredCalls: none,
+		pricing: { usd: none, pricedBy: "none" },
 	});
 	const report = (tokens: number, revision: number) =>
 		run.worker({
@@ -1135,26 +1135,25 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	strictEqual(fold.coverage.duplicateAttempts, 1);
 	strictEqual(foldCallJournal(rows, new Set([first.callId])).totals.attempts, 2);
 	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
+	const one = (fact: Fact<number>) => sumFacts([fact]);
 	const aggregate: RunUsage = {
 		source: "acp",
-		pricingCoverage: "complete",
-		callCountCoverage: "complete",
 		scope: "peer-session",
 		revision: 1,
 		coverage: "complete",
 		target: first.target,
 		usage: {
-			input: measured(80),
-			output: measured(20),
-			cacheRead: unknown,
-			cacheWrite: unknown,
-			cacheWrite1h: unknown,
-			reasoning: unknown,
+			input: one(measured(80)),
+			output: one(measured(20)),
+			cacheRead: one(unknown),
+			cacheWrite: one(unknown),
+			cacheWrite1h: one(unknown),
+			reasoning: one(unknown),
 		},
-		totalTokens: measured(100),
-		apiCalls: unknown,
-		unmeteredCalls: unknown,
-		pricing: { usd: measured(1), pricedBy: "provider" },
+		totalTokens: one(measured(100)),
+		apiCalls: one(unknown),
+		unmeteredCalls: one(unknown),
+		pricing: { usd: one(measured(1)), pricedBy: "provider" },
 	};
 	const aggregateRecord = makeTelemetryRecord(
 		"run.usage_reported",
@@ -1168,7 +1167,11 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	const partialCounts = runUsageFromCallRecords([
 		{
 			...aggregateRecord,
-			data: { ...aggregate, apiCalls: measured(3), unmeteredCalls: measured(0), callCountCoverage: "partial" },
+			data: {
+				...aggregate,
+				apiCalls: sumFacts([measured(3), unknown]),
+				unmeteredCalls: sumFacts([measured(0), unknown]),
+			},
 		},
 	]);
 	strictEqual(factKnownValue(partialCounts.sums.apiCalls ?? emptySum), 3);
@@ -1180,7 +1183,12 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	const partB = {
 		...aggregateRecord,
 		id: makeTelemetryRecord("session.opened", {}, context, clock).id,
-		data: { ...aggregate, partId: "b", totalTokens: measured(0), pricing: { usd: unknown, pricedBy: "none" as const } },
+		data: {
+			...aggregate,
+			partId: "b",
+			totalTokens: one(measured(0)),
+			pricing: { usd: one(unknown), pricedBy: "none" as const },
+		},
 	};
 	const parts = runUsageFromCallRecords([partA, partB, partA]);
 	strictEqual(factKnownValue(parts.sums.totalTokens ?? emptySum), 100);
@@ -1209,10 +1217,10 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		{
 			...aggregate,
 			revision: 2,
-			totalTokens: measured(0),
-			apiCalls: measured(0),
-			unmeteredCalls: measured(0),
-			pricing: { usd: measured(0), pricedBy: "provider" },
+			totalTokens: one(measured(0)),
+			apiCalls: one(measured(0)),
+			unmeteredCalls: one(measured(0)),
+			pricing: { usd: one(measured(0)), pricedBy: "provider" },
 		},
 		aggregateRecord.ctx,
 		clock,
@@ -1222,7 +1230,7 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		0,
 		"latest revision replaces earlier snapshots, including measured zero",
 	);
-	const conflictingAggregate = { ...aggregateRecord, data: { ...aggregate, totalTokens: measured(200) } };
+	const conflictingAggregate = { ...aggregateRecord, data: { ...aggregate, totalTokens: one(measured(200)) } };
 	const damagedAggregate = runUsageFromCallRecords([...withAggregate, conflictingAggregate]);
 	strictEqual(factKnownValue(damagedAggregate.sums.totalTokens ?? emptySum), 0);
 	strictEqual(damagedAggregate.sums.totalTokens.unknownCount > 0, true);
@@ -1468,26 +1476,25 @@ test("usage report discovers a standalone run journal that has no session and no
 	const owner = { sessionId: null, runId: "orphan-run", agent: { role: "worker" as const, id: "orphan-run" } };
 	const run = await openRunTelemetry(owner, telemetryRunDirectory(stateDir, owner.runId));
 	const measured = { kind: "measured" as const, value: 21, source: "provider" as const };
+	const none = sumFacts([unknown]);
 	const usage: RunUsage = {
 		source: "acp",
 		scope: "run",
 		revision: 0,
 		coverage: "complete",
-		pricingCoverage: "unknown",
-		callCountCoverage: "complete",
 		target: { targetId: "target", runtimeId: "acp", api: "acp", requestedModel: "model", reportedModel: unknown },
 		usage: {
-			input: unknown,
-			output: unknown,
-			cacheRead: unknown,
-			cacheWrite: unknown,
-			cacheWrite1h: unknown,
-			reasoning: unknown,
+			input: none,
+			output: none,
+			cacheRead: none,
+			cacheWrite: none,
+			cacheWrite1h: none,
+			reasoning: none,
 		},
-		totalTokens: measured,
-		apiCalls: unknown,
-		unmeteredCalls: unknown,
-		pricing: { usd: unknown, pricedBy: "none" },
+		totalTokens: sumFacts([measured]),
+		apiCalls: none,
+		unmeteredCalls: none,
+		pricing: { usd: none, pricedBy: "none" },
 	};
 	try {
 		ok(

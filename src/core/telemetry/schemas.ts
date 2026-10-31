@@ -14,7 +14,7 @@ import {
 	TransportKind,
 	vocabulary,
 } from "./enums.js";
-import { EstimateMethod, factSchema } from "./fact.js";
+import { EstimateMethod, FactSumSchema, factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
 import { RUN_HASH_CANONICALIZATIONS, RUN_HASH_SUBJECTS } from "./run-vocabulary.js";
 import {
@@ -266,7 +266,21 @@ export const CallSettledSchema = Type.Object(
 );
 export type CallSettled = Static<typeof CallSettledSchema>;
 
-/** Aggregate snapshots describe a delegated scope, never an invented provider call (#434). */
+const usageSums = Type.Object(
+	{
+		input: FactSumSchema,
+		cacheRead: FactSumSchema,
+		cacheWrite: FactSumSchema,
+		cacheWrite1h: FactSumSchema,
+		output: FactSumSchema,
+		reasoning: FactSumSchema,
+	},
+	closed,
+);
+/**
+ * Aggregate snapshots describe a delegated scope, never an invented provider call (#434). Each quantity is a sum with
+ * its coverage, so a scope with one unpriced or unreported call keeps the known subtotal of the others.
+ */
 export const RunUsageSchema = Type.Object(
 	{
 		source: vocabulary(["claude-sdk", "external-cli", "acp"]),
@@ -275,14 +289,15 @@ export const RunUsageSchema = Type.Object(
 		partId: Type.Optional(text),
 		revision: count,
 		coverage: vocabulary(["complete", "partial", "unknown"]),
-		pricingCoverage: vocabulary(["complete", "partial", "unknown"]),
-		callCountCoverage: vocabulary(["complete", "partial", "unknown"]),
 		target,
-		usage: UsageSchema,
-		totalTokens: factSchema(count),
-		apiCalls: factSchema(count),
-		unmeteredCalls: factSchema(count),
-		pricing: PricingSchema,
+		usage: usageSums,
+		totalTokens: FactSumSchema,
+		apiCalls: FactSumSchema,
+		unmeteredCalls: FactSumSchema,
+		pricing: Type.Object(
+			{ usd: FactSumSchema, pricedBy: vocabulary(["provider", "target-rates", "catalog", "free", "none"]) },
+			closed,
+		),
 	},
 	closed,
 );

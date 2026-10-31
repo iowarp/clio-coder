@@ -34,20 +34,35 @@ type MeasuredSource = Extract<Fact<number>, { kind: "measured" }>["source"];
 /** Where each quantity's facts came from, keyed by field name, so a collapsed fact names a real method or source. */
 function provenanceOf(payloads: readonly unknown[]): Map<string, Provenance> {
 	const found = new Map<string, Provenance>();
-	const visit = (value: unknown, key: string) => {
+	const note = (key: string, method: EstimateMethod | undefined, source: MeasuredSource | undefined) => {
+		const entry = found.get(key) ?? { methods: new Set(), sources: new Set() };
+		if (method !== undefined) entry.methods.add(method);
+		if (source !== undefined) entry.sources.add(source);
+		found.set(key, entry);
+	};
+	const visit = (value: unknown, key: string, pricedBy: unknown) => {
 		if (value === null || typeof value !== "object") return;
-		const fact = value as { kind?: unknown; method?: unknown; source?: unknown };
+		const fact = value as { kind?: unknown; method?: unknown; source?: unknown; coverage?: unknown };
 		if (fact.kind === "estimated" || fact.kind === "measured") {
-			const entry = found.get(key) ?? { methods: new Set(), sources: new Set() };
-			if (fact.kind === "estimated") entry.methods.add(fact.method as EstimateMethod);
-			else entry.sources.add(fact.source as MeasuredSource);
-			found.set(key, entry);
+			if (fact.kind === "estimated") note(key, fact.method as EstimateMethod, undefined);
+			else note(key, undefined, fact.source as MeasuredSource);
 			return;
 		}
+		// A reported scope's sums carry no method of their own; its pricing says who priced it (#434).
+		if (fact.coverage !== undefined && "unknownCount" in fact) {
+			const sum = value as FactSum;
+			const usd = key === "usd";
+			if (sum.coverage.estimated > 0)
+				note(key, usd && (pricedBy === "catalog" || pricedBy === "target-rates") ? pricedBy : "peer-report", undefined);
+			if (sum.coverage.measured > 0)
+				note(key, undefined, key === "apiCalls" || (usd && pricedBy === "target-rates") ? "local-count" : "provider");
+			return;
+		}
+		const priced = (value as { pricing?: { pricedBy?: unknown } }).pricing?.pricedBy ?? pricedBy;
 		// A cache bill prices re-prefill, which is not the run's spend.
-		for (const [child, item] of Object.entries(value)) if (child !== "cache") visit(item, child);
+		for (const [child, item] of Object.entries(value)) if (child !== "cache") visit(item, child, priced);
 	};
-	for (const payload of payloads) visit(payload, "");
+	for (const payload of payloads) visit(payload, "", undefined);
 	return found;
 }
 

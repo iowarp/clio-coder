@@ -4,7 +4,8 @@ import type { Fact } from "../core/telemetry/fact.js";
 import { createTelemetryForwarder } from "../core/telemetry/forwarder.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../core/telemetry/ids.js";
-import type { CallUsage, RunUsage } from "../core/telemetry/schemas.js";
+import { sumFacts } from "../core/telemetry/pricing.js";
+import type { CallUsage, Pricing, RunUsage } from "../core/telemetry/schemas.js";
 import { calculatePricingCostUsd } from "../domains/providers/catalog.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput } from "./worker-runtime.js";
@@ -30,19 +31,19 @@ export function bindExternalUsage<T extends object>(message: T, observation: Ext
 	return message;
 }
 
-export function externalUsageFacts(
-	observation: ExternalUsageObservation,
-): Pick<
-	RunUsage,
-	| "usage"
-	| "totalTokens"
-	| "apiCalls"
-	| "unmeteredCalls"
-	| "pricing"
-	| "coverage"
-	| "pricingCoverage"
-	| "callCountCoverage"
-> {
+/** One external summary as single facts, before it is recorded as sums with their coverage (#434). */
+export interface ExternalUsageFacts {
+	usage: CallUsage;
+	totalTokens: Fact<number>;
+	apiCalls: Fact<number>;
+	unmeteredCalls: Fact<number>;
+	pricing: Pricing;
+	coverage: RunUsage["coverage"];
+	/** The summary says its call count misses calls, so the count it states is a lower bound. */
+	callCountPartial: boolean;
+}
+
+export function externalUsageFacts(observation: ExternalUsageObservation): ExternalUsageFacts {
 	const raw = observation.usage;
 	const external = record(raw.clioExternal);
 	const tokensVerified =
@@ -104,8 +105,30 @@ export function externalUsageFacts(
 						: "none",
 		},
 		coverage: observation.coverage,
-		pricingCoverage: estimatedUsd.kind === "unknown" ? "unknown" : "complete",
-		callCountCoverage: raw.callCountCoverage === "partial" ? "partial" : "complete",
+		callCountPartial: raw.callCountCoverage === "partial",
+	};
+}
+
+/** An external summary as the sums run.usage_reported records; a partial call count keeps one unknown call (#434). */
+export function reportedUsageSums(
+	facts: ExternalUsageFacts,
+): Pick<RunUsage, "usage" | "totalTokens" | "apiCalls" | "unmeteredCalls" | "pricing" | "coverage"> {
+	const one = (fact: Fact<number>) => sumFacts([fact]);
+	const counted = (fact: Fact<number>) => sumFacts(facts.callCountPartial ? [fact, unknown] : [fact]);
+	return {
+		usage: {
+			input: one(facts.usage.input),
+			cacheRead: one(facts.usage.cacheRead),
+			cacheWrite: one(facts.usage.cacheWrite),
+			cacheWrite1h: one(facts.usage.cacheWrite1h),
+			output: one(facts.usage.output),
+			reasoning: one(facts.usage.reasoning),
+		},
+		totalTokens: one(facts.totalTokens),
+		apiCalls: counted(facts.apiCalls),
+		unmeteredCalls: counted(facts.unmeteredCalls),
+		pricing: { usd: one(facts.pricing.usd), pricedBy: facts.pricing.pricedBy },
+		coverage: facts.coverage,
 	};
 }
 
@@ -119,7 +142,7 @@ function externalTarget(input: WorkerRunInput) {
 	};
 }
 
-function priceExternalUsage(input: WorkerRunInput, facts: ReturnType<typeof externalUsageFacts>) {
+function priceExternalUsage(input: WorkerRunInput, facts: ExternalUsageFacts): ExternalUsageFacts {
 	if (facts.pricing.usd.kind !== "unknown" || !input.target.pricing) return facts;
 	const rates = input.target.pricing;
 	if (
@@ -128,7 +151,6 @@ function priceExternalUsage(input: WorkerRunInput, facts: ReturnType<typeof exte
 	)
 		return {
 			...facts,
-			pricingCoverage: "complete" as const,
 			pricing: {
 				usd: { kind: "measured" as const, value: 0, source: "local-count" as const },
 				pricedBy: "free" as const,
@@ -141,7 +163,6 @@ function priceExternalUsage(input: WorkerRunInput, facts: ReturnType<typeof exte
 	) as Record<(typeof keys)[number], number>;
 	return {
 		...facts,
-		pricingCoverage: "complete" as const,
 		pricing: {
 			usd: {
 				kind: "measured" as const,
@@ -166,7 +187,7 @@ export function recordExternalUsagePart(
 	telemetryHub().emit(
 		"run.usage_reported",
 		{
-			...priceExternalUsage(input, externalUsageFacts(observation)),
+			...reportedUsageSums(priceExternalUsage(input, externalUsageFacts(observation))),
 			source: "external-cli",
 			scope: "run",
 			partId,
@@ -249,7 +270,7 @@ export function observeExternalWorkerRun(
 				telemetryHub().emit(
 					"run.usage_reported",
 					{
-						...facts,
+						...reportedUsageSums(facts),
 						source: input.runtime.id === "claude-sdk" ? "claude-sdk" : "external-cli",
 						scope: "run",
 						revision: revision++,

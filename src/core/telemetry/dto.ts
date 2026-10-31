@@ -12,7 +12,7 @@ import {
 	TransportKind,
 	vocabulary,
 } from "./enums.js";
-import { factSchema } from "./fact.js";
+import { FactSumSchema, factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId, TelemetryAgentSchema } from "./id-schemas.js";
 import {
 	CallSettledSchema,
@@ -82,17 +82,6 @@ const transportFacts = {
 		closed,
 	),
 };
-
-export const FactSumSchema = Type.Object(
-	{
-		measured: nonNegative,
-		estimated: nonNegative,
-		unknownCount: count,
-		absentCount: count,
-		coverage: Type.Object({ measured: count, estimated: count, unknown: count }, closed),
-	},
-	closed,
-);
 
 export const FACT_METRICS = [
 	"calls",

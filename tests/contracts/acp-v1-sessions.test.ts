@@ -7,7 +7,7 @@ import { clioStateDir } from "../../src/core/xdg.js";
 import { suggestedSessionCostCeilingUsd } from "../../src/domains/scheduling/budget.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import { acpUsageFacts } from "../../src/engine/acp/adapter.js";
+import { acpUsageSums } from "../../src/engine/acp/adapter.js";
 import type { AcpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
@@ -434,7 +434,7 @@ test("ACP prompt usage writes the pricing facts that the delegation adapter read
 		ok(usd);
 		// A catalog price stays an estimate on the wire, and the delegation adapter reads it back as one (#434).
 		ok("kind" in usd ? usd.kind === "estimated" : usd.coverage.estimated === 1);
-		strictEqual(acpUsageFacts(result._meta["clio-coder/usage"]).pricing.usd.kind, "estimated");
+		strictEqual(acpUsageSums(result._meta["clio-coder/usage"]).pricing.usd.coverage.estimated, 1);
 	} finally {
 		await peer.stop();
 	}

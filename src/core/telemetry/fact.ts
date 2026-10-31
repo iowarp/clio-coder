@@ -40,6 +40,25 @@ export function factSchema<T extends TSchema>(value: T) {
 	]);
 }
 
+/** A sum of facts as it crosses a boundary: the known subtotal and how many contributions were unknown (#434). */
+export const FactSumSchema = Type.Object(
+	{
+		measured: Type.Number({ minimum: 0 }),
+		estimated: Type.Number({ minimum: 0 }),
+		unknownCount: Type.Integer({ minimum: 0 }),
+		absentCount: Type.Integer({ minimum: 0 }),
+		coverage: Type.Object(
+			{
+				measured: Type.Integer({ minimum: 0 }),
+				estimated: Type.Integer({ minimum: 0 }),
+				unknown: Type.Integer({ minimum: 0 }),
+			},
+			closed,
+		),
+	},
+	closed,
+);
+
 export interface FactSum {
 	measured: number;
 	estimated: number;

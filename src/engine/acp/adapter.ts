@@ -11,14 +11,15 @@ import { processBirthToken } from "../../core/process-identity.js";
 import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { withTelemetryContext } from "../../core/telemetry/context.js";
 import type { Quantity } from "../../core/telemetry/dto.js";
-import type { Fact } from "../../core/telemetry/fact.js";
+import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import { createTelemetryForwarder } from "../../core/telemetry/forwarder.js";
+import { sumFacts } from "../../core/telemetry/pricing.js";
 import type { RunUsage } from "../../core/telemetry/schemas.js";
 import type { HeartbeatStamp } from "../../domains/dispatch/heartbeat.js";
 import { isBuiltinClaudeAcp } from "../../domains/providers/auth/index.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
 import { findExecutableOnPath } from "../../domains/toolchain/resolve.js";
-import { externalUsageFacts } from "../external-call-telemetry.js";
+import { externalUsageFacts, reportedUsageSums } from "../external-call-telemetry.js";
 import type { AgentEvent } from "../types.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 import { withInstalledCodex } from "./codex-launch.js";
@@ -206,98 +207,73 @@ function flattenPrompt(input: AcpDelegationRunInput): string {
 type QuantityFact = Quantity["fact"];
 const notReported: Fact<number> = { kind: "unknown", reason: "provider-omitted" };
 
-/** A peer's quantity as one fact: a sum with an unknown part is unknown, an estimated part makes it a peer estimate. */
-function peerFact(fact: QuantityFact | undefined, source: "provider" | "local-count" = "provider"): Fact<number> {
-	if (fact === undefined) return notReported;
-	if ("kind" in fact) {
-		if (fact.kind === "estimated") return { kind: "estimated", value: fact.value, method: "peer-report" };
-		return fact.kind === "measured" ? { kind: "measured", value: fact.value, source } : notReported;
-	}
-	if (fact.unknownCount > 0) return notReported;
-	if (fact.coverage.estimated > 0)
-		return { kind: "estimated", value: fact.measured + fact.estimated, method: "peer-report" };
-	if (fact.coverage.measured > 0) return { kind: "measured", value: fact.measured, source };
-	return fact.absentCount > 0 ? { kind: "absent", reason: "not-applicable" } : notReported;
+/** A peer's quantity as the sum it reported, coverage included, so an unknown part never erases the known (#434). */
+function peerSum(fact: QuantityFact | undefined): FactSum {
+	if (fact === undefined) return sumFacts([notReported]);
+	if ("kind" in fact) return sumFacts([fact]);
+	return { ...fact, coverage: { ...fact.coverage } };
 }
 
 /** The unknown contributions of a peer's count: how many of its calls reported no usage. */
-function unreportedCalls(fact: QuantityFact | undefined): Fact<number> {
-	if (fact === undefined) return notReported;
-	if ("kind" in fact) return fact.kind === "unknown" ? { kind: "measured", value: 1, source: "provider" } : notReported;
-	return { kind: "measured", value: fact.unknownCount, source: "provider" };
+function unreportedCalls(fact: QuantityFact | undefined): FactSum {
+	if (fact === undefined) return sumFacts([notReported]);
+	const count = "kind" in fact ? (fact.kind === "unknown" ? 1 : 0) : fact.unknownCount;
+	return sumFacts([{ kind: "measured", value: count, source: "provider" }]);
 }
 
 /**
- * A Clio peer's `_meta["clio-coder/usage"]`, read as the facts it states (#434). The session block covers the peer's
+ * A Clio peer's `_meta["clio-coder/usage"]`, read as the sums it states (#434). The session block covers the peer's
  * helpers and workers; the turn block covers what this delegation asked for. Its pricing is the peer's own claim.
  */
-function clioPeerUsageFacts(meta: AcpUsageMeta, coverage: RunUsage["coverage"]) {
+function clioPeerUsageSums(meta: AcpUsageMeta, coverage: RunUsage["coverage"]): AcpUsageSums {
 	const session = meta.session;
 	const q = session?.quantities ?? meta.quantities;
-	const facts = {
-		input: peerFact(q?.input.fact),
-		output: peerFact(q?.output.fact),
-		cacheRead: peerFact(q?.cacheRead.fact),
-		cacheWrite: peerFact(q?.cacheWrite.fact),
-		cacheWrite1h: notReported,
-		reasoning: peerFact(q?.reasoning.fact),
-	};
-	const usd = peerFact(q?.usd.fact);
+	const usd = peerSum(q?.usd.fact);
 	const free =
 		session !== undefined &&
 		session.pricedBy.free > 0 &&
 		session.pricedBy.provider + session.pricedBy["target-rates"] + session.pricedBy.catalog + session.pricedBy.none === 0;
-	const usdFact = q?.usd.fact;
-	const usdUnknown = usdFact !== undefined && !("kind" in usdFact) && usdFact.unknownCount > 0;
-	const callsFact = q?.calls.fact;
+	const priced = usd.coverage.measured > 0 || usd.coverage.estimated > 0;
 	return {
-		usage: facts,
-		totalTokens: peerFact(q?.total.fact),
-		apiCalls: peerFact(callsFact, "local-count"),
-		unmeteredCalls: unreportedCalls(q?.total.fact),
-		pricing: {
-			usd,
-			pricedBy:
-				usd.kind === "unknown" || usd.kind === "absent"
-					? ("none" as const)
-					: free
-						? ("free" as const)
-						: ("provider" as const),
+		usage: {
+			input: peerSum(q?.input.fact),
+			output: peerSum(q?.output.fact),
+			cacheRead: peerSum(q?.cacheRead.fact),
+			cacheWrite: peerSum(q?.cacheWrite.fact),
+			cacheWrite1h: sumFacts([notReported]),
+			reasoning: peerSum(q?.reasoning.fact),
 		},
+		totalTokens: peerSum(q?.total.fact),
+		apiCalls: peerSum(q?.calls.fact),
+		unmeteredCalls: unreportedCalls(q?.total.fact),
+		pricing: { usd, pricedBy: !priced ? "none" : free ? "free" : "provider" },
 		coverage,
-		pricingCoverage: usdUnknown
-			? usdFact.measured + usdFact.estimated > 0
-				? ("partial" as const)
-				: ("unknown" as const)
-			: usd.kind === "unknown"
-				? ("unknown" as const)
-				: ("complete" as const),
-		callCountCoverage:
-			callsFact !== undefined && !("kind" in callsFact) && callsFact.unknownCount > 0
-				? ("partial" as const)
-				: ("complete" as const),
 	};
 }
 
+type AcpUsageSums = Pick<RunUsage, "usage" | "totalTokens" | "apiCalls" | "unmeteredCalls" | "pricing" | "coverage">;
+
 /** ACP reports describe a delegated scope; omitted call counts and pricing stay unknown (#434). */
-export function acpUsageFacts(value: unknown, coverage: RunUsage["coverage"] = "complete") {
+export function acpUsageSums(value: unknown, coverage: RunUsage["coverage"] = "complete"): AcpUsageSums {
 	if (Value.Check(AcpUsageMetaSchema, value) && (value.quantities !== undefined || value.session !== undefined))
-		return clioPeerUsageFacts(value, coverage);
+		return clioPeerUsageSums(value, coverage);
 	// Another agent's usage carries plain counts and, at most, a cost it put no source on.
 	const raw = isRecord(value) ? value : {};
-	return externalUsageFacts({
-		coverage,
-		usage: {
-			input: raw.input ?? raw.inputTokens ?? raw.input_tokens ?? raw.prompt_tokens,
-			output: raw.output ?? raw.outputTokens ?? raw.output_tokens ?? raw.completion_tokens,
-			cacheRead: raw.cacheRead ?? raw.cacheReadTokens ?? raw.cache_read_tokens,
-			cacheWrite: raw.cacheWrite ?? raw.cacheWriteTokens ?? raw.cache_write_tokens,
-			reasoning: raw.reasoning ?? raw.reasoningTokens ?? raw.reasoning_tokens,
-			totalTokens: raw.totalTokens ?? raw.total_tokens,
-			pricedBy: "none",
-			clioExternal: { tokenUsage: raw.estimated === true ? "unverified" : "provider-reported", cost: "unverified" },
-		},
-	});
+	return reportedUsageSums(
+		externalUsageFacts({
+			coverage,
+			usage: {
+				input: raw.input ?? raw.inputTokens ?? raw.input_tokens ?? raw.prompt_tokens,
+				output: raw.output ?? raw.outputTokens ?? raw.output_tokens ?? raw.completion_tokens,
+				cacheRead: raw.cacheRead ?? raw.cacheReadTokens ?? raw.cache_read_tokens,
+				cacheWrite: raw.cacheWrite ?? raw.cacheWriteTokens ?? raw.cache_write_tokens,
+				reasoning: raw.reasoning ?? raw.reasoningTokens ?? raw.reasoning_tokens,
+				totalTokens: raw.totalTokens ?? raw.total_tokens,
+				pricedBy: "none",
+				clioExternal: { tokenUsage: raw.estimated === true ? "unverified" : "provider-reported", cost: "unverified" },
+			},
+		}),
+	);
 }
 
 function errorMessage(value: unknown): string {
@@ -414,7 +390,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		if (!telemetry) return;
 		forwarder?.enqueue({
 			kind: "run.usage_reported",
-			data: { ...acpUsageFacts(raw, coverage), source: "acp", scope, revision: 0, target: telemetry.target },
+			data: { ...acpUsageSums(raw, coverage), source: "acp", scope, revision: 0, target: telemetry.target },
 			ctx: telemetry.context,
 			wallMs: Date.now(),
 			mono: performance.now(),

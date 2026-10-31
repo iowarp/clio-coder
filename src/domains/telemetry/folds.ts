@@ -306,47 +306,40 @@ function foldRunScope(records: Iterable<TelemetryRecord>, options: FoldOptions) 
 	const callTotals = calls.totals;
 	const apiCalls = callTotals.settled + callTotals.settledNoUsage + callTotals.sentUnsettled;
 	const missingCalls = foldCalls(calls.attempts.filter((attempt) => attempt.settled !== null)).totalTokens.unknownCount;
-	const choose = (fact: Fact<number>) => fromFact(conflict ? unknown : fact);
-	const chooseCount = (fact: Fact<number>) =>
-		!conflict && aggregate?.callCountCoverage !== "complete" && fact.kind !== "unknown"
-			? foldFacts([fact, unknown])
-			: choose(fact);
+	// A snapshot's sums keep their own coverage; only a conflict between snapshots makes a quantity unknown (#434).
+	const choose = (sum: FactSum) => (conflict ? fromFact(unknown) : sum);
+	const known = (sum: FactSum) => sum.coverage.measured + sum.coverage.estimated > 0;
+	const unknownOnly = (sum: FactSum) => !known(sum) && sum.unknownCount > 0;
+	const absentOnly = (sum: FactSum) => !known(sum) && sum.unknownCount === 0 && sum.absentCount > 0;
 	const usage = aggregate
 		? (Object.fromEntries(fields.map((field) => [field, choose(aggregate.usage[field])])) as Record<
 				(typeof fields)[number],
 				FactSum
 			>)
 		: callTotals.usage;
-	const aggregateTokenSubtotal = emptyFactSum();
-	if (aggregate)
-		addGroup(aggregateTokenSubtotal, [
-			aggregate.usage.input,
-			aggregate.usage.output,
-			aggregate.usage.cacheRead,
-			aggregate.usage.cacheWrite,
-		]);
 	return {
 		calls,
 		aggregate: conflict ? null : (aggregate ?? null),
 		source: aggregate ? (conflict ? ("conflict" as const) : ("aggregate" as const)) : ("calls" as const),
 		usage,
 		totalTokens: aggregate
-			? !conflict && aggregate.totalTokens.kind === "unknown"
-				? aggregateTokenSubtotal
+			? !conflict && unknownOnly(aggregate.totalTokens)
+				? componentSubtotal([
+						aggregate.usage.input,
+						aggregate.usage.output,
+						aggregate.usage.cacheRead,
+						aggregate.usage.cacheWrite,
+					])
 				: choose(aggregate.totalTokens)
 			: callTotals.totalTokens,
-		usd: aggregate
-			? !conflict && aggregate.pricingCoverage !== "complete" && aggregate.pricing.usd.kind !== "unknown"
-				? foldFacts([aggregate.pricing.usd, unknown])
-				: choose(aggregate.pricing.usd)
-			: callTotals.usd,
+		usd: aggregate ? choose(aggregate.pricing.usd) : callTotals.usd,
 		// Identified constituent calls provide a lower bound even when the aggregate omits its count (#434).
 		apiCalls: aggregate
-			? !conflict && aggregate.apiCalls.kind === "unknown"
-				? foldFacts([observed(apiCalls), aggregate.apiCalls])
-				: chooseCount(aggregate.apiCalls)
+			? !conflict && unknownOnly(aggregate.apiCalls)
+				? sumFactSums([fromFact(observed(apiCalls)), aggregate.apiCalls])
+				: choose(aggregate.apiCalls)
 			: fromFact(observed(apiCalls)),
-		unmeteredCalls: aggregate ? chooseCount(aggregate.unmeteredCalls) : fromFact(observed(missingCalls)),
+		unmeteredCalls: aggregate ? choose(aggregate.unmeteredCalls) : fromFact(observed(missingCalls)),
 		amountCoverageUnknown: aggregate
 			? conflict || aggregate.coverage !== "complete"
 			: calls.coverage.gapRecords > 0 || callTotals.incomplete > 0 || calls.unresolvedCallIds.length > 0,
@@ -354,13 +347,29 @@ function foldRunScope(records: Iterable<TelemetryRecord>, options: FoldOptions) 
 			conflict ||
 			(aggregate
 				? aggregate.coverage !== "complete" ||
-					aggregate.callCountCoverage !== "complete" ||
-					aggregate.apiCalls.kind === "unknown" ||
-					aggregate.apiCalls.kind === "absent" ||
-					aggregate.unmeteredCalls.kind === "unknown" ||
-					aggregate.unmeteredCalls.kind === "absent"
+					aggregate.apiCalls.unknownCount > 0 ||
+					absentOnly(aggregate.apiCalls) ||
+					aggregate.unmeteredCalls.unknownCount > 0 ||
+					absentOnly(aggregate.unmeteredCalls)
 				: calls.coverage.gapRecords > 0 || callTotals.incomplete > 0 || calls.unresolvedCallIds.length > 0),
 	};
+}
+
+/**
+ * Token components of one scope as a lower bound on its total: the components overlap the same calls, so values add
+ * while each coverage count is the widest any component reports (#434).
+ */
+function componentSubtotal(components: readonly FactSum[]): FactSum {
+	const result = emptyFactSum();
+	for (const sum of components) {
+		result.measured += sum.measured;
+		result.estimated += sum.estimated;
+		result.unknownCount = Math.max(result.unknownCount, sum.unknownCount);
+		result.absentCount = Math.max(result.absentCount, sum.absentCount);
+		for (const kind of ["measured", "estimated", "unknown"] as const)
+			result.coverage[kind] = Math.max(result.coverage[kind], sum.coverage[kind]);
+	}
+	return result;
 }
 
 export function sumFactSums(sums: readonly FactSum[]): FactSum {
