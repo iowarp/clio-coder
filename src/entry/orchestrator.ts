@@ -9,7 +9,6 @@ import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
 import { startRunOutput, writeRunDiagnostic } from "../cli/run-failure.js";
 import { formatBootTrace } from "../core/boot-trace.js";
 import { readClioVersionLabel } from "../core/build-info.js";
-import { installBusTracer } from "../core/bus-trace.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { codexAccountScope } from "../core/codex-account.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
@@ -311,11 +310,6 @@ import { recordFailedCompactionCalls } from "../domains/telemetry/compaction-usa
 import { TELEMETRY_FOLD_VERSION } from "../domains/telemetry/folds.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import { TelemetryDomainModule } from "../domains/telemetry/index.js";
-import {
-	appendResearchTraceLine,
-	RESEARCH_TRACE_FILES,
-	researchTracePath,
-} from "../domains/telemetry/research-files.js";
 import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
@@ -2122,9 +2116,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		: undefined;
 	const bus = telemetryHub();
 	const termination = getTerminationCoordinator();
-	// Domain loading emits before the config contract exists; the trace asks for the mode on every event (#434).
-	let researchBusTrace: () => ((record: Record<string, unknown>) => void) | null = () => null;
-	installBusTracer(() => researchBusTrace());
 	termination.installSignalHandlers();
 
 	ensureClioState();
@@ -2416,12 +2407,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	const config = result.getContract<ConfigContract>("config");
-	researchBusTrace = () => {
-		const telemetry = config?.get().telemetry;
-		if (telemetry?.mode !== "research" || !telemetry.research.busTrace) return null;
-		const path = researchTracePath(clioStateDir(), "bus-trace");
-		return (record) => appendResearchTraceLine(path, record, RESEARCH_TRACE_FILES["bus-trace"]);
-	};
 	const providers = result.getContract<ProvidersContract>("providers");
 	timer.mark("providers resolved");
 

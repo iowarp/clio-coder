@@ -8,7 +8,6 @@ import { assertSafeId } from "../../core/safe-id.js";
  *   sessions/<sessionId>/journal.jsonl   plus objects/
  *   runs/<runId>/journal.jsonl           plus objects/ when a run stores one
  *   consent.json
- *   research/
  *
  * Every scope names its journal `journal.jsonl` and rotates it as `journal.<recId>.jsonl`. Nothing outside the
  * telemetry domain writes under this root (rule11 in tests/boundaries/check-boundaries.ts).
@@ -79,8 +78,4 @@ export function telemetryObjectsDirectory(scopeDirectory: string): string {
 
 export function telemetryConsentPath(stateDir: string): string {
 	return join(telemetryRoot(stateDir), "consent.json");
-}
-
-export function telemetryResearchDirectory(stateDir: string): string {
-	return join(telemetryRoot(stateDir), "research");
 }

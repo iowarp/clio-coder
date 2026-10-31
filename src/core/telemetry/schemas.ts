@@ -593,6 +593,8 @@ export const ProcessBootedSchema = Type.Object(
 	},
 	closed,
 );
+/** A live event the hub delivered, journaled only under research mode's bus-trace flag: its name, never its payload (#434). */
+export const BusTracedSchema = Type.Object({ event: Type.String({ minLength: 1, maxLength: 128 }) }, closed);
 const prewarmLabel = Type.String({ minLength: 1, maxLength: 128 });
 /**
  * Whether a cache pre-warm was admitted: the chat route's prompt warm on a latency surface, or a startup worker warm

@@ -61,7 +61,6 @@ export {
 	telemetryObjectsDirectory,
 	telemetryProcessDirectory,
 	telemetryProcessesDirectory,
-	telemetryResearchDirectory,
 	telemetryRoot,
 	telemetryRunDirectory,
 	telemetryRunsDirectory,

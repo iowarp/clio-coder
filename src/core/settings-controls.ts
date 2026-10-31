@@ -689,7 +689,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"telemetry.research.busTrace": [
 		"Research: bus trace",
-		"In research mode, append shutdown and domain lifecycle bus events to telemetry/research/bus-trace.jsonl in the state directory.",
+		"In research mode, journal the name of every live event the telemetry hub delivers as a bus.traced record.",
 	],
 	"systemOne.record": [
 		"Save decision examples",

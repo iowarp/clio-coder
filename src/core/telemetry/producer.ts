@@ -137,7 +137,11 @@ function enqueueTelemetry(
 	preimage: unknown,
 	given: TelemetryScope | undefined,
 ): boolean {
-	if (!isJournalEvent(name)) return false;
+	if (!isJournalEvent(name)) {
+		// The bus trace is a registry feature: a live event is journaled by name where research mode keeps it (#434).
+		traceLiveEvent(name, given);
+		return false;
+	}
 	const definition = journalDefinition(name);
 	if (definition.scope === "process" || given === PROCESS_SCOPE) {
 		given = processOwner?.context;
@@ -193,6 +197,20 @@ export function enqueueReopenedTelemetry(record: PendingTelemetry): boolean {
 	if (sink) return enqueueInto(sink, record);
 	unownedRecords += 1;
 	return false;
+}
+
+function traceLiveEvent(name: EventName, given: TelemetryScope | undefined): void {
+	const scoped = given === PROCESS_SCOPE ? undefined : given;
+	const ctx = scoped ?? processOwner?.context;
+	const sink = scoped ? sinks.get(telemetryOwner(scoped)) : processOwner?.sink;
+	if (!ctx || !sink) return;
+	try {
+		if (!sinkAdmits(sink, "bus.traced")) return;
+		sink.enqueue({ kind: "bus.traced", data: { event: name }, ctx, wallMs: Date.now(), mono: performance.now() });
+	} catch {
+		// A trace never changes the event it traces (#434).
+		sinkFailures += 1;
+	}
 }
 
 attachJournalRoute({

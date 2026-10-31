@@ -8,7 +8,6 @@ import {
 	TELEMETRY_JOURNAL_FILE,
 	telemetryJournalFiles,
 	telemetryObjectsDirectory,
-	telemetryResearchDirectory,
 	telemetryRunDirectory,
 	telemetryRunsDirectory,
 	telemetrySessionsDirectory,
@@ -41,10 +40,7 @@ export interface PruneAction {
 	mtimeMs: number;
 	reason: PruneReason;
 	/** The session or run whose ownership is re-checked immediately before the delete. */
-	owner:
-		| { kind: "session"; directory: string; meta: string | null }
-		| { kind: "run"; directory: string }
-		| { kind: "research" };
+	owner: { kind: "session"; directory: string; meta: string | null } | { kind: "run"; directory: string };
 }
 
 export interface PruneHold {
@@ -345,11 +341,6 @@ export async function planTelemetryPrune(
 			else if (CONTENT_SUBJECTS.has(subject)) research.push({ file, owner });
 		}
 	}
-	const traceDirectory = telemetryResearchDirectory(stateDir);
-	for (const name of (await realDirectory(traceDirectory)) ? await names(traceDirectory) : []) {
-		const file = await info(join(traceDirectory, name));
-		if (file) research.push({ file, owner: { kind: "research" } });
-	}
 	plan.researchBytes = research.reduce((sum, item) => sum + item.file.bytes, 0);
 	let researchStanding = plan.researchBytes;
 	for (const item of research.sort((a, b) => a.file.mtimeMs - b.file.mtimeMs)) {
@@ -377,14 +368,13 @@ export interface PruneResult {
 export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult> {
 	const result: PruneResult = { removed: [], skipped: [] };
 	const live = async (owner: PruneAction["owner"]): Promise<boolean> => {
-		if (owner.kind === "research") return false;
 		if (locked(owner.directory)) return true;
 		return owner.kind === "session" && (await sessionOwnerLive(owner.meta));
 	};
 	// One owner's files go together, so the liveness check stays fresh for every file it covers.
 	const batches = new Map<string, PruneAction[]>();
 	for (const action of plan.remove) {
-		const key = action.owner.kind === "research" ? "research" : `${action.owner.kind}:${action.owner.directory}`;
+		const key = `${action.owner.kind}:${action.owner.directory}`;
 		batches.set(key, [...(batches.get(key) ?? []), action]);
 	}
 	for (const batch of batches.values()) {
@@ -400,7 +390,7 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 				continue;
 			}
 			// A writer creates its lock before it opens the journal, so a lock seen here means a session just started.
-			if (owner.kind !== "research" && locked(owner.directory)) {
+			if (locked(owner.directory)) {
 				result.skipped.push({ path: action.path, reason: "became live" });
 				continue;
 			}

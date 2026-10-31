@@ -262,6 +262,7 @@ export const EVENTS = {
 	"code_step.settled": journal(S.CodeStepSettledSchema, { tier: "accountability", cc: "content-free" }),
 	"process.started": journal(S.EmptySchema, { tier: "accountability", cc: "content-free" }),
 	"process.exited": journal(S.ProcessExitedSchema, { tier: "accountability", cc: "content-free" }),
+	"bus.traced": journal(S.BusTracedSchema, { tier: "research", cc: "structural", capture: "busTrace" }),
 	"process.booted": journal(S.ProcessBootedSchema, { tier: "operational", cc: "structural" }),
 	"prewarm.decided": journal(S.PrewarmDecidedSchema, { tier: "operational", cc: "structural" }),
 	"prewarm.settled": journal(S.PrewarmSettledSchema, { tier: "operational", cc: "structural" }),
