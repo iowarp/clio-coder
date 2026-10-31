@@ -1234,7 +1234,7 @@ export function spawnHeldWorkerProcess(
 /** The native worker entry, held for its spec. Same argv and environment as `spawnNativeWorker`. */
 export function spawnHeldNativeWorker(opts?: Pick<SpawnOptions, "cwd" | "env" | "workerEntryPath">): HeldWorkerProcess {
 	const workerEntry = opts?.workerEntryPath ?? join(resolvePackageRoot(), "dist/worker/entry.js");
-	return spawnHeldWorkerProcess(process.execPath, ["--disable-warning=ExperimentalWarning", workerEntry], {
+	return spawnHeldWorkerProcess(process.execPath, [workerEntry], {
 		...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
 		env: withCompileCacheEnvironment(opts?.env ?? process.env),
 	});
@@ -1242,15 +1242,11 @@ export function spawnHeldNativeWorker(opts?: Pick<SpawnOptions, "cwd" | "env" | 
 
 export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): SpawnedWorker {
 	const workerEntry = opts?.workerEntryPath ?? join(resolvePackageRoot(), "dist/worker/entry.js");
-	// Workers intentionally use node:sqlite for the trace journal. Its generic
-	// ExperimentalWarning offers operators no action and otherwise leaks into
-	// every internal-agent command's stderr. Suppress only that warning class;
-	// ordinary process warnings remain visible.
 	// Forward the whole option set. Enumerating it here is what silently dropped
 	// every callback a caller passed, so the only field this function decides is
 	// the entry path it consumed and the env default.
 	const { workerEntryPath: _entryPath, ...processOptions } = opts ?? {};
-	return spawnWorkerProcess(process.execPath, ["--disable-warning=ExperimentalWarning", workerEntry], spec, {
+	return spawnWorkerProcess(process.execPath, [workerEntry], spec, {
 		...processOptions,
 		env: withCompileCacheEnvironment(opts?.env ?? process.env),
 	});
