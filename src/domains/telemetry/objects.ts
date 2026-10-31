@@ -8,6 +8,7 @@ import { Value } from "typebox/value";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import type { ObjectRef } from "../../core/telemetry/schemas.js";
 import { ObjectRefSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
+import type { RedactionTally } from "../evidence/redact.js";
 import { createRedactionTally, secretRedactingReplacer } from "../evidence/redact.js";
 import { canonicalJson } from "../prompts/hash.js";
 import { redactSecretString } from "../safety/redaction.js";
@@ -251,6 +252,21 @@ function withheldSecretMaps(value: unknown, key?: string): unknown {
 	return Object.fromEntries(entries.map(([name, item]) => [name, withheldSecretMaps(item, name)]));
 }
 
+/**
+ * The redaction an object's preimage gets before it is hashed, and a share re-applies to every record and object it
+ * exports: value patterns, a secret-flavored property name over its credential-shaped value, URL userinfo, query
+ * credentials and secret flags, and for settings the withheld `headers` and `env` maps (#434).
+ */
+export function redactTelemetryValue<T>(value: T, tally: RedactionTally, secretMaps: boolean): T {
+	const secretValues = secretRedactingReplacer(tally);
+	return JSON.parse(canonicalJson(secretMaps ? withheldSecretMaps(value) : value), (key, item: unknown) => {
+		if (typeof item !== "string") return item;
+		const scrubbed = redactSecretString(item);
+		if (scrubbed !== item) tally.count += 1;
+		return secretValues(key, scrubbed);
+	}) as T;
+}
+
 /** The redacted canonical bytes an object stores and the reference they hash to; no I/O. */
 function storedPreimage(subject: StoredSubject, value: unknown): { ref: ObjectRef; bytes: string } {
 	if (!storedSubjects.has(subject)) throw new Error("telemetry object subject is not enabled for capture");
@@ -258,14 +274,7 @@ function storedPreimage(subject: StoredSubject, value: unknown): { ref: ObjectRe
 	if (shape !== undefined && !Value.Check(shape, value))
 		throw new Error(`telemetry ${subject} object contains unsupported fields`);
 	// Validate before JSON's replacer could silently convert non-finite numbers to null (#434).
-	const canonical = canonicalJson(subject === "config" ? withheldSecretMaps(value) : value);
-	// Value patterns miss URL userinfo, query credentials and secret flags; a run's deliverable is stored in every
-	// capture mode, so both passes run before the bytes are hashed (#434).
-	const secretValues = secretRedactingReplacer(createRedactionTally());
-	const redacted = JSON.parse(canonical, (key, value: unknown) =>
-		secretValues(key, typeof value === "string" ? redactSecretString(value) : value),
-	);
-	const bytes = canonicalJson(redacted);
+	const bytes = canonicalJson(redactTelemetryValue(value, createRedactionTally(), subject === "config"));
 	if (Buffer.byteLength(bytes) > maximumBytes) throw new Error("telemetry object exceeds size limit");
 	return { ref: reference(subject, bytes, "resolvable"), bytes };
 }
