@@ -1,18 +1,11 @@
 import type { DomainModule } from "../../core/domain-loader.js";
-import { createTelemetryBundle, type TelemetryBundleOptions } from "./extension.js";
+import { createTelemetryBundle } from "./extension.js";
 import { TelemetryManifest } from "./manifest.js";
 
 export const TelemetryDomainModule: DomainModule = {
 	manifest: TelemetryManifest,
 	createExtension: createTelemetryBundle,
 };
-
-export function createTelemetryDomainModule(options: TelemetryBundleOptions = {}): DomainModule {
-	return {
-		manifest: TelemetryManifest,
-		createExtension: (context) => createTelemetryBundle(context, options),
-	};
-}
 
 export type { AccountabilitySummary } from "./accountability.js";
 export { summarizeEvidenceIndex } from "./accountability.js";
@@ -64,29 +57,3 @@ export {
 	MAX_PROJECTION_RUNS,
 	PROJECTION_FLUSH_DEBOUNCE_MS,
 } from "./projection.js";
-export type {
-	DispatchTraceMirror,
-	SessionTurnEvent,
-	SessionTurnFinish,
-	SessionTurnStart,
-	SessionTurnTrace,
-	SessionTurnUsage,
-	TraceEventInput,
-	TraceEventRow,
-	TraceGateCheck,
-	TraceGateResultInput,
-	TracePhaseRow,
-	TraceProcessRow,
-	TraceRunRow,
-} from "./trace-store.js";
-export {
-	createDispatchTraceMirror,
-	SESSION_TRACE_ASSIGNMENT_ID,
-	TRACE_DATABASE_FILE,
-	TRACE_EVENT_POLL_LIMIT,
-	TRACE_SCHEMA_VERSION,
-	TraceReader,
-	TraceSchemaVersionError,
-	TraceStore,
-	traceDatabasePath,
-} from "./trace-store.js";

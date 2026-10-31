@@ -14,7 +14,6 @@ import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
-import { TraceReader, TraceStore } from "../../src/domains/telemetry/trace-store.js";
 import type { TurnOutcomeRecord } from "../../src/domains/turn-control/index.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
@@ -27,7 +26,7 @@ for (const continuation of [false, true])
 	it(
 		continuation
 			? "a collect continuation persists the controller block in its user turn"
-			: "a faux tool-free turn writes one outcome after assessment and mirrors it onto the finished trace",
+			: "a faux tool-free turn writes one outcome after assessment",
 		async () => {
 			const scratch = await isolateClioEnv("clio-coder-turn-outcome-");
 			const settings = structuredClone(DEFAULT_SETTINGS);
@@ -80,8 +79,6 @@ for (const continuation of [false, true])
 					},
 				],
 			}).contract;
-			const tracePath = join(scratch.dir, "trace.sqlite");
-			const store = new TraceStore(tracePath);
 			const journals = createSessionJournals(clioStateDir(), () => {
 				throw new Error("fixture journal unavailable");
 			});
@@ -121,8 +118,6 @@ for (const continuation of [false, true])
 					: {}),
 				telemetry: {
 					acquireTelemetrySession: journals.acquire,
-					recordSessionTurn: (trace: Parameters<TelemetryContract["recordSessionTurn"]>[0]) =>
-						store.recordSessionTurn(trace),
 					recordTokens(...args: unknown[]) {
 						liveUsage.push(args);
 					},
@@ -220,24 +215,11 @@ for (const continuation of [false, true])
 				});
 				strictEqual(outcome.completion.decision, "ok");
 				strictEqual(outcome.conversation.clarificationStreak, 1);
-				const reader = new TraceReader(tracePath);
-				try {
-					const runId = `session:${outcome.turnId}`;
-					strictEqual(reader.run(runId)?.status, "success");
-					strictEqual(reader.run(runId)?.api_calls, 1);
-					strictEqual(reader.run(runId)?.missing_token_calls, 0);
-					const mirrored = reader.events(runId).filter((event) => event.type === "turn_outcome");
-					strictEqual(mirrored.length, 1);
-					deepStrictEqual(JSON.parse(mirrored[0]?.payload_json ?? "null"), outcome);
-				} finally {
-					reader.close();
-				}
 			} finally {
 				loop.dispose();
 				await loop.whenSettled();
 				// The writer stays open between calls; the next iteration reuses this session id (#434).
 				await journals.closeAll();
-				store.close();
 				scratch.restore();
 			}
 		},

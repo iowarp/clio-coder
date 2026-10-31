@@ -31,7 +31,6 @@ import type { CostProvenance } from "../providers/index.js";
 import type { CostAggregate, CostEntry, CostEntryLabel, UsageBreakdown } from "./cost.js";
 import type { TurnsSum } from "./read-model.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "./session-journals.js";
-import type { SessionTurnTrace } from "./trace-store.js";
 import type { WorkerProgressSnapshot } from "./worker-progress.js";
 
 /** The footer speed row reads every field: rate, generation time, TTFT and output count. */
@@ -261,19 +260,6 @@ export interface TelemetryContract extends TelemetryRunProjection {
 	): void;
 	/** Record final output token throughput for one completed assistant stream. */
 	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;
-	/**
-	 * Mirror one fact about a turn the operator ran themselves into the trace
-	 * database, so `clio-coder trace runs` lists the session's own turns beside the
-	 * runs it dispatched. The dispatch mirror hears only the dispatch bus
-	 * channels, and an interactive turn is not a dispatch, so without this the
-	 * only rows a session contributes are its workers'.
-	 *
-	 * Best effort, exactly like the dispatch mirror: writes are queued off the
-	 * turn hot path and a failing mirror degrades silently rather than
-	 * interrupting chat.
-	 */
-	recordSessionTurn(trace: SessionTurnTrace): void;
-	recordPackageActivity?(activity: import("../../core/package-activity.js").PackageActivity): void;
 	/**
 	 * Current product-facing projection. Cheap to call: it folds in-memory state
 	 * (active runs, bounded terminal history/notices, session cost/tokens and the

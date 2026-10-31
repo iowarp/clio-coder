@@ -1,7 +1,5 @@
-import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-
-import { TraceReader } from "../telemetry/trace-store.js";
 
 const HISTORY_FILE_LIMIT = 10_000;
 const HISTORY_FILE_BYTE_LIMIT = 8 * 1024 * 1024;
@@ -33,7 +31,7 @@ const LEGACY_HISTORY_LITERALS = [
 	"identity.clio-worker",
 ] as const;
 
-export type NamingHistoryArea = "trace" | "sessions" | "evidence" | "receipts";
+export type NamingHistoryArea = "sessions" | "evidence" | "receipts";
 
 export interface NamingHistoryCount {
 	area: NamingHistoryArea;
@@ -65,7 +63,7 @@ function countLegacyHistoryText(text: string): number {
 	return count;
 }
 
-function inspectTextTree(area: Exclude<NamingHistoryArea, "trace">, root: string): NamingHistoryCount {
+function inspectTextTree(area: NamingHistoryArea, root: string): NamingHistoryCount {
 	const result: NamingHistoryCount = {
 		area,
 		legacyIdentifiers: 0,
@@ -108,41 +106,9 @@ function inspectTextTree(area: Exclude<NamingHistoryArea, "trace">, root: string
 	return result;
 }
 
-function inspectTrace(path: string): NamingHistoryCount {
-	const result: NamingHistoryCount = {
-		area: "trace",
-		legacyIdentifiers: 0,
-		filesInspected: 0,
-		filesSkipped: 0,
-		error: null,
-	};
-	if (!existsSync(path)) return result;
-	try {
-		if (!statSync(path).isFile()) {
-			result.filesSkipped = 1;
-			return result;
-		}
-		const reader = new TraceReader(path);
-		try {
-			const placeholders = LEGACY_EVENT_TYPES.map(() => "?").join(",");
-			const row = reader.db
-				.prepare(`SELECT COUNT(*) AS count FROM events WHERE type IN (${placeholders})`)
-				.get(...LEGACY_EVENT_TYPES) as { count: number | bigint };
-			result.legacyIdentifiers = Number(row.count);
-			result.filesInspected = 1;
-		} finally {
-			reader.close();
-		}
-	} catch (error) {
-		result.error = error instanceof Error ? error.message : String(error);
-	}
-	return result;
-}
-
 /** Count released legacy identifiers without mutating immutable or sealed history. */
 export function inspectNamingHistory(options: InspectNamingHistoryOptions): NamingHistoryCount[] {
 	return [
-		inspectTrace(join(options.stateDir, "trace.sqlite")),
 		inspectTextTree("sessions", join(options.stateDir, "sessions")),
 		inspectTextTree("evidence", join(options.dataDir, "evidence")),
 		inspectTextTree("receipts", join(options.stateDir, "receipts")),

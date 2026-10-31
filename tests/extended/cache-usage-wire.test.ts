@@ -1,13 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { join } from "node:path";
 import { test } from "node:test";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { createCostTracker } from "../../src/domains/telemetry/cost.js";
 import { appendOutOfTurnUsageRow, readOutOfTurnUsageRows } from "../../src/domains/telemetry/out-of-turn-usage.js";
-import { TraceReader, TraceStore } from "../../src/domains/telemetry/trace-store.js";
 import { completeEngineText, streamSimple } from "../../src/engine/ai.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { sideQuestionUsage } from "../../src/session-control/side-question.js";
@@ -144,45 +142,6 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 			deepStrictEqual(archived.errors, []);
 			strictEqual(archived.rows[0]?.usage.cacheWrite1h, long);
 			strictEqual(archived.rows[0]?.usage.totalTokens, 10100);
-			const tracePath = join(env.dir, "cache.sqlite");
-			const trace = new TraceStore(tracePath);
-			try {
-				trace.recordSessionTurn({
-					kind: "start",
-					runId: "cache",
-					agent: "main",
-					target: "fixture",
-					model: model.id,
-					runtime: api,
-					prompt: null,
-					at: new Date(0).toISOString(),
-				});
-				trace.recordSessionTurn({
-					kind: "finish",
-					runId: "cache",
-					status: "success",
-					error: null,
-					at: new Date(1).toISOString(),
-					usage: {
-						inputTokens: usage.input,
-						outputTokens: usage.output,
-						cacheReadTokens: usage.cacheRead,
-						cacheWriteTokens: usage.cacheWrite,
-						...(long === undefined ? {} : { cacheWrite1hTokens: long }),
-						reasoningTokens: 0,
-						totalTokens: usage.totalTokens,
-						costUsd: usage.cost.total,
-					},
-				});
-			} finally {
-				trace.close();
-			}
-			const reader = new TraceReader(tracePath);
-			try {
-				strictEqual(reader.phases("cache")[0]?.cache_write_1h_tokens, long ?? null);
-			} finally {
-				reader.close();
-			}
 		} finally {
 			server.closeAllConnections();
 			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

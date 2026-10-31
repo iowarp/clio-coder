@@ -229,9 +229,9 @@ export function checkTelemetryProducer(file: string, source: string): string[] {
 	return violations;
 }
 
-/** A journal segment, a session's objects/, the trace index or <stateDir>/telemetry/, as a path expression spells it. */
+/** A journal segment, a session's objects/ or <stateDir>/telemetry/, as a path expression spells it. */
 const TELEMETRY_PATH =
-	/[/"'`](calls\.(?:[^"'`/\s]*\.)?jsonl|events\.(?:[^"'`/\s]*\.)?ndjson|trace\.sqlite[^"'`/\s]*|objects|telemetry)(?=[/"'`])/;
+	/[/"'`](calls\.(?:[^"'`/\s]*\.)?jsonl|events\.(?:[^"'`/\s]*\.)?ndjson|objects|telemetry)(?=[/"'`])/;
 /** The write call and which of its arguments name a path it writes, creates, moves or removes. */
 const PATH_WRITES = new Map<string, number[]>([
 	...["writeFile", "appendFile", "createWriteStream", "rm", "rmdir", "unlink", "truncate", "mkdir"].flatMap(

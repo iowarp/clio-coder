@@ -3479,8 +3479,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								finalEntry?.kind === "message" && finalEntry.role === "assistant"
 									? (finalEntry.payload as { text?: unknown; stopReason?: unknown })
 									: undefined;
-							const traced = persistence.lastTracedTurn();
-							const matchesTrace = traced?.runId === `session:${userTurnId}`;
 							const finalAssistantText =
 								typeof finalPayload?.text === "string" ? finalPayload.text : finalMessage ? extractText(finalMessage) : "";
 							// The turn-end site reads the message for the record only. A continuation
@@ -3514,7 +3512,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								interviewDismissed,
 								...(failure ? { failure: { ...failure, retryAttempts: turnRetryAttempts + providerRetryAttempts } } : {}),
 								tokens: {
-									coordinator: matchesTrace ? persistence.currentTurnUsage() : noOutcomeUsage(),
+									coordinator: persistence.turnUsage(userTurnId) ?? noOutcomeUsage(),
 									decisionModel: deps.getDecisionUsage?.(userTurnId) ?? noOutcomeUsage(),
 									workers: workerOutcomeUsage(workerRunIds, deps.outcomeDispatch),
 								},
@@ -3573,8 +3571,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							// next operator message reports runs from the end of the whole chain.
 							if (!continuation) previousOperatorTurn = { id: userTurnId, settledAt: performance.now() };
 							else if (previousOperatorTurn !== null) previousOperatorTurn.settledAt = performance.now();
-							if (matchesTrace && traced)
-								persistence.traceEventForRun(traced.runId, { type: "turn_outcome", name: "turn_outcome", payload: record });
 						} catch {
 							// Measurement must not change turn settlement when a ledger or receipt is unavailable.
 						}
@@ -3585,7 +3581,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// Safety net for thrown paths where agent_end never delivered;
 					// no-op when the agent_end flush already ran.
 					context.flushReconciledSnapshot();
-					persistence.deferTraceClose(false);
 					// Runs on every exit path (normal settle, catch-arm returns) so
 					// a steer the engine never drained still reaches the model.
 					if (options.machineTurn !== undefined) {

@@ -2495,7 +2495,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	if (session) {
-		const unbindActivity = bindSessionPackageActivity(session, telemetry);
+		const unbindActivity = bindSessionPackageActivity(session);
 		termination.onDrain(unbindActivity);
 		termination.onDrain(bus.on(BusChannels.SessionResumed, () => flushPackageActivities()));
 	}

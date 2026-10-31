@@ -39,13 +39,10 @@ it("a session writer opens with its settings and journals each change once, with
 			return () => {};
 		},
 	} as unknown as ConfigContract;
-	const { contract, extension } = createTelemetryBundle(
-		{
-			bus: createSafeEventBus(),
-			getContract: (name: string) => (name === "config" ? config : undefined),
-		} as DomainContext,
-		{ dispatchTrace: false },
-	);
+	const { contract, extension } = createTelemetryBundle({
+		bus: createSafeEventBus(),
+		getContract: (name: string) => (name === "config" ? config : undefined),
+	} as DomainContext);
 	const origin = { id: "config-session", cwdHash: "config-repo" };
 	const directory = join(clioStateDir(), "sessions", origin.cwdHash, origin.id);
 	try {
@@ -101,9 +98,7 @@ it("a session writer opens with its settings and journals each change once, with
 it("a session's lifecycle events become session.opened, session.resumed and session.closed records (#434)", async () => {
 	const env = await isolateClioEnv("clio-coder-lifecycle-records-");
 	const bus = createSafeEventBus();
-	const { extension } = createTelemetryBundle({ bus, getContract: () => undefined } as unknown as DomainContext, {
-		dispatchTrace: false,
-	});
+	const { extension } = createTelemetryBundle({ bus, getContract: () => undefined } as unknown as DomainContext);
 	const origin = { id: "lifecycle-session", cwdHash: "lifecycle-repo" };
 	try {
 		await extension.start();

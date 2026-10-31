@@ -64,7 +64,7 @@ live or locked session or run, a fork parent a kept child reads, or a run a
 kept journal or a receipt references, and a session it cannot fully read keeps
 its objects. Research content expires before the records that cite it, which
 then read as missing.
-Ledgers, receipts and trace.sqlite are not telemetry journals and stay. Nothing
+Ledgers and receipts are not telemetry journals and stay. Nothing
 is deleted without --apply, which re-checks each owner first and prints every
 file it removed.
 

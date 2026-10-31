@@ -52,8 +52,8 @@ Key entry points and their files:
 | `createObservabilityBundle` | `src/domains/telemetry/extension.ts` | Composes cost tracker, projection, trace mirror, and bus listeners |
 | `createObservabilityProjection` | `src/domains/telemetry/projection.ts` | Reactive read model over bus events |
 | `createCostTracker` | `src/domains/telemetry/cost.ts` | Running USD cost and token accumulator |
-| `createDispatchTraceMirror` | `src/domains/telemetry/trace-store.ts` | Async-enqueued SQLite writer for dispatch events |
-| `TraceStore` / `TraceReader` | `src/domains/telemetry/trace-store.ts` | Durable and read-only SQLite access |
+| `createDispatchTraceMirror` | `trace-store.ts` | Async-enqueued SQLite writer for dispatch events |
+| `TraceStore` / `TraceReader` | `trace-store.ts` | Durable and read-only SQLite access |
 | `createWorkerProgressFold` | `src/domains/telemetry/worker-progress.ts` | Bounded, redacted live-progress projection |
 | `appendOutOfTurnUsageRow` / `readOutOfTurnUsageRows` | `src/domains/telemetry/out-of-turn-usage.ts` | Durable JSONL ledger for side questions, handoffs, prewarming |
 | `summarizeEvidenceIndex` | `src/domains/telemetry/accountability.ts` | Pure aggregation over evidence index rows |
@@ -99,7 +99,7 @@ tokens-per-second is zero or non-finite.
 
 ### Trace mirror and session turns
 
-The `DispatchTraceMirror` interface (`src/domains/telemetry/trace-store.ts`) exposes
+The `DispatchTraceMirror` interface (`trace-store.ts`) exposes
 `enqueue(channel, payload)`, `enqueueSessionTurn(trace)`, `flush()`, and `close()`. The extension
 subscribes to the five dispatch bus channels and forwards each payload. `enqueueSessionTurn`
 accepts a `SessionTurnTrace` (start/event/finish triple) that mirrors the operator's own chat-loop
@@ -169,7 +169,7 @@ while preserving the tail and trail (which the operator is already reading).
 
 ## Trace store: SQLite mirror
 
-`TraceStore` (`src/domains/telemetry/trace-store.ts`) writes to a WAL-mode SQLite database at
+`TraceStore` (`trace-store.ts`) writes to a WAL-mode SQLite database at
 `<stateDir>/trace.sqlite`. Schema version 1 (`TRACE_SCHEMA_VERSION = 1`) defines tables:
 `meta`, `runs`, `phases`, `events`, `gate_results`, `agent_sessions`, `processes`.
 
@@ -273,7 +273,7 @@ Four test cases demonstrate concrete wiring:
    `appendOutOfTurnUsageRow`, reads them back via `readOutOfTurnUsageRows`, and asserts
    `callOutcome` is preserved and unknown usage fields remain `null` (not coerced to `0`).
 
-### `tests/contracts/trace-store-legacy-tables.test.ts`
+### `trace-store-legacy-tables.test.ts`
 
 Two test cases:
 

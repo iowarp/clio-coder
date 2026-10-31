@@ -3,8 +3,7 @@ import { readReceiptTextSync } from "../dispatch/receipt-store.js";
 
 /**
  * Telemetry domain wire-up. Listens to the dispatch bus channels and folds
- * their payloads into the session cost tracker, the projection and the trace
- * mirror. Other domains read the snapshot through the contract; the one thing
+ * their payloads into the session cost tracker and the projection. Other domains read the snapshot through the contract; the one thing
  * it emits is `accountability.evidenceReady`, once per run whose evidence
  * bundle landed.
  */
@@ -41,7 +40,6 @@ import { createTelemetryProjection } from "./projection.js";
 import type { SessionCapture, TelemetrySessionOrigin } from "./session-journals.js";
 import { createSessionJournals } from "./session-journals.js";
 import { createLiveTelemetryModel } from "./telemetry-live.js";
-import { createDispatchTraceMirror, type DispatchTraceMirror, traceDatabasePath } from "./trace-store.js";
 
 /**
  * Callbacks the auto-build path uses to report evidence readiness back to the
@@ -170,15 +168,7 @@ function evidenceIndexRow(
 	};
 }
 
-export interface TelemetryBundleOptions {
-	/** Disable the SQLite dispatch mirror for short-lived internal generators. */
-	dispatchTrace?: boolean;
-}
-
-export function createTelemetryBundle(
-	context: DomainContext,
-	options: TelemetryBundleOptions = {},
-): DomainBundle<TelemetryContract> {
+export function createTelemetryBundle(context: DomainContext): DomainBundle<TelemetryContract> {
 	const cost = createCostTracker();
 	// Writers ask before every record and batch, so the capture is answered from memory: consent per session
 	// refreshes on the cold path before each lease, and the result is reused until settings or consent change (#434).
@@ -354,10 +344,6 @@ export function createTelemetryBundle(
 		if (payload.runId) recordedRuns.add(payload.runId);
 		recordDispatchCost(cost, payload, replayed);
 	};
-	const trace: DispatchTraceMirror =
-		options.dispatchTrace === false
-			? { enqueue: () => {}, enqueueSessionTurn: () => {}, flush: async () => {}, close: async () => {} }
-			: createDispatchTraceMirror(traceDatabasePath(clioStateDir()));
 	const unsubscribes: Array<() => void> = [];
 	let latestThroughput: TokenThroughputSnapshot | null = null;
 
@@ -399,15 +385,6 @@ export function createTelemetryBundle(
 			if (settings) {
 				for (const kind of ["hotReload", "nextTurn", "restartRequired"] as const)
 					unsubscribes.push(settings.onChange(kind, recordSettingsChange));
-			}
-			for (const channel of [
-				BusChannels.DispatchEnqueued,
-				BusChannels.DispatchStarted,
-				BusChannels.DispatchProgress,
-				BusChannels.DispatchCompleted,
-				BusChannels.DispatchFailed,
-			] as const) {
-				unsubscribes.push(context.bus.on(channel, (payload) => trace.enqueue(channel, payload)));
 			}
 			unsubscribes.push(
 				context.bus.on(BusChannels.ConfigSessionChanged, recordSessionSettingsChange),
@@ -457,9 +434,6 @@ export function createTelemetryBundle(
 			for (const off of unsubscribes) off();
 			unsubscribes.length = 0;
 			projection.stop();
-			// Terminal trace facts are the live operator contract. Flush them before
-			// potentially slower evidence builds consume the remaining hook budget.
-			await trace.close();
 			// Flush any in-flight forensic builds so a headless run that shuts down
 			// immediately after dispatch still persists its bundle and index row.
 			// Best-effort and bounded by the shutdown hook budget; each build
@@ -617,12 +591,6 @@ export function createTelemetryBundle(
 				replayed,
 			);
 			projection.refresh();
-		},
-		recordSessionTurn(sessionTurn) {
-			trace.enqueueSessionTurn(sessionTurn);
-		},
-		recordPackageActivity(activity) {
-			trace.enqueuePackageActivity?.(activity);
 		},
 		recordTokenThroughput(snapshot) {
 			latestThroughput = snapshot;

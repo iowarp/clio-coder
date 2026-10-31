@@ -5,8 +5,7 @@ import { TelemetryReceiptEvidence, TelemetryRunRow } from "./telemetry.js";
 
 /**
  * Trace history is the run journals (#434 §11.3): each run's read-model row, joined to the dispatch ledger's row for
- * the identity a content-free journal does not hold. A run's calls, feed and process lifecycle are its run timeline;
- * nothing here reads trace.sqlite.
+ * the identity a content-free journal does not hold. A run's calls, feed and process lifecycle are its run timeline.
  */
 const closed = { additionalProperties: false };
 const text = Type.String();

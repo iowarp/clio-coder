@@ -18,7 +18,7 @@ import { containedFile } from "./storage.js";
 /**
  * Trace history over the run journals (#434 §11.3). A run is listed by its journal's last write, newest first, the
  * same key `/api/telemetry/runs` pages by, and joined to the dispatch ledger for the identity a content-free journal
- * does not carry. Every number is the read model's run row; trace.sqlite is not read.
+ * does not carry. Every number is the read model's run row.
  */
 const Cursor = Type.Object(
 	{ writtenMs: Type.Union([Type.Number(), Type.Null()]), runId: Id },

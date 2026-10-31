@@ -377,8 +377,7 @@ function receiptToolLines(receipt: RunReceipt): string[] {
  * carries a command line for an ordinary worker call, so this mode does not
  * pretend to: it reports tool name and outcome per call, aggregates per tool,
  * and the arguments only where the source actually recorded them, which today
- * is the ACP delegation log. Loading the trace mirror to get argv would be a
- * new sqlite path and is deliberately not done here.
+ * is the ACP delegation log.
  */
 function runTools(deps: MonitorToolDeps, runId: string, ownership: DispatchOwnership): ToolResult {
 	const requestedRun = deps.dispatch.getRun(runId);

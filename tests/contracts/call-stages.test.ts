@@ -141,7 +141,6 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 		},
 		telemetry: {
 			acquireTelemetrySession: journals.acquire,
-			recordSessionTurn() {},
 			recordTokens() {},
 			recordTokenThroughput() {},
 			recordNeverSentCalls() {},
@@ -504,7 +503,6 @@ it("a main call journals the model change and the Codex transport resets the hos
 		knownTargets: () => new Set([target.id]),
 		telemetry: {
 			acquireTelemetrySession: journals.acquire,
-			recordSessionTurn() {},
 			recordTokens() {},
 			recordTokenThroughput() {},
 			recordNeverSentCalls() {},

@@ -11,15 +11,12 @@ import { messageCallsForAccounting, messageUsageForAccounting } from "../core/me
 import type { PackageIdentity } from "../core/package-identity.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
-import { normalizeCostProvenance, resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { noteAnthropicStreamQuota, noteCodexStreamQuota } from "../domains/quota/index.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { BudgetBlockData, SessionEntry } from "../domains/session/entries.js";
 import { BUDGET_BLOCK_ENTRY } from "../domains/session/entries.js";
 import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
-import { aggregateCostAmounts } from "../domains/telemetry/cost.js";
-import type { SessionTurnUsage } from "../domains/telemetry/trace-store.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
 import { replaceEngineMessages, setEngineCodexUserTurn } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
@@ -31,21 +28,13 @@ import type {
 	CodexTransportObservation,
 	Usage,
 } from "../engine/types.js";
-import {
-	chainStepToolCallId,
-	type DisplayToolCall,
-	displayToolCall,
-	gatewayChainPlan,
-	gatewayChainSteps,
-	VIA_GATEWAY,
-} from "../tools/gateway-display.js";
+import { type DisplayToolCall, displayToolCall, gatewayChainSteps, VIA_GATEWAY } from "../tools/gateway-display.js";
 import {
 	type AssistantCallTiming,
 	assistantSessionPayload,
 	explainInterruptedAssistant,
 	extractUserText,
 	hasPersistableAssistantContent,
-	hasStructuredToolCall,
 	isEmptyAbortedAssistantMessage,
 	isLengthStopAssistantMessage,
 	recordValue,
@@ -79,28 +68,16 @@ export interface TurnPersistenceDeps {
 	) => Record<string, unknown>;
 	/** Stamp a disturbance on the first request of the next run, which is the first to send it (#434). */
 	noteNextRunColdReason?: (reason: ExpectedColdReason) => void;
-	/**
-	 * Second sink for the same rows, mirroring the operator's own turns into the
-	 * trace database beside the runs this session dispatched. Optional: absent
-	 * telemetry leaves every append exactly as it was. The mirror is
-	 * best-effort by construction, so nothing here inspects or awaits it.
-	 */
+	/** Counts calls that never reached the provider; absent telemetry leaves every append as it was. */
 	telemetry?: TelemetryContract | undefined;
 }
 
 export interface TurnPersistence {
-	currentTurnUsage(): TokenSplit;
-	lastTracedTurn(): { runId: string; usage: SessionTurnUsage | null } | null;
 	/**
-	 * While an engine run is active, a final assistant row only schedules the
-	 * trace close: the run may still carry a middleware continuation, whose
-	 * calls belong to the same operator turn. Turning the deferral off flushes a
-	 * scheduled close.
+	 * Provider-reported usage of every call since the user row `userTurnId`
+	 * opened, or null once a later user row has opened another turn.
 	 */
-	deferTraceClose(active: boolean): void;
-	/** The run continues past the row that scheduled the close; keep the trace open. */
-	continueTracedTurn(): void;
-	traceEventForRun(runId: string, input: TurnTraceEventInput): void;
+	turnUsage(userTurnId: string): TokenSplit | null;
 	/** True when this exact assistant message object was already persisted. */
 	wasPersisted(message: unknown): boolean;
 	appendAssistantTurn(
@@ -148,23 +125,6 @@ export interface TurnPersistence {
 	appendThinkingLevelChangeEntry(thinkingLevel: string, effectiveEffort?: string): void;
 }
 
-/**
- * `runs.agent` for a session turn. The chat loop is the orchestrator itself: it
- * runs under no agent recipe, so this names what actually executed the turn
- * rather than inventing an agent id that no catalog would resolve.
- */
-const SESSION_TRACE_AGENT = "orchestrator";
-
-export interface TurnTraceEventInput {
-	eventId?: string;
-	type: string;
-	name: string;
-	payload?: unknown;
-	tokens?: number | null;
-	startedAt?: string;
-	endedAt?: string | null;
-}
-
 export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistence {
 	const { state } = deps;
 	const persistedAssistantMessages = new WeakSet<object>();
@@ -192,103 +152,34 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		}
 	};
 
-	// --- trace mirror ---------------------------------------------------------
-	// One open runs/phases pair per operator turn, opened by the user row that
-	// starts the turn and closed by the assistant row that ends it. Every helper
-	// is a no-op without a telemetry contract or without an open turn, so a
-	// session that resumes mid-turn contributes nothing rather than half a run.
-	let traceRunId: string | null = null;
-	let traceSessionId: string | null = null;
-	let traceEventSeq = 0;
-	let traceUsage: SessionTurnUsage | null = null;
-	let lastTracedTurn: { runId: string; usage: SessionTurnUsage | null } | null = null;
+	// --- turn usage -----------------------------------------------------------
+	// One usage total per operator turn, opened by the user row that starts it.
+	// Calls after the final row of a run, such as a middleware continuation,
+	// still belong to that turn, so the total stays open until the next user row.
+	let usageTurnId: string | null = null;
+	let turnUsage: Omit<TokenSplit, "provenance"> | null = null;
 	let usageSources = 0;
 	let reportedUsageSources = 0;
 	let measuredUsageSources = 0;
-	const traceToolStarts = new Map<string, string>();
-	// Trace rows and the terminal row name the capability a gateway op=call
-	// ran. Its result may not name it (a refused capability), so the call's own
-	// reading is kept until the call settles.
+	// The terminal row names the capability a gateway op=call ran. Its result
+	// may not name it (a refused capability), so the call's own reading is kept
+	// until the call settles.
 	const shownToolCalls = new Map<string, DisplayToolCall>();
 	let terminalToolShown: { toolCallId: string; toolName: string; viaGateway: boolean } | null = null;
 
-	const traceNow = (): string => new Date().toISOString();
-
-	const mirror = (record: Parameters<TelemetryContract["recordSessionTurn"]>[0] | null): void => {
-		if (record === null) return;
-		deps.telemetry?.recordSessionTurn(record);
-	};
-
-	let traceCloseDeferred = false;
-	let scheduledTraceClose: { status: "success" | "fail"; error: string | null } | null = null;
-	const closeTracedTurnAtFinalRow = (status: "success" | "fail", error: string | null): void => {
-		if (traceCloseDeferred) scheduledTraceClose = { status, error };
-		else finishTracedTurn(status, error);
-	};
-
-	const finishTracedTurn = (status: "success" | "fail", error: string | null): void => {
-		scheduledTraceClose = null;
-		if (traceRunId === null) return;
-		mirror({ kind: "finish", runId: traceRunId, status, error, usage: traceUsage, at: traceNow() });
-		// Settlement runs after the assessor; keep the facts even though the trace is already closed.
-		lastTracedTurn = { runId: traceRunId, usage: traceUsage };
-		traceRunId = null;
-		traceSessionId = null;
-		traceUsage = null;
-		traceToolStarts.clear();
+	const startTurnUsage = (userTurnId: string): void => {
+		usageTurnId = userTurnId;
+		turnUsage = null;
+		usageSources = 0;
+		reportedUsageSources = 0;
+		measuredUsageSources = 0;
 		shownToolCalls.clear();
 		toolOwners.clear();
 	};
 
-	const startTracedTurn = (userTurnId: string, prompt: string, submitted?: AgentRuntime): void => {
-		lastTracedTurn = null;
-		usageSources = 0;
-		reportedUsageSources = 0;
-		measuredUsageSources = 0;
-		if (deps.telemetry === undefined) return;
-		const runtime = submitted ?? state.runtime;
-		if (!runtime) return;
-		// A previous turn still open means it ended without a final assistant row
-		// (an abort, or a stream that died). The operator submitting again is the
-		// honest close for it; leaving it 'running' forever would be worse.
-		finishTracedTurn("fail", "interrupted: a new operator turn started before the previous turn finished");
-		traceRunId = `session:${userTurnId}`;
-		traceSessionId = deps.session?.current()?.id ?? null;
-		traceEventSeq = 0;
-		mirror({
-			kind: "start",
-			runId: traceRunId,
-			sessionId: traceSessionId,
-			agent: SESSION_TRACE_AGENT,
-			target: runtime.targetId,
-			model: runtime.wireModelId,
-			runtime: runtime.runtimeId,
-			prompt: prompt.length > 0 ? prompt : null,
-			at: traceNow(),
-		});
-	};
-
-	const traceEventForRun = (runId: string, input: TurnTraceEventInput): void => {
-		traceEventSeq += 1;
-		mirror({
-			kind: "event",
-			runId,
-			eventId: input.eventId ?? `event:${traceEventSeq}`,
-			type: input.type,
-			name: input.name,
-			...(input.payload === undefined ? {} : { payload: input.payload }),
-			tokens: input.tokens ?? null,
-			startedAt: input.startedAt ?? traceNow(),
-			endedAt: input.endedAt ?? null,
-		});
-	};
-	const traceEvent = (input: TurnTraceEventInput): void => {
-		if (traceRunId !== null) traceEventForRun(traceRunId, input);
-	};
-
 	/** Fold one assistant message's provider-reported usage into the turn total. */
-	const accumulateTraceUsage = (message: AgentMessage): void => {
-		if (traceRunId === null) return;
+	const accumulateTurnUsage = (message: AgentMessage): void => {
+		if (usageTurnId === null) return;
 		const summary = sumRunUsage([message]);
 		const rawUsage = messageUsageForAccounting(message) ?? {};
 		if (summary.costSummary ? !summary.hadUsage : rawUsage.callInvoked === false) return;
@@ -303,45 +194,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			: reported.observed
 				? 1
 				: 0;
-		const total: SessionTurnUsage = traceUsage ?? {
-			inputTokens: 0,
-			outputTokens: 0,
-			cacheReadTokens: 0,
-			cacheWriteTokens: 0,
-			reasoningTokens: 0,
-			totalTokens: 0,
-			costUsd: 0,
-		};
-		const pricing = resolveCostProvenance(
-			rawUsage.costProvenance,
-			normalizeCostProvenance(state.runtime?.runtimeResolution.costProvenance),
-		);
-		const costSummary = aggregateCostAmounts([
-			...(total.costSummary
-				? [{ usd: total.costSummary.knownUsd, provenance: pricing, costSummary: total.costSummary }]
-				: []),
-			{
-				usd: summary.costUsd,
-				provenance: pricing,
-				apiCalls,
-				missingTokenCalls,
-				...(summary.costSummary ? { costSummary: summary.costSummary } : {}),
-			},
-		]);
-		traceUsage = {
-			inputTokens: total.inputTokens + summary.input,
-			outputTokens: total.outputTokens + summary.output,
-			cacheReadTokens: total.cacheReadTokens + summary.cacheRead,
-			cacheWriteTokens: total.cacheWriteTokens + summary.cacheWrite,
-			...(total.cacheWrite1hTokens === undefined && summary.cacheWrite1h === undefined
-				? {}
-				: { cacheWrite1hTokens: (total.cacheWrite1hTokens ?? 0) + (summary.cacheWrite1h ?? 0) }),
-			reasoningTokens: total.reasoningTokens + summary.reasoning,
-			totalTokens: total.totalTokens + summary.tokens,
-			costUsd: costSummary.hasUnknown && costSummary.knownUsd === 0 ? null : costSummary.knownUsd,
-			costSummary,
-			apiCalls: (total.apiCalls ?? 0) + apiCalls,
-			missingTokenCalls: (total.missingTokenCalls ?? 0) + missingTokenCalls,
+		turnUsage = {
+			inputTokens: (turnUsage?.inputTokens ?? 0) + summary.input,
+			outputTokens: (turnUsage?.outputTokens ?? 0) + summary.output,
+			cacheReadTokens: (turnUsage?.cacheReadTokens ?? 0) + summary.cacheRead,
+			totalTokens: (turnUsage?.totalTokens ?? 0) + summary.tokens,
 		};
 	};
 
@@ -395,15 +252,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			const contextWindow = state.runtime.runtimeResolution.capabilityDecisions.contextWindow;
 			if (contextExhaustion && contextWindow > 0) contextExhaustion.contextWindow = contextWindow;
 		}
-		accumulateTraceUsage(message);
-		// The turn is over unless this message asked for tools. A message the
-		// ledger declines to keep still ended the turn, so the mirror closes on
-		// the same signal either way rather than on persistence.
-		const turnContinues = hasStructuredToolCall(message);
-		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) {
-			if (!turnContinues) closeTracedTurnAtFinalRow(failure ? "fail" : "success", failure?.errorMessage ?? null);
-			return;
-		}
+		accumulateTurnUsage(message);
+		if (!deps.session || !hasPersistableAssistantContent(payload, failure)) return;
 		// #423: only persisted calls advance the cache comparison baseline.
 		const usage = (message as { usage?: Usage }).usage;
 		if (usage && typeof usage === "object") {
@@ -423,37 +273,13 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			deps.telemetry?.recordNeverSentCalls(1);
 		}
 		state.lastTurnId = turn.id;
-		traceEvent({
-			type: "message",
-			name: "assistant",
-			payload: {
-				text: payload.text,
-				stopReason: payload.stopReason ?? null,
-				model: payload.model ?? null,
-				toolCalls: turnContinues,
-			},
-			tokens: traceUsage?.totalTokens ?? null,
-		});
-		if (!turnContinues) closeTracedTurnAtFinalRow(failure ? "fail" : "success", failure?.errorMessage ?? null);
 		return turn.id;
 	};
 
 	return {
-		lastTracedTurn: () =>
-			lastTracedTurn === null
-				? null
-				: { runId: lastTracedTurn.runId, usage: lastTracedTurn.usage === null ? null : { ...lastTracedTurn.usage } },
-		traceEventForRun,
-		deferTraceClose(active) {
-			traceCloseDeferred = active;
-			const scheduled = scheduledTraceClose;
-			if (!active && scheduled !== null) finishTracedTurn(scheduled.status, scheduled.error);
-		},
-		continueTracedTurn() {
-			scheduledTraceClose = null;
-		},
-		currentTurnUsage() {
-			const usage = traceUsage ?? lastTracedTurn?.usage;
+		turnUsage(userTurnId) {
+			if (usageTurnId !== userTurnId) return null;
+			const usage = turnUsage;
 			return {
 				inputTokens: usage?.inputTokens ?? 0,
 				outputTokens: usage?.outputTokens ?? 0,
@@ -519,7 +345,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			state.synthesisToolLock = false;
 			state.toolBudgetLock = false;
 			deps.middlewareToolChoice.reset();
-			startTracedTurn(userTurn.id, text);
+			startTurnUsage(userTurn.id);
 		},
 
 		appendToolCallTurn(event): void {
@@ -527,10 +353,6 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			const shown = displayToolCall(event.toolName, event.args);
 			const owner = deps.getToolOwner?.(shown.toolName);
 			if (owner) toolOwners.set(event.toolCallId, owner);
-			for (const step of gatewayChainPlan(event.toolName, event.args)) {
-				const stepOwner = deps.getToolOwner?.(step.capability);
-				if (stepOwner) toolOwners.set(chainStepToolCallId(event.toolCallId, step.id), stepOwner);
-			}
 			const turn = appendTurn(deps.session, {
 				kind: "tool_call",
 				payload: {
@@ -541,22 +363,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				},
 			});
 			state.lastTurnId = turn.id;
-			const startedAt = traceNow();
-			traceToolStarts.set(event.toolCallId, startedAt);
 			shownToolCalls.set(event.toolCallId, shown);
-			traceEvent({
-				eventId: `tool:${event.toolCallId}`,
-				type: "tool_call",
-				name: shown.toolName,
-				payload: {
-					tool: shown.toolName,
-					tool_call_id: event.toolCallId,
-					args: shown.viaGateway ? (shown.args ?? {}) : event.args,
-					...(owner ? { owner } : {}),
-					...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
-				},
-				startedAt,
-			});
 		},
 
 		appendToolResultTurn(event): void {
@@ -585,60 +392,10 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				payload,
 			});
 			state.lastTurnId = turn.id;
-			// Same event row as the call, completed in place: `clio-coder trace tail`
-			// shows one line per tool call carrying the E14 verdict fields, which
-			// is what "what did this turn actually execute" means.
-			const endedAt = traceNow();
-			const startedAt = traceToolStarts.get(event.toolCallId) ?? endedAt;
-			traceToolStarts.delete(event.toolCallId);
 			const result = event.result as { details?: unknown; terminate?: unknown } | undefined;
 			const shown = shownToolCalls.get(event.toolCallId) ?? displayToolCall(event.toolName, undefined, result?.details);
 			shownToolCalls.delete(event.toolCallId);
-			traceEvent({
-				eventId: `tool:${event.toolCallId}`,
-				type: "tool_call",
-				name: shown.toolName,
-				payload: {
-					tool: shown.toolName,
-					tool_call_id: event.toolCallId,
-					...(shown.viaGateway ? { via: VIA_GATEWAY } : {}),
-					args: shown.args ?? (shown.viaGateway ? {} : null),
-					ok: event.isError !== true && event.outcome !== "error" && event.outcome !== "blocked",
-					duration_ms: event.durationMs ?? null,
-					result_summary: payload.resultSummary,
-					...(owner ? { owner } : {}),
-					outcome: event.outcome ?? null,
-					block_reason: event.blockReason ?? null,
-				},
-				startedAt,
-				endedAt,
-			});
-			// A chain's settled steps are spans of their own, named by capability
-			// and linked to the chain call; the ledger keeps the one aggregate.
 			const steps = gatewayChainSteps(event.toolName, event.result);
-			for (const step of steps) {
-				const stepCallId = chainStepToolCallId(event.toolCallId, step.id);
-				const stepOwner = toolOwners.get(stepCallId);
-				toolOwners.delete(stepCallId);
-				traceEvent({
-					eventId: `tool:${stepCallId}`,
-					type: "tool_call",
-					name: step.capability,
-					payload: {
-						tool: step.capability,
-						tool_call_id: stepCallId,
-						parent_tool_call_id: event.toolCallId,
-						via: VIA_GATEWAY,
-						args: step.args,
-						...(stepOwner ? { owner: stepOwner } : {}),
-						ok: !step.isError && step.outcome !== "blocked",
-						outcome: step.outcome ?? null,
-						block_reason: step.blockReason ?? null,
-					},
-					startedAt,
-					endedAt,
-				});
-			}
 			const terminalStep = steps.find((step) => step.terminate === true);
 			terminalToolShown =
 				result?.terminate === true
@@ -674,12 +431,6 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				},
 			});
 			state.lastTurnId = turn.id;
-			traceEvent({
-				type: "message",
-				name: "assistant",
-				payload: { terminalToolResult: true, ...named, toolCallId: terminal.toolCallId },
-			});
-			finishTracedTurn("success", null);
 		},
 
 		appendSubmittedUserTurn(agentRuntime, text, images, synthetic, operatorText, displayText, id, origin): string | null {
@@ -717,10 +468,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			if (sessionId) {
 				agentRuntime.agent.sessionId = sessionId;
 			}
-			// The submitted runtime identity is the authority here: state.runtime is
-			// only set once the turn's agent is built, and a first submit runs
-			// before it.
-			startTracedTurn(userTurn.id, text, agentRuntime);
+			startTurnUsage(userTurn.id);
 			return userTurn.id;
 		},
 

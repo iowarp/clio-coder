@@ -8,7 +8,7 @@ import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import { inspectNamingHistory } from "../domains/lifecycle/naming-history.js";
 
 // Released `clio` names survive only in history Clio reads but never rewrites:
-// identifiers in sessions, receipts, traces and evidence, `clio/task/*` and
+// identifiers in sessions, receipts and evidence, `clio/task/*` and
 // `clio/compete/*` refs, and 0.4 worktree ownership markers. Settings, skills
 // and runtime ids have no such aliases, so nothing here repairs anything and
 // every check is read-only, including under `doctor --fix`.

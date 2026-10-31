@@ -45,7 +45,7 @@ import { redactSecretString } from "../domains/safety/redaction.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { renderCostAmount } from "../domains/telemetry/cost.js";
-import { createTelemetryDomainModule } from "../domains/telemetry/index.js";
+import { TelemetryDomainModule } from "../domains/telemetry/index.js";
 import { runsCost, runsTotal } from "../domains/telemetry/read-model.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
@@ -1056,7 +1056,7 @@ async function loadWikiDispatch(): Promise<{
 		AgentsDomainModule,
 		MiddlewareDomainModule,
 		SessionDomainModule,
-		createTelemetryDomainModule({ dispatchTrace: false }),
+		TelemetryDomainModule,
 		SchedulingDomainModule,
 		createDispatchDomainModule({ journalRunEvents: true, workerHooks: workerHooks.workerHooks }),
 	]);

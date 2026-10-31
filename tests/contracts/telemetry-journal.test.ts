@@ -130,7 +130,7 @@ test("rule11 keeps writes under telemetry paths inside the telemetry domain", ()
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: The source under check builds a segment name in a template.
 		"appendFileSync(`${directory}/events.${id}.ndjson`, line);",
 		'openSync(join(directory, "objects", name), "wx");',
-		'new DatabaseSync(join(stateDir, "trace.sqlite"));',
+		'new DatabaseSync(join(stateDir, "telemetry", "index.sqlite"));',
 	]) {
 		ok(checkTelemetryWrites("src/domains/session/example.ts", source)[0]?.startsWith("rule11:"), source);
 		deepStrictEqual(checkTelemetryWrites("src/domains/telemetry/example.ts", source), []);
@@ -138,7 +138,7 @@ test("rule11 keeps writes under telemetry paths inside the telemetry domain", ()
 	for (const source of [
 		'readFileSync(join(directory, "calls.jsonl"));',
 		'openSync(join(directory, "calls.jsonl"), "r");',
-		'new DatabaseSync(join(stateDir, "trace.sqlite"), { readOnly: true });',
+		'new DatabaseSync(join(stateDir, "telemetry", "index.sqlite"), { readOnly: true });',
 		"rmSync(sessionDirectory, { recursive: true });",
 	])
 		deepStrictEqual(checkTelemetryWrites("src/domains/session/example.ts", source), [], source);

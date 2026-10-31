@@ -386,9 +386,7 @@ describe("contracts/metering integrity", () => {
 				neverInvokedCalls: 1,
 			});
 		}
-		const { contract: telemetry, extension } = createTelemetryBundle({ bus: createSafeEventBus() } as DomainContext, {
-			dispatchTrace: false,
-		});
+		const { contract: telemetry, extension } = createTelemetryBundle({ bus: createSafeEventBus() } as DomainContext);
 		try {
 			const entries: SessionEntry[] = [];
 			const persistence = createTurnPersistence({

@@ -1360,7 +1360,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (!final || localRuntime.agent.hasQueuedMessages?.() === true) return undefined;
 			if (requiredToolReminder !== null && currentRun() && state.activeInterruptReason === null) {
-				persistence.continueTracedTurn();
 				return { action: "continue" };
 			}
 			const terminal = pendingTerminalToolResult;
@@ -1379,7 +1378,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return undefined;
 			state.pendingRequestContinuation = false;
 			state.pendingInRunContinuation = true;
-			persistence.continueTracedTurn();
 			return { action: "continue" };
 		};
 		// What the post-settle resubmit did between runs, done inside this one:
@@ -1595,7 +1593,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (publicEvent) generationTiming.record(publicEvent, eventClock);
 			if (publicEvent?.type === "agent_start") {
-				persistence.deferTraceClose(true);
 				turnEndFiredFor = null;
 				state.pendingInRunContinuation = false;
 				runStartMessageCount = localRuntime.agent.state.messages.length;
@@ -1832,7 +1829,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					persistence.appendTerminalToolAssistantTurn(terminal);
 				}
 				context.flushReconciledSnapshot();
-				persistence.deferTraceClose(false);
 				const finalAssistant = [...enrichedEvent.messages].reverse().find((message) => message.role === "assistant");
 				if (terminal !== null || finalAssistant === undefined || finalAssistant !== turnEndFiredFor) {
 					await middleware.fireTurnEnd(localRuntime, enrichedEvent.messages, terminal ?? undefined);

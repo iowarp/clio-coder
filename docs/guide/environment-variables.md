@@ -39,8 +39,6 @@ The `environment-variable-inventory` check in [check-hygiene.ts](../../scripts/c
 | `CLIO_CODER_NERD_FONT` | off | `1` opts into Nerd Font brain icons on the thinking rail. Ordinary filled and hollow dots are the default; terminal color capability does not establish font coverage. |
 | `CLIO_CODER_SCREEN_READER` | off | `1` uses the compact welcome header and textual thinking effort, disables attention animation, and makes smooth-streaming `auto` use the immediate coalescer. |
 | `CLIO_CODER_INSTANT_SHELL` | on | `0` disables the single-owner Stage 0 interactive shell for immediate rollback. Unset or `1` mounts one terminal/editor owner before service hydration; ACP, headless, ordinary non-TTY, and subcommand paths never mount it. An explicit `CLIO_CODER_INTERACTIVE=1` keeps its force-interactive non-TTY behavior. |
-| `CLIO_CODER_TRACE_RETENTION_DAYS` | 30 | Maximum age in days for terminal rows in the rebuildable SQLite trace mirror. The value is an integer of at least 1; anything else fails with `CLIO_CODER_TRACE_RETENTION_DAYS must be an integer of at least 1` ([trace-store.ts](../../src/domains/telemetry/trace-store.ts)). |
-| `CLIO_CODER_TRACE_MAX_BYTES` | 134217728 | Maximum allocated size for the SQLite trace mirror before the oldest terminal runs are pruned. The value is an integer of at least 1,048,576; anything else fails with `CLIO_CODER_TRACE_MAX_BYTES must be an integer of at least 1048576` (`src/domains/telemetry/trace-store.ts`). |
 
 ## Directory and install layout
 
@@ -82,7 +80,6 @@ These names follow an upstream or operating-system convention. They are not subs
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ANTIGRAVITY_HOME`, `COPILOT_HOME`, `OPENCODE_CONFIG_DIR` | Home directory of each coding agent that interop inventories, in place of its default under your home directory ([registry.ts](../../src/domains/interop/registry.ts)). `CODEX_HOME` also locates Codex's `auth.json` for the Codex CLI quota reader and is passed to a Codex peer. See [Coding Agent Interoperability](interop.md). |
 | `OPENCODE_CONFIG` | OpenCode's own config file. When Clio Coder runs the OpenCode CLI as a peer, it reads this file and `opencode.json` or `opencode.jsonc` under `OPENCODE_CONFIG_DIR` for `{env:NAME}` API-key references, and forwards only those named variables to the child ([opencode.ts](../../src/engine/external-cli/opencode.ts)). |
 | `NODE_COMPILE_CACHE`, `NODE_DISABLE_COMPILE_CACHE` | Node's own compile-cache controls, which beat Clio Coder's. Any `NODE_DISABLE_COMPILE_CACHE` value turns Clio Coder's V8 compile cache off, and a set `NODE_COMPILE_CACHE` replaces Clio Coder's cache directory with the one it names. When either is set, workers inherit it unchanged and Clio injects no separate cache ([compile-cache.ts](../../src/core/compile-cache.ts)). |
-| `NODE_OPTIONS` | Read only for `--trace-warnings`. Clio Coder drops Node's experimental warning for the SQLite trace mirror unless warning tracing is requested there or in Node's own flags ([trace-store.ts](../../src/domains/telemetry/trace-store.ts)). |
 
 ## Debug and trace toggles
 

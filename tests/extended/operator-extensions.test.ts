@@ -36,7 +36,6 @@ import {
 import { isLoadableExtension } from "../../src/domains/extensions/types.js";
 import { disablePlugin, enablePlugin, installPlugin, removePlugin } from "../../src/domains/plugins/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
-import { TraceReader, TraceStore } from "../../src/domains/telemetry/trace-store.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { ExtensionPanelView } from "../../src/interactive/overlays/extension-panel.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
@@ -70,20 +69,16 @@ test("runtime activity retains admitted extension identity", async (t) => {
 		context: () => ({ workspace: cwd, sessionId: "identity-session", mode: "interactive" }),
 		isIdle: () => true,
 	});
-	const db = path.join(env.dir, "trace.sqlite");
-	const store = new TraceStore(db);
 	const activity: PackageActivity[] = [];
 	let sessionReady = false;
 	const unbind = bindPackageActivitySink((row) => {
 		if (!sessionReady) return false;
 		activity.push(row);
-		store.recordPackageActivity({ ...row, sessionId: "identity-session" });
 		return true;
 	});
 	t.after(async () => {
 		await runtime.dispose();
 		unbind();
-		store.close();
 		env.restore();
 	});
 	equal((await runtime.reload("startup")).status, "committed");
@@ -105,13 +100,6 @@ test("runtime activity retains admitted extension identity", async (t) => {
 	const retired = activity.find((row) => row.kind === "runtime_retire" && row.owner.id === entry.id);
 	ok(retired);
 	deepStrictEqual(retired.owner, spec.sourceInfo?.owner);
-	const reader = new TraceReader(db);
-	try {
-		const rows = reader.events("session-activity:identity-session");
-		ok(rows.some((row) => JSON.parse(row.payload_json ?? "{}").owner?.digest === entry.provenance?.contentDigest));
-	} finally {
-		reader.close();
-	}
 });
 test("bounded package activity carries dropped counts until delivery is acknowledged", (t) => {
 	const owner = { kind: "extension", id: "capture-probe", version: "1.0.0", digest: "capture-probe" };

@@ -35,7 +35,7 @@ import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
-import { createTelemetryDomainModule } from "../domains/telemetry/index.js";
+import { TelemetryDomainModule } from "../domains/telemetry/index.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
@@ -552,12 +552,7 @@ async function loadBootstrapDispatch(): Promise<{
 		AgentsDomainModule,
 		MiddlewareDomainModule,
 		SessionDomainModule,
-		// Same shape as the wiki writer: one internal dispatch in a process that
-		// exits with it. The SQLite mirror opens `node:sqlite` on the first
-		// dispatch event, which costs `clio-coder context init` a module load it never
-		// reads back and prints Node's ExperimentalWarning over the command's own
-		// output. Receipts and the ledger still record the run.
-		createTelemetryDomainModule({ dispatchTrace: false }),
+		TelemetryDomainModule,
 		SchedulingDomainModule,
 		createDispatchDomainModule({ workerHooks: workerHooks.workerHooks }),
 	]);
