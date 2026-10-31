@@ -125,7 +125,7 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 		},
 	} as unknown as TUI;
 	const telemetry = { live: () => view, subscribe: () => () => {} };
-	const usage = openUsageOverlay(tui, { subscribe: () => () => {}, telemetry } as unknown as TelemetryContract);
+	const usage = openUsageOverlay(tui, { subscribe: () => () => {}, read: telemetry } as unknown as TelemetryContract);
 	try {
 		const text = stripTerminalSequences(dockTop(tui)?.frame.renderDockBody(200, 30).join("\n") ?? "");
 		ok(text.includes(cold.session.totals.usd.display), text);
