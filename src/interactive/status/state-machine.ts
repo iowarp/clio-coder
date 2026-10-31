@@ -1,5 +1,6 @@
 import type { RunAbortSource } from "../../core/bus-events.js";
 import { ToolNames } from "../../core/tool-names.js";
+import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPhase } from "../../session-control/chat-loop.js";
 import {
 	type AgentStatus,
@@ -259,6 +260,11 @@ function isWaitingForOperator(prev: AgentStatus): boolean {
 	);
 }
 
+/** The messages a run tally folds: its assistant replies and tool results. */
+function settledMessageCount(messages: ReadonlyArray<AgentMessage>): number {
+	return messages.filter((message) => message.role === "assistant" || message.role === "toolResult").length;
+}
+
 function cancelledSummary(
 	prev: AgentStatus,
 	ctx: ReduceContext,
@@ -516,12 +522,13 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			// On the abort path the engine has already replaced the run's window
 			// with one synthetic zero-usage failure message, so this rebuild
 			// reports nothing and would undo the summary run_aborted just wrote
-			// from the live tally. Whichever record saw more tokens is the one
-			// that saw the run; on a normal turn the two agree exactly, because
-			// both fold the same messages through the same function.
+			// from the live tally. The tally saw the run whenever it folded at
+			// least as many messages as the window holds; on a normal turn the two
+			// agree exactly, because both fold the same messages through the same
+			// function.
 			const tally = prev.runTally;
 			const summary =
-				tally && tally.inputTokens + tally.outputTokens > rebuilt.inputTokens + rebuilt.outputTokens
+				tally && tally.settledMessages > 0 && tally.settledMessages >= settledMessageCount(event.messages)
 					? summaryFromRunTally(tally, {
 							startedAt: start,
 							endedAt: ctx.now,

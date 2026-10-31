@@ -2,6 +2,7 @@ import type { FactMetric, Quantity } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
 import { renderCompactCount, renderCount } from "../../core/telemetry/render.js";
 import type { TelemetryView } from "../../domains/observability/contract.js";
+import { type ReasoningUsageView, reasoningFromQuantity } from "../status/reasoning.js";
 
 /**
  * What the footer shows of the session's spend, read from the telemetry read model's live view (#434 §11.3): the
@@ -15,8 +16,8 @@ export interface FooterSpend {
 	cost: string | null;
 	/** Calls that never reached a provider, or null when there are none. */
 	neverSent: string | null;
-	/** The newest turn's tokens across every call it made, workers included. */
-	turn: { input: string; output: string; cacheRead: string; cacheWrite: string } | null;
+	/** The newest turn's tokens across every call it made, workers included, and the reasoning those calls journaled. */
+	turn: { input: string; output: string; cacheRead: string; cacheWrite: string; reasoning: ReasoningUsageView } | null;
 	/** The newest main call's prompt-cache split and verdict. */
 	promptCache: { read: string; write: string; uncached: string; verdict: string } | null;
 }
@@ -43,11 +44,12 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 	const neverSent = session.own.counts.dispositions.neverSent;
 	const main = view.calls({ labels: ["main"], limit: 1 }).calls[0];
 	const turnId = main?.owner.turnId;
+	const turnQuantity = (metric: FactMetric): Quantity | null =>
+		turnId === undefined
+			? null
+			: view.quantity(factRef({ scope: "session", owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
 	const turnCount = (metric: FactMetric): string => {
-		const quantity =
-			turnId === undefined
-				? null
-				: view.quantity(factRef({ scope: "session", owner: view.sessionId, metric, group: { by: "turn", key: turnId } }));
+		const quantity = turnQuantity(metric);
 		return quantity ? renderCompactCount(quantity.fact) : "?";
 	};
 	const spend: FooterTelemetry = {
@@ -66,6 +68,7 @@ export function footerTelemetry(view: TelemetryView | null | undefined): FooterT
 						output: turnCount("output"),
 						cacheRead: turnCount("cacheRead"),
 						cacheWrite: turnCount("cacheWrite"),
+						reasoning: reasoningFromQuantity(turnQuantity("reasoning")),
 					},
 		promptCache: main?.usage
 			? {

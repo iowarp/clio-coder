@@ -3,12 +3,12 @@ import { factRef } from "../core/telemetry/dto.js";
 import { COST_NOT_MEASURED, renderCompactCount } from "../core/telemetry/render.js";
 import type { TelemetryView } from "../domains/observability/contract.js";
 import { usageCoverageLabel } from "../domains/session/usage.js";
+import { type ReasoningUsageView, reasoningFromQuantity } from "./status/reasoning.js";
 
 /**
  * One operator turn's spend as the read model folds it: the session's own calls and the worker runs the turn
  * referenced, read through the same turn-grouped quantities the footer shows, every string the canonical renderer's
- * (#434 §11.3). An unknown count reads `?` and a partial one `≥`, never a zero nothing measured. Reasoning is not
- * here: the journal holds only provider-reported reasoning, so the run keeps its own count and estimate.
+ * (#434 §11.3). An unknown count reads `?` and a partial one `≥`, never a zero nothing measured.
  */
 export interface TurnSpend {
 	/** API calls the turn made, its workers' included; null when the count is unknown. */
@@ -18,6 +18,8 @@ export interface TurnSpend {
 	/** Null when the provider served nothing from its prompt cache. */
 	cacheRead: string | null;
 	cacheWrite: string | null;
+	/** The reasoning the turn's calls journaled, `≈` where Clio estimated it from the thinking they streamed. */
+	reasoning: ReasoningUsageView;
 	/** Null when nothing could be charged. */
 	cost: string | null;
 	/** The calls that reported no usage or never left, or null when every call reported. */
@@ -56,6 +58,7 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 	const output = read("output");
 	const cacheRead = read("cacheRead");
 	const cacheWrite = read("cacheWrite");
+	const reasoning = read("reasoning");
 	const usd = read("usd");
 	const unreported = read("missingTokenCalls");
 	const neverSent = read("neverSent");
@@ -68,6 +71,7 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 		output: renderCompactCount(output.fact),
 		cacheRead: nonZero(cacheRead) ? renderCompactCount(cacheRead.fact) : null,
 		cacheWrite: nonZero(cacheWrite) ? renderCompactCount(cacheWrite.fact) : null,
+		reasoning: reasoningFromQuantity(reasoning),
 		// A turn nothing priced makes no cost claim, so the receipt names none rather than "not measured".
 		cost: contributed(usd) && usd.display !== COST_NOT_MEASURED ? usd.display : null,
 		coverage: unknownCalls > 0 || skipped > 0 ? usageCoverageLabel(unknownCalls, skipped) : null,

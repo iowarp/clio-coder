@@ -50,7 +50,7 @@ import {
 } from "./renderers/tool-execution.js";
 import type { WorkerEntryRenderOptions } from "./renderers/worker-entry.js";
 import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
-import { compactReasoningTokens, type ReasoningUsageView, runReasoning, UNMEASURED_REASONING } from "./status/index.js";
+import { compactReasoningTokens, type ReasoningUsageView, UNMEASURED_REASONING } from "./status/index.js";
 import {
 	clioTheme,
 	fgSequence,
@@ -136,10 +136,8 @@ export interface ChatPanelTurnUsage {
 	turnId?: string;
 	/** The calls the run's own messages settled; the receipt reads the fold until it holds them all. */
 	callIds?: ReadonlyArray<string>;
-	/** The turn's spend as the read model last worded it; absent until a view resolved the turn. */
+	/** The turn's spend and reasoning as the read model last worded them; absent until a view resolved the turn. */
 	spend?: TurnSpend;
-	/** The reasoning the run's own messages report, `≈` when Clio estimated it from thinking text. */
-	reasoning?: ReasoningUsageView;
 	/** Why the run's prompt cache was expected to be cold (`prompt_recompiled`, …). */
 	coldReasons?: ReadonlyArray<string>;
 	/** Settled speculative workers, shown only on the Detailed receipt. */
@@ -535,9 +533,9 @@ function runCallIds(messages: ReadonlyArray<unknown>): string[] {
 	];
 }
 
-/** Settled-turn adapter onto the shared projection; the panel's own summary shape. */
+/** The reasoning the turn's journaled calls hold, unmeasured until a view resolved the turn. */
 function reasoningFromTurnUsage(usage: ChatPanelTurnUsage | undefined): ReasoningUsageView {
-	return usage?.reasoning ?? UNMEASURED_REASONING;
+	return usage?.spend?.reasoning ?? UNMEASURED_REASONING;
 }
 
 function extractAssistantTerminalError(message: unknown): string {
@@ -2709,11 +2707,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				}
 				// Until its run ends, an entry's receipt reads the turn so far.
 				if (reports) {
-					const reasoning = runReasoning([event.message]);
-					assistant.turnUsage = {
-						...(runTurnId === undefined ? {} : { turnId: runTurnId }),
-						...(reasoning.provenance === "unmeasured" ? {} : { reasoning }),
-					};
+					assistant.turnUsage = runTurnId === undefined ? {} : { turnId: runTurnId };
 					trackReceipt(assistant);
 				}
 				if (terminalError.length > 0) assistant.isError = true;
@@ -2798,9 +2792,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 									: Math.max(0, now() - runStartedAt);
 						const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 						const callIds = runCallIds(event.messages);
-						const reasoning = runReasoning(event.messages);
 						target.turnUsage = {
-							...(reasoning.provenance === "unmeasured" ? {} : { reasoning }),
 							...(turnId === undefined ? {} : { turnId }),
 							...(callIds.length > 0 ? { callIds } : {}),
 							...(elapsedMs === undefined ? {} : { elapsedMs }),

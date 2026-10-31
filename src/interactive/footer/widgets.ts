@@ -12,7 +12,7 @@ import { contextCategorySwatch, contextPercentRole, renderContextMeterBar } from
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
-import { formatReasoningChip, reasoningFromSummary, spinnerFrame } from "../status/index.js";
+import { formatReasoningChip, type ReasoningUsageView, spinnerFrame } from "../status/index.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
 import {
 	clioTheme,
@@ -509,13 +509,13 @@ function liveTokenValue(
 }
 
 /**
- * The last turn's reasoning chip, or null when the turn spent none. Every
- * surface that shows reasoning reads the same projection, so the transcript,
- * this footer, and the receipt cannot disagree about the count or whether it
- * is provider-attested.
+ * The newest turn's reasoning chip, or null when the turn spent none. Every
+ * surface that shows reasoning reads the turn's journaled reasoning through the
+ * same projection, so the transcript, this footer, and the receipt cannot
+ * disagree about the count or whether it is provider-attested.
  */
-function reasoningChip(theme: ClioTheme, lastTurn: TurnSummary): string | null {
-	const chip = formatReasoningChip(reasoningFromSummary(lastTurn), formatFooterTokens);
+function reasoningChip(theme: ClioTheme, reasoning: ReasoningUsageView): string | null {
+	const chip = formatReasoningChip(reasoning, formatFooterTokens);
 	return chip === null ? null : theme.fg("counter", chip);
 }
 
@@ -529,7 +529,7 @@ function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary, telemetry: Foo
 	const turn = telemetry?.kind === "ready" ? telemetry.turn : null;
 	const parts: Array<string | null> = [
 		turn ? theme.fg("counter", `${GLYPH.up} ${turn.input} ${GLYPH.down} ${turn.output}`) : null,
-		reasoningChip(theme, lastTurn),
+		turn ? reasoningChip(theme, turn.reasoning) : null,
 		turn && !(turn.cacheRead === "0" && turn.cacheWrite === "0")
 			? theme.fg("annotation", `cache ${turn.cacheRead}/${turn.cacheWrite}`)
 			: null,

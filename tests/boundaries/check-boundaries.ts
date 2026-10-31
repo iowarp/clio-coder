@@ -385,12 +385,12 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 		file: "src/interactive/status/summary.ts",
 		functions: ["foldMessageIntoRunTally"],
 		reason:
-			"the run's own reasoning count and chars/4 estimate behind the reasoning chip and the receipt, which the call journal does not record; its token fields only pick between a live and a rebuilt summary, and every token display reads the read model",
+			"the run's token counts the extension bus sends as turn_end usage, a payload no surface displays; every token and reasoning display reads the read model",
 	},
 	{
 		file: "src/interactive/session-last-turn.ts",
 		functions: ["lastTurnSummaryFromLedger"],
-		reason: "rebuilds that same run tally from the ledger on resume, for the reasoning chip the call journal cannot feed",
+		reason: "rebuilds that same summary from the ledger on resume, whose token fields nothing displays",
 	},
 	{
 		file: "src/cli/modes/print.ts",

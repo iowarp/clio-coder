@@ -203,12 +203,6 @@ function nestedNumber(root: unknown, path: ReadonlyArray<string>): number | null
 	return finiteNonNegative(current);
 }
 
-/** Approximate reasoning tokens from visible thinking text; never a provider attestation. */
-export function estimateReasoningTextTokens(text: string): number | null {
-	if (typeof text !== "string" || text.trim().length === 0) return null;
-	return ceilChars(text.length);
-}
-
 export function extractReasoningTokens(usage: unknown): number | null {
 	if (!isRecord(usage)) return null;
 	const direct =

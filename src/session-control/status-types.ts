@@ -41,9 +41,6 @@ export interface TurnSummary {
 	outputTokens: number;
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
-	reasoningTokens?: number | undefined;
-	/** Whether the reasoning total is provider-reported, estimated from text, or mixed. */
-	reasoningTokenProvenance?: ReasoningTokenProvenance | undefined;
 	toolCount: number;
 	toolErrorCount: number;
 	stopReason: TurnStopReason;
@@ -73,9 +70,8 @@ export interface RunTally {
 	outputTokens: number;
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
-	reasoningTokens: number;
-	hadProviderReasoning: boolean;
-	hadEstimatedReasoning: boolean;
+	/** Assistant and tool-result messages folded, which says whether this tally saw more of the run than a rebuild. */
+	settledMessages: number;
 	toolCount: number;
 	toolErrorCount: number;
 	/** Direct response model-id observation for the last assistant call folded. */

@@ -12,14 +12,12 @@
  * provider usage, the persisted stop reason, the tool result rows the turn
  * produced, and the wall time between the user message that opened the turn and
  * the last row it wrote. Fields the ledger does not carry are left at their
- * neutral value rather than reconstructed: the watchdog peak is zero, and
- * reasoning tokens appear only when a provider reported them, never estimated
- * back off replayed thinking text.
+ * neutral value rather than reconstructed: the watchdog peak is zero. The
+ * reasoning chip reads the turn's journaled reasoning, not this summary.
  */
 
 import { type ResponseModelIdObservation, responseModelIdObservationFromRecord } from "../core/response-model-id.js";
 import { rawDurationMs } from "../core/timers.js";
-import { extractReasoningTokens } from "../domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry, SessionUsageDefaults } from "../domains/session/index.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { TurnStopReason, TurnSummary } from "./status/index.js";
@@ -128,8 +126,6 @@ export function lastTurnSummaryFromLedger(
 	let outputTokens = 0;
 	let cacheReadTokens = 0;
 	let cacheWriteTokens = 0;
-	let reasoningTokens = 0;
-	let sawReasoning = false;
 	let toolCount = 0;
 	let toolErrorCount = 0;
 	let targetId = turn.targetId;
@@ -161,16 +157,11 @@ export function lastTurnSummaryFromLedger(
 		outputTokens += positiveNumber(usage.output);
 		cacheReadTokens += positiveNumber(usage.cacheRead);
 		cacheWriteTokens += positiveNumber(usage.cacheWrite);
-		const reasoning = extractReasoningTokens(usage);
-		if (reasoning !== null) {
-			reasoningTokens += reasoning;
-			sawReasoning = true;
-		}
 	}
 	if (!sawAssistant) return null;
 
 	const lastRow = turn.rows[turn.rows.length - 1];
-	const summary: TurnSummary = {
+	return {
 		elapsedMs: lastRow ? millisBetween(turn.startedAt, lastRow.timestamp) : 0,
 		modelId: modelId ?? "unknown",
 		targetId: targetId ?? "unknown",
@@ -185,9 +176,4 @@ export function lastTurnSummaryFromLedger(
 		truncated: false,
 		responseModelIdObservation,
 	};
-	if (sawReasoning) {
-		summary.reasoningTokens = reasoningTokens;
-		summary.reasoningTokenProvenance = "provider";
-	}
-	return summary;
 }

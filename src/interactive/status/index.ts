@@ -17,8 +17,7 @@ export {
 	formatReasoningChip,
 	type ReasoningProvenance,
 	type ReasoningUsageView,
-	reasoningFromSummary,
-	reasoningFromTally,
+	reasoningFromQuantity,
 	UNMEASURED_REASONING,
 } from "./reasoning.js";
 export { type ReduceContext, reduceStatus, type StatusInputEvent } from "./state-machine.js";
@@ -27,7 +26,6 @@ export {
 	buildSummary,
 	emptyRunTally,
 	foldMessageIntoRunTally,
-	runReasoning,
 } from "./summary.js";
 export {
 	resolveFooterVerb,

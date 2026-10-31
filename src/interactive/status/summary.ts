@@ -1,17 +1,9 @@
 import { messageUsageForAccounting } from "../../core/message-accounting.js";
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
-import { estimateReasoningTextTokens, extractReasoningTokens } from "../../domains/session/context-accounting.js";
 import type { AgentMessage } from "../../engine/types.js";
 import { sumRunUsage } from "../../session-control/chat-loop-messages.js";
-import type {
-	ReasoningTokenProvenance,
-	RunTally,
-	TurnStopReason,
-	TurnSummary,
-	WatchdogTier,
-} from "../../session-control/status-types.js";
-import { type ReasoningUsageView, reasoningFromTally } from "./reasoning.js";
+import type { RunTally, TurnStopReason, TurnSummary, WatchdogTier } from "../../session-control/status-types.js";
 
 export interface BuildSummaryInput {
 	startedAt: number;
@@ -30,21 +22,6 @@ interface UsageLike {
 	cacheRead?: number;
 	cacheWrite?: number;
 	estimated?: boolean;
-}
-
-function assistantThinkingText(message: AgentMessage): string {
-	const content = (message as { content?: unknown }).content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.filter(
-			(block): block is { type: "thinking"; thinking: string } =>
-				!!block &&
-				typeof block === "object" &&
-				(block as { type?: unknown }).type === "thinking" &&
-				typeof (block as { thinking?: unknown }).thinking === "string",
-		)
-		.map((block) => block.thinking)
-		.join("");
 }
 
 function finite(value: unknown): number {
@@ -71,9 +48,7 @@ export function emptyRunTally(): RunTally {
 		outputTokens: 0,
 		cacheReadTokens: 0,
 		cacheWriteTokens: 0,
-		reasoningTokens: 0,
-		hadProviderReasoning: false,
-		hadEstimatedReasoning: false,
+		settledMessages: 0,
 		toolCount: 0,
 		toolErrorCount: 0,
 		responseModelIdObservation: { state: "not-observed" },
@@ -91,6 +66,7 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 	if (message.role === "toolResult") {
 		return {
 			...tally,
+			settledMessages: tally.settledMessages + 1,
 			toolCount: tally.toolCount + 1,
 			toolErrorCount: tally.toolErrorCount + ((message as { isError?: boolean }).isError === true ? 1 : 0),
 		};
@@ -109,9 +85,10 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 			: providerUsage;
 	const folded = sumRunUsage([message], { includeEstimates: true });
 	const summary = folded.costSummary ? folded : undefined;
-	const next: RunTally = {
+	return {
 		...tally,
 		...(summary?.estimated || usage?.estimated === true ? { estimated: true } : {}),
+		settledMessages: tally.settledMessages + 1,
 		responseModelIdObservation:
 			summary?.lastResponseModelIdObservation ?? responseModelIdObservationFromRecord(record, "not-observed"),
 		inputTokens: tally.inputTokens + (summary?.input ?? (usage ? finite(usage.input) : 0)),
@@ -119,49 +96,6 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 		cacheReadTokens: tally.cacheReadTokens + (summary?.cacheRead ?? (usage ? finite(usage.cacheRead) : 0)),
 		cacheWriteTokens: tally.cacheWriteTokens + (summary?.cacheWrite ?? (usage ? finite(usage.cacheWrite) : 0)),
 	};
-	// Interrupted turns carry Clio's own estimated usage object. It retains the
-	// completed-record shape, including `reasoning: 0`, but that zero is not a
-	// provider attestation and must not suppress the thinking-text fallback.
-	const reasoning = summary
-		? summary.hadReasoning
-			? summary.reasoning
-			: null
-		: usage && usage.estimated !== true
-			? extractReasoningTokens(usage)
-			: null;
-	if (reasoning !== null) {
-		next.reasoningTokens += reasoning;
-		next.hadProviderReasoning = true;
-		return next;
-	}
-	// Some providers emit thinking blocks without a usage object. Keep the
-	// fallback explicitly estimated so a run containing both shapes is
-	// reported as mixed rather than silently dropping the unreported block.
-	const estimated = estimateReasoningTextTokens(assistantThinkingText(message));
-	if (estimated !== null) {
-		// A chars/4 estimate over displayed thinking text can outrun what the
-		// provider says the call generated (summarized reasoning, a rail that
-		// re-renders the same block). Reported output is the ceiling for anything
-		// inferred: reasoning is part of that output, never more than it. No
-		// clamp exists upstream in the adapters, so it lives here, once.
-		const reportedOutput =
-			usage && typeof usage.output === "number" && Number.isFinite(usage.output) ? Math.max(0, usage.output) : null;
-		next.reasoningTokens += reportedOutput === null ? estimated : Math.min(estimated, reportedOutput);
-		next.hadEstimatedReasoning = true;
-	}
-	return next;
-}
-
-/**
- * The reasoning a run's own messages report, with its provenance. The call journal holds only provider-reported
- * reasoning, so a run whose provider sent thinking text without a count keeps its chars/4 estimate here (#434 §11.3).
- */
-export function runReasoning(messages: ReadonlyArray<unknown>): ReasoningUsageView {
-	let tally = emptyRunTally();
-	for (const message of messages)
-		if (message && typeof message === "object" && (message as { role?: unknown }).role === "assistant")
-			tally = foldMessageIntoRunTally(tally, message as AgentMessage);
-	return reasoningFromTally(tally);
 }
 
 export interface SummaryFromTallyInput {
@@ -176,7 +110,7 @@ export interface SummaryFromTallyInput {
 }
 
 export function summaryFromRunTally(tally: RunTally, input: SummaryFromTallyInput): TurnSummary {
-	const summary: TurnSummary = {
+	return {
 		elapsedMs: Math.max(0, input.endedAt - input.startedAt),
 		...(tally.estimated === true ? { estimated: true } : {}),
 		modelId: input.modelId,
@@ -193,17 +127,6 @@ export function summaryFromRunTally(tally: RunTally, input: SummaryFromTallyInpu
 		truncated: input.truncated === true,
 		responseModelIdObservation: tally.responseModelIdObservation,
 	};
-	if (tally.hadProviderReasoning || tally.hadEstimatedReasoning) {
-		summary.reasoningTokens = tally.reasoningTokens;
-		const provenance: ReasoningTokenProvenance =
-			tally.hadProviderReasoning && tally.hadEstimatedReasoning
-				? "mixed"
-				: tally.hadProviderReasoning
-					? "provider"
-					: "estimated";
-		summary.reasoningTokenProvenance = provenance;
-	}
-	return summary;
 }
 
 export function buildSummary(input: BuildSummaryInput): TurnSummary {
