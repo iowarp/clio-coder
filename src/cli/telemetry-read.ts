@@ -1,5 +1,4 @@
-import { existsSync, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import { cwdHash } from "../core/cwd-hash.js";
 import type {
 	CacheReportV1,
@@ -39,6 +38,7 @@ import {
 import { describeSealMismatch } from "../domains/telemetry/seal.js";
 import { explainRepoRef, isRepoRef, usageWindow } from "../domains/telemetry/usage-window.js";
 import { formatColumns, printError } from "./shared.js";
+import { resolveTelemetryTarget } from "./telemetry-target.js";
 
 /**
  * `clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain` (#434 §11.3). Each command reads the
@@ -127,12 +127,9 @@ function isoArg(value: string | undefined, flag: string): string | undefined | E
 }
 
 function loadSession(stateDir: string, target: string): SessionSource | null {
-	// A path names the session directory itself; anything else is a session id.
-	if (target.includes("/") && existsSync(target) && statSync(target).isDirectory()) {
-		const directory = resolve(target);
-		return loadSessionTelemetrySource(stateDir, basename(directory), directory);
-	}
-	return loadSessionTelemetrySource(stateDir, target);
+	const resolved = resolveTelemetryTarget(stateDir, target);
+	if (resolved.kind === "archive" || (resolved.kind === "directory" && !resolved.exists)) return null;
+	return loadSessionTelemetrySource(stateDir, resolved.id, resolved.kind === "directory" ? resolved.path : undefined);
 }
 
 const show = (quantity: Quantity) => quantity.display;

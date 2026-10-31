@@ -1,16 +1,11 @@
-import { lstatSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
-import {
-	telemetryImportedStateDir,
-	telemetryRunDirectory,
-	telemetrySessionDirectory,
-} from "../domains/telemetry/paths.js";
+import { telemetryImportedStateDir } from "../domains/telemetry/paths.js";
 import { seal } from "../domains/telemetry/read-model.js";
 import type { SealVerdict } from "../domains/telemetry/seal.js";
 import { describeSealMismatch, readTelemetryScopeFiles } from "../domains/telemetry/seal.js";
 import { printError } from "./shared.js";
+import { resolveTelemetryTarget } from "./telemetry-target.js";
 
 const HELP = `clio-coder telemetry verify <session | scope-dir | archive> [--imported <install-id>] [--json]
 clio-coder telemetry verify --run <run-id> [--imported <install-id>] [--json]
@@ -79,17 +74,17 @@ export async function runTelemetryVerify(argv: ReadonlyArray<string>): Promise<n
 	try {
 		const imported = values.get("--imported");
 		const stateDir = imported === undefined ? clioStateDir() : telemetryImportedStateDir(clioStateDir(), imported);
-		path = runId === undefined ? resolve(target as string) : telemetryRunDirectory(stateDir, runId);
-		let info = lstatSync(path, { throwIfNoEntry: false });
-		if (!info && runId === undefined && !target?.includes("/") && !target?.includes("\\")) {
-			path = telemetrySessionDirectory(stateDir, target as string);
-			info = lstatSync(path, { throwIfNoEntry: false });
-		}
-		if (!info) {
+		const resolved = resolveTelemetryTarget(
+			stateDir,
+			(runId ?? target) as string,
+			runId === undefined ? "session" : "run",
+		);
+		path = resolved.path;
+		if (resolved.kind === "archive") return await verifyArchive(path, json);
+		if (!resolved.exists) {
 			printError(`no telemetry scope for ${runId ?? target} at ${path}`);
 			return 2;
 		}
-		if (runId === undefined && info.isFile()) return await verifyArchive(path, json);
 	} catch (error) {
 		printError(`cannot read telemetry ${runId ?? target}: ${error instanceof Error ? error.message : String(error)}`);
 		return 2;
