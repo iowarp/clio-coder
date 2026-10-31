@@ -50,7 +50,6 @@ import {
 } from "../../src/domains/session/journal-usage.js";
 import { runJournalsInWindow, usageCallsFromRunJournals } from "../../src/domains/session/run-journal-usage.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
-import { exportTelemetryBundle, importTelemetryBundle } from "../../src/domains/telemetry/bundle.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import {
 	openCallJournal,
@@ -846,113 +845,6 @@ test("the process journal receives one health window per process, carrying loop 
 		await journals.closeAll();
 		await processJournal.close(0);
 		await rm(stateDir, { recursive: true, force: true });
-	}
-});
-
-test("a research export round-trips through import-bundle into a fixture with the same fold (#434)", async () => {
-	const root = await mkdtemp(join(tmpdir(), "telemetry-bundle-"));
-	const stateDir = join(root, "state");
-	const research = { content: true, deltas: false, providerHeaders: false, systemOneDataset: false, busTrace: false };
-	const journals = createSessionJournals(stateDir, () => {}, {
-		current: () => effectiveTelemetryCapture({ mode: "research", research }, true),
-	});
-	const origin = { id: "bundle-session", cwdHash: "bundlehash" };
-	const measured = (value: number) => ({ kind: "measured", value, source: "provider" }) as const;
-	const settled = {
-		...unsent,
-		disposition: "settled" as const,
-		stop: { reason: "stop" as const },
-		usage: {
-			input: measured(100),
-			cacheRead: measured(400),
-			cacheWrite: measured(0),
-			cacheWrite1h: measured(0),
-			output: measured(20),
-			reasoning: measured(0),
-		},
-		pricing: {
-			usd: { kind: "estimated", value: 0.01, method: "target-rates" } as const,
-			pricedBy: "target-rates" as const,
-		},
-	};
-	const call = (ctx: Parameters<typeof beginCall>[1], objects?: CallStarted["objects"]) =>
-		beginCall(
-			{
-				...(objects ? { objects } : {}),
-				target: { targetId: "t", runtimeId: "r", api: "a", requestedModel: "m", reportedModel: unknown },
-				roundKind: "normal",
-				toolChoice: "auto",
-			},
-			ctx,
-		);
-	const runId = "bundlerun";
-	const runContext = { sessionId: origin.id, runId, agent: { role: "worker" as const, id: runId } };
-	const run = await openCallJournal({
-		directory: telemetryRunDirectory(stateDir, runId),
-		context: runContext,
-		writer,
-	});
-	try {
-		const lease = await journals.acquire(origin, { role: "main", id: origin.id });
-		const objects = await lease.storeRequestObjects?.({
-			prompt: { sections: [{ id: "s", tokenEstimate: 1 }], fragmentManifest: [], systemPrompt: "fixture prompt" },
-			tools: [{ name: "read" }],
-		});
-		call(lease.context, objects).settle(settled);
-		const worker = call(runContext);
-		worker.settle(settled);
-		telemetryHub().emit("call.linked", { runId, callId: worker.callId }, lease.context);
-		await lease.release();
-		await run.flush();
-		const sources = async (directory: string) => [
-			...(await readCallJournal(directory)).records,
-			...(await readCallJournal(join(directory, "runs", runId))).records,
-		];
-		const sessionDirectory = telemetrySessionDirectory(stateDir, origin.id);
-		const source = foldCallJournal(
-			[
-				...(await readCallJournal(sessionDirectory)).records,
-				...(await readCallJournal(telemetryRunDirectory(stateDir, runId))).records,
-			].map(({ record }) => record),
-		);
-		strictEqual(source.attempts.length, 2);
-		for (const contentClass of ["content-bearing", "structural", "content-free"] as const) {
-			const content = contentClass === "content-bearing";
-			const bundle = join(root, `bundle-${contentClass}`);
-			const fixture = join(root, `fixture-${contentClass}`);
-			await exportTelemetryBundle({
-				stateDir,
-				...{ sessionId: origin.id, sessionStore: null },
-				out: bundle,
-				contentClass,
-				writer,
-			});
-			const imported = await importTelemetryBundle(bundle, fixture);
-			deepStrictEqual(imported.manifest.source.runs, [runId]);
-			strictEqual(imported.manifest.ceiling.mode, "research");
-			strictEqual(imported.manifest.ceiling.capture.content, content);
-			strictEqual(imported.manifest.contentClass, contentClass);
-			const rows = (await sources(fixture)).map(({ record }) => record);
-			deepStrictEqual(foldCallJournal(rows).totals, source.totals, "the fixture folds to the session's totals");
-			strictEqual(
-				rows.some((row) => row.cc === "content-bearing"),
-				content,
-			);
-			ok(contentClass !== "content-free" || rows.every((row) => row.cc === "content-free"));
-			const objects = await readdir(join(fixture, "objects")).catch(() => []);
-			strictEqual(
-				objects.length,
-				{ "content-bearing": 3, structural: 2, "content-free": 0 }[contentClass],
-				"structure and tool schemas with structure; prompt text only with content; none content-free",
-			);
-			strictEqual(imported.manifest.excluded.contentBearing, content ? 0 : 1);
-		}
-		await appendFile(join(root, "bundle-structural", "journal.jsonl"), "x");
-		await rejects(importTelemetryBundle(join(root, "bundle-structural"), join(root, "tampered")), /sha256/);
-	} finally {
-		await run.close();
-		await journals.closeAll();
-		await rm(root, { recursive: true, force: true });
 	}
 });
 

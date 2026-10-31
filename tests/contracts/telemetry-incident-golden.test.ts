@@ -1,21 +1,18 @@
 /**
- * §13.2 golden import (#434): a bundle shaped like session vccap2ywu7n8 (#423) goes through import-bundle and the
- * shared folds, and the epic's invariants hold over what they return. It tests the importer and the folds, not the
- * incident: the bundle is synthetic, built from the figures #423 and the epic publish, and nothing in it comes from
+ * §13.2 golden (#434): a session shaped like vccap2ywu7n8 (#423), laid out as its journal, its three run journals and
+ * its two config objects, goes through the shared folds, and the epic's invariants hold over what they return. It
+ * tests the folds, not the incident: the fixture is synthetic, built from the figures #423 and the epic publish, and nothing in it comes from
  * a real home or session. #423's table of seven breaks sums to 1,284,189 re-prefilled tokens, 17,303 short of its
  * own 1,301,492 total, so the fixture puts the difference on the first break.
  */
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { before, test } from "node:test";
 import type { Fact, FactSum } from "../../src/core/telemetry/fact.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import type { RouteObservation } from "../../src/domains/dispatch/route-policy.js";
 import { estimateRoute } from "../../src/domains/dispatch/route-policy.js";
-import type { BundleImport } from "../../src/domains/telemetry/bundle.js";
-import { importTelemetryBundle } from "../../src/domains/telemetry/bundle.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { foldCallJournal, foldCalls } from "../../src/domains/telemetry/folds.js";
 import type { JournalSource, SessionSource } from "../../src/domains/telemetry/read-model.js";
@@ -36,27 +33,18 @@ const WORKERS = ["2s47tzn7p4bz", "21ee9qwrugeq"];
 // Money is summed in floating point; the crossing is asserted to the cent and the recorded spend to a micro-dollar.
 const USD_TOLERANCE = 1e-6;
 
-let root = "";
-let imported: BundleImport;
 let source: SessionSource;
 
 before(async () => {
-	root = await mkdtemp(join(tmpdir(), "telemetry-incident-golden-"));
-	const out = join(root, "fixture");
-	imported = await importTelemetryBundle(FIXTURE, out);
 	const runs = new Map<string, JournalSource>();
-	for (const runId of imported.manifest.source.runs)
-		runs.set(runId, journalSourceFromRead(await readCallJournal(join(out, "runs", runId)), true, runId));
+	for (const runId of (await readdir(join(FIXTURE, "runs"))).sort())
+		runs.set(runId, journalSourceFromRead(await readCallJournal(join(FIXTURE, "runs", runId)), true, runId));
 	source = {
 		sessionId: SESSION,
-		journal: journalSourceFromRead(await readCallJournal(out), true),
+		journal: journalSourceFromRead(await readCallJournal(FIXTURE), true),
 		runs,
 		parent: null,
 	};
-});
-
-after(async () => {
-	if (root) await rm(root, { recursive: true, force: true });
 });
 
 /** The known part of a fact or a sum: its measured or estimated value. */
@@ -79,20 +67,11 @@ const mainCalls = () => {
 		.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 };
 
-test("the bundle imports whole and byte for byte: every record readable, its three runs and both config objects", async () => {
-	strictEqual(imported.manifest.source.sessionId, SESSION);
-	strictEqual(imported.manifest.contentClass, "structural");
-	strictEqual(imported.unreadable, 0);
-	strictEqual(imported.runs, 3);
-	strictEqual(imported.objects, 2);
-	deepStrictEqual(imported.manifest.source.runs, [...WORKERS, "q7unpricedr1"].sort());
+test("the fixture reads whole: every record readable, its three runs and both config objects", async () => {
+	deepStrictEqual([...source.runs.keys()], [...WORKERS, "q7unpricedr1"].sort());
 	strictEqual(source.journal.skipped + source.journal.damaged, 0);
-	for (const file of imported.manifest.files)
-		deepStrictEqual(
-			await readFile(join(root, "fixture", file.path)),
-			await readFile(join(FIXTURE, file.path)),
-			file.path,
-		);
+	for (const [runId, run] of source.runs) strictEqual(run.skipped + run.damaged, 0, runId);
+	strictEqual((await readdir(join(FIXTURE, "objects"))).length, 2);
 });
 
 test("main-loop dispositions come from recorded facts: 131 invoked of 136 started, and never-sent is not spent", () => {

@@ -533,7 +533,7 @@ const ShareManifestSchema = Type.Object(
 export type ShareManifest = Static<typeof ShareManifestSchema>;
 
 /** The archive bytes for a plan: the manifest first, then each scope's journal, bundle.json and objects. */
-export function shareArchiveBytes(plan: SharePlan): Buffer {
+function shareArchiveBytes(plan: SharePlan): Buffer {
 	const manifest: ShareManifest = {
 		format: SHARE_ARCHIVE_FORMAT,
 		version: 1,

@@ -22,6 +22,7 @@ import {
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
 } from "../domains/session/telemetry-source.js";
+import { TELEMETRY_INSTALL_ID, telemetryImportedStateDir } from "../domains/telemetry/paths.js";
 import type { SessionSource } from "../domains/telemetry/read-model.js";
 import {
 	cacheReport,
@@ -64,6 +65,8 @@ emits the read-model DTO the TUI, ACP and GUI serve. explain also takes a
 usage report's repo:<window> reference, refolded over that window ending now.
 cost --days folds the window usage report reads: the sessions and runs of one
 repository (--repo) or of every repository, over the last <n> days.
+--imported <install-id> on any of these reads the scopes telemetry import placed
+from that installation instead of your own; the two are never folded together.
 `;
 
 interface Args {
@@ -73,7 +76,19 @@ interface Args {
 	json: boolean;
 }
 
-const VALUE_FLAGS = new Set(["run", "role", "disposition", "turn", "from", "to", "limit", "by", "repo", "days"]);
+const VALUE_FLAGS = new Set([
+	"run",
+	"role",
+	"disposition",
+	"turn",
+	"from",
+	"to",
+	"limit",
+	"by",
+	"repo",
+	"days",
+	"imported",
+]);
 
 function parse(argv: ReadonlyArray<string>): Args | string {
 	const [command = "", ...rest] = argv;
@@ -355,7 +370,16 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 		process.stderr.write(READ_HELP);
 		return 2;
 	}
-	const stateDir = clioStateDir();
+	const imported = args.values.get("imported");
+	let stateDir = clioStateDir();
+	if (imported !== undefined) {
+		if (!TELEMETRY_INSTALL_ID.test(imported)) {
+			printError(`--imported takes an install id (inst_ and 32 hex digits), not ${imported}`);
+			return 2;
+		}
+		// Imported scopes read as their own state directory, so nothing here mixes them into the operator's (#434).
+		stateDir = telemetryImportedStateDir(stateDir, imported);
+	}
 	const runId = args.values.get("run");
 	const target = args.positional[0];
 	try {
