@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { RecordRead, SegmentHeader, TelemetryRecord } from "./envelope.js";
 import { readTelemetryRecord } from "./envelope.js";
 
@@ -56,4 +57,41 @@ export function scanTelemetrySegment(bytes: Buffer): SegmentScan {
 		result.validBytes = offset;
 	}
 	return result;
+}
+
+/**
+ * A scope's journal hash chain (#434): `head_n = sha256(head_{n-1} || line_n)` over the raw 32-byte previous head and
+ * the exact bytes of each framed line, CRC suffix included and newline excluded. The empty chain has no head, so
+ * `head_0` is the sha256 of the first segment header line. `lines` counts every chained line, headers included.
+ */
+export interface TelemetryChain {
+	head: Buffer | null;
+	lines: number;
+}
+
+export const EMPTY_TELEMETRY_CHAIN: TelemetryChain = Object.freeze({ head: null, lines: 0 });
+
+/** Extend a chain by one framed line, with or without its trailing newline. */
+export function chainTelemetryLine(chain: TelemetryChain, line: Uint8Array): TelemetryChain {
+	const body = line.length > 0 && line[line.length - 1] === 0x0a ? line.subarray(0, -1) : line;
+	const hash = createHash("sha256");
+	if (chain.head) hash.update(chain.head);
+	return { head: hash.update(body).digest(), lines: chain.lines + 1 };
+}
+
+/** Extend a chain by every complete line in `bytes`; a trailing partial line is not chained. */
+export function chainTelemetryBytes(chain: TelemetryChain, bytes: Buffer): TelemetryChain {
+	let next = chain;
+	let offset = 0;
+	while (offset < bytes.length) {
+		const newline = bytes.indexOf(0x0a, offset);
+		if (newline < 0) break;
+		next = chainTelemetryLine(next, bytes.subarray(offset, newline));
+		offset = newline + 1;
+	}
+	return next;
+}
+
+export function telemetryChainHead(chain: TelemetryChain): string | null {
+	return chain.head ? chain.head.toString("hex") : null;
 }

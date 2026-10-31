@@ -58,6 +58,8 @@ import {
 	TELEMETRY_FOLD_VERSION,
 } from "./folds.js";
 import type { telemetryPromptStructure } from "./objects.js";
+import type { SealVerdict, TelemetryScopeFiles } from "./seal.js";
+import { verifyTelemetryScope } from "./seal.js";
 
 /**
  * The telemetry read model (#434 §11). Pure: callers hand it journal records (read from disk, or the live writer's
@@ -2898,4 +2900,12 @@ export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMe
 	}
 	summary.hitRate = summary.llmSteps === 0 ? 0 : summary.injections / summary.llmSteps;
 	return summary;
+}
+
+/**
+ * A scope's seal verdict, `verified`, `unsealed` or `failed` with the first mismatch, from the scope's own files
+ * (`readTelemetryScopeFiles`). `clio-coder telemetry verify` and every surface read it here (#434).
+ */
+export function seal(scope: TelemetryScopeFiles): SealVerdict {
+	return verifyTelemetryScope(scope);
 }

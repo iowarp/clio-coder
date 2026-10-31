@@ -7,6 +7,7 @@ import { assertSafeId } from "../../core/safe-id.js";
  *   process/<processId>/journal.jsonl    one journal per process, opened on its first process-scoped record
  *   sessions/<sessionId>/journal.jsonl   plus objects/
  *   runs/<runId>/journal.jsonl           plus objects/ when a run stores one
+ *   <scope>/bundle.json                  only while the scope is sealed
  *   consent.json
  *
  * Every scope names its journal `journal.jsonl` and rotates it as `journal.<recId>.jsonl`. Nothing outside the
@@ -70,6 +71,13 @@ export function telemetryJournalFiles(names: readonly string[]): string[] {
 /** Whether a name is one of a scope's journal segments, live or rotated. */
 export function isTelemetryJournalFile(name: string): boolean {
 	return name === TELEMETRY_JOURNAL_FILE || SEGMENT_FILE.test(name);
+}
+
+export const TELEMETRY_BUNDLE_FILE = "bundle.json";
+
+/** A sealed scope's manifest; a live scope has none (#434). */
+export function telemetryBundlePath(scopeDirectory: string): string {
+	return join(scopeDirectory, TELEMETRY_BUNDLE_FILE);
 }
 
 export function telemetryObjectsDirectory(scopeDirectory: string): string {

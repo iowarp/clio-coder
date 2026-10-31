@@ -645,6 +645,28 @@ export const PrewarmSettledSchema = Type.Object(
 	},
 	closed,
 );
+/**
+ * A scope's seal (#434): `head` is the journal's hash chain head before the seal line, `records` the number of chained
+ * lines (segment headers included) that head covers, and the file lists name every journal segment and object of the
+ * scope at that moment. The live segment's entry covers its bytes before the seal line.
+ */
+export const ScopeSealedSchema = Type.Object(
+	{
+		head: sha256Hex,
+		records: count,
+		segments: Type.Array(
+			Type.Object(
+				{ name: Type.String({ pattern: "^journal(\\.rec_[0-9a-f-]+)?\\.jsonl$" }), sha256: sha256Hex, bytes: count },
+				closed,
+			),
+		),
+		objects: Type.Array(
+			Type.Object({ id: Type.String({ pattern: "^obj_[0-9a-f]{64}$" }), sha256: sha256Hex, bytes: count }, closed),
+		),
+	},
+	closed,
+);
+export type ScopeSealed = Static<typeof ScopeSealedSchema>;
 /** The compiled system prompt's redacted text, linked to calls by the structure ref they carry (#434). */
 export const PromptTextCapturedSchema = Type.Object(
 	{ structure: Type.Optional(ObjectRefSchema), text: ObjectRefSchema, bytes: count },

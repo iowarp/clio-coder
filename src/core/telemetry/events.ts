@@ -271,6 +271,10 @@ export const EVENTS = {
 	"process.booted": journal(S.ProcessBootedSchema, { tier: "operational", cc: "structural", scope: "process" }),
 	"prewarm.decided": journal(S.PrewarmDecidedSchema, { tier: "operational", cc: "structural", scope: "process" }),
 	"prewarm.settled": journal(S.PrewarmSettledSchema, { tier: "operational", cc: "structural", scope: "process" }),
+	// The journal writer itself appends a seal as the last line of a closing scope; nothing emits one (#434).
+	"run.sealed": journal(S.ScopeSealedSchema, { tier: "accountability", cc: "content-free" }),
+	"session.sealed": journal(S.ScopeSealedSchema, { tier: "accountability", cc: "content-free" }),
+	"process.sealed": journal(S.ScopeSealedSchema, { tier: "accountability", cc: "content-free" }),
 	"prompt.text_captured": journal(S.PromptTextCapturedSchema, {
 		tier: "research",
 		cc: "content-bearing",

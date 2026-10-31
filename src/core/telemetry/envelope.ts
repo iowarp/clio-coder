@@ -39,6 +39,11 @@ export const SegmentHeaderSchema = Type.Object(
 		),
 		clockOrigin: ClockOriginSchema,
 		writer: Type.Object({ clioCoderVersion: Type.String(), piVersion: Type.String() }, closed),
+		/**
+		 * The scope's hash chain head when this segment opened, on the first header of every segment a rotation opened,
+		 * so the rotated segments form one chain. The scope's first segment starts the chain and carries none (#434).
+		 */
+		chainHead: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
 	},
 	closed,
 );
