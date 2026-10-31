@@ -35,7 +35,19 @@ export const TimelinePanel = memo(function TimelinePanel({
 		enabled: active,
 		retry: false,
 	});
-	const rows = useMemo(() => (timeline.data ? timelineRows(timeline.data.entries) : []), [timeline.data]);
+	// The cache report bills each break; a call row names its own. Without it the rows still read, unbilled.
+	const cache = useQuery({
+		meta: { errorSurface: "inline" },
+		queryKey: ["telemetry", sessionId, "cache"],
+		queryFn: ({ signal }) =>
+			client.call(routes.telemetryCache, { params: { id: sessionId }, query: {}, body: {} }, undefined, signal),
+		enabled: active,
+		retry: false,
+	});
+	const rows = useMemo(
+		() => (timeline.data ? timelineRows(timeline.data.entries, cache.data?.breaks) : []),
+		[timeline.data, cache.data],
+	);
 	const kinds = useMemo(() => timelineKinds(rows), [rows]);
 	const page = useMemo(() => timelinePage(rows, kind, limit), [rows, kind, limit]);
 	return (
@@ -74,6 +86,7 @@ export const TimelinePanel = memo(function TimelinePanel({
 							</select>
 						</label>
 					</div>
+					{cache.error ? <p className="drill__note">Cache breaks are not shown: {cache.error.message}</p> : null}
 					<ol className="drill__rows timeline-panel__rows" aria-label="Journal entries, newest first">
 						{page.rows.map((row) => (
 							<li key={row.key}>

@@ -2,7 +2,7 @@
 // model's order, with its kind word, a title from the closed vocabularies the journal records, and the server's
 // displays beside it. Nothing here formats, rounds or sums a number; a stage bar's geometry is the only arithmetic.
 
-import type { TimelineEntry } from "../../contracts/wire.js";
+import type { CacheReportV1, TimelineEntry } from "../../contracts/wire.js";
 import type { StatusTone } from "../design/status.js";
 import { type StageBar, stageBars } from "../pages/traces/trace-model.js";
 import { type Explainable, explainable } from "./quantity-model.js";
@@ -49,22 +49,37 @@ const said = (label: string, value: string | null | undefined): TimelineDetail[]
 	value ? [{ label, value, ref: null }] : [];
 
 type Described = Pick<TimelineRow, "title" | "tone" | "details">;
+export type CacheBreak = CacheReportV1["breaks"][number];
 
-/** One entry's title, tone and displays. */
-function describe(entry: TimelineEntry): Described {
+/** A call's cache break as the cache report bills it: what was read again, at what price, and where it diverged. */
+const breakDetails = (cacheBreak: CacheBreak | undefined): TimelineDetail[] =>
+	cacheBreak
+		? [
+				{ label: "Re-prefilled", ...explainable(cacheBreak.rePrefilled) },
+				{ label: "Break cost", ...explainable(cacheBreak.breakUsd) },
+				...said("Diverged at", cacheBreak.firstDivergentSection.display),
+				...said("Expected cold", cacheBreak.expectedColdReasons.map(words).join(", ")),
+			]
+		: [];
+
+/** One entry's title, tone and displays; a call names its cache break when the cache report lists one. */
+function describe(entry: TimelineEntry, breaks: ReadonlyMap<string, CacheBreak>): Described {
 	switch (entry.kind) {
-		case "call":
+		case "call": {
+			const cacheBreak = breaks.get(entry.attemptId);
 			return {
-				title: `${entry.label} call · ${words(entry.disposition)}${entry.failure ? ` (${words(entry.failure)})` : ""}`,
-				tone: entry.failure || entry.disposition === "settled_no_usage" ? "fail" : "neutral",
+				title: `${entry.label} call · ${words(entry.disposition)}${entry.failure ? ` (${words(entry.failure)})` : ""}${cacheBreak ? " · cache break" : ""}`,
+				tone: entry.failure || entry.disposition === "settled_no_usage" ? "fail" : cacheBreak ? "warn" : "neutral",
 				details: [
 					{ label: "Tokens", ...explainable(entry.tokens) },
 					{ label: "Cost", ...explainable(entry.usd) },
 					{ label: "First token", ...explainable(entry.timing.ttft) },
 					{ label: "Model time", ...explainable(entry.timing.modelTime) },
 					{ label: "Cache", value: words(entry.cacheVerdict), ref: null },
+					...breakDetails(cacheBreak),
 				],
 			};
+		}
 		case "turn":
 			return {
 				title: `Turn ended: ${words(entry.stopReason)}${entry.cause ? ` (${words(entry.cause)})` : ""}`,
@@ -213,10 +228,12 @@ function describe(entry: TimelineEntry): Described {
 }
 
 /**
- * The timeline as rows. A call keys by its attempt; any other entry by its kind and time, numbered when two of a
- * kind share an instant, so a re-read that appends entries keeps every earlier row's key.
+ * The timeline as rows, each call joined to its break in the session's cache report by attempt. A call keys by its
+ * attempt; any other entry by its kind and time, numbered when two of a kind share an instant, so a re-read that
+ * appends entries keeps every earlier row's key.
  */
-export function timelineRows(entries: readonly TimelineEntry[]): TimelineRow[] {
+export function timelineRows(entries: readonly TimelineEntry[], breaks: readonly CacheBreak[] = []): TimelineRow[] {
+	const byAttempt = new Map(breaks.map((cacheBreak) => [cacheBreak.attemptId as string, cacheBreak]));
 	const seen = new Map<string, number>();
 	return entries.map((entry) => {
 		const base = entry.kind === "call" ? entry.attemptId : `${entry.kind}:${entry.at}`;
@@ -226,7 +243,7 @@ export function timelineRows(entries: readonly TimelineEntry[]): TimelineRow[] {
 			key: repeat === 0 ? base : `${base}:${repeat}`,
 			at: entry.at,
 			kind: TIMELINE_KINDS[entry.kind],
-			...describe(entry),
+			...describe(entry, byAttempt),
 			stages: entry.kind === "call" ? stageBars(entry) : [],
 		};
 	});

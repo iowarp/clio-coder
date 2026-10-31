@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { TIMELINE_KINDS, timelineKinds, timelinePage, timelineRows } from "../client/telemetry/timeline-model.js";
+import {
+	type CacheBreak,
+	TIMELINE_KINDS,
+	timelineKinds,
+	timelinePage,
+	timelineRows,
+} from "../client/telemetry/timeline-model.js";
 import type { Quantity, TimelineEntry } from "../contracts/wire.js";
 
 const unknown = { kind: "unknown", reason: "not-observed" } as const;
@@ -109,6 +115,29 @@ test("a timeline row carries the server's words for every figure, and a call's q
 	assert.deepEqual(turn?.details.at(-1), { label: "Retries", value: "2", ref: null });
 	// Two entries of a kind at one instant keep distinct keys.
 	assert.equal(new Set(rows.map((row) => row.key)).size, rows.length);
+});
+
+test("a call the cache report lists as a break names its bill and where its prefix diverged", () => {
+	const cacheBreak = {
+		callId: "call-1",
+		attemptId: "attempt-1",
+		at: "2026-10-30T10:00:03.000Z",
+		verdict: "cold",
+		expectedColdReasons: ["prompt_recompiled"],
+		firstDivergentSection: { fact: { kind: "measured", value: "memory", source: "provider" }, display: "memory" },
+		rePrefilled: quantity("4,000", "session:s#rePrefilled"),
+		uncachedPrefill: quantity("4,000", "session:s#uncachedPrefill"),
+		breakUsd: quantity("$0.0120", "session:s#breakUsd"),
+	} as unknown as CacheBreak;
+	const model = timelineRows(entries, [cacheBreak]).find((row) => row.kind === "Model call");
+	assert.equal(model?.tone, "warn");
+	assert.match(model?.title ?? "", / · cache break$/);
+	assert.deepEqual(model?.details.slice(-4), [
+		{ label: "Re-prefilled", value: "4,000", ref: "session:s#rePrefilled" },
+		{ label: "Break cost", value: "$0.0120", ref: "session:s#breakUsd" },
+		{ label: "Diverged at", value: "memory", ref: null },
+		{ label: "Expected cold", value: "prompt recompiled", ref: null },
+	]);
 });
 
 test("the timeline pages newest first, says how many earlier rows a page left out, and filters by kind", () => {
