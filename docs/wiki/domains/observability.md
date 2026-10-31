@@ -9,7 +9,6 @@ sources:
   - "src/domains/telemetry/cost.ts"
   - "src/domains/telemetry/trace-store.ts"
   - "src/domains/telemetry/worker-progress.ts"
-  - "src/domains/telemetry/out-of-turn-usage.ts"
   - "src/domains/telemetry/evidence-index.ts"
 tests:
   - "tests/contracts/observability-wiring.test.ts"
@@ -55,9 +54,7 @@ Key entry points and their files:
 | `createDispatchTraceMirror` | `trace-store.ts` | Async-enqueued SQLite writer for dispatch events |
 | `TraceStore` / `TraceReader` | `trace-store.ts` | Durable and read-only SQLite access |
 | `createWorkerProgressFold` | `src/domains/telemetry/worker-progress.ts` | Bounded, redacted live-progress projection |
-| `appendOutOfTurnUsageRow` / `readOutOfTurnUsageRows` | `src/domains/telemetry/out-of-turn-usage.ts` | Durable JSONL ledger for side questions, handoffs, prewarming |
 | `summarizeEvidenceIndex` | `src/domains/telemetry/accountability.ts` | Pure aggregation over evidence index rows |
-| `recordBackgroundMemoryStep` | `src/domains/telemetry/background-memory-usage.ts` | Dual-write for background memory steps |
 
 ## The `ObservabilityContract` and snapshot shape
 
@@ -193,7 +190,6 @@ progress events are dropped when the queue is full, and the drop count is report
 
 ## Out-of-turn usage ledger
 
-`out-of-turn-usage.ts` records priced model calls that were billed beside a session rather than
 inside it: `/btw` side questions, `/handoff` extraction rounds, session prewarming, background
 memory steps, and failed compaction rounds. Each row is one JSON line under
 `<stateDir>/usage/out-of-turn.jsonl`.

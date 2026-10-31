@@ -16,8 +16,6 @@ import {
 } from "../../src/domains/extensions/bus-observations.js";
 import type { ExtensionObservationV2 } from "../../src/domains/extensions/public-api-v2.js";
 import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
-import type { OutOfTurnUsageRow } from "../../src/domains/telemetry/out-of-turn-usage.js";
-import { appendOutOfTurnUsageRow, readOutOfTurnUsageRows } from "../../src/domains/telemetry/out-of-turn-usage.js";
 import type { ProjectionReadModel } from "../../src/domains/telemetry/projection.js";
 import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
@@ -117,72 +115,5 @@ describe("evidence build failure", () => {
 		match(text, /proof\s+\S+ failed/u);
 		match(text, /disk full while writing the bundle/u);
 		projection.stop();
-	});
-});
-
-describe("prewarm usage rows", () => {
-	const row = (overrides: Partial<OutOfTurnUsageRow>): OutOfTurnUsageRow => ({
-		label: "prewarm",
-		repoIdentity: "repo-1",
-		timestamp: "2026-09-25T12:00:00.000Z",
-		target: "local",
-		attributedModelId: "model",
-		usage: {
-			input: null,
-			output: null,
-			cacheRead: null,
-			cacheWrite: null,
-			reasoning: null,
-			totalTokens: null,
-			costUsd: null,
-		},
-		...overrides,
-	});
-
-	it("read back a failed or aborted prewarm as that outcome with unknown usage, not a zero-cost success", () => {
-		const stateDir = join(scratch, "prewarm-state");
-		appendOutOfTurnUsageRow(stateDir, row({ callOutcome: "error" }));
-		appendOutOfTurnUsageRow(stateDir, row({ callOutcome: "aborted" }));
-		appendOutOfTurnUsageRow(
-			stateDir,
-			row({
-				callOutcome: "success",
-				usage: {
-					input: 12,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					reasoning: null,
-					totalTokens: 12,
-					costUsd: 0,
-				},
-			}),
-		);
-		// Rows written before prewarm recorded an outcome stay readable as they were.
-		const { callOutcome: _omitted, ...legacy } = row({
-			usage: {
-				input: 3,
-				output: 1,
-				cacheRead: 0,
-				cacheWrite: 0,
-				reasoning: 0,
-				totalTokens: 4,
-				costUsd: 0,
-			},
-		});
-		appendOutOfTurnUsageRow(stateDir, legacy);
-		const read = readOutOfTurnUsageRows(stateDir);
-		deepStrictEqual(read.errors, []);
-		const [failed, aborted, succeeded, old] = read.rows;
-		equal(failed?.callOutcome, "error");
-		equal(failed?.usage.input, null);
-		equal(failed?.usage.costUsd, null);
-		equal(aborted?.callOutcome, "aborted");
-		equal(aborted?.usage.totalTokens, null);
-		equal(succeeded?.callOutcome, "success");
-		equal(succeeded?.usage.input, 12);
-		equal(succeeded?.usage.reasoning, null);
-		equal(old?.callOutcome, undefined);
-		equal(old?.usage.totalTokens, 4);
 	});
 });

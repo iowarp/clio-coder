@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { CallObservation } from "../core/call-failure.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
@@ -128,21 +127,11 @@ import type { RetrySettings } from "../domains/session/retry.js";
 import { classifyRecoveryFailure, isRetryableRecoveryFailure } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
-import type { CostEntryLabel } from "../domains/telemetry/cost.js";
-import { appendOutOfTurnUsageRow, type OutOfTurnUsageRow } from "../domains/telemetry/out-of-turn-usage.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
 import { reduceTurnOutcome } from "../domains/turn-control/index.js";
 import { createEngineAgent } from "../engine/agent.js";
 import { countImageBlocks } from "../engine/image-context.js";
-import { cwdHash } from "../engine/session.js";
-import type {
-	AgentEvent,
-	AgentMessage,
-	AnthropicMessagesCompat,
-	EngineModel,
-	ImageContent,
-	Usage,
-} from "../engine/types.js";
+import type { AgentEvent, AgentMessage, AnthropicMessagesCompat, EngineModel, ImageContent } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
@@ -178,7 +167,7 @@ import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { NoticeSource } from "./notice-source.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
-import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
+import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
 import type { AgentStatusEvent } from "./status-types.js";
 import {
 	parseTriageAnswer,
@@ -650,8 +639,8 @@ export type DraftOutcome =
 export interface HandoffRoundOptions extends SideQuestionOptions {
 	/**
 	 * Run the second and last extraction round, quoting the parser's complaint
-	 * and what the first round returned. Both rounds bill through the same
-	 * out-of-turn usage store (issue #223).
+	 * and what the first round returned. Both rounds are journaled calls under
+	 * the handoff label (issue #223, #434).
 	 */
 	repair?: HandoffRepairInput;
 }
@@ -899,12 +888,6 @@ export interface CreateChatLoopDeps {
 	runHandoffRound?: typeof runHandoffRound;
 	/** The `/draft` candidate round. Injectable for the same reason. */
 	runDraftRound?: typeof runOutOfTurnRound;
-	/**
-	 * Append one priced out-of-turn call to the durable out-of-turn usage store.
-	 * Defaults to the real writer under the state dir. Contracts inject a spy so
-	 * they can assert the row was written without touching a real state dir.
-	 */
-	recordOutOfTurnUsageRow?: (row: OutOfTurnUsageRow) => void;
 	/**
 	 * Return the current session's entries for token estimation. The chat-loop
 	 * calls this on every submit so the auto-compaction threshold sees the
@@ -2001,88 +1984,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			: {};
 	};
 
-	const writeOutOfTurnUsageRow =
-		deps.recordOutOfTurnUsageRow ?? ((row: OutOfTurnUsageRow): void => appendOutOfTurnUsageRow(clioStateDir(), row));
-
-	/** Legacy fallback for rounds without an owned journal; journaled callbacks carry IDs and skip this writer (#434). */
-	const recordOutOfTurnUsage = (
-		runtime: AgentRuntime,
-		usage: SideQuestionResult["usage"],
-		label: CostEntryLabel,
-		origin: ReturnType<SessionContract["current"]> = deps.session?.current() ?? null,
-		observation?: CallObservation,
-	): void =>
-		recordOutOfTurnUsageFor(
-			{
-				targetId: runtime.targetId,
-				wireModelId: runtime.wireModelId,
-				costProvenance: runtime.runtimeResolution.costProvenance,
-			},
-			usage,
-			label,
-			origin,
-			observation,
-		);
-
-	const recordOutOfTurnUsageFor = (
-		runtime: {
-			targetId: string;
-			wireModelId: string;
-			costProvenance: AgentRuntime["runtimeResolution"]["costProvenance"];
-		},
-		usage: SideQuestionResult["usage"],
-		label: CostEntryLabel,
-		origin: ReturnType<SessionContract["current"]> = deps.session?.current() ?? null,
-		observation?: CallObservation,
-	): void => {
-		if (observation?.callId) return;
-		const costProvenance = usage ? runtime.costProvenance : "unknown";
-		if (observation?.failure?.invoked !== false && (deps.session?.current()?.id ?? null) === (origin?.id ?? null))
-			deps.telemetry?.recordTokens(
-				runtime.targetId,
-				runtime.wireModelId,
-				usage?.totalTokens ?? 0,
-				usage?.costUsd ?? 0,
-				{
-					input: usage?.input ?? 0,
-					output: usage?.output ?? 0,
-					cacheRead: usage?.cacheRead ?? 0,
-					cacheWrite: usage?.cacheWrite ?? 0,
-					...(usage?.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage?.cacheWrite1h }),
-					reasoningTokens: usage?.reasoning ?? 0,
-					totalTokens: usage?.totalTokens ?? 0,
-					apiCalls: 1,
-					...(!usage ? { missingTokenCalls: 1 } : {}),
-				},
-				costProvenance,
-				undefined,
-				label,
-			);
-		const meta = origin;
-		writeOutOfTurnUsageRow({
-			label,
-			...(observation ?? { callOutcome: usage === null ? ("error" as const) : ("success" as const) }),
-			sessionId: meta?.id ?? null,
-			// The identity the session ledger is filed under, so `usage report
-			// --repo` selects these rows with the same hash it selects ledgers with.
-			repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
-			timestamp: new Date().toISOString(),
-			target: runtime.targetId,
-			attributedModelId: runtime.wireModelId,
-			usage: {
-				costProvenance,
-				input: usage?.input ?? null,
-				output: usage?.output ?? null,
-				cacheRead: usage?.cacheRead ?? null,
-				cacheWrite: usage?.cacheWrite ?? null,
-				...(usage?.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage?.cacheWrite1h }),
-				reasoning: usage?.reasoning ?? null,
-				totalTokens: usage?.totalTokens ?? null,
-				costUsd: usage?.costUsd ?? null,
-			},
-		});
-	};
-
 	// A submit owns the turn state machine from the moment it starts running,
 	// which is well before `state.streaming` flips: the probe, auto-compaction,
 	// and the prompt compile all happen first. The pre-warm reads this flag, not
@@ -2298,9 +2199,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				sessionToolLimits,
 			);
 		},
-		recordUsage: (runtime, usage: Usage | null, origin) => {
-			recordOutOfTurnUsage(runtime, sideQuestionUsage(usage), "prewarm", origin);
-		},
 		...(deps.runPrewarm ? { runPrewarm: deps.runPrewarm } : {}),
 		...(deps.abortPrewarmOnSubmit === undefined ? {} : { abortRoundOnSubmit: deps.abortPrewarmOnSubmit }),
 		...(deps.registerPrewarmEndpointSlot ? { registerEndpointSlot: deps.registerPrewarmEndpointSlot } : {}),
@@ -2320,15 +2218,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		withEndpointSlot,
 		callJournal: (runtime) => sideCallJournal(runtime, "prewarm", deps.session?.current() ?? null).telemetry,
 		record: (runtime, refresh) => {
-			const origin = deps.session?.current() ?? null;
-			// A journaled refresh carries its call id, so the legacy writer books only unjournaled ones (#434).
-			recordOutOfTurnUsage(
-				runtime,
-				sideQuestionUsage(refresh.message?.usage),
-				"prewarm",
-				origin,
-				refresh.call ? { ...refresh.call, callOutcome: refresh.error === null ? "success" : "error" } : undefined,
-			);
 			try {
 				deps.session?.appendEntry({
 					kind: "custom",
@@ -2481,7 +2370,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			try {
 				result = await draftRound({
 					...sideCallJournal(resolved, "helper", origin),
-					onUsage: (usage, observation) => recordOutOfTurnUsageFor(resolved, usage, "side-question", origin, observation),
 					admitFlow: () => deps.admitRuntimeFlow?.(destination) ?? null,
 					model: resolved.model,
 					messages: [],
@@ -3923,8 +3811,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					sideQuestionRound({
 						...sideCallJournal(prepared.runtime, "btw", prepared.origin),
 						beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, slot, options.signal),
-						onUsage: (usage, observation) =>
-							recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin, observation),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only: the round appends its own message to this copy, so
@@ -3971,8 +3857,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 									draftRound({
 										...sideCallJournal(prepared.runtime, "helper", prepared.origin),
 										beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, slot, options.signal),
-										onUsage: (usage, observation) =>
-											recordOutOfTurnUsage(prepared.runtime, usage, "side-question", prepared.origin, observation),
 										admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 										model: prepared.runtime.agent.state.model,
 										// One snapshot for every candidate, read-only as the side question's is.
@@ -4021,8 +3905,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					handoffRound({
 						...sideCallJournal(prepared.runtime, "handoff", prepared.origin),
 						beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, slot, options.signal),
-						onUsage: (usage, observation) =>
-							recordOutOfTurnUsage(prepared.runtime, usage, "handoff", prepared.origin, observation),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only, exactly as the side-question round treats it.

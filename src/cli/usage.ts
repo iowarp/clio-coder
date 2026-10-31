@@ -34,9 +34,8 @@ import { formatColumns, printError } from "./shared.js";
 const HELP = `clio-coder usage report [--repo <path>] [--days <n>] [--json]
 
 Cross-session usage analyzer (experimental, read-only). Spend comes from the
-telemetry read model: session and run call journals, plus the ledger and
-out-of-turn rows no journal holds and the sealed receipt of a run with no
-journal, whose known totals count with unknown call coverage. Receipts, session
+telemetry read model: session, run and process call journals; without
+--repo, the calls a process made with no session count too. Receipts, session
 ledgers, the journals' safety decisions, the
 evidence index and the memory store supply the other facts and the improvement
 opportunities, every line citing ids and counts. Nothing is written or stored;

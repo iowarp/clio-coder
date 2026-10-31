@@ -15,7 +15,6 @@ import { createProvidersBundle } from "../../src/domains/providers/extension.js"
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import { appendEntry, appendTurn, readCurrentEntries, startSession } from "../../src/domains/session/manager.js";
-import { backgroundMemoryUsageRow } from "../../src/domains/telemetry/background-memory-usage.js";
 import {
 	createBackgroundMemoryModelClient,
 	createBackgroundMemoryRouting,
@@ -161,10 +160,6 @@ for (const ending of ["deadline", "cancelled"] as const) {
 			strictEqual(step.totalTokens, 0);
 			strictEqual(step.costUsd, 0);
 			strictEqual(step.missingTokenCalls, undefined);
-			const row = backgroundMemoryUsageRow(step, { repoIdentity: null });
-			strictEqual(row.callOutcome, "aborted");
-			strictEqual(row.usage.totalTokens, null);
-			strictEqual(row.usage.costUsd, null);
 			strictEqual(f.providers.list()[0]?.health.lastCheckAt, null, "abort is not endpoint-down evidence");
 			const recovered = await route.client.complete({
 				systemPrompt: "fixture",

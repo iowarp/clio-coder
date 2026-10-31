@@ -23,7 +23,6 @@ import {
 	type ProvidersContract,
 } from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
-import type { Usage } from "../engine/types.js";
 import { type PrewarmTrigger, prewarmPromptTokens, runPrewarmRound } from "./prewarm.js";
 import type { TurnContext } from "./turn-context.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
@@ -78,7 +77,6 @@ export interface TurnPrewarmDeps {
 		runtime: AgentRuntime,
 		origin: ReturnType<SessionContract["current"]>,
 	) => { telemetry?: CallJournalOptions };
-	recordUsage: (runtime: AgentRuntime, usage: Usage | null, origin: ReturnType<SessionContract["current"]>) => void;
 	/**
 	 * Claim one in-flight request on the runtime's endpoint for the duration of
 	 * the round, returning the release handle. This is the seam brief 06 (#250)
@@ -293,7 +291,6 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 					maxInputTokens: Math.min(256, target.cache.warm.maxInputTokens ?? 256),
 					canSend,
 				});
-				if (wake.invoked !== false && !wake.callId) deps.recordUsage(runtime, wake.usage, origin);
 				telemetryHub().emit("prewarm.settled", {
 					round: "model-wake",
 					targetId: target.id,
@@ -403,7 +400,6 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				aborted: result.aborted,
 			});
 		}
-		if (result.invoked !== false && !result.callId) deps.recordUsage(runtime, result.usage, origin);
 		telemetryHub().emit("prewarm.settled", {
 			round: "prompt",
 			targetId: runtime.targetId,

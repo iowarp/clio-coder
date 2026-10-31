@@ -21,7 +21,6 @@ function fixture(startup = false) {
 	let busy = false;
 	const probes: string[] = [];
 	let warms = 0;
-	let recorded = 0;
 	const controller = new AbortController();
 	const providers = {
 		list: () => [status],
@@ -47,9 +46,6 @@ function fixture(startup = false) {
 			strictEqual(request.state.thinkingLevel, "off");
 			return { aborted: false, errorMessage: null, usage: null, backend: null, timing: { apiMs: 1, ttftMs: 1 } };
 		},
-		recordWarm: () => {
-			recorded++;
-		},
 	};
 	return {
 		input,
@@ -57,7 +53,7 @@ function fixture(startup = false) {
 		status,
 		probes,
 		controller,
-		counts: () => [warms, recorded],
+		counts: () => warms,
 		busy: () => {
 			busy = true;
 		},
@@ -69,13 +65,13 @@ test("local worker connections warm silently without inference by default, once 
 	f.input.settings.fleet.profiles.duplicate = { ...f.input.settings.fleet.default };
 	await prepareWorkerTargets(f.input);
 	deepStrictEqual(f.probes, ["worker"]);
-	deepStrictEqual(f.counts(), [0, 0]);
+	strictEqual(f.counts(), 0);
 });
 
 test("opted-in resident local worker target gets one bounded round and records its result", async () => {
 	const f = fixture(true);
 	await prepareWorkerTargets(f.input);
-	deepStrictEqual(f.counts(), [1, 1]);
+	strictEqual(f.counts(), 1);
 });
 
 test("cloud, remote-node, cancelled, and foreground work do not start background requests", async () => {
@@ -87,7 +83,7 @@ test("cloud, remote-node, cancelled, and foreground work do not start background
 		if (kind === "busy") f.busy();
 		await prepareWorkerTargets(f.input);
 		deepStrictEqual(f.probes, [], kind);
-		deepStrictEqual(f.counts(), [0, 0], kind);
+		strictEqual(f.counts(), 0, kind);
 	}
 });
 
@@ -95,12 +91,12 @@ test("unsupported deployment and occupied endpoint never admit an inference warm
 	const f = fixture(true);
 	f.input.observe = async () => ({ warm: "unsupported" }) as never;
 	await prepareWorkerTargets(f.input);
-	deepStrictEqual(f.counts(), [0, 0]);
+	strictEqual(f.counts(), 0);
 	const g = fixture(true);
 	const release = registerForegroundStream("http://127.0.0.1:9876");
 	try {
 		await prepareWorkerTargets(g.input);
-		deepStrictEqual(g.counts(), [0, 0]);
+		strictEqual(g.counts(), 0);
 	} finally {
 		release();
 	}
@@ -115,6 +111,6 @@ test("a turn or target change during preparation prevents the optional model cal
 			return { warm: "bounded", endpoint: "http://127.0.0.1:9876" } as never;
 		};
 		await prepareWorkerTargets(f.input);
-		deepStrictEqual(f.counts(), [0, 0], kind);
+		strictEqual(f.counts(), 0, kind);
 	}
 });

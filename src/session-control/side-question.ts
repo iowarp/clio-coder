@@ -146,9 +146,9 @@ function positive(value: unknown): number {
 }
 
 /**
- * Normalize one provider usage object into the shape `/usage` and the
- * out-of-turn usage store take. Shared with the session pre-warm, which is
- * another call billed beside the session rather than inside it.
+ * Normalize one provider usage object into the side round's reported usage.
+ * Shared with the session pre-warm, which is another call billed beside the
+ * session rather than inside it.
  */
 export function sideQuestionUsage(raw: unknown): SideQuestionUsage | null {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;

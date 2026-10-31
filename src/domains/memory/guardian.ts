@@ -50,7 +50,7 @@ import { taskMemoryBankDelta } from "./memory-events.js";
 import { provenRecipes, recipeAlreadyClaimed } from "./recipes.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 import { TaskMemoryBank } from "./task-bank.js";
-import type { TaskMemoryModelClient, TaskMemoryPolicyResult, TaskMemoryStepUsage } from "./task-memory-policy.js";
+import type { TaskMemoryModelClient, TaskMemoryPolicyResult } from "./task-memory-policy.js";
 import { runTaskMemoryPolicy } from "./task-memory-policy.js";
 import type { TaskMemoryGuardianState } from "./task-memory-status.js";
 
@@ -132,7 +132,6 @@ export interface MemoryGuardianDeps {
 		grounded: ReadonlyArray<TaskMemoryEntry>;
 		ungrounded: ReadonlyArray<TaskMemoryEntry>;
 	}): Promise<HistoryFiling | undefined> | HistoryFiling | undefined;
-	captureStepUsage?: () => (usage: TaskMemoryStepUsage, isCurrent: boolean) => void;
 	telemetry?: TaskMemoryTelemetrySink;
 	onStateChange(state: MemoryGuardianState): void;
 	/** Session and workspace the history source belongs to; a change retires in-flight history work. */
@@ -358,14 +357,12 @@ export function createMemoryGuardian(deps: MemoryGuardianDeps): MemoryGuardian {
 		if (client === null) return "unavailable";
 		if (deps.client.backgroundEndpointBusy()) return "yielded";
 		const live = deps.settings();
-		const usageSink = deps.captureStepUsage?.();
 		const bank = new TaskMemoryBank();
 		const run = (selected: TaskMemoryModelClient): Promise<TaskMemoryPolicyResult> => {
 			const started = process.hrtime.bigint();
 			return runTaskMemoryPolicy(bank, selected, {
 				isCurrent,
 				signal: controller.signal,
-				onStepUsage: (usage) => usageSink?.(usage, isCurrent()),
 				task: "Review an earlier session in this repository for lessons a future session needs.",
 				trajectory: [],
 				workspaceRoot: slice.root,

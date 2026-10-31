@@ -297,8 +297,6 @@ export interface MemoryInterventionDeps {
 	 * routes it to the cost ledger; the middleware never prices anything.
 	 */
 	onStepUsage?: (usage: TaskMemoryStepUsage) => void;
-	/** Capture immutable accounting ownership at launch, before awaiting inference. */
-	captureStepUsage?: () => (usage: TaskMemoryStepUsage, isCurrent: boolean) => void;
 	/**
 	 * Bank entries an llm-tier reminder cited, once the host reported the
 	 * reminder inside an admitted request. The owner proposes them into the
@@ -1238,11 +1236,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			effects: NO_EFFECTS,
 		});
 		const live = settings();
-		const stepGeneration = generation;
 		// A detached answer keeps the turn that launched it, even if the foreground advances (#434).
 		const launchContext = stepContext;
 		const isCurrent = captureContentGuard();
-		const isUsageCurrent = () => !disposed && stepGeneration === generation;
 		// The workspace and the failure episodes this step is reasoning about are
 		// captured with its authority: paths are checked against the session's
 		// workspace, never the process directory, and a correction is bound to
@@ -1251,7 +1247,6 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const launchFailures = openFailureEpisodes(
 			new Set(trajectory.filter((step) => step.outcome === "error").map((step) => step.operationFingerprint)),
 		);
-		const usageSink = deps.captureStepUsage?.();
 		if (disposed || !live.enabled) {
 			const result = silent("no_client");
 			lastDecision = result.decision;
@@ -1296,10 +1291,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						return runTaskMemoryPolicy(deps.bank, selected, {
 							isCurrent,
 							signal: generationController.signal,
-							onStepUsage: (usage) => {
-								if (usageSink) usageSink(usage, isUsageCurrent());
-								else deps.onStepUsage?.(usage);
-							},
+							onStepUsage: (usage) => deps.onStepUsage?.(usage),
 							task: input.task?.trim() || currentTask,
 							trajectory: [...trajectory],
 							workspaceRoot: launchRoot,

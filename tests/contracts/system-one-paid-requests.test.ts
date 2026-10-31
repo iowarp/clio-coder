@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
@@ -97,18 +97,12 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 		getCeilingUsd: () => 1,
 		currentSession: () => "session-1",
 		repoIdentity: () => "repo",
-		stateDir,
 	});
-	const rows = (): unknown[] => {
-		const file = join(stateDir, "usage", "out-of-turn.jsonl");
-		return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
-	};
 	return {
 		admit,
 		charges,
 		neverSent: () => neverSent,
 		admitted: () => admitted,
-		rows,
 		async calls() {
 			await journals.flush();
 			return (await readCallJournal(telemetrySessionDirectory(stateDir, "session-1"))).records
@@ -171,7 +165,7 @@ const urgent = { urgent: yesNo("Urgent?", "it is", "it is not") };
 
 describe("System One paid requests: admission and accounting", () => {
 	it("journals measured zero, missing usage, duplicate callbacks and admission cancellation separately", async () => {
-		const { admit, calls, charges, neverSent, rows } = ledger(paidTarget("llamacpp"));
+		const { admit, calls, charges, neverSent } = ledger(paidTarget("llamacpp"));
 		const signal = new AbortController().signal;
 		const zero = await admit({ targetId: "paid", model: "m", signal });
 		zero({ input: 0, output: 0, providerReported: true }, { callOutcome: "success" });
@@ -182,7 +176,6 @@ describe("System One paid requests: admission and accounting", () => {
 		const settled = await calls();
 		strictEqual(settled.length, 3);
 		strictEqual(neverSent(), 1);
-		strictEqual(rows().length, 0, "owned calls do not write duplicate legacy usage rows");
 		const replayed = ledgerUsageCalls([], settled);
 		deepStrictEqual(
 			charges.map((charge) => [charge.tokens, charge.costUsd, charge.provenance]),
@@ -202,7 +195,7 @@ describe("System One paid requests: admission and accounting", () => {
 
 	it("admits each HTTP request, the schema retry included, and charges the usage of a decision that failed", async () => {
 		const target = paidTarget("llamacpp", "http://accounting.test");
-		const { admit, charges, admitted, rows, calls } = ledger(target);
+		const { admit, charges, admitted, calls } = ledger(target);
 		const bodies = fakeFetch(async (body) =>
 			body.response_format !== undefined
 				? json(400, SCHEMA_REJECTION)
@@ -230,7 +223,6 @@ describe("System One paid requests: admission and accounting", () => {
 		strictEqual(unmetered.length, 1);
 		assertUnmetered(unmetered[0]);
 		for (const charge of charges.filter((charge) => charge.provenance !== "unknown")) assertCharged(charge);
-		strictEqual(rows().length, 0, "rejected and answered calls are retained only in the journal");
 		const settled = await calls();
 		strictEqual(settled.length, bodies.length);
 		strictEqual(settled.filter((row) => row.data.disposition === "settled_no_usage").length, 1);
@@ -240,7 +232,7 @@ describe("System One paid requests: admission and accounting", () => {
 
 	it("admits each one-shot attempt, the schema retry included, and charges the answer's usage", async () => {
 		const target = paidTarget("llamacpp", "http://one-shot.test");
-		const { admit, charges, admitted, rows } = ledger(target);
+		const { admit, charges, admitted } = ledger(target);
 		const bodies = fakeFetch(async (body) =>
 			body.response_format !== undefined
 				? json(400, SCHEMA_REJECTION)
@@ -275,7 +267,6 @@ describe("System One paid requests: admission and accounting", () => {
 		strictEqual(charges.length, 2);
 		assertUnmetered(charges[0]);
 		assertCharged(charges[1]);
-		strictEqual(rows().length, 0, "the journal retains both attempts without legacy duplicates");
 	});
 });
 

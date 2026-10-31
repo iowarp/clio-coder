@@ -1,10 +1,5 @@
 import type { TelemetryHub } from "../core/telemetry/hub.js";
-import type { TaskMemoryStepUsage } from "../domains/memory/task-memory-policy.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
-import {
-	type RecordBackgroundMemoryStepInput,
-	recordBackgroundMemoryStep,
-} from "../domains/telemetry/background-memory-usage.js";
 
 /** Saves the bank of a session being parked and hands it back when that session is resumed. */
 export interface TaskMemoryBankPersistence {
@@ -49,16 +44,5 @@ export function bindTaskMemoryLifecycle(
 	return () => {
 		memory.dispose();
 		for (const off of unsubscribe) off();
-	};
-}
-
-/** The durable row keeps launch identity even when the live cost tracker has moved on. */
-export function captureTaskMemoryUsage(
-	input: Omit<RecordBackgroundMemoryStepInput, "usage">,
-): (usage: TaskMemoryStepUsage, isCurrent: boolean) => void {
-	const { telemetry, ...origin } = input;
-	return (usage, isCurrent) => {
-		if (usage.callId) return;
-		recordBackgroundMemoryStep({ ...origin, usage, telemetry: isCurrent ? telemetry : undefined });
 	};
 }

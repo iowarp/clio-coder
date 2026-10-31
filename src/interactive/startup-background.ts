@@ -16,7 +16,6 @@ interface StartupPreparation {
 	providers: ProvidersContract;
 	signal: AbortSignal;
 	isBusy: () => boolean;
-	recordWarm?: (target: string, model: string, result: PrewarmRoundResult, costProvenance: CostProvenance) => void;
 	/** The session journal that owns each warm's call facts, as a turn prewarm's does (#434). */
 	callJournal?: (target: string, runtime: string, costProvenance: CostProvenance) => CallJournalOptions | undefined;
 	/** Test seams; production always uses the normal engine and deployment checks. */
@@ -77,7 +76,6 @@ async function warmWorkerTarget(input: StartupPreparation, status: TargetStatus,
 	} finally {
 		release();
 	}
-	input.recordWarm?.(target.id, modelId, result, costProvenance);
 	telemetryHub().emit("prewarm.settled", {
 		round: "worker",
 		targetId: target.id,

@@ -21,8 +21,8 @@ export interface TelemetrySessionOrigin {
 export interface TelemetrySessionLease {
 	context: TelemetryContext;
 	/**
-	 * Whether the session's writer opened. Without it records under this lease reach no sink, so a side call keeps
-	 * its spend in the out-of-turn store instead of minting a call id no journal holds (#434).
+	 * Whether the session's writer opened. Without it records under this lease reach no sink, so a side call mints
+	 * no call id no journal holds; the writer reports the gap (#434).
 	 */
 	journaled: boolean;
 	/** Cold request preparation, before beginCall enters the enqueue-only lane (#434). */

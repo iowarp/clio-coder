@@ -11,8 +11,7 @@ import {
 } from "../../src/domains/memory/task-memory-policy.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
-import type { OutOfTurnUsageRow } from "../../src/domains/telemetry/out-of-turn-usage.js";
-import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "../../src/entry/task-memory-lifecycle.js";
+import { bindTaskMemoryLifecycle } from "../../src/entry/task-memory-lifecycle.js";
 import {
 	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
 	RESOLVED_DISPATCH_PLAN_ARGUMENT,
@@ -194,15 +193,13 @@ const response: TaskMemoryModelResponse = {
 };
 
 for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as const) {
-	test(`real session ${transition} invalidates before mutation and preserves originating spend`, async () => {
+	test(`real session ${transition} invalidates before mutation`, async () => {
 		const env = await isolateClioEnv("clio-coder-memory-lifecycle-");
 		const bus = createTelemetryHub();
 		const { contract: session } = createSessionBundle({ bus, getContract: () => undefined });
 		const bank = new TaskMemoryBank();
 		const pending = [deferred<TaskMemoryModelResponse>(), deferred<TaskMemoryModelResponse>()] as const;
 		const requests: TaskMemoryModelRequest[] = [];
-		const rows: OutOfTurnUsageRow[] = [];
-		const live: number[] = [];
 		const proposals: Array<{ sessionId: string | undefined; entries: ReadonlyArray<TaskMemoryEntry> }> = [];
 		const reminders: string[] = [];
 		const registration = createMemoryInterventionRegistration({
@@ -213,17 +210,6 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 					return required(pending[requests.length - 1]).promise;
 				},
 			}),
-			captureStepUsage: () =>
-				captureTaskMemoryUsage({
-					stateDir: env.dir,
-					repoIdentity: required(session.current()).cwdHash,
-					appendRow: (_dir, row) => rows.push(row),
-					telemetry: {
-						recordTokens: (_provider, _model, tokens) => {
-							live.push(tokens);
-						},
-					},
-				}),
 			onInjectedEntries: (entries) => proposals.push({ sessionId: session.current()?.id, entries }),
 			onDeferredReminder: (message) => reminders.push(message),
 		});
@@ -257,10 +243,6 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 			assert.deepEqual(reminders, []);
 			assert.equal(proposals.length, 0);
 			assert.deepEqual(registration.recentActivity(), []);
-			assert.equal(rows.length, 1);
-			assert.equal(required(rows[0]).repoIdentity, origin.cwdHash);
-			assert.equal(required(rows[0]).usage.totalTokens, 10);
-			assert.deepEqual(live, [], "old spend must not inflate successor live totals, even after A->B->A");
 			assert.equal(registration.stepInFlight(), true);
 			pending[1].resolve(response);
 			await registration.whenIdle();
@@ -269,8 +251,6 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 			assert.equal(proposals.length, 0, "a produced reminder is not yet delivered");
 			registration.acknowledgeSubmission([`<system-reminder>\n${required(reminders[0])}\n</system-reminder>`]);
 			assert.equal(required(proposals[0]).sessionId, successor);
-			assert.equal(rows.length, 2);
-			assert.deepEqual(live, [10]);
 		} finally {
 			dispose();
 			await session.close();

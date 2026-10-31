@@ -9,13 +9,6 @@ export const TelemetryDomainModule: DomainModule = {
 
 export type { AccountabilitySummary } from "./accountability.js";
 export { summarizeEvidenceIndex } from "./accountability.js";
-export {
-	type BackgroundMemoryStepUsage,
-	type BackgroundMemoryUsageSink,
-	backgroundMemoryUsageRow,
-	type RecordBackgroundMemoryStepInput,
-	recordBackgroundMemoryStep,
-} from "./background-memory-usage.js";
 export { workspaceTelemetryCapture } from "./consent.js";
 export type {
 	TelemetryContract,
@@ -45,14 +38,6 @@ export { EVIDENCE_INDEX_FILE, MAX_EVIDENCE_INDEX_ROWS, readEvidenceIndex } from 
 export { publishGateDecision } from "./gate-publication.js";
 export { TelemetryManifest } from "./manifest.js";
 export { readTaskMemorySpendSummary } from "./memory-spend.js";
-export type { OutOfTurnUsage, OutOfTurnUsageReadResult, OutOfTurnUsageRow } from "./out-of-turn-usage.js";
-export {
-	appendOutOfTurnUsageRow,
-	OUT_OF_TURN_USAGE_DIR,
-	OUT_OF_TURN_USAGE_FILE,
-	outOfTurnUsagePath,
-	readOutOfTurnUsageRows,
-} from "./out-of-turn-usage.js";
 export {
 	isTelemetryJournalFile,
 	TELEMETRY_JOURNAL_FILE,

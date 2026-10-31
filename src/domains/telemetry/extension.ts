@@ -40,7 +40,6 @@ import { callCoverageForRun, createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
 import { createHealthWindows } from "./health-window.js";
 import { storeTelemetryObject } from "./objects.js";
-import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
 import { telemetrySessionDirectory } from "./paths.js";
 import type { ProcessJournal } from "./process-journal.js";
 import { createProcessJournal } from "./process-journal.js";
@@ -562,32 +561,6 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			cost.reset();
 			recordedRuns.clear();
 			if (sessionId) {
-				for (const row of readOutOfTurnUsageRows(clioStateDir()).rows) {
-					if (row.sessionId !== sessionId) continue;
-					// #430: a never-sent call is evidence, not spend. The live path never
-					// recorded it, so a resumed session must not count it as a call either.
-					if (row.failure?.invoked === false) continue;
-					cost.accumulate(
-						row.target,
-						row.attributedModelId,
-						row.usage.totalTokens ?? 0,
-						row.usage.costUsd ?? 0,
-						{
-							input: row.usage.input ?? 0,
-							output: row.usage.output ?? 0,
-							cacheRead: row.usage.cacheRead ?? 0,
-							cacheWrite: row.usage.cacheWrite ?? 0,
-							...(row.usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: row.usage.cacheWrite1h ?? 0 }),
-							reasoningTokens: row.usage.reasoning ?? 0,
-							missingTokenCalls: row.usage.totalTokens === null ? 1 : 0,
-						},
-						row.usage.costProvenance,
-						undefined,
-						row.label,
-						undefined,
-						true,
-					);
-				}
 				const receiptsDir = join(clioStateDir(), "receipts");
 				for (const name of existsSync(receiptsDir) ? readdirSync(receiptsDir) : []) {
 					if (!name.endsWith(".json")) continue;

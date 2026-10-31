@@ -70,7 +70,7 @@ export interface TurnKeepaliveDeps {
 	isCurrentRuntime: (runtime: AgentRuntime) => boolean;
 	/** False when spending `usd` more would reach the session cost ceiling. */
 	canSpend: (usd: number) => boolean;
-	/** Book one sent refresh: usage, out-of-turn row and ledger entry. */
+	/** Book one sent refresh in the session ledger; its call is journaled by its own scope (#434). */
 	record: (runtime: AgentRuntime, refresh: KeepaliveRefresh) => void;
 	/** The session journal that owns a refresh's call facts, as prewarm's does (#434). */
 	callJournal?: (runtime: AgentRuntime) => CallJournalOptions | undefined;

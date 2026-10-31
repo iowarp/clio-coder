@@ -209,8 +209,6 @@ The row reads `re-prefilled not reported` when no call carried a cache observati
 
 A `/btw` side question and a `/handoff` extraction round are real provider calls that append nothing to the session JSONL, by design: a fleet run briefs its workers from the transcript, and a question the operator asked to orient themselves must not become context those workers inherit. The spend is journaled in the session's call journal under the call's label (`btw`, `handoff`, `prewarm`, `memory`, `system-one`, `safety-judge` or `compaction`). A call that carries no journal call id, because its journal writer failed to open or no session was current, goes to `<stateDir>/usage/out-of-turn.jsonl` instead, one JSON line per priced call.
 
-The out-of-turn store is append-only NDJSON with no automatic row-count retention. [out-of-turn-usage.ts](../../src/domains/telemetry/out-of-turn-usage.ts) opens in append mode and writes one line with `writeSync`; required failed-compaction writes also verify the byte count and `fsync`. Reads report and skip malformed lines.
-
 A row has the following schema:
 
 ```json

@@ -32,7 +32,6 @@ function fixture() {
 		started = resolve;
 	});
 	let reservations = 0;
-	let recorded = 0;
 	let visible = 0;
 	const warm = createTurnPrewarm({
 		state: createTurnState("off"),
@@ -65,9 +64,6 @@ function fixture() {
 			administration: "unsupported",
 			reason: "fixture",
 		}),
-		recordUsage: () => {
-			recorded += 1;
-		},
 		registerEndpointSlot: () => {
 			reservations += 1;
 			return () => {
@@ -80,7 +76,7 @@ function fixture() {
 				started();
 			}),
 	});
-	return { warm, rounds, roundStarted, counts: () => ({ reservations, recorded, visible }) };
+	return { warm, rounds, roundStarted, counts: () => ({ reservations, visible }) };
 }
 
 const completed: PrewarmRoundResult = {
@@ -109,7 +105,7 @@ test("detached warming retains ownership and collapses repeated triggers to one 
 		await delay(10);
 		strictEqual(f.rounds.length, 1, "cooldown also bounds repeated work after the detached round");
 		deepStrictEqual(await f.warm.settled(), { ran: false, reason: "cooldown" });
-		deepStrictEqual(f.counts(), { reservations: 0, recorded: 1, visible: 0 });
+		deepStrictEqual(f.counts(), { reservations: 0, visible: 0 });
 	} finally {
 		f.warm.dispose();
 	}
@@ -127,7 +123,7 @@ test("shutdown aborts detached work and forbids later schedules without releasin
 	f.rounds[0]?.finish({ ...completed, aborted: true });
 	await f.warm.settled();
 	strictEqual(f.rounds.length, 1);
-	deepStrictEqual(f.counts(), { reservations: 0, recorded: 1, visible: 0 });
+	deepStrictEqual(f.counts(), { reservations: 0, visible: 0 });
 });
 
 test("journaled warming keeps its display result without writing a second usage row", async () => {
@@ -137,7 +133,7 @@ test("journaled warming keeps its display result without writing a second usage 
 		await f.roundStarted;
 		f.rounds[0]?.finish({ ...completed, callId: "call-fixture", attemptId: "attempt-fixture" });
 		await f.warm.settled();
-		deepStrictEqual(f.counts(), { reservations: 0, recorded: 0, visible: 1 });
+		deepStrictEqual(f.counts(), { reservations: 0, visible: 1 });
 	} finally {
 		f.warm.dispose();
 	}

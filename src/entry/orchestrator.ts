@@ -303,10 +303,8 @@ import { createFollowUpTracker, observePermissionOutcomes } from "../domains/sys
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
 import { TURN_SITE } from "../domains/system-one/sites/turn.js";
-import type { BackgroundMemoryUsageSink } from "../domains/telemetry/background-memory-usage.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
-import { recordFailedCompactionCalls } from "../domains/telemetry/compaction-usage.js";
 import { TELEMETRY_FOLD_VERSION } from "../domains/telemetry/folds.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import { TelemetryDomainModule, workspaceTelemetryCapture } from "../domains/telemetry/index.js";
@@ -375,7 +373,7 @@ import { backgroundSlotKey, relevanceStartRefusal } from "./relevance-eligibilit
 import { createReloadClasses } from "./reload-classes.js";
 import { createSafetyJudgeCompletion, createSafetyJudgeHost } from "./safety-judge-host.js";
 import { createDecisionUsageTally, createSystemOneHost, createSystemOneRequestAdmission } from "./system-one-host.js";
-import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-lifecycle.js";
+import { bindTaskMemoryLifecycle } from "./task-memory-lifecycle.js";
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 
@@ -1503,13 +1501,17 @@ function appendSkillActivationRegistryEvent(
 	}
 }
 
+/** What a compaction needs of telemetry: its session's journal, and the live projection of its settled calls. */
+type CompactionTelemetry = Pick<TelemetryContract, "acquireTelemetrySession" | "recordTokens"> &
+	Partial<Pick<TelemetryContract, "recordNeverSentCalls">>;
+
 async function runCompactionFlow(
 	session: SessionContract,
 	settings: ClioSettings,
 	providers: ProvidersContract,
 	instructions?: string,
 	trigger?: CompactionTrigger,
-	telemetry?: BackgroundMemoryUsageSink,
+	telemetry?: CompactionTelemetry,
 	budget?: Pick<
 		CompactInput,
 		| "providerCompaction"
@@ -1539,7 +1541,6 @@ async function runCompactionFlow(
 	if (!meta) {
 		throw new Error("no current session to compact; start one with /new or /resume first");
 	}
-	const stateDir = clioStateDir();
 	const activeLeafTurnId = session.tree(meta.id).leafId ?? undefined;
 	const isOriginCurrent = () =>
 		session.current()?.id === meta.id && (session.tree(meta.id).leafId ?? undefined) === activeLeafTurnId;
@@ -1589,19 +1590,6 @@ async function runCompactionFlow(
 		// same bug. See the taskBoard wiring below for the fix.
 		if (!isOriginCurrent()) throw new Error("compaction session or branch changed before summarization");
 		const calls: CompactionCallObservation[] = [];
-		const preserveCalls = () =>
-			recordFailedCompactionCalls(
-				{
-					stateDir,
-					sessionId: meta.id,
-					repoIdentity: meta.cwdHash || cwdHash(meta.cwd),
-					target: resolved.targetId,
-					model: resolved.wireModelId,
-				},
-				calls,
-				isOriginCurrent() ? telemetry : undefined,
-			);
-
 		// A compaction summary is a full streamed request against its resolved target.
 		// The whole transcript goes to it, so the session's restrictions decide first.
 		const flowViolation = admission?.admitFlow?.({
@@ -1692,27 +1680,17 @@ async function runCompactionFlow(
 				...(resolved.refreshApiKey ? { refreshApiKey: resolved.refreshApiKey } : {}),
 				...(instructions !== undefined ? { instructions } : {}),
 			});
-		} catch (error) {
-			try {
-				preserveCalls();
-			} catch (recordingError) {
-				throw new AggregateError([error, recordingError], "compaction failed and its usage could not be fully recorded");
-			}
-			throw error;
 		} finally {
 			releaseEndpointSlot();
 		}
 		if (budget?.signal?.aborted) {
-			preserveCalls();
 			budget.signal.throwIfAborted();
 		}
 		if (!isOriginCurrent()) {
-			preserveCalls();
 			throw new Error("compaction session or branch changed; summary discarded and originating usage retained");
 		}
 		if (result.messagesSummarized === 0 || result.summary.length === 0) {
 			closure.outcome = "discarded";
-			preserveCalls();
 			if (calls.length > 0)
 				throw new Error("compaction returned no summary; reported usage retained without a checkpoint");
 			// The empty result carries why nothing was summarized, which the
@@ -1721,7 +1699,6 @@ async function runCompactionFlow(
 		}
 		if (estimateTokensAfterCompaction(entries, result, continuityNote.tokens) >= result.tokensBefore) {
 			closure.outcome = "discarded";
-			preserveCalls();
 			return { ...result, noGain: true };
 		}
 		if (result.usage) {
@@ -1795,17 +1772,14 @@ async function runCompactionFlow(
 		if (trigger !== undefined) entry.trigger = trigger;
 		// No asynchronous work may separate private publication from the owned ledger append (#423).
 		if (budget?.signal?.aborted) {
-			preserveCalls();
 			budget.signal.throwIfAborted();
 		}
 		if (!isOriginCurrent()) {
-			preserveCalls();
 			throw new Error("compaction ownership changed before publication");
 		}
 		try {
 			result.publishProviderCheckpoint?.();
 		} catch {
-			preserveCalls();
 			budget?.signal?.throwIfAborted();
 			const { providerCompaction: _native, ...portableBudget } = budget ?? {};
 			return runCompactionFlow(
@@ -1830,7 +1804,6 @@ async function runCompactionFlow(
 			try {
 				if (!compactionCheckpointWasWritten(sessionPaths(meta).current, entry.turnId)) {
 					closure.outcome = "failed";
-					preserveCalls();
 					if (result.providerCheckpoint) pruneProviderCheckpoints(result.providerCheckpoint);
 				} else closure.outcome = "committed";
 			} catch (recordingError) {
@@ -1843,26 +1816,6 @@ async function runCompactionFlow(
 		}
 		session.flushAppends?.();
 		closure.outcome = "committed";
-		if (calls.some((call) => call.outcome !== "success")) {
-			try {
-				recordFailedCompactionCalls(
-					{
-						stateDir,
-						sessionId: meta.id,
-						repoIdentity: meta.cwdHash || cwdHash(meta.cwd),
-						target: resolved.targetId,
-						model: resolved.wireModelId,
-					},
-					calls.filter((call) => call.outcome !== "success"),
-					telemetry,
-				);
-			} catch {
-				// The cut is already durable; a secondary accounting failure must not invalidate it (#423).
-				process.emitWarning("Compaction completed, but failed-attempt usage could not be saved", {
-					code: "CLIO_CODER_COMPACTION_USAGE_PERSISTENCE_FAILED",
-				});
-			}
-		}
 		return result;
 	} finally {
 		if (lease && callIds.size > 0)
@@ -1916,7 +1869,7 @@ export function createProductionAutoCompact(
 	session: SessionContract,
 	getSettings: () => ClioSettings,
 	providers: ProvidersContract,
-	telemetry?: BackgroundMemoryUsageSink,
+	telemetry?: CompactionTelemetry,
 	summarize?: CompactInput["summarize"],
 	admission?: {
 		scheduling?: SchedulingContract;
@@ -2746,15 +2699,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			costProvenance: resolveEffectivePricing(target, runtime, modelId).provenance,
 		};
 	};
-	const captureBackgroundMemoryUsage = () => {
-		const meta = session?.current() ?? null;
-		return captureTaskMemoryUsage({
-			stateDir: clioStateDir(),
-			sessionId: meta?.id ?? null,
-			repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
-			...(telemetry === undefined ? {} : { telemetry }),
-		});
-	};
 	// Lesson gate decisions reach the operator through the transcript notice
 	// path once the chat loop has bound it; before that, a diagnostic line.
 	const memoryNotice = (line: string): void => {
@@ -2845,7 +2789,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			backgroundSessionSpendUsd,
 			backgroundCallJournal,
 		),
-		captureStepUsage: captureBackgroundMemoryUsage,
 	});
 	middleware.registerHook(memoryIntervention);
 	const memoryRouteAvailable = (): boolean => {
@@ -2879,7 +2822,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			return { maxTokens: memory.maxOutputTokens, timeoutMs: memory.timeoutMs };
 		},
 		workspaceRoot: memoryWorkspaceRoot,
-		captureStepUsage: captureBackgroundMemoryUsage,
 		telemetry: historyReviews.telemetry,
 		onStateChange: publishGuardianState,
 	});
@@ -3008,7 +2950,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			backgroundSessionSpendUsd,
 			backgroundCallJournal,
 		),
-		captureStepUsage: captureBackgroundMemoryUsage,
 	});
 	const guardedMemory = memoryGuardian;
 	const unsubscribeMemoryLoop = bus.subscribe("safety.loop_blocked", () => memoryIntervention.signalLoop());
@@ -3794,7 +3735,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const meta = session?.current();
 			return meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null;
 		},
-		stateDir: clioStateDir(),
 	};
 	const admitSystemOneRequest = createSystemOneRequestAdmission(systemOneAdmissionDeps);
 	const safetyJudgeOneShot = createSystemOneOneShot(

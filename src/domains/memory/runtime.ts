@@ -88,7 +88,6 @@ export interface MemoryRuntimeInfrastructure {
 		getModelMaxTokens(max: number): number;
 		backgroundEndpointBusy(): boolean;
 	};
-	captureStepUsage?: () => (usage: TaskMemoryStepUsage, isCurrent: boolean) => void;
 	/** The current session and its workspace, for lesson provenance; a read-only query. */
 	currentSession?(): { id: string; cwd: string } | null;
 	/** Where lesson gate decisions reach the operator. */
@@ -660,16 +659,9 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			this.#enabled &&
 			!!this.#infrastructure?.settings().observations.enabled &&
 			!!this.#infrastructure?.settings().enabled;
-		const usageSink = infra.captureStepUsage?.();
 		let usage: TaskMemoryStepUsage | null = null;
-		let recorded = false;
-		let lateRecorded = false;
 		const recordUsage = (next: TaskMemoryStepUsage) => {
 			usage = next;
-			if (recorded && !lateRecorded) {
-				lateRecorded = true;
-				usageSink?.(next, false);
-			}
 		};
 		const started = performance.now();
 		const timeout = setTimeout(() => controller.abort(new Error("observation deadline")), settings.timeoutMs);
@@ -695,15 +687,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				signal: controller.signal,
 				onUsage: recordUsage,
 			});
-			void completion.then(
-				(late) => {
-					if (recorded && late.usage && !lateRecorded) {
-						lateRecorded = true;
-						usageSink?.(late.usage, false);
-					}
-				},
-				() => {},
-			);
+			// The race below abandons a late completion; its rejection is the step's own and already handled there.
+			void completion.catch(() => {});
 			const aborted = new Promise<never>((_, reject) =>
 				controller.signal.addEventListener(
 					"abort",
@@ -784,12 +769,10 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			return "ran";
 		} finally {
 			clearTimeout(timeout);
-			recorded = true;
 			if (this.#controller === controller) {
 				this.#usage = usage;
 				this.#durationMs = performance.now() - started;
 			}
-			if (usage) usageSink?.(usage, isCurrent());
 			this.#event("preparation-settled", {
 				revision: work.revision,
 				priorObservationRevision: this.#ready(work.source).at(-1)?.digest ?? null,
@@ -1009,7 +992,6 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			!controller.signal.aborted &&
 			guard() &&
 			infra.settings().enabled;
-		const usageSink = infra.captureStepUsage?.();
 		if (orphan) this.#event("lesson-retention-orphan", { sourceSessionId: scope.sessionId, revision: source.revision });
 		publish({
 			...EMPTY_RETENTION,
@@ -1038,7 +1020,6 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				timeoutMs,
 				signal: controller.signal,
 				isCurrent,
-				...(usageSink ? { onUsage: usageSink } : {}),
 				...(judge ? { judge } : {}),
 				onProgress: (next) => {
 					if (isCurrent()) publish(next);

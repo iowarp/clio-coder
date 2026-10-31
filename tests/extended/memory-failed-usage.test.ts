@@ -26,7 +26,6 @@ import { EMPTY_CAPABILITIES, type ProvidersContract } from "../../src/domains/pr
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
 import { openCallJournal, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
-import { readOutOfTurnUsageRows } from "../../src/domains/telemetry/out-of-turn-usage.js";
 import { telemetryProcessDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { completeEngineText } from "../../src/engine/ai.js";
@@ -36,7 +35,7 @@ import {
 	registerEngineFauxProvider,
 } from "../../src/engine/api-registry.js";
 import { createBackgroundMemoryModelClient, createBackgroundMemoryRouting } from "../../src/entry/orchestrator.js";
-import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "../../src/entry/task-memory-lifecycle.js";
+import { bindTaskMemoryLifecycle } from "../../src/entry/task-memory-lifecycle.js";
 import { holdEventLoop } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -190,17 +189,6 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				bank,
 				telemetry: createTaskMemoryTelemetrySink(),
 				getModelClient: routing.getModelClient,
-				captureStepUsage: () =>
-					captureTaskMemoryUsage({
-						stateDir: join(env.dir, "state"),
-						repoIdentity: origin.cwdHash,
-						sessionId: origin.id,
-						telemetry: {
-							recordTokens: (_target, _model, tokens) => {
-								live.push(tokens);
-							},
-						},
-					}),
 				onDeferredReminder: (text) => reminders.push(text),
 				onInjectedEntries: (entries) => proposals.push(entries),
 			});
@@ -223,8 +211,6 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				assert.equal(calls[0]?.ctx.sessionId, origin.id);
 				assert.equal(calls[0]?.data.label, "memory");
 				assert.equal(calls[0]?.data.disposition, ending === "stop" && !switched ? "settled" : "sent_unsettled");
-				const rows = readOutOfTurnUsageRows(join(env.dir, "state")).rows;
-				assert.equal(rows.length, 0, "journaled memory calls do not duplicate legacy rows");
 				if (!switched) {
 					const steps = (await readCallJournal(telemetrySessionDirectory(join(env.dir, "state"), origin.id))).records
 						.map(({ record }) => record)
@@ -488,10 +474,7 @@ test("production runtime fallback calls chat once and keeps failed and fallback 
 	const registration = createMemoryInterventionRegistration({
 		bank,
 		...callbacks,
-		captureStepUsage: () => (row, current) => {
-			assert.equal(current, true);
-			usage.push(row);
-		},
+		onStepUsage: (row) => usage.push(row),
 		telemetry: {
 			record: (row) => {
 				reasons.push(row.reason);
@@ -565,7 +548,7 @@ test("fallback shares the original deadline and cancellation discards its late c
 	});
 	let fallbackSignal: AbortSignal | undefined;
 	const bank = new TaskMemoryBank();
-	const usage: Array<{ row: TaskMemoryStepUsage; current: boolean }> = [];
+	const usage: TaskMemoryStepUsage[] = [];
 	const registration = createMemoryInterventionRegistration({
 		bank,
 		timeoutMs: 50,
@@ -582,9 +565,7 @@ test("fallback shares the original deadline and cancellation discards its late c
 				return response;
 			},
 		}),
-		captureStepUsage: () => (row, current) => {
-			usage.push({ row, current });
-		},
+		onStepUsage: (row) => usage.push(row),
 	});
 	const result = registration.runPromptedStep({ deterministicTrigger: true });
 	await new Promise<void>((resolve) => setImmediate(resolve));
@@ -617,7 +598,7 @@ test("fallback shares the original deadline and cancellation discards its late c
 	};
 	release({ text: TEXT, usage: known });
 	await new Promise<void>((resolve) => setImmediate(resolve));
-	assert.deepEqual(usage, [{ row: known, current: false }]);
+	assert.deepEqual(usage, [known]);
 	assert.equal(bank.snapshot().knowledge.length, 0);
 });
 

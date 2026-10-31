@@ -3,7 +3,6 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { test } from "node:test";
 import { createCostTracker } from "../../src/domains/telemetry/cost.js";
-import { appendOutOfTurnUsageRow, readOutOfTurnUsageRows } from "../../src/domains/telemetry/out-of-turn-usage.js";
 import { completeEngineText, streamSimple } from "../../src/engine/ai.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { sideQuestionUsage } from "../../src/session-control/side-question.js";
@@ -113,18 +112,6 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 			tracker.accumulate("fixture", "fixture", side.totalTokens, side.costUsd, side, "estimated");
 			strictEqual(tracker.sessionTokens().cacheWrite1h, long);
 			strictEqual(tracker.sessionTokens().totalTokens, 10100);
-			appendOutOfTurnUsageRow(env.dir, {
-				label: "prewarm",
-				repoIdentity: "fixture",
-				timestamp: new Date(0).toISOString(),
-				target: "fixture",
-				attributedModelId: "fixture",
-				usage: side,
-			});
-			const archived = readOutOfTurnUsageRows(env.dir);
-			deepStrictEqual(archived.errors, []);
-			strictEqual(archived.rows[0]?.usage.cacheWrite1h, long);
-			strictEqual(archived.rows[0]?.usage.totalTokens, 10100);
 		} finally {
 			server.closeAllConnections();
 			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

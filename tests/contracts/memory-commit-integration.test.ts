@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryModelResponse } from "../../src/domains/memory/task-memory-policy.js";
@@ -41,11 +41,9 @@ test("a pre-commit background completion loses content authority while its same-
 	const pending = new Promise<TaskMemoryModelResponse>((resolve) => {
 		complete = resolve;
 	});
-	const usageCurrent: boolean[] = [];
 	const memory = createMemoryInterventionRegistration({
 		bank,
 		getModelClient: () => ({ complete: () => pending }),
-		captureStepUsage: () => (_usage, current) => usageCurrent.push(current),
 	});
 	memory.bindCommitScope(scope);
 	const step = memory.runPromptedStep({ deterministicTrigger: true });
@@ -71,7 +69,6 @@ test("a pre-commit background completion loses content authority while its same-
 	const result = await step;
 	strictEqual(result.reminder, null);
 	strictEqual(bank.snapshot().knowledge.length, 0);
-	deepStrictEqual(usageCurrent, [true]);
 	memory.dispose();
 });
 

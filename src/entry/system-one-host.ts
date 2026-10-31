@@ -48,7 +48,6 @@ import type { TurnRecipeOption, TurnValue } from "../domains/system-one/sites/tu
 import { recipesInGroup, TURN_RECIPE_SITE, TURN_SITE } from "../domains/system-one/sites/turn.js";
 import { TURN_END_SITE } from "../domains/system-one/sites/turn-end.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
-import { appendOutOfTurnUsageRow } from "../domains/telemetry/out-of-turn-usage.js";
 import type { TokenSplit, TurnInterpretation } from "../domains/turn-control/index.js";
 import type { ToolCallGateSubject } from "../tools/registry.js";
 
@@ -65,7 +64,6 @@ export function createSystemOneRequestAdmission(deps: {
 	getCeilingUsd: () => number;
 	currentSession: () => string | null;
 	repoIdentity: () => string | null;
-	stateDir: string;
 	label?: Extract<CostEntryLabel, "system-one" | "safety-judge">;
 }): LlmRequestAdmission {
 	const label = deps.label ?? "system-one";
@@ -176,101 +174,6 @@ export function createSystemOneRequestAdmission(deps: {
 										}),
 								},
 							},
-			});
-			if (call) return;
-			// Admission alone is not evidence of spending when the deadline wins (#429).
-			if (observation?.failure?.invoked === false) return;
-			const outcome = observation ?? {
-				callOutcome: signal.aborted ? ("aborted" as const) : usage === null ? ("error" as const) : ("success" as const),
-			};
-			if (usage === null) {
-				if (deps.currentSession() === session) {
-					deps.telemetry?.recordTokens(
-						targetId,
-						model,
-						0,
-						0,
-						{ apiCalls: 1, missingTokenCalls: 1 },
-						"unknown",
-						undefined,
-						label,
-					);
-				}
-				appendOutOfTurnUsageRow(deps.stateDir, {
-					label,
-					...outcome,
-					sessionId: session,
-					repoIdentity,
-					timestamp: new Date().toISOString(),
-					target: targetId,
-					attributedModelId: model,
-					usage: {
-						costProvenance: "unknown",
-						input: null,
-						output: null,
-						cacheRead: null,
-						cacheWrite: null,
-						reasoning: null,
-						totalTokens: null,
-						costUsd: null,
-					},
-				});
-				return;
-			}
-			const cacheRead = usage.cacheRead ?? 0;
-			const cacheWrite = usage.cacheWrite ?? 0;
-			const reasoning = usage.reasoning ?? 0;
-			const totalTokens = usage.totalTokens ?? usage.input + usage.output + cacheRead + cacheWrite;
-			const costUsd =
-				usage.costUsd ??
-				calculatePricingCostUsd(pricing.rates, {
-					input: usage.input,
-					output: usage.output,
-					cacheRead,
-					cacheWrite,
-					cacheWrite1h: usage.cacheWrite1h ?? 0,
-				});
-			// Late answers must not charge the session that replaced their origin.
-			if (deps.currentSession() === session) {
-				deps.telemetry?.recordTokens(
-					targetId,
-					model,
-					totalTokens,
-					costUsd,
-					{
-						input: usage.input,
-						output: usage.output,
-						cacheRead,
-						cacheWrite,
-						...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
-						reasoningTokens: reasoning,
-						totalTokens,
-						apiCalls: 1,
-					},
-					pricing.provenance,
-					undefined,
-					label,
-				);
-			}
-			appendOutOfTurnUsageRow(deps.stateDir, {
-				label,
-				...outcome,
-				sessionId: session,
-				repoIdentity,
-				timestamp: new Date().toISOString(),
-				target: targetId,
-				attributedModelId: model,
-				usage: {
-					costProvenance: pricing.provenance,
-					input: usage.input,
-					output: usage.output,
-					cacheRead,
-					cacheWrite,
-					...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
-					reasoning,
-					totalTokens,
-					costUsd: pricing.provenance === "unknown" ? null : costUsd,
-				},
 			});
 		};
 		// The engine runs its request inside the call, so its own stages say whether the request ever left (#429).

@@ -38,7 +38,6 @@ import { recordSettledSideCall } from "../domains/session/usage-record.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { OutcomeRecord, SystemOne } from "../domains/system-one/index.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
-import { appendOutOfTurnUsageRow } from "../domains/telemetry/out-of-turn-usage.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
 import { createAgentProgress } from "../engine/tui.js";
@@ -2132,48 +2131,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 										recordSettledSideCall(deps.telemetry, facts);
 								},
 							};
-						},
-						recordWarm: (target, model, result, costProvenance) => {
-							// A journaled warm is booked by its settlement; only an unowned one uses the legacy store (#434).
-							if (result.invoked === false || result.callId) return;
-							const usage = result.usage;
-							if ((deps.session?.current()?.id ?? null) === (startupSession?.id ?? null))
-								deps.telemetry.recordTokens(
-									target,
-									model,
-									usage?.totalTokens ?? 0,
-									usage?.cost.total ?? 0,
-									{
-										input: usage?.input ?? 0,
-										output: usage?.output ?? 0,
-										cacheRead: usage?.cacheRead ?? 0,
-										cacheWrite: usage?.cacheWrite ?? 0,
-										apiCalls: 1,
-										...(!usage ? { missingTokenCalls: 1 } : {}),
-									},
-									usage ? costProvenance : "unknown",
-									undefined,
-									"prewarm",
-								);
-							appendOutOfTurnUsageRow(deps.stateDir, {
-								label: "prewarm",
-								sessionId: startupSession?.id ?? null,
-								repoIdentity: startupSession?.cwdHash ?? null,
-								timestamp: new Date().toISOString(),
-								target,
-								attributedModelId: model,
-								callOutcome: result.aborted ? "aborted" : result.errorMessage ? "error" : "success",
-								usage: {
-									costProvenance: usage ? costProvenance : "unknown",
-									input: usage?.input ?? null,
-									output: usage?.output ?? null,
-									cacheRead: usage?.cacheRead ?? null,
-									cacheWrite: usage?.cacheWrite ?? null,
-									reasoning: null,
-									totalTokens: usage?.totalTokens ?? null,
-									costUsd: usage?.cost.total ?? null,
-								},
-							});
 						},
 					}),
 				)
