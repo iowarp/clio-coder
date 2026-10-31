@@ -80,7 +80,7 @@ Every Clio Coder extension is namespaced under `agentCapabilities._meta`, so a s
 | `clio-coder/telemetry` | `{version: 1, methods: {session, calls, cost, cache, timeline, run, runs, quota, health, whyStopped, explain}, update: "_clio-coder/telemetry/update"}` | a telemetry read model is wired |
 | `clio-coder/workspace` | `{version: 1, update: "session_info_update"}` | workspace facts are wired |
 | `clio-coder/artifacts` | `{version: 1, list, read, categories, perCategory: 200}` | `/view` artifacts are wired |
-| `clio-coder/fleet` | `{version: 1, preview, run, receiptFacts: true, resume: true}` | fleet control is wired |
+| `clio-coder/fleet` | `{version: 1, preview, run, runResultFacts: true, resume: true}` | fleet control is wired |
 | `clio-coder/extensions` | `{version: 1, list, reload}` | extension control is wired |
 | `clio-coder/library` | `{version: 1, reload}` | library reload is wired |
 | `clio-coder/aside` | `{version: 1, ask, draft, cancel, draftCounts: {min: 1, max: 4, default: 3}}` | side rounds are wired |
@@ -409,8 +409,8 @@ An opted-in client (see [Client opt-ins](#client-opt-ins)) receives `_clio-coder
 | `safety.loop_blocked` | `{toolCallId: null, tool, repeatCount, blocksThisTurn, budget, disposition, interrupted, shape: null}`. `disposition` is `block`, `lockout`, or `stop`. | `false` |
 | `run.enqueued`, `run.started` | `{runId, agentId, taskPreview, node, origin, attempt}`. `taskPreview` is a control-stripped prefix of at most 160 bytes. | `false` |
 | `run.progressed` | `{runId, agentId, progressCount, truncated}`. The frame after the 256th for a run carries `truncated: true`, and later ones are dropped. | `false` |
-| `run.completed` | `{runId, agentId, outcome, outcomeCode, outcomeDetail, durationMs, totalTokens, apiCalls, tokenDisplay}` with `_meta["clio-coder/receipt"]`. `totalTokens` and `apiCalls` are the facts the run settled, null when the run recorded none, and `tokenDisplay` is the canonical wording of `totalTokens`, so an unknown count never reads as a counted one. A replayed frame takes them from the run's settled record. | `true` |
-| `run.failed` | `{runId, agentId, outcome, reason, outcomeCode, outcomeDetail, durationMs}` with `_meta["clio-coder/receipt"]`, plus `totalTokens`, `apiCalls` and `tokenDisplay` as above when the run reported its usage. | `true` |
+| `run.completed` | `{runId, agentId, outcome, outcomeCode, outcomeDetail, durationMs, totalTokens, apiCalls, tokenDisplay}` with `_meta["clio-coder/run-result"]`. `totalTokens` and `apiCalls` are the facts the run settled, null when the run recorded none, and `tokenDisplay` is the canonical wording of `totalTokens`, so an unknown count never reads as a counted one. A replayed frame takes them from the run's settled record. | `true` |
+| `run.failed` | `{runId, agentId, outcome, reason, outcomeCode, outcomeDetail, durationMs}` with `_meta["clio-coder/run-result"]`, plus `totalTokens`, `apiCalls` and `tokenDisplay` as above when the run reported its usage. | `true` |
 | `evidence.assessed` | `{runId, firstPassSuccess, findingCount, tags}`. At most 32 tags of 64 bytes. | `false` |
 | `compaction.ended` | `{trigger, outcome?}` | `false` |
 | `context.activity_changed` | `{kind, phase, status, at, message, operation, current?, total?, detail?, stages?, timing?}` for a context operation (`/compact`, recall, init, refresh, reset and the like) of the bound session and workspace. `message` and `detail` are at most 1024 bytes. `operation` carries its id, kind, origin, reason, start time and, once settled, `outcome`, `facts`, `warnings` and runtime-estimated `tokens`. | `true` once `operation.outcome` is set |
@@ -424,11 +424,11 @@ An opted-in client (see [Client opt-ins](#client-opt-ins)) receives `_clio-coder
 
 #### Run result facts on terminal dispatch frames
 
-A `run.completed` or `run.failed` frame carries `_meta["clio-coder/receipt"]`, the facts of the run's settled record, read through the read model's run DTO over `<state>/telemetry/runs/<runId>/` and projected by the same readers the TUI worker footer uses (`src/domains/dispatch/run-result-facts.ts`). The dispatch domain journals `run.settled` before it publishes the terminal event, so a live read finds it. The shape is:
+A `run.completed` or `run.failed` frame carries `_meta["clio-coder/run-result"]`, the facts of the run's settled record, read through the read model's run DTO over `<state>/telemetry/runs/<runId>/` and projected by the same readers the TUI worker footer uses (`src/domains/dispatch/run-result-facts.ts`). The dispatch domain journals `run.settled` before it publishes the terminal event, so a live read finds it. The shape is:
 
 | Field | Value |
 | --- | --- |
-| `receiptId` | The run id. |
+| `runId` | The run id. |
 | `outcome` | The settled outcome, or null. |
 | `contract` | Result-contract conformance: `pass`, `fail`, `not-reached`, `unmeasured` (the run had no typed contract), or null when the settled record is silent. |
 | `contractKind` | `debugger-report`, `verifier-report`, `research-report`, `world-knowledge-report`, `scout-report`, or null. |
@@ -438,7 +438,7 @@ A `run.completed` or `run.failed` frame carries `_meta["clio-coder/receipt"]`, t
 | `placement` | `{mode: "current" or "worktree", branch?, changedPaths?}` for an external peer run, otherwise null. |
 | `unavailable` | `true` when the run has not settled. On a live frame every other field is then null. |
 
-A missing or unreadable run scope yields `unavailable: true` and never fails the frame. Whenever a branch replays to the client (`session/load`, `switch_turn`, `fork`, `handoff/commit`), the same frames replay for every dispatch run on the branch, with `_meta["clio-coder/replay"] = {run: true}` beside the `clio-coder/receipt` key. Replay falls back to the run's `runs.json` row when the run never settled. The frame then keeps the row's `outcome` and reports `unavailable: true` when the row carries its own explanation. A run the ledger shows as still open in another process has no terminal frame yet and is skipped. A replayed run whose outcome is `succeeded` replays as `run.completed`, any other outcome as `run.failed`.
+A missing or unreadable run scope yields `unavailable: true` and never fails the frame. Whenever a branch replays to the client (`session/load`, `switch_turn`, `fork`, `handoff/commit`), the same frames replay for every dispatch run on the branch, with `_meta["clio-coder/replay"] = {run: true}` beside the `clio-coder/run-result` key. Replay falls back to the run's `runs.json` row when the run never settled. The frame then keeps the row's `outcome` and reports `unavailable: true` when the row carries its own explanation. A run the ledger shows as still open in another process has no terminal frame yet and is skipped. A replayed run whose outcome is `succeeded` replays as `run.completed`, any other outcome as `run.failed`.
 
 ### Bounds
 
@@ -530,7 +530,7 @@ Per-message `_meta` keys, beyond the capability keys above. The pushed telemetry
 | `clio-coder/agent` | message, thought, notice, and tool-call `session/update` frames | Orchestrator attribution plus delegated agents. |
 | `clio-coder/notice` | `agent_message_chunk` | `{level}` for a transcript notice or replayed compaction summary. |
 | `clio-coder/replay` | replayed updates and events | `{turn}` on history, `{run: true}` on a replayed dispatch frame; absent on live frames. |
-| `clio-coder/receipt` | `run.completed` and `run.failed` events | Run result facts. |
+| `clio-coder/run-result` | `run.completed` and `run.failed` events | Run result facts. |
 | `clio-coder/decision`, `clio-coder/workerAsk`, `clio-coder/dispatchPlan` | `session/request_permission` | Classification, worker provenance, and plan view. |
 | `clio-coder/truncated` | `targets/list` result | `true` only when the byte budget omitted an entry. |
 | `clio-coder/error` | `error.data._meta` | `{version, code, reason?, modelSelection?}`. |
@@ -567,7 +567,7 @@ An approved call is answered with the peer's `allow_once` option only. Clio neve
 
 `toolGovernance` has three values: `clio-coder-policy` (the default), `deny-all`, and `agent-managed`. `agent-managed` hands the decision to the peer. It is an explicit operator opt-in, requires `trustedUnmediated: true` on the entry (honored only in user settings, never project settings), and cannot enforce `--read-only`, so admission refuses that combination before it starts the peer.
 
-As a client, Clio advertises no client capability in `initialize` (`clientCapabilities: {}`) because it serves no `fs/*` or `terminal/*` method. The only request handler is `session/request_permission`, and the only notification handler is `session/update`. Clio sends a single text block per `session/prompt` and `mcpServers: []` on `session/new`. When a delegation names a model, Clio picks it from the peer's first `select` config option in category `model` and sets it with `session/set_config_option`. A thinking level uses the first option in category `thought_level`, or is folded into the model id as `model[level]` when the peer has no such option. A peer without the option cannot take a named model, and the delegation fails before the prompt. If the peer's response reports another current model, the delegation fails. The receipt's `delegation.selectedModelId` records the value Clio selected, or the option's current value when no model was named.
+As a client, Clio advertises no client capability in `initialize` (`clientCapabilities: {}`) because it serves no `fs/*` or `terminal/*` method. The only request handler is `session/request_permission`, and the only notification handler is `session/update`. Clio sends a single text block per `session/prompt` and `mcpServers: []` on `session/new`. When a delegation names a model, Clio picks it from the peer's first `select` config option in category `model` and sets it with `session/set_config_option`. A thinking level uses the first option in category `thought_level`, or is folded into the model id as `model[level]` when the peer has no such option. A peer without the option cannot take a named model, and the delegation fails before the prompt. If the peer's response reports another current model, the delegation fails. The run result's `delegation.selectedModelId` records the value Clio selected, or the option's current value when no model was named.
 
 Limits and timing for an outbound run:
 

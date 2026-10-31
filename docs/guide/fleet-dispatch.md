@@ -1699,7 +1699,7 @@ hard block.
 - Replay: `/resume` replays worker blocks from their sealed run records; the session file's
   `workerRun` entries carry ids, origin, runtime and task without worker prose; the
   replayed answer is bounded from the run record exactly like the live one. A
-  run with no readable record renders `receipt unavailable`.
+  run with no readable record renders `result unavailable`.
 - Internal `context-bootstrap` and `wiki-writer` runs report through the context rail
   and never open a transcript block. Other shadow and internal helper runs open a
   compact `↳` row.
@@ -1826,7 +1826,7 @@ A card has three rows:
 
 1. The state glyph (`●` running, `◌` queued, `!` stale, `✓` done, `⊘` canceled, `✗` failed, `◌` for a run that succeeded without calling a tool), the agent id, the elapsed clock and the task.
 2. The route (`target/model`), the tool-budget meter (`▰▰▱ tools 12/40`, or `tools 12` with no cap), tokens, and for a finished run its cost when something priced it.
-3. For a live run, the tool call in flight, `last: <call>` while it waits on the model, or its phase (`starting`, `thinking`, `writing`, `calling a tool`, `waiting for the model`, `sealing the receipt`). A queued run reads `queued, waiting for a slot`. For a finished run, the run record's verdict: `✓ succeeded`, `◌ ran no tools`, `⊘ canceled` or `✗ <outcome code>`, then `contract pass|fail|not-reached|unmeasured` when the run settled a result-contract fact, then the trust verdict (`trust reviewed|grounded|unverified|unknown`, or the failed axis in words). A seal that is not intact (such as `seal broken` or `seal unchecked`) replaces the trust verdict. A run with no readable run record shows the ledger's own outcome detail or `receipt unavailable`.
+3. For a live run, the tool call in flight, `last: <call>` while it waits on the model, or its phase (`starting`, `thinking`, `writing`, `calling a tool`, `waiting for the model`, `sealing the run record`). A queued run reads `queued, waiting for a slot`. For a finished run, the run record's verdict: `✓ succeeded`, `◌ ran no tools`, `⊘ canceled` or `✗ <outcome code>`, then `contract pass|fail|not-reached|unmeasured` when the run settled a result-contract fact, then the trust verdict (`trust reviewed|grounded|unverified|unknown`, or the failed axis in words). A seal that is not intact (such as `seal broken` or `seal unchecked`) replaces the trust verdict. A run with no readable run record shows the ledger's own outcome detail or `run record unavailable`.
 
 A narrow dock sheds the task first, then the model, then cost and route. The state glyph and the clock always stay. Every worker-adjacent string is redacted and stripped of control bytes where it is drawn.
 

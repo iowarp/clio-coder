@@ -284,7 +284,7 @@ failed or correlated review, or contradictory context record is
 never carries a verdict on the terminal bus event: the event is published
 before the run's sealed record has been read back and verified, so the board
 reads the run's record back and projects that verified status, and shows
-`trust: receipt not read back` until it can.
+`run record not read back` until it can.
 
 ### Mutation-report grounding
 

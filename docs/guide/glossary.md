@@ -75,7 +75,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Types**: `ExecutionPlanTopology` in [execution-plan.ts](../../src/domains/dispatch/execution-plan.ts), `ReservationTopology` in [reservation-store.ts](../../src/domains/dispatch/reservation-store.ts), `DispatchPlanTopology` in [dispatch-plan.ts](../../src/tools/dispatch-plan.ts).
 
 ### 18. Worker Block
-- **Definition**: The attributed transcript segment rendering a worker's streaming execution. It includes a header with origin glyph and route, a rail for worker prose, coalesced tool names, and a one-line receipt footer.
+- **Definition**: The attributed transcript segment rendering a worker's streaming execution. It includes a header with origin glyph and route, a rail for worker prose, coalesced tool names, and a one-line run result footer.
 - **Owning Type**: `WorkerEntryState` in [worker-stream.ts](../../src/session-control/worker-stream.ts).
 
 ### 19. Origin Glyphs (`◇`/`◆`)
