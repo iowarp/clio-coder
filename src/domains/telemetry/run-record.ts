@@ -3,6 +3,8 @@
  * scope files, so the settled facts, the seal verdict and the result object come from one read.
  */
 
+import { realpathSync } from "node:fs";
+import { isAbsolute, relative, sep } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import { readCallJournal, readCallJournalSync } from "./call-journal.js";
@@ -18,10 +20,29 @@ function record(runId: string, read: Parameters<typeof journalSourceFromRead>[0]
 	return runTelemetry(runId, journalSourceFromRead(read, scope.segments.length > 0, runId), {}, scope);
 }
 
-/** The run's DTO with its seal verdict and result object; null when the run has no readable scope directory. */
+/**
+ * Whether a directory resolves beneath the state root. The scope readers refuse a symlinked scope directory or file
+ * but follow its ancestors, so a `telemetry` or `runs` symlink that leaves the root would otherwise serve a foreign
+ * tree as this host's verified runs (#434).
+ */
+export function containedInStateRoot(stateDir: string, directory: string): boolean {
+	try {
+		const rel = relative(realpathSync(stateDir), realpathSync(directory));
+		return rel !== "" && !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`);
+	} catch {
+		// A path that does not resolve holds nothing to read.
+		return false;
+	}
+}
+
+/**
+ * The run's DTO with its seal verdict and result object; null when the run has no readable scope directory beneath the
+ * state root.
+ */
 export function readRunRecord(stateDir: string, runId: string): RunTelemetryV1 | null {
 	assertSafeId(runId, "run");
 	const directory = telemetryRunDirectory(stateDir, runId);
+	if (!containedInStateRoot(stateDir, directory)) return null;
 	let scope: TelemetryScopeFiles;
 	try {
 		scope = readTelemetryScopeFilesSync(directory);
@@ -35,6 +56,7 @@ export function readRunRecord(stateDir: string, runId: string): RunTelemetryV1 |
 export async function readRunRecordAsync(stateDir: string, runId: string): Promise<RunTelemetryV1 | null> {
 	assertSafeId(runId, "run");
 	const directory = telemetryRunDirectory(stateDir, runId);
+	if (!containedInStateRoot(stateDir, directory)) return null;
 	let scope: TelemetryScopeFiles;
 	try {
 		scope = await readTelemetryScopeFiles(directory);

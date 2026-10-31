@@ -9,9 +9,11 @@
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import {
 	type GateDecisionArtifact,
+	gateDecisionsDirectory,
 	readGateDecisionArtifacts,
 	verifyGateDecisionArtifact,
 } from "../dispatch/gate-decisions.js";
+import { containedInStateRoot } from "../telemetry/run-record.js";
 import { compareCodepoints } from "./ordering.js";
 import {
 	adaptGateDecisionReviewStatus,
@@ -140,7 +142,9 @@ export function readRunGateIndex(stateDir: string): (runId: string) => GateDecis
 	const byRun = new Map<string, GateDecisionArtifact[]>();
 	let gates: GateDecisionArtifact[] = [];
 	try {
-		gates = readGateDecisionArtifacts(undefined, stateDir).map((entry) => entry.artifact);
+		// A decision store that resolves outside the state root judges none of this host's runs.
+		if (containedInStateRoot(stateDir, gateDecisionsDirectory(stateDir)))
+			gates = readGateDecisionArtifacts(undefined, stateDir).map((entry) => entry.artifact);
 	} catch {
 		// An unreadable store composes no later review over any run.
 	}

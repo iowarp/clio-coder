@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { Value } from "typebox/value";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
 import type { RunEvidence } from "../../../../../src/domains/evidence/index.js";
@@ -10,7 +9,7 @@ import {
 	summarizeTrustStatus,
 	trustVerdict,
 } from "../../../../../src/domains/evidence/index.js";
-import { telemetryRunsDirectory } from "../../../../../src/domains/telemetry/index.js";
+import { containedInStateRoot, telemetryRunsDirectory } from "../../../../../src/domains/telemetry/index.js";
 import { Id } from "../../../contracts/common.js";
 import { type EvidenceRequest, EvidenceRun } from "../../../contracts/evidence.js";
 import { AppProblem } from "../../services/problem.js";
@@ -63,8 +62,9 @@ export async function readEvidence(input: EvidenceRequest): Promise<unknown> {
 		return {
 			items: page.items.map(({ run, row }) => ({ run: row, verdict: trustVerdict(run.trust) })),
 			nextCursor: page.nextCursor,
-			// An absent run store is a different fact from a present one holding no settled run.
-			present: existsSync(telemetryRunsDirectory(state)),
+			// An absent run store is a different fact from a present one holding no settled run; a store that resolves
+			// outside the state root is not this host's and reads as absent (#434).
+			present: containedInStateRoot(state, telemetryRunsDirectory(state)),
 		};
 	}
 	if (!Value.Check(Id, input.id)) throw new AppProblem("validation", "Invalid evidence identifier.");

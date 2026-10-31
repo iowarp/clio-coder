@@ -9,7 +9,7 @@ import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import type { GateDecisionArtifact } from "../dispatch/gate-decisions.js";
 import { isDecisionRecord } from "../session/entries.js";
 import { telemetryRunsDirectory } from "../telemetry/paths.js";
-import { readRunRecordAsync } from "../telemetry/run-record.js";
+import { containedInStateRoot, readRunRecordAsync } from "../telemetry/run-record.js";
 import { compareCodepoints } from "./ordering.js";
 import type { RunProvenanceView } from "./provenance.js";
 import { readRunGateIndex, readRunTrust } from "./run-trust.js";
@@ -115,6 +115,8 @@ export async function inspectRunEvidence(stateDir: string, runId: string): Promi
 /** Every run scope on this host, newest settlement first; a run that never settled sorts last. */
 export async function listRunEvidence(stateDir: string): Promise<RunEvidence[]> {
 	const directory = telemetryRunsDirectory(stateDir);
+	// A run store that resolves outside the state root is not this host's evidence (#434).
+	if (!containedInStateRoot(stateDir, directory)) return [];
 	let names: string[];
 	try {
 		names = await readdir(directory);
