@@ -1078,6 +1078,15 @@ export const RunFeedAppendedSchema = Type.Object(
 export const RunLinkedSchema = Type.Object({ runId: ExistingId }, closed);
 export const ProcessExitedSchema = Type.Object({ exitCode: Type.Integer() }, closed);
 /**
+ * What the one-time removal of the pre-#434 telemetry stores did on an existing home: regular files and directories
+ * removed, session metas rewritten without usage, entries left because they were not a regular file or directory,
+ * and removals that failed.
+ */
+export const OldTelemetryRemovedSchema = Type.Object(
+	{ files: count, directories: count, rewritten: count, skipped: count, failed: count },
+	closed,
+);
+/**
  * One boot, once its surface answers: the boot timer's phases as offsets from the timer's start, and on the TUI how
  * long the Stage 0 shell could not answer input. The writer header already names the build (#434).
  */

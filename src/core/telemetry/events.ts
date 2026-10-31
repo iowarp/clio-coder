@@ -278,6 +278,11 @@ export const EVENTS = {
 		capture: "systemOneDataset",
 	}),
 	"bus.traced": journal(S.BusTracedSchema, { tier: "research", cc: "structural", capture: "busTrace" }),
+	"old_telemetry.removed": journal(S.OldTelemetryRemovedSchema, {
+		tier: "operational",
+		cc: "content-free",
+		scope: "process",
+	}),
 	"process.booted": journal(S.ProcessBootedSchema, { tier: "operational", cc: "structural", scope: "process" }),
 	"prewarm.decided": journal(S.PrewarmDecidedSchema, { tier: "operational", cc: "structural", scope: "process" }),
 	"prewarm.settled": journal(S.PrewarmSettledSchema, { tier: "operational", cc: "structural", scope: "process" }),
