@@ -1,3 +1,4 @@
+import { telemetryContext } from "../../core/telemetry/context.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import { recordResearchTrace, researchTraceAdmits } from "../../core/telemetry/research-trace.js";
 import type { MemoryObservationRecorded } from "../../core/telemetry/schemas.js";
@@ -10,11 +11,12 @@ export function observationEvent(
 	facts: Record<string, unknown>,
 	sessionId?: string | null,
 ): void {
-	telemetryHub().emit(
-		"memory.observation_recorded",
-		{ event, facts },
-		sessionId ? { sessionId, label: "memory" } : undefined,
-	);
+	const active = telemetryContext();
+	const context =
+		sessionId && active?.sessionId !== sessionId
+			? { sessionId, label: "memory" as const }
+			: active && { ...active, label: "memory" as const };
+	telemetryHub().emit("memory.observation_recorded", { event, facts }, context);
 }
 
 /** Ask before building content that consented research capture refuses (#434). */
