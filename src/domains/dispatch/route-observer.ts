@@ -362,12 +362,24 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 		return indexed.byDigest;
 	};
 	const reconcileHistory = (sources: DurableQualitySources): void => {
-		if (sources.runs.length === 0) return;
 		const byDigest = digestIndex(sources);
 		const gateKey = gateEvidenceKey(sources, serialOf);
 		for (const record of history.all()) {
 			const subject = byDigest.get(record.receiptDigest);
-			if (subject === undefined) continue;
+			if (subject === undefined) {
+				// A missing or damaged run scope cannot keep a formerly verified quality label (#434).
+				reconciled.delete(record.receiptDigest);
+				if (record.qualityLabel !== "unmeasured" || record.completedCostUsd !== null || record.sourceDigests.length > 0)
+					history.upsert({
+						...record,
+						qualityLabel: "unmeasured",
+						completedCostUsd: null,
+						completedPhaseTiming: null,
+						pricedCoverage: "unknown",
+						sourceDigests: [],
+					});
+				continue;
+			}
 			const recordJson = JSON.stringify(record);
 			const previous = reconciled.get(record.receiptDigest);
 			if (
