@@ -1,26 +1,20 @@
+import type { QuotaStateV1 } from "../core/telemetry/dto.js";
+import { factKnownValue } from "../core/telemetry/known.js";
 import type { QuotaSeverity } from "../domains/quota/presentation.js";
-import {
-	foldDuplicateAccounts,
-	formatPct,
-	primaryWindow,
-	severityForPct,
-	windowAtWarning,
-	windowSeverity,
-} from "../domains/quota/presentation.js";
-import type { UsageSnapshot } from "../domains/quota/types.js";
+import { severityForPct } from "../domains/quota/presentation.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import { wrapTextWithAnsi } from "../engine/tui.js";
 import { type DispatchBoardRow, dispatchStatusPresentation, dispatchUsageText } from "./dispatch-board.js";
-import { formatFooterTokens } from "./footer-panel.js";
 import type { ClioToken } from "./theme/index.js";
-import { clioTheme, formatCompactMs, GLYPH } from "./theme/index.js";
+import { clioTheme, GLYPH } from "./theme/index.js";
 
+export type QuotaProviders = Readonly<QuotaStateV1["providers"]>;
 const clean = (text: string) => sanitizeCallTargetText(redactSecretString(text));
 const tone = (severity: QuotaSeverity): ClioToken =>
 	severity === "critical" ? "error" : severity === "normal" ? "counter" : "warning";
 
-/** Filled cells always mean consumed usage, on every surface. */
+/** Filled cells mean consumed account usage; text is always the read model's display (#434). */
 export function quotaMeter(usedPct: number, cells: number, severity: QuotaSeverity = severityForPct(usedPct)): string {
 	const count = Math.max(1, Math.floor(cells));
 	const used = Math.max(0, Math.min(100, Number.isFinite(usedPct) ? usedPct : 0));
@@ -31,7 +25,6 @@ export function quotaMeter(usedPct: number, cells: number, severity: QuotaSeveri
 		theme.fg("meterFree", GLYPH.meterEmpty.repeat(count - filled))
 	);
 }
-
 export function quotaResetLabel(
 	reset: string | null,
 	now = Date.now(),
@@ -58,95 +51,34 @@ export function quotaResetLabel(
 		: `Resets in ${duration} · ${absolute} (${timeZone})`;
 }
 
-/** Account-wide facts only: never infer a worker's share from changing percentages. */
+/** The latest journaled account readings; missing readings remain unavailable (#434). */
 export function renderQuotaAccounts(
-	snapshots: ReadonlyArray<UsageSnapshot>,
+	providers: QuotaProviders,
 	width: number,
 	options: { compact?: boolean; now?: number; timeZone?: string } = {},
 ): string[] {
 	const theme = clioTheme();
-	const now = options.now ?? Date.now();
-	const accounts = foldDuplicateAccounts(snapshots).filter((account) => account.status !== "no_credentials");
-	if (!accounts.length) return [theme.fg("annotation", "Subscriptions · loading")];
+	if (!providers.length) return [theme.fg("annotation", "Subscriptions · no journaled quota readings")];
 	const out: string[] = [];
-	for (const account of accounts) {
-		const title = clean(`${account.displayName}${account.plan ? ` (${account.plan})` : ""}`);
-		const age =
-			account.fetchedAt === null ? null : Math.max(0, Math.floor((now - Date.parse(account.fetchedAt)) / 60_000));
-		const freshness = account.stale
-			? "STALE · last good reading"
-			: age === null || !Number.isFinite(age)
-				? ""
-				: age === 0
-					? "updated just now"
-					: `updated ${age}m ago`;
-		if (options.compact) {
-			const window = primaryWindow(account);
-			const ordered =
-				window && windowAtWarning(window)
-					? [window, ...account.windows.filter((item) => item !== window)]
-					: account.windows;
-			const windows = ordered
-				.map(
-					(item) =>
-						`${item.scope && item.scope !== item.label ? `${item.scope} ` : ""}${item.label} ${formatPct(item.usedPct)} used`,
-				)
-				.join(" · ");
-			const detail =
-				account.status !== "ok"
-					? (account.message ?? account.status)
-					: account.providerId === "local"
-						? "$0.00 · no subscription window consumed"
-						: windows || account.credits?.display || "no windows reported";
-			const meter = window && width >= 65 ? `${quotaMeter(window.usedPct, 8, windowSeverity(window))} ` : "";
-			out.push(
-				truncateToWidth(
-					`${meter}${theme.fg(account.status !== "ok" || account.stale ? "warning" : "body", `${account.stale ? "STALE · " : ""}${title}`)}  ${clean(detail)}`,
-					width,
-					GLYPH.ellipsis,
-					true,
-				),
-			);
-			continue;
+	for (const account of providers) {
+		const title = clean(`${account.stale ? "STALE · " : ""}${account.provider}`);
+		if (!options.compact) out.push(theme.style("sectionHeading", title, { bold: true }));
+		for (const window of [...account.windows].sort(
+			(a, b) => factKnownValue(b.usedPct.fact) - factKnownValue(a.usedPct.fact),
+		)) {
+			const label = clean(`${window.label ?? window.key} ${window.usedPct.display} used`);
+			const meter = quotaMeter(factKnownValue(window.usedPct.fact), options.compact ? 8 : Math.min(48, width));
+			out.push(...wrapTextWithAnsi(`${meter} ${options.compact ? `${title} · ` : ""}${label}`, Math.max(1, width)));
+			if (!options.compact)
+				out.push(theme.fg("annotation", quotaResetLabel(window.resetsAt, options.now, options.timeZone)));
 		}
-		if (out.length) out.push("");
-		out.push(theme.style("sectionHeading", title, { bold: true }));
-		if (freshness) out.push(theme.fg(account.stale ? "warning" : "annotation", freshness));
-		if (account.status !== "ok")
-			out.push(theme.fg("warning", clean(`${account.status} · ${account.message ?? "usage unavailable"}`)));
-		let scope: string | undefined;
-		for (const window of account.windows) {
-			if (window.scope && scope !== window.scope) {
-				scope = window.scope;
-				out.push(theme.style("body", clean(scope), { bold: true }));
-			}
-			const label = `${window.key.startsWith("weekly_scoped.") ? "Weekly" : window.label} · ${formatPct(window.usedPct)} used · ${formatPct(Math.max(0, 100 - window.usedPct))} remaining${window.active ? " · active limit" : ""}`;
-			out.push(clean(label));
-			out.push(quotaMeter(window.usedPct, Math.max(1, Math.min(48, width)), windowSeverity(window)));
-			out.push(theme.fg("annotation", quotaResetLabel(window.resetsAt, now, options.timeZone)));
-		}
-		if (account.credits) {
-			out.push(
-				clean(
-					`${account.providerId === "local" ? "Local inference" : "Usage credits"} · ${account.credits.display}${account.credits.usedPct === null ? "" : ` · ${formatPct(account.credits.usedPct)} used`}`,
-				),
-			);
-			if (account.credits.usedPct !== null) out.push(quotaMeter(account.credits.usedPct, Math.min(48, width)));
-		}
-		if (account.status === "ok" && account.message)
-			out.push(theme.fg(account.stale ? "warning" : "annotation", clean(account.message)));
-		if (account.status === "ok" && !account.windows.length && !account.credits && !account.message)
-			out.push(theme.fg("annotation", "Connected · no usage windows reported"));
-		if (account.retryAfterSeconds != null) out.push(theme.fg("warning", `Retry after ${account.retryAfterSeconds}s`));
+		if (!account.windows.length) out.push(theme.fg("annotation", `${title} · no windows reported`));
 	}
-	return out.flatMap((line) => (visibleWidth(line) > width ? wrapTextWithAnsi(line, Math.max(1, width)) : [line]));
+	return out.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
 }
 
-/** The route must share the credential owner read by the quota adapter. */
-function routeAccount(
-	route: Pick<DispatchBoardRow, "runtimeId" | "node">,
-	snapshots: ReadonlyArray<UsageSnapshot>,
-): UsageSnapshot | undefined {
+/** Only a known local credential owner can be associated with a reading (#434). */
+function routeAccount(route: Pick<DispatchBoardRow, "runtimeId" | "node">, providers: QuotaProviders) {
 	if (route.node && route.node !== "local") return undefined;
 	const provider = (
 		{
@@ -156,55 +88,47 @@ function routeAccount(
 			"antigravity-code": "antigravity",
 		} as Record<string, string>
 	)[route.runtimeId];
-	// Clio's openai-codex OAuth storage is independent of Codex CLI auth.json.
-	return snapshots.find((item) => item.providerId === provider);
+	return providers.find((item) => item.provider === provider);
 }
 
-/** A weekly badge only when both the account and model group are known. */
 export function routeWeeklyQuota(
 	route: Pick<DispatchBoardRow, "runtimeId" | "wireModelId" | "node">,
-	snapshots: ReadonlyArray<UsageSnapshot>,
+	providers: QuotaProviders,
 ): { label: string; account: string; severity: QuotaSeverity } | null {
-	const account = routeAccount(route, snapshots);
-	if (account?.status !== "ok") return null;
-	const weekly = account.windows.filter((window) => window.key === "weekly" || window.key.endsWith(".weekly"));
-	const model = route.wireModelId.toLowerCase();
-	const matches =
-		account.providerId === "antigravity"
-			? weekly.filter((window) => {
-					const scope = window.scope?.toLowerCase() ?? "";
-					if (model.includes("gemini")) return scope.includes("gemini");
-					if (/claude|opus|sonnet|haiku/.test(model)) return scope.includes("claude");
-					if (model.includes("gpt")) return scope.includes("gpt");
-					return false;
-				})
-			: weekly.filter((window) => !window.scope);
-	if (matches.length !== 1) return null;
-	const window = matches[0];
+	const account = routeAccount(route, providers);
+	const weekly = account?.windows.filter((window) => {
+		if (window.key !== "weekly" && !window.key.endsWith(".weekly")) return false;
+		if (account.provider !== "antigravity") return true;
+		const label = (window.label ?? "").toLowerCase();
+		const model = route.wireModelId.toLowerCase();
+		return model.includes("gemini")
+			? label.includes("gemini")
+			: /claude|opus|sonnet|haiku/.test(model)
+				? label.includes("claude")
+				: model.includes("gpt")
+					? label.includes("gpt")
+					: false;
+	});
+	if (!account || weekly?.length !== 1) return null;
+	const window = weekly[0];
 	if (!window) return null;
 	return {
-		label: `${account.stale ? "STALE · " : ""}weekly ${formatPct(Math.max(0, Math.min(100, 100 - window.usedPct)))} left`,
-		account: account.displayName,
-		severity: windowSeverity(window),
+		label: `${account.stale ? "STALE · " : ""}weekly ${window.usedPct.display} used`,
+		account: account.provider,
+		severity: severityForPct(factKnownValue(window.usedPct.fact)),
 	};
 }
 
-export function workerQuotaLabel(
-	row: Pick<DispatchBoardRow, "runtimeId" | "node">,
-	snapshots: ReadonlyArray<UsageSnapshot>,
-): string {
-	// Remote workers and generic transports may use different credentials. Only
-	// known local credential owners can be associated with this process's reads.
+export function workerQuotaLabel(row: Pick<DispatchBoardRow, "runtimeId" | "node">, providers: QuotaProviders): string {
 	if (row.node && row.node !== "local") return "Account quota unavailable for remote credentials";
-	const account = routeAccount(row, snapshots);
+	const account = routeAccount(row, providers);
 	if (!account) return "Account quota not linked to this runtime";
-	if (account.status !== "ok") return `${account.displayName} · ${account.message ?? account.status}`;
-	return `Shared ${account.displayName}${account.stale ? " · STALE" : ""} · ${account.windows.map((window) => `${window.scope && window.scope !== window.label ? `${window.scope} ` : ""}${window.label} ${formatPct(Math.max(0, 100 - window.usedPct))} left`).join(" · ") || "no windows reported"}`;
+	return `Shared ${account.provider}${account.stale ? " · STALE" : ""} · ${account.windows.map((window) => `${window.label ?? window.key} ${window.usedPct.display} used`).join(" · ") || "no windows reported"}`;
 }
 
 export function renderWorkerUsage(
 	rows: ReadonlyArray<DispatchBoardRow>,
-	snapshots: ReadonlyArray<UsageSnapshot>,
+	snapshots: QuotaProviders,
 	width: number,
 ): string[] {
 	const theme = clioTheme();
@@ -217,7 +141,7 @@ export function renderWorkerUsage(
 		const status = dispatchStatusPresentation(row.status);
 		out.push(
 			"",
-			`${theme.fg("footerIdentity", clean(row.agentId))} ${theme.fg("divider", "·")} ${theme.fg(status.glyphToken ?? status.token, status.glyph)} ${theme.fg(status.token, status.label)} ${theme.fg("divider", "·")} ${theme.fg("toolMetadata", formatCompactMs(row.elapsedMs))}`,
+			`${theme.fg("footerIdentity", clean(row.agentId))} ${theme.fg("divider", "·")} ${theme.fg(status.glyphToken ?? status.token, status.glyph)} ${theme.fg(status.token, status.label)} ${theme.fg("divider", "·")} ${theme.fg("toolMetadata", row.telemetry?.activity.elapsed.display ?? "not available")}`,
 		);
 		out.push(clean(`${row.targetId} / ${row.wireModelId}${row.node ? ` · ${row.node}` : ""}`));
 		out.push(
@@ -227,10 +151,8 @@ export function renderWorkerUsage(
 					? "Token usage awaiting the run's first journaled call"
 					: "Token usage not available",
 		);
-		if (row.lastContextTokens !== null)
-			out.push(
-				`Context ${formatFooterTokens(row.lastContextTokens)}${row.contextWindow ? ` / ${formatFooterTokens(row.contextWindow)}` : ""}`,
-			);
+		const context = row.telemetry?.activity.contextTokens;
+		if (context) out.push(`Context ${context.display}`);
 		out.push(theme.fg("body", clean(workerQuotaLabel(row, snapshots))));
 		out.push(theme.fg("annotation", clean(`/view dispatch:${row.runId}`)));
 	}

@@ -1126,6 +1126,15 @@ export const RunTelemetrySchema = Type.Object(
 	{
 		...header,
 		kind: Type.Literal("run"),
+		activity: Type.Object(
+			{
+				contextTokens: Type.Union([QuantitySchema, Type.Null()]),
+				elapsed: Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed),
+				outputPerSecond: Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed),
+				toolCalls: Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed),
+			},
+			closed,
+		),
 		row: RunRowSchema,
 		journal: JournalCoverageSchema,
 		counts: callCounts,

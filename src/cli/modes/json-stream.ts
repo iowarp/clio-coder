@@ -1,4 +1,5 @@
 import { messageUsageForAccounting } from "../../core/message-accounting.js";
+import { factKnownValue } from "../../core/telemetry/known.js";
 /**
  * Projection from chat-loop events to the headless `--json` wire stream.
  *
@@ -233,7 +234,7 @@ export function segmentUsageFromView(
 	const read = (metric: FactMetric) => view.attempts(attemptIds, metric).fact;
 	const known = (metric: FactMetric) => {
 		const fact = read(metric);
-		return fact.measured + fact.estimated;
+		return factKnownValue(fact);
 	};
 	const total = read("total");
 	const estimated = total.estimated > 0 || total.coverage.estimated > 0;
@@ -243,7 +244,7 @@ export function segmentUsageFromView(
 		cacheRead: known("cacheRead"),
 		cacheWrite: known("cacheWrite"),
 		reasoning: known("reasoning"),
-		totalTokens: total.measured + total.estimated,
+		totalTokens: factKnownValue(total),
 		costUsd: known("usd"),
 		apiCalls: known("apiCalls"),
 		measured: total.unknownCount === 0 && !estimated && total.coverage.measured > 0,

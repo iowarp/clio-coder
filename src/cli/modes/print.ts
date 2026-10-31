@@ -15,6 +15,7 @@ import {
 import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { workerAgent } from "../../core/telemetry/context.js";
 import type { CallRowV1, Quantity } from "../../core/telemetry/dto.js";
+import { factKnownValue } from "../../core/telemetry/known.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
@@ -142,9 +143,7 @@ export interface HeadlessMainAgentOptions {
 
 /** A quantity's known amount: measured plus estimated parts, nothing for an unknown one. */
 function knownAmount(quantity: Quantity): number {
-	const fact = quantity.fact;
-	if ("unknownCount" in fact) return fact.measured + fact.estimated;
-	return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : 0;
+	return factKnownValue(quantity.fact);
 }
 
 const PROVENANCE_BY_PRICER: Record<CallRowV1["pricedBy"], CostAmount["provenance"]> = {

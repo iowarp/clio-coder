@@ -75,7 +75,6 @@ export interface OverlayGeneralOpenersDeps {
 	tui: TUI;
 	transitions: OverlayTransitions;
 	telemetry: TelemetryContract;
-	getQuotaSnapshots?: () => ReadonlyArray<import("../domains/quota/types.js").UsageSnapshot>;
 	getDispatchRows?: () => ReadonlyArray<import("./dispatch-board.js").DispatchBoardRow>;
 	getSessionId?: () => string | null;
 	getContextLedger: () => ContextLedger;
@@ -246,7 +245,6 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
 			getChanges: () => changes,
 			sessionStartedAt: deps.getSessionMeta()?.createdAt ?? null,
-			...(deps.getQuotaSnapshots ? { getQuotaSnapshots: deps.getQuotaSnapshots } : {}),
 			...(deps.getDispatchRows ? { getDispatchRows: deps.getDispatchRows } : {}),
 			...(deps.readSessionEntries
 				? {

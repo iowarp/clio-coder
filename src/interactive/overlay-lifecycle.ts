@@ -83,7 +83,6 @@ function interopProposalsFor(
 export interface OverlayLifecycleRuntimeDeps {
 	onOverlayClosed?: () => void;
 	app: OverlayLifecycleApplicationDeps;
-	getQuotaSnapshots?: () => ReadonlyArray<import("../domains/quota/types.js").UsageSnapshot>;
 	getDispatchRows?: () => ReadonlyArray<import("./dispatch-board.js").DispatchBoardRow>;
 	tui: import("../engine/tui.js").TUI;
 	footer: import("./footer/dashboard.js").FooterDashboardPanel;
@@ -512,7 +511,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		transitions: overlayTransitions,
 		telemetry: deps.app.telemetry,
 		systemOne: () => deps.app.systemOne,
-		...(deps.getQuotaSnapshots ? { getQuotaSnapshots: deps.getQuotaSnapshots } : {}),
 		...(deps.getDispatchRows ? { getDispatchRows: deps.getDispatchRows } : {}),
 		...(deps.app.getSessionId ? { getSessionId: deps.app.getSessionId } : {}),
 		getContextLedger: () => deps.app.chat.contextLedger(),

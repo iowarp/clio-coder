@@ -26,7 +26,6 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { renderCompactCount } from "../core/telemetry/render.js";
 import { terminalBackground } from "../core/terminal-background.js";
 import { colorDisabled } from "../core/terminal-preferences.js";
 import { resolveRole, type SemanticRole } from "../core/theme-roles.js";
@@ -172,10 +171,6 @@ function callText(row: StreamRow): string {
 	return object.length > 0 ? `${clean(verb)} ${object}` : clean(verb);
 }
 
-function elapsedOf(card: WorkerCard, nowMs: number): number {
-	return (card.endedAtMs ?? nowMs) - card.startedAtMs;
-}
-
 // ---------------------------------------------------------------------------
 // Card rows
 // ---------------------------------------------------------------------------
@@ -201,12 +196,6 @@ function stateWord(state: CardState): string {
 	return state === "succeeded" ? "done" : state;
 }
 
-function meter(calls: number, cap: number | undefined): string {
-	if (cap === undefined) return `tools ${calls}`;
-	const filled = Math.min(3, Math.ceil((calls / cap) * 3));
-	return `${"▰".repeat(filled)}${"▱".repeat(3 - filled)} tools ${calls}/${cap}`;
-}
-
 /**
  * The facts row, shed in a fixed order as the dock narrows: the model is cut,
  * then cost, route and tokens leave; the tool budget stays longest.
@@ -214,8 +203,8 @@ function meter(calls: number, cap: number | undefined): string {
 function factsText(card: WorkerCard, width: number): string {
 	const target = clean(card.target);
 	const model = clean(card.model);
-	const tools = meter(card.toolCalls, card.toolCap);
-	const tokens = card.tokens === undefined ? null : `${renderCompactCount(card.tokens)} tok`;
+	const tools = card.toolCallsDisplay === undefined ? "" : `tools ${card.toolCallsDisplay}`;
+	const tokens = card.tokens === undefined ? null : `${card.tokens} tok`;
 	const cost = card.cost ?? null;
 	const join = (parts: ReadonlyArray<string | null>): string => parts.filter((part) => part !== null).join(SEPARATOR);
 	const tail = [tools, tokens, cost];
@@ -302,7 +291,7 @@ function renderCard(
 	const name = clean(card.agentId);
 	const nameWidth = Math.max(1, Math.min(options.nameWidth, inner - TIMER_WIDTH - 4));
 	const shownName = cut(name, nameWidth);
-	const timer = formatClock(elapsedOf(card, options.nowMs)).padStart(TIMER_WIDTH);
+	const timer = (card.elapsed ?? "not available").padStart(TIMER_WIDTH);
 	const head = `${stateGlyph(paint, card)} ${paint.fg(options.selected ? "selectedOption" : "workerIdentity", shownName, options.selected)}${" ".repeat(Math.max(0, nameWidth - visibleWidth(shownName)))} ${paint.fg("toolMetadata", timer)}`;
 	const taskRoom = inner - visibleWidth(head) - 2;
 	const task = clean(card.task);
@@ -517,10 +506,10 @@ function receiptLines(paint: BoardPaint, model: TakeoverModel, width: number): s
 	const receipt = card.receipt;
 	if (receipt === null) return lines;
 	const spend = [
-		`${receipt.toolCalls ?? card.toolCalls} tool call${(receipt.toolCalls ?? card.toolCalls) === 1 ? "" : "s"}`,
-		...(card.tokens !== undefined ? [`${renderCompactCount(card.tokens)} tokens`] : []),
+		`${card.toolCallsDisplay ?? "unknown"} tool calls`,
+		...(card.tokens !== undefined ? [`${card.tokens} tokens`] : []),
 		...(card.cost !== undefined ? [card.cost] : []),
-		...(receipt.durationMs !== undefined ? [formatClock(receipt.durationMs)] : []),
+		...(card.elapsed !== undefined ? [card.elapsed] : []),
 	].join(SEPARATOR);
 	lines.push(cut(paint.fg("toolMetadata", spend), width));
 	const trust = [
@@ -556,11 +545,11 @@ function receiptLines(paint: BoardPaint, model: TakeoverModel, width: number): s
 	return lines;
 }
 
-function takeoverHeader(paint: BoardPaint, model: TakeoverModel, width: number, nowMs: number): string[] {
+function takeoverHeader(paint: BoardPaint, model: TakeoverModel, width: number, _nowMs: number): string[] {
 	const { card } = model;
 	const back = paint.fg("keyboardHint", "◂ esc");
 	const who = `${stateGlyph(paint, card)} ${paint.fg("workerIdentity", clean(card.agentId), true)}`;
-	const clock = paint.fg("toolMetadata", formatClock(elapsedOf(card, nowMs)));
+	const clock = paint.fg("toolMetadata", card.elapsed ?? "not available");
 	const run = paint.fg("toolMetadata", `run ${card.runId}`);
 	const left = `${back}  ${who} ${paint.fg("toolMetadata", stateWord(card.state))} ${clock}`;
 	const first =

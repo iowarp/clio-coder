@@ -5,7 +5,6 @@ import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
 import type { CapabilityFlags, ProvidersContract } from "../../domains/providers/index.js";
 import { acceptsImageInput } from "../../domains/providers/index.js";
-import type { UsageSnapshot } from "../../domains/quota/types.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
@@ -19,6 +18,7 @@ import type { DispatchBoardRow } from "../dispatch-board.js";
 import type { FooterPanel } from "../footer-panel.js";
 import { dispatchSegment } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
+import type { QuotaProviders } from "../quota-view.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
 import { animationStep, clioTheme, collapseHomePath, formatTargetLabel } from "../theme/index.js";
@@ -56,7 +56,7 @@ export type FooterDashboardMode = "compact" | "expanded";
 export interface FooterDashboardDeps {
 	/** Suppress idle teaching when the welcome already owns it. */
 	getWelcomeVisible?: () => boolean;
-	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
+	getQuotaSnapshots?: () => QuotaProviders;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	getExtensionStatus?: () => ReadonlyArray<string>;
 	/** Owner-labelled, pre-styled extension status facts for the compact second line. */
@@ -108,7 +108,7 @@ export interface FooterDashboardDeps {
 export interface FooterDashboardRenderState {
 	/** Extension status facts that join the compact second line. */
 	extensionFacts?: ReadonlyArray<string>;
-	quota?: ReadonlyArray<UsageSnapshot>;
+	quota?: QuotaProviders;
 	quotaRoute?: Pick<DispatchBoardRow, "runtimeId" | "wireModelId" | "node">;
 	demoHint?: string | null;
 	/** interface.demo. False hides the rotating key hints with the tips; absent reads as on. */

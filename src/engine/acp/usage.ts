@@ -1,11 +1,10 @@
 import type { CostReportV1, Quantity } from "../../core/telemetry/dto.js";
+import { factKnownValue } from "../../core/telemetry/known.js";
 
 /** The known part of a read-model quantity: measured plus estimated, never a number for what went unknown. */
 export function knownPart(quantity: Quantity | null | undefined): number {
 	if (!quantity) return 0;
-	const fact = quantity.fact;
-	if ("kind" in fact) return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : 0;
-	return fact.measured + fact.estimated;
+	return factKnownValue(quantity.fact);
 }
 
 const partial = (quantity: Quantity): boolean =>

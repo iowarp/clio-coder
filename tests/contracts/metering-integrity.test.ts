@@ -435,12 +435,16 @@ describe("canonical monetary presentation (#434)", () => {
 			"const usd = rows.map((row) => row.costUsd).reduce((sum, value) => sum + value, 0);",
 			'const caption = usage.input + usage.output + " tokens";',
 			"const total = inputTokens + outputTokens;",
+			"return quantity.fact.measured + quantity.fact.estimated;",
+			"const value = fact.estimated + fact.measured;",
+			'return fact["measured"] + fact["estimated"];',
+			'return (quantity.fact.measured) + (quantity.fact["estimated"]);',
 		])
 			ok(checkSurfaceTotals("src/interactive/example.ts", source).some((line) => line.startsWith("rule14:")));
 		deepStrictEqual(
 			checkSurfaceTotals(
 				"src/interactive/example.ts",
-				'let input = ""; for (const chunk of chunks) input += chunk; counts[name] = (counts[name] ?? 0) + 1; const label = "in " + usage.input + " / " + usage.output;',
+				'let input = ""; for (const chunk of chunks) input += chunk; counts[name] = (counts[name] ?? 0) + 1; const label = "in " + usage.input + " / " + usage.output; const contributions = fact.coverage.measured + fact.coverage.estimated;',
 			),
 			[],
 		);

@@ -1,7 +1,7 @@
 import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
-import type { UsageSnapshot } from "../domains/quota/types.js";
+import { factKnownValue } from "../core/telemetry/known.js";
 import type { RecallTelemetry, SessionEntry } from "../domains/session/index.js";
 import { foldRecallTelemetry, formatRecallTelemetry, hasRecallTelemetry } from "../domains/session/index.js";
 import type { GitChanges } from "../domains/session/workspace/git-probe.js";
@@ -12,6 +12,7 @@ import { matchesKey, wrapTextWithAnsi } from "../engine/tui.js";
 import { ACTIVITY_SPAN_DAYS, bucketActivity, renderActivityHeatmap } from "./activity-view.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
+import type { QuotaProviders } from "./quota-view.js";
 import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
 import { clioTheme, formatCompactMs, padAnsi, rule } from "./theme/index.js";
 
@@ -41,7 +42,7 @@ function nonZero(quantity: Quantity | null | undefined): quantity is Quantity {
 	const fact = quantity.fact;
 	return "kind" in fact
 		? fact.kind === "unknown" || fact.kind === "estimated" || (fact.kind === "measured" && fact.value > 0)
-		: fact.unknownCount > 0 || fact.measured + fact.estimated > 0;
+		: fact.unknownCount > 0 || factKnownValue(fact) > 0;
 }
 
 /** Some call fed this sum, so its value (a measured zero, a local `$0.00`, or `not measured`) is worth a row. */
@@ -183,7 +184,6 @@ interface UsageData {
 
 export interface OpenUsageOverlayOptions {
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
-	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
 	sessionId?: string | null;
 	/** Session ledger, read on every render so newly settled and branched calls appear. */
 	getSessionEntries?: () => ReadonlyArray<SessionEntry>;
@@ -205,7 +205,7 @@ function renderActivity(
 	days: ReadonlyMap<string, number>,
 	sessions: number,
 	data: UsageData,
-	quota: ReadonlyArray<UsageSnapshot>,
+	quota: QuotaProviders,
 	changes: GitChanges | null,
 	startedAt: string | null,
 	now: number,
@@ -247,9 +247,9 @@ function renderActivity(
 	}
 	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
 	if (window) {
-		const pct = Math.max(0, Math.min(100, window.item.usedPct));
+		const pct = Math.max(0, Math.min(100, factKnownValue(window.item.usedPct.fact)));
 		lines.push(
-			`${label("Plan")}${quotaMeter(pct, Math.min(28, Math.max(8, contentWidth - 30)))} ${pct.toFixed(0)}% used ${theme.fg("annotation", `· ${window.entry.displayName} ${window.item.label}`)}`,
+			`${label("Plan")}${quotaMeter(pct, Math.min(28, Math.max(8, contentWidth - 30)))} ${window.item.usedPct.display} used ${theme.fg("annotation", `· ${window.entry.provider} ${window.item.label}`)}`,
 		);
 	} else lines.push(`${label("Plan")}${theme.fg("annotation", "no subscription window reported")}`);
 	return lines;
@@ -266,7 +266,7 @@ class UsageOverlayBody implements Component {
 
 	constructor(
 		private readonly getData: () => UsageData,
-		private readonly getQuotaSnapshots: () => ReadonlyArray<UsageSnapshot>,
+		private readonly getQuotaSnapshots: () => QuotaProviders,
 		private readonly getDispatchRows: () => ReadonlyArray<DispatchBoardRow>,
 		private readonly requestRender: () => void,
 		private readonly activity: {
@@ -387,7 +387,7 @@ export function openUsageOverlay(
 	const sessions = options?.listSessions?.() ?? [];
 	const body = new UsageOverlayBody(
 		() => ({ view: readModel?.live() ?? null, recall }),
-		options?.getQuotaSnapshots ?? (() => []),
+		() => readModel?.quota().providers ?? [],
 		options?.getDispatchRows ?? (() => []),
 		() => tui.requestRender(),
 		{
@@ -426,7 +426,9 @@ export function openUsageOverlay(
 		tui.requestRender();
 	};
 	const offs = readModel
-		? (["session", "calls", "cost", "cache", "runs"] as const).map((topic) => readModel.subscribe(topic, refresh))
+		? (["session", "calls", "cost", "cache", "runs", "quota"] as const).map((topic) =>
+				readModel.subscribe(topic, refresh),
+			)
 		: [];
 
 	return {

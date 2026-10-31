@@ -1,5 +1,6 @@
 import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
+import { factKnownValue } from "../core/telemetry/known.js";
 import { COST_NOT_MEASURED, renderCompactCount } from "../core/telemetry/render.js";
 import { usageCoverageLabel } from "../domains/session/usage.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
@@ -28,9 +29,7 @@ export interface TurnSpend {
 
 /** The known part of a quantity: a measured or estimated value, or a sum's measured and estimated parts. */
 function known(quantity: Quantity): number {
-	const fact = quantity.fact;
-	if ("kind" in fact) return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : 0;
-	return fact.measured + fact.estimated;
+	return factKnownValue(quantity.fact);
 }
 
 function contributed(quantity: Quantity): boolean {

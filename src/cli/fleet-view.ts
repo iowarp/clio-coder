@@ -37,7 +37,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readSettings } from "../core/config.js";
 import type { RunTelemetryV1 } from "../core/telemetry/dto.js";
-import { renderUsdFact } from "../core/telemetry/render.js";
 import { clioStateDir, resetXdgCache } from "../core/xdg.js";
 import type { ExecutionStepResult } from "../domains/dispatch/execution-scheduler.js";
 import { routeSettledLabel } from "../domains/dispatch/route-history.js";
@@ -52,8 +51,9 @@ import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-bound
 import { formatTrustSummaryLine } from "../domains/evidence/trust-projection.js";
 import { inspectRunTrustStatus } from "../domains/evidence/trust-status.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import { loadRunRecord } from "../domains/session/telemetry-source.js";
+import { loadRunRecord, loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
 import type { SettledRunRecord } from "../domains/telemetry/index.js";
+import { runTelemetry } from "../domains/telemetry/read-model.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui-primitives.js";
 import { fleetInspectionScope, resolveFleetRootId } from "./fleet-project-scope.js";
 
@@ -121,7 +121,7 @@ export interface RunViewModel {
 	node: string;
 	phase: string;
 	startedAt: string;
-	elapsedMs: number;
+	telemetry?: RunTelemetryV1;
 	task: string | undefined;
 	transcript: RunViewTranscriptLine[];
 	/** True when the writer dropped display lines or the reader skipped a head. */
@@ -185,10 +185,6 @@ function modelObservationText(settled: SettledRunRecord["settled"]): string {
 	return reported === null
 		? `${requested} · no provider response recorded`
 		: `${requested} · provider ${sanitizeBounded(reported, 512)}`;
-}
-
-function costText(settled: SettledRunRecord["settled"]): string {
-	return renderUsdFact(settled.pricing.usd, settled.pricing.pricedBy);
 }
 
 /**
@@ -299,18 +295,17 @@ function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}): RunV
 		if (rendered !== null) transcript.push(rendered);
 	}
 	const evidence = evidenceLine(run);
-	const startedMs = Date.parse(run.startedAt);
-	const endedMs = run.endedAt === null ? now() : Date.parse(run.endedAt);
+	const telemetry = runTelemetry(runId, loadRunTelemetrySource(clioStateDir(), runId), { now: new Date(now()) });
 	const task = sanitizeBounded(run.task, TASK_MAX_WIDTH);
 	return {
 		runId: run.id,
+		telemetry,
 		agentId: run.agentId,
 		model: run.wireModelId,
 		target: run.targetId,
 		node: run.node?.id ?? "local",
 		phase: run.outcome ?? run.status,
 		startedAt: run.startedAt,
-		elapsedMs: Number.isFinite(startedMs) && Number.isFinite(endedMs) ? Math.max(0, endedMs - startedMs) : 0,
 		task: task.length > 0 ? task : undefined,
 		transcript,
 		transcriptTruncated: journal.truncated,
@@ -331,14 +326,6 @@ function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}): RunV
 // ---------------------------------------------------------------------------
 // Render
 // ---------------------------------------------------------------------------
-
-function formatElapsed(ms: number): string {
-	const seconds = Math.floor(ms / 1000);
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`;
-	return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`;
-}
 
 function clockOf(iso: string): string {
 	// The transcript is a within-run timeline, so the date carries no
@@ -368,7 +355,7 @@ function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH): stri
 	lines.push(truncatePlain(`run ${model.runId}  ${model.agentId}`, columns));
 	lines.push(
 		truncatePlain(
-			`model ${model.model}  target ${model.target}  node ${model.node}  phase ${model.phase}  elapsed ${formatElapsed(model.elapsedMs)}`,
+			`model ${model.model}  target ${model.target}  node ${model.node}  phase ${model.phase}  elapsed ${model.telemetry?.activity.elapsed.display ?? "not available"}`,
 			columns,
 		),
 	);
@@ -401,7 +388,7 @@ function renderRunView(model: RunViewModel, width: number = DEFAULT_WIDTH): stri
 	if (model.record !== undefined) {
 		const settled = model.record.settled;
 		lines.push(...wrapViewerValue("model     ", modelObservationText(settled), columns));
-		lines.push(truncatePlain(`cost      ${costText(settled)}`, columns));
+		lines.push(truncatePlain(`cost      ${model.telemetry?.row.usd.display ?? "not available"}`, columns));
 		lines.push(truncatePlain(`settled   ${sanitizeBounded(routeSettledLabel(settled), 64)}`, columns));
 	}
 	const outcome =
@@ -491,7 +478,7 @@ export interface FleetRunViewModel {
 	rootId: string;
 	fleet: string;
 	startedAt: string;
-	elapsedMs: number;
+	telemetry?: RunTelemetryV1;
 	/** True while the record carries no end stamp. */
 	running: boolean;
 	resumedFrom: string | null;
@@ -549,13 +536,12 @@ function loadFleetRunViewModel(
 			detail: typeof detail === "string" && detail.length > 0 ? detail : undefined,
 		};
 	});
-	const startedMs = Date.parse(record.startedAt);
-	const endedMs = record.endedAt === null ? now() : Date.parse(record.endedAt);
+	const telemetry = runTelemetry(rootId, loadRunTelemetrySource(clioStateDir(), rootId), { now: new Date(now()) });
 	return {
 		rootId: record.id,
+		telemetry,
 		fleet: record.fleet,
 		startedAt: record.startedAt,
-		elapsedMs: Number.isFinite(startedMs) && Number.isFinite(endedMs) ? Math.max(0, endedMs - startedMs) : 0,
 		running: record.endedAt === null,
 		resumedFrom: record.resumedFrom,
 		plannedSteps: stepIds.length,
@@ -576,7 +562,7 @@ function renderFleetRunView(model: FleetRunViewModel, width: number = DEFAULT_WI
 	const resumed = model.resumedFrom === null ? "" : `  resumed from ${sanitizeBounded(model.resumedFrom, 64)}`;
 	lines.push(
 		truncatePlain(
-			`started ${model.startedAt}  elapsed ${formatElapsed(model.elapsedMs)}  ${model.recordedSteps} of ${model.plannedSteps} steps recorded${model.running ? "  (running)" : ""}${resumed}`,
+			`started ${model.startedAt}  elapsed ${model.telemetry?.activity.elapsed.display ?? "not available"}  ${model.recordedSteps} of ${model.plannedSteps} steps recorded${model.running ? "  (running)" : ""}${resumed}`,
 			columns,
 		),
 	);

@@ -1,4 +1,3 @@
-import type { UsageSnapshot } from "../../domains/quota/types.js";
 /** Expanded footer pages: dense inspection, separate from transcript output style. */
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
@@ -9,6 +8,7 @@ import type { DispatchBoardRow } from "../dispatch-board.js";
 import { dispatchStatusPresentation, dispatchUsageText, renderDispatchActivity } from "../dispatch-board.js";
 import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
+import type { QuotaProviders } from "../quota-view.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
 import { brandMark, clioTheme, formatCompactMs, GLYPH, metricText, padAnsi, rule } from "../theme/index.js";
@@ -24,12 +24,7 @@ export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
 const FOOTER_SPLIT_COLUMNS = 84;
 const clean = (value: string) => sanitizeCallTargetText(redactSecretString(value));
 
-function agentCard(
-	row: DispatchBoardRow,
-	width: number,
-	compact = false,
-	quota: ReadonlyArray<UsageSnapshot> = [],
-): string[] {
+function agentCard(row: DispatchBoardRow, width: number, compact = false, quota: QuotaProviders = []): string[] {
 	const theme = clioTheme();
 	const presentation = dispatchStatusPresentation(row.status, { compact: false });
 	const name = clean(row.agentId).replace(
@@ -39,7 +34,7 @@ function agentCard(
 	const audience = row.agentAudience === "shadow" || row.agentAudience === "internal" ? "internal agent" : "fleet agent";
 	const heading = `${theme.fg(row.agentAudience === "shadow" || row.agentAudience === "internal" ? "shadowDispatchAction" : "dispatchAction", GLYPH.subProcess)} ${theme.fg("footerIdentity", name)}`;
 	const lines = wrapTextWithAnsi(
-		`${heading}  ${theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`)}  ${theme.fg("annotation", `${formatCompactMs(row.elapsedMs)} · ${audience}`)}`,
+		`${heading}  ${theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`)}  ${theme.fg("annotation", `${row.telemetry?.activity.elapsed.display ?? "not available"} · ${audience}`)}`,
 		width,
 	);
 	const field = (label: string, value: string) =>
@@ -53,7 +48,7 @@ function agentCard(
 	const activity = renderDispatchActivity(row, width);
 	lines.push(...(compact ? activity.slice(0, 2) : activity));
 	const usage = dispatchUsageText(row.usage);
-	const context = row.progress?.contextTokens ?? row.lastContextTokens;
+	const context = row.telemetry?.activity.contextTokens;
 	lines.push(
 		...field(
 			"Tokens",
@@ -65,12 +60,8 @@ function agentCard(
 		),
 	);
 	const workload: string[] = [];
-	if (context !== undefined && context !== null && context > 0)
-		workload.push(
-			`context ${formatFooterTokens(context)}${row.contextWindow ? ` / ${formatFooterTokens(row.contextWindow)}` : ""}`,
-		);
-	if (row.progress?.toolCalls !== undefined)
-		workload.push(`${row.progress.toolCalls} tool ${row.progress.toolCalls === 1 ? "call" : "calls"}`);
+	if (context) workload.push(`context ${context.display}`);
+	if (row.telemetry) workload.push(`${row.telemetry.activity.toolCalls.display} tool calls`);
 	if (workload.length) lines.push(...field("Work", workload.join(" · ")));
 	const timing: string[] = [];
 	if (row.ttft !== null) timing.push(`first token ${row.ttft}`);
@@ -165,7 +156,7 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 			const usage = row.usage.kind === "ready" ? ` · ${GLYPH.up} ${tokens.prompt} ${GLYPH.down} ${tokens.output}` : "";
 			const compact = [
 				...wrapTextWithAnsi(
-					`${theme.fg(presentation.token, presentation.glyph)} ${theme.fg("footerIdentity", name)} · ${theme.fg(presentation.token, presentation.label)} · ${theme.fg("annotation", audience)} · ${theme.fg("counter", `${formatCompactMs(row.elapsedMs)}${usage}`)}`,
+					`${theme.fg(presentation.token, presentation.glyph)} ${theme.fg("footerIdentity", name)} · ${theme.fg(presentation.token, presentation.label)} · ${theme.fg("annotation", audience)} · ${theme.fg("counter", `${row.telemetry?.activity.elapsed.display ?? "not available"}${usage}`)}`,
 					width,
 				),
 				...wrapTextWithAnsi(

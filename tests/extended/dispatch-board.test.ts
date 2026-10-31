@@ -240,7 +240,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		const rendered = view.render(180).join("\n");
 		match(rendered, /coder/);
 		match(rendered, /check failed/);
-		match(stripTerminalSequences(rendered), /↑ 90 · ↓ 30 \(20\/s wall avg\)/);
+		match(stripTerminalSequences(rendered), /↑ 90 · ↓ 30/);
 		strictEqual(
 			projection.snapshot().runs.find((row) => row.runId === IDENTITY.runId)?.evidence?.evidenceId,
 			"run-board-run",

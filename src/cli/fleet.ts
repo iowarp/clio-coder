@@ -18,7 +18,6 @@
 import { randomBytes } from "node:crypto";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
-import type { Fact } from "../core/telemetry/fact.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
@@ -67,28 +66,21 @@ import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
-import {
-	type CostProvenance,
-	foregroundStreamUsage,
-	normalizeCostProvenance,
-	ProvidersDomainModule,
-} from "../domains/providers/index.js";
+import { foregroundStreamUsage, ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { budgetRemainingText, budgetSpendText, SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
 import {
-	aggregateCostAmounts,
-	type CostAggregate,
 	renderCostAggregate,
 	renderCostAmount,
 	type TelemetryContract,
 	TelemetryDomainModule,
 } from "../domains/telemetry/index.js";
-import { type RunTokenField, runsTotal } from "../domains/telemetry/read-model.js";
-import { readSettledRun } from "../domains/telemetry/run-record.js";
+import { fleetTotals, runTelemetry } from "../domains/telemetry/read-model.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
 import { createFleetReporter } from "./fleet-reporting.js";
@@ -650,18 +642,6 @@ function rowHeartbeat(row: RunEnvelope): "alive" | "stale" | "dead" | "n/a" {
 	return isProcessAlive(row.pid) ? "alive" : "dead";
 }
 
-function finiteCount(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
-}
-
-/** A running row's input/output split, which the owning process writes to the ledger on each reconciler tick. */
-function rowTokenSplit(row: RunEnvelope): { input: number; output: number } {
-	return { input: finiteCount(row.inputTokenCount), output: finiteCount(row.outputTokenCount) };
-}
-
-const countOrNull = (value: unknown): number | null =>
-	typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
-
 export type FleetAdmissionStatus =
 	| { state: "open" }
 	| {
@@ -676,36 +656,20 @@ function admissionStatus(drain: CapacityDrain | null): FleetAdmissionStatus {
 	return { state: "draining", ...drain };
 }
 
-function statusSnapshot(all = false): {
-	generatedAt: string;
-	admission: FleetAdmissionStatus;
-	running: Array<Record<string, unknown>>;
-	retrying: Array<Record<string, unknown>>;
-	totals: {
-		/** The known part of each token field: a run whose ledger row and receipt hold no count adds nothing here. */
-		inputTokens: number;
-		outputTokens: number;
-		totalTokens: number;
-		/** The bare sum, kept for JSON readers that already parse it. Render `cost`. */
-		costUsd: number;
-		/** Mirrors what `DispatchSnapshot.totals.cost` declares for the in-process surface. */
-		cost: CostAggregate;
-		runtimeSeconds: number;
-		/** How many runs the totals cover, and how many left each token field partial or unknown (#434 §11.3). */
-		coverage: { runs: number; unknownRuns: { input: number; output: number; total: number } };
-		/** Each token field as the read model words it, a lower bound beside its unknown runs. */
-		display: { input: string; output: string; total: string };
-	};
-} {
-	const ledger = openLedger();
+function statusSnapshot(all = false) {
 	const nowMs = Date.now();
 	const scope = fleetInspectionScope(all);
-	const rows = ledger.list().filter(scope.seesRun);
-	const running = rows
-		.filter((row) => row.endedAt === null && (row.status === "running" || row.status === "stale"))
-		.map((row) => {
-			const startedMs = Date.parse(row.startedAt);
-			return {
+	const rows = openLedger().list().filter(scope.seesRun);
+	const records = rows.map((row) => ({
+		row,
+		telemetry: runTelemetry(row.id, loadRunTelemetrySource(clioStateDir(), row.id), { now: new Date(nowMs) }),
+	}));
+	return {
+		generatedAt: new Date(nowMs).toISOString(),
+		admission: admissionStatus(capacityDrain(nowMs)),
+		running: records
+			.filter(({ row }) => row.endedAt === null && (row.status === "running" || row.status === "stale"))
+			.map(({ row, telemetry }) => ({
 				runId: row.id,
 				agentId: row.agentId,
 				budget: row.budget ?? null,
@@ -714,102 +678,14 @@ function statusSnapshot(all = false): {
 				heartbeat: rowHeartbeat(row),
 				lineage: row.lineage ?? { parentRunId: null, rootRunId: row.id, attempt: 0, depth: 0 },
 				startedAt: row.startedAt,
-				elapsedMs: Number.isFinite(startedMs) ? Math.max(0, nowMs - startedMs) : 0,
-				tokens: { ...rowTokenSplit(row), total: row.tokenCount },
-				costUsd: row.costUsd,
-				// Absent on pre-provenance ledger rows, which readers must treat as
-				// unknown; `renderCostAmount` normalizes it rather than assuming free.
-				costProvenance: row.costProvenance,
-				costSummary: row.costSummary,
+				elapsed: telemetry.activity.elapsed,
+				tokens: telemetry.tokens,
+				usd: telemetry.row.usd,
 				node: row.node?.id ?? "local",
-			};
-		});
-	// The rows' own counts, folded so a run that recorded none is unknown rather than zero. Reading every run journal
-	// instead cost ~3 s over a full 1,000-run ring, against ~12 ms for the ledger alone.
-	const fields = rows.map(rowTokenFields);
-	const tokens = {
-		input: runsTotal(fields.map((field) => field.input)),
-		output: runsTotal(fields.map((field) => field.output)),
-		total: runsTotal(fields.map((field) => field.total)),
+			})),
+		retrying: [] as Array<Record<string, unknown>>,
+		totals: fleetTotals(records.map(({ telemetry }) => telemetry)),
 	};
-	let runtimeSeconds = 0;
-	// Folded rather than summed: a ledger of runs nobody priced totals to an
-	// absent cost claim, not to zero dollars.
-	const cost = aggregateCostAmounts(
-		rows.map((row) => ({
-			usd: row.costUsd,
-			provenance: normalizeCostProvenance(row.costProvenance),
-			apiCalls: row.apiCalls ?? 1,
-			missingTokenCalls: row.missingTokenCalls ?? 0,
-			...(row.costSummary ? { costSummary: row.costSummary } : {}),
-		})),
-	);
-	for (const row of rows) {
-		const startedMs = Date.parse(row.startedAt);
-		const endedMs = row.endedAt !== null ? Date.parse(row.endedAt) : nowMs;
-		if (Number.isFinite(startedMs) && Number.isFinite(endedMs)) {
-			runtimeSeconds += Math.max(0, endedMs - startedMs) / 1000;
-		}
-	}
-	// The retry queue is in-memory orchestrator state and intentionally not
-	// durable (Symphony §14.3); cross-process it is always empty here.
-	return {
-		generatedAt: new Date(nowMs).toISOString(),
-		admission: admissionStatus(capacityDrain(nowMs)),
-		running,
-		retrying: [],
-		totals: {
-			inputTokens: tokens.input.known,
-			outputTokens: tokens.output.known,
-			totalTokens: tokens.total.known,
-			costUsd: cost.knownUsd,
-			cost,
-			runtimeSeconds,
-			coverage: {
-				runs: rows.length,
-				unknownRuns: {
-					input: tokens.input.unknownRuns,
-					output: tokens.output.unknownRuns,
-					total: tokens.total.unknownRuns,
-				},
-			},
-			display: { input: tokens.input.display, output: tokens.output.display, total: tokens.total.display },
-		},
-	};
-}
-
-/**
- * A ledger row's token fields as the read model folds them. A row is partial when some of its calls reported no usage,
- * or when it predates the count that says so. A row written before the ledger carried the split takes its receipt's,
- * and a field neither holds is unknown, never zero (#434 §6.3).
- */
-function rowTokenFields(row: RunEnvelope): Record<"input" | "output" | "total", RunTokenField> {
-	const partial = row.missingTokenCalls === undefined ? row.apiCalls === undefined : row.missingTokenCalls > 0;
-	const split =
-		row.inputTokenCount !== undefined || row.outputTokenCount !== undefined
-			? { input: countOrNull(row.inputTokenCount), output: countOrNull(row.outputTokenCount) }
-			: row.endedAt !== null
-				? settledTokenFields(row)
-				: { input: null, output: null };
-	return {
-		input: { known: split.input, partial },
-		output: { known: split.output, partial },
-		total: { known: countOrNull(row.tokenCount), partial },
-	};
-}
-
-/** The token split a settled run recorded, for a ledger row that carries none; null where it is not known. */
-function settledTokenFields(row: RunEnvelope): { input: number | null; output: number | null } {
-	const known = (fact: Fact<number>) => (fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null);
-	try {
-		const settled = readSettledRun(clioStateDir(), row.id)?.settled;
-		return settled
-			? { input: known(settled.usage.input), output: known(settled.usage.output) }
-			: { input: null, output: null };
-	} catch {
-		// An unreadable run scope states no split.
-		return { input: null, output: null };
-	}
 }
 
 function runStatus(args: ReadonlyArray<string>): number {
@@ -831,9 +707,9 @@ function runStatus(args: ReadonlyArray<string>): number {
 	} else {
 		process.stdout.write("running:\n");
 		for (const row of snapshot.running) {
-			const lineage = row.lineage as { attempt: number; depth: number };
+			const lineage = row.lineage;
 			process.stdout.write(
-				`  ${row.runId}  ${row.agentId}  node=${row.node}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${Math.round((row.elapsedMs as number) / 1000)}s  ${renderCostAmount(row.costUsd as number, row.costProvenance as CostProvenance | undefined, row.costSummary as CostAggregate | undefined)}\n`,
+				`  ${row.runId}  ${row.agentId}  node=${row.node}  ${row.heartbeat}  attempt=${lineage.attempt} depth=${lineage.depth}  ${row.elapsed.display}  ${row.usd.display}\n`,
 			);
 			const budget = row.budget as RunToolBudgetEnvelope | null;
 			if (budget !== null) {
@@ -854,7 +730,7 @@ function runStatus(args: ReadonlyArray<string>): number {
 	}
 	const t = snapshot.totals;
 	process.stdout.write(
-		`totals: tokens=${t.display.total} (in=${t.display.input} out=${t.display.output}) cost=${renderCostAggregate(t.cost)} runtime=${Math.round(t.runtimeSeconds)}s\n`,
+		`totals: tokens=${t.total.display} (in=${t.input.display} out=${t.output.display}) cost=${t.usd.display} runtime=${t.elapsed.display}\n`,
 	);
 	return 0;
 }

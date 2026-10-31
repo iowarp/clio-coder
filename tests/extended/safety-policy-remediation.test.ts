@@ -117,7 +117,7 @@ test("S1-05 inspect emits compiled safety metadata", async () => {
 	assert.equal(row.detail?.disableDefaultPathPolicy, false);
 });
 test("S1-06 permission rate counts all outcomes and leaves an empty denominator unknown", async () => {
-	const { summarizePermissionDecisions } = await import("../../src/cli/usage.js");
+	const { summarizePermissionDecisions } = await import("../../src/domains/telemetry/read-model.js");
 	type Decision = Parameters<typeof summarizePermissionDecisions>[0][number];
 	const requested = (requestId: string) =>
 		({ k: "approval.requested", data: { tool: "bash", actionClass: "execute", requestId } }) as Decision;
@@ -221,9 +221,9 @@ test("S1-06 usage report reads journaled approvals and emits measured rate", asy
 		{ encoding: "utf8" },
 	);
 	assert.equal(child.status, 0, child.stderr);
-	const rows = child.stdout
-		.trim()
-		.split("\n")
-		.map((line) => JSON.parse(line) as Record<string, unknown>);
-	assert.equal(rows.find((row) => row.fact === "permission-approval")?.approvalRate, 0.5);
+	const report = JSON.parse(child.stdout) as ReturnType<
+		typeof import("../../src/domains/telemetry/read-model.js").usageReport
+	>;
+	assert.equal(report.approvals.rate.fact.kind, "measured");
+	assert.equal(report.approvals.rate.display, "50.0%");
 });

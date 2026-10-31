@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
 	appendFile,
@@ -355,14 +355,11 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
 		);
 		strictEqual(cliReport.status, 0, cliReport.stderr);
-		const rows = cliReport.stdout
-			.trim()
-			.split("\n")
-			.map((line) => JSON.parse(line) as Record<string, unknown>);
+		const reportDto = JSON.parse(cliReport.stdout) as ReturnType<
+			typeof import("../../src/domains/telemetry/read-model.js").usageReport
+		>;
 		// The report reads the run's aggregate through the read model; the receipt's own 99 tokens are not a second source.
-		const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "role")?.report as
-			| CostReportV1
-			| undefined;
+		const cost = reportDto.cost.find((row) => row.groupBy === "role");
 		ok(cost, "the report carries the read model's cost by agent role");
 		deepStrictEqual(cost.scope, { repo: "all", days: 30 });
 		const tokens = cost.total.tokens.fact;
@@ -1507,13 +1504,10 @@ test("usage report discovers a standalone run journal that has no session and no
 			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
 		);
 		strictEqual(report.status, 0, report.stderr);
-		const rows = report.stdout
-			.trim()
-			.split("\n")
-			.map((line) => JSON.parse(line) as Record<string, unknown>);
-		const cost = rows.find((row) => row.fact === "telemetry-cost" && row.groupBy === "role")?.report as
-			| CostReportV1
-			| undefined;
+		const reportDto = JSON.parse(report.stdout) as ReturnType<
+			typeof import("../../src/domains/telemetry/read-model.js").usageReport
+		>;
+		const cost = reportDto.cost.find((row) => row.groupBy === "role");
 		strictEqual(cost?.total.tokens.display, "21");
 		// `telemetry explain` rebuilds the report's repo window from the reference alone (#434 §11.4).
 		const read = new URL("../../src/cli/telemetry-read.ts", import.meta.url).href;
@@ -1554,7 +1548,7 @@ test("usage report discovers a standalone run journal that has no session and no
 	}
 });
 
-test("fleet status totals a run that recorded no tokens as unknown, beside the known part, never as zero (#434 §11.3)", async () => {
+test("fleet status reads unknown journal facts even when the ledger holds token counts (#434 §11.3)", async () => {
 	const scratch = await mkdtemp(join(tmpdir(), "telemetry-fleet-status-"));
 	const stateDir = join(scratch, "state");
 	const row = (id: string, usage: Record<string, number>) => ({
@@ -1596,18 +1590,13 @@ test("fleet status totals a run that recorded no tokens as unknown, beside the k
 		);
 		strictEqual(status.status, 0, status.stderr);
 		const { totals } = JSON.parse(status.stdout) as {
-			totals: {
-				inputTokens: number;
-				totalTokens: number;
-				coverage: { runs: number; unknownRuns: { input: number; total: number } };
-				display: { input: string; total: string };
-			};
+			totals: ReturnType<typeof import("../../src/domains/telemetry/read-model.js").fleetTotals>;
 		};
-		strictEqual(totals.inputTokens, 70, "the known part only");
-		strictEqual(totals.totalTokens, 200);
-		deepStrictEqual(totals.coverage, { runs: 2, unknownRuns: { input: 1, output: 1, total: 1 } });
-		strictEqual(totals.display.input, "≥70 (1 run unknown)");
-		strictEqual(totals.display.total, "≥200 (1 run unknown)");
+		strictEqual(totals.input.fact.measured, 0, "a ledger count supplies no journal fact");
+		ok(totals.input.fact.unknownCount >= 2);
+		ok(totals.total.fact.unknownCount >= 2);
+		match(totals.input.display, /unknown/);
+		match(totals.total.display, /unknown/);
 	} finally {
 		await rm(scratch, { recursive: true, force: true });
 	}

@@ -1,4 +1,3 @@
-import type { UsageSnapshot } from "../domains/quota/types.js";
 import type { TaskBoardSnapshot, TaskBoardStore } from "../domains/session/task-board.js";
 import { taskBoardCounts } from "../domains/session/task-board.js";
 import type { TUI } from "../engine/tui.js";
@@ -31,7 +30,6 @@ export interface InteractiveTickersDeps {
 	dispatchBoardStore: InteractiveDispatchStore;
 	contextActivityStore: InteractiveContextActivityStore;
 	getOverlayState: () => string;
-	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
 	isFooterExpanded: () => boolean;
 	/** True while an extension workspace's islands hold the top-right corner. */
 	isTaskIslandYielded?: () => boolean;

@@ -1,5 +1,6 @@
 import type { CallRowV1, FactMetric, Quantity } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
+import { factKnownValue } from "../../core/telemetry/known.js";
 import { renderCompactCount, renderCount } from "../../core/telemetry/render.js";
 import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import { type ReasoningUsageView, reasoningFromQuantity } from "../status/reasoning.js";
@@ -43,7 +44,7 @@ const contributed = (quantity: Quantity): boolean =>
 const zero = (quantity: Quantity): boolean =>
 	"kind" in quantity.fact
 		? quantity.fact.kind === "measured" && quantity.fact.value === 0
-		: quantity.fact.unknownCount === 0 && quantity.fact.measured + quantity.fact.estimated === 0;
+		: quantity.fact.unknownCount === 0 && factKnownValue(quantity.fact) === 0;
 
 const spends = new WeakMap<TelemetryView, FooterTelemetry>();
 

@@ -125,7 +125,7 @@ test("dashboard pages devote space to agents, context composition and complete s
 	match(activity, /Scout/);
 	match(activity, /internal agent/);
 	match(activity, /Explore the dispatch/);
-	match(activity, /context 17k/);
+	doesNotMatch(activity, /context 17k/);
 	match(activity, /blade\/mini\/qwopus/);
 	const context = plain(renderDashboardPage(state(), "Context", 172, 120, "Alt+U"));
 	match(context, /CONTEXT COMPOSITION/);
@@ -222,8 +222,8 @@ test("Activity gives two live agents full-width tasks and distinct work measurem
 	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u"));
 	match(text, /Read the interview implementation/);
 	match(text, /Inspect the dashboard telemetry\./);
-	match(text, /Tokens.*68k input.*2k output/);
-	match(text, /Work.*context 17k \/ 262\.1k/);
+	match(text, /Tokens.*68,000 input.*2,000 output/);
+	doesNotMatch(text, /Work.*context 17k \/ 262\.1k/);
 });
 
 test("Activity retains fast tool actions between calls and shows live worker output", () => {
@@ -296,7 +296,7 @@ test("Status renders live resource telemetry instead of a configuration dump", (
 		match(text, /Clio RSS/);
 		match(text, /RAM/);
 		match(text, /GPU/);
-		match(text, /Subscriptions.*loading/);
+		match(text, /Subscriptions.*no journaled quota/);
 		match(text, /Clio ceiling/);
 		doesNotMatch(text, /Worker approvals|PERMISSIONS & LIMITS/);
 	} finally {
@@ -336,7 +336,7 @@ test("finished agents collapse into bounded history while retries retain live ca
 	const text = plain(scrolled(snapshot, "Activity", 160, 120));
 	match(text, /Active retry task/);
 	match(text, /INVOCATION HISTORY · 8 finished/);
-	match(text, /Scout · completed.*internal.*1[2]s.*↑ 68k ↓ 2k/);
+	match(text, /Scout · completed.*internal.*not available.*↑ 68,000 ↓ 2,000/);
 	match(text, /4 more finished runs/);
 	doesNotMatch(text, /Historical verbose task/);
 	snapshot.dispatchRows = [{ ...row, status: "failed", outcomeDetail: "result_contract_exhausted" }];
@@ -432,12 +432,18 @@ test("worker cards and Status distinguish shared account limits from recorded se
 	const snapshot = state();
 	snapshot.quota = [
 		{
-			providerId: "claude-code",
-			displayName: "Claude Code",
-			status: "ok",
-			plan: "Max",
-			windows: [{ key: "weekly", label: "Weekly", usedPct: 91, resetsAt: null }],
-			fetchedAt: null,
+			provider: "claude-code",
+			source: "poll",
+			stale: false,
+			windows: [
+				{
+					key: "weekly",
+					label: "Weekly",
+					usedPct: { fact: { kind: "measured", value: 91, source: "provider" }, display: "91%" },
+					resetsAt: null,
+				},
+			],
+			observedAt: null,
 		},
 	];
 	snapshot.dispatchRows = snapshot.dispatchRows.map((row) => ({
@@ -445,10 +451,10 @@ test("worker cards and Status distinguish shared account limits from recorded se
 		runtimeId: "claude-code",
 		runtimeKind: "subprocess",
 	}));
-	match(plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u")), /Account.*Shared Claude Code.*9% left/);
+	match(plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u")), /Account.*Shared claude-code.*91% used/);
 	const status = plain(renderDashboardPage(snapshot, "Status", 160, 120, "alt+u"));
 	match(status, /SESSION · 0 tokens · nothing charged yet/);
-	match(status, /Claude Code.*Weekly 91%/);
+	match(status, /claude-code.*Weekly 91%/);
 	match(plain(renderDashboardPage(snapshot, "Context", 160, 120, "alt+u")), /subscription limits are account-wide/);
 });
 
@@ -459,26 +465,43 @@ test("compact quota stays beside the selected model while workspace and rotating
 	snapshot.session.target = "Claude · claude-opus";
 	snapshot.quota = [
 		{
-			providerId: "claude-code",
-			displayName: "Claude Code",
-			status: "ok",
-			fetchedAt: null,
+			provider: "claude-code",
+			source: "poll",
+			stale: false,
+			observedAt: null,
 			windows: [
-				{ key: "session", label: "5h", usedPct: 7, resetsAt: null },
-				{ key: "weekly", label: "Weekly", usedPct: 9, resetsAt: null },
+				{
+					key: "session",
+					label: "5h",
+					usedPct: { fact: { kind: "measured", value: 7, source: "provider" }, display: "7%" },
+					resetsAt: null,
+				},
+				{
+					key: "weekly",
+					label: "Weekly",
+					usedPct: { fact: { kind: "measured", value: 9, source: "provider" }, display: "9%" },
+					resetsAt: null,
+				},
 			],
 		},
 		{
-			providerId: "codex",
-			displayName: "Codex",
-			status: "ok",
-			fetchedAt: null,
-			windows: [{ key: "weekly", label: "Weekly", usedPct: 77, resetsAt: null }],
+			provider: "codex",
+			source: "poll",
+			stale: false,
+			observedAt: null,
+			windows: [
+				{
+					key: "weekly",
+					label: "Weekly",
+					usedPct: { fact: { kind: "measured", value: 77, source: "provider" }, display: "77%" },
+					resetsAt: null,
+				},
+			],
 		},
 	];
 	for (const width of [80, 120, 160]) {
 		const rows = renderCompactDashboard(snapshot, width).map(stripTerminalSequences);
-		match(rows[1] ?? "", /weekly 91% left/);
+		match(rows[1] ?? "", /weekly 9% used/);
 		doesNotMatch(rows[1] ?? "", /Codex|5h/);
 		match(rows[0] ?? "", /clio-coder.*v050 \*/);
 		doesNotMatch(rows[0] ?? "", /weekly|Claude|Codex/);

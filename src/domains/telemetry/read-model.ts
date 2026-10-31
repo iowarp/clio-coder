@@ -29,6 +29,7 @@ import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemet
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
+import { factKnownValue } from "../../core/telemetry/known.js";
 import {
 	renderCount,
 	renderCountSum,
@@ -2749,6 +2750,46 @@ function runResultOf(settled: Run["settled"], scope: TelemetryScopeFiles | null)
 	}
 }
 
+/** Live and settled run quantities, from journal clocks and tool settlements (#434). */
+function runActivity(run: Run, options: ReadOptions): RunTelemetryV1["activity"] {
+	const started = run.settled?.data.startedAt ?? run.firstAt;
+	const ended = run.settled?.data.endedAt ?? (options.now ?? new Date()).toISOString();
+	const elapsed = started === null ? unobserved : localClock(Math.max(0, Date.parse(ended) - Date.parse(started)));
+	const toolIds = new Set<string>();
+	for (const record of run.source.records) {
+		if (record.k === "tool.settled") toolIds.add(record.ctx.toolCallId ?? record.id);
+		if (
+			record.k === "run.feed_appended" &&
+			record.data.body.kind === "event" &&
+			record.data.body.type === "clio_coder_tool_finish"
+		)
+			toolIds.add(record.data.body.callId ?? record.id);
+	}
+	const tools = run.settled
+		? localCount(run.settled.data.toolCalls)
+		: run.source.present && run.gap === 0
+			? localCount(toolIds.size)
+			: unobserved;
+	const output = quantity({ run }, { scope: "run", owner: run.runId, metric: "output" }).fact;
+	const measured =
+		"kind" in output
+			? output.kind === "measured"
+			: output.unknownCount === 0 && output.coverage.estimated === 0 && output.coverage.measured > 0;
+	const rate =
+		measured && elapsed.kind === "measured" && elapsed.value > 100
+			? localCount(factKnownValue(output) / (elapsed.value / 1000))
+			: unobserved;
+	const latest = [...run.attempts].reverse().find((attempt) => attempt.settled?.usage != null);
+	return {
+		contextTokens: latest
+			? quantity({ run }, { scope: "run", owner: run.runId, attemptId: latest.started.attemptId, metric: "total" })
+			: null,
+		elapsed: { fact: elapsed, display: renderFact(elapsed, "duration") },
+		outputPerSecond: { fact: rate, display: renderFact(rate) },
+		toolCalls: { fact: tools, display: renderFact(tools) },
+	};
+}
+
 /**
  * One run's DTO: its fold, its run.settled facts, and, given the run scope's own files (`readTelemetryScopeFiles`),
  * the seal verdict and the result object the settlement names (#434 §11.1).
@@ -2766,6 +2807,7 @@ export function runTelemetry(
 	return {
 		...header(options),
 		kind: "run",
+		activity: runActivity(run, options),
 		row: runRow(view, run),
 		journal: journalCoverage(source, run.fold.calls),
 		counts: callCounts(view, base),
@@ -3225,4 +3267,110 @@ export function evidenceQuantities(overview: EvidenceOverview) {
 		total: q("total", tokenFact),
 		usd: q("usd", costFact),
 	};
+}
+
+/** Window facts for the usage surface, folded once from the same sources as its spend (#434). */
+export function usageReport(source: RepoSource, from: number, to: number) {
+	const journals = [...source.sessions.flatMap(sessionJournals), ...source.runs.values()];
+	const inWindow = (at: string) => Date.parse(at) >= from && Date.parse(at) <= to + 5_000;
+	const records = accountabilityRecords(journals).filter((record) => inWindow(record.t));
+	const decisions = records.filter((record) => record.k === "tool.decided");
+	const approvals = summarizePermissionDecisions(records);
+	const runs = new Map<string, JournalSource>(source.runs);
+	for (const session of source.sessions) for (const [id, journal] of session.runs) runs.set(id, journal);
+	const settled = [...runs.values()].filter((journal) =>
+		journal.records.some((record) => record.k === "run.settled" && inWindow(record.data.endedAt)),
+	);
+	const byTool = new Map<string, number>();
+	for (const record of decisions) byTool.set(record.data.tool, (byTool.get(record.data.tool) ?? 0) + 1);
+	const rate: Fact<number> =
+		approvals.requested === 0 ? notApplicable : localCount((100 * approvals.granted) / approvals.requested);
+	return {
+		sessions: shownCount(source.sessions.length),
+		runs: shownCount(settled.length),
+		decisions: {
+			total: shownCount(decisions.length),
+			blocked: shownCount(
+				decisions.filter((record) => record.data.decision === "blocked" || record.data.decision === "denied").length,
+			),
+			tools: [...byTool]
+				.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+				.map(([tool, count]) => ({ tool, count: shownCount(count) })),
+		},
+		approvals: {
+			requested: shownCount(approvals.requested),
+			granted: shownCount(approvals.granted),
+			denied: shownCount(approvals.denied),
+			expired: shownCount(approvals.expired),
+			rate: { fact: rate, display: renderFact(rate, "percent") },
+		},
+		tokens: repoTokenQuantities(source),
+		cost: (["role", "model"] as const).map((groupBy) =>
+			repoCostReport(
+				source,
+				{ repo: parseRepoOwner(source.owner)?.cwdHash ?? "all", days: parseRepoOwner(source.owner)?.days ?? 30 },
+				groupBy,
+			),
+		),
+		cache: source.sessions.map((session) => cacheReport(session)),
+	};
+}
+
+/** Fleet totals over run DTOs, preserving unknown contributions from unreadable runs (#434). */
+export function fleetTotals(runs: readonly RunTelemetryV1[]) {
+	const sum = (facts: Array<Fact<number> | FactSum>, unit: "count" | "usd" | "duration") => {
+		const fact = sumFactSums(facts.map((fact) => ("kind" in fact ? foldFacts([fact]) : fact)));
+		return {
+			fact,
+			display:
+				unit === "usd"
+					? renderUsdSum(fact, runs.length > 0 && runs.every((run) => run.settled?.pricing.pricedBy === "free"))
+					: unit === "duration"
+						? renderDurationSum(fact)
+						: renderCountSum(fact),
+		};
+	};
+	return {
+		input: sum(
+			runs.map((run) => run.tokens.input.fact),
+			"count",
+		),
+		output: sum(
+			runs.map((run) => run.tokens.output.fact),
+			"count",
+		),
+		total: sum(
+			runs.map((run) => run.row.tokens.fact),
+			"count",
+		),
+		usd: sum(
+			runs.map((run) => run.row.usd.fact),
+			"usd",
+		),
+		elapsed: sum(
+			runs.map((run) => run.activity.elapsed.fact),
+			"duration",
+		),
+	};
+}
+
+/** Event-window approval rate. Resolutions can belong to requests outside the window. */
+export function summarizePermissionDecisions(records: ReadonlyArray<AccountabilityRecord>): {
+	requested: number;
+	granted: number;
+	denied: number;
+	expired: number;
+	approvalRate: number | null;
+} {
+	const counts = { requested: 0, granted: 0, denied: 0, expired: 0 };
+	// A forwarded ask republishes its request; one request id is one ask.
+	const asked = new Set<string>();
+	for (const record of records) {
+		if (record.k === "approval.requested") {
+			const id = record.data.requestId;
+			if (id === undefined || !asked.has(id)) counts.requested += 1;
+			if (id !== undefined) asked.add(id);
+		} else if (record.k === "approval.resolved") counts[record.data.status] += 1;
+	}
+	return { ...counts, approvalRate: counts.requested === 0 ? null : counts.granted / counts.requested };
 }

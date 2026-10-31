@@ -14,7 +14,6 @@ import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
-import type { UsageSnapshot } from "../domains/quota/types.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { jobIsComplete } from "../domains/scheduling/job-model.js";
 import type { LocalCapacity } from "../domains/scheduling/local-capacity.js";
@@ -56,6 +55,7 @@ import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
 import { createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
 import { buildLayout, type ComposerPlacement, preserveTranscriptScroll } from "./layout.js";
+import type { QuotaProviders } from "./quota-view.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import type { StatusController, TurnSummary } from "./status/index.js";
@@ -189,7 +189,7 @@ export interface InteractivePresentation {
 	changeOutputStyle(mutation: () => void): void;
 	announceSettingChanges(): void;
 	setLocalBashRunning(running: boolean): void;
-	getQuotaSnapshots(): ReadonlyArray<UsageSnapshot>;
+	getQuotaSnapshots(): QuotaProviders;
 	/** Fold one raw chat event into the ephemeral throughput shown only while this turn is active. */
 	recordChatEvent(event: ChatLoopEvent): void;
 	recordToolStart(toolCallId: string, toolName: string): void;
@@ -469,7 +469,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getTokenThroughput: () => (liveGeneration ? currentLiveThroughput() : null),
-		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
+		getQuotaSnapshots: () => deps.telemetry.read?.quota().providers ?? [],
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
@@ -526,7 +526,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		footer.refresh();
 		requestRender();
 	};
-	const unsubscribeTelemetry = (["session", "calls", "cost", "runs"] as const).map(
+	const unsubscribeTelemetry = (["session", "calls", "cost", "runs", "quota"] as const).map(
 		(topic) => deps.telemetry.read?.subscribe(topic, repaintSpend) ?? (() => {}),
 	);
 	// A journal that loses records raises one notice per owner a minute; a rise held by the window is checked when
@@ -754,7 +754,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			pending,
 			fleet: createFleetDock({
 				getRows: () => dispatchBoardStore.activeRows(),
-				getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
+				getQuotaSnapshots: () => deps.telemetry.read?.quota().providers ?? [],
 			}),
 			editor,
 			contextProgress: createContextProgressRail(
@@ -886,7 +886,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		changeOutputStyle: (mutation) =>
 			chatRenderer.mutate(() => preserveTranscriptScroll(transcriptView, deps.terminal.columns, mutation), "output-style"),
 		announceSettingChanges,
-		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
+		getQuotaSnapshots: () => deps.telemetry.read?.quota().providers ?? [],
 		recordChatEvent,
 		recordToolStart: (toolCallId, toolName) => {
 			footerActiveTools.add(toolCallId);

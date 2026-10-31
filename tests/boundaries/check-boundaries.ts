@@ -415,7 +415,7 @@ const USAGE_FIELD = /^(?:input|output|cacheRead|cacheWrite|cacheWrite1h|reasonin
 const TOTAL_NAME = /^(?:tokens|tokenCount|usd)$|(?:Tokens|TokenCount|Usd)$/;
 
 /**
- * A surface sums no token or cost field: no `+=`, self-adding assignment, `field: prev.field + x` fold or `.reduce`
+ * A surface sums no token or cost field, including a FactSum's known parts: no `+=`, self-adding assignment, `field: prev.field + x` fold or `.reduce`
  * over one (#434 §11.3). A bare `input`/`output` identifier is not a field, so string building does not trip it.
  */
 export function checkSurfaceTotals(file: string, source: string, used?: Set<string>): string[] {
@@ -517,6 +517,19 @@ export function checkSurfaceTotals(file: string, source: string, used?: Set<stri
 		if (ts.isBinaryExpression(node)) {
 			const kind = node.operatorToken.kind;
 			if (sumsTotals(node)) report(node);
+			if (kind === ts.SyntaxKind.PlusToken) {
+				const left = unwrap(node.left);
+				const right = unwrap(node.right);
+				if (
+					(ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left)) &&
+					(ts.isPropertyAccessExpression(right) || ts.isElementAccessExpression(right)) &&
+					new Set([field(left), field(right)]).size === 2 &&
+					[field(left), field(right)].every((name) => name === "measured" || name === "estimated") &&
+					left.expression.getText(tree) === right.expression.getText(tree) &&
+					field(left.expression) !== "coverage"
+				)
+					report(node);
+			}
 			if (kind === ts.SyntaxKind.PlusEqualsToken && (total(node.left) || readsTotal(node.right))) report(node);
 			const target = node.left.getText(tree);
 			if (

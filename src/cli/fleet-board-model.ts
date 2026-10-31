@@ -1,3 +1,6 @@
+import { factKnownValue } from "../core/telemetry/known.js";
+import { loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
+import { runTelemetry } from "../domains/telemetry/read-model.js";
 /**
  * The workers dashboard's model: which workers the board shows and what each
  * one is doing, read from durable state only.
@@ -19,8 +22,6 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { TelemetryRecord } from "../core/telemetry/envelope.js";
-import type { Fact, FactSum } from "../core/telemetry/fact.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	RUN_EVENT_JOURNAL_READ_TAIL_BYTES,
@@ -32,12 +33,6 @@ import { readRunResultFacts } from "../domains/dispatch/run-result-facts.js";
 import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { trustStateWord, trustVerdictWord, validationClause } from "../domains/evidence/trust-projection.js";
-import { costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/cost.js";
-import { foldFacts, foldRunJournal, sumFactSums } from "../domains/telemetry/folds.js";
-import { READ_MODEL_FOLD, runTokenCount } from "../domains/telemetry/read-model.js";
-
-/** Lines the feed's writer dropped or this reader skipped: calls whose tokens the fold never saw. */
-const UNREAD: Fact<number> = { kind: "unknown", reason: "not-observed" };
 
 import type { fleetInspectionScope } from "./fleet-project-scope.js";
 
@@ -127,13 +122,6 @@ export interface RunFold {
 	truncated: boolean;
 	rows: StreamRow[];
 	droppedRows: number;
-	toolCalls: number;
-	/**
-	 * The run's tokens as the read model folds the call records its journal holds, so the card and the run report
-	 * show one value and provenance. A journal from before call records folds the feed's model calls instead, a call
-	 * that reported no usage an unknown contribution, never a 0. Undefined until a call settles (#434 §11.3).
-	 */
-	tokens: FactSum | undefined;
 	/** The feed lost events this fold never saw, at the writer's size cap or a head this reader skipped. */
 	eventsUnread: boolean;
 	/** The call running now, if any. */
@@ -155,19 +143,8 @@ interface FoldCursor {
 	pendingById: Map<string, StreamRow>;
 	/** The next prose delta starts a new row rather than continuing the last one. */
 	paragraphBreak: boolean;
-	/** The journal's call and run-usage records, which the read model folds into the run's tokens. */
-	callRecords: TelemetryRecord[];
 	fold: RunFold;
 }
-
-/** The records {@link foldRunJournal} reads; the rest of the journal is the feed or research detail. */
-const CALL_RECORD_KINDS: ReadonlySet<string> = new Set([
-	"call.started",
-	"call.settled",
-	"call.linked",
-	"journal.gap",
-	"run.usage_reported",
-]);
 
 function emptyFold(): RunFold {
 	return {
@@ -175,8 +152,6 @@ function emptyFold(): RunFold {
 		truncated: false,
 		rows: [],
 		droppedRows: 0,
-		toolCalls: 0,
-		tokens: undefined,
 		eventsUnread: false,
 		current: null,
 		last: null,
@@ -194,7 +169,6 @@ function newCursor(path: string): FoldCursor {
 		skipFirst: false,
 		pendingById: new Map(),
 		paragraphBreak: true,
-		callRecords: [],
 		fold: emptyFold(),
 	};
 }
@@ -269,7 +243,6 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunEventJournalLine, { kin
 				pending: true,
 			});
 			if (line.callId !== undefined) cursor.pendingById.set(line.callId, row);
-			fold.toolCalls += 1;
 			fold.current = row;
 			fold.phase = "tool";
 			return;
@@ -282,7 +255,6 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunEventJournalLine, { kin
 			if (line.callId !== undefined) cursor.pendingById.delete(line.callId);
 			row ??= lastPendingFor(fold, tool);
 			if (row === undefined) {
-				fold.toolCalls += 1;
 				row = pushRow(cursor, {
 					at: line.at,
 					kind: "tool",
@@ -410,15 +382,11 @@ function advance(cursor: FoldCursor): FoldCursor {
 		lines.shift();
 		current.skipFirst = false;
 	}
-	const recordsBefore = current.callRecords.length;
 	for (const raw of lines) {
 		if (raw.length === 0) continue;
-		const { line, record } = readRunEventJournalLine(raw);
+		const { line } = readRunEventJournalLine(raw);
 		if (line !== null) applyLine(current, line);
-		else if (record !== null && CALL_RECORD_KINDS.has(record.k)) current.callRecords.push(record);
 	}
-	if (current.callRecords.length > recordsBefore)
-		current.fold.tokens = foldRunJournal(current.callRecords, READ_MODEL_FOLD).totalTokens;
 	return current;
 }
 
@@ -461,10 +429,6 @@ export interface ReceiptView {
 	verdict?: string;
 	validation?: string;
 	failure?: string;
-	toolCalls?: number;
-	/** The sealed token count worded with its call coverage. */
-	tokens?: FactSum;
-	durationMs?: number;
 	answer?: string;
 	changedPaths?: ReadonlyArray<string>;
 }
@@ -482,9 +446,7 @@ function receiptView(runId: string, stateDir: string): ReceiptView | null {
 			? { verdict: trustVerdictWord(facts.trust), validation: validationClause(facts.trust) }
 			: {}),
 		...(facts.failureMessage !== undefined ? { failure: facts.failureMessage } : {}),
-		...(facts.toolCalls !== undefined ? { toolCalls: facts.toolCalls } : {}),
-		...(facts.tokens !== undefined ? { tokens: foldFacts([facts.tokens]) } : {}),
-		...(facts.durationMs !== undefined ? { durationMs: facts.durationMs } : {}),
+
 		...(facts.text !== undefined && facts.text.trim().length > 0 ? { answer: facts.text } : {}),
 		...(facts.changedPaths !== undefined && facts.changedPaths.length > 0 ? { changedPaths: facts.changedPaths } : {}),
 	};
@@ -506,9 +468,11 @@ export interface WorkerCard {
 	target: string;
 	model: string;
 	toolCalls: number;
+	elapsed?: string;
+	toolCallsDisplay?: string;
 	toolCap?: number;
 	/** The run's tokens as the read model words a count: `~` estimated, `≥` with its unknown calls when partial. */
-	tokens?: FactSum;
+	tokens?: string;
 	/** Formatted cost when something priced the run; absent rather than `$0.00` when nothing did. */
 	cost?: string;
 	phase: WorkerPhase;
@@ -614,23 +578,9 @@ function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): Worker
 	const startedAtMs = Date.parse(run.startedAt);
 	const endedAtMs = run.endedAt === null ? null : Date.parse(run.endedAt);
 	const toolCap = toolCapOf(run);
-	// Live, the journal's per-call counts are the only running total, a lower bound when the feed lost lines; once
-	// sealed, the receipt's count is the authenticated one.
-	const ledgerTokens =
-		run.tokenCount > 0
-			? runTokenCount(run.tokenCount, { apiCalls: run.apiCalls, missingTokenCalls: run.missingTokenCalls }).fact
-			: undefined;
-	const streamed =
-		fold.tokens === undefined
-			? undefined
-			: fold.eventsUnread
-				? sumFactSums([fold.tokens, foldFacts([UNREAD])])
-				: fold.tokens;
-	const tokens = isLive(state) ? (streamed ?? ledgerTokens) : (receipt?.tokens ?? ledgerTokens ?? streamed);
-	const cost =
-		run.endedAt === null
-			? null
-			: formatCostAggregate(costAggregateForAmount(run.costUsd, run.costProvenance, run.costSummary));
+	const telemetry = runTelemetry(run.id, loadRunTelemetrySource(source.stateDir, run.id), { now: new Date(nowMs) });
+	const tokens = telemetry.row.tokens.display;
+	const cost = telemetry.row.usd.display;
 	const lastText = lastProse(fold);
 	const rootRunId = run.lineage?.rootRunId;
 	return {
@@ -642,7 +592,9 @@ function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): Worker
 		endedAtMs: endedAtMs !== null && Number.isFinite(endedAtMs) ? endedAtMs : null,
 		target: run.targetId,
 		model: run.wireModelId,
-		toolCalls: receipt?.toolCalls ?? fold.toolCalls,
+		toolCalls: factKnownValue(telemetry.activity.toolCalls.fact),
+		elapsed: telemetry.activity.elapsed.display,
+		toolCallsDisplay: telemetry.activity.toolCalls.display,
 		...(toolCap !== undefined ? { toolCap } : {}),
 		...(tokens !== undefined ? { tokens } : {}),
 		...(cost !== null ? { cost } : {}),

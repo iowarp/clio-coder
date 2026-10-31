@@ -1,4 +1,5 @@
 import type { Quantity } from "../../core/telemetry/dto.js";
+import { factKnownValue } from "../../core/telemetry/known.js";
 import type { ReasoningTokenProvenance } from "../../session-control/status-types.js";
 
 /**
@@ -38,7 +39,7 @@ export function reasoningFromQuantity(quantity: Quantity | null): ReasoningUsage
 	if (measured + estimated === 0) return UNMEASURED_REASONING;
 	const provenance: ReasoningTokenProvenance =
 		estimated === 0 && fact.unknownCount === 0 ? "provider" : measured === 0 ? "estimated" : "mixed";
-	return { tokens: fact.measured + fact.estimated, provenance };
+	return { tokens: factKnownValue(fact), provenance };
 }
 
 /**
@@ -58,13 +59,12 @@ export function compactReasoningTokens(value: number): string {
 
 /**
  * `r123` for a provider-attested count, `r≈123` for anything Clio inferred.
- * Null when there is nothing to state: an unmeasured turn, or one that spent no
- * reasoning tokens at all (a chip reading `r0` names the provenance of zero).
+ * A provider-measured zero is shown as `r0`; an unmeasured turn has no chip (#434).
  */
 export function formatReasoningChip(
 	view: ReasoningUsageView,
 	format: (value: number) => string = compactReasoningTokens,
 ): string | null {
-	if (view.provenance === "unmeasured" || view.tokens <= 0) return null;
+	if (view.provenance === "unmeasured" || (view.tokens <= 0 && view.provenance !== "provider")) return null;
 	return `r${view.provenance === "provider" ? "" : "≈"}${format(view.tokens)}`;
 }

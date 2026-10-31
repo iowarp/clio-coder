@@ -1226,7 +1226,7 @@ function renderEntryLines(
 	detail: TranscriptDetailPolicy,
 	terminalRows: number,
 	previous?: TranscriptEntry,
-	workerOptions?: Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader">,
+	workerOptions?: Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader" | "telemetry">,
 ): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width, detail, unboundedToolBodies, terminalRows);
@@ -1478,12 +1478,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const dispatchGroups = new Map<string, WorkerTranscriptEntry[]>();
 	const workerRenderOptions = (
 		entry: TranscriptEntry,
-	): Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader"> => {
-		if (entry.role !== "worker" || entry.state.parentToolCallId === undefined) return {};
-		const siblings = dispatchGroups.get(entry.state.parentToolCallId);
-		return siblings === undefined
-			? {}
-			: { siblings: siblings.map((sibling) => sibling.state), showGroupHeader: siblings[0] === entry };
+	): Pick<WorkerEntryRenderOptions, "siblings" | "showGroupHeader" | "telemetry"> => {
+		if (entry.role !== "worker") return {};
+		const telemetry = options.getTelemetry?.()?.run(entry.state.runId) ?? null;
+		const siblings =
+			entry.state.parentToolCallId === undefined ? undefined : dispatchGroups.get(entry.state.parentToolCallId);
+		return {
+			telemetry,
+			...(siblings ? { siblings: siblings.map((sibling) => sibling.state), showGroupHeader: siblings[0] === entry } : {}),
+		};
 	};
 	let dirty = true;
 	let renderedSkinEpoch = skinEpoch();
@@ -1621,10 +1624,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const runningTurns = (view: TelemetryView): Set<string> =>
 		new Set(view.runs().flatMap((run) => (run.terminalReason === null && run.turnId !== null ? [run.turnId] : [])));
 	const refreshReceipts = (): void => {
-		if (liveReceipts.size === 0) return;
 		const view = options.getTelemetry?.() ?? null;
 		if (view === receiptView) return;
 		receiptView = view;
+		for (const entry of workerEntries.values()) invalidateEntryCache(entry);
+		dirty = true;
 		// A view still merging its cold read holds a partial session; its turns are read once it has merged.
 		if (view === null || view.seeding) return;
 		const running = runningTurns(view);
@@ -2324,12 +2328,26 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				} else if (entry.role === "worker") {
 					const state = entry.state;
 					// A council member is titled by its own row, not the round's header.
-					const header = firstRow(renderWorkerEntryLines(state, 120, { detail: standard, group: "continues" }));
+					const header = firstRow(
+						renderWorkerEntryLines(state, 120, {
+							detail: standard,
+							group: "continues",
+							telemetry: options.getTelemetry?.()?.run(state.runId) ?? null,
+						}),
+					);
 					add(
 						header,
 						entry.at,
-						() => renderWorkerEntryLines(state, 120, { unbounded: true }),
-						(width) => renderWorkerEntryLines(state, width, { unbounded: true }),
+						() =>
+							renderWorkerEntryLines(state, 120, {
+								unbounded: true,
+								telemetry: options.getTelemetry?.()?.run(state.runId) ?? null,
+							}),
+						(width) =>
+							renderWorkerEntryLines(state, width, {
+								unbounded: true,
+								telemetry: options.getTelemetry?.()?.run(state.runId) ?? null,
+							}),
 						{ searchText: [state.agentId, state.runId] },
 					);
 				} else if (entry.role === "replayBlock") {

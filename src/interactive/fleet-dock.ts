@@ -1,12 +1,12 @@
-import type { UsageSnapshot } from "../domains/quota/types.js";
 import type { Component } from "../engine/tui.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { formatTaskIslandLines } from "./dispatch-board.js";
+import type { QuotaProviders } from "./quota-view.js";
 
 export interface FleetDockDeps {
 	getRows: () => ReadonlyArray<DispatchBoardRow>;
-	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
+	getQuotaSnapshots?: () => QuotaProviders;
 }
 
 /** BT-007: normal-flow rows reserve space rather than covering transcript words. */

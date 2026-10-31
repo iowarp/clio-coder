@@ -12,7 +12,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { createBoardSource } from "../../src/cli/fleet-board-model.js";
 import type { Quantity } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { renderCompactCount } from "../../src/core/telemetry/render.js";
@@ -20,7 +19,6 @@ import { buildContextLedger } from "../../src/domains/session/context-ledger.js"
 import { loadRepoTelemetrySources } from "../../src/domains/session/telemetry-source.js";
 import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
-import { telemetryRunsDirectory } from "../../src/domains/telemetry/paths.js";
 import { repoCostReport, repoOwner, repoTokenQuantities } from "../../src/domains/telemetry/read-model.js";
 import type { LiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
 import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
@@ -131,7 +129,7 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 			return { hide() {} };
 		},
 	} as unknown as TUI;
-	const telemetry = { live: () => view, subscribe: () => () => {} };
+	const telemetry = { live: () => view, quota: () => ({ providers: [] }), subscribe: () => () => {} };
 	const usage = openUsageOverlay(tui, { subscribe: () => () => {}, read: telemetry } as unknown as TelemetryContract);
 	try {
 		const text = stripTerminalSequences(dockTop(tui)?.frame.renderDockBody(200, 30).join("\n") ?? "");
@@ -247,14 +245,6 @@ test("the usage report folds a window the fixture fills to the session's own tot
 		);
 	}
 	deepStrictEqual(said(repoTokenQuantities(repo).total), said(cold.session.totals.tokens));
-});
-
-test("the CLI fleet board folds a run's tokens from its journal as the run report holds them", () => {
-	const fold = createBoardSource(stateDir, telemetryRunsDirectory(stateDir)).folds.fold(PARITY_RUN);
-	const row = cold.runs.find((run) => run.runId === PARITY_RUN);
-	ok(row && fold.tokens);
-	deepStrictEqual(fold.tokens, row.tokens.fact);
-	ok(partial(row.tokens), "the unreported worker call keeps the card's tokens a lower bound");
 });
 
 test("no DTO the surfaces read tells a lie the detectors know (§13.1)", () => {

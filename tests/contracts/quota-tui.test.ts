@@ -140,7 +140,7 @@ test("footer keeps unassociated accounts out of compact rows and supplies all ac
 	let notices: { key: string | null; id: string; level: "error"; text: string; addedAt: number; expiresAt: null }[] = [];
 	const footer = buildFooterDashboard({
 		providers: { list: () => [] } as never,
-		getQuotaSnapshots: accounts,
+		getQuotaSnapshots: () => quotaRows(accounts()),
 		getNotifications: () => notices,
 		getTerminalColumns: () => columns,
 		getTerminalRows: () => 48,
@@ -165,9 +165,9 @@ test("footer keeps unassociated accounts out of compact rows and supplies all ac
 		footer.toggleExpanded();
 		footer.toggleExpanded();
 		const status = plain(footer.view.render(160));
-		match(status, /Claude Code \(Max\).*5h 6%.*Weekly 9%/);
-		match(status, /Codex \(Pro\).*Weekly 76%/);
-		match(status, /Local AI.*\$0.00/);
+		match(status, /claude-code.*Weekly 9%/);
+		match(status, /codex.*Weekly 76%/);
+		match(status, /antigravity.*Weekly 73%/);
 		doesNotMatch(status, /not reported by provider|\/cost/);
 	} finally {
 		footer.dispose();
@@ -234,6 +234,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		},
 		read: {
 			live: () => view,
+			quota: () => ({ providers: quotaRows(quota) }),
 			subscribe: (_topic: string, update: () => void) => {
 				updates.add(update);
 				return () => updates.delete(update);
@@ -253,7 +254,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 			return { hide: () => hidden++ };
 		},
 	} as unknown as TUI;
-	const handle = openUsageOverlay(tui, telemetry, { getQuotaSnapshots: () => quota });
+	const handle = openUsageOverlay(tui, telemetry);
 	// The engine overlay is a zero-row focus proxy; the composer draws the
 	// docked frame, so the test renders the dock's top entry at the terminal height.
 	const frame = dockTop(tui)?.frame as unknown as Component | undefined;
@@ -282,19 +283,19 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		match(render(), /Less .* More · last 182 days/);
 		frame?.handleInput?.("2");
 		const text = scrolled();
-		match(text, /Claude Code \(Max\)/);
-		match(text, /\$30.41\/\$50.00/);
-		match(text, /76% used · 24% remaining/);
-		match(text, /no subscription window consumed/);
+		match(text, /claude-code/);
+		match(text, /Weekly 9% used/);
+		match(text, /76% used/);
+		doesNotMatch(text, /remaining/);
 
-		const codex = text.slice(text.indexOf("Codex"), text.indexOf("Antigravity"));
+		const codex = text.slice(text.indexOf("codex"), text.indexOf("antigravity"));
 		// The row label, not any "5h": a weekly reset rendered as "4d 15h" also contains it.
 		doesNotMatch(codex, /│ 5h · /);
 		quota = accounts().map((entry) =>
 			entry.providerId === "codex" ? { ...entry, stale: true, message: "refresh failed", retryAfterSeconds: 30 } : entry,
 		);
-		match(scrolled(), /STALE · last good reading/);
-		match(scrolled(), /Retry after 30s/);
+		match(scrolled(), /STALE · codex/);
+		doesNotMatch(scrolled(), /Retry after/);
 		const before = renders;
 		listener?.(snapshot);
 		ok(renders > before);
@@ -361,7 +362,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 			},
 		];
 		frame?.handleInput?.("2");
-		match(render(), /expired · run agy/);
+		match(render(), /no journaled quota readings/);
 		frame?.handleInput?.("5");
 		match(render(), /No worker invocations/);
 		frame?.handleInput?.("\t");
@@ -393,13 +394,13 @@ test("footer producer follows selected runtime changes instead of picking the bu
 			knowledgeBase: null,
 		} as never,
 		getSettings: () => ({ ...DEFAULT_SETTINGS, chat: { ...DEFAULT_SETTINGS.chat, target, model: null } }),
-		getQuotaSnapshots: accounts,
+		getQuotaSnapshots: () => quotaRows(accounts()),
 		getTerminalColumns: () => 160,
 		getTerminalRows: () => 48,
 		resolveCurrentBranch: async () => null,
 	});
 	try {
-		match(plain(footer.view.render(160)), /weekly 91% left/);
+		match(plain(footer.view.render(160)), /weekly 9% used/);
 		doesNotMatch(plain(footer.view.render(160)), /Codex|Antigravity/);
 		target = "local";
 		footer.refresh();
@@ -408,3 +409,22 @@ test("footer producer follows selected runtime changes instead of picking the bu
 		footer.dispose();
 	}
 });
+
+function quotaRows(
+	snapshots: readonly UsageSnapshot[],
+): import("../../src/core/telemetry/dto.js").QuotaStateV1["providers"] {
+	return snapshots
+		.filter((snapshot) => snapshot.status === "ok")
+		.map((snapshot) => ({
+			provider: snapshot.providerId,
+			source: "poll",
+			observedAt: snapshot.fetchedAt,
+			stale: snapshot.stale ?? false,
+			windows: snapshot.windows.map((window) => ({
+				key: window.key,
+				label: `${window.scope ? `${window.scope} ` : ""}${window.label}`,
+				usedPct: { fact: { kind: "measured", value: window.usedPct, source: "provider" }, display: `${window.usedPct}%` },
+				resetsAt: window.resetsAt,
+			})),
+		}));
+}

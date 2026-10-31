@@ -1394,7 +1394,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 
 	const interactiveTickers = createInteractiveTickers({
-		getQuotaSnapshots: presentation.getQuotaSnapshots,
 		tui,
 		dispatchBoardStore,
 		contextActivityStore,
@@ -1444,7 +1443,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	overlayLifecycle = createOverlayLifecycle({
 		onOverlayClosed: () => ambientSurfaces?.refresh(),
-		getQuotaSnapshots: presentation.getQuotaSnapshots,
 		getDispatchRows: () => dispatchBoardStore.rows(),
 		app: { ...deps, ...settingActions },
 		tui,

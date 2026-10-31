@@ -1,3 +1,4 @@
+import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
@@ -18,16 +19,14 @@ import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/tele
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import {
-	type WorkerEntryState,
+	type WorkerEntryState as StreamWorkerEntryState,
 	type WorkerReceiptSummary,
 	workerAskedByModel,
 } from "../../session-control/worker-stream.js";
 import { councilLabelText } from "../council-grid.js";
-import { formatFooterTokens } from "../footer-panel.js";
 import {
 	clioTheme,
 	fitUnits,
-	formatCompactMs,
 	functionText,
 	GLYPH,
 	joinFacts,
@@ -39,6 +38,8 @@ import { workerPhaseActivity } from "../worker-activity.js";
 
 const theme = clioTheme();
 const meta = (text: string): string => theme.fg("toolMetadata", text);
+
+type WorkerEntryState = StreamWorkerEntryState & { telemetry?: RunTelemetryV1 | null };
 
 const workerTextCache = new WeakMap<WorkerEntryState, Map<string, { source: string; text: string }>>();
 const workerAnswers = new WeakMap<WorkerEntryState, WorkerAnswerProjection>();
@@ -78,6 +79,7 @@ const ATTEMPT = "↻ ";
 const SEPARATOR = " · ";
 
 export interface WorkerEntryRenderOptions {
+	telemetry?: RunTelemetryV1 | null;
 	nowMs?: number;
 	detail?: TranscriptDetailPolicy;
 	terminalRows?: number;
@@ -350,7 +352,9 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 				? needsInputUnit()
 				: outcomeUnit(entry.receipt);
 	const elapsed =
-		entry.receipt?.durationMs === undefined ? "" : meta(`${SEPARATOR}${formatCompactMs(entry.receipt.durationMs)}`);
+		entry.telemetry === undefined || entry.telemetry === null
+			? ""
+			: meta(`${SEPARATOR}${entry.telemetry.activity.elapsed.display}`);
 	const full = ` ${status}${elapsed}`;
 	let tail = visibleWidth(identity) + visibleWidth(full) <= width ? full : ` ${status}`;
 	// Reserve one identity cell. The optional hint yields before execution
@@ -371,12 +375,13 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const metrics: string[] = [];
 	const exitCode = entry.receipt?.exitCode;
 	if (exitCode !== undefined && exitCode !== 0) metrics.push(`exit ${exitCode}`);
-	const tokens = entry.receipt?.tokenCount ?? entry.progress?.processedTokens;
-	const calls = entry.receipt?.toolCalls ?? entry.progress?.toolCalls;
-	if (tokens !== undefined) metrics.push(`${formatFooterTokens(tokens)} tokens processed`);
-	const context = entry.progress?.contextTokens ?? entry.contextTokens;
-	if (context !== undefined) metrics.push(`context ${formatFooterTokens(context)}`);
-	if (calls !== undefined) metrics.push(`${calls} tool call${calls === 1 ? "" : "s"}`);
+	const tokens = entry.telemetry?.row.tokens.display;
+	const calls = entry.telemetry?.activity.toolCalls.display;
+	if (tokens !== undefined) metrics.push(`${tokens} tokens processed`);
+	const context = entry.telemetry?.activity.contextTokens;
+	if (context) metrics.push(`context ${context.display}`);
+
+	if (calls !== undefined) metrics.push(`${calls} tool calls`);
 	if (inspect && entry.receipt?.contract !== undefined) metrics.push(`contract ${entry.receipt.contract}`);
 	return metrics;
 }
@@ -449,11 +454,6 @@ function describedAction(entry: WorkerEntryState): string | null {
 	return action.descriptor ? `${action.descriptor.verb}${descriptorObject(action.descriptor)}` : action.tool;
 }
 
-function elapsedMsOf(entry: WorkerEntryState, nowMs: number): number | undefined {
-	if (isPending(entry)) return entry.startedAtMs === undefined ? undefined : Math.max(0, nowMs - entry.startedAtMs);
-	return entry.receipt?.durationMs;
-}
-
 const TIMER_WIDTH = 7;
 
 function workerName(entry: WorkerEntryState): string {
@@ -464,16 +464,10 @@ function workerName(entry: WorkerEntryState): string {
 function alignedHeader(
 	entry: WorkerEntryState,
 	width: number,
-	nowMs: number,
+	_nowMs: number,
 	siblings?: ReadonlyArray<WorkerEntryState>,
 ): string {
-	const elapsedMs = elapsedMsOf(entry, nowMs);
-	const elapsed =
-		elapsedMs === undefined
-			? "—"
-			: elapsedMs >= 3_600_000
-				? `${Math.min(999_999, Math.floor(elapsedMs / 3_600_000))}h`
-				: formatCompactMs(elapsedMs);
+	const elapsed = entry.telemetry?.activity.elapsed.display ?? "—";
 	const timer = meta(elapsed.padStart(TIMER_WIDTH));
 	const pending = isPending(entry);
 	const status = pending
@@ -529,17 +523,9 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	const clean = (text: string): string => sanitizeCallTargetText(redactSecretString(text));
 	const target = entry.runtime.targetId === undefined ? "" : clean(entry.runtime.targetId);
 	const model = entry.runtime.wireModelId === undefined ? "" : clean(entry.runtime.wireModelId);
-	const calls = entry.receipt?.toolCalls ?? entry.progress?.toolCalls;
-	const limit = entry.toolCallLimit;
-	const filled =
-		calls === undefined || limit === undefined || limit <= 0 ? 0 : Math.min(3, Math.ceil((calls / limit) * 3));
-	const tools =
-		calls === undefined
-			? ""
-			: limit === undefined || limit <= 0
-				? `tools ${calls}`
-				: `${GLYPH.contextFull.repeat(filled)}${GLYPH.contextFree.repeat(3 - filled)} tools ${calls}/${limit}`;
-	const tokens = entry.receipt?.tokenCount ?? entry.progress?.processedTokens;
+	const calls = entry.telemetry?.activity.toolCalls.display;
+	const tools = calls === undefined ? "" : `tools ${calls}`;
+	const tokens = entry.telemetry?.row.tokens.display;
 	const current = isPending(entry) ? describedAction(entry) : null;
 	const last = (entry.progress?.recentActions ?? entry.recentActions)?.[0];
 	const activity =
@@ -553,7 +539,7 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
 	const facts = [
 		target,
 		tools,
-		tokens === undefined ? "" : `${formatFooterTokens(tokens)} tokens`,
+		tokens === undefined ? "" : `${tokens} tokens`,
 		activity && `${GLYPH.phaseTool} ${activity}`,
 	].filter(Boolean);
 	const modelRoom = room - visibleWidth(facts.join(SEPARATOR)) - (facts.length > 0 ? SEPARATOR.length : 0);
@@ -571,7 +557,7 @@ function liveCardDetail(entry: WorkerEntryState, width: number): string {
  * how long it has run, and what it has spent. No spinner; the panel's clock
  * moves the elapsed.
  */
-function progressLine(entry: WorkerEntryState, width: number, nowMs: number, includeTimer = true): string {
+function progressLine(entry: WorkerEntryState, width: number, _nowMs: number, includeTimer = true): string {
 	const action = describedAction(entry);
 	const [glyph, idle] = workerPhaseActivity(entry.progress?.phase);
 	const answer =
@@ -580,13 +566,13 @@ function progressLine(entry: WorkerEntryState, width: number, nowMs: number, inc
 			: answerText(entry, stripDeadToolCallMarkup(entry.text)).replace(/\s+/gu, " ").trim();
 	const doing =
 		action === null ? `${glyph} ${idle}${answer.length > 0 ? `: ${answer}` : ""}` : `${GLYPH.phaseTool} ${action}`;
-	const elapsedMs = elapsedMsOf(entry, nowMs);
-	const tokens = entry.progress?.processedTokens;
-	const calls = entry.progress?.toolCalls;
+	const elapsed = entry.telemetry?.activity.elapsed.display;
+	const tokens = entry.telemetry?.row.tokens.display;
+	const calls = entry.telemetry?.activity.toolCalls.display;
 	const facts = [
-		...(!includeTimer || elapsedMs === undefined ? [] : [formatCompactMs(elapsedMs)]),
-		...(tokens === undefined ? [] : [`${formatFooterTokens(tokens)} tokens`]),
-		...(calls === undefined ? [] : [`${calls} call${calls === 1 ? "" : "s"}`]),
+		...(!includeTimer || elapsed === undefined ? [] : [elapsed]),
+		...(tokens === undefined ? [] : [`${tokens} tokens`]),
+		...(calls === undefined ? [] : [`${calls} calls`]),
 	];
 	// The elapsed time is the line's live signal, so a narrow row cuts the
 	// action's text and then drops the spend, never the clock.
@@ -655,6 +641,7 @@ export function renderWorkerEntryLines(
 	width: number,
 	options: WorkerEntryRenderOptions,
 ): string[] {
+	entry = { ...entry, telemetry: options.telemetry ?? null };
 	const safeWidth = Math.max(1, Math.floor(width));
 	const inspect = options.unbounded === true;
 	const detail = inspect ? transcriptDetail("detailed") : (options.detail ?? transcriptDetail());

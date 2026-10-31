@@ -394,7 +394,7 @@ describe("Clio rendering invariants", () => {
 		}
 	});
 
-	it("advances a running tool's and a pending worker's elapsed on the panel's own clock", () => {
+	it("advances a running tool clock while worker time requires a read-model DTO", () => {
 		let clock = 10_000;
 		const panel = createChatPanel({ now: () => clock });
 		panel.applyEvent({ type: "agent_start" } as never);
@@ -421,7 +421,7 @@ describe("Clio rendering invariants", () => {
 		// A running row's verb is progressive; its tail is the live mark and the elapsed.
 		match(before, /running `printf tool-command` ● 0ms/u);
 		match(after, /running `printf tool-command` ● 2\.3s/u);
-		strictEqual(after.match(/2\.3s/gu)?.length, 2, "the worker's elapsed advances with the tool's");
+		strictEqual(after.match(/2\.3s/gu)?.length, 1, "worker elapsed requires a journal DTO");
 	});
 
 	it("clears partial state at terminal settlement and ignores late updates", () => {
@@ -1394,11 +1394,11 @@ it("renders aligned helper rows with Standard activity and keeps their identity 
 	ok(started);
 	const state = started.entry;
 	state.startedAtMs = 1000;
-	match(stripTerminalSequences(renderWorkerEntryLines(state, 100, { nowMs: 7000 }).join("\n")), /6.0s/);
-	match(stripTerminalSequences(renderWorkerEntryLines(state, 100, { nowMs: 13000 }).join("\n")), /12s/);
+	doesNotMatch(stripTerminalSequences(renderWorkerEntryLines(state, 100, { nowMs: 7000 }).join("\n")), /6.0s/);
+	doesNotMatch(stripTerminalSequences(renderWorkerEntryLines(state, 100, { nowMs: 13000 }).join("\n")), /12s/);
 	const lines = renderWorkerEntryLines(state, 100, { nowMs: 1000 });
 	deepStrictEqual(lines.map(stripTerminalSequences), [
-		`${GLYPH.subProcess} scout ${GLYPH.running}     0ms  Explore the source architecture`,
+		`${GLYPH.subProcess} scout ${GLYPH.running}       —  Explore the source architecture`,
 		`  │ ${GLYPH.phaseWaiting} starting`,
 	]);
 	ok(lines.every((line) => visibleWidth(line) <= 100));
@@ -1410,7 +1410,7 @@ it("renders aligned helper rows with Standard activity and keeps their identity 
 				nowMs: 7000,
 			});
 			ok(rendered.every((line) => visibleWidth(line) <= width));
-			if (style === "compact") match(stripTerminalSequences(rendered.join("\n")), /scout ● {4}6\.0s {2}Explore/u);
+			if (style === "compact") match(stripTerminalSequences(rendered.join("\n")), /scout ● +— {2}Explore/u);
 		}
 	}
 	const call = renderToolSubline(
@@ -2056,11 +2056,11 @@ describe("transcript block grammar", () => {
 		ok(entry.progress);
 		entry.toolCallLimit = 150;
 		entry.progress = { ...entry.progress, toolCalls: 12, processedTokens: 1200 };
-		match(render("detailed"), /blade · m · ▰▱▱ tools 12\/150 · 1\.2k tokens · ⚙ searching retry\(/u);
+		match(render("detailed"), /blade · m · ⚙ searching retry\(/u);
 		const unknownRoute = { ...entry, runtime: { kind: "acp" as const } };
 		delete unknownRoute.toolCallLimit;
 		const partial = renderWorkerEntryLines(unknownRoute, 80, { detail: transcriptDetail("detailed") });
-		match(stripTerminalSequences(partial[1] ?? ""), /^ {2}│ tools 12 · 1\.2k tokens · ⚙ searching retry\(/u);
+		match(stripTerminalSequences(partial[1] ?? ""), /^ {2}│ ⚙ searching retry\(/u);
 		doesNotMatch(partial.map(stripTerminalSequences).join("\n"), /unknown|\?|\/150/u);
 	});
 
@@ -2178,9 +2178,9 @@ describe("transcript block grammar", () => {
 		const inspected = renderWorkerEntryLines(entry, 80, { unbounded: true }).map(stripTerminalSequences);
 		// The same header, spend, trail and quality rows, in the same words.
 		strictEqual(inspected[0], detailed[0]);
-		strictEqual(inspected[0], "◇ verifier · blade/m · run run-4 ✓ execution ok · 8.2s");
-		strictEqual(inspected[1], "  │ 19.1k tokens processed · context 3.2k · 1 tool call · contract pass");
-		strictEqual(detailed[1], "  │ 19.1k tokens processed · context 3.2k · 1 tool call");
+		strictEqual(inspected[0], "◇ verifier · blade/m · run run-4 ✓ execution ok");
+		strictEqual(inspected[1], "  │ contract pass");
+		match(detailed[1] ?? "", /verdict/u);
 		for (const row of detailed.filter((line) => /│ (⚙|quality )/u.test(line))) ok(inspected.includes(row), row);
 		doesNotMatch(inspected.join("\n"), /└|\btok\b|… \d+ rows/u);
 		// The answer is whole and as the run returned it.
@@ -2643,7 +2643,7 @@ describe("tool classes", () => {
 			const receipt = panel.render(width).map(stripTerminalSequences);
 			for (const [rendered, facts] of [
 				[row, ["exit 0", "18 lines"]],
-				[spend, ["context 3.2k", "6 tool calls"]],
+				[spend, ["execution ok"]],
 				[receipt, ["in 94.4k", "out 930", "reasoning 276"]],
 			] as const) {
 				for (const fact of facts)
@@ -2839,7 +2839,7 @@ describe("agent invocations", () => {
 					strictEqual(new Set(timerColumns).size, 1, "clock columns survive timer format changes");
 					if (style === "detailed" && width >= 80) {
 						match(frame.map(stripTerminalSequences).join("\n"), /4 workers · 4 running · 0 done/u);
-						match(frame.map(stripTerminalSequences).join("\n"), /▰▱▱ tools 1\/150/u);
+						doesNotMatch(frame.map(stripTerminalSequences).join("\n"), /tools 1\/150/u);
 					}
 				}
 				const first = siblings[0];
@@ -2998,43 +2998,6 @@ describe("agent invocations", () => {
 		ok(
 			rows.some((row) => row.includes("↻ failed over → attempt 2 on dynamo/qwen")),
 			rows.join("\n"),
-		);
-	});
-
-	it("keeps a running card's clock in its header at every width", () => {
-		const entry = card({
-			assignmentId: "l1",
-			agentId: "link-checker",
-			pending: true,
-			startedAtMs: 1_000,
-			progress: {
-				revision: 1,
-				phase: "tool",
-				tailText: "",
-				droppedLines: 0,
-				droppedBytes: 0,
-				processedTokens: 6_200,
-				toolCalls: 4,
-				currentAction: { tool: "bash", descriptor: { verb: "running", object: "lychee dist/**/*.html --verbose" } },
-				recentActions: [],
-				toolNames: ["bash"],
-				settled: false,
-			} as unknown as NonNullable<WorkerEntryState["progress"]>,
-		});
-		for (const width of [40, 60, 100, 200]) {
-			const rows = renderWorkerEntryLines(entry, width, { detail: transcriptDetail("standard"), nowMs: 13_000 }).map(
-				stripTerminalSequences,
-			);
-			match(rows[0] ?? "", /link-checker ● +12s/u, `${width}: ${rows[0]}`);
-			match(rows[1] ?? "", /^ {2}│ ⚙ running lychee/u, `${width}: ${rows[1]}`);
-			ok(
-				rows.every((row) => visibleWidth(row) <= width),
-				rows.join("\n"),
-			);
-		}
-		match(
-			stripTerminalSequences(renderWorkerEntryLines(entry, 200, { nowMs: 13_000 })[1] ?? ""),
-			/⚙ running lychee dist\/\*\*\/\*\.html --verbose · 6\.2k tokens · 4 calls$/u,
 		);
 	});
 });

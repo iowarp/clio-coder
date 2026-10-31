@@ -1,3 +1,4 @@
+import { factKnownValue } from "../../core/telemetry/known.js";
 import { costWasMeasured } from "../../domains/telemetry/cost.js";
 import type { AcpWorkspaceView } from "./types.js";
 
@@ -53,7 +54,7 @@ type TurnUsage = ReturnType<typeof turnUsageMeta>;
 /** The usage block a prompt response carries: its turn's and, when the read model has the session, the session's. */
 export type PromptUsage = TurnUsage & { session?: SessionTotals };
 
-const known = (sum: FactSum) => sum.measured + sum.estimated;
+const known = (sum: FactSum) => factKnownValue(sum);
 
 /**
  * `_meta["clio-coder/usage"]` on the prompt response and on in-turn `usage_update` frames: one shape, so the last frame

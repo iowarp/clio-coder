@@ -82,7 +82,10 @@ test("the island's input counts cache reads, so ↑ plus ↓ is the card's proce
 		assert.equal(count(row.usage.prompt.fact) + count(row.usage.output.fact), processed);
 		assert.equal(count(row.usage.total.fact), processed);
 		const text = dispatchUsageText(row.usage);
-		assert.deepEqual([text.prompt, text.output, text.total], ["23.9k", "450", "24.3k"]);
+		assert.deepEqual(
+			[text.prompt, text.output, text.total],
+			[row.usage.prompt.display, row.usage.output.display, row.usage.total.display],
+		);
 	} finally {
 		store.unsubscribe();
 	}

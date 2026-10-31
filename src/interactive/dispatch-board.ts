@@ -1,6 +1,5 @@
-import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
+import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
-import { renderCompactCount } from "../core/telemetry/render.js";
 import type { AgentAudience } from "../domains/agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../domains/dispatch/budget-envelope.js";
 import {
@@ -15,7 +14,6 @@ import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/w
 import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
 import { trustStateWord } from "../domains/evidence/trust-projection.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
-import type { UsageSnapshot } from "../domains/quota/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { TelemetryContract, TelemetryRunSummary, TelemetryView } from "../domains/telemetry/contract.js";
 import type { TelemetryNotice, TelemetrySnapshot } from "../domains/telemetry/index.js";
@@ -24,9 +22,9 @@ import type { Component } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { COUNCIL_SYNTHESIS_LABEL } from "../session-control/council.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
-import { formatWorkerContextMeter } from "./context-meter.js";
 import type { CouncilGroupView, CouncilMemberView } from "./council-grid.js";
 import { councilGroupBody, councilIslandLines } from "./council-grid.js";
+import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
 import { presentWorkerContractAnswer, safeWorkerAnswerText } from "./renderers/worker-answer.js";
 import type { ClioTheme, ClioToken } from "./theme/index.js";
@@ -84,6 +82,7 @@ export interface DispatchBoardRow {
 	budget?: RunToolBudgetEnvelope;
 	status: DispatchBoardStatus;
 	elapsedMs: number;
+	telemetry?: RunTelemetryV1 | null;
 	/** Tokens and cost from the telemetry read model; never the projection's own tally (#434 §11.3). */
 	usage: DispatchRunUsage;
 	/** The run's first call's TTFT as the read model displays it; null before that call settles (#434). */
@@ -183,20 +182,18 @@ export function dispatchUsageText(usage: DispatchRunUsage): DispatchUsageText {
 	if (usage.kind === "unavailable") return UNAVAILABLE_USAGE;
 	if (usage.kind === "pending") return PENDING_USAGE;
 	return {
-		prompt: renderCompactCount(usage.prompt.fact),
-		output: renderCompactCount(usage.output.fact),
-		total: renderCompactCount(usage.total.fact),
+		prompt: usage.prompt.display,
+		output: usage.output.display,
+		total: usage.total.display,
 		cost: usage.usd.display,
 		measuredOutput: measuredCount(usage.output.fact),
 	};
 }
 
 /** Output tokens per wall second, or null when the output is not wholly measured or nothing ran yet. */
-function wallTokenRate(row: DispatchBoardRow, usage: DispatchUsageText): number | null {
-	const elapsedSec = row.elapsedMs / 1000;
-	if (row.status === "enqueued" || usage.measuredOutput === null || elapsedSec <= 0.1) return null;
-	const rate = Math.round(usage.measuredOutput / elapsedSec);
-	return rate > 0 ? rate : null;
+function wallTokenRate(row: DispatchBoardRow, _usage: DispatchUsageText): string | null {
+	const rate = row.telemetry?.activity.outputPerSecond;
+	return row.status !== "enqueued" && rate?.fact.kind === "measured" ? rate.display : null;
 }
 
 /** One fleet plan position: the wave index and the step the run executes. */
@@ -661,7 +658,7 @@ function renderDispatchCard(
 	const theme = options.theme ?? clioTheme();
 	const contentWidth = Math.max(0, width - 4);
 	const agentLabel = agentDisplayLabel(row);
-	const elapsed = formatCompactMs(row.elapsedMs);
+	const elapsed = row.telemetry?.activity.elapsed.display ?? "not available";
 	const usage = dispatchUsageText(row.usage);
 	const cost = usage.cost;
 	const detail = terminalDetail(row);
@@ -720,7 +717,8 @@ function renderDispatchCard(
 		`${theme.fg("annotation", "ttft")} ${theme.fg("body", ttft)}`,
 		`${theme.fg("annotation", "cost")} ${theme.fg("body", cost)}`,
 	];
-	const contextUnit = formatWorkerContextMeter(row.lastContextTokens, row.contextWindow, theme);
+	const context = row.telemetry?.activity.contextTokens;
+	const contextUnit = context ? theme.fg("body", `ctx ${context.display}`) : null;
 	// The phase column: a fleet step says which wave it belongs to and which
 	// step it is; every other run leaves the cell empty rather than inventing a
 	// position, so the column reads as "not a fleet step" and not as wave zero.
@@ -824,11 +822,11 @@ function renderDispatchCard(
 	return frame(theme, cardTitle, bodyLines, width, { rightMeta: elapsed });
 }
 
-function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: ReadonlyArray<UsageSnapshot>): string[] {
+function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
 	const theme = clioTheme();
 	const weekly = routeWeeklyQuota(row, quota);
 	const agentLabel = agentDisplayLabel(row);
-	const elapsed = formatCompactMs(row.elapsedMs);
+	const elapsed = row.telemetry?.activity.elapsed.display ?? "not available";
 	const usage = dispatchUsageText(row.usage);
 	const cost = usage.cost;
 
@@ -1198,7 +1196,7 @@ export function createDispatchBoardView(
 export function formatTaskIslandLines(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	maxRows = 4,
-	quota: ReadonlyArray<UsageSnapshot> = [],
+	quota: QuotaProviders = [],
 	contentWidth = TASK_ISLAND_WIDTH,
 ): string[] {
 	// Councils are folded before the row cap, so a five-member council costs the
@@ -1398,7 +1396,10 @@ export function createDispatchBoardStore(
 					STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
 					(b.finishedAtMs ?? b.startedAtMs) - (a.finishedAtMs ?? a.startedAtMs),
 			)
-			.map((run) => toRow(run, current.generatedAt, dispatchRunUsage(view, run.runId), dispatchRunTtft(view, run.runId)))
+			.map((run) => ({
+				...toRow(run, current.generatedAt, dispatchRunUsage(view, run.runId), dispatchRunTtft(view, run.runId)),
+				telemetry: view?.run(run.runId) ?? null,
+			}))
 			.filter((row) => !activeOnly || !isTerminalStatus(row.status));
 	};
 	return {

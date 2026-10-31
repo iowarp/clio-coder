@@ -56,7 +56,7 @@ test("meters show consumed capacity consistently and remain bounded", () => {
 
 test("account cards retain all groups, local resets and stale status across terminal widths", () => {
 	for (const width of [20, 40, 80, 120]) {
-		const rows = renderQuotaAccounts([account], width, { now, timeZone: "America/Chicago" });
+		const rows = renderQuotaAccounts(quotaRows([account]), width, { now, timeZone: "America/Chicago" });
 		ok(rows.every((row) => visibleWidth(row) <= width));
 		const text = plain(rows).replace(/\n/g, " ");
 		match(text, /Gemini models/);
@@ -64,9 +64,9 @@ test("account cards retain all groups, local resets and stale status across term
 		match(text, /96% used/);
 		match(text, /America\/Chicago/);
 	}
-	const stale = plain(renderQuotaAccounts([{ ...account, stale: true }], 50, { compact: true }));
+	const stale = plain(renderQuotaAccounts(quotaRows([{ ...account, stale: true }]), 50, { compact: true }));
 	match(stale, /STALE/);
-	const compact = plain(renderQuotaAccounts([account], 120, { compact: true }));
+	const compact = plain(renderQuotaAccounts(quotaRows([account]), 120, { compact: true }));
 	ok(compact.indexOf("Claude and GPT") < compact.indexOf("Gemini"), "a binding scope must survive truncation first");
 });
 
@@ -111,10 +111,13 @@ test("a binding scoped quota is surfaced even when the primary group has headroo
 });
 
 test("worker quota joins only known local credential owners and does not claim a per-worker share", () => {
-	match(workerQuotaLabel({ runtimeId: "antigravity-code" }, [account]), /Shared Antigravity.*4% left/);
-	match(workerQuotaLabel({ runtimeId: "antigravity-code", node: "remote-1" }, [account]), /unavailable for remote/);
-	match(workerQuotaLabel({ runtimeId: "openai-codex" }, [{ ...account, providerId: "codex" }]), /not linked/);
-	match(workerQuotaLabel({ runtimeId: "litellm" }, [account]), /not linked/);
+	match(workerQuotaLabel({ runtimeId: "antigravity-code" }, quotaRows([account])), /Shared antigravity.*96% used/);
+	match(
+		workerQuotaLabel({ runtimeId: "antigravity-code", node: "remote-1" }, quotaRows([account])),
+		/unavailable for remote/,
+	);
+	match(workerQuotaLabel({ runtimeId: "openai-codex" }, quotaRows([{ ...account, providerId: "codex" }])), /not linked/);
+	match(workerQuotaLabel({ runtimeId: "litellm" }, quotaRows([account])), /not linked/);
 	const row: DispatchBoardRow = {
 		runId: "worker-1",
 		agentId: "researcher",
@@ -128,42 +131,51 @@ test("worker quota joins only known local credential owners and does not claim a
 		lastContextTokens: null,
 		ttft: null,
 	};
-	const text = plain(renderWorkerUsage([row], [account], 100));
-	match(text, /1.2k recorded tokens/);
+	const text = plain(renderWorkerUsage([row], quotaRows([account]), 100));
+	match(text, /1,234 recorded tokens/);
 	match(text, /not measured/);
-	match(text, /Shared Antigravity/);
+	match(text, /Shared antigravity/);
 	doesNotMatch(text, /\$0.00|quota saved/);
 	match(
-		plain(renderWorkerUsage([{ ...row, usage: { kind: "unavailable" } }], [account], 80)),
+		plain(renderWorkerUsage([{ ...row, usage: { kind: "unavailable" } }], quotaRows([account]), 80)),
 		/Token usage not available/,
 	);
 	match(
-		plain(renderWorkerUsage([{ ...row, usage: { kind: "pending" } }], [account], 80)),
+		plain(renderWorkerUsage([{ ...row, usage: { kind: "pending" } }], quotaRows([account]), 80)),
 		/awaiting the run's first journaled call/,
 	);
 });
 
 test("weekly badges select the model's own group and never infer another account's quota", () => {
 	const route = { runtimeId: "antigravity-code", wireModelId: "gemini-3.8-flash" };
-	strictEqual(routeWeeklyQuota(route, [account])?.label, "weekly 27% left");
-	strictEqual(routeWeeklyQuota({ ...route, wireModelId: "claude-opus" }, [account])?.label, "weekly 4% left");
-	strictEqual(routeWeeklyQuota({ ...route, wireModelId: "gpt-oss" }, [account])?.label, "weekly 4% left");
-	strictEqual(routeWeeklyQuota({ ...route, wireModelId: "auto" }, [account]), null);
-	strictEqual(routeWeeklyQuota({ ...route, node: "remote" }, [account]), null);
-	strictEqual(routeWeeklyQuota({ ...route, runtimeId: "litellm" }, [account]), null);
-	strictEqual(routeWeeklyQuota({ ...route, runtimeId: "openai-codex" }, [{ ...account, providerId: "codex" }]), null);
-	strictEqual(routeWeeklyQuota(route, [{ ...account, status: "expired" }]), null);
+	strictEqual(routeWeeklyQuota(route, quotaRows([account]))?.label, "weekly 73% used");
 	strictEqual(
-		routeWeeklyQuota(route, [
-			{
-				...account,
-				windows: [{ key: "model.gemini", label: "Model quota", scope: "gemini", usedPct: 73, resetsAt: null }],
-			},
-		]),
+		routeWeeklyQuota({ ...route, wireModelId: "claude-opus" }, quotaRows([account]))?.label,
+		"weekly 96% used",
+	);
+	strictEqual(routeWeeklyQuota({ ...route, wireModelId: "gpt-oss" }, quotaRows([account]))?.label, "weekly 96% used");
+	strictEqual(routeWeeklyQuota({ ...route, wireModelId: "auto" }, quotaRows([account])), null);
+	strictEqual(routeWeeklyQuota({ ...route, node: "remote" }, quotaRows([account])), null);
+	strictEqual(routeWeeklyQuota({ ...route, runtimeId: "litellm" }, quotaRows([account])), null);
+	strictEqual(
+		routeWeeklyQuota({ ...route, runtimeId: "openai-codex" }, quotaRows([{ ...account, providerId: "codex" }])),
 		null,
 	);
-	strictEqual(routeWeeklyQuota(route, [{ ...account, stale: true }])?.label, "STALE · weekly 27% left");
-	for (const [usedPct, remaining] of [
+	strictEqual(routeWeeklyQuota(route, quotaRows([{ ...account, status: "expired" }])), null);
+	strictEqual(
+		routeWeeklyQuota(
+			route,
+			quotaRows([
+				{
+					...account,
+					windows: [{ key: "model.gemini", label: "Model quota", scope: "gemini", usedPct: 73, resetsAt: null }],
+				},
+			]),
+		),
+		null,
+	);
+	strictEqual(routeWeeklyQuota(route, quotaRows([{ ...account, stale: true }]))?.label, "STALE · weekly 73% used");
+	for (const [usedPct] of [
 		[0, 100],
 		[100, 0],
 		[7, 93],
@@ -175,8 +187,8 @@ test("weekly badges select the model's own group and never infer another account
 			windows: [{ key: "weekly", label: "Weekly", usedPct: usedPct ?? 0, resetsAt: null }],
 		};
 		strictEqual(
-			routeWeeklyQuota({ runtimeId: "claude-code", wireModelId: "claude-opus" }, [claude])?.label,
-			`weekly ${remaining}% left`,
+			routeWeeklyQuota({ runtimeId: "claude-code", wireModelId: "claude-opus" }, quotaRows([claude]))?.label,
+			`weekly ${usedPct}% used`,
 		);
 	}
 	const row: DispatchBoardRow = {
@@ -192,9 +204,31 @@ test("weekly badges select the model's own group and never infer another account
 		lastContextTokens: null,
 		ttft: null,
 	};
-	const island = formatTaskIslandLines([row], 1, [account]);
-	match(plain(island), /Shared account.*weekly 27% left/);
-	doesNotMatch(plain(island), /4% left|96%|5h/);
+	const island = formatTaskIslandLines([row], 1, quotaRows([account]));
+	match(plain(island), /Shared account.*weekly 73% used/);
+	doesNotMatch(plain(island), /96%|5h/);
 	ok(island.every((line) => visibleWidth(line) <= 76));
-	doesNotMatch(plain(formatTaskIslandLines([{ ...row, node: "remote" }], 1, [account])), /Shared account|weekly/);
+	doesNotMatch(
+		plain(formatTaskIslandLines([{ ...row, node: "remote" }], 1, quotaRows([account]))),
+		/Shared account|weekly/,
+	);
 });
+
+function quotaRows(
+	snapshots: readonly UsageSnapshot[],
+): import("../../src/core/telemetry/dto.js").QuotaStateV1["providers"] {
+	return snapshots
+		.filter((snapshot) => snapshot.status === "ok")
+		.map((snapshot) => ({
+			provider: snapshot.providerId,
+			source: "poll",
+			observedAt: snapshot.fetchedAt,
+			stale: snapshot.stale ?? false,
+			windows: snapshot.windows.map((window) => ({
+				key: window.key,
+				label: `${window.scope ? `${window.scope} ` : ""}${window.label}`,
+				usedPct: { fact: { kind: "measured", value: window.usedPct, source: "provider" }, display: `${window.usedPct}%` },
+				resetsAt: window.resetsAt,
+			})),
+		}));
+}
