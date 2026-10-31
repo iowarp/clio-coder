@@ -11,7 +11,7 @@ import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { CallStarted, ObjectRef } from "../../core/telemetry/schemas.js";
 import type { CallJournal, JournalHealth } from "./call-journal.js";
 import { openCallJournal } from "./call-journal.js";
-import { storeTelemetryObject, telemetryPromptStructure } from "./objects.js";
+import { type storeTelemetryObject, telemetryPromptStructure } from "./objects.js";
 import { telemetrySessionDirectory } from "./paths.js";
 
 export interface TelemetrySessionOrigin {
@@ -40,8 +40,13 @@ export interface TelemetrySessionLease {
 		facts: Omit<EventPayload<"prompt.compiled">, "structure">,
 		ctx: TelemetryContext,
 	): void;
-	/** Seal the session scope at its close; records the lease writes afterwards make it live again (#434). */
-	seal?(): Promise<boolean>;
+	/**
+	 * Ask for the session's seal at its close. The seal lands when the session's last lease releases and its writes
+	 * drain, never while another lease is live (#434).
+	 */
+	requestSeal?(): void;
+	/** Store a session object through the writer, so it never lands behind the session's seal (#434). */
+	storeObject?(subject: Parameters<typeof storeTelemetryObject>[1], value: unknown): Promise<ObjectRef>;
 	release(): Promise<void>;
 }
 
@@ -66,8 +71,8 @@ interface Entry {
 	closing?: Promise<void>;
 	/** Pending close of a writer no work holds; the next lease cancels it (#434). */
 	idle?: NodeJS.Timeout | undefined;
-	/** The session sealed under this writer; the last release closes it at once instead of idling (#434). */
-	sealed?: boolean;
+	/** The session closed; its last release seals the scope and closes the writer instead of idling (#434). */
+	sealRequested?: boolean;
 }
 
 /**
@@ -86,7 +91,7 @@ export function createSessionJournals(
 	unavailable: () => void,
 	capture?: SessionCapture,
 	/** Runs once per writer open, before any lease proceeds, so its records lead the writer's first batch (#434). */
-	opened?: (origin: TelemetrySessionOrigin, sessionDirectory: string) => Promise<void>,
+	opened?: (origin: TelemetrySessionOrigin, sessionDirectory: string, journal: CallJournal) => Promise<void>,
 ) {
 	const entries = new Map<string, Entry>();
 	/** Sessions this process has leased, so a session fact naming one can reopen its writer (#434). */
@@ -107,12 +112,14 @@ export function createSessionJournals(
 			/* A diagnostic observer cannot change the call's result (#434). */
 		}
 	};
-	const close = (id: string, entry: Entry): Promise<void> => {
+	/** `seal` seals the scope first; closing is set at once, so no new lease reaches the writer meanwhile. */
+	const close = (id: string, entry: Entry, seal = false): Promise<void> => {
 		if (entry.idle) clearTimeout(entry.idle);
 		entry.idle = undefined;
 		entry.open = false;
 		entry.closing ??= entry.journal.then(async (journal) => {
 			try {
+				if (seal && journal && !(await journal.seal())) report();
 				await journal?.close();
 			} catch {
 				report();
@@ -166,7 +173,7 @@ export function createSessionJournals(
 					)
 					.then(async (journal) => {
 						try {
-							await opened?.(origin, directory);
+							await opened?.(origin, directory, journal);
 						} catch {
 							report();
 						}
@@ -198,9 +205,9 @@ export function createSessionJournals(
 				for (const subject of ["prompt-structure", "tool-schemas"] as const) {
 					try {
 						if (subject === "prompt-structure" && input.prompt !== undefined)
-							refs.promptStructure = await storeTelemetryObject(directory, subject, telemetryPromptStructure(input.prompt));
+							refs.promptStructure = await journal.storeObject(subject, telemetryPromptStructure(input.prompt));
 						else if (subject === "tool-schemas" && input.tools !== undefined)
-							refs.toolSchemas = await storeTelemetryObject(directory, subject, input.tools);
+							refs.toolSchemas = await journal.storeObject(subject, input.tools);
 					} catch {
 						// Object capture never blocks the request or claims a missing preimage resolves (#434).
 						report();
@@ -211,7 +218,7 @@ export function createSessionJournals(
 					const digest = createHash("sha256").update(text).digest("hex");
 					if (!owned.promptTexts.has(digest) && journal.reserveResearchBytes(Buffer.byteLength(text))) {
 						try {
-							const stored = await storeTelemetryObject(directory, "prompt-text", { text });
+							const stored = await journal.storeObject("prompt-text", { text });
 							owned.promptTexts.add(digest);
 							telemetryHub().emit(
 								"prompt.text_captured",
@@ -229,12 +236,13 @@ export function createSessionJournals(
 				}
 				return refs;
 			},
-			async seal() {
+			requestSeal() {
+				if (!released) owned.sealRequested = true;
+			},
+			async storeObject(subject, value) {
 				const journal = released ? null : await owned.journal;
-				if (!journal) return false;
-				// An idle writer still receives health samples, and any later record would make the closed session live.
-				owned.sealed = true;
-				return journal.seal();
+				if (!journal) throw new Error("session telemetry writer is not open");
+				return journal.storeObject(subject, value);
 			},
 			recordPromptCompiled(structure, facts, callContext) {
 				if (released || owned.promptStructures.has(structure.id)) return;
@@ -253,8 +261,11 @@ export function createSessionJournals(
 					report();
 				}
 				if (owned.users !== 0 || owned.closing || owned.idle) return;
-				if (owned.sealed) {
-					await close(origin.id, owned);
+				if (owned.sealRequested) {
+					// The last lease drained: seal and close at once, since an idle writer still receives health samples
+					// and any later record would make the closed session live again (#434).
+					owned.sealRequested = false;
+					await close(origin.id, owned, true);
 					return;
 				}
 				owned.idle = setTimeout(() => {
@@ -270,10 +281,22 @@ export function createSessionJournals(
 		/** The origin of a session this process leased recently, or undefined for one it never wrote. */
 		knownOrigin: (sessionId: string): TelemetrySessionOrigin | undefined => origins.get(sessionId),
 		/** Sessions whose writer is open now; a closed writer records its settings again when it reopens (#434). */
-		openSessions(): Array<{ origin: TelemetrySessionOrigin; sessionDirectory: string; health: JournalHealth }> {
+		openSessions(): Array<{
+			origin: TelemetrySessionOrigin;
+			sessionDirectory: string;
+			health: JournalHealth;
+			journal: CallJournal;
+		}> {
 			return [...entries.values()].flatMap(({ open, origin, writer }) =>
 				open === true && writer
-					? [{ origin, sessionDirectory: telemetrySessionDirectory(stateDir, origin.id), health: writer.health() }]
+					? [
+							{
+								origin,
+								sessionDirectory: telemetrySessionDirectory(stateDir, origin.id),
+								health: writer.health(),
+								journal: writer,
+							},
+						]
 					: [],
 			);
 		},

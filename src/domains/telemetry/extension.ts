@@ -32,6 +32,7 @@ import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/index.js";
 import { computeSettingsFingerprint } from "../dispatch/settings-fingerprint.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
+import type { CallJournal } from "./call-journal.js";
 import { openCallJournalHealth } from "./call-journal.js";
 import { createConsentView } from "./consent.js";
 import type {
@@ -44,8 +45,6 @@ import type {
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
 import { foldFacts } from "./folds.js";
 import { createHealthWindows } from "./health-window.js";
-import { storeTelemetryObject } from "./objects.js";
-import { telemetrySessionDirectory } from "./paths.js";
 import type { ProcessJournal } from "./process-journal.js";
 import { createProcessJournal } from "./process-journal.js";
 import { createTelemetryProjection } from "./projection.js";
@@ -212,9 +211,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			.acquire(origin, "main")
 			.then(async (lease) => {
 				try {
-					// A session seals at every close; a resume continues the chain past the seal (#434).
+					// A session seals at every close, once its last lease drains; a resume continues the chain (#434).
 					if (lease.journaled && telemetryHub().emit(kind, data, lease.context) && kind === "session.closed")
-						await lease.seal?.();
+						lease.requestSeal?.();
 				} finally {
 					await lease.release();
 				}
@@ -241,11 +240,10 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			.acquire(origin, "main")
 			.then(async (lease) => {
 				try {
-					if (!lease.journaled) return;
-					const sessionDirectory = telemetrySessionDirectory(clioStateDir(), origin.id);
+					if (!lease.journaled || !lease.storeObject) return;
 					const [before, after] = await Promise.all([
-						storeTelemetryObject(sessionDirectory, "config", payload.previous),
-						storeTelemetryObject(sessionDirectory, "config", payload.settings),
+						lease.storeObject("config", payload.previous),
+						lease.storeObject("config", payload.settings),
 					]);
 					telemetryHub().emit("config.changed", { ...settingsChangeData(payload), before, after }, lease.context);
 				} finally {
@@ -260,7 +258,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	// snapshot, so the session neither loses the change nor reads it before the settings it changed (#434).
 	const openingSnapshots = new Map<
 		string,
-		{ origin: TelemetrySessionOrigin; sessionDirectory: string; stored: Promise<void> }
+		{ origin: TelemetrySessionOrigin; journal: CallJournal; stored: Promise<void> }
 	>();
 	// Health is the process's: one window per process into its own journal, never one per session (#434).
 	const healthWindows = createHealthWindows({
@@ -275,7 +273,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		() => writeDiagnostic("[clio-coder:telemetry] call journal unavailable; coverage is incomplete\n"),
 		sessionCapture,
 		// Each writer opens with the settings it records under, so its records never read against unknown settings.
-		async (origin, sessionDirectory) => {
+		async (origin, _sessionDirectory, journal) => {
 			healthWindows.start();
 			let settings: Readonly<ClioSettings> | undefined;
 			try {
@@ -284,14 +282,15 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 				// A writer that opens before the config domain starts has no settings to record yet.
 			}
 			if (!settings) return;
-			const stored = storeTelemetryObject(sessionDirectory, "config", settings).then((ref) => {
+			// Objects go through the writer, so none lands behind the session's seal (#434).
+			const stored = journal.storeObject("config", settings).then((ref) => {
 				telemetryHub().emit(
 					"config.snapshotted",
 					{ settings: ref, settingsFingerprint: settingsFingerprintCommitment(computeSettingsFingerprint(settings)) },
 					sessionContext(origin.id),
 				);
 			});
-			openingSnapshots.set(origin.id, { origin, sessionDirectory, stored });
+			openingSnapshots.set(origin.id, { origin, journal, stored });
 			try {
 				await stored;
 			} finally {
@@ -321,16 +320,13 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		if (!previous || recordedChanges.has(payload)) return;
 		recordedChanges.add(payload);
 		const data = settingsChangeData(payload);
-		const targets: Array<{ origin: TelemetrySessionOrigin; sessionDirectory: string; stored?: Promise<void> }> = [
+		const targets: Array<{ origin: TelemetrySessionOrigin; journal: CallJournal; stored?: Promise<void> }> = [
 			...journals.openSessions(),
 			...openingSnapshots.values(),
 		];
-		for (const { origin, sessionDirectory, stored } of targets) {
+		for (const { origin, journal, stored } of targets) {
 			const store = () =>
-				Promise.all([
-					storeTelemetryObject(sessionDirectory, "config", previous),
-					storeTelemetryObject(sessionDirectory, "config", payload.settings),
-				]);
+				Promise.all([journal.storeObject("config", previous), journal.storeObject("config", payload.settings)]);
 			// A snapshot that failed to store still leaves the change worth recording; its own failure was reported.
 			const write: Promise<void> = (stored ? stored.then(store, store) : store())
 				.then(([before, after]) => {
