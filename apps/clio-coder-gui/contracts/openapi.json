@@ -25431,7 +25431,7 @@
 													},
 													"value": {
 														"type": "object",
-														"required": ["version", "findings", "decisions"],
+														"required": ["version", "findings", "decisions", "cwd"],
 														"properties": {
 															"version": {
 																"type": "number",
@@ -25479,6 +25479,16 @@
 																	},
 																	"additionalProperties": false
 																}
+															},
+															"cwd": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
 															}
 														},
 														"additionalProperties": false
