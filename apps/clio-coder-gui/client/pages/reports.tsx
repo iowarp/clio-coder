@@ -75,9 +75,9 @@ export function UsagePage({ client }: { client: Client }) {
 									<Icon name={index === 0 ? "layers" : index === 1 ? "usage" : index === 2 ? "sessions" : "fleet"} />
 									{figure.label === "Tokens" ? "Recorded tokens" : figure.label === "Cost" ? "Known cost · USD" : figure.label}
 								</p>
-								<p className="usage-total-value">
+								<div className="usage-total-value">
 									<Explained client={client} {...figure} />
-								</p>
+								</div>
 								{figure.note && <small>{figure.note}</small>}
 							</article>
 						))}
