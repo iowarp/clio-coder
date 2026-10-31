@@ -393,11 +393,6 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 		reason: "rebuilds that same run tally from the ledger on resume, for the reasoning chip the call journal cannot feed",
 	},
 	{
-		file: "src/cli/fleet-board-model.ts",
-		functions: ["applyEvent"],
-		reason: "the fleet board's live per-run token count follows the run feed's message_end lines as they stream",
-	},
-	{
 		file: "src/cli/modes/print.ts",
 		functions: ["addRunUsage"],
 		reason:

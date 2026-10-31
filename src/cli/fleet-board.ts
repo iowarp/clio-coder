@@ -26,6 +26,7 @@
  */
 
 import { appendFileSync } from "node:fs";
+import { renderCompactCount } from "../core/telemetry/render.js";
 import { terminalBackground } from "../core/terminal-background.js";
 import { colorDisabled } from "../core/terminal-preferences.js";
 import { resolveRole, type SemanticRole } from "../core/theme-roles.js";
@@ -137,12 +138,6 @@ function formatOffset(ms: number): string {
 	return `+${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
 }
 
-export function formatTokens(tokens: number): string {
-	if (tokens < 1000) return `${tokens}`;
-	if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
-	return `${(tokens / 1_000_000).toFixed(1)}M`;
-}
-
 function formatDuration(ms: number): string {
 	return ms < 1000 ? `${Math.round(ms)}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : formatClock(ms);
 }
@@ -220,7 +215,7 @@ function factsText(card: WorkerCard, width: number): string {
 	const target = clean(card.target);
 	const model = clean(card.model);
 	const tools = meter(card.toolCalls, card.toolCap);
-	const tokens = card.tokens === undefined ? null : `${formatTokens(card.tokens)} tok`;
+	const tokens = card.tokens === undefined ? null : `${renderCompactCount(card.tokens)} tok`;
 	const cost = card.cost ?? null;
 	const join = (parts: ReadonlyArray<string | null>): string => parts.filter((part) => part !== null).join(SEPARATOR);
 	const tail = [tools, tokens, cost];
@@ -523,7 +518,7 @@ function receiptLines(paint: BoardPaint, model: TakeoverModel, width: number): s
 	if (receipt === null) return lines;
 	const spend = [
 		`${receipt.toolCalls ?? card.toolCalls} tool call${(receipt.toolCalls ?? card.toolCalls) === 1 ? "" : "s"}`,
-		...(card.tokens !== undefined ? [`${formatTokens(card.tokens)} tokens`] : []),
+		...(card.tokens !== undefined ? [`${renderCompactCount(card.tokens)} tokens`] : []),
 		...(card.cost !== undefined ? [card.cost] : []),
 		...(receipt.durationMs !== undefined ? [formatClock(receipt.durationMs)] : []),
 	].join(SEPARATOR);

@@ -19,6 +19,7 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import type { Fact, FactSum } from "../core/telemetry/fact.js";
 import { clioStateDir } from "../core/xdg.js";
 import { readRunReceiptFacts } from "../domains/dispatch/receipt-facts.js";
 import {
@@ -32,6 +33,12 @@ import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { trustStateWord, trustVerdictWord, validationClause } from "../domains/evidence/trust-projection.js";
 import { retiredIntegrityVersionOf } from "../domains/evidence/trust-status.js";
 import { costAggregateForAmount, formatCostAggregate } from "../domains/observability/cost.js";
+import { addGroup, emptyFactSum, foldFacts, sumFactSums } from "../domains/observability/folds.js";
+import { runTokenCount } from "../domains/observability/read-model.js";
+
+/** Lines the feed's writer dropped or this reader skipped: calls whose tokens the fold never saw. */
+const UNREAD: Fact<number> = { kind: "unknown", reason: "not-observed" };
+
 import type { fleetInspectionScope } from "./fleet-project-scope.js";
 
 /** Stream rows a run keeps; the head goes first, as in a terminal's scrollback. */
@@ -121,8 +128,13 @@ export interface RunFold {
 	rows: StreamRow[];
 	droppedRows: number;
 	toolCalls: number;
-	/** Tokens the run's model calls processed so far; undefined until one reports. */
-	tokens: number | undefined;
+	/**
+	 * The token facts of the run's settled model calls, folded as the feed streams them: a call that reported no
+	 * usage is an unknown contribution, never a 0. Undefined until a call settles (#434 §11.3).
+	 */
+	tokens: FactSum | undefined;
+	/** The feed lost events this fold never saw, at the writer's size cap or a head this reader skipped. */
+	eventsUnread: boolean;
 	/** The call running now, if any. */
 	current: StreamRow | null;
 	/** The call that finished last. */
@@ -153,6 +165,7 @@ function emptyFold(): RunFold {
 		droppedRows: 0,
 		toolCalls: 0,
 		tokens: undefined,
+		eventsUnread: false,
 		current: null,
 		last: null,
 		phase: "starting",
@@ -282,7 +295,15 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunEventJournalLine, { kin
 		}
 		case "message_end":
 			cursor.paragraphBreak = true;
-			if (line.tokens !== undefined) fold.tokens = (fold.tokens ?? 0) + line.tokens;
+			// A model call's end carries its usage; its tokens only when the provider reported them.
+			if (line.tokens !== undefined || line.usage !== undefined) {
+				fold.tokens ??= emptyFactSum();
+				addGroup(fold.tokens, [
+					line.tokens !== undefined
+						? { kind: "measured", value: line.tokens, source: "provider" }
+						: { kind: "unknown", reason: "provider-omitted" },
+				]);
+			}
 			// Only a message that streamed no prose carries its text here (an ACP
 			// peer, or a journal from before the feed coalesced deltas).
 			if (detail.length > 0) {
@@ -341,6 +362,7 @@ function applyLine(cursor: FoldCursor, line: RunEventJournalLine): void {
 			return;
 		case "journal_truncated":
 			fold.truncated = true;
+			fold.eventsUnread = true;
 			pushRow(cursor, { at: line.at, kind: "note", text: "the journal reached its size cap; later events were dropped" });
 			return;
 		case "receipt":
@@ -378,6 +400,7 @@ function advance(cursor: FoldCursor): FoldCursor {
 		current.offset = size - RUN_EVENT_JOURNAL_READ_TAIL_BYTES;
 		current.skipFirst = true;
 		current.fold.truncated = true;
+		current.fold.eventsUnread = true;
 	}
 	const length = Math.min(size - current.offset, FOLD_READ_MAX_BYTES);
 	const buffer = Buffer.allocUnsafe(length);
@@ -447,7 +470,8 @@ export interface ReceiptView {
 	validation?: string;
 	failure?: string;
 	toolCalls?: number;
-	tokens?: number;
+	/** The sealed token count worded with its call coverage. */
+	tokens?: FactSum;
 	durationMs?: number;
 	answer?: string;
 	changedPaths?: ReadonlyArray<string>;
@@ -474,7 +498,14 @@ function receiptView(runId: string, stateDir: string): ReceiptView | null {
 			: {}),
 		...(facts.failureMessage !== undefined ? { failure: facts.failureMessage } : {}),
 		...(facts.toolCalls !== undefined ? { toolCalls: facts.toolCalls } : {}),
-		...(facts.tokenCount !== undefined ? { tokens: facts.tokenCount } : {}),
+		...(facts.tokenCount !== undefined
+			? {
+					tokens: runTokenCount(facts.tokenCount, {
+						apiCalls: facts.apiCalls,
+						missingTokenCalls: facts.missingTokenCalls,
+					}).fact,
+				}
+			: {}),
 		...(facts.durationMs !== undefined ? { durationMs: facts.durationMs } : {}),
 		...(facts.text !== undefined && facts.text.trim().length > 0 ? { answer: facts.text } : {}),
 		...(facts.changedPaths !== undefined && facts.changedPaths.length > 0 ? { changedPaths: facts.changedPaths } : {}),
@@ -498,7 +529,8 @@ export interface WorkerCard {
 	model: string;
 	toolCalls: number;
 	toolCap?: number;
-	tokens?: number;
+	/** The run's tokens as the read model words a count: `~` estimated, `≥` with its unknown calls when partial. */
+	tokens?: FactSum;
 	/** Formatted cost when something priced the run; absent rather than `$0.00` when nothing did. */
 	cost?: string;
 	phase: WorkerPhase;
@@ -604,10 +636,19 @@ function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): Worker
 	const startedAtMs = Date.parse(run.startedAt);
 	const endedAtMs = run.endedAt === null ? null : Date.parse(run.endedAt);
 	const toolCap = toolCapOf(run);
-	// Live, the journal's per-call counts are the only running total; once
+	// Live, the journal's per-call counts are the only running total, a lower bound when the feed lost lines; once
 	// sealed, the receipt's count is the authenticated one.
-	const ledgerTokens = run.tokenCount > 0 ? run.tokenCount : undefined;
-	const tokens = isLive(state) ? (fold.tokens ?? ledgerTokens) : (receipt?.tokens ?? ledgerTokens ?? fold.tokens);
+	const ledgerTokens =
+		run.tokenCount > 0
+			? runTokenCount(run.tokenCount, { apiCalls: run.apiCalls, missingTokenCalls: run.missingTokenCalls }).fact
+			: undefined;
+	const streamed =
+		fold.tokens === undefined
+			? undefined
+			: fold.eventsUnread
+				? sumFactSums([fold.tokens, foldFacts([UNREAD])])
+				: fold.tokens;
+	const tokens = isLive(state) ? (streamed ?? ledgerTokens) : (receipt?.tokens ?? ledgerTokens ?? streamed);
 	const cost =
 		run.endedAt === null
 			? null
