@@ -13,7 +13,7 @@ import {
 	resolveShareScopes,
 	SHARE_PROFILE_NAMES,
 	SHARE_PROFILES,
-	telemetryInstallId,
+	telemetryShareSource,
 	writeShare,
 } from "../domains/telemetry/share.js";
 import { canSelect, promptMultiSelect, promptSelect } from "./select.js";
@@ -70,7 +70,7 @@ function preview(plan: SharePlan): string {
 	];
 	const byTier: Record<string, number> = {};
 	const byEvent: Record<string, number> = {};
-	const dropped = { tier: 0, contentClass: 0, unreadable: 0, seals: 0, objects: 0, missingObjects: 0 };
+	const dropped = { tier: 0, contentClass: 0, unreadable: 0, seals: 0, objects: 0, missingObjects: 0, projected: 0 };
 	let objects = 0;
 	let objectBytes = 0;
 	let redactions = 0;
@@ -90,8 +90,9 @@ function preview(plan: SharePlan): string {
 	lines.push(`records by tier: ${tally(byTier)}`);
 	lines.push(`records by event: ${tally(byEvent)}`);
 	lines.push(`objects: ${objects} (${formatBytes(objectBytes)}); secrets redacted: ${redactions}`);
+	lines.push(`archive: ${formatBytes(plan.archiveBytes)} uncompressed`);
 	lines.push(
-		`the profile drops: ${dropped.tier} record(s) by tier, ${dropped.contentClass} by content class, ${dropped.unreadable} unreadable line(s), ${dropped.objects} object(s); ${dropped.seals} source seal(s) are replaced by share seals; ${dropped.missingObjects} cited object(s) were already missing`,
+		`the profile drops: ${dropped.tier} record(s) by tier, ${dropped.contentClass} by content class, ${dropped.unreadable} unreadable line(s), ${dropped.objects} object(s); ${dropped.projected} kept record(s) have run identity, diagnostics or paths withheld; ${dropped.seals} source seal(s) are replaced by share seals; ${dropped.missingObjects} cited object(s) were already missing`,
 	);
 	if (downgraded.length > 0)
 		lines.push(`captured without research consent, so shared as structural: ${downgraded.join(", ")}`);
@@ -227,7 +228,7 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>): Promise<nu
 			scopes,
 			skipped,
 			profile,
-			installId: telemetryInstallId(stateDir),
+			source: telemetryShareSource(stateDir),
 			writer: packageWriter(),
 		});
 		process.stdout.write(preview(plan));
@@ -260,7 +261,7 @@ export async function runTelemetryShare(argv: ReadonlyArray<string>): Promise<nu
 	}
 }
 
-/** `telemetry import <archive>`: exit 0 placed or already present, 1 on a failed verify or a differing scope. */
+/** `telemetry import <archive>`: exit 0 placed or already present, 1 on a failed verify or a differing or damaged scope. */
 export async function runTelemetryImport(argv: ReadonlyArray<string>): Promise<number> {
 	if (argv.length !== 1 || argv[0]?.startsWith("-")) {
 		printError("usage: clio-coder telemetry import <archive>");
@@ -273,7 +274,9 @@ export async function runTelemetryImport(argv: ReadonlyArray<string>): Promise<n
 			process.stdout.write(`imported ${scope.kind} ${scope.id} to ${scope.directory}\n`);
 		for (const scope of imported.existing)
 			process.stdout.write(
-				`${scope.identical ? "already imported" : "kept the existing, different"} ${scope.kind} ${scope.id} at ${scope.directory}\n`,
+				scope.damaged !== null
+					? `kept the existing ${scope.kind} ${scope.id} at ${scope.directory}, which fails verification: ${scope.damaged}\n`
+					: `${scope.identical ? "already imported" : "kept the existing, different"} ${scope.kind} ${scope.id} at ${scope.directory}\n`,
 			);
 		process.stdout.write(
 			`verified ${imported.manifest.scopes.length} scope(s) from ${imported.installId} (${imported.manifest.profile}, Clio ${imported.manifest.clioCoderVersion}); read them with --imported ${imported.installId}\n`,

@@ -1,7 +1,7 @@
-import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { createHash, createHmac, randomBytes } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
@@ -19,9 +19,9 @@ import {
 	scanTelemetrySegment,
 	telemetryChainHead,
 } from "../../core/telemetry/segment.js";
-import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
+import { createRedactionTally } from "../evidence/redact.js";
 import { canonicalJson } from "../prompts/hash.js";
-import { CONTENT_SUBJECTS, collectRefs } from "./objects.js";
+import { CONTENT_SUBJECTS, collectRefs, redactTelemetryValue } from "./objects.js";
 import {
 	isTelemetryJournalFile,
 	TELEMETRY_BUNDLE_FILE,
@@ -45,7 +45,12 @@ import {
 	verifyTelemetryScope,
 } from "./seal.js";
 import type { ShareArchiveEntry } from "./share-archive.js";
-import { packTelemetryArchive, unpackTelemetryArchive } from "./share-archive.js";
+import {
+	MAX_SHARE_ARCHIVE_BYTES,
+	packTelemetryArchive,
+	telemetryArchiveSize,
+	unpackTelemetryArchive,
+} from "./share-archive.js";
 
 /**
  * `telemetry share` and `telemetry import` (#434). A share filters sealed scope bundles through a named profile,
@@ -109,24 +114,41 @@ const InstallFileSchema = Type.Object(
 		format: Type.Literal("clio-coder.telemetry.install"),
 		version: Type.Literal(1),
 		installId: Type.String({ pattern: TELEMETRY_INSTALL_ID.source }),
+		/** Keys the anonymous ids a share gives run identity; never leaves this installation. */
+		anonymizationKey: Type.String({ pattern: "^[0-9a-f]{64}$" }),
 	},
 	{ additionalProperties: false },
 );
 
-/** This installation's random id, minted on first use. A share names its source by it, never by host or path (#434). */
-export function telemetryInstallId(stateDir: string): string {
+/** Who a share comes from: the random install id it names, and the private key its anonymous ids are derived under. */
+export interface ShareSource {
+	installId: string;
+	anonymizationKey: string;
+}
+
+/**
+ * This installation's share identity, minted on first use. A share names its source by the random install id, never
+ * by host or path, and a host or user name becomes an id keyed by a secret the archive does not carry, so it is stable
+ * across this installation's shares and cannot be recovered by hashing guesses (#434).
+ */
+export function telemetryShareSource(stateDir: string): ShareSource {
 	const path = telemetryInstallPath(stateDir);
 	try {
 		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-		if (Value.Check(InstallFileSchema, parsed)) return parsed.installId;
+		if (Value.Check(InstallFileSchema, parsed))
+			return { installId: parsed.installId, anonymizationKey: parsed.anonymizationKey };
 		throw new Error(`${path} is not a version 1 install file`);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
-	const installId = `inst_${randomBytes(16).toString("hex")}`;
-	const file: Static<typeof InstallFileSchema> = { format: "clio-coder.telemetry.install", version: 1, installId };
+	const file: Static<typeof InstallFileSchema> = {
+		format: "clio-coder.telemetry.install",
+		version: 1,
+		installId: `inst_${randomBytes(16).toString("hex")}`,
+		anonymizationKey: randomBytes(32).toString("hex"),
+	};
 	safeResourceWrite(path, `${JSON.stringify(file, null, "\t")}\n`, { mode: 0o600 });
-	return installId;
+	return { installId: file.installId, anonymizationKey: file.anonymizationKey };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -286,6 +308,8 @@ export interface ShareDropped {
 	objects: number;
 	/** Referenced objects the scope does not hold. */
 	missingObjects: number;
+	/** Kept records whose run identity, diagnostic prose or paths the profile withheld. */
+	projected: number;
 }
 
 export interface ShareScopePlan {
@@ -312,12 +336,69 @@ export interface SharePlan {
 	createdAt: string;
 	scopes: ShareScopePlan[];
 	skipped: ShareSkip[];
+	/** The archive's uncompressed tar size, within what an import accepts. */
+	archiveBytes: number;
 }
 
 /** A header as a share carries it: the source host becomes the install id, and the rotation chain head is gone. */
 function sharedHeader(header: SegmentHeader, installId: string): SegmentHeader {
 	const { chainHead: _chainHead, ...rest } = header;
 	return { ...rest, clockOrigin: { ...header.clockOrigin, host: installId } };
+}
+
+/** A host or user name as a share below research carries it: an id stable for this installation, not the name. */
+function anonymousId(source: ShareSource, kind: "host" | "user", value: string): string {
+	return `anon_${createHmac("sha256", source.anonymizationKey).update(`${kind}\0${value}`).digest("hex").slice(0, 16)}`;
+}
+
+/** An absolute path in prose: `/a/b`, `~/a` or `C:\\a`, never a URL's `//host` or a relative `a/b`. */
+const PATH_TOKEN = /(?<![\w:/.~-])(?:~|[A-Za-z]:)?[\\/](?![\\/\s])[^\s"'`;,()<>[\]{}|]+/gu;
+
+function withheldPaths(value: unknown, withheld: { count: number }): unknown {
+	if (typeof value === "string")
+		return value.replace(PATH_TOKEN, () => {
+			withheld.count += 1;
+			return "[withheld:path]";
+		});
+	if (Array.isArray(value)) return value.map((item) => withheldPaths(item, withheld));
+	if (value !== null && typeof value === "object")
+		return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, withheldPaths(item, withheld)]));
+	return value;
+}
+
+/**
+ * A retained record as a profile below research carries it (#434). The event's tier and class admit the record, but
+ * its payload can still name the machine and hold what a run said about itself: run identity becomes anonymous ids,
+ * a settled run's diagnostic prose is withheld, and an absolute path anywhere in the payload is withheld. Null when
+ * the record needs no projection.
+ */
+function projectRecord(record: TelemetryRecord, profile: ShareProfile, source: ShareSource): TelemetryRecord | null {
+	if (profile === "research") return null;
+	const withheld = { count: 0 };
+	let data = record.data as Record<string, unknown>;
+	if (record.k === "run.settled") {
+		const settled = data as {
+			identity: { host: string; user: string } | null;
+			outcomeDetail: string | null;
+			failureMessage: string | null;
+		};
+		if (settled.identity !== null || settled.outcomeDetail !== null || settled.failureMessage !== null)
+			withheld.count += 1;
+		data = {
+			...data,
+			identity:
+				settled.identity === null
+					? null
+					: {
+							host: anonymousId(source, "host", settled.identity.host),
+							user: anonymousId(source, "user", settled.identity.user),
+						},
+			outcomeDetail: null,
+			failureMessage: null,
+		};
+	}
+	data = withheldPaths(data, withheld) as Record<string, unknown>;
+	return withheld.count === 0 ? null : ({ ...record, data } as TelemetryRecord);
 }
 
 function admits(profile: ShareProfileDefinition, record: { tier: Tier; cc: ContentClass }): "tier" | "class" | null {
@@ -329,13 +410,22 @@ function admits(profile: ShareProfileDefinition, record: { tier: Tier; cc: Conte
 function filterScope(
 	source: ShareScopeSource,
 	requested: ShareProfile,
-	installId: string,
+	shareSource: ShareSource,
 	writer: SegmentHeader["writer"],
 	now: Date,
 ): ShareScopePlan {
 	const headers: SegmentHeader[] = [];
 	const rows: Array<{ kind: "header"; header: SegmentHeader } | { kind: "record"; record: TelemetryRecord }> = [];
-	const dropped: ShareDropped = { tier: 0, contentClass: 0, unreadable: 0, seals: 0, objects: 0, missingObjects: 0 };
+	const { installId } = shareSource;
+	const dropped: ShareDropped = {
+		tier: 0,
+		contentClass: 0,
+		unreadable: 0,
+		seals: 0,
+		objects: 0,
+		missingObjects: 0,
+		projected: 0,
+	};
 	let sourceSeal: TelemetryRecord | undefined;
 	for (const segment of source.files.segments)
 		for (const row of scanTelemetrySegment(segment.bytes).rows) {
@@ -369,8 +459,11 @@ function filterScope(
 		if (refused === "tier") dropped.tier += 1;
 		else if (refused === "class") dropped.contentClass += 1;
 		else {
-			// A secret that reached a journal never leaves in an archive (#434, A3).
-			const record = redactSecretsDeep(row.record, tally);
+			const projected = projectRecord(row.record, profile, shareSource);
+			if (projected !== null) dropped.projected += 1;
+			// A secret that reached a journal never leaves in an archive, whether a value pattern or only its property
+			// name gives it away (#434, A3).
+			const record = redactTelemetryValue(projected ?? row.record, tally, true);
 			kept.push(record.origin ? { ...record, origin: { ...record.origin, host: installId } } : record);
 		}
 	}
@@ -378,7 +471,7 @@ function filterScope(
 	for (const line of kept) if (line.k !== "segment.open") collectRefs(line.data, refs);
 	const present = new Map(source.files.objects.map((object) => [object.name, object.bytes]));
 	const renamed = new Map<string, string>();
-	const objects: Array<{ id: string; bytes: Buffer }> = [];
+	const shared = new Map<string, Buffer>();
 	for (const [id, subject] of [...refs].sort(([a], [b]) => a.localeCompare(b))) {
 		if (definition.objects === "none" || (definition.objects === "structure" && CONTENT_SUBJECTS.has(subject))) {
 			dropped.objects += 1;
@@ -389,15 +482,16 @@ function filterScope(
 			dropped.missingObjects += 1;
 			continue;
 		}
-		const before = tally.count;
-		const redacted = redactSecretsDeep(JSON.parse(bytes.toString("utf8")) as unknown, tally);
-		// Objects are content-addressed: a redacted preimage is a new object, and the records cite it instead.
-		const shared = tally.count === before ? bytes : Buffer.from(canonicalJson(redacted), "utf8");
-		const sharedId = `obj_${sha256(shared)}`;
+		const redacted = redactTelemetryValue(JSON.parse(bytes.toString("utf8")) as unknown, tally, subject === "config");
+		// Objects are content-addressed: a redacted preimage is a new object, and the records cite it instead. Two
+		// objects that differ only by a secret redact to one, which the archive holds once for both citations.
+		const canonical = Buffer.from(canonicalJson(redacted), "utf8");
+		const preimage = canonical.equals(bytes) ? bytes : canonical;
+		const sharedId = `obj_${sha256(preimage)}`;
 		if (sharedId !== id) renamed.set(id, sharedId);
-		objects.push({ id: sharedId, bytes: shared });
+		shared.set(sharedId, preimage);
 	}
-	objects.sort((a, b) => a.id.localeCompare(b.id));
+	const objects = [...shared].map(([id, bytes]) => ({ id, bytes })).sort((a, b) => a.id.localeCompare(b.id));
 	const rewrite = (line: SegmentHeader | TelemetryRecord): SegmentHeader | TelemetryRecord =>
 		renamed.size === 0
 			? line
@@ -457,6 +551,12 @@ function filterScope(
 		throw new Error(
 			`shared ${source.kind} ${source.id} does not verify: ${check.status === "failed" ? describeSealMismatch(check.mismatch) : check.reason}`,
 		);
+	// A projected or redacted payload that no longer reads would fail the archive's own verification after writing.
+	const violation = profileViolation(
+		{ manifest: bundle, segments: [{ name: TELEMETRY_JOURNAL_FILE, bytes: journal }], objects: [] },
+		profile,
+	);
+	if (violation !== null) throw new Error(`shared ${source.kind} ${source.id} ${violation}`);
 	const byTier: Record<string, number> = {};
 	const byEvent: Record<string, number> = {};
 	let records = 0;
@@ -488,19 +588,27 @@ export function planShare(input: {
 	scopes: ReadonlyArray<ShareScopeSource>;
 	skipped: ReadonlyArray<ShareSkip>;
 	profile: ShareProfile;
-	installId: string;
+	source: ShareSource;
 	writer: SegmentHeader["writer"];
 	now?: Date;
 }): SharePlan {
 	const now = input.now ?? new Date();
-	return {
+	const plan: SharePlan = {
 		profile: input.profile,
-		installId: input.installId,
+		installId: input.source.installId,
 		clioCoderVersion: input.writer.clioCoderVersion,
 		createdAt: now.toISOString(),
-		scopes: input.scopes.map((scope) => filterScope(scope, input.profile, input.installId, input.writer, now)),
+		scopes: input.scopes.map((scope) => filterScope(scope, input.profile, input.source, input.writer, now)),
 		skipped: [...input.skipped],
+		archiveBytes: 0,
 	};
+	// Refuse at preview what `telemetry verify` and `telemetry import` would refuse to unpack (#434).
+	plan.archiveBytes = telemetryArchiveSize(shareArchiveEntries(plan));
+	if (plan.archiveBytes > MAX_SHARE_ARCHIVE_BYTES)
+		throw new Error(
+			`the selection packs to ${plan.archiveBytes} bytes, past the ${MAX_SHARE_ARCHIVE_BYTES}-byte archive limit; share fewer scopes or a smaller profile`,
+		);
+	return plan;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -532,8 +640,8 @@ const ShareManifestSchema = Type.Object(
 );
 export type ShareManifest = Static<typeof ShareManifestSchema>;
 
-/** The archive bytes for a plan: the manifest first, then each scope's journal, bundle.json and objects. */
-function shareArchiveBytes(plan: SharePlan): Buffer {
+/** The archive members for a plan: the manifest first, then each scope's journal, bundle.json and objects. */
+function shareArchiveEntries(plan: SharePlan): ShareArchiveEntry[] {
 	const manifest: ShareManifest = {
 		format: SHARE_ARCHIVE_FORMAT,
 		version: 1,
@@ -552,7 +660,7 @@ function shareArchiveBytes(plan: SharePlan): Buffer {
 		entries.push({ path: `${base}/${TELEMETRY_BUNDLE_FILE}`, bytes: scope.bundle });
 		for (const object of scope.objects) entries.push({ path: `${base}/objects/${object.id}.json`, bytes: object.bytes });
 	}
-	return packTelemetryArchive(entries, Math.floor(Date.parse(plan.createdAt) / 1000));
+	return entries;
 }
 
 /** Write the plan's archive to `out`, which must not exist. */
@@ -567,7 +675,7 @@ export async function writeShare(plan: SharePlan, out: string): Promise<number> 
 		)
 	)
 		throw new Error(`refusing to overwrite ${out}`);
-	const bytes = shareArchiveBytes(plan);
+	const bytes = packTelemetryArchive(shareArchiveEntries(plan), Math.floor(Date.parse(plan.createdAt) / 1000));
 	await safeResourceWriteAsync(out, bytes, { mode: 0o600 });
 	return bytes.length;
 }
@@ -712,8 +820,39 @@ export interface ShareImport {
 	installId: string;
 	manifest: ShareManifest;
 	placed: Array<{ kind: ShareScopeKind; id: string; directory: string }>;
-	/** Scopes already imported; never overwritten. `identical` says whether the archive's bundle matches. */
-	existing: Array<{ kind: ShareScopeKind; id: string; directory: string; identical: boolean }>;
+	/**
+	 * Scopes already imported; never overwritten. `identical` says the scope there verifies and its bundle matches the
+	 * archive's; `damaged` names why the scope there does not verify, null when it does.
+	 */
+	existing: Array<{ kind: ShareScopeKind; id: string; directory: string; identical: boolean; damaged: string | null }>;
+}
+
+/**
+ * Create `segments` under `root` one level at a time, refusing any level that is a symlink or not a directory, and
+ * confirm the result resolves inside `root`. A symlink planted at `imported/<installId>/telemetry` would otherwise
+ * carry a foreign scope into the operator's own telemetry and its totals (#434).
+ */
+async function containedDirectory(root: string, segments: ReadonlyArray<string>): Promise<string> {
+	// The state directory itself is the operator's own; only what lies below it comes from the walk.
+	await mkdir(root, { recursive: true, mode: 0o700 });
+	let directory = root;
+	for (const segment of segments) {
+		directory = join(directory, segment);
+		const found = await lstat(directory).catch((error: NodeJS.ErrnoException) => {
+			if (error.code === "ENOENT") return null;
+			throw error;
+		});
+		if (found === null)
+			await mkdir(directory, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
+				if (error.code !== "EEXIST") throw error;
+			});
+		const settled = await lstat(directory);
+		if (settled.isSymbolicLink() || !settled.isDirectory())
+			throw new Error(`refusing to import through ${directory}: not a plain directory`);
+	}
+	const resolved = relative(await realpath(root), await realpath(directory));
+	if (resolved !== join(...segments)) throw new Error(`refusing to import through ${directory}: it resolves elsewhere`);
+	return directory;
 }
 
 /**
@@ -726,20 +865,37 @@ export async function importShareArchive(stateDir: string, archive: Buffer): Pro
 	const manifest = check.manifest;
 	const base = telemetryImportedStateDir(stateDir, manifest.installId);
 	const result: ShareImport = { installId: manifest.installId, manifest, placed: [], existing: [] };
+	// Every level below the state directory is checked; the imported install directory holds the scopes.
+	const levels = relative(stateDir, base).split(/[\\/]/u);
 	for (const scope of check.scopes) {
 		const directory = scopeDirectory(base, scope.kind, scope.id);
-		if (existsSync(directory)) {
-			const current = await readFile(join(directory, TELEMETRY_BUNDLE_FILE)).catch(() => null);
+		const levelsToParent = [...levels, ...relative(base, directory).split(/[\\/]/u).slice(0, -1)];
+		const parent = await containedDirectory(stateDir, levelsToParent);
+		if ((await lstat(directory).catch(() => null)) !== null) {
+			// No overwrite either way; a scope that no longer verifies is reported, never called already imported (#434).
+			let damaged: string | null;
+			try {
+				const verdict = verifyTelemetryScope(await readTelemetryScopeFiles(directory));
+				damaged =
+					verdict.status === "verified"
+						? null
+						: verdict.status === "failed"
+							? describeSealMismatch(verdict.mismatch)
+							: verdict.reason;
+			} catch (error) {
+				damaged = error instanceof Error ? error.message : String(error);
+			}
+			const current = damaged === null ? await readFile(join(directory, TELEMETRY_BUNDLE_FILE)).catch(() => null) : null;
 			result.existing.push({
 				kind: scope.kind,
 				id: scope.id,
 				directory,
 				identical: current !== null && scope.files.manifest !== null && current.equals(scope.files.manifest),
+				damaged,
 			});
 			continue;
 		}
-		await mkdir(dirname(directory), { recursive: true, mode: 0o700 });
-		const staging = `${directory}.partial-${randomBytes(6).toString("hex")}`;
+		const staging = join(parent, `${scope.id}.partial-${randomBytes(6).toString("hex")}`);
 		try {
 			await mkdir(join(staging, "objects"), { recursive: true, mode: 0o700 });
 			for (const segment of scope.files.segments)
@@ -750,7 +906,9 @@ export async function importShareArchive(stateDir: string, archive: Buffer): Pro
 				mode: 0o600,
 				flag: "wx",
 			});
-			// A placed scope appears whole at once; a reader never sees one without its bundle.json.
+			// A placed scope appears whole at once; a reader never sees one without its bundle.json. The parent is checked
+			// again so a symlink swapped in after staging cannot redirect the rename.
+			await containedDirectory(stateDir, levelsToParent);
 			await rename(staging, directory);
 		} catch (error) {
 			await rm(staging, { recursive: true, force: true });

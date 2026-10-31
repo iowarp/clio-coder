@@ -17,7 +17,7 @@ import {
 	importShareArchive,
 	planShare,
 	resolveShareScopes,
-	telemetryInstallId,
+	telemetryShareSource,
 	verifyShareArchive,
 	writeShare,
 } from "../../src/domains/telemetry/share.js";
@@ -73,8 +73,9 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 		const selection = { sessions: [sessionId], runs: [], repo: null, since: null, until: null };
 		const { scopes, skipped } = resolveShareScopes(stateDir, selection);
 		deepStrictEqual(skipped, []);
-		const installId = telemetryInstallId(stateDir);
-		const plan = planShare({ scopes, skipped, profile: "content-free", installId, writer });
+		const source = telemetryShareSource(stateDir);
+		const installId = source.installId;
+		const plan = planShare({ scopes, skipped, profile: "content-free", source, writer });
 		strictEqual(plan.scopes.length, 1);
 		ok((plan.scopes[0]?.redactions ?? 0) > 0);
 		const archivePath = join(root, "share.tar.gz");
