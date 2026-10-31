@@ -229,9 +229,12 @@ export function checkTelemetryProducer(file: string, source: string): string[] {
 	return violations;
 }
 
-/** A journal segment, a session's objects/ or <stateDir>/telemetry/, as a path expression spells it. */
-const TELEMETRY_PATH =
-	/[/"'`](calls\.(?:[^"'`/\s]*\.)?jsonl|events\.(?:[^"'`/\s]*\.)?ndjson|objects|telemetry)(?=[/"'`])/;
+/**
+ * A path under the telemetry root, as a path expression spells it: a literal `telemetry` segment, or a helper from
+ * src/domains/telemetry/paths.ts, the one module that builds those paths (`telemetryRoot`, `telemetryRunDirectory`,
+ * `telemetryJournalPath`, ...).
+ */
+const TELEMETRY_PATH = /[/"'`](telemetry)(?=[/"'`])|\b(telemetry\w*(?:Root|Directory|Path))\b/;
 /** The write call and which of its arguments name a path it writes, creates, moves or removes. */
 const PATH_WRITES = new Map<string, number[]>([
 	...["writeFile", "appendFile", "createWriteStream", "rm", "rmdir", "unlink", "truncate", "mkdir"].flatMap(
@@ -248,7 +251,7 @@ const PATH_WRITES = new Map<string, number[]>([
 	["safeResourceWriteAsync", [0]],
 ]);
 
-/** Only the telemetry domain writes under the telemetry paths; every other module goes through its writers (#434 §5.1). */
+/** Only the telemetry domain writes under the telemetry root; every other module goes through its writers (#434 §5.1). */
 export function checkTelemetryWrites(file: string, source: string): string[] {
 	if (file.startsWith("src/domains/telemetry/")) return [];
 	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
@@ -302,9 +305,10 @@ export function checkTelemetryWrites(file: string, source: string): string[] {
 		for (const target of paths) {
 			const match = TELEMETRY_PATH.exec(expand(target, new Set()));
 			if (!match) continue;
+			const spelled = match[1] ?? match[2];
 			const line = tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
 			violations.push(
-				`rule11: ${file}:${line} writes under a telemetry path (${match[1]}) outside the telemetry domain; go through the telemetry writers`,
+				`rule11: ${file}:${line} writes under the telemetry root (${spelled}) outside the telemetry domain; go through the telemetry writers`,
 			);
 			break;
 		}

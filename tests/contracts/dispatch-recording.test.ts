@@ -352,25 +352,6 @@ it("dispatch preserves the explicit capture option with journal history disabled
 	}
 });
 
-it("run event journal keeps the per-call cacheReadReported flag through a write and read", () => {
-	const bus = createTelemetryHub();
-	const bridge = attachRunEventJournalBridge(bus, {});
-	const send = (usage: Record<string, unknown>) =>
-		bus.emit("run.progressed", {
-			runId: "cache-flag",
-			agentId: "coder",
-			event: { type: "message_end", message: { role: "assistant", usage } },
-		});
-	send({ input: 10, output: 2, cacheReadReported: true });
-	send({ input: 10, output: 2, cacheReadReported: false });
-	send({ input: 10, output: 2 });
-	bridge.stop();
-	const flags = readRunEventJournal("cache-flag").lines.flatMap((line) =>
-		line.kind === "event" && line.usage ? [line.usage.cacheReadReported] : [],
-	);
-	deepStrictEqual(flags, [true, false, undefined]);
-});
-
 it("a worker killed mid-call keeps the calls it settled and settles its open attempt as sent (#434)", async () => {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;

@@ -121,21 +121,22 @@ test("producer boundaries reject filesystem helpers and serialization without bl
 	deepStrictEqual(checkTelemetryProducer("producer.ts", "sink.enqueue(event);"), []);
 });
 
-test("rule11 keeps writes under telemetry paths inside the telemetry domain", () => {
+test("rule11 keeps writes under the telemetry root inside the telemetry domain", () => {
 	for (const source of [
-		'writeFileSync(join(directory, "calls.jsonl"), bytes);',
+		"writeFileSync(telemetryJournalPath(directory), bytes);",
 		'const path = join(stateDir, "telemetry", "consent.json"); await writeFile(path, "{}");',
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: The source under check builds a segment name in a template.
-		"appendFileSync(`${directory}/events.${id}.ndjson`, line);",
-		'openSync(join(directory, "objects", name), "wx");',
+		"rmSync(telemetryRunDirectory(stateDir, runId), { recursive: true });",
+		"const root = telemetryRunsDirectory(clioStateDir()); mkdirSync(join(root, runId));",
+		'openSync(join(telemetrySessionDirectory(stateDir, id), "objects", name), "wx");',
 		'new DatabaseSync(join(stateDir, "telemetry", "index.sqlite"));',
 	]) {
 		ok(checkTelemetryWrites("src/domains/session/example.ts", source)[0]?.startsWith("rule11:"), source);
 		deepStrictEqual(checkTelemetryWrites("src/domains/telemetry/example.ts", source), []);
 	}
 	for (const source of [
-		'readFileSync(join(directory, "calls.jsonl"));',
-		'openSync(join(directory, "calls.jsonl"), "r");',
+		"readFileSync(telemetryJournalPath(directory));",
+		'openSync(telemetryJournalPath(directory), "r");',
+		'writeFileSync(join(stateDir, "runs", runId, "recording.json"), bytes);',
 		'new DatabaseSync(join(stateDir, "telemetry", "index.sqlite"), { readOnly: true });',
 		"rmSync(sessionDirectory, { recursive: true });",
 	])

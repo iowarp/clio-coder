@@ -1,12 +1,12 @@
 import type { ToolRoundRecord } from "../../engine/types.js";
 import { readToolRounds } from "./types.js";
 /**
- * Append-only run event journal.
+ * Run event journal: the display feed in a run's telemetry journal.
  *
  * Live dispatch events exist only in `DispatchRunEventRegistry`'s in-memory
  * tail (src/tools/dispatch-run-events.ts), so a separate process cannot see a
  * run in flight: the ledger and receipts are durable but the event stream is
- * not. This module tees that same display tail to disk so a viewer process
+ * not. This module tees that same display tail to the run's journal so a viewer process
  * (`clio-coder fleet view`) can follow a run without sharing the orchestrator's
  * heap.
  *
@@ -28,16 +28,13 @@ import { readToolRounds } from "./types.js";
  * are never dropped, so a capped journal still answers what the run was and how
  * it ended.
  *
- * Native runs forward display lines to the run's batched envelope writer (#434).
- * Legacy runs retain the plain-line writer below; readers accept either format.
- * The display terminal closes the feed, while call facts may still drain before
- * dispatch releases the writer.
- *
- * A sink failure (ENOSPC, EPERM, a removed state root) degrades the whole
- * journal to off after one notice. Nothing here ever throws into a dispatch.
+ * Display lines forward to the run's batched telemetry writer, which owns the
+ * file (#434). The display terminal closes the feed, while call facts may still
+ * drain before dispatch releases the writer. Nothing here ever throws into a
+ * dispatch.
  */
 
-import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeClioCoderEventType } from "../../core/naming-events.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
@@ -51,8 +48,6 @@ import { runTelemetryJournal } from "./run-telemetry.js";
 
 /** Per-run size cap; crossing it drops display-only lines behind one marker. */
 export const RUN_EVENT_JOURNAL_CAP_BYTES = 2 * 1024 * 1024;
-/** Pending bytes that trigger a flush of droppable lines; every line, by default. */
-export const RUN_EVENT_JOURNAL_FLUSH_BYTES = 1;
 interface JournalLineBase {
 	seq: number;
 	at: string;
@@ -129,13 +124,6 @@ export interface RunEventJournalSink {
 	append(runId: string, entry: RunEventJournalEntry): void;
 	receipt(runId: string, receipt: RunEventJournalReceipt): void;
 	terminal(runId: string, outcome: string, detail?: string): void;
-}
-
-export interface RunEventJournal extends RunEventJournalSink {
-	/** Flush any buffered droppable lines. Called by tests and by terminal writes. */
-	flush(): void;
-	/** True once a write failed and the journal turned itself off. */
-	degraded(): boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,241 +207,48 @@ function isSafeRunId(runId: string): boolean {
 // Writer
 // ---------------------------------------------------------------------------
 
-interface RunJournalState {
-	path: string;
-	seq: number;
-	bytes: number;
-	pending: string[];
-	pendingBytes: number;
-	dropping: boolean;
-	closed: boolean;
-	touchedAt: number;
-}
-
 /**
- * Runs tracked at once. Bounded so a long-lived orchestrator that never sees a
- * terminal event for some run (a crash, an abandoned batch) cannot grow this
- * map without limit. Eviction only forgets the byte counter; the file itself is
- * untouched and a later write to an evicted run reopens it with a fresh count.
+ * The display tail forwards to the run's telemetry writer, which batches it into the run's journal as `run.feed`
+ * records (#434). A run without an open telemetry owner gets no transcript: only the telemetry domain writes under
+ * the telemetry root, and the open failure that left the run ownerless was already reported where it happened.
  */
-const RUN_STATE_LIMIT = 256;
-
-export interface CreateRunEventJournalOptions {
-	/** Override the journal root. Defaults to `clioStateDir()/runs`, resolved per write. */
-	root?: string;
-	capBytes?: number;
-	flushBytes?: number;
-	warn?: (message: string) => void;
-	now?: () => Date;
-	/** Override enablement. Defaults to {@link runEventJournalEnabled}. */
-	isEnabled?: () => boolean;
-}
-
-function createRunEventJournal(options: CreateRunEventJournalOptions = {}): RunEventJournal {
-	const capBytes = options.capBytes ?? RUN_EVENT_JOURNAL_CAP_BYTES;
-	const flushBytes = options.flushBytes ?? RUN_EVENT_JOURNAL_FLUSH_BYTES;
-	const warn = options.warn ?? ((message: string) => process.stderr.write(`[clio-coder:journal] ${message}\n`));
-	const now = options.now ?? (() => new Date());
-	const isEnabled = options.isEnabled ?? (() => runEventJournalEnabled());
-	const runs = new Map<string, RunJournalState>();
-	let degraded = false;
-
-	const degrade = (error: unknown): void => {
-		if (degraded) return;
-		degraded = true;
-		runs.clear();
-		warn(
-			`run event journal disabled for this process: ${error instanceof Error ? error.message : String(error)}. ` +
-				"Dispatch is unaffected; `clio-coder fleet view` will have no transcript for runs started from here.",
-		);
-	};
-
-	const pruneRunStates = (): void => {
-		while (runs.size > RUN_STATE_LIMIT) {
-			let oldestKey: string | null = null;
-			let oldestSeen = Number.POSITIVE_INFINITY;
-			for (const [key, state] of runs) {
-				if (state.pending.length > 0 || state.touchedAt >= oldestSeen) continue;
-				oldestKey = key;
-				oldestSeen = state.touchedAt;
-			}
-			if (oldestKey === null) break;
-			runs.delete(oldestKey);
-		}
-	};
-
-	const stateFor = (runId: string): RunJournalState | null => {
-		if (degraded || !isSafeRunId(runId) || !isEnabled()) return null;
-		const existing = runs.get(runId);
-		if (existing !== undefined) {
-			if (existing.closed) return null;
-			existing.touchedAt = Date.now();
-			return existing;
-		}
-		if (stateRootRemoved()) return null;
-		let path: string;
-		try {
-			const dir = runEventJournalDir(runId, options.root);
-			mkdirSync(dir, { recursive: true });
-			path = join(dir, TELEMETRY_JOURNAL_FILE);
-		} catch (error) {
-			degrade(error);
-			return null;
-		}
-		// A run reopened after state eviction (or after a resume) continues the
-		// existing file, so the byte counter starts from what is already there
-		// and the cap keeps meaning the same thing.
-		let bytes = 0;
-		let seq = 0;
-		try {
-			const stat = statSync(path);
-			bytes = stat.size;
-		} catch {
-			// First write for this run; the file does not exist yet.
-		}
-		if (bytes > 0) {
-			const existingSeq = countJournalSeq(path);
-			// An envelope journal belongs to its async writer, including after that owner exits (#434).
-			if (existingSeq === null) return null;
-			seq = existingSeq;
-		}
-		const state: RunJournalState = {
-			path,
-			seq,
-			bytes,
-			pending: [],
-			pendingBytes: 0,
-			dropping: bytes >= capBytes,
-			closed: false,
-			touchedAt: Date.now(),
-		};
-		runs.set(runId, state);
-		pruneRunStates();
-		return state;
-	};
-
-	const flushState = (state: RunJournalState): void => {
-		if (state.pending.length === 0) return;
-		const payload = state.pending.join("");
-		state.pending = [];
-		state.pendingBytes = 0;
-		if (stateRootRemoved()) return;
-		try {
-			appendFileSync(state.path, payload, "utf8");
-		} catch (error) {
-			degrade(error);
-		}
-	};
-
-	const write = (state: RunJournalState, line: RunEventJournalBody, droppable: boolean): void => {
-		if (droppable && state.dropping) return;
-		if (droppable && state.bytes + state.pendingBytes >= capBytes) {
-			state.dropping = true;
-			write(state, { kind: "journal_truncated", reason: "per-run size cap", droppedFromSeq: state.seq + 1 }, false);
-			return;
-		}
-		state.seq += 1;
-		const serialized = `${JSON.stringify({ seq: state.seq, at: now().toISOString(), ...line })}\n`;
-		const size = Buffer.byteLength(serialized, "utf8");
-		state.pending.push(serialized);
-		state.pendingBytes += size;
-		state.bytes += size;
-		if (!droppable || state.pendingBytes >= flushBytes) flushState(state);
-	};
-
-	const forward = (runId: string, body: RunEventJournalBody): boolean => {
-		const owner = runTelemetryJournal(runId);
-		if (!owner) return false;
-		if (isEnabled() && !stateRootRemoved()) owner.feed(body, capBytes);
-		return true;
+function createRunEventJournal(): RunEventJournalSink {
+	const forward = (runId: string, body: RunEventJournalBody): void => {
+		if (!isSafeRunId(runId) || !runEventJournalEnabled() || stateRootRemoved()) return;
+		runTelemetryJournal(runId)?.feed(body, RUN_EVENT_JOURNAL_CAP_BYTES);
 	};
 	return {
 		open(runId, agentId): void {
-			if (forward(runId, { kind: "open", runId, agentId })) return;
-			const state = stateFor(runId);
-			if (state === null) return;
-			// Reopening a run that already has lines is a resume or a second
-			// registration of the same logical run; the file keeps its history and
-			// gains a fresh open line rather than being rewritten.
-			write(state, { kind: "open", runId, agentId }, false);
+			forward(runId, { kind: "open", runId, agentId });
 		},
 		append(runId, entry): void {
 			const { at: _at, ...body } = entry;
-			if (forward(runId, { kind: "event", ...body })) return;
-			const state = stateFor(runId);
-			if (state === null) return;
-			write(state, { kind: "event", ...body }, true);
+			forward(runId, { kind: "event", ...body });
 		},
 		receipt(runId, receipt): void {
-			const body: RunEventJournalBody = {
+			forward(runId, {
 				kind: "receipt",
 				outcome: receipt.outcome,
 				exitCode: receipt.exitCode,
 				...(receipt.digest !== undefined ? { digest: receipt.digest } : {}),
 				...(receipt.receiptPath !== undefined ? { receiptPath: receipt.receiptPath } : {}),
 				...(receipt.attemptRunId !== undefined ? { attemptRunId: receipt.attemptRunId } : {}),
-			};
-			if (forward(runId, body)) return;
-			const state = stateFor(runId);
-			if (state === null) return;
-			write(state, body, false);
+			});
 		},
 		terminal(runId, outcome, detail): void {
-			if (forward(runId, { kind: "terminal", outcome, ...(detail !== undefined ? { detail } : {}) })) return;
-			const state = stateFor(runId);
-			if (state === null) return;
-			write(state, detail === undefined ? { kind: "terminal", outcome } : { kind: "terminal", outcome, detail }, false);
-			flushState(state);
-			// Closing here is what makes the terminal line the last write: any
-			// later event for this run finds a closed state and is discarded.
-			state.closed = true;
-		},
-		flush(): void {
-			for (const state of runs.values()) flushState(state);
-		},
-		degraded(): boolean {
-			return degraded;
+			forward(runId, { kind: "terminal", outcome, ...(detail !== undefined ? { detail } : {}) });
 		},
 	};
-}
-
-/**
- * Highest `seq` already in a run's file. Only read when a journal is reopened,
- * which happens on resume or after state eviction, never on the common path.
- */
-function countJournalSeq(path: string): number | null {
-	try {
-		const raw = readFileSync(path, "utf8");
-		if (raw.includes("\t#")) return null;
-		let highest = 0;
-		for (const line of raw.split("\n")) {
-			if (line.length === 0) continue;
-			const parsed = parseRunEventJournalLine(line);
-			if (parsed !== null && parsed.seq > highest) highest = parsed.seq;
-		}
-		return highest;
-	} catch {
-		return 0;
-	}
 }
 
 // ---------------------------------------------------------------------------
 // Process-wide default sink
 // ---------------------------------------------------------------------------
 
-let defaultJournal: RunEventJournal | null = null;
+let defaultJournal: RunEventJournalSink | null = null;
 
-/**
- * The sink every run event registry attaches to unless it was handed one.
- * Created lazily so importing the registry costs nothing, and shared so two
- * registries in one process cannot interleave two byte counters over one file.
- *
- * A run's file path is resolved on its first write and then held, so a state
- * root that moves mid-process (only tests do that) leaves already-opened runs
- * pointing at the old root. Run ids are random, so a fresh root always brings
- * fresh ids with it and nothing observable depends on re-resolving.
- */
-export function defaultRunEventJournal(): RunEventJournal {
+/** The sink every run event registry attaches to unless it was handed one; created lazily, shared per process. */
+export function defaultRunEventJournal(): RunEventJournalSink {
 	defaultJournal ??= createRunEventJournal();
 	return defaultJournal;
 }

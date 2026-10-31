@@ -7,7 +7,7 @@ import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { createStdioTransport } from "../../src/engine/acp/transport.js";
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
-test("saved next-turn settings reach the running guardrail and journal consumers", async () => {
+test("saved next-turn settings reach the running guardrail consumer", async () => {
 	const scratch = await isolateClioEnv("clio-coder-settings-projection-");
 	const originalCwd = process.cwd();
 	try {
@@ -24,21 +24,15 @@ test("saved next-turn settings reach the running guardrail and journal consumers
 				"--input-type=module",
 				"--eval",
 				`
-				import { existsSync } from "node:fs";
 				import { telemetryHub } from ${JSON.stringify(source("core/telemetry/hub.ts"))};
 				import { resolveGuardrail } from ${JSON.stringify(source("core/guardrails.ts"))};
-				import { defaultRunEventJournal, runEventJournalPath } from ${JSON.stringify(source("domains/dispatch/run-event-journal.ts"))};
 				import { createStdioServerTransport } from ${JSON.stringify(source("engine/acp/transport.ts"))};
 				import { bootOrchestrator } from ${JSON.stringify(source("entry/orchestrator.ts"))};
 				const transport = createStdioServerTransport();
-				let observation = 0;
 				telemetryHub().subscribe("config.next_turn_scheduled", () => {
 					queueMicrotask(() => {
-						const runId = "projection-fixture-" + (++observation);
-						defaultRunEventJournal().open(runId, "fixture");
 						transport.notify("probe/settings", {
 							readMaxBytes: resolveGuardrail("readMaxBytes"),
-							journalWritten: existsSync(runEventJournalPath(runId)),
 						});
 					});
 				});
@@ -83,16 +77,14 @@ test("saved next-turn settings reach the running guardrail and journal consumers
 			deepStrictEqual(
 				await change((settings) => {
 					settings.safety.limits.readBytesPerCall = 1024;
-					settings.fleet.history.journal = false;
 				}),
-				{ readMaxBytes: 1024, journalWritten: false },
+				{ readMaxBytes: 1024 },
 			);
 			deepStrictEqual(
 				await change((settings) => {
 					settings.safety.limits.readBytesPerCall = 8192;
-					settings.fleet.history.journal = true;
 				}),
-				{ readMaxBytes: 8192, journalWritten: true },
+				{ readMaxBytes: 8192 },
 			);
 			transport.close();
 			ok(await transport.waitForExit(5_000));
