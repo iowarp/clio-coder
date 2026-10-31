@@ -25,15 +25,19 @@ import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
 const verdictText = {
 	unknown: "Trust information is missing or has not been checked.",
-	unverified: "The receipt is intact. Its result has no observed validation.",
-	grounded: "The receipt is intact and validation was observed.",
-	reviewed: "The receipt is intact and an independent review passed.",
+	unverified: "The record is intact. Its result has no observed validation.",
+	grounded: "The record is intact and validation was observed.",
+	reviewed: "The record is intact and an independent review passed.",
 	compromised:
-		"At least one trust check failed or a validation claim lacked an observed command. The receipt seal may still be intact; read the five checks below.",
+		"At least one trust check failed or a validation claim lacked an observed command. The record seal may still be intact; read the five checks below.",
 };
 
 const trustChecks = [
-	{ key: "artifactIntegrity", label: "Receipt integrity", meaning: "Was the saved receipt verified against its seal?" },
+	{
+		key: "artifactIntegrity",
+		label: "Run record integrity",
+		meaning: "Was the saved record verified against its seal?",
+	},
 	{ key: "validationGrounding", label: "Validation", meaning: "Did an observed command support the claimed check?" },
 	{ key: "independentReview", label: "Independent review", meaning: "Did an independent reviewer check this result?" },
 	{ key: "contextProvenance", label: "Context", meaning: "Was the worker context recorded and valid?" },
@@ -83,7 +87,7 @@ function EvidenceActions({
 	});
 	const tracking = useOperationRequest(client, "evidence", (request) =>
 		client.call(
-			routes.receiptVerify,
+			routes.runRecordVerify,
 			{ ...emptyInput, params: { id: request.workspaceId, runId: request.resourceId } },
 			request.key,
 			undefined,
@@ -94,7 +98,7 @@ function EvidenceActions({
 	const submit = () => tracking.start({ workspaceId: selection.id, resourceId: runId.trim(), action: "verify" });
 	return (
 		<details className="trace-panel evidence-actions" open={initiallyOpen || !!tracking.request}>
-			<summary>Recheck a receipt</summary>
+			<summary>Recheck a record</summary>
 			<p>
 				Choose a workspace and a dispatch run. Each run's evidence is assessed when it settles and sealed with it.
 				Rechecking reads the run's sealed record again to detect changes since it was sealed. The chosen workspace runs the
@@ -164,7 +168,7 @@ function EvidenceActions({
 				</label>
 				<div className="actions">
 					<button type="button" disabled={busy || !selection.id || !runId.trim()} onClick={submit}>
-						Recheck receipt
+						Recheck record
 					</button>
 				</div>
 			</fieldset>
@@ -187,14 +191,14 @@ function EvidenceActions({
 					{operation.data.status === "succeeded" && (
 						<>
 							<p>{operation.data.result.message}</p>
-							{"kind" in operation.data.result && operation.data.result.kind === "receipt-verification" && (
+							{"kind" in operation.data.result && operation.data.result.kind === "run-record-verification" && (
 								<>
 									<p>
 										Integrity result: <strong>{operation.data.result.verification.state}</strong> ·{" "}
 										{formatTime(operation.data.result.verification.verifiedAt)}
 									</p>
 									{operation.data.result.verification.reason && <p>Reason: {operation.data.result.verification.reason}</p>}
-									<p>An intact receipt authenticates the record; it does not establish that the work is correct.</p>
+									<p>An intact record authenticates the record; it does not establish that the work is correct.</p>
 									<dl className="settings-list">
 										{trustChecks.map((check) => (
 											<div key={check.key}>

@@ -4,10 +4,10 @@
  * It opens on a board of worker cards, one per worker of this Clio session,
  * running ones first. Each card says who the worker is, what it was asked,
  * its state and clock, its route, its tool budget, what it spent, and what it
- * is doing now, or for a finished one, how the sealed receipt judged it.
+ * is doing now, or for a finished one, how the sealed record judged it.
  * Enter takes the whole dock over for the selected worker: a pinned header and
  * the worker's live stream underneath (calls with their targets and results,
- * prose as it is written, approvals, refusals, errors), then the receipt
+ * prose as it is written, approvals, refusals, errors), then the record
  * summary once it seals. Esc returns to the board at the same card.
  *
  * Everything comes from durable state (src/cli/fleet-board-model.ts), so the
@@ -230,35 +230,35 @@ function phaseWords(phase: WorkerPhase): [string, string] {
 		case "waiting":
 			return ["◔", "waiting for the model"];
 		case "settled":
-			return ["◔", "sealing the receipt"];
+			return ["◔", "sealing the run record"];
 		default:
 			return ["◌", "starting"];
 	}
 }
 
-/** What a finished worker's receipt says, in the transcript's words. */
+/** What a finished worker's record says, in the transcript's words. */
 function verdictText(paint: BoardPaint, card: WorkerCard): string {
-	const receipt = card.receipt;
-	if (receipt === null) {
-		const detail = card.ledgerDetail === undefined ? "receipt unavailable" : clean(card.ledgerDetail);
+	const record = card.record;
+	if (record === null) {
+		const detail = card.ledgerDetail === undefined ? "run record unavailable" : clean(card.ledgerDetail);
 		return `${stateGlyph(paint, card)} ${paint.fg(card.state === "failed" ? "error" : "toolMetadata", `${stateWord(card.state)} · ${detail}`)}`;
 	}
 	const parts: string[] = [];
-	if (receipt.outcome === "succeeded") {
+	if (record.outcome === "succeeded") {
 		parts.push(card.toolCalls === 0 ? paint.fg("toolMetadata", "◌ ran no tools") : paint.fg("success", "✓ succeeded"));
-	} else if (receipt.outcome === "canceled") {
+	} else if (record.outcome === "canceled") {
 		parts.push(paint.fg("toolMetadata", "⊘ canceled"));
 	} else {
-		parts.push(paint.fg("error", `✗ ${clean(receipt.outcomeCode ?? receipt.outcome)}`));
+		parts.push(paint.fg("error", `✗ ${clean(record.outcomeCode ?? record.outcome)}`));
 	}
-	if (receipt.contract !== undefined) {
-		parts.push(paint.fg(receipt.contract === "fail" ? "error" : "toolMetadata", `contract ${receipt.contract}`));
+	if (record.contract !== undefined) {
+		parts.push(paint.fg(record.contract === "fail" ? "error" : "toolMetadata", `contract ${record.contract}`));
 	}
 	// A broken or unchecked seal outranks the verdict built on it.
-	if (receipt.seal !== undefined && receipt.seal !== "sealed") parts.push(paint.fg("warning", clean(receipt.seal)));
-	else if (receipt.verdict !== undefined) {
-		const sound = ["reviewed", "grounded", "unverified", "unknown"].includes(receipt.verdict);
-		parts.push(paint.fg(sound ? "toolMetadata" : "warning", sound ? `trust ${receipt.verdict}` : clean(receipt.verdict)));
+	if (record.seal !== undefined && record.seal !== "sealed") parts.push(paint.fg("warning", clean(record.seal)));
+	else if (record.verdict !== undefined) {
+		const sound = ["reviewed", "grounded", "unverified", "unknown"].includes(record.verdict);
+		parts.push(paint.fg(sound ? "toolMetadata" : "warning", sound ? `trust ${record.verdict}` : clean(record.verdict)));
 	}
 	return parts.join(paint.fg("toolMetadata", SEPARATOR));
 }
@@ -441,7 +441,7 @@ function streamLines(paint: BoardPaint, row: StreamRow, startedAtMs: number, wid
 				`${lead(paint.fg("toolGlyph", "⚙"))}${paint.fg(row.pending ? "activity" : "toolTarget", call)}${mark}`,
 			];
 			if (row.reason !== undefined && row.outcome !== "ok") {
-				// Two rows say why; the whole reason is in the receipt and `fleet view`.
+				// Two rows say why; the whole reason is in the record and `fleet view`.
 				const why = wrapPrefixed(" ".repeat(prefixWidth), clean(row.reason), width, prefixWidth);
 				if (why.length > 2) why[1] = cut(`${why[1]}…`, width);
 				lines.push(...why.slice(0, 2).map((line) => paint.fg("warning", line)));
@@ -498,13 +498,16 @@ function streamLines(paint: BoardPaint, row: StreamRow, startedAtMs: number, wid
 	}
 }
 
-function receiptLines(paint: BoardPaint, model: TakeoverModel, width: number): string[] {
+function runRecordLines(paint: BoardPaint, model: TakeoverModel, width: number): string[] {
 	const { card } = model;
 	if (isLive(card.state)) return [];
-	const lines: string[] = ["", paint.fg("divider", `${RULE.repeat(2)} receipt ${RULE.repeat(Math.max(0, width - 11))}`)];
+	const lines: string[] = [
+		"",
+		paint.fg("divider", `${RULE.repeat(2)} run record ${RULE.repeat(Math.max(0, width - 14))}`),
+	];
 	lines.push(cut(verdictText(paint, card), width));
-	const receipt = card.receipt;
-	if (receipt === null) return lines;
+	const record = card.record;
+	if (record === null) return lines;
 	const spend = [
 		`${card.toolCallsDisplay ?? "unknown"} tool calls`,
 		...(card.tokens !== undefined ? [`${card.tokens} tokens`] : []),
@@ -512,24 +515,20 @@ function receiptLines(paint: BoardPaint, model: TakeoverModel, width: number): s
 		...(card.elapsed !== undefined ? [card.elapsed] : []),
 	].join(SEPARATOR);
 	lines.push(cut(paint.fg("toolMetadata", spend), width));
-	const trust = [
-		receipt.seal,
-		receipt.verdict === undefined ? undefined : `trust ${receipt.verdict}`,
-		receipt.validation,
-	]
+	const trust = [record.seal, record.verdict === undefined ? undefined : `trust ${record.verdict}`, record.validation]
 		.filter((part) => part !== undefined)
 		.map((part) => clean(part as string))
 		.join(SEPARATOR);
 	if (trust.length > 0) lines.push(...wrapPrefixed("", paint.fg("toolMetadata", trust), width, 2));
-	if (receipt.failure !== undefined) {
-		const first = (receipt.failure.split("\n", 1)[0] ?? "").trim();
+	if (record.failure !== undefined) {
+		const first = (record.failure.split("\n", 1)[0] ?? "").trim();
 		if (first.length > 0) lines.push(...wrapPrefixed("", paint.fg("error", clean(first)), width, 2));
 	}
-	if (receipt.changedPaths !== undefined) {
-		lines.push(...wrapPrefixed("", paint.fg("body", `changed ${receipt.changedPaths.map(clean).join(", ")}`), width, 2));
+	if (record.changedPaths !== undefined) {
+		lines.push(...wrapPrefixed("", paint.fg("body", `changed ${record.changedPaths.map(clean).join(", ")}`), width, 2));
 	}
-	if (receipt.answer !== undefined) {
-		const answer = receipt.answer.split("\n").map((line) => clean(line));
+	if (record.answer !== undefined) {
+		const answer = record.answer.split("\n").map((line) => clean(line));
 		const shown = answer.slice(0, ANSWER_PREVIEW_LINES);
 		lines.push(paint.fg("groupHeading", "answer"));
 		lines.push(...wrapPrefixed("  ", paint.fg("assistantProse", shown.join("\n")), width, 2));
@@ -612,7 +611,7 @@ function renderTakeover(
 		const [glyph, words] = phaseWords(model.card.phase);
 		if (model.card.phase !== "writing") stream.push(cut(`        ${paint.fg("activity", `${glyph} ${words}`)}`, columns));
 	}
-	stream.push(...receiptLines(paint, model, columns - 1).map((line) => (line.length === 0 ? line : ` ${line}`)));
+	stream.push(...runRecordLines(paint, model, columns - 1).map((line) => (line.length === 0 ? line : ` ${line}`)));
 	if (!isLive(model.card.state) && model.fleet?.running === true && view.followSuccessor) {
 		stream.push(cut(` ${paint.fg("activity", "◔ waiting for the fleet's next step…")}`, columns));
 	}

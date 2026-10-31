@@ -94,7 +94,7 @@ function firstLine(text: string): string {
  */
 const FIRST_LINE_REASONS: ReadonlySet<EvictionReason> = new Set<EvictionReason>([
 	"failure_resolved",
-	"dispatch_receipt_settled",
+	"dispatch_run_record_settled",
 ]);
 
 export function renderMarker(input: MarkerInput): string {

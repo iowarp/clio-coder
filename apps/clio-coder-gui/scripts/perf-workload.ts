@@ -29,7 +29,7 @@ const BYTES = Number(values.bytes);
 const WORKLOAD = BYTES > 0 ? `[workload ${BYTES}]` : "[workload]";
 const TYPED = "Typing a follow-up question while Clio Coder is still streaming.";
 
-/** Installed before any app script so the receipt clock and the render counters exist from the start. */
+/** Installed before any app script so the record clock and the render counters exist from the start. */
 const INSTRUMENTATION = `(() => {
 	const WINDOW_FROM = 100;
 	globalThis.__clioRenderCounts = {};

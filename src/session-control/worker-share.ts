@@ -136,13 +136,13 @@ export function isWorkerShareNote(text: string): boolean {
 
 /** Terminal facts of a settled worker block, or null while it is still running. */
 export function workerShareFactsFromEntry(entry: WorkerEntryState): WorkerShareFacts | null {
-	if (entry.pending || entry.receipt === undefined) return null;
+	if (entry.pending || entry.result === undefined) return null;
 	return {
 		agentId: entry.agentId,
 		runId: entry.runId,
-		outcome: entry.receipt.outcome,
+		outcome: entry.result.outcome,
 		text: entry.text,
-		...(entry.receipt.placement ? { placement: entry.receipt.placement } : {}),
+		...(entry.result.placement ? { placement: entry.result.placement } : {}),
 	};
 }
 
@@ -158,7 +158,7 @@ export function selectWorkerRunToShare(entries: ReadonlyArray<WorkerEntryState>,
 	const wanted = id?.trim();
 	for (let index = entries.length - 1; index >= 0; index -= 1) {
 		const entry = entries[index];
-		if (entry === undefined || entry.pending || entry.receipt === undefined) continue;
+		if (entry === undefined || entry.pending || entry.result === undefined) continue;
 		if (wanted === undefined || wanted.length === 0) {
 			if (!workerAskedByModel(entry)) return entry;
 			continue;

@@ -10,8 +10,8 @@ import {
 	HealthFact,
 	type HealthItem,
 } from "../../contracts/fleet-events.js";
-import { ReceiptFacts } from "../../contracts/receipt-facts.js";
-import { ACP_RECEIPT_META_KEY, AcpJob } from "../../contracts/wire.js";
+import { RunResultFacts } from "../../contracts/run-result-facts.js";
+import { ACP_RUN_RESULT_META_KEY, AcpJob } from "../../contracts/wire.js";
 import { AppProblem } from "../services/problem.js";
 import { record } from "./client.js";
 import { projectTelemetryValue } from "./telemetry.js";
@@ -69,16 +69,16 @@ export function fleetEvent(value: unknown, sessionId: string, previousSequence: 
 	const fact = Value.Clean(schema, { type, payload: event.payload });
 	if (!Value.Check(schema, fact) || Buffer.byteLength(JSON.stringify(fact)) > 8192)
 		throw new AppProblem("upstream_acp", "ACP event exceeds its public projection contract.");
-	const rawReceipt = record(event._meta)[ACP_RECEIPT_META_KEY];
-	const receipt = rawReceipt === undefined ? undefined : projectTelemetryValue(ReceiptFacts, rawReceipt);
-	if (receipt && receipt.receiptId !== record(event.payload).runId)
-		throw new AppProblem("upstream_acp", "Receipt identifies a different run.");
+	const rawResult = record(event._meta)[ACP_RUN_RESULT_META_KEY];
+	const result = rawResult === undefined ? undefined : projectTelemetryValue(RunResultFacts, rawResult);
+	if (result && result.runId !== record(event.payload).runId)
+		throw new AppProblem("upstream_acp", "Run result identifies a different run.");
 	const item = {
 		id: randomUUID(),
 		at: new Date().toISOString(),
 		sourceSequence: sequence,
 		fact,
-		...(receipt ? { receipt } : {}),
+		...(result ? { record: result } : {}),
 	} as FleetItem | HealthItem;
 	return { type, item, sequence };
 }

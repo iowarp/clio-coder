@@ -13,7 +13,7 @@ export const CliCommand = Type.Union([
 	Type.Object({ kind: Type.Literal("library.agents") }, closed),
 	Type.Object({ kind: Type.Literal("library.verifiers") }, closed),
 	Type.Object({ kind: Type.Literal("usage.report") }, closed),
-	Type.Object({ kind: Type.Literal("receipt.verify"), id: Id }, closed),
+	Type.Object({ kind: Type.Literal("run.verify"), id: Id }, closed),
 	Type.Object({ kind: Type.Literal("targets.list") }, closed),
 	Type.Object({ kind: Type.Literal("targets.probe"), id: Id }, closed),
 	Type.Object({ kind: Type.Literal("targets.use"), id: Id }, closed),
@@ -61,7 +61,7 @@ export function commandPlan(input: unknown, cwd?: string): { argv: string[]; out
 		case "usage.report":
 			if (!cwd) throw new AppProblem("validation", "A canonical workspace is required for usage.");
 			return { argv: ["usage", "report", "--repo", cwd, "--days", "30", "--json"], output: "json" };
-		case "receipt.verify":
+		case "run.verify":
 			return { argv: ["fleet", "verify", input.id, "--json"], output: "json" };
 		case "targets.list":
 			return { argv: ["targets", "--json"], output: "json" };

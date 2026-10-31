@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { Link } from "react-router";
 import type { Static } from "typebox";
-import type { TraceReceipt, TraceRun } from "../../../contracts/traces.js";
+import type { TraceRun, TraceRunRecord } from "../../../contracts/traces.js";
 import type { CostReportV1, RunTelemetryV1, RunTimelineEntry } from "../../../contracts/wire.js";
 import type { Client } from "../../api/client.js";
 import { clock, formatDuration } from "../../api/clock.js";
@@ -10,7 +10,7 @@ import { Facts as RecordFacts } from "../../design/facts.js";
 import { humanizeKey } from "../../design/facts-model.js";
 import { StatusMark } from "../../design/status.js";
 import { Explained } from "../../telemetry/Explained.js";
-import { ReceiptChecks } from "./receipt-checks.js";
+import { RunRecordChecks } from "./run-record-checks.js";
 import { callPosition, entryLabel, runModelSpend, runSpan, runSpend, stageBars } from "./trace-model.js";
 export function object(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -210,17 +210,17 @@ export function EntryRow({ client, entry, start }: { client: Client; entry: RunT
 	);
 }
 /**
- * The receipt as the read model checks it: the seal's integrity, the checks and outcome it vouches for, and the
+ * The record as the read model checks it: the seal's integrity, the checks and outcome it vouches for, and the
  * evidence bundle that names the run (#434 §11.3). The saved document itself appears only once it is asked for, and
  * nothing in it is vouched for beyond what the checks say.
  */
-export function ReceiptPanel({
+export function RunRecordPanel({
 	data,
 	loadFull,
 	full,
 	loading = false,
 }: {
-	data: Static<typeof TraceReceipt>;
+	data: Static<typeof TraceRunRecord>;
 	loadFull: () => void;
 	full: boolean;
 	loading?: boolean;
@@ -240,7 +240,7 @@ export function ReceiptPanel({
 					</button>
 				) : null}
 			</div>
-			<ReceiptChecks evidence={evidence} />
+			<RunRecordChecks evidence={evidence} />
 			{sealed ? (
 				<>
 					<h3>Outcome</h3>
@@ -263,7 +263,7 @@ export function ReceiptPanel({
 			{record ? (
 				<>
 					<h3>The settled record</h3>
-					<p className="trace-receipt__source">
+					<p className="trace-run-record__source">
 						The run's run.settled and result object. Only the checks above are vouched for by its seal;{" "}
 						<Link to="/evidence">Evidence</Link> collects and rechecks bundles.
 					</p>

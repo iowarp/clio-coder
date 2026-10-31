@@ -401,20 +401,21 @@ try {
 			await tokensExplain.locator("summary").evaluate((element) => element === document.activeElement),
 			"Escape hands focus back to the explained number",
 		);
-		// A run opens on its replay; the sealed receipt's checks have their own view.
-		await page.getByRole("tab", { name: /^Checks & receipt/ }).click();
+		// A run opens on its replay; the sealed record's checks have their own view.
+		await page.getByRole("tab", { name: /^Checks & record/ }).click();
 		// Format conformance and contract quality are separate facts; an unmeasured quality never reads as a pass.
-		const checkRow = (label: string) => page.locator(".receipt-check", { has: page.getByText(label, { exact: true }) });
+		const checkRow = (label: string) =>
+			page.locator(".run-record-check", { has: page.getByText(label, { exact: true }) });
 		const mark = (label: string, word: string) =>
-			checkRow(label).locator(".receipt-check__state .status-mark", { hasText: word }).waitFor();
+			checkRow(label).locator(".run-record-check__state .status-mark", { hasText: word }).waitFor();
 		await mark("Result format", "Conforms");
 		await mark("Result quality", "Not measured");
 		await mark("Claimed checks", "1 of 2 claims grounded");
 		// The checks stand under the seal the read model verified; the saved document comes only on request (#434 §11.3).
-		await page.locator(".receipt-checks__integrity .status-mark", { hasText: "sealed" }).waitFor();
-		assert.equal(await page.getByRole("heading", { name: "The saved document", exact: true }).count(), 0);
-		await page.getByRole("button", { name: "Load full receipt", exact: true }).click();
-		await page.getByRole("heading", { name: "The saved document", exact: true }).waitFor();
+		await page.locator(".run-record-checks__integrity .status-mark", { hasText: "sealed" }).waitFor();
+		assert.equal(await page.getByRole("heading", { name: "The settled record", exact: true }).count(), 0);
+		await page.getByRole("button", { name: "Load full run record", exact: true }).click();
+		await page.getByRole("heading", { name: "The settled record", exact: true }).waitFor();
 		await check("trace-run");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `trace-run-${width}.png`), fullPage: true });

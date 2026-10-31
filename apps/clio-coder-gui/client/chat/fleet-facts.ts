@@ -43,7 +43,7 @@ export interface FleetRun {
 	/** The server's wording of the completed frame's token count; null when the frame reported none. */
 	readonly tokens: string | null;
 	readonly updatedAt: string;
-	readonly receipt?: FleetItem["receipt"];
+	readonly record?: FleetItem["record"];
 }
 
 /**
@@ -181,7 +181,7 @@ export function foldFleetRuns(items: readonly FleetItemLike[]): readonly FleetRu
 			runId = text(payload.runId);
 		if (runId === null) continue;
 		const run = apply(runs.get(runId) ?? blank(runId, item.at), item.fact.type, payload, item.at);
-		runs.set(runId, item.receipt ? { ...run, receipt: item.receipt } : run);
+		runs.set(runId, item.record ? { ...run, record: item.record } : run);
 	}
 	if (runs.size <= FLEET_RUN_CAP) return [...runs.values()];
 	const over = runs.size - FLEET_RUN_CAP;

@@ -59,13 +59,12 @@ test("real CLI rechecks a tampered run seal truthfully", async () => {
 		// The dispatch listing is what makes the run id referenceable at all.
 		await h.request("/api/fleet/dispatches");
 		const verify = async () => {
-			const accepted = await json(
-				await h.post(`/api/workspaces/${workspace.id}/receipts/${seeded.runId}/verify`),
-				Accepted,
-			);
+			const accepted = await json(await h.post(`/api/workspaces/${workspace.id}/runs/${seeded.runId}/verify`), Accepted);
 			const operation = await terminal(h.operations, accepted.operationId, 30_000);
 			assert.ok(
-				operation.status === "succeeded" && "kind" in operation.result && operation.result.kind === "receipt-verification",
+				operation.status === "succeeded" &&
+					"kind" in operation.result &&
+					operation.result.kind === "run-record-verification",
 				JSON.stringify(operation),
 			);
 			return operation.result.verification;

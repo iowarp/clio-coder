@@ -129,7 +129,7 @@ export interface DispatchBoardRow {
 	 * running row carries no receipt id and never implies evidence that does
 	 * not exist yet.
 	 */
-	receiptId?: string;
+	runRecordId?: string;
 	/** Waiting retry projected from the live dispatch snapshot. */
 	retry?: DispatchRetryPresentation;
 	/** Most recent worker delivery acknowledgement for an operator steer. */
@@ -590,7 +590,7 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 		axes.completionEvidence === "absent";
 	const trust =
 		row.trust === undefined
-			? theme.fg("annotation", isTerminalStatus(row.status) ? "receipt not read back" : "not sealed yet")
+			? theme.fg("annotation", isTerminalStatus(row.status) ? "run record not read back" : "not sealed yet")
 			: theme.fg(
 					trustVerdictToken(row.trust.verdict),
 					`${trustVerdictMark(row.trust.verdict)}${row.trust.verdict}; ${compact ? trustStateWord("validationGrounding", "absent") : row.trust.text}`,
@@ -1270,7 +1270,7 @@ function toRow(
 		...(entry.failoverHops !== undefined ? { failoverHops: entry.failoverHops } : {}),
 		...(entry.contextWindow !== undefined ? { contextWindow: entry.contextWindow } : {}),
 		lastContextTokens: entry.lastContextTokens ?? null,
-		...(entry.receiptId !== undefined ? { receiptId: entry.receiptId } : {}),
+		...(entry.runRecordId !== undefined ? { runRecordId: entry.runRecordId } : {}),
 		...(entry.phase !== undefined ? { phase: { ...entry.phase } } : {}),
 		// Both tool fields are views of the one projection, so the compact card and
 		// the expanded detail can never disagree about what is running.

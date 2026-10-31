@@ -6477,10 +6477,7 @@ export function createDispatchBundle(
 					callUsage?.gap();
 					recordingJournal.gap(envelope.id, 1);
 					toolTelemetryIngestionErrors += 1;
-					reportDispatchDiagnostic(
-						`run ${envelope.id}`,
-						new Error("event stream did not drain before receipt finalization"),
-					);
+					reportDispatchDiagnostic(`run ${envelope.id}`, new Error("event stream did not drain before run finalization"));
 				}
 				if (eventPump.droppedEvents() > 0) {
 					reportDispatchDiagnostic(
@@ -8351,10 +8348,7 @@ export function createDispatchBundle(
 					callUsage?.gap();
 					recordingJournal.gap(envelope.id, 1);
 					toolTelemetryIngestionErrors += 1;
-					reportDispatchDiagnostic(
-						`run ${envelope.id}`,
-						new Error("event stream did not drain before receipt finalization"),
-					);
+					reportDispatchDiagnostic(`run ${envelope.id}`, new Error("event stream did not drain before run finalization"));
 				}
 				const malformedFrames = malformedWorkerStdoutLineCount(result);
 				const lostCallFrames = malformedFrames + (result.evidenceIncomplete !== undefined ? 1 : 0);
@@ -10761,7 +10755,7 @@ export function createDispatchBundle(
 				}
 			}
 			const receipt = receipts.at(-1);
-			if (receipt === undefined) throw new Error(`dispatch: member '${runId}' has no terminal receipt`);
+			if (receipt === undefined) throw new Error(`dispatch: member '${runId}' has no terminal run result`);
 			return { receipt, receipts };
 		},
 		abort(runId, reason) {

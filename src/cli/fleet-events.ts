@@ -26,7 +26,7 @@ import { fleetInspectionScope, resolveFleetRootId } from "./fleet-project-scope.
 const HELP = `clio-coder fleet events <fleetRootId> [--follow] [--json] [--all]
 
 Print a fleet run's live event journal: fleet_started, step_dispatched,
-step_settled (the step's receipt or command record path, the digest of its
+step_settled (the step's run record or command record path, the digest of its
 entry in the fleet manifest, and the digest of the manifest bytes written at
 that moment) and fleet_sealed, the last line. Lines are hash-chained, not
 signed: the chain detects a line that does not extend the ones before it, not

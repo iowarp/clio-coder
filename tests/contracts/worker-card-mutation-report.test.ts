@@ -5,7 +5,7 @@ import { WORKER_LIVE_TAIL_MAX_BYTES } from "../../src/domains/telemetry/worker-p
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
-import { createWorkerStream, type WorkerReceiptFacts } from "../../src/session-control/worker-stream.js";
+import { createWorkerStream, type WorkerRunResultFacts } from "../../src/session-control/worker-stream.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { settledRunTrust } from "../harness/settled-run.js";
 
@@ -26,7 +26,7 @@ const report = {
 };
 const text = JSON.stringify(report);
 
-function verifiedFacts(runId: string): WorkerReceiptFacts {
+function verifiedFacts(runId: string): WorkerRunResultFacts {
 	const envelope = fixtureEnvelope(runId);
 	const draft = fixtureReceiptDraft(envelope);
 	draft.output = { text, truncated: false, state: "final", bytes: Buffer.byteLength(text) };
@@ -43,7 +43,7 @@ function verifiedFacts(runId: string): WorkerReceiptFacts {
 
 test("a mutation report that outgrew the live tail settles into prose, not raw JSON (BT-011)", () => {
 	assert.ok(Buffer.byteLength(text) > WORKER_LIVE_TAIL_MAX_BYTES, "the answer must be longer than the live tail");
-	const stream = createWorkerStream({ readReceipt: (runId) => verifiedFacts(runId) });
+	const stream = createWorkerStream({ readResult: (runId) => verifiedFacts(runId) });
 	const started = stream.started({
 		runId: "bt011-run",
 		assignmentId: "bt011",

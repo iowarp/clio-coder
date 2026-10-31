@@ -26,7 +26,7 @@ import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../
 import { toolResultSummary } from "../../src/session-control/chat-loop-messages.js";
 import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
 import type { ChatTurnState } from "../../src/session-control/turn-state.js";
-import type { WorkerEntryState, WorkerReceiptFacts } from "../../src/session-control/worker-stream.js";
+import type { WorkerEntryState, WorkerRunResultFacts } from "../../src/session-control/worker-stream.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
@@ -660,7 +660,7 @@ test("an aborted worker writes one settled row, from its terminal event", () => 
 		requestRender: noop,
 		notify: noop,
 		recordWorkerSettled: (fields) => settled.push(fields),
-		readWorkerReceipt: () => ({ outcome: "canceled", durationMs: 1, tokenCount: 0, toolCalls: 0, text: "" }),
+		readWorkerRunResult: () => ({ outcome: "canceled", durationMs: 1, tokenCount: 0, toolCalls: 0, text: "" }),
 	});
 	const identity = {
 		agentId: "scout",
@@ -694,7 +694,7 @@ test("an aborted worker writes one settled row, from its terminal event", () => 
 
 test("an operator /run resumes with its command above its card, the spend its live card stated and its calls", () => {
 	const noop = (): void => undefined;
-	const receipt: WorkerReceiptFacts = {
+	const receipt: WorkerRunResultFacts = {
 		outcome: "succeeded",
 		durationMs: 42_000,
 		tokenCount: 18_200,
@@ -718,7 +718,7 @@ test("an operator /run resumes with its command above its card, the spend its li
 		},
 		recordWorkerRun: (fields) => runs.push(fields),
 		recordWorkerSettled: (fields) => settled.push(fields),
-		readWorkerReceipt: () => receipt,
+		readWorkerRunResult: () => receipt,
 	});
 	const identity = {
 		agentId: "documenter",
@@ -806,7 +806,7 @@ test("an operator /run resumes with its command above its card, the spend its li
 		},
 	] as SessionEntry[];
 	const replayed = createChatPanel({ getOutputStyle: () => style, getTelemetry: () => view });
-	rehydrateChatPanelFromTurns(replayed, entries, { readWorkerReceipt: () => receipt });
+	rehydrateChatPanelFromTurns(replayed, entries, { readWorkerRunResult: () => receipt });
 	const plain = (panel: ReturnType<typeof createChatPanel>) => panel.render(100).map(stripTerminalSequences).join("\n");
 	assert.match(plain(replayed), /^▌ \/run documenter --target blade/u);
 	assert.match(plain(replayed), /context 6,200/u);

@@ -25,7 +25,7 @@ import { createAssistantGenerationTiming } from "../session-control/assistant-ge
 import type { ChatLoop, ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { RunIo } from "../session-control/slash-commands.js";
 import { parseSlashCommand } from "../session-control/slash-commands.js";
-import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
+import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { createChatPanel } from "./chat-panel.js";
@@ -387,7 +387,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	});
 	const unbindRunReaders = deps.telemetry.bindRunReaders({
 		dispatchSnapshot: () => deps.dispatch.snapshot(),
-		readReceipt: (runId) => readWorkerReceiptFacts(runId),
+		readRunResult: (runId) => readWorkerRunResultFacts(runId),
 	});
 	const dispatchBoardStore = factories.createDispatchBoardStore(deps.telemetry);
 	const contextActivityStore = factories.createContextActivityStore(deps.bus, () => deps.chat.getSessionId());

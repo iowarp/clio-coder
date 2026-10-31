@@ -137,7 +137,7 @@ export const PANELS = {
 		eyebrow: eyebrow("One recorded run", "dispatch ledger", READ_ONLY),
 		title: "Run",
 		boundary:
-			"The receipt is reproduced from the ledger on this machine as it was sealed. Reading it re-runs nothing, and a valid integrity mark authenticates the record rather than the work it describes.",
+			"The record is reproduced from the ledger on this machine as it was sealed. Reading it re-runs nothing, and a valid integrity mark authenticates the record rather than the work it describes.",
 	},
 	sessions: {
 		eyebrow: eyebrow("Your work", "workspaces on this machine", "open, resume and delete"),

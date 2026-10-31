@@ -834,7 +834,7 @@ function competeCorrelation(
 	decider: RunResult,
 ): GateDecisionCorrelation {
 	const subject = candidates[0]?.receipt;
-	if (subject === undefined) throw new Error("compete decision requires at least one candidate receipt");
+	if (subject === undefined) throw new Error("compete decision requires at least one candidate run record");
 	return gateCorrelationOf(subject, decider);
 }
 
@@ -1674,7 +1674,7 @@ async function runCompete(
 					decisions,
 					group,
 					winner: null,
-					needsDecision: `judge run ${judgeReceipt.runId} ended ${pipelineFailureReason(judgeReceipt)}; candidate worktrees were cleaned, their receipts remain; re-run compete or build directly`,
+					needsDecision: `judge run ${judgeReceipt.runId} ended ${pipelineFailureReason(judgeReceipt)}; candidate worktrees were cleaned, their run records remain; re-run compete or build directly`,
 				};
 			}
 			const judged = parseCompeteGateResult(normalizedAssistantText(judgeSummary), compete.candidates);
@@ -1685,7 +1685,7 @@ async function runCompete(
 					decisions,
 					group,
 					winner: null,
-					needsDecision: `${judged.reason}; candidate worktrees were cleaned, their receipts remain; re-run compete or build directly`,
+					needsDecision: `${judged.reason}; candidate worktrees were cleaned, their run records remain; re-run compete or build directly`,
 				};
 			}
 			const pick = judged.result.winner;
@@ -2299,7 +2299,7 @@ async function runCouncil(
 	if (prior.size > 0 && deps.dispatch.sealCouncilSynthesis !== undefined) {
 		const finalRuns = [...prior.values()];
 		const template = finalRuns[0];
-		if (template === undefined) throw new Error("council synthesis has no final member receipt");
+		if (template === undefined) throw new Error("council synthesis has no final member run result");
 		// The sealed text is the whole council-report, not the synthesis alone:
 		// /share <synthesis runId> reads this receipt to bring every final
 		// member's labelled answer and the synthesis line into the main context.

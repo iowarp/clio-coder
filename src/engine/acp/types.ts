@@ -82,7 +82,7 @@ export const ACP_MEMORY_META_KEY = "clio-coder/memory";
 export const ACP_TURN_META_KEY = "clio-coder/turn";
 export const ACP_TRUNCATED_META_KEY = "clio-coder/truncated";
 export const ACP_TOOLS_META_KEY = "clio-coder/tools";
-export const ACP_RECEIPT_META_KEY = "clio-coder/receipt";
+export const ACP_RUN_RESULT_META_KEY = "clio-coder/run-result";
 export const ACP_DISPATCH_PLAN_META_KEY = "clio-coder/dispatchPlan";
 export const ACP_WORKSPACE_META_KEY = "clio-coder/workspace";
 export const ACP_PLAN_META_KEY = "clio-coder/plan";
@@ -524,8 +524,8 @@ export const AcpFleetCapability = Type.Object(
 		version: Type.Literal(1),
 		preview: wireMethod,
 		run: wireMethod,
-		/** Terminal dispatch frames carry `_meta["clio-coder/receipt"]`. */
-		receiptFacts: Type.Optional(Type.Boolean()),
+		/** Terminal dispatch frames carry `_meta["clio-coder/run-result"]`. */
+		runResultFacts: Type.Optional(Type.Boolean()),
 		/** `preview` and `run` accept `resume`, a prior root whose successful prefix the run replays. */
 		resume: Type.Optional(Type.Literal(true)),
 	},

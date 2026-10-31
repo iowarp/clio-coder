@@ -43,7 +43,7 @@ export const MAX_PROJECTION_RUNS = 50;
 export const PROJECTION_FLUSH_DEBOUNCE_MS = 16;
 
 /**
- * What the projection reads beside the bus: the dispatch and receipt readers. Session spend, tokens and timing are
+ * What the projection reads beside the bus: the dispatch and run-result readers. Session spend, tokens and timing are
  * the telemetry read model's, never the projection's (#434).
  */
 export type ProjectionReadModel = TelemetryRunReaders;
@@ -310,7 +310,7 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 	}
 
 	function applyIdentity(summary: RunEntry, id: Partial<DispatchRunIdentity>): void {
-		// A lifecycle update must earn its trust again from the current receipt.
+		// A lifecycle update must earn its trust again from the current run record.
 		delete summary.trust;
 		delete summary.resultContract;
 		if (typeof id.agentId === "string" && id.agentId.length > 0) summary.agentId = id.agentId;
@@ -338,10 +338,10 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 		if (Value.Check(RunUsageFactsSchema, payload.spend)) summary.spend = structuredClone(payload.spend);
 	}
 
-	function settleFromReceipt(summary: RunEntry): void {
+	function settleFromRunResult(summary: RunEntry): void {
 		delete summary.resultContract;
 		try {
-			const facts = runReaders.readReceipt?.(summary.runId);
+			const facts = runReaders.readRunResult?.(summary.runId);
 			// A failed or retired seal cannot supply the board's terminal answer.
 			const text = facts?.trust?.artifactIntegrity.state === "verified" ? facts.text : undefined;
 			summary.progressFold.settle(typeof text === "string" && text.trim().length > 0 ? text : undefined);
@@ -363,9 +363,9 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 		const host = payload.hostVerification;
 		if (host === "verified" || host === "rejected" || host === "skipped" || host === "not_implicated")
 			summary.hostVerification = host;
-		if (payload.reason !== "retry_denied") summary.receiptId = summary.runId;
+		if (payload.reason !== "retry_denied") summary.runRecordId = summary.runId;
 		delete summary.retry;
-		settleFromReceipt(summary);
+		settleFromRunResult(summary);
 	}
 
 	function reconcileRuns(): void {

@@ -200,7 +200,7 @@ export function renderExitSummary(
 				`Workers (${count(snapshot.workers.length)}; ${outcomes(snapshot)})`,
 				snapshot.workers.map(
 					(worker) =>
-						`${worker.agent} · ${worker.outcome} · receipt ${worker.receipt} · ${worker.target} / ${worker.model} · ${worker.runId}`,
+						`${worker.agent} · ${worker.outcome} · run record ${worker.record} · ${worker.target} / ${worker.model} · ${worker.runId}`,
 				),
 			);
 			section(

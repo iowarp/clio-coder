@@ -288,13 +288,13 @@ export const offloadedBodyRung: Rung = {
 };
 
 export const dispatchReceiptSettledRung: Rung = {
-	id: "dispatch_receipt_settled",
+	id: "dispatch_run_record_settled",
 	run({ input, cutoffIndex }, emit): void {
 		for (let i = cutoffIndex - 1; i >= 0; i -= 1) {
 			const entry = input.entries[i];
 			if (entry === undefined || !isReceiptResult(entry)) continue;
 			const by = receiptSettledBy(i, input.entries);
-			if (by !== null) emit(entry.turnId, "dispatch_receipt_settled", by);
+			if (by !== null) emit(entry.turnId, "dispatch_run_record_settled", by);
 		}
 	},
 };

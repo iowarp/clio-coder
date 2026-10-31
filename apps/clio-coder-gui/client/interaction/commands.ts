@@ -54,7 +54,7 @@ export const DESTINATIONS: readonly Destination[] = [
 	{ label: "Context and memory settings", path: "/settings/context", keywords: ["compaction", "memory", "window"] },
 	{ label: "All settings", path: "/settings/advanced", keywords: ["advanced", "registry", "search", "everything"] },
 	{ label: "Fleet", path: "/fleet", keywords: ["dispatch", "workers", "runs"] },
-	{ label: "Evidence", path: "/evidence", keywords: ["receipts", "trust"] },
+	{ label: "Evidence", path: "/evidence", keywords: ["records", "trust"] },
 	{ label: "Skills", path: "/skills", keywords: ["instructions", "components", "capabilities"] },
 	{ label: "Library", path: "/library", keywords: ["packages", "skills", "components", "agents", "extensions"] },
 	{ label: "System", path: "/system", keywords: ["doctor", "health", "paths"] },

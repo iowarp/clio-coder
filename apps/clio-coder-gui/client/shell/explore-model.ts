@@ -24,7 +24,7 @@ const KEYWORDS: Readonly<Record<string, string>> = {
 	usage: "cost costs spending tokens calls models",
 	toolchain: "tools executables install setup",
 	traces: "replay timeline execution events",
-	evidence: "reports receipts findings provenance checks",
+	evidence: "reports records findings provenance checks",
 	fleet: "agents delegation workers teamwork",
 	library: "recipes plugins extensions verifiers",
 	safety: "permissions approvals spending limits",

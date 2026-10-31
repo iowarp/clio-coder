@@ -33,7 +33,7 @@ import {
 import type { AgentMessage } from "../engine/types.js";
 import { isSelfExplainingAbort } from "./chat-loop-messages.js";
 import { readPostureGeneration, readPostureUpdate } from "./posture-policy.js";
-import type { WorkerReceiptReader } from "./worker-stream.js";
+import type { WorkerRunResultReader } from "./worker-stream.js";
 
 const MAX_REPLAY_TEXT_CHARS = 20_000;
 
@@ -70,7 +70,7 @@ export interface RehydrateChatPanelOptions {
 	 * one place replay reads outside the entry stream, and it swallows every
 	 * failure, so a session whose run records are gone still replays.
 	 */
-	readWorkerReceipt?: WorkerReceiptReader;
+	readWorkerRunResult?: WorkerRunResultReader;
 	/**
 	 * Already-rendered continuity blocks, in order, from
 	 * `continuityReplayBlocks`. Each is emitted verbatim exactly once and never

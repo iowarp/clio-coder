@@ -8,7 +8,7 @@ import { register } from "./validate.js";
 export function traceRoutes(app: Hono, hub: EventHub, traces: TraceService) {
 	register(app, hub, routes.traceRuns, ({ query }) => traces.read({ kind: "runs", query }, routes.traceRuns.response));
 	register(app, hub, routes.traceRun, ({ params }) => traces.read({ kind: "run", ...params }, routes.traceRun.response));
-	register(app, hub, routes.traceReceipt, ({ params, query }) =>
-		traces.read({ kind: "receipt", ...params, full: query.include === "full" }, routes.traceReceipt.response),
+	register(app, hub, routes.traceRunRecord, ({ params, query }) =>
+		traces.read({ kind: "run-record", ...params, full: query.include === "full" }, routes.traceRunRecord.response),
 	);
 }

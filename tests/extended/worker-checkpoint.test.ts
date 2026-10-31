@@ -2,7 +2,7 @@ import { doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { renderWorkerEntryLines, workerNeedsInput } from "../../src/interactive/renderers/worker-entry.js";
-import type { WorkerEntryState, WorkerReceiptSummary } from "../../src/session-control/worker-stream.js";
+import type { WorkerEntryState, WorkerRunResultSummary } from "../../src/session-control/worker-stream.js";
 
 function settledWorker(text: string): WorkerEntryState {
 	return {
@@ -16,7 +16,7 @@ function settledWorker(text: string): WorkerEntryState {
 		tools: ["read"],
 		attempts: [],
 		pending: false,
-		receipt: { outcome: "succeeded", durationMs: 72_000 } as WorkerReceiptSummary,
+		result: { outcome: "succeeded", durationMs: 72_000 } as WorkerRunResultSummary,
 	};
 }
 
@@ -34,7 +34,7 @@ test("a worker checkpoint is marked as needing input and keeps its questions on 
 	const entry = settledWorker(CHECKPOINT);
 	ok(workerNeedsInput(entry));
 	ok(!workerNeedsInput(settledWorker("research_identified: RESEARCH.md written")));
-	const { receipt: _settled, ...running } = entry;
+	const { result: _settled, ...running } = entry;
 	ok(!workerNeedsInput(running), "a running worker is not a checkpoint yet");
 	const rows = renderWorkerEntryLines(entry, 100, {
 		terminalRows: 40,

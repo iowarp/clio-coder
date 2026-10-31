@@ -158,7 +158,7 @@ test("call origins are the label report's groups, in the server's words", () => 
 		view.origins.map((origin) => `${origin.label}:${origin.value}`),
 		["Side questions:1", "Conversation calls:9", "Worker run calls:≥2 (1 call unknown)"],
 	);
-	assert.match(view.originsNote, /sealed receipt/u);
+	assert.match(view.originsNote, /each run's journal/u);
 });
 
 test("skills keep the report's order, the read model's rows are claimed, and nothing else is dropped", () => {

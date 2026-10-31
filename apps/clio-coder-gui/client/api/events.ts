@@ -175,9 +175,9 @@ export function subscribe(
 						refreshReads.set(delta.payload.resource, keys);
 					}
 				}
-				// A sealed evidence bundle changes what the evidence and receipt reads return.
+				// A sealed evidence bundle changes what the evidence and record reads return.
 				if (delta.type === "evidence.ready")
-					for (const key of ["evidence", "evidence-detail", "fleet-receipt"]) invalidate.add(key);
+					for (const key of ["evidence", "evidence-detail", "fleet-run-record"]) invalidate.add(key);
 			}
 			if (event.type === "hello") {
 				if (disconnected) {
@@ -197,7 +197,7 @@ export function subscribe(
 				operations.push({ ...event.payload });
 				invalidate.add("tools");
 				if (event.payload.kind.startsWith("evidence."))
-					for (const key of ["evidence", "evidence-detail", "fleet-receipt"]) invalidate.add(key);
+					for (const key of ["evidence", "evidence-detail", "fleet-run-record"]) invalidate.add(key);
 				if (event.payload.kind.startsWith("targets."))
 					for (const key of ["targets", "routing", "workspace-settings", "config-graph", "settings-controls"])
 						invalidate.add(key);

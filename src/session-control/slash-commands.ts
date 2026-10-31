@@ -2549,7 +2549,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				if (result.status === "opened") {
 					ctx.notice(
 						"success",
-						`opened ${command.peer} in pane ${result.paneId} at ${result.cwd}; interactive handoff, no managed receipt`,
+						`opened ${command.peer} in pane ${result.paneId} at ${result.cwd}; interactive handoff, no managed run record`,
 					);
 				} else if (result.status === "missing-binary") {
 					ctx.notice("warn", result.detail);

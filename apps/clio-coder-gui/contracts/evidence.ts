@@ -108,7 +108,7 @@ export const EvidenceDetail = Type.Object(
 	},
 	closed,
 );
-export const ReceiptVerification = Type.Object(
+export const RunRecordVerification = Type.Object(
 	{
 		version: Type.Literal(1),
 		verifiedAt: Type.String(),
@@ -137,11 +137,11 @@ export const ReceiptVerification = Type.Object(
 );
 export const EvidenceOperationResult = Type.Object(
 	{
-		kind: Type.Literal("receipt-verification"),
+		kind: Type.Literal("run-record-verification"),
 		id: Id,
 		exitCode: Type.Literal(0),
 		message: Type.String(),
-		verification: ReceiptVerification,
+		verification: RunRecordVerification,
 	},
 	closed,
 );

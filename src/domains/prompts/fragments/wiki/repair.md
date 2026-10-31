@@ -19,5 +19,5 @@ in plain prose; a source citation must identify an existing enforcing file and v
 location. Never remove evidence merely to hide an unsupported behavioral claim.
 If wider investigation is needed, leave the draft pending and explain why.
 
-Finish after the edit with a short account of the actual changes. Your receipt does
+Finish after the edit with a short account of the actual changes. Your run record does
 not certify the prose: the harness reruns the same publication gate on the file.

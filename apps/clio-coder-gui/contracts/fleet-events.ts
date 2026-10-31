@@ -1,6 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id } from "./common.js";
-import { ReceiptFacts } from "./receipt-facts.js";
+import { RunResultFacts } from "./run-result-facts.js";
 
 const closed = { additionalProperties: false };
 const identifier = Type.String({ maxLength: 128 });
@@ -130,7 +130,7 @@ export const FleetItem = Type.Object(
 		at: Type.String(),
 		sourceSequence: Type.Integer({ minimum: 1 }),
 		fact: FleetFact,
-		receipt: Type.Optional(ReceiptFacts),
+		record: Type.Optional(RunResultFacts),
 	},
 	closed,
 );

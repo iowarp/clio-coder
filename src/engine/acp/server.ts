@@ -262,8 +262,8 @@ import {
 	ACP_QUEUE_CHANGED_NOTIFICATION,
 	ACP_QUEUE_EDIT_METHOD,
 	ACP_QUEUE_META_KEY,
-	ACP_RECEIPT_META_KEY,
 	ACP_REPLAY_META_KEY,
+	ACP_RUN_RESULT_META_KEY,
 	ACP_SESSION_META_KEY,
 	ACP_SESSION_SHELL_METHOD,
 	ACP_SHELL_META_KEY,
@@ -3744,8 +3744,8 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 										version: 1,
 										preview: ACP_FLEET_PREVIEW_METHOD,
 										run: ACP_FLEET_RUN_METHOD,
-										// Terminal dispatch frames carry `_meta[ACP_RECEIPT_META_KEY]` (#ACP-02).
-										receiptFacts: true,
+										// Terminal dispatch frames carry `_meta[ACP_RUN_RESULT_META_KEY]` (#ACP-02).
+										runResultFacts: true,
 										resume: true,
 									},
 								}
@@ -4081,12 +4081,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 
 	/**
-	 * The sealed receipt's facts for a terminal dispatch frame, projected by the
-	 * same readers the TUI footer uses. The domain seals the receipt before it
+	 * The sealed run record's facts for a terminal dispatch frame, projected by the
+	 * same readers the TUI footer uses. The domain seals the run before it
 	 * publishes the terminal event, so a live read finds it; a missing or
 	 * unreadable one reports `unavailable: true` rather than failing the frame.
 	 */
-	const readReceipt = (runId: string, replay: boolean): RunResultFacts | null => {
+	const readResult = (runId: string, replay: boolean): RunResultFacts | null => {
 		try {
 			return replay ? readRunResultFactsForReplay(runId) : readRunResultFacts(runId);
 		} catch {
@@ -4107,8 +4107,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		apiCalls: spend.apiCalls ?? null,
 		tokenDisplay: spend.totalTokens ? renderFact(spend.totalTokens) : null,
 	});
-	const receiptMeta = (runId: string, facts: RunResultFacts | null): Record<string, unknown> => ({
-		[ACP_RECEIPT_META_KEY]: runResultWireFacts(runId, facts),
+	const runResultMeta = (runId: string, facts: RunResultFacts | null): Record<string, unknown> => ({
+		[ACP_RUN_RESULT_META_KEY]: runResultWireFacts(runId, facts),
 	});
 
 	const unsubscribeEvents: Array<() => void> = [];
@@ -4242,7 +4242,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						durationMs: safeCount(payload.durationMs),
 						...runTokenCoverage(payload.spend),
 					},
-					receiptMeta(identity.runId, readReceipt(identity.runId, false)),
+					runResultMeta(identity.runId, readResult(identity.runId, false)),
 				);
 			}),
 		);
@@ -4265,7 +4265,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						durationMs: safeCount(payload.durationMs),
 						...(payload.spend ? runTokenCoverage(payload.spend) : {}),
 					},
-					receiptMeta(identity.runId, readReceipt(identity.runId, false)),
+					runResultMeta(identity.runId, readResult(identity.runId, false)),
 				);
 			}),
 		);
@@ -4856,7 +4856,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	};
 	/**
 	 * A reopened session's historical runs, replayed as the terminal dispatch
-	 * frames a live client would have received, with the same receipt facts the
+	 * frames a live client would have received, with the same run-result facts the
 	 * TUI's replayed footers read (#ACP-02). A run the ledger still shows open
 	 * in another process has no terminal frame yet, so it is skipped.
 	 */
@@ -4867,7 +4867,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			seen.add(run.runId);
 			const identity = dispatchIdentity(run);
 			if (identity === null) continue;
-			const facts = readReceipt(identity.runId, true);
+			const facts = readResult(identity.runId, true);
 			if (facts?.stillRunning === true) continue;
 			const outcome = facts === null ? null : safeStoredIdentifier(facts.outcome, 64);
 			const common = {
@@ -4878,8 +4878,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				outcomeDetail: safeStoredString(facts?.failureMessage ?? facts?.abandonedDetail, 2048) || null,
 				durationMs: safeCount(facts?.durationMs),
 			};
-			const replayMeta = { ...receiptMeta(identity.runId, facts), [ACP_REPLAY_META_KEY]: { run: true } };
-			// The receipt's call coverage words its token count exactly as the live frame did (#434).
+			const replayMeta = { ...runResultMeta(identity.runId, facts), [ACP_REPLAY_META_KEY]: { run: true } };
+			// The run result's call coverage words its token count exactly as the live frame did (#434).
 			const tokens = runTokenCoverage({
 				...(facts?.tokens ? { totalTokens: facts.tokens } : {}),
 				...(facts?.apiCalls !== undefined

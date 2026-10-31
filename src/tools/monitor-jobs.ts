@@ -41,7 +41,7 @@ export async function runJobMonitor(
 		return {
 			kind: "error",
 			message:
-				"monitor: jobs support scope=jobs mode=list, or job_id with mode=status/wait. Jobs carry occurrence evidence, not worker receipts.",
+				"monitor: jobs support scope=jobs mode=list, or job_id with mode=status/wait. Jobs carry occurrence evidence, not worker run records.",
 		};
 	const timeout = args.timeout_ms ?? 60_000;
 	if (

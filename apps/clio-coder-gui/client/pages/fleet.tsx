@@ -23,7 +23,7 @@ import {
 	sortInspectionRecords,
 } from "./run-inspection-model.js";
 import "./run-inspection.css";
-import { ReceiptChecks } from "./traces/receipt-checks.js";
+import { RunRecordChecks } from "./traces/run-record-checks.js";
 
 function Topologies({
 	councils,
@@ -397,18 +397,18 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 		queryFn: () => client.call(routes.dispatchRun, { ...emptyInput, params: { id } }),
 		enabled: dispatch,
 	});
-	// The saved document is read only once asked for; until then the receipt is its evidence alone (#434 §11.3).
+	// The saved document is read only once asked for; until then the record is its evidence alone (#434 §11.3).
 	const [full, setFull] = useState(false);
-	const receipt = useQuery({
+	const record = useQuery({
 		meta: { errorSurface: "inline" },
-		queryKey: ["fleet-receipt", id, full],
+		queryKey: ["fleet-run-record", id, full],
 		queryFn: () =>
-			client.call(routes.fleetReceipt, { ...emptyInput, params: { id }, query: full ? { include: "full" } : {} }),
+			client.call(routes.fleetRunRecord, { ...emptyInput, params: { id }, query: full ? { include: "full" } : {} }),
 		enabled: full,
 		placeholderData: (previous) => previous,
 	});
 	// The full response rechecks the seal, so its evidence replaces the row's once it arrives (#434).
-	const fresh = full && !receipt.isPlaceholderData ? receipt.data : undefined;
+	const fresh = full && !record.isPlaceholderData ? record.data : undefined;
 	const evidence = fresh?.evidence ?? (dispatch ? run.data?.evidence : root.data?.evidence);
 	const saved = fresh?.record ?? null;
 	return (
@@ -426,11 +426,11 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 						: (root.data?.run.fleet ?? "Fleet execution")
 				}
 			/>
-			{Object.entries({ root, run, receipt }).map(([name, query]) =>
+			{Object.entries({ root, run, record }).map(([name, query]) =>
 				query.error ? (
 					<InspectionError
 						key={name}
-						title={`${name === "root" ? "Fleet execution" : name === "run" ? "Dispatch" : "Receipt"} unavailable`}
+						title={`${name === "root" ? "Fleet execution" : name === "run" ? "Dispatch" : "Run record"} unavailable`}
 						error={query.error}
 						busy={query.isFetching}
 						retry={() => {
@@ -531,23 +531,23 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 				</>
 			)}
 			<h2>Run record</h2>
-			{dispatch && receipt.isPending && <p>Reading run record…</p>}
+			{dispatch && record.isPending && <p>Reading run record…</p>}
 			{evidence ? (
 				<>
-					<ReceiptChecks evidence={evidence} />
+					<RunRecordChecks evidence={evidence} />
 					{saved ? (
 						<details>
 							<summary>The settled record, in full</summary>
 							<Facts value={saved} hide={["version"]} />
 						</details>
 					) : evidence.record === "settled" ? (
-						<button type="button" disabled={full && receipt.isFetching} onClick={() => setFull(true)}>
-							{full && receipt.isFetching ? "Reading run record…" : "Load full run record"}
+						<button type="button" disabled={full && record.isFetching} onClick={() => setFull(true)}>
+							{full && record.isFetching ? "Reading run record…" : "Load full run record"}
 						</button>
 					) : null}
 				</>
 			) : !(dispatch ? run.isPending || run.error : root.isPending || root.error) ? (
-				<PanelEmpty>{emptyState.emptyStore("readable receipt", "for this run")}</PanelEmpty>
+				<PanelEmpty>{emptyState.emptyStore("readable record", "for this run")}</PanelEmpty>
 			) : null}
 		</section>
 	);

@@ -208,12 +208,12 @@ export function readRunResultFactsForReplay(runId: string, stateDir = clioStateD
 }
 
 /**
- * The wire shape of `_meta["clio-coder/receipt"]` on an ACP terminal fleet frame. `trust` is the artifact-integrity
+ * The wire shape of `_meta["clio-coder/run-result"]` on an ACP terminal fleet frame. `trust` is the artifact-integrity
  * word the TUI footer prints and `validation` its quality clause, so a client shows the same words without
  * re-implementing the trust projection.
  */
 export interface RunResultWireFacts {
-	receiptId: string;
+	runId: string;
 	outcome: string | null;
 	contract: RunResultContract | null;
 	contractKind: RunPresentedResultContract | null;
@@ -230,7 +230,7 @@ export interface RunResultWireFacts {
 export function runResultWireFacts(runId: string, facts: RunResultFacts | null): RunResultWireFacts {
 	if (facts === null) {
 		return {
-			receiptId: runId,
+			runId: runId,
 			outcome: null,
 			contract: null,
 			contractKind: null,
@@ -245,7 +245,7 @@ export function runResultWireFacts(runId: string, facts: RunResultFacts | null):
 	}
 	const placement = facts.placement;
 	return {
-		receiptId: runId,
+		runId: runId,
 		outcome: facts.outcome,
 		contract: facts.contract ?? null,
 		contractKind: facts.contractKind ?? null,

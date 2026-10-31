@@ -435,7 +435,7 @@ const DATA_VERBS: Readonly<Record<string, readonly [string, string]>> = {
 const MONITOR_VERBS: Readonly<Record<string, readonly [string, string]>> = {
 	status: ["checking", "checked"],
 	peek: ["peeking at", "peeked at"],
-	receipt: ["reading the receipt of", "read the receipt of"],
+	record: ["reading the run record of", "read the run record of"],
 	tools: ["listing the tools of", "listed the tools of"],
 	list: ["listing", "listed"],
 	wait: ["waiting on", "waited on"],

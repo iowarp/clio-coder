@@ -26,7 +26,7 @@ export function evidenceRoutes(app: Hono, hub: EventHub, evidence: EvidenceServi
 		evidence.read({ kind: "detail", id: artifacts.admit("evidence", params.id) }, routes.evidenceDetail.response),
 	);
 	// Admission precedes the operation so a refused reference never creates a row.
-	register(app, hub, routes.receiptVerify, async ({ params }, context) => ({
+	register(app, hub, routes.runRecordVerify, async ({ params }, context) => ({
 		operationId: await evidence.execute(params.id, artifacts.admitAny(RUN_KINDS, params.runId), idempotencyKey(context)),
 	}));
 }

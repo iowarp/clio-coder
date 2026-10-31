@@ -178,7 +178,7 @@ for (const width of widths) {
 		assert.match(plain(rows), /\n {2}│ blade-gateway .*⚙ current-研究/u);
 		assert.doesNotMatch(plain(rows), /state |tools |tokens|last:|newest|\?/u);
 		assert.deepEqual(entry, original);
-		entry.receipt = { outcome: "succeeded", durationMs: 1000 };
+		entry.result = { outcome: "succeeded", durationMs: 1000 };
 		entry.pending = false;
 		entry.text = "needs_input: checkpoint:decision\nWhich 研究 dataset should I inspect?";
 		rows = renderWorkerEntryLines(entry, width, { detail: transcriptDetail("compact") });

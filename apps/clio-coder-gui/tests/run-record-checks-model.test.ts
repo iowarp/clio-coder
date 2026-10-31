@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { contractName, receiptChecks, receiptIntegrity } from "../client/pages/traces/receipt-checks-model.js";
+import { contractName, runRecordChecks, runRecordIntegrity } from "../client/pages/traces/run-record-checks-model.js";
 import type { RunEvidenceV1 } from "../contracts/wire.js";
 
-// Each fixture restates the check-bearing fields of a real v20 receipt sealed by 0.5.6. Digests are
-// shortened stand-ins; the states, bases and claim names are the ones those receipts carry.
+// Fixtures state the check-bearing facts projected from a sealed run record (#434).
+// Digests are shortened stand-ins; the states, bases and claim names follow the run contract.
 const schemaOff = { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null };
 const verifiedTool = {
 	verification: { state: "verified", basis: "validation-tool" },
@@ -84,7 +84,7 @@ const scoutPassed = {
 };
 
 /**
- * A fixture as the read model states it under a seal that verifies: the receipt's quality block flattens into the
+ * A fixture as the read model states it under a seal that verifies: the record's quality block flattens into the
  * sealed facts, and a quality block with no result contract reads `unmeasured` (#434 §11.3).
  */
 function sealedEvidence(raw: Record<string, unknown>): RunEvidenceV1 {
@@ -112,8 +112,8 @@ function sealedEvidence(raw: Record<string, unknown>): RunEvidenceV1 {
 		evidence: null,
 	} as unknown as RunEvidenceV1;
 }
-const byKey = (receipt: Record<string, unknown>) =>
-	new Map(receiptChecks(sealedEvidence(receipt)).map((row) => [row.key, row]));
+const byKey = (record: Record<string, unknown>) =>
+	new Map(runRecordChecks(sealedEvidence(record)).map((row) => [row.key, row]));
 
 test("a verify-tool pass is a verified run with one passed check, and nothing else is promoted", () => {
 	const rows = byKey(verifiedTool);
@@ -257,7 +257,7 @@ test("absent or unfamiliar fields never read as success", () => {
 		{ verification: { state: "trusted" }, hostVerification: { status: "fine", checks: [{ check: "x" }] } },
 	];
 	for (const shape of shapes)
-		for (const row of receiptChecks(sealedEvidence(shape))) {
+		for (const row of runRecordChecks(sealedEvidence(shape))) {
 			assert.notEqual(row.tone, "success", `${JSON.stringify(shape)} promoted ${row.key}`);
 			for (const item of row.items)
 				assert.notEqual(item.tone, "success", `${JSON.stringify(shape)} promoted ${item.name}`);
@@ -275,14 +275,14 @@ test("a seal that does not verify shows no check, only the read model's integrit
 		integrity: { state: "failed", display: "seal failed", detail: "digest mismatch" },
 		sealed: null,
 	} as RunEvidenceV1;
-	assert.deepEqual(receiptChecks(tampered), []);
-	assert.deepEqual(receiptIntegrity(tampered), {
+	assert.deepEqual(runRecordChecks(tampered), []);
+	assert.deepEqual(runRecordIntegrity(tampered), {
 		tone: "fail",
 		word: "seal failed",
 		meaning: "The run seal does not verify, so none of the run's checks are shown. digest mismatch",
 	});
-	assert.equal(receiptIntegrity({ ...tampered, record: "missing" }).meaning, "No run journal was found for this run.");
-	assert.equal(receiptIntegrity(sealedEvidence(verifiedTool)).tone, "success");
+	assert.equal(runRecordIntegrity({ ...tampered, record: "missing" }).meaning, "No run journal was found for this run.");
+	assert.equal(runRecordIntegrity(sealedEvidence(verifiedTool)).tone, "success");
 });
 
 test("contract names come from the source id's kind segment", () => {

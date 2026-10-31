@@ -73,9 +73,9 @@ export interface TelemetryRunSummary {
 	contextWindow?: number;
 	lastContextTokens?: number;
 	progress?: WorkerProgressSnapshot;
-	/** Existing validator identity/conformance, admitted with the verified receipt answer. */
+	/** Existing validator identity/conformance, admitted with the verified run-result answer. */
 	resultContract?: { kind: string; conformance: string };
-	receiptId?: string;
+	runRecordId?: string;
 	retry?: { attempt: number; dueAtMs: number; reason: string };
 	steerAcknowledgement?: { receivedAtMs: number; chars: number };
 	writeRecordDowngrade?: { reason: "opaque_tool_succeeded"; tool: string; toolCallId: string };
@@ -102,14 +102,14 @@ export interface TelemetrySnapshot {
 /** Runtime readers supplied after dispatch is composed, avoiding a domain dependency cycle. */
 export interface TelemetryRunReaders {
 	dispatchSnapshot?: () => DispatchSnapshot;
-	readReceipt?: (
+	readRunResult?: (
 		runId: string,
 	) => { text?: string; trust?: CanonicalTrustStatus; contractKind?: string; contract?: string } | null;
 }
 
 /** Run projection controls shared by the contract and the in-memory projection. */
 export interface TelemetryRunProjection {
-	/** Bind live dispatch and receipt readers; disposal detaches this binding only. */
+	/** Bind live dispatch and run-result readers; disposal detaches this binding only. */
 	bindRunReaders(readers: TelemetryRunReaders): () => void;
 	/** Fold retry timers and live counters from the dispatch reader. */
 	reconcileRuns(): void;

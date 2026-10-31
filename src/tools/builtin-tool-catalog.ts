@@ -27,7 +27,7 @@ function withMetadata<T extends ToolSpec>(spec: T, metadata: ToolMetadata): T {
 // envelope notice (with its exact continuation call) survives shaping instead
 // of being cut again and replaced by a generic hint. The 16KB summary
 // policies are the explicit overrides for tools whose output is inherently
-// aggregate (shell, verification runs, git, dispatch receipts, web pages).
+// aggregate (shell, verification runs, git, dispatch run records, web pages).
 const policyCap = (selfCapBytes: number): number => selfCapBytes + OBSERVATION_POLICY_SLACK_BYTES;
 
 const observePolicy = (selfCapBytes: number, followUpHint: string) =>
@@ -356,7 +356,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Dispatch]: {
 		objective: "Dispatch bounded tasks to configured Clio workers.",
 		discoveryHint:
-			"Workers are delegated model runs. args={list:true} reads the available fleet without starting work. Choose a read-only recipe for inspection; worktree is for authorized writers. Workers that share a ledger board need ONE dispatch call with mode=parallel and a tasks array. Concurrent Clio workers use their admitted ledger tool to post path claims, source-grounded findings, and peer reviews. This board is not a filesystem directory; do not substitute a file for it. Only monitor and dispatch receipts show what a worker actually posted.",
+			"Workers are delegated model runs. args={list:true} reads the available fleet without starting work. Choose a read-only recipe for inspection; worktree is for authorized writers. Workers that share a ledger board need ONE dispatch call with mode=parallel and a tasks array. Concurrent Clio workers use their admitted ledger tool to post path claims, source-grounded findings, and peer reviews. This board is not a filesystem directory; do not substitute a file for it. Only monitor and dispatch run records show what a worker actually posted.",
 		examples: [
 			{
 				goal: "Run two independent workers in one batch with a shared coordination ledger",
@@ -373,7 +373,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		uiLabel: "Dispatch",
 		retrySafety: "not_retry_safe",
 		resultSizePolicy: summaryPolicy(
-			"Use the dispatch receipt paths or ask a narrower worker follow-up for omitted output.",
+			"Use the dispatch run records or ask a narrower worker follow-up for omitted output.",
 		),
 		// No hint: the Tool Contract's inventory line already says when
 		// dispatch(list:true) is the right answer, and the Fleet section says
@@ -398,13 +398,13 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Monitor]: {
 		objective: "Inspect dispatched runs and conversation-owned jobs: state and settled evidence.",
 		discoveryHint:
-			"Inspect existing worker activity. Use observed run IDs with status, receipt, or collect after describing those modes. Collect completed detached work before claiming it is integrated. Empty history means no recorded runs; do not dispatch a new worker merely to inspect history.",
+			"Inspect existing worker activity. Use observed run IDs with status, record, or collect after describing those modes. Collect completed detached work before claiming it is integrated. Empty history means no recorded runs; do not dispatch a new worker merely to inspect history.",
 		examples: [
 			{ goal: "List existing worker runs and results without starting a worker", args: { mode: "list" }, startup: true },
 		],
 		uiLabel: "Monitor",
 		retrySafety: "idempotent",
-		resultSizePolicy: summaryPolicy("Use monitor(mode=receipt) or read the receipt path for full details."),
+		resultSizePolicy: summaryPolicy("Use monitor(mode=record) for full details."),
 		costLatency: "local_fast",
 	},
 	[ToolNames.Steer]: {

@@ -30,7 +30,7 @@ import {
 import { isAwaitingAnswer } from "./approval-model.js";
 import { observeStart } from "./chat-turn.js";
 import { ReasoningDisclosure } from "./Reasoning.js";
-import { WorkerReceipt } from "./ReceiptLine.js";
+import { WorkerRunRecord } from "./RunRecordLine.js";
 import { ToolCard } from "./tool-cards.js";
 import { describeTool, presentTool } from "./tool-presentation.js";
 import "./chat-turn.css";
@@ -74,7 +74,7 @@ function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRo
 					<span className="sr-only">{toolStatusLabel(item.status)}</span>
 				</p>
 			)}
-			<WorkerReceipt client={client} sessionId={session.id} item={item} />
+			<WorkerRunRecord client={client} sessionId={session.id} item={item} />
 			<AnchoredApproval client={client} session={session} item={item} />
 		</li>
 	);

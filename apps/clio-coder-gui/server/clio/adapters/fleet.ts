@@ -64,7 +64,7 @@ export function readFleet(input: FleetRequest): unknown {
 		return { ...artifactPage(rows, input.limit, input.cursor), present: roots.present };
 	}
 
-	if (input.kind === "receipt") {
+	if (input.kind === "run-record") {
 		const run = readRunInspection(input.id);
 		return { evidence: run.evidence, record: input.full ? run.record : null };
 	}

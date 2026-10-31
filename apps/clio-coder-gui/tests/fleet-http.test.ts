@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { Councils, DispatchRuns, FleetGates, FleetReceipt, FleetRootDetail, FleetRoots } from "../contracts/fleet.js";
+import { Councils, DispatchRuns, FleetGates, FleetRootDetail, FleetRoots, FleetRunRecord } from "../contracts/fleet.js";
 import { harness, json } from "./harness/app.js";
 import { seedFleet } from "./harness/fleet-fixture.js";
 
@@ -41,17 +41,17 @@ test("fleet REST: every durable root paginates once beyond 64 entries, corrupt r
 		assert.equal((await json(await h.request("/api/fleet/councils"), Councils)).councils.length, 1);
 		assert.equal((await json(await h.request("/api/fleet/gates"), FleetGates)).decisions.length, 1);
 		// A run's evidence comes through its seal check; the settled record leaves only when asked for (#434 §11.3).
-		const brief = await json(await h.request("/api/fleet/receipts/member-two"), FleetReceipt);
+		const brief = await json(await h.request("/api/fleet/runs/member-two/record"), FleetRunRecord);
 		assert.equal(brief.record, null);
 		assert.equal(brief.evidence.runId, "member-two");
 		assert.equal(brief.evidence.integrity.state, "verified");
 		const full = (path: string) => h.request(`${path}?include=full`);
-		const record = (await json(await full("/api/fleet/receipts/member-two"), FleetReceipt)).record;
+		const record = (await json(await full("/api/fleet/runs/member-two/record"), FleetRunRecord)).record;
 		assert.equal(record?.settled?.agentId, "researcher");
 		assert.equal(record?.seal?.status, "verified");
 		// "escape" is in no listing, so the served-id window refuses it before the
 		// adapter runs; the symlink containment is asserted where it now lives.
-		assert.equal((await h.request("/api/fleet/receipts/escape")).status, 403);
+		assert.equal((await h.request("/api/fleet/runs/escape/record")).status, 403);
 		assert.equal((await h.request("/api/fleet/runs/missing")).status, 404);
 		for (const query of ["limit=0", "limit=1.5", "limit=101", "cursor=broken"])
 			assert.equal((await h.request(`/api/fleet/runs?${query}`)).status, 422);

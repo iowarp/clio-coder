@@ -5,9 +5,9 @@ const closed = { additionalProperties: false };
 const text = Type.String({ maxLength: 4096 });
 const nullableText = Type.Union([text, Type.Null()]);
 const count = Type.Union([Type.Number({ minimum: 0 }), Type.Null()]);
-export const ReceiptFacts = Type.Object(
+export const RunResultFacts = Type.Object(
 	{
-		receiptId: text,
+		runId: text,
 		outcome: nullableText,
 		contract: nullableText,
 		contractKind: nullableText,
@@ -32,4 +32,4 @@ export const ReceiptFacts = Type.Object(
 	},
 	closed,
 );
-export type ReceiptFacts = Static<typeof ReceiptFacts>;
+export type RunResultFacts = Static<typeof RunResultFacts>;

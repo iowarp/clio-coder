@@ -117,7 +117,7 @@ export class TraceAdapter {
 		const cursor = input.kind === "runs" ? cursorOf(input.query.cursor) : null;
 		if ("runId" in input && !Value.Check(Id, input.runId))
 			throw new AppProblem("validation", "Invalid trace run identifier.");
-		if (input.kind === "receipt") return this.receipt(input.runId, input.full ?? false);
+		if (input.kind === "run-record") return this.record(input.runId, input.full ?? false);
 		const ledger = this.identities();
 		if (input.kind === "run") {
 			const identity = ledger.get(input.runId) ?? null;
@@ -157,7 +157,7 @@ export class TraceAdapter {
 	 * A run's evidence through the read model, which checks the run seal and states only what a verified seal vouches
 	 * for (#434 §11.3); the settled record and result object only when the full record is asked for.
 	 */
-	private receipt(runId: string, full: boolean) {
+	private record(runId: string, full: boolean) {
 		const run = readRunInspection(runId);
 		return { evidence: run.evidence, record: full ? run.record : null };
 	}

@@ -286,7 +286,7 @@ const isUserMessage = (entry: SessionEntry | undefined): boolean => entry?.kind 
  * only when that is provable: it names no main user turn and no main call in
  * its turn loads the same skill. Anything ambiguous keeps protection.
  */
-function isFoldedWorkerReceipt(entries: ReadonlyArray<SessionEntry>, index: number): boolean {
+function isFoldedWorkerRunResult(entries: ReadonlyArray<SessionEntry>, index: number): boolean {
 	const entry = entries[index];
 	if (entry?.kind !== "skillActivation" || entry.activation.runId === undefined) return false;
 	const { name, turnId } = entry.activation;
@@ -310,7 +310,7 @@ function findLatestSkillActivationProtectionStart(
 	startIndex: number,
 ): number | null {
 	for (let i = entries.length - 1; i >= startIndex; i--) {
-		if (entries[i]?.kind !== "skillActivation" || isFoldedWorkerReceipt(entries, i)) continue;
+		if (entries[i]?.kind !== "skillActivation" || isFoldedWorkerRunResult(entries, i)) continue;
 		const turnStart = findTurnStartForProtection(entries, i, startIndex);
 		return turnStart === -1 ? i : turnStart;
 	}

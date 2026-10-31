@@ -5,7 +5,7 @@ const USD_LIMIT_KEY =
 	/^(?:max|runMax|maxCost|budget|ceiling|newCeiling|initialCeiling|costCeiling|raiseTo|configured|additional)Usd$|UpperBoundUsd$/u;
 
 /**
- * Report facts and receipts carry spend as read-model quantities that already hold their display; each limit gets a
+ * Report facts and records carry spend as read-model quantities that already hold their display; each limit gets a
  * `<key>Display` sibling here, because a bound is not spend and must never read as unmeasured (#434).
  */
 export function reportCostDisplays(value: unknown): unknown {

@@ -11,14 +11,14 @@ import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer
 import { createDispatchBoardView, type DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
-import { readWorkerReceiptFactsForReplay } from "../../src/session-control/worker-receipts.js";
+import { readWorkerRunResultFactsForReplay } from "../../src/session-control/worker-run-results.js";
 import type { WorkerEntryState } from "../../src/session-control/worker-stream.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { settledRunTrust, writeSettledRun } from "../harness/settled-run.js";
 
 function worker(
 	text: string,
-	kind: NonNullable<WorkerEntryState["receipt"]>["contractKind"] = "debugger-report",
+	kind: NonNullable<WorkerEntryState["result"]>["contractKind"] = "debugger-report",
 ): WorkerEntryState {
 	const envelope = fixtureEnvelope("aa-run");
 	const draft = fixtureReceiptDraft(envelope);
@@ -48,12 +48,12 @@ function worker(
 		tools: [],
 		attempts: [],
 		pending: false,
-		receipt: { trust, outcome: "succeeded", contract: "pass", contractKind: kind },
+		result: { trust, outcome: "succeeded", contract: "pass", contractKind: kind },
 	};
 }
 function board(entry: WorkerEntryState, width: number): string[] {
-	const contract = entry.receipt?.contract;
-	const kind = entry.receipt?.contractKind;
+	const contract = entry.result?.contract;
+	const kind = entry.result?.contractKind;
 	const row: DispatchBoardRow = {
 		runId: entry.runId,
 		agentId: entry.agentId,
@@ -61,7 +61,7 @@ function board(entry: WorkerEntryState, width: number): string[] {
 		runtimeId: "test",
 		targetId: "test",
 		wireModelId: "test",
-		status: entry.pending ? "running" : entry.receipt?.outcome === "failed" ? "failed" : "completed",
+		status: entry.pending ? "running" : entry.result?.outcome === "failed" ? "failed" : "completed",
 		elapsedMs: 0,
 		usage: { kind: "pending" },
 		lastContextTokens: null,
@@ -120,9 +120,9 @@ test("live, failed-contract, partial, malformed and unknown answers never acquir
 	const live = cases[0];
 	const failed = cases[1];
 	const truncated = cases[2];
-	assert.ok(live && failed && truncated && failed.receipt);
+	assert.ok(live && failed && truncated && failed.result);
 	live.pending = true;
-	failed.receipt.contract = "fail";
+	failed.result.contract = "fail";
 	truncated.droppedLines = 1;
 	for (const entry of cases) {
 		for (const rows of [
@@ -172,9 +172,9 @@ test("checkpoint questions and execution failures stay visible", () => {
 	);
 	assert.match(plain(board(checkpoint, 80)), /Should I reproduce/);
 	const failed = worker('{"diagnosis":"The tool failed","reproduction":"unknown","evidence":[]}');
-	assert.ok(failed.receipt);
-	failed.receipt.outcome = "failed";
-	failed.receipt.failureMessage = "Fixture could not start";
+	assert.ok(failed.result);
+	failed.result.outcome = "failed";
+	failed.result.failureMessage = "Fixture could not start";
 	assert.match(plain(renderWorkerEntryLines(failed, 80, {})), /Fixture could not start/);
 	assert.match(plain(board(failed, 80)), /failed/);
 });
@@ -184,7 +184,7 @@ test("scout numeric line tokens that cannot survive parsing remain source text",
 		'{"findings":[{"claim":"Check here","path":"file.ts","line":1.00000000000000001}],"needsSplit":false}',
 		"scout-report",
 	);
-	assert.ok(entry.receipt);
+	assert.ok(entry.result);
 	assert.match(
 		plain(renderWorkerEntryLines(entry, 120, { detail: transcriptDetail("detailed") })),
 		/1\.00000000000000001/,
@@ -223,7 +223,7 @@ test("recognized verifier, research, world knowledge and scout reports retain li
 	] as const;
 	for (const item of cases) {
 		const entry = worker(JSON.stringify(item.value), item.kind);
-		assert.ok(entry.receipt);
+		assert.ok(entry.result);
 		for (const rows of [
 			renderWorkerEntryLines(entry, 120, { detail: transcriptDetail("detailed") }),
 			board(entry, 120),
@@ -260,7 +260,7 @@ for (const mode of ["verified", "tampered", "missing-ledger", "unsealed"] as con
 			const bytes = mode === "unsealed" ? null : readFileSync(bundlePath, "utf8");
 
 			if (mode !== "missing-ledger") writeFileSync(join(stateDir, "runs.json"), JSON.stringify([envelope]));
-			const facts = readWorkerReceiptFactsForReplay("aa2", stateDir);
+			const facts = readWorkerRunResultFactsForReplay("aa2", stateDir);
 			assert.ok(facts);
 			assert.equal(
 				facts.trust?.artifactIntegrity.state,
@@ -283,7 +283,7 @@ for (const mode of ["verified", "tampered", "missing-ledger", "unsealed"] as con
 							runtime: { kind: "clio" },
 						},
 					],
-					{ readWorkerReceipt: (id) => readWorkerReceiptFactsForReplay(id, stateDir) },
+					{ readWorkerRunResult: (id) => readWorkerRunResultFactsForReplay(id, stateDir) },
 				);
 				const output = plain(panel.render(120));
 				if (mode === "verified" || mode === "missing-ledger") assert.match(output, /reproduction reproduced/);
@@ -309,7 +309,7 @@ for (const mode of ["verified", "tampered", "missing-ledger", "unsealed"] as con
 						runtime: { kind: "clio" },
 					},
 				],
-				{ readWorkerReceipt: (id) => readWorkerReceiptFactsForReplay(id, stateDir), unboundedToolBodies: true },
+				{ readWorkerRunResult: (id) => readWorkerRunResultFactsForReplay(id, stateDir), unboundedToolBodies: true },
 			);
 			assert.match(plain(exported.render(120)), /"diagnosis"/);
 			if (bytes !== null) assert.equal(readFileSync(bundlePath, "utf8"), bytes);

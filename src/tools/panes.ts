@@ -142,7 +142,7 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 				if (result.status === "opened") {
 					return {
 						kind: "ok",
-						output: `opened ${peer} in Clio-owned pane ${result.paneId}; interactive handoff in ${result.cwd}; no managed run or receipt is produced.`,
+						output: `opened ${peer} in Clio-owned pane ${result.paneId}; interactive handoff in ${result.cwd}; no managed run record is produced.`,
 						details: { action: "handoff", peer, paneId: result.paneId, workspace: result.cwd, managed: false },
 					};
 				}

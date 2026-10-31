@@ -11,7 +11,7 @@ import type { SessionContract } from "../domains/session/contract.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { ChatLoopEvent } from "../session-control/chat-loop.js";
-import type { WorkerReceiptFacts } from "../session-control/worker-stream.js";
+import type { WorkerRunResultFacts } from "../session-control/worker-stream.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 
 export interface ExitSummarySnapshot {
@@ -31,7 +31,7 @@ export interface ExitSummarySnapshot {
 		target: string;
 		model: string;
 		outcome: string;
-		receipt: string;
+		record: string;
 	}>;
 	permissions: { granted: number; denied: number; expired: number; blocked: number };
 	/**
@@ -148,7 +148,7 @@ export function exitSpend(view: TelemetryView | null | undefined, visitFrom: str
 	};
 }
 
-/** This visit's account. All ledger folds and receipt reads happen while events arrive. */
+/** This visit's account. All ledger folds and record reads happen while events arrive. */
 export function createExitSummaryCollector(deps: CollectorDeps) {
 	const now = deps.now ?? (() => performance.now());
 	let startedAt = now();
@@ -260,7 +260,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				target: run.targetId,
 				model: run.wireModelId,
 				outcome: "running",
-				receipt: "not available",
+				record: "not available",
 			});
 			workerPaths.set(run.runId, new Set());
 			highlight(`${run.agentId} started on ${run.targetId}`);
@@ -356,15 +356,15 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 				}
 			}
 		},
-		observeReceipt(runId: string, receipt: WorkerReceiptFacts | null): void {
+		observeRunResult(runId: string, record: WorkerRunResultFacts | null): void {
 			const worker = workers.get(runId);
-			if (!worker || receipt === null) return;
+			if (!worker || record === null) return;
 			workers.set(runId, {
 				...worker,
-				receipt: receipt.trust ? summarizeTrustStatus(receipt.trust).verdict : "unknown",
+				record: record.trust ? summarizeTrustStatus(record.trust).verdict : "unknown",
 			});
-			if (receipt.toolCounts) workerTools.set(runId, receipt.toolCounts);
-			noteFiles(receipt.changedPaths ?? [], process.cwd(), workerPaths.get(runId));
+			if (record.toolCounts) workerTools.set(runId, record.toolCounts);
+			noteFiles(record.changedPaths ?? [], process.cwd(), workerPaths.get(runId));
 		},
 		observeLocalEntry(entry: unknown): void {
 			noteFiles(mutatingReceipts([entry]).paths);

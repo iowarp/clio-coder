@@ -46,7 +46,7 @@ export const STRUCTURAL_V1_RUNGS: ReadonlyArray<RungId> = [
  * other three candidates stay available as rungs but not here: at the
  * shipped floor `diff_applied` cannot fire (every edit or write echo in the
  * recorded corpus is under 90 tokens), `search_narrowed` never found a
- * search whose every hit was later used, and `dispatch_receipt_settled` took
+ * search whose every hit was later used, and `dispatch_run_record_settled` took
  * eight items on the real corpus without moving a metric. The pin cannot be
  * measured by replay (no corpus holds a recall entry); it enters as the one
  * signal the model itself emits.

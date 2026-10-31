@@ -13,7 +13,7 @@
  * Fleet Runs board reads from the same events, so the two surfaces cannot drift
  * on the answer tail, the tool names, or what a call is touching. This module
  * owns the half the board has no use for: which assignment an event belongs to,
- * which attempt is current, and what the receipt sealed.
+ * which attempt is current, and what the result sealed.
  *
  * Three rules the fold enforces rather than documents:
  *
@@ -72,26 +72,26 @@ export type WorkerResultContract = RunResultContract;
 export type WorkerPresentedResultContract = RunPresentedResultContract;
 
 /**
- * Terminal facts a worker block reports. Sealed by the receipt when it can be
- * read, carried by the terminal event otherwise. The receipt-derived fields
+ * Terminal facts a worker block reports, read from the sealed run scope when
+ * available and carried by the terminal event otherwise (#434). The result-derived fields
  * come from the dispatch domain; the two below are this transcript's own.
  */
-export interface WorkerReceiptSummary extends RunResultSummary {
+export interface WorkerRunResultSummary extends RunResultSummary {
 	/** From an abort marker rather than a sealed terminal event; a later DispatchCompleted/DispatchFailed replaces it. */
 	provisional?: boolean;
-	/** The run is over, but no receipt could be read for it, and the ledger row could not explain why either. */
-	receiptUnavailable?: boolean;
+	/** The run is over, but no result could be read for it, and the ledger row could not explain why either. */
+	resultUnavailable?: boolean;
 }
 
-/** A receipt's projection: the summary plus the answer it sealed. */
-export interface WorkerReceiptFacts extends WorkerReceiptSummary {
+/** A result's projection: the summary plus the answer it sealed. */
+export interface WorkerRunResultFacts extends WorkerRunResultSummary {
 	text?: string;
 	toolCounts?: ReadonlyArray<{ tool: string; count: number }>;
 	changedPaths?: ReadonlyArray<string>;
 }
 
 /** Reads the run's sealed record and projects it; null when it is absent or unreadable. */
-export type WorkerReceiptReader = (runId: string) => WorkerReceiptFacts | null;
+export type WorkerRunResultReader = (runId: string) => WorkerRunResultFacts | null;
 
 /** Presentation follows the admitted audience, never a recipe name. */
 export function isHelperRun(run: { agentAudience?: DispatchStartedPayload["agentAudience"] }): boolean {
@@ -104,7 +104,7 @@ export function isContextOperationRun(run: { agentId: string; requestOrigin?: st
 }
 
 export interface WorkerEntryState {
-	/** Local presentation clock; never restored as a live timer from a receipt. */
+	/** Local presentation clock; never restored as a live timer from a result. */
 	startedAtMs?: number;
 	/** Admitted tool-call ceiling for the current attempt; absent on legacy replay and ACP. */
 	toolCallLimit?: number;
@@ -125,18 +125,18 @@ export interface WorkerEntryState {
 	droppedLines: number;
 	/** Distinct tool names in first-use order, bounded. */
 	tools: string[];
-	/** Canonical live projection. Absent only on receipt-based session replay. */
+	/** Canonical live projection. Absent only on result-based session replay. */
 	progress?: WorkerProgressSnapshot;
 	/**
 	 * The context the run's last model call occupied, as the session recorded it
 	 * when the run settled. Replay only: a live block reads it from `progress`,
-	 * and the sealed receipt carries no per-call usage.
+	 * and the sealed result carries no per-call usage.
 	 */
 	contextTokens?: number;
 	/**
 	 * The calls the run finished last, newest first, as the session recorded them
 	 * when it settled. Replay only, like `contextTokens`: a live block reads them
-	 * from `progress`, and the receipt seals a count rather than a list.
+	 * from `progress`, and the result seals a count rather than a list.
 	 */
 	recentActions?: ReadonlyArray<WorkerAction>;
 	/** Every attempt of this assignment, oldest first. */
@@ -148,7 +148,7 @@ export interface WorkerEntryState {
 	 * the operator watched it under, rather than as one unattributed voice.
 	 */
 	council?: { group: string; label: string; color?: string; round: number };
-	receipt?: WorkerReceiptSummary;
+	result?: WorkerRunResultSummary;
 	/** Agent origin: the tool call whose execution spawned this run. */
 	parentToolCallId?: string;
 }
@@ -171,10 +171,10 @@ export type WorkerStreamChange =
 
 export interface WorkerStreamOptions {
 	/**
-	 * Sealed terminal facts for a finished run. The receipt is the terminal
+	 * Sealed terminal facts for a finished run. The result is the terminal
 	 * truth; the bus payload is only the fallback for when it cannot be read.
 	 */
-	readReceipt?: WorkerReceiptReader;
+	readResult?: WorkerRunResultReader;
 }
 
 export interface WorkerStream {
@@ -234,10 +234,10 @@ export function workerTargetLabel(runtime: WorkerRunRuntime): string {
 
 /**
  * Terminal facts a lifecycle payload can supply on its own. Used only when the
- * sealed receipt is unreadable, so the block still reports an honest outcome
+ * sealed result is unreadable, so the block still reports an honest outcome
  * instead of hanging on a spinner.
  */
-function terminalFacts(payload: DispatchCompletedPayload | DispatchFailedPayload): WorkerReceiptFacts {
+function terminalFacts(payload: DispatchCompletedPayload | DispatchFailedPayload): WorkerRunResultFacts {
 	const detail = nonEmptyString(payload.outcomeDetail);
 	const total = payload.spend?.totalTokens;
 	const tokenCount = total?.kind === "measured" || total?.kind === "estimated" ? finiteNumber(total.value) : undefined;
@@ -256,14 +256,14 @@ function terminalFacts(payload: DispatchCompletedPayload | DispatchFailedPayload
 }
 
 /**
- * The one projection from receipt facts to the summary a block's footer
+ * The one projection from result facts to the summary a block's footer
  * reports, shared by live settlement and by replay so both draw the same
- * numbers from the same bytes. Null is a run whose receipt is gone (an expired
- * state dir, a session copied without its receipts): the run is over and the
+ * numbers from the same bytes. Null is a run whose result is gone (an expired
+ * state dir, a session copied without its run scopes): the run is over and the
  * transcript says so, even when it cannot say how.
  */
-export function workerReceiptSummary(facts: WorkerReceiptFacts | null): WorkerReceiptSummary {
-	if (facts === null) return { outcome: "unknown", receiptUnavailable: true };
+export function workerRunResultSummary(facts: WorkerRunResultFacts | null): WorkerRunResultSummary {
+	if (facts === null) return { outcome: "unknown", resultUnavailable: true };
 	const { text: _text, ...summary } = facts;
 	return summary;
 }
@@ -299,13 +299,13 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 		return entry?.runId === id ? entry : undefined;
 	};
 
-	const settle = (entry: WorkerEntryState, payloadFacts: WorkerReceiptFacts): WorkerStreamChange => {
-		const facts = options.readReceipt?.(entry.runId) ?? { ...payloadFacts, receiptUnavailable: true };
-		entry.receipt = workerReceiptSummary(facts);
+	const settle = (entry: WorkerEntryState, payloadFacts: WorkerRunResultFacts): WorkerStreamChange => {
+		const facts = options.readResult?.(entry.runId) ?? { ...payloadFacts, resultUnavailable: true };
+		entry.result = workerRunResultSummary(facts);
 		entry.pending = false;
 		const attempt = entry.attempts[entry.attempts.length - 1];
 		if (attempt !== undefined) attempt.outcome = facts.outcome;
-		// Terminal truth is the sealed answer. A run whose receipt could not be
+		// Terminal truth is the sealed answer. A run whose result could not be
 		// read keeps whatever durable text its own stream produced, and a run that
 		// produced none keeps the live tail rather than blanking the block.
 		const fold = progressByAssignment.get(entry.assignmentId);
@@ -337,7 +337,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				const toolCallLimit = finiteNumber(payload.budget?.effective.ceiling ?? payload.budget?.effective.toolCalls);
 				if (toolCallLimit === undefined) delete existing.toolCallLimit;
 				else existing.toolCallLimit = toolCallLimit;
-				delete existing.receipt;
+				delete existing.result;
 				existing.attempts.push({ runId, targetLabel: workerTargetLabel(runtime) });
 				assignmentByRun.set(runId, assignmentId);
 				const progress = progressByAssignment.get(assignmentId);
@@ -409,7 +409,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			const durationMs = finiteNumber(payload.elapsedMs);
 			const failureMessage = nonEmptyString(payload.reason);
 			entry.pending = false;
-			entry.receipt = {
+			entry.result = {
 				outcome: "canceled",
 				...(durationMs !== undefined ? { durationMs } : {}),
 				...(failureMessage !== undefined ? { failureMessage } : {}),

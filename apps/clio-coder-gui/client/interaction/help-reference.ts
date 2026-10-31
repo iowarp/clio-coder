@@ -140,10 +140,10 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 			{ term: "Turn", meaning: "One request and everything Clio does in response." },
 			{
 				term: "Evidence",
-				meaning: "Tool activity, approvals, results and receipts that record what happened.",
+				meaning: "Tool activity, approvals, results and records that record what happened.",
 			},
 			{
-				term: "Receipt",
+				term: "Run record",
 				meaning: "A sealed record of a saved run. Verified means Clio checked the record and it still authenticates.",
 			},
 			{

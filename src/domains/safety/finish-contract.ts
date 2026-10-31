@@ -36,7 +36,7 @@ export const DEFAULT_RECENT_ENTRY_LIMIT = 80;
 export type FinishContractEvidenceKind =
 	| "validation_command"
 	| "protected_artifact"
-	| "dispatch_receipt"
+	| "dispatch_run_record"
 	| "limitation";
 
 interface ValidationExecutionEvidence {
@@ -565,9 +565,9 @@ function collectValidationEvidence(
 		const resultId = successfulToolResultId(entry);
 		if (resultId !== null) {
 			const dispatchCandidate = dispatchCalls.get(resultId);
-			const dispatchReceipt = dispatchReceiptEvidence(entry, dispatchCandidate);
-			if (dispatchReceipt !== null) {
-				pushEvidence(evidence, seen, dispatchReceipt);
+			const dispatchRunRecord = dispatchRunRecordEvidence(entry, dispatchCandidate);
+			if (dispatchRunRecord !== null) {
+				pushEvidence(evidence, seen, dispatchRunRecord);
 				continue;
 			}
 			const candidate = toolCalls.get(resultId);
@@ -740,7 +740,7 @@ function successfulToolResultId(entry: unknown): string | null {
 	return stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]);
 }
 
-function dispatchReceiptEvidence(
+function dispatchRunRecordEvidence(
 	entry: unknown,
 	candidate: ToolCallEvidenceCandidate | undefined,
 ): FinishContractEvidence | null {
@@ -753,10 +753,10 @@ function dispatchReceiptEvidence(
 	const result = asRecord(payload.result);
 	const details = asRecord(result?.details);
 	if (details === null) return null;
-	const summary = passedDispatchReceiptSummary(details, candidate);
+	const summary = passedDispatchRunRecordSummary(details, candidate);
 	if (summary === null) return null;
 	const evidence: FinishContractEvidence = {
-		kind: "dispatch_receipt",
+		kind: "dispatch_run_record",
 		summary,
 	};
 	const turnId = candidate?.turnId ?? turnIdOf(entry);
@@ -765,7 +765,7 @@ function dispatchReceiptEvidence(
 }
 
 /**
- * Summarizes a dispatch result as passed-receipt evidence, or null when it is
+ * Summarizes a dispatch result as passed-run evidence, or null when it is
  * not a passing dispatch. Handles the toolkit v2 batch shape
  * (`{mode, runIds, runCount, failedCount, runs:[{runId, agentId, exitCode}]}`
  * where exit codes live per-run) as well as the legacy single-run shape
@@ -774,7 +774,7 @@ function dispatchReceiptEvidence(
  * integrity and validated evidence on their canonical trust axes, so failed or
  * ungrounded checks never become validation evidence through process success.
  */
-function passedDispatchReceiptSummary(
+function passedDispatchRunRecordSummary(
 	details: Record<string, unknown>,
 	candidate: ToolCallEvidenceCandidate | undefined,
 ): string | null {
@@ -784,14 +784,17 @@ function passedDispatchReceiptSummary(
 		if (typeof details.failedCount === "number" && details.failedCount !== 0) return null;
 		const first = runs[0];
 		const runId = typeof first?.runId === "string" && first.runId.length > 0 ? first.runId : "unknown";
-		const agentId = dispatchReceiptAgentId(typeof first?.agentId === "string" ? first.agentId : undefined, candidate);
+		const agentId = dispatchRunRecordAgentId(typeof first?.agentId === "string" ? first.agentId : undefined, candidate);
 		const extra = runs.length > 1 ? ` (+${runs.length - 1} more)` : "";
-		return `dispatch receipt passed: run ${runId} agent ${agentId}${extra}`;
+		return `dispatch run record passed: run ${runId} agent ${agentId}${extra}`;
 	}
 	if (passedDispatchRun(details)) {
 		const runId = typeof details.runId === "string" && details.runId.length > 0 ? details.runId : "unknown";
-		const agentId = dispatchReceiptAgentId(typeof details.agentId === "string" ? details.agentId : undefined, candidate);
-		return `dispatch receipt passed: run ${runId} agent ${agentId}`;
+		const agentId = dispatchRunRecordAgentId(
+			typeof details.agentId === "string" ? details.agentId : undefined,
+			candidate,
+		);
+		return `dispatch run record passed: run ${runId} agent ${agentId}`;
 	}
 	return null;
 }
@@ -810,11 +813,11 @@ function passedDispatchRun(run: Record<string, unknown>): boolean {
 }
 
 /** Prefer the receipt's own agent id, then the dispatch call's, then unknown. */
-function dispatchReceiptAgentId(
-	receiptAgentId: string | undefined,
+function dispatchRunRecordAgentId(
+	runAgentId: string | undefined,
 	candidate: ToolCallEvidenceCandidate | undefined,
 ): string {
-	if (receiptAgentId !== undefined && receiptAgentId.length > 0) return receiptAgentId;
+	if (runAgentId !== undefined && runAgentId.length > 0) return runAgentId;
 	return candidate?.command.match(/^agent=([^\s]+)/)?.[1] ?? "unknown";
 }
 

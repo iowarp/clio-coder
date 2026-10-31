@@ -142,7 +142,7 @@
 .project-trust code {
 	white-space: pre-wrap;
 }
-.worker-receipt {
+.worker-run-result {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 4px 12px;
@@ -152,7 +152,7 @@
 	line-height: 1.6;
 	overflow-wrap: anywhere;
 }
-.worker-receipt a {
+.worker-run-result a {
 	flex-shrink: 0;
 	color: inherit;
 	text-underline-offset: 3px;

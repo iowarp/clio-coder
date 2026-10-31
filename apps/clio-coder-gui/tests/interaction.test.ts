@@ -94,7 +94,7 @@ test("the launcher score ranks a whole-value prefix over a word prefix over a su
 	assert.equal(prefixScore(["Traces", "Go to"], "zz"), 0);
 	assert.equal(prefixScore(["Traces"], "  "), 1, "an empty needle keeps every command in the list");
 	// The first haystack weighs triple, so a title match outranks a keyword match.
-	assert.ok(prefixScore(["Evidence", "receipt"], "receipt") < prefixScore(["Receipts", "evidence"], "receipt"));
+	assert.ok(prefixScore(["Evidence", "record"], "record") < prefixScore(["Run records", "evidence"], "record"));
 });
 
 test("the reference covers every route and prints the keyboard table verbatim", () => {

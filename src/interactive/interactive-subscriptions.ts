@@ -2,12 +2,12 @@ import type { ContextOperation } from "../core/context-operation.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { DispatchRunIdentity } from "../core/telemetry/live-events.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
-import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
+import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import {
 	createWorkerStream,
 	isContextOperationRun,
 	type WorkerEntryState,
-	type WorkerReceiptReader,
+	type WorkerRunResultReader,
 	type WorkerStream,
 	type WorkerStreamChange,
 } from "../session-control/worker-stream.js";
@@ -54,7 +54,7 @@ export interface InteractiveSubscriptionsDeps {
 	 */
 	recordWorkerSettled?: (fields: WorkerSettledFields) => void;
 	/** Run record reader, injected by tests. Defaults to the run's sealed scope. */
-	readWorkerReceipt?: WorkerReceiptReader;
+	readWorkerRunResult?: WorkerRunResultReader;
 	/**
 	 * A dispatch run reached a terminal state. The desktop notification uses it
 	 * to look for a detached batch that settled with this run; nothing else
@@ -76,7 +76,7 @@ export interface InteractiveSubscriptions {
  * once per frame without repeating the projection's footer reads (#428).
  */
 export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDeps): InteractiveSubscriptions {
-	const workers = createWorkerStream({ readReceipt: deps.readWorkerReceipt ?? readWorkerReceiptFacts });
+	const workers = createWorkerStream({ readResult: deps.readWorkerRunResult ?? readWorkerRunResultFacts });
 	/**
 	 * One notice per assignment, not per run. A failed attempt's warning never
 	 * expires and outranks a success, so keyed by run it stayed on the footer

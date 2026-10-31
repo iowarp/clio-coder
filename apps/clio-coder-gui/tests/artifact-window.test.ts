@@ -104,29 +104,29 @@ test("a run id reaches no child process until a fleet listing has served it", as
 	t.after(h.close);
 	const seeded = await seedEvidence(h.home.path, h.home.env);
 	const workspace = await h.workspaces.open(h.home.path);
-	for (const path of [`/api/workspaces/${workspace.id}/receipts/${seeded.runId}/verify`]) {
+	for (const path of [`/api/workspaces/${workspace.id}/runs/${seeded.runId}/verify`]) {
 		const refused = await h.post(path);
 		assert.equal(refused.status, 403);
 		assert.equal((await json(refused, Problem)).code, "unauthorized");
 	}
 	assert.equal(h.cli.activeCount, 0, "A refused reference must not start a CLI child");
 	assert.equal(h.operations.activeCount, 0, "A refused reference must not create an operation row");
-	assert.equal((await h.request(`/api/fleet/receipts/${seeded.runId}`)).status, 403);
+	assert.equal((await h.request(`/api/fleet/runs/${seeded.runId}/record`)).status, 403);
 	await seedFleet(h.home.path, h.home.env);
 	const dispatches = await json(await h.request("/api/fleet/dispatches"), DispatchRuns);
 	assert.ok(dispatches.items.length > 0);
 	const served = dispatches.items[0]?.id ?? "";
-	assert.equal((await h.request(`/api/fleet/receipts/${served}`)).status, 200);
+	assert.equal((await h.request(`/api/fleet/runs/${served}/record`)).status, 200);
 	// The fleet page shows roots and dispatches at once, so their windows are
-	// separate: reading one listing must not unlink the other's receipts.
+	// separate: reading one listing must not unlink the other's records.
 	const roots = await json(await h.request("/api/fleet/runs?limit=5"), FleetRoots);
 	assert.ok(roots.items.length > 0);
-	assert.equal((await h.request(`/api/fleet/receipts/${served}`)).status, 200);
-	assert.equal((await h.request(`/api/fleet/receipts/${roots.items[0]?.id}`)).status, 200);
+	assert.equal((await h.request(`/api/fleet/runs/${served}/record`)).status, 200);
+	assert.equal((await h.request(`/api/fleet/runs/${roots.items[0]?.id}/record`)).status, 200);
 	// A refresh of one listing still narrows that listing's own window.
 	const narrowed = await json(await h.request("/api/fleet/dispatches?limit=1"), DispatchRuns);
 	assert.equal(narrowed.items.length, 1);
-	if (narrowed.items[0]?.id !== served) assert.equal((await h.request(`/api/fleet/receipts/${served}`)).status, 403);
+	if (narrowed.items[0]?.id !== served) assert.equal((await h.request(`/api/fleet/runs/${served}/record`)).status, 403);
 });
 
 test("every response carries the full security header set", async (t) => {

@@ -23,7 +23,7 @@ Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
   auth login               Open interactive Quick Connect for terminal ACP authentication.
 
 This command is intended for ACP frontends to spawn. Interactive delegation remains
-available through /agents, /delegate, the dispatch board, and receipts.
+available through /agents, /delegate, the dispatch board, and run records.
 `;
 
 interface AcpFlags {

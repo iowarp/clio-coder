@@ -539,7 +539,7 @@ export const EVICTION_REASONS = [
 	"search_narrowed",
 	"diff_applied",
 	"offloaded_body",
-	"dispatch_receipt_settled",
+	"dispatch_run_record_settled",
 	"thinking_turn_closed",
 	"age_horizon",
 	"operator",

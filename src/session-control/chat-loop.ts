@@ -407,7 +407,7 @@ const TURN_OUTCOME_TOKENS_CUSTOM_TYPE = "turnOutcomeTokens";
  * wait is bounded. Returns the runs still unsealed, whose tokens the outcome
  * then reports as partial.
  */
-async function awaitWorkerReceipts(
+async function awaitWorkerRunResults(
 	runIds: ReadonlyArray<string>,
 	dispatch: Pick<DispatchContract, "getRun"> | undefined,
 ): Promise<string[]> {
@@ -431,7 +431,7 @@ async function awaitWorkerReceipts(
  * sealed, or null when the cap passed first, and the runs still open stay
  * partial. Returns a stop function for dispose.
  */
-function watchLateWorkerReceipts(input: {
+function watchLateWorkerRunResults(input: {
 	missing: ReadonlyArray<string>;
 	dispatch: Pick<DispatchContract, "getRun"> | undefined;
 	onDone: (sealedAfterMs: number | null) => void;
@@ -2014,7 +2014,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	}): void => {
 		if (input.missing.length === 0 || !deps.outcomeDispatch) return;
 		const sessionId = deps.session?.current()?.id ?? null;
-		const stop = watchLateWorkerReceipts({
+		const stop = watchLateWorkerRunResults({
 			missing: input.missing,
 			dispatch: deps.outcomeDispatch,
 			onDone: (afterMs) => {
@@ -2089,7 +2089,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		try {
 			if (input.control) outcomeCollector.recordControl(input.control);
 			const collected = outcomeCollector.take(input.userTurnId);
-			const missingReceipts = await awaitWorkerReceipts(collected.harness.runIds, deps.outcomeDispatch);
+			const missingReceipts = await awaitWorkerRunResults(collected.harness.runIds, deps.outcomeDispatch);
 			const record = reduceTurnOutcome({
 				...collected,
 				turnId: input.userTurnId,
@@ -3369,7 +3369,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								}
 							}
 							const workerRunIds = [...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds];
-							const missingReceipts = canceled ? await awaitWorkerReceipts(workerRunIds, deps.outcomeDispatch) : [];
+							const missingReceipts = canceled ? await awaitWorkerRunResults(workerRunIds, deps.outcomeDispatch) : [];
 							// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 							if (generation !== submitGeneration) return;
 							const failure = terminalFailureFromAssistantMessage(finalMessage)?.failure ?? currentTurnFailure();

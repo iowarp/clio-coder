@@ -20,7 +20,7 @@ import { summarizeHealth } from "./health.js";
 import { compactDuration, contextMeter, taskOverview } from "./overview-model.js";
 import { ProjectTrustNotice } from "./ProjectTrustNotice.js";
 import type { PaneSession, PaneView } from "./pane-model.js";
-import { ReceiptLine } from "./ReceiptLine.js";
+import { RunRecordLine } from "./RunRecordLine.js";
 import type { RouteFacts } from "./route.js";
 import { modelSessionFacts, sessionFacts } from "./session-facts-model.js";
 import {
@@ -218,7 +218,7 @@ export function SessionOverview({
 	const runs = useMemo(() => foldFleetRuns(session.fleet), [session.fleet]);
 	const evidence = useMemo(() => fleetEvidence(session.fleet), [session.fleet]);
 	const live = runs.filter(isLiveRun);
-	const receipts = runs.filter((run) => run.receipt);
+	const records = runs.filter((run) => run.record);
 	const last = session.turns.at(-1);
 	const working = open && (overview.running || !!session.contextWork?.active);
 	const state =
@@ -412,26 +412,26 @@ export function SessionOverview({
 				</Section>
 			) : null}
 
-			{evidence.length > 0 || receipts.length > 0 ? (
+			{evidence.length > 0 || records.length > 0 ? (
 				<Section
 					id="pane-evidence"
 					title="Evidence"
 					icon="evidence"
 					aside={
 						<span className="pane-card__state">
-							{receipts.length > 0
-								? `${receipts.length} ${receipts.length === 1 ? "receipt" : "receipts"}`
+							{records.length > 0
+								? `${records.length} ${records.length === 1 ? "record" : "records"}`
 								: `${evidence.length} ${evidence.length === 1 ? "bundle" : "bundles"}`}
 						</span>
 					}
 				>
-					{receipts
+					{records
 						.slice(-6)
 						.reverse()
 						.map((run) => (
 							<div key={run.runId}>
 								<strong className="pane-card__facts">{run.agentId}</strong>
-								{run.receipt ? <ReceiptLine receipt={run.receipt} /> : null}
+								{run.record ? <RunRecordLine record={run.record} /> : null}
 							</div>
 						))}
 					<ul className="pane-evidence">

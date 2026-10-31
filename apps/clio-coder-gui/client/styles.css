@@ -945,12 +945,12 @@ nav a:hover {
 	padding: var(--space-3);
 	border-radius: var(--radius-sm);
 }
-.trace-panel .trace-receipt__source {
+.trace-panel .trace-run-record__source {
 	margin: 0;
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
 }
-.trace-receipt-grid {
+.trace-run-record-grid {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 0 var(--space-8);
@@ -1274,7 +1274,7 @@ nav a:hover {
 	align-items: center;
 	overflow-wrap: anywhere;
 }
-.fleet-receipt {
+.fleet-run-record {
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 }
@@ -1306,7 +1306,7 @@ nav a:hover {
 	.trace-panel {
 		padding: var(--space-4);
 	}
-	.trace-receipt-grid {
+	.trace-run-record-grid {
 		grid-template-columns: minmax(0, 1fr);
 	}
 	.trace-run-card {

@@ -189,7 +189,7 @@ export function openHelpOverlay(
 				`**End of turn**: open the queue navigator (${manager.actionLabel("clio-coder.queue.open")}) and press t on a queued message; it then waits until the whole run settles. ACP clients ask for it with mode end-of-turn.`,
 				`**Send now** (${manager.actionLabel("clio-coder.message.interrupt")} or /interrupt <text>): settle active work and deliver the draft as a fresh prompt; with an empty draft it flushes the queue. Queued messages stay queued for the new run. While a tool is running you are asked whether to stop it or wait for it.`,
 				`**Queue navigator** (${manager.actionLabel("clio-coder.queue.open")}): reorder, edit, remove, change the slot of, or send now any queued message.`,
-				"**Interrupt is refused** while an attached dispatch is running (the abort would kill the worker's run with no receipt; steer it with `@<agent>` or cancel it with Esc) and while a permission ask is parked (it is already waiting on you). In both cases the message is queued for the next slot and a notice says why.",
+				"**Interrupt is refused** while an attached dispatch is running (the abort would kill the worker's run with no sealed run record; steer it with `@<agent>` or cancel it with Esc) and while a permission ask is parked (it is already waiting on you). In both cases the message is queued for the next slot and a notice says why.",
 				`**Recover queues**: ${manager.actionLabel("clio-coder.message.dequeue")}. Workers accept next-slot steering through @<agent>.`,
 			],
 		},

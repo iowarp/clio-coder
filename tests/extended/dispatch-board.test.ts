@@ -272,7 +272,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		const trust = settledRunTrust(receipt);
 		let receiptAvailable = true;
 		const { bus, projection, board, progress, start } = setup({
-			readReceipt: () => (receiptAvailable ? { text: "sealed answer", trust } : null),
+			readRunResult: () => (receiptAvailable ? { text: "sealed answer", trust } : null),
 		});
 		board.setFleetPhase(IDENTITY.runId, { wave: 3, stepId: "parser" });
 		bus.emit("run.enqueued", IDENTITY);
@@ -314,7 +314,7 @@ describe("dispatch board uses the telemetry projection", () => {
 				contextWindow: row.contextWindow,
 				contextTokens: row.lastContextTokens,
 				phase: row.phase,
-				receipt: row.receiptId,
+				receipt: row.runRecordId,
 				host: row.hostVerification,
 				hops: row.failoverHops,
 				elapsed: row.elapsedMs,
@@ -463,7 +463,7 @@ describe("dispatch board uses the telemetry projection", () => {
 			usage: undefined,
 		}).result;
 		const trust = settledRunTrust(receipt, { state: "failed", reason: "run seal failed" });
-		const { bus, board, progress, start } = setup({ readReceipt: () => ({ text: "untrusted receipt answer", trust }) });
+		const { bus, board, progress, start } = setup({ readRunResult: () => ({ text: "untrusted receipt answer", trust }) });
 		start();
 		progress({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "observed live tail" } });
 		bus.emit("run.completed", COMPLETED);
@@ -500,7 +500,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		const terminal = board.rows().find((row) => row.runId === IDENTITY.runId);
 		ok(terminal, "the newest settlement must survive despite its old enqueue position");
 		strictEqual(terminal.status, "completed");
-		strictEqual(terminal.receiptId, IDENTITY.runId);
+		strictEqual(terminal.runRecordId, IDENTITY.runId);
 		strictEqual(terminal.elapsedMs, COMPLETED.durationMs);
 		strictEqual(terminal.outcomeDetail, COMPLETED.outcomeDetail);
 		const canonical = projection.snapshot().runs.find((run) => run.runId === IDENTITY.runId);
@@ -735,7 +735,7 @@ describe("dispatch quality presentation", () => {
 				strictEqual(inspection.status.artifactIntegrity.state, "verified");
 				strictEqual(inspection.status.validationGrounding.state, state);
 				const trust = summarizeTrustStatus(inspection.status);
-				const { bus, board, start } = setup({ readReceipt: () => ({ trust: inspection.status }) });
+				const { bus, board, start } = setup({ readRunResult: () => ({ trust: inspection.status }) });
 				start();
 				// This is an ordinary parallel dispatch, with no council grouping.
 				bus.emit("run.completed", { ...COMPLETED, council: undefined });
@@ -769,7 +769,7 @@ describe("dispatch quality presentation", () => {
 				ok(plain(card).replace(/\s+/gu, " ").includes(wording), plain(card));
 
 				const stream = createWorkerStream({
-					readReceipt: () => ({ outcome: "succeeded", contract: "pass", trust: inspection.status }),
+					readResult: () => ({ outcome: "succeeded", contract: "pass", trust: inspection.status }),
 				});
 				stream.started({ ...IDENTITY, agentAudience: "base", pid: null, assignmentId: IDENTITY.runId, attempt: 0 });
 				const worker = stream.completed(COMPLETED)?.entry;

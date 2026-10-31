@@ -30,7 +30,7 @@ host.
 
 Use parallel tasks for independent work and pipeline for work consuming a
 previous result. Never edit files owned by a pending or successful worker.
-Use receipts for synthesis, spot-check consequential evidence, and resolve
+Use run records for synthesis, spot-check consequential evidence, and resolve
 limitations. A failed run supplies leads, not verification: confirm the few
 relevant locations instead of repeating its exploration, and do not repeat the
 same goal and files under a new wording. Report refused dispatches and why any

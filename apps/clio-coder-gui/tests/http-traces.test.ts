@@ -7,7 +7,7 @@ import { harness, json } from "./harness/app.js";
 import { quantitiesOf, telemetryLies } from "./harness/telemetry-fixture.js";
 import { traceFixture } from "./harness/trace-fixture.js";
 
-test("trace history lists run journals joined to the ledger, with read-model rows and the full receipt policy", async (t) => {
+test("trace history lists run journals joined to the ledger, with read-model rows and the full record policy", async (t) => {
 	const h = await harness(),
 		state = join(h.home.path, "state");
 	t.after(() => h.close());
@@ -42,10 +42,10 @@ test("trace history lists run journals joined to the ledger, with read-model row
 		unknown.runs.map((row) => row.runId),
 		["standalone-1"],
 	);
-	const brief = await json(await h.request("/api/traces/runs/run-0000/receipt"), routes.traceReceipt.response);
+	const brief = await json(await h.request("/api/traces/runs/run-0000/record"), routes.traceRunRecord.response);
 	const full = await json(
-		await h.request("/api/traces/runs/run-0000/receipt?include=full"),
-		routes.traceReceipt.response,
+		await h.request("/api/traces/runs/run-0000/record?include=full"),
+		routes.traceRunRecord.response,
 	);
 	// A run's evidence comes through its seal check; the settled record leaves only when asked for (#434 §11.3).
 	assert.equal(brief.record, null);
@@ -61,10 +61,10 @@ test("trace history lists run journals joined to the ledger, with read-model row
 	assert.equal(head.status, 200);
 	assert.equal(await head.text(), "");
 	for (const id of ["a%2Fb", "%2E%2E", "a%5Cb", "..%2Frun-0000", "session%3Aturn"]) {
-		const response = await h.request(`/api/traces/runs/${id}/receipt`);
+		const response = await h.request(`/api/traces/runs/${id}/record`);
 		assert.ok([404, 422].includes(response.status), `${id}: ${response.status}`);
 	}
-	const empty = await json(await h.request("/api/traces/runs/absent/receipt"), routes.traceReceipt.response);
+	const empty = await json(await h.request("/api/traces/runs/absent/record"), routes.traceRunRecord.response);
 	assert.equal(empty.record, null);
 	assert.equal(empty.evidence.record, "missing");
 });

@@ -1,6 +1,6 @@
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
-import { type EvidenceOperationResult, type EvidenceRequest, ReceiptVerification } from "../../contracts/evidence.js";
+import { type EvidenceOperationResult, type EvidenceRequest, RunRecordVerification } from "../../contracts/evidence.js";
 import type { WorkerHost } from "../worker/host.js";
 import type { CliRunner } from "./cli-runner.js";
 import { fingerprint, type OperationRegistry } from "./operations.js";
@@ -24,7 +24,7 @@ export class EvidenceService {
 	 * served: the route admits it against the ArtifactWindow and passes the
 	 * admitted value. Nothing here re-derives it from the request. A run's
 	 * evidence is assessed when it settles, so the one operation left is the
-	 * receipt recheck.
+	 * record recheck.
 	 */
 	async execute(workspaceId: string, runId: string, key: string) {
 		const workspace = await this.workspaces.get(workspaceId);
@@ -35,18 +35,18 @@ export class EvidenceService {
 			fingerprint: fingerprint({ workspaceId, runId, action: "verify" }),
 			cancellable: false,
 			run: async (progress): Promise<EvidenceOperationResult> => {
-				progress("Clio is checking the receipt against its recorded run.");
+				progress("Clio is checking the record against its recorded run.");
 				const verification = Value.Clean(
-					ReceiptVerification,
-					await this.runner.run({ kind: "receipt.verify", id: runId }, workspace.path),
+					RunRecordVerification,
+					await this.runner.run({ kind: "run.verify", id: runId }, workspace.path),
 				);
-				if (!Value.Check(ReceiptVerification, verification))
-					throw new AppProblem("operation_failed", "Receipt verification returned an invalid projection.");
+				if (!Value.Check(RunRecordVerification, verification))
+					throw new AppProblem("operation_failed", "Run record verification returned an invalid projection.");
 				return {
-					kind: "receipt-verification",
+					kind: "run-record-verification",
 					id: runId,
 					exitCode: 0,
-					message: `Receipt check: ${verification.state}.`,
+					message: `Run record check: ${verification.state}.`,
 					verification,
 				};
 			},

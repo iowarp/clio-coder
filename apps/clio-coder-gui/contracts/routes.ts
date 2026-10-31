@@ -24,9 +24,9 @@ import {
 	DispatchRuns,
 	FleetGates,
 	FleetPageQuery,
-	FleetReceipt,
 	FleetRootDetail,
 	FleetRoots,
+	FleetRunRecord,
 } from "./fleet.js";
 import { FleetPreview, FleetPreviewRequest, FleetRunRequest, FleetRunResult } from "./fleet-run.js";
 import {
@@ -104,7 +104,7 @@ import {
 	TelemetryWhyStopped,
 } from "./telemetry.js";
 import { Install, Tools } from "./toolchain.js";
-import { TraceParams, TraceReceipt, TraceRun, TraceRunsPage, TraceRunsQuery } from "./traces.js";
+import { TraceParams, TraceRun, TraceRunRecord, TraceRunsPage, TraceRunsQuery } from "./traces.js";
 import { SessionUsage } from "./usage.js";
 import {
 	AcpAutonomyLevelSchema as AutonomyLevel,
@@ -299,12 +299,12 @@ export const routes = {
 		response: EvidenceDetail,
 		summary: "A run's sealed findings, canonical trust, admitted provenance and gate verdicts",
 	}),
-	receiptVerify: defineRoute({
+	runRecordVerify: defineRoute({
 		...post,
-		path: "/api/workspaces/:id/receipts/:runId/verify",
+		path: "/api/workspaces/:id/runs/:runId/verify",
 		params: Type.Object({ id: Id, runId: Id }, { additionalProperties: false }),
 		response: Accepted,
-		summary: "Recheck receipt integrity against its run through Clio",
+		summary: "Recheck record integrity against its run through Clio",
 	}),
 	fleetRoots: defineRoute({
 		...get,
@@ -317,7 +317,7 @@ export const routes = {
 		...get,
 		path: "/api/fleet/runs/:id",
 		response: FleetRootDetail,
-		summary: "Fleet plan results, receipt and related topology",
+		summary: "Fleet plan results, record and related topology",
 		params: operationParams,
 	}),
 	dispatchRuns: defineRoute({
@@ -334,12 +334,12 @@ export const routes = {
 		summary: "One durable dispatch run",
 		params: operationParams,
 	}),
-	fleetReceipt: defineRoute({
+	fleetRunRecord: defineRoute({
 		...get,
-		path: "/api/fleet/receipts/:id",
+		path: "/api/fleet/runs/:id/record",
 		query: Type.Object({ include: Type.Optional(Type.Literal("full")) }, { additionalProperties: false }),
-		response: FleetReceipt,
-		summary: "Receipt evidence by run identifier, checked against its seal; the saved document on request",
+		response: FleetRunRecord,
+		summary: "Run record evidence by run identifier, checked against its seal; the saved document on request",
 		params: operationParams,
 	}),
 	fleetCouncils: defineRoute({
@@ -957,13 +957,13 @@ export const routes = {
 		response: TraceRun,
 		summary: "One run's journal row and ledger identity",
 	}),
-	traceReceipt: defineRoute({
+	traceRunRecord: defineRoute({
 		...get,
-		path: "/api/traces/runs/:runId/receipt",
+		path: "/api/traces/runs/:runId/record",
 		params: TraceParams,
 		query: Type.Object({ include: Type.Optional(Type.Literal("full")) }, { additionalProperties: false }),
-		response: TraceReceipt,
-		summary: "Receipt evidence checked against its seal; the saved document on request",
+		response: TraceRunRecord,
+		summary: "Run record evidence checked against its seal; the saved document on request",
 	}),
 	telemetrySession: defineRoute({
 		...get,

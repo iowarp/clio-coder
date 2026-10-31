@@ -315,7 +315,7 @@ function documenterDeliveryLabels(run: FinishedRun): string[] {
 			: null;
 	return [
 		`terminal Documenter result: ${summary === null ? "no inline summary is available" : "the inline deliverable or limitation is in output.text JSON field summary"}. Execution success and contract conformance alone do not prove the requested explanation was delivered.`,
-		"Read the summary or the task-authorized artifact once and check it against the requested deliverable. If it is absent, incomplete, or states a limitation, report the specific limitation and the run ID; do not repeatedly read this unchanged terminal receipt or poll it for new output. Keep any separately authorized recovery and its outcome distinct from the original run.",
+		"Read the summary or the task-authorized artifact once and check it against the requested deliverable. If it is absent, incomplete, or states a limitation, report the specific limitation and the run ID; do not repeatedly read this unchanged terminal run record or poll it for new output. Keep any separately authorized recovery and its outcome distinct from the original run.",
 	];
 }
 

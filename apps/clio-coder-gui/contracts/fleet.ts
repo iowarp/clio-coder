@@ -56,7 +56,7 @@ export const DispatchRuns = Type.Object(
 	closed,
 );
 /** A finished run as the read model checks it; its settled record and result object only when the full record is asked for. */
-export const FleetReceipt = Type.Object(
+export const FleetRunRecord = Type.Object(
 	{ evidence: TelemetryRunEvidence, record: Type.Union([TelemetryRunRecord, Type.Null()]) },
 	closed,
 );
@@ -159,5 +159,5 @@ export type DispatchRun = Static<typeof DispatchRun>;
 export type FleetRequest =
 	| { kind: "roots" | "dispatches"; limit: number; cursor?: string }
 	| { kind: "root" | "dispatch"; id: string }
-	| { kind: "receipt"; id: string; full?: boolean }
+	| { kind: "run-record"; id: string; full?: boolean }
 	| { kind: "councils" | "gates" };

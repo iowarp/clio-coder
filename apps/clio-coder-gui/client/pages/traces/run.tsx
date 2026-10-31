@@ -11,7 +11,7 @@ import { StatusMark } from "../../design/status.js";
 import { Explained } from "../../telemetry/Explained.js";
 import { listDestination } from "../run-inspection-model.js";
 import "./trace-live.css";
-import { CallWaterfall, Facts, ReceiptPanel, SpendPanel } from "./panels.js";
+import { CallWaterfall, Facts, RunRecordPanel, SpendPanel } from "./panels.js";
 import "../run-inspection.css";
 import { liveLabel, liveRefetchMs } from "./trace-live-model.js";
 import { entryLabel, histogram, journalNote, runIsLive, runTone, runTotals } from "./trace-model.js";
@@ -68,12 +68,12 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		enabled: journaled,
 		refetchInterval: liveRefetchMs(status),
 	});
-	const receipt = useQuery({
+	const record = useQuery({
 		meta: { errorSurface: "inline" },
 		placeholderData: (previous) => previous,
-		queryKey: ["trace-receipt", runId, full],
+		queryKey: ["trace-run-record", runId, full],
 		enabled: full,
-		queryFn: () => client.call(routes.traceReceipt, { ...input, query: full ? { include: "full" } : {} }),
+		queryFn: () => client.call(routes.traceRunRecord, { ...input, query: full ? { include: "full" } : {} }),
 		refetchInterval: liveRefetchMs(status),
 	});
 	useEffect(() => {
@@ -86,9 +86,9 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		void detail.refetch();
 		void timeline.refetch();
 		void cost.refetch();
-		void receipt.refetch();
+		void record.refetch();
 	};
-	const failure = run.error ?? detail.error ?? timeline.error ?? cost.error ?? receipt.error;
+	const failure = run.error ?? detail.error ?? timeline.error ?? cost.error ?? record.error;
 	if (!run.data)
 		return (
 			<section className="run-inspection">
@@ -99,7 +99,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 						<InspectionError title="Run could not be read" error={run.error as Error} busy={run.isFetching} retry={retry} />
 					</>
 				) : (
-					<p role="status">Reading the run, its journal and saved receipt…</p>
+					<p role="status">Reading the run, its journal and saved record…</p>
 				)}
 			</section>
 		);
@@ -124,7 +124,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 					</span>
 				) : null}
 			</div>
-			<p className="panel-note">Run journal record · receipt integrity is a separate check</p>
+			<p className="panel-note">Run journal record · record integrity is a separate check</p>
 			{note ? <p className="trace-warning">{note}</p> : null}
 			<ul className="trace-totals">
 				{runTotals(trace, detail.data, now).map((total) => (
@@ -156,7 +156,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				<InspectionError
 					title="Refresh failed; showing the last loaded record"
 					error={failure as Error}
-					busy={run.isFetching || detail.isFetching || timeline.isFetching || cost.isFetching || receipt.isFetching}
+					busy={run.isFetching || detail.isFetching || timeline.isFetching || cost.isFetching || record.isFetching}
 					retry={retry}
 				/>
 			)}
@@ -167,7 +167,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				tabs={[
 					{ id: "replay", label: `Replay · ${entries.length} entries` },
 					{ id: "execution", label: `Execution · ${calls} ${calls === 1 ? "call" : "calls"}` },
-					{ id: "checks", label: "Checks & receipt" },
+					{ id: "checks", label: "Checks & record" },
 				]}
 			>
 				{view === "replay" &&
@@ -202,18 +202,18 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				)}
 				{view === "checks" && (
 					<>
-						{full && receipt.isPlaceholderData && <p role="status">Reading the complete saved receipt…</p>}
+						{full && record.isPlaceholderData && <p role="status">Reading the complete saved record…</p>}
 						{trace ? (
-							<ReceiptPanel
+							<RunRecordPanel
 								data={
-									full && receipt.data && !receipt.isPlaceholderData ? receipt.data : { evidence: trace.evidence, record: null }
+									full && record.data && !record.isPlaceholderData ? record.data : { evidence: trace.evidence, record: null }
 								}
-								full={full && !!receipt.data && !receipt.isPlaceholderData}
-								loading={full && (receipt.isPending || receipt.isPlaceholderData)}
+								full={full && !!record.data && !record.isPlaceholderData}
+								loading={full && (record.isPending || record.isPlaceholderData)}
 								loadFull={() => setFull(true)}
 							/>
 						) : (
-							<p role="status">Reading the saved receipt…</p>
+							<p role="status">Reading the saved record…</p>
 						)}
 					</>
 				)}

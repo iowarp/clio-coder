@@ -59,7 +59,7 @@ export type TraceRun = Static<typeof TraceRun>;
  * verifies, and `record` is the run's run.settled payload and result object, sent only when the full record is asked
  * for.
  */
-export const TraceReceipt = Type.Object(
+export const TraceRunRecord = Type.Object(
 	{ evidence: TelemetryRunEvidence, record: Type.Union([TelemetryRunRecord, Type.Null()]) },
 	closed,
 );
@@ -80,4 +80,4 @@ export const TraceParams = Type.Object({ runId: Id }, closed);
 export type TraceRequest =
 	| { kind: "runs"; query: Static<typeof TraceRunsQuery> }
 	| { kind: "run"; runId: string }
-	| { kind: "receipt"; runId: string; full?: boolean };
+	| { kind: "run-record"; runId: string; full?: boolean };

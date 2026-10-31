@@ -17,7 +17,7 @@ import {
 	fleetRunDetail,
 	isLiveRun,
 } from "./fleet-facts.js";
-import { ReceiptLine } from "./ReceiptLine.js";
+import { RunRecordLine } from "./RunRecordLine.js";
 import {
 	dispatchRecordPath,
 	noticeClock,
@@ -133,7 +133,7 @@ function RunNode({
 					<Icon name="external" />
 				</Link>
 			</div>
-			{run.receipt ? <ReceiptLine receipt={run.receipt} /> : null}
+			{run.record ? <RunRecordLine record={run.record} /> : null}
 			{expanded ? (
 				<div className="agents-node__detail" id={detailId}>
 					<dl>

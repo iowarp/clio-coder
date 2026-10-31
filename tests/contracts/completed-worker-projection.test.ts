@@ -20,7 +20,7 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 	}).result;
 	const verified = settledRunTrust(receipt);
 	const rejected = settledRunTrust({ ...receipt, task: "tampered" }, { state: "failed", reason: "run seal failed" });
-	let facts: ReturnType<NonNullable<TelemetryRunReaders["readReceipt"]>> = {
+	let facts: ReturnType<NonNullable<TelemetryRunReaders["readRunResult"]>> = {
 		text: '{"diagnosis":"Verified bytes","reproduction":"unknown","evidence":[]}',
 		trust: verified,
 		contract: "pass",
@@ -28,7 +28,7 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 	};
 	const bus = createTelemetryHub();
 	const projection = createTelemetryProjection(bus, {
-		readReceipt: () => facts,
+		readRunResult: () => facts,
 	});
 	const store = createDispatchBoardStore(projection);
 	const event: DispatchCompletedPayload = {

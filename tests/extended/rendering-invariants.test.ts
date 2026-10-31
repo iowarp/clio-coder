@@ -63,7 +63,7 @@ import {
 import {
 	createWorkerStream,
 	type WorkerEntryState,
-	type WorkerReceiptFacts,
+	type WorkerRunResultFacts,
 } from "../../src/session-control/worker-stream.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { settledRunTrust } from "../harness/settled-run.js";
@@ -535,7 +535,7 @@ describe("worker rendering invariants", () => {
 			tools: ["read"],
 			attempts: [{ runId: "run-outcomes", targetLabel: "blade" }],
 			pending: false,
-			receipt: { outcome: "failed", durationMs: 1000, toolCalls: 2 },
+			result: { outcome: "failed", durationMs: 1000, toolCalls: 2 },
 			progress: progress.snapshot(),
 		} as unknown as WorkerEntryState;
 		const settled = workerSettledFields(entry);
@@ -597,7 +597,7 @@ describe("worker rendering invariants", () => {
 			tools: [],
 			attempts: [],
 			pending: false,
-			receipt: { outcome: "succeeded", durationMs: 21000, trust: settledRunTrust(receipt) },
+			result: { outcome: "succeeded", durationMs: 21000, trust: settledRunTrust(receipt) },
 		};
 		for (const width of [24, 44, 76]) {
 			const lines = renderWorkerEntryLines(entry, width, {});
@@ -613,7 +613,7 @@ describe("worker rendering invariants", () => {
 	});
 
 	it("renders the same sealed outcome facts live and on replay", () => {
-		const facts: WorkerReceiptFacts = {
+		const facts: WorkerRunResultFacts = {
 			outcome: "succeeded",
 			exitCode: 0,
 			tokenCount: 42,
@@ -622,8 +622,8 @@ describe("worker rendering invariants", () => {
 			contract: "pass",
 			text: "sealed worker answer",
 		};
-		const readReceipt = (): WorkerReceiptFacts => facts;
-		const stream = createWorkerStream({ readReceipt });
+		const readResult = (): WorkerRunResultFacts => facts;
+		const stream = createWorkerStream({ readResult });
 		const started = stream.started({
 			runId: "run-1",
 			assignmentId: "assignment-1",
@@ -660,10 +660,10 @@ describe("worker rendering invariants", () => {
 			agentId: "scout",
 			runtime: { kind: "clio", targetId: "local", wireModelId: "worker-model" },
 		};
-		const replayed = workerEntriesFromRunEntries([entry], readReceipt).get("assignment-1");
+		const replayed = workerEntriesFromRunEntries([entry], readResult).get("assignment-1");
 		if (replayed === undefined) throw new Error("worker did not replay");
 
-		deepStrictEqual(completed.entry.receipt, replayed.receipt);
+		deepStrictEqual(completed.entry.result, replayed.result);
 		strictEqual(completed.entry.text, replayed.text);
 		strictEqual(completed.entry.pending, false);
 		strictEqual(replayed.pending, false);
@@ -1376,7 +1376,7 @@ describe("Pi TUI compatibility", () => {
 });
 
 it("renders aligned helper rows with Standard activity and keeps their identity on replay", () => {
-	const stream = createWorkerStream({ readReceipt: () => null });
+	const stream = createWorkerStream({ readResult: () => null });
 	const started = stream.started({
 		runId: "helper-run",
 		assignmentId: "helper-task",
@@ -1449,7 +1449,7 @@ it("renders aligned helper rows with Standard activity and keeps their identity 
 	match(detailed, /\n {2}│ blade · model/u);
 	doesNotMatch(detailed, /full findings/u);
 
-	replayed.receipt = { outcome: "failed", failureMessage: "Invalid helper result" };
+	replayed.result = { outcome: "failed", failureMessage: "Invalid helper result" };
 	const failed = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
 	match(failed, new RegExp(`^${GLYPH.subProcess} scout ✗ +—  Explore the source architecture`, "u"));
 	match(failed, /\n {2}│ ✗ Invalid helper result/u);
@@ -1772,7 +1772,7 @@ describe("transcript block grammar", () => {
 				attempts: [{ runId: "run-1", targetLabel: "mini" }],
 				pending: false,
 				parentToolCallId: "d1",
-				receipt: { outcome: "succeeded" },
+				result: { outcome: "succeeded" },
 			} as WorkerEntryState);
 			say(panel, "The reviewer found nothing.");
 			panel.applyEvent({ type: "agent_end", messages: [assistantMessage("The reviewer found nothing.")] } as never);
@@ -1797,7 +1797,7 @@ describe("transcript block grammar", () => {
 				attempts: [{ runId: `run-${assignmentId}`, targetLabel: "mini" }],
 				pending: false,
 				parentToolCallId,
-				receipt: { outcome: "succeeded" },
+				result: { outcome: "succeeded" },
 			}) as WorkerEntryState;
 		const panel = createChatPanel({ getOutputStyle: () => "detailed" });
 		panel.appendUser("Delegate the review");
@@ -2083,7 +2083,7 @@ describe("transcript block grammar", () => {
 				tools: ["git", "grep", "read", "limitation"],
 				attempts: [{ runId: "run-3", targetLabel: "blade" }],
 				pending,
-				...(pending ? {} : { receipt: { outcome: "succeeded", durationMs: 9_000, toolCalls: 4 } }),
+				...(pending ? {} : { result: { outcome: "succeeded", durationMs: 9_000, toolCalls: 4 } }),
 				progress: {
 					revision: 1,
 					phase: "tool",
@@ -2126,7 +2126,7 @@ describe("transcript block grammar", () => {
 			tools: ["gateway", "read"],
 			attempts: [{ runId: "run-5", targetLabel: "blade" }],
 			pending: false,
-			receipt: { outcome: "succeeded", durationMs: 9_000, toolCalls: 5 },
+			result: { outcome: "succeeded", durationMs: 9_000, toolCalls: 5 },
 			// Newest first, as the worker progress fold keeps them.
 			recentActions: [
 				evidence,
@@ -2159,7 +2159,7 @@ describe("transcript block grammar", () => {
 			attempts: [{ runId: "run-4", targetLabel: "blade" }],
 			pending: false,
 			contextTokens: 3_164,
-			receipt: { outcome: "succeeded", durationMs: 8_200, toolCalls: 1, tokenCount: 19_100, contract: "pass" },
+			result: { outcome: "succeeded", durationMs: 8_200, toolCalls: 1, tokenCount: 19_100, contract: "pass" },
 			progress: {
 				revision: 1,
 				phase: "writing",
@@ -2622,7 +2622,7 @@ describe("tool classes", () => {
 			attempts: [{ runId: "run-6", targetLabel: "blade" }],
 			pending: false,
 			contextTokens: 3_164,
-			receipt: { outcome: "succeeded", durationMs: 8_200, toolCalls: 6, tokenCount: 19_100 },
+			result: { outcome: "succeeded", durationMs: 8_200, toolCalls: 6, tokenCount: 19_100 },
 		} as unknown as WorkerEntryState;
 		const usage = { input: 47_200, output: 465, cacheRead: 0, cacheWrite: 0, reasoning: 138, totalTokens: 47_665 };
 		const call = () =>
@@ -2750,8 +2750,8 @@ describe("tool classes", () => {
 describe("agent invocations", () => {
 	/** A settled card by default; a running one passes `pending: true` and gets no receipt. */
 	const card = (
-		overrides: Partial<Omit<WorkerEntryState, "receipt">> &
-			Pick<WorkerEntryState, "assignmentId" | "agentId"> & { receipt?: WorkerEntryState["receipt"] | undefined },
+		overrides: Partial<Omit<WorkerEntryState, "result">> &
+			Pick<WorkerEntryState, "assignmentId" | "agentId"> & { result?: WorkerEntryState["result"] | undefined },
 	) => {
 		const state = {
 			runId: `${overrides.assignmentId}-r1`,
@@ -2762,10 +2762,10 @@ describe("agent invocations", () => {
 			tools: [],
 			attempts: [{ runId: `${overrides.assignmentId}-r1`, targetLabel: "dynamo/qwen" }],
 			pending: false,
-			receipt: { outcome: "succeeded", durationMs: 38_000, tokenCount: 18_200, toolCalls: 7 },
+			result: { outcome: "succeeded", durationMs: 38_000, tokenCount: 18_200, toolCalls: 7 },
 			...overrides,
 		} as WorkerEntryState;
-		if (state.pending) delete state.receipt;
+		if (state.pending) delete state.result;
 		return state;
 	};
 	const dispatchStart = (panel: ChatPanel, id: string, args: unknown) =>
@@ -2845,7 +2845,7 @@ describe("agent invocations", () => {
 				const first = siblings[0];
 				ok(first);
 				first.pending = false;
-				first.receipt = { outcome: "succeeded", durationMs: 7000, toolCalls: 1 };
+				first.result = { outcome: "succeeded", durationMs: 7000, toolCalls: 1 };
 				panel.applyWorkerState(first);
 				if (style === "detailed") {
 					const rows = renderWorkerEntryLines(first, width, { detail: transcriptDetail(style), siblings });
@@ -2926,7 +2926,7 @@ describe("agent invocations", () => {
 					assignmentId: `f${index}`,
 					agentId: "scout",
 					parentToolCallId: "fan",
-					...(index === 2 ? { receipt: { outcome: "failed", failureMessage: "context overflow", durationMs: 9_000 } } : {}),
+					...(index === 2 ? { result: { outcome: "failed", failureMessage: "context overflow", durationMs: 9_000 } } : {}),
 				}),
 			);
 		}

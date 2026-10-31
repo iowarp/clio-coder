@@ -20,7 +20,7 @@ import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import {
 	type WorkerEntryState as StreamWorkerEntryState,
-	type WorkerReceiptSummary,
+	type WorkerRunResultSummary,
 	workerAskedByModel,
 } from "../../session-control/worker-stream.js";
 import { councilLabelText } from "../council-grid.js";
@@ -159,20 +159,20 @@ function cardPrefix(entry: WorkerEntryState): string {
  * so the separate quality line cannot be mistaken for process status.
  * Abandoned names itself rather than falling through to its `stalled`
  * outcome code, so it reads as a ledger-side finding instead of the ordinary
- * heartbeat-timeout `stalled` a sealed receipt reports.
+ * heartbeat-timeout `stalled` a sealed result reports.
  */
-function outcomeUnit(receipt: WorkerReceiptSummary): string {
+function outcomeUnit(result: WorkerRunResultSummary): string {
 	// A worker that exited cleanly without executing one tool did none of an
 	// assignment that needed tools, so "execution ok" would read as a done task.
-	// The receipt stays succeeded when the worker answered in prose by design
+	// The result stays succeeded when the worker answered in prose by design
 	// (a judge or scout can); the row states the fact in a neutral tone.
-	if (receipt.outcome === "succeeded" && receipt.toolCalls === 0) {
+	if (result.outcome === "succeeded" && result.toolCalls === 0) {
 		return theme.fg("toolMetadata", `${GLYPH.queued} ran no tools`);
 	}
-	if (receipt.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
-	if (receipt.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} canceled`);
-	if (receipt.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
-	return theme.fg("error", `${GLYPH.error} ${receipt.outcomeCode ?? receipt.outcome}`);
+	if (result.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
+	if (result.outcome === "canceled") return theme.fg("toolMetadata", `${GLYPH.cancelled} canceled`);
+	if (result.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
+	return theme.fg("error", `${GLYPH.error} ${result.outcomeCode ?? result.outcome}`);
 }
 
 /**
@@ -181,16 +181,16 @@ function outcomeUnit(receipt: WorkerReceiptSummary): string {
  * Materio and WTF-P workers return `needs_input: checkpoint:decision` (or
  * `task_blocked`, or a `## CHECKPOINT REACHED` heading) followed by the
  * questions the orchestrator has to relay. That is a prose convention, not a
- * receipt field, so the transcript reads the first line of the answer.
+ * result field, so the transcript reads the first line of the answer.
  */
 const CHECKPOINT_PREFIX = /^\s*(?:needs_input\b|task_blocked\b|##\s*CHECKPOINT REACHED\b|##\s*BLOCKED\b)/iu;
 /** Rows a checkpoint's body keeps on the folded row: the questions are the point of the entry. */
 const CHECKPOINT_PREVIEW_ROWS = 16;
 
-export function workerNeedsInput(entry: Pick<WorkerEntryState, "text" | "receipt">): boolean {
+export function workerNeedsInput(entry: Pick<WorkerEntryState, "text" | "result">): boolean {
 	return (
-		entry.receipt !== undefined &&
-		entry.receipt.stillRunning !== true &&
+		entry.result !== undefined &&
+		entry.result.stillRunning !== true &&
 		CHECKPOINT_PREFIX.test(entry.text.trim().replace(/^```[A-Za-z0-9_-]*[^\S\r\n]*\r?\n/u, ""))
 	);
 }
@@ -200,7 +200,7 @@ function needsInputUnit(): string {
 }
 
 /**
- * A block with no settled receipt yet: the live mark, spinner-free. The row's
+ * A block with no settled result yet: the live mark, spinner-free. The row's
  * progress line says what the run is doing; `/view` spells the state out.
  */
 function pendingUnit(): string {
@@ -209,12 +209,12 @@ function pendingUnit(): string {
 
 /**
  * Whether a block should render as still going rather than settled: live,
- * never yet received a receipt (`entry.receipt === undefined`), or replayed
+ * never yet received a result (`entry.result === undefined`), or replayed
  * from a `runs.json` row with no `endedAt` (`stillRunning`) because its
  * process is still executing in another instance of Clio.
  */
 function isPending(entry: WorkerEntryState): boolean {
-	return entry.receipt === undefined || entry.receipt.stillRunning === true;
+	return entry.result === undefined || entry.result.stillRunning === true;
 }
 
 /** Wrap one annotation onto the rail, prefixed on its first row and hanging under it after. */
@@ -226,9 +226,9 @@ function railLines(text: string, token: SemanticRole, width: number): string[] {
 }
 
 function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnswer | null {
-	if (entry.receipt?.trust?.artifactIntegrity.state !== "verified") return null;
-	const kind = entry.receipt?.contractKind;
-	const conformance = entry.receipt?.contract;
+	if (entry.result?.trust?.artifactIntegrity.state !== "verified") return null;
+	const kind = entry.result?.contractKind;
+	const conformance = entry.result?.contract;
 	return presentWorkerContractAnswer(
 		entry.text,
 		kind && conformance ? { kind, conformance } : undefined,
@@ -247,7 +247,7 @@ const isStringArray = (value: unknown): value is string[] =>
  */
 function mutationReportLines(
 	value: Record<string, unknown>,
-	placement: WorkerReceiptSummary["placement"] | undefined,
+	placement: WorkerRunResultSummary["placement"] | undefined,
 ): string[] | null {
 	if (!isStringArray(value.mutatedPaths) || !Array.isArray(value.validations)) return null;
 	const lines: string[] = [];
@@ -276,14 +276,14 @@ function mutationReportLines(
 
 /**
  * The body's source lines. A structured answer (a result-contract JSON object)
- * uses its receipt identity for a readable preview. Unknown objects retain
+ * uses its result identity for a readable preview. Unknown objects retain
  * their original numeric source tokens instead of being parsed and reserialized.
  * Truncated text is not one object and passes through as the prose it is.
  */
 function bodySourceLines(entry: WorkerEntryState): string[] {
 	if (
 		entry.pending ||
-		entry.receipt?.trust?.artifactIntegrity.state !== "verified" ||
+		entry.result?.trust?.artifactIntegrity.state !== "verified" ||
 		entry.droppedLines !== 0 ||
 		(entry.progress?.droppedBytes ?? 0) !== 0
 	)
@@ -293,7 +293,7 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 	const presented = presentedContractAnswer(entry);
 	if (presented !== null) return presented.lines;
 	return (
-		mutationReportLines(structured, entry.receipt?.placement)?.map(safeWorkerAnswerText) ??
+		mutationReportLines(structured, entry.result?.placement)?.map(safeWorkerAnswerText) ??
 		answerText(entry, entry.text).split("\n")
 	);
 }
@@ -325,10 +325,10 @@ function attemptLines(entry: WorkerEntryState, width: number): string[] {
 /**
  * The failure's first line, on the rail above the footer. The footer stays one
  * line of facts; the reason is prose and wraps like prose, so a long message
- * cannot make the receipt line heavier than the answer above it.
+ * cannot make the result line heavier than the answer above it.
  */
 function failureLines(entry: WorkerEntryState, width: number): string[] {
-	const message = entry.receipt?.failureMessage;
+	const message = entry.result?.failureMessage;
 	if (message === undefined) return [];
 	const first = (message.split("\n", 1)[0] ?? "").trim();
 	return first.length === 0 ? [] : railLines(`${GLYPH.error} ${first}`, "error", width);
@@ -346,11 +346,11 @@ function failureLines(entry: WorkerEntryState, width: number): string[] {
 function actionLine(entry: WorkerEntryState, width: number): string {
 	const identity = `${cardPrefix(entry)}${identityUnits(entry).join(meta(SEPARATOR))}`;
 	const status =
-		isPending(entry) || entry.receipt === undefined
+		isPending(entry) || entry.result === undefined
 			? pendingUnit()
 			: workerNeedsInput(entry)
 				? needsInputUnit()
-				: outcomeUnit(entry.receipt);
+				: outcomeUnit(entry.result);
 	const elapsed =
 		entry.telemetry === undefined || entry.telemetry === null
 			? ""
@@ -373,7 +373,7 @@ function actionLine(entry: WorkerEntryState, width: number): string {
  */
 function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const metrics: string[] = [];
-	const exitCode = entry.receipt?.exitCode;
+	const exitCode = entry.result?.exitCode;
 	if (exitCode !== undefined && exitCode !== 0) metrics.push(`exit ${exitCode}`);
 	const tokens = entry.telemetry?.row.tokens.display;
 	const calls = entry.telemetry?.activity.toolCalls.display;
@@ -382,7 +382,7 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	if (context) metrics.push(`context ${context.display}`);
 
 	if (calls !== undefined) metrics.push(`${calls} tool calls`);
-	if (inspect && entry.receipt?.contract !== undefined) metrics.push(`contract ${entry.receipt.contract}`);
+	if (inspect && entry.result?.contract !== undefined) metrics.push(`contract ${entry.result.contract}`);
 	return metrics;
 }
 
@@ -474,13 +474,13 @@ function alignedHeader(
 		? pendingUnit()
 		: workerNeedsInput(entry)
 			? theme.fg("warning", GLYPH.phaseBlocked)
-			: entry.receipt?.outcome === "canceled"
+			: entry.result?.outcome === "canceled"
 				? theme.fg("toolMetadata", GLYPH.cancelled)
-				: entry.receipt?.outcome !== "succeeded" || entry.receipt?.contract === "fail"
+				: entry.result?.outcome !== "succeeded" || entry.result?.contract === "fail"
 					? theme.fg("error", GLYPH.error)
 					: theme.fg(
-							entry.receipt.toolCalls === 0 ? "toolMetadata" : "success",
-							entry.receipt.toolCalls === 0 ? GLYPH.queued : GLYPH.ok,
+							entry.result.toolCalls === 0 ? "toolMetadata" : "success",
+							entry.result.toolCalls === 0 ? GLYPH.queued : GLYPH.ok,
 						);
 	const name = workerName(entry);
 	const widest = Math.max(visibleWidth(name), ...(siblings ?? []).map((sibling) => visibleWidth(workerName(sibling))));
@@ -500,7 +500,7 @@ function alignedHeader(
 
 function dispatchHeader(siblings: ReadonlyArray<WorkerEntryState>, width: number): string {
 	const running = siblings.filter(isPending).length;
-	const done = siblings.filter((entry) => !isPending(entry) && entry.receipt?.outcome === "succeeded").length;
+	const done = siblings.filter((entry) => !isPending(entry) && entry.result?.outcome === "succeeded").length;
 	const failed = siblings.length - running - done;
 	const first = siblings[0];
 	const name =
@@ -622,7 +622,7 @@ function helperRow(
 	return [
 		alignedHeader(entry, width, nowMs, siblings),
 		...(pending && detail.style === "standard" ? [progressLine(entry, width, nowMs, false)] : []),
-		...(entry.receipt?.mergeDetail ? railLines(entry.receipt.mergeDetail, "success", width) : []),
+		...(entry.result?.mergeDetail ? railLines(entry.result.mergeDetail, "success", width) : []),
 		...previewRows(
 			[...failureLines(entry, width), ...attemptLines(entry, width)],
 			previewBudget(detail.errorRows, terminalRows),
@@ -631,8 +631,8 @@ function helperRow(
 			meta(RAIL),
 			RAIL_WIDTH,
 		),
-		...(entry.receipt?.receiptUnavailable ? railLines("receipt unavailable", "warning", width) : []),
-		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", width) : []),
+		...(entry.result?.resultUnavailable ? railLines("result unavailable", "warning", width) : []),
+		...(entry.result?.abandonedDetail ? railLines(entry.result.abandonedDetail, "warning", width) : []),
 	].map(redactSecretString);
 }
 
@@ -675,7 +675,7 @@ export function renderWorkerEntryLines(
 			...(detail.style === "compact" ? [] : [progressLine(entry, safeWidth, nowMs, false)]),
 		].map(redactSecretString);
 	}
-	const integrity = entry.receipt?.trust;
+	const integrity = entry.result?.trust;
 	const provenance =
 		isPending(entry) || integrity?.artifactIntegrity.state === "verified"
 			? []
@@ -687,7 +687,7 @@ export function renderWorkerEntryLines(
 	const quality = isPending(entry)
 		? []
 		: railLines(
-				`quality ${entry.receipt?.trust ? validationClause(entry.receipt.trust) : "validation unknown"}`,
+				`quality ${entry.result?.trust ? validationClause(entry.result.trust) : "validation unknown"}`,
 				"body",
 				safeWidth,
 			);
@@ -710,7 +710,7 @@ export function renderWorkerEntryLines(
 	// are finished work, not activity.
 	const pending = isPending(entry);
 	const recent = entry.progress?.recentActions ?? entry.recentActions ?? [];
-	const totalCalls = entry.receipt?.toolCalls ?? entry.progress?.toolCalls ?? 0;
+	const totalCalls = entry.result?.toolCalls ?? entry.progress?.toolCalls ?? 0;
 	const earlierCalls = pending ? 0 : Math.max(0, totalCalls - recent.length);
 	const trail = pending
 		? recent
@@ -761,10 +761,10 @@ export function renderWorkerEntryLines(
 			? previewRows(trail, budget(WORKER_ACTION_TRAIL_LIMIT + 1), safeWidth, true, meta(RAIL), RAIL_WIDTH)
 			: []),
 		...failure,
-		...(entry.receipt?.mergeDetail ? railLines(entry.receipt.mergeDetail, "success", safeWidth) : []),
+		...(entry.result?.mergeDetail ? railLines(entry.result.mergeDetail, "success", safeWidth) : []),
 		...(presented ? railLines(presented, "body", safeWidth) : []),
-		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", safeWidth) : []),
-		...(entry.receipt?.receiptUnavailable ? railLines("receipt unavailable", "warning", safeWidth) : []),
+		...(entry.result?.abandonedDetail ? railLines(entry.result.abandonedDetail, "warning", safeWidth) : []),
+		...(entry.result?.resultUnavailable ? railLines("result unavailable", "warning", safeWidth) : []),
 		...(entry.droppedLines
 			? railLines(
 					`… ${entry.droppedLines} earlier lines unavailable here · /view dispatch:${entry.runId}`,

@@ -63,7 +63,7 @@ import {
 	toolResultContent,
 	truncateReplayText,
 } from "../session-control/session-replay-messages.js";
-import { readWorkerReceiptFactsForReplay } from "../session-control/worker-receipts.js";
+import { readWorkerRunResultFactsForReplay } from "../session-control/worker-run-results.js";
 import { toolResultPresentationText } from "../tools/result-disposition.js";
 import { budgetAlertNotice } from "./bus-notices.js";
 import type { ChatPanel, ReplayedRunFacts } from "./chat-panel.js";
@@ -709,7 +709,7 @@ function replayEntries(
 	}
 	const workerStates = workerEntriesFromRunEntries(
 		selected.filter((entry): entry is WorkerRunEntry => entry.kind === "workerRun"),
-		options.readWorkerReceipt ?? readWorkerReceiptFactsForReplay,
+		options.readWorkerRunResult ?? readWorkerRunResultFactsForReplay,
 		settledRuns,
 	);
 	const placedAssignments = new Set<string>();

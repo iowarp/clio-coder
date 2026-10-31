@@ -3880,10 +3880,10 @@
 				}
 			}
 		},
-		"/api/workspaces/{id}/receipts/{runId}/verify": {
+		"/api/workspaces/{id}/runs/{runId}/verify": {
 			"post": {
-				"operationId": "receiptVerify",
-				"summary": "Recheck receipt integrity against its run through Clio",
+				"operationId": "runRecordVerify",
+				"summary": "Recheck record integrity against its run through Clio",
 				"security": [
 					{
 						"bearer": []
@@ -4120,7 +4120,7 @@
 		"/api/fleet/runs/{id}": {
 			"get": {
 				"operationId": "fleetRoot",
-				"summary": "Fleet plan results, receipt and related topology",
+				"summary": "Fleet plan results, record and related topology",
 				"security": [
 					{
 						"bearer": []
@@ -5077,10 +5077,10 @@
 				}
 			}
 		},
-		"/api/fleet/receipts/{id}": {
+		"/api/fleet/runs/{id}/record": {
 			"get": {
-				"operationId": "fleetReceipt",
-				"summary": "Receipt evidence by run identifier, checked against its seal; the saved document on request",
+				"operationId": "fleetRunRecord",
+				"summary": "Run record evidence by run identifier, checked against its seal; the saved document on request",
 				"security": [
 					{
 						"bearer": []
@@ -7985,7 +7985,7 @@
 													"type": "string",
 													"maxLength": 128
 												},
-												"receiptFacts": {
+												"runResultFacts": {
 													"type": "boolean"
 												},
 												"resume": {
@@ -13920,7 +13920,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_c2be1583"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_0b53b2b8"
 								}
 							}
 						},
@@ -14823,7 +14823,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_c2be1583"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_0b53b2b8"
 								}
 							}
 						},
@@ -14918,7 +14918,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_c2be1583"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_0b53b2b8"
 								}
 							}
 						},
@@ -14968,7 +14968,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_c2be1583"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_0b53b2b8"
 									}
 								}
 							}
@@ -15459,7 +15459,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_c2be1583"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_0b53b2b8"
 								}
 							}
 						},
@@ -16100,10 +16100,10 @@
 				}
 			}
 		},
-		"/api/traces/runs/{runId}/receipt": {
+		"/api/traces/runs/{runId}/record": {
 			"get": {
-				"operationId": "traceReceipt",
-				"summary": "Receipt evidence checked against its seal; the saved document on request",
+				"operationId": "traceRunRecord",
+				"summary": "Run record evidence checked against its seal; the saved document on request",
 				"security": [
 					{
 						"bearer": []
@@ -17623,7 +17623,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Union_7a0beaa6"
+									"$ref": "#/components/schemas/Union_d616cdcd"
 								}
 							}
 						},
@@ -17718,7 +17718,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Union_7a0beaa6"
+									"$ref": "#/components/schemas/Union_d616cdcd"
 								}
 							}
 						},
@@ -17777,13 +17777,6 @@
 					"$ref": "#/components/schemas/Object_available_contextWindow_defaultModel_dd672f1c"
 				},
 				"maxItems": 200
-			},
-			"Array_0d5b9ae2": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_at_fact_id_36f58932"
-				},
-				"maxItems": 128
 			},
 			"Array_0f3c9b0a": {
 				"type": "array",
@@ -18195,6 +18188,13 @@
 					"$ref": "#/components/schemas/Object_fill_key_label_85b68f62"
 				},
 				"maxItems": 4
+			},
+			"Array_fdb8a333": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_at_fact_id_cdcc8a27"
+				},
+				"maxItems": 128
 			},
 			"CacheReportV1": {
 				"type": "object",
@@ -19500,7 +19500,7 @@
 								"const": "fleet.loopBlocked"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_c7f9ab6e"
+								"$ref": "#/components/schemas/Object_item_resource_revision_22904cc1"
 							}
 						}
 					},
@@ -19528,7 +19528,7 @@
 								"const": "fleet.enqueued"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_c7f9ab6e"
+								"$ref": "#/components/schemas/Object_item_resource_revision_22904cc1"
 							}
 						}
 					},
@@ -19556,7 +19556,7 @@
 								"const": "fleet.started"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_c7f9ab6e"
+								"$ref": "#/components/schemas/Object_item_resource_revision_22904cc1"
 							}
 						}
 					},
@@ -19584,7 +19584,7 @@
 								"const": "fleet.progress"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_c7f9ab6e"
+								"$ref": "#/components/schemas/Object_item_resource_revision_22904cc1"
 							}
 						}
 					},
@@ -19612,7 +19612,7 @@
 								"const": "fleet.completed"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_c7f9ab6e"
+								"$ref": "#/components/schemas/Object_item_resource_revision_22904cc1"
 							}
 						}
 					},
@@ -19640,7 +19640,7 @@
 								"const": "fleet.failed"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_c7f9ab6e"
+								"$ref": "#/components/schemas/Object_item_resource_revision_22904cc1"
 							}
 						}
 					},
@@ -19668,7 +19668,7 @@
 								"const": "evidence.ready"
 							},
 							"payload": {
-								"$ref": "#/components/schemas/Object_item_resource_revision_c7f9ab6e"
+								"$ref": "#/components/schemas/Object_item_resource_revision_22904cc1"
 							}
 						}
 					},
@@ -20159,7 +20159,7 @@
 										"type": "string"
 									},
 									"operation": {
-										"$ref": "#/components/schemas/Union_7a0beaa6"
+										"$ref": "#/components/schemas/Union_d616cdcd"
 									}
 								}
 							}
@@ -21299,11 +21299,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_at_fact_id_36f58932": {
+			"Object_at_fact_id_cdcc8a27": {
 				"type": "object",
 				"required": ["id", "at", "sourceSequence", "fact"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_13f831f0"
+					"$ref": "#/components/schemas/Shape_0f2fda0b"
 				},
 				"additionalProperties": false
 			},
@@ -22266,19 +22266,19 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_cancellable_finishedAt_id_bad1827b": {
-				"type": "object",
-				"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt", "result"],
-				"properties": {
-					"$ref": "#/components/schemas/Shape_eadfb99c"
-				},
-				"additionalProperties": false
-			},
 			"Object_cancellable_finishedAt_id_bb0fe198": {
 				"type": "object",
 				"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt", "problem"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_71196fd3"
+				},
+				"additionalProperties": false
+			},
+			"Object_cancellable_finishedAt_id_d92c15c4": {
+				"type": "object",
+				"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt", "result"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_73a6759b"
 				},
 				"additionalProperties": false
 			},
@@ -22623,7 +22623,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_c2be1583": {
+			"Object_config_contextWork_fleet_0b53b2b8": {
 				"type": "object",
 				"required": [
 					"id",
@@ -22640,7 +22640,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_ce40e8df"
+					"$ref": "#/components/schemas/Shape_27ed336a"
 				},
 				"additionalProperties": false
 			},
@@ -22812,10 +22812,10 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_contract_contractKind_elapsedMs_e847951a": {
+			"Object_contract_contractKind_elapsedMs_3cdbab98": {
 				"type": "object",
 				"required": [
-					"receiptId",
+					"runId",
 					"outcome",
 					"contract",
 					"contractKind",
@@ -22827,7 +22827,7 @@
 					"placement"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_93302a75"
+					"$ref": "#/components/schemas/Shape_b46e3d08"
 				},
 				"additionalProperties": false
 			},
@@ -23460,11 +23460,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_exitCode_id_kind_a3be071a": {
+			"Object_exitCode_id_kind_9f278733": {
 				"type": "object",
 				"required": ["kind", "id", "exitCode", "message", "verification"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_6aab9ef6"
+					"$ref": "#/components/schemas/Shape_fe51400d"
 				},
 				"additionalProperties": false
 			},
@@ -23799,19 +23799,19 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_item_resource_revision_22904cc1": {
+				"type": "object",
+				"required": ["resource", "revision", "item"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_d2ae50e5"
+				},
+				"additionalProperties": false
+			},
 			"Object_item_resource_revision_c419c0fa": {
 				"type": "object",
 				"required": ["resource", "revision", "item"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_79294bbe"
-				},
-				"additionalProperties": false
-			},
-			"Object_item_resource_revision_c7f9ab6e": {
-				"type": "object",
-				"required": ["resource", "revision", "item"],
-				"properties": {
-					"$ref": "#/components/schemas/Shape_baa56e9a"
 				},
 				"additionalProperties": false
 			},
@@ -25806,6 +25806,25 @@
 					"$ref": "#/components/schemas/Union_4c1db78b"
 				}
 			},
+			"Shape_0f2fda0b": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"at": {
+					"type": "string"
+				},
+				"sourceSequence": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"fact": {
+					"$ref": "#/components/schemas/Union_9a136014"
+				},
+				"record": {
+					"$ref": "#/components/schemas/Object_contract_contractKind_elapsedMs_3cdbab98"
+				}
+			},
 			"Shape_108fba47": {
 				"title": {
 					"anyOf": [
@@ -25868,25 +25887,6 @@
 			"Shape_12e39c26": {
 				"ignored": {
 					"$ref": "#/components/schemas/Array_7d31aeb6"
-				}
-			},
-			"Shape_13f831f0": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"at": {
-					"type": "string"
-				},
-				"sourceSequence": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"fact": {
-					"$ref": "#/components/schemas/Union_9a136014"
-				},
-				"receipt": {
-					"$ref": "#/components/schemas/Object_contract_contractKind_elapsedMs_e847951a"
 				}
 			},
 			"Shape_13f97761": {
@@ -26301,6 +26301,66 @@
 				},
 				"display": {
 					"type": "string"
+				}
+			},
+			"Shape_27ed336a": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_11bb1234"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_1a9e2ef4"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_976c1438"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_862a0b3c"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_fdb8a333"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_2b7a18ac": {
@@ -27130,26 +27190,6 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_7608f622"
 				}
 			},
-			"Shape_6aab9ef6": {
-				"kind": {
-					"type": "string",
-					"const": "receipt-verification"
-				},
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"exitCode": {
-					"type": "number",
-					"const": 0
-				},
-				"message": {
-					"type": "string"
-				},
-				"verification": {
-					"$ref": "#/components/schemas/Object_axes_reason_runId_3824a2a2"
-				}
-			},
 			"Shape_6b840e60": {
 				"used": {
 					"type": "string",
@@ -27319,6 +27359,38 @@
 				},
 				"truncated": {
 					"type": "boolean"
+				}
+			},
+			"Shape_73a6759b": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"kind": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"cancellable": {
+					"type": "boolean"
+				},
+				"startedAt": {
+					"type": "string"
+				},
+				"progress": {
+					"$ref": "#/components/schemas/Array_62d9e6ab"
+				},
+				"status": {
+					"type": "string",
+					"const": "succeeded"
+				},
+				"finishedAt": {
+					"type": "string"
+				},
+				"result": {
+					"$ref": "#/components/schemas/Union_5f05c598"
 				}
 			},
 			"Shape_74fd8979": {
@@ -27506,107 +27578,6 @@
 				},
 				"fact": {
 					"$ref": "#/components/schemas/Union_afe90f89"
-				}
-			},
-			"Shape_93302a75": {
-				"receiptId": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"outcome": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"contract": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"contractKind": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"trust": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"validation": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"tokens": {
-					"anyOf": [
-						{
-							"type": "number",
-							"minimum": 0
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"tokensDisplay": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"elapsedMs": {
-					"anyOf": [
-						{
-							"type": "number",
-							"minimum": 0
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"placement": {
-					"$ref": "#/components/schemas/Union_fe2cccf3"
-				},
-				"unavailable": {
-					"type": "boolean",
-					"const": true
 				}
 			},
 			"Shape_9c1b08b0": {
@@ -27892,6 +27863,107 @@
 					"$ref": "#/components/schemas/Union_f4e71cff"
 				}
 			},
+			"Shape_b46e3d08": {
+				"runId": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"outcome": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"contract": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"contractKind": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"trust": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"validation": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"tokens": {
+					"anyOf": [
+						{
+							"type": "number",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"tokensDisplay": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"elapsedMs": {
+					"anyOf": [
+						{
+							"type": "number",
+							"minimum": 0
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"placement": {
+					"$ref": "#/components/schemas/Union_fe2cccf3"
+				},
+				"unavailable": {
+					"type": "boolean",
+					"const": true
+				}
+			},
 			"Shape_b5c78548": {
 				"type": {
 					"type": "string",
@@ -27954,19 +28026,6 @@
 				},
 				"finishedAt": {
 					"type": "string"
-				}
-			},
-			"Shape_baa56e9a": {
-				"resource": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"item": {
-					"$ref": "#/components/schemas/Object_at_fact_id_36f58932"
 				}
 			},
 			"Shape_bdc005cf": {
@@ -28318,64 +28377,17 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_7608f622"
 				}
 			},
-			"Shape_ce40e8df": {
-				"id": {
+			"Shape_d2ae50e5": {
+				"resource": {
 					"type": "string",
 					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
 				},
 				"revision": {
 					"type": "integer",
-					"minimum": 0
+					"minimum": 1
 				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_11bb1234"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_1a9e2ef4"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_976c1438"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_862a0b3c"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_0d5b9ae2"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
+				"item": {
+					"$ref": "#/components/schemas/Object_at_fact_id_cdcc8a27"
 				}
 			},
 			"Shape_d2f42be7": {
@@ -28620,38 +28632,6 @@
 					"$ref": "#/components/schemas/Union_76a27b10"
 				}
 			},
-			"Shape_eadfb99c": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"kind": {
-					"type": "string"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"cancellable": {
-					"type": "boolean"
-				},
-				"startedAt": {
-					"type": "string"
-				},
-				"progress": {
-					"$ref": "#/components/schemas/Array_62d9e6ab"
-				},
-				"status": {
-					"type": "string",
-					"const": "succeeded"
-				},
-				"finishedAt": {
-					"type": "string"
-				},
-				"result": {
-					"$ref": "#/components/schemas/Union_ca0876cf"
-				}
-			},
 			"Shape_ed19653f": {
 				"kind": {
 					"type": "string",
@@ -28779,6 +28759,26 @@
 				},
 				"sseFallbacks": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_7608f622"
+				}
+			},
+			"Shape_fe51400d": {
+				"kind": {
+					"type": "string",
+					"const": "run-record-verification"
+				},
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"exitCode": {
+					"type": "number",
+					"const": 0
+				},
+				"message": {
+					"type": "string"
+				},
+				"verification": {
+					"$ref": "#/components/schemas/Object_axes_reason_runId_3824a2a2"
 				}
 			},
 			"Shape_ff2c96e5": {
@@ -30267,6 +30267,19 @@
 					}
 				]
 			},
+			"Union_5f05c598": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_id_message_304430bd"
+					},
+					{
+						"$ref": "#/components/schemas/Object_exitCode_id_kind_847e19f3"
+					},
+					{
+						"$ref": "#/components/schemas/Object_exitCode_id_kind_9f278733"
+					}
+				]
+			},
 			"Union_5f470bd4": {
 				"anyOf": [
 					{
@@ -30490,22 +30503,6 @@
 					},
 					{
 						"type": "null"
-					}
-				]
-			},
-			"Union_7a0beaa6": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_cancellable_id_kind_c46729e0"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_bad1827b"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_bb0fe198"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_7631365d"
 					}
 				]
 			},
@@ -31288,19 +31285,6 @@
 					}
 				]
 			},
-			"Union_ca0876cf": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_id_message_304430bd"
-					},
-					{
-						"$ref": "#/components/schemas/Object_exitCode_id_kind_847e19f3"
-					},
-					{
-						"$ref": "#/components/schemas/Object_exitCode_id_kind_a3be071a"
-					}
-				]
-			},
 			"Union_ceb97bb9": {
 				"anyOf": [
 					{
@@ -31350,6 +31334,22 @@
 					},
 					{
 						"type": "null"
+					}
+				]
+			},
+			"Union_d616cdcd": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_cancellable_id_kind_c46729e0"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_d92c15c4"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_bb0fe198"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_7631365d"
 					}
 				]
 			},

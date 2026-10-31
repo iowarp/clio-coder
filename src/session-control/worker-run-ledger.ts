@@ -9,11 +9,11 @@
  */
 
 import type { TelemetryHub } from "../core/telemetry/hub.js";
-import { readWorkerReceiptFacts } from "./worker-receipts.js";
+import { readWorkerRunResultFacts } from "./worker-run-results.js";
 import {
 	createWorkerStream,
 	type WorkerEntryState,
-	type WorkerReceiptReader,
+	type WorkerRunResultReader,
 	type WorkerStreamChange,
 } from "./worker-stream.js";
 
@@ -28,9 +28,9 @@ export interface WorkerRunLedger {
 
 export function followWorkerRuns(
 	bus: TelemetryHub,
-	readReceipt: WorkerReceiptReader = readWorkerReceiptFacts,
+	readResult: WorkerRunResultReader = readWorkerRunResultFacts,
 ): WorkerRunLedger {
-	const stream = createWorkerStream({ readReceipt });
+	const stream = createWorkerStream({ readResult });
 	const states = new Map<string, WorkerEntryState>();
 	const keep = (change: WorkerStreamChange | null): void => {
 		if (change === null) return;

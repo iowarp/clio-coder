@@ -50,7 +50,7 @@ import {
 } from "./live-status.js";
 import { MessageActions, TurnOutcome } from "./message-actions.js";
 import { ReasoningDisclosure } from "./Reasoning.js";
-import { WorkerReceipt } from "./ReceiptLine.js";
+import { WorkerRunRecord } from "./RunRecordLine.js";
 import { TurnChanges } from "./TurnChanges.js";
 import { describeTool } from "./tool-presentation.js";
 import { type ChatTurn, sameTurnView } from "./turns.js";
@@ -242,7 +242,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 								return (
 									<div key={segment.item.id}>
 										<MarkdownContent source={segment.item.text} complete={settled} deferDiagrams={live} />
-										<WorkerReceipt client={client} sessionId={session.id} item={segment.item} />
+										<WorkerRunRecord client={client} sessionId={session.id} item={segment.item} />
 									</div>
 								);
 							case "notice":

@@ -96,7 +96,7 @@ function currentOwner(): ClioSessionOwner {
  * (`handoffTransaction`, `continuityCommit`) and the optional continuity
  * payload a compaction summary carries. Version 6 widens the working-set
  * records: four eviction reasons (`search_narrowed`, `diff_applied`,
- * `offloaded_body`, `dispatch_receipt_settled`), the `reread` recall trigger,
+ * `offloaded_body`, `dispatch_run_record_settled`), the `reread` recall trigger,
  * and the optional `contentHash` on an evicted item that the read tool
  * compares against a fresh read of the same path.
  *

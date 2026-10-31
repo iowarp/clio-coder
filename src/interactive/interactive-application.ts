@@ -50,7 +50,7 @@ import type {
 	SlashCommandContext,
 	TaskMemorySeedCommandResult,
 } from "../session-control/slash-commands.js";
-import { readWorkerReceiptFacts } from "../session-control/worker-receipts.js";
+import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import { runParkedInterview } from "../tools/extension-interview.js";
 import type { JobOperations } from "../tools/job-types.js";
@@ -1739,9 +1739,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				"context-result",
 			);
 		},
-		readWorkerReceipt: (runId) => {
-			const receipt = readWorkerReceiptFacts(runId, deps.stateDir);
-			exitSummary.observeReceipt(runId, receipt);
+		readWorkerRunResult: (runId) => {
+			const receipt = readWorkerRunResultFacts(runId, deps.stateDir);
+			exitSummary.observeRunResult(runId, receipt);
 			return receipt;
 		},
 		refreshFooter: () => footer.refresh(),

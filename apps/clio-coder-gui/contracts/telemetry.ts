@@ -25,7 +25,7 @@ export const TelemetryWhyStopped = TELEMETRY_DTO_SCHEMAS.whyStopped;
 export const TelemetryExplanation = TELEMETRY_DTO_SCHEMAS.explanation;
 export const TelemetryQuota = TELEMETRY_DTO_SCHEMAS.quota;
 export const TelemetryUpdate = TELEMETRY_DTO_SCHEMAS.update;
-/** A run's sealed receipt through its integrity check: the facts the seal vouches for, never the raw document. */
+/** A run's sealed record through its integrity check: the facts the seal vouches for, never the raw document. */
 export const TelemetryRunEvidence = TELEMETRY_DTO_SCHEMAS.runEvidence;
 /** A full run record always carries the seal verdict beside the settled facts and result (#434 B10). */
 export const TelemetryRunRecord = Type.Pick(TELEMETRY_DTO_SCHEMAS.run, ["settled", "seal", "result"]);

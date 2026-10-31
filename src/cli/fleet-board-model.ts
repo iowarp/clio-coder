@@ -9,7 +9,7 @@ import { runTelemetry } from "../domains/telemetry/read-model.js";
  * same over SSH), so it shares nothing with the orchestrator's heap. Three
  * sources feed it: the run ledger (`runs.json`) for identity, route, budget and
  * lifecycle; each run's display feed (src/domains/dispatch/run-feed.ts)
- * for the live stream; and the sealed receipt, authenticated against its
+ * for the live stream; and the sealed record, authenticated against its
  * ledger row, for a finished worker's outcome, conformance and trust.
  *
  * Feeds are folded incrementally: a run's fold remembers how many bytes it
@@ -44,7 +44,7 @@ const TEXT_ROW_MAX_CHARS = 8000;
 const FOLD_READ_MAX_BYTES = 512 * 1024;
 /** Finished workers the board lists after the running ones. */
 const FINISHED_CARD_LIMIT = 24;
-/** Lines of a sealed answer the takeover shows under the receipt summary. */
+/** Lines of a sealed answer the takeover shows under the record summary. */
 export const ANSWER_PREVIEW_LINES = 12;
 
 // ---------------------------------------------------------------------------
@@ -415,11 +415,11 @@ function createRunFoldCache(stateDir: string): RunFoldCache {
 }
 
 // ---------------------------------------------------------------------------
-// Receipt facts
+// Run record facts
 // ---------------------------------------------------------------------------
 
-/** What a finished card and the takeover's summary say about the sealed receipt. */
-export interface ReceiptView {
+/** What a finished card and the takeover's summary say about the sealed record. */
+export interface RunRecordView {
 	outcome: string;
 	outcomeCode?: string;
 	contract?: string;
@@ -433,7 +433,7 @@ export interface ReceiptView {
 	changedPaths?: ReadonlyArray<string>;
 }
 
-function receiptView(runId: string, stateDir: string): ReceiptView | null {
+function runRecordView(runId: string, stateDir: string): RunRecordView | null {
 	const facts = readRunResultFacts(runId, stateDir);
 	if (facts === null) return null;
 	const integrity = facts.trust?.artifactIntegrity;
@@ -480,11 +480,11 @@ export interface WorkerCard {
 	last: StreamRow | null;
 	/** Newest prose, for a running card that is writing rather than calling tools. */
 	lastText?: string;
-	receipt: ReceiptView | null;
+	record: RunRecordView | null;
 	/** Present on a step of a fleet run: the root it belongs to. */
 	fleetRootId?: string;
 	attempt: number;
-	/** The ledger closed the row without a receipt; its own words. */
+	/** The ledger closed the row without a record; its own words. */
 	ledgerDetail?: string;
 }
 
@@ -522,13 +522,13 @@ function lastProse(fold: RunFold): string | undefined {
 export interface BoardSource {
 	stateDir: string;
 	folds: RunFoldCache;
-	/** Receipts are immutable once sealed, so each is authenticated and read once. */
-	receipts: Map<string, ReceiptView | null>;
+	/** Run records are immutable once sealed, so each is authenticated and read once. */
+	records: Map<string, RunRecordView | null>;
 	ledger: { mtimeMs: number; size: number; runs: ReadonlyArray<RunEnvelope> } | null;
 }
 
 export function createBoardSource(stateDir: string = clioStateDir()): BoardSource {
-	return { stateDir, folds: createRunFoldCache(stateDir), receipts: new Map(), ledger: null };
+	return { stateDir, folds: createRunFoldCache(stateDir), records: new Map(), ledger: null };
 }
 
 /** The ledger rows, re-read only when `runs.json` changed. A torn or failed read keeps the last good copy. */
@@ -570,10 +570,10 @@ function supersededIds(runs: ReadonlyArray<RunEnvelope>): Set<string> {
 function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): WorkerCard {
 	const fold = source.folds.fold(run.id);
 	const state = cardState(run);
-	let receipt: ReceiptView | null = null;
+	let record: RunRecordView | null = null;
 	if (!isLive(state)) {
-		if (!source.receipts.has(run.id)) source.receipts.set(run.id, receiptView(run.id, source.stateDir));
-		receipt = source.receipts.get(run.id) ?? null;
+		if (!source.records.has(run.id)) source.records.set(run.id, runRecordView(run.id, source.stateDir));
+		record = source.records.get(run.id) ?? null;
 	}
 	const startedAtMs = Date.parse(run.startedAt);
 	const endedAtMs = run.endedAt === null ? null : Date.parse(run.endedAt);
@@ -602,10 +602,10 @@ function buildCard(source: BoardSource, run: RunEnvelope, nowMs: number): Worker
 		current: isLive(state) ? fold.current : null,
 		last: fold.last,
 		...(lastText !== undefined ? { lastText } : {}),
-		receipt,
+		record,
 		...(rootRunId?.startsWith("fleet-") ? { fleetRootId: rootRunId } : {}),
 		attempt: run.lineage?.attempt ?? 0,
-		...(receipt === null && !isLive(state) && run.outcomeDetail ? { ledgerDetail: run.outcomeDetail } : {}),
+		...(record === null && !isLive(state) && run.outcomeDetail ? { ledgerDetail: run.outcomeDetail } : {}),
 	};
 }
 

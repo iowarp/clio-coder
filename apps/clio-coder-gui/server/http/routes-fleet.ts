@@ -38,10 +38,10 @@ export function fleetRoutes(app: Hono, hub: EventHub, fleet: FleetService, artif
 	register(app, hub, routes.dispatchRun, ({ params }) =>
 		fleet.read({ kind: "dispatch", ...params }, routes.dispatchRun.response),
 	);
-	register(app, hub, routes.fleetReceipt, ({ params, query }) =>
+	register(app, hub, routes.fleetRunRecord, ({ params, query }) =>
 		fleet.read(
-			{ kind: "receipt", id: artifacts.admitAny(RUN_KINDS, params.id), full: query.include === "full" },
-			routes.fleetReceipt.response,
+			{ kind: "run-record", id: artifacts.admitAny(RUN_KINDS, params.id), full: query.include === "full" },
+			routes.fleetRunRecord.response,
 		),
 	);
 	register(app, hub, routes.fleetCouncils, () => fleet.read({ kind: "councils" }, routes.fleetCouncils.response));

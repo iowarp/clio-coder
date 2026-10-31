@@ -260,7 +260,7 @@ export function usageView(report: UsageReport): UsageView {
 				: null,
 		origins,
 		originsNote: origins.length
-			? "Calls by what asked for them, in one fold over the window's sessions and runs. Worker calls come from each run's journal, or from its sealed receipt when it left none. A tool loop can make several conversation calls."
+			? "Calls by what asked for them, in one fold over the window's sessions and runs. Worker calls come from each run's journal. A tool loop can make several conversation calls."
 			: byOrigin
 				? "No call was recorded in this window."
 				: "Call origins were not recorded in this window.",

@@ -7,14 +7,14 @@
  * and the run's sealed scope under `telemetry/runs/<runId>/` holding the answer. This
  * module is the bridge in both directions. It projects a live entry state onto
  * the session entry going out, and rebuilds the same {@link WorkerEntryState}
- * from entries plus receipts coming back, so replay hands the renderer the
+ * from entries plus run results coming back, so replay hands the renderer the
  * exact object the reducer would have.
  *
- * Streamed prose never crosses either way. The receipt is the terminal truth
+ * Streamed prose never crosses either way. The result is the terminal truth
  * for a worker's answer, so persisting the live tail would only add a second,
  * staler copy of it to the session file.
  *
- * Pure: the receipt reader is a parameter, so nothing here touches disk.
+ * Pure: the result reader is a parameter, so nothing here touches disk.
  */
 
 import type { SessionEntryInput, WorkerRunEntry } from "../domains/session/index.js";
@@ -23,8 +23,8 @@ import {
 	boundSettledText,
 	type WorkerAttempt,
 	type WorkerEntryState,
-	type WorkerReceiptReader,
-	workerReceiptSummary,
+	type WorkerRunResultReader,
+	workerRunResultSummary,
 	workerTargetLabel,
 } from "../session-control/worker-stream.js";
 
@@ -36,7 +36,7 @@ export type WorkerRunEntryFields = Omit<WorkerRunEntryInput, "parentTurnId">;
 
 /**
  * The custom session entry that records what a settled run's live stream knew
- * and its receipt does not: the context its last model call occupied, and the
+ * and its result does not: the context its last model call occupied, and the
  * calls it finished last, which its Detailed card lists. Never rendered, never
  * model context; replay reads it back onto the block.
  */
@@ -157,18 +157,18 @@ export function workerRunEntryFields(state: WorkerEntryState): WorkerRunEntryFie
  * Attempts fold the way they did live: the entries of one assignment become one
  * block whose header names the last attempt and whose rail carries an `↻` line
  * for each earlier one, so a resumed failover reads as the single run it was.
- * The body and footer come from the last attempt's receipt, which is the
+ * The body and footer come from the last attempt's result, which is the
  * attempt that actually produced an answer, through the same projection the
  * live fold uses to settle a block.
  *
  * The returned map is keyed by assignment. Tool names are not reconstructed:
- * they were live telemetry, the receipt seals a call count rather than a list,
+ * they were live telemetry, the result seals a call count rather than a list,
  * and inventing names from anything else would put a worker's arguments one
  * inference away from the transcript.
  */
 export function workerEntriesFromRunEntries(
 	entries: ReadonlyArray<WorkerRunEntry>,
-	readReceipt: WorkerReceiptReader,
+	readResult: WorkerRunResultReader,
 	/** What each settled run's live stream knew, by run id, from `workerSettled` entries. */
 	settledRuns: ReadonlyMap<string, WorkerSettledFields> = new Map(),
 ): Map<string, WorkerEntryState> {
@@ -183,7 +183,7 @@ export function workerEntriesFromRunEntries(
 	for (const [assignmentId, attempts] of byAssignment) {
 		const last = attempts[attempts.length - 1];
 		if (last === undefined) continue;
-		const facts = readReceipt(last.runId);
+		const facts = readResult(last.runId);
 		const bounded = boundSettledText(facts?.text ?? "");
 		const settled = settledRuns.get(last.runId);
 		const contextTokens = settled?.contextTokens;
@@ -205,7 +205,7 @@ export function workerEntriesFromRunEntries(
 			tools: [],
 			attempts: trail,
 			pending: false,
-			receipt: workerReceiptSummary(facts),
+			result: workerRunResultSummary(facts),
 			...(contextTokens !== undefined ? { contextTokens } : {}),
 			...(settled?.calls !== undefined ? { recentActions: settled.calls.map(settledCallAction) } : {}),
 			...(last.parentToolCallId !== undefined ? { parentToolCallId: last.parentToolCallId } : {}),
