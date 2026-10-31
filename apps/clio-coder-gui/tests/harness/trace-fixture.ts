@@ -99,7 +99,6 @@ export async function traceFixture(
 			exitCode: running ? null : 0,
 			pid: null,
 			heartbeatAt: null,
-			receiptPath: null,
 			sessionId: null,
 			cwd: state,
 			tokenCount: 0,

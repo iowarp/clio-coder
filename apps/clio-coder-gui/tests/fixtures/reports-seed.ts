@@ -1,7 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { clioStateDir } from "../../../../src/core/xdg.js";
 import type { SessionEntry } from "../../../../src/domains/session/entries.js";
 import { openCallJournal } from "../../../../src/domains/telemetry/call-journal.js";
+import { telemetrySessionDirectory } from "../../../../src/domains/telemetry/paths.js";
 import { cwdHash } from "../../../../src/engine/session.js";
 import { telemetryCall } from "../../../../tests/harness/telemetry-view.js";
 
@@ -22,14 +24,15 @@ const sessions = join(cwd, "state/sessions", cwdHash(cwd), "usage-fixture");
 await mkdir(sessions, { recursive: true });
 await writeFile(join(sessions, "current.jsonl"), `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 
+const sessionId = "usage-fixture";
 const journal = await openCallJournal({
-	directory: join(cwd, "state/telemetry/sessions/usage-fixture"),
-	context: { sessionId: "usage-fixture", agent: { role: "main", id: "usage-fixture" } },
+	directory: telemetrySessionDirectory(clioStateDir(), sessionId),
+	context: { sessionId, agent: { role: "main", id: sessionId } },
 	writer: { clioCoderVersion: "test", piVersion: "test" },
 });
 try {
 	for (const index of [1, 2]) {
-		for (const record of telemetryCall("usage-fixture", {
+		for (const record of telemetryCall(sessionId, {
 			turnId: `turn-${index}`,
 			targetId: "fixture-target",
 			at: base.timestamp,
@@ -37,10 +40,14 @@ try {
 			usd: 0.01,
 			pricedBy: "catalog",
 		})) {
-			if (record.k === "call.started")
-				journal.enqueue({ kind: record.k, data: record.data, ctx: record.ctx, wallMs: Date.parse(record.t), mono: 0 });
-			else if (record.k === "call.settled")
-				journal.enqueue({ kind: record.k, data: record.data, ctx: record.ctx, wallMs: Date.parse(record.t), mono: 0 });
+			if (record.k !== "call.started" && record.k !== "call.settled") throw new Error("unexpected fixture event");
+			journal.enqueue({
+				kind: record.k,
+				data: record.data,
+				ctx: record.ctx,
+				wallMs: Date.parse(record.t),
+				mono: record.mono,
+			} as Parameters<typeof journal.enqueue>[0]);
 		}
 	}
 } finally {

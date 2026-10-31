@@ -6,15 +6,15 @@ import { harness, json } from "./harness/app.js";
 import {
 	coldParityDtos,
 	dtoLies,
+	fixtureEnvelope,
+	fixtureReceiptDraft,
 	PARITY_SESSION,
 	quantitiesOf,
 	seedGoldenSession,
 	seedParitySession,
 	seedRunJournal,
-	fixtureEnvelope,
-	fixtureReceiptDraft,
-	writeSettledRun,
 	telemetryLies,
+	writeSettledRun,
 } from "./harness/telemetry-fixture.js";
 
 test("telemetry routes serve the read-model DTOs; every quantity passes the lie detectors and explains to itself", async (t) => {

@@ -281,10 +281,7 @@ test("a seal that does not verify shows no check, only the read model's integrit
 		word: "seal failed",
 		meaning: "The run seal does not verify, so none of the run's checks are shown. digest mismatch",
 	});
-	assert.equal(
-		receiptIntegrity({ ...tampered, record: "missing" }).meaning,
-		"No run journal was found for this run.",
-	);
+	assert.equal(receiptIntegrity({ ...tampered, record: "missing" }).meaning, "No run journal was found for this run.");
 	assert.equal(receiptIntegrity(sealedEvidence(verifiedTool)).tone, "success");
 });
 

@@ -63,7 +63,6 @@ const base: RunEnvelope = {
 	exitCode: 0,
 	pid: null,
 	heartbeatAt: null,
-	receiptPath: null,
 	sessionId: null,
 	cwd: process.argv[2] ?? "",
 	tokenCount: 125,

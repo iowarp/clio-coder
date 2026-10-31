@@ -95,8 +95,6 @@ const adapters = new Set([
 	"src/domains/session/telemetry-source.ts",
 	// The repository window `usage report` folds, so a repo reference explains to the CLI's number (#434 §11.4).
 	"src/domains/telemetry/usage-window.ts",
-	// Every receipt read follows a pruned receipt's tombstone to its evidence copy (#434).
-	"src/domains/dispatch/receipt-store.ts",
 ]);
 // Test-only root seams are intentionally enumerated independently of production.
 const testModules = new Set([
@@ -105,7 +103,6 @@ const testModules = new Set([
 	"src/domains/session/entries.ts",
 	"tests/harness/receipt.ts",
 	"tests/harness/settled-run.ts",
-	"src/domains/dispatch/receipt-integrity.ts",
 	"src/domains/evidence/index.ts",
 	"src/domains/dispatch/state.ts",
 	"src/domains/dispatch/types.ts",
@@ -122,6 +119,11 @@ const testModules = new Set([
 	"tests/harness/telemetry-lies.ts",
 	"src/domains/telemetry/call-journal.ts",
 	"src/domains/telemetry/paths.ts",
+	"src/core/xdg.ts",
+	"src/domains/evidence/trust-status.ts",
+	"src/core/telemetry/schemas.ts",
+	"src/domains/telemetry/index.ts",
+	"src/domains/dispatch/run-settlement.ts",
 ]);
 function files(directory: string): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>

@@ -198,5 +198,4 @@ export class TraceAdapter {
 			record: record?.settled ? { settled: record.settled, seal: record.seal, result: record.result } : null,
 		};
 	}
-
 }

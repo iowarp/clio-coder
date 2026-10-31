@@ -11,14 +11,7 @@ import { humanizeKey } from "../../design/facts-model.js";
 import { StatusMark } from "../../design/status.js";
 import { Explained } from "../../telemetry/Explained.js";
 import { ReceiptChecks } from "./receipt-checks.js";
-import {
-	callPosition,
-	entryLabel,
-	runModelSpend,
-	runSpan,
-	runSpend,
-	stageBars,
-} from "./trace-model.js";
+import { callPosition, entryLabel, runModelSpend, runSpan, runSpend, stageBars } from "./trace-model.js";
 export function object(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
