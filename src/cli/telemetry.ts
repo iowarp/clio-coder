@@ -25,6 +25,7 @@ clio-coder telemetry export <session-id> --out <dir> [--content-free | --structu
 clio-coder telemetry import-bundle <bundle-dir> --out <dir>
 clio-coder telemetry prune [--apply] [--days N] [--max-gib N] [--research-days N] [--research-max-gib N]
 clio-coder telemetry prune --receipts [--apply]
+clio-coder telemetry verify <scope-dir> [--json]
 
 consent records, for this operator, that research content capture may run in a
 workspace (default: the current directory) and everything under it. Capture also
@@ -64,6 +65,13 @@ run's evidence bundle holds a copy under the same seal that verifies, and with
 --apply replaces that receipt with a tombstone naming the copy, which every
 receipt reader follows. A receipt of an open run, an unsealed one, or one with
 no verified copy stays, with the reason printed.
+
+verify checks a sealed scope directory (a session, run or process directory under
+the telemetry root) with nothing but its own files: every segment and object
+bundle.json lists against its size and sha256, the journal hash chain from the
+first segment header, and the seal record's head, line count and file lists. It
+prints verified, unsealed (live or never sealed) or failed with the first
+mismatch, and exits 0 only when the scope verifies, 2 on a usage error.
 `;
 
 function formatBytes(bytes: number): string {
@@ -367,6 +375,7 @@ export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<
 	if (argv[0] === "export") return runExport(argv.slice(1));
 	if (argv[0] === "import-bundle") return runImportBundle(argv.slice(1));
 	if (argv[0] === "prune") return runPrune(argv.slice(1));
+	if (argv[0] === "verify") return (await import("./telemetry-verify.js")).runTelemetryVerify(argv.slice(1));
 	if (argv[0] !== undefined) printError(`unknown telemetry command: ${argv[0]}`);
 	process.stderr.write(HELP);
 	return 2;
