@@ -79,7 +79,8 @@ const SIZE_BUDGETS = [
 	{
 		class: "codemap",
 		match: (path) => path === "dist/assets/codemap.json",
-		maxBytes: 5_000_000,
+		// 0.6.6 measured 5,082,737 bytes: re-pinned to 5.5 MB with the maintainer's approval in the release session (#442).
+		maxBytes: 5_500_000,
 	},
 	{
 		class: "dist bundles",
@@ -88,7 +89,8 @@ const SIZE_BUDGETS = [
 			!path.startsWith("dist/assets/grammars/") &&
 			path !== "dist/assets/codemap.json" &&
 			!path.startsWith("dist/gui/client/"),
-		maxBytes: 16_000_000,
+		// 0.6.6 measured 16,406,845 bytes: re-pinned to 16.5 MB with the maintainer's approval in the release session (#442).
+		maxBytes: 16_500_000,
 	},
 	{
 		class: "gui client",
@@ -112,7 +114,7 @@ const SIZE_BUDGETS = [
 		match: (path) =>
 			!path.includes("/") ||
 			["library/", "examples/", "models/"].some((prefix) => path.startsWith(prefix)) ||
-			[".claude-plugin/marketplace.json", "bin/clio-coder.cjs"].includes(path) ||
+			[".claude-plugin/marketplace.json", "bin/clio-coder.cjs", "assets/clio-mark-gui.webp"].includes(path) ||
 			SHIPPED_SCRIPTS.has(path),
 		maxBytes: 2_000_000,
 	},
