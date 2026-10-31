@@ -35,7 +35,7 @@ Clio closes its docks and leaves utility panes open:
   A second Clio Coder takes no brief on its command line; open it without one and give it its task afterwards.
   It runs against this session's Clio Coder directories and saved credentials, not the pane host's environment.
   This is an interactive handoff; Clio can close the owned pane but does not
-  capture a managed run or receipt from its contents. See [Coding Agent
+  capture a managed run or run record from its contents. See [Coding Agent
   Interoperability](interop.md).
 - **The workers dock.** `Alt+W` shows the workers dashboard in a dock to the right of the session. The dashboard, its keys and the per-run
   takeover are documented with the fleet in [Fleet Dispatch](fleet-dispatch.md). This page covers the utility panes and the dock contract below.

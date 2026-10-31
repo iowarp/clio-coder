@@ -85,7 +85,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder dev components [list] [--json]` | List behavior-affecting harness components. |
 | `clio-coder dev components snapshot --out <path>` | Write a component snapshot JSON file. |
 | `clio-coder dev components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
-| `clio-coder evidence build\|inspect\|list` | Build (`build --run <runId>` or `--session <sessionId>`), list and inspect a run's or session's evidence. Evidence is read from the telemetry read model's run record; a run's sealed scope directory is its evidence bundle. See [Evidence](../architecture/telemetry.md#evidence). |
+| `clio-coder evidence inspect <runId> [--json]\|list` | List the run scopes on this host with their assessment state, or inspect one run's assessment, trust status, findings and gate verdicts by run id. Every run is assessed when it settles, so there is nothing to build; `evidence build` is refused with that reason. A run's sealed scope directory is its evidence. See [Evidence](../architecture/telemetry.md#evidence). |
 | `clio-coder memory list\|propose\|promote\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. `propose --from-evidence <evidenceId>`, `promote --from-handoff <path> --scope <scope>` (with `--entry <id>` to pick entries), `approve <memoryId>`, `reject <memoryId>` and `prune --stale`. Scopes are `repo` (`--repository <canonical-absolute-path>`), `global` (`--acknowledge-global`), `runtime` (`--runtime <source-runtime-id>`) and `agent` (`--agent <source-agent-id>`). Promotion always needs an explicit scope and creates unapproved records for review. |
 | `clio-coder interop inspect [--json]` | Show the host inventory of detected coding agents and how far each one is wired. Changes no host or project files and starts no agent session. |
 | `clio-coder interop adopt <host> [--kind skill\|agent\|prompt\|plugin] [--project\|--user] [--yes] [--dry-run]` | Review and adopt safe resources from a detected host. Wiring a host as a delegation peer is `clio-coder configure --interop`. |
@@ -136,8 +136,8 @@ Given before `run`, they are refused with exit 2.
 pane server. Clio confirms `HERDR_ENV=1`, connects to an existing socket, and
 pings it before registering pane tools. The workers dock runs
 `fleet view --watch` against a selection file. Clio writes the requested run id and
-the session scope into that file, while the dashboard reads the ledger, journals and
-receipts itself, so dispatch remains independent of the pane host and a second
+the session scope into that file, while the dashboard reads the ledger, run journals and
+run feeds itself, so dispatch remains independent of the pane host and a second
 terminal can use the same journal surface directly.
 `interface.panes.enabled` defaults to `embedded`. Bare `clio-coder` can offer to
 open a workspace in a pane host and remember the answer. Inside a host it joins
@@ -228,12 +228,12 @@ project settings saves and by the operator-install approval above.
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. `--temperature` takes a number of 0 or more, `--top-p` and `--min-p` take 0 to 1, and `--top-k` takes a number of 0 or more, rounded down. They reach the main agent and an `--agent` worker alike. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. They reach the main agent and an `--agent` worker alike. |
 | `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |
-| `--json` | Stream JSONL events for main-agent runs; dispatch streams events and receipt JSON. |
+| `--json` | Stream JSONL events for main-agent runs; dispatch streams events and ends with one `result` frame holding the run's `RunResult`. |
 | `--json-events <mode>` | Main-agent JSON stream mode: `full` or `terminal`; implies `--json`. With `--agent` it is a usage error; use `--json`. |
 | `--session <id>` | Append this turn to an existing session identified by `<id>`. |
 | `--continue` | Append this turn to the most recent session for the current working directory. |
-| `--fail-on-noop` | Exit 1 when the main-agent run was a no-op, and seal its receipt as `failed` with `outcomeDetail: "noop"`. Main agent only; with `--agent` it is a usage error. See [Headless No-op Runs](#headless-no-op-runs). |
-| `--timeout <seconds>` | Wall-clock limit for the whole main-agent run, boot included. On expiry the run starts the coordinated shutdown a SIGTERM starts, seals its receipt with outcome `timed_out`, and exits 124. A positive number of seconds no greater than 2,147,483 (the timer ceiling in `src/core/timers.ts`); anything else is a usage error. Main agent only; with `--agent` it is a usage error. |
+| `--fail-on-noop` | Exit 1 when the main-agent run was a no-op, and seal its run record as `failed` with `outcomeDetail: "noop"`. Main agent only; with `--agent` it is a usage error. See [Headless No-op Runs](#headless-no-op-runs). |
+| `--timeout <seconds>` | Wall-clock limit for the whole main-agent run, boot included. On expiry the run starts the coordinated shutdown a SIGTERM starts, seals its run record with outcome `timed_out`, and exits 124. A positive number of seconds no greater than 2,147,483 (the timer ceiling in `src/core/timers.ts`); anything else is a usage error. Main agent only; with `--agent` it is a usage error. |
 | `--max-cost-usd <n>` | Positive finite USD cap on priced spend during this main-agent run. Reaching it stops the run with exit 4 and `budget_ceiling`. Clio warns about unpriced routes the cap cannot bound. With `--agent`, exits 2 with `clio-coder run: --max-cost-usd applies to the main agent, not --agent dispatch`. |
 | `--agent <recipe-id>` | Dispatch a user-facing fleet agent instead of the main agent. Unknown ids and shadow agents (`oracle`, `provenance`, `researcher`, `scout`, `world-knowledge`) fail fast; for their read-only work use `--agent coder --read-only`. |
 | `--skill <path>` | Make one explicit skill file or skill directory available for this run. Repeatable; the model loads its instructions with `context(scope="skills", name=...)`. |
@@ -276,7 +276,7 @@ A task that begins with `/` is checked before boot. A name that is neither a ski
 
 `clio-coder run --cwd <dir> "<task>"` behaves the same as `cd <dir> && clio-coder run "<task>"`. The process enters `<dir>` before it reads layered project settings, context files, skills, `@file` references, or the session ledger, and every tool path resolves against it. Relative paths in other arguments, such as `--skill`, `--steer-channel`, and `@file`, resolve against `<dir>` as well. The path is canonicalized first, so the run ledger records the physical directory as the run's `cwd`.
 
-Image `@file` references in a headless prompt or stdin require the routed model's image-input capability. Clio Coder refuses the turn before sending the image when the route is text-only. The run exits nonzero and prints `IMAGE_INPUT_UNSUPPORTED` with the target and model. A turn refused before admission has no run receipt. When the fleet profile named `vision` (`fleet.profiles.vision`) is configured, that sidecar describes the image and the turn proceeds on the text route.
+Image `@file` references in a headless prompt or stdin require the routed model's image-input capability. Clio Coder refuses the turn before sending the image when the route is text-only. The run exits nonzero and prints `IMAGE_INPUT_UNSUPPORTED` with the target and model. A turn refused before admission has no run record. When the fleet profile named `vision` (`fleet.profiles.vision`) is configured, that sidecar describes the image and the turn proceeds on the text route.
 
 Inline image references accept PNG, JPEG, GIF, or WebP bytes detected by file signature. Clio attempts to resize them to at most 2,000 by 2,000 pixels and below 4.5 MiB of base64 before submission; an image that cannot fit is omitted with a note. There is currently no settings key to disable images or change this inline cap.
 
@@ -287,7 +287,7 @@ Inline image references accept PNG, JPEG, GIF, or WebP bytes detected by file si
 
 ### Headless No-op Runs
 
-Every headless main-agent receipt carries a `safety` summary and a `noop` flag, whatever the flags. `safety.decisions` counts how admission decided each call (`allowed`, `blocked`, `permissionRequested`) and `safety.blockedAttempts` lists every call whose outcome was blocked, with its tool, action class, rule, and reason. These are the names and shapes a dispatched worker's receipt already uses. A call that parked for approval and was denied, because a headless run has no operator to approve it, counts under `permissionRequested` every time, including a repeat whose reason the loop guard replaced with its own guidance.
+Every headless main-agent run record carries a `safety` summary and a `noop` flag, whatever the flags. `safety.decisions` counts how admission decided each call (`allowed`, `blocked`, `permissionRequested`) and `safety.blockedAttempts` lists every call whose outcome was blocked, with its tool, action class, rule, and reason. These are the names and shapes a dispatched worker's run record already uses. A call that parked for approval and was denied, because a headless run has no operator to approve it, counts under `permissionRequested` every time, including a repeat whose reason the loop guard replaced with its own guidance.
 
 `safety.blockedAttempts` keeps the first 50 blocked calls, and clips each reason to 500 characters. When more calls than that were blocked, `safety.blockedAttemptsTruncated` counts the ones left out; the field is absent otherwise. The per-tool `blocked` counts in `toolStats` stay exact either way.
 
@@ -307,7 +307,7 @@ A later successful substantive read or command can recover a block of the same
 action class. Bookkeeping, discovery, and terminal reports do not count as that
 recovery. A successful dispatch counts as a write only when its task worktree
 was merged into this workspace; other dispatch work does not, so inspect worker
-receipts when assessing delegated changes.
+run records when assessing delegated changes.
 
 An unresolved block with no successful write exits 1 and seals `failed` with
 `outcomeDetail: "noop"`, even without `--fail-on-noop`. A successful `limitation`
@@ -409,8 +409,8 @@ The registry table below lists every interactive slash command. On a bare `/`, c
 | `/share` | `/share [runId]` | Share a worker result with the main agent |
 | `/archive` | `/archive export <path> \| /archive import [--dry-run] [--force] <path>` | Export or import a full Clio Coder archive |
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--worktree] [--read-only] [--share] <agent> <task>` | Run a worker or configured headless peer; `--worktree` preserves an isolated task branch and `--read-only` denies writes. |
-| `/delegate` | `/delegate [--read-only] [--share] <agent-id> <task>` | Run a configured ACP peer with a managed receipt; `--read-only` denies write permission requests. |
-| `/peer` | `/peer [--cwd <workspace>] <claude-code\|codex\|opencode\|antigravity\|pi> [brief]` | Open an installed coding agent in an owned Herdr pane; no managed receipt. Needs the pane layer, see [Panes and the Files Pane](panes-and-files.md). |
+| `/delegate` | `/delegate [--read-only] [--share] <agent-id> <task>` | Run a configured ACP peer as a managed run with a sealed run record; `--read-only` denies write permission requests. |
+| `/peer` | `/peer [--cwd <workspace>] <claude-code\|codex\|opencode\|antigravity\|pi> [brief]` | Open an installed coding agent in an owned Herdr pane; no managed run. Needs the pane layer, see [Panes and the Files Pane](panes-and-files.md). |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
 | `/draft` | `/draft [N] <request>` | Draft N answers in parallel (2-4, default 3). With the System One `drafts` site bound, a decision engine says which to read first. `Enter` on a finished draft puts it in the composer, unsent |
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
@@ -534,7 +534,7 @@ show equal percentages are never merged.
 | `/model` and `/thinking` | Choose a route for this session or save it as a default. Cancel leaves the active route unchanged. See [routing defaults](configuration-and-targets.md). |
 | `/btw` and `/draft` | Run side questions or candidate answers without tools or transcript changes. Calls still count in `/usage`. Candidates differ by sampling temperature, or by prompt angle for models that refuse a sampler, with one retry without `temperature` on an `Unsupported parameter: temperature` rejection. Bind `systemOne.sites.drafts` for a judged pick. In `/draft`, `Enter` on a finished draft closes the overlay and appends its text to the composer below anything already typed, never sending it, and `Esc` closes without taking anything. |
 | `/council` | Runs a roster declared under `fleet.rosters` of two to five read-only members: the roster named `default`, or the one `--roster` names. With no `--roster` and no `default` roster, the notice points at `fleet.rosters` in `settings.yaml`. Approval is shown before work starts; share the synthesis or an individual member explicitly with `/share <runId>`. |
-| `/run` and `/delegate` | Start a worker or ACP peer with a managed receipt. Its answer is separate from main-agent context until shared with `--share` or `/share`. |
+| `/run` and `/delegate` | Start a worker or ACP peer as a managed run with a sealed run record. Its answer is separate from main-agent context until shared with `--share` or `/share`. |
 | `/handoff <goal>` | Review a bounded handoff document, then accept it to create a fresh session. The goal must describe a concrete continuation. |
 | `/context` | Bare command opens the context ledger. Subcommands compact or recall session content and manage project context; see [Project context](#project-context). |
 | `/tasks` | Inspect session tasks and the durable project task inbox. ↑/↓ select a row, Tab and Shift+Tab jump between sections, and a board taller than the dock scrolls to keep the selection in view, pages with PgUp/PgDn, and shows its position. `a` adds an operator task; `h`, `d` and `x` hand, finish or drop the selected one. Acceptance checks travel with handed tasks; receipts show whether they passed. |
@@ -560,7 +560,7 @@ Use `/draft <prompt>` to get a few candidate answers without tools or transcript
 
 ### Run a worker and share the answer
 
-Use `/run <agent> <task>` to start a worker with a managed receipt. Its answer stays separate from the main conversation until you share it with `/share <runId>` or start the run with `--share`. `/delegate` starts an ACP peer; see the command table for its arguments.
+Use `/run <agent> <task>` to start a worker as a managed run with a sealed run record. Its answer stays separate from the main conversation until you share it with `/share <runId>` or start the run with `--share`. `/delegate` starts an ACP peer; see the command table for its arguments.
 
 ### Resuming sessions
 
@@ -774,11 +774,11 @@ modes are not symmetric:
   it is a new dispatch.
 - **Send now** is refused while an attached dispatch is running, for the reason
   given below. Cancel the worker itself with `Esc`, which stops the run and
-  still leaves a receipt.
+  still leaves a sealed run record.
 
 Send now is refused in two states and the message is queued at the head of the
 queue for the next slot instead, with a notice saying why: while an attached
-dispatch is running (the abort would kill the worker's run with no receipt;
+dispatch is running (the abort would kill the worker's run with no run record;
 steer it with `@<agent>` or cancel it with `Esc`) and while a permission ask is
 parked (it is already waiting on you). A message that arrives only after the
 run's final turn has settled is resubmitted as a fresh prompt, each queued
@@ -857,7 +857,7 @@ safety:
 
 ## Dispatch and Built-In Agents
 
-Use `clio-coder agents` to inspect the installed agent catalog and `clio-coder run --agent <id> "<task>"` for a non-interactive dispatch. In the TUI, `/run` starts a fleet worker or a configured headless coding peer, `/delegate` starts a configured ACP peer, and `/peer` opens an interactive handoff pane. Fleet profiles determine target, model, and limits; worker execution and receipts are covered by [Fleet dispatch](fleet-dispatch.md). Agent ids and recipe contracts are maintained in [Built-in agents](built-in-agents.md). See [Coding Agent Interoperability](interop.md) for peer setup and workspace choices.
+Use `clio-coder agents` to inspect the installed agent catalog and `clio-coder run --agent <id> "<task>"` for a non-interactive dispatch. In the TUI, `/run` starts a fleet worker or a configured headless coding peer, `/delegate` starts a configured ACP peer, and `/peer` opens an interactive handoff pane. Fleet profiles determine target, model, and limits; worker execution and run records are covered by [Fleet dispatch](fleet-dispatch.md). Agent ids and recipe contracts are maintained in [Built-in agents](built-in-agents.md). See [Coding Agent Interoperability](interop.md) for peer setup and workspace choices.
 
 ## Environment Variables
 

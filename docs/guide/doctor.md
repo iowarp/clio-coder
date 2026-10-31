@@ -96,7 +96,7 @@ The core rows read as follows.
 
 On a home Clio Coder has never written to, plain `doctor` prints a `chat` warning explaining that no model target is configured and an `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
 
-Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, and the `naming immutable history`, `naming git refs` and `naming worktree markers` rows. The naming rows count released `clio` identifiers retained in sessions, receipts, traces and evidence, `clio/task/*` and `clio/compete/*` git refs, and legacy worktree markers. They warn while any remain, are read-only even under `--fix`, and repair nothing.
+Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, and the `naming immutable history`, `naming git refs` and `naming worktree markers` rows. The naming rows count released `clio` identifiers retained in sessions, `clio/task/*` and `clio/compete/*` git refs, and legacy worktree markers. They warn while any remain, are read-only even under `--fix`, and repair nothing.
 
 ## External tool rows
 

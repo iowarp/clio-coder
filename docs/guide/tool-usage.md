@@ -214,7 +214,7 @@ Turn budget: all envelope-backed tools draw from one shared pool per turn (`safe
 
 ## Search scope: read, ls, grep, and find outside the workspace
 
-`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace. The main session also reads outside it without asking, at both levels, on any path a zero-access entry does not cover. For a dispatched worker at `default`, a path that resolves outside the workspace, by an absolute path, a `..`, or a link at any component, is an ask that its `fleet.permissions.mode` route decides. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused at `default`; at `yolo` only Clio's credential store and zero-access entries in an approved `.clio-coder/safety.yaml` stay refused. Read-only dispatched runs deny outside reads and all non-read calls without asking. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, and dispatch receipts stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md).
+`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace. The main session also reads outside it without asking, at both levels, on any path a zero-access entry does not cover. For a dispatched worker at `default`, a path that resolves outside the workspace, by an absolute path, a `..`, or a link at any component, is an ask that its `fleet.permissions.mode` route decides. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused at `default`; at `yolo` only Clio's credential store and zero-access entries in an approved `.clio-coder/safety.yaml` stay refused. Read-only dispatched runs deny outside reads and all non-read calls without asking. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, dispatch run scopes under `<stateDir>/telemetry/runs/` whose result objects a judge reads, and the installed package's `docs/` and `src/` stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md).
 
 ## read: page through a file with offset, limit, and tail
 
@@ -512,7 +512,7 @@ A one-off target or model belongs on the call. Persistent fleet routing is opera
 
 ```text
 dispatch(list=true)
-dispatch(agent="debugger", task="Check the dispatch receipt contract", intent={read_roots: ["src/domains/dispatch/"]})
+dispatch(agent="debugger", task="Check the dispatch run record contract", intent={read_roots: ["src/domains/dispatch/"]})
 dispatch(tasks=[{agent: "coder", task: "Fix the admission test", intent: {write_roots: ["tests/contracts/"], expected_outputs: ["tests/contracts/admission.test.ts"], verification: [{check: "test"}]}}], mode="parallel", detach=true)
 ```
 
@@ -751,7 +751,7 @@ The corpus is every Markdown file under `docs/` except `docs/html/` and `docs/wi
 An omitted query lists files and section counts. An empty result remains JSON with a follow-up hint and a `next` continuation. Output caps at 16 KiB and uses a parseable offload stub if oversize. There is no per-file filter; narrow with more specific query terms.
 
 ```text
-gateway(op="call", capability="clio_docs", args={query: "dispatch receipts evidence", limit: 8})
+gateway(op="call", capability="clio_docs", args={query: "dispatch run records evidence", limit: 8})
 ```
 
 ## clio_library: inspect the component catalog through the gateway
@@ -1007,7 +1007,7 @@ Arguments:
 
 `show` takes the workers dock over for a live dispatched run without moving the keyboard. `open` accepts only the
 fixed preset enum. Arbitrary argv is operator-only through `/panes open` and is
-rejected by the model tool. `handoff` opens the named coding CLI interactively in a Clio Coder-owned pane. It produces no managed run and no receipt. `close` can remove only panes Clio owns, and it ends a dock's process whether the dock is visible or hidden. `list`
+rejected by the model tool. `handoff` opens the named coding CLI interactively in a Clio Coder-owned pane. It produces no managed run and no run record. `close` can remove only panes Clio owns, and it ends a dock's process whether the dock is visible or hidden. `list`
 reports mux health, notification policy, the state of the files, workers and music docks, and the current inventory. Each dock reads `visible`, `hidden` (parked and still running) or `closed`, and the music dock adds what it is playing (`playing <title>` or `paused`). The model reads dock state there rather than from settings files, and `list` reports it whether or not `integrations.music.agentControl` is on. The tool has no action that hides a dock.
 
 ```text
@@ -1023,18 +1023,17 @@ Reads evidence as JSON. A run's evidence is its sealed telemetry run scope, read
 
 Arguments:
 
-- `mode` (required). `list`, `inspect`, `run`, or `session`.
-- `id` (required for `inspect`). An evidence id.
-- `runId` (required for `run`). A dispatch run id.
+- `mode` (required). `list`, `inspect`, or `session`.
+- `runId` (required for `inspect`). A dispatch run id.
 - `sessionId` (required for `session`). This session's id; returns a bounded session summary.
-- `cursor` and `sourceKind` (`list`). `cursor` is the next cursor from a prior page, and `sourceKind` limits the page to `run` or `session` bundles.
+- `cursor` (`list`). The next cursor from a prior page.
 
-`list` returns the bounded newest-first inventory: provenance, tags, totals, and a worst-run trust verdict per bundle. `inspect` returns the bundle overview, the per-run trust axes and verdict, the gate decisions, and the findings. `run` resolves `run-<runId>`; a run with no ledger row is reported absent with `artifactAbsent: true` in the details. Results are capped at 16KB, and a truncated result stays valid JSON with a `preview`. Provenance requires this tool and Verifier may use it.
+`list` returns a bounded newest-first page of at most 12 runs: run id, agent, outcome, seal integrity (`verified`, `unsealed` or `failed`), first-pass success, tags, totals with the renderer's token and cost wording, and a trust verdict per run, never finding prose or task text. `inspect` returns one run's seal integrity, trust axes, findings, gate verdicts, provenance, totals and, when the run's worktree authenticates, its worktree. `session` returns this session's runs and its task-board counts, and refuses another session's id with `evidence_foreign`. A session sees the runs it dispatched and the runs that ran in its project, also after their ledger rows age out. A run that has not settled has no evidence yet and is reported absent with `artifactAbsent: true` in the details. Results are capped at 16KB, and a truncated result stays valid JSON with a `preview`. Provenance requires this tool and Verifier may use it.
 
 ```text
 gateway(op="call", capability="evidence", args={mode: "list"})
-gateway(op="call", capability="evidence", args={mode: "inspect", id: "run-r-42"})
-gateway(op="call", capability="evidence", args={mode: "run", runId: "r-42"})
+gateway(op="call", capability="evidence", args={mode: "inspect", runId: "r-42"})
+gateway(op="call", capability="evidence", args={mode: "session", sessionId: "<this session id>"})
 ```
 
 ## limitation: record what a turn could not verify
@@ -1076,7 +1075,7 @@ Arguments:
 - `rationale` (required). Why the choice won, at most 1024 bytes.
 - `label` (optional). Short title, at most 128 bytes.
 
-The call appends one `decisionLedger` entry with `origin: "agent"` and returns the decision ref `<interviewId>/<key>`. A repeat key supersedes the earlier agent decision with the new rationale as its correction; an operator decision with the same key is never overwritten and the call fails. Dispatch seals every active ref onto the run request, envelope, and receipt, and Clio Coder-controlled commits carry one `Clio-Decision:` trailer per ref.
+The call appends one `decisionLedger` entry with `origin: "agent"` and returns the decision ref `<interviewId>/<key>`. A repeat key supersedes the earlier agent decision with the new rationale as its correction; an operator decision with the same key is never overwritten and the call fails. Dispatch seals every active ref onto the run request, envelope, and run record, and Clio Coder-controlled commits carry one `Clio-Decision:` trailer per ref.
 
 ```text
 decide(key="cache-key-shape", value="capability tuple", alternatives=["node id"], rationale="matches the existing buckets and survives fleet changes", label="Cache key")
@@ -1211,4 +1210,4 @@ A `job` with `runner: "main"` repeats its prompt on the main conversation lane. 
 }
 ```
 
-Call this capability through `gateway(op="call", capability="job", args=...)`. The allowlist is saved with the job and intersected with its creator's and current host constraints. It permits the gateway transport for the named capabilities; naming `gateway` alone does not authorize the tools behind it. Shell, file, dispatch and other MCP capabilities are denied unless included, and denials enter the tool audit. `allow: []` creates a main job with no tool capabilities. The create result and `monitor(job_id=...)` show the stored allowlist. To widen a job, create a new one; resume preserves its bounds.
+Call this capability through `gateway(op="call", capability="job", args=...)`. The allowlist is saved with the job and intersected with its creator's and current host constraints. It permits the gateway transport for the named capabilities; naming `gateway` alone does not authorize the tools behind it. Shell, file, dispatch and other MCP capabilities are denied unless included, and each denial is journaled as a `tool.decided` record. `allow: []` creates a main job with no tool capabilities. The create result and `monitor(job_id=...)` show the stored allowlist. To widen a job, create a new one; resume preserves its bounds.
