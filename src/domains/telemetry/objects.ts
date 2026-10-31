@@ -258,13 +258,36 @@ function withheldSecretMaps(value: unknown, key?: string): unknown {
 }
 
 /**
+ * A property that names a credential. Its value is a credential whatever its shape: a passphrase of short words
+ * matches no value pattern, and redacting only a credential-shaped prefix left the rest exposed (#434). Plural
+ * counts such as `inputTokens` and compounds such as `tokenEstimate` are not credentials.
+ */
+const CREDENTIAL_PROPERTY =
+	/(?:api[_-]?key|password|passwd|passphrase|secret|token|credentials?|authorization|private[_-]?key)$/iu;
+
+/** Every string a credential-named property holds, directly or as a list, is withheld whole. */
+function withheldCredentials(value: unknown, tally: RedactionTally, credential = false): unknown {
+	if (typeof value === "string") {
+		if (!credential || value.startsWith("[redacted:")) return value;
+		tally.count += 1;
+		return "[redacted:credential]";
+	}
+	if (Array.isArray(value)) return value.map((item) => withheldCredentials(item, tally, credential));
+	if (value === null || typeof value !== "object") return value;
+	return Object.fromEntries(
+		Object.entries(value).map(([key, item]) => [key, withheldCredentials(item, tally, CREDENTIAL_PROPERTY.test(key))]),
+	);
+}
+
+/**
  * The redaction an object's preimage gets before it is hashed, and a share re-applies to every record and object it
- * exports: value patterns, a secret-flavored property name over its credential-shaped value, URL userinfo, query
- * credentials and secret flags, and for settings the withheld `headers` and `env` maps (#434).
+ * exports: a credential-named property's whole value, value patterns, URL userinfo, query credentials and secret
+ * flags, and for settings the withheld `headers` and `env` maps (#434).
  */
 export function redactTelemetryValue<T>(value: T, tally: RedactionTally, secretMaps: boolean): T {
 	const secretValues = secretRedactingReplacer(tally);
-	return JSON.parse(canonicalJson(secretMaps ? withheldSecretMaps(value) : value), (key, item: unknown) => {
+	const named = withheldCredentials(secretMaps ? withheldSecretMaps(value) : value, tally);
+	return JSON.parse(canonicalJson(named), (key, item: unknown) => {
 		if (typeof item !== "string") return item;
 		const scrubbed = redactSecretString(item);
 		if (scrubbed !== item) tally.count += 1;
