@@ -5,6 +5,8 @@ import { startedUnderClioAgent } from "./agent-environment.js";
 import { writeDiagnostic } from "./diagnostics.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
+import type { EventName } from "./telemetry/events.js";
+import { telemetryHub } from "./telemetry/hub.js";
 import { clioStateDir } from "./xdg.js";
 
 export type LifecycleActor = "operator" | "model-confirmed" | "upgrade";
@@ -36,6 +38,17 @@ export interface LifecycleReceipt {
 	at: string;
 	actor: LifecycleActor;
 }
+/** The journal event each lifecycle operation records (#434). */
+const LIFECYCLE_EVENTS = {
+	install: "library.installed",
+	update: "library.updated",
+	enable: "library.enabled",
+	disable: "library.disabled",
+	remove: "library.removed",
+	register: "library.registered",
+	import: "library.imported",
+	"share-import": "library.share_imported",
+} as const satisfies Record<LifecycleOperation, EventName>;
 export const LIBRARY_RECEIPT_LIMIT = 512;
 const MAX_BYTES = 1024 * 1024;
 function receiptPath(): string {
@@ -77,6 +90,14 @@ export function recordLifecycleReceipt(
 		at: new Date().toISOString(),
 		actor: context.actor ?? (startedUnderClioAgent() ? "model-confirmed" : "operator"),
 	};
+	// The receipt file is state, the latest provenance per package that /library shows; the journal keeps the
+	// operation itself (#434).
+	try {
+		const { operation, at: _at, ...facts } = receipt;
+		telemetryHub().emit(LIFECYCLE_EVENTS[operation], facts);
+	} catch {
+		// Recording follows the committed mutation and cannot roll back installed bytes.
+	}
 	try {
 		withStateFileLockSync(
 			receiptPath(),

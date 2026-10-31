@@ -436,6 +436,21 @@ export const HookRanSchema = Type.Object(
 	},
 	closed,
 );
+/** One Library lifecycle operation on a package: what changed, at which digests, and who confirmed it (#434). */
+export const LibraryLifecycleSchema = Type.Object(
+	{
+		operationId: ExistingId,
+		kind: ExistingId,
+		id: ExistingId,
+		version: Type.Union([ExistingId, Type.Null()]),
+		contentDigest: Type.Union([ExistingId, Type.Null()]),
+		envelopeDigest: Type.Union([ExistingId, Type.Null()]),
+		scope: ExistingId,
+		source: text,
+		actor: vocabulary(["operator", "model-confirmed", "upgrade"]),
+	},
+	closed,
+);
 export const DomainFailedSchema = Type.Object({ name: ExistingId }, closed);
 /** A settings reload the watcher rejected, keeping the last good settings, or the reload that ended the rejection. */
 export const ConfigReloadFailedSchema = Type.Object({ state: vocabulary(["rejected", "recovered"]) }, closed);
