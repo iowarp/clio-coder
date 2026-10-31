@@ -1065,6 +1065,8 @@ export interface RunResult {
 		applied: boolean;
 		reason?: string;
 		detail?: string;
+		/** New files the host commit left out: no mutation call wrote them and the worker did not stage them. */
+		leftUncommitted?: { count: number; paths: string[] };
 	};
 	/** Required normalized routing request, sealed without task or prompt data. */
 	routingIntent: RoutingIntent;

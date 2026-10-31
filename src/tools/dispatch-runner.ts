@@ -664,6 +664,12 @@ export function formatDispatchOutput(
 				receipt.worktree || receipt.checkoutChanges
 					? ` changed=${JSON.stringify(changedPaths.slice(0, 20))}${changedPaths.length > 20 ? `(+${changedPaths.length - 20} more)` : ""}`
 					: "";
+			// Byproducts the host commit kept out of the branch; the main agent decides whether any should ship.
+			const leftUncommitted = receipt.worktree?.leftUncommitted;
+			const uncommittedSuffix =
+				leftUncommitted === undefined
+					? ""
+					: ` left_uncommitted=${leftUncommitted.count}${JSON.stringify(leftUncommitted.paths)}${leftUncommitted.count > leftUncommitted.paths.length ? `(+${leftUncommitted.count - leftUncommitted.paths.length} more)` : ""}`;
 			const placementSuffix = !external
 				? ""
 				: receipt.worktree
@@ -681,7 +687,7 @@ export function formatDispatchOutput(
 					? truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER)
 					: "(no assistant text captured in the run result)";
 			return [
-				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${renderFactField(receipt.spend.totalTokens)}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${renderFactField(receipt.spend.totalTokens)}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${uncommittedSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
 				`  ${workerTextLabel(trustStatus)}`,
 				...output.split("\n").map((line) => `  ${line}`),
 				...workerTextNonEvidenceNotices(view, trustStatus, answerText).map((notice) => `  ${notice}`),
