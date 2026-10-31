@@ -205,10 +205,9 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 						{full && receipt.isPlaceholderData && <p role="status">Reading the complete saved receipt…</p>}
 						{trace ? (
 							<ReceiptPanel
-								data={{
-									evidence: trace.evidence,
-									record: full && !receipt.isPlaceholderData ? (receipt.data?.record ?? null) : null,
-								}}
+								data={
+									full && receipt.data && !receipt.isPlaceholderData ? receipt.data : { evidence: trace.evidence, record: null }
+								}
 								full={full && !!receipt.data && !receipt.isPlaceholderData}
 								loading={full && (receipt.isPending || receipt.isPlaceholderData)}
 								loadFull={() => setFull(true)}

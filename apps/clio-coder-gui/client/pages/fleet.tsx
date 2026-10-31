@@ -407,8 +407,10 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 		enabled: full,
 		placeholderData: (previous) => previous,
 	});
-	const evidence = dispatch ? run.data?.evidence : root.data?.evidence;
-	const saved = full && !receipt.isPlaceholderData ? receipt.data?.record : null;
+	// The full response rechecks the seal, so its evidence replaces the row's once it arrives (#434).
+	const fresh = full && !receipt.isPlaceholderData ? receipt.data : undefined;
+	const evidence = fresh?.evidence ?? (dispatch ? run.data?.evidence : root.data?.evidence);
+	const saved = fresh?.record ?? null;
 	return (
 		<section className="run-inspection">
 			<Link to={back}>← Fleet history</Link>
