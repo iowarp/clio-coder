@@ -111,7 +111,7 @@ Subcommands:
   view <runId> [--follow] [--all]  read one run's ledger entry, event journal, and receipt
   view <fleetRootId> [--all]    list a fleet run's steps and the run id to view for each
   code-steps <rootId> [--json]  list the deterministic code steps one fleet root ran, from the
-                                per-root records under the state directory's code-steps/ tree
+                                code_step.settled records in the root's run journal
   events <fleetRootId> [--follow] [--json] [--all]
                                 print a fleet run's live event journal of hash-chained, unsigned
                                 lines; each settled step names the manifest bytes written at that

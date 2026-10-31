@@ -173,7 +173,7 @@ clio-coder trace sql <SELECT query> [--db PATH]
 
 Flag values are validated before any database work. `--limit` is an integer from 1 to 500. `--max-age-days` is an integer from 1 to 36500. `--max-bytes` is an integer of at least 1,048,576. `--db` takes a path. A missing flag value, an out-of-range number, or an unknown flag exits 2. `--json` is accepted on every subcommand but only `runs`, `code-steps`, and `prune` use it.
 
-`trace code-steps` is the one subcommand that does not read the mirror. A deterministic fleet code step is a subprocess, not a model run, so [code-step-store.ts](../../src/domains/dispatch/code-step-store.ts) writes its `CodeStepRecord` to `<stateDir>/code-steps/<rootId>/<runId>.json` instead of fabricating route rows in the ledger. The command reads those files back oldest first by `startedAt`, prints the records verbatim under `--json`, skips unreadable or non-version-1 files, and treats an absent root directory as the empty state with exit 0. `--db` is ignored.
+`trace code-steps` is now `clio-coder fleet code-steps`. A deterministic fleet code step is a subprocess, not a model run, so [fleet-run.ts](../../src/domains/dispatch/fleet-run.ts) journals it as `code_step.settled` in the fleet root's run journal instead of fabricating route rows in the ledger. The command reads those records back oldest first by `startedAt` and treats a root with none as the empty state with exit 0.
 
 ### Database Resolution and Error Handling
 

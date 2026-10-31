@@ -17,6 +17,8 @@ import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { attributeCommitMessage } from "../../core/commit-attribution.js";
 import { telemetryContext } from "../../core/telemetry/context.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { Playbook } from "../agents/playbook.js";
@@ -27,7 +29,7 @@ import type { CostProvenance } from "../providers/index.js";
 import { activeDecisionRefs } from "../session/decision-board.js";
 import type { DecisionLedgerEntry } from "../session/entries.js";
 import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../telemetry/cost.js";
-import { telemetryRunDirectory } from "../telemetry/paths.js";
+import { telemetryJournalPath, telemetryRunDirectory } from "../telemetry/paths.js";
 import {
 	assignmentProcessOwnerAlive,
 	claimAssignmentVerdict,
@@ -36,14 +38,15 @@ import {
 	settleStoredAssignment,
 } from "./assignment-store.js";
 import {
+	type CodeStepRecord,
 	type CodeStepRunInput,
+	codeStepDir,
 	newCodeRunId,
 	preflightCodeStep,
 	runCodeStep,
 	workspaceChangedPaths,
 	workspaceChangeSnapshot,
 } from "./code-step.js";
-import { codeStepDir, writeCodeStepRecord } from "./code-step-store.js";
 import type { DispatchContract, DispatchPlanTaskResolution, DispatchRequest } from "./contract.js";
 import { buildDelegationProposalBriefing, validateDelegationPlan } from "./delegation-plan.js";
 import {
@@ -126,7 +129,7 @@ export interface FleetRunStepOutcome extends FleetRunStepEvent {
 	receipt?: RunReceipt;
 	/** The durable code-step record when this was a deterministic step. */
 	codeStep?: Awaited<ReturnType<typeof runCodeStep>>["record"];
-	/** The durable code-step record path when this was a deterministic step. */
+	/** The journal holding the step's `code_step.settled` when this was a deterministic step. */
 	recordPath?: string;
 	/** The scheduler result retained for a replayed step. */
 	result?: ExecutionStepResult;
@@ -329,6 +332,26 @@ function fleetStepIntent(writes: ReadonlyArray<string> | undefined): DispatchInt
 	return built.ok ? built.intent : null;
 }
 
+/** A code step's record as `code_step.settled` carries it; argv, cwd and output stay out of the journal (#434). */
+function codeStepSettledFacts(record: CodeStepRecord): EventPayload<"code_step.settled"> {
+	return {
+		runId: record.runId,
+		stepId: record.stepId,
+		commandId: record.commandId,
+		startedAt: record.startedAt,
+		durationMs: record.durationMs,
+		timeoutMs: record.timeoutMs,
+		exitCode: record.exitCode,
+		signal: record.signal,
+		timedOut: record.timedOut,
+		commands: (record.commandRuns ?? []).map((run) => ({ exitCode: run.exitCode, durationMs: run.durationMs })),
+		outputBytes: record.outputBytes,
+		outputTruncated: record.outputTruncated,
+		outputDigest: record.outputDigest,
+		reportDigest: record.reportDigest,
+	};
+}
+
 export function fleetPlanWaveIndex(plan: ExecutionPlan, stepId: string): number {
 	return plan.waves.findIndex((wave) => wave.includes(stepId));
 }
@@ -436,6 +459,8 @@ async function runFleetHoldingWorkspace(
 		return digest;
 	};
 	const events = createFleetEventJournal(fleetRootId);
+	// A code step's record is its `code_step.settled` in this root's journal (#434).
+	const rootJournalPath = telemetryJournalPath(telemetryRunDirectory(clioStateDir(), fleetRootId));
 	const stepDispatched = (event: FleetRunStepEvent): void => {
 		if (event.replayed !== true) {
 			events.append({
@@ -1110,7 +1135,8 @@ async function runFleetHoldingWorkspace(
 					);
 				}
 				if (step.verification === true) validationFresh = outcome.report.passed;
-				const recordPath = await writeCodeStepRecord(fleetRootId, outcome.record);
+				telemetryHub().emit("code_step.settled", codeStepSettledFacts(outcome.record), rootTelemetry?.context);
+				const recordPath = rootJournalPath;
 				if (input.onStepSettled)
 					input.onStepSettled({
 						...event,
@@ -1220,9 +1246,7 @@ async function runFleetHoldingWorkspace(
 					terminalRunId: stepResult.terminalRunId,
 					receiptDigest: stepResult.receiptDigest ?? null,
 					recordPath:
-						step.kind === "code"
-							? join(codeStepDir(fleetRootId), `${stepResult.terminalRunId}.json`)
-							: join(clioStateDir(), "receipts", `${stepResult.terminalRunId}.json`),
+						step.kind === "code" ? rootJournalPath : join(clioStateDir(), "receipts", `${stepResult.terminalRunId}.json`),
 					...(stepResult.failureReason !== undefined ? { failureReason: stepResult.failureReason } : {}),
 					stepEntryDigest: fleetStepEntryDigest(entry),
 					manifestStepCount,

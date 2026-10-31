@@ -2341,6 +2341,16 @@ export function runTimeline(runId: string, source: JournalSource, options: ReadO
 	};
 }
 
+/** One settled code step of a fleet root, with the time its record was journaled. */
+export type CodeStepRowV1 = EventPayload<"code_step.settled"> & { at: string };
+
+/** The code steps a fleet root's journal settled, oldest start first (#434). */
+export function codeStepsReport(source: JournalSource): CodeStepRowV1[] {
+	return source.records
+		.flatMap((record) => (record.k === "code_step.settled" ? [{ ...record.data, at: record.t }] : []))
+		.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+}
+
 /** The runs a session's own records reference, in run id order. */
 export function runsReport(source: SessionSource): RunRowV1[] {
 	const view: View = { session: source };

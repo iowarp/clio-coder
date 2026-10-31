@@ -1,13 +1,14 @@
 /**
- * `clio-coder fleet code-steps <rootId> [--json]`: every `CodeStepRecord` one
- * fleet root wrote, oldest first. The record is the code step's stand-in for a
- * receipt (argv, cwd, env names, exit code, duration, output digest, artifact
- * paths). JSON is the record verbatim; the table keeps the fields an operator
- * scans for and leaves argv last because it is the widest.
+ * `clio-coder fleet code-steps <rootId> [--json]`: every code step one fleet
+ * root settled, oldest first, read from the `code_step.settled` records in the
+ * root's run journal (#434). JSON is the records as the read model returns
+ * them; the table keeps the fields an operator scans for. Captured output
+ * stays in the step's artifact log under the code-steps directory.
  */
 
-import type { CodeStepRecord } from "../domains/dispatch/code-step.js";
-import { codeStepDir, readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
+import { clioStateDir } from "../core/xdg.js";
+import { loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
+import { type CodeStepRowV1, codeStepsReport } from "../domains/telemetry/read-model.js";
 
 const USAGE = "usage: clio-coder fleet code-steps <rootId> [--json]";
 
@@ -33,9 +34,9 @@ export function runFleetCodeSteps(args: readonly string[]): number {
 		process.stderr.write(`clio-coder fleet code-steps requires a fleet root id\n${USAGE}\n`);
 		return 2;
 	}
-	let records: CodeStepRecord[];
+	let records: CodeStepRowV1[];
 	try {
-		records = readCodeStepRecords(rootId);
+		records = codeStepsReport(loadRunTelemetrySource(clioStateDir(), rootId));
 	} catch (error) {
 		process.stderr.write(`code-step records: ${error instanceof Error ? error.message : String(error)}\n`);
 		return 1;
@@ -46,15 +47,15 @@ export function runFleetCodeSteps(args: readonly string[]): number {
 	}
 	if (records.length === 0) {
 		process.stdout.write(
-			`no code-step records for fleet root ${rootId} under ${codeStepDir(rootId)}. a record is written when a fleet plan runs a deterministic code step.\n`,
+			`no code steps settled in the journal of fleet root ${rootId}. one is recorded when a fleet plan runs a deterministic code step.\n`,
 		);
 		return 0;
 	}
-	process.stdout.write("EXIT  DURATION STARTED                  STEP                 COMMAND              ARGV\n");
+	process.stdout.write("EXIT    DURATION STARTED                  STEP                 COMMAND              RUN\n");
 	for (const record of records) {
 		const exit = record.timedOut ? "timeout" : record.signal !== null ? `sig:${record.signal}` : String(record.exitCode);
 		process.stdout.write(
-			`${exit.padEnd(5)} ${`${record.durationMs}ms`.padStart(8)} ${record.startedAt.padEnd(24)} ${record.stepId.slice(0, 20).padEnd(20)} ${record.commandId.slice(0, 20).padEnd(20)} ${record.argv.join(" ")}\n`,
+			`${exit.padEnd(7)} ${`${record.durationMs}ms`.padStart(8)} ${record.startedAt.padEnd(24)} ${record.stepId.slice(0, 20).padEnd(20)} ${record.commandId.slice(0, 20).padEnd(20)} ${record.runId}\n`,
 		);
 	}
 	return 0;

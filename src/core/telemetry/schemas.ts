@@ -824,3 +824,23 @@ export const GateDecidedSchema = Type.Object(
 	},
 	closed,
 );
+/** A settled deterministic code step of a fleet run; its output stays in the step's artifact log (#434). */
+export const CodeStepSettledSchema = Type.Object(
+	{
+		runId: ExistingId,
+		stepId: ExistingId,
+		commandId: ExistingId,
+		startedAt: utc,
+		durationMs: duration,
+		timeoutMs: duration,
+		exitCode: Type.Integer(),
+		signal: Type.Union([Type.String({ maxLength: 32 }), Type.Null()]),
+		timedOut: Type.Boolean(),
+		commands: Type.Array(Type.Object({ exitCode: Type.Integer(), durationMs: duration }, closed)),
+		outputBytes: count,
+		outputTruncated: Type.Boolean(),
+		outputDigest: sha256Hex,
+		reportDigest: sha256Hex,
+	},
+	closed,
+);

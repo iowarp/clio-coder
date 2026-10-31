@@ -31,7 +31,6 @@ export {
 	runCodeStep,
 	workspaceHasChanges,
 } from "./code-step.js";
-export { readCodeStepRecords, writeCodeStepRecord } from "./code-step-store.js";
 export type { DispatchContract, DispatchRequest } from "./contract.js";
 export type {
 	DelegationPlan,

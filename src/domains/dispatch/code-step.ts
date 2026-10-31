@@ -25,6 +25,7 @@ import {
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
 import { internalGitArgv } from "../../core/internal-git.js";
+import { clioStateDir } from "../../core/xdg.js";
 import { type CheckoutSnapshot, changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
 import {
 	PLAYBOOK_COMMAND_BASE_ENV,
@@ -95,6 +96,11 @@ export interface CodeStepRunInput {
  * what ran, where, for how long, and what came back, without inventing any of
  * the model-run facts (tokens, cost, route) a code step does not have.
  */
+/** Where one fleet root's code steps keep their captured output logs; the record itself is journaled (#434). */
+export function codeStepDir(rootId: string): string {
+	return join(clioStateDir(), "code-steps", rootId);
+}
+
 export interface CodeStepRecord {
 	version: 1;
 	runId: string;

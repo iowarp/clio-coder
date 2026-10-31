@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { runFleetCodeSteps } from "../../src/cli/fleet-code-steps.js";
-import type { CodeStepRecord } from "../../src/domains/dispatch/code-step.js";
-import { readCodeStepRecords, writeCodeStepRecord } from "../../src/domains/dispatch/code-step-store.js";
+import type { EventPayload } from "../../src/core/telemetry/events.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { clioStateDir } from "../../src/core/xdg.js";
+import { openFleetRootTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
+import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 
 /** Runs one fleet code-steps invocation with stdout and stderr captured. */
 async function capture(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -31,32 +34,27 @@ async function capture(args: string[]): Promise<{ code: number; stdout: string; 
 	}
 }
 
-function record(overrides: Partial<CodeStepRecord>): CodeStepRecord {
+function record(overrides: Partial<EventPayload<"code_step.settled">>): EventPayload<"code_step.settled"> {
 	return {
-		version: 1,
 		runId: "run-1",
 		stepId: "lint",
 		commandId: "npm-lint",
-		argv: ["npm", "run", "lint"],
-		cwd: "/work",
-		envNames: ["PATH"],
-		timeoutMs: 60_000,
 		startedAt: "2026-09-02T10:00:00.000Z",
-		endedAt: "2026-09-02T10:00:01.000Z",
 		durationMs: 1000,
+		timeoutMs: 60_000,
 		exitCode: 0,
 		signal: null,
 		timedOut: false,
+		commands: [],
 		outputBytes: 12,
 		outputTruncated: false,
 		outputDigest: "a".repeat(64),
-		artifactPaths: [],
 		reportDigest: "b".repeat(64),
 		...overrides,
 	};
 }
 
-describe("contracts/fleet code-steps reads the deterministic code-step records back", () => {
+describe("contracts/fleet code-steps reads code_step.settled back from the fleet root journal", () => {
 	let home = "";
 	let previousHome: string | undefined;
 	before(() => {
@@ -79,29 +77,33 @@ describe("contracts/fleet code-steps reads the deterministic code-step records b
 	it("treats a root that never ran a code step as the empty state, not a failure", async () => {
 		const result = await capture(["root-empty"]);
 		strictEqual(result.code, 0);
-		match(result.stdout, /no code-step records for fleet root root-empty/);
+		match(result.stdout, /no code steps settled in the journal of fleet root root-empty/);
 		const json = await capture(["root-empty", "--json"]);
 		strictEqual(json.code, 0);
 		deepStrictEqual(JSON.parse(json.stdout), []);
 	});
 
-	it("prints every record the writer persisted, oldest first, verbatim under --json", async () => {
+	it("prints every settled code step, oldest first, under --json with its journal time", async () => {
 		const later = record({ runId: "run-2", stepId: "test", startedAt: "2026-09-02T10:05:00.000Z", exitCode: 1 });
 		const earlier = record({});
-		await writeCodeStepRecord("root-a", later);
-		await writeCodeStepRecord("root-a", earlier);
-		deepStrictEqual(readCodeStepRecords("root-a"), [earlier, later]);
+		const root = await openFleetRootTelemetry("root-a", null, telemetryRunDirectory(clioStateDir(), "root-a"));
+		telemetryHub().emit("code_step.settled", later, root.context);
+		telemetryHub().emit("code_step.settled", earlier, root.context);
+		await root.close();
 
 		const json = await capture(["root-a", "--json"]);
 		strictEqual(json.code, 0);
-		deepStrictEqual(JSON.parse(json.stdout), [earlier, later]);
+		deepStrictEqual(
+			(JSON.parse(json.stdout) as Array<Record<string, unknown>>).map(({ at: _at, ...data }) => data),
+			[earlier, later],
+		);
 
 		const table = await capture(["root-a"]);
 		strictEqual(table.code, 0);
 		const lines = table.stdout.trimEnd().split("\n");
 		strictEqual(lines.length, 3);
-		match(lines[0] ?? "", /^EXIT\s+DURATION\s+STARTED\s+STEP\s+COMMAND\s+ARGV$/);
-		match(lines[1] ?? "", /^0\s+1000ms .*lint .*npm run lint$/);
-		match(lines[2] ?? "", /^1\s+1000ms .*test .*npm run lint$/);
+		match(lines[0] ?? "", /^EXIT\s+DURATION\s+STARTED\s+STEP\s+COMMAND\s+RUN$/);
+		match(lines[1] ?? "", /^0\s+1000ms .*lint .*npm-lint\s+run-1$/);
+		match(lines[2] ?? "", /^1\s+1000ms .*test .*npm-lint\s+run-2$/);
 	});
 });

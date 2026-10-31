@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -135,7 +135,7 @@ Pre-approved assumptions: synthetic scalar observations 10, 12, 14; arithmetic m
 				throw new Error("no model in this deterministic flow");
 			},
 		});
-		const settled: Array<{ recordPath?: string }> = [];
+		const settled: Array<{ codeStep?: { argv: ReadonlyArray<string>; exitCode: number } }> = [];
 		const outcome = await executeFleetRun({
 			plan,
 			playbookName: playbook.name,
@@ -156,8 +156,8 @@ Pre-approved assumptions: synthetic scalar observations 10, 12, 14; arithmetic m
 		deepStrictEqual(JSON.parse(report.outputExcerpt), { synthetic: true, task, count: 3, mean: 12 });
 		ok(result.output.includes(task));
 		strictEqual(settled.length, 1);
-		ok(settled[0]?.recordPath);
-		const record = JSON.parse(readFileSync(settled[0].recordPath, "utf8"));
+		const record = settled[0]?.codeStep;
+		ok(record);
 		deepStrictEqual(record.argv.slice(-1), [task]);
 		strictEqual(record.exitCode, 0);
 		strictEqual(existsSync(join(cwd, ".git")), false);

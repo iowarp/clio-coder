@@ -2,8 +2,6 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { readSettings } from "../core/config.js";
 import { clioStateDir } from "../core/xdg.js";
-import type { CodeStepRecord } from "../domains/dispatch/code-step.js";
-import { readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
 import { dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { type FleetRunRecord, openLedger, readFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
@@ -38,15 +36,9 @@ export function fleetInspectionScope(all: boolean, cwd = process.cwd()) {
 			.map((step) => step.result.terminalRunId)
 			.filter((id): id is string => typeof id === "string");
 		if (terminalRuns.length === 0) return false;
-		// Deterministic steps have their own command records, not model-ledger
-		// rows, and are read only once a run id misses the ledger.
-		let codeSteps: Map<string, CodeStepRecord> | undefined;
 		return terminalRuns.every((id) => {
 			const run = getRun(id);
-			if (run !== null) return seesRun(run);
-			codeSteps ??= new Map(readCodeStepRecords(record.id).map((step) => [step.runId, step]));
-			const code = codeSteps.get(id);
-			return code !== undefined && typeof code.cwd === "string" && ownership.inProject(code.cwd);
+			return run !== null && seesRun(run);
 		});
 	};
 	return { all, seesRun, seesRunId, seesRoot };

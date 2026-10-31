@@ -120,6 +120,7 @@ export const EVENTS = {
 	"run.usage_reported": journal(S.RunUsageSchema, { tier: "accountability", cc: "structural" }),
 	"run.linked": journal(S.RunLinkedSchema, { tier: "accountability", cc: "content-free" }),
 	"gate.decided": journal(S.GateDecidedSchema, { tier: "accountability", cc: "content-free" }),
+	"code_step.settled": journal(S.CodeStepSettledSchema, { tier: "accountability", cc: "content-free" }),
 	"process.started": journal(S.EmptySchema, { tier: "accountability", cc: "content-free" }),
 	"process.exited": journal(S.ProcessExitedSchema, { tier: "accountability", cc: "content-free" }),
 	"prompt.text_captured": journal(S.PromptTextCapturedSchema, {
