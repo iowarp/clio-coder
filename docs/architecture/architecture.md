@@ -28,7 +28,7 @@ tests/
 
 ## Domains
 
-`src/domains/` holds 31 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, memory, session, observability, scheduling, and dispatch, plus mux when the pane tier is active. Each of those except memory has a `manifest.ts` naming its `dependsOn` list. Memory is declared inline in [orchestrator.ts](../../src/entry/orchestrator.ts) with no dependencies: its module wraps the composition root's `MemoryRuntime`, publishes that runtime's contract and disposes it on stop. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
+`src/domains/` holds 31 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, memory, session, telemetry, scheduling, and dispatch, plus mux when the pane tier is active. Each of those except memory has a `manifest.ts` naming its `dependsOn` list. Memory is declared inline in [orchestrator.ts](../../src/entry/orchestrator.ts) with no dependencies: its module wraps the composition root's `MemoryRuntime`, publishes that runtime's contract and disposes it on stop. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
 
 System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the interactive host ([system-one-host.ts](../../src/entry/system-one-host.ts)). The remaining directories, which are components, evidence, evolution, gateway, lifecycle, quota, semantic, semantic-app, system-one, toolchain, turn-control, user-tasks, and workspace-snapshots, are libraries or CLI-owned feature areas whose module functions callers import directly. Memory's own files are also imported as a library beside its loaded contract. Of the libraries, gateway (`src/domains/gateway/mcp/`) and user-tasks have no domain-level `index.ts`, so callers import their files.
 
@@ -38,7 +38,7 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 | components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
 | config | `src/domains/config/**`, [config.ts](../../src/core/config.ts) | `settings.yaml`, keybindings, effect-timing classification, hot reload. |
 | context | `src/domains/context/**` | Layered `CLIO-CODER.md` and subtree `CLIO-CODER.override.md` guidance, codemap indexer, working set, bootstrap, repository context. |
-| dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, run ledger, receipts, route policy and history, worker spawning, admission. |
+| dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, run ledger, run settlement, route policy, worker spawning, admission. |
 | evidence | `src/domains/evidence/**` | Forensic evidence bundles, failure attribution, trust projection. |
 | evolution | `src/domains/evolution/**` | Authority-tiered self-edit change manifests and their validation. |
 | extensions | `src/domains/extensions/**` | Extension packages, which are Clio code in their own process: discovery, capability envelope review, runtime api 2, and lifecycle. |
@@ -48,13 +48,13 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 | memory | `src/domains/memory/**` | Approved long-term memory, task bank, proactive task intervention, and the memory runtime contract the inline domain module publishes. |
 | middleware | `src/domains/middleware/**` | Declarative and programmatic lifecycle hooks and budgets. |
 | mux | `src/domains/mux/**` | Optional interactive pane-host integration: Herdr guest mode, the Yazi file pane, and the cliamp music dock. |
-| observability | `src/domains/telemetry/**` | Cost tracker, projection snapshot, SQLite trace mirror, evidence index, out-of-turn usage store. See [Observability](observability.md) and [Trace Store](trace-store.md). |
+| telemetry | `src/domains/telemetry/**` | Per-scope journals, content-addressed objects, seals and bundles, the read model and its folds (route history included), share, import, verify and retention. See [Telemetry](telemetry.md). |
 | plugins | `src/domains/plugins/**` | Plugin packages, which are Agent Plugins carrying content: discovery, catalog, and lifecycle. Installing one never runs code; the MCP servers its `mcp.json` declares run only after the operator trusts them. |
 | prompts | `src/domains/prompts/**` | Prompt fragments, system prompt compiler, template hashing. |
 | providers | `src/domains/providers/**` | Target-first runtime registry, model probing, credentials, pricing resolution. |
 | quota | `src/domains/quota/**` | Read-only subscription and credit readings from connected provider accounts, cached and normalized for the usage surfaces. |
 | resources | `src/domains/resources/**` | Package library, skills loader, prompts loader. |
-| safety | `src/domains/safety/**` | Ordered policy engine, path policy, zero-access rails, audit. |
+| safety | `src/domains/safety/**` | Ordered policy engine, path policy, zero-access rails, journaled decisions. |
 | scheduling | `src/domains/scheduling/**` | Budget ceilings, node cluster states, local capacity, batch capacity checks. |
 | semantic | `src/domains/semantic/**` | The optional semantic context index: source extraction, embedding records and their per-profile storage generations. |
 | semantic-app | `src/domains/semantic-app/**` | The application boundary of the semantic index: the embedding service, search for the `context` tool and CLI, the extension embedding capability, and the session-scoped background refresh. No model is contacted at startup. |
@@ -112,12 +112,12 @@ decision.
 | 12 | middleware | none |
 | 13 | memory, declared inline | none |
 | 14 | session | config |
-| 15 | observability | providers, session |
-| 16 | scheduling | config, observability |
+| 15 | telemetry | config, providers, session |
+| 16 | scheduling | config, telemetry |
 | 17 | mux, only when the pane tier is active | none |
 | 18 | dispatch | config, safety, agents, providers, middleware, prompts, scheduling |
 
-Observability deliberately omits dispatch from its `dependsOn`, even though it listens to the dispatch bus channels, so that scheduling can sit between observability and dispatch without a cycle. The mux module is imported dynamically through [with-panes.ts](../../src/entry/with-panes.ts), and only when `resolvePanesEnablement` ([panes-activation.ts](../../src/entry/panes-activation.ts)) says the extension is active, so a plain boot loads no mux code.
+Telemetry deliberately omits dispatch from its `dependsOn`, even though it listens to the dispatch bus channels, so that scheduling can sit between telemetry and dispatch without a cycle. The mux module is imported dynamically through [with-panes.ts](../../src/entry/with-panes.ts), and only when `resolvePanesEnablement` ([panes-activation.ts](../../src/entry/panes-activation.ts)) says the extension is active, so a plain boot loads no mux code.
 
 Shutdown stops domains in reverse load order. Each `stop()` runs under a per-hook time budget, and a failure or timeout is logged with a `[clio-coder:domain-loader]` prefix and does not block the remaining domains.
 
@@ -132,15 +132,11 @@ Around the loader, `bootOrchestrator` does the work that must precede or follow 
 
 ## Cold-start work
 
-Two pieces of start-up work are bounded. Receipt recovery reads only the receipts that can matter, so boot cost is independent of receipt history. The workspace probe is shared between the callers of a first prompt, so the tree is not probed again for each.
+Two pieces of start-up work are bounded. Run recovery reads only the ledger rows that can matter, so boot cost is independent of run history. The workspace probe is shared between the callers of a first prompt, so the tree is not probed again for each.
 
-### Orphan receipt recovery
+### Orphan run recovery
 
-The dispatch domain's start opens the run ledger and calls `recoverOrphanReceipts` ([orphan-recovery.ts](../../src/domains/dispatch/orphan-recovery.ts)). It first closes non-terminal ledger rows whose worker process no longer exists on this host, sealing a row from its own verified receipt when one exists. It then scans `<stateDir>/receipts/` for sealed receipts whose ledger row a crash lost, rebuilds the row each one was sealed against, checks the integrity digest, and adopts the valid ones.
-
-Receipts are never pruned, so parsing all of them on every boot would grow with history. The scan therefore skips two kinds of file before reading them. A receipt is written as `<runId>.json`, so a file named for a run the ledger already holds is skipped by name. A file whose modification time is more than one hour before the `startedAt` of the oldest retained ledger row is skipped as evicted by the ledger's retention cap, because a receipt is written after its run started. The hour is slack for a shared filesystem whose server stamps modification times with its own clock. An empty ledger has no horizon, so every unheld receipt is read and a wiped `runs.json` can be rebuilt from receipts. A file that cannot be stat'ed is read anyway.
-
-Files that are read are judged one by one. Unparseable or digest-failing receipts are renamed `<name>.json.corrupt` and never deleted. A receipt that lacks the data to rebuild its row is left in place and counted as skipped. A non-interactive boot that recovered, sealed, quarantined or closed anything prints `[dispatch] ledger recovery: ...` to stderr. A file passed over by the name or age check is never read, so a corrupt receipt for a run the ledger holds, or one older than the horizon, is not quarantined and stays where it is.
+The dispatch domain's start opens the run ledger and calls `recoverAbandonedRuns` ([orphan-recovery.ts](../../src/domains/dispatch/orphan-recovery.ts)). A non-terminal ledger row of this host whose worker process no longer exists is settled from its run's `run.settled` record when the run journal holds one. Otherwise the row closes as `stalled`, its `endedAt` set to the last heartbeat, and the domain journals the `run.settled` the dead host never wrote. A terminal row whose run journal holds `run.settled` but no seal gets its `run.sealed` and `bundle.json` now. Rows another host created are left to that host. A non-interactive boot that settled or closed anything prints `[dispatch] ledger recovery: sealed=<n> abandoned=<n>` to stderr. Recovery is best-effort and never blocks startup.
 
 ### Workspace probe reuse
 
@@ -333,7 +329,7 @@ The root checker in `tests/boundaries/check-boundaries.ts` does not scan it. Its
 
 - `server/clio/wire-shims.ts` re-exports the browser-safe ACP wire declarations: everything in `src/engine/acp/types.ts`, plus the context-operation types from `src/core/context-operation.ts` and `src/core/telemetry/live-events.ts` as type-only exports. It evaluates no process transport.
 - `server/clio/http-shims.ts` re-exports a fixed allowlist for the HTTP process: the ACP stdio transport, errors, and wire types, the XDG directory helpers, `resolvePackageRoot`, process-identity probes, and `getVersionInfo`. The wire types must be type-only.
-- `server/clio/adapters/*.ts` import an allowlist of root domain and core modules, such as the trace store, evidence index, settings layers, provider registry, and dispatch state types. Adapters are blocking readers, so only the worker entries (`server/worker/reads-main.ts` and `ops-main.ts`) may import them, which keeps their work off the HTTP event loop.
+- `server/clio/adapters/*.ts` import an allowlist of root domain and core modules, such as the telemetry read model, evidence projections, settings layers, provider registry, and dispatch state types. Adapters are blocking readers, so only the worker entries (`server/worker/reads-main.ts` and `ops-main.ts`) may import them, which keeps their work off the HTTP event loop.
 - `tests/harness` and `tests/fixtures` use a separate test-seam allowlist.
 
 Any other import of `src/` from the application fails its boundary test. The same test pins the process chokepoint: only `server/process-policy.ts` may create child processes or `Worker` threads, and only it may call the ACP `createStdioTransport`. The application's one escape to the CLI is the closed command table in `server/cli-commands.ts`, which maps a fixed set of kinds to fixed `clio-coder` argv, with no generic command or extra arguments.
@@ -369,23 +365,23 @@ graph TD
 Core data paths:
 
 1. `src/cli/index.ts` loads only argument parsing and boot tracing statically. Every subcommand is a dynamic import in its command table, so a bare start or `--version` pays for its own module graph. Interactive start, `run`, and `acp` all call `runClioCommand` in [clio.ts](../../src/cli/clio.ts), which settles the startup settings, detects or configures a chat route for an existing home, and opens the Stage 0 terminal lease for an interactive TTY.
-2. `bootOrchestrator` initializes config, data, state, and cache directories through [init.ts](../../src/core/init.ts), then runs the domain loader described above. Each domain's `manifest.ts` dependency list sets its position. The dispatch domain's start recovers orphaned receipts, and session bind and the session prompt share workspace probes ([Cold-start work](#cold-start-work)).
+2. `bootOrchestrator` initializes config, data, state, and cache directories through [init.ts](../../src/core/init.ts), then runs the domain loader described above. Each domain's `manifest.ts` dependency list sets its position. The dispatch domain's start recovers orphaned runs, and session bind and the session prompt share workspace probes ([Cold-start work](#cold-start-work)).
 3. The shared chat loop in `src/session-control/` resolves model/runtime state. `resolveSessionTools` in [agent-tools.ts](../../src/tools/agent-tools.ts) supplies the full resolved tool surface when the runtime supports tools, subject to explicit turn constraints. Task-ranked skills and capability advice enter reminder text; the task does not select a different session schema set.
 4. The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.
 5. Tool calls enter [registry.ts](../../src/tools/registry.ts), which enforces visibility, safety, middleware hooks, protected artifacts, and result shaping before returning output.
-6. Fleet dispatch writes run ledger entries and receipts, and spawns each worker as a subprocess. A local worker is `dist/worker/entry.js` ([entry.ts](../../src/worker/entry.ts)); SSH placement launches `clio-coder worker` on the remote install. The worker reads a `WorkerSpec` from stdin, rehydrates the runtime descriptor, runs the engine worker runtime ([worker-runtime.ts](../../src/engine/worker-runtime.ts)), and emits NDJSON events on stdout. Evidence and memory domains consume the receipts later.
+6. Fleet dispatch writes run ledger entries and journals each run in its own telemetry scope, and spawns each worker as a subprocess. A local worker is `dist/worker/entry.js` ([entry.ts](../../src/worker/entry.ts)); SSH placement launches `clio-coder worker` on the remote install. The worker reads a `WorkerSpec` from stdin, rehydrates the runtime descriptor, runs the engine worker runtime ([worker-runtime.ts](../../src/engine/worker-runtime.ts)), and emits NDJSON events on stdout. Evidence and memory domains read the sealed run records later.
 
 ---
 
-## Event and audit model
+## Event and accountability model
 
-Clio Coder uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:
+Clio Coder uses one in-process telemetry hub for status and accountability surfaces, but safety is not delegated to events. The hard gate lives in code:
 
 - Provider capability resolution decides whether tool schemas are sent at all. A tool-capable session gets the complete registry as one deterministic surface, with each tool placed `direct` (schema attached to every request) or behind the `gateway` tool (found and called on demand). Placement changes what the model sees and never what a call is allowed to do ([surface.ts](../../src/tools/surface.ts)).
 - [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Playbook step write boundaries are detect-and-rollback mechanisms (change tracking and rollbacks) with no OS-level confinement. The policy engine blocks writes outside dispatch `write_roots`.
 - The OS sandbox (`safety.sandbox`, `src/core/sandbox/`) contains shell commands in two places. A dispatched worker's own `bash`, `run_script` and verification commands run in the worker sandbox, bound to its write roots. At autonomy `default` the main session's `bash` and `run_script` also run contained in the main-session sandbox, which writes the workspace, the temp roots and `safety.scratchRoots`. Credential variables and secret files are hidden inside either sandbox, and `safety.sandboxUnixSockets: block` refuses new Unix-domain sockets.
 - [registry.ts](../../src/tools/registry.ts) is the admission point for every tool invocation.
-- [seal.ts](../../src/domains/telemetry/seal.ts) and related dispatch files persist receipts used by evidence and cost surfaces.
+- [seal.ts](../../src/domains/telemetry/seal.ts) seals the run journals whose `run.settled` records the evidence and cost surfaces read.
 
 ## Interactive render transactions
 
@@ -435,7 +431,7 @@ declared Stage 0 closure and seams. ACP, headless, ordinary non-TTY invocation, 
 subcommands never construct a lease; the established explicit
 `CLIO_CODER_INTERACTIVE=1` non-TTY override remains force-interactive.
 
-The render trace is opt-in and content-free. `CLIO_CODER_RENDER_TRACE` names a JSONL file ([render-trace.ts](../../src/interactive/render-trace.ts), format version 2) written by a bounded asynchronous writer that never does filesystem append I/O on the render stack, and shutdown awaits a bounded flush. A small in-memory ring of recent input and frame records stays on without the file so a wedged pane can still say which half of the input pipeline stopped. See [Observability](observability.md#diagnostic-tracing-toggles) for the other diagnostic toggles and [TUI boot performance](tui-boot-performance.md) for the boot stages and how to benchmark them.
+The render trace is opt-in and content-free. `CLIO_CODER_RENDER_TRACE` names a JSONL file ([render-trace.ts](../../src/interactive/render-trace.ts), format version 2) written by a bounded asynchronous writer that never does filesystem append I/O on the render stack, and shutdown awaits a bounded flush. A small in-memory ring of recent input and frame records stays on without the file so a wedged pane can still say which half of the input pipeline stopped. See [TUI boot performance](tui-boot-performance.md) for the boot stages and how to benchmark them.
 
 ## Command spec
 

@@ -68,7 +68,7 @@ Clio Coder estimates prompt size locally, then reconciles the estimate with prov
 - **Post-call reconciliation**: `reconcileSnapshot` in [context-accounting.ts](../../src/domains/session/context-accounting.ts) folds the provider's prompt token count (cached tokens included) into the snapshot, sets `reconciledTokens`, and records `divergenceRatio = reconciledTokens / estimatedTokens`. A ratio above 1 means the estimator under-counted.
 - **Snapshot categories**: `system`, `tools`, `toolResults`, `agents`, `skills`, `memory`, `project`, `messages`, plus `reserve`, `free` and `streaming`.
 - **Snapshot sources**: each snapshot labels its total and per-category splits `estimated`, `exact`, `reconciled`, or `streaming`.
-- **Snapshot storage**: `appendContextSnapshot` appends one JSON line per snapshot to `context-snapshots.jsonl` in the session directory, beside `current.jsonl`, on a best-effort basis, so accounting telemetry never aborts a turn. The persisted line keeps ids, window resolution, category counts, source labels, hashes and message ranges. It drops the system prompt, conversation, tool schemas and pending input, which stay in memory for the live overlay. A torn trailing line is skipped on read. Each persisted snapshot is also journaled as a content-free `context.snapshot` record under its session and turn, with its category split, window and source and the call it was reconciled against, and shows on the session timeline ([Telemetry](telemetry.md#catalog)). See [Session Lifecycle](session-lifecycle.md) for the directory layout.
+- **Snapshot storage**: each snapshot is journaled as a content-free `context.snapshotted` record in the session's telemetry journal, under its session and turn, and shows on the session timeline ([Telemetry](telemetry.md#catalog)). The record keeps ids, category counts, source labels, prompt and tool hashes, message ranges and the divergence ratio. It drops the system prompt, conversation, tool schemas and pending input, which stay in memory for the live overlay. Emitting it never aborts a turn.
 
 <details>
 <summary>How estimates, provider counts, and snapshots fit together</summary>
@@ -170,7 +170,7 @@ The Codex backend reuses its cache at input-item granularity, so a changed leadi
 
 ### What each call records
 
-Every main-loop call's `call.settled` record carries a cache block, computed at settle from the request as sent and the usage the provider reported ([cache-physics.ts](../../src/domains/telemetry/cache-physics.ts), [turn-runtime.ts](../../src/session-control/turn-runtime.ts)). Side calls, worker calls and System One calls record an unknown verdict and an unknown re-prefill and bill, so a session with side calls reads its re-prefill and bill totals as lower bounds.
+Every main-loop call's `call.settled` record carries a cache block, computed at settle from the request as sent and the usage the provider reported ([cache-physics.ts](../../src/domains/telemetry/cache-physics.ts), [turn-runtime.ts](../../src/session-control/turn-runtime.ts)). Side calls, worker calls and System One calls record an unknown verdict and an unknown re-prefill and bill, so a session with side calls reads its re-prefill and bill totals as lower bounds. In research mode each attempt also journals `prompt.prefix_captured`: the request's prefix as one SHA-256 commitment per system section, tool set and message, so a break can be placed on the block that moved ([prefix-blocks.ts](../../src/session-control/prefix-blocks.ts)).
 
 | Fact | Meaning |
 | --- | --- |
@@ -190,7 +190,7 @@ The host records an event that may disturb the cache once, on the next call that
 | Reason | Recorded when | Tier |
 | --- | --- | --- |
 | `working_set_evict` | A pressure eviction was applied to the replayed history. | every tier |
-| `prompt_recompiled` | The compiled prompt's hash moved from the last one the session recorded, a resumed process's first compile included, or an in-process switch (`/resume`, `/new`, a fork) replaced a prompt this process had applied. A new session's first compile has nothing to diverge from. | every tier |
+| `prompt_recompiled` | The compiled prompt's hash moved from the last `prompt.compiled` record the session journaled, a resumed process's first compile included, or an in-process switch (`/resume`, `/new`, a fork) replaced a prompt this process had applied. A new session's first compile has nothing to diverge from. | every tier |
 | `thinking_change` | The thinking level changed on a route that can change effort mid-conversation neither natively nor through a configuration update. | every tier |
 | `tool_surface_change` | The tool signature changed on a route that does not accept both tool and system-message changes mid-conversation. | every tier |
 | `model_changed` | The run's target or wire model differs from the previous run's, or on resume from the last call's request fingerprint. | every tier |

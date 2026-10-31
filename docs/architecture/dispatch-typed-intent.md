@@ -87,7 +87,7 @@ field, which the caller had to set on purpose. This is what makes omission a
 compatible rather than a refusal: nothing about it can widen authority. The pure
 compatibility classifier can return `intent_absent_legacy_inference`, but the
 production dispatch path deliberately treats omitted intent as ordinary. The
-approval artifact and receipt provenance remain the operator-visible record.
+approval artifact remains the operator-visible record.
 
 An absolute or malformed path token in prose is not silently dropped. It throws
 `DispatchPathScopeInferenceError` with code `legacy_scope_path_absolute` or
@@ -198,8 +198,7 @@ only malformed or absolute prose-path inference can refuse it.
 | Contract | Version | Carries intent | Migration policy |
 | :--- | :--- | :--- | :--- |
 | **`DispatchIntent`** | `2` | It *is* the intent | **Refused, never migrated.** Any other version fails admission with `intent_version_unsupported`. A stored declaration is restated on a fresh call. |
-| **`DispatchPathScopeProvenance`** | `1` | Resolved scope with field source and confidence, never source prose | Optional legacy receipt field; verified when present and omitted by current writers. |
-| **Run Receipt** | `21` | `intent` inside the integrity digest, plus optional legacy `pathScope` | **Refused, never migrated.** A receipt below v21 is reported as retired: intact, but never read as evidence. |
+| **`RunResult`** | In memory only | `intent`, the normalized declaration admitted before worker execution | Not persisted. The run's `run.settled` (version `1`) carries the `routingIntent`, not the dispatch intent. |
 | **`ResolvedDispatchPlanArtifact`** | `3` | `intent` and `resolvedVerification` per task | **Refused, never migrated.** `resolvedDispatchPlanFromArgs` returns `null` for any version but 3, and a task whose `intent` fails `isDispatchIntent` invalidates the whole artifact. The call falls back to unresolved admission rather than executing a half-understood plan. |
 | **Dispatch plan approval text and hash** | Rendered, hashed | `intent_sha256` for a declared task; the full inferred scope table for a legacy task | Not persisted across versions. The hash binds the exact rendering an operator approved. |
 | **Worker Spec** | `8` without extension hooks; `9` with hooks | **No.** Carries the *resolved* `writeRoots`, not the declaration | Worker reads v8 and v9; v8 cannot carry hooks. Unsupported versions are refused. A worker receives an enforced boundary, never a statement of intent it could reinterpret. |
@@ -275,7 +274,7 @@ producer.
 
 Typed intent is the default for every example below. A call that omits it still
 works without a dedicated warning; it resolves its scope from weaker evidence
-recorded in the approval artifact and receipt.
+recorded in the approval artifact.
 
 ### 6.1 Main-agent call, single writer
 
@@ -394,6 +393,6 @@ The host then asks the operator once per run and root, whatever the session's au
 
 ## 7. Legacy compatibility
 
-Omitted intent uses the legacy inference path described above. Current receipts
-do not persist the resolved `pathScope`, and no runtime adoption threshold
+Omitted intent uses the legacy inference path described above. The run record
+does not persist the resolved `pathScope`, and no runtime adoption threshold
 removes this fallback.

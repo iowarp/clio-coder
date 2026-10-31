@@ -41,7 +41,7 @@ Two definitions can share an id and differ in `moment`. `toolCall` has `card` (t
 
 ## Engines
 
-Clio Coder's defaults bind no engines or sites: `systemOne.engines`, `systemOne.sites` and `systemOne.cuts` are empty, `record` is `false`, `retentionDays` is `30` and `maxMiB` is `64` ([defaults.ts](../../src/core/defaults.ts)). Configuring an engine alone starts no site calls. The one binding Clio Coder can derive on its own is the local relevance engine described below.
+Clio Coder's defaults bind no engines or sites: `systemOne.engines`, `systemOne.sites` and `systemOne.cuts` are empty ([defaults.ts](../../src/core/defaults.ts)). Configuring an engine alone starts no site calls. The one binding Clio Coder can derive on its own is the local relevance engine described below.
 
 An engine implements `decide(request)` and rejects on transport failure, an unusable reply or abort. It does not own deadlines or fallback ([systemone.ts](../../src/domains/system-one/engines/systemone.ts) and [llm.ts](../../src/domains/system-one/engines/llm.ts)). `unsupported(task, question)` says, without any I/O, why the engine must not be asked a question.
 
@@ -119,19 +119,18 @@ Two readers get two artifacts from the same `DecisionRecord`. The recorder is in
 
 **Session ledger rows.** Always on. A compact row per call, custom entry type `systemOne`, drained at the next turn boundary into the session that asked ([rows.ts](../../src/domains/system-one/recorder/rows.ts)). It carries site, site version, engine, kind, build, outcome, error (cut to 160 characters), latency, deadline, the estimated state tokens, a SHA-256 of the state, the number of questions, the answers, usage, `fitted`, the policy summary and the per-engine routes without their rendered text. It never carries the state, so a ledger stays small and safe to share.
 
-**Dataset rows.** Only under research telemetry capture with `telemetry.research.systemOneDataset` and content consent, or when the deprecated `systemOne.record` alias is true ([dataset.ts](../../src/domains/system-one/recorder/dataset.ts), `systemOneDatasetRecording` in [capture.ts](../../src/core/telemetry/capture.ts)). One append-only JSONL file per UTC day at `<state dir>/systemone/YYYY-MM-DD.jsonl`, created `0700` for the directory and `0600` for files. Three row kinds start with their own `"kind"` so a reader classifies a line without parsing it.
+**Dataset samples.** Only under research telemetry capture with `telemetry.research.systemOneDataset` and content consent ([dataset.ts](../../src/domains/system-one/recorder/dataset.ts), `systemOneDatasetRecording` in [capture.ts](../../src/core/telemetry/capture.ts)). Each sample is a research, content-bearing `system_one.sample_captured` record in the session's telemetry journal. The record carries the sample kind, the decision id, site and `ref` it concerns, and a reference to an object in the session's `objects/` directory that holds the sample itself. There is no separate System One store, and telemetry [retention](telemetry.md#retention) expires the samples like any other research content.
 
-| Kind | Holds |
+| Sample | Object holds |
 | --- | --- |
-| `decision` | One call: the redacted state capped at 16 KiB with a `stateTruncated` flag, a digest of the serialized runner-redacted state before the dataset's additional scrub and bound, a redaction count, question hashes, the answers, the policy outcome and the routes, rendered questions included. The row's `engineKind` names the engine kind because `kind` classifies the line |
-| `spec` | One question spec per hash, written once per process and day file so decisions stay small |
+| `decision` | One call: the redacted state capped at 16 KiB with a `stateTruncated` flag, a digest of the serialized runner-redacted state before the dataset's additional scrub and bound, a redaction count, question hashes, the answers, the policy outcome and the routes, rendered questions included, together with the spec of every question it asked, keyed by hash. The row's `engineKind` names the engine kind because `kind` classifies the row |
 | `outcome` | What followed a decision, joined to it by `ref` at export |
 
-Writes are queued (at most 512 rows) and appended on the next event-loop turn with one synchronous `appendFileSync` per day file, and a process `exit` hook flushes what is left. A failed write drops its batch and warns once. A decision finished before any session exists is held until a session adopts it, so it is not filed as `session: null`, and an outcome naming a held decision waits and is written right after it. Pruning runs once shortly after the recorder starts, whether or not recording is on, and then on writes at most hourly: day files older than `systemOne.retentionDays` are deleted, then the oldest files until the directory is under `systemOne.maxMiB`. The newest file is never deleted for size.
+Capture is read when a sample is about to be recorded, so turning it off applies to held decisions too. A decision finished before any session exists is held (at most 512) until a session adopts it, so it is not filed as `session: null`, and an outcome naming a held decision waits and is recorded right after it. A process that ends first drops what it holds, because the process scope keeps no content.
 
 The `ref` on a call is the join key for outcomes: the user turn id, a permission request id, a tool call id, a ranking call id or a queue entry id. Outcome sources are `turn` (what the turn did), `turn-tokens` (amends a canceled turn with worker tokens that sealed after it), `next-operator`, `permission` (how a parked approval was answered and how long it took), `follow-up` (whether a ranked skill, capability or memory entry was later used), `draft` (the draft taken, the judge's pick and whether they agreed) and `steer` (what became of a queued message).
 
-`clio-coder systemone status|export` read the journaled samples through [export.ts](../../src/domains/system-one/recorder/export.ts). Export runs the scrub over every row again on the way out, so a day file written before a scrub fix does not leak through it. The operator workflow for these commands is in the guide's [training dataset](../guide/system-one.md#the-training-dataset) section.
+`clio-coder systemone status|export` read the journaled samples through [export.ts](../../src/domains/system-one/recorder/export.ts). Export runs the scrub over every row again on the way out, so a sample recorded before a scrub fix does not leak through it. The operator workflow for these commands is in the guide's [training dataset](../guide/system-one.md#the-training-dataset) section.
 
 ## Where sites are read
 
@@ -158,7 +157,7 @@ A new engine or a new build of an existing engine (Laya, Julia-1, the Strands De
 1. Bind the engine to a site and run `node --import tsx scripts/decision-probe.ts <fixture.json> --engine <name>` against a labeled fixture in `tests/fixtures/decision-cases/` (`turn.json`, `turn-end.json`, `tool-calls.json`, `tool-results.json` or `capabilities.json`). The engine comes from `systemOne.engines` in the operator's settings, or from `--kind`, `--target` and `--model`. Each case goes through `createSystemOne` exactly as production does, with an in-memory recorder that keeps the raw answers. The probe calls the engine live and is never part of CI.
 2. For each labeled key, read agreement, abstention, wrong and confidently wrong counts, the probability ranges of the positive and negative classes per run, and the suggested cut with its margin to each side. The suggestion is null when the classes overlap.
 3. Add the cuts to `FITTED_CUTS` under the printed build only for keys whose classes clear the site's margin rule, citing the run beside them, and list the renderer and site versions in `FITTED_CONTRACTS`. An operator can try cuts earlier with `systemOne.cuts`, which overlays the table without changing it.
-4. Record real traffic with research capture (or the deprecated `systemOne.record` alias) and export it to compare builds on the operator's own turns.
+4. Record real traffic with research capture and export it to compare builds on the operator's own turns.
 
 A cut from one build says nothing about another build, another vendor, a different renderer or site version, or a chat model reporting logprobs, which is why the key is the identity and an identity absent from the table never acts. The probe and the fixtures live in the source repository and are not in the npm package.
 
@@ -187,7 +186,7 @@ A cut from one build says nothing about another build, another vendor, a differe
 | Doctor rows | [doctor.ts](../../src/domains/lifecycle/doctor.ts) | `systemOneFindings`, `systemOneEngineFindings` |
 | Sites | [turn.ts](../../src/domains/system-one/sites/turn.ts), [tool-call.ts](../../src/domains/system-one/sites/tool-call.ts), [tool-result.ts](../../src/domains/system-one/sites/tool-result.ts), [turn-end.ts](../../src/domains/system-one/sites/turn-end.ts), [relevance.ts](../../src/domains/system-one/sites/relevance.ts), [consult.ts](../../src/domains/system-one/sites/consult.ts), [drafts.ts](../../src/domains/system-one/sites/drafts.ts), [steer.ts](../../src/domains/system-one/sites/steer.ts) | `TURN_SITE`, `TOOL_CALL_CARD_SITE`, `TOOL_CALL_GATE_SITE`, `TOOL_RESULT_SITE`, `TURN_END_SITE`, `RELEVANCE_SITE`, `consultSite`, `DRAFTS_SITE`, `STEER_SITE` |
 | Outcomes | [outcomes.ts](../../src/domains/system-one/outcomes.ts) | `observePermissionOutcomes`, `createFollowUpTracker`, `draftTakenOutcome` |
-| Recorder | [index.ts](../../src/domains/system-one/recorder/index.ts), [dataset.ts](../../src/domains/system-one/recorder/dataset.ts) | ledger rows, dataset writer, export, `describeBindings` |
+| Recorder | [index.ts](../../src/domains/system-one/recorder/index.ts), [dataset.ts](../../src/domains/system-one/recorder/dataset.ts) | ledger rows, dataset sample writer, export, `describeBindings` |
 | Derived relevance engine | [capability-settings.ts](../../src/domains/system-one/capability-settings.ts) | `capabilitySettings`, `capabilityEngineSource` |
 | Host | [system-one-host.ts](../../src/entry/system-one-host.ts) | `createSystemOneHost` |
 | Consult tool | [consult.ts](../../src/tools/consult.ts) | `createConsultTool`, `CONSULT_LIMITS` |

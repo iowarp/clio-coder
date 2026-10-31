@@ -2,7 +2,7 @@
 
 The [fleet dispatch guide](../guide/fleet-dispatch.md) describes operator workflows.
 `src/domains/dispatch/` owns plan compilation, admission, routing, scheduling,
-worker execution, and receipts. These responsibilities share the contracts below.
+worker execution, and run settlement. These responsibilities share the contracts below.
 
 | Contract | Owners and enforcement |
 | --- | --- |
@@ -13,12 +13,12 @@ worker execution, and receipts. These responsibilities share the contracts below
 | Write attribution | The compiler refuses a scheduling wave that mixes boundary-declaring steps with steps that declare none, or that holds more than one step that may write, unless the plan declares the single-writer mode `writers: 1`. A boundary is verified by diffing one shared checkout, so concurrent writers could not be attributed. The scheduler enforces the compiled boundary after the step. |
 | Loop termination | The scheduler marks later loop nodes `unneeded` after a loop terminates, so a declared attempt that was never needed does not run. |
 | Verification freshness | A later workspace step can invalidate an earlier verification. Before a dependent treats it as satisfied, the scheduler reruns the affected check, at most once per verification per wave. A plan has finitely many waves, including those its plan steps add, so the reruns are bounded by the plan's own shape. |
-| Receipt authority | The orchestrator validates and seals receipts. Normalized routing intent is included in receipt integrity; quality records are local to the run. |
+| Run record authority | The orchestrator settles every run: it appends `run.settled` to the run's journal and then `run.sealed` over the chain, so the normalized routing intent and the run's quality facts sit under the run's seal. Quality records are local to the run. See [seals and bundles](telemetry.md#seals-and-bundles). |
 
 Pure reducers and helpers can remain separate files within the domain while
-using the same plan, identity, and lease contracts. Routing history keys on
-capability, and receipt generation consumes the routing decision actually used
-for the attempt.
+using the same plan, identity, and lease contracts. Route history is a fold over
+settled runs keyed by the executed route, and run settlement records the routing
+decision actually used for the attempt.
 
 ## Imports and dependency direction
 

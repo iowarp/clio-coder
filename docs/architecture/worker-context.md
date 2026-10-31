@@ -6,7 +6,7 @@ Clio Coder dispatch separates **what a worker inherits** from **how workers are 
 
 The default remains an isolated conversation. A native worker gets its own Pi Agent, worker system prompt, admitted tools, dynamic project context, task, and run-local accounting. Context inheritance does not grant additional tools, write roots, or autonomy. Conversation isolation is not a filesystem sandbox; use dispatch worktrees when filesystem isolation is required.
 
-With project-context tier `bounded`, workers also receive up to 2,400 characters of codemap, orientation, and wiki discovery fragments even when no handbook exists. Handbook selection remains separate. A task worktree supplies its own structural context when guidance falls back to the source checkout, and receipt provenance includes the orientation message. See [Project context](project-context.md) for freshness and current status retrieval.
+With project-context tier `bounded`, workers also receive up to 2,400 characters of codemap, orientation, and wiki discovery fragments even when no handbook exists. Handbook selection remains separate. A task worktree supplies its own structural context when guidance falls back to the source checkout, and the run's project-context provenance includes the orientation message. See [Project context](project-context.md) for freshness and current status retrieval.
 
 ## Dispatch API
 
@@ -57,7 +57,7 @@ If protected context still cannot fit, the worker ends with `worker_context_exha
 
 ## Evidence and compatibility
 
-Non-isolated requests record context mode, parent session/leaf/workspace, snapshot digest, selected-content digest, estimated tokens, bytes, selected refs, omitted messages, the excluded unfinished tail, and excluded interrupted responses. The resolved plan displays the selection's digest and size; the run envelope and receipt carry the provenance under `workerContext`. Receipt integrity binds it, and context provenance remains separate from independent validation evidence.
+Non-isolated requests record context mode, parent session/leaf/workspace, snapshot digest, selected-content digest, estimated tokens, bytes, selected refs, omitted messages, the excluded unfinished tail, and excluded interrupted responses. The resolved plan displays the selection's digest and size; the run envelope and the run's result carry the provenance under `workerContext`. The run's `run.settled` record keeps its hash and the context-provenance verdict, so the run's seal covers them, and context provenance remains separate from independent validation evidence.
 
 The host persists the selected seed at `<stateDir>/context-seeds/<contentHash>.json`, using mode 0600 and durable writes. These are exact historical artifacts with the same sensitivity as session history; there is no automatic garbage collection. Native seeds are self-contained over the wire, including for remote workers. Their metadata and contents are validated before model use and are covered by the existing whole-spec attestation.
 

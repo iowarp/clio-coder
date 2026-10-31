@@ -2,55 +2,60 @@
 
 The [proactive memory guide](../guide/proactive-memory.md) explains when memory is offered and restored.
 
-Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, and audits. Forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain compiles the evidence bundle under `<dataDir>/evidence/run-<id>/` and updates a compact sidecar index row in `<stateDir>/evidence-index.json`. Long-term memory records are local and evidence-linked, and only an approved record reaches prompt selection. Approval comes from the operator or the narrow repository-knowledge gate described below. Proactive task memory is a separate tier that runs by default on session task banks, and its model-tier reminders can propose durable records whose approval remains governed separately. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.
+Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. A finished run's evidence is its sealed telemetry scope: when a dispatched run settles, the run's journal owner assesses it and journals an `evidence.assessed` record after `run.settled` and before `run.sealed`, so the seal covers the assessment. There is no evidence directory to build and no evidence index; every reader reads the read model's run DTO. Long-term memory records are local and evidence-linked, and only an approved record reaches prompt selection. Approval comes from the operator or the narrow repository-knowledge gate described below. Proactive task memory is a separate tier that runs by default on session task banks, and its model-tier reminders can propose durable records whose approval remains governed separately. Use the TUI [`/view`](observability.md#view) command for interactive inspection of runs, dispatch output, durable tool output, compaction summaries, and session accountability before citing evidence.
 
-Source of truth: `src/domains/evidence/`, `src/domains/memory/`, `src/domains/evolution/`, [evidence.ts](../../src/cli/evidence.ts), [memory.ts](../../src/cli/memory.ts), and [evolve.ts](../../src/cli/evolve.ts).
+Source of truth: `src/domains/evidence/`, `src/domains/memory/`, `src/domains/evolution/`, [evidence.ts](../../src/cli/evidence.ts), [memory.ts](../../src/cli/memory.ts), and [evolve.ts](../../src/cli/evolve.ts). The journal, seal and bundle format are specified in [Telemetry](telemetry.md#evidence).
 
 ---
 
 ## Evidence CLI
 
 ```bash
-clio-coder evidence build --run <runId>
-clio-coder evidence build --session <sessionId>
-clio-coder evidence inspect <evidenceId> [--json]
+clio-coder evidence inspect <runId> [--json]
 clio-coder evidence list
 ```
 
 | Command | Behavior |
 | --- | --- |
-| `build --run <id>` or `build --session <id>` | Writes one bundle and prints `wrote <evidenceId> <directory>`. Exactly one of the two flags is required. Exit 1 when a `receipt-integrity` finding is present (the bundle is still written); a `receipt-retired` finding prints a note and exits 0. |
-| `inspect <evidenceId>` | Prints the evidence ID, source, generation time, run, receipt and tool-call totals, tags, finding count, one `trust <runId>:` summary and axis line per run, a `provenance <runId>:` block per run whose seal verified, and the file list. |
-| `inspect <evidenceId> --json` | Prints a bounded record of at most 16 runs: each run's verdict tier and canonical axis states, with no task text, paths or finding prose. A bundle without `trust-status.json` reports `canonical: false`. |
-| `list` | Prints `N evidence artifacts`, then one row per bundle: ID, source, run count and tags. Incomplete directories are skipped. |
+| `inspect <runId>` | Prints the run id, the seal verdict, when the run was assessed, its outcome and exit code, tool-call and blocked-tool counts, token and cost totals, first-pass success, tags, one `trust:` summary and its axis line, one `gate <decisionId>:` line per verdict, a `provenance:` block when the seal verifies, and every finding with its severity, tag and sentence. Exit 1 when the run has no settled record, or when its seal was checked and rejected (the record is still printed). |
+| `inspect <runId> --json` | Prints a fixed record: `version`, `generatedAt`, `runId`, `assessed`, `integrity` (`verified`, `unsealed` or `failed`), the verdict tier, and every axis by its canonical state. It carries no task text, paths or finding prose. |
+| `list` | Prints `N runs`, then one row per run scope on this host, newest settlement first: run id, outcome (or `unsettled`), state (`assessed`, `unassessed`, `unsealed` or `failed`) and tags. |
 
-Exit codes are 0 on success, 1 for a runtime failure, and 2 for a usage error or an invalid ID (usage text goes to stderr). `clio-coder evidence inspect <id>` requires a valid evidence artifact ID. If the requested artifact does not exist on disk, it exits with code 1 and prints the error and remedy on separate lines:
+Exit codes are 0 on success, 1 for a runtime failure, and 2 for a usage error or an invalid run id (usage text goes to stderr). A run with no settled record prints the reason and a remedy on separate lines:
 
 ```text
-error: evidence artifact not found: <id>
-  run `clio-coder evidence list` to see local bundles
+error: run <runId> has no settled record: <reason>
+  run `clio-coder evidence list` to see local runs
 ```
 
-Evidence IDs are deterministic:
+Nothing builds evidence and nothing prunes it separately. A run's evidence lives and expires with its run scope under telemetry [retention](telemetry.md#retention), and `clio-coder telemetry verify <scope-dir>` checks it with only the scope's own files.
 
-| Source | ID shape |
+### Assessment at settlement
+
+The run's journal owner assesses a run once, from the run's journal records, after it writes `run.settled`. The assessment reads the gate decisions that name the run and, when the run cited decisions, the decision board on its session's active path. A read that fails leaves its part unresolved rather than failing the run. A run with no `run.settled` is not assessed. The assessment is pure over those inputs, and its integrity axis says the producer held the record; a reader replaces that axis with the seal's own verdict.
+
+`evidence.assessed` (version 1) carries structured, content-free facts:
+
+| Field | Meaning |
 | --- | --- |
-| Run | `run-<runId>` |
-| Session | `session-<sessionId>` |
+| `attempt` | The dispatch lineage attempt; null for a run dispatched without a lineage. |
+| `firstPassSuccess` | True only when the run succeeded on lineage attempt 0 and no `no-validation` finding was raised. The accountability read model folds this value into its first-pass success rate. |
+| `failureCause` | The tag a non-zero exit is attributed to, from termination facts only; null for a run that exited 0. |
+| `trust` | The canonical five-axis trust status described below. |
+| `findings` | Up to 128 entries of `id` (`finding-NNN`), `severity` (`info` or `warn`) and `tag`. |
+| `verdicts` | Up to 64 gate decisions that judged the run by settlement: `decisionId`, `digest`, `outcome`, and the independent-review state each produced. |
+| `provenance` | The decision refs the run cited and whether each resolved, the pipeline step it ran as, and the persona override that composed its prompt. Null when recovery sealed the run after its owner died. |
+| `text` | A reference to the run's `evidence-findings` object, which holds each finding's sentence and the decision records the run cited. |
 
-Rebuilding the same evidence ID rewrites the same directory under `<dataDir>/evidence/`. Nothing prunes evidence bundles. They accumulate until you remove them by hand, run `clio-coder reset --data` (which also removes memory and vendored tools), or uninstall.
+Token and cost totals come from the run's folded quantities, so a partially measured run keeps its known subtotal and says what is unknown. A run whose seal does not verify states no totals.
 
-### Automatic build and the evidence index
+### Redaction
 
-On `dispatch.completed` and `dispatch.failed`, `src/domains/telemetry/extension.ts` builds the run's bundle in the background. A failure before admission has no run ledger and builds nothing. A failure is logged as `[clio-coder:evidence] auto-build failed for run <id>` and never fails the run. Each build merges one row, keyed by run ID, into `<stateDir>/evidence-index.json`, a ring of at most 1,000 rows (`src/domains/telemetry/accountability.ts`). A row holds `runId`, `evidenceId`, `tags`, `firstPassSuccess`, `findingCount`, `succeeded`, `completionEvidenceWarning`, `ungroundedClaims` and `generatedAt`. `firstPassSuccess` is true only when the run succeeded on lineage attempt 0 and the bundle carries no `no-validation` tag. The accountability read model and `clio-coder usage report` read the index instead of rebuilding bundles.
-
-### Redaction at the bundle boundary
-
-Secret-shaped values are replaced with `[redacted:<kind>]` across the envelopes, receipts, tool-event previews and the rendered transcript when a bundle is built. `overview.json` records the replacement count as `redactionCount`. Raw session files under `<stateDir>/sessions/` are not touched.
+Secret-shaped values are replaced with `[redacted:<kind>]` in a run's settled facts before they are journaled, and in every object the telemetry object store writes. Raw session files under `<stateDir>/sessions/` are not touched.
 
 ### Secret-shaped value patterns
 
-[redact.ts](../../src/domains/evidence/redact.ts) holds the ordered pattern list for secret-shaped values matched on content. The bundle builder, the trace mirror, memory promotion and handoff, tool-result summaries, the `consult` tool and the System One state scrubber all call it. A match becomes `[redacted:<kind>]` and is counted in the caller's tally. Display-time redaction of tool-call arguments, as the transcript renderer and the workers dashboard apply, is a separate rule set in [redaction.ts](../../src/domains/safety/redaction.ts).
+[redact.ts](../../src/domains/evidence/redact.ts) holds the ordered pattern list for secret-shaped values matched on content. Run settlement, the telemetry journal writer and object store, memory promotion and handoff, tool-result summaries, the `consult` tool and the System One state scrubber all call it. A match becomes `[redacted:<kind>]` and is counted in the caller's tally. Display-time redaction of tool-call arguments, as the transcript renderer and the workers dashboard apply, is a separate rule set in [redaction.ts](../../src/domains/safety/redaction.ts).
 
 | Kind | Matches |
 | --- | --- |
@@ -65,115 +70,87 @@ Secret-shaped values are replaced with `[redacted:<kind>]` across the envelopes,
 
 The `assignment` pattern reads `key=value`, `key: value` and `"key": "value"` shapes. The key is any name containing `api_key`, `api-key`, `apikey`, `secret`, `token`, `passwd`, `password` or `credential`, case-insensitive. The value is a run of 8 or more characters that are not whitespace, quotes, backticks or any of `; , & | < >`. A value that opens a call is code, not a credential, and is left alone: an identifier of letters, digits, underscores and dots, then `(`, then whitespace, a quote, `{`, `[`, `)` or the end of the text. `BASE_TOKENS = frozenset({` and `token = getToken()` therefore stay readable. A call with a real argument still reads as a value, so `password=Summer2024(!)` becomes `password=[redacted:assignment]`.
 
-`redactSecretsDeep` walks plain objects and arrays and redacts string values with the same patterns. It does not see property names. The trace mirror serializes payloads through `secretRedactingReplacer`, which redacts each string leaf before escaping and also treats a string under a secret-flavored property name as an assignment value; see [Bounds and redaction](trace-store.md#bounds-and-redaction).
+`redactSecretsDeep` walks plain objects and arrays and redacts string values with the same patterns. It does not see property names. The telemetry object store serializes objects through `secretRedactingReplacer`, which redacts each string leaf and also treats a string under a secret-flavored property name as an assignment value; see [Objects](telemetry.md#objects).
 
 ---
 
-## Evidence directory layout
+## Run evidence layout
 
-Run and session evidence files:
+A run's evidence is its run scope:
 
 ```text
-<dataDir>/evidence/<evidenceId>/
-├── overview.json
-├── transcript.md
-├── tool-events.jsonl
-├── receipt.json
-├── gate-decisions.json
-├── trust-status.json
-├── findings.json
-└── findings.md
+<stateDir>/telemetry/runs/<runId>/
+├── journal.jsonl     run.started … run.settled, evidence.assessed, run.sealed
+├── objects/          the result object and the evidence-findings object
+└── bundle.json       written by the seal
 ```
 
-Readers open the named core files above. Bundles built by older releases may hold extra trace or audit copies; those files are not required to read a bundle.
+The sealed scope directory is a self-contained bundle that verifies with only its own files; see [Seals and bundles](telemetry.md#seals-and-bundles). Tool facts are `tool.settled` records and the journal is the transcript of what the run did. `/view` accountability views, `clio-coder evidence`, ACP's evidence-ready notice and the GUI evidence view all read the read model's run DTO over this directory. A run whose seal verifies is read through its assessment; a run whose scope is unsealed reads as not yet evidence, and a run whose seal fails reads as a `run-seal` warning.
 
-### Core files
+When a run was chained (pipeline), composed with a persona override, or escalated for a permission, `clio-coder evidence inspect` prints those facts as a `provenance:` block. Pipeline and persona facts come from the sealed assessment and escalation counts from `run.settled`, never from the mutable run ledger. The block is printed only for a run whose seal verifies.
 
-| File | Purpose |
-| --- | --- |
-| `overview.json` | Stable summary (`version: 1`): source, runs, sessions, statuses, tasks, models, totals, tags, redaction count, resolved decisions and file list. Token and cost totals fold only the verified receipts the bundle seals, so they stay the same after run journals are pruned. `tokenCoverage` counts the calls those receipts sealed without usage and the runs with no verified receipt or no call coverage; when either is non-zero, `tokens` is a lower bound and `/view` shows it with `≥`. A run with no verified receipt makes the cost summary unknown, never zero. |
-| `transcript.md` | Human-readable run or session transcript. A skill activation names its owning plugin (`owner=<id>@<version> digest=<digest>`) when a plugin supplied the skill. |
-| `tool-events.jsonl` | Tool summaries from session entries, audit rows, or receipts. |
-| `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`); only receipts that pass integrity verification contribute verified fields. |
-| `gate-decisions.json` | Integrity-verified review verdicts, compete winner selections, and winner confirmations discovered from linked receipt ids. |
-| `trust-status.json` | Canonical per-run five-axis trust projections derived from verified receipts, gate decisions, and grounded validation artifacts. A bundle without it reads as `projection: historical_format`. |
-| `findings.json` / `findings.md` | Structured findings plus a readable report that begins with each linked run's canonical tier, fixed-order summary, and five axes. |
+### Decision provenance
 
-### Run attribution under concurrency
+Decision refs a run cited are resolved once, at assessment, against the decision board on its session's active path. Each ref adds a `context-provenance` finding: `info` when it resolved, `warn` when it does not. Resolved decision records go into the run's `evidence-findings` object and are shown with the run's evidence. Decisions remain session facts; evidence does not reinterpret them as validation results. Wiki page writers receive up to twelve active decisions matching their source paths or symbols and cite those refs in the body and optional `decisions` frontmatter instead of inferring rationale.
 
-Session ledger entries are attributed to a run by the run id the producer stamped on the entry at write time. Rows built from those entries carry that provenance in a `runLink` field (`{ kind, confidence, candidateRunIds? }`) in `tool-events.jsonl`; a write-time stamp is `kind: "entry-run-id"`, `confidence: "exact"`. Entries written without run context fall back to timestamp windowing, labeled `kind: "timestamp-window"`, `confidence: "best-effort"`, and printed as `link=timestamp-window` in the transcript. Concurrent dispatch runs share one clock and their windows overlap, so an entry inside more than one window has no owner the bundle can name. Such an entry is reported in the bundle of every run it may belong to, with `runId: null`, `kind: "ambiguous-timestamp-window"`, and a `candidateRunIds` list, plus a `best-effort-link` finding counting them. An entry inside no window carries `kind: "no-run-window"`. It is never dropped and never claimed as exact.
+### Run result facts
 
-When a run was chained (pipeline), composed with a persona override, or escalated for a permission, `transcript.md` surfaces the receipt's provenance field sets, and `clio-coder evidence inspect` prints them as a `provenance <runId>:` block. The block is printed only for a run whose seal the projection verified; a run whose seal was rejected or retired gets no block. The field paths, types, and stability labels are documented in the [receipt provenance schema](observability.md#receipt-fields-for-dispatch-provenance).
-
-### Task and decision provenance
-
-Session evidence retains the two operator-facing bookkeeping ledgers instead of flattening them into prose. A `taskLedger` projection names the stable board id, goal counts, active runs, required evidence, and bounded task rows with status, origin, `userTaskId`, reason, and evidence. This keeps an operator task traceable from the project inbox correlation through agent pickup and completion. A `decisionLedger` projection names the active-path anchor, interview identity and status, timing, round count, summary, and every settled or superseded decision. Operator revisions are explicit through `revisedAt`, `revisionSource=operator`, and the recorded correction text. Both kinds remain session facts in the readable transcript; evidence does not reinterpret them as validation results. Verified receipt `decisionRefs` link runs to recorded arguments on the session's active path, with resolved records in `overview.json` and resolved or missing-reference findings in both readable evidence documents. Wiki page writers receive up to twelve active decisions matching their source paths or symbols and cite those refs in the body and optional `decisions` frontmatter instead of inferring rationale.
-
-### Sealed receipt facts
-
-`src/domains/dispatch/run-result-facts.ts` reads a sealed receipt back, verifies it against its ledger row, and projects the compact terminal facts that the TUI worker block, the exit summary and ACP terminal fleet frames report; the receipt contract is in [observability.md](observability.md).
+`src/domains/dispatch/run-result-facts.ts` reads a run's DTO over its sealed scope and projects the compact terminal facts that the TUI worker block, the exit summary and ACP terminal fleet frames report. A run that has not settled reads as `result unavailable`.
 
 ---
 
 ## Evidence Tag Taxonomy and Failure Causes
 
-Clio Coder classifies every run and session record using a closed set of 29 canonical tags (`EVIDENCE_TAGS` in `src/domains/evidence/types.ts`). These tags distinguish general execution characteristics, such as lineage linkages, from actual failure causes.
+Clio Coder classifies every run using a closed set of 22 canonical tags (`EVIDENCE_TAGS`, exported from `src/domains/evidence/types.ts`). These tags distinguish general execution characteristics from actual failure causes.
 
 ### Complete Taxonomy
 
 | Tag | Category | Trigger / Meaning |
 | --- | --- | --- |
-| `audit-linked` | Provenance | Audit logs successfully linked to this run or session. |
-| `audit-missing` | Provenance | No matching audit logs were found. |
-| `best-effort-link` | Provenance | Inspection commands or logs linked via heuristics. |
 | `timeout` | Failure | Execution exceeded the maximum duration limit. |
 | `context-overflow` | Constraint | Model context limit was exceeded. |
 | `provider-transient` | Transient | Temporary API or model gateway connection error. |
 | `missing-dependency`| Failure | Python, Node, or system package dependency was missing. |
 | `wrong-runtime` | Configuration | Execution failed due to incorrect compiler or runtime environment. |
-| `proxy-validation` | Validation | Weak validation (e.g. only file-presence check rather than execution). |
-| `no-validation` | Validation | Succeeded turn or run did not execute any verification commands. |
+| `proxy-validation` | Validation | The run claimed validation that was not grounded in an observed execution. |
+| `no-validation` | Validation | A succeeded run has no linked validation evidence. |
 | `destructive-cleanup`| Precaution | Clean-up rules triggered to prevent workspace pollution or damage. |
 | `blocked-tool` | Failure | The safety net blocked a tool call requested by the model. |
-| `escalation` | Precaution | A worker permission escalation timed out or was denied; see the receipt provenance schema below. |
-| `receipt-integrity` | Security | Forensic verification detected receipt modification or checksum mismatch. |
-| `receipt-retired` | Provenance | The receipt was sealed under an integrity version this build no longer verifies. It is not migrated and not read as evidence; the row names both versions. An info row, never the security warning a modified receipt gets. |
+| `escalation` | Precaution | A worker permission escalation timed out or was denied. |
+| `external-bypass` | Security | An external runner used its own permissions outside Clio Coder policy. |
+| `external-approximation` | Historical | Reserved in the vocabulary. Current builds do not emit it. |
+| `independent-review` | Validation | The canonical independent-review axis: a failed or correlated review is a warning; an inconclusive review, or a successful run with no review at all, is an info row saying its result rests on its own record. |
+| `context-provenance` | Provenance | The canonical context-provenance axis read `invalid`, or a cited decision ref resolved (info) or did not resolve (warning). |
+| `completion-evidence` | Validation | The canonical completion-evidence axis: a mutation that finished without validation evidence at the completion boundary is a warning; an explicit limitation is an info row. |
+| `run-seal` | Security | The run's seal did not verify. A seal that was checked and rejected is a warning; a run scope not yet sealed is an info row. |
 | `protected-artifact`| Precaution | Mutating a path protected by project or system safety policies. |
-| `tool-loop` | Constraint | The model repeatedly called the same tool with identical arguments. |
+| `tool-loop` | Constraint | The run exhausted its tool-call cap, or the loop guard disabled its tools. |
 | `test-failure` | Failure | A verification command containing test/lint keywords exited non-zero. |
 | `build-failure` | Failure | A verification command containing build keywords exited non-zero. |
-| `cwd-missing` | Configuration | The directory target specified for execution did not exist. |
-| `session-linked` | Provenance | The run is linked back to its originating parent session. |
-| `session-missing` | Provenance | No parent session could be resolved for this run. |
 | `auth-failure` | Failure | Missing or invalid credentials/API keys. |
-| `external-bypass` | Security | An external runner bypassed standard safety gates. |
-| `external-approximation` | Historical | Older evidence bundles may contain this finding. Current builds do not emit it. |
-| `independent-review` | Validation | The canonical independent-review axis: a failed, correlated, or inconclusive review is a warning; a successful run with no review at all is an info row saying its result rests on its own receipt. |
-| `context-provenance` | Provenance | The canonical context-provenance axis read `invalid`: the receipt's briefing or project-context record contradicts itself. |
-| `completion-evidence` | Validation | The canonical completion-evidence axis: a mutation that finished without validation evidence at the completion boundary is a warning; an explicit limitation is an info row. |
 | `unknown` | Undefined | Unclassified execution failure. |
 
 ---
 
 ### Failure-Cause Tag Subset
 
-A subset of the taxonomy represents actual failure causes (governed by the `FAILURE_CAUSE_TAG_ORDER` array). These are the only tags included in the receipt summaries and TUI observability histograms:
+A subset of the taxonomy represents actual failure causes (governed by the `FAILURE_CAUSE_TAG_ORDER` array). These are the only tags included in the run findings summary and the TUI failure-cause histograms:
 
 1. **`timeout`**: Triggered if the run outcome is `"timed_out"` or `"stalled"`, or if the error/failure text contains `"timed out"` or `"timeout"`.
 2. **`auth-failure`**: Triggered if failure text contains keywords like `"auth"`, `"api key"`, `"credential"`, or `"unauthorized"`.
 3. **`missing-dependency`**: Triggered if failure logs contain `"module not found"`, `"missing package"`, or `"missing dependency"`.
-4. **`build-failure`**: Triggered in receipt summaries when a non-zero receipt exit is paired with build tool names in `toolStats` (e.g. `build`, `compile`, `make`, `cmake`, `cargo`, `gradle`, `ninja`, `tsc`). Forensic evidence may also classify it from termination diagnostics in `outcomeDetail` or the recorded failure message. The task text is never causal evidence.
-5. **`test-failure`**: Triggered in receipt summaries when a non-zero receipt exit is paired with test or lint tool names in `toolStats` (e.g. `pytest`, `ctest`, `jest`, `vitest`, `test`, `lint`, `typecheck`). Forensic evidence may also classify it from termination diagnostics in `outcomeDetail` or the recorded failure message. Validation words in the task text are never causal evidence.
+4. **`build-failure`**: Triggered in the findings summary when a non-zero exit is paired with build tool names in `toolStats` (e.g. `build`, `compile`, `make`, `cmake`, `cargo`, `gradle`, `ninja`, `tsc`). The assessment may also classify it from termination diagnostics in `outcomeDetail` or the recorded failure message. The task text is never causal evidence.
+5. **`test-failure`**: Triggered in the findings summary when a non-zero exit is paired with test or lint tool names in `toolStats` (e.g. `pytest`, `ctest`, `jest`, `vitest`, `test`, `lint`, `typecheck`). The assessment may also classify it from termination diagnostics in `outcomeDetail` or the recorded failure message. Validation words in the task text are never causal evidence.
 6. **`blocked-tool`**: Triggered if tool execution statistics show a blocked count greater than `0`.
 
 ---
 
-## Receipt findingsSummary
+## Run findings summary
 
-Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an optional `findingsSummary` block. This block provides a cheap, integrity-covered summary of the run's findings:
+Each `run.settled` record carries an optional `findings` block, a cheap summary of the run's findings that the seal covers:
 
 ```json
-"findingsSummary": {
+"findings": {
   "tags": ["test-failure"],
   "firstPassSuccess": false,
   "findingCount": 1
@@ -181,18 +158,12 @@ Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an
 ```
 
 ### Computation and Lifecycle
-- **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in [run-findings.ts](../../src/domains/dispatch/run-findings.ts)). It never reads from disk or calls `buildEvidence`.
-- **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected. The evidence index computes its own `firstPassSuccess` from the full bundle, and that value is the authority for accountability rates.
-- **Digest Coverage**: Current receipts use strict v21, whose unkeyed SHA-256 digest covers every current receipt field, including dispatch intent path provenance, resolved path scope, briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, fleet gate provenance, call ids and terminal reason, together with a labelled commitment to the reconstructed ledger fields. Verification recomputes the digest and, while the run ledger still holds the row, compares the row with the receipt and the commitment. A receipt whose row the ring evicted verifies on its seal alone and reports verified (ledger evicted). That catches an edit that leaves the digest stale, but not a receipt and ledger row rewritten together with a recomputed digest, because the digest is not a signature. Only v21 is verified as current evidence. Lower versions are reported as retired and are neither migrated nor read as evidence.
+- **Computed in memory**: `findings` is calculated at settlement from the run's result draft and tool statistics (in [receipt-findings.ts](../../src/domains/dispatch/receipt-findings.ts)). It never reads from disk and never waits on the assessment.
+- **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected. The assessment computes its own `firstPassSuccess`, and that value is the authority for accountability rates.
+- **Integrity**: A run's record is trusted only when its scope's seal verifies. The seal covers every journal line, `run.settled` and `evidence.assessed` included, through the hash chain and `bundle.json`; [Verify](telemetry.md#verify) describes the check. The chain catches an edited record, but a scope rewritten together with a recomputed chain and bundle is not detected, because the seal is not a signature.
 
-| Version | Verification policy | Compatibility policy |
-|---|---|---|
-| v21 | Current canonical projection; every current receipt field and a commitment to the reconstructible ledger fields are covered by the digest and verified | Accepted |
-| v1 through v20 | Historical sealed shape unsupported by this build | Reported as retired; not migrated and not read as evidence |
-| Malformed, unversioned, or future version | No current reader | Invalid; archive incompatible state rather than expecting migration |
-
-Receipt integrity and evidence verification answer different questions. The
-former proves that a receipt matches its ledger envelope; the latter records
+Seal verification and validation evidence answer different questions. The
+former proves that a run's record is what was written; the latter records
 whether applicable validation evidence was observed. Briefing provenance is
 also distinct from bounded project-context provenance: both can be absent or
 present independently, and neither hash is evidence for the other.
@@ -206,10 +177,10 @@ decision and preserve every other axis unchanged.
 
 | Axis | Closed states | Question answered |
 |---|---|---|
-| Artifact integrity | `verified`, `failed`, `absent`, `unknown`, `not_applicable` | Did the integrity verifier check the referenced artifact against its digest? |
+| Artifact integrity | `verified`, `failed`, `absent`, `unknown`, `not_applicable` | Did the run's seal verify the record it covers? |
 | Validation grounding | `validated`, `failed`, `ungrounded`, `absent`, `unknown`, `not_applicable` | What correctness-bearing validation was observed and grounded? |
 | Independent review | `passed`, `failed`, `inconclusive`, `not_independent`, `absent`, `unknown`, `not_applicable` | What outcome did a verified independent reviewer or judge record? |
-| Context provenance | `recorded`, `invalid`, `absent`, `unknown`, `not_applicable` | Is the origin of briefing, project context, or linked evidence recorded consistently? |
+| Context provenance | `recorded`, `invalid`, `absent`, `unknown`, `not_applicable` | Is the origin of briefing, worker context, or project context recorded consistently? |
 | Completion evidence | `evidenced`, `incomplete`, `limited`, `absent`, `unknown`, `not_applicable` | What did the finish contract observe at the completion boundary? |
 
 `absent` means no fact was recorded and carries a reason but no invented
@@ -220,87 +191,70 @@ Sources may retain up to 16 typed artifact references. References contain an
 artifact kind, identifier, and optional SHA-256 digest; they never embed the
 artifact body. Normalization sorts the references and rejects duplicates,
 unbounded lists, unknown fields within an axis, invalid identifiers, and
-sources that are not permitted to speak for an axis. Unknown top-level axes
-from older evidence files are ignored.
+sources that are not permitted to speak for an axis.
 
 The composition rules prohibit cross-axis promotion:
 
 - Verified artifact integrity never promotes validation grounding.
 - Recorded context provenance never promotes validation or correctness.
 - A passing review never establishes authorship or context origin.
-- A completion self-report never promotes validation grounding. The linked
-  `completion_contract` audit row is the run's own report of what it did, so it
-  reaches completion evidence and no other axis. Validation grounding is filled
-  only by independently observed executions the session ledger recorded.
+- A completion self-report never promotes validation grounding. Only a
+  `finish_contract` source may speak for completion evidence, and a run
+  assessment records the axis as `absent` (`not_recorded`).
 
 #### Validation grounding precedence
 
-For a verified receipt, `adaptRunReceiptValidationStatus` reads the first rule that applies:
+For a run whose record is authenticated, `adaptRunTrustStatus` reads the run's settled facts and takes the first rule that applies:
 
-1. No receipt: `absent` with `artifact_missing`.
+1. No run record: `absent` with `artifact_missing`.
 2. Host verification `rejected`: `failed` by `host-verification`. When every failing host check also failed on the task base, the change did not cause the failure, so the state is `unknown` by `host-verification-baseline-failed` and the human clause reads `check also failed on task base; change validation unknown`.
 3. Host verification `verified`: `validated` by `host-verification`. Host verification `not_implicated` (a batch member the failure was charged away from): `unknown` by `host-verification`.
-4. Receipt quality carries a failed typed validation or a failing result contract: `failed` by `receipt-quality`.
-5. Command grounding: the receipt's `validationGrounding.basis` is `no-command-executed` and it claims more than it grounded, or lists ungrounded claims: `ungrounded` by `command-grounding`. A report that names the typed `verify` tool is grounded by the successful `verify` tool result the run recorded, not by a shell command.
+4. The settled quality carries a failed typed validation or a failing result contract: `failed` by `receipt-quality`.
+5. Command grounding: the run's `validationGrounding.basis` is `no-command-executed` and it claims more than it grounded, or lists ungrounded claims: `ungrounded` by `command-grounding`. A report that names the typed `verify` tool is grounded by the successful `verify` tool result the run recorded, not by a shell command.
 6. A passed typed validation or a passing result contract: `validated` by `receipt-quality`.
-7. The receipt's `verification` block: `verified` is `validated` by the recorded basis, `unverified` is `absent` with `not_observed`, and `unknown` or `not_applicable` carry through.
-8. Otherwise `unknown` through the compatibility source.
+7. The run's `verification` fact: `verified` is `validated` by the recorded basis, `unverified` is `absent` with `not_observed`, and `not_applicable` carries through.
+8. Otherwise `unknown`, attributed to the recorded basis; an ACP delegation the host could not observe is attributed to `acp-delegation`.
 
-The current adapters apply the following persisted-format compatibility rules.
-They do not mutate receipt, gate-decision, evidence-bundle, or session formats.
-
-| Existing persisted fact | Canonical mapping |
+| Recorded fact | Canonical mapping |
 |---|---|
-| Missing receipt | Every receipt-owned axis is `absent` with `artifact_missing`. |
-| Current receipt present but integrity not checked | Artifact integrity is `unknown`; the receipt's own digest never verifies itself. The other receipt-owned axes are `absent` with `not_observed` until verification succeeds. |
-| Historical receipt missing its integrity block | Receipt-owned axes are `unknown` through the compatibility source, even if a caller presents a contradictory positive verification result. |
-| Integrity verification succeeds or fails | Artifact integrity is `verified` or `failed`. A failure leaves the receipt-owned validation grounding and context provenance `absent`; no untrusted receipt claim contributes a positive state. Validation the session ledger observed on its own (a validation command that ran and exited 0) still grounds the run, so a tampered run can read `artifactIntegrity: failed` beside `validationGrounding: validated`. The two axes name different artifacts and different authorities, and the bundle's `receipt-integrity` finding is what flags the pairing. |
-| Receipt sealed under a retired integrity version | Artifact integrity is `unknown` through the compatibility source `run_receipt:<runId>:integrity-v<N>-retired`, which is where the human clause reads the version back from (`seal v20 retired (this build verifies v21)`); `failed` and "seal broken" are reserved for a seal this build checked and rejected. The receipt-owned axes are `absent` with `historical_format`, and the verdict is `unknown` rather than `compromised`. The receipt is not migrated and not read as evidence: the bundle records a `receipt-retired` info finding, `evidence build` prints it as a note and exits 0, and `/view verify` reports `not checked` with both versions. |
-| Receipt `verification.state: verified` | Validation grounding is `validated` unless a stronger typed failure or ungrounded claim is present. |
-| Receipt `verification.state: unverified` | Validation grounding is `absent` with `not_observed`; lack of a validation tool is not a failed validation. |
-| Receipt verification `unknown` or `not_applicable` | Validation grounding preserves `unknown` or `not_applicable`. A missing historical verification field maps to `unknown`. |
-| Typed receipt validation or result-contract quality | A passing correctness-bearing fact maps to `validated`; a failing fact maps to `failed`; an ungrounded passing claim maps to `ungrounded`. |
-| Valid bounded project context, valid none-tier workspace-root record, or valid briefing hash | Context provenance is `recorded`. A `none`-tier run still receives the workspace-root message, so a none-tier block naming exactly `workspace-root` with a well-formed count and hash is `recorded`. Explicit project-context tier `none` with no content and no briefing is `not_applicable`; a missing historical field is `unknown`; a contradictory block (a handbook section under a none policy, a hash with no section, a malformed count) is `invalid`. |
-| Gate decision | A verified independent pass or fail maps to `passed` or `failed`; for a compete `winner` outcome the winning subject maps to `passed` and every other subject to `failed`. Correlated review maps to `not_independent`. A decision with no decider or correlation record is `inconclusive`. Unverified artifacts map to `unknown`; operator confirmation or yolo authority alone is `not_applicable` to independent review. |
-| Older receipt with `autonomyEnforcement` | Its integrity seal still verifies when the historical field was covered by the digest. Readers ignore the field and project five trust axes. |
-| Finish-contract assessment | The assessment is an audit row linked to the run and counted in `totals.auditRows`. It does not override the receipt-derived `completionEvidence` axis on the evidence surface alone. |
-| Malformed audit row identifier | A blank or whitespace-only optional identifier remains linked as audit input and never aborts the bundle. It cannot affect the receipt-derived trust projection. |
-| Bundle without `trust-status.json` | Inspection reports `projection: historical_format` with no canonical run projections. It never reconstructs positive states from older summary tags. |
+| Missing run record | Every axis is `absent` with `artifact_missing`. |
+| Run scope not yet sealed | Artifact integrity is `unknown`. Validation grounding and context provenance are `absent` with `not_observed`; no unauthenticated claim contributes a state. |
+| Seal verifies or fails | Artifact integrity is `verified` or `failed`. A failed seal leaves validation grounding and context provenance `absent` with `not_observed`, and the run reads as a `run-seal` warning. |
+| `verification.state: verified` | Validation grounding is `validated` unless a stronger typed failure or ungrounded claim is present. |
+| `verification.state: unverified` | Validation grounding is `absent` with `not_observed`; lack of a validation tool is not a failed validation. |
+| Typed validation or result-contract quality | A passing correctness-bearing fact maps to `validated`; a failing fact maps to `failed`; an ungrounded passing claim maps to `ungrounded`. |
+| Context provenance | Judged once at settlement and kept on `run.settled` with the hashes, never the context. A valid briefing, worker context, bounded project context, or none-tier workspace-root record is `recorded`. A `none`-tier run still receives the workspace-root message, so a none-tier block naming exactly `workspace-root` with a well-formed count and hash is `recorded`. Explicit project-context tier `none` with nothing sent is `not_applicable`; a run with no project-context record and nothing sent is `unknown`; a contradictory block (a handbook section under a none policy, a hash with no section, a malformed count, an invalid briefing or worker context) is `invalid`. |
+| Gate decision | A gate subject cites the run by the digest of its `run.settled`. A verified independent pass or fail maps to `passed` or `failed`; for a compete `winner` outcome the winning subject maps to `passed` and every other subject to `failed`. Correlated review maps to `not_independent`. A decision with no decider or correlation record is `inconclusive`. An unauthenticated artifact or a mismatched subject digest maps to `unknown`; operator confirmation or yolo authority alone is `not_applicable` to independent review. The latest decision is the run's review, and earlier cycles stay listed as verdicts. |
 
-Receipt inspection, worker output, monitor details, and evidence rebuilding all
-use the same verified receipt projection boundary. Evidence rebuilding
+Run inspection, worker output, monitor details, and the assessment all
+use the same trust boundary over the run's settled record. The assessment
 then composes independently verified gate decisions without changing
-receipt-owned axes. Findings such as
+record-owned axes. Findings such as
 `no-validation`, `proxy-validation`, `external-bypass`,
 `independent-review`, `context-provenance`, and `completion-evidence`
-are selected from verified receipt facts and canonical states. `findings.md`
-prints the tier, summary, and every axis before those diagnostic records, while
-their detailed domain artifacts remain in the receipt, gate, audit, and trace
-files.
+are selected from settled facts and canonical states. `evidence inspect`
+prints the summary and every axis before those findings, while
+their detailed facts remain in the run's journal and objects.
 
-The canonical aggregate is an additive projection for downstream work. Evidence
-bundles remain version 1 and gate decisions remain version 2. Receipt integrity
-is independently versioned and currently uses v20; that version adds dispatch
-intent path provenance and resolved path scope while retaining SHA-256 sealing.
+`evidence.assessed` is version 1 and gate decisions remain version 2.
 
 ### Trust projection
 
 [trust-projection.ts](../../src/domains/evidence/trust-projection.ts) is the one place the canonical
 status is turned into words. Every operator surface prints from it, so the
 same canonical input renders the same verdict on the dispatch run line, in a
-monitor block, under `clio-coder evidence inspect`, in `findings.md`, on the
-Fleet Runs board, in the `/view` receipt header, and on the ACP wire.
+monitor block, under `clio-coder evidence inspect`, on the
+Fleet Runs board, in the `/view` run details, and on the ACP wire.
 
 The compact human body has five fixed clauses in a fixed order and answers the
-four operator questions without receipt internals. `evidence inspect` prints it
-after `trust <runId>:`, `findings.md` prints it after `summary:`, and the
-dispatch tool quotes it as `trust="..."`:
+four operator questions without record internals. `evidence inspect` prints it
+after `trust:`, and the dispatch tool quotes it as `trust="..."`:
 
 ```text
 sealed; grounded by host-verification; not independently reviewed; context recorded; completion evidenced
 ```
 
-Receipt-facing headers (the `/view` receipt header and `clio-coder fleet view`)
+Run-record headers (the `/view` run details and `clio-coder fleet view`)
 add the verdict tier under one versioned label:
 
 ```text
@@ -309,14 +263,14 @@ trust v1: grounded; sealed; grounded by host-verification; not independently rev
 
 | Clause | Axis | Question it answers |
 |---|---|---|
-| `sealed` / `seal broken` / `seal unchecked` / `no receipt` | Artifact integrity | Can the record be trusted to be what was written? |
+| `sealed` / `seal broken` / `seal unchecked` / `no run record` | Artifact integrity | Can the record be trusted to be what was written? |
 | `grounded by <claimant>` / `validation failed by <claimant>` / `inferred: validation claimed, none observed` / `no validation observed` / `validation unknown (<system>)` / `validation not applicable` | Validation grounding | Who claims the result, and what was observed? |
 | `independently reviewed: pass` / `independently reviewed: fail` / `independent review inconclusive` / `review not independent` / `not independently reviewed` | Independent review | What did a second, uncorrelated authority check? |
 | `context recorded` / `context record invalid` / `context not recorded` | Context provenance | Is what the worker was given recorded consistently? |
-| `completion evidenced` / `completion unevidenced` / `completion limited` / `completion not applicable` | Completion evidence | What did the finish contract observe? |
+| `completion evidenced` / `completion unevidenced` / `completion limited` / `completion not recorded` | Completion evidence | What did the finish contract observe? |
 
 `inferred` is the word for an `ungrounded` claim. A failure that comes from
-receipt quality reads `recorded validation failed` and no claimant. Every
+the run's recorded quality reads `recorded validation failed` and no claimant. Every
 `unknown` and `absent` state prints as such, so what remains unknown is
 part of the line, never an omission.
 
@@ -328,7 +282,7 @@ trust_status=v1 artifactIntegrity:verified validationGrounding:validated indepen
 ```
 
 The machine projection (`TrustSummaryProjection`, `trust` on the `dispatch`
-tool's `details.runs[]` entries and on the `monitor` receipt details) is
+tool's `details.runs[]` entries and on the `monitor` run details) is
 bounded and versioned (`TRUST_SUMMARY_VERSION = 1`): the verdict tier, the five
 axis states, the claimant, the axes still unknown, the compact text, and up to 8
 `<kind>:<id>` references into the detailed artifacts. It is flat by design so a
@@ -336,16 +290,15 @@ depth-capped wire such as ACP `rawOutput` carries it whole where the nested
 canonical status's artifact references fall off the depth cap.
 
 The verdict tier styles a surface and never scores a run. `reviewed` is the
-only tier styled as independently verified; a sealed receipt with observed
-validation is `grounded`, a sealed receipt with nothing observed is
+only tier styled as independently verified; a sealed record with observed
+validation is `grounded`, a sealed record with nothing observed is
 `unverified`, a broken seal, failed or inferred validation,
 failed or correlated review, or contradictory context record is
-`compromised`, and an unchecked or missing seal is `unknown`. Human receipt summaries name the failed axis instead of printing `compromised`; the machine verdict tier is unchanged. The Fleet Runs board
-never carries a verdict on the terminal bus event: the event is published the
-moment the receipt is sealed, before anything has read it back and
-verified it against the ledger row, so the board reads the receipt file
-back and projects that verified status, and shows `trust: receipt not
-read back` until it can.
+`compromised`, and an unchecked or missing seal is `unknown`. Human run summaries name the failed axis instead of printing `compromised`; the machine verdict tier is unchanged. The Fleet Runs board
+never carries a verdict on the terminal bus event: the event is published
+before the run's sealed record has been read back and verified, so the board
+reads the run's record back and projects that verified status, and shows
+`trust: receipt not read back` until it can.
 
 ### Mutation-report grounding
 
@@ -372,7 +325,7 @@ clio-coder evolve manifest validate <path>
 clio-coder evolve manifest summarize <path>
 ```
 
-`init` prints a template (`version: 1`, `iterationId: exploratory-1`, one change) to stdout and exits 0. `validate` and `summarize` load the JSON, resolve every non-empty `evidenceRef` against the local evidence store, and exit 1 on an invalid manifest, an unreadable file or invalid JSON. `summarize` prints the iteration, base SHA, change count, authority levels, components, files changed, predicted regressions and validation-step count. A usage error exits 2. When the evidence store cannot be read, every non-empty ref fails as not found.
+`init` prints a template (`version: 1`, `iterationId: exploratory-1`, one change) to stdout and exits 0. `validate` and `summarize` load the JSON, resolve every non-empty `evidenceRef` against the run scopes on this host, and exit 1 on an invalid manifest, an unreadable file or invalid JSON. `summarize` prints the iteration, base SHA, change count, authority levels, components, files changed, predicted regressions and validation-step count. A usage error exits 2. When the run scopes cannot be listed, every non-empty ref fails as not found.
 
 | Field | Rule |
 | --- | --- |
@@ -382,7 +335,7 @@ clio-coder evolve manifest summarize <path>
 | `changes[].componentIds`, `filesChanged` | String arrays; at least one of the two must be non-empty. |
 | `changes[].authorityLevel` | One of `prompt`, `tool-description`, `tool-implementation`, `middleware`, `memory`, `runtime`, `safety`, `schema`, `cli`. |
 | `changes[].predictedRegressions` | Must hold an entry when the authority level is high: `tool-implementation`, `middleware`, `runtime`, `safety`, `schema` or `cli`. |
-| `changes[].evidenceRefs` | Empty only for the iteration `exploratory-1`. Each ref must be a `run-<id>` or `session-<id>` bundle ID that exists in `<dataDir>/evidence/`. |
+| `changes[].evidenceRefs` | Empty only for the iteration `exploratory-1`. Each ref must be a run id whose scope exists under `<stateDir>/telemetry/runs/`. |
 | `changes[].predictedFixes`, `validationPlan` | String arrays. |
 | `changes[].expectedBudgetImpact` | Optional; `risk` is `lower`, `same` or `higher`, with optional finite `tokenDelta` and `wallTimeDeltaMs`. |
 
@@ -394,7 +347,7 @@ Nothing enforces a manifest at edit time. The self-edit gate that would require 
 
 ```bash
 clio-coder memory list
-clio-coder memory propose --from-evidence <evidenceId> [scope options]
+clio-coder memory propose --from-evidence <runId> [scope options]
 clio-coder memory promote --from-handoff <path> [--entry <id>...] --scope <scope> [scope options]
 clio-coder memory approve <memoryId>
 clio-coder memory reject <memoryId>
@@ -412,7 +365,7 @@ The store is a JSON object `{ "version": 1, "records": [...] }` (`MEMORY_VERSION
 | Command | Behavior |
 | --- | --- |
 | `list` | Prints the record count, then per record: ID, status (`proposed`, `approved`, `rejected`), scope, confidence, evidence refs, key and lesson. |
-| `propose` | Builds one unapproved record from an evidence bundle and prints it with a `review:` hint. A repeated proposal for the same evidence and scope returns the existing record. |
+| `propose` | Builds one unapproved record from a run's evidence and prints it with a `review:` hint. A repeated proposal for the same run and scope returns the existing record. |
 | `promote` | Builds unapproved records from a version 2 handoff snapshot. |
 | `approve <id>` | Sets `approved`, stamps `lastVerifiedAt` with the current time and clears `rejectedAt`. It stamps `approval.by: operator` and clears regressions. Approving an approved record refreshes `lastVerifiedAt`. |
 | `reject <id>` | Clears `approved` and stamps `rejectedAt`. |
@@ -426,10 +379,10 @@ Usage errors exit 2 with the usage text on stderr; every other failure exits 1.
 | --- | --- |
 | `id` | `mem-` followed by 16 lowercase hex characters, derived from the source so a retried proposal finds the existing record. |
 | `scope` | One of `global`, `repo`, `language`, `runtime`, `agent`, `task-family`, `hpc-domain`. |
-| `key` | A stable key such as `evidence:<evidenceId>` or `promotion:<sourceKind>:<sessionId>:<entryId>`. |
+| `key` | A stable key such as `evidence:<runId>` or `promotion:<sourceKind>:<sessionId>:<entryId>`. |
 | `lesson`, `appliesWhen`, `avoidWhen` | The lesson text and the conditions around it. Evidence proposals truncate the lesson to 240 characters. |
 | `evidenceRefs` | At least one reference. Required for prompt injection. |
-| `confidence` | A number from 0 to 1. Evidence proposals score 0.45 to 0.70; promotions start at 0.6. |
+| `confidence` | A number from 0 to 1. Evidence proposals score 0.55 to 0.75; promotions start at 0.6. |
 | `createdAt`, `lastVerifiedAt`, `rejectedAt`, `approved`, `regressions` | Lifecycle fields. An approved record must not carry `rejectedAt`. A non-empty `regressions` list suppresses injection. |
 | `repository`, `runtime`, `agent` | Structured applicability identities, required for the matching scope and invalid for any other. |
 | `provenance` | Source kind (`evidence`, `task-bank-entry` or `handoff-snapshot`), source session and entry, and the redaction facts. |
@@ -470,7 +423,7 @@ action acknowledges the broader applicability. A successful overlay action write
 unapproved record and names the separate `memory approve` command required to
 make it eligible for injection.
 
-A model-tier reminder the host found inside an admitted request can propose its cited reusable entries as repository-scoped records. Plain one-line repeated-failure records are not reusable lessons; retained knowledge can also pass the evidence gate. Those cite `session:<sessionId>`, plus a `command:` identity for a simple command quoted whole in the entry and a `source:` identity for a quoted source; a record promoted from the overlay or a handoff cites `session-<sessionId>`, the ID shape of the session evidence bundle. See [Where what the tier writes ends up](../guide/proactive-memory.md#where-what-the-tier-writes-ends-up). The model tier runs on the active chat route unless `context.memory.target` and `context.memory.model` name a dedicated route, so these reminders and proposals need no extra configuration. `context.memory.enabled: false` stops them.
+A model-tier reminder the host found inside an admitted request can propose its cited reusable entries as repository-scoped records. Plain one-line repeated-failure records are not reusable lessons; retained knowledge can also pass the evidence gate. Those cite `session:<sessionId>`, plus a `command:` identity for a simple command quoted whole in the entry and a `source:` identity for a quoted source; a record promoted from the overlay or a handoff cites `session-<sessionId>`. See [Where what the tier writes ends up](../guide/proactive-memory.md#where-what-the-tier-writes-ends-up). The model tier runs on the active chat route unless `context.memory.target` and `context.memory.model` name a dedicated route, so these reminders and proposals need no extra configuration. `context.memory.enabled: false` stops them.
 
 The CLI consumes a version 2 `clio-coder-task-memory` handoff snapshot of at most
 1,000,000 bytes. Omitting `--entry` proposes every knowledge and procedural
@@ -581,8 +534,8 @@ Operator notes are not a memory store. They are a block at the end of a compacti
 
 ## Recommended workflow
 
-1. Build evidence from the run or session that taught the lesson.
-2. Inspect the evidence and findings.
+1. Find the run that taught the lesson with `clio-coder evidence list`.
+2. Inspect its evidence and findings with `clio-coder evidence inspect <runId>`.
 3. Propose memory from the evidence, or promote selected public task memory from `/memory` or a redacted handoff.
 4. Review the proposed lesson, source provenance, redaction facts, and exact scope.
 5. Approve only if it is durable and useful under that scope.

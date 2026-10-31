@@ -41,17 +41,16 @@ Markdown.
 | Compete worktrees | `.clio-coder/worktrees/<group>/candidate-<n>/`, always under the project root | Agent-to-agent |
 | Script runs | `.clio-coder/runs/<runId>/` | Human transient and provenance |
 | Tool-result and harness scratch | XDG state `scratch/`, with tool offloads grouped by session | Agent-to-agent |
-| Evidence bundles | XDG data `evidence/` | Human transient (`clio-coder evidence`) |
+| Run evidence | XDG state `telemetry/runs/<runId>/`, the run's sealed telemetry scope | Human transient (`clio-coder evidence`) |
+| Session evidence bundles | XDG data `evidence/` | Human transient (`clio-coder evidence`) |
 | Approved memory | XDG data `memory/records.json` | Human transient (`clio-coder memory`) |
-| Memory step log | XDG state `memory/steps.jsonl` | Human transient (`/memory`) |
 | Session ledgers | XDG state `sessions/` | Agent-to-agent |
-| Dispatch receipts | XDG state `receipts/` | Human transient (`clio-coder trace`) |
-| Audit records | XDG state `audit/` | Human transient |
+| Telemetry journals, objects and seals | XDG state `telemetry/` | Human transient (`clio-coder telemetry`) |
 | Interview transcripts | XDG state `interviews/` | Agent-to-agent |
 | Caches | XDG cache | Agent-to-agent |
 
 `clio-coder paths` prints the resolved XDG directories for your machine. The
-`/view` command browses a session's artifacts and verifies receipts.
+`/view` command browses a session's artifacts.
 
 ## The four roots
 
@@ -87,42 +86,34 @@ problem.
 | Path | Contents |
 | --- | --- |
 | `memory/records.json` | Reviewed long-term memory; see [evidence-and-memory.md](evidence-and-memory.md) |
-| `evidence/<evidenceId>/` | Evidence bundles |
+| `evidence/session-<sessionId>/` | Session evidence bundles |
 | `tools/<id>/<version>/<binary>` | Pinned external programs installed by `clio-coder tools install`, such as `cliamp`. The version is part of the path, so a pin bump installs beside the old copy. |
 
 ### State root: machine-produced state
 
 | Path | Contents |
 | --- | --- |
-| `sessions/<cwdHash>/<sessionId>/` | `meta.json`, `current.jsonl`, `tree.json` and `prompt-manifest.jsonl`. `<cwdHash>` is the first 16 hex characters of the SHA-256 of the resolved working directory. |
-| `audit/<YYYY-MM-DD>.jsonl` | Audit rows, one file per local day |
-| `receipts/<runId>.json` | Sealed dispatch receipts |
+| `sessions/<cwdHash>/<sessionId>/` | `meta.json`, `current.jsonl` and `tree.json`. `<cwdHash>` is the first 16 hex characters of the SHA-256 of the resolved working directory. |
+| `telemetry/` | Every telemetry journal, object, seal and bundle, plus `consent.json`, `install.json` and `imported/`; see [telemetry.md](telemetry.md#layout) |
 | `runs.json`, `fleet-runs/<runId>.json`, `assignments.json`, `batches.json`, `agent-ledgers.json` | The run ledger, fleet run records and the durable dispatch stores |
 | `gate-decisions/<id>.json` | Review and compete gate decisions; undecided ones sit in `gate-decisions/pending/` |
-| `dispatch-admission.json`, `checkout-writer-leases/`, `cancel-requests/`, `code-steps/`, `write-boundaries/`, `runs/` | Capacity leases, writer leases, cancel requests, code-step state, write-boundary records and the run event journal |
+| `dispatch-admission.json`, `checkout-writer-leases/`, `cancel-requests/`, `code-steps/`, `write-boundaries/`, `runs/` | Capacity leases, writer leases, cancel requests, code-step output logs, write-boundary records and run recordings |
 | `dispatch-verification-memo.json`, `artifacts/<runId>/verification/` | Host verification memo and its captured artifacts |
-| `route-history.json` | Route outcome history, a ring of 4,096 records, each with a `settled` label |
-| `telemetry/research/route-observations.jsonl` | Shadow-mode route observations, written only in research telemetry mode and rotated to `.1` past a size bound; older homes may keep a `route-decisions/observations.jsonl` nothing reads |
-| `evidence-index.json` | One row per built run bundle, a ring of 1,000 rows |
-| `memory/steps.jsonl` | Proactive-memory step log, rotated to `.1` past 1 MiB |
 | `memory/banks/<sessionId>.json` | Same-session task-bank snapshot, consumed on resume; newest 64 retained ([task-bank-store.ts](../../src/domains/memory/task-bank-store.ts)) |
-| `usage/out-of-turn.jsonl` | Side-question, handoff, prewarm, background-memory, System One and failed-compaction usage |
-| `trace.sqlite` | Dispatch trace mirror |
 | `scratch/<sessionId>/` | Offloaded tool output and harness scratch |
 | `interviews/` | Interview transcripts |
 | `context-observations/`, `context-seeds/` | Recallable observations and worker context seeds |
 | `protected-artifact-pending/<key>/` | Write-ahead records for pending protected artifacts |
 | `workspace-trust/` | Per-workspace trust records |
-| `systemone/` | The System One decision dataset |
 | `cliamp/` | The `/music` player home: `config.toml`, `themes/clio.toml`, `playlists/clio.toml`, `plugins/clio-dock.lua`, `plugins/.trust.json`, `dock-taps`, and cliamp's own socket, log and history files. Clio Coder rewrites its generated files on each open, and never reads or writes the operator's own `~/.config/cliamp`. |
 | `gui/` | Graphical application state: `workspaces.json`, `children.json` with `<name>.locks/` directories, and `background/` (`server.json`, `owner.json` and the generated `clio-coder-gui-<id>.service` unit) |
 | `install.json`, `migrations.json`, `migration-reports/` | Install metadata and applied migration ids |
-| `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `hook-receipts.json`, `endpoint-slots.json` | Small per-machine stores |
-| `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v3/`, `startup/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hook, startup diagnostics, and the request and tap files shared with the workers dashboard |
+| `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `endpoint-slots.json` | Small per-machine stores |
+| `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v3/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hook, and the request and tap files shared with the workers dashboard |
 
 The clean-exit session summary is built from an in-memory snapshot and is not
-persisted. Sealed receipt facts (`src/domains/dispatch/run-result-facts.ts`) are read
-back from `receipts/` and `runs.json` and have no file of their own.
+persisted. Route history is a fold over `run.settled` records in the run journals
+(`src/domains/telemetry/route-history.ts`) and has no file of its own.
 
 ### Cache root: disposable derived files
 
@@ -230,11 +221,11 @@ Hiding transient output from the working tree must not mean losing it.
 
 - `.clio-coder/artifacts/` is a plain directory; open it.
 - `clio-coder evidence` lists and inspects evidence bundles.
-- `clio-coder trace` queries the dispatch trace mirror and its receipts.
+- `clio-coder telemetry` reads, verifies and shares the telemetry journals.
 - `clio-coder memory` lists proposed and approved memory.
 - `clio-coder paths` locates every XDG root.
 
 Related: [evidence-and-memory.md](evidence-and-memory.md),
-[trace-store.md](trace-store.md), [observability.md](observability.md),
+[telemetry.md](telemetry.md#layout), [observability.md](observability.md#view),
 [artifact-versions.md](artifact-versions.md),
 [CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution rules.

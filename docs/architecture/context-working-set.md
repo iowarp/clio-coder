@@ -188,7 +188,7 @@ The entry points differ in where the body lands:
 | Model | `context(scope="recall", ref=...)` or `context(scope="recall", path=...)` | Back into the working set through the normal observation envelope, so the per-turn pool and the self cap still apply | `contextRecall` with `trigger: "tool"` and the `toolCallId` |
 | Operator | `/context recall <ref>` | The transcript only. It is never submitted as a turn and never counted against the context window | `contextRecall` with `trigger: "operator"` |
 
-An unchanged reread returns the ordinary read body with recall provenance and records trigger `reread`. All three publish `BusChannels.ContextRecalled`; the explicit tool and operator recall routes also run the middleware `on_compaction` hook as stage `working_set_recall`.
+An unchanged reread returns the ordinary read body with recall provenance and records trigger `reread`. All three emit `context.recalled`, which the session journal records; the explicit tool and operator recall routes also run the middleware `on_compaction` hook as stage `working_set_recall`.
 
 ## Settings
 

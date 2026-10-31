@@ -33,7 +33,7 @@ Each model row carries one source label ([`model-discovery.ts`](../../src/domain
 
 A runtime model label is separate metadata: the stable slug remains the wire identity, while `clio-coder models` and target status may show the human label beside it, and a cached label never replaces a live slug. A transient probe failure keeps the last good rows marked as cached and reports the target as down or unavailable with the probe error as the reason. Catalog and profile files are read when the provider domain is built and again at each `/model` refresh, so a profile or overlay edit reaches a running session at the next refresh.
 
-Worker dispatch canonicalizes a requested model id against the live catalog when one exists, and otherwise against the configured and cached ids. A unique case-insensitive match, or a unique id that extends the request after `-`, `:`, `.` or `/`, replaces the requested spelling before the worker spec and receipt are written.
+Worker dispatch canonicalizes a requested model id against the live catalog when one exists, and otherwise against the configured and cached ids. A unique case-insensitive match, or a unique id that extends the request after `-`, `:`, `.` or `/`, replaces the requested spelling before the worker spec is written, so the run settles under the canonical id.
 
 `probeCapabilitiesForModel` is the one exact-id selector. When a router serves several models, capability resolution reads probe data only from the `/v1/models` row keyed to its own exact wire model id.
 
@@ -45,7 +45,7 @@ A catalog-ordered list recommends nothing. `preferredModelFor` returns the runti
 
 ## Capability records and serving provenance
 
-Sealed receipts record a run's target, runtime, wire model, thinking level, and usage. Profiles describe what a model is; live probes and server configuration establish what a deployment serves. A profile cannot set `contextWindow`, `maxTokens`, `reasoningLevels`, `thinkingControlRuntime` or `parallelSlots`, and its `claims.modelMaxContext` is never a serving window. A shared KV pool is not an independent full context allocation for each slot.
+A run's sealed `run.settled` record carries its target, runtime, wire model and usage, and its route decision names the thinking level. Profiles describe what a model is; live probes and server configuration establish what a deployment serves. A profile cannot set `contextWindow`, `maxTokens`, `reasoningLevels`, `thinkingControlRuntime` or `parallelSlots`, and its `claims.modelMaxContext` is never a serving window. A shared KV pool is not an independent full context allocation for each slot.
 
 Precedence among a live report, a target's `capabilities`, a profile and the runtime default is the table in [model profiles](../guide/configuration-and-targets.md#model-profiles). A live yes or no decides `tools`, `vision` and `reasoning`; a live limit is the ceiling for the serving window and output cap; every other flag is descriptive, so the profile outranks the server's flag list and a target's `capabilities` outranks the profile. The effective serving window comes from live probe data, an explicit target override, or for a cloud route with no window endpoint the Pi catalog estimate. A runtime descriptor's own context number is a placeholder that resolution never promotes to a serving limit, so an unreported window stays unknown.
 
@@ -203,7 +203,7 @@ While the orchestrator's turn waits on its own tools, `chat.cacheKeepalive` (on 
 - A refresh fires at 90% of the lifetime, leaving at least 10 seconds of margin, and runs only when its expected saving, the cache-miss surcharge minus the price of the refresh, is at least $0.05.
 - The output cap is 1 token on Anthropic and 16 tokens, the API minimum, on OpenAI Responses and Codex. Pi's Codex adapter sends no cap, so the keepalive adds `max_output_tokens` to the Codex body. Anthropic budget thinking needs `max_tokens` above its budget, so a budget-thinking request is not refreshed.
 - The keepalive follows one request for up to 2 hours while an attached dispatch is running and up to 1 hour on any other tool. It stands down between turns and while a parked permission ask or an `ask_user` interview waits on a person.
-- Each refresh is admitted against the session cost ceiling, holds the route's endpoint slot, is booked as `prewarm` out-of-turn usage and is recorded on the session ledger as a hidden `prewarm` entry with `trigger: "keepalive"`, its economics and the cache usage it observed.
+- Each refresh is admitted against the session cost ceiling, holds the route's endpoint slot, is journaled under the `prewarm` agent role and is recorded on the session ledger as a hidden `prewarm` entry with `trigger: "keepalive"`, its economics and the cache usage it observed.
 
 ## Local Runtime Resolution & Quirks
 

@@ -11,7 +11,7 @@ durable instants, but it does not impose one clock primitive on every module.
 | Fact | Current practice | Representative sources |
 | --- | --- | --- |
 | Process-local elapsed span | Use a monotonic source such as `performance.now()` or `process.hrtime.bigint()` when the start and finish occur in one process. | [heartbeat.ts](../../src/domains/dispatch/heartbeat.ts), [code-step.ts](../../src/domains/dispatch/code-step.ts), [startup-timer.ts](../../src/core/startup-timer.ts) |
-| Durable or cross-process instant | Store epoch milliseconds or canonical UTC from `new Date(...).toISOString()`. | Session entries, receipts, dispatch rows, audit rows |
+| Durable or cross-process instant | Store epoch milliseconds or canonical UTC from `new Date(...).toISOString()`. | Session entries, telemetry records, dispatch rows |
 | Persisted expiry, lock age, or restart-visible deadline | Some owners intentionally compare `Date.now()` values because the fact must survive a process boundary or is derived from filesystem metadata. | [state-file-lock.ts](../../src/core/state-file-lock.ts) for lock age, [capacity-lease.ts](../../src/domains/dispatch/capacity-lease.ts) for lease and drain `expiresAt`, dispatch admission and recovery |
 | Duration between two stored instants | Subtract through `rawDurationMs` and clamp at the render or summing boundary. | [timers.ts](../../src/core/timers.ts), [phase-timing.ts](../../src/domains/dispatch/phase-timing.ts) |
 | Timer delay | Clamp to Node's real limit before calling `setTimeout`. | [timers.ts](../../src/core/timers.ts) |
@@ -20,7 +20,7 @@ durable instants, but it does not impose one clock primitive on every module.
 This means neither `performance.now()` nor `Date.now()` is universally correct.
 A monotonic value has meaning only within its clock origin and is the right
 choice for a live heartbeat age or one process's latency. A wall-clock value is
-necessary for a receipt timestamp, a persisted lease deadline, a filesystem
+necessary for a run record timestamp, a persisted lease deadline, a filesystem
 mtime age, or a record another process must read after restart.
 
 `state-file-lock.ts` uses both on purpose. It measures lock-file age as
@@ -61,11 +61,19 @@ const endedAt = new Date(startedAtMs + durationMs).toISOString();
 ```
 
 The derived ending instant stays consistent with the measured duration even if
-the wall clock changes during the operation. The trace mirror applies the same
-rule to tool spans. A worker measures `durationMs` on its own clock and the
-orchestrator stamps arrival on another, so the mirror stores the observed start
-and derives `ended_at` as that start plus the worker's duration, which keeps the
-two fields consistent by construction ([trace-store.md](trace-store.md)).
+the wall clock changes during the operation.
+
+### Telemetry clocks
+
+Every telemetry record carries both clocks: `t`, a canonical UTC instant, and
+`mono`, the writer's `performance.now()` ([envelope.ts](../../src/core/telemetry/envelope.ts)).
+A `mono` value has meaning only under its clock origin. Each journal segment's
+`segment.open` header names that origin: `host`, `pid`, the process `birthToken`,
+and `monoEpochWallMs` (`performance.timeOrigin`). A local record uses the origin
+of the segment that holds it. A record a worker forwarded keeps its own `origin`
+field, because the worker's monotonic clock is not the parent's.
+`monotonicSpan` returns a span only when both ends share the same origin and the
+end is not earlier than the start, and null otherwise. See [Telemetry](telemetry.md#journals).
 
 ### Cross-host and restart boundaries
 
@@ -83,14 +91,15 @@ serialized ISO heartbeat and the liveness comparison come from one origin.
 On a shared filesystem, a process record created by another host is not checked
 against the local process table. Host, pid, and process-birth facts prevent pid
 reuse and cross-host confusion. When exact event ordering matters, use a
-protocol sequence, SQLite rowid, or append order defined by the owning store.
+protocol sequence or append order defined by the owning store, such as a
+telemetry journal's line order.
 
 ### Injectable seams are local contracts
 
 Clock injection exists where deterministic timing tests or protocol logic need
 it. Examples include the pure heartbeat classifier, the dispatch admission
 queue's `now`, capacity lease calls that take `nowMs`, fleet preflight's `now`,
-worker spawn's `now` and `monotonicNow`, and the audit writer's `dateFn`. Other
+worker spawn's `now` and `monotonicNow`. Other
 modules read a platform clock directly. There is no global
 test-clock harness; tests use the seam supplied by the owner under test or
 exercise real passage explicitly.
@@ -118,28 +127,20 @@ the terminal and ACP clients show identical local times. Each function accepts a
 An absent or unparseable instant renders as `—`. The module keeps its
 `Intl.DateTimeFormat` instances at module scope and rebuilds them, with the zone
 passed explicitly, when `process.env.TZ` changes. Machine-readable surfaces such as
-structured logs, session records, and receipts bypass these formatters.
+structured logs, session records, and telemetry records bypass these formatters.
 
 ---
 
-## 3. Receipt and audit integrity
+## 3. Sealed records
 
-Persisted receipt fields such as `startedAt` and `endedAt` participate in the
-integrity digest owned by [seal.ts](../../src/domains/telemetry/seal.ts). Timestamp
-normalization and duration derivation must finish before sealing. A sealed
-receipt must not be rewritten merely to make its clocks look tidier.
+A finished run's `startedAt` and `endedAt` live on its `run.settled` record,
+and every record's `t` and `mono` are covered by the journal's hash chain and
+the scope's seal ([seal.ts](../../src/domains/telemetry/seal.ts)). Timestamp
+normalization and duration derivation must finish before the record is
+written. A sealed journal is never rewritten to make its clocks look tidier.
 
-Safety audit rows are written under:
-
-```text
-<stateDir>/audit/YYYY-MM-DD.jsonl
-```
-
-The filename date is the operator-local calendar date on which the writer
-opened that generation. Each row still carries a canonical UTC `ts`. Concurrent
-producers do not promise timestamp order in the raw file, so consumers sort by
-`ts` when reconstructing time order. The local date label is not itself a
-machine ordering key.
+Records from concurrent producers do not promise timestamp order in a journal.
+Line order is the chain order; consumers that need time order sort by `t`.
 
 ---
 
@@ -154,7 +155,7 @@ When adding a timed fact:
 4. Use host identity and process-birth evidence before consulting a local pid.
 5. Add a narrow injectable seam when deterministic tests need one; do not imply
    that an unrelated module shares it.
-6. Normalize timestamps before sealing any receipt or evidence digest.
+6. Normalize timestamps before writing any journal record a seal will cover.
 7. Subtract stored instants through `rawDurationMs` and clamp only where a
    duration is rendered or summed.
 8. Pass any configurable timeout through `clampTimerDelayMs` before it reaches
