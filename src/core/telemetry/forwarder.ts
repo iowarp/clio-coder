@@ -13,13 +13,13 @@ export interface WorkerTelemetryFrame {
 const workerKinds = new Set([
 	"call.started",
 	"call.settled",
-	"run.usage",
-	"gap",
+	"run.usage_reported",
+	"journal.gap",
 	"process.started",
 	"process.exited",
 	"tool.settled",
 	"middleware.fired",
-	"auth.event",
+	"auth.refreshed",
 ]);
 
 /** The parent owns identity and publication; a worker cannot attribute facts to a different run or session (#434). */
@@ -99,7 +99,7 @@ export function createTelemetryForwarder(
 			const count = dropped;
 			dropped = 0;
 			send(
-				makeTelemetryRecord("gap", { sink: "worker-stdout", reason: "writer-drop", count }, context, {
+				makeTelemetryRecord("journal.gap", { sink: "worker-stdout", reason: "writer-drop", count }, context, {
 					t: new Date().toISOString(),
 					mono: performance.now(),
 				}),

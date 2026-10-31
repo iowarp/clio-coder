@@ -592,7 +592,7 @@ export function readRunEventJournalLine(raw: string): {
 		if (raw.includes("\t#")) {
 			const row = scanTelemetrySegment(Buffer.from(`${raw}\n`)).rows[0];
 			if (row?.kind !== "record") return UNREADABLE;
-			if (row.record.k !== "run.feed") return { line: null, record: row.record };
+			if (row.record.k !== "run.feed_appended") return { line: null, record: row.record };
 			parsed = { ...row.record.data.body, seq: row.record.data.seq, at: row.record.t };
 		} else parsed = JSON.parse(raw);
 	} catch {

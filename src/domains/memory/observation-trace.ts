@@ -13,14 +13,14 @@ export function observationEvent(stateDir: string, event: string, facts: Record<
  * without the deprecated CLIO_CODER_OBSERVATION_TRACE alias builds nothing (#434).
  */
 export function observationTracing(): boolean {
-	return Boolean(process.env.CLIO_CODER_OBSERVATION_TRACE?.trim()) || researchTraceAdmits("memory.observation");
+	return Boolean(process.env.CLIO_CODER_OBSERVATION_TRACE?.trim()) || researchTraceAdmits("memory.observed");
 }
 
-/** Research content: journaled as `memory.observation` under research capture with consent; the alias keeps its file. */
+/** Research content: journaled as `memory.observed` under research capture with consent; the alias keeps its file. */
 export function traceObservation(event: string, facts: Record<string, unknown>): void {
 	const path = process.env.CLIO_CODER_OBSERVATION_TRACE?.trim();
 	if (path) appendBounded(path, { at: new Date().toISOString(), event, ...facts });
-	if (researchTraceAdmits("memory.observation")) recordResearchTrace("memory.observation", { event }, { event, facts });
+	if (researchTraceAdmits("memory.observed")) recordResearchTrace("memory.observed", { event }, { event, facts });
 }
 
 function appendBounded(path: string, row: unknown): void {

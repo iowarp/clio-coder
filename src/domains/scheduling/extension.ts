@@ -13,8 +13,8 @@ import {
 } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
-import { recordTelemetry } from "../../core/telemetry/producer.js";
-import type { Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { TelemetryContract } from "../telemetry/contract.js";
 import {
@@ -147,13 +147,13 @@ export function createSchedulingBundle(
 		}) => {
 			let held: { block: BudgetAlertPayload; since: number } | undefined;
 			// The hold is journaled once, when it ends, for the call it held (#424).
-			const recordHold = (outcome: Payload<"budget.wait">["outcome"], ceilingUsd?: number): void => {
+			const recordHold = (outcome: EventPayload<"budget.held">["outcome"], ceilingUsd?: number): void => {
 				if (!telemetry || !held) return;
 				const { block, since } = held;
 				const raised = outcome === "raised" && ceilingUsd !== undefined;
 				const by = raised && ceilingChange?.ceilingUsd === ceilingUsd && ceilingChange.at >= since ? ceilingChange : null;
-				recordTelemetry(
-					"budget.wait",
+				telemetryHub().emit(
+					"budget.held",
 					{
 						level: block.level,
 						spendUsd: block.currentUsd,
@@ -194,7 +194,7 @@ export function createSchedulingBundle(
 					const crossing = JSON.stringify([telemetry?.sessionId, ceilingUsd]);
 					if (telemetry && !crossings.has(crossing)) {
 						const { currentUsd: spendUsd, pricing: _pricing, ...rest } = block;
-						if (recordTelemetry("budget.crossing", { ...rest, spendUsd }, telemetry)) crossings.add(crossing);
+						if (telemetryHub().emit("budget.crossed", { ...rest, spendUsd }, telemetry)) crossings.add(crossing);
 					}
 				}
 				if (!waitForRaise) {

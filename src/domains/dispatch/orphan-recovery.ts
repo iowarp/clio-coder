@@ -16,7 +16,7 @@
 import { existsSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import type { Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { hostRunSettledFacts, runStatusForOutcome } from "./outcome.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "./receipt-integrity.js";
@@ -36,7 +36,7 @@ export interface OrphanRecoverySummary {
 	 * The run.settled each abandoned or sealed run's journal may lack because its host died first; the caller journals
 	 * them (#425, #434).
 	 */
-	unsettled: Array<{ runId: string; facts: Payload<"run.settled"> }>;
+	unsettled: Array<{ runId: string; facts: EventPayload<"run.settled"> }>;
 }
 
 /**

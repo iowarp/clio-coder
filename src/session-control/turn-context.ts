@@ -4,8 +4,8 @@ import type { ContextOperationFact } from "../core/context-operation.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { isHostPolicyMessage } from "../core/host-policy-message.js";
 import { providerCheckpointFromMessage, providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
-import { recordTelemetry } from "../core/telemetry/producer.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { compactionBudget, getCatalogModelForRuntime } from "../domains/providers/catalog.js";
@@ -505,8 +505,8 @@ const tokenCount = (value: number): number => (Number.isFinite(value) ? Math.max
 /** The persisted snapshot's split as a journal record, under the real session and turn (#434). */
 function recordContextSnapshot(sessionId: string, snapshot: ContextSnapshot): void {
 	const split = snapshot.categories;
-	recordTelemetry(
-		"context.snapshot",
+	telemetryHub().emit(
+		"context.snapshotted",
 		{
 			snapshotId: snapshot.snapshotId,
 			categories: {

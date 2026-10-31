@@ -4,9 +4,10 @@ import { resolvePackageRoot } from "../../core/package-root.js";
 import type { TelemetryContext, WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { isWorkerTelemetryContext } from "../../core/telemetry/context.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import { readWorkerTelemetryFrame } from "../../core/telemetry/forwarder.js";
-import { recordTelemetry } from "../../core/telemetry/producer.js";
-import type { Payload, StructuralRunFeedBody } from "../../core/telemetry/schemas.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
+import type { StructuralRunFeedBody } from "../../core/telemetry/schemas.js";
 import { RUN_FEED_EVENTS, RUN_FEED_OUTCOMES } from "../../core/telemetry/schemas.js";
 import type { CallJournal } from "../telemetry/call-journal.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
@@ -24,9 +25,9 @@ export interface RunTelemetryJournal {
 	linkSession(context: TelemetryContext): void;
 	gap(reason: "invalid-record" | "writer-drop", count?: number): void;
 	/** The run's one terminal accountability record, written beside its call facts (#425, #434). */
-	settle(data: Payload<"run.settled">): void;
+	settle(data: EventPayload<"run.settled">): void;
 	/** A channel failure the host saw, after exit included; a closed journal records nothing (#425). */
-	channel(data: Payload<"worker.channel">): void;
+	channel(data: EventPayload<"worker.channel_failed">): void;
 	feed(body: RunEventJournalBody, capBytes: number): void;
 	flush(): Promise<void>;
 	close(): Promise<void>;
@@ -90,7 +91,7 @@ export function openRunTelemetry(context: WorkerTelemetryContext, directory: str
  * holds none is written, under the worker context its own run records carry, so its turn stops reading as running
  * (#425, #434).
  */
-export async function settleOrphanedRunJournal(directory: string, facts: Payload<"run.settled">): Promise<void> {
+export async function settleOrphanedRunJournal(directory: string, facts: EventPayload<"run.settled">): Promise<void> {
 	const { openCallJournal, readCallJournal } = await import("../telemetry/call-journal.js");
 	const read = await readCallJournal(directory, "events.ndjson");
 	if (read.records.some(({ record }) => record.k === "run.settled")) return;
@@ -130,7 +131,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 	const versions = await clioWriterVersions();
 	const previous = await readCallJournal(directory, "events.ndjson");
 	let seq = previous.records.reduce(
-		(max, { record }) => (record.k === "run.feed" ? Math.max(max, record.data.seq) : max),
+		(max, { record }) => (record.k === "run.feed_appended" ? Math.max(max, record.data.seq) : max),
 		0,
 	);
 	const writer: CallJournal = await openCallJournal({
@@ -143,14 +144,14 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 	let parent: TelemetryContext | undefined;
 	const references = new Set<string>();
 	let feedClosed = previous.records.some(
-		({ record }) => record.k === "run.feed" && record.data.body.kind === "terminal",
+		({ record }) => record.k === "run.feed_appended" && record.data.body.kind === "terminal",
 	);
 	let feedBytes = previous.records.reduce(
-		(bytes, { record }) => (record.k === "run.feed" ? bytes + Buffer.byteLength(JSON.stringify(record)) : bytes),
+		(bytes, { record }) => (record.k === "run.feed_appended" ? bytes + Buffer.byteLength(JSON.stringify(record)) : bytes),
 		0,
 	);
 	let dropping = previous.records.some(
-		({ record }) => record.k === "run.feed" && record.data.body.kind === "journal_truncated",
+		({ record }) => record.k === "run.feed_appended" && record.data.body.kind === "journal_truncated",
 	);
 	let reported = false;
 	let settled = previous.records.some(({ record }) => record.k === "run.settled");
@@ -179,14 +180,14 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			if (!writer.enqueue(record)) return false;
 			if (parent && (record.kind === "call.started" || record.kind === "call.settled")) {
 				const callId = record.data.callId;
-				if (!references.has(callId) && recordTelemetry("call.ref", { runId: context.runId, callId }, parent))
+				if (!references.has(callId) && telemetryHub().emit("call.linked", { runId: context.runId, callId }, parent))
 					references.add(callId);
 			}
 			if (
 				parent &&
-				record.kind === "run.usage" &&
+				record.kind === "run.usage_reported" &&
 				!references.has(context.runId) &&
-				recordTelemetry("run.ref", { runId: context.runId }, parent)
+				telemetryHub().emit("run.linked", { runId: context.runId }, parent)
 			)
 				references.add(context.runId);
 			return true;
@@ -206,7 +207,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 		gap(reason, count = 1) {
 			if (journal.closed) return;
 			writer.enqueue({
-				kind: "gap",
+				kind: "journal.gap",
 				data: { sink: "worker-ndjson", reason, count },
 				ctx: context,
 				wallMs: Date.now(),
@@ -220,7 +221,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 		},
 		channel(data) {
 			if (journal.closed) return;
-			writer.enqueue({ kind: "worker.channel", data, ctx: context, wallMs: Date.now(), mono: performance.now() });
+			writer.enqueue({ kind: "worker.channel_failed", data, ctx: context, wallMs: Date.now(), mono: performance.now() });
 		},
 		feed(body, capBytes) {
 			if (journal.closed || feedClosed) return;
@@ -241,7 +242,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 					0,
 				);
 			writer.enqueue({
-				kind: "run.feed",
+				kind: "run.feed_appended",
 				data: { seq: ++seq, body: structural },
 				ctx: context,
 				wallMs: Date.now(),

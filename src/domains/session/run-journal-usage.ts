@@ -15,11 +15,11 @@ export function runJournalsInWindow(
 	};
 	const referenced = new Set(
 		session.records.flatMap(({ record }) =>
-			(record.k === "run.ref" || record.k === "call.ref") && within(record.t) ? [record.data.runId] : [],
+			(record.k === "run.linked" || record.k === "call.linked") && within(record.t) ? [record.data.runId] : [],
 		),
 	);
 	const accounting = (row: SessionCallJournalRead["records"][number]) =>
-		row.record.k === "run.usage" || row.record.k === "call.started" || row.record.k === "call.settled";
+		row.record.k === "run.usage_reported" || row.record.k === "call.started" || row.record.k === "call.settled";
 	for (const [runId, journal] of session.runs) {
 		const selected = new Map<string, boolean>();
 		for (const { record } of journal.records) {
@@ -28,7 +28,7 @@ export function runJournalsInWindow(
 				selected.set(record.data.attemptId, within(record.t));
 		}
 		const records = journal.records.filter(({ record }) =>
-			record.k === "run.usage"
+			record.k === "run.usage_reported"
 				? within(record.t)
 				: record.k === "call.started" || record.k === "call.settled"
 					? selected.get(record.data.attemptId)
@@ -48,10 +48,10 @@ export function usageCallsFromRunJournals(runs: Readonly<SessionCallJournalRead[
 			const records = journal.records.map(({ record }) => record);
 			const usage = runUsageFromCallRecords(records);
 			const source = records.find(
-				(record) => record.k === "run.usage" || record.k === "call.started" || record.k === "call.settled",
+				(record) => record.k === "run.usage_reported" || record.k === "call.started" || record.k === "call.settled",
 			);
 			const target =
-				source && (source.k === "run.usage" || source.k === "call.started" || source.k === "call.settled")
+				source && (source.k === "run.usage_reported" || source.k === "call.started" || source.k === "call.settled")
 					? source.data.target
 					: undefined;
 			const incomplete = !source || journal.skipped > 0 || journal.damaged > 0;

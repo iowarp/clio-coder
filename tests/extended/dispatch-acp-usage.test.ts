@@ -166,8 +166,8 @@ for (const scenario of [
 			const stateDir = process.env.CLIO_CODER_STATE_DIR;
 			ok(stateDir);
 			const journal = await readCallJournal(join(stateDir, "runs", run.runId), "events.ndjson");
-			const aggregate = journal.records.find(({ record }) => record.k === "run.usage")?.record;
-			ok(aggregate?.k === "run.usage");
+			const aggregate = journal.records.find(({ record }) => record.k === "run.usage_reported")?.record;
+			ok(aggregate?.k === "run.usage_reported");
 			strictEqual(aggregate.ctx.sessionId, null);
 			const replayed = runUsageFromCallRecords(journal.records.map(({ record }) => record));
 			strictEqual(receipt.tokenCount, replayed.totalTokens);

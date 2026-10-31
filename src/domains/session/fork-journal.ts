@@ -45,23 +45,23 @@ export function readSessionCallJournalSync(
 			if (cutoff === Number.POSITIVE_INFINITY) return true;
 			if (record.k === "call.started" || record.k === "call.settled")
 				return linked.has(record.data.callId) || (sideCallStarts.get(record.data.callId) ?? Number.NaN) <= cutoff;
-			if (record.k === "compaction.closed")
+			if (record.k === "compaction.settled")
 				return record.data.callIds.some((id) => linked.has(id)) || Date.parse(record.t) <= cutoff;
 			return Date.parse(record.t) <= cutoff;
 		});
 		for (const { record } of local.records) {
-			if (record.k !== "call.ref" && record.k !== "run.ref") continue;
+			if (record.k !== "call.linked" && record.k !== "run.linked") continue;
 			const previous = runCutoffs.get(record.data.runId);
 			if (!previous || cutoff > previous.cutoff)
 				runCutoffs.set(record.data.runId, { cutoff, sessionId: record.ctx.sessionId });
 		}
-		const parents = rows.filter(({ record }) => record.k === "session.forked_from");
+		const parents = rows.filter(({ record }) => record.k === "session.forked");
 		if (parents.length > 1) {
 			local.skipped += parents.length;
 			return local;
 		}
 		for (const { record } of parents) {
-			if (record.k !== "session.forked_from") continue;
+			if (record.k !== "session.forked") continue;
 			const parent = record.data;
 			try {
 				assertSafeId(parent.parentSessionId, "parent session");

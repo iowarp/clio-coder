@@ -5,8 +5,9 @@ import { processBirthToken } from "../core/process-identity.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
 import type { WorkerTelemetryFrame } from "../core/telemetry/forwarder.js";
 import { createTelemetryForwarder } from "../core/telemetry/forwarder.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
-import { beginCall, recordTelemetry } from "../core/telemetry/producer.js";
+import { beginCall } from "../core/telemetry/producer.js";
 import type { CallStarted } from "../core/telemetry/schemas.js";
 import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
@@ -32,7 +33,7 @@ export function createWorkerCallTelemetry(
 		emit,
 	);
 	// Announce the fact lane before a synchronous stream can publish legacy usage (#434).
-	recordTelemetry("process.started", {}, context);
+	telemetryHub().emit("process.started", {}, context);
 	forwarder.flush();
 	let call: TelemetryCall | undefined;
 	const settle = (attempt: TelemetryCall | undefined, message: unknown): void => {

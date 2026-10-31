@@ -1,4 +1,4 @@
-import type { PreimageData, PreimageKind } from "./schemas.js";
+import type { PreimageData, PreimageEventName } from "./events.js";
 
 /**
  * The session-scoped home of background research traces. Memory and compaction code runs outside any call, so it
@@ -6,9 +6,9 @@ import type { PreimageData, PreimageKind } from "./schemas.js";
  */
 export interface ResearchTraceSink {
 	/** Answered from memory without allocating, so emitters can skip building a trace standard mode refuses. */
-	admits(kind: PreimageKind): boolean;
+	admits(kind: PreimageEventName): boolean;
 	/** Ownership of `data` and `preimage` transfers to the sink. */
-	record<K extends PreimageKind>(kind: K, data: PreimageData<K>, preimage: unknown): void;
+	record<K extends PreimageEventName>(kind: K, data: PreimageData<K>, preimage: unknown): void;
 }
 
 let registered: ResearchTraceSink | null = null;
@@ -21,11 +21,15 @@ export function registerResearchTraceSink(sink: ResearchTraceSink): () => void {
 }
 
 /** Ask before building a trace's facts: a refused kind must cost nothing on background paths (#434, §14). */
-export function researchTraceAdmits(kind: PreimageKind): boolean {
+export function researchTraceAdmits(kind: PreimageEventName): boolean {
 	return registered?.admits(kind) ?? false;
 }
 
-export function recordResearchTrace<K extends PreimageKind>(kind: K, data: PreimageData<K>, preimage: unknown): void {
+export function recordResearchTrace<K extends PreimageEventName>(
+	kind: K,
+	data: PreimageData<K>,
+	preimage: unknown,
+): void {
 	try {
 		registered?.record(kind, data, preimage);
 	} catch {

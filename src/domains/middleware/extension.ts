@@ -1,6 +1,6 @@
 import type { DomainBundle } from "../../core/domain-loader.js";
 import { telemetryContext, withToolTelemetryContext } from "../../core/telemetry/context.js";
-import { recordTelemetry } from "../../core/telemetry/producer.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
 import {
 	createHookBudgetTracker,
 	type HookBudgetTracker,
@@ -59,7 +59,7 @@ function recordFiredRules(result: MiddlewareHookResult, phase: "sync" | "async" 
 							: -1;
 				if (level > severity) severity = level;
 			}
-			recordTelemetry(
+			telemetryHub().emit(
 				"middleware.fired",
 				{
 					hook: result.hook,

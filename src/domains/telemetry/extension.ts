@@ -21,8 +21,9 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
 import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
-import { recordTelemetry, recordTelemetryContent, telemetryCaptures } from "../../core/telemetry/producer.js";
-import type { Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
+import { telemetryCaptures } from "../../core/telemetry/producer.js";
 import { settingsFingerprintCommitment } from "../../core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/index.js";
@@ -210,13 +211,13 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	const recordLifecycle = <K extends "session.opened" | "session.resumed" | "session.closed">(
 		origin: TelemetrySessionOrigin,
 		kind: K,
-		data: Payload<K>,
+		data: EventPayload<K>,
 	): void => {
 		const write = journals
 			.acquire(origin, "main")
 			.then(async (lease) => {
 				try {
-					if (lease.journaled) recordTelemetry(kind, data, lease.context);
+					if (lease.journaled) telemetryHub().emit(kind, data, lease.context);
 				} finally {
 					await lease.release();
 				}
@@ -247,7 +248,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 						storeTelemetryObject(sessionDirectory, "config", payload.previous),
 						storeTelemetryObject(sessionDirectory, "config", payload.settings),
 					]);
-					recordTelemetry("config.changed", { ...settingsChangeData(payload), before, after }, lease.context);
+					telemetryHub().emit("config.changed", { ...settingsChangeData(payload), before, after }, lease.context);
 				} finally {
 					await lease.release();
 				}
@@ -264,9 +265,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	>();
 	const healthWindows = createHealthWindows({
 		writers: () => journals.openSessions().map(({ origin, health }) => ({ sessionId: origin.id, health })),
-		record: (sessionId, data) => recordTelemetry("health.window", data, sessionContext(sessionId)),
-		recordSamples: (sessionId, data) => recordTelemetry("health.samples", data, sessionContext(sessionId)),
-		samplesWanted: (sessionId) => telemetryCaptures("health.samples", sessionContext(sessionId)),
+		record: (sessionId, data) => telemetryHub().emit("health.sampled", data, sessionContext(sessionId)),
+		recordSamples: (sessionId, data) => telemetryHub().emit("health.samples_captured", data, sessionContext(sessionId)),
+		samplesWanted: (sessionId) => telemetryCaptures("health.samples_captured", sessionContext(sessionId)),
 	});
 	const journals = createSessionJournals(
 		clioStateDir(),
@@ -283,8 +284,8 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			}
 			if (!settings) return;
 			const stored = storeTelemetryObject(sessionDirectory, "config", settings).then((ref) => {
-				recordTelemetry(
-					"config.snapshot",
+				telemetryHub().emit(
+					"config.snapshotted",
 					{ settings: ref, settingsFingerprint: settingsFingerprintCommitment(computeSettingsFingerprint(settings)) },
 					sessionContext(origin.id),
 				);
@@ -300,7 +301,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	const telemetry = createLiveTelemetryModel({ stateDir: clioStateDir });
 	// A change touching several effect kinds reaches each listener with one payload; it is one change (#434).
 	const recordedChanges = new WeakSet<object>();
-	const settingsChangeData = (payload: ConfigChangePayload): Omit<Payload<"config.changed">, "before" | "after"> => ({
+	const settingsChangeData = (
+		payload: ConfigChangePayload,
+	): Omit<EventPayload<"config.changed">, "before" | "after"> => ({
 		source: payload.source ?? "unattributed",
 		...(payload.scope ? { scope: payload.scope } : {}),
 		paths: {
@@ -328,7 +331,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			// A snapshot that failed to store still leaves the change worth recording; its own failure was reported.
 			const write: Promise<void> = (stored ? stored.then(store, store) : store())
 				.then(([before, after]) => {
-					recordTelemetry("config.changed", { ...data, before, after }, sessionContext(origin.id));
+					telemetryHub().emit("config.changed", { ...data, before, after }, sessionContext(origin.id));
 				})
 				.catch(settingsUnavailable)
 				.finally(() => pendingSettingsRecords.delete(write));
@@ -479,7 +482,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 				.acquire(origin, "memory")
 				.then(async (lease) => {
 					try {
-						recordTelemetryContent(kind, owned.data, owned.preimage, lease.context);
+						telemetryHub().emitContent(kind, owned.data, owned.preimage, lease.context);
 					} finally {
 						await lease.release();
 					}

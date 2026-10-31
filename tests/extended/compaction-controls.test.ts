@@ -254,7 +254,7 @@ describe("production compaction controls", () => {
 			journalOutcomes: async () =>
 				(await readCallJournal(join(clioStateDir(), "sessions", state.meta.cwdHash, state.meta.id))).records
 					.map(({ record }) => record)
-					.filter((record) => record.k === "compaction.closed"),
+					.filter((record) => record.k === "compaction.settled"),
 			journalCalls: async () =>
 				(await readCallJournal(join(clioStateDir(), "sessions", state.meta.cwdHash, state.meta.id))).records
 					.map(({ record }) => record)
@@ -387,7 +387,7 @@ describe("production compaction controls", () => {
 				const incomplete = ledgerUsageCalls(
 					f.entries(),
 					{},
-					journal.filter((row) => row.k !== "compaction.closed"),
+					journal.filter((row) => row.k !== "compaction.settled"),
 				);
 				ok(incomplete.every((call) => call.compactionOutcome === "unknown" && call.label === "compaction"));
 			}

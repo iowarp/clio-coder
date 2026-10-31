@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Payload } from "../core/telemetry/schemas.js";
+import type { EventPayload } from "../core/telemetry/events.js";
 import type { CompiledSessionPrompt } from "../domains/prompts/compiler.js";
 
 /** Blocks past this many are counted, not named, so a long session's record stays bounded (#434). */
@@ -17,10 +17,10 @@ const estimate = (text: string): number => Math.ceil(text.length / 4);
 export function prefixBlocksOf(
 	compiled: Pick<CompiledSessionPrompt, "systemPrompt" | "sections"> | null,
 	sent: { systemPrompt?: string; messages: ReadonlyArray<unknown>; tools?: ReadonlyArray<unknown> },
-): Payload<"prefix.blocks"> | undefined {
-	const blocks: Payload<"prefix.blocks">["blocks"] = [];
+): EventPayload<"prompt.prefix_captured"> | undefined {
+	const blocks: EventPayload<"prompt.prefix_captured">["blocks"] = [];
 	let omitted = 0;
-	const add = (block: Payload<"prefix.blocks">["blocks"][number]): void => {
+	const add = (block: EventPayload<"prompt.prefix_captured">["blocks"][number]): void => {
 		if (blocks.length < MAX_BLOCKS) blocks.push(block);
 		else omitted += 1;
 	};

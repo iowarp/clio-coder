@@ -311,8 +311,10 @@ test("a run's receipt evidence carries sealed checks only under a seal that veri
 	// A run with no journal imports its receipt under the same seal: a current one that fails keeps only the target.
 	const imported = (value: unknown) => {
 		writeReceipt(value);
-		const usage = loadRunTelemetrySource(stateDir, "run-evidence").records.find((record) => record.k === "run.usage");
-		return usage?.k === "run.usage" ? usage.data : undefined;
+		const usage = loadRunTelemetrySource(stateDir, "run-evidence").records.find(
+			(record) => record.k === "run.usage_reported",
+		);
+		return usage?.k === "run.usage_reported" ? usage.data : undefined;
 	};
 	strictEqual(imported(receipt)?.usage.input.kind, "measured");
 	const failed = imported({ ...receipt, outcome: "failed" });
@@ -370,7 +372,7 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 	const unpriced = telemetryCall("timeline-records", { at: "2026-10-30T00:00:02.000Z", usd: null });
 	const records: TelemetryRecord[] = [
 		makeTelemetryRecord(
-			"config.snapshot",
+			"config.snapshotted",
 			{ settings: object, settingsFingerprint: settingsFingerprintCommitment("f".repeat(64)) },
 			ctx,
 			clock("2026-10-30T00:00:00.000Z"),
@@ -378,13 +380,13 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 		...priced,
 		...unpriced,
 		makeTelemetryRecord(
-			"budget.crossing",
+			"budget.crossed",
 			{ level: "at", spendUsd: 5, ceilingUsd: 5, contextTokens: 1200 },
 			ctx,
 			clock("2026-10-30T00:00:03.000Z"),
 		),
 		makeTelemetryRecord(
-			"budget.wait",
+			"budget.held",
 			{
 				level: "at",
 				spendUsd: 5,
@@ -398,7 +400,7 @@ test("the timeline and why-stopped carry config, budget and quota records, spend
 			clock("2026-10-30T00:00:04.000Z"),
 		),
 		makeTelemetryRecord(
-			"quota.reading",
+			"quota.read",
 			{
 				provider: "codex",
 				targetId: "fixture",
@@ -453,7 +455,7 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 	};
 	const records: TelemetryRecord[] = [
 		makeTelemetryRecord(
-			"auth.event",
+			"auth.refreshed",
 			{
 				provider: "openai-codex",
 				trigger: "expiry",
@@ -472,7 +474,7 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 			clock(2),
 		),
 		makeTelemetryRecord(
-			"context.snapshot",
+			"context.snapshotted",
 			{
 				snapshotId: "snap-1",
 				categories: {
@@ -496,7 +498,7 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 			clock(3),
 		),
 		makeTelemetryRecord(
-			"system_one.decision",
+			"system_one.decided",
 			{
 				site: "intent",
 				outcome: "timeout",
@@ -520,11 +522,11 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 			{ ...ctx, toolCallId: "tc-1" },
 			clock(6),
 		),
-		makeTelemetryRecord("run.ref", { runId: "run-signals" }, ctx, clock(7)),
+		makeTelemetryRecord("run.linked", { runId: "run-signals" }, ctx, clock(7)),
 	];
 	const run = [
 		makeTelemetryRecord(
-			"worker.channel",
+			"worker.channel_failed",
 			{ lane: "stdin", frameType: "steer", errno: "EPIPE", afterExit: true, failure: "write-failed" },
 			{ sessionId: "timeline-signals", runId: "run-signals", label: "worker" },
 			clock(8),
@@ -609,7 +611,7 @@ test("a model's cost splits into the sessions' own calls and the worker runs, in
 		records.map((record) => ({ ...record, ctx: { ...record.ctx, runId } }) as TelemetryRecord);
 	const main = telemetryCall("split-session", { model: "shared", usd: 0.5 });
 	const ref = makeTelemetryRecord(
-		"run.ref",
+		"run.linked",
 		{ runId: "run-owned" },
 		main[0]?.ctx ?? { sessionId: "split-session", label: "main" },
 		{

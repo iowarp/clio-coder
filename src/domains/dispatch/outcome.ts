@@ -9,7 +9,7 @@
  */
 
 import type { RunBoundKind, RunTerminalReason } from "../../core/telemetry/enums.js";
-import type { Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
 import type { AbortReason } from "./contract.js";
 import type { RunOutcome, RunOutcomeCode, RunStatus } from "./types.js";
@@ -176,7 +176,7 @@ export function hostRunSettledFacts(
 	terminal: ResolvedTerminalReason | undefined,
 	processExitCode: number | null = null,
 	callIds: readonly string[] | null = null,
-): Payload<"run.settled"> {
+): EventPayload<"run.settled"> {
 	return {
 		terminalReason: terminal?.terminalReason ?? "worker_failed",
 		callIds: callIds === null ? null : [...callIds],

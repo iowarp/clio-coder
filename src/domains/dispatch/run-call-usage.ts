@@ -85,7 +85,12 @@ export function createRunCallUsage(context: WorkerTelemetryContext) {
 				snapshot ??= runUsageFromCallRecords(records);
 				return true;
 			}
-			if (record.k !== "call.started" && record.k !== "call.settled" && record.k !== "run.usage" && record.k !== "gap")
+			if (
+				record.k !== "call.started" &&
+				record.k !== "call.settled" &&
+				record.k !== "run.usage_reported" &&
+				record.k !== "journal.gap"
+			)
 				return true;
 			records.push(record);
 			snapshot = runUsageFromCallRecords(records);
@@ -94,7 +99,7 @@ export function createRunCallUsage(context: WorkerTelemetryContext) {
 		gap(count = 1): void {
 			if (!snapshot || count < 1) return;
 			records.push(
-				makeTelemetryRecord("gap", { sink: "worker-ndjson", reason: "writer-drop", count }, context, {
+				makeTelemetryRecord("journal.gap", { sink: "worker-ndjson", reason: "writer-drop", count }, context, {
 					t: new Date().toISOString(),
 					mono: performance.now(),
 				}),

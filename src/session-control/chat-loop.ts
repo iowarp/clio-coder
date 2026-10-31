@@ -5,7 +5,7 @@ import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/c
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { observedToolCallOrigin, telemetryContext } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
-import { recordTelemetry } from "../core/telemetry/producer.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
@@ -2187,7 +2187,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		try {
 			const lease = await acquire(origin, "main", userTurnId);
 			try {
-				recordTelemetry("turn.settled", turnSettlementFromCalls(stopReason, calls, retries, fallbackCause), lease.context);
+				telemetryHub().emit(
+					"turn.settled",
+					turnSettlementFromCalls(stopReason, calls, retries, fallbackCause),
+					lease.context,
+				);
 			} finally {
 				await lease.release();
 			}

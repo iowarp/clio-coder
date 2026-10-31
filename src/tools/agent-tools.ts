@@ -22,7 +22,7 @@ import type { TSchema } from "typebox";
 import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
 import type { TelemetryContext } from "../core/telemetry/context.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
-import { recordTelemetry } from "../core/telemetry/producer.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import type { ToolName } from "../core/tool-names.js";
 import { isMcpToolName, ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
@@ -390,7 +390,7 @@ function recordToolSettled(
 ): void {
 	if (!ctx) return;
 	const images = result?.kind === "ok" ? (result.images?.length ?? 0) : 0;
-	recordTelemetry(
+	telemetryHub().emit(
 		"tool.settled",
 		{
 			tool,

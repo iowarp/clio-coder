@@ -1,11 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClioSettings } from "../../src/core/config.js";
+import type { EventPayload } from "../../src/core/telemetry/events.js";
+import { validPayload } from "../../src/core/telemetry/events.js";
 import { newCallId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
-import type { Payload } from "../../src/core/telemetry/schemas.js";
-import { validPayload } from "../../src/core/telemetry/schemas.js";
 import { FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/calibration.js";
 import { capabilitySettings } from "../../src/domains/system-one/capability-settings.js";
 import { createSystemOne } from "../../src/domains/system-one/factory.js";
@@ -320,11 +320,11 @@ describe("System One runner", () => {
 		} finally {
 			release();
 		}
-		const decisions = records.filter((record) => record.kind === "system_one.decision");
+		const decisions = records.filter((record) => record.kind === "system_one.decided");
 		strictEqual(decisions.length, BREAKER_THRESHOLD + 1);
 		for (const decision of decisions)
-			ok(validPayload("system_one.decision", decision.data), JSON.stringify(decision.data));
-		const data = decisions.map((decision) => decision.data as Payload<"system_one.decision">);
+			ok(validPayload("system_one.decided", decision.data), JSON.stringify(decision.data));
+		const data = decisions.map((decision) => decision.data as EventPayload<"system_one.decided">);
 		deepStrictEqual(
 			data.map((decision) => [decision.outcome, decision.routes[0]?.breaker ?? null]),
 			[

@@ -12,7 +12,7 @@ import {
 	responseModelIdObservationFromRecord,
 } from "../../core/response-model-id.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
-import type { Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import { resolveCostProvenance } from "../providers/types/cost-provenance.js";
@@ -35,7 +35,7 @@ export interface LedgerUsageCall {
 	tokenUsageMissing?: boolean;
 	costSummary?: CostAggregate;
 	callOutcome?: "success" | "error" | "aborted";
-	compactionOutcome?: Payload<"compaction.closed">["outcome"] | "unknown";
+	compactionOutcome?: EventPayload<"compaction.settled">["outcome"] | "unknown";
 	providerId: string;
 	/** Model id the accounting row uses, or `unknown` when an observed response omitted it. */
 	attributedModelId: string;

@@ -1,10 +1,10 @@
-import type { Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import type { AnthropicResponseObservation, CodexQuotaObservation } from "../../engine/types.js";
 import { parseAnthropicHeaders } from "./anthropic-headers.js";
 import { codexStreamSnapshot } from "./observed.js";
 import type { UsageWindow } from "./types.js";
 
-export type QuotaReading = Payload<"quota.reading">;
+export type QuotaReading = EventPayload<"quota.read">;
 
 const utc = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 

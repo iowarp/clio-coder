@@ -49,7 +49,7 @@ export function usageCallsFromJournal(
 	const rows = [...records];
 	const outcomes = new Map<string, NonNullable<LedgerUsageCall["compactionOutcome"]>>();
 	for (const row of rows) {
-		if (row.k !== "compaction.closed") continue;
+		if (row.k !== "compaction.settled") continue;
 		for (const id of row.data.callIds) {
 			const previous = outcomes.get(id);
 			outcomes.set(id, previous !== undefined && previous !== row.data.outcome ? "unknown" : row.data.outcome);

@@ -1,9 +1,9 @@
 import type { EventLoopUtilization } from "node:perf_hooks";
 import { createHistogram, performance as perf } from "node:perf_hooks";
-import type { Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import type { JournalHealth } from "./call-journal.js";
 
-/** How often each open session writer receives a health.window (#428, #434). */
+/** How often each open session writer receives a health.sampled (#428, #434). */
 export const HEALTH_WINDOW_MS = 10_000;
 /** The lag sampler's interval; each tick records how late it ran past this (#428). */
 const LAG_RESOLUTION_MS = 10;
@@ -17,10 +17,10 @@ const ms = (nanoseconds: number) => Math.round(nanoseconds / 1e3) / 1e3;
  */
 export function createHealthWindows(input: {
 	writers: () => ReadonlyArray<{ sessionId: string; health: JournalHealth }>;
-	record: (sessionId: string, data: Payload<"health.window">) => void;
-	/** The window's full distribution, for writers whose mode keeps health.samples (#434). */
-	recordSamples?: (sessionId: string, data: Payload<"health.samples">) => void;
-	/** Whether any open writer would keep health.samples, so standard mode never assembles them. */
+	record: (sessionId: string, data: EventPayload<"health.sampled">) => void;
+	/** The window's full distribution, for writers whose mode keeps health.samples_captured (#434). */
+	recordSamples?: (sessionId: string, data: EventPayload<"health.samples_captured">) => void;
+	/** Whether any open writer would keep health.samples_captured, so standard mode never assembles them. */
 	samplesWanted?: (sessionId: string) => boolean;
 	windowMs?: number;
 }) {
@@ -61,7 +61,7 @@ export function createHealthWindows(input: {
 		utilization = perf.eventLoopUtilization();
 		if (sampled.length > 0 && input.recordSamples) {
 			const memory = process.memoryUsage();
-			const samples: Payload<"health.samples"> = {
+			const samples: EventPayload<"health.samples_captured"> = {
 				windowMs: shared.windowMs,
 				lagPercentiles: lag.count > 0 ? [...lag.percentiles].slice(0, 64).map(([p, value]) => ({ p, ms: ms(value) })) : [],
 				eventLoopUtilization: Math.min(1, Math.max(0, elu.utilization)),

@@ -208,7 +208,7 @@ export function callJournalFolder(callIds?: ReadonlySet<string>, options: FoldOp
 				coverage.conflictingAttempts = conflicts.size;
 			}
 			seen.set(record.id, record);
-			if (record.k === "gap") {
+			if (record.k === "journal.gap") {
 				// A mode change or the research cap only refuses research-tier records; accounting never passes either
 				// gate, so neither leaves a call total partial (#434).
 				if (record.data.reason === "mode-filtered" || record.data.reason === "research-cap") return touched;
@@ -216,7 +216,7 @@ export function callJournalFolder(callIds?: ReadonlySet<string>, options: FoldOp
 				coverage.droppedRecords += record.data.count;
 				return touched;
 			}
-			if (record.k === "call.ref") {
+			if (record.k === "call.linked") {
 				if (!callIds || callIds.has(record.data.callId)) references.add(record.data.callId);
 				return touched;
 			}
@@ -298,7 +298,7 @@ export function foldCallsBy(
 function foldRunScope(records: Iterable<TelemetryRecord>, options: FoldOptions) {
 	const rows = [...records];
 	const calls = foldCallJournal(rows, undefined, options);
-	const aggregates = rows.flatMap((row) => (row.k === "run.usage" ? [row.data] : []));
+	const aggregates = rows.flatMap((row) => (row.k === "run.usage_reported" ? [row.data] : []));
 	const revision = aggregates.reduce((maximum, row) => Math.max(maximum, row.revision), -1);
 	const latest = aggregates.filter((row) => row.revision === revision);
 	const aggregate = latest[0];
@@ -383,11 +383,11 @@ export function sumFactSums(sums: readonly FactSum[]): FactSum {
 /** Parts are disjoint reported contributions, not inferred calls; a whole-scope snapshot replaces them (#434). */
 export function foldRunJournal(records: Iterable<TelemetryRecord>, options: FoldOptions = {}) {
 	const rows = [...records];
-	const whole = rows.filter((row) => row.k !== "run.usage" || row.data.partId === undefined);
+	const whole = rows.filter((row) => row.k !== "run.usage_reported" || row.data.partId === undefined);
 	const base = foldRunScope(whole, options);
 	const parts = new Map<string, TelemetryRecord[]>();
 	for (const row of rows) {
-		if (row.k !== "run.usage" || row.data.partId === undefined) continue;
+		if (row.k !== "run.usage_reported" || row.data.partId === undefined) continue;
 		const group = parts.get(row.data.partId) ?? [];
 		group.push(row);
 		parts.set(row.data.partId, group);

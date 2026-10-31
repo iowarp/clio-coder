@@ -2,8 +2,8 @@ import { hostname } from "node:os";
 import { processBirthToken } from "../core/process-identity.js";
 import type { Fact } from "../core/telemetry/fact.js";
 import { createTelemetryForwarder } from "../core/telemetry/forwarder.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../core/telemetry/ids.js";
-import { recordTelemetry } from "../core/telemetry/producer.js";
 import type { CallUsage, RunUsage } from "../core/telemetry/schemas.js";
 import { calculatePricingCostUsd } from "../domains/providers/catalog.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
@@ -164,8 +164,8 @@ export function recordExternalUsagePart(
 	observation: ExternalUsageObservation,
 ): void {
 	if (!input.telemetryContext) return;
-	recordTelemetry(
-		"run.usage",
+	telemetryHub().emit(
+		"run.usage_reported",
 		{
 			...priceExternalUsage(input, externalUsageFacts(observation)),
 			source: "external-cli",
@@ -196,7 +196,7 @@ export function observeExternalWorkerRun(
 
 	let revision = 0;
 	const calls = new Set<string>();
-	recordTelemetry("process.started", {}, context);
+	telemetryHub().emit("process.started", {}, context);
 	forwarder.flush();
 	try {
 		const handle = start((event) => {
@@ -213,7 +213,7 @@ export function observeExternalWorkerRun(
 						{ stopReason: "stop", usage: { ...observed.usage, clioExternal: { tokenUsage: "provider-reported" } } },
 						"unknown",
 					);
-					recordTelemetry(
+					telemetryHub().emit(
 						"call.settled",
 						{
 							...settlement,
@@ -248,8 +248,8 @@ export function observeExternalWorkerRun(
 					input,
 					externalUsageFacts(bound ?? { usage: record(message.usage), coverage: "unknown", normalized: true }),
 				);
-				recordTelemetry(
-					"run.usage",
+				telemetryHub().emit(
+					"run.usage_reported",
 					{
 						...facts,
 						source: input.runtime.id === "claude-sdk" ? "claude-sdk" : "external-cli",

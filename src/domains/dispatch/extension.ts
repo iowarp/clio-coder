@@ -68,7 +68,7 @@ import {
 	workerSandboxReceipt,
 } from "../../core/sandbox/worker-policy.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
-import type { Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import { isTestFilePath } from "../../core/test-paths.js";
 import { rawDurationMs } from "../../core/timers.js";
 import {
@@ -768,7 +768,7 @@ function runSettledFacts(
 	receipt: RunReceipt,
 	processExitCode: number | null,
 	frameType: string | null,
-): Payload<"run.settled"> {
+): EventPayload<"run.settled"> {
 	return {
 		terminalReason: terminal.terminalReason,
 		callIds: receipt.callIds ?? null,
@@ -7422,7 +7422,7 @@ export function createDispatchBundle(
 				now,
 				monotonicNow,
 				onModelLoaded,
-				onChannelFailure: (fact: Payload<"worker.channel">) => runJournal?.channel(fact),
+				onChannelFailure: (fact: EventPayload<"worker.channel_failed">) => runJournal?.channel(fact),
 				...(agentLedgerId !== null ? { onLedgerPost } : {}),
 				...(grantAttempt !== undefined ? { onGrantRequest } : {}),
 				...(spec.extensionHooks !== undefined ? { onHookRequest } : {}),

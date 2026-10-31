@@ -6,8 +6,7 @@ import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
-import type { Payload } from "../../src/core/telemetry/schemas.js";
+import type { EventPayload } from "../../src/core/telemetry/events.js";
 import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
@@ -61,24 +60,19 @@ it("a session writer opens with its settings and journals each change once, with
 		await lease.release();
 		await extension.stop?.();
 		const records = (await readCallJournal(directory)).records.map(({ record }) => record);
-		const snapshots = records.flatMap((record) => (record.k === "config.snapshot" ? [record.data] : []));
+		const snapshots = records.flatMap((record) => (record.k === "config.snapshotted" ? [record.data] : []));
 		const changes = records.flatMap((record) => (record.k === "config.changed" ? [record.data] : []));
 		strictEqual(snapshots.length, 1);
-		// The digest a route decision carries, labelled as R7 asks; a version 1 record's bare digest reads labelled too.
+		// The digest a route decision carries, labelled as R7 asks.
 		deepStrictEqual(snapshots[0]?.settingsFingerprint, settingsFingerprintCommitment(computeSettingsFingerprint(before)));
-		const v1 = { ...records.find((record) => record.k === "config.snapshot"), kv: 1 } as Record<string, unknown>;
-		const bare = { ...(v1.data as object), settingsFingerprint: computeSettingsFingerprint(before) };
-		const upcast = readTelemetryRecord({ ...v1, data: bare });
-		ok(upcast.kind === "record" && upcast.record.k === "config.snapshot");
-		deepStrictEqual(upcast.record.data.settingsFingerprint, snapshots[0]?.settingsFingerprint);
-		const [opened] = snapshots as [Payload<"config.snapshot">];
+		const [opened] = snapshots as [EventPayload<"config.snapshotted">];
 		const stored = await readTelemetryObject(directory, opened.settings);
 		ok(stored.kind === "resolved");
 		const storedText = JSON.stringify(stored.value);
 		ok(!storedText.includes("leaked-proxy-token"), "a target header value never enters objects/");
 		ok(storedText.includes('"Authorization":"[redacted:headers]"'), "the header name stays as structure");
 		strictEqual(changes.length, 1, "a change is journaled once whatever kinds it touches");
-		const [changed] = changes as [Payload<"config.changed">];
+		const [changed] = changes as [EventPayload<"config.changed">];
 		strictEqual(changed.source, "settings-ui");
 		deepStrictEqual(changed.paths.hotReload, ["safety.limits.sessionCostUsd"]);
 		strictEqual(changed.settingsFingerprint.hash, computeSettingsFingerprint(after));
@@ -147,7 +141,7 @@ it("a session's lifecycle events become session.opened, session.resumed and sess
 			["session.opened", "session.closed"],
 		);
 		const sessionChange = liveRecords.find(({ record }) => record.k === "config.changed")?.record.data as
-			| Payload<"config.changed">
+			| EventPayload<"config.changed">
 			| undefined;
 		strictEqual(sessionChange?.source, "slash-command");
 		strictEqual(sessionChange?.scope, "session");

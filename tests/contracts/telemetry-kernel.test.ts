@@ -10,17 +10,17 @@ import {
 } from "../../src/core/telemetry/context.js";
 import type { SegmentHeader, TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord, monotonicSpan, readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { EVENTS, validPayload } from "../../src/core/telemetry/events.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId, newRecordId, UUID_V7_PATTERN } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import {
 	beginCall,
-	recordTelemetry,
 	registerRunTelemetrySink,
 	registerTelemetrySink,
 	telemetryCallInContext,
 } from "../../src/core/telemetry/producer.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
-import { KIND_NAMES, KIND_REGISTRY, validPayload } from "../../src/core/telemetry/schemas.js";
 import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 
@@ -176,10 +176,10 @@ test("run owners stay separate from session owners, including standalone runs", 
 	const releaseSession = registerTelemetrySink("same-id", { enqueue: (record) => Boolean(session.push(record)) });
 	const releaseRun = registerRunTelemetrySink("same-id", { enqueue: (record) => Boolean(run.push(record)) });
 	try {
-		strictEqual(recordTelemetry("session.opened", {}, { sessionId: "same-id", label: "main" }), true);
-		strictEqual(recordTelemetry("process.started", {}, { sessionId: null, runId: "same-id", label: "worker" }), true);
+		strictEqual(telemetryHub().emit("session.opened", {}, { sessionId: "same-id", label: "main" }), true);
+		strictEqual(telemetryHub().emit("process.started", {}, { sessionId: null, runId: "same-id", label: "worker" }), true);
 		strictEqual(
-			recordTelemetry("process.started", {}, { sessionId: "same-id", runId: "same-id", label: "worker" }),
+			telemetryHub().emit("process.started", {}, { sessionId: "same-id", runId: "same-id", label: "worker" }),
 			true,
 		);
 		strictEqual(session.length, 1);
@@ -189,7 +189,7 @@ test("run owners stay separate from session owners, including standalone runs", 
 		);
 		releaseRun();
 		strictEqual(
-			recordTelemetry("process.started", {}, { sessionId: "same-id", runId: "same-id", label: "worker" }),
+			telemetryHub().emit("process.started", {}, { sessionId: "same-id", runId: "same-id", label: "worker" }),
 			false,
 		);
 		strictEqual(session.length, 1, "a missing run writer never falls back to the parent session");
@@ -296,14 +296,14 @@ test("segment readers preserve future records and distinguish a torn tail from i
 		kind: "skipped",
 		reason: "invalid-record",
 	});
-	deepStrictEqual(Object.keys(KIND_REGISTRY), [...KIND_NAMES]);
-	for (const definition of Object.values(KIND_REGISTRY)) strictEqual(Value.Check(definition.schema, undefined), false);
+	for (const definition of Object.values(EVENTS))
+		if (definition.durability === "journal") strictEqual(Value.Check(definition.schema, undefined), false);
 	const callId = newCallId();
 	const outcome = { callIds: [callId], outcome: "committed", checkpointTurnId: "checkpoint" };
-	strictEqual(validPayload("compaction.closed", outcome), true);
-	strictEqual(validPayload("compaction.closed", { ...outcome, checkpointTurnId: null }), false);
-	strictEqual(validPayload("compaction.closed", { ...outcome, callIds: [callId, callId] }), false);
-	strictEqual(validPayload("compaction.closed", { ...outcome, outcome: "failed", checkpointTurnId: null }), true);
+	strictEqual(validPayload("compaction.settled", outcome), true);
+	strictEqual(validPayload("compaction.settled", { ...outcome, checkpointTurnId: null }), false);
+	strictEqual(validPayload("compaction.settled", { ...outcome, callIds: [callId, callId] }), false);
+	strictEqual(validPayload("compaction.settled", { ...outcome, outcome: "failed", checkpointTurnId: null }), true);
 });
 
 test("monotonic spans never cross a process or segment origin", () => {

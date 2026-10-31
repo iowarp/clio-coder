@@ -277,7 +277,10 @@ export function importLegacyReceipt(runId: string, value: unknown, seal: LegacyR
 	const ctx: TelemetryContext = sessionId
 		? { sessionId, runId, label: "worker" }
 		: { sessionId: null, runId, label: "worker" };
-	const usageRecord = makeTelemetryRecord("run.usage", data, ctx, { t: new Date(endedAt).toISOString(), mono: 0 });
+	const usageRecord = makeTelemetryRecord("run.usage_reported", data, ctx, {
+		t: new Date(endedAt).toISOString(),
+		mono: 0,
+	});
 	usageRecord.id = derivedTelemetryIds(`receipt\0${runId}`, endedAt).usageRecordId;
 	return readTelemetryRecord(usageRecord).kind === "record" ? usageRecord : null;
 }

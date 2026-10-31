@@ -20,9 +20,9 @@ function fullJournal(runId: string) {
 	});
 	return [
 		{ kind: "process.started" as const, data: {}, at: at(0) },
-		{ kind: "run.feed" as const, data: { seq: 1, body: { kind: "open", runId, agentId: "coder" } }, at: at(0) },
+		{ kind: "run.feed_appended" as const, data: { seq: 1, body: { kind: "open", runId, agentId: "coder" } }, at: at(0) },
 		{
-			kind: "run.feed" as const,
+			kind: "run.feed_appended" as const,
 			data: {
 				seq: 2,
 				body: { kind: "event", type: "clio_coder_tool_finish", tool: "read", outcome: "ok", durationMs: 15 },

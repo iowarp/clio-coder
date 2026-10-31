@@ -221,7 +221,7 @@ describe("continuity through real forks, replay and export", () => {
 		const journal = readCallJournalSync(dirname(sessionPaths(child).current));
 		strictEqual(journal.records.length, 1);
 		const fork = journal.records[0]?.record;
-		ok(fork?.k === "session.forked_from");
+		ok(fork?.k === "session.forked");
 		strictEqual(fork.data.parentSessionId, parent.sessionId);
 		strictEqual(fork.data.parentTurnId, "m4");
 

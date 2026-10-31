@@ -25,6 +25,7 @@ import type {
 } from "../../core/telemetry/dto.js";
 import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import {
 	renderCount,
@@ -37,7 +38,7 @@ import {
 	renderUsdLimit,
 	renderUsdSum,
 } from "../../core/telemetry/render.js";
-import type { CallSettled, CallUsage, Payload } from "../../core/telemetry/schemas.js";
+import type { CallSettled, CallUsage } from "../../core/telemetry/schemas.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { CallJournalFolder, CallTotals, FoldedAttempt, FoldOptions, JournalFold } from "./folds.js";
 import {
@@ -183,7 +184,7 @@ interface Run {
 	fold: ReturnType<typeof foldRunJournal>;
 	attempts: Attempt[];
 	byAttempt: Map<string, Attempt>;
-	settled: { at: string; data: Payload<"run.settled"> } | null;
+	settled: { at: string; data: EventPayload<"run.settled"> } | null;
 	firstAt: string | null;
 	lastAt: string | null;
 	sessionId: string | null;
@@ -362,11 +363,11 @@ function grow(growth: Growth, record: TelemetryRecord): readonly string[] {
 	// A tool settles after the call that asked for it, so its record changes that call's attempts.
 	const toolCall = noteTool(growth.tools, record);
 	if (toolCall !== null) return [...(growth.callAttempts.get(toolCall) ?? [])];
-	if ((record.k === "run.ref" || record.k === "call.ref") && !growth.references.has(record.data.runId))
+	if ((record.k === "run.linked" || record.k === "call.linked") && !growth.references.has(record.data.runId))
 		growth.references.set(record.data.runId, record);
 	// A mode-filtered or research-cap gap is policy: only research or content kinds go uncaptured, never
 	// accountability, so neither makes a total partial (#434, R10).
-	if (record.k === "gap" && !POLICY_GAPS.has(record.data.reason)) growth.gapRecord = true;
+	if (record.k === "journal.gap" && !POLICY_GAPS.has(record.data.reason)) growth.gapRecord = true;
 	return growth.folder.add(record);
 }
 
@@ -406,7 +407,7 @@ function buildAnalysis(
 			grow(growth, record);
 			growth.tail.records.add(record.id);
 			if (record.k === "call.started" || record.k === "call.settled") growth.tail.attempts.add(record.data.attemptId);
-			if (record.k === "run.ref" || record.k === "call.ref") growth.tail.runs.add(record.data.runId);
+			if (record.k === "run.linked" || record.k === "call.linked") growth.tail.runs.add(record.data.runId);
 		}
 	const attempts = growth.folder
 		.attempts()
@@ -446,7 +447,7 @@ function extendAnalysis(
 		if (
 			tail.records.has(record.id) ||
 			((record.k === "call.started" || record.k === "call.settled") && tail.attempts.has(record.data.attemptId)) ||
-			((record.k === "run.ref" || record.k === "call.ref") && tail.runs.has(record.data.runId))
+			((record.k === "run.linked" || record.k === "call.linked") && tail.runs.has(record.data.runId))
 		)
 			return false;
 	}
@@ -1949,10 +1950,10 @@ function spendAt(analysis: Analysis, usd: number, t: string): FactSum {
 
 function budgetEntry(
 	analysis: Analysis,
-	record: Extract<TelemetryRecord, { k: "budget.crossing" | "budget.wait" }>,
+	record: Extract<TelemetryRecord, { k: "budget.crossed" | "budget.held" }>,
 ): BudgetEntry {
 	const data = record.data;
-	const wait = record.k === "budget.wait" ? record.data : null;
+	const wait = record.k === "budget.held" ? record.data : null;
 	const waited = wait ? localClock(wait.waitedMs) : null;
 	const spend = spendAt(analysis, data.spendUsd, record.t);
 	// Admission's own estimate of what the held request re-sends; it names no method, so it reads `~`.
@@ -1975,7 +1976,7 @@ function budgetEntry(
 	};
 }
 
-function quotaEntry(record: Extract<TelemetryRecord, { k: "quota.reading" }>): QuotaEntry {
+function quotaEntry(record: Extract<TelemetryRecord, { k: "quota.read" }>): QuotaEntry {
 	return {
 		kind: "quota",
 		at: record.t,
@@ -1992,7 +1993,7 @@ function quotaEntry(record: Extract<TelemetryRecord, { k: "quota.reading" }>): Q
 	};
 }
 
-function gapEntry(record: Extract<TelemetryRecord, { k: "gap" }>): Extract<TimelineEntry, { kind: "gap" }> {
+function gapEntry(record: Extract<TelemetryRecord, { k: "journal.gap" }>): Extract<TimelineEntry, { kind: "gap" }> {
 	const { sink, reason, count } = record.data;
 	return { kind: "gap", at: record.t, sink, reason, count, countShown: shownCount(count) };
 }
@@ -2033,10 +2034,10 @@ export function timeline(
 					callIds: record.data.terminal.callIds as CallRowV1["callId"][],
 				});
 				break;
-			case "run.ref":
+			case "run.linked":
 				entries.push({ kind: "run", at, runId: record.data.runId, event: "referenced", terminalReason: null });
 				break;
-			case "compaction.closed":
+			case "compaction.settled":
 				entries.push({
 					kind: "compaction",
 					at,
@@ -2048,7 +2049,7 @@ export function timeline(
 			case "session.resumed":
 				entries.push({ kind: "session", at, event: record.k === "session.opened" ? "opened" : "resumed", detail: null });
 				break;
-			case "session.forked_from":
+			case "session.forked":
 				entries.push({
 					kind: "session",
 					at,
@@ -2059,10 +2060,10 @@ export function timeline(
 			case "session.closed":
 				entries.push({ kind: "session", at, event: "closed", detail: record.data.reason });
 				break;
-			case "gap":
+			case "journal.gap":
 				entries.push(gapEntry(record));
 				break;
-			case "config.snapshot":
+			case "config.snapshotted":
 				entries.push({
 					kind: "config",
 					at,
@@ -2084,11 +2085,11 @@ export function timeline(
 					previous: record.data.before,
 				});
 				break;
-			case "budget.crossing":
-			case "budget.wait":
+			case "budget.crossed":
+			case "budget.held":
 				entries.push(budgetEntry(analysis, record));
 				break;
-			case "quota.reading":
+			case "quota.read":
 				entries.push(quotaEntry(record));
 				break;
 			case "tool.settled": {
@@ -2126,7 +2127,7 @@ export function timeline(
 					turnId: record.ctx.turnId ?? null,
 				});
 				break;
-			case "auth.event": {
+			case "auth.refreshed": {
 				const duration = localClock(record.data.durationMs);
 				entries.push({
 					kind: "auth",
@@ -2154,7 +2155,7 @@ export function timeline(
 				});
 				break;
 			}
-			case "context.snapshot": {
+			case "context.snapshotted": {
 				const data = record.data;
 				const estimated: Fact<number> | null =
 					data.estimatedTokens === undefined ? null : { kind: "estimated", value: data.estimatedTokens, method: "chars/4" };
@@ -2178,7 +2179,7 @@ export function timeline(
 				});
 				break;
 			}
-			case "system_one.decision": {
+			case "system_one.decided": {
 				const data = record.data;
 				const latency = localClock(data.latencyMs);
 				const deadline = localClock(data.deadlineMs);
@@ -2210,7 +2211,7 @@ export function timeline(
 	// A worker's channel failures live in its run journal; the session shows those of the runs it referenced (#425).
 	for (const run of analysis.runs.values())
 		for (const record of run.source.records)
-			if (record.k === "worker.channel")
+			if (record.k === "worker.channel_failed")
 				entries.push({
 					kind: "worker-channel",
 					at: record.t,
@@ -2298,7 +2299,7 @@ export function runTimeline(runId: string, source: JournalSource, options: ReadO
 	for (const record of source.records) {
 		const at = record.t;
 		switch (record.k) {
-			case "run.feed": {
+			case "run.feed_appended": {
 				const body = record.data.body;
 				const ms = body.kind === "event" ? body.durationMs : undefined;
 				const fact = ms === undefined ? null : localClock(ms);
@@ -2317,7 +2318,7 @@ export function runTimeline(runId: string, source: JournalSource, options: ReadO
 			case "process.exited":
 				entries.push({ kind: "process", at, event: "exited", exitCode: record.data.exitCode });
 				break;
-			case "gap":
+			case "journal.gap":
 				entries.push(gapEntry(record));
 				break;
 		}
@@ -2397,8 +2398,8 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	const latestQuota = new Map<string, QuotaEntry>();
 	for (const record of source.journal.records) {
 		if (record.k === "turn.settled" && (!last || record.t >= last.at)) last = { at: record.t, record };
-		if (record.k === "budget.crossing" || record.k === "budget.wait") budget.push(budgetEntry(analysis, record));
-		if (record.k === "quota.reading") {
+		if (record.k === "budget.crossed" || record.k === "budget.held") budget.push(budgetEntry(analysis, record));
+		if (record.k === "quota.read") {
 			const account = `${record.data.provider}\u0000${record.data.targetId}`;
 			const entry = quotaEntry(record);
 			const prior = latestQuota.get(account);

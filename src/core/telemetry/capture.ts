@@ -1,6 +1,6 @@
 import type { SegmentHeader } from "./envelope.js";
-import type { Kind } from "./schemas.js";
-import { KIND_REGISTRY } from "./schemas.js";
+import type { JournalEventName } from "./events.js";
+import { journalDefinition } from "./events.js";
 
 export type TelemetryMode = SegmentHeader["mode"];
 export type CaptureFlags = SegmentHeader["capture"];
@@ -53,8 +53,8 @@ export function sameTelemetryCapture(a: TelemetryCapture, b: TelemetryCapture): 
  * or structural payloads. Research adds its tier per the kind's capture flag, and
  * content-bearing kinds only with content capture (#434).
  */
-export function captureAdmits(capture: TelemetryCapture, kind: Kind): boolean {
-	const definition: { tier: string; cc: string; capture?: CaptureFlag } = KIND_REGISTRY[kind];
+export function captureAdmits(capture: TelemetryCapture, kind: JournalEventName): boolean {
+	const definition = journalDefinition(kind);
 	if (definition.cc === "content-bearing" && !capture.capture.content) return false;
 	if (definition.tier !== "research") return true;
 	if (capture.mode !== "research") return false;

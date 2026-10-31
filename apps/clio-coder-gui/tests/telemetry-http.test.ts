@@ -177,7 +177,7 @@ test("a run's timeline orders its process, feed and settlement, with a feed dura
 	await seedRunJournal(state, "run-gamma", [
 		{ kind: "process.started", data: {}, at: "2026-10-30T10:00:00.000Z" },
 		{
-			kind: "run.feed",
+			kind: "run.feed_appended",
 			data: {
 				seq: 1,
 				body: { kind: "event", type: "clio_coder_tool_finish", tool: "read", outcome: "ok", durationMs: 1250 },

@@ -214,7 +214,7 @@ export async function seedParitySession(stateDir: string): Promise<void> {
 			},
 		},
 	};
-	const ref = makeTelemetryRecord("run.ref", { runId: PARITY_RUN }, settled.ctx, { t: at(2), mono: 0 });
+	const ref = makeTelemetryRecord("run.linked", { runId: PARITY_RUN }, settled.ctx, { t: at(2), mono: 0 });
 	const worker = [
 		...telemetryCall(PARITY_SESSION, { label: "worker", usage: { input: 50, output: 10 }, usd: 0.25, at: at(2) }),
 		...telemetryCall(PARITY_SESSION, { label: "worker", usage: { input: 20, output: null }, usd: null, at: at(2) }),

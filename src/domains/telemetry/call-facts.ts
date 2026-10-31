@@ -1,7 +1,8 @@
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
 import type { FailureCause } from "../../core/telemetry/enums.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact } from "../../core/telemetry/fact.js";
-import type { CallSettled, CallStarted, CallUsage, Payload } from "../../core/telemetry/schemas.js";
+import type { CallSettled, CallStarted, CallUsage } from "../../core/telemetry/schemas.js";
 import { ceilChars, normalizeTokenUsage } from "../../core/token-split.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 
@@ -242,10 +243,10 @@ export function turnSettlementFromCalls(
 	calls: readonly CallSettled[],
 	retries: number,
 	fallbackCause?: FailureCause,
-): Payload<"turn.settled"> {
+): EventPayload<"turn.settled"> {
 	const reason = (
 		typeof stopReason === "string" && STOP_REASONS.has(stopReason) ? stopReason : "error"
-	) as Payload<"turn.settled">["stopReason"];
+	) as EventPayload<"turn.settled">["stopReason"];
 	const last = calls.at(-1);
 	const stages = last?.stages;
 	return {

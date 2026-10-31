@@ -440,7 +440,7 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	const recordUsage = (raw: unknown, scope: RunUsage["scope"], coverage: RunUsage["coverage"]) => {
 		if (!telemetry) return;
 		forwarder?.enqueue({
-			kind: "run.usage",
+			kind: "run.usage_reported",
 			data: { ...acpUsageFacts(raw, coverage), source: "acp", scope, revision: 0, target: telemetry.target },
 			ctx: telemetry.context,
 			wallMs: Date.now(),

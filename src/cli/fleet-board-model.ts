@@ -167,9 +167,9 @@ interface FoldCursor {
 const CALL_RECORD_KINDS: ReadonlySet<string> = new Set([
 	"call.started",
 	"call.settled",
-	"call.ref",
-	"gap",
-	"run.usage",
+	"call.linked",
+	"journal.gap",
+	"run.usage_reported",
 ]);
 
 function emptyFold(): RunFold {

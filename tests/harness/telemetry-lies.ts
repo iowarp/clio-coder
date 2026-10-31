@@ -1,8 +1,9 @@
 import type { Quantity } from "../../src/core/telemetry/dto.js";
 import { parseFactRef } from "../../src/core/telemetry/dto.js";
 import { Disposition, FailureCause, RoundKind, RunTerminalReason, StopReason } from "../../src/core/telemetry/enums.js";
+import { EVENTS } from "../../src/core/telemetry/events.js";
 import type { FactSum } from "../../src/core/telemetry/fact.js";
-import { CallSettledSchema, KIND_REGISTRY } from "../../src/core/telemetry/schemas.js";
+import { CallSettledSchema } from "../../src/core/telemetry/schemas.js";
 
 /**
  * The #434 §13.1 lie detectors over read-model DTOs, shared by the root parity tests and the GUI route tests.
@@ -189,7 +190,7 @@ export function unlabelledHashes(dto: unknown): string[] {
 }
 
 const COLD_REASONS = CallSettledSchema.properties.cache.properties.expectedColdReasons.items.enum as string[];
-const CHANNEL_FAILURES = (KIND_REGISTRY["worker.channel"].schema as { properties: { failure: { enum: string[] } } })
+const CHANNEL_FAILURES = (EVENTS["worker.channel_failed"].schema as { properties: { failure: { enum: string[] } } })
 	.properties.failure.enum;
 const VERDICTS = CallSettledSchema.properties.cache.properties.verdict.enum as string[];
 /** The classifiers a DTO carries, each with the closed vocabulary its value comes from. */

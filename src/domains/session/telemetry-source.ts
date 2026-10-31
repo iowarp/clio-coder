@@ -359,9 +359,9 @@ function* loadSession(
 	);
 	const { header, entries } = yield* readLedger(directory);
 	const ledger = yield* readLifecycle(directory);
-	const forked = own.records.find((record) => record.k === "session.forked_from");
+	const forked = own.records.find((record) => record.k === "session.forked");
 	const lineage =
-		forked?.k === "session.forked_from"
+		forked?.k === "session.forked"
 			? {
 					sessionId: forked.data.parentSessionId,
 					turnId: forked.data.parentTurnId,
@@ -374,7 +374,7 @@ function* loadSession(
 	const copied = lineage ? copiedFromParent(entries, lineage.turnId, header?.timestamp ?? null) : new Set<string>();
 	const runs = new Map<string, JournalSource>();
 	for (const record of own.records)
-		if ((record.k === "call.ref" || record.k === "run.ref") && !runs.has(record.data.runId))
+		if ((record.k === "call.linked" || record.k === "run.linked") && !runs.has(record.data.runId))
 			runs.set(record.data.runId, yield* loadRun(stateDir, record.data.runId));
 	let parent: SessionSource | null = null;
 	if (ancestors && lineage && !seen.has(lineage.sessionId) && seen.size < MAX_LINEAGE) {
@@ -509,7 +509,7 @@ export interface RepoTelemetrySources {
 }
 
 const isCall = (record: TelemetryRecord) => record.k === "call.started" || record.k === "call.settled";
-const accounting = (record: TelemetryRecord) => record.k === "run.usage" || isCall(record);
+const accounting = (record: TelemetryRecord) => record.k === "run.usage_reported" || isCall(record);
 
 /**
  * An attempt counts in the window its settlement falls in, or its start while it has none; any other record counts by
@@ -534,7 +534,7 @@ function windowRecords(records: readonly TelemetryRecord[], from: number, to: nu
 function windowSession(source: SessionSource, from: number, to: number): SessionSource {
 	const records = windowRecords(source.journal.records, from, to);
 	const referenced = new Set(
-		records.flatMap((record) => (record.k === "run.ref" || record.k === "call.ref" ? [record.data.runId] : [])),
+		records.flatMap((record) => (record.k === "run.linked" || record.k === "call.linked" ? [record.data.runId] : [])),
 	);
 	const runs = new Map<string, JournalSource>();
 	for (const [runId, run] of source.runs) {
@@ -548,7 +548,7 @@ function windowSession(source: SessionSource, from: number, to: number): Session
 			...source.journal,
 			// A reference to a run the window leaves out would read as an unreadable run.
 			records: records.filter(
-				(record) => (record.k !== "run.ref" && record.k !== "call.ref") || runs.has(record.data.runId),
+				(record) => (record.k !== "run.linked" && record.k !== "call.linked") || runs.has(record.data.runId),
 			),
 		},
 		legacy: { ...source.legacy, records: windowRecords(source.legacy.records, from, to) },

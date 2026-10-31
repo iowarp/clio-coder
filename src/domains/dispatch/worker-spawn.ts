@@ -1,5 +1,5 @@
 import type { FlowRestrictionSet } from "../../core/flow-restrictions.js";
-import type { Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 /**
  * Orchestrator-side subprocess spawner for the native worker.
  *
@@ -172,9 +172,9 @@ export interface WorkerProcessOptions {
 	shutdownGraceMs?: number;
 	/**
 	 * Every channel failure, the ones after exit that no longer change the outcome included, with the frame type
-	 * actually being written and its error code, for the run's worker.channel records (#425).
+	 * actually being written and its error code, for the run's worker.channel_failed records (#425).
 	 */
-	onChannelFailure?: (fact: Payload<"worker.channel">) => void;
+	onChannelFailure?: (fact: EventPayload<"worker.channel_failed">) => void;
 	/**
 	 * Consume the worker's attestation. Remote transports use the announced
 	 * remote pid and process-group id for their kill fallback. Attestation is
@@ -1010,7 +1010,7 @@ function attachWorkerChannel(
 	 */
 	let queuedStdinBytes = 0;
 
-	function reportChannel(fact: Payload<"worker.channel">): void {
+	function reportChannel(fact: EventPayload<"worker.channel_failed">): void {
 		try {
 			opts?.onChannelFailure?.(fact);
 		} catch {
@@ -1040,7 +1040,7 @@ function attachWorkerChannel(
 	function failChannel(
 		operation: WorkerChannelFailure["operation"],
 		detail: string,
-		kind: Payload<"worker.channel">["failure"],
+		kind: EventPayload<"worker.channel_failed">["failure"],
 		error?: unknown,
 		frameType: string = operation,
 	): false {

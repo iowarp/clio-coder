@@ -13,11 +13,11 @@ import type { TelemetryContext } from "../../core/telemetry/context.js";
 import { telemetryOwner } from "../../core/telemetry/context.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { makeTelemetryRecord, readTelemetryRecord } from "../../core/telemetry/envelope.js";
+import type { EventPayload, JournalEventName, PreimageEventName } from "../../core/telemetry/events.js";
+import { PREIMAGE_SUBJECTS } from "../../core/telemetry/events.js";
 import { newRecordId } from "../../core/telemetry/ids.js";
 import type { PendingTelemetry, TelemetrySink } from "../../core/telemetry/producer.js";
 import { registerRunTelemetrySink, registerTelemetrySink } from "../../core/telemetry/producer.js";
-import type { Kind, Payload, PreimageKind } from "../../core/telemetry/schemas.js";
-import { PREIMAGE_SUBJECTS } from "../../core/telemetry/schemas.js";
 import type { SegmentScan } from "../../core/telemetry/segment.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
@@ -37,7 +37,7 @@ export interface JournalHealth {
 	skipped: number;
 }
 export interface CallJournal extends TelemetrySink {
-	admits(kind: Kind): boolean;
+	admits(kind: JournalEventName): boolean;
 	flush(): Promise<void>;
 	close(): Promise<void>;
 	health(): JournalHealth;
@@ -182,7 +182,7 @@ export function callJournalHeader(
 export function seedForkCallJournal(
 	directory: string,
 	sessionId: string,
-	lineage: Payload<"session.forked_from">,
+	lineage: EventPayload<"session.forked">,
 ): void {
 	const path = join(directory, "calls.jsonl");
 	if (existsSync(path)) throw new Error("fork journal already exists");
@@ -195,7 +195,7 @@ export function seedForkCallJournal(
 		piVersion: pkg.dependencies["@earendil-works/pi-ai"] ?? "unknown",
 	});
 	const row = makeTelemetryRecord(
-		"session.forked_from",
+		"session.forked",
 		lineage,
 		{ sessionId, label: "main" },
 		{
@@ -260,7 +260,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				reason: "torn-tail" | "writer-drop" | "invalid-record" | "mode-filtered" | "research-cap",
 				count: number,
 			) =>
-				makeTelemetryRecord("gap", { sink: fileName, reason, count }, options.context, {
+				makeTelemetryRecord("journal.gap", { sink: fileName, reason, count }, options.context, {
 					t: new Date().toISOString(),
 					mono: performance.now(),
 				});
@@ -369,7 +369,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							if (pending.preimage !== undefined) {
 								// Content is reserved against the cap and durable in objects/ before a record cites it (#434).
 								const subject = Object.hasOwn(PREIMAGE_SUBJECTS, pending.kind)
-									? PREIMAGE_SUBJECTS[pending.kind as PreimageKind]
+									? PREIMAGE_SUBJECTS[pending.kind as PreimageEventName]
 									: undefined;
 								let bytes: number;
 								try {
@@ -439,7 +439,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 						let rotation: Buffer[] = [];
 						if (size >= (options.segmentBytes ?? 32 * 1024 * 1024)) {
 							const closing = encodeTelemetryLine(
-								makeTelemetryRecord("segment.closed", { reason: "rotation" }, options.context, {
+								makeTelemetryRecord("journal.segment_closed", { reason: "rotation" }, options.context, {
 									t: new Date().toISOString(),
 									mono: performance.now(),
 								}),
@@ -458,7 +458,7 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							// A mode change closes the segment in place and opens one whose header admits what follows.
 							lines.unshift(
 								encodeTelemetryLine(
-									makeTelemetryRecord("segment.closed", { reason: "mode-change" }, options.context, {
+									makeTelemetryRecord("journal.segment_closed", { reason: "mode-change" }, options.context, {
 										t: new Date().toISOString(),
 										mono: performance.now(),
 									}),

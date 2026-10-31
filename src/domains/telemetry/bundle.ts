@@ -293,8 +293,9 @@ export async function exportTelemetryBundle(input: ExportBundleInput): Promise<B
 	for (const record of session.parsed) {
 		collectRefs(record.data, refs);
 		const data = record.data as Record<string, unknown> | undefined;
-		if ((record.k === "call.ref" || record.k === "run.ref") && typeof data?.runId === "string") runs.add(data.runId);
-		if (record.k === "session.forked_from" && typeof data?.parentSessionId === "string")
+		if ((record.k === "call.linked" || record.k === "run.linked") && typeof data?.runId === "string")
+			runs.add(data.runId);
+		if (record.k === "session.forked" && typeof data?.parentSessionId === "string")
 			forkedFrom = {
 				parentSessionId: data.parentSessionId,
 				parentTurnId: String(data.parentTurnId),

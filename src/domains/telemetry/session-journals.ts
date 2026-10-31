@@ -6,8 +6,9 @@ import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { SegmentHeader } from "../../core/telemetry/envelope.js";
-import { recordTelemetry } from "../../core/telemetry/producer.js";
-import type { CallStarted, ObjectRef, Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
+import type { CallStarted, ObjectRef } from "../../core/telemetry/schemas.js";
 import type { CallJournal, JournalHealth } from "./call-journal.js";
 import { openCallJournal } from "./call-journal.js";
 import { storeTelemetryObject, telemetryPromptStructure } from "./objects.js";
@@ -35,7 +36,7 @@ export interface TelemetrySessionLease {
 	 */
 	recordPromptCompiled?(
 		structure: ObjectRef,
-		facts: Omit<Payload<"prompt.compiled">, "structure">,
+		facts: Omit<EventPayload<"prompt.compiled">, "structure">,
 		ctx: TelemetryContext,
 	): void;
 	release(): Promise<void>;
@@ -194,14 +195,14 @@ export function createSessionJournals(
 					}
 				}
 				const text = input.prompt?.systemPrompt;
-				if (text !== undefined && journal.admits("prompt.text")) {
+				if (text !== undefined && journal.admits("prompt.text_captured")) {
 					const digest = createHash("sha256").update(text).digest("hex");
 					if (!owned.promptTexts.has(digest) && journal.reserveResearchBytes(Buffer.byteLength(text))) {
 						try {
 							const stored = await storeTelemetryObject(directory, "prompt-text", { text });
 							owned.promptTexts.add(digest);
-							recordTelemetry(
-								"prompt.text",
+							telemetryHub().emit(
+								"prompt.text_captured",
 								{
 									...(refs.promptStructure ? { structure: refs.promptStructure } : {}),
 									text: stored,
@@ -218,7 +219,7 @@ export function createSessionJournals(
 			},
 			recordPromptCompiled(structure, facts, callContext) {
 				if (released || owned.promptStructures.has(structure.id)) return;
-				if (recordTelemetry("prompt.compiled", { ...facts, structure }, callContext))
+				if (telemetryHub().emit("prompt.compiled", { ...facts, structure }, callContext))
 					owned.promptStructures.add(structure.id);
 			},
 			async release() {

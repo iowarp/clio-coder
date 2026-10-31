@@ -156,8 +156,8 @@ async function readSessionTelemetry(directory: string, sessionId: string): Promi
 			if (row.kind !== "record") continue;
 			const record = row.record;
 			collectRefs(record.data, session.refs);
-			if (record.k === "call.ref" || record.k === "run.ref") session.runs.add(record.data.runId);
-			if (record.k === "session.forked_from") session.parent = record.data.parentSessionId;
+			if (record.k === "call.linked" || record.k === "run.linked") session.runs.add(record.data.runId);
+			if (record.k === "session.forked") session.parent = record.data.parentSessionId;
 		}
 	}
 	for (const name of objectNames) {

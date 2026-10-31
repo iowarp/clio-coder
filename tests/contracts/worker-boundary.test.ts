@@ -11,8 +11,8 @@ import { fileURLToPath } from "node:url";
 import { createCliWorkerHooks, workerHookStartupFailure } from "../../src/cli/worker-extension-hooks.js";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import type { Payload } from "../../src/core/telemetry/schemas.js";
-import { validPayload } from "../../src/core/telemetry/schemas.js";
+import type { EventPayload } from "../../src/core/telemetry/events.js";
+import { validPayload } from "../../src/core/telemetry/events.js";
 import { parseAgentRecipeSchema } from "../../src/domains/agents/recipe-schema.js";
 import { parseCodeReport } from "../../src/domains/agents/result-contract.js";
 import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
@@ -499,7 +499,7 @@ require("node:readline").createInterface({ input: process.stdin }).once("line", 
   setTimeout(() => process.exit(1), 400);
 });
 `;
-		const facts: Payload<"worker.channel">[] = [];
+		const facts: EventPayload<"worker.channel_failed">[] = [];
 		const worker = spawnWorkerProcess(
 			process.execPath,
 			["-e", child, CONTROL_FRAME_PREFIX, JSON.stringify(approvedIdentityForSpec(bulkFixtureSpec))],
@@ -514,7 +514,7 @@ require("node:readline").createInterface({ input: process.stdin }).once("line", 
 			await sleep(20);
 		}
 		await worker.promise;
-		for (const fact of facts) ok(validPayload("worker.channel", fact), JSON.stringify(fact));
+		for (const fact of facts) ok(validPayload("worker.channel_failed", fact), JSON.stringify(fact));
 		deepStrictEqual(
 			facts.find((fact) => fact.lane === "stdout"),
 			{

@@ -10,8 +10,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { writeDiagnostic } from "../../core/diagnostics.js";
-import { recordTelemetry } from "../../core/telemetry/producer.js";
-import type { Payload } from "../../core/telemetry/schemas.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
 import { createRedactionTally } from "../evidence/redact.js";
 import type { CallContract } from "./calibration.js";
 import { cutsFor, validationOf } from "./calibration.js";
@@ -136,7 +136,7 @@ interface BreakerState {
 /** The journal calls a decision's model requests open, collected while its engines run (#429, #434). */
 const decisionCalls = new AsyncLocalStorage<Set<string>>();
 
-/** The host's request admission names the call it opened, so system_one.decision can cite it (#429). */
+/** The host's request admission names the call it opened, so system_one.decided can cite it (#429). */
 export function noteSystemOneCall(callId: string): void {
 	decisionCalls.getStore()?.add(callId);
 }
@@ -407,7 +407,7 @@ export function createRunner(deps: RunnerDeps): Runner {
 			const asked = plans.filter(
 				(plan) => Object.keys(plan.questions).length > 0 || Object.keys(plan.abstained).length > 0,
 			);
-			const routes: Payload<"system_one.decision">["routes"] = (asked.length > 0 ? asked : plans)
+			const routes: EventPayload<"system_one.decided">["routes"] = (asked.length > 0 ? asked : plans)
 				.slice(0, 16)
 				.map((plan) => {
 					const breaker = breakerMoves.get(plan);
@@ -421,8 +421,8 @@ export function createRunner(deps: RunnerDeps): Runner {
 				});
 			if (routes.length === 0) return;
 			try {
-				recordTelemetry(
-					"system_one.decision",
+				telemetryHub().emit(
+					"system_one.decided",
 					{
 						site: site.id,
 						...(site.moment !== undefined ? { moment: site.moment } : {}),

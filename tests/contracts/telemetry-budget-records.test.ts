@@ -4,9 +4,9 @@ import type { BudgetAlertPayload, ConfigChangePayload } from "../../src/core/bus
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
+import { validPayload } from "../../src/core/telemetry/events.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { registerTelemetrySink } from "../../src/core/telemetry/producer.js";
-import { validPayload } from "../../src/core/telemetry/schemas.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
 import {
 	type BudgetBlockView,
@@ -68,8 +68,8 @@ it("a held paid request journals one crossing per ceiling and its hold, with the
 			scope: "session",
 		});
 		await sessionHeld;
-		const crossings = records.filter((record) => record.kind === "budget.crossing");
-		const holds = records.flatMap((record) => (record.kind === "budget.wait" ? [record.data] : []));
+		const crossings = records.filter((record) => record.kind === "budget.crossed");
+		const holds = records.flatMap((record) => (record.kind === "budget.held" ? [record.data] : []));
 		strictEqual(crossings.length, 1, "a crossing is journaled once per ceiling");
 		deepStrictEqual(crossings[0]?.data, { level: "over", spendUsd: 1.25, ceilingUsd: 1, contextTokens: 900 });
 		strictEqual(crossings[0]?.ctx.callId, "cal_held");

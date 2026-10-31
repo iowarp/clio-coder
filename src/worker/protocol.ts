@@ -72,7 +72,7 @@ export const WORKER_STDOUT_BACKLOG_MAX_BYTES = 4 * WORKER_BULK_FRAME_MAX_BYTES;
 export const WORKER_STDOUT_INCOMPLETE_MARKER = "[worker] bulk output incomplete: ";
 /**
  * Stderr prefix of the typed twin of that line: a JSON object with the closed failure class, the system error
- * code and the frame type being written, so the host records worker.channel without reading prose (#425).
+ * code and the frame type being written, so the host records worker.channel_failed without reading prose (#425).
  */
 export const WORKER_STDOUT_FAILURE_MARKER = "[worker] bulk lane failure ";
 export type WorkerStdoutFailure =

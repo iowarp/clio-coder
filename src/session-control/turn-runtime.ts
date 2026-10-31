@@ -1,8 +1,9 @@
 import type { BudgetAlertPayload } from "../core/bus-events.js";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, messageUsageForAccounting, rememberMessageCalls } from "../core/message-accounting.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
-import { beginCall, recordTelemetry, telemetryCaptures } from "../core/telemetry/producer.js";
+import { beginCall, telemetryCaptures } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
@@ -350,7 +351,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const fingerprint = quotaReadingFingerprint(reading);
 		const previous = journaledQuota.get(key);
 		if (previous?.fingerprint === fingerprint && previous.turnId === owner.turnId) return;
-		if (recordTelemetry("quota.reading", reading, { ...owner, callId: facts.callId, attemptId: facts.attemptId }))
+		if (telemetryHub().emit("quota.read", reading, { ...owner, callId: facts.callId, attemptId: facts.attemptId }))
 			journaledQuota.set(key, { fingerprint, turnId: owner.turnId });
 	};
 
@@ -963,9 +964,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							carriedColdReasons = [];
 							// Research capture: the prefix exactly as this attempt sends it, hashed (#423, #434).
 							attempt.withContext(() => {
-								if (!telemetryCaptures("prefix.blocks")) return;
+								if (!telemetryCaptures("prompt.prefix_captured")) return;
 								const blocks = prefixBlocksOf(context.compiledSessionPrompt?.() ?? null, sent);
-								if (blocks) recordTelemetry("prefix.blocks", blocks);
+								if (blocks) telemetryHub().emit("prompt.prefix_captured", blocks);
 							});
 						}
 						// The provider stream runs inside the attempt's context, so the engine seam and every observer below it

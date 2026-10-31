@@ -3,14 +3,17 @@ import type { TelemetryContext } from "./context.js";
 import { telemetryContext, telemetryOwner, withTelemetryContext } from "./context.js";
 import type { FailureCause } from "./enums.js";
 import type { ClockOrigin } from "./envelope.js";
+import type { EventName, EventPayload, JournalEventName } from "./events.js";
+import { isJournalEvent } from "./events.js";
+import { attachJournalRoute, telemetryHub } from "./hub.js";
 import { newAttemptId, newCallId } from "./ids.js";
-import type { CallSettled, CallStarted, Kind, Payload, PreimageData, PreimageKind } from "./schemas.js";
+import type { CallSettled, CallStarted } from "./schemas.js";
 import { DELTA_GAP_BOUNDS_MS } from "./schemas.js";
 
-export type PendingTelemetry<K extends Kind = Kind> = K extends Kind
+export type PendingTelemetry<K extends JournalEventName = JournalEventName> = K extends JournalEventName
 	? {
 			kind: K;
-			data: Payload<K>;
+			data: EventPayload<K>;
 			ctx: TelemetryContext;
 			wallMs: number;
 			mono: number;
@@ -33,7 +36,7 @@ export interface TelemetrySink {
 	/** Enqueue only. Ownership of data transfers to the sink; callers must not mutate it (#434). */
 	enqueue(record: PendingTelemetry): boolean;
 	/** Whether the owner's current mode captures this kind. A sink without it captures standard kinds only (#434). */
-	admits?(kind: Kind): boolean;
+	admits?(kind: JournalEventName): boolean;
 }
 
 const sinks = new Map<string, TelemetrySink>();
@@ -61,7 +64,7 @@ export function telemetryProducerHealth(): { unownedRecords: number; sinkFailure
 	return { unownedRecords, sinkFailures };
 }
 
-function sinkAdmits(sink: TelemetrySink, kind: Kind): boolean {
+function sinkAdmits(sink: TelemetrySink, kind: JournalEventName): boolean {
 	return sink.admits ? sink.admits(kind) : captureAdmits(STANDARD_CAPTURE, kind);
 }
 
@@ -69,7 +72,7 @@ function sinkAdmits(sink: TelemetrySink, kind: Kind): boolean {
  * Whether a record of this kind would be captured under ctx now, so a producer can skip assembling research data
  * the mode drops (#434). It answers for this moment only: the record itself is still filtered when it is enqueued.
  */
-export function telemetryCaptures(kind: Kind, ctx = telemetryContext()): boolean {
+export function telemetryCaptures(kind: JournalEventName, ctx = telemetryContext()): boolean {
 	const sink = ctx ? sinks.get(telemetryOwner(ctx)) : undefined;
 	if (!sink) return false;
 	try {
@@ -80,42 +83,26 @@ export function telemetryCaptures(kind: Kind, ctx = telemetryContext()): boolean
 }
 
 /** No serialization, filesystem access, or locks may enter this call stack (#434, rule13). */
-export function recordTelemetry<K extends Kind>(kind: K, data: Payload<K>, ctx = telemetryContext()): boolean {
-	return enqueueTelemetry(kind, data, undefined, ctx);
-}
-
-/**
- * Enqueue a content-bearing research record whose preimage the writer stores, reserves against the research cap
- * and cites before the record is written. The caller hands over ownership of `preimage` (#434).
- */
-export function recordTelemetryContent<K extends PreimageKind>(
-	kind: K,
-	data: PreimageData<K>,
-	preimage: unknown,
-	ctx = telemetryContext(),
-): boolean {
-	return enqueueTelemetry(kind, data as Payload<K>, preimage, ctx);
-}
-
-function enqueueTelemetry<K extends Kind>(
-	kind: K,
-	data: Payload<K>,
+function enqueueTelemetry(
+	name: EventName,
+	data: unknown,
 	preimage: unknown,
 	ctx: TelemetryContext | undefined,
 ): boolean {
+	if (!isJournalEvent(name)) return false;
 	const sink = ctx ? sinks.get(telemetryOwner(ctx)) : undefined;
 	if (!ctx || !sink) {
 		unownedRecords += 1;
 		return false;
 	}
 	try {
-		// Not capturing a kind the mode excludes is policy, not a drop: it is neither a gap nor a failure (#434, R10).
-		if (!sinkAdmits(sink, kind)) return false;
+		// Not capturing an event the mode excludes is policy, not a drop: it is neither a gap nor a failure (#434, R10).
+		if (!sinkAdmits(sink, name)) return false;
 		// Two literals keep the standard path at its single allocation (#434, §14).
 		return sink.enqueue(
 			(preimage === undefined
-				? { kind, data, ctx, wallMs: Date.now(), mono: performance.now() }
-				: { kind, data, ctx, wallMs: Date.now(), mono: performance.now(), preimage }) as PendingTelemetry,
+				? { kind: name, data, ctx, wallMs: Date.now(), mono: performance.now() }
+				: { kind: name, data, ctx, wallMs: Date.now(), mono: performance.now(), preimage }) as PendingTelemetry,
 		);
 	} catch {
 		// Accounting cannot turn a completed call into a retry (#434).
@@ -123,6 +110,10 @@ function enqueueTelemetry<K extends Kind>(
 		return false;
 	}
 }
+
+attachJournalRoute({
+	journal: (name, data, preimage, ctx) => enqueueTelemetry(name, data, preimage, ctx ?? telemetryContext()),
+});
 
 type Stage = "admission" | "auth" | "transform" | "connect" | "send";
 type StageFacts = { waitedOn?: "budget" | "capacity" | "steering"; refreshed?: boolean; reused?: boolean };
@@ -141,7 +132,7 @@ export interface TelemetryCall {
 	mark(mark: "firstByte" | "firstToken"): void;
 	/**
 	 * One generated delta. Present only under research delta capture, so a stream that has no histogram to feed never
-	 * inspects its deltas: the attempt records the gaps as call.timing.deltas after it settles (#428, #434).
+	 * inspects its deltas: the attempt records the gaps as call.timing_captured after it settles (#428, #434).
 	 */
 	delta?(): void;
 	/**
@@ -238,8 +229,8 @@ export function beginCall(
 		let entered = false;
 		let successor: TelemetryCall | undefined;
 		let response: ObservedResponse | undefined;
-		const gaps = scope && telemetryCaptures("call.timing.deltas", scope) ? newGapHistogram() : undefined;
-		recordTelemetry("call.started", metadata, scope);
+		const gaps = scope && telemetryCaptures("call.timing_captured", scope) ? newGapHistogram() : undefined;
+		telemetryHub().emit("call.started", metadata, scope);
 		const handle: TelemetryCall = {
 			callId,
 			attemptId,
@@ -294,9 +285,9 @@ export function beginCall(
 					target: { ...metadata.target, reportedModel: reportedModel ?? metadata.target.reportedModel },
 					stages,
 				};
-				recordTelemetry("call.settled", facts, scope);
+				telemetryHub().emit("call.settled", facts, scope);
 				const timing = gaps?.payload();
-				if (timing) recordTelemetry("call.timing.deltas", timing, scope);
+				if (timing) telemetryHub().emit("call.timing_captured", timing, scope);
 				return facts;
 			},
 			abandon(cause) {
@@ -339,7 +330,7 @@ function newGapHistogram() {
 			last = now;
 			deltas += 1;
 		},
-		payload(): Payload<"call.timing.deltas"> | undefined {
+		payload(): EventPayload<"call.timing_captured"> | undefined {
 			return deltas === 0 ? undefined : { deltas, gapCounts, maxGapMs: round(maxGapMs), spanMs: round(last - first) };
 		},
 	};

@@ -5,7 +5,7 @@ import type { TaskMemoryEnvelope } from "./task-memory-policy.js";
 
 /**
  * Opt-in raw-envelope trace for the LLM memory tier. Off unless research
- * capture with consent admits `memory.trace`, or the deprecated
+ * capture with consent admits `memory.traced`, or the deprecated
  * CLIO_CODER_MEMORY_TRACE alias names a file (#434).
  *
  * The telemetry row is deliberately content-free: it carries counts and
@@ -59,12 +59,12 @@ export function createTaskMemoryTrace(path: string | null, now: () => Date = () 
 	let opened = false;
 	return {
 		active() {
-			return path !== null || researchTraceAdmits("memory.trace");
+			return path !== null || researchTraceAdmits("memory.traced");
 		},
 		record(envelope) {
-			if (researchTraceAdmits("memory.trace"))
+			if (researchTraceAdmits("memory.traced"))
 				recordResearchTrace(
-					"memory.trace",
+					"memory.traced",
 					{
 						decision: envelope.decision,
 						reason: envelope.reason,

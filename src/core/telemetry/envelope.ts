@@ -4,10 +4,11 @@ import { Value } from "typebox/value";
 import type { TelemetryContext } from "./context.js";
 import { TelemetryContextSchema } from "./context.js";
 import { ContentClass, Tier, vocabulary } from "./enums.js";
+import type { EventPayload, JournalEventName } from "./events.js";
+import { isJournalEvent, journalDefinition, validPayload } from "./events.js";
 import { UUID_V7_PATTERN } from "./id-schemas.js";
 import { newRecordId } from "./ids.js";
-import type { Kind, Payload } from "./schemas.js";
-import { isKind, KIND_REGISTRY, UtcSchema, upcastPayload, validPayload } from "./schemas.js";
+import { UtcSchema } from "./schemas.js";
 
 const closed = { additionalProperties: false };
 export const ClockOriginSchema = Type.Object(
@@ -71,18 +72,18 @@ export const EnvelopeSchema = Type.Object(
 	},
 	closed,
 );
-export type TelemetryRecord<K extends Kind = Kind> = K extends Kind
-	? Omit<Static<typeof EnvelopeSchema>, "k" | "data"> & { k: K; data: Payload<K> }
+export type TelemetryRecord<K extends JournalEventName = JournalEventName> = K extends JournalEventName
+	? Omit<Static<typeof EnvelopeSchema>, "k" | "data"> & { k: K; data: EventPayload<K> }
 	: never;
 
 /** Called by the writer after dequeue; producers do not allocate ids or serialize per record (#434). */
-export function makeTelemetryRecord<K extends Kind>(
+export function makeTelemetryRecord<K extends JournalEventName>(
 	kind: K,
-	data: Payload<K>,
+	data: EventPayload<K>,
 	ctx: TelemetryContext,
 	clock: { t: string; mono: number },
 ): TelemetryRecord<K> {
-	const definition = KIND_REGISTRY[kind];
+	const definition = journalDefinition(kind);
 	return {
 		v: 1,
 		k: kind,
@@ -119,32 +120,25 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 			: { kind: "skipped", reason: "invalid-record", segment: true };
 	}
 	if (!Value.Check(EnvelopeSchema, value)) return { kind: "skipped", reason: "invalid-record" };
-	if (!isKind(value.k)) return { kind: "skipped", reason: "unknown-kind" };
-	const definition = KIND_REGISTRY[value.k];
-	if (value.kv > definition.version) return { kind: "skipped", reason: "unknown-version" };
-	let data: unknown;
-	try {
-		data = upcastPayload(value.k, value.kv, value.data);
-	} catch {
-		// Bad historical payloads are counted just like a failed current-schema check (#434).
-		return { kind: "skipped", reason: "invalid-record" };
-	}
-	if (data === undefined) return { kind: "skipped", reason: "unknown-version" };
+	if (!isJournalEvent(value.k)) return { kind: "skipped", reason: "unknown-kind" };
+	const definition = journalDefinition(value.k);
+	if (value.kv !== definition.version) return { kind: "skipped", reason: "unknown-version" };
+	const data = value.data;
 	if (value.tier !== definition.tier || value.cc !== definition.cc || !validPayload(value.k, data)) {
 		return { kind: "skipped", reason: "invalid-record" };
 	}
 	if (value.k === "call.started" || value.k === "call.settled") {
-		const call = data as Payload<"call.started">;
+		const call = data as EventPayload<"call.started">;
 		if (value.ctx.callId !== call.callId || value.ctx.attemptId !== call.attemptId || value.ctx.label !== call.label) {
 			return { kind: "skipped", reason: "invalid-record" };
 		}
 	}
 	if (
-		value.k === "run.usage" &&
+		value.k === "run.usage_reported" &&
 		(!value.ctx.runId || value.ctx.label !== "worker" || value.ctx.callId || value.ctx.attemptId)
 	)
 		return { kind: "skipped", reason: "invalid-record" };
-	return { kind: "record", record: { ...value, kv: definition.version, data } as TelemetryRecord };
+	return { kind: "record", record: value as TelemetryRecord };
 }
 
 /** A monotonic value only has meaning under its own segment origin (#434). */

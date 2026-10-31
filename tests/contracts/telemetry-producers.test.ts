@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Type } from "typebox";
 import { telemetryContext } from "../../src/core/telemetry/context.js";
+import { validPayload } from "../../src/core/telemetry/events.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { abandonedSettlement, beginCall, registerTelemetrySink } from "../../src/core/telemetry/producer.js";
-import { DELTA_GAP_BOUNDS_MS, validPayload } from "../../src/core/telemetry/schemas.js";
+import { DELTA_GAP_BOUNDS_MS } from "../../src/core/telemetry/schemas.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { listMiddlewareRuleDefinitions } from "../../src/domains/middleware/rules.js";
@@ -26,7 +27,13 @@ function capture(sessionId: string, admitResearch = false) {
 		enqueue: (record) => Boolean(records.push(record)),
 		admits: (kind) =>
 			admitResearch ||
-			!["health.samples", "call.timing.deltas", "prefix.blocks", "request.capture", "provider.headers"].includes(kind),
+			![
+				"health.samples_captured",
+				"call.timing_captured",
+				"prompt.prefix_captured",
+				"request.captured",
+				"provider.headers_captured",
+			].includes(kind),
 	});
 	return { records, release, of: (kind: string) => records.filter((record) => record.kind === kind) };
 }
@@ -143,9 +150,9 @@ test("call.timing.deltas is a gap histogram recorded only where delta capture is
 			for (let index = 0; index < 4; index++) call.delta?.();
 			call.abandon("internal");
 		}
-		strictEqual(standard.of("call.timing.deltas").length, 0);
-		const [timing] = deep.of("call.timing.deltas");
-		ok(timing && validPayload("call.timing.deltas", timing.data), JSON.stringify(timing?.data));
+		strictEqual(standard.of("call.timing_captured").length, 0);
+		const [timing] = deep.of("call.timing_captured");
+		ok(timing && validPayload("call.timing_captured", timing.data), JSON.stringify(timing?.data));
 		const data = timing.data as { deltas: number; gapCounts: number[] };
 		strictEqual(data.deltas, 4);
 		strictEqual(data.gapCounts.length, DELTA_GAP_BOUNDS_MS.length + 1);
@@ -161,7 +168,7 @@ test("prefix.blocks follows the sent prompt: compiled sections only when the sen
 	const compiled = { systemPrompt: "S", sections: [{ id: "identity", tokenEstimate: 3, contentHash: hash }] };
 	const sent = { systemPrompt: "S", messages: [{ role: "user", content: "hi" }], tools: [{ name: "read" }] };
 	const blocks = prefixBlocksOf(compiled, sent);
-	ok(blocks && validPayload("prefix.blocks", blocks));
+	ok(blocks && validPayload("prompt.prefix_captured", blocks));
 	deepStrictEqual(
 		blocks.blocks.map((block) => [block.kind, block.id ?? null]),
 		[
@@ -185,7 +192,7 @@ test("health.samples rides beside health.window only for writers that keep it (#
 		],
 		record: (sessionId) => windows.push(sessionId),
 		recordSamples: (sessionId, data) => {
-			ok(validPayload("health.samples", data), JSON.stringify(data));
+			ok(validPayload("health.samples_captured", data), JSON.stringify(data));
 			samples.push(sessionId);
 		},
 		samplesWanted: (sessionId) => sessionId === "kept",
@@ -246,11 +253,11 @@ test("research capture keeps a request body and only allowlisted headers, and st
 		const scoped = call.withContext(() => telemetryContext());
 		const sent = JSON.stringify({ model: "m", input: [{ role: "user", content: "hi" }] });
 		researchCaptureFor(call, scoped)?.settle(sent);
-		const [body] = deep.of("request.capture");
+		const [body] = deep.of("request.captured");
 		deepStrictEqual(body?.preimage, { body: JSON.parse(sent) });
 		deepStrictEqual(body.data, { bodyBytes: Buffer.byteLength(sent), truncated: false });
-		const [headers] = deep.of("provider.headers");
-		ok(headers && validPayload("provider.headers", headers.data), JSON.stringify(headers?.data));
+		const [headers] = deep.of("provider.headers_captured");
+		ok(headers && validPayload("provider.headers_captured", headers.data), JSON.stringify(headers?.data));
 		deepStrictEqual(headers.data, {
 			status: 200,
 			headers: { "x-codex-primary-used-percent": "12", "x-request-id": "req_1" },
@@ -268,7 +275,7 @@ test("research capture keeps a request body and only allowlisted headers, and st
 		);
 		call.abandon("internal");
 		plain.abandon("internal");
-		strictEqual(standard.of("request.capture").length + standard.of("provider.headers").length, 0);
+		strictEqual(standard.of("request.captured").length + standard.of("provider.headers_captured").length, 0);
 	} finally {
 		deep.release();
 		standard.release();

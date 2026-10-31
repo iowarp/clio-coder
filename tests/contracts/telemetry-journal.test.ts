@@ -23,18 +23,15 @@ import {
 	STANDARD_CAPTURE,
 	systemOneDatasetRecording,
 } from "../../src/core/telemetry/capture.js";
+import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import type { CostReportV1, ExplanationV1 } from "../../src/core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
-import {
-	beginCall,
-	recordTelemetry,
-	recordTelemetryContent,
-	telemetryProducerHealth,
-} from "../../src/core/telemetry/producer.js";
+import { beginCall, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import { registerResearchTraceSink } from "../../src/core/telemetry/research-trace.js";
 import type { CallStarted, RunUsage } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
@@ -160,12 +157,12 @@ test("worker forwarding preserves identity and source clocks with bounded deferr
 			run,
 		);
 		call.settle(unsent);
-		strictEqual(recordTelemetry("process.exited", { exitCode: 0 }, run), false);
+		strictEqual(telemetryHub().emit("process.exited", { exitCode: 0 }, run), false);
 		strictEqual(frames.length, 0, "enqueue does not serialize or emit inline");
 		forwarder.close();
 		deepStrictEqual(
 			frames.map((frame) => frame.record.k),
-			["call.started", "call.settled", "gap"],
+			["call.started", "call.settled", "journal.gap"],
 		);
 		const meter = createRunCallUsage(run);
 		strictEqual(meter.snapshot(), undefined);
@@ -210,7 +207,7 @@ test("worker forwarding preserves identity and source clocks with bounded deferr
 				frames.map((frame) => frame.record.id),
 			);
 			ok(forwarded.every((row) => row.record.ctx.sessionId === null));
-			ok(saved.records.some((row) => row.record.k === "segment.closed" && row.origin.host !== "remote-worker"));
+			ok(saved.records.some((row) => row.record.k === "journal.segment_closed" && row.origin.host !== "remote-worker"));
 			const folded = foldCallJournal(saved.records.map(({ record }) => record));
 			strictEqual(folded.totals.neverSent, 1);
 			strictEqual(folded.coverage.droppedRecords, 1);
@@ -235,8 +232,8 @@ test("overlapping work retains its original session and releases ownership only 
 		const side = await journals.acquire(origin, "memory", "turn-a");
 		await main.release();
 		const next = await journals.acquire({ ...origin, id: "next" }, "main", "turn-b");
-		recordTelemetry("session.opened", {}, next.context);
-		recordTelemetry("session.resumed", {}, side.context);
+		telemetryHub().emit("session.opened", {}, next.context);
+		telemetryHub().emit("session.resumed", {}, side.context);
 		await next.release();
 		await side.release();
 		const original = await readCallJournal(join(stateDir, "sessions", "repo", "original"));
@@ -329,7 +326,10 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		run.worker({
 			type: "clio_coder_telemetry",
 			record: {
-				...makeTelemetryRecord("run.usage", aggregate(tokens, revision), context, { t: new Date().toISOString(), mono: 1 }),
+				...makeTelemetryRecord("run.usage_reported", aggregate(tokens, revision), context, {
+					t: new Date().toISOString(),
+					mono: 1,
+				}),
 				origin: { host: "fixture", pid: 1, birthToken: "fixture", monoEpochWallMs: 1 },
 			},
 		});
@@ -349,7 +349,7 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		ok(report(9, 1));
 		await run.flush();
 		const snapshot = readSessionCallJournalSync(sessionDirectory, []);
-		strictEqual(snapshot.records.filter(({ record }) => record.k === "run.ref").length, 1);
+		strictEqual(snapshot.records.filter(({ record }) => record.k === "run.linked").length, 1);
 		strictEqual(runJournalsInWindow(snapshot, 0, 1).size, 0);
 		const missing = {
 			...snapshot,
@@ -608,7 +608,7 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 		deepStrictEqual(replayed[0]?.[8], projected[0]?.costSummary);
 		await journal.close();
 		const before = telemetryProducerHealth().unownedRecords;
-		strictEqual(recordTelemetry("session.closed", { reason: "completed" }, context), false);
+		strictEqual(telemetryHub().emit("session.closed", { reason: "completed" }, context), false);
 		strictEqual(telemetryProducerHealth().unownedRecords, before + 1);
 	} finally {
 		await journal.close();
@@ -620,10 +620,10 @@ test("a flush returns only after the batch a sibling flush started behind the on
 	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
 	const journal = await openCallJournal({ sessionDirectory, context, writer });
 	try {
-		recordTelemetry("session.opened", {}, context);
+		telemetryHub().emit("session.opened", {}, context);
 		const first = journal.flush();
 		// Queued while the first batch is in flight: the first flush waiting on it writes this one as its own batch.
-		recordTelemetry("session.opened", {}, context);
+		telemetryHub().emit("session.opened", {}, context);
 		const second = journal.flush();
 		const third = journal.flush();
 		await third;
@@ -640,10 +640,10 @@ test("journal overflow and invalid records produce gaps, rotation preserves reco
 	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
 	const journal = await openCallJournal({ sessionDirectory, context, writer, queueCapacity: 2, segmentBytes: 1 });
 	try {
-		for (let n = 0; n < 4; n += 1) recordTelemetry("session.opened", {}, context);
+		for (let n = 0; n < 4; n += 1) telemetryHub().emit("session.opened", {}, context);
 		await journal.flush();
 		strictEqual(journal.health().dropped, 2);
-		recordTelemetry("session.opened", { unexpected: "field" }, context);
+		telemetryHub().emit("session.opened", { unexpected: "field" }, context);
 		await journal.flush();
 		strictEqual(journal.health().invalid, 1);
 		const call = beginCall(
@@ -659,7 +659,7 @@ test("journal overflow and invalid records produce gaps, rotation preserves reco
 		await journal.flush();
 		const rows = (await readCallJournal(sessionDirectory)).records.map(({ record }) => record);
 		deepStrictEqual(
-			rows.filter((row) => row.k === "gap").map((row) => row.data),
+			rows.filter((row) => row.k === "journal.gap").map((row) => row.data),
 			[
 				{ sink: "calls.jsonl", reason: "writer-drop", count: 2 },
 				{ sink: "calls.jsonl", reason: "invalid-record", count: 1 },
@@ -669,7 +669,7 @@ test("journal overflow and invalid records produce gaps, rotation preserves reco
 		const settled = rows.find((row) => row.k === "call.settled");
 		ok(settled?.k === "call.settled");
 		strictEqual(settled.data.stop.detail, "api_key=[redacted:assignment]");
-		ok(rows.some((row) => row.k === "segment.closed"));
+		ok(rows.some((row) => row.k === "journal.segment_closed"));
 	} finally {
 		await journal.close();
 		await rm(sessionDirectory, { recursive: true, force: true });
@@ -681,18 +681,18 @@ test("a segment header says what its mode admits, and a mode change opens a new 
 	let capture = STANDARD_CAPTURE;
 	const journal = await openCallJournal({ sessionDirectory, context, writer, capture: () => capture });
 	try {
-		recordTelemetry("session.opened", {}, context);
+		telemetryHub().emit("session.opened", {}, context);
 		await journal.flush();
 		const research = { content: true, deltas: true, providerHeaders: false, systemOneDataset: true, busTrace: false };
 		capture = effectiveTelemetryCapture({ mode: "research", research }, false);
-		recordTelemetry("session.resumed", {}, context);
+		telemetryHub().emit("session.resumed", {}, context);
 		await journal.flush();
 		const rows = scanTelemetrySegment(await readFile(join(sessionDirectory, "calls.jsonl"))).rows;
 		deepStrictEqual(
 			rows.map((row) =>
 				row.kind === "header" ? `header:${row.header.mode}` : row.kind === "record" ? row.record.k : row.reason,
 			),
-			["header:standard", "session.opened", "segment.closed", "header:research", "session.resumed"],
+			["header:standard", "session.opened", "journal.segment_closed", "header:research", "session.resumed"],
 		);
 		const header = rows[3];
 		ok(header?.kind === "header");
@@ -723,14 +723,24 @@ test("standard mode writes no content-bearing record; content needs research, th
 	} as const;
 	const prompt = { text, bytes: 10 };
 	try {
-		strictEqual(recordTelemetry("prompt.text", prompt, context), false);
+		strictEqual(telemetryHub().emit("prompt.text_captured", prompt, context), false);
 		// A forwarded record skips the producer check; the writer still refuses it under standard.
-		journal.enqueue({ kind: "prompt.text", data: prompt, ctx: context, wallMs: Date.now(), mono: performance.now() });
+		journal.enqueue({
+			kind: "prompt.text_captured",
+			data: prompt,
+			ctx: context,
+			wallMs: Date.now(),
+			mono: performance.now(),
+		});
 		await journal.flush();
 		capture = effectiveTelemetryCapture({ mode: "research", research }, false);
-		strictEqual(recordTelemetry("prompt.text", prompt, context), false, "research without consent keeps no content");
+		strictEqual(
+			telemetryHub().emit("prompt.text_captured", prompt, context),
+			false,
+			"research without consent keeps no content",
+		);
 		capture = effectiveTelemetryCapture({ mode: "research", research }, true);
-		strictEqual(recordTelemetry("prompt.text", prompt, context), true);
+		strictEqual(telemetryHub().emit("prompt.text_captured", prompt, context), true);
 		strictEqual(journal.reserveResearchBytes(5000), false, "a preimage past the session cap is refused");
 		await journal.flush();
 		let admitsContent = false;
@@ -739,10 +749,10 @@ test("standard mode writes no content-bearing record; content needs research, th
 			if (row.kind === "header") admitsContent = row.header.capture.content;
 			else if (row.kind === "record") {
 				if (row.record.cc === "content-bearing") ok(admitsContent, "content only under a header that admits it");
-				seen.push(row.record.k === "gap" ? `gap:${(row.record.data as { reason: string }).reason}` : row.record.k);
+				seen.push(row.record.k === "journal.gap" ? `gap:${(row.record.data as { reason: string }).reason}` : row.record.k);
 			}
 		}
-		deepStrictEqual(seen, ["gap:mode-filtered", "segment.closed", "prompt.text", "gap:research-cap"]);
+		deepStrictEqual(seen, ["gap:mode-filtered", "journal.segment_closed", "prompt.text_captured", "gap:research-cap"]);
 		strictEqual(journal.health().capped, 1);
 		const fold = foldCallJournal((await readCallJournal(sessionDirectory)).records.map(({ record }) => record));
 		strictEqual(fold.coverage.gapRecords, 0, "refused research capture never leaves accounting partial");
@@ -775,7 +785,7 @@ test("a session stores prompt text only under content capture, once per distinct
 		}
 		const directory = join(stateDir, "sessions", origin.cwdHash, origin.id);
 		const texts = (await readCallJournal(directory)).records.flatMap(({ record }) =>
-			record.k === "prompt.text" ? [record] : [],
+			record.k === "prompt.text_captured" ? [record] : [],
 		);
 		strictEqual(texts.length, 1, "standard stored none, and a repeated prompt is recorded once");
 		const stored = await readTelemetryObject(directory, texts[0]?.data.text ?? telemetryCommitment("prompt-text", ""));
@@ -799,7 +809,7 @@ test("memory and observation traces journal content only under research capture 
 		record(kind, data, preimage) {
 			leases.push(
 				journals.acquire(origin, "memory").then(async (lease) => {
-					recordTelemetryContent(kind, data, preimage, lease.context);
+					telemetryHub().emitContent(kind, data, preimage, lease.context);
 					await lease.release();
 				}),
 			);
@@ -835,11 +845,11 @@ test("memory and observation traces journal content only under research capture 
 		const records = (await readCallJournal(directory)).records.map(({ record }) => record);
 		deepStrictEqual(
 			records.filter((record) => record.cc === "content-bearing").map((record) => record.k),
-			["memory.observation", "memory.trace"],
+			["memory.observed", "memory.traced"],
 		);
-		const observation = records.find((record) => record.k === "memory.observation");
-		const trace = records.find((record) => record.k === "memory.trace");
-		ok(observation?.k === "memory.observation" && trace?.k === "memory.trace");
+		const observation = records.find((record) => record.k === "memory.observed");
+		const trace = records.find((record) => record.k === "memory.traced");
+		ok(observation?.k === "memory.observed" && trace?.k === "memory.traced");
 		strictEqual(trace.data.userPromptChars, envelope.userPrompt.length);
 		const observed = await readTelemetryObject(directory, observation.data.content);
 		ok(observed.kind === "resolved");
@@ -858,7 +868,7 @@ test("each open session writer receives health windows carrying loop lag, RSS an
 	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
 	const health = createHealthWindows({
 		writers: () => journals.openSessions().map(({ origin, health }) => ({ sessionId: origin.id, health })),
-		record: (sessionId, data) => recordTelemetry("health.window", data, { sessionId, label: "main" }),
+		record: (sessionId, data) => telemetryHub().emit("health.sampled", data, { sessionId, label: "main" }),
 		windowMs: 50,
 	});
 	const journals = createSessionJournals(
@@ -878,8 +888,8 @@ test("each open session writer receives health windows carrying loop lag, RSS an
 		for (const origin of origins) {
 			const journal = await readCallJournal(join(stateDir, "sessions", origin.cwdHash, origin.id));
 			strictEqual(journal.damaged, 0);
-			ok(!journal.records.some(({ record }) => record.k === "gap"), "every window passes its own schema");
-			const windows = journal.records.flatMap(({ record }) => (record.k === "health.window" ? [record.data] : []));
+			ok(!journal.records.some(({ record }) => record.k === "journal.gap"), "every window passes its own schema");
+			const windows = journal.records.flatMap(({ record }) => (record.k === "health.sampled" ? [record.data] : []));
 			ok(windows.length >= 1);
 			for (const window of windows) {
 				ok(window.windowMs > 0 && window.rssBytes > 0);
@@ -948,7 +958,7 @@ test("a research export round-trips through import-bundle into a fixture with th
 		call("main", lease.context, objects).settle(settled);
 		const worker = call("worker", runContext);
 		worker.settle(settled);
-		recordTelemetry("call.ref", { runId, callId: worker.callId }, lease.context);
+		telemetryHub().emit("call.linked", { runId, callId: worker.callId }, lease.context);
 		await lease.release();
 		await run.flush();
 		const sources = async (directory: string) => [
@@ -1043,11 +1053,7 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 	const sessions = join(stateDir, "sessions", "hash");
 	const old = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
 	const ended = JSON.stringify({ endedAt: "2026-01-01T00:00:00.000Z", owner: null });
-	const journal = async (
-		id: string,
-		work: (ctx: NonNullable<Parameters<typeof recordTelemetry>[2]>) => void,
-		fileName?: "events.ndjson",
-	) => {
+	const journal = async (id: string, work: (ctx: TelemetryContext) => void, fileName?: "events.ndjson") => {
 		const directory = fileName ? join(stateDir, "runs", id) : join(sessions, id);
 		const ctx = fileName
 			? { sessionId: "kept", runId: id, label: "worker" as const }
@@ -1065,14 +1071,14 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 	};
 	const age = async (path: string) => utimes(path, old, old);
 	try {
-		const expired = await journal("expired", (ctx) => recordTelemetry("session.opened", {}, ctx));
+		const expired = await journal("expired", (ctx) => telemetryHub().emit("session.opened", {}, ctx));
 		await writeFile(join(expired, "current.jsonl"), "{}\n");
 		await storeTelemetryObject(expired, "tool-schemas", [{ name: "read" }]);
 		await age(join(expired, "calls.jsonl"));
-		const live = await journal("live", (ctx) => recordTelemetry("session.opened", {}, ctx));
+		const live = await journal("live", (ctx) => telemetryHub().emit("session.opened", {}, ctx));
 		await age(join(live, "calls.jsonl"));
 		await writeFile(join(live, "calls.jsonl.lock"), "{}");
-		const parent = await journal("parent", (ctx) => recordTelemetry("session.opened", {}, ctx));
+		const parent = await journal("parent", (ctx) => telemetryHub().emit("session.opened", {}, ctx));
 		await age(join(parent, "calls.jsonl"));
 		await mkdir(join(sessions, "child"), { recursive: true });
 		seedForkCallJournal(join(sessions, "child"), "child", {
@@ -1095,12 +1101,12 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 			capture: () => effectiveTelemetryCapture({ mode: "research", research }, true),
 		});
 		const keptContext = { sessionId: "kept", label: "main" as const };
-		recordTelemetry(
-			"prompt.text",
+		telemetryHub().emit(
+			"prompt.text_captured",
 			{ structure: { ...structure, subject: "prompt-structure" }, text, bytes: 10 },
 			keptContext,
 		);
-		recordTelemetry(
+		telemetryHub().emit(
 			"call.started",
 			{
 				...{ callId: newCallId(), attemptId: newAttemptId(), attempt: 0, label: "main" },
@@ -1111,7 +1117,7 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 			},
 			keptContext,
 		);
-		recordTelemetry("run.ref", { runId: "cited" }, keptContext);
+		telemetryHub().emit("run.linked", { runId: "cited" }, keptContext);
 		await keptJournal.close();
 		await writeFile(join(keptDirectory, "meta.json"), ended);
 		await age(join(keptDirectory, "objects", `${text.id}.json`));
@@ -1236,7 +1242,7 @@ test("only the next owner repairs torn tails; future records survive reopening a
 	const path = join(sessionDirectory, "calls.jsonl");
 	let journal = await openCallJournal({ sessionDirectory, context, writer });
 	try {
-		recordTelemetry("session.opened", {}, context);
+		telemetryHub().emit("session.opened", {}, context);
 		await journal.close();
 		const future = makeTelemetryRecord("session.opened", {}, context, {
 			t: new Date().toISOString(),
@@ -1255,7 +1261,7 @@ test("only the next owner repairs torn tails; future records survive reopening a
 		const result = await readCallJournal(sessionDirectory);
 		strictEqual(result.damaged, 0);
 		strictEqual(result.skipped, 1);
-		ok(result.records.some(({ record }) => record.k === "gap" && record.data.reason === "torn-tail"));
+		ok(result.records.some(({ record }) => record.k === "journal.gap" && record.data.reason === "torn-tail"));
 	} finally {
 		await journal.close();
 		await rm(sessionDirectory, { recursive: true, force: true });
@@ -1300,7 +1306,7 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	const incomplete = makeTelemetryRecord("call.started", started(), context, clock);
 	const missingCall = newCallId();
 	const refs = [first.callId, missingCall].map((callId) =>
-		makeTelemetryRecord("call.ref", { callId, runId: "run" }, context, clock),
+		makeTelemetryRecord("call.linked", { callId, runId: "run" }, context, clock),
 	);
 	const rows = [
 		priced,
@@ -1358,7 +1364,7 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		pricing: { usd: measured(1), pricedBy: "provider" },
 	};
 	const aggregateRecord = makeTelemetryRecord(
-		"run.usage",
+		"run.usage_reported",
 		aggregate,
 		{ sessionId: "session", runId: "run", label: "worker" },
 		clock,
@@ -1398,7 +1404,7 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	strictEqual(runAggregate.costSummary.unknownCallCoverageRuns, 1);
 	deepStrictEqual(runUsageFromCallRecords([...withAggregate].reverse()), runAggregate);
 	const zeroAggregate = makeTelemetryRecord(
-		"run.usage",
+		"run.usage_reported",
 		{
 			...aggregate,
 			revision: 2,
@@ -1732,7 +1738,7 @@ test("usage report discovers a standalone run journal that has no session and no
 			run.worker({
 				type: "clio_coder_telemetry",
 				record: {
-					...makeTelemetryRecord("run.usage", usage, owner, { t: new Date().toISOString(), mono: 1 }),
+					...makeTelemetryRecord("run.usage_reported", usage, owner, { t: new Date().toISOString(), mono: 1 }),
 					origin: { host: "fixture", pid: 1, birthToken: "fixture", monoEpochWallMs: 1 },
 				},
 			}),

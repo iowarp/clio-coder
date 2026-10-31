@@ -1,6 +1,7 @@
 import type { TelemetryContext } from "../core/telemetry/context.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
-import { recordTelemetry, recordTelemetryContent, telemetryCaptures } from "../core/telemetry/producer.js";
+import { telemetryCaptures } from "../core/telemetry/producer.js";
 import { PROVIDER_HEADER_PATTERN } from "../core/telemetry/schemas.js";
 
 /** A body past this many characters keeps only its head, as text; the session's research cap still applies (#434). */
@@ -15,8 +16,8 @@ const ALLOWED_HEADER = new RegExp(PROVIDER_HEADER_PATTERN);
  */
 export function researchCaptureFor(call: TelemetryCall | undefined, ctx: TelemetryContext | undefined) {
 	if (!call || !ctx) return undefined;
-	const body = telemetryCaptures("request.capture", ctx);
-	const headers = telemetryCaptures("provider.headers", ctx);
+	const body = telemetryCaptures("request.captured", ctx);
+	const headers = telemetryCaptures("provider.headers_captured", ctx);
 	if (!body && !headers) return undefined;
 	return {
 		/** The serialized payload Pi handed its provider; absent when it never got that far. */
@@ -24,8 +25,8 @@ export function researchCaptureFor(call: TelemetryCall | undefined, ctx: Telemet
 			try {
 				if (body && serialized !== undefined) {
 					const truncated = serialized.length > REQUEST_CAPTURE_MAX_CHARS;
-					recordTelemetryContent(
-						"request.capture",
+					telemetryHub().emitContent(
+						"request.captured",
 						{ bodyBytes: Buffer.byteLength(serialized), truncated },
 						// A parsed copy: the live payload shares message objects the agent keeps mutating.
 						truncated
@@ -42,7 +43,7 @@ export function researchCaptureFor(call: TelemetryCall | undefined, ctx: Telemet
 						if (ALLOWED_HEADER.test(key)) kept[key] = String(value).slice(0, HEADER_VALUE_MAX_CHARS);
 					}
 					if (Object.keys(kept).length > 0)
-						recordTelemetry("provider.headers", { status: response.status, headers: kept }, ctx);
+						telemetryHub().emit("provider.headers_captured", { status: response.status, headers: kept }, ctx);
 				}
 			} catch {
 				// Research capture never changes the call it describes (#434).

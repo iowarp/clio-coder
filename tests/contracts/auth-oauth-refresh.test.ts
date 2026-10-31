@@ -15,10 +15,10 @@ import { classifyCallFailure } from "../../src/core/call-failure.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../../src/core/oauth-retry.js";
 import { isProviderAuthRejection } from "../../src/core/provider-auth-error.js";
 import { withTelemetryContext } from "../../src/core/telemetry/context.js";
+import { validPayload } from "../../src/core/telemetry/events.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { registerTelemetrySink, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
-import { validPayload } from "../../src/core/telemetry/schemas.js";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { AuthStorage, resolveAuthTarget } from "../../src/domains/providers/auth/storage.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
@@ -356,9 +356,9 @@ describe("contracts/auth OAuth refresh", () => {
 		} finally {
 			release();
 		}
-		const events = records.filter((record) => record.kind === "auth.event");
+		const events = records.filter((record) => record.kind === "auth.refreshed");
 		strictEqual(events.length, 2);
-		for (const event of events) ok(validPayload("auth.event", event.data), JSON.stringify(event.data));
+		for (const event of events) ok(validPayload("auth.refreshed", event.data), JSON.stringify(event.data));
 		const byOutcome = Object.fromEntries(
 			events.map((event) => [(event.data as { outcome: string }).outcome, event.data]),
 		);

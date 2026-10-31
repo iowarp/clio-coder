@@ -8,10 +8,10 @@ import type {
 } from "../../core/telemetry/dto.js";
 import { parseFactRef, TELEMETRY_DTO_VERSION, TELEMETRY_TOPICS } from "../../core/telemetry/dto.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import { telemetryProducerHealth } from "../../core/telemetry/producer.js";
 import { renderFact } from "../../core/telemetry/render.js";
-import type { Payload } from "../../core/telemetry/schemas.js";
 import { observedQuotaReadings, STREAM_QUOTA_TTL_MS } from "../quota/observed.js";
 import type { CallJournalRead, PersistedTelemetry } from "./call-journal.js";
 import {
@@ -150,7 +150,7 @@ interface Binding {
 	health: HealthCursor;
 }
 
-type QuotaReading = Payload<"quota.reading">;
+type QuotaReading = EventPayload<"quota.read">;
 type QuotaRow = QuotaStateV1["providers"][number];
 /** The newest journaled reading per account, scanned forward as the session's journal grows (#434). */
 interface QuotaCursor {
@@ -161,11 +161,11 @@ interface QuotaCursor {
 /** The account a reading names, as the process's own observations key it: Codex readings are per target. */
 const quotaAccount = (reading: QuotaReading) =>
 	reading.provider === "codex" ? `codex:${reading.targetId}` : reading.provider;
-/** The newest health.window the bound session's journal holds, scanned forward as the journal grows (#434 §14). */
+/** The newest health.sampled the bound session's journal holds, scanned forward as the journal grows (#434 §14). */
 interface HealthCursor {
 	records: readonly TelemetryRecord[] | null;
 	scanned: number;
-	latest: { at: string; data: Payload<"health.window"> } | null;
+	latest: { at: string; data: EventPayload<"health.sampled"> } | null;
 }
 
 function owned(owner: string): Owned {
@@ -244,23 +244,27 @@ function merge(entry: Owned, cold: JournalSource): void {
 }
 
 function referencedRuns(records: readonly TelemetryRecord[]): string[] {
-	return records.flatMap((record) => (record.k === "call.ref" || record.k === "run.ref" ? [record.data.runId] : []));
+	return records.flatMap((record) =>
+		record.k === "call.linked" || record.k === "run.linked" ? [record.data.runId] : [],
+	);
 }
 
 function topicsFor(owner: string, root: string, records: readonly TelemetryRecord[]): Set<TelemetryTopic> {
 	if (owner.startsWith("run:"))
-		return new Set<TelemetryTopic>(records.some((record) => record.k === "gap") ? [...RUN_TOPICS, "health"] : RUN_TOPICS);
+		return new Set<TelemetryTopic>(
+			records.some((record) => record.k === "journal.gap") ? [...RUN_TOPICS, "health"] : RUN_TOPICS,
+		);
 	// An ancestor's batches move only the lineage totals the session DTO carries.
 	if (owner !== root) return new Set<TelemetryTopic>(["session"]);
 	const topics = new Set<TelemetryTopic>();
 	for (const record of records) {
 		if (record.k === "call.started" || record.k === "call.settled") for (const topic of SESSION_TOPICS) topics.add(topic);
-		else if (record.k === "call.ref" || record.k === "run.ref") for (const topic of RUN_TOPICS) topics.add(topic);
-		else if (record.k === "gap") {
+		else if (record.k === "call.linked" || record.k === "run.linked") for (const topic of RUN_TOPICS) topics.add(topic);
+		else if (record.k === "journal.gap") {
 			topics.add("session");
 			topics.add("health");
-		} else if (record.k === "quota.reading") topics.add("quota");
-		else if (record.k === "health.window") topics.add("health");
+		} else if (record.k === "quota.read") topics.add("quota");
+		else if (record.k === "health.sampled") topics.add("health");
 		else {
 			topics.add("session");
 			topics.add("timeline");
@@ -574,7 +578,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		}
 		for (; cursor.scanned < records.length; cursor.scanned += 1) {
 			const record = records[cursor.scanned];
-			if (record?.k !== "quota.reading") continue;
+			if (record?.k !== "quota.read") continue;
 			const account = quotaAccount(record.data);
 			const prior = cursor.latest.get(account);
 			if (!prior || record.data.observedAt > prior.observedAt) cursor.latest.set(account, record.data);
@@ -595,7 +599,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		}
 		for (; cursor.scanned < records.length; cursor.scanned += 1) {
 			const record = records[cursor.scanned];
-			if (record?.k !== "health.window") continue;
+			if (record?.k !== "health.sampled") continue;
 			if (!cursor.latest || record.t >= cursor.latest.at) cursor.latest = { at: record.t, data: record.data };
 		}
 		return cursor.latest;
@@ -728,7 +732,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		},
 		health() {
 			const producer = telemetryProducerHealth();
-			// Loop lag is the session's newest health.window: unknown until one lands, or when no sample landed in that
+			// Loop lag is the session's newest health.sampled: unknown until one lands, or when no sample landed in that
 			// window (#434 §14).
 			const window = latestHealthWindow()?.data.loopLag;
 			const lag = (ms: number | undefined) => {

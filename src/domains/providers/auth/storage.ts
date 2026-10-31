@@ -1,7 +1,7 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { rememberResolvedSecret } from "../../../core/sandbox/env-scrub.js";
 import { telemetryContext } from "../../../core/telemetry/context.js";
-import { recordTelemetry } from "../../../core/telemetry/producer.js";
+import { telemetryHub } from "../../../core/telemetry/hub.js";
 import type { OAuthLoginCallbacks } from "../../../engine/oauth.js";
 import type { AuthOperationOptions } from "../../../engine/types.js";
 import type { RuntimeAuth, RuntimeDescriptor } from "../types/runtime-descriptor.js";
@@ -542,7 +542,7 @@ export class AuthStorage {
 	}
 
 	/**
-	 * One auth.event per refresh under the lock: whether this process called the provider, what came back, and the
+	 * One auth.refreshed per refresh under the lock: whether this process called the provider, what came back, and the
 	 * credential's updatedAt before and after, so another writer's rotation is visible. No token is recorded (#427).
 	 */
 	private async refreshOAuthCredentialWithLock(
@@ -572,8 +572,8 @@ export class AuthStorage {
 			const ctx = telemetryContext();
 			try {
 				if (ctx)
-					recordTelemetry(
-						"auth.event",
+					telemetryHub().emit(
+						"auth.refreshed",
 						{
 							provider: providerId,
 							trigger: rejectedApiKey === undefined ? "expiry" : "rejected",

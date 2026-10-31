@@ -66,9 +66,10 @@ import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { captureAdmits, STANDARD_CAPTURE, systemOneDatasetRecording } from "../core/telemetry/capture.js";
 import { factRef } from "../core/telemetry/dto.js";
-import { recordTelemetry } from "../core/telemetry/producer.js";
+import type { EventPayload } from "../core/telemetry/events.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import { registerResearchTraceSink } from "../core/telemetry/research-trace.js";
-import type { CallSettled, Payload } from "../core/telemetry/schemas.js";
+import type { CallSettled } from "../core/telemetry/schemas.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -1554,7 +1555,7 @@ async function runCompactionFlow(
 	const lease = await telemetry?.acquireTelemetrySession?.(meta, "compaction");
 	const callIds = new Set<string>();
 	const settledCalls: CallSettled[] = [];
-	const closure: Payload<"compaction.closed"> = { callIds: [], outcome: "failed", checkpointTurnId: null };
+	const closure: EventPayload<"compaction.settled"> = { callIds: [], outcome: "failed", checkpointTurnId: null };
 	try {
 		// Folded over the full applicable ledger before this compaction cuts it, so
 		// the carry written below reflects every durable transition, including ones
@@ -1871,7 +1872,7 @@ async function runCompactionFlow(
 		return result;
 	} finally {
 		if (lease && callIds.size > 0)
-			recordTelemetry("compaction.closed", { ...closure, callIds: [...callIds] }, lease.context);
+			telemetryHub().emit("compaction.settled", { ...closure, callIds: [...callIds] }, lease.context);
 		if (telemetry && session.current()?.id === meta.id) {
 			try {
 				for (const facts of settledCalls) {

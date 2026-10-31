@@ -20,7 +20,7 @@ import type {
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
-import type { PreimageData, PreimageKind } from "../../core/telemetry/schemas.js";
+import type { PreimageData, PreimageEventName } from "../../core/telemetry/events.js";
 import type { AgentAudience } from "../agents/spec.js";
 import type { RunToolBudgetEnvelope } from "../dispatch/budget-envelope.js";
 import type { DispatchSnapshot } from "../dispatch/contract.js";
@@ -227,7 +227,7 @@ export interface TelemetryContract extends TelemetryRunProjection {
 	/** What the session's telemetry captures now, for recorders that write outside the call journal (#434). */
 	telemetryCapture?(origin: TelemetrySessionOrigin): TelemetryCapture;
 	/** Journal a background research trace into the session's own journal, its text into `objects/` (#434). */
-	recordResearchTrace?<K extends PreimageKind>(
+	recordResearchTrace?<K extends PreimageEventName>(
 		origin: TelemetrySessionOrigin,
 		kind: K,
 		data: PreimageData<K>,

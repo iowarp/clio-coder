@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { validPayload } from "../../src/core/telemetry/schemas.js";
+import { validPayload } from "../../src/core/telemetry/events.js";
 import { decideBackgroundStep } from "../../src/domains/memory/background-budget.js";
 import { getCatalogModelForRuntime } from "../../src/domains/providers/catalog.js";
 import { createCodexCliQuotaProvider } from "../../src/domains/quota/codex-cli-provider.js";
@@ -366,7 +366,7 @@ it("journals a codex.rate_limits event as one quota reading whose identity ignor
 	const later = parseCodexQuotaEvent(event, "account", NOW.getTime() + 5_000);
 	assert.ok(first && later);
 	const reading = quotaReadingFromMessage({ codexQuota: first }, "openai-codex", "codex-target");
-	assert.ok(reading && validPayload("quota.reading", reading));
+	assert.ok(reading && validPayload("quota.read", reading));
 	assert.equal(reading.source, "stream-event");
 	assert.equal(reading.limitReached, true);
 	assert.deepEqual(
