@@ -27,8 +27,11 @@ export interface ProcessJournal {
 	readonly processId: string;
 	/** Flush what reached the writer. */
 	flush(): Promise<void>;
-	/** Write `process.exited` and seal when the journal opened, then release it; one that never opened stays absent. */
-	close(exitCode: number): Promise<void>;
+	/**
+	 * Write `process.exited` and seal when the journal opened, then release it; one that never opened stays absent.
+	 * False when the journal opened and its seal did not land, which the unavailable callback also reports (#434).
+	 */
+	close(exitCode: number): Promise<boolean>;
 }
 
 /**
@@ -117,16 +120,18 @@ export function createProcessJournal(
 			await (await writer)?.flush();
 		},
 		async close(exitCode) {
-			if (closed) return;
+			if (closed) return true;
 			closed = true;
 			unregister();
 			const journal = await writer;
-			if (!journal) return;
+			if (!journal) return ready !== null;
 			if (dropped > 0) unavailable();
 			journal.enqueue(stamp("process.exited", { exitCode }));
-			// An orderly exit seals the process scope (#434).
-			await journal.seal();
+			// An orderly exit seals the process scope; a seal that did not land is coverage the caller must report (#434).
+			const sealed = await journal.seal();
 			await journal.close();
+			if (!sealed) unavailable();
+			return sealed;
 		},
 	};
 }

@@ -263,10 +263,11 @@ export async function runLibraryCommand(
 	let exitCode = 1;
 	try {
 		exitCode = await executeLibraryCommand(args, discoveryOptions);
-		return exitCode;
 	} finally {
-		await journal.close(exitCode);
+		// A lifecycle command whose process scope did not seal has no durable account, so it cannot report success (#434).
+		if (!(await journal.close(exitCode)) && exitCode === 0) exitCode = 1;
 	}
+	return exitCode;
 }
 
 async function executeLibraryCommand(
