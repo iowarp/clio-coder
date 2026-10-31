@@ -7,6 +7,7 @@ import { STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { SegmentHeader } from "../../core/telemetry/envelope.js";
 import { readTelemetryRecord } from "../../core/telemetry/envelope.js";
 import { crc32, scanTelemetrySegment } from "../../core/telemetry/segment.js";
+import { CONTENT_SUBJECTS, collectRefs } from "./objects.js";
 import {
 	TELEMETRY_JOURNAL_FILE,
 	telemetryJournalFiles,
@@ -26,20 +27,6 @@ import {
 export const BUNDLE_FORMAT = "clio-telemetry-bundle/1";
 const MAX_FILE_BYTES = 1024 * 1024 * 1024;
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
-const OBJECT_ID = /^obj_[0-9a-f]{64}$/;
-/**
- * Object subjects that hold content: a share below content-bearing drops them, and research retention expires a
- * session's before the records that cite them. A run's `run-result` is written in every mode (#434).
- */
-export const CONTENT_SUBJECTS: ReadonlySet<string> = new Set([
-	"prompt-text",
-	"request",
-	"memory-trace",
-	"observation-trace",
-	"system-one-sample",
-	"run-result",
-]);
-
 /**
  * The most a bundle's records may carry: content-free facts only, structure beside them, or content under research
  * mode and consent. An export is content-free unless asked for more (#434 §11.3, §14).
@@ -211,19 +198,6 @@ async function readSegments(directory: string): Promise<Buffer[] | null> {
 		}
 	}
 	throw new Error(`${directory} rotated repeatedly during export`);
-}
-
-/** Resolvable references anywhere in a record's payload, by object id. */
-export function collectRefs(value: unknown, refs: Map<string, string>): void {
-	if (Array.isArray(value)) {
-		for (const item of value) collectRefs(item, refs);
-		return;
-	}
-	if (!value || typeof value !== "object") return;
-	const record = value as Record<string, unknown>;
-	if (record.label === "resolvable" && typeof record.id === "string" && OBJECT_ID.test(record.id))
-		refs.set(record.id, typeof record.subject === "string" ? record.subject : "unknown");
-	for (const child of Object.values(record)) collectRefs(child, refs);
 }
 
 function ceilingOf(headers: ReadonlyArray<SegmentHeader>, content: boolean): TelemetryCapture {

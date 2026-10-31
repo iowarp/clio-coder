@@ -3,7 +3,7 @@ import { lstat, readdir, readFile, rm, rmdir } from "node:fs/promises";
 import { join } from "node:path";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { liveSessionOwner } from "../session/live-owner.js";
-import { CONTENT_SUBJECTS, collectRefs } from "./bundle.js";
+import { CONTENT_SUBJECTS, collectRefs } from "./objects.js";
 import {
 	TELEMETRY_JOURNAL_FILE,
 	telemetryBundlePath,

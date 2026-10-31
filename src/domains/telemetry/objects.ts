@@ -98,6 +98,34 @@ const promptStructureSchema = Type.Object(
 	{ additionalProperties: false },
 );
 
+/**
+ * Object subjects that hold content: a share below the research profile drops them, and research retention expires a
+ * session's before the records that cite them. A run's `run-result` is written in every mode (#434).
+ */
+export const CONTENT_SUBJECTS: ReadonlySet<string> = new Set([
+	"prompt-text",
+	"request",
+	"memory-trace",
+	"observation-trace",
+	"system-one-sample",
+	"run-result",
+]);
+
+const OBJECT_ID = /^obj_[0-9a-f]{64}$/;
+
+/** Resolvable references anywhere in a record's payload: object id to subject. */
+export function collectRefs(value: unknown, refs: Map<string, string>): void {
+	if (Array.isArray(value)) {
+		for (const item of value) collectRefs(item, refs);
+		return;
+	}
+	if (!value || typeof value !== "object") return;
+	const record = value as Record<string, unknown>;
+	if (record.label === "resolvable" && typeof record.id === "string" && OBJECT_ID.test(record.id))
+		refs.set(record.id, typeof record.subject === "string" ? record.subject : "unknown");
+	for (const child of Object.values(record)) collectRefs(child, refs);
+}
+
 /** Commitments intentionally perform no I/O and make no claim that a preimage is retained (#434). */
 export function telemetryCommitment(subject: ObjectRef["subject"], value: unknown): ObjectRef {
 	return reference(subject, canonicalJson(value), "commitment");
