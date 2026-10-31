@@ -103,6 +103,19 @@ export interface SessionSource {
 	 */
 	accountQuota?: readonly TelemetryRecord[];
 }
+/** The account window a cold or live session reads, bounded by its own journal lifecycle (#434). */
+export function sessionAccountQuotaWindow(records: readonly TelemetryRecord[]): { from: number; to: number } | null {
+	let from = Number.POSITIVE_INFINITY;
+	let last: TelemetryRecord | undefined;
+	for (const record of records) {
+		const at = Date.parse(record.t);
+		if (Number.isFinite(at) && at < from) from = at;
+		if (!last || record.t >= last.t) last = record;
+	}
+	if (!Number.isFinite(from)) return null;
+	return { from, to: last?.k === "session.closed" ? Date.parse(last.t) : Number.POSITIVE_INFINITY };
+}
+
 /** Several sessions read as one scope: a repository's sessions over a window, already windowed by the loader (#434). */
 export interface RepoSource {
 	/** The ref owner, `<cwdHash>-<days>d` or `all-<days>d`; see {@link repoOwner}. */

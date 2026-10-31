@@ -19,7 +19,7 @@ import {
 	telemetrySessionsDirectory,
 } from "../telemetry/index.js";
 import type { JournalSource, ProcessIdentity, SessionSource } from "../telemetry/read-model.js";
-import { journalSourceFromRead } from "../telemetry/read-model.js";
+import { journalSourceFromRead, sessionAccountQuotaWindow } from "../telemetry/read-model.js";
 
 /**
  * Cold-path loader for the telemetry read model (#434 §11): a session's own journal, the run journals it referenced,
@@ -270,17 +270,10 @@ function* hostQuotaRecords(stateDir: string, since: number | null): Load<Telemet
 /** The account readings recorded while the session ran: from its first record to its close, or until now (#434). */
 function* withAccountQuota(stateDir: string, load: Load<SessionSource | null>): Load<SessionSource | null> {
 	const source = yield* load;
-	const records = source?.journal.records ?? [];
-	if (!source || records.length === 0) return source;
-	let from = Number.POSITIVE_INFINITY;
-	let last: TelemetryRecord | undefined;
-	for (const record of records) {
-		const at = Date.parse(record.t);
-		if (Number.isFinite(at) && at < from) from = at;
-		if (!last || record.t >= last.t) last = record;
-	}
-	if (!Number.isFinite(from)) return source;
-	const to = last?.k === "session.closed" ? Date.parse(last.t) : Number.POSITIVE_INFINITY;
+	if (!source) return source;
+	const window = sessionAccountQuotaWindow(source.journal.records);
+	if (!window) return source;
+	const { from, to } = window;
 	const accountQuota = (yield* hostQuotaRecords(stateDir, from)).filter((record) => {
 		const at = Date.parse(record.t);
 		return at >= from && at <= to;

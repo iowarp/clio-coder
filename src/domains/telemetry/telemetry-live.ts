@@ -36,6 +36,7 @@ import {
 	quantityOf,
 	runsReport,
 	runTelemetry,
+	sessionAccountQuotaWindow,
 	sessionTelemetry,
 	timeline,
 	turnsSum,
@@ -135,6 +136,7 @@ interface Node {
 	sessionId: string;
 	journal: Owned;
 	ledger?: SessionSource["ledger"];
+	accountQuota: readonly TelemetryRecord[];
 	runIds: Set<string>;
 	parent: { sessionId: string; turnId: string; at: string; node: Node | null } | null;
 	snapshot?: { journal: JournalSource; runs: JournalSource[]; parent: SessionSource | null; source: SessionSource };
@@ -399,6 +401,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			const node: Node = {
 				sessionId: src.sessionId,
 				journal: adopt(owner, src.journal),
+				accountQuota: src.accountQuota ?? [],
 				...(src.ledger ? { ledger: src.ledger } : {}),
 				runIds: new Set(src.runs.keys()),
 				parent: null,
@@ -416,6 +419,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			return node;
 		};
 		binding.root = build(source);
+		mergeAccountQuota(binding);
 		// Batches that landed after the cold read may reference runs it never saw; their buffers are kept and read.
 		const late: Array<{ entry: Owned; runId: string }> = [];
 		for (const node of binding.nodes.values())
@@ -514,10 +518,12 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		const runIds = [...node.runIds].sort();
 		const runs = runIds.map((runId) => journalOf(binding.owners.get(runOwner(runId))));
 		const journal = journalOf(node.journal);
+		mergeNodeAccountQuota(node);
 		const cached = node.snapshot;
 		if (
 			cached &&
 			cached.journal === journal &&
+			cached.source.accountQuota === node.accountQuota &&
 			cached.parent === parent &&
 			cached.runs.length === runs.length &&
 			cached.runs.every((run, index) => run === runs[index])
@@ -531,6 +537,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 				? { sessionId: node.parent.sessionId, turnId: node.parent.turnId, at: node.parent.at, source: parent }
 				: null,
 			...(node.ledger ? { ledger: node.ledger } : {}),
+			accountQuota: node.accountQuota,
 		};
 		// The node's journal only grows by appending after its seed, so the read model folds just the new batch (#434).
 		if (cached) continueSource(source, cached.source);
@@ -549,6 +556,31 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		};
 	};
 
+	const mergeNodeAccountQuota = (node: Node): boolean => {
+		const window = sessionAccountQuotaWindow(node.journal.records);
+		const records = new Map(node.accountQuota.map((record) => [record.id, record]));
+		for (const record of processFollow?.quota.values() ?? []) {
+			const at = Date.parse(record.t);
+			if (window && at >= window.from && at <= window.to) records.set(record.id, record);
+		}
+		const next = [...records.values()].filter((record) => {
+			const at = Date.parse(record.t);
+			return window && at >= window.from && at <= window.to;
+		});
+		if (next.length === node.accountQuota.length && next.every((record, index) => record === node.accountQuota[index]))
+			return false;
+		node.accountQuota = next;
+		return true;
+	};
+	const mergeAccountQuota = (binding: Binding): void => {
+		let changed = false;
+		for (const node of binding.nodes.values()) changed = mergeNodeAccountQuota(node) || changed;
+		if (changed) {
+			binding.version += 1;
+			markDirty(["session", "timeline"]);
+		}
+	};
+
 	/**
 	 * This process's own journal, followed from its persisted batches once a reader asks: health is a process fact,
 	 * so the newest window is the process's, never one session's (#434 §14).
@@ -564,6 +596,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			for (const { record } of read.records) {
 				if (record.k === "quota.read") {
 					follow.quota.set(record.id, record);
+					if (current) mergeAccountQuota(current);
 					markDirty(["quota"]);
 				} else if (record.k === "health.sampled") {
 					if (!follow.health || record.t >= follow.health.at) follow.health = { at: record.t, data: record.data };
@@ -578,6 +611,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			.then((records) => {
 				if (processFollow !== follow || !records) return;
 				for (const record of records) follow.quota.set(record.id, record);
+				if (current) mergeAccountQuota(current);
 				markDirty(["quota"]);
 			})
 			.catch(() => {
