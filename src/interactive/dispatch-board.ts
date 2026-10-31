@@ -1351,8 +1351,9 @@ function runUsagesOf(view: TelemetryView): Map<string, DispatchRunUsage> {
 const runTtfts = new WeakMap<TelemetryView, Map<string, string | null>>();
 
 /**
- * The run's first call's TTFT, send to first token, as its journal records it: the one TTFT every surface shows,
- * never an orchestrator clock that also counts the worker's startup (#434). Null until that call settles with one.
+ * The run's first generated token, send to first token of its earliest attempt that produced one, as the read model
+ * folds the run's journal: never an orchestrator clock that also counts the worker's startup, and never hidden by a
+ * failed attempt before it (#434). Null until such an attempt settles.
  */
 function dispatchRunTtft(view: TelemetryView | null | undefined, runId: string): string | null {
 	if (!view) return null;
@@ -1362,9 +1363,9 @@ function dispatchRunTtft(view: TelemetryView | null | undefined, runId: string):
 		runTtfts.set(view, ttfts);
 	}
 	if (ttfts.has(runId)) return ttfts.get(runId) ?? null;
-	const first = view.calls({ runId }).calls[0];
-	const kind = first && "kind" in first.timing.ttft.fact ? first.timing.ttft.fact.kind : null;
-	const ttft = first && (kind === "measured" || kind === "estimated") ? first.timing.ttft.display : null;
+	const first = view.quantity(factRef({ scope: "run", owner: runId, metric: "firstToken" }));
+	const kind = first && "kind" in first.fact ? first.fact.kind : null;
+	const ttft = first && (kind === "measured" || kind === "estimated") ? first.display : null;
 	ttfts.set(runId, ttft);
 	return ttft;
 }

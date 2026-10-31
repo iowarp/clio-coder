@@ -1069,7 +1069,8 @@ const RULES: Record<FactMetric, string> = {
 	apiCalls: "count(attempts that reached the provider)",
 	missingTokenCalls: "count(sent attempts whose token usage is unknown)",
 	ttft: "stages.firstToken − stages.send.end, per attempt",
-	firstToken: "stages.firstToken − stages.send.end for the first main-agent response in start order",
+	firstToken:
+		"ttft of the earliest attempt that measured or estimated one (for a prompt, among its main-agent responses), so a failed attempt before it never hides it",
 	modelTime: "stages.settle − stages.firstToken, per attempt",
 	settle: "stages.settle, per attempt",
 	admissionWait: "stages.admission.end − stages.admission.start, per attempt",
@@ -1360,9 +1361,9 @@ function latestContext(source: SessionSource): TelemetryRecord<"context.snapshot
 }
 
 function measure(view: View, ref: ParsedFactRef): Measurement | null {
-	if (ref.metric === "firstToken") {
-		if (!("session" in view) || ref.scope !== "session" || ref.owner !== view.session.sessionId || ref.attemptId)
-			return null;
+	// A prompt's first token is its first main-agent response; other scopes take the earliest attempt below (#434).
+	if (ref.metric === "firstToken" && "session" in view && ref.scope === "session") {
+		if (ref.owner !== view.session.sessionId || ref.attemptId) return null;
 		if (ref.group && ref.group.by !== "turns" && ref.group.by !== "turn") return null;
 		const analysis = analyze(view.session);
 		const turns = ref.group?.by === "turns" ? new Set(ref.group.key === "-" ? [] : ref.group.key.split(",")) : null;
@@ -1487,6 +1488,14 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 	const selection = select(view, ref);
 	if (!selection) return null;
 	const encoded = factRef(ref);
+	if (ref.metric === "firstToken") {
+		const fact = firstTokenFact(
+			selection.attempt
+				? [selection.attempt]
+				: selection.parts.flatMap((part) => part.attempts ?? part.run?.attempts ?? []),
+		);
+		return { quantity: { fact, display: display("ttft", fact, false), ref: encoded }, selection };
+	}
 	const attempt = selection.attempt;
 	if (attempt) {
 		const metric = ref.metric;
@@ -1503,6 +1512,19 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 	const sums = selection.parts.map((part) => partSum(part, ref.metric));
 	const fact = sums.length === 1 && sums[0] ? sums[0] : sumFactSums(sums);
 	return { quantity: { fact, display: display(ref.metric, fact, allFree(selection.parts)), ref: encoded }, selection };
+}
+
+/**
+ * The first generated token of a selection: the TTFT of its earliest attempt that has one. A retry after a failed
+ * request still shows when the work first produced output (#434).
+ */
+function firstTokenFact(attempts: readonly Attempt[]): Fact<number> {
+	const ordered = [...attempts].sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
+	for (const attempt of ordered) {
+		const fact = attemptFact(attempt, "ttft");
+		if (fact.kind === "measured" || fact.kind === "estimated") return fact;
+	}
+	return unobserved;
 }
 
 function partSum(part: Part, metric: FactMetric): FactSum {
