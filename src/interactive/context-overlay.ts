@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { relative } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
+import { uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
@@ -234,7 +235,8 @@ function renderContextLedgerLines(
 	lines.push(theme.fg("annotation", footer));
 
 	// Cache facts are the newest main call's journal record (#434 §11.3), so an unreported cache read reads unknown,
-	// never 0. The session shell hash and the serving backend's timings are Clio's own and stay on the ledger.
+	// never 0. The session shell hash and the serving backend's timings are Clio's own and stay on the ledger. A server
+	// that omits cache reads from its usage but reports cache_n in its timings shows that read, labelled the server's.
 	const cache = ledger.promptCache;
 	const call = telemetry?.calls({ labels: ["main"], limit: 1 }).calls[0] ?? null;
 	if (cache || call) {
@@ -244,10 +246,9 @@ function renderContextLedgerLines(
 		else {
 			const verdict = call.cache.verdict;
 			const readFact = call.usage.cacheRead.fact;
-			const backendCacheReadsUnknown =
-				verdict === "unknown" ||
-				("kind" in readFact && readFact.kind === "unknown") ||
-				cache?.backend?.cachedTokens === null;
+			const serverRead =
+				"kind" in readFact && readFact.kind === "unknown" ? (cache?.backend?.cachedTokens ?? null) : undefined;
+			const backendCacheReadsUnknown = verdict === "unknown" || serverRead === null;
 			const backend = backendCacheReadsUnknown
 				? "server does not report cache reads"
 				: verdict === "hot"
@@ -269,9 +270,11 @@ function renderContextLedgerLines(
 						backend,
 						...rePrefilled,
 						"·",
-						`cache read ${call.usage.cacheRead.display}`,
+						serverRead === undefined
+							? `cache read ${call.usage.cacheRead.display}`
+							: `server cache read ${formatTokens(serverRead)}`,
 						"·",
-						`uncached input ${call.usage.input.display}`,
+						`uncached prefill ${call.cache.uncachedPrefill.display}`,
 					].join(" ");
 			// Reasons Clio recorded before the call describe either prefix-byte changes
 			// or local-server activity that displaced the cached prefix. A cold turn
@@ -285,10 +288,12 @@ function renderContextLedgerLines(
 				cache?.shellReused === true && verdict === "cold" && !backendCacheReadsUnknown && coldReasons.length === 0;
 			lines.push(theme.fg(misleading ? "warning" : "annotation", line));
 			if (cache?.backend) {
+				// The serving backend's own timing for the run's last call, worded as its counts, not the journal's.
+				const evaluated = uncachedPrefillTokens(cache.backend);
 				const prefill =
-					cache.backend.cachedTokens !== null
-						? `prefill: ${call.cache.uncachedPrefill.display} uncached · ${formatTokens(cache.backend.cachedTokens)} cached · ${formatTokens(cache.backend.promptMs)} ms`
-						: `prefill: ${formatTokens(cache.backend.promptTokens)} prompt · ${formatTokens(cache.backend.promptMs)} ms`;
+					evaluated !== null
+						? `server prefill: ${formatTokens(evaluated)} evaluated · ${formatTokens(cache.backend.promptTokens - evaluated)} cached · ${formatTokens(cache.backend.promptMs)} ms`
+						: `server prefill: ${formatTokens(cache.backend.promptTokens)} prompt · ${formatTokens(cache.backend.promptMs)} ms`;
 				lines.push(theme.fg("annotation", prefill));
 			}
 			if (coldReasons.length > 0) {

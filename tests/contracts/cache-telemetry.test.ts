@@ -6,7 +6,12 @@ import {
 	type CacheRequestStructure,
 } from "../../src/core/cache-telemetry.js";
 import type { CallUsage } from "../../src/core/telemetry/schemas.js";
-import { cachePhysics, firstDivergentSection } from "../../src/domains/observability/cache-physics.js";
+import {
+	cachePhysics,
+	firstDivergentSection,
+	serverTimedUsage,
+} from "../../src/domains/observability/cache-physics.js";
+import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { foldPromptCacheTelemetry } from "../../src/domains/session/prompt-cache.js";
 
@@ -109,6 +114,47 @@ test("the journal names the first divergence in request order and leaves an unre
 		pricing,
 	});
 	deepStrictEqual(resumed.cache.rePrefilledTokens, { kind: "unknown", reason: "not-observed" });
+});
+
+test("a server whose usage omits cache reads is judged by its own cache_n, and its usage facts stand (#434)", () => {
+	const settlement = callSettlementFromMessage(
+		{
+			role: "assistant",
+			stopReason: "stop",
+			usage: { input: 10_000, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 10_005, cacheReadReported: false },
+		},
+		"known_free",
+	);
+	// The usage's input is the whole prompt, so it is no uncached prefill without a measured read beside it.
+	deepStrictEqual(settlement.usage?.input, { kind: "measured", value: 10_000, source: "provider" });
+	deepStrictEqual(settlement.usage?.cacheRead, { kind: "unknown", reason: "provider-omitted" });
+	deepStrictEqual(settlement.cache.uncachedPrefillTokens, { kind: "unknown", reason: "provider-omitted" });
+	const backend = {
+		promptTokens: 10_000,
+		cachedTokens: 6_000,
+		predictedTokens: 5,
+		promptMs: 120,
+		predictedMs: 40,
+		source: "llamacpp-timings",
+	} as const;
+	const timed = serverTimedUsage(settlement, backend);
+	deepStrictEqual(
+		[timed?.input, timed?.cacheRead, timed?.cacheWrite],
+		[4_000, 6_000, 0].map((value) => ({ kind: "measured", value, source: "provider" })),
+	);
+	const structure: CacheRequestStructure = { system: "s", tools: "t", entries: ["a", "b"], answered: true };
+	const physics = cachePhysics({
+		settlement: { ...settlement, usage: timed ?? null },
+		structure,
+		previous: { structure, promptTokens: 9_000 },
+		pricing: { rates: null, provenance: "known_free" },
+	});
+	deepStrictEqual(physics.cache.rePrefilledTokens, { kind: "measured", value: 3_000, source: "local-count" });
+	strictEqual(physics.baseline?.promptTokens, 10_000);
+	strictEqual(serverTimedUsage(settlement, { ...backend, cachedTokens: null }), undefined);
+	strictEqual(serverTimedUsage({ ...settlement, disposition: "sent_unsettled" }, backend), undefined);
+	const read = { ...settlement, usage: timed ?? null };
+	strictEqual(serverTimedUsage(read, backend), undefined, "a measured read is the provider's and stands");
 });
 
 test("an omitted cache read leaves the shortfall unknown and is never a break, in new and old ledger rows (#434)", () => {

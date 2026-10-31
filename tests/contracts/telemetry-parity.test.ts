@@ -144,7 +144,7 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 		const [newest] = cold.calls.calls.filter((call) => call.label === "main").slice(-1);
 		ok(newest?.usage, "the newest main call settled with usage");
 		ok(text.includes(`cache read ${newest.usage.cacheRead.display}`), text);
-		ok(text.includes(`uncached input ${newest.usage.input.display}`), text);
+		ok(text.includes(`uncached prefill ${newest.cache.uncachedPrefill.display}`), text);
 	} finally {
 		context.hide();
 	}

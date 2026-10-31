@@ -650,13 +650,22 @@ test("a cache break re-prefills past the shared band, or an unknown amount on a 
 	const call = (
 		verdict: CallSettled["cache"]["verdict"],
 		rePrefilled: CallSettled["cache"]["rePrefilledTokens"],
-		cacheRead = 0,
+		cacheRead: number | null = 0,
+		timed?: { input: number; uncached: number },
 	) =>
-		telemetryCall("cache-breaks", { usage: { cacheRead } }).map((record) =>
+		telemetryCall("cache-breaks", { usage: { cacheRead, ...(timed ? { input: timed.input } : {}) } }).map((record) =>
 			record.k === "call.settled"
 				? ({
 						...record,
-						data: { ...record.data, cache: { ...record.data.cache, verdict, rePrefilledTokens: rePrefilled } },
+						data: {
+							...record.data,
+							cache: {
+								...record.data.cache,
+								verdict,
+								rePrefilledTokens: rePrefilled,
+								...(timed ? { uncachedPrefillTokens: { kind: "measured", value: timed.uncached, source: "provider" } } : {}),
+							},
+						},
 					} as TelemetryRecord)
 				: record,
 		);
@@ -674,6 +683,8 @@ test("a cache break re-prefills past the shared band, or an unknown amount on a 
 					// What an append loses at the provider's 128-token boundaries, and a loss under a tenth of the prefix.
 					...call("partial", measured(849), 200_000),
 					...call("partial", measured(5_000), 100_000),
+					// A server whose usage omits its read, which read its prompt less the prefill its timings measured.
+					...call("partial", measured(5_000), null, { input: 100_000, uncached: 5_000 }),
 					...call("partial", measured(4_096)),
 					...call("partial", unknown),
 					...call("cold", unknown),

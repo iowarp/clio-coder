@@ -8,7 +8,7 @@ import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { observationTracing, traceObservation } from "../domains/memory/observation-trace.js";
 import type { CacheBaseline } from "../domains/observability/cache-physics.js";
-import { cachePhysics } from "../domains/observability/cache-physics.js";
+import { cachePhysics, serverTimedUsage } from "../domains/observability/cache-physics.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/observability/session-journals.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
@@ -719,8 +719,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			} catch {
 				// A request Clio cannot digest leaves its cache facts unobserved; telemetry never fails the call (#434).
 			}
+			const backend = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
+			// A server whose usage omits cache reads its own timings report is judged by those timings (#434).
+			const timed = serverTimedUsage(settlement, backend);
 			const physics = cachePhysics({
-				settlement,
+				settlement: timed ? { ...settlement, usage: timed } : settlement,
 				structure,
 				previous: cacheBaselines.get(key),
 				pricing: resolveEffectivePricing(resolution.target, resolution.runtime, resolution.wireModelId),
@@ -728,7 +731,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (physics.baseline) cacheBaselines.set(key, physics.baseline);
 			else cacheBaselines.delete(key);
 			const usage = (message as { usage?: Record<string, unknown> }).usage ?? {};
-			const backend = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
 			const verdict =
 				settlement.disposition === "settled" && typeof usage.input === "number" && typeof usage.cacheRead === "number"
 					? backendCacheVerdict(
@@ -740,7 +742,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					: "unknown";
 			return {
 				...settlement,
-				cache: { ...settlement.cache, ...physics.cache, expectedColdReasons: sent ? reasons : [], verdict },
+				cache: {
+					...settlement.cache,
+					...physics.cache,
+					...(timed ? { uncachedPrefillTokens: timed.input } : {}),
+					expectedColdReasons: sent ? reasons : [],
+					verdict,
+				},
 			};
 		};
 		// A call the producer relabels never sent, because its stages never reached the send, leaves its expected cold

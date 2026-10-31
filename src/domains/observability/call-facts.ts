@@ -194,7 +194,14 @@ export function callSettlementFromMessage(
 			firstDivergentSection: unobserved,
 			expectedColdReasons: [],
 			rePrefilledTokens: unobserved,
-			uncachedPrefillTokens: neverSent || !terminal ? unobserved : counts.input,
+			// Input is the uncached prefill only beside a measured cache read; a provider that omits its reads reports
+			// the whole prompt there (#434).
+			uncachedPrefillTokens:
+				neverSent || !terminal
+					? unobserved
+					: counts.cacheRead.kind === "measured"
+						? counts.input
+						: { kind: "unknown", reason: "provider-omitted" },
 			verdict: "unknown",
 		},
 		...(typeof raw.responseId === "string" ? { responseId: raw.responseId } : {}),

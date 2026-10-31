@@ -1,5 +1,5 @@
-import type { CacheRequestStructure } from "../../core/cache-telemetry.js";
-import { firstChangedSection } from "../../core/cache-telemetry.js";
+import type { BackendCompletionTimings, CacheRequestStructure } from "../../core/cache-telemetry.js";
+import { firstChangedSection, uncachedPrefillTokens } from "../../core/cache-telemetry.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { CallSettled } from "../../core/telemetry/schemas.js";
 import type { EffectivePricing } from "../providers/catalog.js";
@@ -18,6 +18,28 @@ const notApplicable = { kind: "absent", reason: "not-applicable" } as const;
 const unobserved = { kind: "unknown", reason: "not-observed" } as const;
 const counted = <T>(value: T) => ({ kind: "measured", value, source: "local-count" }) as const;
 const measured = (fact: Fact<number> | undefined): number | null => (fact?.kind === "measured" ? fact.value : null);
+
+/**
+ * The usage a server that omits cache reads from its usage but reports them in its own timings (llama.cpp's cache_n)
+ * is judged by: the prompt it evaluated is the uncached input and cache_n the read. Undefined when the provider
+ * measured its own read or the timings report none, so the provider's usage facts stand (#434).
+ */
+export function serverTimedUsage(
+	settlement: Pick<CallSettled, "disposition" | "usage">,
+	backend: BackendCompletionTimings | null | undefined,
+): NonNullable<CallSettled["usage"]> | undefined {
+	const usage = settlement.usage;
+	if (!usage || usage.cacheRead.kind === "measured" || settlement.disposition === "sent_unsettled") return undefined;
+	const evaluated = uncachedPrefillTokens(backend);
+	if (evaluated === null || !backend) return undefined;
+	const server = (value: number) => ({ kind: "measured", value, source: "provider" }) as const;
+	return {
+		...usage,
+		input: server(evaluated),
+		cacheRead: server(backend.promptTokens - evaluated),
+		cacheWrite: server(0),
+	};
+}
 
 /** Request order is the leading prompt, its tools, then the transcript; a shorter transcript diverges where it ends. */
 export function firstDivergentSection(previous: CacheRequestStructure, current: CacheRequestStructure): string | null {

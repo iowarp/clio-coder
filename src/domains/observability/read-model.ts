@@ -787,17 +787,22 @@ function runModelKey(run: Run): string {
 }
 /**
  * A cache break re-prefilled what the cache had served past the shared band: more than 1,024 tokens and a tenth of the
- * previous request's prefix, which is what this call read plus what it prefilled again. An unknown re-prefill breaks
- * on a call whose verdict says the cache missed. `partial` also labels an ordinary call that appended a tool result to
- * a warm prefix, and the band absorbs the tokens such an append loses at cache boundaries (#423).
+ * previous request's prefix, which is what this call read plus what it prefilled again. A server whose usage omits
+ * its read but whose timings measured the uncached prefill read the prompt less that prefill. An unknown re-prefill
+ * breaks on a call whose verdict says the cache missed. `partial` also labels an ordinary call that appended a tool
+ * result to a warm prefix, and the band absorbs the tokens such an append loses at cache boundaries (#423, #434).
  */
 function isBreak(attempt: Attempt): boolean {
 	const settled = attempt.settled;
 	if (!settled || settled.disposition === "never_sent") return false;
 	const re = settled.cache.rePrefilledTokens;
 	if (re.kind === "measured" || re.kind === "estimated") {
-		const read = settled.usage?.cacheRead;
-		const served = read && (read.kind === "measured" || read.kind === "estimated") ? read.value : 0;
+		const known = (fact: Fact<number> | undefined) =>
+			fact && (fact.kind === "measured" || fact.kind === "estimated") ? fact.value : null;
+		const prompt = known(settled.usage?.input);
+		const uncached = known(settled.cache.uncachedPrefillTokens);
+		const served =
+			known(settled.usage?.cacheRead) ?? (prompt !== null && uncached !== null ? Math.max(0, prompt - uncached) : 0);
 		return cacheBreakLoss(re.value, served + re.value);
 	}
 	return re.kind === "unknown" && (settled.cache.verdict === "cold" || settled.cache.verdict === "partial");

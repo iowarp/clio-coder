@@ -1053,6 +1053,60 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("words a server's own cache read when its usage omits one, and labels the server's prefill timing (#434)", () => {
+		const ledger = () =>
+			buildContextLedger({
+				provider: "fixture",
+				model: "fixture",
+				contextWindow: 32768,
+				systemPromptTokens: 1200,
+				toolSchemaTokens: 800,
+				messageTokens: 1000,
+				compactionThreshold: 0.9,
+				compactionAuto: true,
+				promptCache: {
+					shellReused: true,
+					cacheReadTokens: null,
+					cacheWriteTokens: null,
+					uncachedInputTokens: 10_000,
+					backend: {
+						promptTokens: 10_000,
+						cachedTokens: 6_000,
+						predictedTokens: 10,
+						promptMs: 120,
+						predictedMs: 50,
+						source: "llamacpp-timings",
+					},
+					uncachedPrefillTokens: 4_000,
+					backendVerdict: "partial",
+				},
+			});
+		const view = telemetryViewOf(
+			"server-cache",
+			telemetryCall("server-cache", {
+				usage: { input: 10_000, cacheRead: null },
+				cache: {
+					verdict: "partial",
+					rePrefilledTokens: { kind: "measured", value: 3_000, source: "local-count" },
+					uncachedPrefillTokens: { kind: "measured", value: 4_000, source: "provider" },
+				},
+			}),
+		);
+		const tui = {
+			showOverlay: () => ({ hide() {} }),
+			requestRender() {},
+		} as unknown as TUI;
+		const handle = openContextOverlay(tui, ledger, { telemetry: { live: () => view, subscribe: () => () => {} } });
+		try {
+			const plain = (dockTop(tui)?.frame.renderDockBody(140, 60) ?? []).map(stripTerminalSequences).join("\n");
+			match(plain, /backend partly reused · re-prefilled 3,000 · server cache read 6,000 · uncached prefill 4,000/u);
+			match(plain, /server prefill: 4,000 evaluated · 6,000 cached · 120 ms/u);
+			doesNotMatch(plain, /does not report cache reads/u);
+		} finally {
+			handle.hide();
+		}
+	});
+
 	it("lists System One's engine breakers on /health beside the route breakers", () => {
 		const tui = {
 			showOverlay: () => ({ hide() {} }),

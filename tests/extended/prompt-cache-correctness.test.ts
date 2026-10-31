@@ -533,7 +533,7 @@ describe("session replay prefix stability", () => {
 	});
 });
 
-it("a changed tool choice is a cold reason for the request that sends it, and a #426 retry compares past the rejection (#434)", () => {
+it("a changed tool choice is a cold reason for the request that sends it, a #426 retry compares past the rejection, and a server's cache_n is its read (#434)", () => {
 	const state = createTurnState("off");
 	const runtime = { targetId: "cloud", runtimeId: "fixture", wireModelId: "chat" } as unknown as AgentRuntime;
 	state.runtime = runtime;
@@ -562,6 +562,23 @@ it("a changed tool choice is a cold reason for the request that sends it, and a 
 	state.runtime = { ...runtime, wireModelId: "other" } as AgentRuntime;
 	deepStrictEqual(send("none"), []);
 	deepStrictEqual(notices, [["tool_choice_change"]]);
+	// The ledger observation judges a server whose usage omits cache reads by its own cache_n, as the journal does,
+	// so doctor and /usage count the same breaks (#434).
+	state.runtime = null;
+	const observation = (
+		context.promptCachePayloadForAssistant(
+			{ input: 10_000, output: 5, cacheRead: 0, cacheWrite: 0, cacheReadReported: false } as never,
+			{
+				promptTokens: 10_000,
+				cachedTokens: 6_000,
+				predictedTokens: 5,
+				promptMs: 120,
+				predictedMs: 40,
+				source: "llamacpp-timings",
+			},
+		) as { observation: { cacheReadTokens: number | null; inclusiveInputTokens: number } }
+	).observation;
+	deepStrictEqual([observation.cacheReadTokens, observation.inclusiveInputTokens], [6_000, 10_000]);
 	context.dispose();
 });
 

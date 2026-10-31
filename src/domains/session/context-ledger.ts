@@ -136,11 +136,17 @@ export interface PromptCacheStats {
 	cacheReadTokens: number | null;
 	/** Provider-reported cache-write tokens for the last run. */
 	cacheWriteTokens: number | null;
-	/** Provider-reported uncached input tokens for the last run. */
+	/**
+	 * Provider-reported input tokens for the last run. Beside a reported cache read they are the uncached input; a
+	 * provider that omits its cache reads reports its whole prompt here.
+	 */
 	uncachedInputTokens: number | null;
 	/** Serving-backend timings for the run's last API call; null when none were captured. */
 	backend: BackendCompletionTimings | null;
-	/** Backend prompt tokens not served from cache, derived only when cache reads were reported. */
+	/**
+	 * The prompt tokens the serving backend evaluated for the run's last call (llama.cpp's prompt_n), from its own
+	 * timings; null unless those timings also report its cache reads (cache_n).
+	 */
 	uncachedPrefillTokens: number | null;
 	/**
 	 * Cache verdict of the run's first API call, classified by

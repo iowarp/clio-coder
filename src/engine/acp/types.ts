@@ -1285,6 +1285,7 @@ export interface AcpContextLedger {
 		shellReused: boolean;
 		cacheReadTokens: number | null;
 		cacheWriteTokens: number | null;
+		/** Provider-reported input for the last run; the whole prompt when the provider omits its cache reads. */
 		uncachedInputTokens: number | null;
 		backendVerdict: "hot" | "partial" | "cold" | "small" | "unknown" | null;
 		/** Cache disturbances Clio expected before the last settled run, so a client can tell a planned cold start. */
@@ -1298,7 +1299,7 @@ export interface AcpContextLedger {
 			predictedMs: number;
 			source: "llamacpp-timings" | "lmstudio-timings";
 		} | null;
-		/** Backend prompt tokens not served from cache; null unless cache reads were reported. */
+		/** Prompt tokens the serving backend evaluated for the run's last call, from its own timings; null unless they report cache reads. */
 		uncachedPrefillTokens?: number | null;
 	} | null;
 }
