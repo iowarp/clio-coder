@@ -1,8 +1,5 @@
 import type { CallObservation } from "../core/call-failure.js";
-import { writeDiagnostic } from "../core/diagnostics.js";
 import { beginCall, processTelemetryContext } from "../core/telemetry/producer.js";
-import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
-import { recordUsageCall } from "../domains/session/usage-record.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
 import type { CostEntryLabel } from "../domains/telemetry/cost.js";
 /**
@@ -106,18 +103,8 @@ export function createSystemOneRequestAdmission(deps: {
 		const settle = (message: unknown): void => {
 			if (settled) return;
 			settled = true;
-			const facts = call?.settle(
-				callSettlementFromMessage(message, pricing.provenance),
-				reportedModelFromMessage(message),
-			);
 			try {
-				if (facts && deps.telemetry && deps.currentSession() === session) {
-					if (facts.disposition === "never_sent") deps.telemetry.recordNeverSentCalls(1);
-					for (const projected of usageCallsFromAttempts([{ started: facts, settled: facts }]))
-						recordUsageCall(deps.telemetry, projected);
-				}
-			} catch {
-				writeDiagnostic("[clio-coder:telemetry] live decision projection failed; journal retains the call\n");
+				call?.settle(callSettlementFromMessage(message, pricing.provenance), reportedModelFromMessage(message));
 			} finally {
 				void lease?.release();
 			}
@@ -128,7 +115,7 @@ export function createSystemOneRequestAdmission(deps: {
 				if (deps.scheduling?.admitPaidRequest) {
 					await deps.scheduling.admitPaidRequest({ waitForRaise: false, getCeilingUsd: deps.getCeilingUsd, signal });
 				} else {
-					const currentUsd = deps.telemetry?.sessionCost() ?? 0;
+					const currentUsd = (await deps.telemetry?.settledSessionSpend())?.usd ?? 0;
 					const ceilingUsd = deps.getCeilingUsd();
 					if (sessionCeilingReached(currentUsd, ceilingUsd)) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
 				}

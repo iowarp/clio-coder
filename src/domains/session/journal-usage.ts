@@ -61,7 +61,7 @@ export function usageCallsFromJournal(
 }
 
 /** A completed provider call can still fail to produce a checkpoint; absence alone proves neither outcome (#434). */
-export function withCompactionOutcome(
+function withCompactionOutcome(
 	call: LedgerUsageCall,
 	outcome: NonNullable<LedgerUsageCall["compactionOutcome"]>,
 ): LedgerUsageCall {

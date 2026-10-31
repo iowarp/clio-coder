@@ -28,7 +28,8 @@ it("a held paid request journals one crossing per ceiling and its hold, with the
 			return () => {};
 		},
 	} as unknown as ConfigContract;
-	const telemetryContract = { sessionCost: () => 1.25 };
+	const spent = { usd: 1.25, estimated: false, unpriced: false, ref: null };
+	const telemetryContract = { sessionSpend: () => spent, settledSessionSpend: async () => spent };
 	const bus = createTelemetryHub();
 	const { contract, extension } = createSchedulingBundle({
 		bus,
@@ -93,7 +94,13 @@ it("a ceiling stop names estimated or partly unpriced spend as it was priced, an
 	settings.safety.limits.sessionCostUsd = 1;
 	const config = { get: () => settings, onChange: () => () => {} } as unknown as ConfigContract;
 	const summary = { knownUsd: 1.25, hasEstimated: true, hasUnknown: false, allKnownFree: false, calls: 3 };
-	const telemetryContract = { sessionCost: () => summary.knownUsd, sessionCostSummary: () => ({ ...summary }) };
+	const spend = () => ({
+		usd: summary.knownUsd,
+		estimated: summary.hasEstimated,
+		unpriced: summary.hasUnknown,
+		ref: null,
+	});
+	const telemetryContract = { sessionSpend: spend, settledSessionSpend: async () => spend() };
 	const { contract, extension } = createSchedulingBundle({
 		bus: createTelemetryHub(),
 		getContract: (<T>(name: string) =>
@@ -126,10 +133,16 @@ it("a ceiling stop names estimated or partly unpriced spend as it was priced, an
 		summary.hasEstimated = false;
 		await stop({ additionalUsd: 0.5, additionalPricing: { estimated: false, unpriced: true } });
 		deepStrictEqual(blocks[1]?.pricing, { estimated: false, unpriced: true });
-		strictEqual(budgetBlockSpendText(readBudgetBlock(blocks[1]) as BudgetBlockView), "$1.75 +? of $1.00 ceiling");
-		// A stop recorded before stops carried their pricing still reads as it did.
-		const { pricing: _, ...legacy } = blocks[1] as BudgetAlertPayload;
-		strictEqual(budgetBlockSpendText(readBudgetBlock(legacy) as BudgetBlockView), "$1.75 of $1.00 ceiling");
+		// Spend so far and the projected cost are separate fields; the stop compares and names both (#434).
+		strictEqual(blocks[1]?.currentUsd, 1.25);
+		strictEqual(blocks[1]?.projectedUsd, 0.5);
+		strictEqual(
+			budgetBlockSpendText(readBudgetBlock(blocks[1]) as BudgetBlockView),
+			"$1.75 +? of $1.00 ceiling (~$0.50 est pending)",
+		);
+		// A stop that carries no pricing names its spend without a mark.
+		const { pricing: _, projectedUsd: _projected, ...unmarked } = blocks[1] as BudgetAlertPayload;
+		strictEqual(budgetBlockSpendText(readBudgetBlock(unmarked) as BudgetBlockView), "$1.25 of $1.00 ceiling");
 		ok(records.every((record) => validPayload(record.kind, record.data)));
 	} finally {
 		release();

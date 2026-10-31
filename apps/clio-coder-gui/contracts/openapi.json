@@ -21039,7 +21039,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_at_attemptId_callId_8988786d": {
+			"Object_at_attemptId_callId_5c6d49f4": {
 				"type": "object",
 				"required": [
 					"kind",
@@ -21049,6 +21049,7 @@
 					"callId",
 					"attemptId",
 					"spend",
+					"projected",
 					"ceiling",
 					"contextTokens",
 					"outcome",
@@ -21057,7 +21058,7 @@
 					"raisedBy"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_4fb36f23"
+					"$ref": "#/components/schemas/Shape_6538b83a"
 				},
 				"additionalProperties": false
 			},
@@ -24932,49 +24933,6 @@
 					]
 				}
 			},
-			"Shape_4fb36f23": {
-				"kind": {
-					"type": "string",
-					"const": "budget"
-				},
-				"at": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"event": {
-					"enum": ["crossing", "wait"]
-				},
-				"level": {
-					"enum": ["at", "over"]
-				},
-				"callId": {
-					"$ref": "#/components/schemas/Union_3c066253"
-				},
-				"attemptId": {
-					"$ref": "#/components/schemas/Union_e7cc1cf6"
-				},
-				"spend": {
-					"$ref": "#/components/schemas/Object_display_fact_26230a1c"
-				},
-				"ceiling": {
-					"$ref": "#/components/schemas/Object_display_usd_e86d2907"
-				},
-				"contextTokens": {
-					"$ref": "#/components/schemas/Union_5cb69bec"
-				},
-				"outcome": {
-					"$ref": "#/components/schemas/Union_ee32f0b1"
-				},
-				"waited": {
-					"$ref": "#/components/schemas/Union_5cb69bec"
-				},
-				"raisedTo": {
-					"$ref": "#/components/schemas/Union_f4020539"
-				},
-				"raisedBy": {
-					"$ref": "#/components/schemas/Union_6ab8d6d6"
-				}
-			},
 			"Shape_4fbca3d1": {
 				"type": {
 					"type": "string",
@@ -25197,6 +25155,52 @@
 				},
 				"coverage": {
 					"$ref": "#/components/schemas/Object_estimated_measured_unknown_4c605d35"
+				}
+			},
+			"Shape_6538b83a": {
+				"kind": {
+					"type": "string",
+					"const": "budget"
+				},
+				"at": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"event": {
+					"enum": ["crossing", "wait"]
+				},
+				"level": {
+					"enum": ["at", "over"]
+				},
+				"callId": {
+					"$ref": "#/components/schemas/Union_3c066253"
+				},
+				"attemptId": {
+					"$ref": "#/components/schemas/Union_e7cc1cf6"
+				},
+				"spend": {
+					"$ref": "#/components/schemas/Object_display_fact_26230a1c"
+				},
+				"projected": {
+					"$ref": "#/components/schemas/Union_5cb69bec"
+				},
+				"ceiling": {
+					"$ref": "#/components/schemas/Object_display_usd_e86d2907"
+				},
+				"contextTokens": {
+					"$ref": "#/components/schemas/Union_5cb69bec"
+				},
+				"outcome": {
+					"$ref": "#/components/schemas/Union_ee32f0b1"
+				},
+				"waited": {
+					"$ref": "#/components/schemas/Union_5cb69bec"
+				},
+				"raisedTo": {
+					"$ref": "#/components/schemas/Union_f4020539"
+				},
+				"raisedBy": {
+					"$ref": "#/components/schemas/Union_6ab8d6d6"
 				}
 			},
 			"Shape_6b840e60": {
@@ -27198,7 +27202,7 @@
 									"additionalProperties": false
 								},
 								{
-									"$ref": "#/components/schemas/Object_at_attemptId_callId_8988786d"
+									"$ref": "#/components/schemas/Object_at_attemptId_callId_5c6d49f4"
 								},
 								{
 									"$ref": "#/components/schemas/Object_at_kind_limitReached_4c311aad"
@@ -29610,7 +29614,7 @@
 					"budget": {
 						"type": "array",
 						"items": {
-							"$ref": "#/components/schemas/Object_at_attemptId_callId_8988786d"
+							"$ref": "#/components/schemas/Object_at_attemptId_callId_5c6d49f4"
 						}
 					},
 					"quota": {

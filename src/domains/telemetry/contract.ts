@@ -1,4 +1,3 @@
-import type { ResponseModelIdObservationCounts } from "../../core/response-model-id.js";
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import type {
 	CacheReportV1,
@@ -28,7 +27,7 @@ import type { DispatchRequestOrigin, RunKind } from "../dispatch/types.js";
 import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import type { CostProvenance } from "../providers/index.js";
-import type { CostAggregate, CostEntry, CostEntryLabel, UsageBreakdown } from "./cost.js";
+import type { CostAggregate } from "./cost.js";
 import type { TurnsSum } from "./read-model.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "./session-journals.js";
 import type { WorkerProgressSnapshot } from "./worker-progress.js";
@@ -129,15 +128,13 @@ export interface TelemetryRunEvidence {
 }
 
 /**
- * Single product-facing projection of the telemetry domain. A materialized,
- * bounded read model folded from the event bus plus the session cost tracker.
+ * Single product-facing projection of the telemetry domain: run lifecycle and evidence notices folded from the event
+ * bus, plus the latest throughput. Spend and tokens are read from the read model (`read`), never from here (#434).
  * `generatedAt` is the wall-clock time the snapshot object was assembled.
  */
 export interface TelemetrySnapshot {
 	generatedAt: number;
 	session: {
-		cost: CostAggregate;
-		tokens: UsageBreakdown;
 		latestThroughput: TokenThroughputSnapshot | null;
 	};
 	runs: readonly TelemetryRunSummary[];
@@ -208,6 +205,15 @@ export interface TelemetryReadModel {
 	subscribe(topic: TelemetryTopic, listener: (update: TelemetryUpdateV1) => void): () => void;
 }
 
+/** Priced spend with how it was priced: any estimated part marks it `~`, any unpriced call or gap marks it partial. */
+export interface SessionSpend {
+	usd: number;
+	estimated: boolean;
+	unpriced: boolean;
+	/** The fact the amount came from; null when nothing has been spent yet. */
+	ref: FactRef | null;
+}
+
 export interface TelemetryContract extends TelemetryRunProjection {
 	/** Absent on contracts built without the telemetry extension, such as test doubles. */
 	read?: TelemetryReadModel;
@@ -216,17 +222,17 @@ export interface TelemetryContract extends TelemetryRunProjection {
 	 * the coordinated shutdown's status, or the status a CLI command returns (#434).
 	 */
 	setExitStatus?(code: number): void;
-	recordRunTokens?(
-		runId: string,
-		source: "journal" | "unavailable",
-		...args: Parameters<TelemetryContract["recordTokens"]>
-	): void;
-	/** Running session USD cost. */
-	sessionCost(): number;
-	sessionCostSummary(): CostAggregate;
-	/** Running session cost log entries. */
-	costEntries(): ReadonlyArray<CostEntry>;
-	/** Reset the running session token and cost totals. */
+	/**
+	 * Spend so far as the budget gate enforces it: the live read model's `session:<id>#usd` (own calls plus referenced
+	 * runs) for the bound session, or with no session this process's own calls (`process:<id>#usd`), its estimated
+	 * and unpriced parts flagged. Read from persisted batches only; the gate itself reads {@link settledSessionSpend}.
+	 */
+	sessionSpend(): SessionSpend;
+	/** {@link sessionSpend} after every queued record is written and the live fold has seeded, so it never lags (#434). */
+	settledSessionSpend(): Promise<SessionSpend>;
+	/** What the live read model already holds of a run's priced spend, so a meter's in-flight cost is not counted twice. */
+	journaledRunUsd(runId: string): number;
+	/** Bind the read model to the session now current, or to none. */
 	resetSession(sessionId?: string | null): void;
 	/** Hold the journal for this work's original session, including work surviving a UI switch (#434). */
 	acquireTelemetrySession?(
@@ -243,37 +249,12 @@ export interface TelemetryContract extends TelemetryRunProjection {
 		data: PreimageData<K>,
 		preimage: unknown,
 	): void;
-	/** Count persisted never-sent assistant calls without adding spend or API calls (#430). */
-	recordNeverSentCalls(count: number): void;
-	/**
-	 * Record a token count. Used by dispatch glue, diags, and the chat loop's
-	 * `message_end` handler. `breakdown` is optional for call sites (dispatch
-	 * bus payloads) that only know the total token count; callers with a
-	 * pi-ai `Usage` object should pass the full breakdown so the snapshot's
-	 * session tokens can surface input/output/reasoning separately.
-	 */
-	recordTokens(
-		providerId: string,
-		attributedModelId: string,
-		tokens: number,
-		costUsd?: number,
-		breakdown?: Partial<UsageBreakdown>,
-		costProvenance?: CostProvenance,
-		modelIdFacts?: {
-			requestedModelIds: ReadonlyArray<string>;
-			responseModelIdObservationCounts: Readonly<ResponseModelIdObservationCounts>;
-		},
-		/** Marks a priced call that was not an ordinary turn, such as a `/btw` side question. */
-		label?: CostEntryLabel,
-		costSummary?: CostAggregate,
-		replayed?: boolean,
-	): void;
 	/** Record final output token throughput for one completed assistant stream. */
 	recordTokenThroughput(snapshot: TokenThroughputSnapshot): void;
 	/**
 	 * Current product-facing projection. Cheap to call: it folds in-memory state
-	 * (active runs, bounded terminal history/notices, session cost/tokens and the
-	 * latest throughput) into a fresh immutable snapshot.
+	 * (active runs, bounded terminal history/notices and the latest throughput)
+	 * into a fresh immutable snapshot.
 	 */
 	snapshot(): TelemetrySnapshot;
 	/**

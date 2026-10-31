@@ -29,7 +29,6 @@ import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { appendEntry, appendTurn, readCurrentEntries, startSession } from "../../src/domains/session/manager.js";
 import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
-import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { readSessionContextSnapshots } from "../../src/domains/telemetry/index.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
@@ -238,11 +237,9 @@ describe("production compaction controls", () => {
 			};
 			registerEngineApiProvider({ api: faux.api, stream, streamSimple: stream });
 		}
-		const liveUsage: unknown[][] = [];
 		const journals = createSessionJournals(clioStateDir(), () => {});
 		return {
 			session,
-			liveUsage,
 			journal: async () =>
 				(await readCallJournal(telemetrySessionDirectory(clioStateDir(), state.meta.id))).records.map(
 					({ record }) => record,
@@ -273,7 +270,6 @@ describe("production compaction controls", () => {
 				return collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current);
 			},
 			run: createProductionAutoCompact(session, () => settings, providers, {
-				recordTokens: (...args) => liveUsage.push(args),
 				...(journaled ? { acquireTelemetrySession: journals.acquire } : {}),
 			}),
 		};
@@ -367,11 +363,6 @@ describe("production compaction controls", () => {
 			const journal = await f.journal();
 			const calls = ledgerUsageCalls(f.entries(), journal);
 			strictEqual(calls.length, f.calls.length);
-			strictEqual(calls.length, f.liveUsage.length);
-			strictEqual(
-				calls.reduce((sum, call) => sum + call.totalTokens, 0),
-				f.liveUsage.reduce((sum, row) => sum + Number(row[2]), 0),
-			);
 			ok(calls.every((call) => call.facts && call.compactionOutcome === outcome));
 			ok(calls.every((call) => call.label === (outcome === "committed" ? "compaction" : "failed-compaction")));
 			if (outcome === "committed") {
@@ -1183,11 +1174,6 @@ describe("production compaction controls", () => {
 			[{ callIds: journalCalls.map((row) => row.data.callId), outcome: "failed", checkpointTurnId: null }],
 		);
 		const calls = ledgerUsageCalls(f.entries(), await f.journal());
-		strictEqual(f.liveUsage.length, 2);
-		strictEqual(
-			f.liveUsage.reduce((sum, row) => sum + Number(row[2]), 0),
-			30,
-		);
 		ok(calls.every((call) => call.providerId === "summary-target" && call.label === "failed-compaction"));
 	});
 	it("keeps ambiguous zero failed usage null and reports it as unknown in the built CLI", async () => {
@@ -1202,9 +1188,6 @@ describe("production compaction controls", () => {
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		};
 		await rejects(f.run(), /fixture stream error/);
-		// The live sink gets an unmetered record rather than nothing (5996f82c6).
-		strictEqual(f.liveUsage.length, 1);
-		strictEqual((f.liveUsage[0]?.[4] as { missingTokenCalls?: number }).missingTokenCalls, 1);
 		const result = spawnSync(
 			process.execPath,
 			[new URL("../../dist/cli/index.js", import.meta.url).pathname, "usage", "report", "--json", "--repo", scratch.dir],
@@ -1280,14 +1263,12 @@ describe("production compaction controls", () => {
 		};
 		await rejects(f.run(), /session or branch changed/);
 		strictEqual(f.entries().filter((entry) => entry.kind === "compactionSummary").length, 0);
-		strictEqual(f.liveUsage.length, 0);
 	});
 	it("retains spending without a checkpoint when the selected branch changes", async () => {
 		const f = fixture(true);
 		f.response.beforeReturn = () => f.pinLeaf("different-leaf");
 		await rejects(f.run(), /session or branch changed/);
 		strictEqual(f.entries().filter((entry) => entry.kind === "compactionSummary").length, 0);
-		strictEqual(f.liveUsage.length, 0);
 	});
 	it("preserves spending when checkpoint append provably wrote nothing", async () => {
 		const f = fixture(true);
@@ -1319,12 +1300,11 @@ describe("production compaction controls", () => {
 		match(readFileSync(sessionPaths(f.state.meta).current, "utf8"), /compactionSummary/);
 	});
 	for (const legacy of [false, true]) {
-		it(`attributes successful live compaction accounting to ${legacy ? "legacy chat fallback" : "the selected summary route"}`, async () => {
+		it(`reports a successful compaction through ${legacy ? "the legacy chat fallback" : "the selected summary route"}`, async () => {
 			const f = fixture(true);
 			const snapshotJournals = createSessionJournals(clioStateDir(), () => {});
 			await snapshotJournals.acquire(f.state.meta, "main");
 			if (!legacy) f.settings.context.compaction.model = "summary-target/summary";
-			const recorded: unknown[][] = [];
 			const bus = createTelemetryHub();
 			const pruned: ContextPrunedPayload[] = [];
 			const notices: string[] = [];
@@ -1350,7 +1330,6 @@ describe("production compaction controls", () => {
 					}
 					return result;
 				},
-				telemetry: { recordTokens: (...args: unknown[]) => recorded.push(args) } as unknown as TelemetryContract,
 				middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
 				emitNotice: (text) => notices.push(text),
 			});
@@ -1415,9 +1394,6 @@ describe("production compaction controls", () => {
 			const figures = liveLine.match(/compacted (.+? tokens)/u)?.[1];
 			ok(figures);
 			ok(renderCompactionSummaryEntry(checkpoint, 200).join("\n").includes(figures));
-			strictEqual(recorded.length, 1);
-			deepStrictEqual(recorded[0]?.slice(0, 2), legacy ? ["chat-target", "chat"] : ["summary-target", "summary"]);
-			strictEqual(recorded[0]?.[5], legacy ? "known_free" : "unknown");
 		});
 	}
 	it("keeps successful compaction usage solely on its checkpoint", async () => {

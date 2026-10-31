@@ -1986,6 +1986,8 @@ function budgetEntry(
 	const spend = spendAt(analysis, data.spendUsd, record.t);
 	// Admission's own estimate of what the held request re-sends; it names no method, so it reads `~`.
 	const context = data.contextTokens === undefined ? null : estimatedSum(data.contextTokens);
+	// Counted ahead of its settlement, so it is a projection and reads `~` (#434).
+	const projected = data.projectedUsd === undefined ? null : estimatedSum(data.projectedUsd);
 	return {
 		kind: "budget",
 		at: record.t,
@@ -1994,6 +1996,7 @@ function budgetEntry(
 		callId: (record.ctx.callId ?? null) as CallRowV1["callId"] | null,
 		attemptId: (record.ctx.attemptId ?? null) as CallRowV1["attemptId"] | null,
 		spend: { fact: spend, display: renderUsdSum(spend, false) },
+		projected: projected ? { fact: projected, display: renderUsdSum(projected, false) } : null,
 		ceiling: { usd: data.ceilingUsd, display: renderUsdLimit(data.ceilingUsd) },
 		contextTokens: context ? { fact: context, display: renderCountSum(context) } : null,
 		outcome: wait?.outcome ?? null,

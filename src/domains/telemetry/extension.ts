@@ -1,21 +1,21 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
-import { readReceiptTextSync } from "../dispatch/receipt-store.js";
 
 /**
  * Telemetry domain wire-up. Listens to the dispatch bus channels and folds
- * their payloads into the session cost tracker and the projection. Other domains read the snapshot through the contract; the one thing
- * it emits is `evidence.assessed`, once per run whose evidence
- * bundle landed.
+ * their payloads into the projection, and answers spend from the read model.
+ * Other domains read the snapshot through the contract; the one thing it emits
+ * is `evidence.assessed`, once per run whose evidence bundle landed.
  */
 
-import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ClioSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/capture.js";
 import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
+import { factRef, type Quantity } from "../../core/telemetry/dto.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
+import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import type {
 	ConfigChangePayload,
@@ -31,13 +31,18 @@ import { settingsFingerprintCommitment } from "../../core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/index.js";
 import { computeSettingsFingerprint } from "../dispatch/settings-fingerprint.js";
-import type { RunReceipt } from "../dispatch/types.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
 import { openCallJournalHealth } from "./call-journal.js";
 import { createConsentView } from "./consent.js";
-import type { TelemetryContract, TelemetryRunEvidence, TokenThroughputSnapshot } from "./contract.js";
-import { callCoverageForRun, createCostTracker } from "./cost.js";
+import type {
+	SessionSpend,
+	TelemetryContract,
+	TelemetryRunEvidence,
+	TelemetryView,
+	TokenThroughputSnapshot,
+} from "./contract.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
+import { foldFacts } from "./folds.js";
 import { createHealthWindows } from "./health-window.js";
 import { storeTelemetryObject } from "./objects.js";
 import { telemetrySessionDirectory } from "./paths.js";
@@ -70,41 +75,6 @@ type DispatchTerminalLike = {
 /** Pre-admission failures have an announced run id but never create a run ledger. */
 export function dispatchHasEvidenceLedger(payload: DispatchTerminalLike): boolean {
 	return payload.lineage !== undefined;
-}
-
-function recordDispatchCost(
-	cost: ReturnType<typeof createCostTracker>,
-	payload: DispatchTerminalLike,
-	replayed = false,
-): void {
-	if (!payload.targetId || !payload.wireModelId || typeof payload.tokenCount !== "number") {
-		return;
-	}
-	// Dispatch terminal payloads carry the same full split as receipts. Preserve
-	// it so /usage and the footer agree with the fleet board instead of showing
-	// zero input/output/cache for worker-only sessions.
-	const accumulate = payload.runId ? cost.replace.bind(cost, `run:${payload.runId}`) : cost.accumulate.bind(cost);
-	accumulate(
-		payload.targetId,
-		payload.wireModelId,
-		payload.tokenCount,
-		payload.costUsd,
-		{
-			input: payload.inputTokenCount ?? 0,
-			output: payload.outputTokenCount ?? 0,
-			cacheRead: payload.cacheReadTokenCount ?? 0,
-			cacheWrite: payload.cacheWriteTokenCount ?? 0,
-			...(payload.cacheWrite1hTokenCount === undefined ? {} : { cacheWrite1h: payload.cacheWrite1hTokenCount }),
-			reasoningTokens: payload.reasoningTokenCount ?? 0,
-			totalTokens: payload.tokenCount,
-			...callCoverageForRun(payload),
-		},
-		payload.costProvenance,
-		undefined,
-		"worker",
-		payload.costSummary,
-		replayed,
-	);
 }
 
 /**
@@ -175,8 +145,24 @@ function evidenceIndexRow(
 	};
 }
 
+function factSumOf(fact: Fact<number> | FactSum | undefined): FactSum | null {
+	return fact === undefined ? null : "unknownCount" in fact ? fact : foldFacts([fact]);
+}
+
+const NOTHING_SPENT: SessionSpend = { usd: 0, estimated: false, unpriced: false, ref: null };
+
+function spendOfQuantity(quantity: Quantity | null | undefined): SessionSpend {
+	const sum = factSumOf(quantity?.fact);
+	if (!quantity || !sum) return NOTHING_SPENT;
+	return {
+		usd: sum.measured + sum.estimated,
+		estimated: sum.estimated > 0 || sum.coverage.estimated > 0,
+		unpriced: sum.unknownCount > 0,
+		ref: quantity.ref,
+	};
+}
+
 export function createTelemetryBundle(context: DomainContext): DomainBundle<TelemetryContract> {
-	const cost = createCostTracker();
 	// Writers ask before every record and batch, so the capture is answered from memory: consent per session
 	// refreshes on the cold path before each lease, and the result is reused until settings or consent change (#434).
 	const consent = createConsentView(clioStateDir());
@@ -354,24 +340,24 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		}
 	};
 	let sessionId: string | null | undefined;
-	const recordedRuns = new Set<string>();
-	const recordRun = (payload: DispatchTerminalLike, replayed = false): void => {
-		if (sessionId !== undefined && payload.sessionId !== undefined && payload.sessionId !== sessionId) return;
-		if (payload.runId && recordedRuns.has(payload.runId)) return;
-		if (!payload.lineage) return;
-		if (payload.runId) recordedRuns.add(payload.runId);
-		recordDispatchCost(cost, payload, replayed);
+	/** With no session bound, this process's own calls are the spend; refreshed off the read path as its journal grows. */
+	let processSpend: SessionSpend = NOTHING_SPENT;
+	const refreshProcessSpend = async (): Promise<SessionSpend> => {
+		processSpend = spendOfQuantity(await telemetry.processQuantity?.("usd"));
+		return processSpend;
+	};
+	/** The budget gate's spend: the read model's whole-session fold, estimated parts and unpriced calls flagged (#434). */
+	const spendOf = (view: TelemetryView | null): SessionSpend => {
+		if (!sessionId) return processSpend;
+		if (!view || view.sessionId !== sessionId) return NOTHING_SPENT;
+		return spendOfQuantity(view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "usd" })));
 	};
 	const unsubscribes: Array<() => void> = [];
 	let latestThroughput: TokenThroughputSnapshot | null = null;
 
-	// The product-facing projection folds the bus channels plus the session cost
-	// tracker into a single bounded snapshot. It reads these accessors at
-	// snapshot-build time, so it always observes the latest state regardless of
-	// bus-handler ordering.
+	// The product-facing projection folds the bus channels into a single bounded snapshot. It reads the throughput
+	// at snapshot-build time, so it always observes the latest state regardless of bus-handler ordering.
 	const projection = createTelemetryProjection(context.bus, {
-		sessionCostSummary: () => cost.sessionCost(),
-		sessionTokens: () => cost.sessionTokens(),
 		latestThroughput: () => latestThroughput,
 	});
 
@@ -461,7 +447,6 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			unsubscribes.push(
 				context.bus.subscribe("run.completed", (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
-					recordRun(payload);
 					// Kick off the heavy forensic build without blocking the bus.
 					// buildAndIndexEvidence swallows all failures; stop() flushes it.
 					if (typeof payload.runId === "string" && payload.runId.length > 0) {
@@ -472,7 +457,6 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			unsubscribes.push(
 				context.bus.subscribe("run.failed", (raw) => {
 					const payload: DispatchTerminalLike = raw ?? {};
-					recordRun(payload);
 					// A failed run is never a first-pass success; still build the
 					// bundle so its failure-cause tags exist for the index.
 					if (typeof payload.runId === "string" && payload.runId.length > 0 && dispatchHasEvidenceLedger(payload)) {
@@ -506,12 +490,6 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	};
 
 	const contract: TelemetryContract = {
-		recordRunTokens(runId, source, ...args) {
-			// A sealed receipt already restored the complete run; its journal may since have been evicted (#434).
-			if (source === "unavailable" && recordedRuns.has(runId)) return;
-			cost.replace(`run:${runId}`, ...args);
-			projection.refresh();
-		},
 		acquireTelemetrySession: journals.acquire,
 		telemetryCapture(origin) {
 			// Recorders outside a call ask between leases; the first ask starts the consent read (#434).
@@ -552,82 +530,26 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 					// The journal reports its own unavailability; a trace never fails the work it describes (#434).
 				});
 		},
-		sessionCost: () => cost.sessionTotal(),
-		sessionCostSummary: () => cost.sessionCost(),
-		costEntries: () => cost.entries(),
+		sessionSpend: () => spendOf(telemetry.live()),
+		async settledSessionSpend() {
+			// Every queued settlement is written, and so published to the live model, before the fold is read (#434).
+			await journals.flush();
+			if (!sessionId) return refreshProcessSpend();
+			return spendOf(await telemetry.settled());
+		},
+		journaledRunUsd(runId) {
+			// A run this session does not reference resolves to no quantity, so nothing of it is journaled here.
+			const sum = factSumOf(telemetry.live()?.quantity(factRef({ scope: "run", owner: runId, metric: "usd" }))?.fact);
+			return sum ? sum.measured + sum.estimated : 0;
+		},
 		resetSession(nextSessionId) {
 			sessionId = nextSessionId;
 			telemetry.bind(nextSessionId ?? null);
-			cost.reset();
-			recordedRuns.clear();
-			if (sessionId) {
-				const receiptsDir = join(clioStateDir(), "receipts");
-				for (const name of existsSync(receiptsDir) ? readdirSync(receiptsDir) : []) {
-					if (!name.endsWith(".json")) continue;
-					let run: RunReceipt;
-					try {
-						run = JSON.parse(readReceiptTextSync(join(receiptsDir, name))) as RunReceipt;
-					} catch (error) {
-						writeDiagnostic(`[clio-coder:usage] cannot read receipt ${name}: ${String(error)}\n`);
-						continue;
-					}
-					if (!run || run.sessionId !== sessionId || run.agentId === "main-agent") continue;
-					const unverifiedTokens = run.externalTelemetry && run.externalTelemetry.tokenUsage !== "provider-reported";
-					recordRun(
-						{
-							runId: run.runId,
-							sessionId: run.sessionId,
-							lineage: run.lineage,
-							targetId: run.targetId,
-							wireModelId: run.wireModelId,
-							tokenCount: unverifiedTokens ? 0 : run.tokenCount,
-							inputTokenCount: unverifiedTokens ? 0 : run.inputTokenCount,
-							outputTokenCount: unverifiedTokens ? 0 : run.outputTokenCount,
-							cacheReadTokenCount: unverifiedTokens ? 0 : run.cacheReadTokenCount,
-							cacheWriteTokenCount: unverifiedTokens ? 0 : run.cacheWriteTokenCount,
-							cacheWrite1hTokenCount: unverifiedTokens ? 0 : run.cacheWrite1hTokenCount,
-							reasoningTokenCount: unverifiedTokens ? 0 : run.reasoningTokenCount,
-							apiCalls: run.apiCalls,
-							missingTokenCalls: run.missingTokenCalls,
-							costUsd: run.costUsd,
-							costProvenance: run.costProvenance,
-							costSummary: run.costSummary,
-						},
-						true,
-					);
-				}
-			}
 			latestThroughput = null;
-			projection.refresh();
-		},
-		recordNeverSentCalls(count) {
-			cost.recordNeverSentCalls(count);
-			projection.refresh();
-		},
-		recordTokens(
-			providerId,
-			attributedModelId,
-			tokens,
-			costUsd,
-			breakdown,
-			costProvenance,
-			modelIdFacts,
-			label,
-			costSummary,
-			replayed,
-		) {
-			cost.accumulate(
-				providerId,
-				attributedModelId,
-				tokens,
-				costUsd,
-				breakdown,
-				costProvenance,
-				modelIdFacts,
-				label,
-				costSummary,
-				replayed,
-			);
+			if (!nextSessionId)
+				void refreshProcessSpend().catch(() => {
+					// An unreadable process journal leaves the last known spend; the next admission reads it again (#434).
+				});
 			projection.refresh();
 		},
 		recordTokenThroughput(snapshot) {

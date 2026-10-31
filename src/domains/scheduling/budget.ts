@@ -26,7 +26,10 @@ export const SESSION_COST_CEILING_SETTING = "safety.limits.sessionCostUsd";
  */
 export interface BudgetBlockView {
 	level: "at" | "over";
+	/** Priced spend so far. */
 	currentUsd: number;
+	/** Cost counted against the ceiling ahead of its settlement, such as running workers' meters (#434). */
+	projectedUsd?: number;
 	ceilingUsd: number;
 	contextTokens?: number;
 	raiseToUsd: number;
@@ -92,14 +95,15 @@ export function readBudgetBlock(value: unknown): BudgetBlockView | null {
 	const p = value as Record<string, unknown>;
 	if (p.level !== "at" && p.level !== "over") return null;
 	if (!finite(p.currentUsd) || !finite(p.ceilingUsd)) return null;
+	const projectedUsd = finite(p.projectedUsd) && p.projectedUsd > 0 ? p.projectedUsd : 0;
+	const counted = p.currentUsd + projectedUsd;
 	const raiseToUsd =
-		finite(p.raiseToUsd) && p.raiseToUsd > p.currentUsd
-			? p.raiseToUsd
-			: suggestedSessionCostCeilingUsd(p.currentUsd, p.ceilingUsd);
+		finite(p.raiseToUsd) && p.raiseToUsd > counted ? p.raiseToUsd : suggestedSessionCostCeilingUsd(counted, p.ceilingUsd);
 	const pricing = readPricing(p.pricing);
 	return {
 		level: p.level,
 		currentUsd: p.currentUsd,
+		...(projectedUsd > 0 ? { projectedUsd } : {}),
 		ceilingUsd: p.ceilingUsd,
 		...(finite(p.contextTokens) && p.contextTokens > 0 ? { contextTokens: p.contextTokens } : {}),
 		raiseToUsd,
@@ -107,9 +111,16 @@ export function readBudgetBlock(value: unknown): BudgetBlockView | null {
 	};
 }
 
-/** `$5.00 of $5.00 ceiling`, `~$5.00 est of …` or `$5.00 +? of …`, with more digits for a sub-cent ceiling. */
-export function budgetBlockSpendText(block: Pick<BudgetBlockView, "currentUsd" | "ceilingUsd" | "pricing">): string {
-	return `${budgetSpendText(block.currentUsd, block.pricing)} of ${renderCostAmount(block.ceilingUsd, "known")} ceiling`;
+/**
+ * `$5.00 of $5.00 ceiling`, `~$5.00 est of …` or `$5.00 +? of …`, with more digits for a sub-cent ceiling. Projected
+ * cost counts toward the amount compared and is named after the ceiling, since it has not settled yet (#434).
+ */
+export function budgetBlockSpendText(
+	block: Pick<BudgetBlockView, "currentUsd" | "projectedUsd" | "ceilingUsd" | "pricing">,
+): string {
+	const projected = block.projectedUsd ?? 0;
+	const pending = projected > 0 ? ` (${renderCostAmount(projected, "estimated")} pending)` : "";
+	return `${budgetSpendText(block.currentUsd + projected, block.pricing)} of ${renderCostAmount(block.ceilingUsd, "known")} ceiling${pending}`;
 }
 
 /** The one-line operator notice for a ceiling stop; `error` once spend has passed the ceiling. */

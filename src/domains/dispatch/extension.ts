@@ -4099,14 +4099,15 @@ export function createDispatchBundle(
 	}
 
 	/**
-	 * Priced spend metered by workers still running. A worker's spend reaches
-	 * the session ledger only when its run ends (telemetry records it on
-	 * the terminal event, after `active` drops the run), so without this a
-	 * fan-out admitted every member against settled spend alone.
+	 * Priced spend metered by workers still running, beyond what the session's read model already folds from their run
+	 * journals. Without it a fan-out admitted every member against settled spend alone; counted whole, a call that
+	 * settled into a running worker's journal would count twice, once spent and once projected (#434).
 	 */
 	function inFlightSpendUsd(): number {
+		const telemetry = context.getContract<TelemetryContract>("telemetry");
 		let usd = 0;
-		for (const run of active.values()) usd += run.meter.costUsd ?? 0;
+		for (const [runId, run] of active)
+			usd += Math.max(0, (run.meter.costUsd ?? 0) - (telemetry?.journaledRunUsd(runId) ?? 0));
 		return usd;
 	}
 

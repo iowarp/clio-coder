@@ -265,13 +265,6 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			kind: "assistant",
 			payload,
 		});
-		if (
-			payload.callInvoked === false ||
-			recordValue(payload.usage)?.callInvoked === false ||
-			recordValue(payload.failure)?.invoked === false
-		) {
-			deps.telemetry?.recordNeverSentCalls(1);
-		}
 		state.lastTurnId = turn.id;
 		return turn.id;
 	};

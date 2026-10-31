@@ -34,7 +34,6 @@ import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
-import { recordSettledSideCall } from "../domains/session/usage-record.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { OutcomeRecord, SystemOne } from "../domains/system-one/index.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
@@ -2126,10 +2125,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 								targetId,
 								runtimeId,
 								costProvenance,
-								onSettled: (facts) => {
-									if (startupSession && deps.session?.current()?.id === startupSession.id)
-										recordSettledSideCall(deps.telemetry, facts);
-								},
 							};
 						},
 					}),

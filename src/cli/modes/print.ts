@@ -12,6 +12,7 @@ import {
 	type SkillActivation,
 	skillActivationFromToolDetails,
 } from "../../core/skill-activation.js";
+import type { CallRowV1, Quantity } from "../../core/telemetry/dto.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
@@ -40,7 +41,7 @@ import { readToolRounds } from "../../domains/dispatch/types.js";
 import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
-import type { CostAmount, CostEntry } from "../../domains/telemetry/cost.js";
+import type { CostAmount } from "../../domains/telemetry/cost.js";
 import { aggregateCostAmounts } from "../../domains/telemetry/cost.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
@@ -119,81 +120,52 @@ export interface HeadlessMainAgentOptions {
 	 */
 	scopeNotices?: (listener: (payload: unknown) => void) => () => void;
 	/**
-	 * This process's priced-call ledger. Compaction runs its own model calls
-	 * outside the turn's event stream, so the ones recorded during the run are
-	 * folded into its receipt from here.
+	 * The session's compaction calls the read model holds from `from` on. Compaction runs its own model calls outside
+	 * the turn's event stream, so the ones journaled during the run are folded into its receipt from here (#434).
 	 */
-	costEntries?: () => ReadonlyArray<CostEntry>;
+	compactionCalls?: (from: string) => Promise<readonly CallRowV1[]>;
 	/** `clio-coder run --max-cost-usd`: the cap the receipt records. */
 	costCap?: RunReceiptCostCap;
 }
 
-/** Ledger labels of the model calls a run makes outside its own turn events that the run still owes. */
-const RUN_OWNED_COST_LABELS: ReadonlySet<string> = new Set(["compaction", "failed-compaction"]);
-
-/**
- * A run-owned row's identity by content. A continued session's ledger already
- * holds its earlier compaction rows when the run starts, and a session reset
- * replays them as new objects in a different order, so neither the ledger's
- * length nor object identity tells this run's rows from them.
- */
-function runOwnedCostKey(entry: CostEntry): string {
-	return JSON.stringify([
-		entry.label,
-		entry.providerId,
-		entry.attributedModelId,
-		entry.tokens,
-		entry.usd,
-		entry.input,
-		entry.output,
-	]);
+/** A quantity's known amount: measured plus estimated parts, nothing for an unknown one. */
+function knownAmount(quantity: Quantity): number {
+	const fact = quantity.fact;
+	if ("unknownCount" in fact) return fact.measured + fact.estimated;
+	return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : 0;
 }
 
-/** Counts of the run-owned rows a ledger holds, keyed by content. */
-function runOwnedCostCounts(entries: ReadonlyArray<CostEntry>): Map<string, number> {
-	const counts = new Map<string, number>();
-	for (const entry of entries) {
-		if (entry.label === undefined || !RUN_OWNED_COST_LABELS.has(entry.label)) continue;
-		const key = runOwnedCostKey(entry);
-		counts.set(key, (counts.get(key) ?? 0) + 1);
-	}
-	return counts;
-}
+const PROVENANCE_BY_PRICER: Record<CallRowV1["pricedBy"], CostAmount["provenance"]> = {
+	provider: "known",
+	"target-rates": "known",
+	catalog: "estimated",
+	free: "known_free",
+	none: "unknown",
+};
 
-/** Folds the run-owned rows the ledger holds beyond those it held at the start. */
-function foldRunOwnedCosts(
-	stats: HeadlessMainAgentReceiptStats,
-	entries: ReadonlyArray<CostEntry>,
-	atStart: ReadonlyMap<string, number>,
-): void {
-	const earlier = new Map(atStart);
-	for (const entry of entries) {
-		if (entry.label === undefined || !RUN_OWNED_COST_LABELS.has(entry.label)) continue;
-		const key = runOwnedCostKey(entry);
-		const remaining = earlier.get(key) ?? 0;
-		if (remaining > 0) {
-			earlier.set(key, remaining - 1);
-			continue;
-		}
-		const apiCalls = entry.apiCalls ?? 1;
-		stats.costAmounts.push({
-			usd: entry.usd,
-			provenance: entry.provenance,
-			apiCalls,
-			missingTokenCalls: entry.missingTokenCalls ?? 0,
-		});
+/** Folds the compaction calls the run made, as the read model holds them, into its receipt (#434). */
+function foldRunOwnedCosts(stats: HeadlessMainAgentReceiptStats, calls: readonly CallRowV1[]): void {
+	for (const call of calls) {
+		if (call.disposition === "never_sent") continue;
+		const usd = knownAmount(call.usd);
+		const total = call.usage?.total.fact;
+		const unknown = total === undefined || ("unknownCount" in total ? total.unknownCount > 0 : total.kind === "unknown");
+		const missingTokenCalls = unknown ? 1 : 0;
+		stats.costAmounts.push({ usd, provenance: PROVENANCE_BY_PRICER[call.pricedBy], apiCalls: 1, missingTokenCalls });
+		const tokens = call.usage;
+		const reasoning = tokens ? knownAmount(tokens.reasoning) : 0;
 		const usage: RunUsageSummary = {
-			tokens: entry.tokens,
-			costUsd: entry.usd,
-			input: entry.input,
-			output: entry.output,
-			cacheRead: entry.cacheRead,
-			cacheWrite: entry.cacheWrite,
-			reasoning: entry.reasoningTokens,
-			apiCalls,
-			missingTokenCalls: entry.missingTokenCalls ?? 0,
-			hadReasoning: entry.reasoningTokens > 0,
-			hadUsage: true,
+			tokens: tokens ? knownAmount(tokens.total) : 0,
+			costUsd: usd,
+			input: tokens ? knownAmount(tokens.input) : 0,
+			output: tokens ? knownAmount(tokens.output) : 0,
+			cacheRead: tokens ? knownAmount(tokens.cacheRead) : 0,
+			cacheWrite: tokens ? knownAmount(tokens.cacheWrite) : 0,
+			reasoning,
+			apiCalls: 1,
+			missingTokenCalls,
+			hadReasoning: reasoning > 0,
+			hadUsage: tokens !== null,
 			responseModelIdObservationCounts: emptyResponseModelIdObservationCounts(),
 			// The response-model facts stay the turn's own; a compaction call reports none here.
 			lastResponseModelIdObservation: stats.usage?.lastResponseModelIdObservation ?? { state: "not-observed" },
@@ -888,22 +860,22 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// phase instead of losing the whole run's usage. Whichever caller arrives
 	// first seals; the other awaits that same seal.
 	let sealed: Promise<void> | null = null;
-	const costAtStart = runOwnedCostCounts(options.costEntries?.() ?? []);
 	const sealReceipt = (terminal: HeadlessTerminalOutcome): Promise<void> => {
 		if (sealed !== null) return sealed;
 		const endedAt = new Date().toISOString();
-		const ledger = options.costEntries?.() ?? [];
-		foldRunOwnedCosts(receiptStats, ledger, costAtStart);
-		sealed = recordHeadlessMainAgentReceipt({
-			runId,
-			chat,
-			task: options.prompt,
-			startedAt,
-			endedAt,
-			terminal,
-			stats: receiptStats,
-			...(options.costCap !== undefined ? { costCap: options.costCap } : {}),
-		}).catch((error: unknown) => {
+		sealed = (async () => {
+			foldRunOwnedCosts(receiptStats, (await options.compactionCalls?.(startedAt)) ?? []);
+			await recordHeadlessMainAgentReceipt({
+				runId,
+				chat,
+				task: options.prompt,
+				startedAt,
+				endedAt,
+				terminal,
+				stats: receiptStats,
+				...(options.costCap !== undefined ? { costCap: options.costCap } : {}),
+			});
+		})().catch((error: unknown) => {
 			process.stderr.write(
 				`clio-coder run: receipt write failed: ${error instanceof Error ? error.message : String(error)}\n`,
 			);

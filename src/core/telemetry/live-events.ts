@@ -271,8 +271,15 @@ export interface ToolBudgetExceededPayload {
  * operator increase in interactive mode.
  */
 export interface BudgetAlertPayload {
+	/** Whether spend plus projected cost meets or passes the ceiling. */
 	level: "at" | "over";
+	/** Priced spend so far: the read model's live session fold, never including projected cost (#434). */
 	currentUsd: number;
+	/**
+	 * Cost counted against the ceiling before it settles: running workers' meters beyond what their journals hold, or a
+	 * turn's spend no journal holds. Absent when nothing was projected.
+	 */
+	projectedUsd?: number;
 	ceilingUsd: number;
 	/**
 	 * Estimated input tokens of the paid request that is parked, when the caller
@@ -280,7 +287,7 @@ export interface BudgetAlertPayload {
 	 * so the stop names it beside the dollars (#423).
 	 */
 	contextTokens?: number;
-	/** How `currentUsd` was priced, so the stop marks estimated or partly unpriced spend (#434 §6.3). */
+	/** How `currentUsd` and `projectedUsd` were priced, so the stop marks estimated or partly unpriced spend (#434 §6.3). */
 	pricing?: { estimated: boolean; unpriced: boolean };
 }
 

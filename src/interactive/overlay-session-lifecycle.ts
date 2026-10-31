@@ -12,6 +12,7 @@ import {
 } from "../domains/session/handoff-service.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { liveSessionOwner } from "../domains/session/live-owner.js";
+import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { TUI } from "../engine/tui.js";
 import type { ChatLoop } from "../session-control/chat-loop.js";
 import { replayCurrentSession, restoreSession } from "../session-control/index.js";
@@ -32,7 +33,6 @@ import { openSessionOverlay } from "./overlays/session-selector.js";
 import { openTreeOverlay } from "./overlays/tree-selector.js";
 import { lastTurnSummaryFromLedger } from "./session-last-turn.js";
 import { settleChatBeforeSessionSwitch } from "./session-switch-settlement.js";
-import { reseedSessionUsageFromLedger, type SessionUsageSink } from "./session-usage-reseed.js";
 import type { TurnSummary } from "./status/index.js";
 
 export interface OverlaySessionLifecycleDeps {
@@ -61,11 +61,10 @@ export interface OverlaySessionLifecycleDeps {
 	openHandoffReviewOverlay?: typeof openHandoffReviewOverlay;
 	announceTaskMemorySeedOffer(): void;
 	/**
-	 * Running usage totals, reseeded whenever the session under them changes.
-	 * Without this a resumed session renders the previous session's numbers
-	 * under the resumed session's id.
+	 * The telemetry read model's session binding, moved whenever the session under it changes. Without this a resumed
+	 * session renders the previous session's numbers under the resumed session's id.
 	 */
-	sessionUsage?: SessionUsageSink;
+	sessionUsage?: Pick<TelemetryContract, "resetSession">;
 	/**
 	 * The footer's last-turn line, rescoped alongside those totals. Without it a
 	 * `/tree` switch left the line describing a turn on the branch the reader had
@@ -139,7 +138,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 	 */
 	function rescopeToBranch(session: SessionContract, turns: SessionEntry[], leafTurnId: string | null): void {
 		const defaults = sessionUsageDefaults(session);
-		if (deps.sessionUsage) reseedSessionUsageFromLedger(deps.sessionUsage, turns, defaults, leafTurnId);
+		deps.sessionUsage?.resetSession(defaults.sessionId);
 		deps.setLastTurnSummary?.(lastTurnSummaryFromLedger(turns, defaults, leafTurnId));
 	}
 

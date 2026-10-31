@@ -583,7 +583,10 @@ export const BudgetEntrySchema = Type.Object(
 		level: vocabulary(["at", "over"]),
 		callId: Type.Union([CallIdSchema, Type.Null()]),
 		attemptId: Type.Union([AttemptIdSchema, Type.Null()]),
+		/** Spend so far as admission saw it. */
 		spend: shown,
+		/** Cost admission counted ahead of its settlement, such as running workers' meters; null when none (#434). */
+		projected: Type.Union([shown, Type.Null()]),
 		ceiling: limit,
 		contextTokens: Type.Union([shown, Type.Null()]),
 		outcome: Type.Union([vocabulary(["raised", "removed", "cleared", "refused", "aborted"]), Type.Null()]),

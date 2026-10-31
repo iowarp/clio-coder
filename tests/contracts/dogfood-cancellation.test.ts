@@ -5,6 +5,7 @@ import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
 import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { CallRowV1 } from "../../src/core/telemetry/dto.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
 import {
@@ -19,7 +20,6 @@ import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { isSessionEntry, isSessionHeader, type SessionEntry } from "../../src/domains/session/index.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
-import type { CostEntry } from "../../src/domains/telemetry/cost.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import { readSessionFileEntries, sessionPaths } from "../../src/engine/session.js";
@@ -960,38 +960,35 @@ it("headless shutdown retains its cancelled receipt and exit 143 without route a
 });
 
 it("a headless receipt counts the compaction calls its run made, once", { timeout: 15_000 }, async () => {
-	const compaction: CostEntry = {
-		providerId: "fixture",
-		attributedModelId: "summarizer",
-		requestedModelIds: [],
-		responseModelIdObservationCounts: {
-			reportedCalls: 0,
-			notReportedCalls: 0,
-			notObservedCalls: 1,
-			legacyDifferenceOnlyCalls: 0,
+	const measured = (value: number) => ({
+		fact: { kind: "measured" as const, value, source: "provider" as const },
+		display: String(value),
+		ref: "own:fixture#total",
+	});
+	// Only the fields the receipt fold reads; the read model supplies the rest of a call row.
+	const compaction = {
+		disposition: "settled",
+		pricedBy: "target-rates",
+		usd: measured(0.25),
+		usage: {
+			input: measured(6000),
+			output: measured(1000),
+			cacheRead: measured(0),
+			cacheWrite: measured(0),
+			cacheWrite1h: measured(0),
+			reasoning: measured(0),
+			prompt: measured(6000),
+			total: measured(7000),
 		},
-		tokens: 7000,
-		usd: 0.25,
-		provenance: "known",
-		input: 6000,
-		output: 1000,
-		cacheRead: 0,
-		cacheWrite: 0,
-		reasoningTokens: 0,
-		apiCalls: 1,
-		label: "compaction",
-	};
+	} as unknown as CallRowV1;
 	// One run without a compaction is the baseline the same turn with one is measured against.
-	const sealedRun = async (row: CostEntry | null): Promise<RunReceipt> => {
+	const sealedRun = async (row: CallRowV1 | null): Promise<RunReceipt> => {
 		const before = new Set(readRunJournal(join(env.dir, "state"))?.receipts.map((receipt) => receipt.runId) ?? []);
 		const f = fixture("success");
-		const ledger: CostEntry[] = [];
-		f.loop.onEvent((event) => {
-			// Compaction records its own call in the session's priced-call ledger, outside the turn's events.
-			if (row !== null && event.type === "agent_end" && ledger.length === 0) ledger.push(row);
-		});
+		// Compaction journals its own call in the session's journal, outside the turn's events.
+		const compactionCalls = async () => (row === null ? [] : [row]);
 		try {
-			strictEqual(await runHeadlessMainAgent(f.loop, { prompt: "Hello", mode: "json", costEntries: () => ledger }), 0);
+			strictEqual(await runHeadlessMainAgent(f.loop, { prompt: "Hello", mode: "json", compactionCalls }), 0);
 		} finally {
 			await f.close();
 		}

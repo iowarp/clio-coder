@@ -23,7 +23,6 @@ export {
 	COST_NOT_MEASURED,
 	type CostAggregate,
 	type CostAmount,
-	type CostEntry,
 	type CostEntryLabel,
 	costAggregateForAmount,
 	costWasMeasured,

@@ -1578,32 +1578,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const compactionFailureMessage = (error: unknown): string =>
 		`compaction failed: ${error instanceof Error ? error.message : String(error)}`;
 
-	const recordCompactionUsage = (agentRuntime: AgentRuntime, result: CompactResult): void => {
-		if (result.callIds?.length) return;
-		const usage = result.usage;
-		if (!usage || !deps.telemetry) return;
-		deps.telemetry.recordTokens(
-			usage.targetId ?? agentRuntime.targetId,
-			usage.modelId ?? agentRuntime.wireModelId,
-			usage.totalTokens,
-			usage.cost.total,
-			{
-				input: usage.input,
-				output: usage.output,
-				cacheRead: usage.cacheRead,
-				cacheWrite: usage.cacheWrite,
-				...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
-				reasoningTokens: usage.reasoning,
-				totalTokens: usage.totalTokens,
-				apiCalls: Math.max(1, Math.round(usage.apiCalls)),
-				...(usage.missingTokenCalls ? { missingTokenCalls: usage.missingTokenCalls } : {}),
-			},
-			usage.costProvenance ?? agentRuntime.runtimeResolution.costProvenance,
-			undefined,
-			"compaction",
-		);
-	};
-
 	/**
 	 * Two-mechanism context protection. When pressure crosses the single
 	 * threshold, first apply a non-destructive working-set eviction. If pressure
@@ -2195,11 +2169,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (!summaryLifecycleStarted) startSummaryLifecycle();
 		emitCompactionActivity("running", "saving checkpoint and rebuilding context", "state");
 
-		// The checkpoint identifies the selected summary route; older results
-		// fall back to the active chat route. The ledger carries usage for reseed; this is the
-		// live sink, so `/usage` and the footer move the moment /context compact
-		// returns instead of staying byte-identical to before it ran.
-		recordCompactionUsage(agentRuntime, result);
 		if (deps.memoryCommitBridge && !handoff && deps.session?.flushAppends) {
 			deps.session.flushAppends();
 			await deps.session.checkpoint("context-summary");

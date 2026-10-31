@@ -1,5 +1,5 @@
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
-import { isHostAuthored, messageUsageForAccounting, rememberMessageCalls } from "../core/message-accounting.js";
+import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall, telemetryCaptures } from "../core/telemetry/producer.js";
@@ -9,9 +9,7 @@ import { requestFits } from "../domains/context/budget/request-fit.js";
 import { observationTracing, traceObservation } from "../domains/memory/observation-events.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { journalAccountQuota, quotaReadingFromMessage } from "../domains/quota/index.js";
-import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
 import { PROMPT_MANIFEST_VERSION } from "../domains/session/prompt-manifest.js";
-import { recordUsageCall } from "../domains/session/usage-record.js";
 import type { CacheBaseline } from "../domains/telemetry/cache-physics.js";
 import { cachePhysics, serverTimedUsage } from "../domains/telemetry/cache-physics.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
@@ -35,7 +33,6 @@ import { performance } from "node:perf_hooks";
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import { gatewayRoutingObservationFromRecord, gatewayRoutingObservationLabel } from "../core/gateway-routing.js";
-import { attributedModelId } from "../core/response-model-id.js";
 import type { BudgetAlertPayload } from "../core/telemetry/live-events.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import {
@@ -746,7 +743,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const recordSettledCall = (
 			facts: CallSettled | undefined,
 			owner: TelemetrySessionLease["context"] | undefined,
-			hidden = false,
 		): void => {
 			if (facts) settledAttempts.push(facts);
 			if (!facts || !deps.telemetry || owner?.sessionId !== deps.sessionOrigin?.()?.id) return;
@@ -754,11 +750,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// including a stream that settles after its run ended (#434).
 			if (owner?.turnId) turnCalls.set(owner.turnId, [...(turnCalls.get(owner.turnId) ?? []), facts]);
 			if (!currentRun()) return;
-			// Final never-sent messages are counted when persisted; hidden retries have no ledger row (#430, #434).
-			if (hidden && facts.disposition === "never_sent") deps.telemetry.recordNeverSentCalls(1);
-			for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) {
-				recordUsageCall(deps.telemetry, call);
-			}
 		};
 		const settleModelCall = async (message: AgentMessage): Promise<boolean> => {
 			const call = modelCall;
@@ -802,11 +793,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			journalLease = undefined;
 			attemptRequest = undefined;
 			if (call) {
-				recordSettledCall(
-					call.abandon(state.activeInterruptByOperator ? "operator_cancel" : "internal"),
-					lease?.context,
-					true,
-				);
+				recordSettledCall(call.abandon(state.activeInterruptByOperator ? "operator_cancel" : "internal"), lease?.context);
 			}
 			await lease?.release();
 		};
@@ -994,7 +981,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						);
 						const facts = modelCall.settle(settlement, reportedModelFromMessage(message));
 						carryRelabelledReasons(settlement, facts);
-						recordSettledCall(facts, journalLease?.context, true);
+						recordSettledCall(facts, journalLease?.context);
 					},
 				);
 			},
@@ -1062,7 +1049,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						hold.waitedOn = "budget";
 						persistence.appendBudgetBlock({
 							...block,
-							raiseToUsd: suggestedSessionCostCeilingUsd(block.currentUsd, block.ceilingUsd),
+							raiseToUsd: suggestedSessionCostCeilingUsd(block.currentUsd + (block.projectedUsd ?? 0), block.ceilingUsd),
 							setting: "safety.limits.sessionCostUsd",
 						});
 					};
@@ -1101,7 +1088,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							if (sessionCeilingReached(currentUsd + unsettledSpendUsd, ceilingUsd)) {
 								recordBlock({
 									level: currentUsd + unsettledSpendUsd > ceilingUsd ? "over" : "at",
-									currentUsd: currentUsd + unsettledSpendUsd,
+									currentUsd,
+									...(unsettledSpendUsd > 0 ? { projectedUsd: unsettledSpendUsd } : {}),
 									ceilingUsd,
 									contextTokens: input,
 									...(pricing ? { pricing } : {}),
@@ -1616,48 +1604,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message.role === "assistant") {
 				const completed = sumRunUsage([enrichedEvent.message]);
-				if (!deps.telemetry && completed.hadUsage && Number.isFinite(completed.costUsd) && completed.costUsd > 0) {
+				// A call no journal holds is counted against the ceiling for the rest of its run only (#434).
+				if (
+					(!deps.telemetry || !journalAccounted) &&
+					completed.hadUsage &&
+					Number.isFinite(completed.costUsd) &&
+					completed.costUsd > 0
+				) {
 					unsettledSpendUsd += completed.costUsd;
-				}
-			}
-			if (
-				enrichedEvent.type === "message_end" &&
-				enrichedEvent.message.role === "assistant" &&
-				deps.telemetry &&
-				!journalAccounted
-			) {
-				const summary = sumRunUsage([enrichedEvent.message]);
-				const rawUsage = messageUsageForAccounting(enrichedEvent.message) ?? {};
-				const reported = normalizeTokenUsage(rawUsage ?? {});
-				if (summary.hadUsage && rawUsage.callInvoked === true) {
-					deps.telemetry.recordTokens(
-						localRuntime.targetId,
-						attributedModelId(
-							summary.lastResponseModelIdObservation,
-							localRuntime.wireModelId,
-							summary.lastDifferingResponseModelId,
-						),
-						reported.totalTokens,
-						rawUsage.estimated === true ? 0 : summary.costUsd,
-						{
-							input: reported.input,
-							output: reported.output,
-							cacheRead: reported.cacheRead,
-							cacheWrite: reported.cacheWrite,
-							...(summary.cacheWrite1h === undefined ? {} : { cacheWrite1h: summary.cacheWrite1h }),
-							reasoningTokens: reported.reasoning,
-							totalTokens: reported.totalTokens,
-							apiCalls: summary.apiCalls,
-							...(!reported.observed ? { missingTokenCalls: 1 } : {}),
-						},
-						rawUsage.estimated === true
-							? "unknown"
-							: (rawUsage.costProvenance as AgentRuntime["runtimeResolution"]["costProvenance"]),
-						{
-							requestedModelIds: [localRuntime.wireModelId],
-							responseModelIdObservationCounts: summary.responseModelIdObservationCounts,
-						},
-					);
 				}
 			}
 			if (enrichedEvent.type === "agent_end" && deps.telemetry) {

@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { match, ok, rejects, strictEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/l
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { SessionCostCeilingError } from "../../src/domains/scheduling/budget.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
-import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
+import { usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
 import { createLlmEngine } from "../../src/domains/system-one/engines/llm.js";
 import type { OneShotPort } from "../../src/domains/system-one/index.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
@@ -68,9 +68,7 @@ interface Charge {
 function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<void>) {
 	const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-system-one-paid-"));
 	directories.push(stateDir);
-	const charges: Charge[] = [];
 	let admitted = 0;
-	let neverSent = 0;
 	const scheduling: Pick<SchedulingContract, "admitPaidRequest"> = {
 		async admitPaidRequest() {
 			admitted += 1;
@@ -81,33 +79,42 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 		throw new Error("journal unavailable");
 	});
 	flushers.push(journals.closeAll);
-	const telemetry: Pick<TelemetryContract, "recordTokens" | "acquireTelemetrySession" | "recordNeverSentCalls"> = {
+	const telemetry: Pick<TelemetryContract, "acquireTelemetrySession"> = {
 		acquireTelemetrySession: journals.acquire,
-		recordNeverSentCalls(count) {
-			neverSent += count;
-		},
-		recordTokens(_provider, _model, tokens, costUsd, breakdown, provenance, _facts, label) {
-			charges.push({ tokens, costUsd, breakdown, provenance, label });
-		},
 	};
 	const admit = createSystemOneRequestAdmission({
 		providers: { getTarget: (id) => (id === target.id ? target : null) },
 		scheduling: scheduling as SchedulingContract,
-		telemetry: telemetry as TelemetryContract,
+		telemetry: telemetry as unknown as TelemetryContract,
 		getCeilingUsd: () => 1,
 		currentSession: () => "session-1",
 		repoIdentity: () => "repo",
 	});
+	const calls = async () => {
+		await journals.flush();
+		return (await readCallJournal(telemetrySessionDirectory(stateDir, "session-1"))).records
+			.map(({ record }) => record)
+			.filter((record) => record.k === "call.settled");
+	};
 	return {
 		admit,
-		charges,
-		neverSent: () => neverSent,
 		admitted: () => admitted,
-		async calls() {
-			await journals.flush();
-			return (await readCallJournal(telemetrySessionDirectory(stateDir, "session-1"))).records
-				.map(({ record }) => record)
-				.filter((record) => record.k === "call.settled");
+		calls,
+		/** Each journaled call's spend, as the read model's journal fold books it (#434). */
+		async charges(): Promise<Charge[]> {
+			return usageCallsFromJournal(await calls()).map((call) => ({
+				tokens: call.totalTokens,
+				costUsd: call.costUsd,
+				breakdown: {
+					input: call.input,
+					output: call.output,
+					cacheRead: call.cacheRead,
+					apiCalls: call.apiCalls ?? 1,
+					missingTokenCalls: call.missingTokenCalls ?? 0,
+				},
+				provenance: call.costProvenance,
+				label: call.label,
+			}));
 		},
 	};
 }
@@ -165,7 +172,7 @@ const urgent = { urgent: yesNo("Urgent?", "it is", "it is not") };
 
 describe("System One paid requests: admission and accounting", () => {
 	it("journals measured zero, missing usage, duplicate callbacks and admission cancellation separately", async () => {
-		const { admit, calls, charges, neverSent } = ledger(paidTarget("llamacpp"));
+		const { admit, calls } = ledger(paidTarget("llamacpp"));
 		const signal = new AbortController().signal;
 		const zero = await admit({ targetId: "paid", model: "m", signal });
 		zero({ input: 0, output: 0, providerReported: true }, { callOutcome: "success" });
@@ -175,12 +182,6 @@ describe("System One paid requests: admission and accounting", () => {
 		await rejects(admit({ targetId: "paid", model: "m", signal: AbortSignal.abort() }));
 		const settled = await calls();
 		strictEqual(settled.length, 3);
-		strictEqual(neverSent(), 1);
-		const replayed = ledgerUsageCalls([], settled);
-		deepStrictEqual(
-			charges.map((charge) => [charge.tokens, charge.costUsd, charge.provenance]),
-			replayed.map((call) => [call.totalTokens, call.costUsd, call.costProvenance]),
-		);
 		const measured = settled.find((row) => row.data.disposition === "settled");
 		strictEqual(measured?.data.usage?.output.kind, "measured");
 		strictEqual(measured?.data.usage?.cacheRead.kind, "unknown");
@@ -195,7 +196,7 @@ describe("System One paid requests: admission and accounting", () => {
 
 	it("admits each HTTP request, the schema retry included, and charges the usage of a decision that failed", async () => {
 		const target = paidTarget("llamacpp", "http://accounting.test");
-		const { admit, charges, admitted, calls } = ledger(target);
+		const { admit, charges: journaled, admitted, calls } = ledger(target);
 		const bodies = fakeFetch(async (body) =>
 			body.response_format !== undefined
 				? json(400, SCHEMA_REJECTION)
@@ -218,6 +219,7 @@ describe("System One paid requests: admission and accounting", () => {
 		ok(bodies[0]?.response_format !== undefined);
 		strictEqual(admitted(), bodies.length, "every request was admitted, the retry included");
 		// The rejected request reported no usage and is recorded as unmetered; every answered one is charged.
+		const charges = await journaled();
 		strictEqual(charges.length, 6);
 		const unmetered = charges.filter((charge) => charge.provenance === "unknown");
 		strictEqual(unmetered.length, 1);
@@ -232,7 +234,7 @@ describe("System One paid requests: admission and accounting", () => {
 
 	it("admits each one-shot attempt, the schema retry included, and charges the answer's usage", async () => {
 		const target = paidTarget("llamacpp", "http://one-shot.test");
-		const { admit, charges, admitted } = ledger(target);
+		const { admit, charges: journaled, admitted } = ledger(target);
 		const bodies = fakeFetch(async (body) =>
 			body.response_format !== undefined
 				? json(400, SCHEMA_REJECTION)
@@ -264,6 +266,7 @@ describe("System One paid requests: admission and accounting", () => {
 		strictEqual(bodies.length, 2);
 		ok(bodies[0]?.response_format !== undefined && bodies[1]?.response_format === undefined);
 		strictEqual(admitted(), 2, "both attempts were admitted");
+		const charges = await journaled();
 		strictEqual(charges.length, 2);
 		assertUnmetered(charges[0]);
 		assertCharged(charges[1]);

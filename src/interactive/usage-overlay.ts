@@ -365,13 +365,8 @@ class UsageOverlayBody implements Component {
 }
 
 /**
- * Mount the read-only usage overlay. Quota comes from the shared presentation feed. The session cost comes from the
- * telemetry projection's `snapshot().session.cost`, while the
- * per-provider/model rows fold `telemetry.costEntries()`. The overlay is
- * kept live by `telemetry.subscribe()`: the projection already folds the
- * dispatch terminal channels and every `recordTokens()` into one coalesced
- * update, so a single subscription replaces the former DispatchCompleted /
- * DispatchFailed / chat-turn refresh wiring. `hide()` unsubscribes.
+ * Mount the read-only usage overlay. Quota comes from the shared presentation feed; spend and tokens come from the
+ * telemetry read model's live session view (#434). `hide()` unsubscribes.
  */
 export function openUsageOverlay(
 	tui: TUI,

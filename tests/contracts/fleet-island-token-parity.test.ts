@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
 import type { TelemetryReadModel } from "../../src/domains/telemetry/contract.js";
-import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
 import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
 import { createDispatchBoardStore, dispatchUsageText } from "../../src/interactive/dispatch-board.js";
 import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
@@ -44,8 +43,6 @@ test("the island's input counts cache reads, so ↑ plus ↓ is the card's proce
 				retrying: [],
 				totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, runtimeSeconds: 0 },
 			}) as unknown as DispatchSnapshot,
-		sessionCostSummary: emptyCostAggregate,
-		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 		latestThroughput: () => null,
 	});
 	const view = telemetryViewOf("session-1", [], new Map([["run-1", telemetryCall("session-1", { usage })]]));

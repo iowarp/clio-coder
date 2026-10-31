@@ -12,7 +12,6 @@ import { buildEvidence } from "../../src/domains/evidence/index.js";
 import { summarizeTrustStatus } from "../../src/domains/evidence/trust-projection.js";
 import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import type { TelemetryRunReaders, TelemetryRunSummary } from "../../src/domains/telemetry/contract.js";
-import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
 import {
 	createTelemetryProjection,
 	MAX_PROJECTION_RUNS,
@@ -121,8 +120,6 @@ function setup(readers: TelemetryRunReaders = {}) {
 	const bus = createTelemetryHub();
 	const projection = createTelemetryProjection(bus, {
 		...readers,
-		sessionCostSummary: emptyCostAggregate,
-		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 		latestThroughput: () => null,
 	});
 	projections.push(projection);

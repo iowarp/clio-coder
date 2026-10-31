@@ -15,7 +15,6 @@ import {
 	subscribeExtensionObservations,
 } from "../../src/domains/extensions/bus-observations.js";
 import type { ExtensionObservationV2 } from "../../src/domains/extensions/public-api-v2.js";
-import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
 import type { ProjectionReadModel } from "../../src/domains/telemetry/projection.js";
 import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
@@ -85,8 +84,6 @@ describe("compaction observations", () => {
 describe("evidence build failure", () => {
 	function readModel(): ProjectionReadModel {
 		return {
-			sessionCostSummary: () => emptyCostAggregate(),
-			sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 			latestThroughput: () => null,
 		};
 	}

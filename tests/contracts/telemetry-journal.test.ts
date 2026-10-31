@@ -51,9 +51,6 @@ import {
 import { runJournalsInWindow, usageCallsFromRunJournals } from "../../src/domains/session/run-journal-usage.js";
 import { ledgerCallFailureCounts, ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { rebuildUsageProjections } from "../../src/domains/session/usage-projection.js";
-import type { SessionUsageSink } from "../../src/domains/session/usage-record.js";
-import { recordUsageCall } from "../../src/domains/session/usage-record.js";
-import { reseedSessionUsageFromLedger } from "../../src/domains/session/usage-reseed.js";
 import { exportTelemetryBundle, importTelemetryBundle } from "../../src/domains/telemetry/bundle.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import {
@@ -71,7 +68,6 @@ import {
 	resolveConsentWorkspace,
 	revokeTelemetryConsent,
 } from "../../src/domains/telemetry/consent.js";
-import { createCostTracker } from "../../src/domains/telemetry/cost.js";
 import { foldCallJournal, foldCallsBy, foldFacts, TELEMETRY_FOLD_VERSION } from "../../src/domains/telemetry/folds.js";
 import { createHealthWindows } from "../../src/domains/telemetry/health-window.js";
 import {
@@ -338,15 +334,6 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		ok(report(5, 0));
 		await run.flush();
 		await journals.flush();
-		const tracker = createCostTracker();
-		const sink: SessionUsageSink = {
-			resetSession: () => tracker.reset(),
-			recordTokens: tracker.accumulate,
-			recordRunTokens: (id, _source, ...args) => tracker.replace(id, ...args),
-		};
-		reseedSessionUsageFromLedger(sink, [], { sessionId: "parent", journalStateDir: stateDir });
-		strictEqual(tracker.sessionTokens().totalTokens, 5);
-		strictEqual(tracker.sessionTokens().apiCalls, 0);
 		ok(report(9, 1));
 		await run.flush();
 		const snapshot = readSessionCallJournalSync(stateDir, "parent", []);
@@ -359,10 +346,6 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		const unresolved = usageCallsFromRunJournals(runJournalsInWindow(missing, 0, Number.POSITIVE_INFINITY));
 		strictEqual(unresolved[0]?.apiCalls, 0);
 		strictEqual(unresolved[0]?.costSummary?.unknownCallCoverageRuns, 1);
-		for (const call of usageCallsFromRunJournals(snapshot.runs)) recordUsageCall(sink, call);
-		strictEqual(tracker.sessionTokens().totalTokens, 9);
-		strictEqual(tracker.entries().length, 1);
-		strictEqual(tracker.sessionCost().unknownCallCoverageRuns, 1);
 		await mkdir(sessionDirectory, { recursive: true });
 		await writeFile(join(sessionDirectory, "current.jsonl"), "");
 		await mkdir(join(stateDir, "receipts"));
@@ -404,7 +387,7 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		ok(cost, "the report carries the read model's cost by origin");
 		deepStrictEqual(cost.scope, { repo: "all", days: 30 });
 		const tokens = cost.total.tokens.fact;
-		strictEqual("kind" in tokens ? Number.NaN : tokens.measured, tracker.sessionTokens().totalTokens);
+		strictEqual("kind" in tokens ? Number.NaN : tokens.measured, 9);
 		strictEqual(cost.total.tokens.display, "9");
 		deepStrictEqual(
 			cost.groups.map((group) => group.key),
@@ -578,37 +561,6 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 			invokedUnknownCalls: 0,
 			neverInvokedCalls: 1,
 		});
-		const replayed: unknown[][] = [];
-		reseedSessionUsageFromLedger(
-			{
-				resetSession() {},
-				recordTokens(...args) {
-					replayed.push(args);
-				},
-			},
-			ledger,
-			{ sessionId: context.sessionId, journalStateDir: stateRoot },
-		);
-		const liveRecorded: unknown[][] = [];
-		for (const call of live)
-			recordUsageCall(
-				{
-					recordTokens: (...args) => {
-						liveRecorded.push(args);
-					},
-				},
-				call,
-			);
-		deepStrictEqual(
-			liveRecorded.map((args) => args.slice(0, -1)),
-			replayed.map((args) => args.slice(0, -1)),
-		);
-		strictEqual(liveRecorded[0]?.[9], false);
-		strictEqual(replayed[0]?.[9], true);
-		strictEqual(replayed.length, 1);
-		strictEqual(replayed[0]?.[1], "served-model");
-		strictEqual(replayed[0]?.[2], 9);
-		deepStrictEqual(replayed[0]?.[8], projected[0]?.costSummary);
 		await journal.close();
 		const before = telemetryProducerHealth().unownedRecords;
 		strictEqual(telemetryHub().emit("session.closed", { reason: "shutdown" }, context), false);

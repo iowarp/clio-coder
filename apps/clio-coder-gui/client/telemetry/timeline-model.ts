@@ -137,6 +137,7 @@ function describe(entry: TimelineEntry, breaks: ReadonlyMap<string, CacheBreak>)
 				tone: entry.level === "over" || entry.outcome === "refused" || entry.outcome === "aborted" ? "fail" : "warn",
 				details: [
 					...shown("Spend", entry.spend),
+					...shown("Pending", entry.projected),
 					...shown("Ceiling", entry.ceiling),
 					...shown("Context", entry.contextTokens),
 					...shown("Waited", entry.waited),

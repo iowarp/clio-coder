@@ -668,7 +668,9 @@ export const QuotaReadSchema = Type.Object(
 export const BudgetCrossedSchema = Type.Object(
 	{
 		level: vocabulary(["at", "over"]),
+		/** Spend so far; the cost admission counted ahead of its settlement is `projectedUsd` (#434). */
 		spendUsd: duration,
+		projectedUsd: Type.Optional(duration),
 		ceilingUsd: duration,
 		/** Estimated input tokens of the held request, which is what each further call re-sends (#423). */
 		contextTokens: Type.Optional(count),
@@ -680,6 +682,7 @@ export const BudgetHeldSchema = Type.Object(
 	{
 		level: vocabulary(["at", "over"]),
 		spendUsd: duration,
+		projectedUsd: Type.Optional(duration),
 		ceilingUsd: duration,
 		contextTokens: Type.Optional(count),
 		/**

@@ -10,7 +10,7 @@ import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/i
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/index.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
-import { callCoverageForRun, createCostTracker, renderCostAggregate } from "../../src/domains/telemetry/cost.js";
+import { callCoverageForRun } from "../../src/domains/telemetry/cost.js";
 import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js";
 import {
 	remainingContextMaxTokens,
@@ -18,7 +18,6 @@ import {
 	setGlobalDefaultMaxOutputTokens,
 } from "../../src/engine/apis/output-budget.js";
 import type { AgentMessage } from "../../src/engine/types.js";
-import { reseedSessionUsageFromLedger } from "../../src/interactive/session-usage-reseed.js";
 import {
 	assistantSessionPayload,
 	estimatedUsageForInterruptedTurn,
@@ -204,8 +203,7 @@ describe("contracts/metering integrity", () => {
 		);
 	});
 
-	it("preserves declared call counts and unknown run coverage through usage projections", () => {
-		const tracker = createCostTracker();
+	it("preserves declared call counts and unknown run coverage", () => {
 		for (const [counts, expected] of [
 			[{}, { apiCalls: 0, missingTokenCalls: 0, unknownCallCoverageRuns: 1 }],
 			[
@@ -220,48 +218,7 @@ describe("contracts/metering integrity", () => {
 		] as const) {
 			const coverage = callCoverageForRun(counts);
 			deepStrictEqual(coverage, expected);
-			tracker.accumulate("target", "model", 0, 0, coverage, "known_free", undefined, "worker");
 		}
-		strictEqual(tracker.sessionCost().calls, 5);
-		strictEqual(tracker.sessionCost().unknownCallCoverageRuns, 2);
-		strictEqual(renderCostAggregate(tracker.sessionCost()), "$0.00 local");
-		tracker.reset();
-		strictEqual(tracker.sessionTokens().unknownCallCoverageRuns, undefined);
-		strictEqual(renderCostAggregate(tracker.sessionCost()), "not measured");
-	});
-
-	it("replaces replayed run snapshots without retaining their previous amounts or missing coverage", () => {
-		const tracker = createCostTracker();
-		tracker.accumulate("main", "model", 10, 0, { apiCalls: 1 }, "known_free");
-		tracker.replace(
-			"run:worker",
-			"worker",
-			"model",
-			3,
-			0,
-			{ apiCalls: 0, unknownCallCoverageRuns: 1, cacheWrite1h: 2 },
-			"unknown",
-		);
-		strictEqual(tracker.sessionTokens().totalTokens, 13);
-		strictEqual(tracker.sessionCost().hasUnknown, true);
-		tracker.replace(
-			"run:worker",
-			"worker",
-			"model",
-			7,
-			0,
-			{ apiCalls: 2, missingTokenCalls: 0, cacheWrite1h: 4 },
-			"known_free",
-		);
-		strictEqual(tracker.sessionTokens().totalTokens, 17);
-		strictEqual(tracker.sessionTokens().cacheWrite1h, 4);
-		strictEqual(tracker.sessionCost().calls, 3);
-		strictEqual(tracker.sessionCost().hasUnknown, false);
-		strictEqual(tracker.sessionCost().unknownCallCoverageRuns, undefined);
-		strictEqual(tracker.entries().length, 2);
-		tracker.reset();
-		strictEqual(tracker.sessionTokens().totalTokens, 0);
-		strictEqual(tracker.entries().length, 0);
 	});
 
 	it("estimates spent prompt and streamed output when cancellation prevents final usage", () => {
@@ -359,12 +316,6 @@ describe("contracts/metering integrity", () => {
 				ok("payload" in entry);
 				strictEqual((entry.payload as Record<string, unknown>).usage, null);
 			}
-			strictEqual(telemetry.snapshot().session.tokens.neverSentCalls, 3);
-			strictEqual(telemetry.snapshot().session.tokens.apiCalls ?? 0, 0);
-			strictEqual(telemetry.snapshot().session.cost.calls, 0);
-			deepStrictEqual(telemetry.costEntries(), []);
-			reseedSessionUsageFromLedger(telemetry, []);
-			strictEqual(telemetry.snapshot().session.tokens.neverSentCalls ?? 0, 0);
 		} finally {
 			await extension.stop?.();
 		}

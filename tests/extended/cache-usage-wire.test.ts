@@ -2,7 +2,6 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { test } from "node:test";
-import { createCostTracker } from "../../src/domains/telemetry/cost.js";
 import { completeEngineText, streamSimple } from "../../src/engine/ai.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { sideQuestionUsage } from "../../src/session-control/side-question.js";
@@ -108,10 +107,8 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 			strictEqual(completion.usage.costUsd, usage.cost.total);
 			const side = sideQuestionUsage(usage);
 			ok(side);
-			const tracker = createCostTracker();
-			tracker.accumulate("fixture", "fixture", side.totalTokens, side.costUsd, side, "estimated");
-			strictEqual(tracker.sessionTokens().cacheWrite1h, long);
-			strictEqual(tracker.sessionTokens().totalTokens, 10100);
+			strictEqual(side.cacheWrite1h, long);
+			strictEqual(side.totalTokens, 10100);
 		} finally {
 			server.closeAllConnections();
 			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

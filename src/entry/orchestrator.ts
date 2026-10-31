@@ -66,7 +66,6 @@ import { factRef } from "../core/telemetry/dto.js";
 import type { EventPayload } from "../core/telemetry/events.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { registerResearchTraceSink } from "../core/telemetry/research-trace.js";
-import type { CallSettled } from "../core/telemetry/schemas.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -275,7 +274,6 @@ import {
 	parseSessionEntries,
 	SessionDomainModule,
 } from "../domains/session/index.js";
-import { usageCallsFromAttempts, withCompactionOutcome } from "../domains/session/journal-usage.js";
 import {
 	clearPendingProtectedArtifact,
 	reconcilePendingProtectedArtifacts,
@@ -291,8 +289,6 @@ import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
 import { writeTranscriptExport } from "../domains/session/transcript-export.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
-import { recordUsageCall } from "../domains/session/usage-record.js";
-import { reseedSessionUsageFromLedger } from "../domains/session/usage-reseed.js";
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
 import { archiveCommandHost, type ShareContract, ShareDomainModule } from "../domains/share/index.js";
@@ -1501,9 +1497,8 @@ function appendSkillActivationRegistryEvent(
 	}
 }
 
-/** What a compaction needs of telemetry: its session's journal, and the live projection of its settled calls. */
-type CompactionTelemetry = Pick<TelemetryContract, "acquireTelemetrySession" | "recordTokens"> &
-	Partial<Pick<TelemetryContract, "recordNeverSentCalls">>;
+/** What a compaction needs of telemetry: its session's journal. */
+type CompactionTelemetry = Pick<TelemetryContract, "acquireTelemetrySession">;
 
 async function runCompactionFlow(
 	session: SessionContract,
@@ -1549,7 +1544,6 @@ async function runCompactionFlow(
 	// Keep this owner alive through checkpoint publication, after individual streams close (#434).
 	const lease = await telemetry?.acquireTelemetrySession?.(meta, "compaction");
 	const callIds = new Set<string>();
-	const settledCalls: CallSettled[] = [];
 	const closure: EventPayload<"compaction.settled"> = { callIds: [], outcome: "failed", checkpointTurnId: null };
 	try {
 		// Folded over the full applicable ledger before this compaction cuts it, so
@@ -1637,7 +1631,6 @@ async function runCompactionFlow(
 								costProvenance: resolved.costProvenance,
 								onSettled: (facts) => {
 									callIds.add(facts.callId);
-									settledCalls.push(facts);
 								},
 							},
 						}
@@ -1820,17 +1813,6 @@ async function runCompactionFlow(
 	} finally {
 		if (lease && callIds.size > 0)
 			telemetryHub().emit("compaction.settled", { ...closure, callIds: [...callIds] }, lease.context);
-		if (telemetry && session.current()?.id === meta.id) {
-			try {
-				for (const facts of settledCalls) {
-					if (facts.disposition === "never_sent") telemetry.recordNeverSentCalls?.(1);
-					for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }]))
-						recordUsageCall(telemetry, withCompactionOutcome(call, closure.outcome));
-				}
-			} catch {
-				writeDiagnostic("[clio-coder:telemetry] live compaction projection failed; journal retains the calls\n");
-			}
-		}
 		await lease?.release();
 	}
 }
@@ -2678,7 +2660,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// The spend the scheduling gate admits paid requests against, so a memory
 	// step's projected cost meets the same ceiling chat and dispatch do.
 	const backgroundSessionSpendUsd = (): number =>
-		result.getContract<SchedulingContract>("scheduling")?.preflight().currentUsd ?? telemetry?.sessionCost() ?? 0;
+		result.getContract<SchedulingContract>("scheduling")?.preflight().currentUsd ?? telemetry?.sessionSpend().usd ?? 0;
 	const backgroundCallJournal = (targetId: string, modelId: string): CallJournalOptions | undefined => {
 		const origin = session?.current();
 		const acquire = telemetry?.acquireTelemetrySession;
@@ -2689,11 +2671,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			origin: origin ?? null,
 			acquire,
 			label: "memory",
-			onSettled: (facts) => {
-				if (!telemetry || !origin || session?.current()?.id !== origin.id) return;
-				if (facts.disposition === "never_sent") telemetry.recordNeverSentCalls(1);
-				for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) recordUsageCall(telemetry, call);
-			},
 			targetId,
 			runtimeId: runtime.id,
 			costProvenance: resolveEffectivePricing(target, runtime, modelId).provenance,
@@ -4485,18 +4462,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	const reseedUsage = (): void => {
 		const meta = session?.current();
-		if (!meta || !telemetry || !session) return;
-		reseedSessionUsageFromLedger(
-			telemetry,
-			readCurrentSessionEntries(),
-			{
-				target: meta.target,
-				model: meta.model,
-				sessionId: meta.id,
-				journalStateDir: clioStateDir(),
-			},
-			session.tree(meta.id).leafId,
-		);
+		if (!meta || !telemetry) return;
+		telemetry.resetSession(meta.id);
 	};
 	termination.onDrain(bus.subscribe("session.reattached", reseedUsage));
 	termination.onDrain(bus.subscribe("session.turn_switched", reseedUsage));
@@ -5028,19 +4995,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 			try {
 				const resumedEntries = readCurrentSessionEntries();
-				if (telemetry) {
-					reseedSessionUsageFromLedger(
-						telemetry,
-						resumedEntries,
-						{
-							target: resumedMeta.target,
-							model: resumedMeta.model,
-							sessionId: resumedMeta.id,
-							journalStateDir: clioStateDir(),
-						},
-						leafTurnId,
-					);
-				}
+				telemetry?.resetSession(resumedMeta.id);
 				// Scoped to the leaf resume landed on for the same reason the /resume
 				// overlay is (issue #107): with a /tree pin persisted, the file still
 				// holds the abandoned branch after the pinned turn, and replaying it
@@ -5884,11 +5839,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// earlier spend does not count against it. It becomes the session
 		// ceiling every paid request already passes: the main agent's, each
 		// compaction's and each dispatch's admission. A lower configured
-		// ceiling still holds.
+		// ceiling still holds. The start is read the way admission reads spend, so the cap counts only this run (#434).
 		const runCostCap =
 			options.headless.maxCostUsd === undefined
 				? null
-				: createRunCostCap(telemetry?.sessionCost() ?? 0, options.headless.maxCostUsd);
+				: createRunCostCap((await telemetry?.settledSessionSpend())?.usd ?? 0, options.headless.maxCostUsd);
 		if (runCostCap !== null) {
 			startupOverrides.set(
 				"safety.limits.sessionCostUsd",
@@ -6014,7 +5969,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.headless.deadline !== undefined ? { deadline: options.headless.deadline } : {}),
 				...(dispatch ? { dispatch } : {}),
 				scopeNotices: (listener) => bus.subscribe("run.scope_notice_raised", listener),
-				...(telemetry ? { costEntries: () => telemetry.costEntries() } : {}),
+				...(telemetry
+					? {
+							compactionCalls: async (from: string) => {
+								// Every queued settlement is written and the live fold seeded before the calls are read (#434).
+								await telemetry.settledSessionSpend();
+								return telemetry.read?.live()?.calls({ labels: ["compaction"], from }).calls ?? [];
+							},
+						}
+					: {}),
 				...(runCostCap !== null ? { costCap: { maxUsd: runCostCap.maxUsd, unpricedRoutes } } : {}),
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 			});

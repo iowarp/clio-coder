@@ -193,8 +193,6 @@ test("an approved git-control-file write refreshes the baseline, and the exit su
 	strictEqual(s.parks.length, 1);
 
 	const telemetry = {
-		costEntries: () => [],
-		sessionCostSummary: () => ({ knownUsd: 0, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 0 }),
 		subscribe: () => () => {},
 	} as unknown as TelemetryContract;
 	const collector = createExitSummaryCollector({

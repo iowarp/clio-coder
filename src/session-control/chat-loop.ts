@@ -8,8 +8,6 @@ import { telemetryHub } from "../core/telemetry/hub.js";
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
-import { journalOwnsSideUsage } from "../domains/session/journal-usage.js";
-import { recordSettledSideCall } from "../domains/session/usage-record.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import type { TelemetrySessionLease } from "../domains/telemetry/session-journals.js";
@@ -1967,14 +1965,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						origin,
 						acquire,
 						label,
-						...(journalOwnsSideUsage(label)
-							? {
-									onSettled: (facts) => {
-										if (!deps.telemetry || !origin || deps.session?.current()?.id !== origin.id) return;
-										recordSettledSideCall(deps.telemetry, facts);
-									},
-								}
-							: {}),
 						targetId: runtime.targetId,
 						runtimeId: runtime.runtimeId,
 						costProvenance:

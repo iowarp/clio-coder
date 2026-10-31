@@ -13,13 +13,10 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DeclaredRuntimeNotice } from "../../src/core/telemetry/live-events.js";
-import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
 import { createTelemetryProjection, type ProjectionReadModel } from "../../src/domains/telemetry/projection.js";
 
 function stubReadModel(): ProjectionReadModel {
 	return {
-		sessionCostSummary: () => emptyCostAggregate(),
-		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 		latestThroughput: () => null,
 	};
 }

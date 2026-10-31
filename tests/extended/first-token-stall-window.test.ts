@@ -129,7 +129,8 @@ function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0, budget?: Budget
 	context.bus.subscribe("budget.alerted", (payload) => {
 		alerts.push(payload);
 	});
-	const spent = { sessionCost: () => budget?.spentUsd ?? 0 } as unknown as TelemetryContract;
+	const spend = () => ({ usd: budget?.spentUsd ?? 0, estimated: false, unpriced: false, ref: null });
+	const spent = { sessionSpend: spend, settledSessionSpend: async () => spend() } as unknown as TelemetryContract;
 	const scheduling = budget
 		? createSchedulingBundle(
 				{

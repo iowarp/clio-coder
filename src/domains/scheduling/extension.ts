@@ -11,7 +11,7 @@ import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { BudgetAlertPayload, ConfigChangePayload, ConfigChangeSource } from "../../core/telemetry/live-events.js";
 import type { ConfigContract } from "../config/contract.js";
-import type { TelemetryContract } from "../telemetry/contract.js";
+import type { SessionSpend, TelemetryContract } from "../telemetry/contract.js";
 import {
 	type BudgetSpendPricing,
 	combineBudgetPricing,
@@ -27,6 +27,14 @@ import {
 	type LocalCapacitySamplerOptions,
 	resolveGlobalConcurrency,
 } from "./local-capacity.js";
+
+/** Priced spend so far and how it was priced (#434 §6.3). */
+interface Spend {
+	usd: number;
+	pricing: BudgetSpendPricing;
+}
+
+const NOTHING_SPENT: SessionSpend = { usd: 0, estimated: false, unpriced: false, ref: null };
 
 export interface SchedulingBundleOptions {
 	/** Host sampling seams for `fleet.concurrency: auto`; tests inject facts and a clock. */
@@ -71,17 +79,23 @@ export function createSchedulingBundle(
 		budget = createBudgetState(nextCeiling);
 	}
 
-	function evaluate(): { verdict: ReturnType<typeof budget.checkCeiling>; currentUsd: number } {
-		syncBudget();
-		const currentUsd = telemetry?.sessionCost() ?? 0;
-		return { verdict: budget.checkCeiling(currentUsd), currentUsd };
+	const spendOf = (spend: SessionSpend): Spend => ({
+		usd: spend.usd,
+		pricing: { estimated: spend.estimated, unpriced: spend.unpriced },
+	});
+	/** The session's priced spend so far and how it was priced, from the read model's live session fold (#434). */
+	function spendNow(): Spend {
+		return spendOf(telemetry?.sessionSpend() ?? NOTHING_SPENT);
+	}
+	/** Admission's read: every queued settlement written and the live fold seeded first, so the gate never lags. */
+	async function settledSpend(): Promise<Spend> {
+		return spendOf((await telemetry?.settledSessionSpend()) ?? NOTHING_SPENT);
 	}
 
-	/** How the session's spend was priced, read where a stop names it; enforcement reads sessionCost() alone. */
-	function sessionPricing(): BudgetSpendPricing | undefined {
-		// A minimal telemetry stub may lack the summary; the stop then names its spend as before.
-		const summary = telemetry?.sessionCostSummary?.();
-		return summary ? { estimated: summary.hasEstimated, unpriced: summary.hasUnknown } : undefined;
+	function evaluate(): { verdict: ReturnType<typeof budget.checkCeiling>; spend: Spend } {
+		syncBudget();
+		const spend = spendNow();
+		return { verdict: budget.checkCeiling(spend.usd), spend };
 	}
 
 	const extension: DomainExtension = {
@@ -101,14 +115,15 @@ export function createSchedulingBundle(
 			);
 			unsubscribes.push(
 				context.bus.subscribe("run.enqueued", () => {
-					const { verdict, currentUsd } = evaluate();
+					syncBudget();
+					if (budget.ceilingUsd <= 0) return;
+					const { verdict, spend } = evaluate();
 					if (verdict !== "under") {
-						const pricing = sessionPricing();
 						context.bus.emit("budget.alerted", {
 							level: verdict,
-							currentUsd,
+							currentUsd: spend.usd,
 							ceilingUsd: budget.ceilingUsd,
-							...(pricing ? { pricing } : {}),
+							pricing: spend.pricing,
 						} satisfies BudgetAlertPayload);
 					}
 				}),
@@ -126,9 +141,8 @@ export function createSchedulingBundle(
 			return budget.ceilingUsd;
 		},
 		preflight: () => {
-			const { verdict, currentUsd } = evaluate();
-			const pricing = sessionPricing();
-			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd, ...(pricing ? { pricing } : {}) };
+			const { verdict, spend } = evaluate();
+			return { verdict, currentUsd: spend.usd, ceilingUsd: budget.ceilingUsd, pricing: spend.pricing };
 		},
 		admitPaidRequest: async ({
 			waitForRaise,
@@ -152,6 +166,7 @@ export function createSchedulingBundle(
 					{
 						level: block.level,
 						spendUsd: block.currentUsd,
+						...(block.projectedUsd !== undefined ? { projectedUsd: block.projectedUsd } : {}),
 						ceilingUsd: block.ceilingUsd,
 						...(block.contextTokens !== undefined ? { contextTokens: block.contextTokens } : {}),
 						outcome,
@@ -163,9 +178,11 @@ export function createSchedulingBundle(
 				);
 			};
 			for (;;) {
-				const { currentUsd } = evaluate();
-				const spend = currentUsd + additionalUsd;
+				syncBudget();
 				const ceilingUsd = getCeilingUsd?.() ?? budget.ceilingUsd;
+				// No ceiling compares nothing, so an uncapped session's calls pay for no flush and no seed.
+				const spent = ceilingUsd > 0 ? await settledSpend() : null;
+				const spend = (spent?.usd ?? 0) + additionalUsd;
 				if (!sessionCeilingReached(spend, ceilingUsd)) {
 					if (held)
 						recordHold(ceilingUsd <= 0 ? "removed" : ceilingUsd > held.block.ceilingUsd ? "raised" : "cleared", ceilingUsd);
@@ -176,10 +193,11 @@ export function createSchedulingBundle(
 					throw signal.reason ?? new Error("budget wait aborted");
 				}
 				if (!held) {
-					const pricing = combineBudgetPricing(sessionPricing(), additionalUsd > 0 ? additionalPricing : undefined);
+					const pricing = combineBudgetPricing(spent?.pricing, additionalUsd > 0 ? additionalPricing : undefined);
 					const block: BudgetAlertPayload = {
 						level: spend > ceilingUsd ? "over" : "at",
-						currentUsd: spend,
+						currentUsd: spent?.usd ?? 0,
+						...(additionalUsd > 0 ? { projectedUsd: additionalUsd } : {}),
 						ceilingUsd,
 						...(contextTokens !== undefined ? { contextTokens } : {}),
 						...(pricing ? { pricing } : {}),

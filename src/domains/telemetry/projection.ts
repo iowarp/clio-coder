@@ -37,7 +37,7 @@ import type {
 	TelemetrySnapshot,
 	TokenThroughputSnapshot,
 } from "./contract.js";
-import type { CostAggregate, UsageBreakdown } from "./cost.js";
+import type { CostAggregate } from "./cost.js";
 import { createWorkerProgressFold, type WorkerProgressFold } from "./worker-progress.js";
 
 /** Settled run summaries retained, in addition to all active runs. */
@@ -49,20 +49,18 @@ export const PROJECTION_FLUSH_DEBOUNCE_MS = 16;
 
 /**
  * Read model the projection folds session-local state from. The extension owns
- * the cost tracker and the latest-throughput register; the projection reads
- * them at snapshot-build time so ordering with the extension's own bus handlers
- * never matters (both run synchronously before the debounced build).
+ * the latest-throughput register; the projection reads it at snapshot-build time
+ * so ordering with the extension's own bus handlers never matters. Session spend
+ * and tokens are the telemetry read model's, never the projection's (#434).
  */
 export interface ProjectionReadModel extends TelemetryRunReaders {
-	sessionCostSummary(): CostAggregate;
-	sessionTokens(): UsageBreakdown;
 	latestThroughput(): TokenThroughputSnapshot | null;
 }
 
 export interface TelemetryProjection extends TelemetryRunProjection {
 	snapshot(): TelemetrySnapshot;
 	subscribe(listener: (snapshot: TelemetrySnapshot) => void): () => void;
-	/** Recompute after a direct session mutation (recordTokens/resetSession/throughput). */
+	/** Recompute after a direct session mutation (resetSession/throughput). */
 	refresh(): void;
 	/** A forensic evidence build for `runId` has started. */
 	evidenceBuildStarted(runId: string): void;
@@ -292,8 +290,6 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 		return {
 			generatedAt: Date.now(),
 			session: {
-				cost: deps.sessionCostSummary(),
-				tokens: deps.sessionTokens(),
 				latestThroughput: deps.latestThroughput(),
 			},
 			// Newest-first: Map preserves first-seen (enqueue) order, so reversing

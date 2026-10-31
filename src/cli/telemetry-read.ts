@@ -291,7 +291,7 @@ function printTimeline(dto: TimelineV1): string {
 				return `${entry.at}  config   ${entry.event}${entry.source ? ` by ${entry.source}` : ""}${paths.length > 0 ? ` · ${paths.join(", ")}` : ""}`;
 			}
 			case "budget":
-				return `${entry.at}  budget   ${entry.event} ${entry.level} · spend ${entry.spend.display} of ${entry.ceiling.display}${entry.waited ? ` · waited ${entry.waited.display}` : ""}${entry.outcome ? ` · ${entry.outcome}` : ""}${entry.raisedTo ? ` to ${entry.raisedTo.display}` : ""}${entry.raisedBy ? ` by ${entry.raisedBy}` : ""}`;
+				return `${entry.at}  budget   ${entry.event} ${entry.level} · spend ${entry.spend.display}${entry.projected ? ` + ${entry.projected.display} pending` : ""} of ${entry.ceiling.display}${entry.waited ? ` · waited ${entry.waited.display}` : ""}${entry.outcome ? ` · ${entry.outcome}` : ""}${entry.raisedTo ? ` to ${entry.raisedTo.display}` : ""}${entry.raisedBy ? ` by ${entry.raisedBy}` : ""}`;
 			case "tool":
 				return `${entry.at}  tool     ${entry.tool} ${entry.outcome}${entry.blocked ? ` (${entry.blocked})` : ""} · ${entry.duration.display}${entry.parked ? ` · parked ${entry.parked.display}` : ""}${entry.resultBytes ? ` · ${entry.resultBytes.display} bytes` : ""}`;
 			case "middleware":

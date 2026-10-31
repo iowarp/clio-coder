@@ -5,7 +5,6 @@ import type { DispatchCompletedPayload } from "../../src/core/telemetry/live-eve
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import type { TelemetryRunReaders } from "../../src/domains/telemetry/contract.js";
-import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
 import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
 import { createDispatchBoardStore } from "../../src/interactive/dispatch-board.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
@@ -24,8 +23,6 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 	const bus = createTelemetryHub();
 	const projection = createTelemetryProjection(bus, {
 		readReceipt: () => facts,
-		sessionCostSummary: emptyCostAggregate,
-		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
 		latestThroughput: () => null,
 	});
 	const store = createDispatchBoardStore(projection);
