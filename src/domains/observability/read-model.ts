@@ -1,4 +1,5 @@
 import { processIdentityAlive } from "../../core/process-identity.js";
+import { cacheBreakLoss } from "../../core/telemetry/cache-break.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type {
 	CacheReportV1,
@@ -785,15 +786,20 @@ function runModelKey(run: Run): string {
 	return target ? modelKey(target) : "unknown/unknown";
 }
 /**
- * A cache break re-prefilled what the cache had served: a re-prefill above zero, or an unknown one on a call whose
- * verdict says the cache missed. `partial` also labels an ordinary call that appended a tool result to a warm prefix
- * (#423), so a partial call whose re-prefill is a known zero is no break.
+ * A cache break re-prefilled what the cache had served past the shared band: more than 1,024 tokens and a tenth of the
+ * previous request's prefix, which is what this call read plus what it prefilled again. An unknown re-prefill breaks
+ * on a call whose verdict says the cache missed. `partial` also labels an ordinary call that appended a tool result to
+ * a warm prefix, and the band absorbs the tokens such an append loses at cache boundaries (#423).
  */
 function isBreak(attempt: Attempt): boolean {
 	const settled = attempt.settled;
 	if (!settled || settled.disposition === "never_sent") return false;
 	const re = settled.cache.rePrefilledTokens;
-	if (re.kind === "measured" || re.kind === "estimated") return re.value > 0;
+	if (re.kind === "measured" || re.kind === "estimated") {
+		const read = settled.usage?.cacheRead;
+		const served = read && (read.kind === "measured" || read.kind === "estimated") ? read.value : 0;
+		return cacheBreakLoss(re.value, served + re.value);
+	}
 	return re.kind === "unknown" && (settled.cache.verdict === "cold" || settled.cache.verdict === "partial");
 }
 function coldKeys(attempt: Attempt): string[] {

@@ -5,6 +5,7 @@ import {
 	emptyCacheVerdictCounts,
 	uncachedPrefillTokens,
 } from "../../core/cache-telemetry.js";
+import { cacheBreakLoss } from "../../core/telemetry/cache-break.js";
 import type { SessionEntry } from "./entries.js";
 
 /** Durable prompt-cache facts folded across assistant calls in one ledger slice. */
@@ -128,10 +129,8 @@ export function foldPromptCacheTelemetry(entries: ReadonlyArray<SessionEntry>): 
 			// #423: historical unknown calls also include healthy appends, so apply the same calibrated band.
 			if (
 				observation.cause !== "none" &&
-				observation.shortfallTokens > 1_024 &&
 				finiteNonNegative(observation.expectedCachedTokens) &&
-				finiteNonNegative(observation.cacheReadTokens) &&
-				observation.cacheReadTokens < 0.9 * observation.expectedCachedTokens
+				cacheBreakLoss(observation.shortfallTokens, observation.expectedCachedTokens)
 			) {
 				reprefilledTokens += observation.shortfallTokens;
 				cacheBreakCalls += 1;

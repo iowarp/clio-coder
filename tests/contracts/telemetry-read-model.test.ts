@@ -646,9 +646,13 @@ test("a model's cost splits into the sessions' own calls and the worker runs, in
 	ok(repoCostReport(repo, { repo: "all", days: 30 }, "label", now).groups.every((group) => group.audience === null));
 });
 
-test("a cache break is a re-prefill above zero, or an unknown one on a missed cache, never a partial call that re-read nothing (#423, #434 §13.2)", () => {
-	const call = (verdict: CallSettled["cache"]["verdict"], rePrefilled: CallSettled["cache"]["rePrefilledTokens"]) =>
-		telemetryCall("cache-breaks").map((record) =>
+test("a cache break re-prefills past the shared band, or an unknown amount on a missed cache, never a boundary loss (#423, #434 §13.2)", () => {
+	const call = (
+		verdict: CallSettled["cache"]["verdict"],
+		rePrefilled: CallSettled["cache"]["rePrefilledTokens"],
+		cacheRead = 0,
+	) =>
+		telemetryCall("cache-breaks", { usage: { cacheRead } }).map((record) =>
 			record.k === "call.settled"
 				? ({
 						...record,
@@ -667,6 +671,9 @@ test("a cache break is a re-prefill above zero, or an unknown one on a missed ca
 				records: [
 					// An ordinary tool-result append on a warm prefix.
 					...call("partial", measured(0)),
+					// What an append loses at the provider's 128-token boundaries, and a loss under a tenth of the prefix.
+					...call("partial", measured(849), 200_000),
+					...call("partial", measured(5_000), 100_000),
 					...call("partial", measured(4_096)),
 					...call("partial", unknown),
 					...call("cold", unknown),

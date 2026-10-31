@@ -506,7 +506,10 @@ export const CacheReportSchema = Type.Object(
 		uncachedPrefill: QuantitySchema,
 		rePrefilled: QuantitySchema,
 		breakUsd: QuantitySchema,
-		/** Calls whose re-prefill is measured above zero or whose verdict is cold or partial. */
+		/**
+		 * Calls that prefilled again more than the cache-break band allows (cache-break.ts), or whose re-prefill is unknown
+		 * on a cold or partial verdict.
+		 */
 		breaks: Type.Array(cacheBreak),
 		byCause: Type.Array(
 			Type.Object({ cause: text, breaks: count, rePrefilled: QuantitySchema, breakUsd: QuantitySchema }, closed),

@@ -1,3 +1,5 @@
+import { cacheBreakLoss } from "./telemetry/cache-break.js";
+
 /** Cache classification for one backend completion call. */
 export type BackendCacheVerdict = "hot" | "partial" | "cold" | "small" | "unknown";
 
@@ -165,9 +167,7 @@ export function buildCacheCallObservation(
 	const expected = previous?.inclusiveInputTokens ?? null;
 	const read = usage.cacheRead;
 	const shortfall = expected === null || read === null ? null : Math.max(0, expected - read);
-	// #423: healthy appends lost 91–849 tokens at the provider's 128-token boundaries.
-	// Require both >1,024 lost tokens and >10% loss before declaring a break.
-	const broke = expected !== null && read !== null && shortfall !== null && shortfall > 1_024 && read < 0.9 * expected;
+	const broke = expected !== null && shortfall !== null && cacheBreakLoss(shortfall, expected);
 	const prior = previous?.requestFingerprint;
 	const fingerprintCause =
 		prior && requestFingerprint
