@@ -32,6 +32,7 @@ const PLAYBOOKS_MIGRATION_ID = "2026-10-06-playbooks-and-packages";
 const ACP_ADAPTERS_MIGRATION_ID = "2026-10-07-acp-adapters";
 const CLAUDE_SUBSCRIPTION_MIGRATION_ID = "2026-10-07-claude-subscription";
 const FLEET_JUDGE_MIGRATION_ID = "2026-10-20-fleet-permissions-judge";
+const OLD_TELEMETRY_MIGRATION_ID = "2026-10-31-remove-old-telemetry";
 const REPO = resolve(dirname(new URL(import.meta.url).pathname), "..", "..");
 
 describe("settings and migration boundary", () => {
@@ -353,6 +354,7 @@ targets:
 			ACP_ADAPTERS_MIGRATION_ID,
 			CLAUDE_SUBSCRIPTION_MIGRATION_ID,
 			FLEET_JUDGE_MIGRATION_ID,
+			OLD_TELEMETRY_MIGRATION_ID,
 		]);
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
@@ -383,7 +385,7 @@ targets:
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(stateDir, "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");

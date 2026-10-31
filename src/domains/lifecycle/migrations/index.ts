@@ -40,6 +40,7 @@ import playbooksAndPackages from "./2026-10-06-playbooks-and-packages.js";
 import acpAdapters from "./2026-10-07-acp-adapters.js";
 import claudeSubscription from "./2026-10-07-claude-subscription.js";
 import fleetPermissionsJudge from "./2026-10-20-fleet-permissions-judge.js";
+import removeOldTelemetry from "./2026-10-31-remove-old-telemetry.js";
 import { appendMigrationNotice } from "./notices.js";
 import { REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
@@ -94,6 +95,7 @@ const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	acpAdapters,
 	claudeSubscription,
 	fleetPermissionsJudge,
+	removeOldTelemetry,
 ]);
 
 // A fresh home records REGISTERED_MIGRATION_IDS as already applied. An id

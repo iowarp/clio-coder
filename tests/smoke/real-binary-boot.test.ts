@@ -229,7 +229,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			const env = home.env;
 			const first = await run(["upgrade"], env);
 			strictEqual(first.code, 0, first.output);
-			match(first.output, /6 migrations applied/u);
+			match(first.output, /7 migrations applied/u);
 			strictEqual(readFileSync(join(home.root, "config", "settings.yaml.v1.bak"), "utf8"), V1_SETTINGS);
 			const manifest = JSON.parse(readFileSync(join(home.root, "state", "migrations.json"), "utf8"));
 			deepStrictEqual(manifest.applied, [
@@ -239,6 +239,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 				"2026-10-07-acp-adapters",
 				"2026-10-07-claude-subscription",
 				"2026-10-20-fleet-permissions-judge",
+				"2026-10-31-remove-old-telemetry",
 			]);
 			const migrated = readFileSync(join(home.root, "config", "settings.yaml"), "utf8");
 			match(migrated, /^version: 2$/mu);
