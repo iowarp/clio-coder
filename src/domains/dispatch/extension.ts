@@ -6826,15 +6826,17 @@ export function createDispatchBundle(
 				const endedAt = new Date().toISOString();
 				timing.endedAt = endedAt;
 				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
-				runJournal?.settle(
-					settleUnfinishedRun(ledgerRef.get(envelope.id) ?? envelope, {
-						terminal: resolvedTerminal,
-						outcome: "failed",
-						detail,
-						endedAt,
-						processExitCode: null,
-					}),
-				);
+				runJournal
+					?.settle(
+						settleUnfinishedRun(ledgerRef.get(envelope.id) ?? envelope, {
+							terminal: resolvedTerminal,
+							outcome: "failed",
+							detail,
+							endedAt,
+							processExitCode: null,
+						}),
+					)
+					.catch((settleError: unknown) => reportDispatchDiagnostic(`settle run ${envelope.id}`, settleError));
 				try {
 					ledgerRef.update(envelope.id, {
 						status: "failed",
@@ -9262,15 +9264,17 @@ export function createDispatchBundle(
 				const endedAt = new Date().toISOString();
 				timing.endedAt = endedAt;
 				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
-				runJournal?.settle(
-					settleUnfinishedRun(ledgerRef.get(envelope.id) ?? envelope, {
-						terminal: resolvedTerminal,
-						outcome: "failed",
-						detail,
-						endedAt,
-						processExitCode: null,
-					}),
-				);
+				runJournal
+					?.settle(
+						settleUnfinishedRun(ledgerRef.get(envelope.id) ?? envelope, {
+							terminal: resolvedTerminal,
+							outcome: "failed",
+							detail,
+							endedAt,
+							processExitCode: null,
+						}),
+					)
+					.catch((settleError: unknown) => reportDispatchDiagnostic(`settle run ${envelope.id}`, settleError));
 				try {
 					ledgerRef.update(envelope.id, {
 						status: "failed",

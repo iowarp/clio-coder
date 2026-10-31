@@ -253,6 +253,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 	let reported = false;
 	let settled = previous.records.some(({ record }) => record.k === "run.settled");
 	let settling: Promise<void> = Promise.resolve();
+	let durableSettle: Promise<void> = Promise.resolve();
 	const reportHealth = () => {
 		const health = writer.health();
 		if (!reported && (health.writeErrors > 0 || health.dropped > 0 || health.invalid > 0)) {
@@ -313,21 +314,34 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			});
 		},
 		settle(settlement) {
-			if (journal.closed || settled) return settling;
+			if (journal.closed) return Promise.reject(new Error("run telemetry journal is closed"));
+			if (settled) return durableSettle;
 			settled = true;
 			const wallMs = Date.now();
 			const mono = performance.now();
-			settling = writer.storeObject("run-result", settlement.result).then(
-				(result) => {
-					writer.enqueue({ kind: "run.settled", data: runSettledRecord(settlement, result), ctx: context, wallMs, mono });
-				},
-				() => {
-					// A settlement whose result object could not be stored is not written, so the scope stays unsealed.
-					settled = false;
-					writeDiagnostic("[clio-coder:telemetry] run result object could not be stored; the run stays unsealed\n");
-				},
-			);
-			return settling.then(() => writer.flush());
+			const before = writer.health();
+			// The caller publishes the run as finished only once this resolves, so every way the record can fail to
+			// land rejects: a stored result object, the enqueue, and the write itself (#434).
+			const durable = (async () => {
+				const result = await writer.storeObject("run-result", settlement.result);
+				if (
+					!writer.enqueue({ kind: "run.settled", data: runSettledRecord(settlement, result), ctx: context, wallMs, mono })
+				)
+					throw new Error("run.settled could not be enqueued");
+				await writer.flush();
+				const after = writer.health();
+				if (after.writeErrors > before.writeErrors || after.invalid > before.invalid)
+					throw new Error("run.settled was not persisted");
+			})().catch((error: unknown) => {
+				// A settlement that did not land leaves the scope unsealed; a later settle may try again.
+				settled = false;
+				writeDiagnostic("[clio-coder:telemetry] run settlement could not be persisted; the run stays unsealed\n");
+				throw error;
+			});
+			// Flush and close wait for the attempt whatever its result; only settling callers see the failure.
+			durableSettle = durable;
+			settling = durable.catch(() => undefined);
+			return durable;
 		},
 		channel(data) {
 			if (journal.closed) return;
