@@ -7,6 +7,8 @@ import {
 } from "../../../../src/domains/dispatch/gate-decisions.js";
 import { writeFleetRun } from "../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../src/domains/dispatch/types.js";
+import { openCallJournal } from "../../../../src/domains/telemetry/call-journal.js";
+import { telemetryRunDirectory } from "../../../../src/domains/telemetry/paths.js";
 
 const state = process.env.CLIO_CODER_STATE_DIR;
 assert.ok(state);
@@ -92,16 +94,29 @@ for (const id of ["fleet-149", "member-two"])
 		join(state, "receipts", `${id}.json`),
 		JSON.stringify({ version: 1, runId: id, outcome: "succeeded", output: { text: "Fixture receipt output" } }),
 	);
-const decision = materializePendingGateDecision(
-	stagePendingGateDecision({
-		group: "fixture-gate",
-		topology: "review",
-		cycle: 1,
-		outcome: "pass",
-		subjects: [{ runId: "member-two", digest: "b".repeat(64) }],
-		decider: { runId: "member-one", digest: "c".repeat(64) },
-		correlation: { agent: false, target: true, modelFamily: false, runtime: true, node: true, independent: true },
-		createdAt: stamp(7),
-	}),
-);
-process.stdout.write(JSON.stringify({ count: 150, gateId: decision.artifact.id }));
+const context = { sessionId: null, runId: "fixture-gate", label: "main" } as const;
+const journal = await openCallJournal({
+	directory: telemetryRunDirectory(state, context.runId),
+	context,
+	writer: { clioCoderVersion: "test", piVersion: "test" },
+});
+try {
+	const decision = await materializePendingGateDecision(
+		stagePendingGateDecision(
+			{
+				group: "fixture-gate",
+				topology: "review",
+				cycle: 1,
+				outcome: "pass",
+				subjects: [{ runId: "member-two", digest: "b".repeat(64) }],
+				decider: { runId: "member-one", digest: "c".repeat(64) },
+				correlation: { agent: false, target: true, modelFamily: false, runtime: true, node: true, independent: true },
+				createdAt: stamp(7),
+			},
+			{ stateDir: state, telemetry: context },
+		),
+	);
+	process.stdout.write(JSON.stringify({ count: 150, gateId: decision.artifact.id }));
+} finally {
+	await journal.close();
+}

@@ -1,11 +1,14 @@
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { GateDecisionArtifact } from "../../../../src/domains/dispatch/gate-decisions.js";
 import {
 	materializePendingGateDecision,
 	stagePendingGateDecision,
 } from "../../../../src/domains/dispatch/gate-decisions.js";
 import { withReceiptIntegrity } from "../../../../src/domains/dispatch/receipt-integrity.js";
 import { buildEvidence } from "../../../../src/domains/evidence/index.js";
+import { openCallJournal } from "../../../../src/domains/telemetry/call-journal.js";
+import { telemetryRunDirectory } from "../../../../src/domains/telemetry/paths.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../../../../tests/harness/receipt.js";
 
 const cwd = process.argv[2];
@@ -32,18 +35,34 @@ for (const envelope of envelopes) {
 	await writeFile(join(stateDir, "receipts", `${envelope.id}.json`), JSON.stringify(receipt));
 }
 const built = await buildEvidence({ dataDir, stateDir, runId: "evidence-source" });
-const gate = materializePendingGateDecision(
-	stagePendingGateDecision({
-		group: "evidence-gate",
-		topology: "review",
-		cycle: 1,
-		outcome: "pass",
-		subjects: [{ runId: "evidence-source", digest: "b".repeat(64) }],
-		decider: { runId: "build-source", digest: "c".repeat(64) },
-		correlation: { agent: false, target: true, modelFamily: false, runtime: true, node: true, independent: true },
-		createdAt: "2026-09-01T00:00:00.000Z",
-	}),
-).artifact;
+const context = { sessionId: null, runId: "evidence-gate", label: "main" } as const;
+const journal = await openCallJournal({
+	directory: telemetryRunDirectory(stateDir, context.runId),
+	context,
+	writer: { clioCoderVersion: "test", piVersion: "test" },
+});
+let gate: GateDecisionArtifact;
+try {
+	gate = (
+		await materializePendingGateDecision(
+			stagePendingGateDecision(
+				{
+					group: "evidence-gate",
+					topology: "review",
+					cycle: 1,
+					outcome: "pass",
+					subjects: [{ runId: "evidence-source", digest: "b".repeat(64) }],
+					decider: { runId: "build-source", digest: "c".repeat(64) },
+					correlation: { agent: false, target: true, modelFamily: false, runtime: true, node: true, independent: true },
+					createdAt: "2026-09-01T00:00:00.000Z",
+				},
+				{ stateDir, telemetry: context },
+			),
+		)
+	).artifact;
+} finally {
+	await journal.close();
+}
 for (let i = 0; i < 40; i++) {
 	const id = `evidence-${String(i).padStart(3, "0")}`,
 		dir = join(dataDir, "evidence", id);
