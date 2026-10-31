@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { listStateDirectory, withinStateRootAsync } from "../../core/state-boundary.js";
 import type { JournalPayload, PreimageEventName } from "../../core/telemetry/events.js";
 import { readCallJournal } from "./call-journal.js";
 import { readTelemetryObject } from "./objects.js";
@@ -26,13 +26,17 @@ export async function* readJournaledContent<N extends PreimageEventName>(
 ): AsyncGenerator<JournaledContent<N>> {
 	let sessions: string[];
 	try {
-		sessions = (await readdir(telemetrySessionsDirectory(stateDir))).filter((name) => SAFE_ID.test(name)).sort();
+		sessions = (await listStateDirectory(stateDir, telemetrySessionsDirectory(stateDir)))
+			.filter((name) => SAFE_ID.test(name))
+			.sort();
 	} catch {
 		// No session has journaled anything yet.
 		return;
 	}
 	for (const sessionId of sessions) {
 		const directory = telemetrySessionDirectory(stateDir, sessionId);
+		// A session scope that is symlinked or leaves the state root is not this host's content (#434).
+		if (!(await withinStateRootAsync(stateDir, directory))) continue;
 		let records: Awaited<ReturnType<typeof readCallJournal>>["records"];
 		try {
 			records = (await readCallJournal(directory)).records;

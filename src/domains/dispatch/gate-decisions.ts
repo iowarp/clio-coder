@@ -10,10 +10,11 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { Value } from "typebox/value";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
+import { listStateDirectorySync, readStateFileSync } from "../../core/state-boundary.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import { TelemetryContextSchema, telemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
@@ -346,6 +347,16 @@ function pendingDecisionsDirectory(stateDir = clioStateDir()): string {
 	return join(decisionsDirectory(stateDir), "pending");
 }
 
+/** A gate directory's names; none when it is missing, symlinked or outside the state root, and other errors throw. */
+function listGateDirectory(stateDir: string, directory: string): string[] {
+	try {
+		return listStateDirectorySync(stateDir, directory);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw error;
+	}
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -580,10 +591,15 @@ function buildGateDecisionArtifact(
 	return artifact;
 }
 
-function readVerifiedArtifact(path: string): GateDecisionArtifact {
+/** Every gate file is read through the state boundary: a symlinked or escaping file is never opened (#434). */
+function readStateJson(stateDir: string, path: string): unknown {
+	return JSON.parse(readStateFileSync(stateDir, path).toString("utf8")) as unknown;
+}
+
+function readVerifiedArtifact(stateDir: string, path: string): GateDecisionArtifact {
 	let value: unknown;
 	try {
-		value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+		value = readStateJson(stateDir, path);
 	} catch (error) {
 		throw new Error(
 			`gate decision artifact is unreadable at ${path}: ${error instanceof Error ? error.message : String(error)}`,
@@ -606,7 +622,7 @@ function persistGateDecisionArtifact(
 	mkdirSync(directory, { recursive: true });
 	const path = decisionArtifactPath(artifact.id, stateDir);
 	if (existsSync(path)) {
-		const existing = readVerifiedArtifact(path);
+		const existing = readVerifiedArtifact(stateDir, path);
 		if (
 			allowIdenticalExisting &&
 			existing.id === artifact.id &&
@@ -838,7 +854,7 @@ function persistPendingGateDecision(
 function loadPendingGateDecision(handle: PendingGateDecisionHandle): PendingGateDecisionHandle | null {
 	assertPendingHandlePath(handle);
 	if (!existsSync(handle.path)) return null;
-	const record = parsePendingGateDecisionRecord(JSON.parse(readFileSync(handle.path, "utf8")) as unknown);
+	const record = parsePendingGateDecisionRecord(readStateJson(handle.stateDir, handle.path));
 	if (record.id !== handle.record.id) throw new Error("pending gate decision changed identity on disk");
 	return pendingHandle(record, handle.stateDir);
 }
@@ -1006,7 +1022,7 @@ export async function materializePendingGateDecision(
 		throw new Error(`pending gate decision and artifact are both missing: ${record.id}`);
 	}
 	const written = persistGateDecisionArtifact(record.decision, handle.stateDir, true);
-	const persisted = readVerifiedArtifact(written.path);
+	const persisted = readVerifiedArtifact(handle.stateDir, written.path);
 	if (persisted.integrity.digest !== record.decision.integrity.digest) {
 		throw new Error(`materialized gate decision does not match pending record: ${record.id}`);
 	}
@@ -1025,16 +1041,14 @@ export async function finalizePendingGateDecision(
 
 export function readPendingGateDecisions(stateDir = clioStateDir()): PendingGateDecisionReadResult {
 	const directory = pendingDecisionsDirectory(stateDir);
-	if (!existsSync(directory)) return { records: [], errors: [] };
+	const names = listGateDirectory(stateDir, directory);
 	const records: PendingGateDecisionHandle[] = [];
 	const errors: PendingGateDecisionReadResult["errors"] = [];
-	for (const name of readdirSync(directory)
-		.filter((entry) => entry.endsWith(".json"))
-		.sort()) {
+	for (const name of names.filter((entry) => entry.endsWith(".json")).sort()) {
 		const path = join(directory, name);
 		let raw: unknown;
 		try {
-			raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+			raw = readStateJson(stateDir, path);
 			const record = parsePendingGateDecisionRecord(raw);
 			if (name !== `${record.id}.json`) throw new Error("pending gate decision filename does not match its id");
 			records.push({ record, path, stateDir });
@@ -1055,7 +1069,7 @@ export function preflightPendingGateDecisionMaterialization(handles: ReadonlyArr
 		if (handle.record.kind !== "decision") continue;
 		const path = decisionArtifactPath(handle.record.decision.id, handle.stateDir);
 		if (!existsSync(path)) continue;
-		const existing = readVerifiedArtifact(path);
+		const existing = readVerifiedArtifact(handle.stateDir, path);
 		if (existing.integrity.digest !== handle.record.decision.integrity.digest) {
 			throw new Error(`gate decision artifact conflicts with pending record: ${handle.record.id}`);
 		}
@@ -1141,14 +1155,13 @@ export function readGateDecisionArtifacts(
 	stateDir = clioStateDir(),
 ): Array<{ artifact: GateDecisionArtifact; path: string }> {
 	const directory = decisionsDirectory(stateDir);
-	if (!existsSync(directory)) return [];
 	const out: Array<{ artifact: GateDecisionArtifact; path: string }> = [];
-	for (const name of readdirSync(directory)
+	for (const name of listGateDirectory(stateDir, directory)
 		.filter((entry) => entry.endsWith(".json"))
 		.sort()) {
 		const path = join(directory, name);
 		try {
-			const artifact = JSON.parse(readFileSync(path, "utf8")) as GateDecisionArtifact;
+			const artifact = readStateJson(stateDir, path) as GateDecisionArtifact;
 			if (group !== undefined && artifact.group !== group) continue;
 			if (!verifyGateDecisionArtifact(artifact).ok) continue;
 			out.push({ artifact, path });

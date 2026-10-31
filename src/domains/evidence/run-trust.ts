@@ -6,6 +6,7 @@
  * so the two projections of one run cannot disagree on its trust.
  */
 
+import { withinStateRoot } from "../../core/state-boundary.js";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import {
 	type GateDecisionArtifact,
@@ -13,7 +14,6 @@ import {
 	readGateDecisionArtifacts,
 	verifyGateDecisionArtifact,
 } from "../dispatch/gate-decisions.js";
-import { containedInStateRoot } from "../telemetry/run-record.js";
 import { compareCodepoints } from "./ordering.js";
 import {
 	adaptGateDecisionReviewStatus,
@@ -143,7 +143,7 @@ export function readRunGateIndex(stateDir: string): (runId: string) => GateDecis
 	let gates: GateDecisionArtifact[] = [];
 	try {
 		// A decision store that resolves outside the state root judges none of this host's runs.
-		if (containedInStateRoot(stateDir, gateDecisionsDirectory(stateDir)))
+		if (withinStateRoot(stateDir, gateDecisionsDirectory(stateDir)))
 			gates = readGateDecisionArtifacts(undefined, stateDir).map((entry) => entry.artifact);
 	} catch {
 		// An unreadable store composes no later review over any run.

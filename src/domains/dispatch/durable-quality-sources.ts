@@ -12,8 +12,9 @@
  * fresh object and is verified again.
  */
 
-import { existsSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs";
+import type { Stats } from "node:fs";
 import { join } from "node:path";
+import { listStateDirectorySync, readStateFileSync, statStatePathSync } from "../../core/state-boundary.js";
 import type { RouteHistoryEntry, RouteHistoryFold, SettledRunFacts } from "../telemetry/index.js";
 import { createRouteHistoryFold } from "../telemetry/index.js";
 import { type GateDecisionArtifact, gateDecisionsDirectory, verifyGateDecisionArtifact } from "./gate-decisions.js";
@@ -63,14 +64,6 @@ function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
 	);
 }
 
-function statOrNull(path: string): Stats | null {
-	try {
-		return statSync(path);
-	} catch {
-		return null;
-	}
-}
-
 function durableRun(run: SettledRunFacts): DurableRunSource {
 	const settled = run.facts;
 	return {
@@ -116,17 +109,21 @@ export function createDurableQualitySourceCache(
 
 	const readGates = (): { artifacts: GateDecisionArtifact[]; changed: boolean } => {
 		let changed = false;
-		const names = existsSync(gatesDir)
-			? readdirSync(gatesDir)
-					.filter((entry) => entry.endsWith(".json"))
-					.sort()
-			: [];
+		let names: string[] = [];
+		try {
+			// Gate artifacts are read through the state boundary: a symlinked or escaping store judges no route (#434).
+			names = listStateDirectorySync(options.stateDir, gatesDir)
+				.filter((entry) => entry.endsWith(".json"))
+				.sort();
+		} catch {
+			// A missing or unreadable store holds no decision.
+		}
 		const seen = new Set<string>();
 		const artifacts: GateDecisionArtifact[] = [];
 		for (const name of names) {
 			const path = join(gatesDir, name);
-			const stats = statOrNull(path);
-			if (stats === null) continue;
+			const stats = statStatePathSync(options.stateDir, path);
+			if (stats === null || !stats.isFile()) continue;
 			seen.add(path);
 			const identity = identityOf(stats);
 			const cached = gates.get(path);
@@ -137,7 +134,7 @@ export function createDurableQualitySourceCache(
 			changed = true;
 			let artifact: GateDecisionArtifact | null = null;
 			try {
-				const parsed = JSON.parse(readFileSync(path, "utf8")) as GateDecisionArtifact;
+				const parsed = JSON.parse(readStateFileSync(options.stateDir, path).toString("utf8")) as GateDecisionArtifact;
 				// Read APIs ignore malformed or unverifiable artifacts, exactly as
 				// `readGateDecisionArtifacts` does.
 				if (verifyGateDecisionArtifact(parsed).ok) artifact = parsed;

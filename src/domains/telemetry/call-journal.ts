@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { processBirthToken } from "../../core/process-identity.js";
 import { safeResourceWrite, safeResourceWriteAsync } from "../../core/safe-resource-write.js";
+import { readRegularFile, readRegularFileSync } from "../../core/state-boundary.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
 import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import { captureAdmits, STANDARD_CAPTURE, sameTelemetryCapture } from "../../core/telemetry/capture.js";
@@ -805,7 +806,7 @@ async function readCallJournalSnapshot(directory: string, retries: number): Prom
 	for (const file of files) {
 		let bytes: Buffer;
 		try {
-			bytes = await readFile(join(directory, file));
+			bytes = await readRegularFile(join(directory, file));
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT" && retries > 0)
 				return readCallJournalSnapshot(directory, retries - 1);
@@ -858,7 +859,7 @@ export function readCallJournalSync(directory: string): CallJournalRead {
 			throw error;
 		}
 		try {
-			for (const file of files) appendReadSegment(result, readFileSync(join(directory, file)));
+			for (const file of files) appendReadSegment(result, readRegularFileSync(join(directory, file)));
 			if (files.join("\n") === names().join("\n")) return result;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

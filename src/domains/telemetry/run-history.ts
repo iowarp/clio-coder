@@ -1,6 +1,7 @@
-import { readdirSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
+import { statStatePathSync } from "../../core/state-boundary.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { FleetRunRecord } from "../dispatch/index.js";
 import { councilTopologies, gateTopology, openLedger, readFleetRun, runEvidenceOf } from "../dispatch/index.js";
@@ -16,17 +17,8 @@ import { readRunRecord } from "./run-record.js";
 
 /** Bound identity records before their domain readers open them; telemetry stays in its own run scopes (#434). */
 function containedRecord(root: string, ...parts: string[]): boolean {
-	try {
-		const base = realpathSync(root);
-		const path = realpathSync(resolve(base, ...parts));
-		const rel = relative(base, path);
-		const info = statSync(path);
-		return (
-			!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`) && info.isFile() && info.size <= 8 * 1024 * 1024
-		);
-	} catch {
-		return false;
-	}
+	const info = statStatePathSync(root, join(root, ...parts));
+	return info !== null && info.isFile() && info.size <= 8 * 1024 * 1024;
 }
 
 /** Identity and orchestration history for run surfaces; terminal facts always come from the run DTO (#434). */

@@ -7,6 +7,8 @@ export const TelemetryDomainModule: DomainModule = {
 	createExtension: createTelemetryBundle,
 };
 
+/** The read boundary every telemetry reader opens its paths through, for surfaces that report a store present (#434). */
+export { withinStateRoot } from "../../core/state-boundary.js";
 export type { AccountabilitySummary } from "./accountability.js";
 export { summarizeRunAccountability } from "./accountability.js";
 export { workspaceTelemetryCapture } from "./consent.js";
@@ -104,7 +106,6 @@ export {
 } from "./run-history.js";
 export type { SettledRunRecord } from "./run-record.js";
 export {
-	containedInStateRoot,
 	readRunRecord,
 	readRunRecordAsync,
 	readSettledRun,

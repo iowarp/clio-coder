@@ -16,8 +16,8 @@
  * a reader nothing the run id does not.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { listStateDirectorySync, readStateFileSync, withinStateRoot } from "../../core/state-boundary.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { GateRouteCorrelation } from "./execution-role.js";
 import {
@@ -191,10 +191,11 @@ function readDecisionWindow(stateDir: string): {
 	unverifiable: number;
 } {
 	const directory = gateDecisionsDirectory(stateDir);
-	if (!existsSync(directory)) return { present: false, artifacts: [], unverifiable: 0 };
+	// A store that is symlinked or resolves outside the state root is not this host's and reads as absent (#434).
+	if (!withinStateRoot(stateDir, directory)) return { present: false, artifacts: [], unverifiable: 0 };
 	let entries: string[];
 	try {
-		entries = readdirSync(directory).filter((name) => name.endsWith(".json"));
+		entries = listStateDirectorySync(stateDir, directory).filter((name) => name.endsWith(".json"));
 	} catch {
 		// The directory is there and unreadable, which is not the same as absent.
 		return { present: true, artifacts: [], unverifiable: 0 };
@@ -204,7 +205,7 @@ function readDecisionWindow(stateDir: string): {
 	for (const name of entries.slice(0, GATE_TOPOLOGY_MAX_SCAN)) {
 		let artifact: GateDecisionArtifact;
 		try {
-			artifact = JSON.parse(readFileSync(join(directory, name), "utf8")) as GateDecisionArtifact;
+			artifact = JSON.parse(readStateFileSync(stateDir, join(directory, name)).toString("utf8")) as GateDecisionArtifact;
 		} catch {
 			unverifiable += 1;
 			continue;

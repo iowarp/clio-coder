@@ -1,8 +1,16 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { access, readdir, readFile, stat } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
+import {
+	listStateDirectory,
+	listStateDirectorySync,
+	readStateFile,
+	readStateFileSync,
+	statStatePath,
+	statStatePathSync,
+	withinStateRoot,
+	withinStateRootAsync,
+} from "../../core/state-boundary.js";
 import type { RunEvidenceV1, RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { readRunEvidence } from "../dispatch/run-result-facts.js";
@@ -69,9 +77,17 @@ function* scopeFiles(directory: string): Load<TelemetryScopeFiles | null> {
 	return (yield { op: "scope", directory }) as TelemetryScopeFiles | null;
 }
 
-function performSync(io: Io): unknown {
+const EMPTY_READ: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
+
+/**
+ * Every file this loader opens goes through the state boundary (`core/state-boundary.ts`): a path that is a symlink
+ * or resolves outside the state root reads as absent, so no listing, presence check or scope read can serve a foreign
+ * tree as this host's telemetry (#434).
+ */
+function performSync(stateDir: string, io: Io): unknown {
 	switch (io.op) {
 		case "scope":
+			if (!withinStateRoot(stateDir, io.directory)) return null;
 			try {
 				return readTelemetryScopeFilesSync(io.directory);
 			} catch {
@@ -79,62 +95,55 @@ function performSync(io: Io): unknown {
 				return null;
 			}
 		case "journal":
-			return readCallJournalSync(io.directory);
+			return withinStateRoot(stateDir, io.directory) ? readCallJournalSync(io.directory) : { ...EMPTY_READ };
 		case "text":
 			try {
-				return readFileSync(io.path, "utf8");
+				return readStateFileSync(stateDir, io.path).toString("utf8");
 			} catch {
 				// Every caller treats an unreadable file as an absent one.
 				return null;
 			}
 		case "list":
 			try {
-				return readdirSync(io.path);
+				return listStateDirectorySync(stateDir, io.path);
 			} catch {
 				// No directory: nothing to list.
 				return null;
 			}
 		case "exists":
-			return existsSync(io.path);
+			return withinStateRoot(stateDir, io.path);
 		case "mtime":
-			try {
-				return statSync(io.path).mtimeMs;
-			} catch {
-				// No file: nothing to order by.
-				return null;
-			}
+			return statStatePathSync(stateDir, io.path)?.mtimeMs ?? null;
 	}
 }
 
-async function performAsync(io: Io): Promise<unknown> {
+async function performAsync(stateDir: string, io: Io): Promise<unknown> {
 	switch (io.op) {
 		case "scope":
+			if (!(await withinStateRootAsync(stateDir, io.directory))) return null;
 			return readTelemetryScopeFiles(io.directory).catch(() => null);
 		case "journal":
-			return readCallJournal(io.directory);
+			return (await withinStateRootAsync(stateDir, io.directory)) ? readCallJournal(io.directory) : { ...EMPTY_READ };
 		case "text":
-			return readFile(io.path, "utf8").catch(() => null);
-		case "list":
-			return readdir(io.path).catch(() => null);
-		case "exists":
-			return access(io.path).then(
-				() => true,
-				() => false,
-			);
-		case "mtime":
-			return stat(io.path).then(
-				(info) => info.mtimeMs,
+			return readStateFile(stateDir, io.path).then(
+				(bytes) => bytes.toString("utf8"),
 				() => null,
 			);
+		case "list":
+			return listStateDirectory(stateDir, io.path).catch(() => null);
+		case "exists":
+			return withinStateRootAsync(stateDir, io.path);
+		case "mtime":
+			return (await statStatePath(stateDir, io.path))?.mtimeMs ?? null;
 	}
 }
 
-function runSync<T>(load: Load<T>): T {
+function runSync<T>(stateDir: string, load: Load<T>): T {
 	let step = load.next();
 	while (!step.done) {
 		let value: unknown;
 		try {
-			value = performSync(step.value);
+			value = performSync(stateDir, step.value);
 		} catch (error) {
 			step = load.throw(error);
 			continue;
@@ -144,12 +153,12 @@ function runSync<T>(load: Load<T>): T {
 	return step.value;
 }
 
-async function runAsync<T>(load: Load<T>): Promise<T> {
+async function runAsync<T>(stateDir: string, load: Load<T>): Promise<T> {
 	let step = load.next();
 	while (!step.done) {
 		let value: unknown;
 		try {
-			value = await performAsync(step.value);
+			value = await performAsync(stateDir, step.value);
 		} catch (error) {
 			step = load.throw(error);
 			continue;
@@ -301,7 +310,7 @@ function* withAccountQuota(stateDir: string, load: Load<SessionSource | null>): 
 
 /** This host's journaled quota readings, for the live quota view's seed (#434). */
 export function loadHostQuotaRecordsAsync(stateDir: string): Promise<TelemetryRecord[]> {
-	return runAsync(hostQuotaRecords(stateDir, null));
+	return runAsync(stateDir, hostQuotaRecords(stateDir, null));
 }
 
 /** One process journal: the calls its process made with no session or run (#434). */
@@ -317,16 +326,16 @@ function* loadProcess(stateDir: string, processId: string): Load<JournalSource> 
 }
 
 export function loadProcessTelemetrySourceAsync(stateDir: string, processId: string): Promise<JournalSource> {
-	return runAsync(loadProcess(stateDir, processId));
+	return runAsync(stateDir, loadProcess(stateDir, processId));
 }
 
 export function loadRunTelemetrySource(stateDir: string, runId: string): JournalSource {
-	return runSync(loadRun(stateDir, runId));
+	return runSync(stateDir, loadRun(stateDir, runId));
 }
 
 /** The same read off the event loop's critical path, for the live model and ACP (#434). */
 export function loadRunTelemetrySourceAsync(stateDir: string, runId: string): Promise<JournalSource> {
-	return runAsync(loadRun(stateDir, runId));
+	return runAsync(stateDir, loadRun(stateDir, runId));
 }
 
 function* loadRunScope(stateDir: string, runId: string): Load<TelemetryScopeFiles | null> {
@@ -336,11 +345,11 @@ function* loadRunScope(stateDir: string, runId: string): Load<TelemetryScopeFile
 
 /** A run scope's own files, which the run DTO reads its seal verdict and result object from (#434). */
 export function loadRunScopeFiles(stateDir: string, runId: string): TelemetryScopeFiles | null {
-	return runSync(loadRunScope(stateDir, runId));
+	return runSync(stateDir, loadRunScope(stateDir, runId));
 }
 
 export function loadRunScopeFilesAsync(stateDir: string, runId: string): Promise<TelemetryScopeFiles | null> {
-	return runAsync(loadRunScope(stateDir, runId));
+	return runAsync(stateDir, loadRunScope(stateDir, runId));
 }
 
 /** A run's DTO with its seal verdict and result object, from its run scope; null with no run directory (#434). */
@@ -359,11 +368,11 @@ export function loadSessionTelemetrySource(
 	sessionId: string,
 	directory?: string | null,
 ): SessionSource | null {
-	return runSync(withAccountQuota(stateDir, loadSession(stateDir, sessionId, directory, new Set())));
+	return runSync(stateDir, withAccountQuota(stateDir, loadSession(stateDir, sessionId, directory, new Set())));
 }
 
 export function loadSessionTelemetrySourceAsync(stateDir: string, sessionId: string): Promise<SessionSource | null> {
-	return runAsync(withAccountQuota(stateDir, loadSession(stateDir, sessionId, undefined, new Set())));
+	return runAsync(stateDir, withAccountQuota(stateDir, loadSession(stateDir, sessionId, undefined, new Set())));
 }
 
 /** The keyset after a page of run journals: the last row's write time and id. */
@@ -422,10 +431,13 @@ function* listRuns(
 	};
 }
 
-/** Run ids with a directory under the telemetry root's `runs/`; none when it does not exist, and other errors throw. */
+/**
+ * Run ids with a directory under the telemetry root's `runs/`; none when it does not exist or leaves the state root,
+ * and other errors throw.
+ */
 export function listRunTelemetryIds(stateDir: string): string[] {
 	try {
-		return readdirSync(telemetryRunsDirectory(stateDir));
+		return listStateDirectorySync(stateDir, telemetryRunsDirectory(stateDir));
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
 		throw error;
@@ -435,29 +447,27 @@ export function listRunTelemetryIds(stateDir: string): string[] {
 /** Whether the run has a telemetry directory; one whose journal is missing or torn is unknown coverage, not absent. */
 export function runTelemetryDirectoryExists(stateDir: string, runId: string): boolean {
 	assertSafeId(runId, "run");
-	return statSync(telemetryRunDirectory(stateDir, runId), { throwIfNoEntry: false })?.isDirectory() === true;
+	return statStatePathSync(stateDir, telemetryRunDirectory(stateDir, runId))?.isDirectory() === true;
 }
 
 /** The run journal's last write in epoch ms, the key run listings page by; null when it was never written. */
 export function runTelemetryWrittenMs(stateDir: string, runId: string): number | null {
 	assertSafeId(runId, "run");
-	return (
-		statSync(telemetryJournalPath(telemetryRunDirectory(stateDir, runId)), { throwIfNoEntry: false })?.mtimeMs ?? null
-	);
+	return statStatePathSync(stateDir, telemetryJournalPath(telemetryRunDirectory(stateDir, runId)))?.mtimeMs ?? null;
 }
 
 export function listRunTelemetrySources(
 	stateDir: string,
 	page: { limit: number; before?: RunListCursor | null },
 ): RunTelemetryListing {
-	return runSync(listRuns(stateDir, page));
+	return runSync(stateDir, listRuns(stateDir, page));
 }
 
 export function listRunTelemetrySourcesAsync(
 	stateDir: string,
 	page: { limit: number; before?: RunListCursor | null },
 ): Promise<RunTelemetryListing> {
-	return runAsync(listRuns(stateDir, page));
+	return runAsync(stateDir, listRuns(stateDir, page));
 }
 
 /** A report window: one workspace bucket's sessions, or every bucket's, between two epoch-ms bounds (#434 §11.1). */
@@ -599,5 +609,5 @@ function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTele
 
 /** Every session and standalone run a `usage report` window covers, windowed; a cold, synchronous read for the CLI. */
 export function loadRepoTelemetrySources(stateDir: string, window: RepoTelemetryWindow): RepoTelemetrySources {
-	return runSync(loadRepo(stateDir, window));
+	return runSync(stateDir, loadRepo(stateDir, window));
 }

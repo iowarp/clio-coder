@@ -4,12 +4,12 @@
  * reads the mutable run ledger.
  */
 
-import { readdir } from "node:fs/promises";
+import { listStateDirectory } from "../../core/state-boundary.js";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import type { GateDecisionArtifact } from "../dispatch/gate-decisions.js";
 import { isDecisionRecord } from "../session/entries.js";
 import { telemetryRunsDirectory } from "../telemetry/paths.js";
-import { containedInStateRoot, readRunRecordAsync } from "../telemetry/run-record.js";
+import { readRunRecordAsync } from "../telemetry/run-record.js";
 import { compareCodepoints } from "./ordering.js";
 import type { RunProvenanceView } from "./provenance.js";
 import { readRunGateIndex, readRunTrust } from "./run-trust.js";
@@ -118,12 +118,10 @@ export async function inspectRunEvidence(stateDir: string, runId: string): Promi
  * caller already holds without opening their scopes.
  */
 export async function listRunEvidence(stateDir: string, skip?: (runId: string) => boolean): Promise<RunEvidence[]> {
-	const directory = telemetryRunsDirectory(stateDir);
-	// A run store that resolves outside the state root is not this host's evidence (#434).
-	if (!containedInStateRoot(stateDir, directory)) return [];
 	let names: string[];
 	try {
-		names = await readdir(directory);
+		// A run store that is symlinked or resolves outside the state root is not this host's evidence (#434).
+		names = await listStateDirectory(stateDir, telemetryRunsDirectory(stateDir));
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
 		throw error;

@@ -9,7 +9,7 @@ import {
 	summarizeTrustStatus,
 	trustVerdict,
 } from "../../../../../src/domains/evidence/index.js";
-import { containedInStateRoot, telemetryRunsDirectory } from "../../../../../src/domains/telemetry/index.js";
+import { telemetryRunsDirectory, withinStateRoot } from "../../../../../src/domains/telemetry/index.js";
 import { Id } from "../../../contracts/common.js";
 import { type EvidenceRequest, EvidenceRun } from "../../../contracts/evidence.js";
 import { AppProblem } from "../../services/problem.js";
@@ -64,7 +64,7 @@ export async function readEvidence(input: EvidenceRequest): Promise<unknown> {
 			nextCursor: page.nextCursor,
 			// An absent run store is a different fact from a present one holding no settled run; a store that resolves
 			// outside the state root is not this host's and reads as absent (#434).
-			present: containedInStateRoot(state, telemetryRunsDirectory(state)),
+			present: withinStateRoot(state, telemetryRunsDirectory(state)),
 		};
 	}
 	if (!Value.Check(Id, input.id)) throw new AppProblem("validation", "Invalid evidence identifier.");

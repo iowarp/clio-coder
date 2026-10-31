@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readFileSync } from "node:fs";
-import { lstat, open, readdir, rm } from "node:fs/promises";
+import { lstatSync, readdirSync } from "node:fs";
+import { lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import { readRegularFile, readRegularFileSync } from "../../core/state-boundary.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type {
 	TelemetryScopeKind as ScopeKindSchema,
@@ -83,19 +84,23 @@ function sha256Of(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function readRegularFile(path: string): Promise<Buffer> {
-	const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+/** A scope's objects directory is part of the scope; one that is a symlink is refused, never followed (#434). */
+async function objectFileNames(scopeDirectory: string): Promise<string[]> {
+	const directory = telemetryObjectsDirectory(scopeDirectory);
 	try {
-		if (!(await handle.stat()).isFile()) throw new Error(`${path} is not a regular file`);
-		return await handle.readFile();
-	} finally {
-		await handle.close();
+		if (!(await lstat(directory)).isDirectory()) throw new Error(`${directory} is not a directory`);
+		return (await readdir(directory)).sort();
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw error;
 	}
 }
 
-async function objectFileNames(scopeDirectory: string): Promise<string[]> {
+function objectFileNamesSync(scopeDirectory: string): string[] {
+	const directory = telemetryObjectsDirectory(scopeDirectory);
 	try {
-		return (await readdir(telemetryObjectsDirectory(scopeDirectory))).sort();
+		if (!lstatSync(directory).isDirectory()) throw new Error(`${directory} is not a directory`);
+		return readdirSync(directory).sort();
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
 		throw error;
@@ -181,16 +186,6 @@ export async function readTelemetryScopeFiles(scopeDirectory: string): Promise<T
 	return { manifest, segments, objects };
 }
 
-function readRegularFileSync(path: string): Buffer {
-	const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-	try {
-		if (!fstatSync(fd).isFile()) throw new Error(`${path} is not a regular file`);
-		return readFileSync(fd);
-	} finally {
-		closeSync(fd);
-	}
-}
-
 /** The synchronous {@link readTelemetryScopeFiles}, for the CLI and the synchronous run DTO readers (#434). */
 export function readTelemetryScopeFilesSync(scopeDirectory: string): TelemetryScopeFiles {
 	if (!lstatSync(scopeDirectory).isDirectory()) throw new Error(`${scopeDirectory} is not a directory`);
@@ -202,14 +197,7 @@ export function readTelemetryScopeFilesSync(scopeDirectory: string): TelemetrySc
 		name,
 		bytes: readRegularFileSync(join(scopeDirectory, name)),
 	}));
-	let objectNames: string[];
-	try {
-		objectNames = readdirSync(telemetryObjectsDirectory(scopeDirectory)).sort();
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-		objectNames = [];
-	}
-	const objects = objectNames.map((name) => ({
+	const objects = objectFileNamesSync(scopeDirectory).map((name) => ({
 		name,
 		bytes: readRegularFileSync(join(telemetryObjectsDirectory(scopeDirectory), name)),
 	}));

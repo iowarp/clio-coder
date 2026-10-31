@@ -84,7 +84,8 @@ function countLedgerReads(stateDir: string): { reads: string[]; restore: () => v
 		return (original as (...args: unknown[]) => unknown)(path, ...rest);
 	}) as typeof fs.readFileSync;
 	fs.openSync = ((path: unknown, ...rest: unknown[]) => {
-		if (tracked(path) && (path as string).endsWith("/bundle.json")) reads.push(path as string);
+		// Bundles and gate artifacts are opened without following symlinks, then read by descriptor.
+		if (tracked(path)) reads.push(path as string);
 		return (originalOpen as (...args: unknown[]) => number)(path, ...rest);
 	}) as typeof fs.openSync;
 	syncBuiltinESMExports();

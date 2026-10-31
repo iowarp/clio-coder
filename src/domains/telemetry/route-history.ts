@@ -9,6 +9,7 @@
 
 import { lstatSync, readdirSync, type Stats } from "node:fs";
 import { join } from "node:path";
+import { listStateDirectorySync, withinStateRoot } from "../../core/state-boundary.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import type { RunSettled } from "../../core/telemetry/schemas.js";
 import {
@@ -190,7 +191,7 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 		read() {
 			let names: string[] = [];
 			try {
-				names = readdirSync(telemetryRunsDirectory(options.stateDir));
+				names = listStateDirectorySync(options.stateDir, telemetryRunsDirectory(options.stateDir));
 			} catch {
 				// No run has opened a journal on this host yet.
 				names = [];
@@ -207,7 +208,8 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 					// A name that is not a safe run id is not a run scope.
 					continue;
 				}
-				const identity = scopeIdentity(directory);
+				// A run scope that is symlinked or leaves the state root is not this host's route history (#434).
+				const identity = withinStateRoot(options.stateDir, directory) ? scopeIdentity(directory) : null;
 				if (identity === null) continue;
 				seen.add(runId);
 				const cached = cache.get(runId);

@@ -1,5 +1,6 @@
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { listStateDirectorySync, withinStateRoot } from "../../core/state-boundary.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { readCallJournalSync } from "./call-journal.js";
@@ -24,10 +25,11 @@ export function readTaskMemorySpendSummary(stateDir: string = clioStateDir()): T
 		telemetryProcessesDirectory(stateDir),
 	]) {
 		try {
+			// Scope directories are read through the state boundary; a symlinked or escaping one holds no spend (#434).
 			directories.push(
-				...readdirSync(root, { withFileTypes: true })
-					.filter((entry) => entry.isDirectory())
-					.map((entry) => join(root, entry.name)),
+				...listStateDirectorySync(stateDir, root)
+					.map((name) => join(root, name))
+					.filter((directory) => withinStateRoot(stateDir, directory)),
 			);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") unreadableFiles += 1;
