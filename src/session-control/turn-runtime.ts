@@ -782,7 +782,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				rememberMessageCalls(message, settledAttempts);
 			}
 			await lease?.release();
-			return call !== undefined;
+			// A minted call id is not accounting: only a journal that opened holds the call's spend, so a call under a
+			// lease that failed to open stays under the in-run cost guard (#434).
+			return call !== undefined && lease?.journaled === true;
 		};
 		// A round the loop moves past without an assistant message still settles its attempt, so no call.started stays
 		// open and no lease is held past the run (#434, R9). It has no ledger row, so a never-sent one is counted here.
