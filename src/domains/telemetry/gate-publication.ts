@@ -24,7 +24,21 @@ export async function publishGateDecision(
 	const prior = publications.get(directory);
 	const publication = (async () => {
 		await prior?.catch(() => {}); // A failed publication leaves its WAL for another attempt (#434).
+		const findDecision = async () =>
+			(await readCallJournal(directory)).records.find(
+				({ record }) => record.k === "gate.decided" && record.data.decisionId === data.decisionId,
+			)?.record;
 		const existing = ownedCallJournal(context);
+		if (!existing) {
+			// A retry of a publication that already landed resolves by reading; opening a writer would make a sealed
+			// scope live again for nothing (#434).
+			const decided = await findDecision();
+			if (decided?.k === "gate.decided") {
+				if (decided.data.digest !== data.digest)
+					throw new Error(`gate decision telemetry conflicts with artifact: ${data.decisionId}`);
+				return;
+			}
+		}
 		let journal = existing;
 		if (!journal) {
 			const pkg = JSON.parse(await readFile(join(resolvePackageRoot(), "package.json"), "utf8")) as {
@@ -39,10 +53,6 @@ export async function publishGateDecision(
 		}
 		try {
 			await journal.flush();
-			const findDecision = async () =>
-				(await readCallJournal(directory)).records.find(
-					({ record }) => record.k === "gate.decided" && record.data.decisionId === data.decisionId,
-				)?.record;
 			const decided = await findDecision();
 			if (decided?.k === "gate.decided" && decided.data.digest !== data.digest)
 				throw new Error(`gate decision telemetry conflicts with artifact: ${data.decisionId}`);
