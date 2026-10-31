@@ -27,7 +27,7 @@ describe("turn observations", () => {
 		usage.observe({ type: "agent_start" });
 		settled({ role: "assistant", model: "m", stopReason: "toolUse", usage: { input: 100, output: 20, cacheRead: 5 } });
 		settled({ role: "toolResult", usage: { input: 999 } });
-		// An interrupted call keeps the provider's zeros.
+		// An interrupted call's unreported zeros stay unknown (#434).
 		settled({
 			role: "assistant",
 			model: "m",
@@ -37,22 +37,42 @@ describe("turn observations", () => {
 		// The terminal reads the fold and takes how the turn ended from its own summary.
 		turns.turnEnd({ ...usage.current(), modelId: "m", targetId: "t", stopReason: "cancelled" });
 		const end = observations.at(-1);
+		const partialTokens = {
+			measured: 0,
+			estimated: 0,
+			unknownCount: 1,
+			absentCount: 0,
+			coverage: { measured: 1, estimated: 0, unknown: 1 },
+		};
 		deepStrictEqual(end?.event === "turn_end" ? end.usage : null, {
-			inputTokens: 100,
-			outputTokens: 20,
-			cacheReadTokens: 5,
-			cacheWriteTokens: 0,
+			inputTokens: { ...partialTokens, measured: 100 },
+			outputTokens: { ...partialTokens, measured: 20 },
+			cacheReadTokens: { ...partialTokens, measured: 5 },
+			cacheWriteTokens: {
+				measured: 0,
+				estimated: 0,
+				unknownCount: 2,
+				absentCount: 0,
+				coverage: { measured: 0, estimated: 0, unknown: 2 },
+			},
 			costUsd: null,
 			model: "m",
 			target: "t",
 		});
 		equal(end?.event === "turn_end" ? end.outcome : null, "aborted");
 		usage.observe({ type: "agent_start" });
+		const emptyTokens = {
+			measured: 0,
+			estimated: 0,
+			unknownCount: 0,
+			absentCount: 0,
+			coverage: { measured: 0, estimated: 0, unknown: 0 },
+		};
 		deepStrictEqual(usage.current(), {
-			inputTokens: 0,
-			outputTokens: 0,
-			cacheReadTokens: 0,
-			cacheWriteTokens: 0,
+			inputTokens: emptyTokens,
+			outputTokens: emptyTokens,
+			cacheReadTokens: emptyTokens,
+			cacheWriteTokens: emptyTokens,
 			modelId: "",
 			stopReason: "completed",
 		});
