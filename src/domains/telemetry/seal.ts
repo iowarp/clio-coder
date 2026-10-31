@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, readdir } from "node:fs/promises";
+import { lstat, open, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Static } from "typebox";
 import { Type } from "typebox";
@@ -91,6 +91,19 @@ async function objectFileNames(scopeDirectory: string): Promise<string[]> {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
 		throw error;
 	}
+}
+
+/** The temp file `safeResourceWriteAsync` writes an object through before its rename. */
+const INTERRUPTED_OBJECT_WRITE = /^\.obj_[0-9a-f]{64}\.json\.tmp-/u;
+
+/**
+ * Remove object writes a stopped process left before their rename. Only a caller holding the scope's writer lock may
+ * call this, since any other writer's temp files would be live (#434).
+ */
+export async function removeInterruptedObjectWrites(scopeDirectory: string): Promise<void> {
+	for (const name of await objectFileNames(scopeDirectory))
+		if (INTERRUPTED_OBJECT_WRITE.test(name))
+			await rm(join(telemetryObjectsDirectory(scopeDirectory), name), { force: true });
 }
 
 /** Every object the scope holds, as a seal lists them; a file that is not an object is not listed. */

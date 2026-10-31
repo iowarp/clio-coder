@@ -49,6 +49,7 @@ import {
 	describeSealMismatch,
 	listScopeObjects,
 	readTelemetryScopeFiles,
+	removeInterruptedObjectWrites,
 	SEAL_EVENTS,
 	scopeBundleManifest,
 	telemetryScopeOf,
@@ -306,6 +307,8 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			}
 			const rotatedScans = rotated.map((segment) => scanTelemetrySegment(segment.bytes));
 			const bundlePath = telemetryBundlePath(options.directory);
+			// An object write a stopped process left half done is not an object; the lock makes it abandoned (#434).
+			await removeInterruptedObjectWrites(options.directory);
 			// A sealed scope must still verify before this writer makes it live, so reopening never launders an edit.
 			if (existsSync(bundlePath)) {
 				const verdict = verifyTelemetryScope(await readTelemetryScopeFiles(options.directory));
@@ -321,8 +324,6 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				throw new Error(`telemetry chain does not verify: ${describeSealMismatch(walk.mismatch)}`);
 			let chain: TelemetryChain = walk ? walk.chain : EMPTY_TELEMETRY_CHAIN;
 			const segments: ScopeFileEntry[] = walk ? walk.segments.slice(0, rotated.length) : [];
-			// A scope reopened after its seal is resealed when this writer closes, as a resumed session is (#434).
-			const resealOnClose = walk?.tipIsSeal ?? false;
 			let sequence = rotated.reduce((max, { name }) => Math.max(max, telemetrySegmentSequence(name) ?? 0), 0);
 			// Appending makes a sealed scope live again; its manifest goes before the first new byte (#434).
 			await rm(bundlePath, { force: true });
@@ -622,6 +623,8 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				const current = handle;
 				let objects: Awaited<ReturnType<typeof listScopeObjects>>;
 				try {
+					// Every object write of this writer is serialized behind the seal, so a temp file is abandoned.
+					await removeInterruptedObjectWrites(options.directory);
 					objects = await listScopeObjects(options.directory);
 				} catch {
 					// An object that cannot be read or does not match its id refuses the seal; nothing was written.
@@ -715,11 +718,8 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 					closed = true;
 					unregister?.();
 					closing = (async () => {
-						await exclusively(() =>
-							holdingBatches(async () => {
-								if (resealOnClose && !sealCurrent) await sealNow();
-							}),
-						);
+						// Closing a writer never seals: sealing follows the scope's lifecycle, never writer disposal (#434).
+						await exclusively(() => holdingBatches(async () => {}));
 						if (scheduled) clearImmediate(scheduled);
 						release();
 						await owner;
