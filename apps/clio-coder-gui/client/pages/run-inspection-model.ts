@@ -50,6 +50,6 @@ export function evidenceVerdictTone(verdict: string) {
 			: "unverified";
 }
 
-export function evidenceRequestIdentity(workspace: string, run: string, kind: "build" | "verify"): string {
+export function evidenceRequestIdentity(workspace: string, run: string, kind: "verify"): string {
 	return JSON.stringify([workspace, run.trim(), kind]);
 }

@@ -4,7 +4,6 @@ import type { JobChangedPayload } from "../job-types.js";
 import type { CaptureFlag } from "./capture.js";
 import type { ContentClass, Tier } from "./enums.js";
 import type {
-	AccountabilityEvidenceReadyPayload,
 	AgentStatusChangedPayload,
 	BudgetAlertPayload,
 	CompactionPayload,
@@ -22,6 +21,7 @@ import type {
 	DispatchScopeNoticePayload,
 	DispatchStartedPayload,
 	DomainFailedPayload,
+	EvidenceAssessedPayload,
 	ExtensionsLoadIssuePayload,
 	GitHooksChangedPayload,
 	InternalGitDriftPayload,
@@ -225,6 +225,11 @@ function projectRunEnqueued(payload: DispatchEnqueuedPayload): Static<typeof S.R
 }
 
 /** Start facts only: identity the envelope carries and the spawned command stay on the live payload (#434). */
+/** The run id is the record's own context; only live subscribers, which see no context, are handed it (#434). */
+function projectEvidenceAssessed({ runId: _runId, ...assessment }: EvidenceAssessedPayload): S.EvidenceAssessed {
+	return assessment;
+}
+
 function projectRunStarted(payload: DispatchStartedPayload): Static<typeof S.RunStartedSchema> {
 	return { pid: payload.pid, assignmentId: payload.assignmentId, attempt: payload.attempt };
 }
@@ -248,6 +253,11 @@ export const EVENTS = {
 	"journal.segment_closed": journal(S.JournalSegmentClosedSchema, { tier: "accountability", cc: "content-free" }),
 	"turn.settled": journal(S.TurnSettledSchema, { tier: "accountability", cc: "content-free" }),
 	"run.settled": journal(S.RunSettledSchema, { tier: "accountability", cc: "content-free" }),
+	"evidence.assessed": journal(S.EvidenceAssessedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		project: projectEvidenceAssessed,
+	}),
 	"run.feed_appended": journal(S.RunFeedAppendedSchema, { tier: "operational", cc: "structural" }),
 	"run.usage_reported": journal(S.RunUsageSchema, { tier: "accountability", cc: "structural" }),
 	"run.linked": journal(S.RunLinkedSchema, { tier: "accountability", cc: "content-free" }),
@@ -438,7 +448,6 @@ export const EVENTS = {
 	"run.progressed": live<DispatchProgressPayload>(),
 	"run.completed": live<DispatchCompletedPayload>(),
 	"run.failed": live<DispatchFailedPayload>(),
-	"evidence.assessed": live<AccountabilityEvidenceReadyPayload>(),
 	"compaction.started": live<CompactionPayload>(),
 	"compaction.ended": live<CompactionPayload>(),
 	"middleware.hook_failed": journal(S.MiddlewareHookFailedSchema, {

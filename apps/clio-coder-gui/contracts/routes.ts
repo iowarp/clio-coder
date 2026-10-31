@@ -290,21 +290,14 @@ export const routes = {
 		path: "/api/evidence",
 		query: FleetPageQuery,
 		response: EvidencePage,
-		summary: "Paginated evidence artifacts and trust verdicts",
+		summary: "Paginated finished runs with their sealed assessments and trust verdicts",
 	}),
 	evidenceDetail: defineRoute({
 		...get,
 		path: "/api/evidence/:id",
 		params: operationParams,
 		response: EvidenceDetail,
-		summary: "Evidence findings, canonical trust, admitted provenance and gate decisions",
-	}),
-	evidenceBuild: defineRoute({
-		...post,
-		path: "/api/workspaces/:id/evidence/:runId/build",
-		params: Type.Object({ id: Id, runId: Id }, { additionalProperties: false }),
-		response: Accepted,
-		summary: "Collect evidence for a run through Clio",
+		summary: "A run's sealed findings, canonical trust, admitted provenance and gate verdicts",
 	}),
 	receiptVerify: defineRoute({
 		...post,

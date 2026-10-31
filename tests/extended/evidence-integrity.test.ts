@@ -1,10 +1,11 @@
-import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { attributeEvidenceFailure, type EvidenceFailureFacts } from "../../src/domains/evidence/failure-attribution.js";
-import { admitRunProvenance, runProvenanceFromUnknown } from "../../src/domains/evidence/provenance.js";
+import { admitRunProvenance } from "../../src/domains/evidence/provenance.js";
 import { createRedactionTally, redactSecretsDeep } from "../../src/domains/evidence/redact.js";
-import { evidenceDirectory } from "../../src/domains/evidence/store.js";
+import { inspectRunEvidence } from "../../src/domains/evidence/run-evidence.js";
+import { inspectRunTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { createProtectedArtifactsRegistration } from "../../src/domains/safety/protected-artifacts-registration.js";
 
 const FAILURE: EvidenceFailureFacts = {
@@ -15,29 +16,20 @@ const FAILURE: EvidenceFailureFacts = {
 };
 
 describe("evidence integrity boundary", () => {
-	it("treats artifact names as identities, never paths", () => {
-		strictEqual(evidenceDirectory("/data", "evidence-123"), "/data/evidence/evidence-123");
+	it("treats run ids as identities, never paths", async () => {
 		for (const id of ["../receipt", "nested/receipt", "/absolute"]) {
-			throws(() => evidenceDirectory("/data", id), /invalid evidence id|path separators/);
+			await rejects(inspectRunEvidence("/state", id), /invalid run id|path separators/);
 		}
 	});
 
-	it("admits only validated provenance fields", () => {
-		const view = runProvenanceFromUnknown({
+	it("admits provenance only under a verified integrity axis", () => {
+		const view = {
 			pipeline: { fromRunId: "run-parent", position: 2, inputBytes: 1024, inputTruncated: false },
 			personaOverride: { promptHash: "a".repeat(64) },
-		});
-		deepStrictEqual(view.pipeline, {
-			fromRunId: "run-parent",
-			position: 2,
-			inputBytes: 1024,
-			inputTruncated: false,
-		});
-		deepStrictEqual(runProvenanceFromUnknown({ pipeline: { position: "2", inputBytes: -1 } }), {});
-		deepStrictEqual(admitRunProvenance(view), {
-			pipeline: view.pipeline,
-			personaOverride: view.personaOverride,
-		});
+		};
+		deepStrictEqual(admitRunProvenance(view), view);
+		const unsealed = inspectRunTrustStatus(null).status;
+		deepStrictEqual(admitRunProvenance(view, unsealed), {});
 	});
 
 	it("redacts secrets deeply and accounts for every replacement", () => {

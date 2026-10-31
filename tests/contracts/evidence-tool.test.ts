@@ -1,12 +1,12 @@
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { materializePendingGateDecision, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
 import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import { evidenceDetailSnapshot } from "../../src/domains/evidence/detail.js";
-import { buildEvidence, type inspectEvidence, TRUST_STATUS_AXES } from "../../src/domains/evidence/index.js";
+import { inspectRunEvidence, TRUST_STATUS_AXES } from "../../src/domains/evidence/index.js";
 import { EVIDENCE_INVENTORY_MAX_ARTIFACTS } from "../../src/domains/evidence/inventory.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { telemetryJournalPath, telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
@@ -16,32 +16,31 @@ import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 import { writeSettledRun } from "../harness/settled-run.js";
 
-type EvidenceOutput = Awaited<ReturnType<typeof inspectEvidence>> &
-	Awaited<ReturnType<typeof evidenceDetailSnapshot>> & {
-		artifacts: { evidenceId: string }[];
-		truncated: boolean;
-		nextCursor: string | null;
-		gateDecisions: unknown[];
-		taskBoard: {
-			total: number;
-			completed: number;
-			active: number;
-			pending: number;
-			blocked: number;
-			cancelled: number;
-			open: number;
-		} | null;
-		toolEvents: { total: number; linked: number };
-		worktree?: {
-			branch?: string;
-			changedPaths?: string[];
-			apply?: "merge" | "preserve";
-			applied?: boolean;
-			snapshot?: "working-tree" | "unavailable";
-			reason?: string;
-			status?: "withheld";
-		};
+type EvidenceOutput = Awaited<ReturnType<typeof inspectRunEvidence>> & {
+	artifacts: { runId: string; totals: unknown }[];
+	runs: { runId: string }[];
+	truncated: boolean;
+	nextCursor: string | null;
+	gateDecisions: unknown[];
+	taskBoard: {
+		total: number;
+		completed: number;
+		active: number;
+		pending: number;
+		blocked: number;
+		cancelled: number;
+		open: number;
+	} | null;
+	worktree?: {
+		branch?: string;
+		changedPaths?: string[];
+		apply?: "merge" | "preserve";
+		applied?: boolean;
+		snapshot?: "working-tree" | "unavailable";
+		reason?: string;
+		status?: "withheld";
 	};
+};
 
 /** The fixture run's own session: evidence reads are scoped to the session and project asking. */
 const FIXTURE_SESSION = "session-1";
@@ -69,15 +68,32 @@ async function tamper(runId: string): Promise<void> {
 	await writeFile(path, text.replace('"agentId":"coder"', '"agentId":"codex"'));
 }
 
-async function fixture(tampered = false, task?: string) {
+async function fixture(tampered = false, task?: string, extra: Partial<RunResultDraft> = {}) {
 	const envelope = { ...fixtureEnvelope("fixture"), ...(task === undefined ? {} : { task }) };
 	await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
 	await settle({
 		...fixtureReceiptDraft(envelope),
 		validationGrounding: { claimed: 12, grounded: 1, ungrounded: ["typecheck"], basis: "no-command-executed" },
+		...extra,
 	});
 	if (tampered) await tamper(envelope.id);
 	return envelope;
+}
+
+/** Settle `count` runs of the fixture session, a second apart, and one run of another project's session. */
+async function manyRuns(count: number): Promise<string[]> {
+	const envelopes = Array.from({ length: count }, (_, index) => ({
+		...fixtureEnvelope(`copy-${String(index).padStart(2, "0")}`),
+		endedAt: new Date(2000000000000 + index * 1000).toISOString(),
+	}));
+	const foreign = {
+		...fixtureEnvelope("foreign"),
+		sessionId: "other-session",
+		cwd: join(clioStateDir(), "other-project"),
+	};
+	await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([...envelopes, foreign]));
+	for (const envelope of [...envelopes, foreign]) await settle(fixtureReceiptDraft(envelope));
+	return envelopes.map((envelope) => envelope.id);
 }
 
 describe("evidence tool", () => {
@@ -87,100 +103,47 @@ describe("evidence tool", () => {
 	});
 	afterEach(() => env.restore());
 
-	it("lists an empty inventory and bounds the newest fixture bundles", async () => {
+	it("lists an empty inventory, then pages visible runs newest first without revealing foreign ones", async () => {
 		deepStrictEqual(output(await evidence({ mode: "list" })).artifacts, []);
-		await fixture();
-		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
-		for (let i = 0; i < EVIDENCE_INVENTORY_MAX_ARTIFACTS + 2; i += 1) {
-			const id = `copy-${i}`;
-			const dir = join(clioDataDir(), "evidence", id);
-			await mkdir(dir, { recursive: true });
-			await writeFile(
-				join(dir, "overview.json"),
-				JSON.stringify({ ...built.overview, evidenceId: id, generatedAt: new Date(2000000000000 + i).toISOString() }),
-			);
-		}
-		const listed = output(await evidence({ mode: "list" }));
-		strictEqual(listed.artifacts.length, EVIDENCE_INVENTORY_MAX_ARTIFACTS);
-		strictEqual(listed.truncated, true);
-		strictEqual(listed.artifacts[0]?.evidenceId, `copy-${EVIDENCE_INVENTORY_MAX_ARTIFACTS + 1}`);
-	});
-
-	it("pages visible session bundles without repeating or revealing foreign artifacts", async () => {
-		await fixture();
-		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
-		for (let index = 0; index < EVIDENCE_INVENTORY_MAX_ARTIFACTS + 3; index += 1) {
-			const id = `session-copy-${String(index).padStart(2, "0")}`;
-			const dir = join(clioDataDir(), "evidence", id);
-			await mkdir(dir, { recursive: true });
-			await writeFile(
-				join(dir, "overview.json"),
-				JSON.stringify({
-					...built.overview,
-					evidenceId: id,
-					source: { kind: "session", sessionId: FIXTURE_SESSION },
-					sessionId: FIXTURE_SESSION,
-					generatedAt: "2026-09-24T00:00:00.000Z",
-				}),
-			);
-		}
-		const foreignId = "session-foreign";
-		const foreignDir = join(clioDataDir(), "evidence", foreignId);
-		await mkdir(foreignDir, { recursive: true });
-		await writeFile(
-			join(foreignDir, "overview.json"),
-			JSON.stringify({
-				...built.overview,
-				evidenceId: foreignId,
-				source: { kind: "session", sessionId: "other-session" },
-				sessionId: "other-session",
-				cwds: [join(clioStateDir(), "other-project")],
-			}),
-		);
-
-		const first = output(await evidence({ mode: "list", sourceKind: "session" }));
+		const ids = await manyRuns(EVIDENCE_INVENTORY_MAX_ARTIFACTS + 2);
+		const first = output(await evidence({ mode: "list", cursor: undefined }));
 		strictEqual(first.artifacts.length, EVIDENCE_INVENTORY_MAX_ARTIFACTS);
 		strictEqual(first.truncated, true);
-		strictEqual(first.nextCursor, first.artifacts.at(-1)?.evidenceId);
-		const second = output(await evidence({ mode: "list", sourceKind: "session", cursor: first.nextCursor }));
-		strictEqual(second.artifacts.length, 3);
+		strictEqual(first.artifacts[0]?.runId, ids.at(-1));
+		strictEqual(first.nextCursor, first.artifacts.at(-1)?.runId);
+		const second = output(await evidence({ mode: "list", cursor: first.nextCursor }));
+		strictEqual(second.artifacts.length, 2);
 		strictEqual(second.truncated, false);
 		strictEqual(second.nextCursor, null);
-		const ids = [...first.artifacts, ...second.artifacts].map((item) => item.evidenceId);
-		strictEqual(new Set(ids).size, EVIDENCE_INVENTORY_MAX_ARTIFACTS + 3);
-		ok(ids.every((id) => id !== foreignId));
-		strictEqual((await evidence({ mode: "list", sourceKind: "session", cursor: foreignId })).kind, "error");
-		strictEqual((await evidence({ mode: "list", sourceKind: "run", cursor: first.nextCursor })).kind, "error");
+		const listed = [...first.artifacts, ...second.artifacts].map((item) => item.runId);
+		strictEqual(new Set(listed).size, ids.length);
+		ok(listed.every((id) => id !== "foreign"));
+		strictEqual((await evidence({ mode: "list", cursor: "foreign" })).kind, "error");
 	});
 
-	it("inspects the fixture using the CLI trust projection and canonical findings", async () => {
+	it("inspects the fixture as its sealed evidence and the CLI trust projection", async () => {
 		await fixture();
-		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
-		strictEqual(built.ungroundedClaims, 11);
-		const inspected = output(await evidence({ mode: "inspect", id: built.evidenceId }));
-		deepStrictEqual(inspected.overview, built.overview);
-		deepStrictEqual(inspected.findings, built.findings);
-		deepStrictEqual(inspected.trustStatus, built.trustStatus);
-		deepStrictEqual(inspected.runs, (await evidenceDetailSnapshot(built.evidenceId)).runs);
-		deepStrictEqual(Object.keys(inspected.runs[0]?.axes ?? {}), [...TRUST_STATUS_AXES]);
-		strictEqual(inspected.runs[0]?.verdict, (await evidenceDetailSnapshot(built.evidenceId)).runs[0]?.verdict);
-		deepStrictEqual(inspected.gateDecisions, []);
+		const inspected = output(await evidence({ mode: "inspect", runId: "fixture" }));
+		const run = await inspectRunEvidence(clioStateDir(), "fixture");
+		deepStrictEqual(inspected, JSON.parse(JSON.stringify(run)));
+		strictEqual(inspected.ungroundedClaims, 11);
+		ok(inspected.assessedAt !== null);
+		deepStrictEqual(inspected.verdicts, []);
+		const detail = await evidenceDetailSnapshot("fixture");
+		strictEqual(detail.assessed, true);
+		strictEqual(detail.integrity, "verified");
+		deepStrictEqual(Object.keys(detail.axes), [...TRUST_STATUS_AXES]);
+		ok(inspected.findings.some((finding) => finding.tag === "proxy-validation"));
 	});
 
 	it("reports agent-managed delegation from a verified run", async () => {
-		const envelope = fixtureEnvelope("delegation-bypass");
-		await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
-		await settle({
-			...fixtureReceiptDraft(envelope),
+		await fixture(false, undefined, {
 			delegation: { toolGovernance: "agent-managed" } as NonNullable<RunResultDraft["delegation"]>,
 		});
-		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: envelope.id });
-		ok(built.findings.some((finding) => finding.tag === "external-bypass"));
+		ok(output(await evidence({ mode: "inspect", runId: "fixture" })).findings.some((f) => f.tag === "external-bypass"));
 	});
 
-	it("returns only integrity-verified gate decisions", async () => {
-		await fixture();
-		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
+	it("records only integrity-verified gate decisions present when the run settled", async () => {
 		const pending = stagePendingGateDecision(
 			{
 				group: "evidence-tool",
@@ -195,22 +158,28 @@ describe("evidence tool", () => {
 				telemetry: { sessionId: null, runId: "fixture", agent: { role: "coordinator", id: "fixture" } },
 			},
 		);
-		const valid = (await materializePendingGateDecision(pending)).artifact;
-		await writeFile(
-			join(built.directory, "gate-decisions.json"),
-			JSON.stringify({ version: 1, evidenceId: built.evidenceId, decisions: [valid, { ...valid, outcome: "fail" }] }),
-		);
-		deepStrictEqual(output(await evidence({ mode: "inspect", id: built.evidenceId })).gateDecisions, [valid]);
+		const valid = await materializePendingGateDecision(pending);
+		// A copy whose outcome was edited no longer verifies and is not read.
+		const forged = join(dirname(valid.path), "forged.json");
+		await copyFile(valid.path, forged);
+		const text = await readFile(forged, "utf8");
+		ok(/"outcome":\s*"pass"/u.test(text));
+		await writeFile(forged, text.replace(/"outcome":(\s*)"pass"/u, '"outcome":$1"fail"'));
+		await fixture();
+		const verdicts = output(await evidence({ mode: "inspect", runId: "fixture" })).verdicts;
+		strictEqual(verdicts.length, 1);
+		strictEqual(verdicts[0]?.decisionId, valid.artifact.id);
+		// The subject digest is not the run's settled digest, so the review stays unknown rather than passed.
+		strictEqual(verdicts[0]?.review, "unknown");
 	});
 
-	it("builds a missing run bundle and reuses an existing bundle", async () => {
+	it("reads without writing and classifies as a read", async () => {
 		await fixture();
-		strictEqual(output(await evidence({ mode: "run", runId: "fixture" })).evidenceId, "run-fixture");
-		const file = join(clioDataDir(), "evidence", "run-fixture", "overview.json");
-		const before = await readFile(file, "utf8");
-		await evidence({ mode: "run", runId: "fixture" });
-		strictEqual(await readFile(file, "utf8"), before);
-		strictEqual(classify({ tool: "evidence", args: { mode: "run", runId: "fixture" } }).actionClass, "read");
+		const before = await readFile(telemetryJournalPath(telemetryRunDirectory(clioStateDir(), "fixture")), "utf8");
+		const first = output(await evidence({ mode: "inspect", runId: "fixture" }));
+		deepStrictEqual(output(await evidence({ mode: "inspect", runId: "fixture" })).findings, first.findings);
+		strictEqual(await readFile(telemetryJournalPath(telemetryRunDirectory(clioStateDir(), "fixture")), "utf8"), before);
+		strictEqual(classify({ tool: "evidence", args: { mode: "inspect", runId: "fixture" } }).actionClass, "read");
 	});
 
 	it("exposes worktree fields only while the run seal still verifies", async () => {
@@ -226,7 +195,8 @@ describe("evidence tool", () => {
 		const envelope = { ...fixtureEnvelope("worktree-fixture"), cwd: worktree.path };
 		await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
 		await settle({ ...fixtureReceiptDraft(envelope), worktree });
-		deepStrictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree, {
+		const inspect = { mode: "inspect", runId: envelope.id };
+		deepStrictEqual(output(await evidence(inspect)).worktree, {
 			branch: worktree.branch,
 			changedPaths: worktree.changedPaths,
 			changedPathsOmitted: 0,
@@ -244,30 +214,20 @@ describe("evidence tool", () => {
 			reason: "worktree_merge_conflict",
 		};
 		await settle({ ...fixtureReceiptDraft(envelope), worktree: failedApply });
-		strictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree?.reason, "worktree_merge_conflict");
-		const mergedWorktree = {
-			path: worktree.path,
-			branch: worktree.branch,
-			diffHash: worktree.diffHash,
-			changedPaths: worktree.changedPaths,
-			apply: "merge" as const,
-			applied: true,
-		};
-		await settle({ ...fixtureReceiptDraft(envelope), worktree: mergedWorktree });
-		strictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree?.applied, true);
+		strictEqual(output(await evidence(inspect)).worktree?.reason, "worktree_merge_conflict");
+		const { reason: _reason, ...merged } = failedApply;
+		await settle({ ...fixtureReceiptDraft(envelope), worktree: { ...merged, applied: true } });
+		strictEqual(output(await evidence(inspect)).worktree?.applied, true);
 		await tamper(envelope.id);
-		deepStrictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree, {
-			status: "withheld",
-			reason: "run-seal",
-		});
+		deepStrictEqual(output(await evidence(inspect)).worktree, { status: "withheld", reason: "run-seal" });
 	});
 
 	it("does not infer worktree placement from a failed seal on a regular run", async () => {
 		await fixture(true);
-		strictEqual(output(await evidence({ mode: "run", runId: "fixture" })).worktree, undefined);
+		strictEqual(output(await evidence({ mode: "inspect", runId: "fixture" })).worktree, undefined);
 	});
 
-	it("returns a bounded redacted summary only to the owning session", async () => {
+	it("returns a bounded summary only to the owning session", async () => {
 		const secret = `ghp_${"A".repeat(24)}`;
 		await fixture(false, `Check token ${secret}`);
 		const sessionDir = join(clioStateDir(), "sessions", "fixture-cwd", FIXTURE_SESSION);
@@ -302,17 +262,6 @@ describe("evidence tool", () => {
 						},
 					],
 				},
-				{
-					kind: "bashExecution",
-					turnId: "bash-1",
-					parentTurnId: null,
-					timestamp: "2026-09-05T00:00:03.000Z",
-					command: `printf ${secret}`,
-					output: "done",
-					exitCode: 0,
-					cancelled: false,
-					truncated: false,
-				},
 			]
 				.map((row) => JSON.stringify(row))
 				.join("\n")}\n`,
@@ -321,10 +270,8 @@ describe("evidence tool", () => {
 		const foreign = await evidence(request, "session-2");
 		strictEqual(foreign.kind, "error");
 		deepStrictEqual(foreign.details, { code: "evidence_foreign", artifactAbsent: false });
-		const bundlePath = join(clioDataDir(), "evidence", "session-session-1", "overview.json");
-		await rejects(readFile(bundlePath, "utf8"));
 
-		const absent = await evidence({ mode: "session", sessionId: "missing-session" });
+		const absent = await evidence({ mode: "session", sessionId: "missing-session" }, "missing-session");
 		strictEqual(absent.kind, "error");
 		deepStrictEqual(absent.details, { code: "artifact_absent", artifactAbsent: true });
 
@@ -334,8 +281,10 @@ describe("evidence tool", () => {
 		const summary = JSON.parse(own.output);
 		strictEqual(summary.version, 1);
 		strictEqual(summary.sessionId, FIXTURE_SESSION);
-		strictEqual(summary.artifact.sourceKind, "session");
-		strictEqual(summary.artifact.totals.runs, 1);
+		deepStrictEqual(
+			summary.runs.map((run: { runId: string }) => run.runId),
+			["fixture"],
+		);
 		deepStrictEqual(summary.taskBoard, {
 			total: 2,
 			completed: 1,
@@ -345,67 +294,32 @@ describe("evidence tool", () => {
 			cancelled: 0,
 			open: 1,
 		});
-		const oldOverview = JSON.parse(await readFile(bundlePath, "utf8"));
-		deepStrictEqual(summary.toolEvents, {
-			total: oldOverview.totals.toolEvents,
-			linked: oldOverview.totals.linkedToolEvents,
-		});
-		ok(summary.toolEvents.linked >= 1);
-		ok(summary.artifact.redactionCount > 0);
 		ok(!own.output.includes(secret));
-		ok(!("tasks" in summary.artifact));
-		ok(!("cwds" in summary.artifact));
-		ok(!("validation" in summary));
+		ok(!("task" in summary.runs[0]));
+		ok(!("cwd" in summary.runs[0]));
 		ok(Buffer.byteLength(own.output, "utf8") <= EVIDENCE_TOOL_MAX_BYTES);
-		delete oldOverview.totals.toolEvents;
-		delete oldOverview.totals.linkedToolEvents;
-		await writeFile(bundlePath, JSON.stringify(oldOverview));
-		const oldBundle = output(await evidence(request));
-		deepStrictEqual(oldBundle.toolEvents, { total: 0, linked: 0 });
-		deepStrictEqual(oldBundle.taskBoard, summary.taskBoard);
 	});
 
-	it("reports absent artifacts distinctly from invalid ids and incomplete bundles", async () => {
-		for (const args of [
-			{ mode: "inspect", id: "missing" },
-			{ mode: "run", runId: "missing" },
-		]) {
-			const result = await evidence(args);
-			strictEqual(result.kind, "error");
-			deepStrictEqual(result.details, { code: "artifact_absent", artifactAbsent: true });
-			if (result.kind === "error") match(result.message, /evidence artifact not found/);
-		}
-		const invalid = await evidence({ mode: "inspect", id: "../escape" });
+	it("reports an unsettled run as absent and an invalid id as an error", async () => {
+		const unsettled = fixtureEnvelope("unsettled");
+		await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([unsettled]));
+		const absent = await evidence({ mode: "inspect", runId: "unsettled" });
+		strictEqual(absent.kind, "error");
+		deepStrictEqual(absent.details, { code: "artifact_absent", artifactAbsent: true });
+		const missing = await evidence({ mode: "inspect", runId: "missing" });
+		strictEqual(missing.kind, "error");
+		const invalid = await evidence({ mode: "inspect", runId: "../escape" });
 		strictEqual(invalid.kind, "error");
 		strictEqual(invalid.details?.artifactAbsent, false);
-		await fixture();
-		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
-		await writeFile(join(built.directory, "findings.json"), "broken");
-		const broken = await evidence({ mode: "inspect", id: built.evidenceId });
-		strictEqual(broken.kind, "error");
-		strictEqual(broken.details?.artifactAbsent, false);
 	});
 
 	it("bounds UTF-8 output while keeping the truncation envelope valid JSON", async () => {
-		await fixture();
-		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
-		await writeFile(
-			join(built.directory, "findings.json"),
-			JSON.stringify({
-				version: 1,
-				evidenceId: built.evidenceId,
-				findings: [
-					{
-						id: "large",
-						severity: "warn",
-						tag: "no-validation",
-						runId: "fixture",
-						message: '大"\n'.repeat(EVIDENCE_TOOL_MAX_BYTES),
-					},
-				],
-			}),
-		);
-		const result = await evidence({ mode: "inspect", id: built.evidenceId });
+		// Unresolved decision refs carry their ref into finding prose, which makes the run's evidence large.
+		const refs = Array.from({ length: 40 }, (_, index) => `${index}${'大"\n'.repeat(130)}`);
+		const envelope = { ...fixtureEnvelope("fixture"), decisionRefs: refs };
+		await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
+		await settle({ ...fixtureReceiptDraft(envelope), decisionRefs: refs });
+		const result = await evidence({ mode: "inspect", runId: "fixture" });
 		strictEqual(output(result).truncated, true);
 		if (result.kind !== "ok") return;
 		ok(Buffer.byteLength(result.output, "utf8") <= EVIDENCE_TOOL_MAX_BYTES);
@@ -415,25 +329,20 @@ describe("evidence tool", () => {
 
 	it("withholds a tampered run's facts and ungrounded counts", async () => {
 		await fixture(true);
-		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
-		strictEqual(built.ungroundedClaims, 0);
-		const inspected = output(await evidence({ mode: "inspect", id: built.evidenceId }));
-		strictEqual(inspected.overview.totals.runRecords, 0);
-		strictEqual(inspected.overview.totals.tokens, 0);
-		strictEqual(inspected.runs[0]?.verdict, "compromised");
-		ok(inspected.findings.some((finding: { tag: string }) => finding.tag === "run-seal"));
+		const inspected = output(await evidence({ mode: "inspect", runId: "fixture" }));
+		strictEqual(inspected.ungroundedClaims, 0);
+		strictEqual(inspected.totals, null);
+		strictEqual(inspected.assessedAt, null);
+		strictEqual((await evidenceDetailSnapshot("fixture")).verdict, "compromised");
+		ok(inspected.findings.some((finding) => finding.tag === "run-seal"));
 	});
 
-	it("keeps another session's bundle from another project out of list and inspect", async () => {
+	it("keeps another session's run from another project out of list and inspect", async () => {
 		await fixture();
-		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
 		// The fixture ran in /workspace under session-1; this caller is neither.
 		deepStrictEqual(output(await evidence({ mode: "list" }, "session-2")).artifacts, []);
-		const refused = await evidence({ mode: "inspect", id: built.evidenceId }, "session-2");
+		const refused = await evidence({ mode: "inspect", runId: "fixture" }, "session-2");
 		strictEqual(refused.kind, "error");
 		deepStrictEqual(refused.details, { code: "evidence_foreign", artifactAbsent: false });
-		if (refused.kind === "error") match(refused.message, /belongs to another project/);
-		const run = await evidence({ mode: "run", runId: "fixture" }, "session-2");
-		strictEqual(run.kind, "error");
 	});
 });

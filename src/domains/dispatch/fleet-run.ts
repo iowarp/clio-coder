@@ -28,7 +28,13 @@ import type { AgentSpec } from "../agents/spec.js";
 import type { CostProvenance } from "../providers/index.js";
 import { activeDecisionRefs } from "../session/decision-board.js";
 import type { DecisionLedgerEntry } from "../session/entries.js";
-import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../telemetry/cost.js";
+import {
+	aggregateCostAmounts,
+	type CostAggregate,
+	costAggregateOfFactSum,
+	renderCostAmount,
+} from "../telemetry/cost.js";
+import { foldFacts } from "../telemetry/folds.js";
 import { telemetryJournalPath, telemetryRunDirectory } from "../telemetry/paths.js";
 import { readVerifiedRun } from "../telemetry/run-record.js";
 import {
@@ -338,8 +344,12 @@ function replayedStepRun(runId: string, digest: string): StepRun | null {
 	if (record === null) return null;
 	const settled = record.settled;
 	const delivered = record.result?.state === "resolved" ? record.result.value : null;
-	const usd = settled.pricing.usd;
-	const priced = usd.kind === "measured" || usd.kind === "estimated";
+	// The run's folded spend keeps a measured subtotal its settled fact collapses to unknown once any call is (#434).
+	const usd = record.row.usd.fact;
+	const costSummary = costAggregateOfFactSum(
+		"unknownCount" in usd ? usd : foldFacts([usd]),
+		settled.pricing.pricedBy === "free",
+	);
 	return {
 		runId,
 		digest: settled.digest,
@@ -349,14 +359,15 @@ function replayedStepRun(runId: string, digest: string): StepRun | null {
 		runtimeId: settled.route.runtimeId,
 		nodeId: settled.node?.id ?? "local",
 		changedPaths: [...(delivered?.worktree?.changedPaths ?? []), ...(delivered?.checkoutChanges?.changedPaths ?? [])],
-		costUsd: priced ? usd.value : 0,
-		costProvenance: !priced
+		costUsd: costSummary.knownUsd,
+		costProvenance: costSummary.hasUnknown
 			? "unknown"
-			: usd.kind === "estimated"
+			: costSummary.hasEstimated
 				? "estimated"
-				: settled.pricing.pricedBy === "free"
+				: costSummary.allKnownFree
 					? "known_free"
 					: "known",
+		costSummary,
 	};
 }
 

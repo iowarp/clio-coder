@@ -6,6 +6,7 @@
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { RunResultObject, RunSettled } from "../../core/telemetry/schemas.js";
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../agents/result-contract.js";
+import type { RunAssessmentContext } from "../evidence/assessment.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
 import { runContextProvenance } from "../evidence/trust-status.js";
 import { redactSecretString } from "../safety/redaction.js";
@@ -32,6 +33,21 @@ import type { RunEnvelope, RunOutcome, RunPhaseDurations, RunResult, RunResultDr
 export interface RunSettlement {
 	facts: Omit<RunSettled, "result">;
 	result: RunResultObject;
+	/** What the run's assessment reads of its dispatch, from the ledger row it settled from (#434). */
+	assessment?: RunAssessmentContext;
+}
+
+/** The provenance a run's sealed assessment records, as dispatch admitted the run. */
+function runAssessmentContext(
+	run: Pick<RunEnvelope, "sessionId" | "lineage" | "decisionRefs" | "pipeline" | "personaOverride">,
+): RunAssessmentContext {
+	return {
+		sessionId: run.sessionId,
+		attempt: run.lineage?.attempt ?? null,
+		decisionRefs: [...(run.decisionRefs ?? [])],
+		pipeline: run.pipeline ? { ...run.pipeline } : null,
+		personaOverride: run.personaOverride ? { ...run.personaOverride } : null,
+	};
 }
 
 const DIAGNOSTIC_CHARS = 1024;
@@ -321,6 +337,7 @@ export function settleUnfinishedRun(
 	},
 ): RunSettlement {
 	return redactedSettlement({
+		assessment: runAssessmentContext(run),
 		facts: {
 			version: 1,
 			agentId: run.agentId,
@@ -422,10 +439,13 @@ export function finishRunResult(
 		draft.findingsSummary === undefined
 			? { ...draft, findingsSummary: computeReceiptFindingsSummary(draft, row) }
 			: draft;
-	const settlement = settleFinishedRun(sealed, {
-		...input,
-		phaseTiming: deriveEnvelopePhaseDurations(row, row.endedAt ?? draft.endedAt),
-	});
+	const settlement: RunSettlement = {
+		...settleFinishedRun(sealed, {
+			...input,
+			phaseTiming: deriveEnvelopePhaseDurations(row, row.endedAt ?? draft.endedAt),
+		}),
+		assessment: runAssessmentContext(row),
+	};
 	const record = runSettledRecord(settlement, telemetryObjectRef("run-result", settlement.result));
 	return {
 		result: { ...sealed, routingIntent: draft.routingIntent, digest: runSettledDigest(record) },

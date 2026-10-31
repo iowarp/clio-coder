@@ -1,6 +1,8 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import type { EvidenceAssessedPayload } from "../../src/core/telemetry/live-events.js";
+import { composeTrustStatus } from "../../src/domains/evidence/index.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
@@ -53,13 +55,33 @@ const chat: AcpServerChat = {
 	getSessionId: () => null,
 };
 
-const EVIDENCE = {
-	runId: "run-7",
-	evidenceId: "ev-7",
-	firstPassSuccess: true,
-	findingCount: 2,
-	tags: ["validated", "lint"],
-};
+/** A live assessment whose findings carry the given tags; the ACP frame keeps only its counters (#434). */
+function assessment(runId: string, tags: string[]): EvidenceAssessedPayload {
+	return {
+		runId,
+		version: 1,
+		attempt: 0,
+		firstPassSuccess: true,
+		failureCause: null,
+		trust: JSON.parse(JSON.stringify(composeTrustStatus())),
+		findings: tags.map((tag, index) => ({
+			id: `finding-00${index + 1}`,
+			severity: "info",
+			tag,
+		})) as EvidenceAssessedPayload["findings"],
+		verdicts: [],
+		provenance: null,
+		text: {
+			label: "resolvable",
+			function: "sha256",
+			canonicalization: "json-sorted-v1",
+			subject: "evidence-findings",
+			id: `obj_${"0".repeat(64)}`,
+		},
+	};
+}
+
+const EVIDENCE = assessment("run-7", ["no-validation", "independent-review"]);
 
 function eventsOf(peer: ReturnType<typeof fakeTransport>): Array<Record<string, unknown>> {
 	return peer.notifications
@@ -68,7 +90,7 @@ function eventsOf(peer: ReturnType<typeof fakeTransport>): Array<Record<string, 
 }
 
 describe("contracts/acp forwards accountability.evidenceReady only to a client that opted in", () => {
-	it("advertises the kind, forwards the projection's evidence summary verbatim, and marks it terminal", async () => {
+	it("advertises the kind, forwards the assessment's counters, and does not mark it terminal", async () => {
 		const bus = createTelemetryHub();
 		const peer = fakeTransport();
 		const served = serveClioAcpAgent({ transport: peer.transport, chat, bus, cwd: process.cwd() });
@@ -82,20 +104,22 @@ describe("contracts/acp forwards accountability.evidenceReady only to a client t
 		bus.emit("evidence.assessed", EVIDENCE);
 		// Tags that are not bounded identifiers (a control character, over 64
 		// bytes) are dropped, never truncated into new ones.
-		bus.emit("evidence.assessed", {
-			...EVIDENCE,
-			runId: "run-8",
-			tags: ["ok", "bad\u0007tag", "x".repeat(65)],
-		});
+		bus.emit("evidence.assessed", assessment("run-8", ["ok", "bad\u0007tag", "x".repeat(65)]));
 
 		const events = eventsOf(peer);
 		strictEqual(events.length, 2);
 		const first = events[0] ?? {};
 		strictEqual(first.kind, "evidence.assessed");
 		strictEqual(first.sessionId, session.sessionId);
-		strictEqual(first.terminal, true);
+		// The assessment is journaled before the run's seal, so it precedes the run's terminal frame.
+		strictEqual(first.terminal, false);
 		strictEqual(first.turnId, null);
-		deepStrictEqual(first.payload, EVIDENCE);
+		deepStrictEqual(first.payload, {
+			runId: "run-7",
+			firstPassSuccess: true,
+			findingCount: 2,
+			tags: ["no-validation", "independent-review"],
+		});
 		const second = events[1]?.payload as { tags: string[] };
 		deepStrictEqual(second.tags, ["ok"]);
 
@@ -118,7 +142,7 @@ describe("contracts/acp forwards accountability.evidenceReady only to a client t
 		strictEqual(await served, 0);
 	});
 
-	it("drops an event whose run or evidence id cannot be represented instead of repairing it", async () => {
+	it("drops an event whose run id cannot be represented instead of repairing it", async () => {
 		const bus = createTelemetryHub();
 		const peer = fakeTransport();
 		const served = serveClioAcpAgent({ transport: peer.transport, chat, bus, cwd: process.cwd() });
@@ -127,7 +151,7 @@ describe("contracts/acp forwards accountability.evidenceReady only to a client t
 			clientCapabilities: { _meta: { "clio-coder/events": { version: 1, kinds: ["evidence.assessed"] } } },
 		});
 		await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] });
-		bus.emit("evidence.assessed", { ...EVIDENCE, evidenceId: "ev\u001bid" });
+		bus.emit("evidence.assessed", { ...EVIDENCE, runId: "run\u001bid" });
 		strictEqual(eventsOf(peer).length, 0);
 		peer.transport.close();
 		strictEqual(await served, 0);

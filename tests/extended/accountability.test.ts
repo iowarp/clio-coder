@@ -1,23 +1,60 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { summarizeEvidenceIndex } from "../../src/domains/telemetry/accountability.js";
-import type { EvidenceIndexRow } from "../../src/domains/telemetry/evidence-index.js";
+import type { EvidenceFinding, EvidenceTag, RunEvidence } from "../../src/domains/evidence/index.js";
+import { composeTrustStatus } from "../../src/domains/evidence/index.js";
+import { summarizeRunAccountability } from "../../src/domains/telemetry/accountability.js";
 
-function row(runId: string, fields: Partial<EvidenceIndexRow> = {}): EvidenceIndexRow {
+interface Fields {
+	succeeded?: boolean;
+	firstPassSuccess?: boolean;
+	tags?: EvidenceTag[];
+	completionWarning?: boolean;
+	ungroundedClaims?: number;
+	assessed?: boolean;
+}
+
+function run(runId: string, fields: Fields = {}): RunEvidence {
+	const tags = fields.tags ?? [];
+	const findings: EvidenceFinding[] = tags.map((tag, index) => ({
+		id: `finding-${String(index + 1).padStart(3, "0")}`,
+		severity: tag === "completion-evidence" && fields.completionWarning !== true ? "info" : "warn",
+		tag,
+		runId,
+		message: tag,
+	}));
+	const at = "2026-09-05T00:00:00.000Z";
 	return {
 		runId,
-		evidenceId: `run-${runId}`,
-		firstPassSuccess: true,
-		tags: [],
-		findingCount: 0,
-		generatedAt: "2026-09-05T00:00:00.000Z",
-		...fields,
+		sessionId: null,
+		integrity: { state: "verified", by: "seal" },
+		trust: composeTrustStatus(),
+		assessedAt: fields.assessed === false ? null : at,
+		settled: {
+			at,
+			startedAt: at,
+			endedAt: at,
+			agentId: "worker",
+			targetId: "local",
+			runtimeId: "openai",
+			wireModelId: "model",
+			outcome: fields.succeeded === false ? "failed" : "succeeded",
+			exitCode: fields.succeeded === false ? 1 : 0,
+		},
+		firstPassSuccess: fields.firstPassSuccess ?? true,
+		failureCause: null,
+		tags,
+		findings,
+		verdicts: [],
+		provenance: null,
+		decisions: [],
+		ungroundedClaims: fields.ungroundedClaims ?? 0,
+		totals: null,
 	};
 }
 
 describe("accountability evidence fold", () => {
-	it("returns zero counters for an empty index", () => {
-		deepStrictEqual(summarizeEvidenceIndex([]), {
+	it("returns zero counters for no assessed runs", () => {
+		deepStrictEqual(summarizeRunAccountability([run("unassessed", { assessed: false })]), {
 			totalRuns: 0,
 			firstPassRuns: 0,
 			firstPassRate: 0,
@@ -28,30 +65,29 @@ describe("accountability evidence fold", () => {
 	});
 
 	it("counts each unverified success once and claims across all outcomes", () => {
-		const summary = summarizeEvidenceIndex([
-			row("none", { succeeded: true, tags: ["no-validation"], ungroundedClaims: 2 }),
-			row("proxy", { succeeded: true, tags: ["proxy-validation"], ungroundedClaims: 3 }),
-			row("completion", { succeeded: true, tags: ["completion-evidence"], completionEvidenceWarning: true }),
-			row("overlap", {
-				succeeded: true,
+		const summary = summarizeRunAccountability([
+			run("none", { tags: ["no-validation"], ungroundedClaims: 2 }),
+			run("proxy", { tags: ["proxy-validation"], ungroundedClaims: 3 }),
+			run("completion", { tags: ["completion-evidence"], completionWarning: true }),
+			run("overlap", {
 				tags: ["no-validation", "proxy-validation", "completion-evidence"],
-				completionEvidenceWarning: true,
+				completionWarning: true,
 				ungroundedClaims: 1,
 			}),
-			row("failed", {
+			run("failed", {
 				succeeded: false,
 				firstPassSuccess: false,
 				tags: ["no-validation", "test-failure"],
-				completionEvidenceWarning: true,
+				completionWarning: true,
 				ungroundedClaims: 4,
 			}),
-			row("info", { succeeded: true, tags: ["completion-evidence"], completionEvidenceWarning: false }),
-			row("grounded", { succeeded: true, ungroundedClaims: 0 }),
-			row("historical", { tags: ["no-validation", "completion-evidence"] }),
+			run("info", { tags: ["completion-evidence"] }),
+			run("grounded"),
+			run("unassessed", { assessed: false, tags: ["no-validation"] }),
 		]);
-		strictEqual(summary.totalRuns, 8);
-		strictEqual(summary.firstPassRuns, 7);
-		strictEqual(summary.firstPassRate, 7 / 8);
+		strictEqual(summary.totalRuns, 7);
+		strictEqual(summary.firstPassRuns, 6);
+		strictEqual(summary.firstPassRate, 6 / 7);
 		strictEqual(summary.unverifiedSuccesses, 4);
 		strictEqual(summary.ungroundedClaims, 10);
 		deepStrictEqual(summary.failureCauses, [{ tag: "test-failure", count: 1 }]);

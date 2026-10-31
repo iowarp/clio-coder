@@ -1,11 +1,10 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { evidenceDirectory } from "../../src/domains/evidence/store.js";
-import { readEvidenceIndex } from "../../src/domains/telemetry/evidence-index.js";
+import { inspectRunEvidence } from "../../src/domains/evidence/index.js";
 import {
 	closeServer,
 	hasToolExchange,
@@ -155,12 +154,11 @@ for (const scenario of ["clean", "recovered", "terminal-error"] as const) {
 
 // Issue #331 reported `[clio-coder:evidence] auto-build failed for run <id>:
 // run ledger not found` on a healthy headless run under a fresh pinned state
-// directory whose dispatch reached DispatchCompleted. The evidence auto-build
-// starts on that event and reads `<stateDir>/runs.json`, which the emitting
-// finalizer persists first. This drives that exact shape without a model: the
+// directory. A run is now assessed by its journal owner before its seal (#434),
+// so this checks the sealed scope holds that assessment. It drives the shape without a model: the
 // main agent dispatches one worker that reads a file and whose terminal text
 // satisfies its result contract, then ends the turn with the artifact tool.
-test("built headless artifact: a completed dispatch builds its evidence under a fresh pinned state dir", async () => {
+test("built headless artifact: a completed dispatch seals its assessment under a fresh pinned state dir", async () => {
 	const scratch = makeScratchHome("clio-coder-headless-artifact-dispatch-");
 	const fixture = await startOpenAICompatFixture("worker done: nothing to change\n", {
 		// The worker's own conversation has no dispatch tool. It reads once, since a
@@ -218,10 +216,11 @@ test("built headless artifact: a completed dispatch builds its evidence under a 
 		strictEqual(dispatched.length, 1);
 		strictEqual(dispatched[0]?.settled.outcome, "succeeded");
 		strictEqual([...journal.envelopes.values()].filter((run) => run.agentId === "main-agent").length, 1);
-		const rows = readEvidenceIndex(stateDir).filter((row) => row.runId === dispatched[0]?.row.runId);
-		strictEqual(rows.length, 1, JSON.stringify(readEvidenceIndex(stateDir)));
-		strictEqual(rows[0]?.succeeded, true);
-		ok(existsSync(join(evidenceDirectory(join(scratch.dir, "data"), rows[0]?.evidenceId ?? ""), "overview.json")));
+		// The dispatched run sealed with its assessment, so its sealed scope is its evidence (#434).
+		const evidence = await inspectRunEvidence(stateDir, dispatched[0]?.row.runId ?? "");
+		strictEqual(evidence.integrity.state, "verified");
+		ok(evidence.assessedAt !== null, JSON.stringify(evidence));
+		strictEqual(evidence.settled?.outcome, "succeeded");
 	} finally {
 		await closeServer(fixture.server);
 		scratch.cleanup();

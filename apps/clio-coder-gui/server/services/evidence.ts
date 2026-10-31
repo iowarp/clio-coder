@@ -1,11 +1,6 @@
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
-import {
-	EvidenceItem,
-	type EvidenceOperationResult,
-	type EvidenceRequest,
-	ReceiptVerification,
-} from "../../contracts/evidence.js";
+import { type EvidenceOperationResult, type EvidenceRequest, ReceiptVerification } from "../../contracts/evidence.js";
 import type { WorkerHost } from "../worker/host.js";
 import type { CliRunner } from "./cli-runner.js";
 import { fingerprint, type OperationRegistry } from "./operations.js";
@@ -27,53 +22,33 @@ export class EvidenceService {
 	/**
 	 * `runId` reaches a child process argv, so it must already be an id this host
 	 * served: the route admits it against the ArtifactWindow and passes the
-	 * admitted value. Nothing here re-derives it from the request.
+	 * admitted value. Nothing here re-derives it from the request. A run's
+	 * evidence is assessed when it settles, so the one operation left is the
+	 * receipt recheck.
 	 */
-	async execute(workspaceId: string, runId: string, action: "build" | "verify", key: string) {
+	async execute(workspaceId: string, runId: string, key: string) {
 		const workspace = await this.workspaces.get(workspaceId);
 		return this.operations.create({
-			kind: `evidence.${action}`,
+			kind: "evidence.verify",
 			scope: workspaceId,
 			key,
-			fingerprint: fingerprint({ workspaceId, runId, action }),
+			fingerprint: fingerprint({ workspaceId, runId, action: "verify" }),
 			cancellable: false,
 			run: async (progress): Promise<EvidenceOperationResult> => {
-				progress(
-					action === "build"
-						? "Clio is collecting the run’s evidence."
-						: "Clio is checking the receipt against its recorded run.",
+				progress("Clio is checking the receipt against its recorded run.");
+				const verification = Value.Clean(
+					ReceiptVerification,
+					await this.runner.run({ kind: "receipt.verify", id: runId }, workspace.path),
 				);
-				if (action === "verify") {
-					const verification = Value.Clean(
-						ReceiptVerification,
-						await this.runner.run({ kind: "receipt.verify", id: runId }, workspace.path),
-					);
-					if (!Value.Check(ReceiptVerification, verification))
-						throw new AppProblem("operation_failed", "Receipt verification returned an invalid projection.");
-					return {
-						kind: "receipt-verification",
-						id: runId,
-						exitCode: 0,
-						message: `Receipt check: ${verification.state}.`,
-						verification,
-					};
-				}
-				try {
-					await this.runner.run({ kind: "evidence.build", id: runId }, workspace.path);
-					const artifact = await this.read({ kind: "built", runId }, EvidenceItem);
-					return {
-						kind: "evidence",
-						id: artifact.overview.evidenceId,
-						exitCode: 0,
-						message: "Evidence collected. Review its findings and trust status.",
-						artifact,
-					};
-				} catch {
-					throw new AppProblem(
-						"operation_failed",
-						"Evidence collection or its follow-up read failed. Clio may have written an artifact with integrity findings; refresh the evidence list before retrying.",
-					);
-				}
+				if (!Value.Check(ReceiptVerification, verification))
+					throw new AppProblem("operation_failed", "Receipt verification returned an invalid projection.");
+				return {
+					kind: "receipt-verification",
+					id: runId,
+					exitCode: 0,
+					message: `Receipt check: ${verification.state}.`,
+					verification,
+				};
 			},
 		});
 	}

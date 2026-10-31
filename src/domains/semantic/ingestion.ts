@@ -3,7 +3,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import { stripVTControlCharacters } from "node:util";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { codemapPath, readCodewiki, wikiDir } from "../context/index.js";
-import type { EvidenceInspectable } from "../evidence/index.js";
+import type { RunEvidence } from "../evidence/index.js";
 import type { MemoryPromptOptions, MemoryRecord } from "../memory/index.js";
 import { selectMemoryForPrompt } from "../memory/index.js";
 import type { CompiledPathPolicy } from "../safety/index.js";
@@ -504,8 +504,8 @@ export interface ProjectSourcesOptions extends ExtractionOptions {
 	projectId: string;
 	memoryRecords?: readonly MemoryRecord[];
 	memoryEligibility?: MemoryPromptOptions;
-	/** Only caller-authorized inspected bundles; raw sessions and receipts are never read. */
-	evidence?: readonly { bundle: EvidenceInspectable; directory: string; redactedTranscript?: string }[];
+	/** Only caller-authorized runs' sealed evidence, with each run's scope directory; raw sessions are never read. */
+	evidence?: readonly { run: RunEvidence; directory: string }[];
 }
 
 export function eligibleSemanticMemory(
@@ -642,45 +642,20 @@ export async function extractProjectSources(options: ProjectSourcesOptions): Pro
 			add(textPieces(base, text, limits));
 		}
 	for (const entry of options.evidence ?? []) {
-		const { overview, findings } = entry.bundle;
-		// Every asserted owner must resolve to this project; a mixed-owner bundle is excluded whole.
-		if (
-			!overview.cwds.length ||
-			overview.cwds.some((cwd) => {
-				try {
-					return realpathSync(cwd) !== root;
-				} catch {
-					return true;
-				}
-			})
-		)
-			continue;
-		const common = {
-			updatedAt: overview.generatedAt,
-			...(overview.runIds.length === 1 && overview.runIds[0] ? { runId: overview.runIds[0] } : {}),
-		};
-		const addSurface = (name: string, text: string, location: SemanticLocation = {}) => {
-			const base = {
-				...baseFor(join(entry.directory, name), `evidence:${overview.evidenceId}:${name}`, "evidence", sourceHash(text)),
-				...common,
-			};
-			add(textPieces(base, text, limits, location));
-		};
-		addSurface("overview.json", overview.tasks.join("\n"));
-		for (const [index, finding] of findings.entries()) {
+		const { run } = entry;
+		for (const [index, finding] of run.findings.entries()) {
 			const base = {
 				...baseFor(
-					join(entry.directory, "findings.json"),
-					`evidence:${overview.evidenceId}:finding:${finding.id}`,
+					join(entry.directory, "journal.jsonl"),
+					`evidence:${run.runId}:finding:${finding.id}`,
 					"evidence",
 					sourceHash(finding.message),
 				),
-				updatedAt: overview.generatedAt,
-				...(finding.runId ? { runId: finding.runId } : {}),
+				updatedAt: run.assessedAt ?? run.settled?.at ?? new Date(0).toISOString(),
+				runId: run.runId,
 			};
 			add(textPieces(base, finding.message, limits, { output: index }));
 		}
-		if (entry.redactedTranscript) addSurface("transcript.md", entry.redactedTranscript);
 	}
 	options.signal?.throwIfAborted();
 	return result;

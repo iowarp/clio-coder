@@ -1,23 +1,15 @@
 /**
- * Accountability read model. A pure aggregation over the sidecar evidence index
- * (see evidence-index.ts) that yields a rolling first-pass-success rate and a
- * failure-cause tag histogram for the session. This is presentation-grade
- * read-only data: it recomputes nothing, it only folds the rows written
- * when each dispatch run finalized. Those rows are
- * forensic-derived and are the authority for user-visible first-pass-success
- * rates. The receipt summary is the conservative integrity-covered snapshot,
- * so a false receipt summary and a true forensic row is an intentional
- * divergence, not a contradiction. The `/view` accountability page and
- * `clio-coder usage` surface this without re-running `buildEvidence`.
+ * Accountability read model. A pure fold over runs' journaled assessments (#434) that yields a rolling
+ * first-pass-success rate and a failure-cause tag histogram. It recomputes nothing: each run's assessment was judged
+ * when the run settled and sealed with it. The `/view` accountability page and `clio-coder usage` surface it.
  */
 
-import { type EvidenceTag, FAILURE_CAUSE_TAGS } from "../evidence/index.js";
-import type { EvidenceIndexRow } from "./evidence-index.js";
+import { type EvidenceTag, FAILURE_CAUSE_TAGS, type RunEvidence } from "../evidence/index.js";
 
 /**
  * Aggregated accountability snapshot.
  *
- * - `totalRuns` is the number of indexed runs.
+ * - `totalRuns` is the number of assessed runs.
  * - `firstPassRuns` is how many of those first-pass-succeeded.
  * - `firstPassRate` is `firstPassRuns / totalRuns`, or 0 when there are no runs.
  * - `failureCauses` is a histogram over the canonical failure-cause subset,
@@ -33,26 +25,27 @@ export interface AccountabilitySummary {
 }
 
 /**
- * Fold a set of evidence index rows into the accountability summary. Pure and
- * deterministic: identical input yields identical output, with the failure-cause
- * histogram ignoring provenance/quality tags that are not failure causes.
+ * Fold runs' evidence into the accountability summary. Pure and deterministic: identical input yields identical
+ * output. Only a run whose sealed assessment verified counts, and the failure-cause histogram ignores quality tags
+ * that are not failure causes.
  */
-export function summarizeEvidenceIndex(rows: ReadonlyArray<EvidenceIndexRow>): AccountabilitySummary {
+export function summarizeRunAccountability(runs: ReadonlyArray<RunEvidence>): AccountabilitySummary {
+	const rows = runs.filter((run) => run.assessedAt !== null);
 	const totalRuns = rows.length;
 	let firstPassRuns = 0;
 	let unverifiedSuccesses = 0;
 	let ungroundedClaims = 0;
 	const counts = new Map<EvidenceTag, number>();
 	for (const row of rows) {
-		if (row.firstPassSuccess) firstPassRuns += 1;
+		if (row.firstPassSuccess === true) firstPassRuns += 1;
 		if (
-			row.succeeded === true &&
+			row.settled?.outcome === "succeeded" &&
 			(row.tags.includes("no-validation") ||
 				row.tags.includes("proxy-validation") ||
-				row.completionEvidenceWarning === true)
+				row.findings.some((finding) => finding.tag === "completion-evidence" && finding.severity === "warn"))
 		)
 			unverifiedSuccesses += 1;
-		ungroundedClaims += row.ungroundedClaims ?? 0;
+		ungroundedClaims += row.ungroundedClaims;
 		for (const tag of row.tags) {
 			if (!FAILURE_CAUSE_TAGS.has(tag)) continue;
 			counts.set(tag, (counts.get(tag) ?? 0) + 1);

@@ -8,7 +8,7 @@ export { MAX_SERVED_ARTIFACT_IDS } from "../../contracts/common.js";
  *
  * Every other adapter takes fixed argv precisely so that nothing the browser
  * says can steer a child process. Two operations cannot work that way: reading
- * one evidence bundle and verifying one receipt both need an id, and an id typed
+ * one run's evidence and verifying one receipt both need an id, and an id typed
  * into a URL is exactly the free-form argv the rest of this boundary refuses.
  *
  * The resolution is that the browser never introduces an id. It may only echo
@@ -32,7 +32,7 @@ export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
  * Fleet roots and dispatch runs are separate families because the fleet page
  * shows both listings at once: merging them would mean whichever query resolved
  * second silently unlinked the other list's receipts. They are admitted together
- * because a receipt, an evidence build and a receipt verify all take a run id
+ * because a receipt and a receipt verify both take a run id
  * and cannot tell which listing showed it.
  */
 export const RUN_KINDS = ["run", "dispatch"] as const satisfies readonly ArtifactKind[];

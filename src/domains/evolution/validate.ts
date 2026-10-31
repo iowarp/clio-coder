@@ -21,7 +21,7 @@ export interface ManifestValidationIssue {
  *
  * `resolveEvidenceRef` injects evidence-store resolution as a pure predicate so
  * the evolution domain never imports the evidence domain. The CLI builds it from
- * the local evidence store; when it is absent, the format and resolution checks
+ * the local run scopes; when it is absent, the format and resolution checks
  * on `evidenceRefs` are skipped entirely (preserving the prior schema-only
  * behavior).
  */
@@ -29,7 +29,8 @@ export interface ValidateChangeManifestOptions {
 	resolveEvidenceRef?: (ref: string) => boolean;
 }
 
-const EVIDENCE_REF_PREFIXES = ["run-", "session-"] as const;
+/** An evidence ref names a run whose sealed scope holds its assessment (#434). */
+const EVIDENCE_REF = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export type ManifestValidationResult =
 	| {
@@ -182,20 +183,17 @@ function checkEvidenceRefs(
 		const ref = evidenceRefs[index];
 		if (ref === undefined) continue;
 		if (!isEvidenceRefFormat(ref)) {
-			issues.push({ path: `${path}[${index}]`, message: "expected a run-<id> or session-<id> bundle id" });
+			issues.push({ path: `${path}[${index}]`, message: "expected a run id" });
 			continue;
 		}
 		if (!resolveEvidenceRef(ref)) {
-			issues.push({ path: `${path}[${index}]`, message: `evidence bundle not found: ${ref}` });
+			issues.push({ path: `${path}[${index}]`, message: `no assessed run: ${ref}` });
 		}
 	}
 }
 
 function isEvidenceRefFormat(ref: string): boolean {
-	for (const prefix of EVIDENCE_REF_PREFIXES) {
-		if (ref.startsWith(prefix) && ref.length > prefix.length) return true;
-	}
-	return false;
+	return EVIDENCE_REF.test(ref);
 }
 
 function readRequiredString(

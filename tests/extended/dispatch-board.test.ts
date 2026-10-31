@@ -1,14 +1,14 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchCompletedPayload, DispatchEnqueuedPayload } from "../../src/core/telemetry/live-events.js";
-import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { resolveToolBudgetEnvelope } from "../../src/domains/dispatch/budget-envelope.js";
 import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
-import { buildEvidence } from "../../src/domains/evidence/index.js";
+import { composeTrustStatus, inspectRunEvidence } from "../../src/domains/evidence/index.js";
 import { summarizeTrustStatus } from "../../src/domains/evidence/trust-projection.js";
 import type { TelemetryRunReaders, TelemetryRunSummary } from "../../src/domains/telemetry/contract.js";
 import { readVerifiedRun } from "../../src/domains/telemetry/index.js";
@@ -210,10 +210,24 @@ describe("dispatch board uses the telemetry projection", () => {
 			() =>
 				bus.emit("evidence.assessed", {
 					runId: IDENTITY.runId,
-					evidenceId: "run-board-run",
+					version: 1,
+					attempt: 0,
 					firstPassSuccess: true,
-					findingCount: 2,
-					tags: ["session-linked"],
+					failureCause: null,
+					trust: JSON.parse(JSON.stringify(composeTrustStatus())),
+					findings: [
+						{ id: "finding-001", severity: "info", tag: "independent-review" },
+						{ id: "finding-002", severity: "warn", tag: "no-validation" },
+					],
+					verdicts: [],
+					provenance: null,
+					text: {
+						label: "resolvable",
+						function: "sha256",
+						canonicalization: "json-sorted-v1",
+						subject: "evidence-findings",
+						id: `obj_${"0".repeat(64)}`,
+					},
 				}),
 		];
 		for (const publish of events) {
@@ -241,10 +255,10 @@ describe("dispatch board uses the telemetry projection", () => {
 		match(rendered, /coder/);
 		match(rendered, /check failed/);
 		match(stripTerminalSequences(rendered), /↑ 90 · ↓ 30/);
-		strictEqual(
-			projection.snapshot().runs.find((row) => row.runId === IDENTITY.runId)?.evidence?.evidenceId,
-			"run-board-run",
-		);
+		deepStrictEqual(projection.snapshot().runs.find((row) => row.runId === IDENTITY.runId)?.evidence, {
+			firstPassSuccess: true,
+			findingCount: 2,
+		});
 		board.unsubscribe();
 		strictEqual(bus.listeners("run.completed").length, 1);
 	});
@@ -783,12 +797,10 @@ describe("dispatch quality presentation", () => {
 				strictEqual(collected.kind, "ok");
 				ok(collected.output.includes(wording), collected.output);
 				match(collected.output, /state=succeeded/u);
-				const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: envelope.id });
-				const evidence = built.trustStatus.runs[0]?.status;
-				ok(evidence);
-				deepStrictEqual(summarizeTrustStatus(evidence), trust);
-				const findings = await readFile(join(built.directory, "findings.md"), "utf8");
-				ok(findings.includes(wording), findings);
+				// The run's sealed assessment projects the same trust the board shows (#434).
+				const evidence = await inspectRunEvidence(clioStateDir(), envelope.id);
+				ok(evidence.assessedAt !== null);
+				deepStrictEqual(summarizeTrustStatus(evidence.trust), trust);
 				strictEqual(JSON.stringify(readVerifiedRun(clioStateDir(), envelope.id)?.settled), bytes);
 				strictEqual(readVerifiedRun(clioStateDir(), envelope.id)?.seal?.status, "verified");
 				if (quality === "unknown") doesNotMatch(plain(collapsed), /validation failed/u);

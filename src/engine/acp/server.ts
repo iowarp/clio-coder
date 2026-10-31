@@ -54,7 +54,6 @@ import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { emitApproval } from "../../core/telemetry/approvals.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type {
-	AccountabilityEvidenceReadyPayload,
 	BudgetAlertPayload,
 	CompactionPayload,
 	ContextActivityPayload,
@@ -64,6 +63,7 @@ import type {
 	DispatchFailedPayload,
 	DispatchProgressPayload,
 	DispatchStartedPayload,
+	EvidenceAssessedPayload,
 	LoopBlockedPayload,
 	PermissionRequestedPayload,
 	ProviderHealthPayload,
@@ -1117,9 +1117,9 @@ const ACP_MAX_LIVE_TOOL_CALLS = 128;
  * with it rather than trusted. `safety.loop_blocked` was the first member; the
  * dispatch lifecycle joined it so a client can draw a live fleet board from
  * reported facts instead of inferring one from tool titles or timing;
- * `evidence.assessed` follows a run's terminal event once its
- * evidence bundle has landed, so the board can show first-pass success and a
- * finding count without reading Clio's state tree. The last four are the
+ * `evidence.assessed` precedes a run's terminal event, once the run's
+ * assessment is journaled ahead of its seal, so the board can show first-pass
+ * success and a finding count without reading Clio's state tree. The last four are the
  * session's own health: without them a client can only infer that context was
  * compacted, that the window is close to full, that the loop guard stopped a
  * turn on volume rather than repetition, or that a target went down, by
@@ -4284,24 +4284,22 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			}),
 		);
 		unsubscribeEvents.push(
-			bus.subscribe("evidence.assessed", (payload: AccountabilityEvidenceReadyPayload) => {
-				// Arrives after run.completed or run.failed for the same run,
-				// so it is terminal too: nothing about that run follows it. The
-				// bundle's prose (findings, overview) stays behind; only the summary
-				// counters the projection itself carries cross, and the tags are
-				// filtered to bounded identifiers rather than truncated into new ones.
+			bus.subscribe("evidence.assessed", (payload: EvidenceAssessedPayload) => {
+				// The run's journal owner assesses it before sealing, so this arrives ahead of the run's
+				// run.completed or run.failed and is not terminal (#434). Only the summary counters cross;
+				// the finding prose stays in the run scope, and the tags are filtered to bounded identifiers
+				// rather than truncated into new ones.
 				const runId = safeStoredIdentifier(payload.runId, ACP_MAX_DISPATCH_ID_BYTES);
-				const evidenceId = safeStoredIdentifier(payload.evidenceId, ACP_MAX_DISPATCH_ID_BYTES);
-				if (runId === null || evidenceId === null) return;
-				const tags = (Array.isArray(payload.tags) ? payload.tags : [])
+				if (runId === null) return;
+				const findings = Array.isArray(payload.findings) ? payload.findings : [];
+				const tags = [...new Set(findings.map((finding) => finding.tag))]
 					.map((tag) => safeStoredIdentifier(tag, ACP_MAX_EVIDENCE_TAG_BYTES))
 					.filter((tag): tag is string => tag !== null)
 					.slice(0, ACP_MAX_EVIDENCE_TAGS);
-				forwardEvent("evidence.assessed", null, true, {
+				forwardEvent("evidence.assessed", null, false, {
 					runId,
-					evidenceId,
 					firstPassSuccess: payload.firstPassSuccess === true,
-					findingCount: safeCount(payload.findingCount),
+					findingCount: safeCount(findings.length),
 					tags,
 				});
 			}),

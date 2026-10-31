@@ -470,7 +470,7 @@ test("evidence candidates tell the agent which authorized bundle to inspect", as
 	if (searched.kind === "ok") {
 		const payload = JSON.parse(searched.output);
 		assert.equal(payload.hits[0].evidenceId, "run-history");
-		assert.match(payload.followUp, /evidence\(mode=inspect,id=hit\.evidenceId\)/);
+		assert.match(payload.followUp, /evidence\(mode=inspect,runId=hit\.evidenceId\)/);
 	}
 });
 

@@ -42,10 +42,9 @@ import {
 	renderUsdLimit,
 	renderUsdSum,
 } from "../../core/telemetry/render.js";
-import type { CallSettled, CallUsage, ObjectRef } from "../../core/telemetry/schemas.js";
-import { RunResultObjectSchema } from "../../core/telemetry/schemas.js";
+import type { CallSettled, CallUsage, EvidenceAssessed, ObjectRef } from "../../core/telemetry/schemas.js";
+import { EvidenceFindingsObjectSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
 import { ToolNames } from "../../core/tool-names.js";
-import type { EvidenceOverview } from "../evidence/index.js";
 import type { ContextSnapshot } from "../session/context-accounting.js";
 import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
 import { foldDecisions } from "./fact-folds.js";
@@ -217,6 +216,7 @@ interface Run {
 	attempts: Attempt[];
 	byAttempt: Map<string, Attempt>;
 	settled: { at: string; data: EventPayload<"run.settled"> } | null;
+	assessed: { at: string; data: EvidenceAssessed } | null;
 	firstAt: string | null;
 	lastAt: string | null;
 	sessionId: string | null;
@@ -357,12 +357,15 @@ function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryR
 	const fold = foldRunJournal(source.records, READ_MODEL_FOLD);
 	const attempts = attemptsOf(source.records, fold.calls.attempts);
 	let settled: Run["settled"] = null;
+	let assessed: Run["assessed"] = null;
 	let firstAt: string | null = null;
 	let lastAt: string | null = null;
 	for (const record of source.records) {
 		if (firstAt === null || record.t < firstAt) firstAt = record.t;
 		if (lastAt === null || record.t > lastAt) lastAt = record.t;
 		if (record.k === "run.settled" && (!settled || record.t >= settled.at)) settled = { at: record.t, data: record.data };
+		if (record.k === "evidence.assessed" && (!assessed || record.t >= assessed.at))
+			assessed = { at: record.t, data: record.data };
 	}
 	const run: Run = {
 		runId,
@@ -372,6 +375,7 @@ function analyzeRun(runId: string, source: JournalSource, reference?: TelemetryR
 		attempts,
 		byAttempt: new Map(attempts.map((attempt) => [attempt.started.attemptId, attempt])),
 		settled,
+		assessed,
 		firstAt,
 		lastAt,
 		sessionId: source.records[0]?.ctx.sessionId ?? reference?.ctx.sessionId ?? null,
@@ -2851,18 +2855,20 @@ export function runRowTelemetry(runId: string, source: JournalSource): RunRowV1 
 	return runRow({ run }, run);
 }
 
-/** The run-result object a settlement names, from the scope's own files; `missing` when they do not hold it intact. */
-function runResultOf(settled: Run["settled"], scope: TelemetryScopeFiles | null): RunTelemetryV1["result"] {
-	if (settled === null || scope === null) return null;
-	const id = settled.data.result.id;
-	const file = scope.objects.find((object) => object.name === `${id}.json`);
-	if (file === undefined || createHash("sha256").update(file.bytes).digest("hex") !== id.slice("obj_".length))
+/** An object a run record names, from the scope's own files; `missing` when they do not hold it intact. */
+function scopeObject<T>(
+	ref: ObjectRef,
+	scope: TelemetryScopeFiles,
+	check: (value: unknown) => value is T,
+): { state: "resolved"; value: T } | { state: "missing" } {
+	const file = scope.objects.find((object) => object.name === `${ref.id}.json`);
+	if (file === undefined || createHash("sha256").update(file.bytes).digest("hex") !== ref.id.slice("obj_".length))
 		return { state: "missing" };
 	try {
 		const value: unknown = JSON.parse(file.bytes.toString("utf8"));
-		return Value.Check(RunResultObjectSchema, value) ? { state: "resolved", value } : { state: "missing" };
+		return check(value) ? { state: "resolved", value } : { state: "missing" };
 	} catch {
-		// Bytes that hash to the id but do not parse were never a stored result object.
+		// Bytes that hash to the id but do not parse were never a stored object.
 		return { state: "missing" };
 	}
 }
@@ -2911,6 +2917,23 @@ function runActivity(run: Run, options: ReadOptions): RunTelemetryV1["activity"]
 	};
 }
 
+function runResultOf(settled: Run["settled"], scope: TelemetryScopeFiles | null): RunTelemetryV1["result"] {
+	if (settled === null || scope === null) return null;
+	return scopeObject(settled.data.result, scope, (value) => Value.Check(RunResultObjectSchema, value));
+}
+
+function runAssessmentOf(assessed: Run["assessed"], scope: TelemetryScopeFiles | null): RunTelemetryV1["assessment"] {
+	if (assessed === null) return null;
+	return {
+		...assessed.data,
+		at: assessed.at,
+		content:
+			scope === null
+				? null
+				: scopeObject(assessed.data.text, scope, (value) => Value.Check(EvidenceFindingsObjectSchema, value)),
+	};
+}
+
 /**
  * One run's DTO: its fold, its run.settled facts, and, given the run scope's own files (`readTelemetryScopeFiles`),
  * the seal verdict and the result object the settlement names (#434 §11.1).
@@ -2945,6 +2968,7 @@ export function runTelemetry(
 			: null,
 		seal: scope === null ? null : verifyTelemetryScope(scope),
 		result: runResultOf(settled, scope),
+		assessment: runAssessmentOf(run.assessed, scope),
 	};
 }
 
@@ -3118,30 +3142,11 @@ const EXPLAIN_CAP = 500;
 /** Resolve a reference against a session (any scope it can see) or a standalone run. */
 export function explain(
 	ref: FactRef,
-	source:
-		| { session: SessionSource }
-		| { runId: string; run: JournalSource }
-		| { repo: RepoSource }
-		| { evidence: EvidenceOverview },
+	source: { session: SessionSource } | { runId: string; run: JournalSource } | { repo: RepoSource },
 	options: ReadOptions = {},
 ): ExplanationV1 | null {
 	const parsed = parseFactRef(ref);
 	if (!parsed) return null;
-	if ("evidence" in source) {
-		if (parsed.scope !== "evidence" || parsed.owner !== source.evidence.evidenceId) return null;
-		const value = evidenceQuantities(source.evidence)[parsed.metric as keyof ReturnType<typeof evidenceQuantities>];
-		return value
-			? {
-					...header(options),
-					kind: "explanation",
-					ref,
-					value,
-					coverage: renderCoverage(value.fact),
-					rule: "The evidence bundle's sealed totals, with missing receipt coverage retained (#434).",
-					from: { callIds: [], attemptIds: [], runIds: source.evidence.runIds, recordIds: [], omitted: 0 },
-				}
-			: null;
-	}
 	const view: View =
 		"session" in source
 			? { session: source.session }
@@ -3354,40 +3359,6 @@ export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMe
  */
 export function seal(scope: TelemetryScopeFiles): SealVerdict {
 	return verifyTelemetryScope(scope);
-}
-
-/** A sealed evidence bundle owns its totals; its reference never names a changing live session (#434). */
-export function evidenceQuantities(overview: EvidenceOverview) {
-	const q = (metric: FactMetric, fact: Fact<number> | FactSum): Quantity => ({
-		fact,
-		display: display(metric, fact, overview.totals.costSummary?.allKnownFree === true),
-		ref: factRef({ scope: "evidence", owner: overview.evidenceId, metric }),
-	});
-	const totals = overview.totals;
-	const gap = totals.tokenCoverage;
-	const tokenFact = withGap(counted(totals.tokens), gap ? gap.unknownCalls + gap.unknownRuns : 1);
-	const summary = totals.costSummary;
-	const costFact: FactSum = summary
-		? {
-				measured: summary.hasEstimated ? 0 : summary.knownUsd,
-				estimated: summary.hasEstimated ? summary.knownUsd : 0,
-				unknownCount: summary.hasUnknown ? 1 : 0,
-				absentCount: 0,
-				coverage: {
-					measured: summary.hasEstimated ? 0 : 1,
-					estimated: summary.hasEstimated ? 1 : 0,
-					unknown: summary.hasUnknown ? 1 : 0,
-				},
-			}
-		: unknownSum(1);
-	return {
-		runs: q("runs", counted(totals.runs)),
-		runRecords: q("runRecords", counted(totals.runRecords)),
-		toolCalls: q("toolCalls", counted(totals.toolCalls)),
-		toolErrors: q("toolErrors", counted(totals.toolErrors)),
-		total: q("total", tokenFact),
-		usd: q("usd", costFact),
-	};
 }
 
 /** Window facts for the usage surface, folded once from the same sources as its spend (#434). */

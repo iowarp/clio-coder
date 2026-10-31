@@ -1,6 +1,6 @@
 import { deepStrictEqual, equal, match, ok, throws } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -8,23 +8,19 @@ import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
-import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { createRecordingJournal, parseRecordingCast, readRunRecording } from "../../src/domains/dispatch/recording.js";
 import { readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
 import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
-import { buildEvidence } from "../../src/domains/evidence/build.js";
-import { exportEvidenceRecordings } from "../../src/domains/evidence/recordings.js";
-import { inspectEvidence } from "../../src/domains/evidence/store.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
-import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { fixtureEnvelope } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
-import { writeSettledRun } from "../harness/settled-run.js";
 
 let env: Awaited<ReturnType<typeof isolateClioEnv>>;
 beforeEach(async () => {
@@ -127,44 +123,14 @@ it("reports disk failure without throwing into dispatch", () => {
 	ok(warnings.length > 0);
 });
 
-it("exports recording evidence with exact references and leaves the run seal intact", async () => {
-	const run = fixtureEnvelope("fixture");
-	const journal = createRecordingJournal();
-	run.recording = journal.start(run.id, node);
-	journal.append(run.id, { at: "", type: "text", detail: "warning\ncorrection\n" });
-	journal.terminal(run.id, "succeeded");
-	writeFileSync(join(clioStateDir(), "runs.json"), JSON.stringify([run]));
-	await writeSettledRun(clioStateDir(), fixtureReceiptDraft(run));
-	const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: run.id });
-	const manifest = built.overview.recordings?.[0];
-	ok(manifest?.castPath);
-	ok(built.overview.files.includes(manifest.castPath));
-	const cast = readFileSync(join(built.directory, manifest.castPath), "utf8");
-	parseRecordingCast(cast);
-	equal(createHash("sha256").update(cast).digest("hex"), manifest.sha256);
-	deepStrictEqual(
-		(await inspectEvidence(clioDataDir(), built.evidenceId)).overview.recordings,
-		built.overview.recordings,
-	);
-	equal(
-		built.findings.some((finding) => finding.tag === "run-seal"),
-		false,
-	);
-});
-
-it("rejects corrupt, missing and redirected capture files, retaining visible evidence failures", () => {
+it("rejects corrupt, missing and redirected capture files", () => {
 	const run = fixtureEnvelope("corrupt");
 	const journal = createRecordingJournal();
 	run.recording = journal.start(run.id, node);
 	journal.terminal(run.id, "succeeded");
 	writeFileSync(join(clioStateDir(), "runs", run.id, "recording.cast"), "corrupt");
-	const failed = exportEvidenceRecordings(clioStateDir(), join(clioDataDir(), "fixture"), [run]);
-	equal(failed[0]?.completion, "failed");
-	equal(failed[0]?.castPath, null);
-	match(failed[0]?.error ?? "", /checksum/);
-	const missing = fixtureEnvelope("missing");
-	missing.recording = { manifestPath: "ignored" };
-	equal(exportEvidenceRecordings(clioStateDir(), clioDataDir(), [missing])[0]?.completion, "failed");
+	throws(() => readRunRecording(clioStateDir(), run.id), /checksum/);
+	equal(readRunRecording(clioStateDir(), "missing"), null);
 	symlinkSync(env.dir, join(clioStateDir(), "runs", "escape"));
 	throws(() => journal.start("../escape", node));
 	throws(() => readRunRecording(clioStateDir(), "escape"), /directory/);
@@ -297,7 +263,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 			equal(journal.damaged, 0);
 			deepStrictEqual(
 				journal.records.map(({ record }) => record.k),
-				["run.started", "call.started", "call.settled", "run.settled", "run.sealed"],
+				["run.started", "call.started", "call.settled", "run.settled", "evidence.assessed", "run.sealed"],
 			);
 			const settled = journal.records[3]?.record;
 			ok(settled?.k === "run.settled");
@@ -423,6 +389,7 @@ it("a worker killed mid-call keeps the calls it settled and settles its open att
 				"gap:writer-drop",
 				"call.settled",
 				"run.settled",
+				"evidence.assessed",
 				"run.sealed",
 			],
 		);

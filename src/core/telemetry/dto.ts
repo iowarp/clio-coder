@@ -16,6 +16,8 @@ import { factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId, TelemetryAgentSchema } from "./id-schemas.js";
 import {
 	CallSettledSchema,
+	EvidenceAssessedSchema,
+	EvidenceFindingsObjectSchema,
 	MIDDLEWARE_EFFECTS,
 	ObjectRefSchema,
 	PricingSchema,
@@ -145,17 +147,7 @@ export type FactMetric = (typeof FACT_METRICS)[number];
 /** `cause` selects a closed failure cause, `wait` an admission hold, `cold` an expected cold reason. */
 export const FACT_GROUPS = ["role", "model", "turn", "run", "cause", "wait", "cold", "category", "turns"] as const;
 export type FactGroup = (typeof FACT_GROUPS)[number];
-export const FACT_SCOPES = [
-	"own",
-	"runs",
-	"session",
-	"lineage",
-	"run",
-	"repo",
-	"process",
-	"context",
-	"evidence",
-] as const;
+export const FACT_SCOPES = ["own", "runs", "session", "lineage", "run", "repo", "process", "context"] as const;
 export type FactScope = (typeof FACT_SCOPES)[number];
 
 /**
@@ -163,7 +155,7 @@ export type FactScope = (typeof FACT_SCOPES)[number];
  * session's journal owns; `runs` the worker runs it referenced; `session` both, what the account was charged; `lineage`
  * a session with its fork ancestors; `run` one run journal; `repo` a repository's sessions and runs over a window, owned
  * as `<cwdHash>-<days>d` or `all-<days>d`; `process` the calls one process's journal owns, those no session or run
- * owned. `context` names a session's latest journaled snapshot; `evidence` names a sealed evidence bundle. The
+ * owned. `context` names a session's latest journaled snapshot. The
  * `turns` group names the comma-separated operator turns one prompt ran. `own` and `runs` also take a `repo` owner,
  * splitting its window into the sessions' own calls and the worker
  * runs. An attempt narrows `own`, `run` or `process` to one attempt.
@@ -1129,10 +1121,15 @@ export const RunEvidenceSchema = Type.Object(
 				closed,
 			),
 		),
-		/** The evidence bundle the run was filed under, from the evidence index; null when none names it. */
+		/** The run's journaled assessment; null unless the seal verifies and the run was assessed before it sealed. */
 		evidence: nullable(
 			Type.Object(
-				{ evidenceId: ExistingId, findingCount: count, succeeded: nullable(Type.Boolean()), filedAt: UtcSchema },
+				{
+					assessedAt: UtcSchema,
+					firstPassSuccess: Type.Boolean(),
+					findingCount: count,
+					tags: Type.Array(ExistingId),
+				},
 				closed,
 			),
 		),
@@ -1183,6 +1180,25 @@ export const RunTelemetrySchema = Type.Object(
 		result: Type.Union([
 			Type.Object({ state: Type.Literal("resolved"), value: RunResultObjectSchema }, closed),
 			Type.Object({ state: Type.Literal("missing") }, closed),
+			Type.Null(),
+		]),
+		/**
+		 * The run's assessment as its evidence.assessed holds it (#434), with the `evidence-findings` object it names:
+		 * `content` is `missing` when the scope does not hold that object and null when no scope files were read.
+		 */
+		assessment: Type.Union([
+			Type.Object(
+				{
+					...EvidenceAssessedSchema.properties,
+					at: UtcSchema,
+					content: Type.Union([
+						Type.Object({ state: Type.Literal("resolved"), value: EvidenceFindingsObjectSchema }, closed),
+						Type.Object({ state: Type.Literal("missing") }, closed),
+						Type.Null(),
+					]),
+				},
+				closed,
+			),
 			Type.Null(),
 		]),
 	},

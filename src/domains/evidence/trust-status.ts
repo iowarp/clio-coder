@@ -1,5 +1,14 @@
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import type { RunSettled } from "../../core/telemetry/schemas.js";
+import {
+	TRUST_ABSENCE_REASONS,
+	TRUST_ARTIFACT_KINDS,
+	TRUST_STATUS_AUTHORITY_KINDS,
+	TRUST_STATUS_AXES,
+	TRUST_STATUS_SOURCE_KINDS,
+	TRUST_STATUS_STATES,
+	type TrustStatusAxis,
+} from "../../core/telemetry/trust-vocabulary.js";
 import { parseWorkerContextProvenance } from "../../worker/context-seed.js";
 import type { GateDecisionArtifact, GateDecisionVerification } from "../dispatch/gate-decisions.js";
 import type { RunBriefingProvenance, RunProjectContextProvenance, RunResult } from "../dispatch/types.js";
@@ -14,46 +23,17 @@ export const TRUST_STATUS_VERSION = 1 as const;
 export const TRUST_STATUS_MAX_ARTIFACT_REFERENCES = 16;
 export const TRUST_STATUS_MAX_IDENTIFIER_LENGTH = 512;
 
-export const TRUST_STATUS_AXES = [
-	"artifactIntegrity",
-	"validationGrounding",
-	"independentReview",
-	"contextProvenance",
-	"completionEvidence",
-] as const;
+export type { TrustStatusAxis } from "../../core/telemetry/trust-vocabulary.js";
+export { TRUST_STATUS_AXES, TRUST_STATUS_STATES } from "../../core/telemetry/trust-vocabulary.js";
 
-export type TrustStatusAxis = (typeof TRUST_STATUS_AXES)[number];
-
-/** Runtime vocabularies and the source of the corresponding closed state unions. */
-export const TRUST_STATUS_STATES = {
-	artifactIntegrity: ["verified", "failed", "absent", "unknown", "not_applicable"],
-	validationGrounding: ["validated", "failed", "ungrounded", "absent", "unknown", "not_applicable"],
-	independentReview: ["passed", "failed", "inconclusive", "not_independent", "absent", "unknown", "not_applicable"],
-	contextProvenance: ["recorded", "invalid", "absent", "unknown", "not_applicable"],
-	completionEvidence: ["evidenced", "incomplete", "limited", "absent", "unknown", "not_applicable"],
-} as const satisfies Record<TrustStatusAxis, ReadonlyArray<string>>;
-
-export type TrustStatusSourceKind =
-	| "run_seal"
-	| "run_record"
-	| "gate_decision"
-	| "evidence_bundle"
-	| "finish_contract"
-	| "compatibility";
+export type TrustStatusSourceKind = (typeof TRUST_STATUS_SOURCE_KINDS)[number];
 
 export interface TrustStatusSource {
 	kind: TrustStatusSourceKind;
 	id: string;
 }
 
-export type TrustStatusAuthorityKind =
-	| "clio"
-	| "validator"
-	| "reviewer"
-	| "operator"
-	| "runtime"
-	| "external_system"
-	| "unknown";
+export type TrustStatusAuthorityKind = (typeof TRUST_STATUS_AUTHORITY_KINDS)[number];
 
 /** The actor or subsystem entitled to make the attributed observation. */
 export interface TrustStatusAuthority {
@@ -61,17 +41,7 @@ export interface TrustStatusAuthority {
 	id: string;
 }
 
-export type TrustArtifactKind =
-	| "run_record"
-	| "validation_result"
-	| "gate_decision"
-	| "briefing"
-	| "project_context"
-	| "worker_context"
-	| "autonomy_policy"
-	| "finish_contract_evidence"
-	| "evidence_bundle"
-	| "session_entry";
+export type TrustArtifactKind = (typeof TRUST_ARTIFACT_KINDS)[number];
 
 export interface TrustArtifactReference {
 	kind: TrustArtifactKind;
@@ -89,7 +59,7 @@ export interface AttributedTrustStatus {
 	artifacts: ReadonlyArray<TrustArtifactReference>;
 }
 
-export type TrustAbsenceReason = "not_recorded" | "not_observed" | "artifact_missing" | "historical_format";
+export type TrustAbsenceReason = (typeof TRUST_ABSENCE_REASONS)[number];
 
 export interface AbsentTrustStatus {
 	state: "absent";
@@ -130,16 +100,6 @@ export type TrustStatusProjection = Partial<TrustStatusAxes>;
 
 export type TrustStatusValidation = { ok: true; status: CanonicalTrustStatus } | { ok: false; reason: string };
 
-/**
- * Artifact kinds that are self-reports of the run under inspection. They can
- * establish `completionEvidence`, the axis they authentically own, and can
- * never be read as independently observed validation.
- */
-const SELF_REPORTED_ARTIFACT_KINDS: ReadonlySet<TrustArtifactKind> = new Set([
-	"finish_contract_evidence",
-	"run_record",
-]);
-
 const AXIS_STATES: Record<TrustStatusAxis, ReadonlySet<string>> = {
 	artifactIntegrity: new Set(TRUST_STATUS_STATES.artifactIntegrity),
 	validationGrounding: new Set(TRUST_STATUS_STATES.validationGrounding),
@@ -150,9 +110,9 @@ const AXIS_STATES: Record<TrustStatusAxis, ReadonlySet<string>> = {
 
 const AXIS_SOURCES: Record<TrustStatusAxis, ReadonlySet<TrustStatusSourceKind>> = {
 	artifactIntegrity: new Set(["run_seal", "compatibility"]),
-	validationGrounding: new Set(["run_record", "evidence_bundle", "compatibility"]),
+	validationGrounding: new Set(["run_record", "compatibility"]),
 	independentReview: new Set(["gate_decision", "compatibility"]),
-	contextProvenance: new Set(["run_record", "evidence_bundle", "compatibility"]),
+	contextProvenance: new Set(["run_record", "compatibility"]),
 	completionEvidence: new Set(["finish_contract", "compatibility"]),
 };
 
@@ -160,49 +120,17 @@ const SOURCE_AUTHORITIES: Record<TrustStatusSourceKind, ReadonlySet<TrustStatusA
 	run_seal: new Set(["clio"]),
 	run_record: new Set(["clio", "validator", "runtime", "external_system", "unknown"]),
 	gate_decision: new Set(["clio", "reviewer", "operator", "unknown"]),
-	evidence_bundle: new Set(["clio"]),
 	finish_contract: new Set(["clio"]),
 	compatibility: new Set(["clio", "unknown"]),
 };
 
-const ABSENCE_REASONS: ReadonlySet<string> = new Set([
-	"not_recorded",
-	"not_observed",
-	"artifact_missing",
-	"historical_format",
-]);
+const ABSENCE_REASONS: ReadonlySet<string> = new Set(TRUST_ABSENCE_REASONS);
 
-const SOURCE_KINDS: ReadonlySet<string> = new Set([
-	"run_seal",
-	"run_record",
-	"gate_decision",
-	"evidence_bundle",
-	"finish_contract",
-	"compatibility",
-]);
+const SOURCE_KINDS: ReadonlySet<string> = new Set(TRUST_STATUS_SOURCE_KINDS);
 
-const AUTHORITY_KINDS: ReadonlySet<string> = new Set([
-	"clio",
-	"validator",
-	"reviewer",
-	"operator",
-	"runtime",
-	"external_system",
-	"unknown",
-]);
+const AUTHORITY_KINDS: ReadonlySet<string> = new Set(TRUST_STATUS_AUTHORITY_KINDS);
 
-const ARTIFACT_KINDS: ReadonlySet<string> = new Set([
-	"run_record",
-	"validation_result",
-	"gate_decision",
-	"briefing",
-	"project_context",
-	"worker_context",
-	"autonomy_policy",
-	"finish_contract_evidence",
-	"evidence_bundle",
-	"session_entry",
-]);
+const ARTIFACT_KINDS: ReadonlySet<string> = new Set(TRUST_ARTIFACT_KINDS);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -218,7 +146,7 @@ function hasExactKeys(value: Record<string, unknown>, keys: ReadonlyArray<string
  * to. Exported so derivation boundaries can drop an unusable identifier from a
  * malformed input row instead of throwing at normalization time.
  */
-export function isTrustStatusIdentifier(value: unknown): value is string {
+function isTrustStatusIdentifier(value: unknown): value is string {
 	if (typeof value !== "string" || value.trim().length === 0 || value.length > TRUST_STATUS_MAX_IDENTIFIER_LENGTH) {
 		return false;
 	}
@@ -506,33 +434,6 @@ export function adaptGateDecisionReviewStatus(
 		);
 	}
 	return attributed("inconclusive", source, authority, artifacts);
-}
-
-export interface GroundedEvidenceValidationInput {
-	evidenceId: string;
-	runId: string;
-	artifacts?: ReadonlyArray<TrustArtifactReference>;
-}
-
-/**
- * Project validation that the evidence linker grounded in an executed
- * artifact. Grounding requires at least one independently observed artifact:
- * a self-report of the run under inspection cannot ground its own validation
- * (docs/architecture/evidence-and-memory.md, "composition rules"), and an empty reference
- * list grounds
- * nothing at all.
- */
-export function adaptGroundedEvidenceValidationStatus(
-	input: GroundedEvidenceValidationInput,
-): ValidationGroundingStatus {
-	const observed = (input.artifacts ?? []).filter((artifact) => !SELF_REPORTED_ARTIFACT_KINDS.has(artifact.kind));
-	if (observed.length === 0) return absentTrustStatus("not_observed");
-	return attributed(
-		"validated",
-		{ kind: "evidence_bundle", id: `${input.evidenceId}:${input.runId}` },
-		{ kind: "clio", id: "evidence-grounding" },
-		uniqueBoundedReferences([{ kind: "evidence_bundle", id: input.evidenceId }, ...observed]),
-	);
 }
 
 function uniqueBoundedReferences(references: ReadonlyArray<TrustArtifactReference>): TrustArtifactReference[] {

@@ -48,7 +48,7 @@ function fullJournal(runId: string) {
 
 /**
  * Trace history as path A reads it (#434): `count` run journals with dispatch ledger rows beside any the ledger
- * already holds, run-0000 a whole settled run with checks under its seal and an evidence row, every third other run
+ * already holds, run-0000 a whole settled run with checks and an assessment under its seal, every third other run
  * still running. `writtenMs` sets each journal's write time, the history's order, so ties and pages are deterministic.
  */
 /** run-0000's result: verified, with a typed check, a contract and grounding the run's seal vouches for. */
@@ -113,17 +113,4 @@ export async function traceFixture(
 	const ledger = join(state, "runs.json");
 	const held: unknown[] = existsSync(ledger) ? (JSON.parse(readFileSync(ledger, "utf8")) as unknown[]) : [];
 	writeFileSync(ledger, JSON.stringify([...held, ...rows]));
-	writeFileSync(
-		join(state, "evidence-index.json"),
-		JSON.stringify([
-			{
-				runId: "run-0000",
-				evidenceId: "evidence-1",
-				tags: [],
-				firstPassSuccess: true,
-				findingCount: 0,
-				generatedAt: endedAt,
-			},
-		]),
-	);
 }

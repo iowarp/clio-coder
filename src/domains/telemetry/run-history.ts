@@ -77,7 +77,7 @@ export function readRunInspection(runId: string, state = clioStateDir()) {
 	const run = readRunRecord(state, runId);
 	return {
 		telemetry: run?.row ?? runRowTelemetry(runId, loadRunTelemetrySource(state, runId)),
-		evidence: runEvidenceOf(runId, run, state),
+		evidence: runEvidenceOf(runId, run),
 		record: run?.settled ? { settled: run.settled, seal: run.seal, result: run.result } : null,
 	};
 }

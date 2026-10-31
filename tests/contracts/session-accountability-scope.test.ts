@@ -4,13 +4,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import { writeEvidenceIndexRowQueued } from "../../src/domains/telemetry/evidence-index.js";
 import { AccountabilityArtifactProvider } from "../../src/interactive/view/artifacts.js";
+import { fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
-// The evidence index is machine-wide. `/view` is the surface that reads it for a
+// Run scopes are machine-wide. `/view` folds their sealed assessments for a
 // session, so it must fold only the runs that session can see: its own, plus
-// runs recorded in the same project, never another project's.
+// runs recorded in the same project, never another project's (#434).
 test("/view accountability folds the runs the session sees and excludes other projects", async () => {
 	const home = await isolateClioEnv("clio-session-accountability-");
 	try {
@@ -37,13 +38,14 @@ test("/view accountability folds the runs the session sees and excludes other pr
 				sessionId: item.sessionId,
 				cwd: item.cwd,
 			});
-			await writeEvidenceIndexRowQueued(clioStateDir(), {
-				runId: run.id,
-				evidenceId: `evidence-${index}`,
-				tags: [],
-				firstPassSuccess: item.success,
-				findingCount: 0,
-				generatedAt: new Date().toISOString(),
+			const endedAt = new Date().toISOString();
+			ledger.update(run.id, { endedAt, status: "completed" });
+			const settled = { ...run, endedAt };
+			await writeSettledRun(clioStateDir(), {
+				...fixtureReceiptDraft(settled),
+				sessionId: item.sessionId,
+				lineage: { parentRunId: null, rootRunId: run.id, attempt: item.success ? 0 : 1, depth: 0 },
+				verification: { state: "verified", basis: "validation-tool" },
 			});
 		}
 		await ledger.persist();

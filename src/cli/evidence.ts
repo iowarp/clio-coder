@@ -1,105 +1,66 @@
 import { InvalidIdError } from "../core/safe-id.js";
-import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import type { EvidenceOverview, EvidenceRunProvenance } from "../domains/evidence/index.js";
+import { clioStateDir } from "../core/xdg.js";
+import type { RunEvidence } from "../domains/evidence/index.js";
 import {
-	buildEvidence,
-	EvidenceNotFoundError,
 	formatTrustAxes,
 	formatTrustSummary,
-	inspectEvidence,
-	listEvidenceOverviews,
-	loadEvidenceRunProvenance,
+	inspectRunEvidence,
+	listRunEvidence,
 	provenanceTranscriptLines,
 } from "../domains/evidence/index.js";
 import { runEvidenceDetail } from "./evidence-detail.js";
-import { printError, printNote, printOk } from "./shared.js";
+import { printError } from "./shared.js";
 
-const HELP = `clio-coder evidence build --run <runId>
-clio-coder evidence build --session <sessionId>
-clio-coder evidence inspect <evidenceId> [--json]
+const HELP = `clio-coder evidence inspect <runId> [--json]
 clio-coder evidence list
 
-Build or inspect deterministic Clio evidence artifacts.
+Inspect a finished run's evidence: its seal's verdict and the assessment the run
+journaled before sealing. Each run is assessed when it settles; there is nothing
+to build.
 `;
 
-type EvidenceCommand = "build" | "inspect" | "list";
+type EvidenceCommand = "inspect" | "list";
 
 interface ParsedEvidenceArgs {
 	command?: EvidenceCommand;
 	json: boolean;
 	runId?: string;
-	sessionId?: string;
-	evidenceId?: string;
 	help: boolean;
 }
 
 function parseEvidenceArgs(args: ReadonlyArray<string>): ParsedEvidenceArgs {
 	const parsed: ParsedEvidenceArgs = { help: false, json: false };
-	for (let index = 0; index < args.length; index += 1) {
-		const arg = args[index];
-		if (arg === undefined) continue;
+	for (const arg of args) {
 		if (arg === "--help" || arg === "-h") {
 			parsed.help = true;
 			continue;
 		}
 		if (parsed.command === undefined) {
-			if (arg === "build" || arg === "inspect" || arg === "list") {
+			if (arg === "inspect" || arg === "list") {
 				parsed.command = arg;
 				continue;
 			}
-			// The fixed host read had no caller once the GUI stopped spawning it (#434 §11.3).
-			if (arg === "inventory")
+			// A run is assessed when it settles, inside its sealed scope (#434).
+			if (arg === "build")
 				throw new Error(
-					"evidence inventory was removed: use `clio-coder evidence list` or `evidence inspect <evidenceId> --json`",
+					"evidence build was removed: every run is assessed when it settles; use `evidence inspect <runId>`",
 				);
 			throw new Error(`unknown evidence command: ${arg}`);
-		}
-		if (parsed.command === "build") {
-			if (arg === "--run") {
-				const value = args[index + 1];
-				if (value === undefined || value.startsWith("-")) throw new Error("--run requires a run id");
-				parsed.runId = value;
-				index += 1;
-				continue;
-			}
-			if (arg === "--session") {
-				const value = args[index + 1];
-				if (value === undefined || value.startsWith("-")) throw new Error("--session requires a session id");
-				parsed.sessionId = value;
-				index += 1;
-				continue;
-			}
-			throw new Error(`unknown evidence build argument: ${arg}`);
 		}
 		if (parsed.command === "inspect" && arg === "--json" && !parsed.json) {
 			parsed.json = true;
 			continue;
 		}
-		if (parsed.command === "inspect" && parsed.evidenceId === undefined) {
-			if (arg.startsWith("-")) throw new Error("inspect requires an evidence id");
-			parsed.evidenceId = arg;
+		if (parsed.command === "inspect" && parsed.runId === undefined) {
+			if (arg.startsWith("-")) throw new Error("inspect requires a run id");
+			parsed.runId = arg;
 			continue;
 		}
 		throw new Error(`unexpected evidence argument: ${arg}`);
 	}
 	if (parsed.help) return parsed;
-	if (parsed.command === undefined) throw new Error("evidence requires build, inspect, or list");
-	if (parsed.command === "build") {
-		if (parsed.runId !== undefined && parsed.sessionId !== undefined) {
-			throw new Error("build accepts only one of --run or --session");
-		}
-		if (parsed.runId === undefined && parsed.sessionId === undefined) {
-			throw new Error("build requires --run <runId> or --session <sessionId>");
-		}
-	}
-	if (parsed.command === "inspect" && parsed.evidenceId === undefined)
-		throw new Error("inspect requires an evidence id");
-	if (
-		parsed.command === "list" &&
-		(parsed.runId !== undefined || parsed.sessionId !== undefined || parsed.evidenceId !== undefined)
-	) {
-		throw new Error("list does not accept extra arguments");
-	}
+	if (parsed.command === undefined) throw new Error("evidence requires inspect or list");
+	if (parsed.command === "inspect" && parsed.runId === undefined) throw new Error("inspect requires a run id");
 	return parsed;
 }
 
@@ -109,9 +70,8 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 		parsed = parseEvidenceArgs(args);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		// Usage that accompanies an error goes to stderr with it. Splitting the
-		// two put the error on stderr and the usage on stdout, so a caller
-		// capturing stdout for evidence output collected a help screen instead.
+		// Usage that accompanies an error goes to stderr with it, so a caller capturing stdout for evidence output never
+		// collects a help screen instead.
 		process.stderr.write(HELP);
 		return 2;
 	}
@@ -119,120 +79,76 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 		process.stdout.write(HELP);
 		return 0;
 	}
-	const dataDir = clioDataDir();
 	const stateDir = clioStateDir();
 	try {
-		if (parsed.command === "build") {
-			const result = await buildEvidence({
-				dataDir,
-				stateDir,
-				...(parsed.runId === undefined ? {} : { runId: parsed.runId }),
-				...(parsed.sessionId === undefined ? {} : { sessionId: parsed.sessionId }),
-			});
-			// The artifact is still written (the finding is part of the evidence),
-			// but the verdict line and exit code must not say ok over a run whose
-			// seal was checked and rejected.
-			const integrityFailures = result.findings.filter((entry) => entry.tag === "run-seal" && entry.severity === "warn");
-			// A run that has not settled or sealed yet is not evidence, which is a
-			// note beside the verdict and leaves the exit code alone.
-			const unsealed = result.findings.filter((entry) => entry.tag === "run-seal" && entry.severity === "info");
-			if (integrityFailures.length > 0) process.stdout.write(`wrote ${result.evidenceId} ${result.directory}\n`);
-			else printOk(`wrote ${result.evidenceId} ${result.directory}`);
-			for (const entry of unsealed) {
-				printNote(`${entry.runId !== null ? `run ${entry.runId}: ` : ""}${entry.message}`);
+		if (parsed.command === "inspect" && parsed.runId !== undefined) {
+			if (parsed.json) return runEvidenceDetail(parsed.runId);
+			const evidence = await inspectRunEvidence(stateDir, parsed.runId);
+			if (evidence.settled === null && evidence.integrity.state !== "failed") {
+				printError(
+					`run ${parsed.runId} has no settled record: ${evidence.integrity.state === "verified" ? "not settled" : evidence.integrity.reason}`,
+				);
+				process.stderr.write("  run `clio-coder evidence list` to see local runs\n");
+				return 1;
 			}
-			for (const failure of integrityFailures) {
-				printError(`${failure.runId !== null ? `run ${failure.runId}: ` : ""}${failure.message}`);
-			}
-			return integrityFailures.length > 0 ? 1 : 0;
+			renderEvidence(evidence);
+			// The record is printed either way, but the exit code never says ok over a seal that was checked and rejected.
+			return evidence.integrity.state === "failed" ? 1 : 0;
 		}
-		if (parsed.command === "inspect") {
-			const evidenceId = parsed.evidenceId;
-			if (evidenceId === undefined) {
-				printError("inspect requires an evidence id");
-				return 2;
-			}
-			if (parsed.json) return runEvidenceDetail(evidenceId);
-			const inspected = await inspectEvidence(dataDir, evidenceId);
-			const provenance = await loadEvidenceRunProvenance(dataDir, evidenceId);
-			renderEvidence(inspected, provenance);
-			return 0;
-		}
-		if (parsed.command === "list") {
-			renderEvidenceList(await listEvidenceOverviews(dataDir));
-			return 0;
-		}
-		printError("evidence requires build, inspect, or list");
-		return 2;
+		renderEvidenceList(await listRunEvidence(stateDir));
+		return 0;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
-		// The id came from the user, and the command that shows which ids exist is
-		// the only thing that turns this exit into a working one.
-		if (error instanceof EvidenceNotFoundError)
-			process.stderr.write("  run `clio-coder evidence list` to see local bundles\n");
 		return error instanceof InvalidIdError ? 2 : 1;
 	}
 }
 
-function renderEvidence(
-	input: Awaited<ReturnType<typeof inspectEvidence>>,
-	provenance: ReadonlyArray<EvidenceRunProvenance> = [],
-): void {
-	const { overview, findings, trustStatus } = input;
-	process.stdout.write(`evidence: ${overview.evidenceId}\n`);
-	process.stdout.write(`source: ${formatSource(overview)}\n`);
-	process.stdout.write(`generated: ${overview.generatedAt}\n`);
-	process.stdout.write(`runs: ${overview.totals.runs}\n`);
-	process.stdout.write(`run records: ${overview.totals.runRecords}\n`);
-	process.stdout.write(`tool calls: ${overview.totals.toolCalls}\n`);
-	process.stdout.write(`blocked tools: ${overview.totals.blockedToolCalls}\n`);
-	process.stdout.write(`tags: ${formatList(overview.tags)}\n`);
-	process.stdout.write(`findings: ${findings.length}\n`);
-	if (trustStatus.projection === "historical_format") {
-		process.stdout.write("trust status: unavailable (historical bundle without canonical projection)\n");
-	} else {
-		// The compact projection answers the trust questions; the canonical axis
-		// line beneath it is the drill-down, in the same form the dispatch tool
-		// and monitor print.
-		for (const run of trustStatus.runs) {
-			process.stdout.write(`trust ${run.runId}: ${formatTrustSummary(run.status)}\n`);
-			process.stdout.write(`  ${formatTrustAxes(run.status)}\n`);
-		}
+function renderEvidence(evidence: RunEvidence): void {
+	const write = (line: string) => process.stdout.write(`${line}\n`);
+	write(`run: ${evidence.runId}`);
+	write(`seal: ${evidence.integrity.state === "verified" ? "verified" : evidence.integrity.reason}`);
+	write(`assessed: ${evidence.assessedAt ?? "no"}`);
+	if (evidence.settled) write(`outcome: ${evidence.settled.outcome} (exit ${evidence.settled.exitCode ?? "?"})`);
+	if (evidence.totals) {
+		write(`tool calls: ${evidence.totals.toolCalls}`);
+		write(`blocked tools: ${evidence.totals.blockedToolCalls}`);
+		write(`tokens: ${evidence.totals.tokens.display}`);
+		write(`cost: ${evidence.totals.usd.display}`);
 	}
-	// Provenance is the detail behind the projection, never a second reading
-	// of it: each run's block is gated on that run's canonical status, so a
-	// receipt the projection withheld (a broken or retired seal) prints no
-	// autonomy value here, and a run whose block would be empty prints no
-	// header. A historical bundle has no projection and admits no axis detail.
-	const statusByRun = new Map(trustStatus.runs.map((entry) => [entry.runId, entry.status]));
-	for (const { runId, view } of provenance) {
-		const lines = provenanceTranscriptLines(view, statusByRun.get(runId));
-		if (lines.length === 0) continue;
-		process.stdout.write(`provenance ${runId}:\n`);
-		for (const line of lines) process.stdout.write(`  ${line}\n`);
+	if (evidence.firstPassSuccess !== null) write(`first pass: ${evidence.firstPassSuccess ? "yes" : "no"}`);
+	write(`tags: ${formatList(evidence.tags)}`);
+	// The compact projection answers the trust questions; the canonical axis line beneath it is the drill-down, in the
+	// same form the dispatch tool and monitor print.
+	write(`trust: ${formatTrustSummary(evidence.trust)}`);
+	write(`  ${formatTrustAxes(evidence.trust)}`);
+	for (const verdict of evidence.verdicts) write(`gate ${verdict.decisionId}: ${verdict.outcome} (${verdict.review})`);
+	// Provenance is the sealed assessment's; a run whose seal did not verify prints none.
+	const lines = evidence.provenance === null ? [] : provenanceTranscriptLines(evidence.provenance, evidence.trust);
+	if (lines.length > 0) {
+		write("provenance:");
+		for (const line of lines) write(`  ${line}`);
 	}
-	process.stdout.write(`files: ${formatList(overview.files)}\n`);
+	write(`findings: ${evidence.findings.length}`);
+	for (const finding of evidence.findings) write(`  [${finding.severity}] ${finding.tag}: ${finding.message}`);
 }
 
-function renderEvidenceList(overviews: ReadonlyArray<EvidenceOverview>): void {
-	process.stdout.write(`${overviews.length} evidence artifacts\n`);
-	if (overviews.length === 0) return;
+function renderEvidenceList(runs: ReadonlyArray<RunEvidence>): void {
+	process.stdout.write(`${runs.length} runs\n`);
+	if (runs.length === 0) return;
 	process.stdout.write("\n");
-	for (const overview of overviews) {
+	for (const run of runs) {
+		const state =
+			run.integrity.state !== "verified" ? run.integrity.state : run.assessedAt === null ? "unassessed" : "assessed";
 		process.stdout.write(
 			[
-				overview.evidenceId.padEnd(28),
-				formatSource(overview).padEnd(24),
-				`${overview.totals.runs} run${overview.totals.runs === 1 ? "" : "s"}`.padEnd(8),
-				formatList(overview.tags),
+				run.runId.padEnd(28),
+				(run.settled?.outcome ?? "unsettled").padEnd(12),
+				state.padEnd(12),
+				formatList(run.tags),
 			].join(""),
 		);
 		process.stdout.write("\n");
 	}
-}
-
-function formatSource(overview: EvidenceOverview): string {
-	return overview.source.kind === "run" ? `run ${overview.source.runId}` : `session ${overview.source.sessionId}`;
 }
 
 function formatList(values: ReadonlyArray<string>): string {

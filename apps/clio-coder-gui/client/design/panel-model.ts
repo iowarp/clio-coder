@@ -28,7 +28,7 @@ export const MUTABILITIES = [
 	"check only",
 	"detect only",
 	"detect and answer offers",
-	"collect and recheck",
+	"recheck",
 	"install and remove",
 	"edit your user layer",
 	"add, probe and remove",
@@ -38,28 +38,28 @@ export const MUTABILITIES = [
 
 export const PANELS = {
 	evidenceInventory: {
-		eyebrow: eyebrow("Evidence bundles", "installation-wide", "collect and recheck"),
+		eyebrow: eyebrow("Run evidence", "installation-wide", "recheck"),
 		title: "Evidence",
 		boundary:
-			"Bundles are read from this installation's evidence directory. Collecting or rechecking runs the same Clio command you would run yourself, on this machine; no bundle is edited and nothing is uploaded.",
+			"Each run's evidence is read from its sealed run scope on this installation. Rechecking runs the same Clio command you would run yourself, on this machine; no run is edited and nothing is uploaded.",
 	},
 	evidenceBundle: {
-		eyebrow: eyebrow("Evidence bundle", "one dispatch report", "collect and recheck"),
+		eyebrow: eyebrow("Run evidence", "one dispatch run", "recheck"),
 		title: "Evidence",
 		boundary:
-			"A bundle is reproduced as it was collected. Its files stay in the evidence directory on this machine, and nothing here re-runs the work the bundle describes.",
+			"A run's assessment is reproduced as it was sealed when the run settled. Its scope stays on this machine, and nothing here re-runs the work it describes.",
 	},
 	evidenceTrust: {
 		eyebrow: eyebrow("Trust projection", "one dispatch run", READ_ONLY),
 		title: "Trust by run",
 		boundary:
-			"The receipt itself stays in the bundle on this machine. What this panel shows is the recorded trust projection: its authorities, its artifact digests, and the reason each axis holds or does not.",
+			"The run's record stays in its sealed scope on this machine. What this panel shows is the recorded trust projection: its authorities, its artifact digests, and the reason each axis holds or does not.",
 	},
 	evidenceGates: {
-		eyebrow: eyebrow("Gate decisions", "sealed coordinator verdicts", READ_ONLY),
-		title: "Authenticated gate decisions",
+		eyebrow: eyebrow("Gate verdicts", "sealed with the run", READ_ONLY),
+		title: "Gate verdicts",
 		boundary:
-			"A decision is reproduced from the bundle on this machine, exactly as the coordinator sealed it. Nothing here re-runs a gate, and an intact decision authenticates the record rather than the work it describes.",
+			"A verdict is reproduced from the run's sealed assessment on this machine, as it stood when the run settled. Nothing here re-runs a gate, and an intact verdict authenticates the record rather than the work it describes.",
 	},
 	usage: {
 		eyebrow: eyebrow("Recorded usage", "30-day window", READ_ONLY),

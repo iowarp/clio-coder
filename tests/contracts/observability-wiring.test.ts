@@ -1,9 +1,8 @@
 /**
- * Telemetry facts whose writer and reader disagreed: an evidence build failure
- * was raised at a level the dispatch board never reads, and a failed or
- * aborted prewarm was read back as a zero-cost success.
+ * Telemetry facts whose writer and reader disagreed: a failed or aborted
+ * prewarm was read back as a zero-cost success.
  */
-import { deepStrictEqual, equal, match } from "node:assert/strict";
+import { deepStrictEqual, equal } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,11 +14,6 @@ import {
 	subscribeExtensionObservations,
 } from "../../src/domains/extensions/bus-observations.js";
 import type { ExtensionObservationV2 } from "../../src/domains/extensions/public-api-v2.js";
-import type { ProjectionReadModel } from "../../src/domains/telemetry/projection.js";
-import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
-import { stripTerminalSequences } from "../../src/engine/tui.js";
-import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
-import { createDispatchBoardView } from "../../src/interactive/dispatch-board.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "clio-coder-telemetry-wiring-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -77,37 +71,5 @@ describe("compaction observations", () => {
 			["ok", "ok", "failed", "failed", "unknown"],
 		);
 		unsubscribe();
-	});
-});
-
-describe("evidence build failure", () => {
-	function readModel(): ProjectionReadModel {
-		return {};
-	}
-
-	it("reaches the dispatch board as a failed proof with its reason", () => {
-		const projection = createTelemetryProjection(createTelemetryHub(), readModel());
-		projection.evidenceBuildFailed("run-proof", "disk full while writing the bundle");
-		const row: DispatchBoardRow = {
-			runId: "run-proof",
-			agentId: "coder",
-			runtimeKind: "http",
-			runtimeId: "fixture",
-			targetId: "local",
-			wireModelId: "model",
-			status: "completed",
-			elapsedMs: 0,
-			usage: { kind: "pending" },
-			lastContextTokens: null,
-			ttft: null,
-		};
-		const board = createDispatchBoardView(
-			() => [row],
-			() => projection.snapshot(),
-		);
-		const text = board.render(120).map(stripTerminalSequences).join("\n");
-		match(text, /proof\s+\S+ failed/u);
-		match(text, /disk full while writing the bundle/u);
-		projection.stop();
 	});
 });

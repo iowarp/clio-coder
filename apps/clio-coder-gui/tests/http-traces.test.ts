@@ -53,7 +53,8 @@ test("trace history lists run journals joined to the ledger, with read-model row
 	assert.equal(brief.evidence.sealed?.validationGrounding?.claimed, 2);
 	assert.equal(full.record?.settled?.agentId, "coder");
 	assert.equal(full.record?.seal?.status, "verified");
-	assert.equal(brief.evidence.evidence?.evidenceId, "evidence-1");
+	// The assessment the run sealed with, read only under its verified seal (#434).
+	assert.ok(brief.evidence.evidence?.assessedAt);
 	assert.equal((await h.request("/api/traces/runs/missing")).status, 404);
 	assert.equal((await h.post("/api/traces/runs")).status, 405);
 	const head = await h.request("/api/traces/runs/run-0000", { method: "HEAD" });
@@ -66,12 +67,6 @@ test("trace history lists run journals joined to the ledger, with read-model row
 	const empty = await json(await h.request("/api/traces/runs/absent/receipt"), routes.traceReceipt.response);
 	assert.equal(empty.record, null);
 	assert.equal(empty.evidence.record, "missing");
-	for (const malformed of ["{bad", "[]", "null"]) {
-		writeFileSync(join(state, "evidence-index.json"), malformed);
-		const unindexed = await json(await h.request("/api/traces/runs/run-0000/receipt"), routes.traceReceipt.response);
-		assert.equal(unindexed.evidence.evidence, null);
-		assert.equal(unindexed.evidence.integrity.state, "verified");
-	}
 });
 
 test("trace history refuses a bad cursor and an unreadable ledger, and re-reads a replaced one", async (t) => {

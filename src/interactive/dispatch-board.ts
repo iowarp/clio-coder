@@ -16,7 +16,7 @@ import { trustStateWord } from "../domains/evidence/trust-projection.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { TelemetryContract, TelemetryRunSummary, TelemetryView } from "../domains/telemetry/contract.js";
-import type { TelemetryNotice, TelemetrySnapshot } from "../domains/telemetry/index.js";
+import type { TelemetrySnapshot } from "../domains/telemetry/index.js";
 import type { WorkerAction, WorkerProgressSnapshot } from "../domains/telemetry/worker-progress.js";
 import type { Component } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
@@ -372,58 +372,28 @@ export function dispatchStatusPresentation(
 }
 
 /** Evidence-readiness state for a dispatch run, derived from the telemetry projection. */
-export type EvidenceState = "pending" | "ready" | "failed" | "none";
+export type EvidenceState = "ready" | "none";
 
 /**
  * Compact, presentation-ready evidence readiness for one run. Derived purely
- * from a TelemetrySnapshot: no evidence files are read and no /view
- * artifact bodies are inspected. `viewFilter` is the `/view` deep-link an
- * operator would type to inspect the run or its bundle.
+ * from a TelemetrySnapshot: no run scope is read and no /view artifact bodies
+ * are inspected. `viewFilter` is the `/view` deep-link an operator would type
+ * to inspect the run or its assessment.
  */
 export interface RunEvidencePresentation {
 	state: EvidenceState;
-	/** Bundle id, present only when the evidence is ready. */
-	evidenceId?: string;
-	/** Short failure reason drawn from the latest evidence notice, when failed. */
-	reason?: string;
-	/** The `/view` filter text: evidence:<id|runId>, or dispatch:<runId> when absent. */
+	/** The `/view` filter text: evidence:<runId> once assessed, dispatch:<runId> before. */
 	viewFilter: string;
 }
 
-// A run's evidence failure is signalled by its latest evidence notice carrying
-// the error level and this run's id; a trailing warning/info notice for the same
-// run is not a failure, and a notice without ref.runId is not attributed here.
-function latestEvidenceFailureReason(notices: readonly TelemetryNotice[], runId: string): string | null {
-	for (let index = notices.length - 1; index >= 0; index -= 1) {
-		const notice = notices[index];
-		if (!notice) continue;
-		if (notice.kind !== "evidence" || notice.ref?.runId !== runId) continue;
-		if (notice.level !== "error") return null;
-		const reason = notice.message.replace(/\s+/g, " ").trim();
-		return reason.length > 0 ? reason : null;
-	}
-	return null;
-}
-
 /**
- * Fold a TelemetrySnapshot into the evidence readiness for one run. Cheap
- * and pure: it scans the bounded run and notice rings the projection already
- * maintains and reads no evidence files. Pending outranks a stale ready bundle
- * because an in-flight rebuild is the more current signal; a matching run
- * summary with an evidence bundle is ready; the latest error-level evidence
- * notice for the run marks it failed.
+ * Fold a TelemetrySnapshot into the evidence readiness for one run: a run whose assessment the projection saw is
+ * ready (#434). Cheap and pure; it reads no run scope.
  */
 function deriveRunEvidenceState(snapshot: TelemetrySnapshot | undefined, runId: string): RunEvidencePresentation {
 	if (!snapshot || runId.length === 0) return { state: "none", viewFilter: `dispatch:${runId}` };
-	if (snapshot.pendingEvidenceBuildRunIds.includes(runId)) {
-		return { state: "pending", viewFilter: `evidence:${runId}` };
-	}
-	const evidence = snapshot.runs.find((run) => run.runId === runId)?.evidence;
-	if (evidence) {
-		return { state: "ready", evidenceId: evidence.evidenceId, viewFilter: `evidence:${evidence.evidenceId}` };
-	}
-	const reason = latestEvidenceFailureReason(snapshot.notices, runId);
-	if (reason !== null) return { state: "failed", reason, viewFilter: `evidence:${runId}` };
+	if (snapshot.runs.find((run) => run.runId === runId)?.evidence)
+		return { state: "ready", viewFilter: `evidence:${runId}` };
 	return { state: "none", viewFilter: `dispatch:${runId}` };
 }
 
@@ -433,20 +403,10 @@ interface EvidenceGlyphPresentation {
 	token: ClioToken;
 }
 
-// Proof state shares the section 5 glyph language with run status: the queued
-// glyph for pending build work, the ok check for a ready bundle, and the error
-// cross for a failed build. `none` renders no marker.
+// Proof state shares the section 5 glyph language with run status: the ok check for an assessed run. `none` renders
+// no marker.
 function evidenceStatePresentation(state: EvidenceState): EvidenceGlyphPresentation | null {
-	switch (state) {
-		case "pending":
-			return { glyph: GLYPH.queued, word: "pending", token: "info" };
-		case "ready":
-			return { glyph: GLYPH.ok, word: "ready", token: "success" };
-		case "failed":
-			return { glyph: GLYPH.error, word: "failed", token: "error" };
-		case "none":
-			return null;
-	}
+	return state === "ready" ? { glyph: GLYPH.ok, word: "ready", token: "success" } : null;
 }
 
 // Dispatch card rows follow the footer dashboard key-value grammar: a dim key
@@ -478,13 +438,11 @@ function cardWrappedValueLines(theme: ClioTheme, key: string, value: string, con
 	);
 }
 
-// The `proof` row: the colored state marker, an optional failure reason, then
-// the dim `/view` filter an operator would type.
+// The `proof` row: the colored state marker, then the dim `/view` filter an operator would type.
 function evidenceCardLine(theme: ClioTheme, evidence: RunEvidencePresentation, contentWidth: number): string | null {
 	const presentation = evidenceStatePresentation(evidence.state);
 	if (!presentation) return null;
 	const units = [theme.fg(presentation.token, `${presentation.glyph} ${presentation.word}`)];
-	if (evidence.state === "failed" && evidence.reason) units.push(theme.fg("body", evidence.reason));
 	units.push(theme.fg("annotation", evidence.viewFilter));
 	return cardUnitsLine(theme, "proof", units, contentWidth);
 }

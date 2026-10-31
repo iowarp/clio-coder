@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import type { ObjectRef } from "../../core/telemetry/schemas.js";
-import { ObjectRefSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
+import { EvidenceFindingsObjectSchema, ObjectRefSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
 import type { RedactionTally } from "../evidence/redact.js";
 import { createRedactionTally, secretRedactingReplacer } from "../evidence/redact.js";
 import { canonicalJson } from "../prompts/hash.js";
@@ -25,7 +25,8 @@ type StoredSubject =
 	| "memory-trace"
 	| "observation-trace"
 	| "system-one-sample"
-	| "run-result";
+	| "run-result"
+	| "evidence-findings";
 const hash = Type.String({ pattern: "^[0-9a-f]{64}$" });
 const count = Type.Integer({ minimum: 0 });
 const range = Type.Union([Type.Tuple([Type.Integer({ minimum: 1 }), Type.Integer({ minimum: 1 })]), Type.Null()]);
@@ -101,7 +102,8 @@ const promptStructureSchema = Type.Object(
 
 /**
  * Object subjects that hold content: a share below the research profile drops them, and research retention expires a
- * session's before the records that cite them. A run's `run-result` is written in every mode (#434).
+ * session's before the records that cite them. A run's `run-result` and `evidence-findings` are written in every mode
+ * (#434).
  */
 export const CONTENT_SUBJECTS: ReadonlySet<string> = new Set([
 	"prompt-text",
@@ -110,6 +112,7 @@ export const CONTENT_SUBJECTS: ReadonlySet<string> = new Set([
 	"observation-trace",
 	"system-one-sample",
 	"run-result",
+	"evidence-findings",
 ]);
 
 const OBJECT_ID = /^obj_[0-9a-f]{64}$/;
@@ -226,6 +229,7 @@ const contentSchemas: Partial<Record<StoredSubject, TSchema>> = {
 		{ additionalProperties: false },
 	),
 	"run-result": RunResultObjectSchema,
+	"evidence-findings": EvidenceFindingsObjectSchema,
 };
 const storedSubjects: ReadonlySet<string> = new Set<StoredSubject>([
 	"prompt-structure",
@@ -237,6 +241,7 @@ const storedSubjects: ReadonlySet<string> = new Set<StoredSubject>([
 	"observation-trace",
 	"system-one-sample",
 	"run-result",
+	"evidence-findings",
 ]);
 
 /**

@@ -1,12 +1,13 @@
 /** Application boundary for the optional semantic index. No model is contacted at startup. */
 
 import { realpathSync } from "node:fs";
-import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import type { ClioSettings } from "../../core/config.js";
 import { readSettings, semanticUsable } from "../../core/config.js";
-import { clioCacheDir, clioDataDir } from "../../core/xdg.js";
-import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../evidence/index.js";
+import { clioCacheDir, clioDataDir, clioStateDir } from "../../core/xdg.js";
+import { readRunRecording } from "../dispatch/index.js";
+import { inspectRunEvidence, type RunEvidence } from "../evidence/index.js";
 import type { ExtensionEmbeddingRequest } from "../extensions/public-api-v2.js";
 import { canonicalMemoryRepositoryIdentity, loadMemoryRecordsSync } from "../memory/index.js";
 import { openAuthStorage, resolveAuthTarget } from "../providers/auth/index.js";
@@ -242,61 +243,51 @@ export async function refreshSemantic(options: SemanticAppOptions, signal?: Abor
 	const allowPath = (path: string) => policy.readablePath(path);
 	const records = loadMemoryRecordsSync(clioDataDir());
 	const memoryEligibility = { activeRepository: canonicalMemoryRepositoryIdentity(app.projectId) };
-	const evidence: Array<{
-		bundle: Awaited<ReturnType<typeof inspectEvidence>>;
-		directory: string;
-		redactedTranscript?: string;
-	}> = [];
+	const evidence: Array<{ run: RunEvidence; directory: string }> = [];
 	const recordingSnapshots: ExtractionResult[] = [];
-	for (const overview of (await listEvidenceOverviews(clioDataDir())).slice(-100)) {
+	const stateDir = clioStateDir();
+	// The run ledger says which runs ran in this project; what is indexed is each run's sealed evidence (#434).
+	const { openLedger } = await import("../dispatch/state.js");
+	const { telemetryRunDirectory } = await import("../telemetry/paths.js");
+	for (const row of openLedger().list({ limit: 100 })) {
 		signal?.throwIfAborted();
-		if (
-			!overview.cwds.length ||
-			overview.cwds.some((cwd) => {
-				try {
-					return realpathSync(cwd) !== app.projectId;
-				} catch {
-					return true;
-				}
-			})
-		)
+		try {
+			if (realpathSync(row.cwd) !== app.projectId) continue;
+		} catch {
 			continue;
-		const directory = evidenceDirectory(clioDataDir(), overview.evidenceId);
-		const bundle = await inspectEvidence(clioDataDir(), overview.evidenceId);
-		const transcriptPath = join(directory, "transcript.md");
-		const transcriptStat = await stat(transcriptPath).catch(() => null);
-		const redactedTranscript =
-			transcriptStat && transcriptStat.size <= 1024 * 1024 ? await readFile(transcriptPath, "utf8") : undefined;
-		evidence.push({ bundle, directory, ...(redactedTranscript ? { redactedTranscript } : {}) });
-		for (const recording of overview.recordings ?? []) {
-			if (!recording.castPath || !recording.sha256) continue;
-			try {
-				recordingSnapshots.push(
-					extractRecording(
-						{
-							projectId: app.projectId,
-							runId: recording.runId,
-							root: directory,
-							path: join(directory, recording.castPath),
-							sha256: recording.sha256,
-							redacted: true,
-						},
-						signal ? { signal } : {},
-					),
-				);
-			} catch (error) {
-				recordingSnapshots.push({
-					records: [],
-					truncated: false,
-					sources: [
-						{
-							path: join(directory, recording.castPath),
-							state: "failed",
-							reason: error instanceof Error ? error.message : String(error),
-						},
-					],
-				});
-			}
+		}
+		const run = await inspectRunEvidence(stateDir, row.id).catch(() => null);
+		if (run === null || run.assessedAt === null) continue;
+		evidence.push({ run, directory: telemetryRunDirectory(stateDir, row.id) });
+		let recording: ReturnType<typeof readRunRecording> = null;
+		try {
+			recording = readRunRecording(stateDir, row.id);
+		} catch {
+			// A recording that does not verify is not indexed; the run's evidence still is.
+		}
+		const manifest = recording?.manifest;
+		if (!manifest?.castPath || !manifest.sha256) continue;
+		const path = join(stateDir, manifest.castPath);
+		try {
+			recordingSnapshots.push(
+				extractRecording(
+					{
+						projectId: app.projectId,
+						runId: row.id,
+						root: join(stateDir, "runs", row.id),
+						path,
+						sha256: manifest.sha256,
+						redacted: true,
+					},
+					signal ? { signal } : {},
+				),
+			);
+		} catch (error) {
+			recordingSnapshots.push({
+				records: [],
+				truncated: false,
+				sources: [{ path, state: "failed", reason: error instanceof Error ? error.message : String(error) }],
+			});
 		}
 	}
 	const snapshots: ExtractionResult[] = [
@@ -374,7 +365,9 @@ export async function searchSemantic(
 	}
 	const policy = createSafetyPolicyEngine({ cwd: app.projectId });
 	const records = loadMemoryRecordsSync(clioDataDir());
-	const evidenceRoot = join(clioDataDir(), "evidence");
+	const { telemetryRunsDirectory } = await import("../telemetry/paths.js");
+	const evidenceRoot = telemetryRunsDirectory(clioStateDir());
+	const recordingRoot = join(clioStateDir(), "runs");
 	const realRoot = (root: string) => {
 		try {
 			return [realpathSync(root)];
@@ -383,8 +376,8 @@ export async function searchSemantic(
 			return [];
 		}
 	};
-	// Recording paths are canonical, evidence surface paths are not; a symlinked data directory needs both.
-	const evidenceRoots = [evidenceRoot, ...realRoot(evidenceRoot)];
+	// Recording paths are canonical, evidence surface paths are not; a symlinked state directory needs both.
+	const evidenceRoots = [evidenceRoot, ...realRoot(evidenceRoot), recordingRoot, ...realRoot(recordingRoot)];
 	const inboxRoots = registeredInboxes(app.config, app.projectId).flatMap((inbox) => realRoot(inbox.root));
 	const eligibleMemories = eligibleSemanticMemory(records, {
 		activeRepository: canonicalMemoryRepositoryIdentity(app.projectId),

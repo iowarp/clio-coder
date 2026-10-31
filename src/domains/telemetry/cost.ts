@@ -3,6 +3,7 @@
  * journals; nothing here accumulates it (#434).
  */
 
+import type { FactSum } from "../../core/telemetry/fact.js";
 import {
 	COST_NOT_MEASURED,
 	costClaimMeasured,
@@ -80,6 +81,21 @@ export function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmoun
 			(amount.costSummary?.allKnownFree ?? amount.provenance === "known_free") && (first || aggregate.allKnownFree),
 		// Carried summaries retain their call coverage along with their USD and flags (#434).
 		calls: aggregate.calls + (amount.costSummary?.calls ?? amount.apiCalls ?? 1),
+	};
+}
+
+/**
+ * A folded spend quantity as a cost aggregate: the measured and estimated subtotal stays known when some
+ * contributions are unknown, and the unknown ones are flagged rather than collapsing the whole to unknown (#434).
+ */
+export function costAggregateOfFactSum(sum: FactSum, pricedFree: boolean): CostAggregate {
+	const known = sum.measured + sum.estimated;
+	return {
+		knownUsd: known,
+		hasEstimated: sum.estimated > 0 || sum.coverage.estimated > 0,
+		hasUnknown: sum.unknownCount > 0,
+		allKnownFree: pricedFree && known === 0 && sum.unknownCount === 0,
+		calls: sum.coverage.measured + sum.coverage.estimated + sum.coverage.unknown,
 	};
 }
 

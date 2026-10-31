@@ -1,4 +1,4 @@
-import type { RunEnvelope, RunPersonaOverride, RunPipelineProvenance, RunResult } from "../dispatch/types.js";
+import type { RunPersonaOverride, RunPipelineProvenance, RunResult } from "../dispatch/types.js";
 import type { CanonicalTrustStatus } from "./trust-status.js";
 
 /**
@@ -45,21 +45,6 @@ export function extractRunProvenance(receipt: ProvenanceReceipt): RunProvenanceV
 }
 
 /**
- * A run's provenance from its ledger row and its settled escalations: what an evidence bundle records in `run.json`
- * (#434).
- */
-export function runProvenanceOf(
-	envelope: Pick<RunEnvelope, "pipeline" | "personaOverride">,
-	escalation: RunEscalationCounts | null,
-): RunProvenanceView {
-	const view: RunProvenanceView = {};
-	if (envelope.pipeline !== undefined) view.pipeline = envelope.pipeline;
-	if (envelope.personaOverride !== undefined) view.personaOverride = envelope.personaOverride;
-	if (escalation !== null) view.escalation = escalation;
-	return view;
-}
-
-/**
  * The slice of a provenance view the canonical projection admits. The
  * provenance is admitted only when the receipt seal verified. Without a
  * projection, callers may print it beside their own integrity banner.
@@ -77,56 +62,6 @@ export function admitRunProvenance(view: RunProvenanceView, status?: CanonicalTr
 /** True when at least one provenance field set is present. */
 export function hasRunProvenance(view: RunProvenanceView): boolean {
 	return view.pipeline !== undefined || view.personaOverride !== undefined || view.escalation !== undefined;
-}
-
-/**
- * Defensively read a provenance view off a bundle's `run.json` entry. Each field is validated so a malformed or
- * partial entry yields an empty view instead of throwing. Used by surfaces that read the bundle back.
- */
-export function runProvenanceFromUnknown(value: unknown): RunProvenanceView {
-	if (!isRecord(value)) return {};
-	const view: RunProvenanceView = {};
-	const pipeline = pipelineFromUnknown(value.pipeline);
-	if (pipeline !== null) view.pipeline = pipeline;
-	const personaOverride = personaOverrideFromUnknown(value.personaOverride);
-	if (personaOverride !== null) view.personaOverride = personaOverride;
-	const escalation = escalationFromUnknown(value.escalation);
-	if (escalation !== null) view.escalation = escalation;
-	return view;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function finiteNumber(value: unknown): number | null {
-	return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function pipelineFromUnknown(value: unknown): RunPipelineProvenance | null {
-	if (!isRecord(value)) return null;
-	const position = finiteNumber(value.position);
-	const inputBytes = finiteNumber(value.inputBytes);
-	if (position === null || inputBytes === null) return null;
-	const fromRunId = typeof value.fromRunId === "string" ? value.fromRunId : null;
-	return { fromRunId, position, inputBytes, inputTruncated: value.inputTruncated === true };
-}
-
-function personaOverrideFromUnknown(value: unknown): RunPersonaOverride | null {
-	if (!isRecord(value) || typeof value.promptHash !== "string" || value.promptHash.length === 0) return null;
-	return { promptHash: value.promptHash };
-}
-
-function escalationFromUnknown(value: unknown): RunEscalationCounts | null {
-	if (!isRecord(value)) return null;
-	const requested = finiteNumber(value.requested);
-	if (requested === null) return null;
-	return {
-		requested,
-		approved: finiteNumber(value.approved) ?? 0,
-		denied: finiteNumber(value.denied) ?? 0,
-		timedOut: finiteNumber(value.timedOut) ?? 0,
-	};
 }
 
 function escalationCountsFrom(safety: RunResult["safety"]): RunEscalationCounts | null {

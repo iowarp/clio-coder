@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { clioDataDir } from "../core/xdg.js";
+import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import {
 	approveMemoryRecord,
 	canonicalMemoryRepositoryIdentity,
@@ -20,7 +20,7 @@ import {
 import { printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder memory list
-clio-coder memory propose --from-evidence <evidenceId> [scope options]
+clio-coder memory propose --from-evidence <runId> [scope options]
 clio-coder memory promote --from-handoff <path> [--entry <id>...] --scope <scope> [scope options]
 clio-coder memory approve <memoryId>
 clio-coder memory reject <memoryId>
@@ -82,7 +82,7 @@ function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
 			if (arg === "--from-evidence") {
 				if (parsed.command !== "propose") throw new Error("--from-evidence is valid only for memory propose");
 				const value = args[index + 1];
-				if (value === undefined || value.startsWith("-")) throw new Error("--from-evidence requires an evidence id");
+				if (value === undefined || value.startsWith("-")) throw new Error("--from-evidence requires a run id");
 				parsed.evidenceId = value;
 				index += 1;
 				continue;
@@ -149,7 +149,7 @@ function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
 	if (parsed.help) return parsed;
 	if (parsed.command === undefined) throw new Error("memory requires list, propose, promote, approve, reject, or prune");
 	if (parsed.command === "propose" && parsed.evidenceId === undefined) {
-		throw new Error("propose requires --from-evidence <evidenceId>");
+		throw new Error("propose requires --from-evidence <runId>");
 	}
 	if (parsed.command === "promote" && parsed.handoffPath === undefined) {
 		throw new Error("promote requires --from-handoff <path>");
@@ -245,10 +245,19 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 		if (parsed.command === "propose") {
 			const evidenceId = parsed.evidenceId;
 			if (evidenceId === undefined) {
-				printError("propose requires --from-evidence <evidenceId>");
+				printError("propose requires --from-evidence <runId>");
 				return 2;
 			}
-			const result = await proposeMemoryFromEvidence(dataDir, evidenceId, scopeSelection(parsed));
+			// The ledger row words and scopes the lesson; the run's sealed evidence carries its claims (#434).
+			const { openLedger } = await import("../domains/dispatch/state.js");
+			const row = openLedger().get(evidenceId);
+			const result = await proposeMemoryFromEvidence(
+				dataDir,
+				clioStateDir(),
+				evidenceId,
+				{ task: row?.task ?? null, cwd: row?.cwd ?? null },
+				scopeSelection(parsed),
+			);
 			renderProposal(result.record, result.created);
 			return 0;
 		}

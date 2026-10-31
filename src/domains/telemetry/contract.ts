@@ -46,26 +46,6 @@ export interface TokenThroughputSnapshot {
 }
 
 /**
- * One bounded, product-facing telemetry event: an evidence build that
- * failed for a run, read by the Dispatch Board to explain why a run has no
- * evidence bundle. This used to also carry runtime/middleware/safety/loop/
- * tool-budget/context/budget notices classified off the same bus channels the
- * interactive layer's own notice pipeline (bus-notices.ts and
- * interactive-event-projection.ts) classifies independently for the toast
- * surface a session actually shows; those seven kinds had no reader of their
- * own here and were removed rather than kept as an unread second opinion.
- * `message` is a short rendered line and `ref` links back to the run.
- */
-export interface TelemetryNotice {
-	kind: "evidence";
-	level: "info" | "warning" | "error";
-	message: string;
-	ref?: {
-		runId?: string;
-	};
-}
-
-/**
  * Compact lifecycle summary for an active or recently settled dispatch run. Projected from the
  * dispatch bus channels; raw tool arguments and reasoning are absent. Worker
  * progress is a bounded, redacted presentation of the live stream. `evidence`
@@ -113,32 +93,17 @@ export interface TelemetryRunSummary {
 	costProvenance: CostProvenance;
 	costSummary?: CostAggregate;
 	outcomeDetail?: string | null;
-	/** The landed bundle, which the board links to by id. */
-	evidence?: { evidenceId: string } | null;
+	/** The run's journaled assessment, as its `evidence.assessed` reported it (#434). */
+	evidence?: { firstPassSuccess: boolean; findingCount: number } | null;
 }
 
 /**
- * The evidence-readiness facts an evidence build reports once its bundle lands.
- * It is the `evidence.assessed` payload ACP forwards; the run
- * summary keeps only `evidenceId`.
- */
-export interface TelemetryRunEvidence {
-	evidenceId: string;
-	firstPassSuccess: boolean;
-	findingCount: number;
-	tags: readonly string[];
-}
-
-/**
- * Single product-facing projection of the telemetry domain: run lifecycle and evidence notices folded from the event
- * bus. Spend, tokens and timing are read from the read model (`read`), never from here (#434). `generatedAt` is the
+ * Single product-facing projection of the telemetry domain: run lifecycle and assessments folded from the event bus. Spend, tokens and timing are read from the read model (`read`), never from here (#434). `generatedAt` is the
  * wall-clock time the snapshot object was assembled.
  */
 export interface TelemetrySnapshot {
 	generatedAt: number;
 	runs: readonly TelemetryRunSummary[];
-	notices: readonly TelemetryNotice[];
-	pendingEvidenceBuildRunIds: readonly string[];
 }
 
 /** Runtime readers supplied after dispatch is composed, avoiding a domain dependency cycle. */
@@ -258,7 +223,7 @@ export interface TelemetryContract extends TelemetryRunProjection {
 	): void;
 	/**
 	 * Current product-facing projection. Cheap to call: it folds in-memory state
-	 * (active runs, bounded terminal history/notices and the latest throughput)
+	 * (active runs, bounded terminal history and the latest throughput)
 	 * into a fresh immutable snapshot.
 	 */
 	snapshot(): TelemetrySnapshot;

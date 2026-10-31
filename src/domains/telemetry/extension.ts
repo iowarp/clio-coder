@@ -3,8 +3,8 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 /**
  * Telemetry domain wire-up. Listens to the dispatch bus channels and folds
  * their payloads into the projection, and answers spend from the read model.
- * Other domains read the snapshot through the contract; the one thing it emits
- * is `evidence.assessed`, once per run whose evidence bundle landed.
+ * Other domains read the snapshot through the contract. A run's assessment is
+ * journaled by its own journal owner before the run seals (`dispatch/run-telemetry.ts`).
  */
 
 import { join } from "node:path";
@@ -29,15 +29,13 @@ import {
 	telemetryCaptures,
 } from "../../core/telemetry/producer.js";
 import { settingsFingerprintCommitment } from "../../core/telemetry/schemas.js";
-import { clioDataDir, clioStateDir } from "../../core/xdg.js";
+import { clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/index.js";
 import { computeSettingsFingerprint } from "../dispatch/settings-fingerprint.js";
-import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
 import type { CallJournal } from "./call-journal.js";
 import { openCallJournalHealth } from "./call-journal.js";
 import { createConsentView } from "./consent.js";
-import type { SessionSpend, TelemetryContract, TelemetryRunEvidence, TelemetryView } from "./contract.js";
-import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
+import type { SessionSpend, TelemetryContract, TelemetryView } from "./contract.js";
 import { foldFacts } from "./folds.js";
 import { createHealthWindows } from "./health-window.js";
 import type { ProcessJournal } from "./process-journal.js";
@@ -46,16 +44,6 @@ import { createTelemetryProjection } from "./projection.js";
 import type { SessionCapture, TelemetrySessionOrigin } from "./session-journals.js";
 import { createSessionJournals } from "./session-journals.js";
 import { createLiveTelemetryModel } from "./telemetry-live.js";
-
-/**
- * Callbacks the auto-build path uses to report evidence readiness back to the
- * projection without coupling the pure build helper to it. `onReady` fires once
- * the sidecar index row lands; `onFailed` fires when the build or write throws.
- */
-interface EvidenceBuildHooks {
-	onReady(runId: string, evidence: TelemetryRunEvidence): void;
-	onFailed(runId: string, message: string): void;
-}
 
 /**
  * Terminal dispatch payload with every field optional. Partial<> alone does
@@ -67,76 +55,8 @@ type DispatchTerminalLike = {
 };
 
 /** Pre-admission failures have an announced run id but never create a run ledger. */
-export function dispatchHasEvidenceLedger(payload: DispatchTerminalLike): boolean {
+export function dispatchHasRunLedger(payload: DispatchTerminalLike): boolean {
 	return payload.lineage !== undefined;
-}
-
-/**
- * Build the forensic evidence bundle for a finalized run and record a compact
- * sidecar index row. Best-effort: every failure (build throws, write throws) is
- * logged to stderr and swallowed so a run completes normally regardless.
- *
- * `succeeded` distinguishes the DispatchCompleted channel (terminal success)
- * from DispatchFailed; only a succeeded run is eligible for firstPassSuccess.
- * `attempt` is the dispatch lineage attempt (0 = first try, increments per
- * retry). A retry, a non-success outcome, or a bundle that shows no validation
- * evidence all force firstPassSuccess to false. See section 7 of the spec.
- */
-async function buildAndIndexEvidence(
-	runId: string,
-	succeeded: boolean,
-	attempt: number | undefined,
-	hooks: EvidenceBuildHooks,
-): Promise<void> {
-	try {
-		const dataDir = clioDataDir();
-		const stateDir = clioStateDir();
-		const result = await buildEvidence({ dataDir, stateDir, runId });
-		const row = evidenceIndexRow(runId, result, succeeded, attempt);
-		await writeEvidenceIndexRowQueued(stateDir, row);
-		hooks.onReady(runId, {
-			evidenceId: row.evidenceId,
-			firstPassSuccess: row.firstPassSuccess,
-			findingCount: row.findingCount,
-			tags: row.tags,
-		});
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		writeDiagnostic(`[clio-coder:evidence] auto-build failed for run ${runId}: ${message}\n`);
-		hooks.onFailed(runId, message);
-	}
-}
-
-/**
- * firstPassSuccess is TRUE only when the terminal outcome succeeded, the run
- * had zero dispatch retries (lineage attempt 0), and the built bundle carries
- * validation evidence. We read validation evidence negatively: a bundle whose
- * overview or findings tags include `no-validation` means the run produced no
- * validation, so it cannot first-pass-succeed.
- */
-function evidenceIndexRow(
-	runId: string,
-	result: EvidenceBuildResult,
-	succeeded: boolean,
-	attempt: number | undefined,
-): EvidenceIndexRow {
-	const tags = result.overview.tags;
-	const hasNoValidationTag =
-		tags.includes("no-validation") || result.findings.some((finding) => finding.tag === "no-validation");
-	const firstPassSuccess = succeeded && attempt === 0 && !hasNoValidationTag;
-	return {
-		runId,
-		evidenceId: result.evidenceId,
-		tags: [...tags],
-		firstPassSuccess,
-		findingCount: result.findings.length,
-		succeeded,
-		completionEvidenceWarning: result.findings.some(
-			(finding) => finding.tag === "completion-evidence" && finding.severity === "warn",
-		),
-		ungroundedClaims: result.ungroundedClaims,
-		generatedAt: new Date().toISOString(),
-	};
 }
 
 function factSumOf(fact: Fact<number> | FactSum | undefined): FactSum | null {
@@ -362,7 +282,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	/** A run that ended while no session was bound, and that names none, is this process's own (#434). */
 	const adoptRun = (payload: DispatchTerminalLike): void => {
 		// A dispatch refused before admission never opened a run journal; there is nothing of it to fold.
-		if (sessionId || payload.sessionId || !dispatchHasEvidenceLedger(payload)) return;
+		if (sessionId || payload.sessionId || !dispatchHasRunLedger(payload)) return;
 		if (typeof payload.runId !== "string" || payload.runId.length === 0) return;
 		processRuns.add(payload.runId);
 	};
@@ -376,28 +296,6 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 
 	// The product-facing projection folds the bus channels into a single bounded snapshot.
 	const projection = createTelemetryProjection(context.bus, {});
-
-	// In-flight forensic builds. The terminal event is emitted after the receipt
-	// and ledger are persisted (dispatch finalizers persist before emit), so a
-	// build that starts here reads durable state. We keep the bus handler
-	// non-blocking by not awaiting the build inline, but a headless one-shot
-	// `clio-coder run` tears the process down right after the run, which would abandon
-	// the build mid-flight. Tracking the promises lets stop() flush them so the
-	// bundle and index row reliably land on every path, not just long-lived
-	// interactive sessions.
-	const pendingBuilds = new Set<Promise<void>>();
-	const trackBuild = (runId: string, succeeded: boolean, attempt: number | undefined): void => {
-		projection.evidenceBuildStarted(runId);
-		const build = buildAndIndexEvidence(runId, succeeded, attempt, {
-			onReady: (id, evidence) => {
-				// The projection and ACP consume the same evidence-ready event.
-				context.bus.emit("evidence.assessed", { runId: id, ...evidence });
-			},
-			onFailed: (id, message) => projection.evidenceBuildFailed(id, message),
-		});
-		pendingBuilds.add(build);
-		void build.finally(() => pendingBuilds.delete(build));
-	};
 
 	// The status the host named before stopping its domains; every host that exits through them names one (#434).
 	let exitStatus: number | undefined;
@@ -461,26 +359,8 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 				}),
 			);
 			unsubscribes.push(
-				context.bus.subscribe("run.completed", (raw) => {
-					const payload: DispatchTerminalLike = raw ?? {};
-					adoptRun(payload);
-					// Kick off the heavy forensic build without blocking the bus.
-					// buildAndIndexEvidence swallows all failures; stop() flushes it.
-					if (typeof payload.runId === "string" && payload.runId.length > 0) {
-						trackBuild(payload.runId, true, payload.lineage?.attempt);
-					}
-				}),
-			);
-			unsubscribes.push(
-				context.bus.subscribe("run.failed", (raw) => {
-					const payload: DispatchTerminalLike = raw ?? {};
-					adoptRun(payload);
-					// A failed run is never a first-pass success; still build the
-					// bundle so its failure-cause tags exist for the index.
-					if (typeof payload.runId === "string" && payload.runId.length > 0 && dispatchHasEvidenceLedger(payload)) {
-						trackBuild(payload.runId, false, payload.lineage?.attempt);
-					}
-				}),
+				context.bus.subscribe("run.completed", (raw) => adoptRun(raw ?? {})),
+				context.bus.subscribe("run.failed", (raw) => adoptRun(raw ?? {})),
 			);
 		},
 		async stop() {
@@ -497,13 +377,6 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			for (const off of unsubscribes) off();
 			unsubscribes.length = 0;
 			projection.stop();
-			// Flush any in-flight forensic builds so a headless run that shuts down
-			// immediately after dispatch still persists its bundle and index row.
-			// Best-effort and bounded by the shutdown hook budget; each build
-			// already swallows its own failures.
-			if (pendingBuilds.size > 0) {
-				await Promise.allSettled([...pendingBuilds]);
-			}
 		},
 	};
 

@@ -87,7 +87,7 @@ test("evidence detail admits only what the listing showed, and a refusal is not 
 	assert.equal(cold.status, 403, "A bookmarked detail opened cold names an id this host never served");
 	assert.equal((await json(cold, Problem)).code, "unauthorized");
 	const page = await json(await h.request("/api/evidence?limit=10"), EvidencePage);
-	assert.equal(page.items[0]?.overview.evidenceId, "evidence-039");
+	assert.equal(page.items[0]?.run.runId, "evidence-039");
 	assert.equal((await h.request("/api/evidence/evidence-039")).status, 200);
 	// Well-shaped but never served: refused rather than looked up and 404ed.
 	const invented = await h.request("/api/evidence/evidence-999");
@@ -104,10 +104,7 @@ test("a run id reaches no child process until a fleet listing has served it", as
 	t.after(h.close);
 	const seeded = await seedEvidence(h.home.path, h.home.env);
 	const workspace = await h.workspaces.open(h.home.path);
-	for (const path of [
-		`/api/workspaces/${workspace.id}/evidence/${seeded.runId}/build`,
-		`/api/workspaces/${workspace.id}/receipts/${seeded.runId}/verify`,
-	]) {
+	for (const path of [`/api/workspaces/${workspace.id}/receipts/${seeded.runId}/verify`]) {
 		const refused = await h.post(path);
 		assert.equal(refused.status, 403);
 		assert.equal((await json(refused, Problem)).code, "unauthorized");

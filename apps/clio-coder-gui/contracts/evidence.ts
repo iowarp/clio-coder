@@ -35,92 +35,76 @@ export const TrustSummary = Type.Object(
 	},
 	closed,
 );
-export const EvidenceOverview = Type.Object(
+const Quantity = TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.tokens;
+/** One finished run as its sealed scope states it (#434): the seal's verdict and, under it, the run's assessment. */
+export const EvidenceRun = Type.Object(
 	{
-		version: Type.Literal(1),
-		evidenceId: Id,
-		source: Type.Union([
-			Type.Object({ kind: Type.Literal("run"), runId: Id }, closed),
-			Type.Object({ kind: Type.Literal("session"), sessionId: Id }, closed),
-		]),
-		generatedAt: Type.String(),
-		runIds: strings,
+		runId: Id,
 		sessionId: nullable,
-		statuses: strings,
+		integrity: Type.Union([Type.Literal("verified"), Type.Literal("unsealed"), Type.Literal("failed")]),
+		/** The seal verifier's reason when the seal does not verify. */
+		sealReason: nullable,
+		assessedAt: nullable,
+		settledAt: nullable,
 		startedAt: nullable,
 		endedAt: nullable,
-		tasks: strings,
-		cwds: strings,
-		agentIds: strings,
-		targetIds: strings,
-		runtimeIds: strings,
-		modelIds: strings,
+		agentId: nullable,
+		targetId: nullable,
+		wireModelId: nullable,
+		outcome: nullable,
+		firstPassSuccess: Type.Union([Type.Boolean(), Type.Null()]),
 		tags: strings,
-		files: strings,
-		quantities: Type.Object(
-			{
-				runs: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
-				runRecords: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
-				toolCalls: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
-				toolErrors: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
-				total: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.tokens,
-				usd: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.usd,
-			},
-			closed,
-		),
-		totals: Type.Object(
-			{
-				runs: Type.Number(),
-				runRecords: Type.Number(),
-				toolCalls: Type.Number(),
-				toolErrors: Type.Number(),
-				blockedToolCalls: Type.Number(),
-				sessionEntries: Type.Number(),
-				auditRows: Type.Number(),
-				toolEvents: Type.Number(),
-				linkedToolEvents: Type.Number(),
-				protectedArtifacts: Type.Number(),
-				tokens: Type.Number(),
-				tokenCoverage: Type.Optional(Type.Object({ unknownCalls: Type.Number(), unknownRuns: Type.Number() }, closed)),
-				costUsd: Type.Number(),
-				wallTimeMs: Type.Number(),
-			},
-			closed,
-		),
-		redactionCount: Type.Optional(Type.Number()),
-		decisions: Type.Optional(
-			Type.Array(Type.Object({ runId: Type.String(), sessionId: Type.String(), ref: Type.String(), record }, closed)),
-		),
+		/** The run's folded quantities with their coverage; null unless the seal verifies. */
+		quantities: Type.Union([Type.Object({ tokens: Quantity, usd: Quantity }, closed), Type.Null()]),
+		totals: Type.Union([
+			Type.Object(
+				{
+					toolCalls: Type.Number(),
+					toolErrors: Type.Number(),
+					blockedToolCalls: Type.Number(),
+					wallTimeMs: Type.Number(),
+				},
+				closed,
+			),
+			Type.Null(),
+		]),
 	},
 	closed,
 );
-export const EvidenceItem = Type.Object({ overview: EvidenceOverview, verdict: Verdict }, closed);
+export const EvidenceItem = Type.Object({ run: EvidenceRun, verdict: Verdict }, closed);
 export const EvidencePage = Type.Object(
 	{ items: Type.Array(EvidenceItem), nextCursor: nullable, present: Type.Boolean() },
 	closed,
 );
 export const EvidenceDetail = Type.Object(
 	{
-		overview: EvidenceOverview,
+		run: EvidenceRun,
 		verdict: Verdict,
-		projection: Type.Union([Type.Literal("canonical"), Type.Literal("historical_format")]),
 		findings: Type.Array(
 			Type.Object(
 				{
 					id: Type.String(),
 					severity: Type.Union([Type.Literal("info"), Type.Literal("warn")]),
 					tag: Type.String(),
-					runId: nullable,
+					runId: Type.String(),
 					message: Type.String(),
 				},
 				closed,
 			),
 		),
-		// Full canonical attributed axes and authenticated decisions are intentionally retained.
-		runs: Type.Array(Type.Object({ runId: Type.String(), status: record, summary: TrustSummary }, closed)),
-		provenance: Type.Array(Type.Object({ runId: Type.String(), view: record, lines: strings }, closed)),
-		gateDecisions: Type.Array(record),
-		attribution: Type.Object({ exact: Type.Number(), bestEffort: Type.Number(), unclassified: Type.Number() }, closed),
+		// The full canonical attributed axes are intentionally retained.
+		status: record,
+		summary: TrustSummary,
+		verdicts: Type.Array(
+			Type.Object(
+				{ decisionId: Type.String(), digest: Type.String(), outcome: Type.String(), review: Type.String() },
+				closed,
+			),
+		),
+		provenance: Type.Object({ view: record, lines: strings }, closed),
+		decisions: Type.Array(
+			Type.Object({ runId: Type.String(), sessionId: Type.String(), ref: Type.String(), record }, closed),
+		),
 	},
 	closed,
 );
@@ -151,24 +135,15 @@ export const ReceiptVerification = Type.Object(
 	},
 	closed,
 );
-export const EvidenceOperationResult = Type.Union([
-	Type.Object(
-		{ kind: Type.Literal("evidence"), id: Id, exitCode: Type.Literal(0), message: Type.String(), artifact: EvidenceItem },
-		closed,
-	),
-	Type.Object(
-		{
-			kind: Type.Literal("receipt-verification"),
-			id: Id,
-			exitCode: Type.Literal(0),
-			message: Type.String(),
-			verification: ReceiptVerification,
-		},
-		closed,
-	),
-]);
+export const EvidenceOperationResult = Type.Object(
+	{
+		kind: Type.Literal("receipt-verification"),
+		id: Id,
+		exitCode: Type.Literal(0),
+		message: Type.String(),
+		verification: ReceiptVerification,
+	},
+	closed,
+);
 export type EvidenceOperationResult = Static<typeof EvidenceOperationResult>;
-export type EvidenceRequest =
-	| { kind: "list"; limit: number; cursor?: string }
-	| { kind: "detail"; id: string }
-	| { kind: "built"; runId: string };
+export type EvidenceRequest = { kind: "list"; limit: number; cursor?: string } | { kind: "detail"; id: string };

@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { CODEWIKI_VERSION, writeCodewiki } from "../../src/domains/context/index.js";
-import type { EvidenceInspectable } from "../../src/domains/evidence/index.js";
+import type { RunEvidence } from "../../src/domains/evidence/index.js";
 import type { MemoryRecord } from "../../src/domains/memory/index.js";
 import { canonicalMemoryRepositoryIdentity } from "../../src/domains/memory/index.js";
 import type { SemanticEmbed, SemanticProfile, SemanticRecord } from "../../src/domains/semantic/index.js";
@@ -242,7 +242,7 @@ test("inboxes require explicit roots, honor ignores/protection, preserve noteboo
 	await assert.rejects(previewInbox({ ...registration, root: "." }), /absolute root/);
 });
 
-test("project extraction uses typed codemap/wiki and excludes unapproved or foreign memories/evidence", async () => {
+test("project extraction uses typed codemap/wiki and run evidence and excludes unapproved or foreign memories", async () => {
 	const root = join(isolated.dir, "project");
 	mkdirSync(join(root, ".clio-coder", "wiki"), { recursive: true });
 	writeFileSync(join(root, "retry.ts"), "// retry after durable checkpoint\nexport function recover() { return 1; }\n");
@@ -290,57 +290,17 @@ test("project extraction uses typed codemap/wiki and excludes unapproved or fore
 			{ ...memory, id: "foreign", repository: { kind: "canonical-path" as const, key: "/foreign" } },
 		],
 	};
-	const bundle: EvidenceInspectable = {
-		overview: {
-			version: 1,
-			evidenceId: "e1",
-			source: { kind: "run", runId: "run-7" },
-			generatedAt: "2026-10-07T00:00:00Z",
-			runIds: ["run-7"],
-			sessionId: null,
-			statuses: [],
-			startedAt: null,
-			endedAt: null,
-			tasks: ["previous checkpoint failure"],
-			cwds: [root],
-			agentIds: [],
-			targetIds: [],
-			runtimeIds: [],
-			modelIds: [],
-			totals: {
-				runs: 1,
-				runRecords: 0,
-				toolCalls: 0,
-				toolErrors: 0,
-				blockedToolCalls: 0,
-				sessionEntries: 0,
-				auditRows: 0,
-				toolEvents: 0,
-				linkedToolEvents: 0,
-				protectedArtifacts: 0,
-				tokens: 0,
-				costUsd: 0,
-				wallTimeMs: 0,
-			},
-			tags: [],
-			files: [],
-		},
-		findings: [{ id: "f1", severity: "warn", tag: "unknown", runId: "run-7", message: "checkpoint corrected" }],
-		trustStatus: { version: 1, evidenceId: "e1", projection: "historical_format", runs: [] },
-	};
-	const result = await extractProjectSources({
-		...options,
-		evidence: [
-			{ bundle, directory: root, redactedTranscript: "redacted warning segment" },
-			{
-				bundle: { ...bundle, overview: { ...bundle.overview, evidenceId: "foreign-evidence", cwds: [isolated.dir] } },
-				directory: isolated.dir,
-			},
-		],
-	});
-	assert(result.records.some((r) => r.path.endsWith("findings.json") && r.runId === "run-7"));
-	assert(result.records.some((r) => r.path.endsWith("transcript.md")));
-	assert(!result.records.some((r) => r.sourceId.includes("foreign-evidence")));
+	// The caller passes only this project's runs; ingestion indexes each run's sealed finding prose (#434).
+	const run = {
+		runId: "run-7",
+		sessionId: null,
+		assessedAt: "2026-10-07T00:00:00.000Z",
+		settled: null,
+		findings: [{ id: "finding-001", severity: "warn", tag: "unknown", runId: "run-7", message: "checkpoint corrected" }],
+	} as unknown as RunEvidence;
+	const result = await extractProjectSources({ ...options, evidence: [{ run, directory: root }] });
+	assert(result.records.some((r) => r.path.endsWith("journal.jsonl") && r.runId === "run-7"));
+	assert(result.records.some((r) => r.kind === "evidence" && r.text.includes("checkpoint corrected")));
 	assert(
 		result.records.some((r) => r.kind === "code" && r.location.line === 2 && r.text.includes("recover")),
 		JSON.stringify(result),
@@ -562,20 +522,20 @@ test("broad artifact search follows source links without repeating pages from on
 	);
 });
 
-test("evidence candidates carry an inspectable bundle identity", async () => {
+test("evidence candidates carry an inspectable run identity", async () => {
 	const index = new SemanticIndex({ projectId: "project-a", profile, embed: fixtureEmbed([]), cacheDir: isolated.dir });
 	await index.refresh([
 		{
 			...record("historical", "checkpoint incident"),
-			sourceId: "evidence:run-history:transcript.md",
+			sourceId: "evidence:run-history:finding:finding-001",
 			kind: "evidence",
-			path: join(isolated.dir, "evidence", "run-history", "transcript.md"),
+			path: join(isolated.dir, "telemetry", "runs", "run-history", "journal.jsonl"),
 		},
 		{
 			...record("cast", "warning corrected"),
 			sourceId: "recording:worker-1",
 			kind: "recording",
-			path: join(isolated.dir, "evidence", "run-worker", "recordings", "worker.cast"),
+			path: join(isolated.dir, "runs", "run-worker", "recording.cast"),
 		},
 	]);
 	const hits = index.searchVector("checkpoint warning", undefined, { projectId: "project-a" }).hits;

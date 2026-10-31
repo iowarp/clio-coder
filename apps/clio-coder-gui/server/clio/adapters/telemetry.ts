@@ -1,7 +1,6 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { clioDataDir, clioStateDir } from "../../../../../src/core/xdg.js";
-import { inspectEvidence } from "../../../../../src/domains/evidence/index.js";
+import { clioStateDir } from "../../../../../src/core/xdg.js";
 import type { RunListCursor } from "../../../../../src/domains/session/index.js";
 import {
 	listRunTelemetrySources,
@@ -41,12 +40,6 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 	if (input.kind === "explain") {
 		const ref = parseFactRef(input.ref);
 		if (!ref) throw new AppProblem("validation", "Invalid telemetry reference.");
-		if (ref.scope === "evidence") {
-			const detail = await inspectEvidence(clioDataDir(), ref.owner);
-			const explained = explain(input.ref, { evidence: detail.overview });
-			if (!explained) throw notFound();
-			return explained;
-		}
 		// A repository window is rebuilt the way `usage report` folds it, ending now, exactly as the CLI's explain does.
 		const repo = isRepoRef(ref);
 		if (!repo && !Value.Check(Id, ref.owner)) throw new AppProblem("validation", "Invalid telemetry reference.");

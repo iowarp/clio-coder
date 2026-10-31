@@ -48,12 +48,6 @@ export interface OwnedBatchFields {
 	readonly cwd?: string;
 }
 
-/** An aggregate over runs, such as an evidence bundle: one session id and the cwds its runs executed in. */
-export interface OwnedBundleFields {
-	readonly sessionId: string | null;
-	readonly cwds: ReadonlyArray<string>;
-}
-
 export interface DispatchOwnership {
 	readonly owner: DispatchOwner;
 	/** True when `cwd` is the owner's workspace or inside it. */
@@ -61,7 +55,6 @@ export interface DispatchOwnership {
 	ownsRun(run: OwnedRunFields): boolean;
 	seesRun(run: OwnedRunFields): boolean;
 	ownsBatch(batch: OwnedBatchFields): boolean;
-	seesBundle(bundle: OwnedBundleFields): boolean;
 }
 
 /**
@@ -135,7 +128,5 @@ export function dispatchOwnership(owner: DispatchOwner): DispatchOwnership {
 			batch.sessionId !== null && batch.sessionId !== undefined
 				? batch.sessionId === owner.sessionId
 				: inProject(batch.cwd),
-		seesBundle: (bundle) =>
-			(bundle.sessionId !== null && bundle.sessionId === owner.sessionId) || bundle.cwds.some((cwd) => inProject(cwd)),
 	};
 }

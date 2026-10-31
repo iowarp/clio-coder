@@ -1,175 +1,93 @@
-import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { Value } from "typebox/value";
-import { clioDataDir } from "../../../../../src/core/xdg.js";
-import type { EvidenceTrustStatusView } from "../../../../../src/domains/evidence/index.js";
+import { clioStateDir } from "../../../../../src/core/xdg.js";
+import type { RunEvidence } from "../../../../../src/domains/evidence/index.js";
 import {
 	admitRunProvenance,
-	inspectEvidence,
-	listEvidenceOverviews,
-	loadEvidenceGateDecisions,
-	loadEvidenceRunProvenance,
-	loadEvidenceTrustStatus,
+	inspectRunEvidence,
+	listRunEvidence,
 	provenanceTranscriptLines,
 	summarizeTrustStatus,
 	trustVerdict,
-	worstTrustVerdict,
 } from "../../../../../src/domains/evidence/index.js";
-import { evidenceQuantities } from "../../../../../src/domains/telemetry/index.js";
+import { telemetryRunsDirectory } from "../../../../../src/domains/telemetry/index.js";
 import { Id } from "../../../contracts/common.js";
-import { EvidenceOverview, type EvidenceRequest } from "../../../contracts/evidence.js";
+import { type EvidenceRequest, EvidenceRun } from "../../../contracts/evidence.js";
 import { AppProblem } from "../../services/problem.js";
-import { artifactPage, containedFile } from "./storage.js";
+import { artifactPage } from "./storage.js";
 
-/** Preflight the exact files a root seam reads, including optional files. Never follow an escaping symlink. */
-function guard(data: string, id: string, names: string[]): number {
-	let bytes = 0;
-	for (const name of names) {
-		try {
-			lstatSync(join(data, "evidence", id, name));
-		} catch (error) {
-			if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) continue;
-			throw error;
-		}
-		const path = containedFile(data, "evidence", id, name);
-		if (!path) throw new AppProblem("unavailable", "Evidence storage contains an unsafe or oversized artifact.");
-		bytes += statSync(path).size;
-	}
-	return bytes;
-}
-// The bundle verdict is the inventory's: the worst of its runs, as src/ orders them.
-function verdict(trust: EvidenceTrustStatusView) {
-	return worstTrustVerdict(trust.runs.map((run) => trustVerdict(run.status)));
-}
-/**
- * A bundle's totals are the ones its verified runs settled; the server words tokens as a lower bound with the coverage
- * marker and cost through the shared renderer, so the browser shows strings and sums nothing (#434).
- */
-function displayOverview(overview: Awaited<ReturnType<typeof listEvidenceOverviews>>[number]) {
-	const { costSummary: _summary, ...totals } = overview.totals;
-	return { ...overview, totals, quantities: evidenceQuantities(overview) };
-}
-async function inventory(data: string) {
-	let entries: string[];
-	try {
-		entries = readdirSync(join(data, "evidence"));
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { rows: [], present: false };
-		throw error;
-	}
-	if (entries.length > 10_000) throw new AppProblem("unavailable", "Evidence inventory exceeds 10,000 directories.");
-	let bytes = 0;
-	for (const id of entries) {
-		// The canonical listing also ignores identifiers rejected by assertSafeId.
-		bytes += guard(data, id, ["overview.json"]);
-		if (bytes > 64 * 1024 * 1024) throw new AppProblem("unavailable", "Evidence overview inventory exceeds 64 MiB.");
-	}
+/** A run that never settled stands in the inventory only when its seal was checked and failed. */
+const NEVER = "1970-01-01T00:00:00.000Z";
+
+/** The run as the GUI shows it: identity, seal verdict and the sealed assessment's summary (#434). */
+function runRow(run: RunEvidence) {
+	const settled = run.settled;
 	return {
-		present: true,
-		rows: (await listEvidenceOverviews(data))
-			.map(displayOverview)
-			.filter((row) => Value.Check(EvidenceOverview, row) && Number.isFinite(Date.parse(row.generatedAt))),
+		runId: run.runId,
+		sessionId: run.sessionId,
+		integrity: run.integrity.state,
+		sealReason: run.integrity.state === "verified" ? null : run.integrity.reason,
+		assessedAt: run.assessedAt,
+		settledAt: settled?.at ?? null,
+		startedAt: settled?.startedAt ?? null,
+		endedAt: settled?.endedAt ?? null,
+		agentId: settled?.agentId ?? null,
+		targetId: settled?.targetId ?? null,
+		wireModelId: settled?.wireModelId ?? null,
+		outcome: settled?.outcome ?? null,
+		firstPassSuccess: run.firstPassSuccess,
+		tags: [...run.tags],
+		quantities: run.totals === null ? null : { tokens: run.totals.tokens, usd: run.totals.usd },
+		totals:
+			run.totals === null
+				? null
+				: {
+						toolCalls: run.totals.toolCalls,
+						toolErrors: run.totals.toolErrors,
+						blockedToolCalls: run.totals.blockedToolCalls,
+						wallTimeMs: run.totals.wallTimeMs,
+					},
 	};
 }
-async function item(data: string, overview: Awaited<ReturnType<typeof inventory>>["rows"][number]) {
-	guard(data, overview.evidenceId, ["trust-status.json"]);
-	try {
-		return { overview, verdict: verdict(await loadEvidenceTrustStatus(data, overview.evidenceId)) };
-	} catch {
-		return { overview, verdict: "unknown" as const };
-	}
-}
 
-/** Only link-confidence counts cross into the GUI; event text stays in the artifact. */
-function attributionCounts(data: string, id: string) {
-	const counts = { exact: 0, bestEffort: 0, unclassified: 0 };
-	const path = containedFile(data, "evidence", id, "tool-events.jsonl");
-	if (!path) return counts;
-	for (const line of readFileSync(path, "utf8").split("\n")) {
-		if (!line.trim()) continue;
-		let row: unknown;
-		try {
-			row = JSON.parse(line);
-		} catch {
-			counts.unclassified += 1;
-			continue;
-		}
-		if (row === null || typeof row !== "object" || Array.isArray(row)) {
-			counts.unclassified += 1;
-			continue;
-		}
-		const event = row as { confidence?: unknown; runLink?: { confidence?: unknown } };
-		const direct = event.confidence;
-		const linked = event.runLink?.confidence;
-		const confidence = direct === undefined ? linked : linked === undefined || linked === direct ? direct : null;
-		if (confidence === "exact") counts.exact += 1;
-		else if (confidence === "best-effort") counts.bestEffort += 1;
-		else counts.unclassified += 1;
-	}
-	return counts;
-}
 export async function readEvidence(input: EvidenceRequest): Promise<unknown> {
-	const data = clioDataDir();
-	if (input.kind === "list" || input.kind === "built") {
-		const { rows, present } = await inventory(data);
-		if (input.kind === "built") {
-			const row = rows
-				.filter((row) => row.source.kind === "run" && row.source.runId === input.runId)
-				.sort((a, b) => b.generatedAt.localeCompare(a.generatedAt))[0];
-			if (!row) throw new AppProblem("unavailable", "The completed build has no readable evidence artifact.");
-			return item(data, row);
-		}
+	const state = clioStateDir();
+	if (input.kind === "list") {
+		const runs = (await listRunEvidence(state)).filter((run) => run.settled !== null || run.integrity.state === "failed");
+		const rows = runs.map((run) => ({ run, row: runRow(run) })).filter(({ row }) => Value.Check(EvidenceRun, row));
 		const page = artifactPage(
-			rows.map((overview) => ({ id: overview.evidenceId, startedAt: overview.generatedAt, overview })),
+			rows.map(({ run, row }) => ({ id: run.runId, startedAt: run.settled?.at ?? NEVER, run, row })),
 			input.limit,
 			input.cursor,
 		);
 		return {
-			items: await Promise.all(page.items.map((row) => item(data, row.overview))),
+			items: page.items.map(({ run, row }) => ({ run: row, verdict: trustVerdict(run.trust) })),
 			nextCursor: page.nextCursor,
-			present,
+			// An absent run store is a different fact from a present one holding no settled run.
+			present: existsSync(telemetryRunsDirectory(state)),
 		};
 	}
 	if (!Value.Check(Id, input.id)) throw new AppProblem("validation", "Invalid evidence identifier.");
-	guard(data, input.id, [
-		"overview.json",
-		"findings.json",
-		"trust-status.json",
-		"run.json",
-		"gate-decisions.json",
-		"tool-events.jsonl",
-	]);
-	if (!containedFile(data, "evidence", input.id, "overview.json"))
-		throw new AppProblem("not_found", "Evidence artifact was not found.");
+	let run: RunEvidence;
 	try {
-		const detail = await inspectEvidence(data, input.id);
-		const provenance = await loadEvidenceRunProvenance(data, input.id);
-		return {
-			overview: displayOverview(detail.overview),
-			findings: detail.findings,
-			verdict: verdict(detail.trustStatus),
-			projection: detail.trustStatus.projection,
-			runs: detail.trustStatus.runs.map((run) => ({ ...run, summary: summarizeTrustStatus(run.status) })),
-			provenance: provenance.flatMap((run) => {
-				const status = detail.trustStatus.runs.find((entry) => entry.runId === run.runId)?.status;
-				// A historical bundle has no authenticated projection to admit provenance against.
-				return status
-					? [
-							{
-								runId: run.runId,
-								view: admitRunProvenance(run.view, status),
-								lines: provenanceTranscriptLines(run.view, status),
-							},
-						]
-					: [];
-			}),
-			gateDecisions: await loadEvidenceGateDecisions(data, input.id),
-			attribution: attributionCounts(data, input.id),
-		};
+		run = await inspectRunEvidence(state, input.id);
 	} catch {
-		throw new AppProblem(
-			"unavailable",
-			"This evidence artifact is incomplete or unreadable. Other artifacts remain available.",
-		);
+		throw new AppProblem("unavailable", "This run's evidence is unreadable. Other runs remain available.");
 	}
+	if (run.settled === null && run.integrity.state !== "failed")
+		throw new AppProblem("not_found", "That run has not settled; it has no evidence yet.");
+	const provenance = run.provenance ?? {};
+	return {
+		run: runRow(run),
+		verdict: trustVerdict(run.trust),
+		findings: run.findings,
+		status: run.trust,
+		summary: summarizeTrustStatus(run.trust),
+		verdicts: run.verdicts,
+		provenance: {
+			view: admitRunProvenance(provenance, run.trust),
+			lines: provenanceTranscriptLines(provenance, run.trust),
+		},
+		decisions: run.decisions,
+	};
 }

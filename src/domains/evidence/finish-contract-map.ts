@@ -5,15 +5,15 @@ import type { EvidenceTag } from "./types.js";
  * One evidence spine: the live finish-contract layer is a cheap projection of
  * the forensic evidence taxonomy.
  *
- * The forensic layer (`evidence/build.ts`) speaks the canonical 23-tag
- * `EVIDENCE_TAGS` vocabulary over durable artifacts. The live layer
+ * The forensic layer (`evidence/assessment.ts`) speaks the canonical
+ * `EVIDENCE_TAGS` vocabulary over a run's sealed journal. The live layer
  * (`safety/finish-contract.ts`) speaks a 4-kind in-loop vocabulary
  * (`FinishContractEvidenceKind`) over the last ~80 session entries. They are
  * the same accountability concept observed at two depths.
  *
  * This module documents that relationship as a pure mapping: each live kind
  * projects onto the canonical `EvidenceTag`(s) it informs. It is types and a
- * table only. It does NOT import the heavy evidence builder, and nothing here
+ * table only. It does NOT import the run assessment, and nothing here
  * changes runtime behavior; the live gate still behaves exactly as today.
  *
  * The mapping is a `Record` keyed by every `FinishContractEvidenceKind`, so the
@@ -26,9 +26,8 @@ import type { EvidenceTag } from "./types.js";
  *     (validation present but a weak proxy).
  *   - protected_artifact: a protect action, which the forensic layer records
  *     under `protected-artifact`.
- *   - dispatch_receipt: a passed dispatch run, whose forensic concerns are
- *     `run-seal` (the run's seal verifies) and `session-linked` (the run is
- *     linked to its session).
+ *   - dispatch_receipt: a passed dispatch run, whose forensic concern is
+ *     `run-seal` (the run's seal verifies).
  *   - limitation: a successful `limitation` tool receipt, which the forensic
  *     layer records as the `completion-evidence` info row for a run that
  *     finished limited instead of evidenced.
@@ -36,6 +35,6 @@ import type { EvidenceTag } from "./types.js";
 export const FINISH_CONTRACT_EVIDENCE_TAGS: Record<FinishContractEvidenceKind, readonly EvidenceTag[]> = {
 	validation_command: ["no-validation", "proxy-validation"],
 	protected_artifact: ["protected-artifact"],
-	dispatch_receipt: ["run-seal", "session-linked"],
+	dispatch_receipt: ["run-seal"],
 	limitation: ["completion-evidence"],
 } as const;

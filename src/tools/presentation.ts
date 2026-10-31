@@ -535,8 +535,8 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 	[ToolNames.Evidence]: {
 		class: "knowledge",
 		verbs: CLASS_VERBS.knowledge,
-		object: (args) => plain(joinDefined("evidence", text(args, "mode"), text(args, "id") ?? text(args, "runId"))),
-		consumes: ["mode", "id", "runId"],
+		object: (args) => plain(joinDefined("evidence", text(args, "mode"), text(args, "runId"))),
+		consumes: ["mode", "runId"],
 	},
 	[ToolNames.Ledger]: {
 		class: "knowledge",

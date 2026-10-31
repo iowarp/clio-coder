@@ -8,12 +8,10 @@ export const TelemetryDomainModule: DomainModule = {
 };
 
 export type { AccountabilitySummary } from "./accountability.js";
-export { summarizeEvidenceIndex } from "./accountability.js";
+export { summarizeRunAccountability } from "./accountability.js";
 export { workspaceTelemetryCapture } from "./consent.js";
 export type {
 	TelemetryContract,
-	TelemetryNotice,
-	TelemetryRunEvidence,
 	TelemetryRunSummary,
 	TelemetrySnapshot,
 	TokenThroughputSnapshot,
@@ -31,8 +29,6 @@ export {
 	renderCostAmount,
 	type UsageBreakdown,
 } from "./cost.js";
-export type { EvidenceIndexRow } from "./evidence-index.js";
-export { EVIDENCE_INDEX_FILE, MAX_EVIDENCE_INDEX_ROWS, readEvidenceIndex } from "./evidence-index.js";
 export type {
 	DecisionRow,
 	DecisionsFold,
@@ -64,7 +60,6 @@ export {
 export type { ProjectionReadModel, TelemetryProjection } from "./projection.js";
 export {
 	createTelemetryProjection,
-	MAX_PROJECTION_NOTICES,
 	MAX_PROJECTION_RUNS,
 	PROJECTION_FLUSH_DEBOUNCE_MS,
 } from "./projection.js";
@@ -73,7 +68,6 @@ export {
 	callsReport,
 	costReport,
 	emptyTaskMemorySpendSummary,
-	evidenceQuantities,
 	explain,
 	foldTaskMemorySpend,
 	READ_MODEL_FOLD,

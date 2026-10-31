@@ -13,22 +13,20 @@ import type { DispatchContract } from "../dispatch/contract.js";
 import type { DispatchOwnership } from "../dispatch/ownership.js";
 import { dispatchOwnership } from "../dispatch/ownership.js";
 import type { RunEnvelope } from "../dispatch/types.js";
-import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../evidence/store.js";
-import { renderEvidenceTokens } from "../evidence/totals-display.js";
+import { runEvidence } from "../evidence/run-evidence.js";
 import { formatTrustSummaryLine, trustStateWord } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus, TrustStatusAxis } from "../evidence/trust-status.js";
 import { inspectRunTrustStatus, TRUST_STATUS_AXES } from "../evidence/trust-status.js";
-import type { EvidenceFinding, EvidenceInspectable, EvidenceOverview, EvidenceSource } from "../evidence/types.js";
+import type { RunEvidence } from "../evidence/types.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { redactSecretString } from "../safety/redaction.js";
-import { renderCostAggregate, renderCostAmount } from "../telemetry/cost.js";
+import { renderCostAmount } from "../telemetry/cost.js";
 import { type DecisionRow, decisionRow } from "../telemetry/fact-folds.js";
 import type { AccountabilitySummary } from "../telemetry/index.js";
 import {
-	readEvidenceIndex,
 	readRunRecord,
 	readRunRecordAsync,
-	summarizeEvidenceIndex,
+	summarizeRunAccountability,
 	telemetryJournalPath,
 	telemetryRunDirectory,
 	telemetrySessionDirectory,
@@ -201,11 +199,6 @@ function shortValue(value: string, maxLength = 12): string {
 	const trimmed = value.replace(/\s+/g, " ").trim();
 	if (trimmed.length <= maxLength) return trimmed;
 	return trimmed.slice(0, maxLength);
-}
-
-function formatList(values: ReadonlyArray<string>, fallback = "none"): string {
-	const cleaned = values.map((value) => value.trim()).filter((value) => value.length > 0);
-	return cleaned.length > 0 ? cleaned.join(", ") : fallback;
 }
 
 function formatOptionalString(value: string | null | undefined, fallback = "none"): string {
@@ -418,102 +411,58 @@ async function loadTextPath(path: string): Promise<ViewArtifactLoadResult> {
 	}
 }
 
-function evidenceBundlePath(dataDir: string, evidenceId: string): string | undefined {
-	try {
-		return evidenceDirectory(dataDir, evidenceId);
-	} catch {
-		return undefined;
-	}
-}
-
-function evidenceSourceLabel(source: EvidenceSource): string {
-	switch (source.kind) {
-		case "run":
-			return `run ${source.runId}`;
-		case "session":
-			return `session ${source.sessionId}`;
-	}
-}
-
-function evidenceSourceTitle(source: EvidenceSource): string {
-	switch (source.kind) {
-		case "run":
-			return `run ${shortValue(source.runId)}`;
-		case "session":
-			return `session ${shortValue(source.sessionId)}`;
-	}
-}
-
-function renderEvidenceMarkdown(
-	overview: EvidenceOverview,
-	findings: ReadonlyArray<EvidenceFinding>,
-	path: string | undefined,
-	loadError?: string,
-): string[] {
-	const lines = [
-		"# Evidence Bundle",
+function renderEvidenceDetails(evidence: RunEvidence, path: string): string[] {
+	const settled = evidence.settled;
+	const totals = evidence.totals;
+	return [
+		"# Run evidence",
 		"",
-		`- evidence id: ${overview.evidenceId}`,
-		`- source: ${evidenceSourceLabel(overview.source)}`,
-		`- generated: ${overview.generatedAt}`,
-		`- run ids: ${formatList(overview.runIds)}`,
-		`- session id: ${formatOptionalString(overview.sessionId)}`,
-		`- statuses: ${formatList(overview.statuses)}`,
-		"",
-		"## Tasks",
-	];
-	if (overview.tasks.length === 0) {
-		lines.push("- none");
-	} else {
-		for (const task of overview.tasks) lines.push(`- ${task}`);
-	}
-	lines.push(
-		"",
-		"## Targets / Models",
-		"",
-		`- targets: ${formatList(overview.targetIds)}`,
-		`- runtimes: ${formatList(overview.runtimeIds)}`,
-		`- models: ${formatList(overview.modelIds)}`,
-		`- agents: ${formatList(overview.agentIds)}`,
+		`- run id: ${evidence.runId}`,
+		`- session id: ${formatOptionalString(evidence.sessionId)}`,
+		`- seal: ${evidence.integrity.state === "verified" ? "verified" : evidence.integrity.reason}`,
+		`- assessed: ${evidence.assessedAt ?? "no"}`,
+		...(settled
+			? [
+					`- outcome: ${settled.outcome} (exit ${settled.exitCode ?? "?"})`,
+					`- agent: ${settled.agentId}`,
+					`- target: ${settled.targetId}`,
+					`- runtime: ${settled.runtimeId}`,
+					`- model: ${settled.wireModelId}`,
+				]
+			: []),
 		"",
 		"## Totals",
 		"",
-		`- runs: ${overview.totals.runs}`,
-		`- run records: ${overview.totals.runRecords}`,
-		`- tool calls: ${overview.totals.toolCalls}`,
-		`- tool errors: ${overview.totals.toolErrors}`,
-		`- blocked tool calls: ${overview.totals.blockedToolCalls}`,
-		`- tokens: ${renderEvidenceTokens(overview.totals, { count: formatFooterTokens })}`,
-		`- cost: ${renderCostAggregate(overview.totals.costSummary)}`,
-		`- protected artifacts: ${overview.totals.protectedArtifacts}`,
-		`- wall time: ${formatDurationMs(overview.totals.wallTimeMs)}`,
+		...(totals
+			? [
+					`- tool calls: ${totals.toolCalls}`,
+					`- tool errors: ${totals.toolErrors}`,
+					`- blocked tool calls: ${totals.blockedToolCalls}`,
+					`- tokens: ${totals.tokens.display}`,
+					`- cost: ${totals.usd.display}`,
+					`- wall time: ${formatDurationMs(totals.wallTimeMs)}`,
+				]
+			: ["- not stated: the run's seal does not vouch for its record"]),
 		"",
 		"## Tags",
-	);
-	if (overview.tags.length === 0) {
-		lines.push("- none");
-	} else {
-		for (const tag of overview.tags) lines.push(`- ${tag}`);
-	}
-	lines.push("", "## Findings");
-	if (findings.length === 0) {
-		lines.push("- none");
-	} else {
-		for (const finding of findings) {
-			const run = finding.runId ? ` run ${finding.runId}` : "";
-			lines.push(`- ${finding.severity} ${finding.tag}${run}: ${finding.message}`);
-		}
-	}
-	lines.push("", "## Files", "", `- backing path: ${path ?? "unknown"}`);
-	if (overview.files.length === 0) {
-		lines.push("- files: none");
-	} else {
-		for (const file of overview.files) lines.push(`- ${file}`);
-	}
-	if (loadError !== undefined) {
-		lines.push("", "## Load Error", "", loadError);
-	}
-	return lines;
+		...(evidence.tags.length === 0 ? ["- none"] : evidence.tags.map((tag) => `- ${tag}`)),
+		"",
+		"## Findings",
+		...(evidence.findings.length === 0
+			? ["- none"]
+			: evidence.findings.map((finding) => `- ${finding.severity} ${finding.tag}: ${finding.message}`)),
+		...(evidence.verdicts.length === 0
+			? []
+			: [
+					"",
+					"## Gate verdicts",
+					...evidence.verdicts.map((verdict) => `- ${verdict.decisionId}: ${verdict.outcome} (${verdict.review})`),
+				]),
+		"",
+		"## Files",
+		"",
+		`- run scope: ${path}`,
+	];
 }
 
 function readableVerification(status: CanonicalTrustStatus): string {
@@ -558,41 +507,34 @@ function factValue(fact: Fact<number>): number | null {
 	return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null;
 }
 
-function renderEvidenceSummary(
-	inspected: EvidenceInspectable,
-	runs: ReadonlyArray<SettledRunView>,
-	runError?: string,
-): string[] {
-	const { overview, findings, trustStatus } = inspected;
+function renderEvidenceSummary(evidence: RunEvidence, run: SettledRunView | null): string[] {
+	const settled = evidence.settled;
+	const totals = evidence.totals;
 	return [
-		...(overview.tasks.length > 1 ? overview.tasks.map((task) => `- ${task}`) : []),
-		`Agent: ${formatList(overview.agentIds, "not recorded")}`,
-		`Run: ${formatList(overview.runIds, "not recorded")}`,
-		`Model: ${formatList(overview.modelIds, "not recorded")}`,
+		`Agent: ${settled?.agentId ?? "not recorded"}`,
+		`Run: ${evidence.runId}`,
+		`Model: ${settled?.wireModelId ?? "not recorded"}`,
 		"",
-		...(trustStatus.runs.length > 0
-			? trustStatus.runs.map((run) => `Recorded verification (${run.runId}): ${readableVerification(run.status)}`)
-			: ["Verification: no recorded verification for this bundle."]),
+		`Recorded verification: ${readableVerification(evidence.trust)}`,
 		"",
 		"## What changed",
-		...(runs.length > 0
-			? runs.flatMap((run) => [...(runs.length > 1 ? [`### Run ${run.runId}`] : []), ...renderRunChanges(run)])
-			: ["Changed paths were not recorded."]),
+		...(run ? renderRunChanges(run) : ["Changed paths were not recorded."]),
 		"",
 		"## Checks and findings",
-		...runs.flatMap((run) => [...(runs.length > 1 ? [`### Run ${run.runId}`] : []), ...renderRunChecks(run)]),
-		...(runError ? [runError] : []),
-		...(findings.length > 0
-			? findings.map(
-					(finding) => `- ${finding.message}${finding.runId && overview.runIds.length > 1 ? ` (run ${finding.runId})` : ""}`,
-				)
+		...(run ? renderRunChecks(run) : []),
+		...(evidence.findings.length > 0
+			? evidence.findings.map((finding) => `- ${finding.message}`)
 			: ["No additional findings recorded."]),
 		"",
 		"## What happened",
-		`${overview.totals.runs} runs · ${overview.totals.toolCalls} tool calls · ${overview.totals.toolErrors} errors · ${overview.totals.blockedToolCalls} blocked`,
-		`${formatDurationMs(overview.totals.wallTimeMs)} · ${renderEvidenceTokens(overview.totals, { unit: " tokens", count: formatFooterTokens })} · ${renderCostAggregate(overview.totals.costSummary)}`,
+		...(totals
+			? [
+					`${totals.toolCalls} tool calls · ${totals.toolErrors} errors · ${totals.blockedToolCalls} blocked`,
+					`${formatDurationMs(totals.wallTimeMs)} · ${totals.tokens.display} tokens · ${totals.usd.display}`,
+				]
+			: ["Not stated: the run's seal does not vouch for its record."]),
 		"",
-		"Press i for all bundle details and backing files.",
+		"Press i for all evidence details.",
 	];
 }
 
@@ -743,90 +685,66 @@ async function loadRunRecordSummary(stateDir: string, runId: string): Promise<Vi
 	}
 }
 
+/** Finished runs by their sealed evidence: the run's seal verdict and the assessment it sealed with (#434). */
 export class EvidenceArtifactProvider implements ArtifactProvider {
 	readonly category = "evidence" as const;
 
 	constructor(private readonly deps: ArtifactProviderDeps) {}
 
 	async list(): Promise<ViewArtifact[]> {
-		const dataDir = this.deps.dataDir;
-		if (!dataDir) return [];
-		let overviews: EvidenceOverview[];
-		try {
-			overviews = await listEvidenceOverviews(dataDir);
-		} catch {
-			return [];
-		}
-		const ownership = viewOwnership(this.deps);
-		overviews = overviews.filter((overview) => ownership.seesBundle(overview));
-		return overviews.map((overview) => {
-			const path = evidenceBundlePath(dataDir, overview.evidenceId);
-			const artifact: ViewArtifact = {
-				id: overview.evidenceId,
+		const stateDir = this.deps.stateDir;
+		const artifacts: ViewArtifact[] = [];
+		// The ledger decides which runs this session may see; everything shown comes from each run's scope.
+		for (const env of listRunEnvelopes(this.deps)) {
+			if (env.endedAt === null) continue;
+			const directory = telemetryRunDirectory(stateDir, env.id);
+			if (maybeSizeBytes(telemetryJournalPath(directory)) === undefined) continue;
+			artifacts.push({
+				id: env.id,
 				category: this.category,
-				title: safeTitle(
-					`${formatList(overview.statuses, "Evidence")} · ${overview.tasks[0] ?? evidenceSourceTitle(overview.source)}`,
-					"Evidence bundle",
-				),
-				timestamp: parseTime(overview.generatedAt),
+				title: safeTitle(`${env.outcome ?? env.status} · ${env.task}`, "Run evidence"),
+				timestamp: parseTime(env.endedAt),
 				searchText: [
-					overview.evidenceId,
-					evidenceSourceTitle(overview.source),
-					...overview.runIds,
-					...(overview.sessionId ? [overview.sessionId] : []),
-					...overview.tasks,
-					...overview.cwds,
-					...overview.agentIds,
-					...overview.targetIds,
-					...overview.runtimeIds,
-					...overview.modelIds,
-					...overview.statuses,
-					...overview.tags,
-					...overview.files,
+					env.id,
+					...(env.sessionId ? [env.sessionId] : []),
+					env.agentId,
+					env.targetId,
+					env.runtimeId,
+					env.wireModelId,
+					env.status,
 				],
+				path: directory,
+				runId: env.id,
+				...(env.sessionId !== null ? { sessionId: env.sessionId } : {}),
 				load: async () => {
 					try {
-						const inspected = await inspectEvidence(dataDir, overview.evidenceId);
-						const runs: SettledRunView[] = [];
-						let runError: string | undefined;
-						try {
-							for (const runId of inspected.overview.runIds) {
-								const run = settledRunView(runId, await readRunRecordAsync(this.deps.stateDir, runId));
-								if (run !== null) runs.push(run);
-							}
-						} catch (err) {
-							runError = `Recorded changes and checks unavailable: ${err instanceof Error ? err.message : String(err)}`;
-						}
+						const record = await readRunRecordAsync(stateDir, env.id);
+						const evidence = runEvidence(env.id, record);
+						const run = evidence.integrity.state === "verified" ? settledRunView(env.id, record) : null;
 						return {
 							format: "markdown" as const,
-							lines: renderEvidenceSummary(inspected, runs, runError),
+							lines: renderEvidenceSummary(evidence, run),
 							details: {
 								format: "markdown",
 								lines: [
-									...renderEvidenceMarkdown(inspected.overview, inspected.findings, path),
+									...renderEvidenceDetails(evidence, directory),
 									"",
 									"## Recorded verification",
 									"",
 									"```json",
-									JSON.stringify(inspected.trustStatus, null, 2),
+									JSON.stringify(evidence.trust, null, 2),
 									"```",
 								],
 							},
 						};
 					} catch (err) {
 						const message = err instanceof Error ? err.message : String(err);
-						return {
-							format: "markdown" as const,
-							lines: renderEvidenceMarkdown(overview, [], path, `unable to inspect evidence: ${message}`),
-						};
+						return { format: "markdown" as const, lines: [`unable to read run evidence: ${message}`] };
 					}
 				},
-			};
-			if (path !== undefined) artifact.path = path;
-			if (overview.runIds.length === 1 && overview.runIds[0] !== undefined) artifact.runId = overview.runIds[0];
-			if (overview.sessionId !== null) artifact.sessionId = overview.sessionId;
-			return artifact;
-		});
+			});
+		}
+		return artifacts;
 	}
 }
 
@@ -1489,10 +1407,13 @@ export class AccountabilityArtifactProvider implements ArtifactProvider {
 				title: "Session accountability",
 				timestamp: Date.now(),
 				load: async () => {
-					// The index is machine-wide; fold only the runs this view lists.
-					const visible = new Set(listRunEnvelopes(this.deps).map((env) => env.id));
-					const rows = readEvidenceIndex(stateDir).filter((row) => visible.has(row.runId));
-					return { format: "markdown" as const, lines: renderAccountabilitySummary(summarizeEvidenceIndex(rows)) };
+					// Fold only the runs this view lists, each from its own sealed assessment (#434).
+					const runs: RunEvidence[] = [];
+					for (const env of listRunEnvelopes(this.deps)) {
+						if (env.endedAt === null) continue;
+						runs.push(runEvidence(env.id, await readRunRecordAsync(stateDir, env.id).catch(() => null)));
+					}
+					return { format: "markdown" as const, lines: renderAccountabilitySummary(summarizeRunAccountability(runs)) };
 				},
 			},
 		];

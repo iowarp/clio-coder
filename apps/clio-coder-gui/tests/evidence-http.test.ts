@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Static } from "typebox";
@@ -8,7 +8,7 @@ import { Accepted } from "../contracts/operations.js";
 import { harness, json, terminal } from "./harness/app.js";
 import { seedEvidence } from "./harness/evidence-fixture.js";
 
-test("evidence REST preserves all 40 artifacts, historical unknown, provenance and bounded contained reads", async () => {
+test("evidence REST pages all 40 runs newest first with their sealed assessments and admitted provenance", async () => {
 	const h = await harness();
 	try {
 		await seedEvidence(h.home.path, h.home.env);
@@ -16,93 +16,48 @@ test("evidence REST preserves all 40 artifacts, historical unknown, provenance a
 		// under a parallel tier with a cold transform cache outlasts the 10 s read deadline.
 		// Pay that import here on its own budget so every asserted read keeps the shipped deadline.
 		await h.reads.call("evidence.read", { kind: "list", limit: 1 }, { deadlineMs: 60_000 });
-		await writeFile(join(h.home.path, "data/evidence/incomplete-file"), "incomplete artifact");
-		const visited: string[] = [],
-			unknown: string[] = [];
+		const visited: string[] = [];
 		let cursor: string | null = null;
 		do {
 			const page: Static<typeof EvidencePage> = await json(
 				await h.request(`/api/evidence?limit=7${cursor ? `&cursor=${cursor}` : ""}`),
 				EvidencePage,
 			);
-			visited.push(...page.items.map((row) => row.overview.evidenceId));
-			// Sealed totals arrive worded by the server; the browser shows the strings and sums nothing (#434).
+			visited.push(...page.items.map((row) => row.run.runId));
+			// Totals arrive worded by the server; the browser shows the strings and sums nothing (#434).
 			for (const row of page.items) {
-				assert.equal(typeof row.overview.quantities.total?.display, "string");
-				assert.equal(typeof row.overview.quantities.usd?.display, "string");
+				assert.equal(row.run.integrity, "verified");
+				assert.ok(row.run.assessedAt);
+				assert.equal(typeof row.run.quantities?.tokens.display, "string");
+				assert.equal(typeof row.run.quantities?.usd.display, "string");
 			}
-			unknown.push(...page.items.filter((row) => row.verdict === "unknown").map((row) => row.overview.evidenceId));
 			cursor = page.nextCursor;
 		} while (cursor);
 		assert.equal(visited.length, 40);
 		assert.equal(new Set(visited).size, 40);
 		assert.equal(visited[0], "evidence-039");
-		assert.deepEqual(unknown, ["evidence-000"]);
-		await writeFile(
-			join(h.home.path, "data/evidence/evidence-039/tool-events.jsonl"),
-			[
-				{ source: "session-entry", confidence: "exact", resultPreview: "private event text" },
-				{ source: "audit-row", confidence: "best-effort" },
-				{ source: "run-aggregate" },
-			]
-				.map((row) => JSON.stringify(row))
-				.join("\n"),
-		);
 		const detail = await json(await h.request("/api/evidence/evidence-039"), EvidenceDetail);
-		assert.deepEqual(detail.attribution, { exact: 1, bestEffort: 1, unclassified: 1 });
-		assert.equal(JSON.stringify(detail).includes("private event text"), false);
-		assert.equal(detail.runs[0]?.summary.axes.artifactIntegrity, "verified");
-		assert.equal(Object.keys(detail.runs[0]?.summary.axes ?? {}).length, 5);
-		assert.equal(Object.hasOwn(detail.runs[0]?.summary.axes ?? {}, "autonomyEnforcement"), false);
-		assert.equal(detail.runs[0]?.summary.verdict, detail.verdict);
-		assert.equal(detail.gateDecisions.length, 1);
-		assert.equal(detail.gateDecisions[0]?.outcome, "pass");
-		assert.match(detail.provenance[0]?.lines.join(" ") ?? "", /step 2.*earlier-run/);
-		const historicalPath = join(h.home.path, "data/evidence/evidence-038/trust-status.json");
-		const historical = JSON.parse(await readFile(historicalPath, "utf8"));
-		for (const run of historical.runs) {
-			run.status.autonomyEnforcement = { state: "absent", reason: "not_recorded" };
-		}
-		await writeFile(historicalPath, JSON.stringify(historical));
-		const older = await json(await h.request("/api/evidence/evidence-038"), EvidenceDetail);
-		assert.equal(Object.keys(older.runs[0]?.summary.axes ?? {}).length, 5);
-		assert.equal(
-			(await json(await h.request("/api/evidence/evidence-000"), EvidenceDetail)).projection,
-			"historical_format",
-		);
+		assert.equal(detail.summary.axes.artifactIntegrity, "verified");
+		assert.equal(Object.keys(detail.summary.axes).length, 5);
+		assert.equal(detail.summary.verdict, detail.verdict);
+		assert.match(detail.provenance.lines.join(" "), /step 2.*earlier-run/);
 		// An id this host never served is refused, not looked up: 404 would claim a
 		// search that did not happen. tests/artifact-window.test.ts owns that rule.
 		assert.equal((await h.request("/api/evidence/missing")).status, 403);
 		for (const query of ["limit=0", "limit=101", "cursor=broken"])
 			assert.equal((await h.request(`/api/evidence?${query}`)).status, 422);
-		await writeFile(join(h.home.path, "outside.json"), '{"leak":true}');
-		await symlink(join(h.home.path, "outside.json"), join(h.home.path, "data/evidence/evidence-000/trust-status.json"));
-		assert.equal((await h.request("/api/evidence/evidence-000")).status, 503);
-		assert.equal((await h.request("/api/evidence/evidence-039")).status, 200);
 	} finally {
 		await h.close();
 	}
 });
 
-test("real CLI builds evidence once per key, follows typed storage, and rechecks a tampered run seal truthfully", async () => {
+test("real CLI rechecks a tampered run seal truthfully", async () => {
 	const h = await harness();
 	try {
 		const seeded = await seedEvidence(h.home.path, h.home.env);
 		const workspace = await h.workspaces.open(h.home.path);
-		// The operator reaches a build from the dispatch list; that listing is what
-		// makes the run id referenceable at all.
+		// The dispatch listing is what makes the run id referenceable at all.
 		await h.request("/api/fleet/dispatches");
-		const path = `/api/workspaces/${workspace.id}/evidence/${seeded.runId}/build`;
-		const accepted = await json(await h.post(path, {}, "build-once"), Accepted);
-		assert.deepEqual(await json(await h.post(path, {}, "build-once"), Accepted), accepted);
-		const operation = await terminal(h.operations, accepted.operationId, 30_000);
-		assert.equal(operation.status, "succeeded", JSON.stringify(operation));
-		assert.ok(operation.status === "succeeded" && "kind" in operation.result && operation.result.kind === "evidence");
-		assert.equal(operation.result.artifact.overview.source.kind, "run");
-		// A collected bundle is refused until a listing serves it, so the GUI must not
-		// link its detail straight from the operation result.
-		assert.equal((await h.request(`/api/evidence/${operation.result.id}`)).status, 403);
-		assert.equal((await json(await h.request("/api/evidence?limit=100"), EvidencePage)).items.length, 41);
 		const verify = async () => {
 			const accepted = await json(
 				await h.post(`/api/workspaces/${workspace.id}/receipts/${seeded.runId}/verify`),
@@ -116,7 +71,7 @@ test("real CLI builds evidence once per key, follows typed storage, and rechecks
 			return operation.result.verification;
 		};
 		assert.equal((await verify()).state, "verified");
-		// A rewritten result object: the seal lists the object's digest, which no longer matches (#434).
+		// A rewritten object: the seal lists the object's digest, which no longer matches (#434).
 		const objects = join(h.home.path, "state/telemetry/runs", seeded.runId, "objects");
 		const [object] = await readdir(objects);
 		assert.ok(object);
@@ -125,20 +80,19 @@ test("real CLI builds evidence once per key, follows typed storage, and rechecks
 		const failed = await verify();
 		assert.equal(failed.state, "failed");
 		assert.equal(failed.reason, "object-mismatch");
-		assert.equal((await h.post(path, { argv: ["--session", "escape"] })).status, 422);
 		assert.equal(h.cli.activeCount, 0);
 	} finally {
 		await h.close();
 	}
 });
 
-test("evidence inventory distinguishes an absent directory from a present empty directory", async () => {
+test("evidence inventory distinguishes an absent run store from a present empty one", async () => {
 	const h = await harness();
 	try {
 		const absent = await json(await h.request("/api/evidence"), EvidencePage);
 		assert.equal(absent.present, false);
 		assert.deepEqual(absent.items, []);
-		await mkdir(join(h.home.path, "data/evidence"), { recursive: true });
+		await mkdir(join(h.home.path, "state/telemetry/runs"), { recursive: true });
 		const empty = await json(await h.request("/api/evidence"), EvidencePage);
 		assert.equal(empty.present, true);
 		assert.deepEqual(empty.items, []);

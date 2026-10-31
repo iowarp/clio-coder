@@ -1,17 +1,14 @@
-import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { Type } from "typebox";
 import { mcpToolName, ToolNames } from "../../src/core/tool-names.js";
-import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
-import { buildEvidence } from "../../src/domains/evidence/index.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { invokeRegisteredTool, type ToolFinishEvent } from "../../src/tools/agent-tools.js";
 import { createDataTool } from "../../src/tools/gateway/data-tool.js";
 import { createGatewayTool } from "../../src/tools/gateway/index.js";
 import { createRegistry } from "../../src/tools/registry.js";
-import { fixtureEnvelope } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("gateway correction contracts", () => {
@@ -162,63 +159,6 @@ describe("gateway correction contracts", () => {
 					deepStrictEqual(records[1], records[0]);
 				}
 			}
-		}
-	});
-
-	it("exports capability identity in paired, unpaired, result-only evidence and transcripts", async () => {
-		await mkdir(clioStateDir(), { recursive: true });
-		await writeFile(
-			join(clioStateDir(), "runs.json"),
-			JSON.stringify([{ ...fixtureEnvelope("fixture"), sessionId: "session-1" }]),
-		);
-		for (const capability of ["artifact", "git"]) {
-			const projections = [];
-			for (const gateway of [false, true]) {
-				const tool = gateway ? "gateway" : capability;
-				const args = { op: "log", path: "report.md" };
-				const entries: unknown[] = [];
-				const message = (role: string, id: string, payload: unknown) => ({
-					kind: "message",
-					role,
-					turnId: id,
-					parentTurnId: null,
-					timestamp: "2026-09-16T00:00:00.000Z",
-					payload,
-				});
-				for (const id of ["paired", "unpaired"])
-					entries.push(
-						message("tool_call", id, { id, name: tool, args: gateway ? { op: "call", capability, args } : args }),
-					);
-				for (const id of ["paired", "result-only"])
-					entries.push(
-						message("tool_result", `${id}-result`, {
-							toolCallId: id,
-							toolName: tool,
-							result: { kind: "ok", output: "done", details: gateway && id === "result-only" ? { capability } : {} },
-						}),
-					);
-				const dir = join(clioStateDir(), "sessions", "workspace", "session-1");
-				await mkdir(dir, { recursive: true });
-				await writeFile(join(dir, "current.jsonl"), entries.map((entry) => JSON.stringify(entry)).join("\n"));
-				const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), sessionId: "session-1" });
-				const events = (await readFile(join(built.directory, "tool-events.jsonl"), "utf8"))
-					.trim()
-					.split("\n")
-					.map((line) => JSON.parse(line));
-				strictEqual(events.length, 3);
-				for (const event of events) strictEqual(event.tool, capability);
-				deepStrictEqual(events.map((event) => event.linkKind).sort(), [
-					"session-tool-call",
-					"session-tool-call-result",
-					"session-tool-result",
-				]);
-				const transcript = await readFile(join(built.directory, "transcript.md"), "utf8");
-				doesNotMatch(transcript, /tool_(?:call|result) gateway/);
-				match(transcript, new RegExp(`tool_call ${capability}`));
-				match(transcript, new RegExp(`tool_result ${capability}`));
-				projections.push({ events, transcript: transcript.split("## Linked Session Transcript")[1] });
-			}
-			deepStrictEqual(projections[1], projections[0]);
 		}
 	});
 });

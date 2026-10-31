@@ -1,5 +1,5 @@
-export type { BuildEvidenceOptions } from "./build.js";
-export { buildEvidence } from "./build.js";
+export type { AssessRunInput, RunAssessment, RunAssessmentContext } from "./assessment.js";
+export { assessRun, gatherRunAssessment } from "./assessment.js";
 export { FINISH_CONTRACT_EVIDENCE_TAGS } from "./finish-contract-map.js";
 export type { RunEscalationCounts, RunProvenanceView } from "./provenance.js";
 export {
@@ -11,18 +11,7 @@ export {
 	provenanceTranscriptLines,
 } from "./provenance.js";
 export { createRedactionTally, redactSecretSegments } from "./redact.js";
-export type { EvidenceRunProvenance } from "./store.js";
-export {
-	EVIDENCE_FILES,
-	EvidenceNotFoundError,
-	evidenceDirectory,
-	inspectEvidence,
-	listEvidenceOverviews,
-	loadEvidenceGateDecisions,
-	loadEvidenceRunProvenance,
-	loadEvidenceTrustStatus,
-} from "./store.js";
-export { renderEvidenceTokens } from "./totals-display.js";
+export { inspectRunEvidence, listRunEvidence, runEvidence } from "./run-evidence.js";
 export type { TrustSummaryProjection, TrustVerdict } from "./trust-projection.js";
 export {
 	formatTrustAxes,
@@ -45,7 +34,6 @@ export type {
 	CanonicalTrustStatus,
 	CompletionEvidenceStatus,
 	ContextProvenanceStatus,
-	GroundedEvidenceValidationInput,
 	IndependentReviewStatus,
 	RunIntegrity,
 	RunTrustFacts,
@@ -66,7 +54,6 @@ export type {
 export {
 	absentTrustStatus,
 	adaptGateDecisionReviewStatus,
-	adaptGroundedEvidenceValidationStatus,
 	adaptRunTrustStatus,
 	composeTrustStatus,
 	inspectRunTrustStatus,
@@ -79,33 +66,12 @@ export {
 	validateTrustStatus,
 } from "./trust-status.js";
 export type {
-	EvidenceAuditLinkedRow,
-	EvidenceBuildResult,
+	EvidenceDecision,
 	EvidenceFinding,
-	EvidenceFindingsFile,
-	EvidenceGateDecisionsFile,
-	EvidenceInspectable,
-	EvidenceLinkConfidence,
-	EvidenceOverview,
-	EvidenceProtectedArtifactEvent,
-	EvidenceProtectedArtifactsFile,
-	EvidenceRunFile,
-	EvidenceRunSource,
-	EvidenceRunTrustStatus,
 	EvidenceSeverity,
-	EvidenceSource,
 	EvidenceTag,
-	EvidenceToolEvent,
-	EvidenceToolEventSource,
-	EvidenceTotals,
-	EvidenceTrustStatusFile,
-	EvidenceTrustStatusView,
+	EvidenceVerdict,
 	FailureCauseTag,
-	HistoricalEvidenceTrustStatus,
+	RunEvidence,
 } from "./types.js";
-export {
-	EVIDENCE_TAGS,
-	EVIDENCE_VERSION,
-	FAILURE_CAUSE_TAG_ORDER,
-	FAILURE_CAUSE_TAGS,
-} from "./types.js";
+export { EVIDENCE_TAGS, FAILURE_CAUSE_TAG_ORDER, FAILURE_CAUSE_TAGS } from "./types.js";

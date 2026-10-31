@@ -48,13 +48,13 @@ const exactMutationPolicy = {
 const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	// OBSERVE: read-class, parallel, envelope + shared turn budget.
 	[ToolNames.Evidence]: {
-		objective: "Inspect canonical evidence, trust status, gate decisions, and findings.",
+		objective: "Inspect a finished run's sealed assessment: trust status, gate verdicts, and findings.",
 		discoveryHint:
-			"Evidence records observed execution and verification separately from an assistant's completion claim. List bundles, then inspect returned IDs when a claim needs checking. A receipt proves only what it records.",
-		examples: [{ goal: "List recorded evidence bundles without running a check", args: { mode: "list" }, startup: true }],
+			"Evidence records observed execution and verification separately from an assistant's completion claim. List runs, then inspect a returned run id when a claim needs checking. A run's seal proves only what it records.",
+		examples: [{ goal: "List assessed runs without running a check", args: { mode: "list" }, startup: true }],
 		uiLabel: "Evidence",
 		retrySafety: "idempotent",
-		resultSizePolicy: summaryPolicy("Inspect one run with evidence(mode=run, runId=<id>) to narrow the output."),
+		resultSizePolicy: summaryPolicy("Inspect one run with evidence(mode=inspect, runId=<id>) to narrow the output."),
 		costLatency: "local_medium",
 	},
 	[ToolNames.Read]: {

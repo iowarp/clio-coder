@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { EvidenceFinding, EvidenceOverview, EvidenceTag } from "../evidence/index.js";
-import { inspectEvidence } from "../evidence/index.js";
+import type { EvidenceTag, RunEvidence } from "../evidence/index.js";
+import { inspectRunEvidence } from "../evidence/index.js";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import {
 	applyScopeIdentity,
@@ -9,7 +9,7 @@ import {
 	validateMemoryScopeSelection,
 } from "./promotion.js";
 import { insertMemoryRecordIfAbsent } from "./store.js";
-import type { MemoryProposalResult, MemoryRecord, MemoryRepositoryIdentity, MemoryScope } from "./types.js";
+import type { MemoryProposalResult, MemoryRecord } from "./types.js";
 import { validateMemoryRecord } from "./validate.js";
 
 const LESSON_MAX_CHARS = 240;
@@ -25,69 +25,81 @@ const TAG_PRIORITY = [
 	"missing-dependency",
 	"wrong-runtime",
 	"auth-failure",
-	"cwd-missing",
 	"destructive-cleanup",
 	"unknown",
 ] as const satisfies ReadonlyArray<EvidenceTag>;
 
-export async function proposeMemoryFromEvidence(
-	dataDir: string,
-	evidenceId: string,
-	selection?: MemoryScopeSelection,
-): Promise<MemoryProposalResult> {
-	const evidence = await inspectEvidence(dataDir, evidenceId);
-	const record = memoryRecordFromEvidence(evidence.overview, evidence.findings, selection);
-	return insertMemoryRecordIfAbsent(dataDir, record);
+/**
+ * What the run ledger says of the run it proposes from: its task and workspace. They scope and word the lesson only;
+ * every claim the lesson makes comes from the run's sealed evidence (#434).
+ */
+export interface EvidenceRunContext {
+	task: string | null;
+	cwd: string | null;
 }
 
-export function memoryIdFromEvidence(evidenceId: string): string {
-	const digest = createHash("sha256").update(evidenceId, "utf8").digest("hex").slice(0, 16);
+export async function proposeMemoryFromEvidence(
+	dataDir: string,
+	stateDir: string,
+	runId: string,
+	context: EvidenceRunContext,
+	selection?: MemoryScopeSelection,
+): Promise<MemoryProposalResult> {
+	const evidence = await inspectRunEvidence(stateDir, runId);
+	if (evidence.assessedAt === null)
+		throw new Error(
+			`run ${runId} has no sealed assessment to propose from: ${evidence.integrity.state === "verified" ? "not assessed" : evidence.integrity.reason}`,
+		);
+	return insertMemoryRecordIfAbsent(dataDir, memoryRecordFromEvidence(evidence, context, selection));
+}
+
+export function memoryIdFromEvidence(runId: string): string {
+	const digest = createHash("sha256").update(runId, "utf8").digest("hex").slice(0, 16);
 	return `mem-${digest}`;
 }
 
 export function memoryRecordFromEvidence(
-	overview: EvidenceOverview,
-	findings: ReadonlyArray<EvidenceFinding>,
+	evidence: RunEvidence,
+	context: EvidenceRunContext,
 	selection?: MemoryScopeSelection,
 ): MemoryRecord {
-	const tags = overview.tags;
+	const tags = evidence.tags;
 	const primaryTag = primaryEvidenceTag(tags);
-	const repository = inferRepository(overview);
+	const repository = context.cwd === null ? null : canonicalMemoryRepositoryIdentity(context.cwd);
+	const runtimeIds = evidence.settled ? [evidence.settled.runtimeId] : [];
+	const agentIds = evidence.settled ? [evidence.settled.agentId] : [];
 	const validatedSelection =
-		selection === undefined
-			? undefined
-			: validateMemoryScopeSelection(selection, {
-					runtimeIds: overview.runtimeIds,
-					agentIds: overview.agentIds,
-				});
-	const scope = validatedSelection?.scope ?? inferScope(overview, repository);
+		selection === undefined ? undefined : validateMemoryScopeSelection(selection, { runtimeIds, agentIds });
+	const scope =
+		validatedSelection?.scope ??
+		(repository !== null ? "repo" : runtimeIds.length > 0 ? "runtime" : agentIds.length > 0 ? "agent" : "global");
 	const record: MemoryRecord = {
 		id:
 			validatedSelection === undefined
-				? memoryIdFromEvidence(overview.evidenceId)
-				: memoryIdFromEvidenceScope(overview.evidenceId, memoryScopeIdentityKey(validatedSelection)),
+				? memoryIdFromEvidence(evidence.runId)
+				: memoryIdFromEvidenceScope(evidence.runId, memoryScopeIdentityKey(validatedSelection)),
 		scope,
-		key: `evidence:${overview.evidenceId}`,
-		lesson: truncateText(buildLesson(overview, findings, primaryTag), LESSON_MAX_CHARS),
-		evidenceRefs: [overview.evidenceId],
-		appliesWhen: appliesWhen(overview),
-		avoidWhen: avoidWhen(overview),
-		confidence: confidenceForEvidence(overview, findings),
-		createdAt: overview.generatedAt,
+		key: `evidence:${evidence.runId}`,
+		lesson: truncateText(buildLesson(evidence, context, primaryTag), LESSON_MAX_CHARS),
+		evidenceRefs: [evidence.runId],
+		appliesWhen: appliesWhen(evidence, context),
+		avoidWhen:
+			context.cwd === null && runtimeIds.length === 0 && tags.length === 0
+				? []
+				: ["current task, repo, runtime, or failure mode differs from cited evidence"],
+		confidence: confidenceForEvidence(evidence),
+		createdAt: evidence.assessedAt ?? evidence.settled?.at ?? new Date(0).toISOString(),
 		approved: false,
 		provenance: {
 			sourceKind: "evidence",
-			evidenceId: overview.evidenceId,
-			...(overview.sessionId === null ? {} : { sourceSessionId: overview.sessionId }),
+			evidenceId: evidence.runId,
+			...(evidence.sessionId === null ? {} : { sourceSessionId: evidence.sessionId }),
 		},
 	};
 	if (validatedSelection !== undefined) applyScopeIdentity(record, validatedSelection);
 	else if (scope === "repo" && repository !== null) record.repository = repository;
-	else if (scope === "runtime" && overview.runtimeIds[0] !== undefined) {
-		record.runtime = { kind: "runtime", key: overview.runtimeIds[0] };
-	} else if (scope === "agent" && overview.agentIds[0] !== undefined) {
-		record.agent = { kind: "agent", key: overview.agentIds[0] };
-	}
+	else if (scope === "runtime" && runtimeIds[0] !== undefined) record.runtime = { kind: "runtime", key: runtimeIds[0] };
+	else if (scope === "agent" && agentIds[0] !== undefined) record.agent = { kind: "agent", key: agentIds[0] };
 	const validated = validateMemoryRecord(record);
 	if (!validated.valid) {
 		throw new Error(
@@ -102,24 +114,6 @@ function memoryIdFromEvidenceScope(evidenceId: string, scopeKey: string): string
 	return `mem-${digest}`;
 }
 
-/**
- * Repo scope requires exactly one evidence cwd that canonicalizes to a usable
- * repository identity; anything else is ambiguous and falls through to the
- * next scope.
- */
-function inferRepository(overview: EvidenceOverview): MemoryRepositoryIdentity | null {
-	const cwds = [...new Set(overview.cwds)];
-	if (cwds.length !== 1 || cwds[0] === undefined) return null;
-	return canonicalMemoryRepositoryIdentity(cwds[0]);
-}
-
-function inferScope(overview: EvidenceOverview, repository: MemoryRepositoryIdentity | null): MemoryScope {
-	if (repository !== null) return "repo";
-	if (overview.runtimeIds.length > 0) return "runtime";
-	if (overview.agentIds.length > 0) return "agent";
-	return "global";
-}
-
 function primaryEvidenceTag(tags: ReadonlyArray<EvidenceTag>): EvidenceTag | null {
 	for (const tag of TAG_PRIORITY) {
 		if (tags.includes(tag)) return tag;
@@ -127,79 +121,61 @@ function primaryEvidenceTag(tags: ReadonlyArray<EvidenceTag>): EvidenceTag | nul
 	return tags[0] ?? null;
 }
 
-function buildLesson(
-	overview: EvidenceOverview,
-	findings: ReadonlyArray<EvidenceFinding>,
-	primaryTag: EvidenceTag | null,
-): string {
-	const task = overview.tasks[0] ?? "the cited workflow";
+function buildLesson(evidence: RunEvidence, context: EvidenceRunContext, primaryTag: EvidenceTag | null): string {
+	const task = context.task ?? "the cited workflow";
+	const findings = evidence.findings;
 	const finding = findings.find((item) => item.severity === "warn") ?? findings[0] ?? null;
 	const findingText = finding === null ? "" : ` Finding: ${finding.message}`;
 	if (primaryTag === "test-failure") {
-		return `Evidence ${overview.evidenceId} shows validation failure around "${task}". Recheck the failing validation path before claiming completion.${findingText}`;
+		return `Evidence ${evidence.runId} shows validation failure around "${task}". Recheck the failing validation path before claiming completion.${findingText}`;
 	}
 	if (primaryTag === "build-failure") {
-		return `Evidence ${overview.evidenceId} shows build failure around "${task}". Rebuild before treating related changes as complete.${findingText}`;
+		return `Evidence ${evidence.runId} shows build failure around "${task}". Rebuild before treating related changes as complete.${findingText}`;
 	}
 	if (primaryTag === "blocked-tool") {
-		return `Evidence ${overview.evidenceId} shows blocked tool activity around "${task}". Adjust the workflow to respect tool and safety policy.${findingText}`;
+		return `Evidence ${evidence.runId} shows blocked tool activity around "${task}". Adjust the workflow to respect tool and safety policy.${findingText}`;
 	}
 	if (primaryTag === "protected-artifact") {
-		return `Evidence ${overview.evidenceId} includes protected artifacts for "${task}". Preserve validated artifacts unless newer validation supersedes them.${findingText}`;
+		return `Evidence ${evidence.runId} includes protected artifacts for "${task}". Preserve validated artifacts unless newer validation supersedes them.${findingText}`;
 	}
 	if (primaryTag === "timeout") {
-		return `Evidence ${overview.evidenceId} shows timeout risk around "${task}". Prefer bounded validation steps and explicit limits.${findingText}`;
+		return `Evidence ${evidence.runId} shows timeout risk around "${task}". Prefer bounded validation steps and explicit limits.${findingText}`;
 	}
 	if (primaryTag === "context-overflow") {
-		return `Evidence ${overview.evidenceId} shows context pressure around "${task}". Prefer scoped retrieval or compaction over prompt growth.${findingText}`;
+		return `Evidence ${evidence.runId} shows context pressure around "${task}". Prefer scoped retrieval or compaction over prompt growth.${findingText}`;
 	}
 	if (primaryTag === "missing-dependency") {
-		return `Evidence ${overview.evidenceId} shows a missing dependency around "${task}". Verify local prerequisites before rerunning the workflow.${findingText}`;
+		return `Evidence ${evidence.runId} shows a missing dependency around "${task}". Verify local prerequisites before rerunning the workflow.${findingText}`;
 	}
 	if (primaryTag === "wrong-runtime") {
-		return `Evidence ${overview.evidenceId} shows runtime mismatch around "${task}". Confirm the configured runtime and model before dispatch.${findingText}`;
+		return `Evidence ${evidence.runId} shows runtime mismatch around "${task}". Confirm the configured runtime and model before dispatch.${findingText}`;
 	}
 	if (primaryTag === "auth-failure") {
-		return `Evidence ${overview.evidenceId} shows auth failure around "${task}". Check target credentials before repeating the workflow.${findingText}`;
-	}
-	if (primaryTag === "cwd-missing") {
-		return `Evidence ${overview.evidenceId} shows missing working-directory state around "${task}". Confirm repo-local cwd paths before running commands.${findingText}`;
+		return `Evidence ${evidence.runId} shows auth failure around "${task}". Check target credentials before repeating the workflow.${findingText}`;
 	}
 	if (primaryTag === "destructive-cleanup") {
-		return `Evidence ${overview.evidenceId} shows destructive cleanup risk around "${task}". Keep validated artifacts protected until replacement validation exists.${findingText}`;
+		return `Evidence ${evidence.runId} shows destructive cleanup risk around "${task}". Keep validated artifacts protected until replacement validation exists.${findingText}`;
 	}
-	const tagText = overview.tags.length === 0 ? "no failure tags" : `tags ${overview.tags.join(", ")}`;
-	return `Evidence ${overview.evidenceId} records ${tagText} for "${task}". Keep this as memory only after human approval.${findingText}`;
+	const tagText = evidence.tags.length === 0 ? "no failure tags" : `tags ${evidence.tags.join(", ")}`;
+	return `Evidence ${evidence.runId} records ${tagText} for "${task}". Keep this as memory only after human approval.${findingText}`;
 }
 
-function appliesWhen(overview: EvidenceOverview): string[] {
+function appliesWhen(evidence: RunEvidence, context: EvidenceRunContext): string[] {
 	return uniqueStrings([
-		`source:${formatSource(overview)}`,
-		...overview.tasks.map((task) => `task:${truncateText(task, APPLY_MAX_CHARS)}`),
-		...overview.cwds.map((cwd) => `cwd:${truncateText(cwd, APPLY_MAX_CHARS)}`),
-		...overview.tags.map((tag) => `tag:${tag}`),
-		...overview.runtimeIds.map((runtimeId) => `runtime:${runtimeId}`),
-		...overview.modelIds.map((modelId) => `model:${modelId}`),
+		`source:run:${evidence.runId}`,
+		...(context.task === null ? [] : [`task:${truncateText(context.task, APPLY_MAX_CHARS)}`]),
+		...(context.cwd === null ? [] : [`cwd:${truncateText(context.cwd, APPLY_MAX_CHARS)}`]),
+		...evidence.tags.map((tag) => `tag:${tag}`),
+		...(evidence.settled ? [`runtime:${evidence.settled.runtimeId}`, `model:${evidence.settled.wireModelId}`] : []),
 	]);
 }
 
-function avoidWhen(overview: EvidenceOverview): string[] {
-	if (overview.cwds.length === 0 && overview.runtimeIds.length === 0 && overview.tags.length === 0) return [];
-	return ["current task, repo, runtime, or failure mode differs from cited evidence"];
-}
-
-function confidenceForEvidence(overview: EvidenceOverview, findings: ReadonlyArray<EvidenceFinding>): number {
-	let value = 0.45;
-	if (overview.totals.runs > 0) value += 0.05;
-	if (overview.totals.runRecords > 0) value += 0.05;
-	if (overview.tags.length > 0) value += 0.05;
-	if (findings.some((finding) => finding.severity === "warn")) value += 0.05;
-	if (overview.totals.linkedToolEvents > 0 || overview.totals.toolEvents > 0) value += 0.05;
+function confidenceForEvidence(evidence: RunEvidence): number {
+	let value = 0.55;
+	if (evidence.tags.length > 0) value += 0.05;
+	if (evidence.findings.some((finding) => finding.severity === "warn")) value += 0.05;
+	if ((evidence.totals?.toolCalls ?? 0) > 0) value += 0.05;
 	return Math.min(0.75, Number(value.toFixed(2)));
-}
-
-function formatSource(overview: EvidenceOverview): string {
-	return overview.source.kind === "run" ? `run:${overview.source.runId}` : `session:${overview.source.sessionId}`;
 }
 
 function truncateText(value: string, maxChars: number): string {

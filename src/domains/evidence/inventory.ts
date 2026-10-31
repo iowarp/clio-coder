@@ -1,68 +1,42 @@
 /**
- * Fixed machine-readable projection of recent evidence artifacts.
+ * Fixed machine-readable projection of recent runs' evidence (#434).
  *
- * `evidence list` is an operator table and `evidence inspect <id>` needs an id,
- * so neither is a transport a GUI host can invoke blind. This command accepts
- * no identifier, path, or limit, selects a bounded newest-first window itself,
- * and emits provenance, tags, totals, and a trust verdict.
- *
- * An overview carries the working directories the runs executed in, the task
- * text the operator typed, and the file names inside the bundle. None of that
- * appears here. What does is the shape of the artifact and how far it can be
- * trusted, which is what an operator picks a bundle by.
+ * `evidence list` is an operator table and `evidence inspect <runId>` needs an id, so neither is a transport a host
+ * can invoke blind. This read selects a bounded newest-first window itself and emits each run's identity, finding
+ * tags, totals and trust verdict. The run's finding prose and its task text do not appear here.
  */
 
-import { clioDataDir } from "../../core/xdg.js";
+import { clioStateDir } from "../../core/xdg.js";
 import { truncateToWidth } from "../../engine/tui-primitives.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
-import {
-	EVIDENCE_TAGS,
-	type EvidenceOverview,
-	type EvidenceTag,
-	listEvidenceOverviews,
-	loadEvidenceTrustStatus,
-	type TrustVerdict,
-	trustVerdict,
-	worstTrustVerdict,
-} from "./index.js";
-import { compareCodepoints } from "./ordering.js";
+import { listRunEvidence } from "./run-evidence.js";
+import { type TrustVerdict, trustVerdict } from "./trust-projection.js";
+import { EVIDENCE_TAGS, type EvidenceTag, type RunEvidence } from "./types.js";
 
 export const EVIDENCE_INVENTORY_MAX_ARTIFACTS = 12;
-export const EVIDENCE_INVENTORY_MAX_IDS = 8;
 
 const IDENTITY_WIDTH = 128;
 
 export interface EvidenceInventoryArtifact {
-	readonly evidenceId: string;
-	readonly sourceKind: "run" | "session";
-	readonly generatedAt: string;
+	readonly runId: string;
+	readonly assessedAt: string | null;
 	readonly startedAt: string | null;
 	readonly endedAt: string | null;
-	readonly runIds: readonly string[];
-	readonly runIdsTruncated: boolean;
-	readonly agentIds: readonly string[];
-	readonly statuses: readonly string[];
+	readonly agentId: string | null;
+	readonly outcome: string | null;
+	readonly integrity: "verified" | "unsealed" | "failed";
+	readonly firstPassSuccess: boolean | null;
 	readonly tags: readonly EvidenceTag[];
 	readonly totals: Readonly<{
-		runs: number;
-		runRecords: number;
 		toolCalls: number;
 		toolErrors: number;
 		blockedToolCalls: number;
-		protectedArtifacts: number;
-		tokens: number;
-		costUsd: number;
+		/** The run's token and cost quantities as the canonical renderer words them, coverage marker included. */
+		tokens: string;
+		cost: string;
 		wallTimeMs: number;
-	}>;
-	/** Secret-shaped values the builder replaced across the bundle's exports. */
-	readonly redactionCount: number;
-	readonly trust: Readonly<{
-		verdict: TrustVerdict;
-		/** Runs whose canonical trust status the bundle actually recorded. */
-		runsCovered: number;
-		/** True when the bundle predates the canonical trust projection. */
-		historical: boolean;
-	}>;
+	}> | null;
+	readonly verdict: TrustVerdict;
 }
 
 export interface EvidenceInventorySnapshot {
@@ -74,109 +48,66 @@ export interface EvidenceInventorySnapshot {
 	readonly nextCursor?: string | null;
 }
 
-function bounded(value: string, width: number): string {
-	const sanitized = sanitizeCallTargetText(value);
-	if (sanitized.length === 0) return "unavailable";
-	return sanitizeCallTargetText(truncateToWidth(sanitized, width, "…", false));
-}
-
-/** Distinct, sanitized, bounded, in first-seen order. */
-function identities(values: ReadonlyArray<string>): string[] {
-	const seen: string[] = [];
-	for (const value of values) {
-		const text = bounded(value, IDENTITY_WIDTH);
-		if (!seen.includes(text)) seen.push(text);
-		if (seen.length >= EVIDENCE_INVENTORY_MAX_IDS) break;
-	}
-	return seen;
-}
-
-function tally(value: number | undefined): number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
-}
-
-function amount(value: number | undefined): number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
-}
-
-/** Newest generation first. An unparseable stamp sorts oldest rather than throwing. */
-function byNewest(a: EvidenceOverview, b: EvidenceOverview): number {
-	return (
-		(Date.parse(b.generatedAt) || 0) - (Date.parse(a.generatedAt) || 0) || compareCodepoints(b.evidenceId, a.evidenceId)
-	);
-}
-
 export interface EvidenceInventoryPage {
 	readonly cursor?: string;
 	readonly limit?: number;
 }
 
+function bounded(value: string): string {
+	const sanitized = sanitizeCallTargetText(value);
+	if (sanitized.length === 0) return "unavailable";
+	return sanitizeCallTargetText(truncateToWidth(sanitized, IDENTITY_WIDTH, "…", false));
+}
+
+function artifactOf(run: RunEvidence): EvidenceInventoryArtifact {
+	return {
+		runId: bounded(run.runId),
+		assessedAt: run.assessedAt,
+		startedAt: run.settled?.startedAt ?? null,
+		endedAt: run.settled?.endedAt ?? null,
+		agentId: run.settled ? bounded(run.settled.agentId) : null,
+		outcome: run.settled?.outcome ?? null,
+		integrity: run.integrity.state,
+		firstPassSuccess: run.firstPassSuccess,
+		tags: run.tags.filter((tag) => EVIDENCE_TAGS.includes(tag)),
+		totals:
+			run.totals === null
+				? null
+				: {
+						toolCalls: run.totals.toolCalls,
+						toolErrors: run.totals.toolErrors,
+						blockedToolCalls: run.totals.blockedToolCalls,
+						tokens: run.totals.tokens.display,
+						cost: run.totals.usd.display,
+						wallTimeMs: run.totals.wallTimeMs,
+					},
+		verdict: trustVerdict(run.trust),
+	};
+}
+
 /**
- * `include` narrows the bundles before the newest-first window is taken, so a
- * caller scoping the inventory to one session or project still gets a full
- * window of its own bundles rather than whatever survived a machine-wide cut.
+ * `include` narrows the runs before the newest-first window is taken, so a caller scoping the inventory to one session
+ * or project still gets a full window of its own runs rather than whatever survived a machine-wide cut.
  */
 export async function evidenceInventorySnapshot(
 	now: () => number = Date.now,
-	dataDir: string = clioDataDir(),
-	include?: (overview: EvidenceOverview) => boolean,
+	stateDir: string = clioStateDir(),
+	include?: (run: RunEvidence) => boolean,
 	page?: EvidenceInventoryPage,
 ): Promise<EvidenceInventorySnapshot> {
-	const listed = await listEvidenceOverviews(dataDir);
-	const all = (include === undefined ? listed : listed.filter(include)).sort(byNewest);
-	const cursorIndex = page?.cursor === undefined ? -1 : all.findIndex((item) => item.evidenceId === page.cursor);
+	const listed = await listRunEvidence(stateDir);
+	const all = include === undefined ? listed : listed.filter(include);
+	const cursorIndex = page?.cursor === undefined ? -1 : all.findIndex((item) => item.runId === page.cursor);
 	if (page?.cursor !== undefined && cursorIndex < 0) throw new Error("cursor unavailable in visible evidence inventory");
 	const start = cursorIndex + 1;
 	const limit = Math.min(EVIDENCE_INVENTORY_MAX_ARTIFACTS, Math.max(1, page?.limit ?? EVIDENCE_INVENTORY_MAX_ARTIFACTS));
 	const window = all.slice(start, start + limit);
-	const artifacts: EvidenceInventoryArtifact[] = [];
-	for (const overview of window) {
-		// One unreadable trust file costs that artifact its verdict, never the
-		// whole inventory: the bundle itself is still the thing being listed.
-		let verdict: TrustVerdict = "unknown";
-		let runsCovered = 0;
-		let historical = true;
-		try {
-			const status = await loadEvidenceTrustStatus(dataDir, overview.evidenceId);
-			historical = status.projection !== "canonical";
-			runsCovered = status.runs.length;
-			const verdicts = status.runs.map((run) => trustVerdict(run.status));
-			verdict = worstTrustVerdict(verdicts);
-		} catch {
-			verdict = "unknown";
-		}
-		artifacts.push({
-			evidenceId: bounded(overview.evidenceId, IDENTITY_WIDTH),
-			sourceKind: overview.source.kind,
-			generatedAt: overview.generatedAt,
-			startedAt: overview.startedAt,
-			endedAt: overview.endedAt,
-			runIds: identities(overview.runIds),
-			runIdsTruncated: overview.runIds.length > EVIDENCE_INVENTORY_MAX_IDS,
-			agentIds: identities(overview.agentIds),
-			statuses: identities(overview.statuses),
-			tags: overview.tags.filter((tag) => EVIDENCE_TAGS.includes(tag)),
-			totals: {
-				runs: tally(overview.totals.runs),
-				runRecords: tally(overview.totals.runRecords),
-				toolCalls: tally(overview.totals.toolCalls),
-				toolErrors: tally(overview.totals.toolErrors),
-				blockedToolCalls: tally(overview.totals.blockedToolCalls),
-				protectedArtifacts: tally(overview.totals.protectedArtifacts),
-				tokens: tally(overview.totals.tokens),
-				costUsd: amount(overview.totals.costUsd),
-				wallTimeMs: tally(overview.totals.wallTimeMs),
-			},
-			redactionCount: tally(overview.redactionCount),
-			trust: { verdict, runsCovered, historical },
-		});
-	}
 	const hasMore = start + window.length < all.length;
 	return {
 		version: 1,
 		generatedAt: new Date(now()).toISOString(),
-		artifacts,
+		artifacts: window.map(artifactOf),
 		truncated: hasMore,
-		...(page === undefined ? {} : { nextCursor: hasMore ? (window.at(-1)?.evidenceId ?? null) : null }),
+		...(page === undefined ? {} : { nextCursor: hasMore ? (window.at(-1)?.runId ?? null) : null }),
 	};
 }

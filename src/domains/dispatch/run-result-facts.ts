@@ -19,7 +19,7 @@ import { integrityClause, trustStateWord, validationClause } from "../evidence/t
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import { inspectRunTrustStatus } from "../evidence/trust-status.js";
 import { TELEMETRY_FOLD_VERSION } from "../telemetry/folds.js";
-import { readEvidenceIndex, readRunRecord } from "../telemetry/index.js";
+import { readRunRecord } from "../telemetry/index.js";
 
 export type RunResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
 
@@ -330,7 +330,6 @@ function sealedChecks(run: SettledRun): Sealed {
 export function runEvidenceOf(
 	runId: string,
 	record: RunTelemetryV1 | null,
-	stateDir = clioStateDir(),
 	options: { now?: Date } = {},
 ): RunEvidenceV1 {
 	const inspection = inspectRunTrustStatus(record);
@@ -346,24 +345,17 @@ export function runEvidenceOf(
 						display: integrityClause(status),
 						detail: clip(inspection.integrity.reason),
 					};
-	let evidence: RunEvidenceV1["evidence"] = null;
-	try {
-		const filed = readEvidenceIndex(stateDir).filter((entry) => entry.runId === runId);
-		const newest = filed.reduce<(typeof filed)[number] | null>(
-			(latest, entry) => (latest === null || entry.generatedAt > latest.generatedAt ? entry : latest),
-			null,
-		);
-		if (newest && Number.isFinite(Date.parse(newest.generatedAt)))
-			evidence = {
-				evidenceId: newest.evidenceId,
-				findingCount: Math.max(0, Math.trunc(newest.findingCount)),
-				succeeded: newest.succeeded ?? null,
-				filedAt: new Date(newest.generatedAt).toISOString(),
-			};
-	} catch {
-		// An unreadable evidence index files the run under no bundle; the run's own facts still stand.
-		evidence = null;
-	}
+	// The assessment is read only under a seal that verifies; an unauthenticated record claims none (#434).
+	const assessment = inspection.integrity.state === "verified" ? (record?.assessment ?? null) : null;
+	const evidence: RunEvidenceV1["evidence"] =
+		assessment === null
+			? null
+			: {
+					assessedAt: assessment.at,
+					firstPassSuccess: assessment.firstPassSuccess,
+					findingCount: assessment.findings.length,
+					tags: [...new Set(assessment.findings.map((finding) => finding.tag))].sort(),
+				};
 	return {
 		v: TELEMETRY_DTO_VERSION,
 		foldVersion: TELEMETRY_FOLD_VERSION,
@@ -394,5 +386,5 @@ export function readRunEvidence(runId: string, stateDir = clioStateDir(), option
 		// An unreadable run scope reads as a missing record.
 		record = null;
 	}
-	return runEvidenceOf(runId, record, stateDir, options);
+	return runEvidenceOf(runId, record, options);
 }

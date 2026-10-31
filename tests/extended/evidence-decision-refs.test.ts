@@ -2,8 +2,8 @@ import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:asse
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
-import { buildEvidence, inspectEvidence } from "../../src/domains/evidence/index.js";
+import { clioStateDir } from "../../src/core/xdg.js";
+import { inspectRunEvidence } from "../../src/domains/evidence/index.js";
 import { activeDecisionRefs, createDecisionBoardStore } from "../../src/domains/session/decision-board.js";
 import {
 	type DecisionLedgerEntry,
@@ -28,13 +28,21 @@ function message(turnId: string, parentTurnId: string | null): MessageEntry {
 		payload: "choose cache key",
 	};
 }
-async function bundle(
+/**
+ * Settle a run citing `refs` against a session ledger holding `entries`, the way dispatch does: the assessment reads
+ * the board when the run settles and seals with it (#434). The ledger is written first, as it exists at settle time.
+ */
+async function assessed(
 	entries: SessionEntry[],
 	refs?: string[],
-	options: { tamper?: boolean; pinnedLeaf?: string; session?: boolean } = {},
+	options: { tamper?: boolean; pinnedLeaf?: string } = {},
 ) {
 	const envelope = { ...fixtureEnvelope("decisions"), ...(refs ? { decisionRefs: refs } : {}) };
-	await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
+	const dir = join(clioStateDir(), "sessions", "workspace", "session-1");
+	await mkdir(dir, { recursive: true });
+	await writeFile(join(dir, "current.jsonl"), entries.map((entry) => JSON.stringify(entry)).join("\n"));
+	if (options.pinnedLeaf)
+		await writeFile(join(dir, "meta.json"), JSON.stringify({ pinnedLeafTurnId: options.pinnedLeaf }));
 	const scope = telemetryRunDirectory(clioStateDir(), envelope.id);
 	await rm(scope, { recursive: true, force: true });
 	await writeSettledRun(clioStateDir(), { ...fixtureReceiptDraft(envelope), ...(refs ? { decisionRefs: refs } : {}) });
@@ -43,20 +51,7 @@ async function bundle(
 		const path = telemetryJournalPath(scope);
 		await writeFile(path, (await readFile(path, "utf8")).replace('"agentId":"coder"', '"agentId":"codex"'));
 	}
-	const dir = join(clioStateDir(), "sessions", "workspace", "session-1");
-	await mkdir(dir, { recursive: true });
-	await writeFile(join(dir, "current.jsonl"), entries.map((entry) => JSON.stringify(entry)).join("\n"));
-	if (options.pinnedLeaf)
-		await writeFile(join(dir, "meta.json"), JSON.stringify({ pinnedLeafTurnId: options.pinnedLeaf }));
-	const result = await buildEvidence({
-		dataDir: clioDataDir(),
-		stateDir: clioStateDir(),
-		...(options.session ? { sessionId: "session-1" } : { runId: envelope.id }),
-	});
-	const read = await inspectEvidence(clioDataDir(), result.overview.evidenceId);
-	const transcript = await readFile(join(result.directory, "transcript.md"), "utf8");
-	const findings = await readFile(join(result.directory, "findings.md"), "utf8");
-	return { ...read, transcript, findingsText: findings };
+	return inspectRunEvidence(clioStateDir(), envelope.id);
 }
 
 describe("run decision provenance", () => {
@@ -65,7 +60,7 @@ describe("run decision provenance", () => {
 		isolated = await isolateClioEnv();
 	});
 	afterEach(() => isolated.restore());
-	it("persists and renders agent revisions without attributing them to the operator", async () => {
+	it("persists agent revisions without attributing them to the operator", async () => {
 		const entries: DecisionLedgerEntry[] = [];
 		const board = createDecisionBoardStore({
 			readEntries: () => entries,
@@ -80,10 +75,6 @@ describe("run decision provenance", () => {
 			const result = await tool.run({ key: "cache-key", value, alternatives: ["fleet hash"], rationale: `use ${value}` });
 			strictEqual(result.kind, "ok", JSON.stringify(result));
 		}
-		const result = await bundle([message("root", null), ...entries], undefined, { session: true });
-		doesNotMatch(result.transcript, /(?:revision|correction)Source=operator/u);
-		match(result.transcript, /revisionSource=agent/u);
-		match(result.transcript, /correctionSource=agent correction=use node id/u);
 		const persisted: unknown[] = JSON.parse(JSON.stringify(entries));
 		ok(persisted.every(isSessionEntry));
 		const restored = createDecisionBoardStore({ readEntries: () => persisted }).snapshot();
@@ -107,9 +98,6 @@ describe("run decision provenance", () => {
 				},
 			});
 			board.supersede(initial.interviewId, "cache-key", "operator selected node id");
-			const result = await bundle([message("root", null), ...entries], undefined, { session: true });
-			match(result.transcript, /revisionSource=operator/u);
-			match(result.transcript, /correctionSource=operator correction=operator selected node id/u);
 			const persisted: unknown[] = JSON.parse(JSON.stringify(entries));
 			ok(persisted.every(isSessionEntry));
 			const revision = createDecisionBoardStore({ readEntries: () => persisted }).snapshot()[0];
@@ -118,35 +106,17 @@ describe("run decision provenance", () => {
 			strictEqual(revision?.decisions[0]?.revisionSource, "operator");
 		});
 	}
-	it("leaves historical revision authors unknown when the ledger did not record them", async () => {
-		const initial = await agentDecision();
-		delete initial.origin;
-		delete initial.decisions[0]?.source;
-		initial.decisions = initial.decisions.map((record) => ({
-			...record,
-			status: "superseded",
-			revisedAt: initial.endedAt,
-			correction: "historical correction",
-		}));
-		ok(isSessionEntry(initial));
-		const result = await bundle([message("root", null), initial], undefined, { session: true });
-		match(result.transcript, /revisionSource=unknown/u);
-		match(result.transcript, /correctionSource=unknown correction=historical correction/u);
-		doesNotMatch(result.transcript, /(?:revision|correction)Source=(?:operator|agent)/u);
-	});
-	it("resolves a real decide record before the run window and reports missing refs on both readable surfaces", async () => {
+	it("resolves a real decide record into the sealed assessment and reports missing refs", async () => {
 		const decision = await agentDecision();
 		ok(isSessionEntry(decision), "persisted producer records must pass the session reader");
 		const refs = activeDecisionRefs([decision]);
-		const result = await bundle([message("root", null), decision], [...refs, "missing/key"]);
-		strictEqual(result.overview.decisions?.length, 1);
-		strictEqual(result.overview.decisions[0]?.ref, refs[0]);
-		deepStrictEqual(result.overview.decisions[0]?.record, decision.decisions[0]);
-		for (const text of [result.transcript, result.findingsText]) {
-			ok(text.includes(`Decision ref ${refs[0]} resolved`));
-			match(text, /Decision ref missing\/key does not resolve/u);
-		}
-		match(result.transcript, /needs keys that survive fleet changes/u);
+		const result = await assessed([message("root", null), decision], [...refs, "missing/key"]);
+		strictEqual(result.decisions.length, 1);
+		strictEqual(result.decisions[0]?.ref, refs[0]);
+		deepStrictEqual(result.decisions[0]?.record, decision.decisions[0]);
+		const text = result.findings.map((row) => row.message).join("\n");
+		ok(text.includes(`Decision ref ${refs[0]} resolved`));
+		match(text, /Decision ref missing\/key does not resolve/u);
 		ok(
 			result.findings.some(
 				(row) => row.tag === "context-provenance" && row.severity === "info" && row.message.includes(refs[0] ?? "missing"),
@@ -163,41 +133,57 @@ describe("run decision provenance", () => {
 		const chosen = await agentDecision("chosen", "chosen-key");
 		const entries = [message("root", null), message("abandoned", "root"), abandoned, message("chosen", "root"), chosen];
 		const refs = activeDecisionRefs([abandoned, chosen]);
-		const current = await bundle(entries, refs);
+		const current = await assessed(entries, refs);
 		deepStrictEqual(
-			current.overview.decisions?.map((entry) => entry.record.key),
+			current.decisions.map((entry) => entry.record.key),
 			["chosen-key"],
 		);
-		const pinned = await bundle(entries, refs, { pinnedLeaf: "abandoned" });
+		const pinned = await assessed(entries, refs, { pinnedLeaf: "abandoned" });
 		deepStrictEqual(
-			pinned.overview.decisions?.map((entry) => entry.record.key),
+			pinned.decisions.map((entry) => entry.record.key),
 			["abandoned-key"],
 		);
-		const linearPinned = await bundle(
+		const linearPinned = await assessed(
 			[message("root", null), message("chosen", "root"), chosen],
 			activeDecisionRefs([chosen]),
 			{ pinnedLeaf: "root" },
 		);
-		deepStrictEqual(linearPinned.overview.decisions, []);
+		deepStrictEqual(linearPinned.decisions, []);
 	});
 	it("does not promote refs from a run whose seal fails, or invent refs a run never recorded", async () => {
 		const decision = await agentDecision();
 		const entries = [message("root", null), decision];
 		for (const options of [{ tamper: true }, {}]) {
-			const result = await bundle(entries, "tamper" in options ? activeDecisionRefs([decision]) : undefined, options);
-			deepStrictEqual(result.overview.decisions, []);
-			doesNotMatch(result.transcript, /## Decision provenance/u);
+			const result = await assessed(entries, "tamper" in options ? activeDecisionRefs([decision]) : undefined, options);
+			deepStrictEqual(result.decisions, []);
 			ok(!result.findings.some((row) => row.message.startsWith("Decision ref ")));
 		}
 	});
-	it("redacts recorded arguments at the export boundary", async () => {
+	it("reads cited decisions from the seal, never from a later ledger edit (#434)", async () => {
+		const decision = await agentDecision();
+		const refs = activeDecisionRefs([decision]);
+		await assessed([message("root", null), decision], refs);
+		// Rewriting the session ledger and the run ledger after the run sealed changes nothing the evidence reads.
+		await writeFile(join(clioStateDir(), "sessions", "workspace", "session-1", "current.jsonl"), "");
+		await writeFile(
+			join(clioStateDir(), "runs.json"),
+			JSON.stringify([{ ...fixtureEnvelope("decisions"), decisionRefs: ["forged/key"] }]),
+		);
+		const result = await inspectRunEvidence(clioStateDir(), "decisions");
+		strictEqual(result.integrity.state, "verified");
+		deepStrictEqual(
+			result.decisions.map((entry) => entry.ref),
+			refs,
+		);
+		ok(!result.findings.some((row) => row.message.includes("forged/key")));
+	});
+	it("redacts recorded arguments where the assessment stores them", async () => {
 		const decision = await agentDecision();
 		const record = decision.decisions[0];
 		if (!record) throw new Error("missing decision");
 		record.rationale = `Authorization: Bearer ghp_${"a".repeat(40)}`;
-		const result = await bundle([message("root", null), decision], activeDecisionRefs([decision]));
-		doesNotMatch(JSON.stringify(result.overview), /a{40}/u);
-		doesNotMatch(result.transcript, /a{40}/u);
-		ok((result.overview.redactionCount ?? 0) > 0);
+		const result = await assessed([message("root", null), decision], activeDecisionRefs([decision]));
+		strictEqual(result.decisions.length, 1);
+		doesNotMatch(JSON.stringify(result), /a{40}/u);
 	});
 });

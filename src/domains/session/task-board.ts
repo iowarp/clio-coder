@@ -323,7 +323,7 @@ function acceptanceRequirement(item: TaskLedgerValidationEvidence): TaskLedgerVa
 }
 
 /** Identify only the synthetic passed row emitted by the old done projection. */
-export function legacyTaskCompletionRow(
+function legacyTaskCompletionRow(
 	goal: TaskLedgerGoal,
 	evidence: ReadonlyArray<TaskLedgerValidationEvidence>,
 ): TaskLedgerValidationEvidence | undefined {

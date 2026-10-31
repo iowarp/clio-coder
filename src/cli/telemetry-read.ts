@@ -15,8 +15,7 @@ import type {
 } from "../core/telemetry/dto.js";
 import { parseFactRef } from "../core/telemetry/dto.js";
 import { AgentRole, Disposition } from "../core/telemetry/enums.js";
-import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import { inspectEvidence } from "../domains/evidence/index.js";
+import { clioStateDir } from "../core/xdg.js";
 import {
 	loadRunScopeFiles,
 	loadRunTelemetrySource,
@@ -390,16 +389,14 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 				return 2;
 			}
 			const explained =
-				ref.scope === "evidence"
-					? explain(target as string, { evidence: (await inspectEvidence(clioDataDir(), ref.owner)).overview })
-					: ref.scope === "run"
-						? explain(target as string, { runId: ref.owner, run: loadRunTelemetrySource(stateDir, ref.owner) })
-						: isRepoRef(ref)
-							? await explainRepoRef(stateDir, target as string, ref.owner)
-							: (() => {
-									const session = loadSessionTelemetrySource(stateDir, ref.owner);
-									return session ? explain(target as string, { session }) : null;
-								})();
+				ref.scope === "run"
+					? explain(target as string, { runId: ref.owner, run: loadRunTelemetrySource(stateDir, ref.owner) })
+					: isRepoRef(ref)
+						? await explainRepoRef(stateDir, target as string, ref.owner)
+						: (() => {
+								const session = loadSessionTelemetrySource(stateDir, ref.owner);
+								return session ? explain(target as string, { session }) : null;
+							})();
 			if (!explained) {
 				printError(`nothing in the journals resolves ${target}`);
 				return 1;

@@ -11,7 +11,7 @@ import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { DispatchFailedPayload } from "../../src/core/telemetry/live-events.js";
-import { dispatchHasEvidenceLedger } from "../../src/domains/telemetry/extension.js";
+import { dispatchHasRunLedger } from "../../src/domains/telemetry/extension.js";
 import { createTelemetryProjection, type ProjectionReadModel } from "../../src/domains/telemetry/projection.js";
 
 function stubReadModel(): ProjectionReadModel {
@@ -35,9 +35,9 @@ function baseFailedPayload(overrides: Partial<DispatchFailedPayload> = {}): Disp
 
 describe("telemetry run summary: dispatch-failed terminal fields", () => {
 	it("does not auto-build evidence for a pre-admission failure that created no ledger", () => {
-		strictEqual(dispatchHasEvidenceLedger(baseFailedPayload()), false);
+		strictEqual(dispatchHasRunLedger(baseFailedPayload()), false);
 		strictEqual(
-			dispatchHasEvidenceLedger(
+			dispatchHasRunLedger(
 				baseFailedPayload({ lineage: { parentRunId: null, rootRunId: "run-1", attempt: 0, depth: 0 } }),
 			),
 			true,

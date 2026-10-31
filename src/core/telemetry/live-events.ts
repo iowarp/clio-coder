@@ -13,7 +13,6 @@ import type {
 import type { MiddlewareHook } from "../../domains/middleware/types.js";
 import type { TargetStatus } from "../../domains/providers/contract.js";
 import type { CostProvenance } from "../../domains/providers/index.js";
-import type { TelemetryRunEvidence } from "../../domains/telemetry/contract.js";
 import type { CostAggregate } from "../../domains/telemetry/cost.js";
 import type { ClioSettings } from "../config.js";
 import type { ContextOperation } from "../context-operation.js";
@@ -22,6 +21,7 @@ import type {
 	ContextPrunedSchema,
 	ContextRecalledSchema,
 	DomainLoadedSchema,
+	EvidenceAssessed,
 	PluginReloadedSchema,
 	ShutdownRequestedSchema,
 } from "./schemas.js";
@@ -736,16 +736,10 @@ export interface DispatchFailedPayload extends DispatchRunIdentity, Partial<Disp
 // ---------------------------------------------------------------------------
 
 /**
- * Published on `evidence.assessed` by the
- * telemetry extension once a finalized run's evidence bundle and its
- * sidecar index row have landed. The evidence fields are exactly
- * {@link TelemetryRunEvidence}, the shape the projection already attaches
- * to the run summary, so the bus and the snapshot cannot describe the same
- * moment two ways. A failed build publishes nothing here: the projection's
- * notice is the failure surface, and a client that never receives this event
- * has learned only that no bundle is ready, which is the truth.
+ * Published on `evidence.assessed` by the run's journal owner after its run.settled and before its seal. Live
+ * subscribers also get the run id, which the journal record carries in its context instead (#434).
  */
-export interface AccountabilityEvidenceReadyPayload extends TelemetryRunEvidence {
+export interface EvidenceAssessedPayload extends EvidenceAssessed {
 	runId: string;
 }
 

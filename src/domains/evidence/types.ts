@@ -1,51 +1,15 @@
-import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
-import type { GateDecisionArtifact, RunEnvelope, ToolCallStat } from "../dispatch/index.js";
-import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
+import type { Quantity } from "../../core/telemetry/dto.js";
+import { EVIDENCE_TAGS, type EvidenceTag } from "../../core/telemetry/trust-vocabulary.js";
 import type { DecisionRecord } from "../session/entries.js";
-import type { CostAggregate } from "../telemetry/cost.js";
-import type { SettledRunRecord } from "../telemetry/index.js";
 import type { RunProvenanceView } from "./provenance.js";
-import type { CanonicalTrustStatus } from "./trust-status.js";
+import type { CanonicalTrustStatus, RunIntegrity } from "./trust-status.js";
 
-export const EVIDENCE_VERSION = 1;
-
-export const EVIDENCE_TAGS = [
-	"audit-linked",
-	"audit-missing",
-	"best-effort-link",
-	"timeout",
-	"context-overflow",
-	"provider-transient",
-	"missing-dependency",
-	"wrong-runtime",
-	"proxy-validation",
-	"no-validation",
-	"destructive-cleanup",
-	"blocked-tool",
-	"escalation",
-	"external-bypass",
-	"external-approximation",
-	"independent-review",
-	"context-provenance",
-	"completion-evidence",
-	"run-seal",
-	"protected-artifact",
-	"tool-loop",
-	"test-failure",
-	"build-failure",
-	"cwd-missing",
-	"session-linked",
-	"session-missing",
-	"auth-failure",
-	"unknown",
-] as const;
-
-export type EvidenceTag = (typeof EVIDENCE_TAGS)[number];
+export type { EvidenceTag };
+export { EVIDENCE_TAGS };
 
 /**
- * Canonical failure-cause subset for receipt summaries and observability
- * histograms. Provenance/quality tags such as `audit-linked`, `session-linked`,
- * and `no-validation` remain evidence tags, but they are not failure causes.
+ * Canonical failure-cause subset for run summaries and observability histograms. Quality tags such as
+ * `no-validation` remain evidence tags, but they are not failure causes.
  */
 export const FAILURE_CAUSE_TAG_ORDER = [
 	"timeout",
@@ -61,31 +25,17 @@ export type FailureCauseTag = (typeof FAILURE_CAUSE_TAG_ORDER)[number];
 /** Fast membership test for the canonical failure-cause subset. */
 export const FAILURE_CAUSE_TAGS: ReadonlySet<EvidenceTag> = new Set(FAILURE_CAUSE_TAG_ORDER);
 
-export type EvidenceSource = { kind: "run"; runId: string } | { kind: "session"; sessionId: string };
+export type EvidenceSeverity = "info" | "warn";
 
-export interface EvidenceTotals {
-	costSummary?: CostAggregate;
-	runs: number;
-	runRecords: number;
-	toolCalls: number;
-	toolErrors: number;
-	blockedToolCalls: number;
-	sessionEntries: number;
-	auditRows: number;
-	toolEvents: number;
-	linkedToolEvents: number;
-	protectedArtifacts: number;
-	/** The verified runs' settled token counts; a lower bound whenever `tokenCoverage` names a gap. */
-	tokens: number;
-	/**
-	 * What `tokens` cannot cover: runs that have not settled, whose seal did not verify, or whose settled token
-	 * count is unknown (#434, P5).
-	 */
-	tokenCoverage?: { unknownCalls: number; unknownRuns: number };
-	costUsd: number;
-	wallTimeMs: number;
+export interface EvidenceFinding {
+	id: string;
+	severity: EvidenceSeverity;
+	tag: EvidenceTag;
+	runId: string;
+	message: string;
 }
 
+/** A decision the run cited, as its sealed assessment recorded it when the run settled. */
 export interface EvidenceDecision {
 	runId: string;
 	sessionId: string;
@@ -93,197 +43,56 @@ export interface EvidenceDecision {
 	record: DecisionRecord;
 }
 
-export interface EvidenceOverview {
-	/** Display artifacts locate activity; sealed run records retain authority. */
-	recordings?: import("../dispatch/index.js").RecordingManifest[];
-	/** Recorded arguments resolved from verified runs on the linked active session path. */
-	decisions?: EvidenceDecision[];
-	version: 1;
-	evidenceId: string;
-	source: EvidenceSource;
-	generatedAt: string;
-	runIds: string[];
-	sessionId: string | null;
-	statuses: string[];
-	startedAt: string | null;
-	endedAt: string | null;
-	tasks: string[];
-	cwds: string[];
-	agentIds: string[];
-	targetIds: string[];
-	runtimeIds: string[];
-	modelIds: string[];
-	totals: EvidenceTotals;
-	tags: EvidenceTag[];
-	files: string[];
-	/**
-	 * Number of secret-shaped values replaced with `[redacted:<kind>]` across
-	 * the bundle's export surfaces (previews, transcript, receipts) at build
-	 * time. Additive field: older bundles simply lack it. Zero means the
-	 * patterns matched nothing; raw local session files are never touched.
-	 */
-	redactionCount?: number;
+/** A gate decision that judged the run by the time it settled. */
+export interface EvidenceVerdict {
+	decisionId: string;
+	digest: string;
+	outcome: string;
+	review: CanonicalTrustStatus["independentReview"]["state"];
 }
-
-export type EvidenceSeverity = "info" | "warn";
-
-export interface EvidenceFinding {
-	id: string;
-	severity: EvidenceSeverity;
-	tag: EvidenceTag;
-	runId: string | null;
-	message: string;
-}
-
-export interface EvidenceFindingsFile {
-	version: 1;
-	evidenceId: string;
-	findings: EvidenceFinding[];
-}
-
-export interface EvidenceGateDecisionsFile {
-	version: 1;
-	evidenceId: string;
-	decisions: GateDecisionArtifact[];
-}
-
-export interface EvidenceBuildResult {
-	evidenceId: string;
-	directory: string;
-	overview: EvidenceOverview;
-	findings: EvidenceFinding[];
-	trustStatus: EvidenceTrustStatusFile;
-	/** Total claims without matching commands, from runs whose seal verified only. */
-	ungroundedClaims: number;
-}
-
-export interface EvidenceInspectable {
-	overview: EvidenceOverview;
-	findings: EvidenceFinding[];
-	trustStatus: EvidenceTrustStatusView;
-}
-
-export interface EvidenceRunTrustStatus {
-	runId: string;
-	status: CanonicalTrustStatus;
-}
-
-/** Canonical per-run projection persisted by current evidence builders. */
-export interface EvidenceTrustStatusFile {
-	version: 1;
-	evidenceId: string;
-	projection: "canonical";
-	runs: EvidenceRunTrustStatus[];
-}
-
-/** Explicit compatibility result for a bundle built before the projection existed. */
-export interface HistoricalEvidenceTrustStatus {
-	version: 1;
-	evidenceId: string;
-	projection: "historical_format";
-	runs: [];
-}
-
-export type EvidenceTrustStatusView = EvidenceTrustStatusFile | HistoricalEvidenceTrustStatus;
-
-export interface EvidenceRunSource {
-	envelope: RunEnvelope;
-	/** The run's record through the read model when it settled; null when it has not. */
-	run: SettledRunRecord | null;
-	/** The run's record whether or not it settled; null with no run scope to read. */
-	record: RunTelemetryV1 | null;
-	/** Why the run's record is not evidence: not settled, unsealed, or a seal that did not verify. */
-	runError: string | null;
-	/** True when the run's seal was checked and did not verify. */
-	sealFailed: boolean;
-}
-
-export type EvidenceLinkConfidence = "exact" | "best-effort";
 
 /**
- * How a row's `runId` was derived. `entry-run-id` is the run id the producer
- * stamped on the record at write time and is exact. The others are timestamp
- * windowing, which is a fallback: concurrent runs share one clock, so their
- * windows overlap and containment cannot name an owner. A row inside more than
- * one window is `ambiguous-timestamp-window`, reports a null `runId`, and lists
- * every run it may belong to instead of picking one.
+ * One finished run's evidence, read from its run scope (#434): the seal's verdict, and under a verified seal the
+ * assessment its producer journaled before sealing. Nothing the mutable run ledger says reaches this view.
  */
-export interface EvidenceRunLink {
-	kind: "entry-run-id" | "timestamp-window" | "ambiguous-timestamp-window" | "no-run-window";
-	confidence: EvidenceLinkConfidence;
-	candidateRunIds?: string[];
-}
-
-export type EvidenceToolEventSource = "session-entry" | "audit-row" | "run-aggregate";
-
-export interface EvidenceToolEvent {
-	source: EvidenceToolEventSource;
-	runId: string | null;
+export interface RunEvidence {
+	runId: string;
 	sessionId: string | null;
-	tool: string;
-	count: number;
-	ok: number;
-	errors: number;
-	blocked: number;
-	totalDurationMs: number;
-	timestamp?: string;
-	toolCallId?: string;
-	linkKind?: string;
-	confidence?: EvidenceLinkConfidence;
-	decision?: string;
-	actionClass?: string;
-	argsPreview?: string;
-	resultPreview?: string;
-	/** How `runId` was derived. Present on events built from session ledger entries. */
-	runLink?: EvidenceRunLink;
+	integrity: RunIntegrity;
+	/** The assessment's axes with the seal's own integrity verdict; the run record's alone when not assessed. */
+	trust: CanonicalTrustStatus;
+	/** When the assessment was journaled; null when the run was never assessed or its seal does not verify. */
+	assessedAt: string | null;
+	settled: {
+		at: string;
+		startedAt: string;
+		endedAt: string;
+		agentId: string;
+		targetId: string;
+		runtimeId: string;
+		wireModelId: string;
+		outcome: string;
+		exitCode: number | null;
+	} | null;
+	firstPassSuccess: boolean | null;
+	failureCause: EvidenceTag | null;
+	/** Distinct finding tags, sorted. */
+	tags: EvidenceTag[];
+	findings: EvidenceFinding[];
+	verdicts: EvidenceVerdict[];
+	/** Provenance the sealed assessment records; null when it records none. */
+	provenance: RunProvenanceView | null;
+	decisions: EvidenceDecision[];
+	/** Claims of validation the run made without a matching command, from its settled record. */
+	ungroundedClaims: number;
+	/** Null unless the seal verifies: an unauthenticated record states no totals. */
+	totals: {
+		toolCalls: number;
+		toolErrors: number;
+		blockedToolCalls: number;
+		/** The run's folded quantities, with their coverage: a partially measured run keeps its known subtotal. */
+		tokens: Quantity;
+		usd: Quantity;
+		wallTimeMs: number;
+	} | null;
 }
-
-export interface EvidenceAuditLinkedRow {
-	kind: "audit-linked";
-	auditKind: string;
-	ts: string | null;
-	runId: string | null;
-	sessionId: string | null;
-	linkKind: string;
-	confidence: EvidenceLinkConfidence;
-	reasons: string[];
-	candidateRunIds?: string[];
-	row: Record<string, unknown>;
-}
-
-/** `run.json`: each run's settled record and seal verdict as the bundle read them. */
-export interface EvidenceRunFile {
-	version: 1;
-	runs: Array<{
-		runId: string;
-		settled: SettledRunRecord["settled"] | null;
-		seal: SettledRunRecord["seal"];
-		provenance: RunProvenanceView;
-	}>;
-}
-
-export interface EvidenceProtectedArtifactEvent {
-	kind: "protected-artifact";
-	sessionId: string;
-	runId: string | null;
-	timestamp: string;
-	turnId: string;
-	parentTurnId: string | null;
-	action: "protect";
-	artifact: ProtectedArtifact;
-	toolName?: string;
-	toolCallId?: string;
-	/** Run id the session ledger recorded on the entry itself at write time. */
-	sourceRunId?: string;
-	correlationId?: string;
-	/** How `runId` was derived. */
-	runLink?: EvidenceRunLink;
-}
-
-export interface EvidenceProtectedArtifactsFile {
-	version: 1;
-	artifacts: ProtectedArtifact[];
-	events: EvidenceProtectedArtifactEvent[];
-}
-
-export type EvidenceToolStat = ToolCallStat;

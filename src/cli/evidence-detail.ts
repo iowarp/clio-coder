@@ -8,7 +8,7 @@ import { evidenceDetailSnapshot } from "../domains/evidence/detail.js";
  * an id at a terminal is naming something on their own machine, which is a
  * different act from a browser frame naming it.
  */
-export async function runEvidenceDetail(evidenceId: string): Promise<number> {
-	process.stdout.write(`${JSON.stringify(await evidenceDetailSnapshot(evidenceId), null, 2)}\n`);
+export async function runEvidenceDetail(runId: string): Promise<number> {
+	process.stdout.write(`${JSON.stringify(await evidenceDetailSnapshot(runId), null, 2)}\n`);
 	return 0;
 }

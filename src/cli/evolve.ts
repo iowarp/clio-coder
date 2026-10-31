@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
-import { clioDataDir } from "../core/xdg.js";
-import { listEvidenceOverviews } from "../domains/evidence/index.js";
+import { clioStateDir } from "../core/xdg.js";
+import { listRunEvidence } from "../domains/evidence/index.js";
 import type { ChangeManifestSummary, ManifestValidationIssue } from "../domains/evolution/index.js";
 import {
 	createChangeManifestTemplate,
@@ -15,8 +15,8 @@ clio-coder evolve manifest validate <path>
 clio-coder evolve manifest summarize <path>
 
 Create, validate, or summarize a Clio Coder change manifest. validate and
-summarize resolve each non-empty evidenceRef (run-<id> / session-<id>) against
-the local evidence store, so a manifest that points at a missing bundle fails.
+summarize resolve each non-empty evidenceRef (a run id) against the local run
+scopes, so a manifest that points at a run with no sealed assessment fails.
 `;
 
 interface EvidenceRefResolver {
@@ -26,7 +26,7 @@ interface EvidenceRefResolver {
 }
 
 /**
- * Snapshot the local evidence-store bundle ids once and expose them as a pure
+ * Snapshot the local assessed run ids once and expose them as a pure
  * predicate the evolution validator can call without importing the evidence
  * domain. On any read failure the predicate rejects every ref and `resolvable`
  * is false, so the caller can warn that refs could not be checked rather than
@@ -35,8 +35,8 @@ interface EvidenceRefResolver {
 async function loadEvidenceRefResolver(): Promise<EvidenceRefResolver> {
 	let knownIds: Set<string>;
 	try {
-		const overviews = await listEvidenceOverviews(clioDataDir());
-		knownIds = new Set(overviews.map((overview) => overview.evidenceId));
+		const runs = await listRunEvidence(clioStateDir());
+		knownIds = new Set(runs.filter((run) => run.assessedAt !== null).map((run) => run.runId));
 	} catch {
 		return { resolveEvidenceRef: () => false, knownCount: 0, resolvable: false };
 	}
@@ -178,7 +178,7 @@ async function runSummarize(parsed: ParsedEvolveArgs): Promise<number> {
 
 function reportRefResolution(refCount: number, resolver: EvidenceRefResolver): void {
 	if (!resolver.resolvable) {
-		process.stdout.write("evidence refs: could not read the local evidence store; refs were not resolved\n");
+		process.stdout.write("evidence refs: could not read the local run scopes; refs were not resolved\n");
 		return;
 	}
 	if (refCount === 0) {
@@ -186,7 +186,7 @@ function reportRefResolution(refCount: number, resolver: EvidenceRefResolver): v
 		return;
 	}
 	process.stdout.write(
-		`evidence refs: ${formatCount(refCount, "ref")} resolved against ${formatCount(resolver.knownCount, "local bundle")}\n`,
+		`evidence refs: ${formatCount(refCount, "ref")} resolved against ${formatCount(resolver.knownCount, "assessed run")}\n`,
 	);
 }
 

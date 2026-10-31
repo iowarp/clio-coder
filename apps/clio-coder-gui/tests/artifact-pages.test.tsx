@@ -16,7 +16,7 @@ register(
 		'export async function load(url, context, next) { return url.endsWith(".css") ? { format: "module", source: "", shortCircuit: true } : next(url, context); }',
 	)}`,
 );
-const { CollectedEvidence, EvidencePage } = await import("../client/pages/evidence.js");
+const { EvidencePage } = await import("../client/pages/evidence.js");
 const { FleetPage } = await import("../client/pages/fleet.js");
 
 const client = { token: "t", call: () => new Promise(() => {}) } as unknown as Client;
@@ -39,12 +39,12 @@ function listed(staleTime: number) {
 				items: [
 					{
 						verdict: "grounded",
-						overview: {
-							evidenceId: "evidence-007",
-							generatedAt: "2026-09-24T00:00:00.000Z",
-							tasks: [],
-							totals: { runs: 1, receipts: 1 },
-							quantities: {},
+						run: {
+							runId: "evidence-007",
+							agentId: null,
+							settledAt: "2026-09-24T00:00:00.000Z",
+							tags: [],
+							quantities: null,
 						},
 					},
 				],
@@ -64,12 +64,6 @@ test("the evidence list offers its links only while no refresh can have narrowed
 	assert.match(refreshing, /evidence-007/);
 	assert.doesNotMatch(refreshing, /href="\/evidence\/evidence-007"/);
 	assert.match(refreshing, /<button type="button" disabled="">Load older evidence<\/button>/);
-});
-
-test("newly collected evidence is named, never linked to its unlisted detail", () => {
-	const html = render(new QueryClient(), <CollectedEvidence id="evidence-new" />);
-	assert.match(html, /<code>evidence-new<\/code>/);
-	assert.doesNotMatch(html, /href=/);
 });
 
 test("both fleet lists offer links only while settled, and render nothing after a failed refresh", () => {
@@ -137,7 +131,7 @@ test("evidence discovery restores URL filters and detail navigation excludes lau
 	assert.doesNotMatch(filtered, /href="[^"]*token=/);
 	assert.match(filtered, /name="q" value="evidence-007"/);
 	const noMatch = render(queries, <EvidencePage client={client} />, "/evidence?q=missing");
-	assert.match(noMatch, /No loaded bundle matches these filters/);
+	assert.match(noMatch, /No loaded run matches these filters/);
 	assert.doesNotMatch(noMatch, /href="\/evidence\/evidence-007/);
 });
 
@@ -211,13 +205,13 @@ test("artifact pages distinguish missing stores from present empty history", () 
 		if (present) {
 			assert.match(fleet, /recorded no fleet run/);
 			assert.match(fleet, /recorded no dispatch run/);
-			assert.match(evidence, /recorded no evidence bundle/);
+			assert.match(evidence, /recorded no settled run/);
 			assert.doesNotMatch(fleet + evidence, /missing store/);
 		} else {
 			assert.match(fleet, /no fleet history store/);
 			assert.match(fleet, /no dispatch ledger store/);
 			assert.match(evidence, /no evidence inventory store/);
-			assert.doesNotMatch(fleet + evidence, /recorded no (fleet run|dispatch run|evidence bundle)/);
+			assert.doesNotMatch(fleet + evidence, /recorded no (fleet run|dispatch run|settled run)/);
 		}
 	}
 });

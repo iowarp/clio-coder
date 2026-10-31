@@ -10,6 +10,8 @@ import { readWorkerTelemetryFrame } from "../../core/telemetry/forwarder.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { StructuralRunFeedBody } from "../../core/telemetry/schemas.js";
 import { RUN_FEED_EVENTS, RUN_FEED_OUTCOMES } from "../../core/telemetry/schemas.js";
+import { clioStateDir } from "../../core/xdg.js";
+import type { RunAssessmentContext } from "../evidence/assessment.js";
 import type { CallJournal } from "../telemetry/call-journal.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
 import type { RunSettlement } from "./run-settlement.js";
@@ -144,8 +146,38 @@ async function completeRunJournal(directory: string, settlement: RunSettlement |
 			throw error;
 		}
 	}
+	// A host that died after run.settled left no assessment; recovery assesses what the journal holds (#434).
+	if (!read.records.some(({ record }) => record.k === "evidence.assessed"))
+		await journalAssessment(writer, directory, context, settlement?.assessment ?? null);
 	// The recovered terminal is the run's terminal, so it seals the run scope (#434).
 	await sealAndClose(writer);
+}
+
+/**
+ * Journal the run's assessment after its run.settled and before its seal, so the seal covers it (#434). Best effort:
+ * a run whose assessment cannot be built or stored still seals, and readers see it as not assessed.
+ */
+async function journalAssessment(
+	writer: CallJournal,
+	directory: string,
+	context: RunOwnerTelemetryContext,
+	assessment: RunAssessmentContext | null,
+): Promise<void> {
+	try {
+		await writer.flush();
+		const [{ readCallJournal }, { gatherRunAssessment }] = await Promise.all([
+			import("../telemetry/call-journal.js"),
+			import("../evidence/index.js"),
+		]);
+		const records = (await readCallJournal(directory)).records.map(({ record }) => record);
+		const assessed = await gatherRunAssessment(clioStateDir(), context.runId, records, assessment);
+		if (assessed === null) return;
+		const text = await writer.storeObject("evidence-findings", assessed.text);
+		if (!telemetryHub().emit("evidence.assessed", { runId: context.runId, ...assessed.data, text }, context))
+			throw new Error("assessment record refused");
+	} catch {
+		writeDiagnostic("[clio-coder:telemetry] run assessment could not be journaled; the run seals without one\n");
+	}
 }
 
 /** Seal a run scope at its terminal and close its writer; a seal that did not land rejects after the close (#434). */
@@ -335,6 +367,9 @@ async function openOwnedRunTelemetry(
 				const after = writer.health();
 				if (after.writeErrors > before.writeErrors || after.invalid > before.invalid)
 					throw new Error("run.settled was not persisted");
+				// The assessment is best-effort: a run whose assessment fails still seals, without one.
+				await journalAssessment(writer, directory, context, settlement.assessment ?? null);
+				await writer.flush();
 			})().catch((error: unknown) => {
 				// A settlement that did not land leaves the scope unsealed; a later settle may try again.
 				settled = false;

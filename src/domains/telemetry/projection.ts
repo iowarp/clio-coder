@@ -13,7 +13,7 @@ import { normalizeTokenUsage } from "../../core/token-split.js";
  *   of DispatchProgress events coalesces into one notification.
  * - Worker progress retains only bounded answer text and redacted action
  *   descriptors. Tool arguments and reasoning are never stored.
- * - Terminal history and notices are bounded; active runs remain until settlement.
+ * - Terminal history is bounded; active runs remain until settlement.
  */
 
 import { resolveDispatchFailureStatus } from "../../core/dispatch-outcome.js";
@@ -28,8 +28,6 @@ import { summarizeTrustStatus } from "../evidence/trust-projection.js";
 import { type CostProvenance, resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import type {
-	TelemetryNotice,
-	TelemetryRunEvidence,
 	TelemetryRunProjection,
 	TelemetryRunReaders,
 	TelemetryRunSummary,
@@ -40,8 +38,6 @@ import { createWorkerProgressFold, type WorkerProgressFold } from "./worker-prog
 
 /** Settled run summaries retained, in addition to all active runs. */
 export const MAX_PROJECTION_RUNS = 50;
-/** Recent notices retained across all kinds. */
-export const MAX_PROJECTION_NOTICES = 100;
 /** Debounce for coalescing listener notifications, in milliseconds. */
 export const PROJECTION_FLUSH_DEBOUNCE_MS = 16;
 
@@ -56,10 +52,6 @@ export interface TelemetryProjection extends TelemetryRunProjection {
 	subscribe(listener: (snapshot: TelemetrySnapshot) => void): () => void;
 	/** Recompute after a direct session mutation (resetSession/throughput). */
 	refresh(): void;
-	/** A forensic evidence build for `runId` has started. */
-	evidenceBuildStarted(runId: string): void;
-	/** The evidence build for `runId` failed; surface a bounded notice. */
-	evidenceBuildFailed(runId: string, message: string): void;
 	/** Detach bus listeners and cancel any pending flush. */
 	stop(): void;
 }
@@ -84,15 +76,6 @@ function resolveHeartbeat(status: unknown): TelemetryRunSummary["status"] | null
 	if (status === "stale") return "stale";
 	if (status === "dead") return "dead";
 	return null;
-}
-
-/** Build a notice ref from candidate parts, dropping anything non-string/empty. */
-function makeRef(parts: Record<string, unknown>): TelemetryNotice["ref"] | undefined {
-	const ref: Record<string, string> = {};
-	for (const [key, value] of Object.entries(parts)) {
-		if (typeof value === "string" && value.length > 0) ref[key] = value;
-	}
-	return Object.keys(ref).length > 0 ? (ref as TelemetryNotice["ref"]) : undefined;
 }
 
 interface RunEntry extends TelemetryRunSummary {
@@ -273,8 +256,6 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 	const terminalHistory = new Set<string>();
 	const fleetPhases = new Map<string, NonNullable<TelemetryRunSummary["phase"]>>();
 	let runReaders: TelemetryRunReaders = deps;
-	const notices: TelemetryNotice[] = [];
-	const pendingEvidence = new Set<string>();
 
 	const listeners = new Set<(snapshot: TelemetrySnapshot) => void>();
 	let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -292,8 +273,6 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 					progress: progressFold.snapshot(),
 				});
 			}),
-			notices: [...notices],
-			pendingEvidenceBuildRunIds: [...pendingEvidence],
 		};
 	}
 
@@ -401,25 +380,6 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 		if (payload.costSummary !== undefined) summary.costSummary = payload.costSummary as CostAggregate;
 	}
 
-	function pushNotice(
-		kind: TelemetryNotice["kind"],
-		level: TelemetryNotice["level"],
-		message: string,
-		ref?: TelemetryNotice["ref"],
-	): void {
-		const notice: TelemetryNotice = {
-			kind,
-			level,
-			message,
-			...(ref ? { ref } : {}),
-		};
-		notices.push(notice);
-		if (notices.length > MAX_PROJECTION_NOTICES) {
-			notices.splice(0, notices.length - MAX_PROJECTION_NOTICES);
-		}
-		markChanged();
-	}
-
 	function settleFromReceipt(summary: RunEntry): void {
 		delete summary.resultContract;
 		try {
@@ -498,13 +458,6 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			changed = true;
 		}
 		if (changed) markChanged();
-	}
-
-	function evidenceBuildSucceeded(runId: string, evidence: TelemetryRunEvidence): void {
-		pendingEvidence.delete(runId);
-		const summary = runs.get(runId);
-		if (summary) summary.evidence = { evidenceId: evidence.evidenceId };
-		markChanged();
 	}
 
 	const unsubscribes: Array<() => void> = [
@@ -659,8 +612,10 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 			markChanged();
 		}),
 		bus.subscribe("evidence.assessed", (payload) => {
-			const runId = asRunId(payload?.runId);
-			if (runId) evidenceBuildSucceeded(runId, payload);
+			const summary = runs.get(asRunId(payload?.runId) ?? "");
+			if (!summary) return;
+			summary.evidence = { firstPassSuccess: payload.firstPassSuccess, findingCount: payload.findings.length };
+			markChanged();
 		}),
 	];
 
@@ -693,23 +648,6 @@ export function createTelemetryProjection(bus: TelemetryHub, deps: ProjectionRea
 		},
 		refresh() {
 			markChanged();
-		},
-		evidenceBuildStarted(runId) {
-			if (typeof runId !== "string" || runId.length === 0) return;
-			pendingEvidence.add(runId);
-			markChanged();
-		},
-		evidenceBuildFailed(runId, message) {
-			pendingEvidence.delete(runId);
-			// A failed build is an error. The dispatch board reads only error-level
-			// evidence notices as a failed proof, so the warning this used to raise
-			// left the board's failed state unreachable.
-			pushNotice(
-				"evidence",
-				"error",
-				message.length > 0 ? message : `evidence build failed for ${runId}`,
-				makeRef({ runId }),
-			);
 		},
 		stop() {
 			for (const off of unsubscribes) off();
