@@ -2,8 +2,6 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { test } from "node:test";
-import type { SessionEntry } from "../../src/domains/session/entries.js";
-import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { createCostTracker } from "../../src/domains/telemetry/cost.js";
 import { appendOutOfTurnUsageRow, readOutOfTurnUsageRows } from "../../src/domains/telemetry/out-of-turn-usage.js";
 import { completeEngineText, streamSimple } from "../../src/engine/ai.js";
@@ -109,21 +107,6 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 			});
 			strictEqual(completion.usage.cacheWrite1h, long);
 			strictEqual(completion.usage.costUsd, usage.cost.total);
-			for (const stopReason of ["stop", "error", "aborted"]) {
-				const calls = ledgerUsageCalls([
-					{
-						kind: "message",
-						role: "assistant",
-						turnId: "fixture",
-						parentTurnId: null,
-						timestamp: new Date(0).toISOString(),
-						payload: { ...assistant, stopReason },
-					} as SessionEntry,
-				]);
-				strictEqual(calls.length, 1, "reported spend survives terminal failure");
-				strictEqual(calls[0]?.cacheWrite1h, long);
-				strictEqual(calls[0]?.totalTokens, 10100);
-			}
 			const side = sideQuestionUsage(usage);
 			ok(side);
 			const tracker = createCostTracker();

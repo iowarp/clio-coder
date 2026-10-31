@@ -1,28 +1,20 @@
 /**
- * Session accounting prefers linked call-journal facts, including retries. Old
- * ledger rows remain a compatibility input until explicitly imported (#434).
- * Model-change entries retain their attribution for that legacy path.
+ * Session accounting reads linked call-journal facts only, retries included (#434). The ledger is the conversation:
+ * it says which calls a branch's turns made, and never what they used or cost, so a call no journal holds is not
+ * measured.
  */
 
-import { messageUsageForAccounting } from "../../core/message-accounting.js";
-
-import {
-	attributedModelId,
-	type ResponseModelIdObservation,
-	responseModelIdObservationFromRecord,
-} from "../../core/response-model-id.js";
+import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
-import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
-import { resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import type { CostAggregate, CostEntryLabel } from "../telemetry/cost.js";
 import type { CallTotals } from "../telemetry/folds.js";
 import { foldCallJournal, foldCalls } from "../telemetry/folds.js";
 import type { SessionEntry } from "./entries.js";
 import { journalOwnsSideUsage, usageCallsFromJournal } from "./journal-usage.js";
 
-/** One attempt projected from the journal, or a legacy ledger usage row (#434). */
+/** One attempt projected from the journal (#434). */
 export interface LedgerUsageCall {
 	runId?: string;
 	runJournalUnavailable?: boolean;
@@ -60,40 +52,20 @@ export interface LedgerUsageCall {
 
 /** The target and model a session ran under before any modelChange row. */
 export interface SessionUsageDefaults {
-	/** The state root whose telemetry journal holds `sessionId`'s calls; without it the ledger alone folds. */
+	/** The state root whose telemetry journal holds `sessionId`'s calls; without it nothing is measured. */
 	journalStateDir?: string;
 	target?: string | null;
 	model?: string | null;
 	sessionId?: string | null;
 }
 
-function numberAt(source: Record<string, unknown>, key: string): number {
-	const value = source[key];
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
-}
-
-function stringAt(source: Record<string, unknown>, ...keys: string[]): string | null {
-	for (const key of keys) {
-		const value = source[key];
-		if (typeof value === "string" && value.trim().length > 0) return value;
-	}
-	return null;
-}
-
 /**
- * One entry per completed assistant API call that carried provider usage.
- *
- * Attribution follows the live path, which records under the *target* id and
- * the wire model rather than the runtime name. Reading the runtime out of the
- * payload instead split one endpoint into two blocks in `/cost`, so a single
- * `node-a` target on `llamacpp` rendered as two providers whose turn counts
- * diverged with every resume. `modelChange` rows are replayed in order so a
- * session that switched targets mid-way attributes each call to the active
- * target.
+ * The journal's attempts for the calls the supplied (active-path) entries link: an assistant message's call, a
+ * checkpoint's calls, plus side calls the journal owns and main calls whose turn is on the path but whose message a
+ * crash lost. An entry whose call no journal holds contributes nothing (#434).
  */
 export function ledgerUsageCalls(
 	entries: ReadonlyArray<SessionEntry>,
-	defaults: SessionUsageDefaults = {},
 	journal: ReadonlyArray<TelemetryRecord> = [],
 ): LedgerUsageCall[] {
 	const calls: LedgerUsageCall[] = [];
@@ -107,140 +79,27 @@ export function ledgerUsageCalls(
 		journalCalls.set(call.callId, group);
 	}
 	const projected = new Set<string>();
-	let currentTarget = defaults.target ?? null;
-	let currentModel = defaults.model ?? null;
-	for (const entry of entries) {
-		// Checkpoints link their calls; older checkpoints retain an aggregate fallback (#434).
-		if (entry?.kind === "compactionSummary") {
-			if (entry.callIds?.length && entry.callIds.every((id) => journalCalls.has(id))) {
-				for (const id of entry.callIds) {
-					if (!projected.has(id)) calls.push(...(journalCalls.get(id) ?? []));
-					projected.add(id);
-				}
-				continue;
-			}
-			// If any referenced facts are missing, the legacy aggregate substitutes for the whole group (#434).
-			for (const id of entry.callIds ?? []) projected.add(id);
-			const usage = entry.usage;
-			if (!usage) continue;
-			calls.push({
-				providerId: usage.targetId ?? currentTarget ?? "unknown",
-				attributedModelId: usage.modelId ?? currentModel ?? "unknown",
-				requestedModelId: usage.modelId ?? currentModel ?? "unknown",
-				responseModelIdObservation: { state: "not-observed" },
-				input: usage.input,
-				output: usage.output,
-				cacheRead: usage.cacheRead,
-				cacheWrite: usage.cacheWrite,
-				...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
-				reasoningTokens: usage.reasoning,
-				totalTokens: usage.totalTokens,
-				costUsd: usage.cost.total,
-				label: "compaction",
-				...(usage.missingTokenCalls ? { missingTokenCalls: usage.missingTokenCalls } : {}),
-				costProvenance: resolveCostProvenance(usage.costProvenance, usage.cost.total > 0 ? "estimated" : "unknown"),
-				// A split turn runs two summarization streams under one entry; the
-				// provider served that many calls even though one row records them.
-				apiCalls: Math.max(1, Math.round(usage.apiCalls)),
-			});
-			continue;
-		}
-		if (entry?.kind === "modelChange") {
-			const change = entry as { target?: unknown; modelId?: unknown; provider?: unknown };
-			if (typeof change.target === "string" && change.target.length > 0) currentTarget = change.target;
-			else if (typeof change.provider === "string" && change.provider.length > 0) currentTarget = change.provider;
-			if (typeof change.modelId === "string" && change.modelId.length > 0) currentModel = change.modelId;
-			continue;
-		}
-		if (entry?.kind !== "message" || entry.role !== "assistant") continue;
-		const payload = entry.payload;
-		if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
-		const record = payload as Record<string, unknown>;
-		if (typeof record.callId === "string" && journalCalls.has(record.callId)) {
-			if (!projected.has(record.callId)) calls.push(...(journalCalls.get(record.callId) ?? []));
-			projected.add(record.callId);
-			continue;
-		}
-		const rawUsage = messageUsageForAccounting(record);
-		if (!rawUsage || typeof rawUsage !== "object" || Array.isArray(rawUsage)) {
-			if (
-				typeof record.callId === "string" &&
-				!projected.has(record.callId) &&
-				record.callInvoked !== false &&
-				(record.failure as { invoked?: boolean } | undefined)?.invoked !== false
-			) {
-				projected.add(record.callId);
-				calls.push({
-					callId: record.callId,
-					providerId: currentTarget ?? stringAt(record, "provider", "api") ?? "unknown",
-					requestedModelId: currentModel ?? stringAt(record, "model") ?? "unknown",
-					attributedModelId: "unknown",
-					responseModelIdObservation: { state: "not-observed" },
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					reasoningTokens: 0,
-					totalTokens: 0,
-					apiCalls: 0,
-					missingTokenCalls: 0,
-					costUsd: 0,
-					costProvenance: "unknown",
-					costSummary: {
-						knownUsd: 0,
-						hasEstimated: false,
-						hasUnknown: true,
-						allKnownFree: false,
-						calls: 0,
-						unknownCallCoverageRuns: 1,
-					},
-				});
-			}
-			continue;
-		}
-		const usage = rawUsage as Record<string, unknown>;
-		if (usage.callInvoked === false || (record.failure as { invoked?: boolean } | undefined)?.invoked === false) continue;
-		const { input, output, cacheRead, cacheWrite, totalTokens, reasoning, observed } = normalizeTokenUsage(usage);
-		const cost = usage.cost;
-		const costUsd =
-			usage.estimated !== true && cost && typeof cost === "object"
-				? numberAt(cost as Record<string, unknown>, "total")
-				: 0;
-		const requestedModelId = currentModel ?? stringAt(record, "model") ?? "unknown";
-		const differingResponseModelId = stringAt(record, "responseModel");
-		const responseModelIdObservation = responseModelIdObservationFromRecord(record, "legacy-difference-only");
-		calls.push({
-			...(typeof record.callId === "string" ? { callId: record.callId } : {}),
-			providerId: stringAt(usage, "targetId") ?? currentTarget ?? stringAt(record, "provider", "api") ?? "unknown",
-			attributedModelId: attributedModelId(responseModelIdObservation, requestedModelId, differingResponseModelId),
-			requestedModelId,
-			responseModelIdObservation,
-			input,
-			output,
-			cacheRead,
-			cacheWrite,
-			...(typeof usage.cacheWrite1h === "number" ? { cacheWrite1h: numberAt(usage, "cacheWrite1h") } : {}),
-			reasoningTokens: reasoning,
-			totalTokens,
-			costUsd,
-			costProvenance:
-				usage.estimated !== true
-					? resolveCostProvenance(usage.costProvenance, costUsd > 0 ? "estimated" : "unknown")
-					: "unknown",
-			...(!observed ? { missingTokenCalls: 1 } : {}),
-		});
-	}
-	const sideIds = new Set(
-		journal.flatMap((row) =>
-			(row.k === "call.started" || row.k === "call.settled") && journalOwnsSideUsage(row.data.label)
-				? [row.data.callId]
-				: [],
-		),
-	);
-	for (const id of sideIds) if (!projected.has(id)) calls.push(...(journalCalls.get(id) ?? []));
-	for (const id of orphanMainCallIds(entries, journal))
-		if (!projected.has(id)) calls.push(...(journalCalls.get(id) ?? []));
+	const project = (id: string) => {
+		if (projected.has(id)) return;
+		projected.add(id);
+		calls.push(...(journalCalls.get(id) ?? []));
+	};
+	for (const id of linkedCallIds(entries)) if (journalCalls.has(id)) project(id);
+	for (const row of journal)
+		if ((row.k === "call.started" || row.k === "call.settled") && journalOwnsSideUsage(row.data.label))
+			project(row.data.callId);
+	for (const id of orphanMainCallIds(entries, journal)) project(id);
 	return calls;
+}
+
+/** Call ids the entries link, in ledger order: a checkpoint's calls, then each assistant message's call. */
+function linkedCallIds(entries: ReadonlyArray<SessionEntry>): string[] {
+	return entries.flatMap((entry) => {
+		if (entry.kind === "compactionSummary") return entry.callIds ?? [];
+		if (entry.kind !== "message" || entry.role !== "assistant") return [];
+		const callId = (entry.payload as { callId?: unknown } | null)?.callId;
+		return typeof callId === "string" ? [callId] : [];
+	});
 }
 
 /**
@@ -271,57 +130,30 @@ function orphanMainCallIds(entries: ReadonlyArray<SessionEntry>, journal: Readon
 	return orphans;
 }
 
-/** Never-sent rows stay outside spending, but remain visible in coverage (#430). */
+/** Never-sent calls stay outside spending, but remain visible in coverage (#430). */
 export function ledgerCallFailureCounts(
 	entries: ReadonlyArray<SessionEntry>,
 	journal: ReadonlyArray<TelemetryRecord> = [],
 	seen?: Set<string>,
 ) {
-	const linked = new Set(
-		entries.flatMap((entry) => {
-			if (entry.kind === "compactionSummary") return entry.callIds ?? [];
-			if (entry.kind !== "message" || entry.role !== "assistant") return [];
-			const callId = (entry.payload as { callId?: unknown } | null)?.callId;
-			return typeof callId === "string" ? [callId] : [];
-		}),
-	);
+	const linked = new Set(linkedCallIds(entries));
 	for (const row of journal) {
 		if ((row.k === "call.started" || row.k === "call.settled") && journalOwnsSideUsage(row.data.label))
 			linked.add(row.data.callId);
 	}
 	for (const id of orphanMainCallIds(entries, journal)) linked.add(id);
-	const folded = foldCallJournal(journal, linked);
-	const projected = new Set(folded.attempts.map(({ started }) => started.callId));
-	const unique = folded.attempts.filter(({ started }) => {
+	const unique = foldCallJournal(journal, linked).attempts.filter(({ started }) => {
 		if (seen?.has(started.attemptId)) return false;
 		seen?.add(started.attemptId);
 		return true;
 	});
-	let invokedUnknownCalls = unique.filter(
+	const invokedUnknownCalls = unique.filter(
 		(attempt) =>
 			attempt.settled !== null &&
 			attempt.settled.disposition !== "never_sent" &&
 			foldCalls([attempt]).totalTokens.unknownCount > 0,
 	).length;
-	let neverInvokedCalls = foldCalls(unique).neverSent;
-	for (const entry of entries) {
-		if (entry.kind !== "message" || entry.role !== "assistant") continue;
-		const payload = entry.payload as {
-			callId?: string;
-			usage?: Record<string, unknown> | null;
-			callInvoked?: boolean;
-			failure?: { invoked?: boolean };
-		} | null;
-		if (payload?.callId && projected.has(payload.callId)) continue;
-		const key = `legacy:${payload?.callId ?? entry.turnId}`;
-		if (seen?.has(key)) continue;
-		seen?.add(key);
-		const usage = payload?.usage;
-		if (payload?.callInvoked === false || usage?.callInvoked === false || payload?.failure?.invoked === false)
-			neverInvokedCalls += 1;
-		else if (usage && !normalizeTokenUsage(usage).observed) invokedUnknownCalls += 1;
-	}
-	return { invokedUnknownCalls, neverInvokedCalls };
+	return { invokedUnknownCalls, neverInvokedCalls: foldCalls(unique).neverSent };
 }
 
 /** Coverage labels preserve the distinction between unknown and never sent (#430). */

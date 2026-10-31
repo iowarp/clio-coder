@@ -25,7 +25,6 @@ import {
 	resolveContinuityProjection,
 } from "../../src/domains/session/continuity/projection.js";
 import { isSessionEntry, SESSION_ENTRY_KINDS, type SessionEntry } from "../../src/domains/session/entries.js";
-import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { CURRENT_SESSION_FORMAT_VERSION } from "../../src/engine/session.js";
 
 /**
@@ -325,34 +324,6 @@ describe("continuity readers", () => {
 		const once = resolveContinuityProjection({ entries: readyLedger(), sessionId: SESSION, nowMs: PREPARED_AT + 1_000 });
 		strictEqual(continuityProjectionTokens(projection), continuityProjectionTokens(once));
 		strictEqual(continuityReplayBlocks(projection).length, 1);
-	});
-
-	it("keeps continuity out of billed usage and charges a carrying summary's own call once", () => {
-		const summary = carryingSummary("h1-summary") as unknown as Record<string, unknown>;
-		const billed = ledgerUsageCalls(
-			[
-				tx("h1-prep", null, 0, 0, { phase: "prepared", accepted: NOTE, policy: policy() }),
-				commitEntry(),
-				{
-					...summary,
-					usage: {
-						targetId: "t",
-						modelId: "m",
-						input: 10,
-						output: 5,
-						cacheRead: 0,
-						cacheWrite: 0,
-						reasoning: 0,
-						totalTokens: 15,
-						cost: { total: 0.1 },
-						apiCalls: 1,
-					},
-				} as unknown as SessionEntry,
-			],
-			{},
-		);
-		strictEqual(billed.length, 1);
-		strictEqual(billed[0]?.totalTokens, 15);
 	});
 
 	it("round-trips both kinds and a carry through the tolerant archive reader", () => {

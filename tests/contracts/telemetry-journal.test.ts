@@ -566,7 +566,7 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 				payload: { callId: call.callId, usage: { input: 999, output: 999, totalTokens: 1998 } },
 			},
 		];
-		deepStrictEqual(ledgerUsageCalls([...ledger, ...ledger], {}, rows), projected);
+		deepStrictEqual(ledgerUsageCalls([...ledger, ...ledger], rows), projected);
 		deepStrictEqual(ledgerCallFailureCounts([...ledger, ...ledger], rows), {
 			invokedUnknownCalls: 0,
 			neverInvokedCalls: 1,
@@ -1546,12 +1546,10 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 		const entries = [entry(inheritedId, "turn"), entry(childId, "child-turn")];
 		const parentCalls = ledgerUsageCalls(
 			entries.slice(0, 1),
-			{},
 			readSessionCallJournalSync(root, "parent", entries).records.map(({ record }) => record),
 		);
 		const childCalls = ledgerUsageCalls(
 			entries,
-			{},
 			readSessionCallJournalSync(root, "child", entries).records.map(({ record }) => record),
 		);
 		strictEqual(
@@ -1571,12 +1569,13 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 		ok(unavailable.skipped > 0);
 		const remaining = ledgerUsageCalls(
 			entries,
-			{},
 			unavailable.records.map(({ record }) => record),
 		);
-		const inherited = remaining.find((call) => call.callId === inheritedId);
-		strictEqual(inherited?.apiCalls, 0);
-		strictEqual(inherited?.costSummary?.unknownCallCoverageRuns, 1);
+		// With the parent's journal gone the inherited call is not measured; the ledger supplies no stand-in (#434).
+		strictEqual(
+			remaining.find((call) => call.callId === inheritedId),
+			undefined,
+		);
 		strictEqual(
 			remaining.reduce((sum, call) => sum + call.totalTokens, 0),
 			11,
@@ -1669,11 +1668,11 @@ test("a crash-orphaned main call counts only when its user turn is on the active
 		payload: { text: "go" },
 	});
 	deepStrictEqual(
-		ledgerUsageCalls([user("user-1")], {}, rows).map((row) => row.callId),
+		ledgerUsageCalls([user("user-1")], rows).map((row) => row.callId),
 		[callId],
 		"the settled call survives the lost assistant message",
 	);
-	deepStrictEqual(ledgerUsageCalls([user("other-branch")], {}, rows), [], "another branch's turn keeps its own calls");
+	deepStrictEqual(ledgerUsageCalls([user("other-branch")], rows), [], "another branch's turn keeps its own calls");
 });
 
 test("usage report discovers a standalone run journal that has no session and no receipt (#434)", async () => {

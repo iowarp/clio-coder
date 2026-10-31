@@ -379,7 +379,7 @@ describe("production compaction controls", () => {
 			else await f.run();
 			strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 0);
 			const journal = await f.journal();
-			const calls = ledgerUsageCalls(f.entries(), {}, journal);
+			const calls = ledgerUsageCalls(f.entries(), journal);
 			strictEqual(calls.length, f.calls.length);
 			strictEqual(calls.length, f.liveUsage.length);
 			strictEqual(
@@ -391,7 +391,6 @@ describe("production compaction controls", () => {
 			if (outcome === "committed") {
 				const incomplete = ledgerUsageCalls(
 					f.entries(),
-					{},
 					journal.filter((row) => row.k !== "compaction.settled"),
 				);
 				ok(incomplete.every((call) => call.compactionOutcome === "unknown" && call.label === "compaction"));
@@ -1009,13 +1008,6 @@ describe("production compaction controls", () => {
 		ok(key);
 		strictEqual(f.calls[0]?.capacity[key], 1);
 		strictEqual(foregroundStreamUsage()[key] ?? 0, 0);
-		const usage = ledgerUsageCalls(f.entries(), { target: "chat-target", model: "chat" });
-		strictEqual(usage.length, 1);
-		strictEqual(usage[0]?.providerId, "summary-target");
-		strictEqual(usage[0]?.requestedModelId, "summary");
-		strictEqual(usage[0]?.attributedModelId, "summary");
-		deepStrictEqual(usage[0]?.responseModelIdObservation, { state: "not-observed" });
-		strictEqual(usage[0]?.apiCalls, f.calls.length);
 		const persisted = f.entries().find((entry) => entry.kind === "compactionSummary");
 		ok(persisted?.kind === "compactionSummary");
 		strictEqual(persisted.usage?.targetId, "summary-target");
@@ -1240,7 +1232,7 @@ describe("production compaction controls", () => {
 			[{ callIds: journalCalls.map((row) => row.data.callId), outcome: "failed", checkpointTurnId: null }],
 		);
 		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 0);
-		const calls = ledgerUsageCalls(f.entries(), {}, await f.journal());
+		const calls = ledgerUsageCalls(f.entries(), await f.journal());
 		const rows = failedCompactionUsageFromCalls(calls);
 		const summary = summarizeFailedCompactionUsage(rows);
 		strictEqual(summary.calls, 2);
@@ -1271,7 +1263,7 @@ describe("production compaction controls", () => {
 		};
 		await rejects(f.run(), /fixture stream error/);
 		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 0);
-		const rows = failedCompactionUsageFromCalls(ledgerUsageCalls(f.entries(), {}, await f.journal()));
+		const rows = failedCompactionUsageFromCalls(ledgerUsageCalls(f.entries(), await f.journal()));
 		strictEqual(rows.length, 1);
 		// Rows carry pricing provenance again (5996f82c6); a null cost reads as unknown.
 		deepStrictEqual(rows[0]?.usage, {
@@ -1489,7 +1481,7 @@ describe("production compaction controls", () => {
 		};
 		await rejects(f.run(), /post-append failure/);
 		strictEqual((await f.journalOutcomes())[0]?.data.outcome, "committed");
-		strictEqual(ledgerUsageCalls(f.entries()).length, 1);
+		strictEqual(ledgerUsageCalls(f.entries(), await f.journal()).length, 1);
 		strictEqual(readOutOfTurnUsageRows(clioStateDir()).rows.length, 0);
 	});
 	it("reports ambiguous checkpoint persistence without a speculative second accounting write", async () => {
@@ -1607,10 +1599,10 @@ describe("production compaction controls", () => {
 		});
 	}
 	it("keeps successful compaction usage solely on its checkpoint", async () => {
-		const f = fixture(true);
+		const f = fixture(true, true, true);
 		await f.run();
 		strictEqual(f.calls.length, 1);
-		strictEqual(ledgerUsageCalls(f.entries()).length, 1);
+		strictEqual(ledgerUsageCalls(f.entries(), await f.journal()).length, 1);
 		deepStrictEqual(readOutOfTurnUsageRows(clioStateDir()), { rows: [], errors: [] });
 	});
 	it("escapes operator-note delimiters and preserves their value across compactions without model echoes", async () => {
@@ -1681,21 +1673,6 @@ describe("production compaction controls", () => {
 		match(secondPrompt, /fixture checkpoint/);
 		doesNotMatch(secondPrompt, /abandoned/);
 	});
-	it("keeps legacy checkpoint usage attributed to its active chat route", async () => {
-		const f = fixture();
-		await f.run();
-		const entries = f.entries();
-		for (const entry of entries) {
-			if (entry.kind !== "compactionSummary" || !entry.usage) continue;
-			delete entry.usage.targetId;
-			delete entry.usage.modelId;
-		}
-		f.state.writer.replaceEntries(entries);
-		const usage = ledgerUsageCalls(f.entries(), { target: "legacy-target", model: "legacy-model" });
-		strictEqual(usage[0]?.providerId, "legacy-target");
-		strictEqual(usage[0]?.attributedModelId, "legacy-model");
-		deepStrictEqual(usage[0]?.responseModelIdObservation, { state: "not-observed" });
-	});
 	it("sends the custom prompt and route through both split-turn streams", async () => {
 		const f = fixture();
 		f.settings.context.compaction.model = "summary-target/summary";
@@ -1716,9 +1693,6 @@ describe("production compaction controls", () => {
 			strictEqual(call.systemPrompt, "split summary instructions");
 			match(call.user, /<operator-instructions>(?:\n|\\n)focus stays in user message(?:\n|\\n)<\/operator-instructions>/);
 		}
-		const usage = ledgerUsageCalls(f.entries());
-		strictEqual(usage[0]?.apiCalls, 2);
-		strictEqual(usage[0]?.providerId, "summary-target");
 		const entry = f.entries().find((entry) => entry.kind === "compactionSummary");
 		ok(entry?.kind === "compactionSummary");
 		strictEqual(entry.trigger, "force");

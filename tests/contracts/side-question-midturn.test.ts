@@ -183,7 +183,7 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 			live.map((call) => [call.callId, call.attemptId]),
 		);
 		assert.deepEqual(
-			ledgerUsageCalls([], {}, records),
+			ledgerUsageCalls([], records),
 			usageCallsFromAttempts(live.map((settled) => ({ started: settled, settled }))),
 		);
 		assert.equal(ledgerCallFailureCounts([], records).neverInvokedCalls, 1);
@@ -196,13 +196,13 @@ test("side rounds journal schema retries once and preserve never-sent admission 
 			Date.parse("2026-01-02T00:00:00.000Z"),
 			Date.parse("2026-01-03T00:00:00.000Z"),
 		);
-		assert.equal(ledgerUsageCalls([], {}, inWindow).length, 2);
+		assert.equal(ledgerUsageCalls([], inWindow).length, 2);
 		const outside = journalUsageWindow(
 			shifted,
 			Date.parse("2026-01-03T00:00:00.000Z"),
 			Date.parse("2026-01-04T00:00:00.000Z"),
 		);
-		assert.equal(ledgerUsageCalls([], {}, outside).length, 0);
+		assert.equal(ledgerUsageCalls([], outside).length, 0);
 		assert.equal(calls[0]?.data.callId, calls[1]?.data.callId);
 		assert.notEqual(calls[0]?.data.attemptId, calls[1]?.data.attemptId);
 		assert.equal(calls[1]?.data.attempt, 1);

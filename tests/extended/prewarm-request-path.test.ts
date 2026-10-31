@@ -217,7 +217,7 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 		strictEqual(result.attemptId, calls[0]?.data.attemptId);
 		strictEqual(live.length, 2);
 		deepStrictEqual(
-			ledgerUsageCalls([], {}, records),
+			ledgerUsageCalls([], records),
 			usageCallsFromAttempts(live.map((settled) => ({ started: settled, settled }))),
 		);
 		strictEqual(ledgerCallFailureCounts([], records).neverInvokedCalls, 1);

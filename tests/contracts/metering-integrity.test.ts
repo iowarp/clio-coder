@@ -8,8 +8,7 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
-import { ledgerUsageCalls, type SessionEntry } from "../../src/domains/session/index.js";
-import { ledgerCallFailureCounts } from "../../src/domains/session/usage.js";
+import type { SessionEntry } from "../../src/domains/session/index.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { callCoverageForRun, createCostTracker, renderCostAggregate } from "../../src/domains/telemetry/cost.js";
 import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js";
@@ -134,7 +133,7 @@ describe("contracts/metering integrity", () => {
 		}
 	});
 
-	it("keeps provider usage immutable while accounting reads separate annotations and legacy rows", () => {
+	it("keeps provider usage immutable while accounting reads separate annotations", () => {
 		for (const reported of [zeroUsage, { ...zeroUsage, input: 10, output: 3, totalTokens: 13 }]) {
 			const usage = Object.freeze({ ...reported, cost: Object.freeze({ ...reported.cost }) });
 			const message = {
@@ -160,23 +159,6 @@ describe("contracts/metering integrity", () => {
 			strictEqual(projected.targetId, "selected-target");
 			projected.input = 999;
 			strictEqual(usage.input, reported.input);
-			// Old ledgers persisted the annotations beside usage, and older ones inside it; both still read alike.
-			const accounting = (message as unknown as { callAccounting: Record<string, unknown> }).callAccounting;
-			const entry = assistant("immutable", "aborted", usage, { ...payload, callAccounting: accounting });
-			const calls = ledgerUsageCalls([entry]);
-			strictEqual(calls[0]?.providerId, "selected-target");
-			strictEqual(calls[0]?.totalTokens, reported.totalTokens);
-			const legacy = assistant(
-				"legacy",
-				"aborted",
-				{ ...usage, ...accounting, callInvoked: true },
-				{ responseModelIdObservation: payload.responseModelIdObservation },
-			);
-			strictEqual(calls[0]?.callId, "call-fixture");
-			deepStrictEqual(
-				ledgerUsageCalls([legacy]).map((call) => ({ ...call, callId: "call-fixture" })),
-				calls,
-			);
 		}
 		for (const source of [
 			"message.usage.input = 0;",
@@ -282,34 +264,6 @@ describe("contracts/metering integrity", () => {
 		strictEqual(tracker.entries().length, 0);
 	});
 
-	it("attributes provider usage to the target and the model that answered", () => {
-		const [call] = ledgerUsageCalls(
-			[
-				assistant(
-					"a1",
-					"stop",
-					{
-						input: 120,
-						output: 30,
-						cacheRead: 80,
-						cacheWrite: 5,
-						totalTokens: 235,
-						cost: { total: 0.25 },
-					},
-					{ provider: "llamacpp", model: "requested-model", responseModel: "answering-model" },
-				),
-			],
-			{ target: "local-cluster", model: "requested-model" },
-		);
-
-		strictEqual(call?.providerId, "local-cluster");
-		strictEqual(call?.requestedModelId, "requested-model");
-		strictEqual(call?.attributedModelId, "answering-model");
-		strictEqual(call?.totalTokens, 235);
-		strictEqual(call?.cacheRead, 80);
-		strictEqual(call?.costUsd, 0.25);
-	});
-
 	it("estimates spent prompt and streamed output when cancellation prevents final usage", () => {
 		const message = {
 			role: "assistant",
@@ -372,20 +326,6 @@ describe("contracts/metering integrity", () => {
 			messages: [{ ...message, usage: zeroUsage, callInvoked: false }],
 		}) as { usage: { missingTokenCalls?: number } };
 		strictEqual(frame.usage.missingTokenCalls ?? 0, 0);
-		const unknown = assistant("unknown", "aborted", { ...zeroUsage, callInvoked: true });
-		for (const neverSent of [
-			assistant("never-sent", "aborted", usage),
-			assistant("never-sent-failure", "aborted", zeroUsage, {
-				failure: { invoked: false, stage: "admission", errorClass: "aborted", httpStatus: null },
-			}),
-		]) {
-			deepStrictEqual(ledgerUsageCalls([neverSent]), []);
-			deepStrictEqual(ledgerUsageCalls([unknown, neverSent]), ledgerUsageCalls([unknown]));
-			deepStrictEqual(ledgerCallFailureCounts([unknown, neverSent]), {
-				invokedUnknownCalls: 1,
-				neverInvokedCalls: 1,
-			});
-		}
 		const { contract: telemetry, extension } = createTelemetryBundle({ bus: createTelemetryHub() } as DomainContext);
 		try {
 			const entries: SessionEntry[] = [];
@@ -423,15 +363,6 @@ describe("contracts/metering integrity", () => {
 			strictEqual(telemetry.snapshot().session.tokens.apiCalls ?? 0, 0);
 			strictEqual(telemetry.snapshot().session.cost.calls, 0);
 			deepStrictEqual(telemetry.costEntries(), []);
-			for (let resume = 0; resume < 2; resume += 1) {
-				reseedSessionUsageFromLedger(telemetry, [unknown, ...entries]);
-				const snapshot = telemetry.snapshot();
-				strictEqual(snapshot.session.tokens.neverSentCalls, 3);
-				strictEqual(snapshot.session.tokens.missingTokenCalls, 1);
-				strictEqual(snapshot.session.tokens.apiCalls, 1);
-				strictEqual(snapshot.session.tokens.totalTokens, 0);
-				strictEqual(snapshot.session.cost.calls, 1);
-			}
 			reseedSessionUsageFromLedger(telemetry, []);
 			strictEqual(telemetry.snapshot().session.tokens.neverSentCalls ?? 0, 0);
 		} finally {
@@ -530,55 +461,6 @@ describe("contracts/metering integrity", () => {
 		strictEqual(resolveReservedOutputTokens(131_072), 32_768);
 		strictEqual(resolveReservedOutputTokens(4_096), 4_096);
 		strictEqual(resolveReservedOutputTokens(null), 32_768);
-	});
-
-	it("reseeds reported spend including aborted calls, with missing-call coverage for placeholders and estimates", () => {
-		let resets = 0;
-		const recorded: Array<{ provider: string; model: string; tokens: number; missing: number }> = [];
-		const completed = {
-			input: 100,
-			output: 20,
-			cacheRead: 30,
-			cacheWrite: 0,
-			totalTokens: 150,
-			cost: { total: 0.1 },
-		};
-		reseedSessionUsageFromLedger(
-			{
-				resetSession: () => {
-					resets += 1;
-				},
-				recordTokens: (provider, model, tokens, _cost, breakdown) =>
-					recorded.push({ provider, model, tokens, missing: breakdown?.missingTokenCalls ?? 0 }),
-			},
-			[
-				assistant("unobserved", "aborted", {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { total: 0 },
-				}),
-				assistant("aborted", "aborted", completed, { provider: "llamacpp", responseModel: "model-a" }),
-				assistant(
-					"estimated",
-					"aborted",
-					{ ...completed, estimated: true },
-					{ provider: "llamacpp", responseModel: "model-a" },
-				),
-				assistant("complete", "stop", completed, { provider: "llamacpp", responseModel: "model-a" }),
-			],
-			{ target: "local-cluster", model: "model-a" },
-		);
-
-		strictEqual(resets, 1);
-		deepStrictEqual(recorded, [
-			{ provider: "local-cluster", model: "model-a", tokens: 0, missing: 1 },
-			{ provider: "local-cluster", model: "model-a", tokens: 150, missing: 0 },
-			{ provider: "local-cluster", model: "model-a", tokens: 0, missing: 1 },
-			{ provider: "local-cluster", model: "model-a", tokens: 150, missing: 0 },
-		]);
 	});
 });
 

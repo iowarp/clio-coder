@@ -183,7 +183,7 @@ describe("System One paid requests: admission and accounting", () => {
 		strictEqual(settled.length, 3);
 		strictEqual(neverSent(), 1);
 		strictEqual(rows().length, 0, "owned calls do not write duplicate legacy usage rows");
-		const replayed = ledgerUsageCalls([], {}, settled);
+		const replayed = ledgerUsageCalls([], settled);
 		deepStrictEqual(
 			charges.map((charge) => [charge.tokens, charge.costUsd, charge.provenance]),
 			replayed.map((call) => [call.totalTokens, call.costUsd, call.costProvenance]),

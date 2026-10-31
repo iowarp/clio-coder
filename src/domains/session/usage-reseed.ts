@@ -1,5 +1,5 @@
 /**
- * Rebuild the running usage totals from a session's own ledger.
+ * Rebuild the running usage totals from a session's journal, scoped by its ledger.
  *
  * The `/usage` overlay and the footer both render one process-lifetime
  * accumulator, and only `startNewSession` ever reset it. Resuming did not, so a
@@ -9,9 +9,9 @@
  * and sent nothing reported zero for a session holding tens of thousands of
  * tokens on disk.
  *
- * The fold itself is `ledgerUsageCalls` in the session domain, which owns the
- * ledger and serves `clio-coder usage report` from the same function. This module is
- * only the sink wiring between that fold and the telemetry projection.
+ * The fold itself is `ledgerUsageCalls` in the session domain: the journal's
+ * calls that the ledger's active path links. This module is only the sink
+ * wiring between that fold and the telemetry projection.
  */
 
 import { writeDiagnostic } from "../../core/diagnostics.js";
@@ -28,9 +28,8 @@ import { recordUsageCall } from "./usage-record.js";
 export type { SessionUsageSink } from "./usage-record.js";
 
 /**
- * Clear the running totals and replay the supplied session's recorded calls
- * into them. Safe to call with an empty ledger: the totals reset to zero, which
- * is the honest answer for a session that has spent nothing.
+ * Clear the running totals and replay the supplied session's journaled calls
+ * into them. A session with no journal resets to nothing measured.
  *
  * `activeLeafTurnId` scopes the fold to one branch, through the same
  * `filterEntriesToActivePath` the transcript replays through. current.jsonl is
@@ -55,13 +54,13 @@ export function reseedSessionUsageFromLedger(
 			if (journal.skipped || journal.damaged)
 				writeDiagnostic("[clio-coder:telemetry] session usage journal has skipped or damaged records\n");
 		} catch {
-			// Reset onto this session's ledger even when its optional journal cannot be read (#434).
-			writeDiagnostic("[clio-coder:telemetry] session usage journal unavailable; using legacy ledger coverage\n");
+			// Reset even when the journal cannot be read: the session then reads as not measured (#434).
+			writeDiagnostic("[clio-coder:telemetry] session usage journal unavailable; usage not measured\n");
 		}
 	}
 	sink.resetSession(defaults.sessionId);
 	const records = journal?.records.map(({ record }) => record);
 	sink.recordNeverSentCalls?.(ledgerCallFailureCounts(scoped, records).neverInvokedCalls);
-	for (const call of ledgerUsageCalls(scoped, defaults, records)) recordUsageCall(sink, call, true);
+	for (const call of ledgerUsageCalls(scoped, records)) recordUsageCall(sink, call, true);
 	if (journal) for (const call of usageCallsFromRunJournals(journal.runs)) recordUsageCall(sink, call, true);
 }
