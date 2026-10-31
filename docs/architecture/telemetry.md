@@ -22,7 +22,7 @@ Code that writes, folds or renders telemetry follows these rules.
 | R12 Readers tolerate | A reader skips and counts a record kind or version it does not know, and never renames or deletes a store another version wrote. `route-history.json` is the one documented exception: a file older than version 3 is set aside ([Artifact Versions](artifact-versions.md)). |
 | R13 The emit path is cheap | Recording a fact is one allocation and a ring-buffer push, with no filesystem access, serialization or locks. The writer batches, redacts and writes later. The boundary check `checkTelemetryProducer` enforces this for [producer.ts](../../src/core/telemetry/producer.ts). |
 
-The read-model contract tests run lie detectors (L1, L2, L3, L5, L9) over every quantity a DTO carries; the detectors live in `tests/harness/telemetry-lies.ts`.
+The read-model contract tests run the lie detectors of #434 §13.1 over every DTO: L1, L2, L3, L5 and L9 over each quantity it carries, and L4 (a cache verdict without its tokens), L6 (unmeasured read as false), L7 (an amount off the shared pricing policy), L8 (a hash without its R7 label) and L10 (a cause outside its closed vocabulary) over its structure. The detectors live in `tests/harness/telemetry-lies.ts`.
 
 ## Glossary
 

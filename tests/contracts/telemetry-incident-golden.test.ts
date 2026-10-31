@@ -27,7 +27,7 @@ import {
 	sessionTelemetry,
 	whyStopped,
 } from "../../src/domains/observability/read-model.js";
-import { quantitiesOf, telemetryLies } from "../harness/telemetry-lies.js";
+import { dtoLies } from "../harness/telemetry-lies.js";
 
 const FIXTURE = new URL("../fixtures/telemetry/golden/vccap2ywu7n8/", import.meta.url).pathname;
 const SESSION = "vccap2ywu7n8";
@@ -254,6 +254,6 @@ test("no DTO over the golden tells a lie the detectors know (§13.1)", () => {
 		whyStopped: whyStopped(source),
 		runs: runsReport(source),
 	})) {
-		deepStrictEqual(telemetryLies(quantitiesOf(dto)), [], name);
+		deepStrictEqual(dtoLies(dto), [], name);
 	}
 });

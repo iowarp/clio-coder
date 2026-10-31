@@ -2,8 +2,10 @@
  * P3 lie detectors over the read model (#434 §13.1): the golden P0 ledger, imported with stable ids, builds every
  * session DTO, and every quantity in them must hold L1 (unknown never zero), L2 (never-sent carries nothing), L3 (a
  * partial sum is never a total), L5 (every number resolves through explain to the same fact) and L9 (absent is
- * neither unknown nor zero). The detectors live in tests/harness/telemetry-lies.ts so the GUI route tests run the
- * same ones over the DTOs they serve.
+ * neither unknown nor zero). Their structure must hold L4 (a cache verdict shows its tokens), L6 (unmeasured never
+ * reads false), L7 (every amount priced by the shared policy), L8 (every hash R7-labelled) and L10 (every cause from
+ * its closed vocabulary). The detectors live in tests/harness/telemetry-lies.ts so the GUI route tests run the same
+ * ones over the DTOs they serve.
  */
 import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -54,10 +56,15 @@ import { loadRunTelemetrySource, loadSessionTelemetrySource } from "../../src/do
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import {
 	absentRenderedOtherwise,
+	costsOffPolicy,
+	freeTextClassifiers,
 	quantitiesOf,
 	unknownRenderedAsTotal,
+	unlabelledHashes,
 	unmarkedEstimates,
+	unmeasuredRenderedAsFalse,
 	unparsableRefs,
+	verdictsWithoutTokens,
 } from "../harness/telemetry-lies.js";
 import { telemetryCall } from "../harness/telemetry-view.js";
 
@@ -118,6 +125,42 @@ test("L2 and L9: a never-sent call carries no usage, and absent renders as not a
 	strictEqual(calls[0]?.usage, null);
 	strictEqual("kind" in (calls[0]?.usd.fact ?? {}) ? (calls[0]?.usd.fact as { kind: string }).kind : null, "absent");
 	deepStrictEqual(absentRenderedOtherwise(all), []);
+});
+
+test("L4, L6, L7, L8 and L10: every DTO's labels, booleans, prices, hashes and causes hold, and each detector catches its lie", () => {
+	for (const [name, , dto] of dtos) {
+		deepStrictEqual(verdictsWithoutTokens(dto), [], name);
+		deepStrictEqual(unmeasuredRenderedAsFalse(dto), [], name);
+		deepStrictEqual(costsOffPolicy(dto), [], name);
+		deepStrictEqual(unlabelledHashes(dto), [], name);
+		deepStrictEqual(freeTextClassifiers(dto), [], name);
+	}
+	const unknown = { fact: { kind: "unknown", reason: "not-observed" }, display: "unknown", ref: "x" };
+	const measured = (value: number, source = "provider") => ({
+		fact: { kind: "measured", value, source },
+		display: String(value),
+		ref: "x",
+	});
+	strictEqual(verdictsWithoutTokens({ cache: { verdict: "cold", uncachedPrefill: unknown } }).length, 1);
+	deepStrictEqual(verdictsWithoutTokens({ entry: { cacheVerdict: "hot", tokens: measured(40) } }), []);
+	strictEqual(unmeasuredRenderedAsFalse({ reused: { fact: unknown.fact, display: "false" } }).length, 1);
+	strictEqual(costsOffPolicy({ call: { usd: measured(0.4), pricedBy: "catalog" } }).length, 1);
+	deepStrictEqual(costsOffPolicy({ call: { usd: measured(0, "local-count"), pricedBy: "free" } }), []);
+	const sum = { measured: 0.4, estimated: 0, unknownCount: 0, absentCount: 0 };
+	const fold = { ...sum, coverage: { measured: 2, estimated: 0, unknown: 0 } };
+	const pricing = { provider: 1, "target-rates": 0, catalog: 1, free: 0, none: 0 };
+	strictEqual(
+		costsOffPolicy({ total: { usd: { fact: fold, display: "$0.40", ref: "x" }, pricedBy: pricing } }).length,
+		1,
+	);
+	strictEqual(unlabelledHashes({ config: { settingsFingerprint: "a".repeat(64) } }).length, 1);
+	const ref = { label: "resolvable", function: "sha256", canonicalization: "json-sorted-v1", subject: "config" };
+	deepStrictEqual(unlabelledHashes({ settings: { ...ref, id: `obj_${"a".repeat(64)}` } }), []);
+	strictEqual(freeTextClassifiers({ byCause: [{ cause: "the provider said no" }] }).length, 1);
+	deepStrictEqual(
+		freeTextClassifiers({ byCause: [{ cause: "unattributed", expectedColdReasons: ["compaction"] }] }),
+		[],
+	);
 });
 
 test("live equals CLI: the live model folds exactly the batches a cold read of the same journal holds (#434 §11)", {
