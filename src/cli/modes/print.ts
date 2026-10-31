@@ -1,24 +1,43 @@
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { messageUsageForAccounting } from "../../core/message-accounting.js";
+import { readClioVersion } from "../../core/package-root.js";
 import {
 	addResponseModelIdObservationCounts,
 	emptyResponseModelIdObservationCounts,
 } from "../../core/response-model-id.js";
 import { withRunOverrides } from "../../core/run-overrides.js";
-import type { PendingSkillRequest } from "../../core/skill-activation.js";
+import {
+	type PendingSkillRequest,
+	type SkillActivation,
+	skillActivationFromToolDetails,
+} from "../../core/skill-activation.js";
+import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
+import { workerAgent } from "../../core/telemetry/context.js";
 import type { CallRowV1, Quantity } from "../../core/telemetry/dto.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
+import { clioStateDir } from "../../core/xdg.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
-import { runStatusForOutcome } from "../../domains/dispatch/outcome.js";
+import { mainAgentTerminalReason, runStatusForOutcome } from "../../domains/dispatch/outcome.js";
+import {
+	createRunResultQuality,
+	deriveReceiptVerification,
+	typedValidationFactsFromVerifyCalls,
+	type VerifyCallOutcome,
+	verifyCheckIdentity,
+} from "../../domains/dispatch/receipt-findings.js";
+import { finishRunResult } from "../../domains/dispatch/run-settlement.js";
+import { openRunTelemetry } from "../../domains/dispatch/run-telemetry.js";
 import { newRunId, openLedger } from "../../domains/dispatch/state.js";
 import type {
+	RunEnvelope,
 	RunKind,
 	RunOutcome,
 	RunResultCostCap,
+	RunResultDraft,
 	RunResultSafetySummary,
 	RunStatus,
 	SafetyBlockedAttempt,
@@ -30,6 +49,8 @@ import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import type { CostAmount } from "../../domains/telemetry/cost.js";
 import { aggregateCostAmounts } from "../../domains/telemetry/cost.js";
+import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
+import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
@@ -208,6 +229,9 @@ interface HeadlessMainAgentRunStats {
 	toolRounds: ToolRoundRecord[];
 	toolStats: Map<string, ToolCallStat>;
 	pendingCapabilities: Map<string, string>;
+	pendingVerifyCalls: Map<string, string | null>;
+	verifyCalls: VerifyCallOutcome[];
+	skillActivations: SkillActivation[];
 	usage: RunUsageSummary | null;
 	costAmounts: CostAmount[];
 	/** The decision axis, counted the way a worker's settled run counts it. */
@@ -361,6 +385,8 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (event.type === "tool_execution_start") {
 		const call = effectiveToolCall(event.toolName, event.args);
 		stats.pendingCapabilities.set(event.toolCallId, call.toolName);
+		if (call.toolName === ToolNames.Verify)
+			stats.pendingVerifyCalls.set(event.toolCallId, verifyCheckIdentity(call.args));
 		return;
 	}
 	if (event.type !== "tool_execution_end") return;
@@ -370,6 +396,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	// session history retain the real aggregate call/result pair.
 	for (const child of gatewayChainReceipts(event.toolName, event.result)) {
 		const toolCallId = `${event.toolCallId}:${child.id}`;
+		if (child.capability === ToolNames.Verify) stats.pendingVerifyCalls.set(toolCallId, verifyCheckIdentity(child.args));
 		recordToolEnd(stats, {
 			type: "tool_execution_end",
 			toolCallId,
@@ -385,6 +412,20 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (durationMs !== undefined) stat.totalDurationMs += durationMs;
 	// Registry settlement is authoritative; legacy producers only expose isError.
 	const outcome = (event as { outcome?: unknown }).outcome;
+	if (tool === ToolNames.Verify) {
+		stats.verifyCalls.push({
+			check: stats.pendingVerifyCalls.get(event.toolCallId) ?? null,
+			outcome:
+				outcome === "ok" || outcome === "error" || outcome === "blocked"
+					? outcome
+					: outcome === undefined
+						? event.isError
+							? "error"
+							: "ok"
+						: null,
+		});
+		stats.pendingVerifyCalls.delete(event.toolCallId);
+	}
 	if (outcome === "blocked") stat.blocked += 1;
 	else if (outcome === "error") stat.errors += 1;
 	else if (outcome === "ok") stat.ok += 1;
@@ -485,6 +526,15 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS && !terminating) stats.mutatingSucceeded += 1;
 	if (outcome === "ok" && tool === ToolNames.Dispatch)
 		stats.mergedTaskWorktrees += mergedTaskWorktreeCount(event.result);
+	if (tool === ToolNames.Context) {
+		const rawTurnId = (event as { turnId?: unknown }).turnId;
+		const turnId = typeof rawTurnId === "string" ? rawTurnId : undefined;
+		const activation = skillActivationFromToolDetails(
+			(event.result as { details?: unknown } | undefined)?.details,
+			turnId,
+		);
+		if (activation) stats.skillActivations.push(activation);
+	}
 }
 
 function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSummary {
@@ -610,9 +660,21 @@ interface HeadlessTerminalOutcome {
 	outcomeDetail?: string;
 }
 
+function sortedToolStats(stats: Map<string, ToolCallStat>): ToolCallStat[] {
+	return [...stats.values()].sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
+}
+
+function countToolStats(stats: Map<string, ToolCallStat>): number {
+	let count = 0;
+	for (const stat of stats.values()) count += stat.count;
+	return count;
+}
+
 /**
- * The main-agent run's ledger row. Its record is the session journal's turn and session facts; a main-agent run
- * settles no run result of its own (#434).
+ * Settle the main-agent run the way dispatch settles a worker (#434): one result built with its run.settled, the
+ * record made durable and the run scope sealed, and only then the ledger row published terminal, so `fleet verify`
+ * and `fleet view` read a finished run the same way whoever ran it. A settlement that does not land publishes the row
+ * failed with the reason, as a dispatch finalization failure does.
  */
 async function recordHeadlessMainAgentRun(input: {
 	runId: string;
@@ -636,9 +698,18 @@ async function recordHeadlessMainAgentRun(input: {
 	const reasoningTokenCount = usage?.reasoning ?? 0;
 	const costUsd = usage?.costUsd ?? 0;
 	const cost = aggregateCostAmounts(input.stats.costAmounts);
+	const costProvenance =
+		cost.calls === 0 || cost.hasUnknown
+			? "unknown"
+			: cost.hasEstimated
+				? "estimated"
+				: cost.allKnownFree
+					? "known_free"
+					: "known";
 	const { exitCode, outcome, status } = input.terminal;
 	const outcomeDetail = input.terminal.outcomeDetail ?? input.terminal.failureMessage;
 	const outcomeCode = outcome === "failed" ? snapshot.outcomeCode : undefined;
+	const sessionId = snapshot.sessionId ?? input.chat.getSessionId();
 	const ledger = openLedger();
 	const envelope = ledger.create({
 		id: input.runId,
@@ -650,7 +721,7 @@ async function recordHeadlessMainAgentRun(input: {
 		wireModelId: snapshot.wireModelId,
 		runtimeId: snapshot.runtimeId,
 		runtimeKind: snapshot.runtimeKind,
-		sessionId: snapshot.sessionId ?? input.chat.getSessionId(),
+		sessionId,
 		cwd: snapshot.cwd,
 	});
 	const lineage = {
@@ -659,7 +730,7 @@ async function recordHeadlessMainAgentRun(input: {
 		attempt: 0,
 		depth: 0,
 	};
-	const updated = ledger.update(envelope.id, {
+	const terminalPatch: Partial<RunEnvelope> = {
 		startedAt: input.startedAt,
 		endedAt: input.endedAt,
 		status,
@@ -681,8 +752,102 @@ async function recordHeadlessMainAgentRun(input: {
 		costUsd,
 		promptSignature: snapshot.promptSignature,
 		toolSignature: snapshot.toolSignature,
-	});
-	if (!updated) return;
+	};
+	const toolStats = sortedToolStats(input.stats.toolStats);
+	const typedValidations = typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls);
+	const draft: RunResultDraft = {
+		runId: envelope.id,
+		cwd: snapshot.cwd,
+		agentId: "main-agent",
+		executionRole: "builder",
+		requestOrigin: "user",
+		task: input.task,
+		targetId: snapshot.targetId,
+		wireModelId: snapshot.wireModelId,
+		runtimeId: snapshot.runtimeId,
+		runtimeKind: snapshot.runtimeKind,
+		outcome,
+		outcomeDetail,
+		...(outcomeCode === undefined ? {} : { outcomeCode }),
+		lineage,
+		// Host checks belong to this run, independently of any worker it dispatched.
+		verification: deriveReceiptVerification({ toolStats, typedValidations }),
+		routingIntent: {
+			posture: "manual",
+			maxCostUsd: null,
+			deadlineMs: null,
+			minimumQuality: null,
+			requiredCapabilities: [],
+			locality: "any",
+			failover: "none",
+		},
+		quality: createRunResultQuality({ runtimeEnforceable: false, enforcementPassed: null, typedValidations }),
+		costProvenance,
+		startedAt: input.startedAt,
+		endedAt: input.endedAt,
+		exitCode,
+		...(input.terminal.failureMessage !== null ? { failureMessage: input.terminal.failureMessage } : {}),
+		tokenCount,
+		apiCalls: usage?.apiCalls ?? 0,
+		...(input.stats.toolRounds.length > 0 ? { toolRounds: input.stats.toolRounds } : {}),
+		missingTokenCalls: usage?.missingTokenCalls ?? 0,
+		costSummary: cost,
+		inputTokenCount,
+		outputTokenCount,
+		cacheReadTokenCount,
+		cacheWriteTokenCount,
+		reasoningTokenCount,
+		costUsd,
+		compiledPromptHash: snapshot.compiledPromptHash,
+		staticCompositionHash: snapshot.staticCompositionHash,
+		promptSignature: snapshot.promptSignature,
+		toolSignature: snapshot.toolSignature,
+		clioCoderVersion: readClioVersion(),
+		piMonoVersion: readPiMonoVersion(),
+		platform: process.platform,
+		nodeVersion: process.version,
+		toolCalls: countToolStats(input.stats.toolStats),
+		toolStats,
+		skillActivations: input.stats.skillActivations,
+		autonomy: snapshot.autonomy,
+		// Recorded on every main-agent run, flag or no flag, so a driver can apply its own no-op rule to a run that
+		// exited 0.
+		safety: {
+			decisions: { ...input.stats.decisions },
+			blockedAttempts: [...input.stats.blockedAttempts],
+			...(input.stats.blockedAttemptsTruncated > 0
+				? { blockedAttemptsTruncated: input.stats.blockedAttemptsTruncated }
+				: {}),
+		},
+		noop: headlessNoop(input.stats),
+		...(input.costCap !== undefined ? { costCap: input.costCap } : {}),
+		...(snapshot.runtimeResolution ? { runtimeResolution: snapshot.runtimeResolution } : {}),
+		terminalReason: mainAgentTerminalReason(outcome).terminalReason,
+		sessionId,
+	};
+	try {
+		// The run's model calls are journaled in its session; its run scope holds the terminal record and the seal.
+		const context: WorkerTelemetryContext =
+			sessionId === null
+				? { sessionId: null, runId: envelope.id, agent: workerAgent(envelope.id) }
+				: { sessionId, runId: envelope.id, agent: workerAgent(envelope.id) };
+		const journal = await openRunTelemetry(context, telemetryRunDirectory(clioStateDir(), envelope.id));
+		try {
+			const finished = finishRunResult(
+				draft,
+				{ ...envelope, ...terminalPatch },
+				{ terminal: mainAgentTerminalReason(outcome), processExitCode: null, frameType: null, usage: undefined },
+			);
+			await journal.settle(finished.settlement);
+		} finally {
+			await journal.close();
+		}
+		ledger.update(envelope.id, terminalPatch);
+	} catch (error) {
+		const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
+		process.stderr.write(`clio-coder run: run record write failed: ${detail}\n`);
+		ledger.update(envelope.id, { ...terminalPatch, status: "failed", outcome: "failed", outcomeDetail: detail });
+	}
 	await ledger.persist();
 }
 
@@ -716,6 +881,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		toolRounds: [],
 		toolStats: new Map<string, ToolCallStat>(),
 		pendingCapabilities: new Map(),
+		pendingVerifyCalls: new Map(),
+		verifyCalls: [],
+		skillActivations: [],
 		usage: null,
 		costAmounts: [],
 		decisions: { allowed: 0, blocked: 0, permissionRequested: 0 },

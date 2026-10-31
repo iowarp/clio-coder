@@ -165,3 +165,26 @@ export function resolveRunTerminalReason(
 	if (evidence.permissionFailure || evidence.exitCode !== 0) return { terminalReason: "worker_failed" };
 	return { terminalReason: "completed" };
 }
+
+/**
+ * How a headless main-agent run ended, from its resolved outcome alone: it has no worker loop evidence, and its turn
+ * deadline is the only bound it runs under (#434).
+ */
+export function mainAgentTerminalReason(outcome: RunOutcome): ResolvedTerminalReason {
+	switch (outcome) {
+		case "succeeded":
+			return { terminalReason: "completed" };
+		case "canceled":
+			return { terminalReason: "cancelled_by_operator" };
+		case "timed_out":
+			return { terminalReason: "bound_reached", boundKind: "time" };
+		case "stalled":
+			return { terminalReason: "stalled" };
+		case "denied_by_policy":
+			return { terminalReason: "denied_by_policy" };
+		case "spawn_failed":
+			return { terminalReason: "spawn_error" };
+		case "failed":
+			return { terminalReason: "worker_failed" };
+	}
+}
