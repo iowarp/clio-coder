@@ -49,8 +49,21 @@ function header(path: string, size: number, mtime: number): Buffer {
 	return block;
 }
 
+/**
+ * The uncompressed tar size `entries` pack to: a header and padded body per member, then the end-of-archive blocks.
+ * A share checks it before writing, so it never writes an archive its own reader refuses (#434).
+ */
+export function telemetryArchiveSize(entries: ReadonlyArray<{ bytes: { length: number } }>): number {
+	let size = BLOCK * 2;
+	for (const entry of entries) size += BLOCK + Math.ceil(entry.bytes.length / BLOCK) * BLOCK;
+	return size;
+}
+
 /** One gzipped ustar stream holding `entries` in order, every member stamped with `mtime` (epoch seconds). */
 export function packTelemetryArchive(entries: ReadonlyArray<ShareArchiveEntry>, mtime: number): Buffer {
+	const size = telemetryArchiveSize(entries);
+	if (size > MAX_SHARE_ARCHIVE_BYTES)
+		throw new Error(`archive would expand to ${size} bytes, past the ${MAX_SHARE_ARCHIVE_BYTES}-byte limit`);
 	const parts: Buffer[] = [];
 	for (const entry of entries) {
 		parts.push(header(entry.path, entry.bytes.length, mtime), entry.bytes);
@@ -90,7 +103,14 @@ export function unpackTelemetryArchive(archive: Buffer): ShareArchiveEntry[] {
 	let offset = 0;
 	while (offset + BLOCK <= tar.length) {
 		const block = tar.subarray(offset, offset + BLOCK);
-		if (block.every((byte) => byte === 0)) return entries;
+		if (block.every((byte) => byte === 0)) {
+			// Bytes past the end-of-archive blocks, a second tar appended or a second gzip member, are outside the
+			// manifest and every check; only zero padding may follow (#434).
+			if (offset + BLOCK * 2 > tar.length) throw new Error("archive ends without its second end-of-archive block");
+			if (!tar.subarray(offset + BLOCK).every((byte) => byte === 0))
+				throw new Error(`archive holds bytes after its end-of-archive blocks at ${offset}`);
+			return entries;
+		}
 		let sum = 0;
 		for (const [index, byte] of block.entries()) sum += index >= 148 && index < 156 ? 0x20 : byte;
 		if (Number.parseInt(field(block, 148, 8).trim(), 8) !== sum)
