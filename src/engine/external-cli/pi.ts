@@ -200,7 +200,7 @@ export const PI_CLI_CONNECTOR: JsonlCliConnector = {
 			const rawUsage = cliEventRecord(message.usage);
 			observeUsage(
 				{
-					usage: { ...rawUsage, costProvenance: "estimated" },
+					usage: { ...rawUsage, pricedBy: "catalog" },
 					coverage: "complete",
 					costEstimateMethod: "peer-report",
 					// Pi's message usage is normalized before JSONL; its zero placeholders prove no measurement (#434).

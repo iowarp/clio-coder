@@ -56,29 +56,29 @@ export function externalUsageFacts(
 	const usage = Object.fromEntries(fields.map((key) => [key, token(key)])) as CallUsage;
 	const cost = record(raw.cost).total ?? raw.costUsd;
 	const usd =
-		raw.costProvenance === "unknown" ||
+		raw.pricedBy === "none" ||
 		external.cost === "missing" ||
 		external.cost === "unverified" ||
 		(observation.normalized && cost === 0)
 			? unknown
 			: read(cost, false);
-	// Declared target rates read as known (#434); a peer's own total or a catalog rate stays an estimate.
+	// Declared target rates price it as measured (#434); a peer's own total or a catalog rate stays an estimate.
 	const declaredRates =
 		usd.kind === "measured" &&
-		raw.costProvenance === "known" &&
+		raw.pricedBy === "target-rates" &&
 		external.cost !== "provider-reported" &&
 		observation.costEstimateMethod === undefined;
 	const estimatedUsd =
 		usd.kind === "measured" &&
 		!declaredRates &&
-		(raw.costProvenance === "estimated" || raw.costProvenance === "known") &&
+		(raw.pricedBy === "catalog" || raw.pricedBy === "target-rates") &&
 		external.cost !== "provider-reported"
 			? {
 					kind: "estimated" as const,
 					value: usd.value,
 					method:
 						observation.costEstimateMethod ??
-						(raw.costProvenance === "known" ? ("target-rates" as const) : ("catalog" as const)),
+						(raw.pricedBy === "target-rates" ? ("target-rates" as const) : ("catalog" as const)),
 				}
 			: usd.kind === "measured" && declaredRates
 				? { kind: "measured" as const, value: usd.value, source: "local-count" as const }
@@ -94,7 +94,7 @@ export function externalUsageFacts(
 				estimatedUsd.kind === "estimated"
 					? observation.costEstimateMethod === "peer-report"
 						? "provider"
-						: raw.costProvenance === "known"
+						: raw.pricedBy === "target-rates"
 							? "target-rates"
 							: "catalog"
 					: estimatedUsd.kind === "measured"
@@ -105,8 +105,7 @@ export function externalUsageFacts(
 		},
 		coverage: observation.coverage,
 		pricingCoverage: estimatedUsd.kind === "unknown" ? "unknown" : "complete",
-		callCountCoverage:
-			typeof raw.unknownCallCoverageRuns === "number" && raw.unknownCallCoverageRuns > 0 ? "partial" : "complete",
+		callCountCoverage: raw.callCountCoverage === "partial" ? "partial" : "complete",
 	};
 }
 

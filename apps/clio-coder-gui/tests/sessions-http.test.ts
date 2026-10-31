@@ -88,16 +88,9 @@ test("workspace and session routes stream one complete turn with recorded usage 
 			.join(""),
 		"Hello from Clio.",
 	);
-	assert.deepEqual(snapshot.turns.at(-1)?.usage, {
-		input: 11,
-		output: 12,
-		cacheRead: 13,
-		cacheWrite: 14,
-		reasoning: 15,
-		totalTokens: 50,
-		costUsd: 0.001,
-		costDisplay: "not measured",
-	});
+	const usage = snapshot.turns.at(-1)?.usage;
+	assert.equal(usage?.quantities?.total.display, "50");
+	assert.equal(usage?.quantities?.usd.display, "not measured");
 	const turnEvents = events.filter((event) => event.type.startsWith("turn."));
 	assert.equal(turnEvents[0]?.type, "turn.started");
 	assert.equal(turnEvents.at(-1)?.type, "turn.finished");

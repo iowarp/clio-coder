@@ -1,8 +1,7 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
-import { TurnQuantitiesSchema } from "../../core/telemetry/dto.js";
+import { PricedByCountsSchema, QuantitySchema, TurnQuantitiesSchema } from "../../core/telemetry/dto.js";
 import type { ProjectTrustSurface, WorkspaceTrustVerdict } from "../../core/workspace-trust.js";
-import type { CostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ViewArtifactCategory, ViewArtifactFormat } from "../../domains/session/view-artifacts.js";
 import type { UserTask } from "../../domains/user-tasks/store.js";
 import type { DispatchPlanView } from "../../tools/dispatch-plan.js";
@@ -390,25 +389,6 @@ export interface AcpPromptResponse {
 	_meta?: unknown;
 }
 
-export interface AcpDelegationUsage {
-	costSummary?: AcpCostAggregate;
-	apiCalls?: number;
-	missingTokenCalls?: number;
-	/** A valid peer token field was present, including an explicit zero. */
-	tokensReported: boolean;
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
-	reasoningTokens: number;
-	/** Peer-reported total when present, otherwise input+output+cacheRead+cacheWrite, matching the ACP server side. */
-	totalTokens: number;
-	/** Sum of peer cost.total (legacy) or costUsd (Clio metadata); never re-priced. */
-	costUsd: number;
-	/** Absent until usage is reported; missing or unsupported pricing provenance stays unknown. */
-	costProvenance?: CostProvenance;
-}
-
 export interface AcpDelegationResult {
 	messages: AgentMessage[];
 	exitCode: number;
@@ -416,7 +396,6 @@ export interface AcpDelegationResult {
 	/** True when the turn request hit its configured timeout. */
 	timedOut?: boolean;
 	failureMessage?: string;
-	usage: AcpDelegationUsage;
 	delegation: {
 		acpSessionId: string | null;
 		selectedModelId?: string;
@@ -1464,15 +1443,6 @@ export interface AcpIgnoredProjectSurface {
 	fix: string;
 }
 
-export interface AcpCostAggregate {
-	unknownCallCoverageRuns?: number;
-	knownUsd: number;
-	hasEstimated: boolean;
-	hasUnknown: boolean;
-	allKnownFree: boolean;
-	calls: number;
-}
-
 export interface AcpCommandFlagSpec {
 	name: string;
 	takesValue?: boolean;
@@ -1523,44 +1493,29 @@ export interface AcpCommandResult {
 	lines: string[];
 }
 
-const usageMetaFields = {
-	quantities: Type.Optional(TurnQuantitiesSchema),
-	unknownCallCoverageRuns: Type.Optional(Type.Integer({ minimum: 0 })),
-	costDisplay: Type.Optional(Type.String()),
-	costSummary: Type.Optional(
-		Type.Object(
-			{
-				knownUsd: Type.Number({ minimum: 0 }),
-				hasEstimated: Type.Boolean(),
-				hasUnknown: Type.Boolean(),
-				allKnownFree: Type.Boolean(),
-				calls: Type.Integer({ minimum: 0 }),
-				unknownCallCoverageRuns: Type.Optional(Type.Integer({ minimum: 0 })),
-			},
-			closed,
-		),
-	),
-	apiCalls: Type.Optional(Type.Integer({ minimum: 0 })),
-	missingTokenCalls: Type.Optional(Type.Integer({ minimum: 0 })),
-	input: Type.Integer({ minimum: 0 }),
-	output: Type.Integer({ minimum: 0 }),
-	cacheRead: Type.Integer({ minimum: 0 }),
-	cacheWrite: Type.Integer({ minimum: 0 }),
-	reasoning: Type.Integer({ minimum: 0 }),
-	totalTokens: Type.Optional(Type.Integer({ minimum: 0 })),
-	costUsd: Type.Optional(Type.Number({ minimum: 0 })),
-	costProvenance: Type.Optional(
-		Type.Union([Type.Literal("known"), Type.Literal("known_free"), Type.Literal("estimated"), Type.Literal("unknown")]),
-	),
-};
+/**
+ * `_meta["clio-coder/usage"]`: the prompt's operator turns, their workers included, and the session's whole spend, as
+ * read-model quantities: each a fact or fact sum beside its canonical display and ref (#434). No plain number stands
+ * in for a quantity, so an unknown or partial count never reaches a client as a zero.
+ */
+const SessionUsageQuantitiesSchema = Type.Object(
+	{
+		input: QuantitySchema,
+		output: QuantitySchema,
+		cacheRead: QuantitySchema,
+		cacheWrite: QuantitySchema,
+		reasoning: QuantitySchema,
+		total: QuantitySchema,
+		usd: QuantitySchema,
+		calls: QuantitySchema,
+	},
+	closed,
+);
 export const AcpUsageMetaSchema = Type.Object(
 	{
-		...usageMetaFields,
+		quantities: Type.Optional(TurnQuantitiesSchema),
 		session: Type.Optional(
-			Type.Object(
-				{ ...usageMetaFields, calls: Type.Integer({ minimum: 0 }), hasEstimatedCost: Type.Optional(Type.Boolean()) },
-				closed,
-			),
+			Type.Object({ quantities: SessionUsageQuantitiesSchema, pricedBy: PricedByCountsSchema }, closed),
 		),
 	},
 	closed,

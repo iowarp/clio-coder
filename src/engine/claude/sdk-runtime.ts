@@ -146,7 +146,7 @@ function telemetryUsage(raw: unknown, totalCostUsd?: number): Record<string, unk
 		cacheRead: usage.cache_read_input_tokens,
 		cacheWrite: usage.cache_creation_input_tokens,
 		costUsd: totalCostUsd,
-		...(totalCostUsd === undefined ? {} : { costProvenance: "estimated" }),
+		...(totalCostUsd === undefined ? {} : { pricedBy: "catalog" }),
 	};
 }
 

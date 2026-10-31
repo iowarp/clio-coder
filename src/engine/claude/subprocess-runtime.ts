@@ -208,7 +208,7 @@ function buildAssistantMessage(input: {
 				usage?.cacheWrite ??
 				usage?.cacheWriteTokens,
 			costUsd,
-			...(costUsd === undefined ? {} : { costProvenance: "estimated" }),
+			...(costUsd === undefined ? {} : { pricedBy: "catalog" }),
 		},
 		coverage: input.result ? "complete" : "partial",
 		costEstimateMethod: "peer-report",

@@ -19,13 +19,26 @@ const start = Type.Object(
 	closed,
 );
 /**
- * A terminal run's call coverage beside its token count, as the engine forwards it: null where the run never recorded
- * it. `tokenDisplay` is the engine's wording of the count through the read model, a lower bound beside the calls that
- * reported no usage, so neither the server nor the browser formats it (#434). An older engine sends none of them.
+ * A terminal run's token total as the engine forwards it: the run's settled fact, or null where the run recorded none,
+ * and `tokenDisplay`, the engine's wording of that fact through the canonical renderer, so neither the server nor the
+ * browser formats it (#434).
  */
+const tokenFact = Type.Union([
+	Type.Object(
+		{
+			kind: Type.Literal("measured"),
+			value: Type.Integer({ minimum: 0 }),
+			source: Type.Union([Type.Literal("provider"), Type.Literal("local-clock"), Type.Literal("local-count")]),
+		},
+		closed,
+	),
+	Type.Object({ kind: Type.Literal("estimated"), value: Type.Integer({ minimum: 0 }), method: identifier }, closed),
+	Type.Object({ kind: Type.Literal("unknown"), reason: identifier }, closed),
+	Type.Object({ kind: Type.Literal("absent"), reason: identifier }, closed),
+]);
 const tokenCoverage = {
-	apiCalls: Type.Optional(count),
-	missingTokenCalls: Type.Optional(count),
+	totalTokens: Type.Optional(Type.Union([tokenFact, Type.Null()])),
+	apiCalls: Type.Optional(Type.Union([tokenFact, Type.Null()])),
 	tokenDisplay: Type.Optional(Type.Union([Type.String({ maxLength: 64 }), Type.Null()])),
 };
 export const FleetPayloads = {
@@ -52,7 +65,6 @@ export const FleetPayloads = {
 			outcomeCode: nullableId,
 			outcomeDetail,
 			durationMs: count,
-			tokenCount: count,
 			...tokenCoverage,
 		},
 		closed,
@@ -65,8 +77,6 @@ export const FleetPayloads = {
 			outcomeCode: Type.Optional(nullableId),
 			outcomeDetail,
 			durationMs: count,
-			/** A failed run carries its tokens only when it reported a count. */
-			tokenCount: Type.Optional(count),
 			...tokenCoverage,
 		},
 		closed,

@@ -46,7 +46,30 @@ const update = (
 	meta = { "clio-coder/agent": [{ version: 1, role: "orchestrator", agentId: "orchestrator" }] },
 ) => send({ method: "session/update", params: { sessionId, update: value, ...(meta ? { _meta: meta } : {}) } });
 const text = (value) => update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: value } });
-const usage = { input: 11, output: 12, cacheRead: 13, cacheWrite: 14, reasoning: 15, totalTokens: 50, costUsd: 0.001 };
+// The turn's usage as read-model quantities, each a fact beside its canonical display (#434).
+const quantity = (metric, value, display = String(value)) => ({
+	fact: { kind: "measured", value, source: "provider" },
+	display,
+	ref: `session:fixture#${metric}`,
+});
+const usage = {
+	quantities: {
+		input: quantity("input", 11),
+		output: quantity("output", 12),
+		cacheRead: quantity("cacheRead", 13),
+		cacheWrite: quantity("cacheWrite", 14),
+		reasoning: quantity("reasoning", 15),
+		prompt: quantity("prompt", 38),
+		total: quantity("total", 50),
+		usd: { fact: { kind: "unknown", reason: "not-observed" }, display: "not measured", ref: "session:fixture#usd" },
+		calls: quantity("calls", 1),
+		firstToken: {
+			fact: { kind: "unknown", reason: "not-observed" },
+			display: "unknown",
+			ref: "session:fixture#firstToken",
+		},
+	},
+};
 let writeCalls = 0;
 // Settled frames mirror src/engine/acp/server.ts: `content` carries the result
 // text and `rawOutput` is `{result, isError}`. A refusal is a FAILED call worded

@@ -4096,27 +4096,17 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 	};
 	/**
-	 * A terminal fleet frame's call coverage beside its token count: null where the run never recorded it, and the count
-	 * worded as a lower bound when calls went unreported, so a board never shows a partly counted run as whole (#434).
+	 * A terminal fleet frame's token and call facts as the run settled them, null where the run recorded none, beside the
+	 * canonical wording of the total, so a board never shows an unknown run as a counted one (#434).
 	 */
 	const runTokenCoverage = (spend: {
 		totalTokens?: Fact<number>;
 		apiCalls?: Fact<number>;
-	}): {
-		tokenCount: number | null;
-		apiCalls: number | null;
-		missingTokenCalls: number | null;
-		tokenDisplay: string | null;
-	} => {
-		const known = (fact: Fact<number> | undefined) =>
-			fact?.kind === "measured" || fact?.kind === "estimated" ? safeCount(fact.value) : null;
-		return {
-			tokenCount: known(spend.totalTokens),
-			apiCalls: known(spend.apiCalls),
-			missingTokenCalls: null,
-			tokenDisplay: spend.totalTokens ? renderFact(spend.totalTokens) : null,
-		};
-	};
+	}): { totalTokens: Fact<number> | null; apiCalls: Fact<number> | null; tokenDisplay: string | null } => ({
+		totalTokens: spend.totalTokens ?? null,
+		apiCalls: spend.apiCalls ?? null,
+		tokenDisplay: spend.totalTokens ? renderFact(spend.totalTokens) : null,
+	});
 	const receiptMeta = (runId: string, facts: RunResultFacts | null): Record<string, unknown> => ({
 		[ACP_RECEIPT_META_KEY]: runResultWireFacts(runId, facts),
 	});

@@ -64,7 +64,7 @@ export function callCoverageForRun(run: { apiCalls?: unknown; missingTokenCalls?
 	};
 }
 
-export function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmount): CostAggregate {
+function accumulateCostAmount(aggregate: CostAggregate, amount: CostAmount): CostAggregate {
 	const first = !costWasMeasured(aggregate);
 	const unknownCallCoverageRuns =
 		(aggregate.unknownCallCoverageRuns ?? 0) +

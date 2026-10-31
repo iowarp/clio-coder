@@ -1,158 +1,50 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { describe, it } from "node:test";
+import { it } from "node:test";
 
-import { acpUsageFacts, emptyUsage, mergeUsage } from "../../src/engine/acp/adapter.js";
+import { acpUsageFacts } from "../../src/engine/acp/adapter.js";
 
-describe("ACP delegation usage accumulator carries cost and a combined total", () => {
-	it("starts totalTokens and costUsd at zero beside the token counters", () => {
-		const usage = emptyUsage();
-		strictEqual(usage.totalTokens, 0);
-		strictEqual(usage.costUsd, 0);
-	});
-
-	it("takes an explicit total and cost from the peer when present", () => {
-		const usage = emptyUsage();
-		mergeUsage(usage, {
-			input: 10,
-			input_tokens: 10,
-			output: 5,
-			outputTokens: 5,
-			cacheRead: 1,
-			cacheWrite: 1,
-			totalTokens: 100,
-			total_tokens: 100,
-			cost: { total: 0.0123 },
-		});
-		strictEqual(usage.totalTokens, 100);
-		strictEqual(usage.apiCalls, 0);
-		strictEqual(usage.costSummary?.unknownCallCoverageRuns, 1);
-		strictEqual(usage.inputTokens, 10);
-		strictEqual(usage.outputTokens, 5);
-		strictEqual(usage.costUsd, 0.0123);
-	});
-
-	it("derives totalTokens from input+output+cacheRead+cacheWrite and leaves costUsd at 0 when the peer sends only token counts", () => {
-		const usage = emptyUsage();
-		mergeUsage(usage, { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, reasoning: 40 });
-		strictEqual(usage.inputTokens, 10);
-		strictEqual(usage.outputTokens, 5);
-		strictEqual(usage.cacheReadTokens, 2);
-		strictEqual(usage.cacheWriteTokens, 1);
-		strictEqual(usage.reasoningTokens, 40);
-		strictEqual(usage.totalTokens, 18);
-		strictEqual(usage.costUsd, 0);
-	});
-
-	it("accumulates explicit and derived totals across merges like every other field", () => {
-		const usage = emptyUsage();
-		mergeUsage(usage, { input: 10, output: 5, total_tokens: 15, cost: { total: 0.01 } });
-		mergeUsage(usage, { input: 3, output: 2 });
-		strictEqual(usage.totalTokens, 20);
-		strictEqual(usage.costUsd, 0.01);
-	});
-
-	it("treats a missing or malformed cost object as zero rather than throwing", () => {
-		const usage = emptyUsage();
-		mergeUsage(usage, { input: 1, output: 1, cost: "not-an-object" });
-		mergeUsage(usage, { input: 1, output: 1, cost: { total: "not-a-number" } });
-		mergeUsage(usage, "not-a-record");
-		strictEqual(usage.costUsd, 0);
-		strictEqual(usage.totalTokens, 4);
-	});
+const quantity = (metric: string, fact: unknown) => ({ fact, display: "-", ref: `session:peer#${metric}` });
+const measured = (value: number) => ({ kind: "measured", value, source: "provider" });
+const sum = (measuredPart: number, unknownCount: number, estimated = 0) => ({
+	measured: measuredPart,
+	estimated,
+	unknownCount,
+	absentCount: 0,
+	coverage: { measured: measuredPart > 0 ? 1 : 0, estimated: estimated > 0 ? 1 : 0, unknown: unknownCount },
 });
 
-describe("ACP usage presence and provenance", () => {
-	it("distinguishes valid zero counts from absent or malformed usage", () => {
-		const usage = emptyUsage();
-		for (const raw of [undefined, {}, { totalTokens: -1 }, { totalTokens: Number.NaN }, { input: "0" }]) {
-			mergeUsage(usage, raw);
-			strictEqual(usage.tokensReported, false);
-		}
-		mergeUsage(usage, { input_tokens: 0 });
-		strictEqual(usage.tokensReported, true);
-		strictEqual(usage.totalTokens, 0);
-		strictEqual(usage.costProvenance, "unknown");
-	});
-
-	it("prefers explicit zero and treats total/cost aliases as alternate representations", () => {
-		const usage = emptyUsage();
-		mergeUsage(usage, {
-			input: 10,
-			totalTokens: 0,
-			total_tokens: 25,
-			cost: { total: 0 },
-			costUsd: 1,
-			costProvenance: "known",
-		});
-		strictEqual(usage.totalTokens, 0);
-		strictEqual(usage.inputTokens, 10);
-		strictEqual(usage.costUsd, 0);
-		strictEqual(usage.costProvenance, "known");
-	});
-
-	it("retains a numeric amount without inventing pricing provenance", () => {
-		const usage = emptyUsage();
-		mergeUsage(usage, { costUsd: 0.0123 });
-		strictEqual(usage.tokensReported, false);
-		strictEqual(usage.costUsd, 0.0123);
-		strictEqual(usage.costProvenance, "unknown");
-	});
-
-	it("does not treat malformed cost as measured zero", () => {
-		for (const cost of [-1, Number.NaN, Number.POSITIVE_INFINITY, "0"]) {
-			const usage = emptyUsage();
-			mergeUsage(usage, { input: 1, cost: { total: cost }, costProvenance: "known_free" });
-			strictEqual(usage.costUsd, 0);
-			strictEqual(usage.costProvenance, "unknown");
-		}
-	});
-
-	it("keeps accumulated provenance conservative across priced and unpriced reports", () => {
-		const usage = emptyUsage();
-		mergeUsage(usage, { totalTokens: 0, costUsd: 0, costProvenance: "known_free" });
-		mergeUsage(usage, { totalTokens: 5, costUsd: 0.01, costProvenance: "known" });
-		strictEqual(usage.costProvenance, "known");
-		mergeUsage(usage, { totalTokens: 3, costUsd: 0.02, costProvenance: "estimated" });
-		strictEqual(usage.costProvenance, "estimated");
-		mergeUsage(usage, { totalTokens: 2 });
-		strictEqual(usage.costProvenance, "unknown");
-		strictEqual(usage.totalTokens, 10);
-		strictEqual(usage.costUsd, 0.03);
-		deepStrictEqual(usage.costSummary, {
-			knownUsd: 0.03,
-			hasEstimated: true,
-			hasUnknown: true,
-			allKnownFree: false,
-			calls: 0,
-			unknownCallCoverageRuns: 4,
-		});
-	});
-});
-
-it("captures ACP field presence, amount provenance and count coverage independently", () => {
-	const facts = acpUsageFacts({
-		totalTokens: 0,
-		costUsd: 0.5,
-		costProvenance: "known",
-		apiCalls: 0,
-		missingTokenCalls: 0,
-	});
+it("reads another agent's plain counts as measured tokens it put no price on", () => {
+	const facts = acpUsageFacts({ totalTokens: 0, input_tokens: 4, costUsd: 0.5 });
 	deepStrictEqual(facts.totalTokens, { kind: "measured", value: 0, source: "provider" });
-	strictEqual(facts.usage.input.kind, "unknown");
-	strictEqual(facts.apiCalls.kind, "measured");
-	strictEqual(facts.pricing.usd.kind, "measured");
-	const partial = acpUsageFacts({
-		totalTokens: 20,
-		unknownCallCoverageRuns: 1,
-		apiCalls: 3,
-		missingTokenCalls: 1,
-		costProvenance: "unknown",
-		costSummary: { knownUsd: 0.5, hasEstimated: true, hasUnknown: true, allKnownFree: false, calls: 3 },
-	});
-	deepStrictEqual(partial.pricing.usd, { kind: "estimated", value: 0.5, method: "peer-report" });
-	strictEqual(partial.coverage, "complete");
-	strictEqual(partial.pricingCoverage, "partial");
-	strictEqual(partial.callCountCoverage, "partial");
-	deepStrictEqual(partial.totalTokens, { kind: "measured", value: 20, source: "provider" });
+	deepStrictEqual(facts.usage.input, { kind: "measured", value: 4, source: "provider" });
+	strictEqual(facts.usage.output.kind, "unknown");
+	strictEqual(facts.pricing.usd.kind, "unknown");
+	strictEqual(facts.pricing.pricedBy, "none");
 	strictEqual(acpUsageFacts({}).apiCalls.kind, "unknown");
+});
+
+it("reads a Clio peer's quantities as the facts they state, its partial sums as unknown (#434)", () => {
+	const pricedBy = { provider: 0, "target-rates": 1, catalog: 1, free: 0, none: 1 };
+	const facts = acpUsageFacts({
+		session: {
+			quantities: {
+				input: quantity("input", measured(140)),
+				output: quantity("output", measured(10)),
+				cacheRead: quantity("cacheRead", measured(0)),
+				cacheWrite: quantity("cacheWrite", measured(0)),
+				reasoning: quantity("reasoning", measured(0)),
+				total: quantity("total", sum(150, 1)),
+				usd: quantity("usd", sum(0.25, 1, 0.25)),
+				calls: quantity("calls", sum(3, 0)),
+			},
+			pricedBy,
+		},
+	});
+	deepStrictEqual(facts.usage.input, { kind: "measured", value: 140, source: "provider" });
+	strictEqual(facts.totalTokens.kind, "unknown");
+	deepStrictEqual(facts.missingTokenCalls, { kind: "measured", value: 1, source: "provider" });
+	deepStrictEqual(facts.apiCalls, { kind: "measured", value: 3, source: "local-count" });
+	strictEqual(facts.pricing.usd.kind, "unknown");
+	strictEqual(facts.pricingCoverage, "partial");
+	strictEqual(facts.callCountCoverage, "complete");
 });

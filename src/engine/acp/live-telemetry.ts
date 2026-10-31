@@ -1,5 +1,3 @@
-import { factKnownValue } from "../../core/telemetry/known.js";
-import { costWasMeasured } from "../../domains/telemetry/cost.js";
 import type { AcpWorkspaceView } from "./types.js";
 
 export type { AcpWorkspaceView } from "./types.js";
@@ -24,18 +22,16 @@ export { ACP_PLAN_META_KEY, ACP_WORKSPACE_META_KEY } from "./types.js";
  * meter frame is not a model saying something.
  */
 
-import type { FactMetric } from "../../core/telemetry/dto.js";
+import type { CostReportV1, FactMetric, Quantity, TurnQuantities } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
-import type { FactSum } from "../../core/telemetry/fact.js";
-import type { CostProvenance } from "../../domains/providers/types/cost-provenance.js";
+import type { Fact } from "../../core/telemetry/fact.js";
+import { renderFact } from "../../core/telemetry/render.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
 import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import { ACP_CONTEXT_META_KEY, projectContextLedger } from "./context-ledger.js";
-import type { AcpCostAggregate } from "./types.js";
 import { ACP_USAGE_META_KEY } from "./types.js";
-import { knownFree, knownPart, unknownCallCoverage } from "./usage.js";
 
 const MAX_PLAN_ENTRIES = 100;
 const MAX_TEXT_BYTES = 1024;
@@ -54,79 +50,46 @@ type TurnUsage = ReturnType<typeof turnUsageMeta>;
 /** The usage block a prompt response carries: its turn's and, when the read model has the session, the session's. */
 export type PromptUsage = TurnUsage & { session?: SessionTotals };
 
-const known = (sum: FactSum) => factKnownValue(sum);
-
 /**
- * `_meta["clio-coder/usage"]` on the prompt response and on in-turn `usage_update` frames: one shape, so the last frame
- * equals the response. Totals are the known part of the read model's sum over the prompt's operator turns, their
- * workers included; firstToken names its first main-agent response alone (#434 §11.3). v1 forces the five token
- * counts; with no view of the session nothing else is claimed.
+ * The turn part of `_meta["clio-coder/usage"]` on the prompt response and on in-turn `usage_update` frames: one shape,
+ * so the last frame equals the response. Each quantity is the read model's sum over the prompt's operator turns,
+ * their workers included; firstToken names its first main-agent response alone (#434 §11.3). With no view of the
+ * session nothing is claimed.
  */
-export function turnUsageMeta(view: TelemetryView | null, turn: AcpPromptTurn) {
-	if (view === null)
-		return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, costProvenance: "unknown" };
+export function turnUsageMeta(view: TelemetryView | null, turn: AcpPromptTurn): { quantities?: TurnQuantities } {
+	if (view === null) return {};
 	const turnIds = [...turn.turnIds];
-	const sum = (metric: FactMetric) => view.turns(turnIds, metric);
-	const usd = sum("usd");
-	const calls = sum("calls").fact;
-	const cost: AcpCostAggregate = {
-		knownUsd: known(usd.fact),
-		hasEstimated: usd.fact.coverage.estimated > 0,
-		hasUnknown: usd.fact.unknownCount > 0,
-		allKnownFree: usd.free && usd.fact.unknownCount === 0 && usd.fact.coverage.estimated === 0,
-		calls: known(calls),
-		...(calls.unknownCount > 0 ? { unknownCallCoverageRuns: calls.unknownCount } : {}),
-	};
-	const apiCalls = known(sum("apiCalls").fact);
-	const missingTokenCalls = known(sum("missingTokenCalls").fact);
+	const group = { by: "turns" as const, key: turnIds.sort().join(",") || "-" };
 	return {
 		quantities: Object.fromEntries(
-			(
-				[
-					"input",
-					"output",
-					"cacheRead",
-					"cacheWrite",
-					"reasoning",
-					"prompt",
-					"total",
-					"usd",
-					"calls",
-					"firstToken",
-				] as const
-			).map((metric) => {
-				const ref = factRef({
-					scope: "session",
-					owner: view.sessionId,
-					metric,
-					group: { by: "turns", key: turnIds.sort().join(",") || "-" },
-				});
-				if (metric === "firstToken") return [metric, view.quantity(ref)];
-				const q = sum(metric);
-				return [
-					metric,
-					{
-						fact: q.fact,
-						display: q.display,
-						ref,
-					},
-				];
+			TURN_METRICS.map((metric) => {
+				const ref = factRef({ scope: "session", owner: view.sessionId, metric, group });
+				if (metric === "firstToken") return [metric, view.quantity(ref) ?? unobservedQuantity(ref)];
+				const q = view.turns(turnIds, metric);
+				return [metric, { fact: q.fact, display: q.display, ref }];
 			}),
-		),
-		input: known(sum("input").fact),
-		output: known(sum("output").fact),
-		cacheRead: known(sum("cacheRead").fact),
-		cacheWrite: known(sum("cacheWrite").fact),
-		reasoning: known(sum("reasoning").fact),
-		totalTokens: known(sum("total").fact),
-		costUsd: cost.knownUsd,
-		costDisplay: usd.display,
-		costProvenance: provenanceOf(cost),
-		costSummary: cost,
-		...(apiCalls > 0 ? { apiCalls } : {}),
-		...(missingTokenCalls > 0 ? { missingTokenCalls } : {}),
+		) as TurnQuantities,
 	};
 }
+
+/** A quantity the read model holds nothing for: unknown, never zero. */
+function unobservedQuantity(ref: Quantity["ref"]): Quantity {
+	const fact: Fact<number> = { kind: "unknown", reason: "not-observed" };
+	return { fact, display: renderFact(fact), ref };
+}
+
+const TURN_METRICS = [
+	"input",
+	"output",
+	"cacheRead",
+	"cacheWrite",
+	"reasoning",
+	"prompt",
+	"total",
+	"usd",
+	"calls",
+	"firstToken",
+] as const;
 
 function bounded(text: string): string {
 	let safe = "";
@@ -216,63 +179,45 @@ const usageSignatureOf = (value: unknown) =>
 const EMPTY_PLAN_SIGNATURE = JSON.stringify(projectAcpPlan(null));
 
 interface SessionTotals {
-	costDisplay: string;
-	costSummary: AcpCostAggregate;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoning: number;
-	totalTokens: number;
-	costUsd: number;
-	costProvenance: CostProvenance;
-	calls: number;
-	unknownCallCoverageRuns?: number;
-	missingTokenCalls?: number;
-	hasEstimatedCost?: boolean;
-}
-
-function provenanceOf(cost: AcpCostAggregate): CostProvenance {
-	if (!costWasMeasured(cost) || cost.hasUnknown) return "unknown";
-	if (cost.hasEstimated) return "estimated";
-	return cost.allKnownFree ? "known_free" : "known";
+	quantities: Record<
+		"input" | "output" | "cacheRead" | "cacheWrite" | "reasoning" | "total" | "usd" | "calls",
+		Quantity
+	>;
+	pricedBy: CostReportV1["total"]["pricedBy"];
 }
 
 /**
  * The session's whole spend for `usage_update` and the prompt response, read from the telemetry read model: its own
- * calls and the worker runs it referenced (#434 §11.3). Each number is a quantity's known part; the cost's
- * provenance and `missingTokenCalls` say what it leaves out.
+ * calls and the worker runs it referenced, each a quantity with its fact and display (#434 §11.3).
  */
 export function sessionUsageTotals(view: TelemetryView): SessionTotals {
-	const read = (metric: FactMetric) => view.quantity(factRef({ scope: "session", owner: view.sessionId, metric }));
+	const read = (metric: FactMetric): Quantity => {
+		const ref = factRef({ scope: "session", owner: view.sessionId, metric });
+		return view.quantity(ref) ?? unobservedQuantity(ref);
+	};
 	const total = view.cost("role").total;
-	const usd = total.usd;
-	const fact = usd.fact;
-	const summary: AcpCostAggregate = {
-		knownUsd: knownPart(usd),
-		hasEstimated: "kind" in fact ? fact.kind === "estimated" : fact.coverage.estimated > 0,
-		hasUnknown: "kind" in fact ? fact.kind === "unknown" : fact.unknownCount > 0,
-		allKnownFree: knownFree(total.pricedBy, usd),
-		calls: knownPart(total.calls),
-		...(unknownCallCoverage(total.calls) > 0 ? { unknownCallCoverageRuns: unknownCallCoverage(total.calls) } : {}),
-	};
-	const missingTokenCalls = knownPart(read("missingTokenCalls"));
 	return {
-		costSummary: summary,
-		costDisplay: usd.display,
-		input: knownPart(read("input")),
-		output: knownPart(read("output")),
-		cacheRead: knownPart(read("cacheRead")),
-		cacheWrite: knownPart(read("cacheWrite")),
-		reasoning: knownPart(read("reasoning")),
-		totalTokens: knownPart(total.tokens),
-		costUsd: summary.knownUsd,
-		costProvenance: provenanceOf(summary),
-		calls: summary.calls,
-		...(summary.unknownCallCoverageRuns ? { unknownCallCoverageRuns: summary.unknownCallCoverageRuns } : {}),
-		...(missingTokenCalls > 0 ? { missingTokenCalls } : {}),
-		...(summary.hasEstimated ? { hasEstimatedCost: true } : {}),
+		quantities: {
+			input: read("input"),
+			output: read("output"),
+			cacheRead: read("cacheRead"),
+			cacheWrite: read("cacheWrite"),
+			reasoning: read("reasoning"),
+			total: total.tokens,
+			usd: total.usd,
+			calls: total.calls,
+		},
+		pricedBy: total.pricedBy,
 	};
+}
+
+/** ACP's `cost` is a plain amount, so it is sent only when the session's whole spend is known: nothing unpriced. */
+function plainCost(session: SessionTotals | null): number | null {
+	if (session === null) return null;
+	const fact = session.quantities.usd.fact;
+	if ("kind" in fact) return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null;
+	const contributions = fact.coverage.measured + fact.coverage.estimated + fact.unknownCount;
+	return contributions > 0 && fact.unknownCount === 0 ? fact.measured + fact.estimated : null;
 }
 
 export interface AcpLiveTelemetryDeps {
@@ -345,19 +290,17 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		framedSession = session;
 		const sessionView = view?.session() ?? null;
 		accountingSignature = usageSignatureOf(sessionView);
-		// ACP `cost` is a plain amount, so an unknown price stays absent rather than reading as zero.
-		const knownCost = session !== null && session.calls > 0;
+		// ACP `cost` is a plain amount, so an unknown or partly unpriced spend stays absent rather than reading as zero.
+		const amount = plainCost(session);
 		return {
 			sessionUpdate: "usage_update",
 			used: context.usedTokens,
 			size: context.contextWindow,
-			...(knownCost && session !== null && session.costProvenance !== "unknown"
-				? { cost: { amount: session.costUsd, currency: "USD" } }
-				: {}),
+			...(amount !== null ? { cost: { amount, currency: "USD" } } : {}),
 			_meta: {
 				[ACP_CONTEXT_META_KEY]: context,
 				[ACP_USAGE_META_KEY]: {
-					turn: framedTurn && "quantities" in framedTurn ? framedTurn.quantities : null,
+					turn: framedTurn?.quantities ?? null,
 					session: sessionView,
 				},
 			},

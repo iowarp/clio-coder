@@ -255,9 +255,11 @@ it("forwards bounded failure codes and reasons for withheld and idle workers", a
 	strictEqual(await served, 0);
 });
 
-it("words a finished run's tokens with its call coverage, never a partly counted run as whole (#434 §11.3)", async () => {
+it("forwards a finished run's token facts with their wording, never an unknown run as counted (#434 §11.3)", async () => {
 	const { bus, peer, served } = await openSession(["run.completed"]);
-	const completed = (runId: string, coverage: Record<string, number>) =>
+	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
+	const unknown = { kind: "unknown" as const, reason: "provider-omitted" as const };
+	const completed = (runId: string, totalTokens: unknown) =>
 		bus.emit("run.completed", {
 			runId,
 			agentId: "coder",
@@ -270,21 +272,18 @@ it("words a finished run's tokens with its call coverage, never a partly counted
 			outcomeCode: null,
 			outcomeDetail: null,
 			durationMs: 10,
-			tokenCount: 1_200,
-			...coverage,
+			spend: { totalTokens, apiCalls: measured(3) },
 		} as never);
-	completed("partial", { apiCalls: 3, missingTokenCalls: 1 });
-	completed("whole", { apiCalls: 3, missingTokenCalls: 0 });
-	completed("legacy", {});
+	completed("whole", measured(1_200));
+	completed("partial", unknown);
 	deepStrictEqual(
 		eventsOf(peer).map((event) => {
-			const { apiCalls, missingTokenCalls, tokenDisplay } = event.payload as Record<string, unknown>;
-			return { apiCalls, missingTokenCalls, tokenDisplay };
+			const { totalTokens, tokenDisplay } = event.payload as Record<string, unknown>;
+			return { totalTokens, tokenDisplay };
 		}),
 		[
-			{ apiCalls: 3, missingTokenCalls: 1, tokenDisplay: "≥1,200 (1 call unknown)" },
-			{ apiCalls: 3, missingTokenCalls: 0, tokenDisplay: "1,200" },
-			{ apiCalls: null, missingTokenCalls: null, tokenDisplay: "≥1,200 (call coverage not recorded)" },
+			{ totalTokens: measured(1_200), tokenDisplay: "1,200" },
+			{ totalTokens: unknown, tokenDisplay: "unknown (provider omitted)" },
 		],
 	);
 	peer.transport.close();

@@ -7,6 +7,7 @@ import { projectContextLedger } from "../../src/engine/acp/context-ledger.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
+import type { AcpUsageMeta } from "../../src/engine/acp/types.js";
 import { readModelOf, telemetryCall } from "../harness/telemetry-view.js";
 
 const LEDGER: ContextLedger = {
@@ -337,7 +338,7 @@ test("the prompt response waits for the read model to fold the turn's last call,
 					role: "assistant",
 					content: [{ type: "text", text: "done" }],
 					stopReason: "stop",
-					usage: { input: 100, output: 20, totalTokens: 120, cost: { total: 0.25 }, costProvenance: "known" },
+					usage: { input: 100, output: 20, totalTokens: 120, cost: { total: 0.25 }, pricedBy: "target-rates" },
 				};
 				rememberMessageCalls(message, [settled.data]);
 				onEvent({ type: "agent_start", turnId: "turn-1" });
@@ -367,16 +368,16 @@ test("the prompt response waits for the read model to fold the turn's last call,
 	const result = (await call("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] })) as {
 		_meta: Record<string, Record<string, unknown>>;
 	};
-	const reply = result._meta["clio-coder/usage"] ?? {};
-	assert.equal(reply.output, 20);
-	assert.equal(reply.costDisplay, "$0.25");
+	const reply = (result._meta["clio-coder/usage"] ?? {}) as AcpUsageMeta;
+	assert.equal(reply.quantities?.output.display, "20");
+	assert.equal(reply.quantities?.usd.display, "$0.25");
 	const frames = updates
 		.filter((update) => update.sessionUpdate === "usage_update")
 		.map((update) => (update as { _meta: Record<string, Record<string, unknown>> })._meta["clio-coder/usage"] ?? {});
 	// The turn's last frame, session block included, is what the response repeats.
 	assert.deepEqual(frames.filter((frame) => frame.turn !== null).at(-1)?.turn, reply.quantities);
 	// The batch that folded during the workspace wait reached a later session frame, not the response.
-	assert.equal((reply.session as { calls?: number } | undefined)?.calls, 2);
+	assert.equal(reply.session?.quantities.calls.display, "2");
 	assert.equal(
 		(frames.at(-1)?.session as { own: { counts: { calls: { display: string } } } } | undefined)?.own.counts.calls.display,
 		"2",

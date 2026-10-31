@@ -10,14 +10,13 @@ import {
 import { processBirthToken } from "../../core/process-identity.js";
 import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { withTelemetryContext } from "../../core/telemetry/context.js";
+import type { Quantity } from "../../core/telemetry/dto.js";
+import type { Fact } from "../../core/telemetry/fact.js";
 import { createTelemetryForwarder } from "../../core/telemetry/forwarder.js";
 import type { RunUsage } from "../../core/telemetry/schemas.js";
-import { hasTokenUsageCounts, normalizeTokenUsage } from "../../core/token-split.js";
 import type { HeartbeatStamp } from "../../domains/dispatch/heartbeat.js";
 import { isBuiltinClaudeAcp } from "../../domains/providers/auth/index.js";
-import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { SafetyContract } from "../../domains/safety/contract.js";
-import { accumulateCostAmount, callCoverageForRun, emptyCostAggregate } from "../../domains/telemetry/cost.js";
 import { findExecutableOnPath } from "../../domains/toolchain/resolve.js";
 import { externalUsageFacts } from "../external-call-telemetry.js";
 import type { AgentEvent } from "../types.js";
@@ -32,7 +31,7 @@ import {
 	createStdioTransport,
 	type StdioTransportOptions,
 } from "./transport.js";
-import type { AcpDelegationResult, AcpDelegationUsage, AcpInitializeResponse, AcpPromptResponse } from "./types.js";
+import type { AcpDelegationResult, AcpInitializeResponse, AcpPromptResponse, AcpUsageMeta } from "./types.js";
 import { ACP_SESSION_META_KEY, ACP_USAGE_META_KEY, AcpUsageMetaSchema } from "./types.js";
 
 type AcpRunEvent = AgentEvent | ClioWorkerEvent;
@@ -204,39 +203,89 @@ function flattenPrompt(input: AcpDelegationRunInput): string {
 	return parts.join("\n\n");
 }
 
-export function emptyUsage(): AcpDelegationUsage {
+type QuantityFact = Quantity["fact"];
+const notReported: Fact<number> = { kind: "unknown", reason: "provider-omitted" };
+
+/** A peer's quantity as one fact: a sum with an unknown part is unknown, an estimated part makes it a peer estimate. */
+function peerFact(fact: QuantityFact | undefined, source: "provider" | "local-count" = "provider"): Fact<number> {
+	if (fact === undefined) return notReported;
+	if ("kind" in fact) {
+		if (fact.kind === "estimated") return { kind: "estimated", value: fact.value, method: "peer-report" };
+		return fact.kind === "measured" ? { kind: "measured", value: fact.value, source } : notReported;
+	}
+	if (fact.unknownCount > 0) return notReported;
+	if (fact.coverage.estimated > 0)
+		return { kind: "estimated", value: fact.measured + fact.estimated, method: "peer-report" };
+	if (fact.coverage.measured > 0) return { kind: "measured", value: fact.measured, source };
+	return fact.absentCount > 0 ? { kind: "absent", reason: "not-applicable" } : notReported;
+}
+
+/** The unknown contributions of a peer's count: how many of its calls reported no usage. */
+function unreportedCalls(fact: QuantityFact | undefined): Fact<number> {
+	if (fact === undefined) return notReported;
+	if ("kind" in fact) return fact.kind === "unknown" ? { kind: "measured", value: 1, source: "provider" } : notReported;
+	return { kind: "measured", value: fact.unknownCount, source: "provider" };
+}
+
+/**
+ * A Clio peer's `_meta["clio-coder/usage"]`, read as the facts it states (#434). The session block covers the peer's
+ * helpers and workers; the turn block covers what this delegation asked for. Its pricing is the peer's own claim.
+ */
+function clioPeerUsageFacts(meta: AcpUsageMeta, coverage: RunUsage["coverage"]) {
+	const session = meta.session;
+	const q = session?.quantities ?? meta.quantities;
+	const facts = {
+		input: peerFact(q?.input.fact),
+		output: peerFact(q?.output.fact),
+		cacheRead: peerFact(q?.cacheRead.fact),
+		cacheWrite: peerFact(q?.cacheWrite.fact),
+		cacheWrite1h: notReported,
+		reasoning: peerFact(q?.reasoning.fact),
+	};
+	const usd = peerFact(q?.usd.fact);
+	const free =
+		session !== undefined &&
+		session.pricedBy.free > 0 &&
+		session.pricedBy.provider + session.pricedBy["target-rates"] + session.pricedBy.catalog + session.pricedBy.none === 0;
+	const usdFact = q?.usd.fact;
+	const usdUnknown = usdFact !== undefined && !("kind" in usdFact) && usdFact.unknownCount > 0;
+	const callsFact = q?.calls.fact;
 	return {
-		tokensReported: false,
-		inputTokens: 0,
-		outputTokens: 0,
-		cacheReadTokens: 0,
-		cacheWriteTokens: 0,
-		reasoningTokens: 0,
-		totalTokens: 0,
-		costUsd: 0,
+		usage: facts,
+		totalTokens: peerFact(q?.total.fact),
+		apiCalls: peerFact(callsFact, "local-count"),
+		missingTokenCalls: unreportedCalls(q?.total.fact),
+		pricing: {
+			usd,
+			pricedBy:
+				usd.kind === "unknown" || usd.kind === "absent"
+					? ("none" as const)
+					: free
+						? ("free" as const)
+						: ("provider" as const),
+		},
+		coverage,
+		pricingCoverage: usdUnknown
+			? usdFact.measured + usdFact.estimated > 0
+				? ("partial" as const)
+				: ("unknown" as const)
+			: usd.kind === "unknown"
+				? ("unknown" as const)
+				: ("complete" as const),
+		callCountCoverage:
+			callsFact !== undefined && !("kind" in callsFact) && callsFact.unknownCount > 0
+				? ("partial" as const)
+				: ("complete" as const),
 	};
 }
 
-/** Presence matters: an explicit zero must not fall back to another observation. */
-function nonnegative(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
-}
-
-/** ACP reports describe a delegated scope; omitted call counts and provenance stay unknown (#434). */
+/** ACP reports describe a delegated scope; omitted call counts and pricing stay unknown (#434). */
 export function acpUsageFacts(value: unknown, coverage: RunUsage["coverage"] = "complete") {
+	if (Value.Check(AcpUsageMetaSchema, value) && (value.quantities !== undefined || value.session !== undefined))
+		return clioPeerUsageFacts(value, coverage);
+	// Another agent's usage carries plain counts and, at most, a cost it put no source on.
 	const raw = isRecord(value) ? value : {};
-	const summary = Value.Check(AcpUsageMetaSchema.properties.costSummary, raw.costSummary) ? raw.costSummary : undefined;
-	const cost = summary?.knownUsd ?? (isRecord(raw.cost) ? raw.cost.total : raw.costUsd);
-	const provenance = summary
-		? summary.hasUnknown && summary.knownUsd === 0
-			? "unknown"
-			: summary.hasEstimated
-				? "estimated"
-				: summary.allKnownFree
-					? "known_free"
-					: "known"
-		: resolveCostProvenance(raw.costProvenance, "unknown");
-	const facts = externalUsageFacts({
+	return externalUsageFacts({
 		coverage,
 		usage: {
 			input: raw.input ?? raw.inputTokens ?? raw.input_tokens ?? raw.prompt_tokens,
@@ -245,86 +294,10 @@ export function acpUsageFacts(value: unknown, coverage: RunUsage["coverage"] = "
 			cacheWrite: raw.cacheWrite ?? raw.cacheWriteTokens ?? raw.cache_write_tokens,
 			reasoning: raw.reasoning ?? raw.reasoningTokens ?? raw.reasoning_tokens,
 			totalTokens: raw.totalTokens ?? raw.total_tokens,
-			apiCalls: raw.apiCalls,
-			missingTokenCalls: raw.missingTokenCalls,
-			unknownCallCoverageRuns: raw.unknownCallCoverageRuns ?? summary?.unknownCallCoverageRuns,
-			costUsd: cost,
-			costProvenance: provenance,
-			clioExternal: {
-				tokenUsage: raw.estimated === true ? "unverified" : "provider-reported",
-				cost:
-					provenance === "known" || provenance === "known_free"
-						? "provider-reported"
-						: provenance === "unknown"
-							? "unverified"
-							: undefined,
-			},
+			pricedBy: "none",
+			clioExternal: { tokenUsage: raw.estimated === true ? "unverified" : "provider-reported", cost: "unverified" },
 		},
 	});
-	if (facts.pricing.usd.kind === "estimated")
-		facts.pricing = { usd: { ...facts.pricing.usd, method: "peer-report" }, pricedBy: "provider" };
-	if (provenance === "known_free" && facts.pricing.usd.kind === "measured") facts.pricing.pricedBy = "free";
-	if (summary?.hasUnknown) facts.pricingCoverage = summary.knownUsd > 0 ? "partial" : "unknown";
-	return facts;
-}
-
-export function mergeUsage(into: AcpDelegationUsage, raw: unknown): void {
-	if (!isRecord(raw)) return;
-	const { input, output, cacheRead, cacheWrite, reasoning, totalTokens } = normalizeTokenUsage(raw);
-	const coverage = callCoverageForRun(raw);
-	const tokensReported =
-		raw.estimated !== true &&
-		[
-			raw.totalTokens,
-			raw.total_tokens,
-			raw.input,
-			raw.inputTokens,
-			raw.input_tokens,
-			raw.output,
-			raw.outputTokens,
-			raw.output_tokens,
-			raw.prompt_tokens,
-			raw.completion_tokens,
-			raw.cacheRead,
-			raw.cacheReadTokens,
-			raw.cache_read_tokens,
-			raw.cacheWrite,
-			raw.cacheWriteTokens,
-			raw.cache_write_tokens,
-		].some((value) => nonnegative(value) !== undefined);
-	into.tokensReported ||= tokensReported;
-	into.inputTokens += input;
-	into.outputTokens += output;
-	into.cacheReadTokens += cacheRead;
-	into.cacheWriteTokens += cacheWrite;
-	into.reasoningTokens += reasoning;
-	into.totalTokens += totalTokens;
-	into.apiCalls = (into.apiCalls ?? 0) + coverage.apiCalls;
-	into.missingTokenCalls = (into.missingTokenCalls ?? 0) + coverage.missingTokenCalls;
-	// Clio metadata uses costUsd; legacy message usage uses cost.total. These
-	// are alternate representations of one amount, never additive sources.
-	const cost = (isRecord(raw.cost) ? nonnegative(raw.cost.total) : undefined) ?? nonnegative(raw.costUsd);
-	into.costUsd += raw.estimated === true ? 0 : (cost ?? 0);
-	const summary = Value.Check(AcpUsageMetaSchema.properties.costSummary, raw.costSummary) ? raw.costSummary : undefined;
-	into.costSummary = accumulateCostAmount(into.costSummary ?? emptyCostAggregate(), {
-		usd: raw.estimated === true ? 0 : (cost ?? 0),
-		provenance:
-			raw.estimated === true
-				? "unknown"
-				: cost === undefined
-					? "unknown"
-					: resolveCostProvenance(raw.costProvenance, "unknown"),
-		...coverage,
-		...(summary ? { costSummary: summary } : {}),
-	});
-	if (tokensReported || cost !== undefined) {
-		const provenance = cost === undefined ? "unknown" : resolveCostProvenance(raw.costProvenance, "unknown");
-		const previous = into.costProvenance;
-		if (previous === undefined || previous === provenance) into.costProvenance = provenance;
-		else if (previous === "unknown" || provenance === "unknown") into.costProvenance = "unknown";
-		else if (previous === "estimated" || provenance === "estimated") into.costProvenance = "estimated";
-		else into.costProvenance = "known";
-	}
 }
 
 function errorMessage(value: unknown): string {
@@ -363,7 +336,6 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 		monotonic: heartbeatMonotonicAnchor,
 	};
 	const queue = new AsyncEventQueue<AcpRunEvent>();
-	const usage = emptyUsage();
 	const mapper = new AcpEventMapper();
 	const transportOptions: StdioTransportOptions = { cwd: input.agent.cwd ?? input.cwd };
 	if (input.environment) transportOptions.env = input.environment;
@@ -628,20 +600,12 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 			const metaUsage = isRecord(promptResponse?._meta)
 				? (promptResponse._meta as Record<string, unknown>)[ACP_USAGE_META_KEY]
 				: undefined;
-			if (metaUsage !== undefined) {
-				// This adapter creates one fresh peer session and submits one prompt.
-				// Clio's session subtotal includes that peer's helpers and workers.
-				const session = isRecord(metaUsage) && isRecord(metaUsage.session) ? metaUsage.session : null;
-				const metadata = session ? { ...session, apiCalls: session.calls } : metaUsage;
-				const fallback = promptResponse?.usage ?? promptResponse?.tokenUsage;
-				const fallbackTokens = isRecord(metadata) && !hasTokenUsageCounts(metadata) && isRecord(fallback);
-				const raw = fallbackTokens ? { ...fallback, ...metadata } : metadata;
-				mergeUsage(usage, raw);
-				recordUsage(raw, session ? "peer-session" : "run", session && fallbackTokens ? "partial" : "complete");
+			if (Value.Check(AcpUsageMetaSchema, metaUsage)) {
+				// This adapter creates one fresh peer session and submits one prompt. Clio's session block covers that
+				// peer's helpers and workers, so it is the delegation's scope when present (#434).
+				recordUsage(metaUsage, metaUsage.session ? "peer-session" : "run", "complete");
 			} else {
-				const raw = promptResponse?.usage ?? promptResponse?.tokenUsage;
-				mergeUsage(usage, raw);
-				recordUsage(raw, "run", "complete");
+				recordUsage(promptResponse?.usage ?? promptResponse?.tokenUsage, "run", "complete");
 			}
 			const reportedFailure =
 				authFailure ??
@@ -664,7 +628,6 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				...(reportedFailure !== null || (stopReason !== "end_turn" && stopReason !== "cancelled")
 					? { failureMessage: reportedFailure ?? `ACP stopReason=${stopReason}` }
 					: {}),
-				usage,
 				delegation: {
 					acpSessionId: sessionId,
 					...(selectedModelId !== null ? { selectedModelId } : {}),
@@ -688,7 +651,6 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 				stopReason: aborted ? "cancelled" : "error",
 				...(err instanceof AcpTimeoutError ? { timedOut: true } : {}),
 				failureMessage: message,
-				usage,
 				delegation: {
 					acpSessionId: sessionId,
 					...(selectedModelId !== null ? { selectedModelId } : {}),

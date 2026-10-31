@@ -1,4 +1,4 @@
-import { renderCostAmount } from "../../domains/telemetry/cost.js";
+import { renderUsdLimit } from "../../core/telemetry/render.js";
 import type { AcpDispatchPlanMeta } from "./types.js";
 
 export type { AcpDispatchPlanMeta } from "./types.js";
@@ -63,7 +63,7 @@ export function projectDispatchPlanMeta(view: DispatchPlanView): AcpDispatchPlan
 		planScale: view.planScale,
 		hash: view.hash,
 		...(view.costCeilingUsd !== undefined
-			? { costCeilingUsd: view.costCeilingUsd, costCeilingDisplay: renderCostAmount(view.costCeilingUsd, "known") }
+			? { costCeilingUsd: view.costCeilingUsd, costCeilingDisplay: renderUsdLimit(view.costCeilingUsd) }
 			: {}),
 		...(view.deadlineMs !== undefined ? { deadlineMs: view.deadlineMs } : {}),
 		tasks,

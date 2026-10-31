@@ -1,4 +1,4 @@
-import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
@@ -7,10 +7,12 @@ import { clioStateDir } from "../../src/core/xdg.js";
 import { suggestedSessionCostCeilingUsd } from "../../src/domains/scheduling/budget.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { acpUsageFacts } from "../../src/engine/acp/adapter.js";
 import type { AcpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
+import type { AcpUsageMeta } from "../../src/engine/acp/types.js";
 import { budgetAlertNotice } from "../../src/interactive/bus-notices.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { writeSettledRun } from "../harness/settled-run.js";
@@ -393,7 +395,7 @@ test("ACP load streams history beyond the former four MiB byte limit", async () 
 	}
 });
 
-test("ACP prompt usage writes cost provenance that the delegation adapter reads", async () => {
+test("ACP prompt usage writes the pricing facts that the delegation adapter reads", async () => {
 	// The turn's one call, priced from the catalog, as the read model folds it.
 	const records = telemetryCall("acp", {
 		turnId: "turn-1",
@@ -410,7 +412,7 @@ test("ACP prompt usage writes cost provenance that the delegation adapter reads"
 				message: {
 					role: "assistant",
 					content: [{ type: "text", text: "done" }],
-					usage: { input: 3, output: 2, cost: { total: 0.01 }, costProvenance: "estimated" },
+					usage: { input: 3, output: 2, cost: { total: 0.01 }, pricedBy: "catalog" },
 				},
 			});
 			emit({ type: "agent_end", turnId: "turn-1", messages: [] });
@@ -427,14 +429,18 @@ test("ACP prompt usage writes cost provenance that the delegation adapter reads"
 		const result = (await peer.call("session/prompt", {
 			sessionId: opened.sessionId,
 			prompt: [{ type: "text", text: "Hello" }],
-		})) as { _meta: { "clio-coder/usage": { costProvenance: string } } };
-		strictEqual(result._meta["clio-coder/usage"].costProvenance, "estimated");
+		})) as { _meta: { "clio-coder/usage": AcpUsageMeta } };
+		const usd = result._meta["clio-coder/usage"].quantities?.usd.fact;
+		ok(usd);
+		// A catalog price stays an estimate on the wire, and the delegation adapter reads it back as one (#434).
+		ok("kind" in usd ? usd.kind === "estimated" : usd.coverage.estimated === 1);
+		strictEqual(acpUsageFacts(result._meta["clio-coder/usage"]).pricing.usd.kind, "estimated");
 	} finally {
 		await peer.stop();
 	}
 });
 
-test("a reloaded session replays a finished run's tokens with its settled call coverage, as the live frame words them (#434)", async () => {
+test("a reloaded session replays a finished run's token facts as the live frame words them (#434)", async () => {
 	const timestamp = "2026-09-25T12:00:00.000Z";
 	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
 	const settle = (runId: string, outcome: "succeeded" | "failed", apiCalls: number | null) =>
@@ -490,33 +496,30 @@ test("a reloaded session replays a finished run's tokens with its settled call c
 		await loaded.call("session/load", { sessionId: "session-1", cwd: loaded.cwd, mcpServers: [] });
 		deepStrictEqual(
 			loaded.events.map((event) => {
-				const { runId, tokenCount, apiCalls, missingTokenCalls, tokenDisplay } = event.payload as Record<string, unknown>;
-				return { kind: event.kind, runId, tokenCount, apiCalls, missingTokenCalls, tokenDisplay };
+				const { runId, totalTokens, apiCalls, tokenDisplay } = event.payload as Record<string, unknown>;
+				return { kind: event.kind, runId, totalTokens, apiCalls, tokenDisplay };
 			}),
 			[
 				{
 					kind: "run.completed",
 					runId: "replay-partial",
-					tokenCount: 1_200,
-					apiCalls: 3,
-					missingTokenCalls: null,
-					tokenDisplay: "≥1,200 (call coverage not recorded)",
+					totalTokens: measured(1_200),
+					apiCalls: { kind: "measured", value: 3, source: "local-count" },
+					tokenDisplay: "1,200",
 				},
 				{
 					kind: "run.failed",
 					runId: "replay-failed",
-					tokenCount: 1_200,
-					apiCalls: 2,
-					missingTokenCalls: null,
-					tokenDisplay: "≥1,200 (call coverage not recorded)",
+					totalTokens: measured(1_200),
+					apiCalls: { kind: "measured", value: 2, source: "local-count" },
+					tokenDisplay: "1,200",
 				},
 				{
 					kind: "run.completed",
 					runId: "replay-legacy",
-					tokenCount: 1_200,
+					totalTokens: measured(1_200),
 					apiCalls: null,
-					missingTokenCalls: null,
-					tokenDisplay: "≥1,200 (call coverage not recorded)",
+					tokenDisplay: "1,200",
 				},
 			],
 		);

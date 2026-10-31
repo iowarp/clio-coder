@@ -82,7 +82,7 @@ export const OPENCODE_CLI_CONNECTOR: JsonlCliConnector = {
 						reasoning: tokens?.reasoning,
 						totalTokens: tokens?.total,
 						costUsd: part.cost,
-						costProvenance: "estimated",
+						pricedBy: "catalog",
 					},
 					coverage: "complete",
 					costEstimateMethod: "peer-report",

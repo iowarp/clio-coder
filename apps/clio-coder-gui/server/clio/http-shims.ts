@@ -2,15 +2,14 @@ export { ACP_CONTEXT_STATUS_METHOD } from "../../../../src/core/context-operatio
 export { resolvePackageRoot } from "../../../../src/core/package-root.js";
 export { processAlive, processBirthToken } from "../../../../src/core/process-identity.js";
 export { pendingInstalledVersion, registerRunningBuild } from "../../../../src/core/running-build.js";
-export { renderCompactCount, renderCount, renderFact } from "../../../../src/core/telemetry/render.js";
+export {
+	renderCompactCount,
+	renderCount,
+	renderFact,
+	renderUsdLimit,
+} from "../../../../src/core/telemetry/render.js";
 export { clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "../../../../src/core/xdg.js";
 export { getVersionInfo } from "../../../../src/domains/lifecycle/version.js";
-export type { CostAggregate } from "../../../../src/domains/telemetry/cost.js";
-export {
-	aggregateCostAmounts,
-	renderCostAggregate,
-	renderUsdLimit,
-} from "../../../../src/domains/telemetry/cost.js";
 export {
 	AcpProcessError,
 	AcpProtocolError,

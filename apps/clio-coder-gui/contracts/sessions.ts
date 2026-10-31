@@ -87,25 +87,8 @@ export const SessionSummary = Type.Object(
 	closed,
 );
 export type SessionSummary = Static<typeof SessionSummary>;
-export const Usage = Type.Pick(
-	AcpUsageMetaSchema,
-	[
-		"quantities",
-		"input",
-		"output",
-		"cacheRead",
-		"cacheWrite",
-		"reasoning",
-		"totalTokens",
-		"costUsd",
-		"costDisplay",
-		"costProvenance",
-		"costSummary",
-		"apiCalls",
-		"missingTokenCalls",
-	],
-	{ additionalProperties: false },
-);
+/** A turn's usage as read-model quantities, each a fact with its canonical display (#434). */
+export const Usage = Type.Pick(AcpUsageMetaSchema, ["quantities"], { additionalProperties: false });
 export type Usage = Static<typeof Usage>;
 export const Provenance = Type.Array(
 	Type.Object(

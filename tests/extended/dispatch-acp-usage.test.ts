@@ -35,104 +35,69 @@ const components = { input: 10, output: 5, cacheRead: 2, cacheWrite: 1, reasonin
 const split = [10, 5, 2, 1, 3];
 const zero = [0, 0, 0, 0, 0];
 const meta = (usage: unknown) => ({ _meta: { "clio-coder/usage": usage } });
+const measured = (value: number) => ({ kind: "measured", value, source: "provider" });
+const quantity = (metric: string, fact: unknown) => ({ fact, display: "-", ref: `session:peer#${metric}` });
+const pricers = (counts: Partial<Record<"provider" | "target-rates" | "catalog" | "free" | "none", number>>) => ({
+	provider: 0,
+	"target-rates": 0,
+	catalog: 0,
+	free: 0,
+	none: 0,
+	...counts,
+});
+/** A Clio peer's session block: its quantities as facts and who priced its calls (#434). */
+const peerSession = (input: number, output: number, usd: number, pricedBy: ReturnType<typeof pricers>) =>
+	meta({
+		session: {
+			quantities: {
+				input: quantity("input", measured(input)),
+				output: quantity("output", measured(output)),
+				cacheRead: quantity("cacheRead", measured(0)),
+				cacheWrite: quantity("cacheWrite", measured(0)),
+				reasoning: quantity("reasoning", measured(0)),
+				total: quantity("total", measured(input + output)),
+				usd: quantity("usd", measured(usd)),
+				calls: quantity("calls", measured(3)),
+			},
+			pricedBy,
+		},
+	});
 
 for (const scenario of [
 	{
-		name: "total-only with nested peer cost",
-		response: meta({ totalTokens: 123, cost: { total: 0.0123 }, costProvenance: "known" }),
-		total: 123,
-		split: zero,
-		cost: 0.0123,
-		provenance: "known",
-	},
-	{
-		name: "Clio metadata costUsd with estimated provenance",
-		response: meta({
-			totalTokens: 123,
-			costUsd: 0.01,
-			costProvenance: "known",
-			session: {
-				input: 140,
-				output: 10,
-				totalTokens: 150,
-				costUsd: 0.02,
-				costProvenance: "unknown",
-				calls: 3,
-				missingTokenCalls: 1,
-				costSummary: { knownUsd: 0.02, hasEstimated: true, hasUnknown: true, allKnownFree: false, calls: 3 },
-			},
-		}),
+		name: "a Clio peer's session facts",
+		response: peerSession(140, 10, 0.02, pricers({ "target-rates": 3 })),
 		total: 150,
 		split: [140, 10, 0, 0, 0],
-		// The session cost is partly unpriced, so the run's one cost fact is unknown, never the priced part (#434).
-		cost: 0,
-		provenance: "unknown",
+		cost: 0.02,
+		pricedBy: "provider",
 	},
 	{
-		name: "components seen by both adapter and event meter",
-		response: { usage: components },
-		total: 18,
-		split,
+		name: "a Clio peer whose every call was free",
+		response: peerSession(4, 3, 0, pricers({ free: 3 })),
+		total: 7,
+		split: [4, 3, 0, 0, 0],
 		cost: 0,
-		provenance: "unknown",
+		pricedBy: "free",
 	},
+	{ name: "another agent's components", response: { usage: components }, total: 18, split, cost: 0, pricedBy: "none" },
 	{
 		name: "explicit total overrides component sum",
 		response: { usage: { ...components, total_tokens: 100 } },
 		total: 100,
 		split,
 		cost: 0,
-		provenance: "unknown",
+		pricedBy: "none",
 	},
 	{
-		name: "explicit zero total overrides component sum",
-		response: { usage: { ...components, totalTokens: 0, cost: { total: 0 }, costProvenance: "known" } },
+		name: "explicit zero total overrides component sum, and its cost names no pricer",
+		response: { usage: { ...components, totalTokens: 0, cost: { total: 0 } } },
 		total: 0,
 		split,
 		cost: 0,
-		provenance: "known",
+		pricedBy: "none",
 	},
-	{
-		name: "explicit zero metadata overrides event usage",
-		response: { ...meta({ totalTokens: 0, costUsd: 0, costProvenance: "known_free" }), usage: components },
-		total: 0,
-		split: zero,
-		cost: 0,
-		provenance: "known_free",
-	},
-	{
-		name: "absent metadata usage retains event components",
-		response: { ...meta({}), usage: components },
-		total: 18,
-		split,
-		cost: 0,
-		provenance: "unknown",
-	},
-	{
-		name: "cost-only metadata retains event components",
-		response: { ...meta({ costUsd: 0.03, costProvenance: "known" }), usage: components },
-		total: 18,
-		split,
-		cost: 0.03,
-		provenance: "known",
-	},
-	{ name: "absent usage stays unknown", response: {}, total: 0, split: zero, cost: 0, provenance: "unknown" },
-	{
-		name: "unsupported provenance remains unknown",
-		response: meta({ totalTokens: 7, costUsd: 0.04, costProvenance: "measured" }),
-		total: 7,
-		split: zero,
-		cost: 0,
-		provenance: "unknown",
-	},
-	{
-		name: "absent cost ignores claimed provenance",
-		response: meta({ totalTokens: 7, costProvenance: "known_free" }),
-		total: 7,
-		split: zero,
-		cost: 0,
-		provenance: "unknown",
-	},
+	{ name: "absent usage stays unknown", response: {}, total: 0, split: zero, cost: 0, pricedBy: "none" },
 ]) {
 	it(`seals ACP usage: ${scenario.name}`, { timeout: 15_000 }, async (t) => {
 		const settings = structuredClone(DEFAULT_SETTINGS);
@@ -186,14 +151,7 @@ for (const scenario of [
 					spend.usage.reasoning,
 				].map(factKnownValue),
 				costUsd: factKnownValue(pricing.usd),
-				costProvenance:
-					pricing.usd.kind === "unknown" || pricing.usd.kind === "absent"
-						? "unknown"
-						: pricing.pricedBy === "free"
-							? "known_free"
-							: pricing.usd.kind === "estimated"
-								? "estimated"
-								: "known",
+				pricedBy: pricing.pricedBy,
 			};
 			t.diagnostic(
 				JSON.stringify({
@@ -204,7 +162,7 @@ for (const scenario of [
 					sealedIntegrity: integrity.ok,
 				}),
 			);
-			if (scenario.name === "total-only with nested peer cost") {
+			if (scenario.name === "a Clio peer's session facts") {
 				t.diagnostic(JSON.stringify({ sealedEvidence: { receipt: persisted, envelope } }));
 			}
 			strictEqual(receipt.outcome, "succeeded");
@@ -212,15 +170,15 @@ for (const scenario of [
 				tokenCount: scenario.total,
 				split: scenario.split,
 				costUsd: scenario.cost,
-				costProvenance: scenario.provenance,
+				pricedBy: scenario.pricedBy,
 			});
 			if (scenario.name === "absent usage stays unknown") {
 				// A real ACP reply without usage is still one provider observation, but never a metered call.
 				strictEqual(receipt.upstreamResponses?.length, 1);
 				strictEqual("usage" in (receipt.upstreamResponses?.[0] ?? {}), false);
 			}
-			if (scenario.name === "Clio metadata costUsd with estimated provenance") {
-				deepStrictEqual(spend.apiCalls, { kind: "measured", value: 3, source: "provider" });
+			if (scenario.name === "a Clio peer's session facts") {
+				deepStrictEqual(spend.apiCalls, { kind: "measured", value: 3, source: "local-count" });
 				const { usd } = bundle.contract.snapshot().totals.cost;
 				strictEqual(usd.measured + usd.estimated, factKnownValue(pricing.usd));
 			}

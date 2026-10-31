@@ -73,13 +73,6 @@ after(() => {
 
 const timeless = (dto: unknown) =>
 	JSON.parse(JSON.stringify(dto, (key, value: unknown) => (key === "generatedAt" ? undefined : value))) as unknown;
-/** What a number-only surface may carry of a quantity: its measured and estimated part. */
-const knownPart = (quantity: Quantity) =>
-	"kind" in quantity.fact
-		? quantity.fact.kind === "measured" || quantity.fact.kind === "estimated"
-			? quantity.fact.value
-			: 0
-		: quantity.fact.measured + quantity.fact.estimated;
 const estimated = (quantity: Quantity) =>
 	"kind" in quantity.fact ? quantity.fact.kind === "estimated" : quantity.fact.coverage.estimated > 0;
 const partial = (quantity: Quantity) =>
@@ -173,11 +166,9 @@ test("the dispatch board shows a run's tokens and cost as the same quantities th
 
 test("ACP's live totals and its telemetry methods carry the same value and provenance", async () => {
 	const live = sessionUsageTotals(view);
-	strictEqual(live.costDisplay, cold.session.totals.usd.display);
-	strictEqual(live.costSummary.knownUsd, knownPart(cold.session.totals.usd));
-	strictEqual(live.costSummary.hasEstimated, estimated(cold.session.totals.usd));
-	strictEqual(live.costSummary.hasUnknown, partial(cold.session.totals.usd));
-	strictEqual(live.totalTokens, knownPart(cold.session.totals.tokens));
+	deepStrictEqual(live.quantities.usd.fact, cold.session.totals.usd.fact);
+	strictEqual(live.quantities.usd.display, cold.session.totals.usd.display);
+	deepStrictEqual(live.quantities.total.fact, cold.session.totals.tokens.fact);
 	const handlers = telemetryRequestHandlers({
 		model,
 		params: (params) => params as Record<string, unknown>,
@@ -193,15 +184,12 @@ test("ACP's prompt usage block words the prompt's operator turn as the read mode
 	const turn = cold.costByTurn.groups.find((group) => group.key === "turn-parity");
 	ok(turn);
 	const usage = turnUsageMeta(view, { turnIds: new Set(["turn-parity"]), attemptIds: new Set() });
-	ok("costSummary" in usage, "a bound view words the prompt's turn");
-	strictEqual(usage.costDisplay, turn.usd.display);
-	strictEqual(usage.costUsd, knownPart(turn.usd));
-	strictEqual(usage.costSummary.hasEstimated, estimated(turn.usd));
-	strictEqual(usage.costSummary.hasUnknown, partial(turn.usd));
-	strictEqual(usage.costSummary.calls, knownPart(turn.calls));
-	strictEqual(usage.totalTokens, knownPart(turn.tokens));
+	ok(usage.quantities, "a bound view words the prompt's turn");
+	strictEqual(usage.quantities.usd.display, turn.usd.display);
+	deepStrictEqual(usage.quantities.usd.fact, turn.usd.fact);
+	deepStrictEqual(usage.quantities.calls.fact, turn.calls.fact);
+	deepStrictEqual(usage.quantities.total.fact, turn.tokens.fact);
 	ok(partial(turn.tokens), "the turn's unreported calls keep its tokens a lower bound");
-	strictEqual(usage.missingTokenCalls, "kind" in turn.tokens.fact ? undefined : turn.tokens.fact.unknownCount);
 	const records: TelemetryRecord[] = [100, 900].flatMap((ttft, index) =>
 		telemetryCall(PARITY_SESSION, { turnId: "first-token", at: `2026-10-30T00:00:0${index}.000Z` }).map((record) =>
 			record.k === "call.settled"

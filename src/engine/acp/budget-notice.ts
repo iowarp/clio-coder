@@ -1,4 +1,4 @@
-import { renderCostAmount } from "../../domains/telemetry/cost.js";
+import { renderUsdLimit } from "../../core/telemetry/render.js";
 import type { AcpBudgetBlock, AcpBudgetCapability } from "./types.js";
 
 export type { AcpBudgetBlock } from "./types.js";
@@ -51,8 +51,8 @@ export function budgetBlockFrame(payload: unknown): AcpBudgetFrame | null {
 			[ACP_BUDGET_META_KEY]: {
 				version: 1,
 				currentDisplay: budgetSpendText(block.currentUsd, block.pricing),
-				ceilingDisplay: renderCostAmount(block.ceilingUsd, "known"),
-				raiseDisplay: renderCostAmount(block.raiseToUsd, "known"),
+				ceilingDisplay: renderUsdLimit(block.ceilingUsd),
+				raiseDisplay: renderUsdLimit(block.raiseToUsd),
 				level: block.level,
 				currentUsd: block.currentUsd,
 				ceilingUsd: block.ceilingUsd,

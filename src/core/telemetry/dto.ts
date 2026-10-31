@@ -239,11 +239,14 @@ export const TurnQuantitiesSchema = Type.Object(
 	},
 	closed,
 );
+export type TurnQuantities = Static<typeof TurnQuantitiesSchema>;
 
-const pricedBy = Type.Object(
+/** How many priced contributions each pricer stands behind, so a renderer can say free or estimated (#434). */
+export const PricedByCountsSchema = Type.Object(
 	{ provider: count, "target-rates": count, catalog: count, free: count, none: count },
 	closed,
 );
+const pricedBy = PricedByCountsSchema;
 const cost = Type.Object({ usd: QuantitySchema, pricedBy }, closed);
 const dispositions = Type.Object(
 	{

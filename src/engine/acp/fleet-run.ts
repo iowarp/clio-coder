@@ -1,5 +1,5 @@
+import { renderUsdLimit } from "../../core/telemetry/render.js";
 import { budgetSpendText } from "../../domains/scheduling/index.js";
-import { renderCostAmount } from "../../domains/telemetry/cost.js";
 import type { AcpFleetPreview, AcpFleetStep } from "./types.js";
 
 export type { AcpFleetPreview, AcpFleetStep } from "./types.js";
@@ -132,11 +132,9 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 			ceilingUsd: preview.budget.ceilingUsd,
 			currentUsd: preview.budget.currentUsd,
 			playbookUsd: preview.budget.playbookUsd,
-			ceilingDisplay: renderCostAmount(preview.budget.ceilingUsd, "known"),
+			ceilingDisplay: renderUsdLimit(preview.budget.ceilingUsd),
 			currentDisplay: budgetSpendText(preview.budget.currentUsd, preview.budget.pricing),
-			...(preview.budget.playbookUsd !== null
-				? { playbookDisplay: renderCostAmount(preview.budget.playbookUsd, "known") }
-				: {}),
+			...(preview.budget.playbookUsd !== null ? { playbookDisplay: renderUsdLimit(preview.budget.playbookUsd) } : {}),
 		},
 		truncated,
 		...(preview.resume !== undefined
