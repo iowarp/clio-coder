@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { telemetryInvalidations } from "../client/telemetry/live-model.js";
@@ -6,12 +9,29 @@ import type { Event } from "../contracts/events.js";
 import { routes } from "../contracts/routes.js";
 import { sessionUpdateTelemetry } from "../server/acp/telemetry.js";
 import { harness, json } from "./harness/app.js";
+import { coldParityDtos, parityUsageFrame, seedParitySession } from "./harness/telemetry-fixture.js";
 
 test("a telemetry_update names the reads to refresh and folds nothing (#434)", () => {
 	assert.deepEqual(telemetryInvalidations({ topics: ["session", "cost"] }), ["telemetry", "session-usage"]);
 	assert.deepEqual(telemetryInvalidations({ topics: ["cache", "timeline", "runs"] }), ["telemetry"]);
 	assert.deepEqual(telemetryInvalidations({ topics: ["quota", "health"] }), []);
 	assert.deepEqual(telemetryInvalidations({ topics: [] }), []);
+});
+
+test("the live usage DTO carries the parity fixture's session totals as the read model words them (#434 §13.2)", async (t) => {
+	const state = mkdtempSync(join(tmpdir(), "clio-gui-live-parity-"));
+	t.after(() => rmSync(state, { recursive: true, force: true }));
+	await seedParitySession(state);
+	const { tokens, usd } = coldParityDtos(state).session.totals;
+	const session = sessionUpdateTelemetry(await parityUsageFrame(state))?.usage?.session;
+	assert.ok(session && !("kind" in tokens.fact) && !("kind" in usd.fact));
+	assert.equal(session.costDisplay, usd.display);
+	// A partly unpriced cost has no amount to show; its words carry what is known.
+	assert.equal(session.costProvenance, "unknown");
+	assert.equal(session.costUsd, null);
+	assert.equal(session.hasEstimatedCost, usd.fact.coverage.estimated > 0);
+	assert.equal(session.totalTokens, tokens.fact.measured + tokens.fact.estimated);
+	assert.equal(session.missingTokenCalls, tokens.fact.unknownCount);
 });
 
 test("a usage_update's unknowns reach the browser as null, never as 0 (R1)", () => {

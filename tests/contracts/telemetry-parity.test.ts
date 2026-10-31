@@ -1,23 +1,28 @@
 /**
  * Cross-surface parity (#434 §13.2, R11): one fixture on disk, read live the way the TUI and ACP read it and cold the
  * way the CLI's `--json` and the GUI's routes read it, shows one value and one provenance for each fact on every
- * surface. The footer, /usage, /context, the exit card, the dispatch board, ACP's v1 usage, its live totals and its
- * telemetry methods each take the live view; the CLI and the GUI serve the cold DTOs, which the GUI's own route test
- * compares with what it serves. Every DTO the surfaces read passes the §13.1 lie detectors.
+ * surface. The footer, /usage, /context, the exit card, the dispatch board, ACP's v1 usage, its prompt usage block,
+ * its live totals and its telemetry methods each take the live view; the CLI and the GUI serve the cold DTOs, which
+ * the GUI's own route test compares with what it serves, and its live usage test with the frame ACP pushes. The usage
+ * report folds the window the fixture fills, and the CLI fleet board folds the run journal itself. Every DTO the
+ * surfaces read passes the §13.1 lie detectors.
  */
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { createBoardSource } from "../../src/cli/fleet-board-model.js";
 import type { Quantity } from "../../src/core/telemetry/dto.js";
 import { renderCompactCount } from "../../src/core/telemetry/render.js";
 import type { TelemetryView } from "../../src/domains/observability/contract.js";
 import type { ObservabilityContract } from "../../src/domains/observability/index.js";
+import { repoCostReport, repoOwner, repoTokenQuantities } from "../../src/domains/observability/read-model.js";
 import type { LiveTelemetryModel } from "../../src/domains/observability/telemetry-live.js";
 import { createLiveTelemetryModel } from "../../src/domains/observability/telemetry-live.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
-import { sessionUsageTotals } from "../../src/engine/acp/live-telemetry.js";
+import { loadRepoTelemetrySources } from "../../src/domains/session/telemetry-source.js";
+import { sessionUsageTotals, turnUsageMeta } from "../../src/engine/acp/live-telemetry.js";
 import { telemetryRequestHandlers } from "../../src/engine/acp/telemetry-methods.js";
 import { ACP_TELEMETRY_METHODS } from "../../src/engine/acp/types.js";
 import { sessionUsageV1 } from "../../src/engine/acp/usage.js";
@@ -183,6 +188,53 @@ test("ACP's v1 usage, its live totals and its telemetry methods carry the same v
 		timeless(await handlers[method]?.({ sessionId: PARITY_SESSION, ...params }));
 	deepStrictEqual(await served(ACP_TELEMETRY_METHODS.session), timeless(cold.session));
 	deepStrictEqual(await served(ACP_TELEMETRY_METHODS.cost, { groupBy: "model" }), timeless(cold.costByModel));
+});
+
+test("ACP's prompt usage block words the prompt's operator turn as the read model's turn report does", () => {
+	const turn = cold.costByTurn.groups.find((group) => group.key === "turn-parity");
+	ok(turn);
+	const usage = turnUsageMeta(view, { turnIds: new Set(["turn-parity"]), attemptIds: new Set() });
+	ok("costSummary" in usage, "a bound view words the prompt's turn");
+	strictEqual(usage.costDisplay, turn.usd.display);
+	strictEqual(usage.costUsd, knownPart(turn.usd));
+	strictEqual(usage.costSummary.hasEstimated, estimated(turn.usd));
+	strictEqual(usage.costSummary.hasUnknown, partial(turn.usd));
+	strictEqual(usage.costSummary.calls, knownPart(turn.calls));
+	strictEqual(usage.totalTokens, knownPart(turn.tokens));
+	ok(partial(turn.tokens), "the turn's unreported calls keep its tokens a lower bound");
+	strictEqual(usage.missingTokenCalls, "kind" in turn.tokens.fact ? undefined : turn.tokens.fact.unknownCount);
+});
+
+test("the usage report folds a window the fixture fills to the session's own totals and groups", () => {
+	const days = 36_500;
+	const repo = {
+		owner: repoOwner(null, days),
+		...loadRepoTelemetrySources(stateDir, { cwdHash: null, from: 0, to: Date.now() + 86_400_000, standaloneRuns: "all" }),
+	};
+	// The window and the session own different references, so the two agree on each value and its words.
+	const said = (quantity: Quantity) => ({ fact: quantity.fact, display: quantity.display });
+	for (const [groupBy, session] of [
+		["model", cold.costByModel],
+		["label", cold.costByLabel],
+	] as const) {
+		const report = repoCostReport(repo, { repo: "all", days }, groupBy);
+		deepStrictEqual(said(report.total.usd), said(session.total.usd), groupBy);
+		deepStrictEqual(said(report.total.tokens), said(session.total.tokens), groupBy);
+		deepStrictEqual(
+			report.groups.map((group) => [group.key, said(group.calls), said(group.tokens), said(group.usd)]),
+			session.groups.map((group) => [group.key, said(group.calls), said(group.tokens), said(group.usd)]),
+			groupBy,
+		);
+	}
+	deepStrictEqual(said(repoTokenQuantities(repo).total), said(cold.session.totals.tokens));
+});
+
+test("the CLI fleet board folds a run's tokens from its journal as the run report holds them", () => {
+	const fold = createBoardSource(stateDir, join(stateDir, "runs")).folds.fold(PARITY_RUN);
+	const row = cold.runs.find((run) => run.runId === PARITY_RUN);
+	ok(row && fold.tokens);
+	deepStrictEqual(fold.tokens, row.tokens.fact);
+	ok(partial(row.tokens), "the unreported worker call keeps the card's tokens a lower bound");
 });
 
 test("no DTO the surfaces read tells a lie the detectors know (§13.1)", () => {

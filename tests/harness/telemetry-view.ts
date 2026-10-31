@@ -11,10 +11,12 @@ import { openCallJournal } from "../../src/domains/observability/call-journal.js
 import type { TelemetryReadModel, TelemetryView } from "../../src/domains/observability/contract.js";
 import type { JournalSource } from "../../src/domains/observability/read-model.js";
 import { callsReport, costReport, runsReport, sessionTelemetry } from "../../src/domains/observability/read-model.js";
-import { telemetryView } from "../../src/domains/observability/telemetry-live.js";
+import { createLiveTelemetryModel, telemetryView } from "../../src/domains/observability/telemetry-live.js";
+import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { isSessionEntry } from "../../src/domains/session/entries.js";
 import { importLegacySession } from "../../src/domains/session/legacy-import.js";
 import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
+import { createAcpLiveTelemetry } from "../../src/engine/acp/live-telemetry.js";
 import type { DispatchRunUsage } from "../../src/interactive/dispatch-board.js";
 import { dispatchRunUsage } from "../../src/interactive/dispatch-board.js";
 
@@ -263,7 +265,47 @@ export function coldParityDtos(stateDir: string) {
 		session: sessionTelemetry(source),
 		costByModel: costReport(source, "model"),
 		costByLabel: costReport(source, "label"),
+		costByTurn: costReport(source, "turn"),
 		calls: callsReport(source),
 		runs: runsReport(source),
 	};
+}
+
+/** The usage_update frame an ACP server bound to the parity fixture sends, read from the live model (#434 §13.2). */
+export async function parityUsageFrame(stateDir: string): Promise<Record<string, unknown>> {
+	const model = createLiveTelemetryModel({ stateDir: () => stateDir });
+	model.bind(PARITY_SESSION);
+	try {
+		const seeded = new Promise<void>((resolve) => {
+			model.subscribe("session", () => {
+				if (model.live()?.seeding === false) resolve();
+			});
+		});
+		if (model.live()?.seeding !== false) await seeded;
+		const frames: Record<string, unknown>[] = [];
+		const live = createAcpLiveTelemetry({
+			notify: (_sessionId, update) => frames.push(update),
+			sessionId: () => PARITY_SESSION,
+			cwd: stateDir,
+			contextLedger: () =>
+				buildContextLedger({
+					provider: "fixture",
+					model: "fixture",
+					contextWindow: 32768,
+					systemPromptTokens: 1200,
+					toolSchemaTokens: 800,
+					messageTokens: 1000,
+					compactionThreshold: 0.9,
+					compactionAuto: true,
+				}),
+			sessionTelemetry: () => model.live(),
+		});
+		live.bind(true);
+		live.dispose();
+		const frame = frames.find((update) => update.sessionUpdate === "usage_update");
+		if (!frame) throw new Error("the parity session sent no usage_update");
+		return frame;
+	} finally {
+		model.stop();
+	}
 }
