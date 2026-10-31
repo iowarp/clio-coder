@@ -639,6 +639,13 @@ export function createRunner(deps: RunnerDeps): Runner {
 								if (failures >= BREAKER_THRESHOLD) breakerMoves.set(plan, "opened");
 								plan.outcome = "timeout";
 							} else if (upstream?.aborted === true) {
+								// A cancelled probe proves nothing about the engine, so the breaker is half-open again at once
+								// instead of reading probing until the probe's deadline (#434).
+								const breaker = breakers.get(key);
+								if (breakerMoves.get(plan) === "probe" && breaker?.probing === true) {
+									breaker.probing = false;
+									breaker.openUntil = performance.now();
+								}
 								plan.outcome = "canceled";
 							} else {
 								// An answer or a refusal both prove the engine responds.

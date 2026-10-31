@@ -10,7 +10,12 @@ import { FITTED_CONTRACTS, FITTED_CUTS } from "../../src/domains/system-one/cali
 import { capabilitySettings } from "../../src/domains/system-one/capability-settings.js";
 import { createSystemOne } from "../../src/domains/system-one/factory.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
-import { BREAKER_THRESHOLD, createRunner, noteSystemOneCall } from "../../src/domains/system-one/runner.js";
+import {
+	BREAKER_COOLDOWN_MS,
+	BREAKER_THRESHOLD,
+	createRunner,
+	noteSystemOneCall,
+} from "../../src/domains/system-one/runner.js";
 import type {
 	Answer,
 	DecisionEngine,
@@ -265,6 +270,25 @@ describe("System One runner", () => {
 		strictEqual(open.failures, BREAKER_THRESHOLD);
 		strictEqual(open.site, site().id);
 		ok(open.remainingMs > 0);
+	});
+
+	it("settles a cancelled probe back to half-open instead of probing until its deadline (#434)", async (t) => {
+		const { runner, bind, records } = harness();
+		const binding = bind(fakeEngine(hangs));
+		for (let index = 0; index < BREAKER_THRESHOLD; index += 1) await runner.run(binding, site(), "x", {});
+		const now = performance.now.bind(performance);
+		let skew = 0;
+		t.mock.method(performance, "now", () => now() + skew);
+		skew = BREAKER_COOLDOWN_MS + 1;
+		strictEqual(runner.breakers()[0]?.state, "half-open");
+		const cancel = new AbortController();
+		const probe = runner.run(binding, site(), "x", { signal: cancel.signal });
+		await new Promise((resolve) => setImmediate(resolve));
+		strictEqual(runner.breakers()[0]?.state, "probing");
+		cancel.abort();
+		strictEqual(await probe, null);
+		strictEqual(records.at(-1)?.outcome, "canceled");
+		strictEqual(runner.breakers()[0]?.state, "half-open");
 	});
 
 	it("records system_one.decision with its breaker moves and the calls its engine opened (#429)", async () => {
