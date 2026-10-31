@@ -274,10 +274,11 @@ test("segment readers preserve future records and distinguish a torn tail from i
 	);
 	strictEqual(scan.validBytes, lines.length);
 	strictEqual(scan.tornTailBytes, 0);
-	// A development segment written under the legacy writer key still reads, under the canonical one (#434).
+	// A header under a retired writer key is skipped and counted, never upcast (#434).
 	deepStrictEqual(readTelemetryRecord({ ...header, writer: { clioVersion: "dev", piVersion: "test" } }), {
-		kind: "header",
-		header: { ...header, writer: { clioCoderVersion: "dev", piVersion: "test" } },
+		kind: "skipped",
+		reason: "invalid-record",
+		segment: true,
 	});
 	const partial = Buffer.from('{"v":1,"k":"call.settled"');
 	const torn = scanTelemetrySegment(Buffer.concat([lines, partial]));
