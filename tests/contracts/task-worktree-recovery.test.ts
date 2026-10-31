@@ -11,6 +11,7 @@ import {
 	discardIdleTaskWorktree,
 	discardTaskWorktree,
 	listPreservedTaskWorktrees,
+	previewTaskWorktree,
 	recoverTaskWorktrees,
 	settleTaskWorktree,
 	type TaskWorktree,
@@ -143,14 +144,14 @@ describe("task worktree restart recovery", () => {
 				authoredPaths: [join(task.path, `${runId}.txt`)],
 			});
 			ok(preview.commit !== undefined);
-			return { task, commit: preview.commit };
+			return { task, commit: preview.commit, preview: previewTaskWorktree(task, preview.commit) };
 		};
 
 		const clean = prepare("run-pinned-clean");
 		const landed = applyTaskWorktree({
 			worktree: clean.task,
 			apply: "merge",
-			pinnedCommit: clean.commit,
+			preview: clean.preview,
 			authoredPaths: [],
 		});
 		strictEqual(landed.applied, true);
@@ -158,18 +159,17 @@ describe("task worktree restart recovery", () => {
 		strictEqual(landed.commit, clean.commit);
 
 		const dirty = prepare("run-pinned-dirty");
-		// An untracked file can never join a pinned merge, so drift is a change to a committed path.
-		writeFileSync(join(dirty.task.path, `${dirty.task.runId}.txt`), "late\n");
+		writeFileSync(join(dirty.task.path, "late.txt"), "late\n");
 		const dirtyRefusal = applyTaskWorktree({
 			worktree: dirty.task,
 			apply: "merge",
-			pinnedCommit: dirty.commit,
+			preview: dirty.preview,
 			authoredPaths: [],
 		});
 		strictEqual(dirtyRefusal.reason, "worktree_changed_since_preview");
 		strictEqual(dirtyRefusal.applied, false);
 		strictEqual(dirtyRefusal.commit, dirty.commit);
-		match(dirtyRefusal.detail ?? "", /uncommitted changes/u);
+		match(dirtyRefusal.detail ?? "", /new or changed untracked files/u);
 		strictEqual(git(root, "rev-parse", dirty.task.branch), dirty.commit, "the refusal commits nothing new");
 		ok(!existsSync(join(root, `${dirty.task.runId}.txt`)), "the previewed work was not merged either");
 
@@ -180,7 +180,7 @@ describe("task worktree restart recovery", () => {
 		const movedRefusal = applyTaskWorktree({
 			worktree: moved.task,
 			apply: "merge",
-			pinnedCommit: moved.commit,
+			preview: moved.preview,
 			authoredPaths: [],
 		});
 		strictEqual(movedRefusal.reason, "worktree_changed_since_preview");
@@ -280,17 +280,16 @@ describe("task worktree restart recovery", () => {
 			authoredPaths: [join(late.path, "w.txt")],
 		}).commit;
 		ok(lateCommit !== undefined);
-		writeFileSync(join(late.path, "w.txt"), "after preview\n");
-		const refused = discardTaskWorktree(late, lateCommit);
+		const latePreview = previewTaskWorktree(late, lateCommit);
+		writeFileSync(join(late.path, "after-preview.txt"), "x\n");
+		const refused = discardTaskWorktree(late, latePreview);
 		strictEqual(refused.outcome, "changed");
-		match(refused.outcome === "changed" ? refused.detail : "", /uncommitted changes/u);
+		match(refused.outcome === "changed" ? refused.detail : "", /new or changed untracked files/u);
 		ok(
-			readFileSync(join(late.path, "w.txt"), "utf8") === "after preview\n" &&
-				branches().includes(late.branch) &&
-				existsSync(markerPath(late)),
+			existsSync(join(late.path, "after-preview.txt")) && branches().includes(late.branch) && existsSync(markerPath(late)),
 		);
-		git(late.path, "checkout", "-q", "--", "w.txt");
-		deepStrictEqual(discardTaskWorktree(late, lateCommit), { outcome: "discarded", claimReleased: true });
+		rmSync(join(late.path, "after-preview.txt"));
+		deepStrictEqual(discardTaskWorktree(late, latePreview), { outcome: "discarded", claimReleased: true });
 
 		// A branch already gone needs no `git branch -D`: the outcome is what the steps did.
 		const gone = createTaskWorktree(root, "run-discard-gone", undefined, "merge");

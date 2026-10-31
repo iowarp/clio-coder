@@ -863,15 +863,61 @@ function committedReceipt(worktree: TaskWorktree, commit: string, apply: TaskWor
 	};
 }
 
-/** How a worktree no longer holds exactly the commit that was previewed, or null when it does. */
-function previewDrift(worktree: TaskWorktree, pinned: string, head: string): string | null {
-	if (head !== pinned) return `is now at ${head}`;
-	// Only what a commit would take counts. Ignored files never reach one, and
-	// an untracked file reaches one only through the authored set of the settle
-	// commit that already ran, so a byproduct left beside the pin is no drift.
+/**
+ * What an operator was shown: the pinned commit and the untracked files the
+ * settle commit left beside it. Merge lands only the commit, but Discard and
+ * the cleanup after Merge remove the worktree with `--force`, so each one
+ * refuses once those files are no longer the ones the preview saw.
+ */
+export interface TaskWorktreePreview {
+	commit: string;
+	untracked: string;
+}
+
+/**
+ * A digest of each untracked file's path and inode stamp. ctime moves on every
+ * write, rename and chmod and cannot be set back, so an equal digest means no
+ * untracked file appeared, vanished or changed. Ignored files stay out, as they
+ * do from every host commit.
+ */
+function untrackedState(path: string): string {
+	const hash = createHash("sha256");
+	for (const entry of untrackedPaths(path)) {
+		let stamp = "gone";
+		try {
+			const stat = lstatSync(join(path, entry), { bigint: true });
+			stamp = `${stat.mode}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+		} catch {
+			// A file removed between the listing and the stat still names its path.
+		}
+		hash.update(entry).update("\0").update(stamp).update("\0");
+	}
+	return hash.digest("hex");
+}
+
+/** Record what an operator is about to be shown for `commit`, before the card that shows it. */
+export function previewTaskWorktree(worktree: TaskWorktree, commit: string): TaskWorktreePreview {
+	return { commit, untracked: untrackedState(worktree.path) };
+}
+
+/** How a worktree no longer holds exactly what was previewed, or null when it does. */
+function previewDrift(worktree: TaskWorktree, preview: TaskWorktreePreview, head: string): string | null {
+	if (head !== preview.commit) return `is now at ${head}`;
 	if (gitBytes(worktree.path, ["status", "--porcelain", "-z", "--untracked-files=no"]).length > 0)
 		return "has uncommitted changes";
+	if (untrackedState(worktree.path) !== preview.untracked) return "has new or changed untracked files";
 	return null;
+}
+
+/**
+ * How the worktree drifted from `preview`, or null when it did not. A merge
+ * of the pinned commit leaves the worktree on it, so the cleanup that follows
+ * reads the same answer the merge did unless something arrived in between.
+ */
+export function taskWorktreePreviewDrift(worktree: TaskWorktree, preview: TaskWorktreePreview): string | null {
+	const head = checkTaskWorktreeHead(worktree);
+	if (!head.ok) return head.detail;
+	return previewDrift(worktree, preview, head.commit);
 }
 
 /** The branch a merge from this task would land on right now: the source checkout's branch, or `detached HEAD`. */
@@ -926,23 +972,23 @@ export function applyTaskWorktree(input: {
 	 */
 	authoredPaths: Iterable<string> | null;
 	/**
-	 * Merge exactly this commit, one an earlier pass pinned and an operator was
-	 * shown, instead of committing the working tree again. Refused unless the
-	 * branch still names it and the tree holds nothing newer, so a window
-	 * between the preview and the merge cannot land work nobody saw.
+	 * Merge exactly the commit an earlier pass pinned and an operator was shown,
+	 * instead of committing the working tree again. Refused unless the branch
+	 * still names it and the tree holds nothing newer, so a window between the
+	 * preview and the merge cannot land work nobody saw.
 	 */
-	pinnedCommit?: string;
+	preview?: TaskWorktreePreview;
 }): TaskWorktreeReceipt {
 	const { worktree } = input;
 	const before = checkTaskWorktreeHead(worktree);
 	if (!before.ok) return headMovedReceipt(worktree, input.apply, before.detail);
 	let commit: string;
 	let leftUncommitted: string[];
-	if (input.pinnedCommit !== undefined) {
-		commit = input.pinnedCommit;
+	if (input.preview !== undefined) {
+		commit = input.preview.commit;
 		// Nothing is committed now, so every untracked file stays out of this merge.
 		leftUncommitted = untrackedPaths(worktree.path);
-		const found = previewDrift(worktree, commit, before.commit);
+		const found = previewDrift(worktree, input.preview, before.commit);
 		if (found !== null) {
 			const drift = `${WORKTREE_CHANGED_SINCE_PREVIEW}: task worktree ${worktree.runId} ${found} since commit ${commit} was offered for merge. Nothing was merged; the branch ${worktree.branch} is preserved.`;
 			return {
@@ -1043,23 +1089,23 @@ export type TaskWorktreeDiscard =
  * what each step actually did. The outcome is read from the steps, never
  * inferred from the one that failed: a claim that cannot be removed after the
  * branch is deleted is still a discard, and a branch that is already gone needs
- * no `git branch -D`. With `pinnedCommit`, nothing is removed unless the
- * worktree still holds exactly that commit. A worktree gone with its branch kept releases the claim,
+ * no `git branch -D`. With `preview`, nothing is removed unless the worktree
+ * still holds exactly what it recorded. A worktree gone with its branch kept releases the claim,
  * because nothing of Clio's is left to guard and the operator holds the branch.
  */
-export function discardTaskWorktree(worktree: TaskWorktree, pinnedCommit?: string): TaskWorktreeDiscard {
+export function discardTaskWorktree(worktree: TaskWorktree, preview?: TaskWorktreePreview): TaskWorktreeDiscard {
 	try {
 		assertOwnership(worktree);
 		// `worktree remove --force` and `branch -D` delete whatever was added after
-		// the preview, so a pinned discard applies the same drift check as Merge.
-		if (pinnedCommit !== undefined) {
+		// the preview, so a previewed discard applies the same drift check as Merge.
+		if (preview !== undefined) {
 			const head = checkTaskWorktreeHead(worktree);
 			if (!head.ok) return { outcome: "changed", detail: head.detail };
-			const found = previewDrift(worktree, pinnedCommit, head.commit);
+			const found = previewDrift(worktree, preview, head.commit);
 			if (found !== null) {
 				return {
 					outcome: "changed",
-					detail: `task worktree ${worktree.runId} ${found} since commit ${pinnedCommit} was offered for discard`,
+					detail: `task worktree ${worktree.runId} ${found} since commit ${preview.commit} was offered for discard`,
 				};
 			}
 		}

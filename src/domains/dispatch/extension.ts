@@ -112,6 +112,7 @@ import { changedCheckoutDiff, changedCheckoutPaths, snapshotCheckout } from "../
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import { effectiveToolCall, gatewayChainReceipts, withGatewayForCapabilities } from "../../tools/surface.js";
+import type { TaskWorktreePreview } from "../../tools/task-worktree.js";
 import {
 	applyTaskWorktree,
 	cleanupTaskWorktree,
@@ -120,12 +121,14 @@ import {
 	discardTaskWorktree,
 	gitCheckoutRoot,
 	mergeDestination,
+	previewTaskWorktree,
 	protectedPathsChangedByWorktreeBranch,
 	settleTaskWorktree,
 	shareTaskWorktreeDependencies,
 	snapshotTaskWorktree,
 	taskWorktreeBaseDiff,
 	taskWorktreeHoldsWork,
+	taskWorktreePreviewDrift,
 	WORKTREE_CHANGED_SINCE_PREVIEW,
 } from "../../tools/task-worktree.js";
 import { diskWorktreeParent, prepareWorktreeParent, resolveWorktreeRoot } from "../../tools/worktree-root.js";
@@ -8665,6 +8668,8 @@ export function createDispatchBundle(
 				let worktreeReceipt: RunResultDraft["worktree"];
 				// Set when the operator discarded the branch and worktree from the merge card.
 				let worktreeDiscarded = false;
+				// Set when an operator's Merge landed a previewed commit; its cleanup keeps the same guard.
+				let mergedPreview: TaskWorktreePreview | undefined;
 				// Set once the task claim is gone, so the closing settle below does not
 				// look for it. A discard that removed the worktree but not the branch
 				// releases the claim too: nothing of Clio's is left to guard.
@@ -8717,8 +8722,19 @@ export function createDispatchBundle(
 						let discardFailed = false;
 						let branchKept = false;
 						let discardChanged: string | null = null;
-						// The commit the card describes. Merge lands this id or nothing.
+						// The commit the card describes and the untracked files beside it,
+						// recorded before the card shows. Merge lands this id or nothing, and
+						// neither choice removes a worktree that changed since.
 						const previewedCommit = worktreeReceipt.commit;
+						let preview: TaskWorktreePreview | undefined;
+						if (previewedCommit !== undefined) {
+							try {
+								preview = previewTaskWorktree(req.taskWorktree, previewedCommit);
+							} catch (previewError) {
+								// Without the record no card is built, so nothing can remove the worktree unguarded.
+								reportDispatchDiagnostic(`preview task worktree ${req.taskWorktree.runId}`, previewError);
+							}
+						}
 						// The preserve pass does not look at protected paths, only the merge
 						// does, so the card learns of them here and withholds Merge. A surface
 						// with no operator never builds a card, so it pays for no git call.
@@ -8736,7 +8752,7 @@ export function createDispatchBundle(
 						}
 						const card =
 							withheldVerdict !== null &&
-							previewedCommit !== undefined &&
+							preview !== undefined &&
 							previewedProtected !== null &&
 							(worktreeReceipt.changedPaths?.length ?? 0) > 0
 								? await askWithheldMerge(activeRun, {
@@ -8778,7 +8794,7 @@ export function createDispatchBundle(
 								protectedPaths: mergeProtectedPaths,
 								commitMessage: taskCommitMessage,
 								authoredPaths,
-								...(previewedCommit !== undefined ? { pinnedCommit: previewedCommit } : {}),
+								...(preview !== undefined ? { preview } : {}),
 							});
 							if (landed.reason === WORKTREE_CHANGED_SINCE_PREVIEW) {
 								// The branch is still withheld, so it keeps the withheld outcome
@@ -8799,13 +8815,14 @@ export function createDispatchBundle(
 								finalDetail = landed.detail ?? landed.reason;
 								failureMessage = finalDetail;
 							} else {
+								mergedPreview = preview;
 								worktreeReceipt = {
 									...landed,
 									detail: `${landed.detail}; operator merge accepted after the gate held it because ${withheldVerdict?.reason ?? "of its report"}`,
 								};
 							}
 						} else if (card?.choice === "discard") {
-							const discard = discardTaskWorktree(req.taskWorktree, previewedCommit);
+							const discard = discardTaskWorktree(req.taskWorktree, preview);
 							if (discard.outcome === "discarded") {
 								worktreeDiscarded = true;
 								claimReleased = discard.claimReleased;
@@ -9001,7 +9018,19 @@ export function createDispatchBundle(
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
 					try {
 						if (remoteReturn && returnedCommit) await cleanupFleetChangeReturn(remoteReturn, returnedCommit);
-						cleanupTaskWorktree(req.taskWorktree, true);
+						// The forced removal would delete whatever arrived after the operator's
+						// preview, which the merge itself refused to land.
+						const drift = mergedPreview !== undefined ? taskWorktreePreviewDrift(req.taskWorktree, mergedPreview) : null;
+						if (drift === null) cleanupTaskWorktree(req.taskWorktree, true);
+						else {
+							settleTaskWorktree(req.taskWorktree);
+							reportDispatchDiagnostic(
+								`keep merged task worktree ${req.taskWorktree.runId}`,
+								new Error(
+									`task worktree ${req.taskWorktree.path} ${drift} since commit ${mergedPreview?.commit} was offered for merge, so it and branch ${req.taskWorktree.branch} stay`,
+								),
+							);
+						}
 					} catch (cleanupError) {
 						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
 					}
