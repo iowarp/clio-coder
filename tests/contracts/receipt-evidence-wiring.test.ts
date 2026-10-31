@@ -5,16 +5,10 @@
  * orphan's council and cost provenance.
  */
 import { deepStrictEqual, equal, match, ok } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { clioStateDir } from "../../src/core/xdg.js";
-import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { openLedger } from "../../src/domains/dispatch/state.js";
-import type { RunEnvelope, RunResultDraft } from "../../src/domains/dispatch/types.js";
 import {
 	createBoundedEventQueue,
 	WORKER_BULK_FRAME_MAX_BYTES,
@@ -23,7 +17,6 @@ import {
 import { spawnWorkerProcess } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
-import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 describe("bulk-lane backpressure", () => {
 	it("keeps the tool frames the receipt fold reads above the queue bound", () => {
@@ -102,43 +95,5 @@ describe("spawn failure diagnostics", () => {
 		} finally {
 			await bundle.extension.stop?.();
 		}
-	});
-});
-
-describe("orphan adoption", () => {
-	beforeEach(() => isolateDispatchState());
-	afterEach(() => restoreDispatchState());
-
-	it("restores the council and cost provenance the receipt carries", () => {
-		const council = { group: "council-7", label: "Design review", color: "cyan", round: 2 };
-		const envelope: RunEnvelope = { ...fixtureEnvelope("orphan-council"), council, costProvenance: "known" };
-		const draft: RunResultDraft = {
-			...fixtureReceiptDraft(envelope),
-			council,
-			costProvenance: "known",
-			reproducibility: {
-				cwd: envelope.cwd,
-				safetyPolicy: {
-					version: 1,
-					rulePackHash: null,
-					rulePackVersion: null,
-					projectPolicyPath: null,
-					projectPolicyHash: null,
-					projectPolicyValid: null,
-				},
-			},
-		};
-		const receipt = withReceiptIntegrity(draft, envelope);
-		const receipts = join(clioStateDir(), "receipts");
-		mkdirSync(receipts, { recursive: true });
-		writeFileSync(join(receipts, `${receipt.runId}.json`), JSON.stringify(receipt));
-
-		const ledger = openLedger({ maxRuns: 10 });
-		const summary = recoverOrphanReceipts(ledger);
-		equal(summary.recovered, 1);
-		const adopted = ledger.get(receipt.runId);
-		ok(adopted);
-		deepStrictEqual(adopted.council, council);
-		equal(adopted.costProvenance, "known");
 	});
 });

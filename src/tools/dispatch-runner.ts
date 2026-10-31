@@ -77,6 +77,8 @@ import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
 import { aggregateCostAmounts, renderCostAggregate } from "../domains/telemetry/cost.js";
+import type { SettledRunRecord } from "../domains/telemetry/index.js";
+import { readVerifiedRun } from "../domains/telemetry/index.js";
 import { renderCompeteJudgeTask } from "./compete-judge-task.js";
 import {
 	type CandidateWorktree,
@@ -1121,21 +1123,15 @@ function readVerifiedGateReceipt(deps: DispatchToolDeps, runId: string): RunResu
 
 function ledgerProjectionFor(deps: DispatchToolDeps, ledgerId: string) {
 	const runs = deps.dispatch.listRuns().filter((run) => run.projection?.ledgerId === ledgerId);
-	const receipts = new Map<string, RunResult | null>();
-	const readReceipt = (run: RunEnvelope): RunResult | null => {
-		if (!receipts.has(run.id)) {
-			try {
-				receipts.set(run.id, readVerifiedGateReceipt(deps, run.id));
-			} catch {
-				// S8: unauthenticated or missing evidence cannot appear as receipt facts on the board.
-				receipts.set(run.id, null);
-			}
-		}
-		return receipts.get(run.id) ?? null;
+	const settled = new Map<string, SettledRunRecord | null>();
+	// S8: a run whose seal does not verify cannot appear as findings on the board.
+	const readRun = (run: RunEnvelope): SettledRunRecord | null => {
+		if (!settled.has(run.id)) settled.set(run.id, readVerifiedRun(clioStateDir(), run.id));
+		return settled.get(run.id) ?? null;
 	};
 	return {
-		assignments: projectLedgerAssignments(runs, readReceipt),
-		receiptFindings: projectReceiptFindings(runs, readReceipt),
+		assignments: projectLedgerAssignments(runs, readRun),
+		receiptFindings: projectReceiptFindings(runs, readRun),
 	};
 }
 

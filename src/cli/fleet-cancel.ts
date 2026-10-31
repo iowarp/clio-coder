@@ -24,7 +24,7 @@ import {
 	isCancelableRunId,
 	writeRunCancelRequest,
 } from "../domains/dispatch/cancel-requests.js";
-import { isOpenRunRow, sealRowFromVerifiedReceipt } from "../domains/dispatch/orphan-recovery.js";
+import { isOpenRunRow, sealRowFromSettledRun } from "../domains/dispatch/orphan-recovery.js";
 import { runStatusForOutcome } from "../domains/dispatch/outcome.js";
 import { type Ledger, openLedger } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
@@ -173,9 +173,9 @@ async function cancelOrphan(
 			action = "terminated_orphan";
 		}
 	}
-	// The dead owner may have written the receipt before it went down; that
-	// sealed record is the truth and outranks an operator cancel.
-	if (!sealRowFromVerifiedReceipt(ledger, row.id)) {
+	// The dead owner may have settled the run before it went down; that
+	// record is the truth and outranks an operator cancel.
+	if (!sealRowFromSettledRun(ledger, row.id)) {
 		ledger.update(row.id, {
 			status: runStatusForOutcome("canceled"),
 			outcome: "canceled",
@@ -195,7 +195,7 @@ async function cancelOrphan(
 		state: "sealed",
 		outcome: sealed?.outcome ?? null,
 		outcomeDetail: sealed?.outcomeDetail ?? null,
-		note: "no receipt is minted for an orphan the owner never finalized; the ledger row carries the outcome",
+		note: "no run result is settled for an orphan the owner never finalized; the ledger row carries the outcome",
 	};
 }
 

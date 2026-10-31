@@ -78,5 +78,13 @@ export {
 } from "./read-model.js";
 export type { JournaledContent } from "./research-content.js";
 export { readJournaledContent } from "./research-content.js";
+export type { SettledRunRecord } from "./run-record.js";
+export {
+	readRunRecord,
+	readRunRecordAsync,
+	readSettledRun,
+	readSettledRunAsync,
+	readVerifiedRun,
+} from "./run-record.js";
 export { readSessionContextSnapshots, readSessionPromptCompiles } from "./session-artifacts.js";
 export { explainRepoRef, isRepoRef } from "./usage-window.js";

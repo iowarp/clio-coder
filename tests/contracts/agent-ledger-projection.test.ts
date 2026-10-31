@@ -14,8 +14,9 @@ import {
 } from "../../src/domains/dispatch/agent-ledger-store.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import { settleFinishedRun } from "../../src/domains/dispatch/run-settlement.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import type { RunResult } from "../../src/domains/dispatch/types.js";
+import type { SettledRunRecord } from "../../src/domains/telemetry/index.js";
 import { parseAgentLedgerEntry } from "../../src/worker/protocol.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -61,15 +62,25 @@ function projection() {
 		},
 	};
 	const receipt = withReceiptIntegrity(draft, sealed);
+	const settlement = settleFinishedRun(receipt, {
+		terminal: { terminalReason: "completed" },
+		processExitCode: 0,
+		frameType: null,
+		usage: undefined,
+	});
+	const record = {
+		settled: { ...settlement.facts, at: receipt.endedAt },
+		result: { state: "resolved", value: settlement.result },
+	} as unknown as SettledRunRecord;
 	const runs = [sealed, running];
-	const readReceipt = (run: { id: string }): RunResult | null => (run.id === sealed.id ? receipt : null);
+	const readRun = (run: { id: string }): SettledRunRecord | null => (run.id === sealed.id ? record : null);
 	return {
 		sealed,
 		running,
 		receipt,
 		runs,
-		assignments: projectLedgerAssignments(runs, readReceipt),
-		receiptFindings: projectReceiptFindings(runs, readReceipt),
+		assignments: projectLedgerAssignments(runs, readRun),
+		receiptFindings: projectReceiptFindings(runs, readRun),
 	};
 }
 

@@ -1,3 +1,4 @@
+import { clioStateDir } from "../core/xdg.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import { readAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
@@ -10,7 +11,12 @@ import { isTerminalRunEnvelope } from "../domains/dispatch/types.js";
 import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 import { adaptRunResultTrustStatus, inspectRunResultTrustStatus } from "../domains/evidence/trust-status.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
-import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/index.js";
+import {
+	COST_NOT_MEASURED,
+	costAggregateForAmount,
+	formatCostAggregate,
+	readVerifiedRun,
+} from "../domains/telemetry/index.js";
 import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
 import type { MonitorToolDeps } from "./monitor.js";
 import type { ToolResult } from "./registry.js";
@@ -300,14 +306,14 @@ export async function collectRuns(
 	// renders, so a repeated collect answers the same way as the first.
 	const ledgerRuns =
 		ledgerId === null ? [] : deps.dispatch.listRuns().filter((run) => run.projection?.ledgerId === ledgerId);
-	const receipts = new Map(ledgerRuns.map((run) => [run.id, durableRunEvidence(run).receipt]));
-	const readReceipt = (run: RunEnvelope) => receipts.get(run.id) ?? null;
+	const settledRuns = new Map(ledgerRuns.map((run) => [run.id, readVerifiedRun(clioStateDir(), run.id)]));
+	const readRun = (run: RunEnvelope) => settledRuns.get(run.id) ?? null;
 	const board =
 		ledgerId === null
 			? null
 			: renderAgentLedgerBoard(ledgerId, {
-					assignments: projectLedgerAssignments(ledgerRuns, readReceipt),
-					receiptFindings: projectReceiptFindings(ledgerRuns, readReceipt),
+					assignments: projectLedgerAssignments(ledgerRuns, readRun),
+					receiptFindings: projectReceiptFindings(ledgerRuns, readRun),
 				});
 	// The batch is only reported collected when the durable mark actually
 	// persisted; on failure it stays open for a later collect and the result

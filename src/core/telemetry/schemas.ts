@@ -729,7 +729,13 @@ export const RunResultObjectSchema = Type.Object(
 					text: Type.String(),
 					bytes: count,
 					truncated: Type.Boolean(),
-					structured: Type.Optional(Type.Unknown()),
+					/** The host-validated internal handoff; `text` holds the same payload as canonical JSON. */
+					structured: Type.Optional(
+						Type.Object(
+							{ version: Type.Literal(1), kind: ExistingId, data: Type.Record(Type.String(), Type.Unknown()) },
+							closed,
+						),
+					),
 				},
 				closed,
 			),

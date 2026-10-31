@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
+import { recoverAbandonedRuns } from "../../src/domains/dispatch/orphan-recovery.js";
 import { runEventJournalRoot } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry, settleOrphanedRunJournal } from "../../src/domains/dispatch/run-telemetry.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
@@ -215,7 +215,7 @@ describe("session durability boundary", () => {
 		await journal.close();
 
 		const reopened = openLedger({ maxRuns: 10 });
-		const recovered = recoverOrphanReceipts(reopened);
+		const recovered = recoverAbandonedRuns(reopened);
 		strictEqual(recovered.abandoned, 1);
 		strictEqual(reopened.get(run.id)?.status, "dead");
 		strictEqual(reopened.get(run.id)?.outcome, "stalled");

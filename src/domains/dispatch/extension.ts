@@ -357,7 +357,7 @@ import {
 	mergeCardCauseNote,
 } from "./merge-card.js";
 import { mergeGateVerdict, mergeWithheldDetail, removedTestCases, taskRequestsTestRemoval } from "./merge-gate.js";
-import { recoverOrphanReceipts } from "./orphan-recovery.js";
+import { recoverAbandonedRuns } from "./orphan-recovery.js";
 import {
 	type ResolvedTerminalReason,
 	type RunTerminationEvidence,
@@ -10340,11 +10340,10 @@ export function createDispatchBundle(
 					return getEffectiveSettings()?.fleet?.history?.maxRuns ?? resolveGuardrail("maxDispatchRuns");
 				},
 			});
-			// Symphony P10: restart recovery from durable artifacts. Adopt
-			// receipts whose ledger rows were lost to a crash between
-			// recordReceipt() and persist(); quarantine tampered ones.
+			// Symphony P10: restart recovery from durable artifacts. A row whose
+			// host died settles from its run's journal, or closes as stalled.
 			try {
-				const recovery = recoverOrphanReceipts(ledger, {
+				const recovery = recoverAbandonedRuns(ledger, {
 					journalUnsealed: (runId) => {
 						const directory = telemetryRunDirectory(clioStateDir(), runId);
 						return existsSync(telemetryJournalPath(directory)) && !existsSync(telemetryBundlePath(directory));
@@ -10359,12 +10358,10 @@ export function createDispatchBundle(
 					void trackDurableWrite(sealSettledRunJournal(telemetryRunDirectory(clioStateDir(), runId))).catch((error) =>
 						reportDispatchDiagnostic(`seal the journal of run ${runId}`, error),
 					);
-				if (recovery.recovered > 0 || recovery.corrupt > 0 || recovery.abandoned > 0 || recovery.sealed > 0) {
+				if (recovery.abandoned > 0 || recovery.sealed > 0) {
 					await ledger.persist();
 					if (process.env.CLIO_CODER_INTERACTIVE !== "1") {
-						process.stderr.write(
-							`[dispatch] ledger recovery: recovered=${recovery.recovered} sealed=${recovery.sealed} corrupt=${recovery.corrupt} abandoned=${recovery.abandoned} skipped=${recovery.skipped}\n`,
-						);
+						process.stderr.write(`[dispatch] ledger recovery: sealed=${recovery.sealed} abandoned=${recovery.abandoned}\n`);
 					}
 				}
 			} catch {

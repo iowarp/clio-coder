@@ -14,7 +14,8 @@
 
 import { isAbsolute, relative } from "node:path";
 import type { AgentLedgerBody, AgentLedgerEntry } from "../../worker/protocol.js";
-import type { RunEnvelope, RunLedgerProjection, RunOutcome, RunResult, RunStatus } from "./types.js";
+import type { SettledRunRecord } from "../telemetry/index.js";
+import type { RunEnvelope, RunLedgerProjection, RunOutcome, RunStatus } from "./types.js";
 
 /**
  * Ceiling on a rendered board wherever one is handed to a model: a worker's
@@ -51,47 +52,46 @@ function oneLine(value: string): string {
 
 export function projectLedgerAssignments(
 	runs: ReadonlyArray<RunEnvelope>,
-	readReceipt: (run: RunEnvelope) => RunResult | null,
+	readRun: (run: RunEnvelope) => SettledRunRecord | null,
 ): ReadonlyArray<LedgerAssignment> {
 	return runs.map((run) => {
-		const receipt = readReceipt(run);
+		const settled = readRun(run)?.settled;
 		const scope = run.projection;
-		const legacy = receipt?.pathScope;
-		const intent = receipt?.intent;
 		return {
 			runId: run.id,
 			assignmentId: run.lineage?.rootRunId ?? null,
 			agentId: run.agentId,
 			task: Array.from(oneLine(run.task)).slice(0, 160).join(""),
-			readRoots: scope?.readRoots ?? legacy?.workingContextPaths.map((entry) => entry.path) ?? intent?.readRoots ?? [],
-			writeRoots: scope?.writeRoots ?? legacy?.writeBoundaries.map((entry) => entry.path) ?? intent?.writeRoots ?? [],
-			scopeSource: scope?.scopeSource ?? (legacy !== undefined || intent !== undefined ? "intent" : "none"),
+			readRoots: scope?.readRoots ?? [],
+			writeRoots: scope?.writeRoots ?? [],
+			scopeSource: scope?.scopeSource ?? "none",
 			status: run.status,
 			outcome: run.outcome ?? null,
-			toolCalls: receipt?.toolCalls ?? null,
-			grounding: receipt?.validationGrounding
-				? `claimed:${receipt.validationGrounding.claimed} grounded:${receipt.validationGrounding.grounded}`
+			toolCalls: settled?.toolCalls ?? null,
+			grounding: settled?.validationGrounding
+				? `claimed:${settled.validationGrounding.claimed} grounded:${settled.validationGrounding.grounded}`
 				: null,
 		};
 	});
 }
 
-/** The reader supplies authenticated receipts; only final passing helper handoffs are projected. */
+/** The reader supplies runs whose seal verified; only final passing helper handoffs are projected. */
 export function projectReceiptFindings(
 	runs: ReadonlyArray<RunEnvelope>,
-	readReceipt: (run: RunEnvelope) => RunResult | null,
+	readRun: (run: RunEnvelope) => SettledRunRecord | null,
 ): ReadonlyArray<LedgerReceiptFindings> {
 	return runs.flatMap((run) => {
-		const receipt = readReceipt(run);
-		const output = receipt?.output;
+		const record = readRun(run);
+		const settled = record?.settled;
+		const output = record?.result?.state === "resolved" ? record.result.value.output : null;
 		const result = output?.structured;
 		if (
-			!receipt ||
-			receipt.outcome !== "succeeded" ||
-			receipt.exitCode !== 0 ||
+			!settled ||
+			settled.outcome !== "succeeded" ||
+			settled.exitCode !== 0 ||
 			output?.state !== "final" ||
 			output.truncated ||
-			receipt.quality?.resultContract?.conformance !== "pass" ||
+			settled.quality?.resultContract?.conformance !== "pass" ||
 			result?.kind !== "scout-report"
 		)
 			return [];
