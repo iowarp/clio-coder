@@ -158,7 +158,7 @@ Each `run.settled` record carries an optional `findings` block, a cheap summary 
 ```
 
 ### Computation and Lifecycle
-- **Computed in memory**: `findings` is calculated at settlement from the run's result draft and tool statistics (in [receipt-findings.ts](../../src/domains/dispatch/receipt-findings.ts)). It never reads from disk and never waits on the assessment.
+- **Computed in memory**: `findings` is calculated at settlement from the run's result draft and tool statistics (in [run-findings.ts](../../src/domains/dispatch/run-findings.ts)). It never reads from disk and never waits on the assessment.
 - **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected. The assessment computes its own `firstPassSuccess`, and that value is the authority for accountability rates.
 - **Integrity**: A run's record is trusted only when its scope's seal verifies. The seal covers every journal line, `run.settled` and `evidence.assessed` included, through the hash chain and `bundle.json`; [Verify](telemetry.md#verify) describes the check. The chain catches an edited record, but a scope rewritten together with a recomputed chain and bundle is not detected, because the seal is not a signature.
 
