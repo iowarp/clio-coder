@@ -313,9 +313,14 @@ async function runFleet(
 	const config = loaded.getContract<ConfigContract>("config");
 	const safety = loaded.getContract<SafetyContract>("safety");
 	const scheduling = loaded.getContract<SchedulingContract>("scheduling");
+	// The process journal records the status an early exit returns, as the settled run's exit does (#434).
+	const exitWith = async (code: number, stop: () => Promise<void>): Promise<number> => {
+		loaded.getContract<TelemetryContract>("telemetry")?.setExitStatus?.(code);
+		await stop();
+		return code;
+	};
 	if (!dispatch || !agents || !safety) {
-		await loaded.stop();
-		return fail("required domains unavailable (dispatch/agents/safety)");
+		return exitWith(fail("required domains unavailable (dispatch/agents/safety)"), () => loaded.stop());
 	}
 	const fleetSettings = config?.get() ?? readSettings();
 	// Install `fleet.history.journal` the same way the interactive composition root
@@ -330,8 +335,7 @@ async function runFleet(
 		settings: fleetSettings,
 	});
 	if (preflightError !== null) {
-		await loaded.stop();
-		return fail(`preflight failed: ${preflightError}`);
+		return exitWith(fail(`preflight failed: ${preflightError}`), () => loaded.stop());
 	}
 
 	const fleetRootId = newFleetRootId();
@@ -368,8 +372,7 @@ async function runFleet(
 			},
 		});
 	} catch (err) {
-		await loaded.stop();
-		return fail(err instanceof Error ? err.message : String(err));
+		return exitWith(fail(err instanceof Error ? err.message : String(err)), () => loaded.stop());
 	}
 	// Started before route preflight, so preview sees the tool hooks dispatch
 	// will and refuses a step whose route cannot carry a blocking one before any
@@ -382,12 +385,10 @@ async function runFleet(
 	try {
 		hookRefusal = await workerHooks.start(loaded);
 	} catch (err) {
-		await stopRun();
-		return fail(err instanceof Error ? err.message : String(err));
+		return exitWith(fail(err instanceof Error ? err.message : String(err)), stopRun);
 	}
 	if (hookRefusal !== null) {
-		await stopRun();
-		return refuse(hookRefusal);
+		return exitWith(refuse(hookRefusal), stopRun);
 	}
 	if (dispatch.preview !== undefined) {
 		try {
@@ -414,47 +415,49 @@ async function runFleet(
 			}
 			plan = bindExecutionPlanEndpoints(plan, bindings);
 		} catch (err) {
-			await stopRun();
-			return fail(`route preflight failed: ${err instanceof Error ? err.message : String(err)}`);
+			return exitWith(fail(`route preflight failed: ${err instanceof Error ? err.message : String(err)}`), stopRun);
 		}
 	}
 	try {
 		preflightWriteBoundaries(plan, process.cwd());
 	} catch (err) {
-		await stopRun();
-		return fail(`preflight failed: ${err instanceof Error ? err.message : String(err)}`);
+		return exitWith(fail(`preflight failed: ${err instanceof Error ? err.message : String(err)}`), stopRun);
 	}
 
 	let resume: ExecuteFleetRunInput["resume"];
 	if (resumeId !== undefined) {
 		const record = readFleetRun(resumeId);
 		if (record === null) {
-			await stopRun();
-			return refuse(`resume run '${resumeId}' was not found in the durable fleet ledger`);
+			return exitWith(refuse(`resume run '${resumeId}' was not found in the durable fleet ledger`), stopRun);
 		}
 		const planned = planFleetResume(record, plan, playbook, vars, process.cwd());
 		if (!planned.ok) {
 			if (planned.reason === "fleet-name") {
-				await stopRun();
-				return refuse(`resume run '${resumeId}' belongs to fleet '${planned.priorFleet}', not '${planned.currentFleet}'`);
+				return exitWith(
+					refuse(`resume run '${resumeId}' belongs to fleet '${planned.priorFleet}', not '${planned.currentFleet}'`),
+					stopRun,
+				);
 			}
 			if (planned.reason === "workspace") {
-				await loaded.stop();
-				return refuse(
-					planned.priorCwd === null
-						? `resume run '${resumeId}' predates recorded workspaces, so it cannot be resumed in ${planned.currentCwd}`
-						: `resume run '${resumeId}' ran in ${planned.priorCwd}, not ${planned.currentCwd}`,
+				return exitWith(
+					refuse(
+						planned.priorCwd === null
+							? `resume run '${resumeId}' predates recorded workspaces, so it cannot be resumed in ${planned.currentCwd}`
+							: `resume run '${resumeId}' ran in ${planned.priorCwd}, not ${planned.currentCwd}`,
+					),
+					stopRun,
 				);
 			}
 			if (planned.reason === "running") {
-				await loaded.stop();
-				return refuse(
-					`resume run '${resumeId}' is still running in process ${planned.pid}; wait for it to settle or cancel it first`,
+				return exitWith(
+					refuse(
+						`resume run '${resumeId}' is still running in process ${planned.pid}; wait for it to settle or cancel it first`,
+					),
+					stopRun,
 				);
 			}
 			if (planned.reason === "vars") {
-				await stopRun();
-				return refuse(`resume run '${resumeId}' used different --var values`);
+				return exitWith(refuse(`resume run '${resumeId}' used different --var values`), stopRun);
 			}
 			process.stderr.write(
 				`clio-coder fleet: resume plan hash differs: prior=${planned.priorHash} current=${planned.currentHash}\n`,
@@ -464,8 +467,7 @@ async function runFleet(
 				process.stderr.write(`    prior: ${JSON.stringify(entry.prior)}\n`);
 				process.stderr.write(`    current: ${JSON.stringify(entry.current)}\n`);
 			}
-			await stopRun();
-			return 1;
+			return exitWith(1, stopRun);
 		}
 		resume = { record, replayed: planned.replayed };
 	}
