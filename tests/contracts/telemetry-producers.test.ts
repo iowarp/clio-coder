@@ -15,6 +15,7 @@ import { createMiddlewareBundle } from "../../src/domains/middleware/extension.j
 import { listMiddlewareRuleDefinitions } from "../../src/domains/middleware/rules.js";
 import { createHealthWindows } from "../../src/domains/telemetry/health-window.js";
 import { telemetryJournalPath, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { readSessionPromptCompiles } from "../../src/domains/telemetry/session-artifacts.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { researchCaptureFor } from "../../src/engine/research-capture.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
@@ -211,8 +212,21 @@ test("prompt.compiled is recorded once per structure by a writer, under the call
 	try {
 		const journals = createSessionJournals(stateDir, () => {});
 		const lease = await journals.acquire({ id: "prompt-compiled", cwdHash: "cwd" }, "main");
+		const compile = {
+			version: 4,
+			at: "2026-10-31T12:00:00.000Z",
+			previousHash: null,
+			systemPromptHash: "a".repeat(64),
+			tokenEstimate: 3,
+			thinkingLevel: "off",
+			contextWindow: 32768,
+			contextWindowSource: "loaded",
+			projectPreload: null,
+			sections: [{ id: "identity", tokenEstimate: 3 }],
+			fragments: [{ id: "identity", relPath: "identity.md", contentHash: "b".repeat(64), dynamic: false }],
+		};
 		const structure = await lease.storeRequestObjects?.({
-			prompt: { sections: [{ id: "identity", tokenEstimate: 3 }], fragmentManifest: [] },
+			prompt: { sections: compile.sections, fragmentManifest: compile.fragments, compile },
 		});
 		ok(structure?.promptStructure);
 		const ids = [newCallId(), newCallId()];
@@ -229,6 +243,7 @@ test("prompt.compiled is recorded once per structure by a writer, under the call
 			.filter((line) => line.includes('"prompt.compiled"'));
 		strictEqual(lines.length, 1);
 		ok(lines[0]?.includes(ids[0] as string));
+		deepStrictEqual(readSessionPromptCompiles(stateDir, "prompt-compiled"), { records: [compile], errors: [] });
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
 	}

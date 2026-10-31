@@ -888,7 +888,7 @@ export const SafetyJudgedSchema = Type.Object(
 );
 /**
  * The first request of this writer to cite a compiled prompt structure; ctx names that call. The structure object
- * holds the section ids, fragment hashes and token estimates prompt-manifest.jsonl records (#434).
+ * holds the compile metadata, preload accounting, section ids and fragment hashes (#434).
  */
 export const PromptCompiledSchema = Type.Object(
 	{
@@ -910,6 +910,15 @@ export const PromptCompiledSchema = Type.Object(
 export const ContextSnapshottedSchema = Type.Object(
 	{
 		snapshotId: ExistingId,
+		providerId: Type.Union([ExistingId, Type.Null()]),
+		runtimeId: Type.Union([ExistingId, Type.Null()]),
+		modelId: Type.Union([ExistingId, Type.Null()]),
+		promptSegments: Type.Optional(Type.Array(Type.Object({ id: ExistingId, tokenEstimate: count }, closed))),
+		splits: Type.Record(Type.String(), vocabulary(["estimated", "exact", "reconciled"])),
+		promptHash: Type.Optional(sha256Hex),
+		toolSignature: Type.Optional(Type.String()),
+		messageRange: Type.Optional(Type.Object({ start: count, end: count }, closed)),
+		divergenceRatio: Type.Optional(Type.Number({ minimum: 0 })),
 		categories: Type.Object(
 			{
 				system: count,

@@ -10,6 +10,7 @@ import type { CallMessageObserver } from "../core/telemetry/producer.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { compactionBudget, getCatalogModelForRuntime } from "../domains/providers/catalog.js";
+import { getLatestContextSnapshot } from "../domains/session/context-history.js";
 import {
 	appendEnginePolicyMessage,
 	compactEngineCodex,
@@ -117,7 +118,6 @@ import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaul
 import { maskStaleObservations } from "../domains/session/compaction/mask-observations.js";
 import { createTokenEstimator } from "../domains/session/compaction/tokens.js";
 import {
-	appendContextSnapshot,
 	type CaptureContextSnapshotInput,
 	type ContextSnapshot,
 	type ContextUsageSnapshot,
@@ -127,7 +127,6 @@ import {
 	estimateAgentContextBreakdown,
 	estimateAgentContextTokens,
 	estimateAgentMessageTokens,
-	getLatestContextSnapshot,
 	reconcileSnapshot,
 	snapshotInputTokens,
 } from "../domains/session/context-accounting.js";
@@ -145,7 +144,6 @@ import {
 	withProviderCheckpointMeasurements,
 } from "../domains/session/entries.js";
 import {
-	appendPromptCompileRecord,
 	PROMPT_MANIFEST_VERSION,
 	readPromptCompileRecords,
 	type SessionPromptCompileRecord,
@@ -323,6 +321,7 @@ export interface TurnContext {
 	 * reminder: what changed in frozen prompt inputs since the compile (#423).
 	 */
 	sessionPromptDelta(): string;
+	promptCompileRecord?(): SessionPromptCompileRecord | null;
 	compiledSessionPrompt?(): CompiledSessionPrompt | null;
 	logPromptCompileIfPending(): void;
 	invalidateSessionPromptCache(): void;
@@ -509,6 +508,15 @@ function recordContextSnapshot(sessionId: string, snapshot: ContextSnapshot): vo
 		"context.snapshotted",
 		{
 			snapshotId: snapshot.snapshotId,
+			providerId: snapshot.providerId,
+			runtimeId: snapshot.runtimeId,
+			modelId: snapshot.modelId,
+			splits: snapshot.sources.splits,
+			...(snapshot.promptSegments ? { promptSegments: snapshot.promptSegments } : {}),
+			...(snapshot.promptHash ? { promptHash: snapshot.promptHash } : {}),
+			...(snapshot.toolSignature ? { toolSignature: snapshot.toolSignature } : {}),
+			...(snapshot.messageRange ? { messageRange: snapshot.messageRange } : {}),
+			...(snapshot.divergenceRatio !== undefined ? { divergenceRatio: snapshot.divergenceRatio } : {}),
 			categories: {
 				system: tokenCount(split.system),
 				tools: tokenCount(split.tools),
@@ -652,6 +660,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const memoryOrigin = (runtime: AgentRuntime): string =>
 		JSON.stringify([process.cwd(), runtime.targetId, runtime.runtimeId, runtime.wireModelId]);
 	let pendingPromptLogEntry: SessionPromptCompileRecord | null = null;
+	let latestPromptCompile: SessionPromptCompileRecord | null = null;
 	// Reuse an empty automatic attempt only for identical ledger and provider
 	// context. Same-turn tool growth or same-length content replacement must
 	// get a fresh cut; ordinary below-threshold checks never fingerprint it.
@@ -840,10 +849,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	const persistContextSnapshot = (snapshot: ContextSnapshot): void => {
 		const currentSession = deps.session?.current();
-		if (currentSession) {
-			appendContextSnapshot(currentSession, snapshot);
-			recordContextSnapshot(currentSession.id, snapshot);
+		if (!currentSession) {
+			snapshotPersistPending = true;
+			return;
 		}
+		if (snapshot.sessionId !== null && snapshot.sessionId !== currentSession.id) return;
+		snapshot.sessionId = currentSession.id;
+		recordContextSnapshot(currentSession.id, snapshot);
 		snapshotPersistPending = false;
 	};
 
@@ -862,7 +874,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// The snapshot row belongs to the named Clio session whose ledger it is
 		// appended to; the engine agent's own sessionId is unset in practice.
 		return captureContextSnapshot({
-			sessionId: deps.session?.current()?.id ?? agentRuntime.agent.sessionId ?? "unknown",
+			sessionId: deps.session?.current()?.id ?? null,
 			turnId,
 			providerId: agentRuntime.targetId,
 			runtimeId: agentRuntime.runtimeId,
@@ -2970,7 +2982,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				}
 				setEngineSystemPrompt(agentRuntime.agent, result.systemPrompt, result.pinnedPrefix);
 				if (changed) {
-					pendingPromptLogEntry = {
+					pendingPromptLogEntry = latestPromptCompile = {
 						version: PROMPT_MANIFEST_VERSION,
 						at: compiledAt,
 						previousHash,
@@ -3044,9 +3056,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		/**
 		 * Write the queued prompt-compile ledger entry and its full manifest
-		 * record. Deferred until after the user turn is appended so the session
-		 * is guaranteed to exist. The current.jsonl entry stays hash-only; the
-		 * section/fragment breakdown goes to the prompt-manifest.jsonl sibling.
+		 * record. The journal captures the structure when the request cites it (#434).
+		 * Deferred until after the user turn is appended so the session exists.
 		 */
 		logPromptCompileIfPending(): void {
 			const currentMeta = deps.session?.current();
@@ -3086,10 +3097,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// Ledger logging is diagnostics, not control flow; never abort a turn.
 			}
 			previousPromptSections = entry.sections;
-			appendPromptCompileRecord(currentMeta, entry);
 		},
 
 		compiledSessionPrompt: () => sessionPrompt,
+		promptCompileRecord: () => latestPromptCompile,
 		sessionPromptDelta(): string {
 			return sessionPromptDelta;
 		},
@@ -3508,6 +3519,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			resumedPromptHash = null;
 			sessionWorkingContextPaths.clear();
 			pendingPromptLogEntry = null;
+			latestPromptCompile = null;
 			emptyAutoCompactContextKey = null;
 			autoCompactFailures = 0;
 			noGainSummaryDigest = null;

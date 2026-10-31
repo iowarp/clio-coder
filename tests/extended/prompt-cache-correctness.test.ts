@@ -1,20 +1,11 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
 import type { CompiledSessionPrompt } from "../../src/domains/prompts/compiler.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
-import type { SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import {
-	getPromptManifestFilePath,
-	PROMPT_MANIFEST_VERSION,
-	readPromptCompileManifest,
-} from "../../src/domains/session/prompt-manifest.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
@@ -580,33 +571,4 @@ it("a changed tool choice is a cold reason for the request that sends it, a #426
 	).observation;
 	deepStrictEqual([observation.cacheReadTokens, observation.inclusiveInputTokens], [6_000, 10_000]);
 	context.dispose();
-});
-
-it("prompt layout v4 preserves readable provenance from unversioned and v2 manifests", (t) => {
-	strictEqual(PROMPT_MANIFEST_VERSION, 4);
-	const root = mkdtempSync(join(tmpdir(), "clio-prompt-layout-"));
-	t.after(() => rmSync(root, { recursive: true, force: true }));
-	const meta = { id: "layout-compatibility", cwd: root, cwdHash: "fixture" } as SessionMeta;
-	const path = getPromptManifestFilePath(meta, root);
-	mkdirSync(dirname(path), { recursive: true });
-	const record = {
-		at: "2026-09-20T00:00:00.000Z",
-		previousHash: null,
-		systemPromptHash: sha256("old prompt"),
-		tokenEstimate: 2,
-		thinkingLevel: null,
-		projectPreload: null,
-		sections: [],
-		fragments: [],
-	};
-	writeFileSync(
-		path,
-		[record, { ...record, version: 2 }, { ...record, version: 3 }].map((row) => JSON.stringify(row)).join("\n"),
-	);
-	const loaded = readPromptCompileManifest(meta, root);
-	deepStrictEqual(loaded.errors, []);
-	deepStrictEqual(
-		loaded.records.map((row) => row.version),
-		[undefined, 2, 3],
-	);
 });

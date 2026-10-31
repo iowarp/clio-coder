@@ -1,8 +1,8 @@
 import { ok, strictEqual, throws } from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import {
 	createLiveBudgetProducer,
 	type LiveBudgetInput,
@@ -12,8 +12,10 @@ import {
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import { estimateAgentMessageTokens } from "../../src/domains/session/context-accounting.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
+import { readSessionContextSnapshots } from "../../src/domains/telemetry/index.js";
+import { telemetryJournalPath, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
-import { sessionPaths } from "../../src/engine/session.js";
 import type { AgentMessage, Usage } from "../../src/engine/types.js";
 import { resolveTurnOutputReserve } from "../../src/session-control/output-reserve.js";
 import { createTurnContext, type TurnContextDeps } from "../../src/session-control/turn-context.js";
@@ -280,10 +282,16 @@ describe("live budget policy resolution", () => {
 
 describe("live budget adapter", () => {
 	let isolated: IsolatedClioEnv;
+	let journals: ReturnType<typeof createSessionJournals>;
 	beforeEach(async () => {
 		isolated = await isolateClioEnv("clio-coder-live-budget-");
+		journals = createSessionJournals(clioStateDir(), () => {});
+		await journals.acquire({ id: "budget-session", cwdHash: "budget-fixture" }, "main");
 	});
-	afterEach(() => isolated.restore());
+	afterEach(async () => {
+		await journals.closeAll();
+		isolated.restore();
+	});
 
 	function fixture(overrides: Partial<TurnContextDeps> = {}) {
 		const state = createTurnState("medium");
@@ -344,18 +352,12 @@ describe("live budget adapter", () => {
 			emitNotice: () => {},
 			...overrides,
 		});
-		// The path production actually writes to: `getSnapshotsFilePath` resolves it
-		// through `sessionPaths(meta)`, which follows CLIO_CODER_STATE_DIR. Guessing
-		// a directory here would let a persisting read pass unnoticed, so the file
-		// is resolved through the same owner and the test establishes a positive
-		// control before asserting the count holds.
-		const snapshotsFile = join(dirname(sessionPaths(meta).current), "context-snapshots.jsonl");
-		const snapshotLines = (): number => {
-			try {
-				return readFileSync(snapshotsFile, "utf8").split("\n").filter(Boolean).length;
-			} catch {
-				return 0;
-			}
+		const snapshotsFile = telemetryJournalPath(telemetrySessionDirectory(clioStateDir(), meta.id));
+		const snapshotLines = async (): Promise<number> => {
+			await journals.flush();
+			return readFileSync(snapshotsFile, "utf8")
+				.split("\n")
+				.filter((line) => line.includes('"context.snapshotted"')).length;
 		};
 		return { state, runtime, settings, context, meta, snapshotLines, summaries: () => summaries };
 	}
@@ -552,15 +554,23 @@ describe("live budget adapter", () => {
 		ok(rebudgeted.revision !== retargeted.revision, "an output-budget change is a different request");
 	});
 
-	it("reads without repricing, persisting, or reducing", () => {
+	it("reads without repricing, persisting, or reducing", async () => {
 		const f = reconciledFixture();
 		// Positive control: prove the watched file is the one a real capture lands
 		// in, so an unchanged count afterwards means nothing was written rather
 		// than that the test is watching the wrong path.
-		strictEqual(f.snapshotLines(), 0, "nothing has been persisted yet");
+		strictEqual(await f.snapshotLines(), 0, "nothing has been persisted yet");
 		f.context.persistContextSnapshot(f.context.captureRuntimeContextSnapshot(f.runtime, "t1", 0.85));
-		const persisted = f.snapshotLines();
+		const persisted = await f.snapshotLines();
 		strictEqual(persisted, 1, "a real capture appends to the file this test watches");
+		const snapshot = f.context.captureRuntimeContextSnapshot(f.runtime, "t2", 0.85);
+		f.context.persistContextSnapshot({ ...snapshot, sessionId: "another-session" });
+		strictEqual(await f.snapshotLines(), persisted, "a snapshot from another session cannot land here");
+		f.context.persistContextSnapshot({ ...snapshot, sessionId: null });
+		strictEqual(await f.snapshotLines(), persisted + 1, "a capture before session creation binds when it lands");
+		const landed = readSessionContextSnapshots(clioStateDir(), f.meta.id).at(-1);
+		strictEqual(landed?.sessionId, f.meta.id);
+		strictEqual(landed?.turnId, "t2");
 
 		const published = f.context.refreshLiveBudget();
 		for (let i = 0; i < 25; i += 1) {
@@ -568,7 +578,7 @@ describe("live budget adapter", () => {
 			strictEqual(view.revision, published.revision);
 			strictEqual(view.inputTokens, published.inputTokens);
 		}
-		strictEqual(f.snapshotLines(), persisted, "inspection must not append to the snapshot ledger");
+		strictEqual(await f.snapshotLines(), persisted + 1, "inspection must not append to the snapshot ledger");
 		strictEqual(f.summaries(), 0, "inspection must not run a summary");
 		strictEqual(f.state.streaming, false);
 	});

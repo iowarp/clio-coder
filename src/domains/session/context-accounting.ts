@@ -1,12 +1,8 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { isHostPolicyMessage } from "../../core/host-policy-message.js";
 import { ceilChars } from "../../core/token-split.js";
-import { cwdHash, sessionPaths } from "../../engine/session.js";
 import type { AgentMessage, Usage } from "../../engine/types.js";
 import { DEFAULT_COMPACTION_THRESHOLD } from "./compaction/auto.js";
 import { categoryForSegment } from "./context-ledger.js";
-import type { SessionMeta } from "./contract.js";
 
 const IMAGE_CHAR_ESTIMATE = 4800;
 const MESSAGE_OVERHEAD_TOKENS = 16;
@@ -35,7 +31,7 @@ export interface ContextUsageBreakdown {
 
 export interface ContextSnapshot {
 	snapshotId: string;
-	sessionId: string;
+	sessionId: string | null;
 	turnId: string;
 	providerId: string | null;
 	runtimeId: string | null;
@@ -300,95 +296,6 @@ export function contextUsageSnapshot(
 	return breakdown ? { ...base, breakdown } : base;
 }
 
-// Persisted snapshot helpers
-function getSnapshotsFilePath(meta: SessionMeta): string {
-	const safeMeta = {
-		...meta,
-		cwdHash: meta.cwdHash || cwdHash(meta.cwd || process.cwd()),
-	};
-	const paths = sessionPaths(safeMeta);
-	return join(dirname(paths.current), "context-snapshots.jsonl");
-}
-
-/**
- * Strip the heavy captured inputs before persisting. The JSONL ledger exists
- * for accounting and audit (token splits, window resolution, hashes, ranges);
- * persisting the full conversation and tool schemas per turn would duplicate
- * the session log with O(turns^2) growth. The in-memory snapshot keeps the
- * full capture for the live overlay and replay inspection.
- */
-function persistableSnapshot(snapshot: ContextSnapshot): ContextSnapshot {
-	const {
-		systemPrompt: _systemPrompt,
-		conversationMessages: _messages,
-		activeToolSchemas: _tools,
-		pendingUserInput: _pending,
-		images: _images,
-		...slim
-	} = snapshot;
-	return slim;
-}
-
-/** Best-effort append; accounting telemetry must never abort a turn. */
-export function appendContextSnapshot(meta: SessionMeta, snapshot: ContextSnapshot): void {
-	try {
-		const file = getSnapshotsFilePath(meta);
-		appendFileSync(file, `${JSON.stringify(persistableSnapshot(snapshot))}\n`, "utf8");
-	} catch {
-		// Disk pressure or permissions; the live in-memory snapshot still serves the UI.
-	}
-}
-
-function getContextSnapshots(meta: SessionMeta): ContextSnapshot[] {
-	try {
-		const file = getSnapshotsFilePath(meta);
-		if (!existsSync(file)) return [];
-		const content = readFileSync(file, "utf8");
-		const snapshots: ContextSnapshot[] = [];
-		for (const line of content.split("\n")) {
-			if (line.trim().length === 0) continue;
-			try {
-				snapshots.push(JSON.parse(line) as ContextSnapshot);
-			} catch {
-				// Skip a torn trailing line from an interrupted append.
-			}
-		}
-		return snapshots;
-	} catch {
-		return [];
-	}
-}
-
-export function getLatestContextSnapshot(meta: SessionMeta): ContextSnapshot | null {
-	const list = getContextSnapshots(meta);
-	return list.at(-1) ?? null;
-}
-
-/**
- * The window a previous process measured this session's prompts against, when
- * the backend itself reported it as the one it had open (issue #227).
- *
- * A resumed session re-resolves its target before discovery has reported a
- * loaded window, so the first turn budgets against the probed server-wide
- * figure, which on a multi-slot backend is a multiple of what the model is
- * actually serving. The snapshot ledger already recorded the number the
- * backend named, so the resume carries it forward instead of re-probing.
- * Scoped to the same target and model: a different selection has no claim on
- * that measurement, and a live loaded window always outranks this one, so a
- * model reloaded at a new size corrects on the next resolution.
- */
-export function lastLoadedContextWindow(meta: SessionMeta, providerId: string, modelId: string): number | null {
-	const snapshots = getContextSnapshots(meta);
-	for (let i = snapshots.length - 1; i >= 0; i -= 1) {
-		const snapshot = snapshots[i];
-		if (snapshot?.contextWindowSource !== "loaded") continue;
-		if (snapshot.providerId !== providerId || snapshot.modelId !== modelId) continue;
-		const window = snapshot.effectiveContextWindow;
-		if (typeof window === "number" && Number.isFinite(window) && window > 0) return window;
-	}
-	return null;
-}
-
 function buildSnapshotCategories(inputs: {
 	systemPrompt?: string | undefined;
 	promptSegments?: ReadonlyArray<{ id: string; tokenEstimate: number }> | undefined;
@@ -468,7 +375,7 @@ function buildSnapshotCategories(inputs: {
 }
 
 export interface CaptureContextSnapshotInput {
-	sessionId: string;
+	sessionId: string | null;
 	turnId: string;
 	providerId: string | null;
 	runtimeId: string | null;

@@ -834,8 +834,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (!origin || !deps.telemetry?.acquireTelemetrySession) return;
 			journalLease = await deps.telemetry.acquireTelemetrySession(origin, "main", state.activeUserTurnId ?? undefined);
 			const compiled = context.compiledSessionPrompt?.();
+			const compile = context.promptCompileRecord?.();
 			const objects = await journalLease.storeRequestObjects?.({
-				...(compiled ? { prompt: compiled } : {}),
+				...(compiled ? { prompt: { ...compiled, ...(compile ? { compile } : {}) } } : {}),
 				tools: localRuntime.agent.state.tools.map(({ name, description, parameters }) => ({
 					name,
 					description,

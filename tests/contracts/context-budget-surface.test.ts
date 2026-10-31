@@ -1,16 +1,18 @@
 import { deepStrictEqual, doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import fs, { readdirSync, readFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { configureGuardrails } from "../../src/core/guardrails.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { BudgetInspection } from "../../src/domains/context/budget/inspection.js";
 import type { LiveBudgetView } from "../../src/domains/context/budget/live-view.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
+import { telemetryJournalPath, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
-import { sessionPaths } from "../../src/engine/session.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import type { AgentMessage, Usage } from "../../src/engine/types.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
@@ -66,10 +68,14 @@ function files(dir: string): string[] {
 
 describe("native budget inspection through the registered context tool", () => {
 	let env: IsolatedClioEnv;
+	let journals: ReturnType<typeof createSessionJournals>;
 	beforeEach(async () => {
 		env = await isolateClioEnv("clio-coder-budget-surface-");
+		journals = createSessionJournals(clioStateDir(), () => {});
+		await journals.acquire({ id: "surface-session", cwdHash: "surface-fixture" }, "main");
 	});
-	afterEach(() => {
+	afterEach(async () => {
+		await journals.closeAll();
 		configureGuardrails(undefined);
 		env.restore();
 	});
@@ -197,7 +203,8 @@ describe("native budget inspection through the registered context tool", () => {
 		strictEqual(grown.outputReserveTokens, 8192);
 		notStrictEqual(grown.thresholdReserveTokens, grown.outputReserveTokens);
 		f.context.persistContextSnapshot(f.context.captureRuntimeContextSnapshot(f.runtime, "leaf", 0.85));
-		const snapshots = join(dirname(sessionPaths(f.meta).current), "context-snapshots.jsonl");
+		const snapshots = telemetryJournalPath(telemetrySessionDirectory(clioStateDir(), f.meta.id));
+		await journals.flush();
 		const persisted = readFileSync(snapshots, "utf8");
 		const counters = f.counters();
 		const beforeFiles = files(env.dir);
@@ -309,7 +316,8 @@ describe("native budget inspection through the registered context tool", () => {
 	it("does not rescan diagnostic snapshots on a pre-runtime budget read, even after passive settings change", async () => {
 		const f = fixture();
 		f.context.persistContextSnapshot(f.context.captureRuntimeContextSnapshot(f.runtime, "leaf", 0.85));
-		const watched = join(dirname(sessionPaths(f.meta).current), "context-snapshots.jsonl");
+		await journals.flush();
+		const watched = telemetryJournalPath(telemetrySessionDirectory(clioStateDir(), f.meta.id));
 		// Load the lazy runner before instrumenting builtin I/O, then watch the
 		// actual path the owning persistence seam wrote (with a positive control).
 		await inspect(f.registry);

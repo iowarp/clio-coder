@@ -478,6 +478,10 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 			"context.snapshotted",
 			{
 				snapshotId: "snap-1",
+				providerId: "local",
+				runtimeId: "fixture",
+				modelId: "model",
+				splits: {},
 				categories: {
 					system: 1,
 					tools: 1,

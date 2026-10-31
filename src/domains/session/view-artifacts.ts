@@ -28,8 +28,12 @@ import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { redactSecretString } from "../safety/redaction.js";
 import { renderCostAggregate, renderCostAmount } from "../telemetry/cost.js";
 import type { AccountabilitySummary } from "../telemetry/index.js";
-import { readEvidenceIndex, summarizeEvidenceIndex } from "../telemetry/index.js";
-import { telemetryJournalPath, telemetrySessionDirectory } from "../telemetry/paths.js";
+import {
+	readEvidenceIndex,
+	summarizeEvidenceIndex,
+	telemetryJournalPath,
+	telemetrySessionDirectory,
+} from "../telemetry/index.js";
 import type { AccountabilityRecord, JournalSource, SessionSource } from "../telemetry/read-model.js";
 import { accountabilityRecords, sessionJournals } from "../telemetry/read-model.js";
 import type { SessionMeta } from "./contract.js";
@@ -43,7 +47,7 @@ import type {
 	TaskLedgerValidationEvidence,
 } from "./entries.js";
 import type { SessionPromptCompileRecord } from "./prompt-manifest.js";
-import { getPromptManifestFilePath, readPromptCompileManifest } from "./prompt-manifest.js";
+import { readPromptCompileManifest } from "./prompt-manifest.js";
 import { foldSessionArtifacts, resolveSessionArtifactPath } from "./session-artifacts.js";
 import { filterEntriesToActivePath } from "./tree/active-path.js";
 
@@ -1637,7 +1641,7 @@ export class PromptManifestArtifactProvider implements ArtifactProvider {
 	async list(): Promise<ViewArtifact[]> {
 		const meta = this.deps.sessionMeta;
 		if (!meta) return [];
-		const path = getPromptManifestFilePath(meta, this.deps.stateDir);
+		const path = telemetryJournalPath(telemetrySessionDirectory(this.deps.stateDir, meta.id));
 		const read = readPromptCompileManifest(meta, this.deps.stateDir);
 		const artifacts = read.records.map(
 			(record, index): ViewArtifact => ({

@@ -2,6 +2,8 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { runBootstrap } from "../../src/domains/context/bootstrap.js";
 import {
 	applyInitImplications,
@@ -13,14 +15,13 @@ import { readClioState, writeClioState } from "../../src/domains/context/state.j
 import { assembleWikiTree } from "../../src/domains/context/wiki/assemble.js";
 import { readWikiPage } from "../../src/domains/context/wiki/frontmatter.js";
 import {
-	appendContextSnapshot,
 	captureContextSnapshot,
-	getLatestContextSnapshot,
-	lastLoadedContextWindow,
 	reconcileSnapshot,
 	snapshotInputTokens,
 } from "../../src/domains/session/context-accounting.js";
+import { getLatestContextSnapshot, lastLoadedContextWindow } from "../../src/domains/session/context-history.js";
 import type { SessionMeta } from "../../src/domains/session/contract.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import type { Usage } from "../../src/engine/types.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -194,7 +195,7 @@ describe("contracts/context lifecycle", () => {
 		strictEqual(readClioState(cwd)?.lastBootstrap, undefined);
 	});
 
-	it("resumes from the latest persisted snapshot and bounds loaded-window recall to its target", () => {
+	it("resumes from the latest persisted snapshot and bounds loaded-window recall to its target", async () => {
 		const meta = {
 			id: "session-1",
 			createdAt: "2026-08-31T12:00:00.000Z",
@@ -204,7 +205,32 @@ describe("contracts/context lifecycle", () => {
 		const first = snapshot("turn-1", "loaded", 65_536);
 		const otherModel = snapshot("turn-2", "loaded", 200_000, "local", "other-model");
 		const latest = snapshot("turn-3", "probe", 262_144);
-		for (const value of [first, otherModel, latest]) appendContextSnapshot(meta, value);
+		const journals = createSessionJournals(clioStateDir(), () => {});
+		const lease = await journals.acquire(meta, "main");
+		try {
+			for (const value of [first, otherModel, latest])
+				telemetryHub().emit(
+					"context.snapshotted",
+					{
+						snapshotId: value.snapshotId,
+						categories: value.categories,
+						providerId: value.providerId,
+						runtimeId: value.runtimeId,
+						modelId: value.modelId,
+						source: value.sources.total,
+						splits: value.sources.splits,
+						window: {
+							desired: value.desiredContextWindow,
+							effective: value.effectiveContextWindow,
+							source: value.contextWindowSource,
+						},
+					},
+					{ ...lease.context, turnId: value.turnId },
+				);
+		} finally {
+			await lease.release();
+			await journals.closeAll();
+		}
 
 		const resumed = getLatestContextSnapshot(meta);
 		strictEqual(resumed?.turnId, "turn-3");

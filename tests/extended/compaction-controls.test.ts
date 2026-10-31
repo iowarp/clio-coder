@@ -1,7 +1,7 @@
 import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
@@ -23,7 +23,7 @@ import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtim
 import { COMPACTION_SYSTEM_PROMPT } from "../../src/domains/session/compaction/compact.js";
 import { findCutPoint } from "../../src/domains/session/compaction/cut-point.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
-import { type ContextSnapshot, snapshotInputTokens } from "../../src/domains/session/context-accounting.js";
+import { snapshotInputTokens } from "../../src/domains/session/context-accounting.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { appendEntry, appendTurn, readCurrentEntries, startSession } from "../../src/domains/session/manager.js";
@@ -34,6 +34,7 @@ import {
 	summarizeFailedCompactionUsage,
 } from "../../src/domains/telemetry/compaction-usage.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { readSessionContextSnapshots } from "../../src/domains/telemetry/index.js";
 import {
 	appendOutOfTurnUsageRow,
 	outOfTurnUsagePath,
@@ -1505,6 +1506,8 @@ describe("production compaction controls", () => {
 	for (const legacy of [false, true]) {
 		it(`attributes successful live compaction accounting to ${legacy ? "legacy chat fallback" : "the selected summary route"}`, async () => {
 			const f = fixture(true);
+			const snapshotJournals = createSessionJournals(clioStateDir(), () => {});
+			await snapshotJournals.acquire(f.state.meta, "main");
 			if (!legacy) f.settings.context.compaction.model = "summary-target/summary";
 			const recorded: unknown[][] = [];
 			const bus = createTelemetryHub();
@@ -1572,10 +1575,8 @@ describe("production compaction controls", () => {
 			strictEqual(event.tokensAfter, context.promptSideTokens());
 			ok(event.tokensAfter < event.tokensBefore);
 			ok(event.tokensAfter > 9810, "provider usage and fresh full-context estimates are deliberately different");
-			const snapshots = readFileSync(join(dirname(sessionPaths(f.state.meta).current), "context-snapshots.jsonl"), "utf8")
-				.trim()
-				.split("\n")
-				.map((line) => JSON.parse(line) as ContextSnapshot);
+			await snapshotJournals.closeAll();
+			const snapshots = readSessionContextSnapshots(clioStateDir(), f.state.meta.id);
 			strictEqual(snapshots.length, 2);
 			strictEqual(snapshots[0]?.snapshotId, event.snapshotIdBefore);
 			strictEqual(snapshots[1]?.snapshotId, event.snapshotIdAfter);

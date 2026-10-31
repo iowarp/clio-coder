@@ -38,8 +38,10 @@ import {
 	renderUsdLimit,
 	renderUsdSum,
 } from "../../core/telemetry/render.js";
-import type { CallSettled, CallUsage } from "../../core/telemetry/schemas.js";
+import type { CallSettled, CallUsage, ObjectRef } from "../../core/telemetry/schemas.js";
 import { ToolNames } from "../../core/tool-names.js";
+import type { ContextSnapshot } from "../session/context-accounting.js";
+import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
 import type { CallJournalFolder, CallTotals, FoldedAttempt, FoldOptions, JournalFold } from "./folds.js";
 import {
 	addCallTotals,
@@ -53,6 +55,7 @@ import {
 	sumFactSums,
 	TELEMETRY_FOLD_VERSION,
 } from "./folds.js";
+import type { telemetryPromptStructure } from "./objects.js";
 
 /**
  * The telemetry read model (#434 §11). Pure: callers hand it journal records (read from disk, or the live writer's
@@ -2646,4 +2649,62 @@ export function explain(
 			omitted: attempts.length - listed.length,
 		},
 	};
+}
+
+/** Session accounting replays only snapshots owned by this session, in journal order (#434). */
+export function contextSnapshots(records: readonly TelemetryRecord[], sessionId: string): ContextSnapshot[] {
+	return records.flatMap((record) => {
+		if (record.k !== "context.snapshotted" || record.ctx.sessionId !== sessionId) return [];
+		const data = record.data;
+		return [
+			{
+				snapshotId: data.snapshotId,
+				sessionId,
+				turnId: record.ctx.turnId ?? "",
+				providerId: data.providerId,
+				runtimeId: data.runtimeId,
+				modelId: data.modelId,
+				desiredContextWindow: data.window.desired,
+				effectiveContextWindow: data.window.effective,
+				contextWindowSource: data.window.source,
+				categories: data.categories,
+				sources: { total: data.source, splits: data.splits },
+				...(data.promptSegments ? { promptSegments: data.promptSegments } : {}),
+				...(data.promptHash ? { promptHash: data.promptHash } : {}),
+				...(data.toolSignature ? { toolSignature: data.toolSignature } : {}),
+				...(data.messageRange ? { messageRange: data.messageRange } : {}),
+				...(data.estimatedTokens !== undefined ? { estimatedTokens: data.estimatedTokens } : {}),
+				...(data.reconciledTokens !== undefined ? { reconciledTokens: data.reconciledTokens } : {}),
+				...(data.divergenceRatio !== undefined ? { divergenceRatio: data.divergenceRatio } : {}),
+				...(record.ctx.callId ? { callId: record.ctx.callId } : {}),
+				...(record.ctx.attemptId ? { attemptId: record.ctx.attemptId } : {}),
+			},
+		];
+	});
+}
+
+/** An idle writer can announce a structure again; the first compile owns its provenance (#434). */
+export function promptCompiles(
+	records: readonly TelemetryRecord[],
+	sessionId: string,
+	resolve: (ref: ObjectRef) => ReturnType<typeof telemetryPromptStructure> | null,
+): SessionPromptCompileRecord[] {
+	const seen = new Set<string>();
+	return records.flatMap((record) => {
+		if (record.k !== "prompt.compiled" || record.ctx.sessionId !== sessionId || seen.has(record.data.structure.id))
+			return [];
+		const structure = resolve(record.data.structure);
+		if (!structure?.compile) return [];
+		seen.add(record.data.structure.id);
+		return [
+			{
+				...structure.compile,
+				sections: structure.sections,
+				fragments: structure.fragments.map((fragment) => {
+					if (fragment.relPath === undefined) throw new Error("prompt fragment path is unavailable");
+					return { ...fragment, relPath: fragment.relPath };
+				}),
+			},
+		];
+	});
 }

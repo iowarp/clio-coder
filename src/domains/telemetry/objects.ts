@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { lstat, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import type { TSchema } from "typebox";
@@ -10,6 +10,7 @@ import type { ObjectRef } from "../../core/telemetry/schemas.js";
 import { ObjectRefSchema } from "../../core/telemetry/schemas.js";
 import { createRedactionTally, secretRedactingReplacer } from "../evidence/redact.js";
 import { canonicalJson } from "../prompts/hash.js";
+import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
 import { telemetryObjectsDirectory } from "./paths.js";
 
 const maximumBytes = 16 * 1024 * 1024;
@@ -22,6 +23,44 @@ type StoredSubject =
 	| "memory-trace"
 	| "observation-trace";
 const hash = Type.String({ pattern: "^[0-9a-f]{64}$" });
+const count = Type.Integer({ minimum: 0 });
+const range = Type.Union([Type.Tuple([Type.Integer({ minimum: 1 }), Type.Integer({ minimum: 1 })]), Type.Null()]);
+const projectPreloadSchema = Type.Union([
+	Type.Null(),
+	Type.Object(
+		{
+			mode: Type.Union([Type.Literal("full"), Type.Literal("partial"), Type.Literal("synopsis"), Type.Literal("none")]),
+			chars: count,
+			lines: count,
+			reason: Type.Union([Type.Literal("size"), Type.Literal("lines"), Type.Literal("no-clio-md"), Type.Null()]),
+			nearLimit: Type.Boolean(),
+			label: Type.String(),
+			includedChars: Type.Optional(count),
+			includedLines: Type.Optional(count),
+			omittedSupportFragments: Type.Optional(count),
+			providerSupportsTools: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),
+			sources: Type.Optional(
+				Type.Array(
+					Type.Object(
+						{
+							path: Type.String(),
+							contentHash: hash,
+							availableChars: count,
+							availableLines: count,
+							includedChars: count,
+							includedLines: count,
+							includedRange: range,
+							omittedRange: range,
+							omissionReason: Type.Union([Type.Literal("budget"), Type.Null()]),
+						},
+						{ additionalProperties: false },
+					),
+				),
+			),
+		},
+		{ additionalProperties: false },
+	),
+]);
 const promptStructureSchema = Type.Object(
 	{
 		sections: Type.Array(
@@ -31,7 +70,26 @@ const promptStructureSchema = Type.Object(
 			),
 		),
 		fragments: Type.Array(
-			Type.Object({ id: Type.String(), contentHash: hash, dynamic: Type.Boolean() }, { additionalProperties: false }),
+			Type.Object(
+				{ id: Type.String(), relPath: Type.Optional(Type.String()), contentHash: hash, dynamic: Type.Boolean() },
+				{ additionalProperties: false },
+			),
+		),
+		compile: Type.Optional(
+			Type.Object(
+				{
+					version: Type.Integer({ minimum: 1 }),
+					at: Type.String(),
+					previousHash: Type.Union([hash, Type.Null()]),
+					systemPromptHash: hash,
+					tokenEstimate: Type.Integer({ minimum: 0 }),
+					thinkingLevel: Type.Union([Type.String(), Type.Null()]),
+					contextWindow: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+					contextWindowSource: Type.Union([Type.String(), Type.Null()]),
+					projectPreload: projectPreloadSchema,
+				},
+				{ additionalProperties: false },
+			),
 		),
 	},
 	{ additionalProperties: false },
@@ -55,7 +113,8 @@ function reference(subject: ObjectRef["subject"], bytes: string, label: ObjectRe
 /** Select structure explicitly: passing a compiled prompt must never persist its text in standard mode (#434). */
 export function telemetryPromptStructure(prompt: {
 	sections: ReadonlyArray<{ id: string; tokenEstimate: number; contentHash?: string }>;
-	fragmentManifest: ReadonlyArray<{ id: string; contentHash: string; dynamic: boolean }>;
+	fragmentManifest: ReadonlyArray<{ id: string; relPath?: string; contentHash: string; dynamic: boolean }>;
+	compile?: SessionPromptCompileRecord;
 }) {
 	return {
 		sections: prompt.sections.map(({ id, tokenEstimate, contentHash }) => ({
@@ -63,7 +122,27 @@ export function telemetryPromptStructure(prompt: {
 			tokenEstimate,
 			...(contentHash === undefined ? {} : { contentHash }),
 		})),
-		fragments: prompt.fragmentManifest.map(({ id, contentHash, dynamic }) => ({ id, contentHash, dynamic })),
+		fragments: prompt.fragmentManifest.map(({ id, relPath, contentHash, dynamic }) => ({
+			id,
+			contentHash,
+			dynamic,
+			...(relPath === undefined ? {} : { relPath }),
+		})),
+		...(prompt.compile
+			? {
+					compile: {
+						version: prompt.compile.version,
+						at: prompt.compile.at,
+						previousHash: prompt.compile.previousHash,
+						systemPromptHash: prompt.compile.systemPromptHash,
+						tokenEstimate: prompt.compile.tokenEstimate,
+						thinkingLevel: prompt.compile.thinkingLevel,
+						contextWindow: prompt.compile.contextWindow,
+						contextWindowSource: prompt.compile.contextWindowSource,
+						projectPreload: prompt.compile.projectPreload,
+					},
+				}
+			: {}),
 	};
 }
 
@@ -179,5 +258,34 @@ export async function readTelemetryObject(scopeDirectory: string, ref: ObjectRef
 	if (reference(ref.subject, bytes, "resolvable").id !== ref.id) throw new Error("telemetry object digest mismatch");
 	const value: unknown = JSON.parse(bytes);
 	if (canonicalJson(value) !== bytes) throw new Error("telemetry object is not canonical JSON");
+	return { kind: "resolved", value };
+}
+
+/** Synchronous cold resume uses the same verified preimages as asynchronous surfaces (#434). */
+export function readTelemetryObjectSync(scopeDirectory: string, ref: ObjectRef): TelemetryObjectRead {
+	if (!Value.Check(ObjectRefSchema, ref)) throw new Error("invalid telemetry object reference");
+	if (ref.label === "commitment") return { kind: "commitment" };
+	const directory = telemetryObjectsDirectory(scopeDirectory);
+	let bytes: string;
+	try {
+		const stat = lstatSync(directory);
+		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("telemetry objects directory is not a directory");
+		const fd = openSync(join(directory, `${ref.id}.json`), constants.O_RDONLY | constants.O_NOFOLLOW);
+		try {
+			const file = fstatSync(fd);
+			if (!file.isFile() || file.size > maximumBytes) throw new Error("invalid telemetry object size or type");
+			bytes = readFileSync(fd, "utf8");
+		} finally {
+			closeSync(fd);
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "missing" };
+		throw error;
+	}
+	if (reference(ref.subject, bytes, "resolvable").id !== ref.id) throw new Error("telemetry object digest mismatch");
+	const value: unknown = JSON.parse(bytes);
+	if (canonicalJson(value) !== bytes) throw new Error("telemetry object is not canonical JSON");
+	const schema = contentSchemas[ref.subject as StoredSubject];
+	if (schema && !Value.Check(schema, value)) throw new Error("invalid telemetry object shape");
 	return { kind: "resolved", value };
 }

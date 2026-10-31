@@ -3196,6 +3196,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						...(options.display ? { display: options.display } : {}),
 						...(options.origin !== undefined ? { origin: options.origin } : {}),
 					});
+				// The first submit creates its session after capture; open its writer before session events land (#434).
+				const landedSession = deps.session?.current();
+				if (!turnLease && landedSession && deps.telemetry?.acquireTelemetrySession) {
+					try {
+						turnLease = await deps.telemetry.acquireTelemetrySession(landedSession, "main");
+					} catch {
+						// The writer reports its own failure; telemetry cannot abort a submitted turn (#434).
+					}
+				}
 				context.logPromptCompileIfPending();
 				if (deps.flushSystemOne && deps.session?.current()) {
 					try {
