@@ -122,7 +122,7 @@ Claude setup can offer it on first use.
 From source, build the release tag:
 
 ```bash
-git clone --branch v0.6.5 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.6.6 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local
