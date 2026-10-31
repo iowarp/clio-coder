@@ -431,17 +431,20 @@ describe("canonical monetary presentation (#434)", () => {
 		deepStrictEqual(runBoundaryCheck(process.cwd()).violations, []);
 	});
 
-	it("rejects a surface that sums a token or cost field, including a field-by-field merge under a computed key", () => {
+	it("rejects a surface that sums a token or cost field anywhere, including a field-by-field merge under a computed key", () => {
 		for (const source of [
 			"function show(rows) { let tokens = 0; for (const row of rows) tokens += row.tokens; return tokens; }",
 			"const total = rows.reduce((sum, row) => sum + row.usage.input, 0);",
 			"for (const [key] of FIELDS) totals[key] = (totals[key] ?? 0) + (receipt[key] ?? 0);",
+			"const shown = usage.input + usage.cacheRead;",
+			"render(row.usage.input + (row.usage.output ?? 0));",
+			"const usd = rows.map((row) => row.costUsd).reduce((sum, value) => sum + value, 0);",
 		])
 			ok(checkSurfaceTotals("src/interactive/example.ts", source).some((line) => line.startsWith("rule14:")));
 		deepStrictEqual(
 			checkSurfaceTotals(
 				"src/interactive/example.ts",
-				'let input = ""; for (const chunk of chunks) input += chunk; counts[name] = (counts[name] ?? 0) + 1;',
+				'let input = ""; for (const chunk of chunks) input += chunk; counts[name] = (counts[name] ?? 0) + 1; const label = "in " + usage.input + " / " + usage.output;',
 			),
 			[],
 		);

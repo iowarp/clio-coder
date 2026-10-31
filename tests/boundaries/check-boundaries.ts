@@ -386,6 +386,24 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 		reason: "the producer side of a delegated run: it folds the peer's reported deltas into the run's run.usage snapshot",
 	},
 	{
+		file: "src/interactive/context-bar.ts",
+		functions: ["buildSegmentedContextBar"],
+		reason:
+			"context-window occupancy from the context ledger's estimate, not spend: pending user text joins the conversation segment",
+	},
+	{
+		file: "src/interactive/footer/context-rail.ts",
+		functions: ["contextBreakdownForBar"],
+		reason:
+			"context-window occupancy from the context ledger's estimate, not spend: pending user text joins the conversation segment",
+	},
+	{
+		file: "src/interactive/footer/widgets.ts",
+		functions: ["contextComposition"],
+		reason:
+			"context-window occupancy from the context ledger's estimate, not spend: pending user text joins the conversation segment",
+	},
+	{
 		file: "src/cli/modes/print.ts",
 		functions: ["addRunUsage"],
 		reason:
@@ -475,9 +493,28 @@ export function checkSurfaceTotals(file: string, source: string, used?: Set<stri
 			);
 		});
 	};
+	// `a.input + a.output` in a declaration, return or argument is a total the surface made up, wherever it lands; a
+	// string operand is text building, never a sum (#434).
+	const text = (node: ts.Expression): boolean => {
+		const operand = unwrap(node);
+		return (
+			ts.isStringLiteral(operand) ||
+			ts.isNoSubstitutionTemplateLiteral(operand) ||
+			ts.isTemplateExpression(operand) ||
+			(ts.isBinaryExpression(operand) && operand.operatorToken.kind === ts.SyntaxKind.PlusToken && addsText(operand))
+		);
+	};
+	const addsText = (sum: ts.BinaryExpression): boolean => text(sum.left) || text(sum.right);
+	const sumsTotals = (node: ts.BinaryExpression): boolean =>
+		node.operatorToken.kind === ts.SyntaxKind.PlusToken &&
+		!(ts.isBinaryExpression(node.parent) && node.parent.operatorToken.kind === ts.SyntaxKind.PlusToken) &&
+		!addsText(node) &&
+		readsTotal(node.left) &&
+		readsTotal(node.right);
 	const visit = (node: ts.Node): void => {
 		if (ts.isBinaryExpression(node)) {
 			const kind = node.operatorToken.kind;
+			if (sumsTotals(node)) report(node);
 			if (kind === ts.SyntaxKind.PlusEqualsToken && (total(node.left) || readsTotal(node.right))) report(node);
 			const target = node.left.getText(tree);
 			if (
@@ -499,7 +536,7 @@ export function checkSurfaceTotals(file: string, source: string, used?: Set<stri
 			ts.isCallExpression(node) &&
 			ts.isPropertyAccessExpression(node.expression) &&
 			node.expression.name.text === "reduce" &&
-			node.arguments.some((argument) => readsTotal(argument))
+			(node.arguments.some((argument) => readsTotal(argument)) || readsTotal(node.expression.expression))
 		)
 			report(node);
 		ts.forEachChild(node, visit);
