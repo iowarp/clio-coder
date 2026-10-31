@@ -115,6 +115,7 @@ export function loadVerifiedScoutSource(input: {
 			digest: record.settled.digest,
 			facts: record.settled,
 			delivered: record.result?.state === "resolved" ? record.result.value : null,
+			assessment: record.assessment,
 		},
 		envelope,
 		input.agentSpecs,

@@ -481,6 +481,7 @@ it("labels a Documenter summary above the default allowance as the inline delive
 				digest: receipt.settled.digest,
 				facts: receipt.settled,
 				delivered: resolvedRunResult(receipt),
+				assessment: receipt.assessment,
 			},
 			PRODUCER_INTEGRITY,
 		);

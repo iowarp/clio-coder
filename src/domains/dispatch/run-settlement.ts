@@ -24,7 +24,6 @@ import { type RouteDecisionV1, routeConstraintValidity } from "./route-decision.
 import { defaultRoutingIntent, type RoutingIntent } from "./routing-intent.js";
 import type { RunUsageFacts } from "./run-call-usage.js";
 import { unobservedRunUsageFacts } from "./run-call-usage.js";
-import { computeRunFindingsSummary } from "./run-findings.js";
 import { labelledRunHashes, undeclaredRunHashes } from "./run-hashes.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "./run-upstream.js";
 import type { RunEnvelope, RunOutcome, RunPhaseDurations, RunResult, RunResultDraft } from "./types.js";
@@ -253,13 +252,6 @@ export function settleFinishedRun(
 			validationGrounding: receipt.validationGrounding
 				? { ...receipt.validationGrounding, ungrounded: [...receipt.validationGrounding.ungrounded] }
 				: null,
-			findings: receipt.findingsSummary
-				? {
-						tags: [...receipt.findingsSummary.tags],
-						firstPassSuccess: receipt.findingsSummary.firstPassSuccess,
-						findingCount: receipt.findingsSummary.findingCount,
-					}
-				: null,
 			worktree: receipt.worktree
 				? { apply: receipt.worktree.apply, applied: receipt.worktree.applied, snapshot: receipt.worktree.snapshot ?? null }
 				: null,
@@ -380,7 +372,6 @@ export function settleUnfinishedRun(
 			verification: { state: "unknown", basis: "result-unavailable" },
 			quality: null,
 			validationGrounding: null,
-			findings: null,
 			worktree: null,
 			hostVerification: null,
 			contextProvenance: runContextProvenance(run),
@@ -418,8 +409,7 @@ export interface FinishedRunResult {
 }
 
 /**
- * The one function that finishes a run (#434): it seals the findings summary onto the result, builds the settlement
- * run.settled records from it, and names the result by the digest of that record, so the value dispatch hands its
+ * The one function that finishes a run (#434): it builds the settlement run.settled records from the result and names the result by the digest of that record, so the value dispatch hands its
  * caller and the record its journal keeps never disagree. `row` is the run ledger row as the terminal patch leaves it.
  */
 export function finishRunResult(
@@ -436,10 +426,8 @@ export function finishRunResult(
 	// R7: a hash without a declared function, canonicalization, subject and label is never settled (#434).
 	const undeclared = undeclaredRunHashes(draft, draft.agentId);
 	if (undeclared.length > 0) throw new Error(`run ${draft.runId} carries undeclared hashes ${undeclared.join(", ")}`);
-	const sealed: RunResultDraft =
-		draft.findingsSummary === undefined ? { ...draft, findingsSummary: computeRunFindingsSummary(draft, row) } : draft;
 	const settlement: RunSettlement = {
-		...settleFinishedRun(sealed, {
+		...settleFinishedRun(draft, {
 			...input,
 			phaseTiming: deriveEnvelopePhaseDurations(row, row.endedAt ?? draft.endedAt),
 		}),
@@ -447,7 +435,7 @@ export function finishRunResult(
 	};
 	const record = runSettledRecord(settlement, telemetryObjectRef("run-result", settlement.result));
 	return {
-		result: { ...sealed, routingIntent: draft.routingIntent, digest: runSettledDigest(record) },
+		result: { ...draft, routingIntent: draft.routingIntent, digest: runSettledDigest(record) },
 		settlement,
 	};
 }

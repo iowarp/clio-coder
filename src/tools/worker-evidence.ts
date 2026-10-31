@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
-import type { RunResultObject, RunSettled } from "../core/telemetry/schemas.js";
+import type { EvidenceAssessed, RunResultObject, RunSettled } from "../core/telemetry/schemas.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	RESULT_SUMMARY_MAX_BYTES_CEILING,
@@ -17,8 +17,9 @@ import { telemetryObjectsDirectory, telemetryRunDirectory } from "../domains/tel
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 /**
- * A finished run as worker evidence reads it: the facts its run.settled records and the result object it delivered,
- * whether the producing process holds them in memory or a reader loaded them from the sealed run scope (#434).
+ * A finished run as worker evidence reads it: the facts its run.settled records, the result object it delivered and
+ * the findings its evidence.assessed holds, whether the producing process holds them in memory or a reader loaded them
+ * from the sealed run scope (#434).
  */
 export interface FinishedRun {
 	runId: string;
@@ -46,7 +47,6 @@ export interface FinishedRun {
 		| "context"
 		| "upstream"
 		| "skills"
-		| "findings"
 		| "contextProvenance"
 		| "hashes"
 		| "flowRestrictions"
@@ -55,6 +55,8 @@ export interface FinishedRun {
 		| "blockedAttempts"
 	>;
 	delivered: RunResultObject | null;
+	/** The run's journaled assessment; null when the run has none or the producer has not read it back. */
+	assessment: Pick<EvidenceAssessed, "firstPassSuccess" | "findings"> | null;
 }
 
 const authenticated = (integrity: RunIntegrity) => integrity.state === "verified";
@@ -187,10 +189,11 @@ function activityLabels(run: FinishedRun, status: CanonicalTrustStatus): string[
 		// something and nothing changed, under an exit code that says success.
 		if (!activity.mutatingSucceeded && isMutationClassRun(run, status)) labels.push("mutation_effect=none");
 	}
-	const findings = run.facts.findings;
-	if (findings !== null) {
-		if (!findings.firstPassSuccess) labels.push("first_pass=false");
-		if (findings.tags.length > 0) labels.push(`findings=${[...findings.tags].sort().join(",")}`);
+	const assessment = run.assessment;
+	if (assessment !== null) {
+		if (!assessment.firstPassSuccess) labels.push("first_pass=false");
+		const tags = [...new Set(assessment.findings.filter((finding) => finding.severity === "warn").map((f) => f.tag))];
+		if (tags.length > 0) labels.push(`findings=${tags.sort().join(",")}`);
 	}
 	return labels;
 }
@@ -427,6 +430,7 @@ export function finishedRun(result: RunResultDraft | RunResult): FinishedRun {
 		digest: "digest" in result ? result.digest : null,
 		facts: settlement.facts,
 		delivered: settlement.result,
+		assessment: null,
 	};
 }
 

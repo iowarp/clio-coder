@@ -22,7 +22,6 @@ import type { CallUsage } from "../../core/token-split.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
 import type { AgentAudience } from "../agents/spec.js";
-import type { EvidenceTag } from "../evidence/index.js";
 import type { CostProvenance, RuntimeEnforcement, RuntimeTargetSnapshot } from "../providers/index.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
@@ -413,22 +412,6 @@ export interface RunResultQuality {
 	typedValidations: RunResultTypedValidationFact[];
 	responseSchema: RunResultResponseSchemaFact;
 	resultContract: RunResultContractFact | null;
-}
-
-/**
- * Compact, durable, integrity-covered findings summary folded onto a receipt at
- * record time (the durable half of the v0.2.7 "Both" findings-sink decision).
- * It is computed cheaply from the envelope/outcome/exitCode/toolStats, never by
- * calling buildEvidence (which reads the receipt and would create a cycle). The
- * full forensic bundle is the enriched version; this is the always-present
- * compact half. The v3 integrity branch folds it into the digest, so the
- * payload must stay JSON-clean: tags is a stably ordered array, firstPassSuccess
- * a boolean, findingCount a finite number. No undefined inside.
- */
-export interface RunResultFindingsSummary {
-	tags: EvidenceTag[];
-	firstPassSuccess: boolean;
-	findingCount: number;
 }
 
 /** Host display facts only: persisted with the run, excluded from receipt integrity and authority. */
@@ -1137,8 +1120,6 @@ export interface RunResult {
 	/** Effective target/runtime/model/thinking/capability decision for this run. */
 	runtimeResolution?: RuntimeTargetSnapshot;
 	delegation?: RunResultDelegation;
-	/** Compact findings summary; absent on receipts written before v3 integrity. */
-	findingsSummary?: RunResultFindingsSummary;
 	/** Passing validation claims measured against executed commands; absent when none were claimed. */
 	validationGrounding?: RunValidationGrounding;
 	/** Read-only recipe admitted against a mutating task; absent when the pairing was sound. */

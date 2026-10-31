@@ -825,16 +825,6 @@ export const RunSettledSchema = Type.Object(
 				closed,
 			),
 		),
-		findings: nullable(
-			Type.Object(
-				{
-					tags: Type.Array(ExistingId, { maxItems: 64 }),
-					firstPassSuccess: Type.Boolean(),
-					findingCount: count,
-				},
-				closed,
-			),
-		),
 		/** The isolated writer checkout's verdict; its path, branch and changed paths are in the result object. */
 		worktree: nullable(
 			Type.Object(

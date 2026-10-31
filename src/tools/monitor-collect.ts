@@ -97,6 +97,7 @@ export function durableRunEvidence(envelope: RunEnvelope | null): DurableRunEvid
 			digest: settled.digest,
 			facts: settled,
 			delivered: record.result?.state === "resolved" ? record.result.value : null,
+			assessment: record.assessment,
 		},
 		integrity,
 		trustStatus: inspection.status,

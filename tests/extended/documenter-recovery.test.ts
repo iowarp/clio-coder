@@ -100,6 +100,7 @@ it("gives the parent a bounded exit for an unchanged terminal Documenter report 
 				digest: receipt.settled.digest,
 				facts: receipt.settled,
 				delivered: resolvedRunResult(receipt),
+				assessment: receipt.assessment,
 			},
 			{ state: "failed", reason: "tampered" },
 		);
