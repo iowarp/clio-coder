@@ -513,7 +513,7 @@ export interface ClioAcpServerOptions {
 	 */
 	aside?: AcpAsideControl;
 	/**
-	 * The session's cost ledger, folded as /usage folds it, and the quota
+	 * The session's spend as the read model folds it for /usage, and the quota
 	 * service, for `_clio-coder/usage/read`. Absent means the method refuses.
 	 */
 	usage?: AcpUsageSource;
@@ -3958,7 +3958,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		...(options.usage !== undefined ? { sessionTelemetry: () => liveSessionView() } : {}),
 		...(options.usage?.subscribe || options.telemetryReadModel
 			? {
-					// The cost ledger's change, or a folded batch: a model response can land before its call is folded.
+					// A usage source's change, or a folded batch: a model response can land before its call is folded.
 					subscribeUsage: (listener: () => void) => {
 						const offs = [options.usage?.subscribe?.(listener), options.telemetryReadModel?.subscribe("session", listener)];
 						return () => {

@@ -171,7 +171,7 @@ export function sessionUsageV1(view: TelemetryView | null) {
 			return {
 				provider: bounded(slash < 0 ? group.key : group.key.slice(0, slash)),
 				model: bounded(slash < 0 ? "" : group.key.slice(slash + 1)),
-				// One per own call and one per worker run, as the cost ledger counted its entries.
+				// One per own call and one per worker run.
 				runs: knownPart(read("own", "calls", group.key)) + workers,
 				calls: knownPart(group.calls),
 				...(missing > 0 ? { missingTokenCalls: missing } : {}),

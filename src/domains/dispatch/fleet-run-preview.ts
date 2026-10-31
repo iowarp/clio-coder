@@ -85,7 +85,7 @@ export interface FleetRunPreviewBudget {
 	currentUsd: number;
 	/** The playbook's own declared ceiling, or null when it declares none. */
 	playbookUsd: number | null;
-	/** How `currentUsd` was priced; absent when no cost tracker said, and then it reads as known (#434 §6.3). */
+	/** How `currentUsd` was priced; absent when the scheduling read could not say, and then it reads as known (#434 §6.3). */
 	pricing?: BudgetSpendPricing;
 }
 

@@ -2,7 +2,7 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 /**
  * Reactive telemetry projection. Folds the dispatch and evidence bus
- * channels plus the session cost tracker into a single bounded
+ * channels and the latest throughput into a single bounded
  * {@link TelemetrySnapshot} that product surfaces (footer, overlays, the
  * dispatch board) consume through one seam.
  *

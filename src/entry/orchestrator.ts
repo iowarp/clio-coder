@@ -2654,7 +2654,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const memoryTrace = createTaskMemoryTrace();
 	// The route the last resolved memory client would call, kept so the endpoint
 	// check and the cost row read the same resolution the step itself used.
-	// Journal settlements own memory spend; legacy clients retain the captured usage fallback (#434).
+	// Each memory step is a journaled call, in its session's journal or the process journal (#434).
 	// The spend the scheduling gate admits paid requests against, so a memory
 	// step's projected cost meets the same ceiling chat and dispatch do.
 	const backgroundSessionSpendUsd = (): number =>
@@ -5656,7 +5656,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							},
 						}
 					: {}),
-				// /usage: the overlay's own fold of the cost ledger, and the quota service
+				// /usage: the read model's session view, and the quota service
 				// behind its cache, so reopening the view does not spend a provider read.
 				...(telemetry
 					? {

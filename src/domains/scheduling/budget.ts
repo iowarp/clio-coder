@@ -38,7 +38,7 @@ export interface BudgetBlockView {
 }
 
 /**
- * How the spend a stop compares was priced, as the cost tracker that admission reads words it: any estimated part
+ * How the spend a stop compares was priced, as the read model's spend fold that admission reads words it: any estimated part
  * marks the amount `~`, and any sent call it could not price adds `+?`, so a stop never names estimated or partial
  * spend as known (#434 §6.3).
  */

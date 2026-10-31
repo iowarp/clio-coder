@@ -1954,7 +1954,7 @@ type QuotaEntry = Extract<TimelineEntry, { kind: "quota" }>;
 
 /**
  * The spend admission saw at `t`, marked as the session's priced calls settled by then were: estimated when any was,
- * with every sent call it could not price beside it, as the cost tracker that fed admission words it (#434 §8).
+ * with every sent call it could not price beside it, as admission's own read of the session fold words it (#434 §8).
  */
 function spendAt(analysis: Analysis, usd: number, t: string): FactSum {
 	let estimated = false;
