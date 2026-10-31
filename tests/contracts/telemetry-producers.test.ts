@@ -184,27 +184,30 @@ test("prefix.blocks follows the sent prompt: compiled sections only when the sen
 	strictEqual(locked?.blocks[0]?.id, "system-prompt");
 });
 
-test("health.samples rides beside health.window only for writers that keep it (#428, #434)", async () => {
-	const windows: string[] = [];
-	const samples: string[] = [];
-	const health = createHealthWindows({
-		writers: () => [
-			{ sessionId: "kept", health: { queueDepth: 0, dropped: 0 } as never },
-			{ sessionId: "standard", health: { queueDepth: 0, dropped: 0 } as never },
-		],
-		record: (sessionId) => windows.push(sessionId),
-		recordSamples: (sessionId, data) => {
-			ok(validPayload("health.samples_captured", data), JSON.stringify(data));
-			samples.push(sessionId);
-		},
-		samplesWanted: (sessionId) => sessionId === "kept",
-		windowMs: 40,
-	});
-	health.start();
-	await new Promise((resolve) => setTimeout(resolve, 70));
-	health.stop();
-	ok(windows.includes("kept") && windows.includes("standard"));
-	ok(samples.length > 0 && samples.every((sessionId) => sessionId === "kept"));
+test("health.samples_captured rides beside the process's health.sampled only when its mode keeps it (#428, #434)", async () => {
+	for (const wanted of [true, false]) {
+		const windows: Array<{ queueDepth: number; dropped: number }> = [];
+		let samples = 0;
+		const health = createHealthWindows({
+			active: () => true,
+			writers: () => [{ queueDepth: 2, dropped: 1 } as never, { queueDepth: 3, dropped: 0 } as never],
+			record: (data) => {
+				ok(validPayload("health.sampled", data), JSON.stringify(data));
+				windows.push(data.writer);
+			},
+			recordSamples: (data) => {
+				ok(validPayload("health.samples_captured", data), JSON.stringify(data));
+				samples += 1;
+			},
+			samplesWanted: () => wanted,
+			windowMs: 40,
+		});
+		health.start();
+		await new Promise((resolve) => setTimeout(resolve, 70));
+		health.stop();
+		ok(windows.length > 0 && windows.every((writer) => writer.queueDepth === 5 && writer.dropped === 1));
+		strictEqual(samples > 0, wanted);
+	}
 });
 
 test("prompt.compiled is recorded once per structure by a writer, under the call that first cited it (#434)", async () => {

@@ -16,7 +16,7 @@ import type { TelemetryCapture, TelemetrySettings } from "../../core/telemetry/c
 import { effectiveTelemetryCapture, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
-import { telemetryHub } from "../../core/telemetry/hub.js";
+import { PROCESS_SCOPE, telemetryHub } from "../../core/telemetry/hub.js";
 import type {
 	ConfigChangePayload,
 	ConfigSessionChangePayload,
@@ -33,6 +33,7 @@ import type { ConfigContract } from "../config/index.js";
 import { computeSettingsFingerprint } from "../dispatch/settings-fingerprint.js";
 import type { RunReceipt } from "../dispatch/types.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
+import { openCallJournalHealth } from "./call-journal.js";
 import { createConsentView } from "./consent.js";
 import type { TelemetryContract, TelemetryRunEvidence, TokenThroughputSnapshot } from "./contract.js";
 import { callCoverageForRun, createCostTracker } from "./cost.js";
@@ -274,11 +275,13 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		string,
 		{ origin: TelemetrySessionOrigin; sessionDirectory: string; stored: Promise<void> }
 	>();
+	// Health is the process's: one window per process into its own journal, never one per session (#434).
 	const healthWindows = createHealthWindows({
-		writers: () => journals.openSessions().map(({ origin, health }) => ({ sessionId: origin.id, health })),
-		record: (sessionId, data) => telemetryHub().emit("health.sampled", data, sessionContext(sessionId)),
-		recordSamples: (sessionId, data) => telemetryHub().emit("health.samples_captured", data, sessionContext(sessionId)),
-		samplesWanted: (sessionId) => telemetryCaptures("health.samples_captured", sessionContext(sessionId)),
+		active: () => journals.openSessions().length > 0,
+		writers: () => openCallJournalHealth().map(({ health }) => health),
+		record: (data) => telemetryHub().emit("health.sampled", data, PROCESS_SCOPE),
+		recordSamples: (data) => telemetryHub().emit("health.samples_captured", data, PROCESS_SCOPE),
+		samplesWanted: () => telemetryCaptures("health.samples_captured", PROCESS_SCOPE),
 	});
 	const journals = createSessionJournals(
 		clioStateDir(),

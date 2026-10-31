@@ -22,6 +22,7 @@ import {
 } from "./call-journal.js";
 import type { TelemetryReadModel, TelemetryView } from "./contract.js";
 import { TELEMETRY_FOLD_VERSION } from "./folds.js";
+import { telemetryProcessId } from "./process-journal.js";
 import type { JournalSource, SessionSource } from "./read-model.js";
 import {
 	cacheReport,
@@ -145,7 +146,6 @@ interface Binding {
 	version: number;
 	view?: { version: number; view: LocalView };
 	quota: QuotaCursor;
-	health: HealthCursor;
 }
 
 type QuotaReading = EventPayload<"quota.read">;
@@ -159,11 +159,10 @@ interface QuotaCursor {
 /** The account a reading names, as the process's own observations key it: Codex readings are per target. */
 const quotaAccount = (reading: QuotaReading) =>
 	reading.provider === "codex" ? `codex:${reading.targetId}` : reading.provider;
-/** The newest health.sampled the bound session's journal holds, scanned forward as the journal grows (#434 §14). */
-interface HealthCursor {
-	records: readonly TelemetryRecord[] | null;
-	scanned: number;
-	latest: { at: string; data: EventPayload<"health.sampled"> } | null;
+/** The newest health window this process journaled, while a reader follows its process journal (#434 §14). */
+interface ProcessFollow {
+	off: () => void;
+	health: { at: string; data: EventPayload<"health.sampled"> } | null;
 }
 
 function owned(owner: string): Owned {
@@ -262,7 +261,6 @@ function topicsFor(owner: string, root: string, records: readonly TelemetryRecor
 			topics.add("session");
 			topics.add("health");
 		} else if (record.k === "quota.read") topics.add("quota");
-		else if (record.k === "health.sampled") topics.add("health");
 		else {
 			topics.add("session");
 			topics.add("timeline");
@@ -501,7 +499,6 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			off: [],
 			version: 0,
 			quota: { records: null, scanned: 0, latest: new Map() },
-			health: { records: null, scanned: 0, latest: null },
 		};
 		current = binding;
 		binding.off.push(subscribeAllPersistedTelemetry(onEvent(binding)));
@@ -515,6 +512,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	};
 	// A headless run or worker that never reads live telemetry never subscribes, so its appends publish nothing.
 	const activate = () => {
+		followProcess();
 		if (bound !== null && current === null) bindTo(bound);
 	};
 
@@ -580,23 +578,26 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		return cursor.latest;
 	};
 
-	/** The session's newest health window, from records already in memory; never a cold read (#434 §14). */
-	const latestHealthWindow = (): HealthCursor["latest"] => {
-		const binding = current;
-		const records = binding?.owners.get(sessionOwner(binding.sessionId))?.records;
-		if (!binding || !records) return null;
-		const cursor = binding.health;
-		if (cursor.records !== records) {
-			cursor.records = records;
-			cursor.scanned = 0;
-			cursor.latest = null;
-		}
-		for (; cursor.scanned < records.length; cursor.scanned += 1) {
-			const record = records[cursor.scanned];
-			if (record?.k !== "health.sampled") continue;
-			if (!cursor.latest || record.t >= cursor.latest.at) cursor.latest = { at: record.t, data: record.data };
-		}
-		return cursor.latest;
+	/**
+	 * This process's own journal, followed from its persisted batches once a reader asks: health is a process fact,
+	 * so the newest window is the process's, never one session's (#434 §14).
+	 */
+	let processFollow: ProcessFollow | null = null;
+	const followProcess = (): ProcessFollow => {
+		if (processFollow) return processFollow;
+		const follow: ProcessFollow = { off: () => {}, health: null };
+		follow.off = subscribePersistedTelemetry(`process:${telemetryProcessId()}`, (_owner, event) => {
+			if (event.kind !== "appended") return;
+			const read: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
+			appendPersistedTelemetry(read, event);
+			for (const { record } of read.records) {
+				if (record.k !== "health.sampled") continue;
+				if (!follow.health || record.t >= follow.health.at) follow.health = { at: record.t, data: record.data };
+				markDirty(["health"]);
+			}
+		});
+		processFollow = follow;
+		return follow;
 	};
 
 	const live = (): LocalView | null => {
@@ -622,6 +623,8 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		},
 		stop() {
 			unbind();
+			processFollow?.off();
+			processFollow = null;
 			bound = null;
 			if (timer) clearTimeout(timer);
 			timer = undefined;
@@ -726,9 +729,9 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		},
 		health() {
 			const producer = telemetryProducerHealth();
-			// Loop lag is the session's newest health.sampled: unknown until one lands, or when no sample landed in that
+			// Loop lag is the process's newest health.sampled: unknown until one lands, or when no sample landed in that
 			// window (#434 §14).
-			const window = latestHealthWindow()?.data.loopLag;
+			const window = followProcess().health?.data.loopLag;
 			const lag = (ms: number | undefined) => {
 				const fact: Fact<number> =
 					ms === undefined

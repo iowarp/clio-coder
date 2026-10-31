@@ -3,7 +3,7 @@ import { createHistogram, performance as perf } from "node:perf_hooks";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { JournalHealth } from "./call-journal.js";
 
-/** How often each open session writer receives a health.sampled (#428, #434). */
+/** How often the process records a health.sampled while a session writer is open (#428, #434). */
 export const HEALTH_WINDOW_MS = 10_000;
 /** The lag sampler's interval; each tick records how late it ran past this (#428). */
 const LAG_RESOLUTION_MS = 10;
@@ -11,17 +11,21 @@ const LAG_RESOLUTION_MS = 10;
 const ms = (nanoseconds: number) => Math.round(nanoseconds / 1e3) / 1e3;
 
 /**
- * Event-loop lag, RSS and writer pressure per window, sampled only while a session writer is open. Lag comes from an
- * interval that keeps its baseline across windows: monitorEventLoopDelay drops the first interval after every
- * reset(), so a stall that straddled a window boundary would never be measured (#428, #434).
+ * Event-loop lag, RSS and writer pressure per window, sampled only while a session writer is open and recorded once
+ * per process, because they are the process's facts. Lag comes from an interval that keeps its baseline across
+ * windows: monitorEventLoopDelay drops the first interval after every reset(), so a stall that straddled a window
+ * boundary would never be measured (#428, #434).
  */
 export function createHealthWindows(input: {
-	writers: () => ReadonlyArray<{ sessionId: string; health: JournalHealth }>;
-	record: (sessionId: string, data: EventPayload<"health.sampled">) => void;
-	/** The window's full distribution, for writers whose mode keeps health.samples_captured (#434). */
-	recordSamples?: (sessionId: string, data: EventPayload<"health.samples_captured">) => void;
-	/** Whether any open writer would keep health.samples_captured, so standard mode never assembles them. */
-	samplesWanted?: (sessionId: string) => boolean;
+	/** Whether a session writer is open; the first window that finds none stops the sampler. */
+	active: () => boolean;
+	/** Every journal writer this process holds open, the process journal's own included. */
+	writers: () => ReadonlyArray<JournalHealth>;
+	record: (data: EventPayload<"health.sampled">) => void;
+	/** The window's full distribution, when the process journal's mode keeps health.samples_captured (#434). */
+	recordSamples?: (data: EventPayload<"health.samples_captured">) => void;
+	/** Whether health.samples_captured would be kept, so standard mode never assembles it. */
+	samplesWanted?: () => boolean;
 	windowMs?: number;
 }) {
 	const lag = createHistogram();
@@ -38,8 +42,9 @@ export function createHealthWindows(input: {
 	const close = () => {
 		const now = performance.now();
 		const writers = input.writers();
-		const shared = {
-			windowMs: now - windowStart,
+		const windowMs = now - windowStart;
+		input.record({
+			windowMs,
 			...(lag.count > 0
 				? {
 						loopLag: {
@@ -51,28 +56,26 @@ export function createHealthWindows(input: {
 					}
 				: {}),
 			rssBytes: process.memoryUsage.rss(),
-		};
-		for (const { sessionId, health } of writers)
-			input.record(sessionId, { ...shared, writer: { queueDepth: health.queueDepth, dropped: health.dropped } });
-		const sampled = input.recordSamples
-			? writers.filter(({ sessionId }) => input.samplesWanted?.(sessionId) ?? false)
-			: [];
+			writer: {
+				queueDepth: writers.reduce((sum, health) => sum + health.queueDepth, 0),
+				dropped: writers.reduce((sum, health) => sum + health.dropped, 0),
+			},
+		});
 		const elu = perf.eventLoopUtilization(utilization);
 		utilization = perf.eventLoopUtilization();
-		if (sampled.length > 0 && input.recordSamples) {
+		if (input.recordSamples && (input.samplesWanted?.() ?? false)) {
 			const memory = process.memoryUsage();
-			const samples: EventPayload<"health.samples_captured"> = {
-				windowMs: shared.windowMs,
+			input.recordSamples({
+				windowMs,
 				lagPercentiles: lag.count > 0 ? [...lag.percentiles].slice(0, 64).map(([p, value]) => ({ p, ms: ms(value) })) : [],
 				eventLoopUtilization: Math.min(1, Math.max(0, elu.utilization)),
 				heapUsedBytes: memory.heapUsed,
 				externalBytes: memory.external,
-			};
-			for (const { sessionId } of sampled) input.recordSamples(sessionId, samples);
+			});
 		}
 		lag.reset();
 		windowStart = now;
-		if (writers.length === 0) stop();
+		if (!input.active()) stop();
 	};
 	return {
 		/** A writer opened. The sampler runs until a window finds none open (#434). */

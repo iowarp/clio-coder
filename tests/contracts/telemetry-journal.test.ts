@@ -29,7 +29,7 @@ import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
-import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import { PROCESS_SCOPE, telemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { beginCall, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import { registerResearchTraceSink } from "../../src/core/telemetry/research-trace.js";
@@ -59,6 +59,7 @@ import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/d
 import {
 	callJournalHeader,
 	openCallJournal,
+	openCallJournalHealth,
 	readCallJournal,
 	readCallJournalSync,
 	seedForkCallJournal,
@@ -79,7 +80,13 @@ import {
 	telemetryCommitment,
 	telemetryPromptStructure,
 } from "../../src/domains/telemetry/objects.js";
-import { telemetryRunDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import {
+	telemetryProcessDirectory,
+	telemetryProcessesDirectory,
+	telemetryRunDirectory,
+	telemetrySessionDirectory,
+} from "../../src/domains/telemetry/paths.js";
+import { createProcessJournal } from "../../src/domains/telemetry/process-journal.js";
 import {
 	applyTelemetryPrune,
 	DEFAULT_PRUNE_POLICY,
@@ -866,11 +873,13 @@ test("memory and observation traces journal content only under research capture 
 	}
 });
 
-test("each open session writer receives health windows carrying loop lag, RSS and its own writer pressure (#434)", async () => {
+test("the process journal receives one health window per process, carrying loop lag, RSS and its writers' pressure (#434)", async () => {
 	const stateDir = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const processJournal = createProcessJournal(stateDir, () => {});
 	const health = createHealthWindows({
-		writers: () => journals.openSessions().map(({ origin, health }) => ({ sessionId: origin.id, health })),
-		record: (sessionId, data) => telemetryHub().emit("health.sampled", data, { sessionId, label: "main" }),
+		active: () => journals.openSessions().length > 0,
+		writers: () => openCallJournalHealth().map(({ health }) => health),
+		record: (data) => telemetryHub().emit("health.sampled", data, PROCESS_SCOPE),
 		windowMs: 50,
 	});
 	const journals = createSessionJournals(
@@ -887,21 +896,26 @@ test("each open session writer receives health windows carrying loop lag, RSS an
 		for (const origin of origins) await (await journals.acquire(origin, "main")).release();
 		await new Promise((resolve) => setTimeout(resolve, 130));
 		await journals.closeAll();
+		await processJournal.close(0);
 		for (const origin of origins) {
 			const journal = await readCallJournal(telemetrySessionDirectory(stateDir, origin.id));
-			strictEqual(journal.damaged, 0);
-			ok(!journal.records.some(({ record }) => record.k === "journal.gap"), "every window passes its own schema");
-			const windows = journal.records.flatMap(({ record }) => (record.k === "health.sampled" ? [record.data] : []));
-			ok(windows.length >= 1);
-			for (const window of windows) {
-				ok(window.windowMs > 0 && window.rssBytes > 0);
-				ok((window.loopLag?.samples ?? 0) > 0);
-				strictEqual(window.writer.dropped, 0);
-			}
+			ok(!journal.records.some(({ record }) => record.k === "health.sampled"), "no session keeps a process fact");
+		}
+		const [processId] = await readdir(telemetryProcessesDirectory(stateDir));
+		const journal = await readCallJournal(telemetryProcessDirectory(stateDir, processId as string));
+		strictEqual(journal.damaged, 0);
+		ok(!journal.records.some(({ record }) => record.k === "journal.gap"), "every window passes its own schema");
+		const windows = journal.records.flatMap(({ record }) => (record.k === "health.sampled" ? [record.data] : []));
+		ok(windows.length >= 1);
+		for (const window of windows) {
+			ok(window.windowMs > 0 && window.rssBytes > 0);
+			ok((window.loopLag?.samples ?? 0) > 0);
+			strictEqual(window.writer.dropped, 0);
 		}
 	} finally {
 		health.stop();
 		await journals.closeAll();
+		await processJournal.close(0);
 		await rm(stateDir, { recursive: true, force: true });
 	}
 });

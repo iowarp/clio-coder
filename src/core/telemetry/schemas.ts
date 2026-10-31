@@ -733,7 +733,7 @@ export const HealthSampledSchema = Type.Object(
 			Type.Object({ samples: Type.Integer({ minimum: 1 }), p50Ms: duration, p99Ms: duration, maxMs: duration }, closed),
 		),
 		rssBytes: count,
-		/** This session's writer: records queued now, and records it dropped since it opened. */
+		/** Every journal writer the process holds open: records queued now, and records they dropped since opening. */
 		writer: Type.Object({ queueDepth: count, dropped: count }, closed),
 	},
 	closed,

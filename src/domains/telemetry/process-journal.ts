@@ -14,7 +14,7 @@ import { telemetryProcessDirectory } from "./paths.js";
 let processId: string | undefined;
 
 /** This process's telemetry id, `prc_<uuidv7>`, minted on first use and stable for the process's life (#434). */
-function telemetryProcessId(): string {
+export function telemetryProcessId(): string {
 	processId ??= newProcessId();
 	return processId;
 }
