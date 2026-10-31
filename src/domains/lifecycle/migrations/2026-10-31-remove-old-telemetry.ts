@@ -14,7 +14,13 @@ import type { Migration } from "./index.js";
  * thrown, so boot proceeds whatever the home holds.
  */
 
-const STATE_FILES = ["trace.sqlite", "trace.sqlite-wal", "trace.sqlite-shm", "evidence-index.json"] as const;
+const STATE_FILES = [
+	"trace.sqlite",
+	"trace.sqlite-wal",
+	"trace.sqlite-shm",
+	"evidence-index.json",
+	"route-history.json",
+] as const;
 const STATE_DIRECTORIES = [
 	["usage"],
 	["receipts"],
