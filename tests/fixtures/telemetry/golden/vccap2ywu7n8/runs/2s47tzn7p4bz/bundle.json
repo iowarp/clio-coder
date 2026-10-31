@@ -1,0 +1,29 @@
+{
+	"format": "clio-coder.telemetry.bundle",
+	"version": 1,
+	"scope": {
+		"kind": "run",
+		"id": "2s47tzn7p4bz"
+	},
+	"sealedAt": "2026-10-19T12:23:40.000Z",
+	"clioCoderVersion": "0.6.6-dev",
+	"host": "golden-fixture",
+	"segments": [
+		{
+			"name": "journal.jsonl",
+			"sha256": "e509a690ad28d7c2c2d83b55d1aeb4d1d466d26803071d19a76d14bd7a789831",
+			"bytes": 9445
+		}
+	],
+	"objects": [
+		{
+			"id": "obj_455d55e5364aeec55c68085f73bf9e5330a7326210d34183e2a2e4248f6167a9",
+			"sha256": "455d55e5364aeec55c68085f73bf9e5330a7326210d34183e2a2e4248f6167a9",
+			"bytes": 133
+		}
+	],
+	"seal": {
+		"recordId": "rec_01a192a1-a0a1-714e-baa3-a5a1e3dfe5f9",
+		"head": "435c337a04e86eeead75fbeca08c2464441078fd17207981c811c12e33a4d902"
+	}
+}
