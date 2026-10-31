@@ -117,6 +117,7 @@ const testModules = new Set([
 	"tests/harness/telemetry-view.ts",
 	"tests/harness/telemetry-lies.ts",
 	"src/domains/telemetry/call-journal.ts",
+	"src/domains/telemetry/paths.ts",
 ]);
 function files(directory: string): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
