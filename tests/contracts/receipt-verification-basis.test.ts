@@ -1,7 +1,7 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { test } from "node:test";
 
-import { deriveReceiptVerification } from "../../src/domains/dispatch/receipt-findings.js";
+import { deriveRunVerification } from "../../src/domains/dispatch/run-findings.js";
 import type { ToolCallStat } from "../../src/domains/dispatch/types.js";
 
 // BT-012. A worker ran `verify` and it failed, and the receipt still said
@@ -23,32 +23,32 @@ function stat(tool: string, counts: { ok: number; errors: number }): ToolCallSta
 }
 
 test("a validation tool that ran and failed is unverified, not absent", () => {
-	deepStrictEqual(deriveReceiptVerification({ toolStats: [stat("verify", { ok: 0, errors: 1 })] }), {
+	deepStrictEqual(deriveRunVerification({ toolStats: [stat("verify", { ok: 0, errors: 1 })] }), {
 		state: "unverified",
 		basis: "validation-tool",
 	});
 });
 
 test("a validation tool with both passing and failing calls is still unverified", () => {
-	deepStrictEqual(deriveReceiptVerification({ toolStats: [stat("npm test", { ok: 1, errors: 1 })] }), {
+	deepStrictEqual(deriveRunVerification({ toolStats: [stat("npm test", { ok: 1, errors: 1 })] }), {
 		state: "unverified",
 		basis: "validation-tool",
 	});
 });
 
 test("a validation tool that ran and passed stays verified", () => {
-	deepStrictEqual(deriveReceiptVerification({ toolStats: [stat("pytest", { ok: 2, errors: 0 })] }), {
+	deepStrictEqual(deriveRunVerification({ toolStats: [stat("pytest", { ok: 2, errors: 0 })] }), {
 		state: "verified",
 		basis: "validation-tool",
 	});
 });
 
 test("no validation tool at all still reports that none ran", () => {
-	deepStrictEqual(deriveReceiptVerification({ toolStats: [stat("read", { ok: 3, errors: 0 })] }), {
+	deepStrictEqual(deriveRunVerification({ toolStats: [stat("read", { ok: 3, errors: 0 })] }), {
 		state: "unverified",
 		basis: "no-validation-tool",
 	});
-	deepStrictEqual(deriveReceiptVerification({ toolStats: [] }), {
+	deepStrictEqual(deriveRunVerification({ toolStats: [] }), {
 		state: "unverified",
 		basis: "no-validation-tool",
 	});
@@ -59,10 +59,10 @@ test("no validation tool at all still reports that none ran", () => {
 // validated where Clio could not observe it.
 test("read-only and ACP bases are unchanged by a failed validation tool", () => {
 	deepStrictEqual(
-		deriveReceiptVerification({ toolStats: [stat("verify", { ok: 0, errors: 1 })] }, { capabilityClass: "read-only" }),
+		deriveRunVerification({ toolStats: [stat("verify", { ok: 0, errors: 1 })] }, { capabilityClass: "read-only" }),
 		{ state: "not_applicable", basis: "read-only-agent" },
 	);
-	deepStrictEqual(deriveReceiptVerification({ toolStats: [] }, { acpDelegation: true }), {
+	deepStrictEqual(deriveRunVerification({ toolStats: [] }, { acpDelegation: true }), {
 		state: "unknown",
 		basis: "acp-external-unobserved",
 	});
@@ -72,7 +72,7 @@ test("read-only and ACP bases are unchanged by a failed validation tool", () => 
 // "could not observe" basis for the same run.
 test("an observed failed validation outranks the ACP unobserved basis", () => {
 	deepStrictEqual(
-		deriveReceiptVerification({ toolStats: [stat("verify", { ok: 0, errors: 1 })] }, { acpDelegation: true }),
+		deriveRunVerification({ toolStats: [stat("verify", { ok: 0, errors: 1 })] }, { acpDelegation: true }),
 		{ state: "unverified", basis: "validation-tool" },
 	);
 });

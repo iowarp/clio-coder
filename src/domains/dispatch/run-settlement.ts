@@ -20,12 +20,12 @@ import {
 } from "./budget-envelope.js";
 import type { ResolvedTerminalReason } from "./outcome.js";
 import { deriveEnvelopePhaseDurations } from "./phase-timing.js";
-import { computeReceiptFindingsSummary } from "./receipt-findings.js";
-import { labelledRunHashes, undeclaredReceiptHashes } from "./receipt-hashes.js";
 import { type RouteDecisionV1, routeConstraintValidity } from "./route-decision.js";
 import { defaultRoutingIntent, type RoutingIntent } from "./routing-intent.js";
 import type { RunUsageFacts } from "./run-call-usage.js";
 import { unobservedRunUsageFacts } from "./run-call-usage.js";
+import { computeRunFindingsSummary } from "./run-findings.js";
+import { labelledRunHashes, undeclaredRunHashes } from "./run-hashes.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "./run-upstream.js";
 import type { RunEnvelope, RunOutcome, RunPhaseDurations, RunResult, RunResultDraft } from "./types.js";
 
@@ -377,7 +377,7 @@ export function settleUnfinishedRun(
 			escalations: null,
 			flowRestrictions: null,
 			toolGovernance: null,
-			verification: { state: "unknown", basis: "receipt-unavailable" },
+			verification: { state: "unknown", basis: "result-unavailable" },
 			quality: null,
 			validationGrounding: null,
 			findings: null,
@@ -434,12 +434,10 @@ export function finishRunResult(
 ): FinishedRunResult {
 	if (draft.routingIntent === undefined) throw new Error(`run ${draft.runId} has no routing intent`);
 	// R7: a hash without a declared function, canonicalization, subject and label is never settled (#434).
-	const undeclared = undeclaredReceiptHashes(draft, draft.agentId);
+	const undeclared = undeclaredRunHashes(draft, draft.agentId);
 	if (undeclared.length > 0) throw new Error(`run ${draft.runId} carries undeclared hashes ${undeclared.join(", ")}`);
 	const sealed: RunResultDraft =
-		draft.findingsSummary === undefined
-			? { ...draft, findingsSummary: computeReceiptFindingsSummary(draft, row) }
-			: draft;
+		draft.findingsSummary === undefined ? { ...draft, findingsSummary: computeRunFindingsSummary(draft, row) } : draft;
 	const settlement: RunSettlement = {
 		...settleFinishedRun(sealed, {
 			...input,

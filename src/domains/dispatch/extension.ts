@@ -376,13 +376,6 @@ import {
 } from "./path-scope.js";
 import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase-timing.js";
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
-import type { VerifyCallOutcome } from "./receipt-findings.js";
-import {
-	createRunResultQuality,
-	deriveReceiptVerification,
-	typedValidationFactsFromVerifyCalls,
-	verifyCheckIdentity,
-} from "./receipt-findings.js";
 import { createRecordingJournal } from "./recording.js";
 import * as recovery from "./recovery-candidates.js";
 import { collectReproducibilityMetadata } from "./reproducibility.js";
@@ -416,6 +409,13 @@ import type { RunCallUsage } from "./run-call-usage.js";
 import { createRunCallUsage } from "./run-call-usage.js";
 import { defaultRunEventJournal } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
+import type { VerifyCallOutcome } from "./run-findings.js";
+import {
+	createRunResultQuality,
+	deriveRunVerification,
+	typedValidationFactsFromVerifyCalls,
+	verifyCheckIdentity,
+} from "./run-findings.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { finishRunResult, settleUnfinishedRun } from "./run-settlement.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
@@ -6500,7 +6500,7 @@ export function createDispatchBundle(
 				// Clio-observed telemetry only: an external ACP agent executes its
 				// own tools, so no zero-activity note is derived from this record.
 				toolActivity: summarizeToolActivity(toolStats, acpToolActionClass),
-				verification: deriveReceiptVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
+				verification: deriveRunVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
 				effectiveFailover: failoverModeFor(req),
 				quality: createRunResultQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
@@ -8410,7 +8410,7 @@ export function createDispatchBundle(
 				toolCalls: countToolCalls(toolStats),
 				toolStats: finalToolStats,
 				toolActivity,
-				verification: deriveReceiptVerification(
+				verification: deriveRunVerification(
 					{ toolStats: finalToolStats, typedValidations },
 					{ capabilityClass: lifecycle.capabilityClass },
 				),

@@ -573,7 +573,7 @@ const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null
 /** Diagnostic text a finished run states about itself, clipped and redacted where it is built (#434). */
 const diagnostic = Type.String({ maxLength: 1024 });
 const digest = Type.String({ minLength: 1, maxLength: 256 });
-/** One R7-labelled hash a finished run carries, named by the field it was computed for (`receipt-hashes.ts`, #434). */
+/** One R7-labelled hash a finished run carries, named by the field it was computed for (`run-hashes.ts`, #434). */
 export const RunHashSchema = Type.Object(
 	{
 		field: Type.String({ minLength: 1, maxLength: 256 }),
@@ -581,7 +581,7 @@ export const RunHashSchema = Type.Object(
 		function: Type.Literal("sha256"),
 		canonicalization: vocabulary(RUN_HASH_CANONICALIZATIONS),
 		subject: vocabulary(RUN_HASH_SUBJECTS),
-		store: Type.Optional(vocabulary(["run-receipts", "context-seeds"])),
+		store: Type.Optional(vocabulary(["run-journals", "context-seeds"])),
 		hash: digest,
 	},
 	closed,
@@ -777,7 +777,7 @@ export const RunSettledSchema = Type.Object(
 					"read-only-agent",
 					"no-validation-tool",
 					"acp-external-unobserved",
-					"receipt-unavailable",
+					"result-unavailable",
 				]),
 			},
 			closed,

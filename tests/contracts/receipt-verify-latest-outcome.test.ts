@@ -13,7 +13,7 @@
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { verifyCheckIdentity } from "../../src/domains/dispatch/receipt-findings.js";
+import { verifyCheckIdentity } from "../../src/domains/dispatch/run-findings.js";
 
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";

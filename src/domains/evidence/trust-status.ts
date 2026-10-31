@@ -527,7 +527,7 @@ function runValidationStatus(facts: RunTrustFacts): ValidationGroundingStatus {
 	// A batch member the failure was charged away from has no validator verdict of its own.
 	if (host?.status === "not_implicated") return attributed("unknown", source, hostAuthority, artifacts);
 	if (settledQualityFails(facts.quality))
-		return attributed("failed", source, { kind: "validator", id: "receipt-quality" }, artifacts);
+		return attributed("failed", source, { kind: "validator", id: "result-quality" }, artifacts);
 	const grounding = facts.validationGrounding;
 	if (
 		grounding?.basis === "no-command-executed" &&
@@ -535,7 +535,7 @@ function runValidationStatus(facts: RunTrustFacts): ValidationGroundingStatus {
 	)
 		return attributed("ungrounded", source, { kind: "validator", id: "command-grounding" }, artifacts);
 	if (settledQualityValidates(facts.quality))
-		return attributed("validated", source, { kind: "validator", id: "receipt-quality" }, artifacts);
+		return attributed("validated", source, { kind: "validator", id: "result-quality" }, artifacts);
 	const verification = facts.verification;
 	if (verification.state === "verified")
 		return attributed("validated", source, { kind: "validator", id: verification.basis }, artifacts);

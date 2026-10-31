@@ -294,7 +294,7 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			validationGrounding: {
 				state: "validated",
 				source: { kind: "run_record", id: "run-1" },
-				authority: { kind: "validator", id: "receipt-quality" },
+				authority: { kind: "validator", id: "result-quality" },
 				artifacts: [],
 			},
 		});

@@ -859,7 +859,7 @@ export interface RunResultVerification {
 		| "no-validation-tool"
 		| "acp-external-unobserved"
 		/** No sealed receipt to read: it is missing, unreadable, or failed integrity. */
-		| "receipt-unavailable";
+		| "result-unavailable";
 }
 
 export interface RunHostVerificationCheck {

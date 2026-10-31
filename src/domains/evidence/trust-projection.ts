@@ -126,7 +126,7 @@ export function validationClause(status: Pick<CanonicalTrustStatus, "validationG
 	if (entry.state === "unknown" && entry.authority.id === "host-verification-baseline-failed")
 		return "check also failed on task base; change validation unknown";
 	if (entry.state === "absent") return word;
-	if (entry.state === "failed" && entry.authority.id === "receipt-quality") return "recorded validation failed";
+	if (entry.state === "failed" && entry.authority.id === "result-quality") return "recorded validation failed";
 	if (entry.state === "validated" || entry.state === "failed") return `${word} by ${entry.authority.id}`;
 	// A named external system that could not observe the run is worth naming;
 	// the historical-format placeholder is not an authority anyone can ask.

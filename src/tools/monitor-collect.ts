@@ -5,7 +5,7 @@ import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dis
 import { readAgentLedger, renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import type { DurableAssignmentRecord } from "../domains/dispatch/assignment-store.js";
 import type { DispatchOwnership } from "../domains/dispatch/ownership.js";
-import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
+import { UNVERIFIABLE_RUN_VERIFICATION } from "../domains/dispatch/run-findings.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { isTerminalRunEnvelope } from "../domains/dispatch/types.js";
 import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
@@ -347,7 +347,7 @@ export async function collectRuns(
 					exitCode: row.run?.exitCode ?? null,
 					runIntegrity: row.evidence.integrity,
 					trustStatus: row.evidence.trustStatus,
-					evidenceVerification: evidenceRun?.facts.verification ?? UNVERIFIABLE_RECEIPT_VERIFICATION,
+					evidenceVerification: evidenceRun?.facts.verification ?? UNVERIFIABLE_RUN_VERIFICATION,
 					hostVerification: evidenceRun?.facts.hostVerification ?? null,
 					context: evidenceRun?.facts.context ?? null,
 					...(output ? { output: { state: output.state, bytes: output.bytes, truncated: output.truncated } } : {}),

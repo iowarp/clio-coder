@@ -1047,7 +1047,7 @@ export const RunEvidenceSchema = Type.Object(
 									"read-only-agent",
 									"no-validation-tool",
 									"acp-external-unobserved",
-									"receipt-unavailable",
+									"result-unavailable",
 								]),
 							},
 							closed,

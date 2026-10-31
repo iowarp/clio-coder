@@ -33,7 +33,7 @@ export const RUN_OUTCOME_CODES = [
 ] as const;
 export type RunOutcomeCode = (typeof RUN_OUTCOME_CODES)[number];
 
-/** How each labelled hash a finished run carries was computed (`receipt-hashes.ts`, #434). */
+/** How each labelled hash a finished run carries was computed (`run-hashes.ts`, #434). */
 export const RUN_HASH_CANONICALIZATIONS = [
 	/** UTF-8 bytes of the text as given (trimmed where the subject says so). */
 	"utf8-text",
@@ -52,7 +52,7 @@ export const RUN_HASH_CANONICALIZATIONS = [
 	/** The referenced artifact's own integrity digest, copied. */
 	"artifact-digest",
 ] as const;
-export type ReceiptHashCanonicalization = (typeof RUN_HASH_CANONICALIZATIONS)[number];
+export type RunHashCanonicalization = (typeof RUN_HASH_CANONICALIZATIONS)[number];
 
 /** What each labelled hash a finished run carries is a hash of. */
 export const RUN_HASH_SUBJECTS = [
@@ -68,7 +68,7 @@ export const RUN_HASH_SUBJECTS = [
 	"project-context",
 	"plan-text",
 	"execution-plan",
-	"run-receipt",
+	"run-settlement",
 	"validation-result",
 	"response-schema",
 	"result-contract",
@@ -88,4 +88,4 @@ export const RUN_HASH_SUBJECTS = [
 	"skill-file",
 	"package-provenance",
 ] as const;
-export type ReceiptHashSubject = (typeof RUN_HASH_SUBJECTS)[number];
+export type RunHashSubject = (typeof RUN_HASH_SUBJECTS)[number];

@@ -346,7 +346,7 @@ function hasPassingValidation(
  * of Clio-observed validation is unknown rather than a negative assertion.
  * Pass the receipt's typed validations so the marker agrees with them.
  */
-export function deriveReceiptVerification(
+export function deriveRunVerification(
 	draft: Pick<RunResultDraft, "toolStats"> & { typedValidations?: ReadonlyArray<RunResultTypedValidationFact> },
 	context: { capabilityClass?: string | null; acpDelegation?: boolean } = {},
 ): RunResultVerification {
@@ -375,9 +375,9 @@ export function deriveReceiptVerification(
  * Evidence confidence when no sealed receipt can be read: the run has none, or
  * its integrity check failed, so nothing it claims may be reported as verified.
  */
-export const UNVERIFIABLE_RECEIPT_VERIFICATION: RunResultVerification = {
+export const UNVERIFIABLE_RUN_VERIFICATION: RunResultVerification = {
 	state: "unknown",
-	basis: "receipt-unavailable",
+	basis: "result-unavailable",
 };
 
 /**
@@ -389,7 +389,7 @@ export const UNVERIFIABLE_RECEIPT_VERIFICATION: RunResultVerification = {
  * in the receipt stats, and no failure-cause tag. Absent draft lineage falls
  * back to the envelope before treating the run as attempt 0.
  */
-export function computeReceiptFindingsSummary(draft: RunResultDraft, envelope: RunEnvelope): RunResultFindingsSummary {
+export function computeRunFindingsSummary(draft: RunResultDraft, envelope: RunEnvelope): RunResultFindingsSummary {
 	const detected = classifyTags(draft, envelope);
 	const tags = FAILURE_CAUSE_TAG_ORDER.filter((tag) => detected.has(tag));
 

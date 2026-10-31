@@ -1,48 +1,47 @@
 /**
- * R7 declarations for every hash a v21 receipt can carry (#434). A receipt
- * names this set in its sealed `hashSet` field instead of repeating the
- * declarations, so receipts stay small and the set is versioned like any other
- * serialization contract. Sealing refuses a hash-shaped field without a
- * declaration, so a new hash cannot ship unlabelled.
+ * R7 declarations for every hash a finished run can carry (#434). run.settled
+ * records each declared hash with its label, and settlement refuses a
+ * hash-shaped field without a declaration, so a new hash cannot ship
+ * unlabelled.
  *
  * `commitment` means Clio does not retain the preimage: the hash can confirm a
  * candidate preimage but cannot produce one. `resolvable` names the store that
- * holds the preimage. No receipt hash resolves through session `objects/` yet:
+ * holds the preimage. No run hash resolves through session `objects/` yet:
  * worker prompts, briefings and steering are never persisted.
  */
-import type { ReceiptHashCanonicalization, ReceiptHashSubject } from "../../core/telemetry/run-vocabulary.js";
+import type { RunHashCanonicalization, RunHashSubject } from "../../core/telemetry/run-vocabulary.js";
 import type { RunHash } from "../../core/telemetry/schemas.js";
 
-export const RECEIPT_HASH_SET = "clio-coder.receipt-hashes/1" as const;
+export type { RunHashCanonicalization, RunHashSubject };
 
-export type { ReceiptHashCanonicalization, ReceiptHashSubject };
-
-export interface ReceiptHashDeclaration {
+export interface RunHashDeclaration {
 	label: "commitment" | "resolvable";
 	function: "sha256";
-	canonicalization: ReceiptHashCanonicalization;
-	subject: ReceiptHashSubject;
+	canonicalization: RunHashCanonicalization;
+	subject: RunHashSubject;
 	/** Where a resolvable preimage lives. */
-	store?: "run-receipts" | "context-seeds";
+	store?: "run-journals" | "context-seeds";
 }
 
 interface DeclarationRow {
-	/** Matches the receipt path with array indices removed, e.g. `steering[].contentHash`. */
+	/** Matches the result field path with array indices removed, e.g. `steering[].contentHash`. */
 	path: RegExp;
-	declaration: ReceiptHashDeclaration;
+	declaration: RunHashDeclaration;
 	/** The headless main agent hashes a different preimage under the same field name. */
-	mainAgent?: ReceiptHashDeclaration;
+	mainAgent?: RunHashDeclaration;
 }
 
-const commitment = (
-	subject: ReceiptHashSubject,
-	canonicalization: ReceiptHashCanonicalization,
-): ReceiptHashDeclaration => ({ label: "commitment", function: "sha256", canonicalization, subject });
+const commitment = (subject: RunHashSubject, canonicalization: RunHashCanonicalization): RunHashDeclaration => ({
+	label: "commitment",
+	function: "sha256",
+	canonicalization,
+	subject,
+});
 const resolvable = (
-	subject: ReceiptHashSubject,
-	canonicalization: ReceiptHashCanonicalization,
-	store: NonNullable<ReceiptHashDeclaration["store"]>,
-): ReceiptHashDeclaration => ({ label: "resolvable", function: "sha256", canonicalization, subject, store });
+	subject: RunHashSubject,
+	canonicalization: RunHashCanonicalization,
+	store: NonNullable<RunHashDeclaration["store"]>,
+): RunHashDeclaration => ({ label: "resolvable", function: "sha256", canonicalization, subject, store });
 
 const systemPrompt = commitment("compiled-system-prompt", "utf8-text");
 
@@ -77,8 +76,11 @@ const DECLARATIONS: ReadonlyArray<DeclarationRow> = [
 		declaration: commitment("plan-text", "utf8-text"),
 	},
 	{ path: /^plan\.source\.executionPlanHash$/u, declaration: commitment("execution-plan", "json-insertion-order") },
-	{ path: /^plan\.source\.runDigest$/u, declaration: resolvable("run-receipt", "artifact-digest", "run-receipts") },
-	{ path: /^gate\.subjects\[\]\.digest$/u, declaration: resolvable("run-receipt", "artifact-digest", "run-receipts") },
+	{ path: /^plan\.source\.runDigest$/u, declaration: resolvable("run-settlement", "artifact-digest", "run-journals") },
+	{
+		path: /^gate\.subjects\[\]\.digest$/u,
+		declaration: resolvable("run-settlement", "artifact-digest", "run-journals"),
+	},
 	{
 		path: /^quality\.typedValidations\[\]\.validatorDigest$/u,
 		declaration: commitment("validation-result", "json-sorted-v1"),
@@ -121,19 +123,19 @@ const DECLARATIONS: ReadonlyArray<DeclarationRow> = [
 		path: /^skillActivations\[\]\.owner\.(?:digest|envelopeDigest)$/u,
 		declaration: commitment("package-provenance", "json-sorted-v1"),
 	},
-	// Legacy fields with no current writer; a receipt that carries one still names what it was.
+	// Legacy fields with no current writer; a run that carries one still names what it was.
 	{
 		path: /^attestation\.(?:settingsFingerprint|specDigest|endpointIdentityHash|toolSignature)$/u,
 		declaration: commitment("settings", "json-sorted-prefixed-v1"),
 	},
 	{ path: /^fleetGate\.pathHash$/u, declaration: commitment("checkout-tree", "utf8-text") },
-	{ path: /^ledgerContribution\.digest$/u, declaration: commitment("run-receipt", "json-sorted-v1") },
+	{ path: /^ledgerContribution\.digest$/u, declaration: commitment("run-settlement", "json-sorted-v1") },
 ];
 
 const HASH_KEY = /(?:Hash|hash|Digest|digest|Signature|Fingerprint|fingerprint|^sha256)$/u;
 
 /**
- * Subtrees a receipt seals verbatim from another process or a model: the ACP
+ * Subtrees a run result carries verbatim from another process or a model: the ACP
  * peer's `initialize` capabilities, the inputs of the tool calls it made, and
  * the worker's validated structured result, whose keys the model chose (a
  * report naming a `commitHash`, say). Their keys are not Clio's hashes, so R7
@@ -145,15 +147,15 @@ const OPAQUE_SUBTREES: ReadonlyArray<RegExp> = [
 	/^output\.structured\.data$/u,
 ];
 
-/** The declaration for one normalized receipt path, or null when the set does not declare it. */
-function receiptHashDeclaration(path: string, agentId: string): ReceiptHashDeclaration | null {
+/** The declaration for one normalized result field path, or null when the set does not declare it. */
+function runHashDeclaration(path: string, agentId: string): RunHashDeclaration | null {
 	const row = DECLARATIONS.find((candidate) => candidate.path.test(path));
 	if (!row) return null;
 	return agentId === "main-agent" && row.mainAgent ? row.mainAgent : row.declaration;
 }
 
 /** Hash-shaped string fields a draft carries without a declaration; `integrity` is declared by its own type. */
-export function undeclaredReceiptHashes(draft: object, agentId: string): string[] {
+export function undeclaredRunHashes(draft: object, agentId: string): string[] {
 	const undeclared = new Set<string>();
 	const visit = (value: unknown, path: string) => {
 		if (OPAQUE_SUBTREES.some((subtree) => subtree.test(path))) return;
@@ -165,7 +167,7 @@ export function undeclaredReceiptHashes(draft: object, agentId: string): string[
 		for (const [key, child] of Object.entries(value)) {
 			const childPath = path === "" ? key : `${path}.${key}`;
 			if (path === "" && key === "integrity") continue;
-			if (typeof child === "string" && HASH_KEY.test(key) && receiptHashDeclaration(childPath, agentId) === null)
+			if (typeof child === "string" && HASH_KEY.test(key) && runHashDeclaration(childPath, agentId) === null)
 				undeclared.add(childPath);
 			else visit(child, childPath);
 		}
@@ -192,9 +194,7 @@ export function labelledRunHashes(draft: object, agentId: string): RunHash[] {
 			const childPattern = pattern === "" ? key : `${pattern}.${key}`;
 			if (pattern === "" && key === "integrity") continue;
 			const declaration =
-				typeof child === "string" && child !== "" && HASH_KEY.test(key)
-					? receiptHashDeclaration(childPattern, agentId)
-					: null;
+				typeof child === "string" && child !== "" && HASH_KEY.test(key) ? runHashDeclaration(childPattern, agentId) : null;
 			if (declaration !== null && typeof child === "string")
 				hashes.push({ field: childPath, ...declaration, hash: child });
 			else visit(child, childPath, childPattern);

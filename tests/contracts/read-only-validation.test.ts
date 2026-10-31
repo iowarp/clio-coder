@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { it } from "node:test";
 import { resultContractShape, validateResultContract } from "../../src/domains/agents/result-contract.js";
 import { mergeWithheldDetail, removedTestCases } from "../../src/domains/dispatch/merge-gate.js";
-import { typedValidationFactsFromVerifyCalls } from "../../src/domains/dispatch/receipt-findings.js";
+import { typedValidationFactsFromVerifyCalls } from "../../src/domains/dispatch/run-findings.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 

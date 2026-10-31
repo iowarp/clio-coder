@@ -1292,7 +1292,7 @@
 			"src/domains/dispatch/path-scope.ts": "779ef8e28facca217f8b779d88ee5d230c3fcf27260aab97123902fbbc40c145",
 			"src/domains/dispatch/phase-timing.ts": "951ed53eb24dffcdcad95d8933788732726dd328131c4af5801fb086e494e590",
 			"src/domains/dispatch/placement.ts": "2bbb89c55461a4ba16b3d510a506a22e90182f10eacad64b64eb603d20e3ff16",
-			"src/domains/dispatch/receipt-findings.ts": "13c1707c5bf4e67246b701519efdf0d14c72b44e489599df1e22302059d70106",
+			"src/domains/dispatch/run-findings.ts": "13c1707c5bf4e67246b701519efdf0d14c72b44e489599df1e22302059d70106",
 			"src/domains/dispatch/receipt-integrity.ts": "d7118d91e6dc5f6fb596f05c9a8d6ca22f48c7a43a32840be1b744510837e1ae",
 			"src/domains/dispatch/recovery-candidates.ts": "4f596667f90e1b4d614cf4327f945b6ea47cc41eb78692e2ccd3a8ff4ee5ce64",
 			"src/domains/dispatch/reproducibility.ts": "8ce67613bb1dd3be06d6b1bd2e89f5041e01814fca67d53f00a148d6a2cb1c93",

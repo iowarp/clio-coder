@@ -21,14 +21,14 @@ import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { mainAgentTerminalReason, runStatusForOutcome } from "../../domains/dispatch/outcome.js";
+import type { RunCallUsage } from "../../domains/dispatch/run-call-usage.js";
 import {
 	createRunResultQuality,
-	deriveReceiptVerification,
+	deriveRunVerification,
 	typedValidationFactsFromVerifyCalls,
 	type VerifyCallOutcome,
 	verifyCheckIdentity,
-} from "../../domains/dispatch/receipt-findings.js";
-import type { RunCallUsage } from "../../domains/dispatch/run-call-usage.js";
+} from "../../domains/dispatch/run-findings.js";
 import { finishRunResult } from "../../domains/dispatch/run-settlement.js";
 import { openRunTelemetry } from "../../domains/dispatch/run-telemetry.js";
 import { newRunId, openLedger } from "../../domains/dispatch/state.js";
@@ -767,7 +767,7 @@ async function recordHeadlessMainAgentRun(input: {
 		...(outcomeCode === undefined ? {} : { outcomeCode }),
 		lineage,
 		// Host checks belong to this run, independently of any worker it dispatched.
-		verification: deriveReceiptVerification({ toolStats, typedValidations }),
+		verification: deriveRunVerification({ toolStats, typedValidations }),
 		routingIntent: {
 			posture: "manual",
 			maxCostUsd: null,

@@ -98,7 +98,7 @@ function verification(value: Sealed["verification"]): CheckRow {
 					? "A read-only agent changes nothing, so there is nothing to verify."
 					: basis === "acp-external-unobserved"
 						? "An external agent did the work where Clio Coder could not observe its checks."
-						: basis === "receipt-unavailable"
+						: basis === "result-unavailable"
 							? "No sealed receipt could be read for this run."
 							: `Recorded basis: ${basis ?? "none"}.`;
 	const [tone, word]: [StatusTone, string] =

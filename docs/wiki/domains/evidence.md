@@ -310,7 +310,7 @@ shrinking page size until the 16 KiB cap (`EVIDENCE_TOOL_MAX_BYTES`) fits;
 `EvidenceNotFoundError`; `session` refuses foreign session ids with an
 `evidence_foreign` error and never leaks task text or cwds in its summary.
 
-**Downstream reads inside dispatch.** `src/domains/dispatch/receipt-findings.ts`
+**Downstream reads inside dispatch.** `src/domains/dispatch/run-findings.ts`
 is deliberately *not* `buildEvidence`: it is a cheap pure classifier over
 in-memory receipt draft fields, imported at record time to keep the v3 integrity
 digest JSON-clean. It consumes `EvidenceTag` and `FAILURE_CAUSE_TAG_ORDER` from
@@ -372,7 +372,7 @@ check is `pnpm run test:file -- tests/contracts/evidence-tool.test.ts`.
 
 ## Extension seams
 
-- **New evidence tag**: add it to `EVIDENCE_TAGS` in `src/domains/evidence/types.ts`; add it to `FAILURE_CAUSE_TAG_ORDER` only when it is a canonical failure cause; add the emitting rule to `buildFindings` in `src/domains/evidence/assessment.ts` (or `classifyTags` in `src/domains/dispatch/receipt-findings.ts` for the cheap receipt-time classifier).
+- **New evidence tag**: add it to `EVIDENCE_TAGS` in `src/domains/evidence/types.ts`; add it to `FAILURE_CAUSE_TAG_ORDER` only when it is a canonical failure cause; add the emitting rule to `buildFindings` in `src/domains/evidence/assessment.ts` (or `classifyTags` in `src/domains/dispatch/run-findings.ts` for the cheap receipt-time classifier).
 - **New trust axis state**: extend `TRUST_STATUS_STATES` in `src/domains/evidence/trust-status.ts` and, when a new source kind participates, its rows in `AXIS_SOURCES` and `SOURCE_AUTHORITIES`.
 - **New redaction shape**: add a `SECRET_PATTERNS` entry in `src/domains/evidence/redact.ts`; `overview.redactionCount` self-describes the bundle afterward.
 - **New provenance field**: widen `ProvenanceReceipt` (`Pick<RunReceipt, ...>`) and `RunProvenanceView` in `src/domains/evidence/provenance.ts`, plus the validators in `runProvenanceFromUnknown`; `admitRunProvenance` gates it on verified integrity automatically.
