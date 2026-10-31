@@ -33,13 +33,12 @@ describe("turn observations", () => {
 		usage.observe({ type: "agent_start" });
 		settled({ role: "assistant", model: "m", stopReason: "toolUse", usage: { input: 100, output: 20, cacheRead: 5 } });
 		settled({ role: "toolResult", usage: { input: 999 } });
-		// An interrupted call keeps the provider's zeros; Clio's estimate beside them is for display only.
+		// An interrupted call keeps the provider's zeros.
 		settled({
 			role: "assistant",
 			model: "m",
 			stopReason: "aborted",
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			estimatedUsage: { input: 300, output: 40, cacheRead: 0, cacheWrite: 0, estimated: true },
 		});
 		// The terminal reads the fold and takes how the turn ended from its own summary.
 		turns.turnEnd({ ...usage.current(), modelId: "m", targetId: "t", stopReason: "cancelled" });

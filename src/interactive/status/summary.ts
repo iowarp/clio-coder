@@ -54,7 +54,7 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 		};
 	}
 	if (message.role !== "assistant") return tally;
-	const folded = sumRunUsage([message], { includeEstimates: true });
+	const folded = sumRunUsage([message]);
 	return {
 		...tally,
 		settledMessages: tally.settledMessages + 1,

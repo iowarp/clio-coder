@@ -102,10 +102,17 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
  * counts tool-use prompt tokens that Pi maps to no field; only a breakdown with no count at all, the legacy
  * total-only row, leaves its zeros unknown.
  */
+/** What an interrupted call that reported no usage cost, estimated from its prompt side and the text it streamed. */
+export interface InterruptedUsageEstimate {
+	input: number;
+	output: number;
+}
+
 export function callSettlementFromMessage(
 	message: unknown,
 	costProvenance: CostProvenance,
 	cause?: FailureCause,
+	interrupted?: InterruptedUsageEstimate | null,
 ): Omit<CallSettled, keyof CallStarted | "stages"> {
 	const raw = record(message);
 	const usage = record(raw.usage);
@@ -172,17 +179,16 @@ export function callSettlementFromMessage(
 		else if (costProvenance === "estimated")
 			pricing = { usd: { kind: "estimated", value: usd, method: "catalog" }, pricedBy: "catalog" };
 	}
-	// The display estimate an interrupted call carries when the provider reported nothing; the journal keeps it beside
-	// the measured usage, never inside it, so a resumed transcript reads as the live one did (#430, #434).
-	const estimate = record(raw.estimatedUsage);
-	const estimated = (value: unknown, method: "prompt-side-only" | "chars/4") => {
+	// The estimate an interrupted call gets when the provider reported nothing; the journal keeps it beside the
+	// measured usage, never inside it, so a resumed transcript reads as the live one did (#430, #434).
+	const estimated = (value: number | undefined, method: "prompt-side-only" | "chars/4") => {
 		const tokens = amount(value);
 		return tokens !== null && Number.isInteger(tokens) ? { kind: "estimated" as const, value: tokens, method } : null;
 	};
-	const interruptedInput = estimated(estimate.input, "prompt-side-only");
-	const interruptedOutput = estimated(estimate.output, "chars/4");
+	const interruptedInput = estimated(interrupted?.input, "prompt-side-only");
+	const interruptedOutput = estimated(interrupted?.output, "chars/4");
 	const interruptedEstimate =
-		!neverSent && !terminal && !observed && estimate.estimated === true && interruptedInput && interruptedOutput
+		!neverSent && !terminal && !observed && interruptedInput && interruptedOutput
 			? { input: interruptedInput, output: interruptedOutput }
 			: undefined;
 	return {

@@ -76,7 +76,8 @@ describe("contracts/metering integrity", () => {
 			cost: Object.freeze({ ...zeroUsage.cost, total: 0.25 }),
 			clioExternal: { tokenUsage: "provider-reported", cost: "provider-reported" },
 		});
-		const settled = (attempt: number, message: unknown): CallSettled => ({
+		const estimate = { input: 20, output: 3 };
+		const settled = (attempt: number, message: unknown, interrupted?: typeof estimate): CallSettled => ({
 			callId: "call-fixture",
 			attemptId: `attempt-${attempt}`,
 			attempt,
@@ -90,7 +91,7 @@ describe("contracts/metering integrity", () => {
 				reportedModel: { kind: "measured", value: "served", source: "provider" },
 			},
 			stages: { settle: 1 },
-			...callSettlementFromMessage(message, "known"),
+			...callSettlementFromMessage(message, "known", undefined, interrupted),
 		});
 		const first = settled(0, { stopReason: "stop", usage });
 		// Thinking the provider counted no reasoning for is estimated at chars/4, never above the measured output.
@@ -103,12 +104,11 @@ describe("contracts/metering integrity", () => {
 				stopReason: "aborted",
 				callInvoked: invoked,
 				usage: zeroUsage,
-				estimatedUsage: { input: 20, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 23, estimated: true },
 			} as unknown as AgentMessage;
-			rememberMessageCalls(message, [first, settled(1, message)]);
-			// The journal keeps the display estimate beside the usage, where no fold sums it.
+			rememberMessageCalls(message, [first, settled(1, message, estimate)]);
+			// The journal keeps the estimate beside the usage, where no fold sums it.
 			deepStrictEqual(
-				settled(1, message).interruptedEstimate,
+				settled(1, message, estimate).interruptedEstimate,
 				invoked
 					? {
 							input: { kind: "estimated", value: 20, method: "prompt-side-only" },
@@ -124,9 +124,6 @@ describe("contracts/metering integrity", () => {
 			strictEqual(summary.costSummary?.hasUnknown, invoked);
 			strictEqual(summary.costSummary?.calls, invoked ? 2 : 1);
 			strictEqual(summary.lastResponseModelIdObservation.state, "reported");
-			const display = sumRunUsage([message], { includeEstimates: true });
-			strictEqual(display.tokens, invoked ? 33 : 10);
-			strictEqual(display.costUsd, 0.25);
 			strictEqual((message as unknown as { usage: unknown }).usage, zeroUsage);
 		}
 	});
@@ -234,8 +231,6 @@ describe("contracts/metering integrity", () => {
 		ok(corrected);
 		strictEqual(corrected.input, 9_658);
 		ok(typeof corrected.output === "number" && corrected.output > 0);
-		strictEqual(corrected.totalTokens, corrected.input + corrected.output);
-		strictEqual(corrected.estimated, true);
 		strictEqual(estimatedUsageForInterruptedTurn({ ...message, stopReason: "stop" } as AgentMessage, 9_658), null);
 	});
 
@@ -253,7 +248,6 @@ describe("contracts/metering integrity", () => {
 		const usage = estimatedUsageForInterruptedTurn(message, 100);
 		strictEqual(usage?.output, 5004);
 		strictEqual(usage?.input, 100);
-		strictEqual(usage?.estimated, true);
 		const raw = { ...message, clioCoderOutputChars: 24_000 } as unknown as AgentMessage;
 		strictEqual(estimatedUsageForInterruptedTurn(raw, 100)?.output, 6000);
 		const authoritative = { ...raw, usage: { ...zeroUsage, input: 100, output: 42, totalTokens: 142 } } as AgentMessage;

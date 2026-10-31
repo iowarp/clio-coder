@@ -13,6 +13,7 @@ import { journalAccountQuota, quotaReadingFromMessage } from "../domains/quota/i
 import { PROMPT_MANIFEST_VERSION } from "../domains/session/prompt-manifest.js";
 import type { CacheBaseline } from "../domains/telemetry/cache-physics.js";
 import { cachePhysics, serverTimedUsage } from "../domains/telemetry/cache-physics.js";
+import type { InterruptedUsageEstimate } from "../domains/telemetry/call-facts.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/telemetry/session-journals.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
@@ -751,7 +752,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (owner?.turnId) turnCalls.set(owner.turnId, [...(turnCalls.get(owner.turnId) ?? []), facts]);
 			if (!currentRun()) return;
 		};
-		const settleModelCall = async (message: AgentMessage): Promise<boolean> => {
+		const settleModelCall = async (
+			message: AgentMessage,
+			interrupted: InterruptedUsageEstimate | null = null,
+		): Promise<boolean> => {
 			const call = modelCall;
 			const lease = journalLease;
 			modelCall = undefined;
@@ -766,6 +770,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						message.role === "assistant" && message.stopReason === "aborted" && state.activeInterruptByOperator
 							? "operator_cancel"
 							: undefined,
+						interrupted,
 					),
 					message,
 				);
@@ -1549,12 +1554,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				) {
 					deps.emitNotice(`[Clio Coder] ${gatewayRoutingObservationLabel(gatewayRouting)}`);
 				}
-				const interruptedUsage = estimatedUsageForInterruptedTurn(enrichedEvent.message, context.promptSideTokens());
-				if (interruptedUsage !== null) {
-					// Preserve the display estimate without replacing provider usage (#423, #430).
-					Object.assign(enrichedEvent.message, { estimatedUsage: interruptedUsage });
-				}
-				journalAccounted = await settleModelCall(enrichedEvent.message);
+				// The estimate goes to the call's settlement, where the read model folds it; it never rides on the message,
+				// so no reader sums it beside the provider's usage (#423, #430, #434).
+				journalAccounted = await settleModelCall(
+					enrichedEvent.message,
+					estimatedUsageForInterruptedTurn(enrichedEvent.message, context.promptSideTokens()),
+				);
 				// A reply Clio wrote into the prompt, such as the loop guard's recovery pair, settles the call opened at
 				// turn_start as never sent, as its ledger row counts it; the model's own reply gets a call of its own (#434).
 				if (isHostAuthored(message)) await openModelCall();

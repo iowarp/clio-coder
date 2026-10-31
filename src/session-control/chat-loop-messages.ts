@@ -2,6 +2,7 @@ import { classifyCallFailure, readCallFailure } from "../core/call-failure.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
 import { resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
+import type { InterruptedUsageEstimate } from "../domains/telemetry/call-facts.js";
 import type { CostAggregate, CostAmount } from "../domains/telemetry/cost.js";
 import { aggregateCostAmounts } from "../domains/telemetry/cost.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
@@ -452,10 +453,7 @@ export interface RunUsageSummary {
  * actually billed and keeps the `/usage` overlay and footer counters
  * aligned across tool-heavy runs.
  */
-export function sumRunUsage(
-	messages: ReadonlyArray<AgentMessage>,
-	options: { includeEstimates?: boolean } = {},
-): RunUsageSummary {
+export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSummary {
 	const summary: RunUsageSummary = {
 		tokens: 0,
 		costUsd: 0,
@@ -527,37 +525,11 @@ export function sumRunUsage(
 					...(call.costSummary ? { costSummary: call.costSummary } : {}),
 				});
 			}
-			// Aborted output estimates remain a display-only addition; they never alter journal facts (#423, #434).
-			const estimate = record.estimatedUsage as Record<string, unknown> | undefined;
-			const terminal = unique.at(-1);
-			if (
-				options.includeEstimates &&
-				terminal?.disposition === "sent_unsettled" &&
-				record.stopReason === "aborted" &&
-				estimate?.estimated === true
-			) {
-				const display = normalizeTokenUsage({ ...estimate, estimated: false });
-				summary.input += display.input;
-				summary.output += display.output;
-				summary.cacheRead += display.cacheRead;
-				summary.cacheWrite += display.cacheWrite;
-				summary.tokens += display.totalTokens;
-				summary.estimated = true;
-			}
 			continue;
 		}
 		const providerUsage = messageUsageForAccounting(message);
 		if (!providerUsage || typeof providerUsage !== "object" || providerUsage.callInvoked === false) continue;
-		const estimate = record.estimatedUsage as Record<string, unknown> | undefined;
-		// Display estimates must never enter provider accounting by default (#423, #430).
-		const usage =
-			options.includeEstimates &&
-			providerUsage.callInvoked === true &&
-			record.stopReason === "aborted" &&
-			!normalizeTokenUsage(providerUsage).observed &&
-			estimate?.estimated === true
-				? estimate
-				: providerUsage;
+		const usage = providerUsage;
 		if ((usage as { estimated?: unknown }).estimated === true) summary.estimated = true;
 		summary.lastResponseModelIdObservation = responseModelIdObservationFromRecord(record, "not-observed");
 		addResponseModelIdObservationCount(summary.responseModelIdObservationCounts, summary.lastResponseModelIdObservation);
@@ -567,9 +539,7 @@ export function sumRunUsage(
 				: null;
 		summary.hadUsage = true;
 		summary.apiCalls += 1;
-		const reported = normalizeTokenUsage(
-			options.includeEstimates && usage.estimated === true ? { ...usage, estimated: false } : usage,
-		);
+		const reported = normalizeTokenUsage(usage);
 		summary.input += reported.input;
 		summary.output += reported.output;
 		summary.cacheRead += reported.cacheRead;
@@ -692,10 +662,9 @@ export function assistantSessionPayload(
  * accounting and the output side from the text that actually arrived, so both
  * are recorded as estimates rather than as zero.
  *
- * `estimated: true` is the provenance marker: no surface may report these as
- * provider-reported numbers. This feeds the interrupted record and the turn's
- * display, while provider spend and context reconciliation retain their own
- * authoritative usage paths.
+ * The call's settlement journals it as `interruptedEstimate`, beside the
+ * provider's usage and never inside it, and surfaces read it from the read
+ * model as an estimate (#434). It never rides on the message.
  *
  * Returns null when the provider did report usage (there is nothing to fill in)
  * or when neither prompt nor output tokens can be estimated. Never-sent
@@ -704,7 +673,7 @@ export function assistantSessionPayload(
 export function estimatedUsageForInterruptedTurn(
 	message: AgentMessage,
 	promptSideTokens: number,
-): Record<string, unknown> | null {
+): InterruptedUsageEstimate | null {
 	if ((message as { stopReason?: unknown }).stopReason !== "aborted") return null;
 	const reported = (message as { usage?: Record<string, unknown> }).usage;
 	// A request cancelled before invocation sent no prompt. Estimating one put
@@ -725,16 +694,7 @@ export function estimatedUsageForInterruptedTurn(
 	const input = Math.max(0, Math.round(promptSideTokens));
 	if (streamedChars === 0 && input === 0) return null;
 	const output = streamedChars > 0 ? Math.max(1, ceilChars(streamedChars)) : 0;
-	return {
-		input,
-		output,
-		cacheRead: 0,
-		cacheWrite: 0,
-		reasoning: 0,
-		totalTokens: input + output,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-		estimated: true,
-	};
+	return { input, output };
 }
 
 export function hasPersistableAssistantContent(

@@ -33,7 +33,7 @@ import { buildSummary } from "../../src/interactive/status/summary.js";
 import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { type ChatLoopEvent, createChatLoop } from "../../src/session-control/chat-loop.js";
-import { recordValue } from "../../src/session-control/chat-loop-messages.js";
+import { estimatedUsageForInterruptedTurn, recordValue } from "../../src/session-control/chat-loop-messages.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { INITIAL_STATUS } from "../../src/session-control/status-types.js";
 import { createRegistry } from "../../src/tools/registry.js";
@@ -383,18 +383,12 @@ for (const mode of ["partial", "thinking", "empty"] as const) {
 			// The ledger is the conversation record; the journal owns the call's accounting and estimate (#434 §5.3).
 			strictEqual(payload.callAccounting, undefined);
 			strictEqual(payload.estimatedUsage, undefined);
-			// The live message keeps the display estimate that call.settled journals as interruptedEstimate. A hollow
-			// message_end is suppressed, so the run's window is where the live message is read.
+			// The estimate goes to call.settled as interruptedEstimate and never rides on the live message (#434).
 			const ended = f.events.filter((event) => event.type === "agent_end").at(-1);
 			ok(ended?.type === "agent_end");
 			const sent = ended.messages.filter((message) => message.role === "assistant");
 			strictEqual(sent.length, 1);
-			const estimatedUsage = recordValue((sent[0] as unknown as Record<string, unknown>).estimatedUsage);
-			ok(estimatedUsage);
-			strictEqual(estimatedUsage.estimated, true);
-			ok(Number(estimatedUsage.input) > 0);
-			if (mode !== "empty") ok(Number(estimatedUsage.output) > 0);
-			else strictEqual(estimatedUsage.output, 0);
+			strictEqual((sent[0] as unknown as Record<string, unknown>).estimatedUsage, undefined);
 			const serialized = JSON.stringify(assistant);
 			doesNotMatch(serialized, /LiteLLM route|\/model/u);
 			if (mode === "partial") ok(serialized.includes(PARTIAL));
@@ -527,12 +521,16 @@ for (const source of ["stream_cancel", "loop_guard"] as const) {
 			ok(assistant?.kind === "message");
 			const payload = recordValue(assistant.payload);
 			// The read model's fold of the cancelled call as the producer settles the run's live message: sent, with no
-			// usage reported, and the display estimate journaled beside its usage (#430, #434 §11.3).
+			// usage reported, and the estimate journaled beside its usage (#430, #434 §11.3).
 			const ended = f.events.filter((event) => event.type === "agent_end").at(-1);
 			ok(ended?.type === "agent_end");
+			const message = ended.messages.filter((entry) => entry.role === "assistant").at(-1);
+			ok(message);
 			const settlement = callSettlementFromMessage(
-				ended.messages.filter((message) => message.role === "assistant").at(-1),
+				message,
 				"unknown",
+				undefined,
+				estimatedUsageForInterruptedTurn(message, 1_000),
 			);
 			strictEqual(settlement.disposition, "sent_unsettled");
 			ok(settlement.interruptedEstimate);

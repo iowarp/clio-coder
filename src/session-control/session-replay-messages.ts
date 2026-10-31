@@ -204,7 +204,6 @@ export function richMessageFromEntry(entry: MessageEntry, maxTextChars?: number)
 			"callInvoked",
 			"callAccounting",
 			"failure",
-			"estimatedUsage",
 			"api",
 			"provider",
 			"model",
