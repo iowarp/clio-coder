@@ -2,6 +2,7 @@ import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import { factKnownValue } from "../core/telemetry/known.js";
+import { renderCoverage } from "../core/telemetry/render.js";
 import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
 import type { RecallTelemetry, SessionEntry } from "../domains/session/index.js";
 import { foldRecallTelemetry, formatRecallTelemetry, hasRecallTelemetry } from "../domains/session/index.js";
@@ -117,7 +118,7 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null): stri
 	const session = view.session();
 	const byRole = view.cost("role");
 	const cache = view.cache();
-	const missing = view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "missingTokenCalls" }));
+	const tokenCoverage = session.totals.tokens;
 	const neverSent = session.own.counts.dispositions.neverSent;
 	const groups = [...byRole.groups].sort((a, b) =>
 		a.key === "main" ? -1 : b.key === "main" ? 1 : a.key.localeCompare(b.key),
@@ -131,9 +132,7 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null): stri
 		),
 		["model calls", byRole.total.calls.display],
 		["harness overhead", session.overhead.share.display],
-		...(nonZero(missing)
-			? [["unknown token usage", `${missing.display} calls`, "token amounts are lower bounds"] as const]
-			: []),
+		["token coverage", renderCoverage(tokenCoverage.fact)],
 		...(nonZero(neverSent) ? [["never sent", `${neverSent.display} calls`] as const] : []),
 		...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
 		...tokenRows(view),
@@ -238,12 +237,11 @@ function renderActivity(
 		const totals = view.session().totals;
 		const cost = contributed(totals.usd) ? `${totals.usd.display} · ` : "";
 		lines.push(`${label("Session")}${cost}${theme.fg("counter", tokensText(totals.tokens.display))}${elapsed}`);
-		const missing = view.quantity(factRef({ scope: "session", owner: view.sessionId, metric: "missingTokenCalls" }));
+		const tokenCoverage = renderCoverage(totals.tokens.fact);
 		const neverSent = view.session().own.counts.dispositions.neverSent;
-		const usage = [
-			nonZero(missing) ? `${missing.display} calls with unknown usage` : null,
-			nonZero(neverSent) ? `${neverSent.display} never sent` : null,
-		].filter((part) => part !== null);
+		const usage = [tokenCoverage, nonZero(neverSent) ? `${neverSent.display} never sent` : null].filter(
+			(part) => part !== null,
+		);
 		if (usage.length > 0) lines.push(`${label("Usage")}${theme.fg("annotation", usage.join(" · "))}`);
 	}
 	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];

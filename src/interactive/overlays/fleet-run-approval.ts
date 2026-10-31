@@ -11,9 +11,9 @@
  * without a TUI.
  */
 
+import { renderUsdLimit } from "../../core/telemetry/render.js";
 import type { FleetRunPreview, FleetRunPreviewStep } from "../../domains/dispatch/index.js";
 import { budgetSpendText } from "../../domains/scheduling/budget.js";
-import { renderCostAmount } from "../../domains/telemetry/cost.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
@@ -86,11 +86,11 @@ export function formatBudgetLine(preview: FleetRunPreview): string {
 	const playbook =
 		preview.budget.playbookUsd === null
 			? "playbook declares no ceiling"
-			: `playbook ceiling ${renderCostAmount(preview.budget.playbookUsd, "known")}`;
+			: `playbook ceiling ${renderUsdLimit(preview.budget.playbookUsd)}`;
 	const ceiling =
 		preview.budget.ceilingUsd === 0
 			? "no session ceiling"
-			: `${renderCostAmount(preview.budget.ceilingUsd, "known")} session ceiling`;
+			: `${renderUsdLimit(preview.budget.ceilingUsd)} session ceiling`;
 	return `budget: admitted under ${ceiling}, ${budgetSpendText(preview.budget.currentUsd, preview.budget.pricing)} spent, ${playbook}`;
 }
 

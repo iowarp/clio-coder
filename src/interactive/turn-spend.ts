@@ -59,10 +59,10 @@ export function turnSpend(view: TelemetryView, turnId: string): TurnSpend | null
 	const cacheWrite = read("cacheWrite");
 	const reasoning = read("reasoning");
 	const usd = read("usd");
-	const unreported = read("missingTokenCalls");
+	const total = read("total");
 	const neverSent = read("neverSent");
-	if (!calls || !input || !output || !cacheRead || !cacheWrite || !usd || !unreported || !neverSent) return null;
-	const unknownCalls = known(unreported);
+	if (!calls || !input || !output || !cacheRead || !cacheWrite || !usd || !total || !neverSent) return null;
+	const unknownCalls = "kind" in total.fact ? (total.fact.kind === "unknown" ? 1 : 0) : total.fact.unknownCount;
 	const skipped = known(neverSent);
 	return {
 		calls: "kind" in calls.fact || calls.fact.unknownCount === 0 ? known(calls) : null,

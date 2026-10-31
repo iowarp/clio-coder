@@ -1,7 +1,8 @@
 /** Expanded footer pages: dense inspection, separate from transcript output style. */
+
+import { renderUsdLimit } from "../../core/telemetry/render.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
-import { renderCostAmount } from "../../domains/telemetry/cost.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
@@ -497,7 +498,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 				? "unknown"
 				: state.costCeilingUsd === 0
 					? "none"
-					: `${renderCostAmount(state.costCeilingUsd, "known")} · tracked pricing only`,
+					: `${renderUsdLimit(state.costCeilingUsd)} · tracked pricing only`,
 		],
 		["MCP connected", names(state.connections?.mcp)],
 		["Plugins active", names(state.connections?.plugins)],

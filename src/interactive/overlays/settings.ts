@@ -13,8 +13,8 @@ import {
 	settingInactiveNote,
 	settingsV2PathForRow,
 } from "../../core/settings-controls.js";
+import { renderUsdLimit } from "../../core/telemetry/render.js";
 import { settingsChangeKind } from "../../domains/config/classify.js";
-import { renderCostAmount } from "../../domains/telemetry/cost.js";
 import { openTargetWizard } from "../target-wizard.js";
 
 export { SETTINGS_LABELS_BY_ID } from "../../core/settings-controls.js";
@@ -3219,7 +3219,7 @@ function formatSettingsValue(path: string, value: string): string {
 	}
 	if (path.endsWith("Bytes")) return `${(number / 1024).toLocaleString()} KB`;
 	if (path === "safety.limits.sessionCostUsd" || path === "turnControl.orientation.maxCostUsdPerTurn")
-		return renderCostAmount(number, "known");
+		return renderUsdLimit(number);
 	if (
 		path === "context.compaction.threshold" ||
 		path === "context.workingSet.target" ||
