@@ -447,6 +447,7 @@ export function checkSurfaceTotals(file: string, source: string, used?: Set<stri
 	const readsTotal = (node: ts.Node): boolean => {
 		const name = field(node);
 		if (name !== undefined && (TOTAL_NAME.test(name) || USAGE_FIELD.test(name))) return true;
+		if (ts.isIdentifier(node) && TOTAL_NAME.test(node.text)) return true;
 		return ts.forEachChild(node, (child) => readsTotal(child) || undefined) === true;
 	};
 	const owner = (node: ts.Node): string => {
@@ -493,8 +494,9 @@ export function checkSurfaceTotals(file: string, source: string, used?: Set<stri
 			);
 		});
 	};
-	// `a.input + a.output` in a declaration, return or argument is a total the surface made up, wherever it lands; a
-	// string operand is text building, never a sum (#434).
+	// `a.input + a.output` in a declaration, return or argument is a total the surface made up, wherever it lands, even
+	// when the sum is then concatenated into text; an addition with a string operand is text building, never a sum
+	// (#434).
 	const text = (node: ts.Expression): boolean => {
 		const operand = unwrap(node);
 		return (
@@ -507,8 +509,8 @@ export function checkSurfaceTotals(file: string, source: string, used?: Set<stri
 	const addsText = (sum: ts.BinaryExpression): boolean => text(sum.left) || text(sum.right);
 	const sumsTotals = (node: ts.BinaryExpression): boolean =>
 		node.operatorToken.kind === ts.SyntaxKind.PlusToken &&
-		!(ts.isBinaryExpression(node.parent) && node.parent.operatorToken.kind === ts.SyntaxKind.PlusToken) &&
-		!addsText(node) &&
+		!text(node.left) &&
+		!text(node.right) &&
 		readsTotal(node.left) &&
 		readsTotal(node.right);
 	const visit = (node: ts.Node): void => {

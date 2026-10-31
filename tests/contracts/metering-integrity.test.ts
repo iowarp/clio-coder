@@ -433,6 +433,8 @@ describe("canonical monetary presentation (#434)", () => {
 			"const shown = usage.input + usage.cacheRead;",
 			"render(row.usage.input + (row.usage.output ?? 0));",
 			"const usd = rows.map((row) => row.costUsd).reduce((sum, value) => sum + value, 0);",
+			'const caption = usage.input + usage.output + " tokens";',
+			"const total = inputTokens + outputTokens;",
 		])
 			ok(checkSurfaceTotals("src/interactive/example.ts", source).some((line) => line.startsWith("rule14:")));
 		deepStrictEqual(
