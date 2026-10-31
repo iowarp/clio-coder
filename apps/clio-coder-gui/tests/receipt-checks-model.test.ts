@@ -281,7 +281,10 @@ test("a seal that does not verify shows no check, only the read model's integrit
 		word: "seal failed",
 		meaning: "The seal does not verify, so none of the receipt's checks are shown. digest mismatch",
 	});
-	assert.equal(receiptIntegrity({ ...tampered, receipt: "missing" }).meaning, "No receipt was saved for this run.");
+	assert.equal(
+		receiptIntegrity({ ...tampered, receipt: "missing" }).meaning,
+		"No saved receipt was found for this run.",
+	);
 	assert.equal(receiptIntegrity(sealedEvidence(verifiedTool)).tone, "success");
 });
 
