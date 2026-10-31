@@ -50,6 +50,7 @@ export function createProcessJournal(
 	let dropped = 0;
 	let writer: Promise<CallJournal | null> | undefined;
 	let closed = false;
+	let closing: Promise<boolean> | undefined;
 	/** The opened writer, null once opening failed. */
 	let ready: CallJournal | null | undefined;
 	const stamp = (
@@ -119,19 +120,28 @@ export function createProcessJournal(
 		async flush() {
 			await (await writer)?.flush();
 		},
-		async close(exitCode) {
-			if (closed) return true;
-			closed = true;
-			unregister();
-			const journal = await writer;
-			if (!journal) return ready !== null;
-			if (dropped > 0) unavailable();
-			journal.enqueue(stamp("process.exited", { exitCode }));
-			// An orderly exit seals the process scope; a seal that did not land is coverage the caller must report (#434).
-			const sealed = await journal.seal();
-			await journal.close();
-			if (!sealed) unavailable();
-			return sealed;
+		close(exitCode) {
+			// Every caller shares the first close and its result, so a second caller never reports a seal early (#434).
+			closing ??= (async () => {
+				closed = true;
+				unregister();
+				const journal = await writer;
+				if (!journal) return ready !== null;
+				if (dropped > 0) unavailable();
+				// The opening transfer can fill the queue; drain it so the terminal record always has room.
+				await journal.flush();
+				const persisted = journal.health().persisted;
+				const queued = journal.enqueue(stamp("process.exited", { exitCode }));
+				await journal.flush();
+				const health = journal.health();
+				// The seal must cover a durable process.exited; without one the exit status is lost, so nothing seals.
+				const exited = queued && health.writeErrors === 0 && health.persisted > persisted;
+				const sealed = exited && (await journal.seal());
+				await journal.close();
+				if (!sealed) unavailable();
+				return sealed;
+			})();
+			return closing;
 		},
 	};
 }
