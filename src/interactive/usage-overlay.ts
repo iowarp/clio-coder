@@ -120,7 +120,8 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null): stri
 	const groups = [...byRole.groups].sort((a, b) =>
 		a.key === "main" ? -1 : b.key === "main" ? 1 : a.key.localeCompare(b.key),
 	);
-	const cached = nonZero(cache.cacheRead) || nonZero(cache.cacheWrite) || nonZero(cache.rePrefilled);
+	// A measured zero read is a cache that served nothing, which the rows say; only a session no call fed hides them.
+	const cached = contributed(cache.cacheRead) || contributed(cache.cacheWrite) || contributed(cache.rePrefilled);
 	const v = cache.verdicts;
 	return kvBlock([
 		...groups.map(

@@ -505,7 +505,7 @@ function liveTokenValue(
 	const output = finiteNonNegative(throughput?.outputTokens);
 	const context = finiteNonNegative(contextUsed);
 	const turnInput = telemetry?.kind === "ready" ? (telemetry.turn?.input ?? null) : null;
-	const input = context > 0 ? formatFooterTokens(context) : turnInput !== null && turnInput !== "0" ? turnInput : null;
+	const input = context > 0 ? formatFooterTokens(context) : turnInput;
 	const parts = [
 		output > 0
 			? theme.fg("counter", `${GLYPH.down} ${throughput?.estimated ? "≈" : ""}${formatFooterTokens(output)}`)
