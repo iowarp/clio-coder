@@ -6,6 +6,16 @@ import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { type Explainable, explanationView } from "./quantity-model.js";
 import "./explain.css";
 
+/** Keep the panel inside the viewport: a figure near its right edge, such as a cost column, opens leftward. */
+function placePanel(details: HTMLDetailsElement): void {
+	const panel = details.querySelector<HTMLElement>(".explain__panel");
+	if (!panel) return;
+	panel.style.removeProperty("--explain-shift");
+	const box = panel.getBoundingClientRect();
+	const shift = Math.max(8 - box.left, Math.min(0, document.documentElement.clientWidth - 8 - box.right));
+	if (shift !== 0) panel.style.setProperty("--explain-shift", `${Math.round(shift)}px`);
+}
+
 /**
  * A displayed quantity that opens explain() for its reference (#434 §11.4): what it counts, its coverage and where
  * it came from. A value with no reference is plain text, because nothing would resolve it.
@@ -25,7 +35,14 @@ export function Explained({ client, label, value, ref }: Explainable & { client:
 	if (ref === null) return <>{value}</>;
 	const view = explanation.data ? explanationView(explanation.data) : null;
 	return (
-		<details className="explain" ref={panel} onToggle={(event) => setOpen(event.currentTarget.open)}>
+		<details
+			className="explain"
+			ref={panel}
+			onToggle={(event) => {
+				setOpen(event.currentTarget.open);
+				if (event.currentTarget.open) placePanel(event.currentTarget);
+			}}
+		>
 			<summary aria-label={`${label}: ${value}. Explain this number.`}>{value}</summary>
 			<div className="explain__panel">
 				<p className="explain__title">{label}</p>
