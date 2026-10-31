@@ -89,7 +89,7 @@ function fixture(
 		getDispatchSnapshot: () => snapshot(options.running),
 		getCwd: () => "/workspace",
 		resolveBinaryPath: () => (options.bash === undefined ? "/bin/bash" : options.bash),
-		newestJournalRunId: () => null,
+		newestFeedRunId: () => null,
 	});
 	const registry = createRegistry({ safety: createWorkerSafety() });
 	registerAllTools(registry, { mcpCapabilities: false, panes });
@@ -151,7 +151,7 @@ describe("panes tool", () => {
 		deepStrictEqual(f.calls, []);
 	});
 
-	it("names the missing binary and the empty journal instead of opening a broken pane", async () => {
+	it("names the missing binary and the empty display feed instead of opening a broken pane", async () => {
 		const f = fixture({ bash: null });
 		match(
 			errorMessage(await f.call({ action: "open", preset: "shell" })),
@@ -159,7 +159,7 @@ describe("panes tool", () => {
 		);
 		match(
 			errorMessage(await fixture().call({ action: "open", preset: "logs" })),
-			/no dispatched run has written a journal under .* yet/,
+			/no dispatched run has written a display feed under .* yet/,
 		);
 		deepStrictEqual(f.calls, []);
 	});

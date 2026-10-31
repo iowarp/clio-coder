@@ -157,9 +157,9 @@ describe("contracts/panes files surface", () => {
 		match(result.reason, /clio-coder --with-panes/u);
 	});
 
-	it("explains an empty logs preset by the journal root it watched", async () => {
+	it("explains an empty logs preset by the run state directory it watched", async () => {
 		const { mux } = fakeMux();
-		const root = mkdtempSync(join(tmpdir(), "clio-coder-panes-journal-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-panes-feed-"));
 		try {
 			const panes = createPanesRuntime({
 				mux,
@@ -167,12 +167,12 @@ describe("contracts/panes files surface", () => {
 				getDispatchSnapshot: () => SNAPSHOT,
 				getCwd: () => "/w",
 				resolveBinaryPath: () => "/usr/bin/tail",
-				journalRoot: () => root,
-				newestJournalRunId: () => null,
+				stateDir: () => root,
+				newestFeedRunId: () => null,
 			});
 			const result = await panes.open({ preset: "logs" });
 			strictEqual(result.status, "refused");
-			match(result.reason, new RegExp(`no dispatched run has written a journal under ${root}`, "u"));
+			match(result.reason, new RegExp(`no dispatched run has written a display feed under ${root}/runs`, "u"));
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

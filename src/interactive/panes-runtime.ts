@@ -21,13 +21,9 @@ import { isAbsolute, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ClioSettings } from "../core/config.js";
-import { resolveClioDirs } from "../core/xdg.js";
+import { clioStateDir, resolveClioDirs } from "../core/xdg.js";
 import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
-import {
-	newestRunEventJournalRunId,
-	runEventJournalPath,
-	runEventJournalRoot,
-} from "../domains/dispatch/run-event-journal.js";
+import { newestRunFeedRunId, runFeedPath } from "../domains/dispatch/run-feed.js";
 import { clioPaneEnv } from "../domains/mux/child-env.js";
 import type { MuxContract, MuxPaneRecord } from "../domains/mux/index.js";
 import type { MusicState } from "../domains/mux/music-operations.js";
@@ -67,10 +63,10 @@ export interface PanesRuntimeDeps {
 	agentRefusal?: () => string | null;
 	/** Injection seam for tests; production uses the toolchain ladder. */
 	resolveBinaryPath?: (name: string) => string | null;
-	/** Journal root override for tests. */
-	journalRoot?: () => string;
-	/** Newest run whose journal exists, for the `logs` preset. */
-	newestJournalRunId?: () => string | null;
+	/** State directory override for tests. */
+	stateDir?: () => string;
+	/** Newest run whose display feed exists, for the `logs` preset. */
+	newestFeedRunId?: () => string | null;
 	/** The music pane's live facts. Absent where music cannot run; never gated by agentControl. */
 	musicState?: () => Promise<MusicState>;
 }
@@ -159,7 +155,7 @@ export function describePanesLeftBehind(mux: Pick<MuxContract, "list" | "docks">
 
 export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	const probe = deps.resolveBinaryPath ?? resolveBinary;
-	const journalRoot = deps.journalRoot ?? runEventJournalRoot;
+	const stateDir = deps.stateDir ?? clioStateDir;
 	let yaziController: PanesYaziController | null = null;
 	let watchController: PanesWatchController | null = null;
 	let nextPendingOpen = 0;
@@ -213,12 +209,12 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 	const presetArgv = (presetId: string, binaryPath: string): ReadonlyArray<string> | null => {
 		if (presetId === "shell") return [binaryPath, "-l"];
 		if (presetId === "logs") {
-			const runId = (deps.newestJournalRunId ?? (() => newestRunEventJournalRunId(journalRoot())))();
+			const runId = (deps.newestFeedRunId ?? (() => newestRunFeedRunId(stateDir())))();
 			if (runId === null) return null;
-			// `-F` rather than `-f`: the journal is recreated when its run's
+			// `-F` rather than `-f`: the feed is recreated when its run's
 			// directory is pruned, and a viewer following an inode would silently
 			// stop at that point.
-			return [binaryPath, "-n", "200", "-F", runEventJournalPath(runId, journalRoot())];
+			return [binaryPath, "-n", "200", "-F", runFeedPath(runId, stateDir())];
 		}
 		return null;
 	};
@@ -406,7 +402,7 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				if (argv === null) {
 					return {
 						status: "refused",
-						reason: `no dispatched run has written a journal under ${journalRoot()} yet; the logs pane follows the newest run once one starts`,
+						reason: `no dispatched run has written a display feed under ${stateDir()}/runs yet; the logs pane follows the newest run once one starts`,
 					};
 				}
 				const pendingId = beginPendingOpen(preset.id);

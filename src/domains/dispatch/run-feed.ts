@@ -17,7 +17,18 @@
  * Nothing here throws into a dispatch.
  */
 
-import { closeSync, constants, lstatSync, mkdirSync, openSync, readSync, rmSync, statSync, writeSync } from "node:fs";
+import {
+	closeSync,
+	constants,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	readSync,
+	rmSync,
+	statSync,
+	writeSync,
+} from "node:fs";
 import { join } from "node:path";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { ToolCallFacts } from "../../tools/agent-tools.js";
@@ -52,6 +63,29 @@ function runStateDirectory(stateDir: string, runId: string): string {
 /** One run's feed file. */
 export function runFeedPath(runId: string, stateDir: string = clioStateDir()): string {
 	return join(runStateDirectory(stateDir, runId), RUN_FEED_FILE);
+}
+
+/** The run whose display feed was written most recently, for `/panes open logs` (#434). */
+export function newestRunFeedRunId(stateDir: string = clioStateDir()): string | null {
+	if (stateRootRemoved()) return null;
+	let names: string[];
+	try {
+		names = readdirSync(join(stateDir, "runs"));
+	} catch {
+		return null;
+	}
+	let newest: { runId: string; at: number } | null = null;
+	for (const runId of names) {
+		if (!isSafeRunId(runId)) continue;
+		try {
+			const stats = statSync(runFeedPath(runId, stateDir), { throwIfNoEntry: false });
+			if (stats === undefined || !stats.isFile()) continue;
+			if (newest === null || stats.mtimeMs > newest.at) newest = { runId, at: stats.mtimeMs };
+		} catch {
+			// A run pruned while the directory is scanned has no feed to follow (#434).
+		}
+	}
+	return newest?.runId ?? null;
 }
 
 /** Remove the feeds of runs that left the ledger ring; recordings beside them keep their own authority. */
@@ -245,13 +279,15 @@ export function parseToolCallFacts(value: unknown): ToolCallFacts | undefined {
 	}
 	for (const key of ["startLine", "endLine"] as const) {
 		const count = record[key];
-		if (count === null || (typeof count === "number" && Number.isSafeInteger(count) && count >= 1)) callFacts[key] = count;
+		if (count === null || (typeof count === "number" && Number.isSafeInteger(count) && count >= 1))
+			callFacts[key] = count;
 	}
 	for (const key of ["partialLine", "truncated", "poolExhausted"] as const) {
 		if (typeof record[key] === "boolean") callFacts[key] = record[key];
 	}
 	if (record.targetTruncated === true) callFacts.targetTruncated = true;
-	if (record.rangeUnit === "physical-lines" || record.rangeUnit === "rendered-lines") callFacts.rangeUnit = record.rangeUnit;
+	if (record.rangeUnit === "physical-lines" || record.rangeUnit === "rendered-lines")
+		callFacts.rangeUnit = record.rangeUnit;
 	return callFacts;
 }
 
