@@ -176,7 +176,7 @@ import {
 	bounded as boundedFleetText,
 	projectFleetPreview,
 } from "./fleet-run.js";
-import type { AcpLiveTelemetry } from "./live-telemetry.js";
+import type { AcpLiveTelemetry, PromptUsage } from "./live-telemetry.js";
 import {
 	ACP_WORKSPACE_META_KEY,
 	type AcpPromptTurn,
@@ -675,7 +675,7 @@ interface ActivePrompt {
 	/** The operator turns and call attempts the usage block reads from the telemetry read model. */
 	turn: AcpPromptTurn;
 	/** The usage block the turn's last meter frame carried, which the prompt response repeats. */
-	settledUsage?: ReturnType<typeof turnUsageMeta> | null;
+	settledUsage?: PromptUsage | null;
 	model?: string;
 	generationMs?: number;
 	timedOutputTokens?: number;
@@ -7247,8 +7247,9 @@ function promptResponse(
 		stopReason,
 		_meta: {
 			...ceiling,
-			[ACP_USAGE_META_KEY]: {
-				...(active.settledUsage ?? turnUsageMeta(session, active.turn)),
+			// The settled block is the final usage_update's snapshot; only a prompt that never settled reads live.
+			[ACP_USAGE_META_KEY]: active.settledUsage ?? {
+				...turnUsageMeta(session, active.turn),
 				...(session ? { session: sessionUsageTotals(session) } : {}),
 			},
 			[ACP_TURN_META_KEY]: {

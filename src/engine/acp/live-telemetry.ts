@@ -50,6 +50,8 @@ export interface AcpPromptTurn {
 }
 
 type TurnUsage = ReturnType<typeof turnUsageMeta>;
+/** The usage block a prompt response carries: its turn's and, when the read model has the session, the session's. */
+export type PromptUsage = TurnUsage & { session?: SessionTotals };
 
 const known = (sum: FactSum) => sum.measured + sum.estimated;
 
@@ -259,10 +261,10 @@ export interface AcpLiveTelemetry {
 	toolSettled(mayWrite: boolean): void;
 	/**
 	 * Waits (bounded) until the read model has folded every call the turn's runs settled, flushes the meter and plan,
-	 * and waits (bounded) for a workspace probe in flight. Returns the turn's usage block as the last frame carried it,
-	 * for the prompt response to repeat; null when no turn was open.
+	 * and waits (bounded) for a workspace probe in flight. Returns the usage block, turn and session, as the last frame
+	 * carried it before that wait, for the prompt response to repeat; null when no turn was open.
 	 */
-	turnSettled(): Promise<TurnUsage | null>;
+	turnSettled(): Promise<PromptUsage | null>;
 	/** The latest workspace view, probing once if none landed yet; null when unwired or the probe failed. */
 	workspace(): Promise<AcpWorkspaceView | null>;
 	dispose(): void;
@@ -273,8 +275,9 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 	let accountingSignature: string | null = null;
 	let planSignature: string | null = EMPTY_PLAN_SIGNATURE;
 	let turn: AcpPromptTurn | null = null;
-	/** The turn block the newest meter frame computed. */
+	/** The turn and session blocks the newest meter frame computed. */
 	let framedTurn: TurnUsage | null = null;
+	let framedSession: SessionTotals | null = null;
 	const foldWaiters = new Set<{ check(): void; release(): void }>();
 	let pendingUsage: ReturnType<typeof setImmediate> | null = null;
 	let workspaceView: AcpWorkspaceView | null = null;
@@ -301,6 +304,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		const view = deps.sessionTelemetry?.() ?? null;
 		const session = view === null ? null : sessionUsageTotals(view);
 		framedTurn = turn === null ? null : turnUsageMeta(view, turn);
+		framedSession = session;
 		accountingSignature = JSON.stringify(session);
 		// ACP `cost` is a plain amount, so an unknown price stays absent rather than reading as zero.
 		const knownCost = session !== null && session.calls > 0;
@@ -313,27 +317,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 				: {}),
 			_meta: {
 				[ACP_CONTEXT_META_KEY]: context,
-				[ACP_USAGE_META_KEY]: {
-					...framedTurn,
-					session:
-						session === null
-							? null
-							: {
-									input: session.input,
-									output: session.output,
-									cacheRead: session.cacheRead,
-									cacheWrite: session.cacheWrite,
-									reasoning: session.reasoning,
-									totalTokens: session.totalTokens,
-									costUsd: session.costUsd,
-									costDisplay: session.costDisplay,
-									costProvenance: session.costProvenance,
-									calls: session.calls,
-									...(session.unknownCallCoverageRuns ? { unknownCallCoverageRuns: session.unknownCallCoverageRuns } : {}),
-									...(session.missingTokenCalls ? { missingTokenCalls: session.missingTokenCalls } : {}),
-									...(session.hasEstimatedCost ? { hasEstimatedCost: true } : {}),
-								},
-				},
+				[ACP_USAGE_META_KEY]: { ...framedTurn, session },
 			},
 		};
 	};
@@ -475,9 +459,20 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 			const settling = turn;
 			if (settling !== null) await awaitFold(settling);
 			framedTurn = null;
+			framedSession = null;
 			flushUsage(true);
 			flushPlan(true);
-			const usage = settling === null ? null : (framedTurn ?? turnUsageMeta(deps.sessionTelemetry?.() ?? null, settling));
+			// The response repeats the last frame, so a batch folded during the workspace wait below reaches neither.
+			// flushUsage reassigns both; the casts undo the narrowing to null the resets above left.
+			const frame = framedTurn as TurnUsage | null;
+			const frameSession = framedSession as SessionTotals | null;
+			let usage: PromptUsage | null = null;
+			if (settling !== null && frame !== null) {
+				usage = { ...frame, ...(frameSession !== null ? { session: frameSession } : {}) };
+			} else if (settling !== null) {
+				const view = deps.sessionTelemetry?.() ?? null;
+				usage = { ...turnUsageMeta(view, settling), ...(view !== null ? { session: sessionUsageTotals(view) } : {}) };
+			}
 			turn = null;
 			const inFlight = probing;
 			if (inFlight === null) return usage;

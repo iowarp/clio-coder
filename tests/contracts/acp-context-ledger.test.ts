@@ -242,17 +242,11 @@ test("a long turn streams usage_update per model response with the meter rising 
 	assert.equal(frames[0]?._meta["clio-coder/context"]?.compactionThreshold, 0.8);
 	const last = frames.at(-1);
 	const { session, ...turn } = last?._meta["clio-coder/usage"] ?? {};
-	const { session: replySession, ...replyTurn } = result._meta["clio-coder/usage"] as Record<string, unknown>;
-	assert.deepEqual(turn, replyTurn);
-	assert.deepEqual((replySession as { costSummary: unknown }).costSummary, {
-		knownUsd: 2.5,
-		hasEstimated: true,
-		hasUnknown: true,
-		allKnownFree: false,
-		calls: 9,
-	});
+	// The response repeats the last frame whole, its session block included.
+	assert.deepEqual(last?._meta["clio-coder/usage"], result._meta["clio-coder/usage"]);
 	assert.equal((turn as { output: number }).output, 100);
 	assert.deepEqual(session, {
+		costSummary: { knownUsd: 2.5, hasEstimated: true, hasUnknown: true, allKnownFree: false, calls: 9 },
 		input: 540,
 		output: 120,
 		cacheRead: 250,
@@ -272,7 +266,7 @@ test("a long turn streams usage_update per model response with the meter rising 
 	await served;
 });
 
-test("the prompt response waits for the read model to fold the turn's last call, and the last frame matches it", async () => {
+test("the prompt response waits for the read model to fold the turn's last call, and repeats the turn's last frame", async () => {
 	const handlers = new Map<string, (params: unknown) => unknown>();
 	const updates: Array<Record<string, unknown>> = [];
 	let close: () => void = () => {};
@@ -280,6 +274,7 @@ test("the prompt response waits for the read model to fold the turn's last call,
 	let folded: () => void = () => {};
 	const records: TelemetryRecord[] = [];
 	let bound: string | null = null;
+	let probes = 0;
 	const transport: AcpJsonRpcPeerTransport = {
 		closed: false,
 		request: async () => ({}) as never,
@@ -313,8 +308,33 @@ test("the prompt response waits for the read model to fold the turn's last call,
 			() => bound,
 			() => records,
 		),
+		// The probe a write starts is still in flight when the turn settles; a batch folds while the response waits on it.
+		workspace: async (cwd) => {
+			probes++;
+			if (probes > 1) {
+				setTimeout(() => {
+					records.push(...telemetryCall("late", { turnId: "turn-2", usage: { input: 7, output: 3 }, usd: 0.01 }));
+					folded();
+				}, 40);
+				await new Promise((resolve) => setTimeout(resolve, 80));
+			}
+			return {
+				cwd,
+				isGit: false,
+				branch: null,
+				dirty: null,
+				ahead: null,
+				behind: null,
+				recentCommits: [],
+				remoteUrl: null,
+				projectType: "unknown",
+				capturedAt: new Date().toISOString(),
+			};
+		},
 		chat: {
 			submit: async () => {
+				onEvent({ type: "tool_execution_start", toolCallId: "w1", toolName: "write", args: { path: "a.txt" } });
+				onEvent({ type: "tool_execution_end", toolCallId: "w1", toolName: "write", result: "ok", isError: false });
 				const call = telemetryCall("late", { turnId: "turn-1", usage: { input: 100, output: 20 }, usd: 0.25 });
 				const settled = call.find((record) => record.k === "call.settled");
 				assert.ok(settled?.k === "call.settled");
@@ -352,14 +372,17 @@ test("the prompt response waits for the read model to fold the turn's last call,
 	const result = (await call("session/prompt", { sessionId, prompt: [{ type: "text", text: "go" }] })) as {
 		_meta: Record<string, Record<string, unknown>>;
 	};
-	const { session: _replySession, ...replyTurn } = result._meta["clio-coder/usage"] ?? {};
-	assert.equal(replyTurn.output, 20);
-	assert.equal(replyTurn.costDisplay, "$0.25");
-	const last = updates.filter((update) => update.sessionUpdate === "usage_update").at(-1) as
-		| { _meta: Record<string, Record<string, unknown>> }
-		| undefined;
-	const { session: _session, ...turn } = last?._meta["clio-coder/usage"] ?? {};
-	assert.deepEqual(turn, replyTurn);
+	const reply = result._meta["clio-coder/usage"] ?? {};
+	assert.equal(reply.output, 20);
+	assert.equal(reply.costDisplay, "$0.25");
+	const frames = updates
+		.filter((update) => update.sessionUpdate === "usage_update")
+		.map((update) => (update as { _meta: Record<string, Record<string, unknown>> })._meta["clio-coder/usage"] ?? {});
+	// The turn's last frame, session block included, is what the response repeats.
+	assert.deepEqual(frames.filter((frame) => "output" in frame).at(-1), reply);
+	// The batch that folded during the workspace wait reached a later session frame, not the response.
+	assert.equal((reply.session as { calls?: number } | undefined)?.calls, 1);
+	assert.equal((frames.at(-1)?.session as { calls?: number } | undefined)?.calls, 2);
 	close();
 	await served;
 });
