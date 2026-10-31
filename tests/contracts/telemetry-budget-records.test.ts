@@ -12,6 +12,7 @@ import {
 	type BudgetBlockView,
 	type BudgetSpendPricing,
 	budgetBlockSpendText,
+	budgetRemainingText,
 	describeBudgetBlock,
 	readBudgetBlock,
 } from "../../src/domains/scheduling/budget.js";
@@ -135,4 +136,12 @@ it("a ceiling stop names estimated or partly unpriced spend as it was priced, an
 		release();
 		await extension.stop?.();
 	}
+});
+
+it("the session budget a spend leaves carries the spend's estimate, and an unpriced part makes it an upper bound (#434 §6.3)", () => {
+	strictEqual(budgetRemainingText(5, 1.25, undefined), "$3.75");
+	strictEqual(budgetRemainingText(5, 1.25, { estimated: false, unpriced: false }), "$3.75");
+	strictEqual(budgetRemainingText(5, 1.25, { estimated: true, unpriced: false }), "~$3.75 est");
+	strictEqual(budgetRemainingText(5, 1.25, { estimated: false, unpriced: true }), "at most $3.75");
+	strictEqual(budgetRemainingText(5, 1.25, { estimated: true, unpriced: true }), "at most ~$3.75 est");
 });

@@ -86,7 +86,7 @@ import { ResourcesDomainModule } from "../domains/resources/index.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
-import { budgetSpendText, SchedulingDomainModule } from "../domains/scheduling/index.js";
+import { budgetRemainingText, budgetSpendText, SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
@@ -239,7 +239,7 @@ function preflightPlaybook(playbook: Playbook, deps: FleetPreflightDeps): string
 		if (playbook.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
 			if (playbook.budgetUsd > remaining) {
-				return `fleet budget ${renderCostAmount(playbook.budgetUsd, "known")} exceeds remaining session budget ${renderCostAmount(remaining, "known")}`;
+				return `fleet budget ${renderCostAmount(playbook.budgetUsd, "known")} exceeds remaining session budget ${budgetRemainingText(budget.ceilingUsd, budget.currentUsd, budget.pricing)}`;
 			}
 		}
 	}

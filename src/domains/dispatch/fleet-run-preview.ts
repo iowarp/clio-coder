@@ -32,7 +32,7 @@ import {
 } from "../agents/index.js";
 import { type AgentSpec, agentSpecFingerprint } from "../agents/spec.js";
 import { foregroundStreamUsage } from "../providers/index.js";
-import { type BudgetSpendPricing, budgetSpendText } from "../scheduling/budget.js";
+import { type BudgetSpendPricing, budgetRemainingText, budgetSpendText } from "../scheduling/budget.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { bindExecutionPlanEndpoints, type ExecutionPlan, type ExecutionPlanStep } from "./execution-plan.js";
 import { type AgentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "./execution-role.js";
@@ -334,7 +334,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 			const remaining = budget.ceilingUsd - budget.currentUsd;
 			if (playbook.budgetUsd > remaining) {
 				diagnostics.push(
-					`fleet budget ${renderCostAmount(playbook.budgetUsd, "known")} exceeds remaining session budget ${renderCostAmount(remaining, "known")}`,
+					`fleet budget ${renderCostAmount(playbook.budgetUsd, "known")} exceeds remaining session budget ${budgetRemainingText(budget.ceilingUsd, budget.currentUsd, budget.pricing)}`,
 				);
 			}
 		}

@@ -72,6 +72,27 @@ export function budgetSpendText(usd: number, pricing: BudgetSpendPricing | undef
 	});
 }
 
+/**
+ * The session budget a spend leaves: the ceiling less that spend, so it carries the spend's estimate, and an unpriced
+ * part of the spend makes it an upper bound rather than a lower one (#434 §6.3).
+ */
+export function budgetRemainingText(
+	ceilingUsd: number,
+	spentUsd: number,
+	pricing: BudgetSpendPricing | undefined,
+): string {
+	const remaining = ceilingUsd - spentUsd;
+	if (!pricing) return renderCostAmount(remaining, "known");
+	const text = renderCostAmount(remaining, undefined, {
+		knownUsd: remaining,
+		hasEstimated: pricing.estimated,
+		hasUnknown: false,
+		allKnownFree: false,
+		calls: 1,
+	});
+	return pricing.unpriced ? `at most ${text}` : text;
+}
+
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 
 /** Null for a payload that is not a ceiling stop; a missing or stale raise is recomputed. */

@@ -17,6 +17,7 @@ export function createSchedulingDomainModule(options: SchedulingBundleOptions): 
 export type { BudgetBlockView, BudgetSpendPricing, BudgetVerdict, RunCostCap } from "./budget.js";
 export {
 	budgetBlockSpendText,
+	budgetRemainingText,
 	budgetSpendText,
 	createRunCostCap,
 	describeBudgetBlock,
