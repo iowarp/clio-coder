@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import { workerMcpNoNetworkNotice } from "../core/sandbox/worker-policy.js";
 import { evaluateSkillToolSurface } from "../core/skill-activation.js";
+import type { TelemetryContext } from "../core/telemetry/context.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -902,6 +903,7 @@ async function runReviewGated(
 	review: ReviewGateSettings,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
+	gateTelemetry: TelemetryContext | undefined,
 ): Promise<GateRunOutcome> {
 	const group = newGateGroupId("review");
 	const runs: CompletedRun[] = [];
@@ -912,7 +914,9 @@ async function runReviewGated(
 	): Promise<{ artifact: GateDecisionArtifact; path: string }> => {
 		const decision = pending
 			? await finalizePendingGateDecision(pending, draft)
-			: await materializePendingGateDecision(stagePendingGateDecision(draft));
+			: await materializePendingGateDecision(
+					stagePendingGateDecision(draft, { ...(gateTelemetry === undefined ? {} : { telemetry: gateTelemetry }) }),
+				);
 		decisions.push(decision);
 		return decision;
 	};
@@ -944,6 +948,7 @@ async function runReviewGated(
 		if (request.gate?.role === "reviewer") {
 			try {
 				pendingGate = stagePendingGateOutput({
+					...(gateTelemetry === undefined ? {} : { telemetry: gateTelemetry }),
 					group: request.gate.group,
 					topology: "review",
 					cycle: request.gate.cycle,
@@ -1375,6 +1380,7 @@ async function runCompete(
 	autonomy: AutonomyLevel,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
+	gateTelemetry: TelemetryContext | undefined,
 ): Promise<CompeteOutcome> {
 	const requestedRoot = base.cwd !== undefined && base.cwd.length > 0 ? base.cwd : process.cwd();
 	if (!isGitRepository(requestedRoot)) {
@@ -1397,7 +1403,12 @@ async function runCompete(
 	const recordDecision = async (draft: GateDecisionDraft, pending?: PendingGateDecisionHandle) => {
 		const decision = pending
 			? await finalizePendingGateDecision(pending, draft)
-			: await materializePendingGateDecision(stagePendingGateDecision(draft, { resourceRoot: requestedRoot }));
+			: await materializePendingGateDecision(
+					stagePendingGateDecision(draft, {
+						...(gateTelemetry === undefined ? {} : { telemetry: gateTelemetry }),
+						resourceRoot: requestedRoot,
+					}),
+				);
 		decisions.push(decision);
 		return decision;
 	};
@@ -1441,6 +1452,7 @@ async function runCompete(
 				const pendingGate =
 					request.gate?.role === "judge"
 						? stagePendingGateOutput({
+								...(gateTelemetry === undefined ? {} : { telemetry: gateTelemetry }),
 								group: request.gate.group,
 								topology: "compete",
 								cycle: request.gate.cycle,
@@ -1875,6 +1887,7 @@ async function runApplyWinner(
 		| { outcome: "operator-confirmed"; requestId: string; requestedBy: string }
 		| { outcome: "yolo-applied" }
 		| null,
+	gateTelemetry: TelemetryContext | undefined,
 	mergeWinner: typeof mergeWinnerBranch = mergeWinnerBranch,
 	protectedPaths: ReadonlyArray<string> = [],
 ): Promise<ToolResult> {
@@ -1941,22 +1954,25 @@ async function runApplyWinner(
 	}
 	const writeConfirmation = (): Promise<{ artifact: GateDecisionArtifact; path: string }> =>
 		materializePendingGateDecision(
-			stagePendingGateDecision({
-				group,
-				topology: "compete",
-				cycle: 1,
-				outcome: authority.outcome,
-				subjects: [winnerRef.subject],
-				winner: winnerRef,
-				confirmation: {
-					id: winnerDecision.artifact.id,
-					digest: winnerDecision.artifact.integrity.digest,
+			stagePendingGateDecision(
+				{
+					group,
+					topology: "compete",
+					cycle: 1,
+					outcome: authority.outcome,
+					subjects: [winnerRef.subject],
+					winner: winnerRef,
+					confirmation: {
+						id: winnerDecision.artifact.id,
+						digest: winnerDecision.artifact.integrity.digest,
+					},
+					detail:
+						authority.outcome === "operator-confirmed"
+							? `operator confirmation ${authority.requestId} (${authority.requestedBy}) approved ${branch} under dispatch plan ${planHash}`
+							: `yolo applied ${branch} under dispatch plan ${planHash}`,
 				},
-				detail:
-					authority.outcome === "operator-confirmed"
-						? `operator confirmation ${authority.requestId} (${authority.requestedBy}) approved ${branch} under dispatch plan ${planHash}`
-						: `yolo applied ${branch} under dispatch plan ${planHash}`,
-			}),
+				{ ...(gateTelemetry === undefined ? {} : { telemetry: gateTelemetry }) },
+			),
 		);
 	let confirmation: { artifact: GateDecisionArtifact; path: string } | null = null;
 	if (authority.outcome === "operator-confirmed") {
@@ -2372,25 +2388,17 @@ export async function runDispatchTool(
 	args: Record<string, unknown>,
 	options?: ToolInvokeOptions,
 ): Promise<ToolResult> {
-	// Gate staging retains the dispatching host's scope across worker settlement and recovery (#434).
+	// Gates retain the host owner without redirecting routing facts out of the active session (#434).
 	const runId = options?.hostRun?.runId ?? options?.runId;
 	const sessionId = options?.sessionId ?? telemetryContext()?.sessionId;
-	return withToolTelemetryContext(
+	const gateTelemetry = withToolTelemetryContext(
 		{
 			...options,
 			...(runId === undefined ? {} : { runId }),
 			...(sessionId == null ? {} : { sessionId }),
 		},
-		() => runDispatchToolInContext(inputDeps, admissionState, args, options),
+		telemetryContext,
 	);
-}
-
-async function runDispatchToolInContext(
-	inputDeps: DispatchToolDeps,
-	admissionState: DispatchAdmissionState,
-	args: Record<string, unknown>,
-	options?: ToolInvokeOptions,
-): Promise<ToolResult> {
 	const deps: RegisteredDispatchToolDeps = {
 		...inputDeps,
 		runEvents: inputDeps.runEvents ?? createDispatchRunEventRegistry(),
@@ -2459,7 +2467,14 @@ async function runDispatchToolInContext(
 			apply_winner: { branch: snapshot.branch, cwd: snapshot.cwd },
 			[RESOLVED_DISPATCH_PLAN_ARGUMENT]: trustedWinnerPlan,
 		}).hash;
-		return runApplyWinner(snapshot, planHash, authority, deps.competeWorktrees?.mergeWinner, protectedPaths);
+		return runApplyWinner(
+			snapshot,
+			planHash,
+			authority,
+			gateTelemetry,
+			deps.competeWorktrees?.mergeWinner,
+			protectedPaths,
+		);
 	}
 	if (snapshot?.kind !== "dispatch") {
 		return { kind: "error", message: "dispatch: trusted execution admission snapshot is unavailable" };
@@ -2771,7 +2786,7 @@ async function runDispatchToolInContext(
 				};
 			}
 			try {
-				const outcome = await runCompete(deps, requests[0], compete, autonomy, timeoutMs, options?.signal);
+				const outcome = await runCompete(deps, requests[0], compete, autonomy, timeoutMs, options?.signal, gateTelemetry);
 				return competeResult(deps, outcome, autonomy, maxOutputBytes);
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
@@ -2797,7 +2812,7 @@ async function runDispatchToolInContext(
 				return { kind: "error", message: `dispatch: review does not combine with mode=${mode}` };
 			}
 			try {
-				const outcome = await runReviewGated(deps, requests[0], review, timeoutMs, options?.signal);
+				const outcome = await runReviewGated(deps, requests[0], review, timeoutMs, options?.signal, gateTelemetry);
 				return reviewGateResult(deps, outcome, maxOutputBytes);
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
