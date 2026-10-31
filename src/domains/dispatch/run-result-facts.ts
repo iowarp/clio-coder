@@ -15,12 +15,11 @@ import type { RunEvidenceV1, RunTelemetryV1 } from "../../core/telemetry/dto.js"
 import { TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import { clioStateDir } from "../../core/xdg.js";
-import { readRunGateIndex, readRunTrust } from "../evidence/run-trust.js";
+import { type GateReview, readRunGateIndex, readRunTrust } from "../evidence/run-trust.js";
 import { integrityClause, trustStateWord, validationClause } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import { TELEMETRY_FOLD_VERSION } from "../telemetry/folds.js";
 import { readRunRecord } from "../telemetry/index.js";
-import type { GateDecisionArtifact } from "./gate-decisions.js";
 
 export type RunResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
 
@@ -99,8 +98,11 @@ function contractKindOf(sourceId: string | undefined): RunPresentedResultContrac
 
 type SettledRun = RunTelemetryV1 & { settled: NonNullable<RunTelemetryV1["settled"]> };
 
-/** Project a run DTO onto the facts a worker block renders; null when the run has not settled. */
-function runResultFactsOf(record: RunTelemetryV1 | null): RunResultFacts | null {
+/**
+ * Project a run DTO onto the facts a worker block renders; null when the run has not settled. `gates` are the
+ * journaled review decisions about the run, so its trust agrees with its evidence view (#434).
+ */
+function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<GateReview>): RunResultFacts | null {
 	if (record === null || record.settled === null) return null;
 	const settled = record.settled;
 	const result = record.result?.state === "resolved" ? record.result.value : null;
@@ -134,7 +136,7 @@ function runResultFactsOf(record: RunTelemetryV1 | null): RunResultFacts | null 
 	const failureMessage = result?.failureMessage ?? settled.failureMessage;
 	const text = result?.output?.text;
 	return {
-		trust: readRunTrust(record).trust,
+		trust: readRunTrust(record, gates).trust,
 		outcome: settled.outcome,
 		tokens: settled.totalTokens,
 		tokensDisplay: record.row.tokens.display,
@@ -158,7 +160,7 @@ function runResultFactsOf(record: RunTelemetryV1 | null): RunResultFacts | null 
 /** The run's facts from its run scope; null when it has not settled or cannot be read. */
 export function readRunResultFacts(runId: string, stateDir = clioStateDir()): RunResultFacts | null {
 	try {
-		return runResultFactsOf(readRunRecord(stateDir, runId));
+		return runResultFactsOf(readRunRecord(stateDir, runId), readRunGateIndex(stateDir)(runId));
 	} catch {
 		// An unreadable run scope is an unavailable result, never a failed render.
 		return null;
@@ -331,7 +333,7 @@ function sealedChecks(run: SettledRun): Sealed {
 export function runEvidenceOf(
 	runId: string,
 	record: RunTelemetryV1 | null,
-	options: { now?: Date; gates?: ReadonlyArray<GateDecisionArtifact> } = {},
+	options: { now?: Date; gates?: ReadonlyArray<GateReview> } = {},
 ): RunEvidenceV1 {
 	// The evidence domain's one derivation: the sealed assessment's trust under the seal's verdict, with later review
 	// gates composed over it, so this DTO and `runEvidence` agree on every axis (#434).

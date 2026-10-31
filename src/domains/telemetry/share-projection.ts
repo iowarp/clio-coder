@@ -270,7 +270,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		candidates: { ...keep("rejection", "score", "dominated", "samples", "ready"), route: ROUTE_TUPLE },
 	},
 	"gate.decided": {
-		...keep("topology", "cycle", "outcome", "digest"),
+		...keep("topology", "cycle", "outcome", "independent", "digest"),
 		decisionId: "id",
 		group: "id",
 		confirms: "id",

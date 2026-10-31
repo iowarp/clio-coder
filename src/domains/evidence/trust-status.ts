@@ -1,4 +1,5 @@
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
 import type { RunSettled } from "../../core/telemetry/schemas.js";
 import {
 	TRUST_ABSENCE_REASONS,
@@ -10,7 +11,7 @@ import {
 	type TrustStatusAxis,
 } from "../../core/telemetry/trust-vocabulary.js";
 import { parseWorkerContextProvenance } from "../../worker/context-seed.js";
-import type { GateDecisionArtifact, GateDecisionVerification } from "../dispatch/gate-decisions.js";
+import type { GateDecisionVerification } from "../dispatch/gate-decisions.js";
 import type { RunBriefingProvenance, RunProjectContextProvenance, RunResult } from "../dispatch/types.js";
 import { normalizeYoloGateAuthority, normalizeYoloGateOutcome } from "../dispatch/yolo-ids.js";
 import type { SealVerdict } from "../telemetry/seal.js";
@@ -384,30 +385,33 @@ function validWorkerContext(value: unknown): boolean {
 	}
 }
 
-function gateReference(artifact: GateDecisionArtifact): TrustArtifactReference {
-	return sha256Reference("gate_decision", artifact.id, artifact.integrity.digest);
+/** A gate decision as its journaled `gate.decided` states it: the facts a review verdict reads (#434). */
+export type GateDecisionFacts = EventPayload<"gate.decided">;
+
+function gateReference(gate: GateDecisionFacts): TrustArtifactReference {
+	return sha256Reference("gate_decision", gate.decisionId, gate.digest);
 }
 
-function gateAuthority(artifact: GateDecisionArtifact): TrustStatusAuthority {
-	if (artifact.outcome === "operator-confirmed") return { kind: "operator", id: "gate-confirmation" };
-	if (normalizeYoloGateOutcome(artifact.outcome) === "yolo-applied") return { kind: "clio", id: "yolo-gate-policy" };
-	return { kind: "reviewer", id: artifact.decider?.runId ?? "unavailable-decider" };
+function gateAuthority(gate: GateDecisionFacts): TrustStatusAuthority {
+	if (gate.outcome === "operator-confirmed") return { kind: "operator", id: "gate-confirmation" };
+	if (normalizeYoloGateOutcome(gate.outcome) === "yolo-applied") return { kind: "clio", id: "yolo-gate-policy" };
+	return { kind: "reviewer", id: gate.decider?.runId ?? "unavailable-decider" };
 }
 
 /**
  * Adapt one authenticated decision for one subject. Missing authentication is
- * unknown review, never a positive verdict inherited from artifact presence.
+ * unknown review, never a positive verdict inherited from a record's presence.
  */
 export function adaptGateDecisionReviewStatus(
-	artifact: GateDecisionArtifact | null | undefined,
+	gate: GateDecisionFacts | null | undefined,
 	subjectRunId: string,
 	verification?: GateDecisionVerification,
 ): IndependentReviewStatus {
-	if (artifact === null || artifact === undefined) return absentTrustStatus("artifact_missing");
-	const source: TrustStatusSource = { kind: "gate_decision", id: artifact.id };
-	const artifacts = [gateReference(artifact)];
-	const authority = gateAuthority(artifact);
-	if (!artifact.subjects.some((subject) => subject.runId === subjectRunId)) return absentTrustStatus("not_recorded");
+	if (gate === null || gate === undefined) return absentTrustStatus("artifact_missing");
+	const source: TrustStatusSource = { kind: "gate_decision", id: gate.decisionId };
+	const artifacts = [gateReference(gate)];
+	const authority = gateAuthority(gate);
+	if (!gate.subjects.some((subject) => subject.runId === subjectRunId)) return absentTrustStatus("not_recorded");
 	if (verification === undefined || !verification.ok) {
 		return attributed(
 			"unknown",
@@ -416,22 +420,17 @@ export function adaptGateDecisionReviewStatus(
 			artifacts,
 		);
 	}
-	if (artifact.decider === undefined || artifact.correlation === undefined) {
-		if (artifact.outcome === "operator-confirmed" || normalizeYoloGateOutcome(artifact.outcome) === "yolo-applied") {
+	if (gate.decider === undefined || gate.independent === undefined) {
+		if (gate.outcome === "operator-confirmed" || normalizeYoloGateOutcome(gate.outcome) === "yolo-applied") {
 			return attributed("not_applicable", source, authority, artifacts);
 		}
 		return attributed("inconclusive", source, authority, artifacts);
 	}
-	if (!artifact.correlation.independent) return attributed("not_independent", source, authority, artifacts);
-	if (artifact.outcome === "pass") return attributed("passed", source, authority, artifacts);
-	if (artifact.outcome === "fail") return attributed("failed", source, authority, artifacts);
-	if (artifact.outcome === "winner") {
-		return attributed(
-			artifact.winner?.subject.runId === subjectRunId ? "passed" : "failed",
-			source,
-			authority,
-			artifacts,
-		);
+	if (!gate.independent) return attributed("not_independent", source, authority, artifacts);
+	if (gate.outcome === "pass") return attributed("passed", source, authority, artifacts);
+	if (gate.outcome === "fail") return attributed("failed", source, authority, artifacts);
+	if (gate.outcome === "winner") {
+		return attributed(gate.winner?.runId === subjectRunId ? "passed" : "failed", source, authority, artifacts);
 	}
 	return attributed("inconclusive", source, authority, artifacts);
 }

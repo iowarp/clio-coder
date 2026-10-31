@@ -7,12 +7,11 @@
 
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EvidenceAssessed, EvidenceFindingsObject, RunSettled } from "../../core/telemetry/schemas.js";
-import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "../dispatch/gate-decisions.js";
 import type { RunPersonaOverride, RunPipelineProvenance } from "../dispatch/types.js";
 import type { DecisionRecord } from "../session/entries.js";
 import { runSettledDigest } from "../telemetry/run-digest.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
-import { compareGates, reviewFinding } from "./run-trust.js";
+import { compareGates, type GateReview, readGateReviews, reviewFinding } from "./run-trust.js";
 import {
 	adaptGateDecisionReviewStatus,
 	adaptRunTrustStatus,
@@ -36,8 +35,8 @@ export interface RunAssessmentContext {
 export interface AssessRunInput {
 	records: ReadonlyArray<TelemetryRecord>;
 	context: RunAssessmentContext | null;
-	/** Gate decisions naming the run, as their own integrity admits them. */
-	gateDecisions: ReadonlyArray<GateDecisionArtifact>;
+	/** Gate decisions naming the run, from sealed coordinator and session journals (`readGateReviews`). */
+	gateDecisions: ReadonlyArray<GateReview>;
 	/** The decision records on the run's session's active path, by ref; null when the session was not read. */
 	decisions: ReadonlyMap<string, DecisionRecord> | null;
 }
@@ -69,16 +68,15 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 	let trust = adaptRunTrustStatus({ ...settled, runId, digest }, { state: "verified", by: "producer" });
 	const verdicts: EvidenceAssessed["verdicts"] = [];
 	for (const gate of [...input.gateDecisions].sort(compareGates)) {
-		if (!gate.subjects.some((subject) => subject.runId === runId)) continue;
-		const artifact = verifyGateDecisionArtifact(gate);
 		const subject = gate.subjects.find((entry) => entry.runId === runId);
+		if (subject === undefined) continue;
 		// A gate subject cites the run by the digest of its run.settled (#434).
 		const verification =
-			artifact.ok && subject?.digest === digest
+			subject.digest === digest
 				? ({ ok: true } as const)
-				: ({ ok: false, reason: artifact.ok ? "gate subject run digest mismatched" : artifact.reason } as const);
+				: ({ ok: false, reason: "gate subject run digest mismatched" } as const);
 		const review = adaptGateDecisionReviewStatus(gate, runId, verification);
-		verdicts.push({ decisionId: gate.id, digest: gate.integrity.digest, outcome: gate.outcome, review: review.state });
+		verdicts.push({ decisionId: gate.decisionId, digest: gate.digest, outcome: gate.outcome, review: review.state });
 		// The latest decision is the run's review; earlier cycles stay listed as verdicts.
 		trust = composeTrustStatus(trust, { independentReview: review });
 	}
@@ -180,8 +178,9 @@ function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[
 }
 
 /**
- * Read what an assessment needs beside the run's journal: the gate decisions naming the run and, when the run cited
- * decisions, its session's decision board. A read that fails leaves its part unresolved rather than failing the run.
+ * Read what an assessment needs beside the run's journal: the gate decisions its sealed coordinator and session
+ * journals hold about the run and, when the run cited decisions, its session's decision board. A read that fails
+ * leaves its part unresolved rather than failing the run.
  */
 export async function gatherRunAssessment(
 	stateDir: string,
@@ -189,10 +188,9 @@ export async function gatherRunAssessment(
 	records: ReadonlyArray<TelemetryRecord>,
 	context: RunAssessmentContext | null,
 ): Promise<RunAssessment | null> {
-	const { readGateDecisionArtifactsForRunIds } = await import("../dispatch/gate-decisions.js");
-	let gateDecisions: GateDecisionArtifact[] = [];
+	let gateDecisions: GateReview[] = [];
 	try {
-		gateDecisions = readGateDecisionArtifactsForRunIds(new Set([runId]), stateDir).map((entry) => entry.artifact);
+		gateDecisions = readGateReviews(stateDir, runId, records);
 	} catch {
 		// Unreadable gate decisions leave the review axis as the run record states it.
 	}

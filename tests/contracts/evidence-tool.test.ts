@@ -143,7 +143,7 @@ describe("evidence tool", () => {
 		ok(output(await evidence({ mode: "inspect", runId: "fixture" })).findings.some((f) => f.tag === "external-bypass"));
 	});
 
-	it("records only integrity-verified gate decisions present when the run settled", async () => {
+	it("never takes a review verdict from gate artifact files", async () => {
 		const pending = stagePendingGateDecision(
 			{
 				group: "evidence-tool",
@@ -166,11 +166,11 @@ describe("evidence tool", () => {
 		ok(/"outcome":\s*"pass"/u.test(text));
 		await writeFile(forged, text.replace(/"outcome":(\s*)"pass"/u, '"outcome":$1"fail"'));
 		await fixture();
-		const verdicts = output(await evidence({ mode: "inspect", runId: "fixture" })).verdicts;
-		strictEqual(verdicts.length, 1);
-		strictEqual(verdicts[0]?.decisionId, valid.artifact.id);
-		// The subject digest is not the run's settled digest, so the review stays unknown rather than passed.
-		strictEqual(verdicts[0]?.review, "unknown");
+		// Settling afresh removed the journal that held gate.decided; the artifacts left behind are dispatch state, so
+		// neither the authentic one nor the forged copy yields a verdict (#434).
+		const read = output(await evidence({ mode: "inspect", runId: "fixture" }));
+		strictEqual(read.verdicts.length, 0);
+		strictEqual(read.trust.independentReview.state, "absent");
 	});
 
 	it("reads without writing and classifies as a read", async () => {

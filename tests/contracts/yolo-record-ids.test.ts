@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { councilTopologies } from "../../src/domains/dispatch/council-topology.js";
 import {
 	type GateDecisionArtifact,
+	gateDecidedFacts,
 	gateDecisionsDirectory,
 	materializePendingGateDecision,
 	stagePendingGateDecision,
@@ -125,7 +126,7 @@ test("old and new gate outcomes verify and project under the yolo names", async 
 			equal(decision.outcome, "yolo-applied");
 			equal(decision.reason, "yolo-applied-winner");
 		}
-		const status = adaptGateDecisionReviewStatus(oldArtifact, subject.runId, { ok: true });
+		const status = adaptGateDecisionReviewStatus(gateDecidedFacts(oldArtifact), subject.runId, { ok: true });
 		if (status.state === "absent") throw new Error("gate status unexpectedly absent");
 		equal(status.authority.id, "yolo-gate-policy");
 		const historical = {

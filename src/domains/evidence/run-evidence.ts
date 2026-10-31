@@ -6,23 +6,22 @@
 
 import { listStateDirectory } from "../../core/state-boundary.js";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
-import type { GateDecisionArtifact } from "../dispatch/gate-decisions.js";
 import { isDecisionRecord } from "../session/entries.js";
 import { telemetryRunsDirectory } from "../telemetry/paths.js";
 import { readRunRecordAsync } from "../telemetry/run-record.js";
 import { compareCodepoints } from "./ordering.js";
 import type { RunProvenanceView } from "./provenance.js";
-import { readRunGateIndex, readRunTrust } from "./run-trust.js";
+import { type GateReview, readRunGateIndex, readRunTrust } from "./run-trust.js";
 import type { EvidenceDecision, EvidenceFinding, EvidenceTag, RunEvidence } from "./types.js";
 
 /**
- * The run's evidence from its DTO and the gate decisions naming it (`readRunGateIndex`); a later review composes over
- * the sealed assessment as `readRunTrust` admits it.
+ * The run's evidence from its DTO and the journaled gate decisions naming it (`readRunGateIndex`); a later review
+ * composes over the sealed assessment as `readRunTrust` admits it.
  */
 export function runEvidence(
 	runId: string,
 	record: RunTelemetryV1 | null,
-	gates: ReadonlyArray<GateDecisionArtifact> = [],
+	gates: ReadonlyArray<GateReview> = [],
 ): RunEvidence {
 	const read = readRunTrust(record, gates);
 	const integrity = read.integrity;

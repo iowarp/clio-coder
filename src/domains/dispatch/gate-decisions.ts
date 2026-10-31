@@ -636,8 +636,11 @@ function persistGateDecisionArtifact(
 	return { artifact, path };
 }
 
-/** The decision as `gate.decided` carries it: identities, verdict and digest; findings stay in the artifact (#434). */
-function gateDecidedFacts(artifact: GateDecisionArtifact): EventPayload<"gate.decided"> {
+/**
+ * The decision as `gate.decided` carries it: identities, verdict, the decider's independence and digest; findings stay
+ * in the artifact. The journal record is what later readers trust; the artifact stays dispatch state (#434).
+ */
+export function gateDecidedFacts(artifact: GateDecisionArtifact): EventPayload<"gate.decided"> {
 	return {
 		decisionId: artifact.id,
 		group: artifact.group,
@@ -648,6 +651,7 @@ function gateDecidedFacts(artifact: GateDecisionArtifact): EventPayload<"gate.de
 		...(artifact.decider !== undefined
 			? { decider: { runId: artifact.decider.runId, digest: artifact.decider.digest } }
 			: {}),
+		...(artifact.correlation !== undefined ? { independent: artifact.correlation.independent } : {}),
 		...(artifact.winner !== undefined
 			? { winner: { index: artifact.winner.index, runId: artifact.winner.subject.runId } }
 			: {}),
@@ -1171,17 +1175,4 @@ export function readGateDecisionArtifacts(
 		}
 	}
 	return out;
-}
-
-/** Discover trusted coordinator decisions from receipt identities alone. */
-export function readGateDecisionArtifactsForRunIds(
-	runIds: ReadonlySet<string>,
-	stateDir = clioStateDir(),
-): Array<{ artifact: GateDecisionArtifact; path: string }> {
-	if (runIds.size === 0) return [];
-	return readGateDecisionArtifacts(undefined, stateDir).filter(({ artifact }) => {
-		if (artifact.subjects.some((subject) => runIds.has(subject.runId))) return true;
-		if (artifact.decider !== undefined && runIds.has(artifact.decider.runId)) return true;
-		return artifact.winner !== undefined && runIds.has(artifact.winner.subject.runId);
-	});
 }

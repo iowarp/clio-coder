@@ -6,11 +6,13 @@
 import { assertSafeId } from "../../core/safe-id.js";
 import { withinStateRoot, withinStateRootAsync } from "../../core/state-boundary.js";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
+import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { readCallJournal, readCallJournalSync } from "./call-journal.js";
-import { telemetryRunDirectory } from "./paths.js";
+import { telemetryRunDirectory, telemetrySessionDirectory } from "./paths.js";
 import { journalSourceFromRead, runTelemetry } from "./read-model.js";
 import type { TelemetryScopeFiles } from "./seal.js";
-import { readTelemetryScopeFiles, readTelemetryScopeFilesSync } from "./seal.js";
+import { readTelemetryScopeFiles, readTelemetryScopeFilesSync, verifyTelemetryScope } from "./seal.js";
 
 /** A run DTO whose run settled: the facts its run.settled recorded are present. */
 export type SettledRunRecord = RunTelemetryV1 & { settled: NonNullable<RunTelemetryV1["settled"]> };
@@ -70,4 +72,30 @@ export function readVerifiedRun(stateDir: string, runId: string, digest?: string
 	const run = readSettledRun(stateDir, runId);
 	if (run?.seal?.status !== "verified") return null;
 	return digest === undefined || run.settled.digest === digest ? run : null;
+}
+
+/**
+ * The records a run or session scope's seal authenticates, in chain order; null unless the scope sits beneath the
+ * state root and its seal verifies. The records come from the very bytes the seal verdict checked, so a reader that
+ * acts on them acts only on what the seal vouches for (#434).
+ */
+export function readSealedScopeRecords(
+	stateDir: string,
+	scope: { kind: "run" | "session"; id: string },
+): TelemetryRecord[] | null {
+	const directory =
+		scope.kind === "run" ? telemetryRunDirectory(stateDir, scope.id) : telemetrySessionDirectory(stateDir, scope.id);
+	if (!withinStateRoot(stateDir, directory)) return null;
+	let files: TelemetryScopeFiles;
+	try {
+		files = readTelemetryScopeFilesSync(directory);
+	} catch {
+		// No readable scope: nothing it holds is authenticated.
+		return null;
+	}
+	if (verifyTelemetryScope(files).status !== "verified") return null;
+	const records: TelemetryRecord[] = [];
+	for (const segment of files.segments)
+		for (const row of scanTelemetrySegment(segment.bytes).rows) if (row.kind === "record") records.push(row.record);
+	return records;
 }

@@ -1846,6 +1846,8 @@ export const GateDecidedSchema = Type.Object(
 		]),
 		subjects: Type.Array(gateSubject),
 		decider: Type.Optional(gateSubject),
+		/** Whether the decider's route was independent of the subjects it graded; present whenever a decider is. */
+		independent: Type.Optional(Type.Boolean()),
 		winner: Type.Optional(Type.Object({ index: count, runId: ExistingId }, closed)),
 		confirms: Type.Optional(ExistingId),
 		digest: sha256Hex,

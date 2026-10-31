@@ -122,7 +122,6 @@ export { FleetWorkspaceBusyError, FleetWorkspaceLockUnavailableError } from "./f
 export type { GateDecisionArtifact, GateDecisionOutcome } from "./gate-decisions.js";
 export {
 	readGateDecisionArtifacts,
-	readGateDecisionArtifactsForRunIds,
 	verifyGateDecisionArtifact,
 } from "./gate-decisions.js";
 export { gateTopology } from "./gate-topology.js";
