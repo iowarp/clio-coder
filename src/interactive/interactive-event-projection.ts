@@ -133,6 +133,14 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		deps.chat.onEvent((event) => {
 			deps.onChatEventIngress?.(event);
 			if (event.type === "notice") {
+				// The unchanged card retains the reason and measured tokens, including
+				// discarded-checkpoint usage; these receipts would repeat it (D6g).
+				if (
+					event.level === "info" &&
+					(event.text === "compaction would not reduce context; checkpoint discarded (usage recorded)" ||
+						event.text.startsWith("[/context compact] too short to compact ("))
+				)
+					return;
 				// Context stages already occupy the rail above the editor. Legacy status
 				// receipts belong in the footer; errors retain their transcript evidence.
 				// The compaction receipt follows them: the operation's result card now

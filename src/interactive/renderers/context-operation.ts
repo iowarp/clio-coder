@@ -1,5 +1,5 @@
+import type { ContextOperation } from "../../core/context-operation.js";
 import { wrapTextWithAnsi } from "../../engine/tui.js";
-import type { ContextOperationResult } from "../context-operation-view.js";
 import {
 	CONTEXT_KIND_TITLES,
 	compactionQualifier,
@@ -13,10 +13,10 @@ import {
 import { clioTheme, formatCompactMs, frame, GLYPH } from "../theme/index.js";
 
 /**
- * The transcript card shares persisted facts with replay. Live unchanged
- * results also retain the explanation carried only by terminal activity (D6f).
+ * Live and resumed cards share the terminal explanation as well as measured
+ * facts, so settling the live rail does not lose an unchanged result (D6g).
  */
-export function renderContextOperationResult(operation: ContextOperationResult, width: number): string[] {
+export function renderContextOperationResult(operation: ContextOperation, width: number): string[] {
 	const theme = clioTheme();
 	const outcome = operation.outcome ?? "completed";
 	const tone = outcomeTone(outcome);
@@ -28,8 +28,24 @@ export function renderContextOperationResult(operation: ContextOperationResult, 
 
 	const room = Math.max(1, width - 4);
 	const body: string[] = [];
-	if (outcome === "unchanged" && operation.conclusion) {
-		for (const line of wrapTextWithAnsi(plain(operation.conclusion), room)) body.push(theme.fg("body", line));
+	const conclusion =
+		operation.kind === "compaction"
+			? operation.conclusion
+					?.replace(
+						"summary would not reduce context (usage recorded)",
+						"compaction would not reduce context; checkpoint discarded (usage recorded)",
+					)
+					.replace("nothing to summarize", "no older history can be summarized yet")
+			: operation.conclusion;
+	// A pre-summary reduction can complete even when the summary itself has no
+	// gain. Its discarded-checkpoint receipt still belongs on the card (D6g).
+	if (
+		conclusion &&
+		(outcome === "unchanged" ||
+			conclusion.includes("checkpoint discarded (usage recorded)") ||
+			conclusion.includes("no older history can be summarized yet"))
+	) {
+		for (const line of wrapTextWithAnsi(plain(conclusion), room)) body.push(theme.fg("body", line));
 	}
 	const { cause, warnings } = splitWarnings(operation);
 	if (cause) {

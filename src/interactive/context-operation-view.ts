@@ -62,11 +62,6 @@ export function showsContextResult(operation: ContextOperation): boolean {
 	return true;
 }
 
-export interface ContextOperationResult extends ContextOperation {
-	/** The terminal activity explains an unchanged result beyond its persisted facts (D6f). */
-	conclusion?: string;
-}
-
 /**
  * Qualifier for a settled compaction card. The summarizer is the only stage
  * that records a summarized fact, so a completed compaction without one only

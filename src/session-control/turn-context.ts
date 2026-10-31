@@ -1746,7 +1746,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						kind: "custom",
 						customType: CONTEXT_OPERATION_CUSTOM_TYPE,
 						parentTurnId: state.lastTurnId,
-						data: event.operation,
+						data: { ...event.operation, conclusion: event.message },
 					});
 			},
 		);

@@ -345,8 +345,11 @@ describe("production compaction controls", () => {
 						: [],
 				);
 			deepStrictEqual(
-				operations.map((operation) => operation?.outcome),
-				["unchanged", "unchanged"],
+				operations.map((operation) => [operation?.outcome, operation?.conclusion]),
+				[
+					["unchanged", "summary would not reduce context (usage recorded)"],
+					["unchanged", "summary would not reduce context (usage recorded)"],
+				],
 			);
 		} finally {
 			loop.dispose();
