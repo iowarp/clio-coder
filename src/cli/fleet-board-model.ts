@@ -19,13 +19,14 @@
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import type { TelemetryRecord } from "../core/telemetry/envelope.js";
 import type { Fact, FactSum } from "../core/telemetry/fact.js";
 import { clioStateDir } from "../core/xdg.js";
 import { readRunReceiptFacts } from "../domains/dispatch/receipt-facts.js";
 import {
-	parseRunEventJournalLine,
 	RUN_EVENT_JOURNAL_READ_TAIL_BYTES,
 	type RunEventJournalLine,
+	readRunEventJournalLine,
 	runEventJournalPath,
 } from "../domains/dispatch/run-event-journal.js";
 import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
@@ -33,8 +34,8 @@ import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { trustStateWord, trustVerdictWord, validationClause } from "../domains/evidence/trust-projection.js";
 import { retiredIntegrityVersionOf } from "../domains/evidence/trust-status.js";
 import { costAggregateForAmount, formatCostAggregate } from "../domains/observability/cost.js";
-import { addGroup, emptyFactSum, foldFacts, sumFactSums } from "../domains/observability/folds.js";
-import { runTokenCount } from "../domains/observability/read-model.js";
+import { addGroup, emptyFactSum, foldFacts, foldRunJournal, sumFactSums } from "../domains/observability/folds.js";
+import { READ_MODEL_FOLD, runTokenCount } from "../domains/observability/read-model.js";
 
 /** Lines the feed's writer dropped or this reader skipped: calls whose tokens the fold never saw. */
 const UNREAD: Fact<number> = { kind: "unknown", reason: "not-observed" };
@@ -129,8 +130,9 @@ export interface RunFold {
 	droppedRows: number;
 	toolCalls: number;
 	/**
-	 * The token facts of the run's settled model calls, folded as the feed streams them: a call that reported no
-	 * usage is an unknown contribution, never a 0. Undefined until a call settles (#434 §11.3).
+	 * The run's tokens as the read model folds the call records its journal holds, so the card and the run report
+	 * show one value and provenance. A journal from before call records folds the feed's model calls instead, a call
+	 * that reported no usage an unknown contribution, never a 0. Undefined until a call settles (#434 §11.3).
 	 */
 	tokens: FactSum | undefined;
 	/** The feed lost events this fold never saw, at the writer's size cap or a head this reader skipped. */
@@ -154,8 +156,21 @@ interface FoldCursor {
 	pendingById: Map<string, StreamRow>;
 	/** The next prose delta starts a new row rather than continuing the last one. */
 	paragraphBreak: boolean;
+	/** The journal's call and run-usage records, which the read model folds into the run's tokens. */
+	callRecords: TelemetryRecord[];
+	/** The feed's model calls, read only when the journal holds no call records. */
+	feedTokens: FactSum | undefined;
 	fold: RunFold;
 }
+
+/** The records {@link foldRunJournal} reads; the rest of the journal is the feed or research detail. */
+const CALL_RECORD_KINDS: ReadonlySet<string> = new Set([
+	"call.started",
+	"call.settled",
+	"call.ref",
+	"gap",
+	"run.usage",
+]);
 
 function emptyFold(): RunFold {
 	return {
@@ -182,6 +197,8 @@ function newCursor(path: string): FoldCursor {
 		skipFirst: false,
 		pendingById: new Map(),
 		paragraphBreak: true,
+		callRecords: [],
+		feedTokens: undefined,
 		fold: emptyFold(),
 	};
 }
@@ -297,8 +314,8 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunEventJournalLine, { kin
 			cursor.paragraphBreak = true;
 			// A model call's end carries its usage; its tokens only when the provider reported them.
 			if (line.tokens !== undefined || line.usage !== undefined) {
-				fold.tokens ??= emptyFactSum();
-				addGroup(fold.tokens, [
+				cursor.feedTokens ??= emptyFactSum();
+				addGroup(cursor.feedTokens, [
 					line.tokens !== undefined
 						? { kind: "measured", value: line.tokens, source: "provider" }
 						: { kind: "unknown", reason: "provider-omitted" },
@@ -422,11 +439,16 @@ function advance(cursor: FoldCursor): FoldCursor {
 		lines.shift();
 		current.skipFirst = false;
 	}
+	const recordsBefore = current.callRecords.length;
 	for (const raw of lines) {
 		if (raw.length === 0) continue;
-		const parsed = parseRunEventJournalLine(raw);
-		if (parsed !== null) applyLine(current, parsed);
+		const { line, record } = readRunEventJournalLine(raw);
+		if (line !== null) applyLine(current, line);
+		else if (record !== null && CALL_RECORD_KINDS.has(record.k)) current.callRecords.push(record);
 	}
+	if (current.callRecords.length > recordsBefore)
+		current.fold.tokens = foldRunJournal(current.callRecords, READ_MODEL_FOLD).totalTokens;
+	else if (current.callRecords.length === 0) current.fold.tokens = current.feedTokens;
 	return current;
 }
 

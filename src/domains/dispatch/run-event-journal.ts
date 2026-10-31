@@ -50,6 +50,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { normalizeClioCoderEventType } from "../../core/naming-events.js";
+import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import type { CallUsage } from "../../core/token-split.js";
 import { normalizeCallUsage } from "../../core/token-split.js";
@@ -572,17 +573,35 @@ function journalFacts(record: Record<string, unknown>): RunEventJournalFacts {
 }
 
 /** One journal line, read defensively: null for anything malformed or of an unknown kind. */
-export function parseRunEventJournalLine(raw: string): RunEventJournalLine | null {
+function parseRunEventJournalLine(raw: string): RunEventJournalLine | null {
+	return readRunEventJournalLine(raw).line;
+}
+
+const UNREADABLE = { line: null, record: null } as const;
+
+/**
+ * One journal line, scanned once: the feed line it holds, or the telemetry record beside the feed, such as a call's
+ * start or settlement, that is no feed line. Both are null for anything malformed (#434).
+ */
+export function readRunEventJournalLine(raw: string): {
+	line: RunEventJournalLine | null;
+	record: TelemetryRecord | null;
+} {
 	let parsed: unknown;
 	try {
 		if (raw.includes("\t#")) {
 			const row = scanTelemetrySegment(Buffer.from(`${raw}\n`)).rows[0];
-			if (row?.kind !== "record" || row.record.k !== "run.feed") return null;
+			if (row?.kind !== "record") return UNREADABLE;
+			if (row.record.k !== "run.feed") return { line: null, record: row.record };
 			parsed = { ...row.record.data.body, seq: row.record.data.seq, at: row.record.t };
 		} else parsed = JSON.parse(raw);
 	} catch {
-		return null;
+		return UNREADABLE;
 	}
+	return { line: feedLine(parsed), record: null };
+}
+
+function feedLine(parsed: unknown): RunEventJournalLine | null {
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
 	const record = parsed as Record<string, unknown>;
 	if (typeof record.seq !== "number" || typeof record.at !== "string" || typeof record.kind !== "string") return null;

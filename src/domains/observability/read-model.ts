@@ -314,7 +314,7 @@ function attemptsOf(records: readonly TelemetryRecord[], attempts: readonly Fold
 
 const unavailable: JournalSource = { present: false, records: [], modes: [], skipped: 0, damaged: 0 };
 /** Every surface reads an interrupted call's estimate where the provider reported nothing (#430). */
-const READ_MODEL_FOLD: FoldOptions = { interruptedEstimates: true };
+export const READ_MODEL_FOLD: FoldOptions = { interruptedEstimates: true };
 const POLICY_GAPS: ReadonlySet<string> = new Set(["mode-filtered", "research-cap"]);
 
 /** A run journal reads the same until the live model swaps its source, so each source is folded once. */
