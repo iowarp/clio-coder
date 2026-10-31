@@ -9,7 +9,7 @@ import type { PendingTelemetry, TelemetrySink } from "../../core/telemetry/produ
 import { registerProcessTelemetrySink } from "../../core/telemetry/producer.js";
 import type { CallJournal } from "./call-journal.js";
 import { openCallJournal } from "./call-journal.js";
-import { telemetryProcessDirectory } from "./paths.js";
+import { TELEMETRY_JOURNAL_FILE, telemetryProcessDirectory } from "./paths.js";
 
 let processId: string | undefined;
 
@@ -47,8 +47,10 @@ export function createProcessJournal(
 	let closed = false;
 	/** The opened writer, null once opening failed. */
 	let ready: CallJournal | null | undefined;
-	const stamp = (kind: "process.started" | "process.exited", data: PendingTelemetry["data"]): PendingTelemetry =>
-		({ kind, data, ctx: context, wallMs: Date.now(), mono: performance.now() }) as PendingTelemetry;
+	const stamp = (
+		kind: "process.started" | "process.exited" | "journal.gap",
+		data: PendingTelemetry["data"],
+	): PendingTelemetry => ({ kind, data, ctx: context, wallMs: Date.now(), mono: performance.now() }) as PendingTelemetry;
 	const open = (): Promise<CallJournal | null> =>
 		(writer ??= readFile(join(resolvePackageRoot(), "package.json"), "utf8")
 			.then((text) => {
@@ -67,6 +69,9 @@ export function createProcessJournal(
 				ready = journal;
 				journal.enqueue(stamp("process.started", {}));
 				for (const record of pending.splice(0)) journal.enqueue(record);
+				// What the queue refused before the writer opened is a gap the journal itself must show (#434).
+				if (dropped > 0)
+					journal.enqueue(stamp("journal.gap", { sink: TELEMETRY_JOURNAL_FILE, reason: "writer-drop", count: dropped }));
 				return journal;
 			})
 			.catch(() => {
