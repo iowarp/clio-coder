@@ -87,14 +87,17 @@ export function openRunTelemetry(context: WorkerTelemetryContext, directory: str
 }
 
 /**
- * Journal the run.settled a run's host died before writing, from recovery's verdict. Only a journal that exists and
- * holds none is written, under the worker context its own run records carry, so its turn stops reading as running
- * (#425, #434).
+ * Journal the run.settled a run's host died before writing, from recovery's verdict, and seal the run. Only a journal
+ * that exists is written, under the worker context its own run records carry, so its turn stops reading as running
+ * (#425, #434). A run whose host died after run.settled but before its seal keeps that settlement and gets the seal.
  */
 export async function settleOrphanedRunJournal(directory: string, facts: EventPayload<"run.settled">): Promise<void> {
 	const { openCallJournal, readCallJournal } = await import("../telemetry/call-journal.js");
+	const { telemetryBundlePath } = await import("../telemetry/paths.js");
+	const { existsSync } = await import("node:fs");
 	const read = await readCallJournal(directory);
-	if (read.records.some(({ record }) => record.k === "run.settled")) return;
+	const settled = read.records.some(({ record }) => record.k === "run.settled");
+	if (settled && read.records.at(-1)?.record.k === "run.sealed" && existsSync(telemetryBundlePath(directory))) return;
 	const context = read.records.map(({ record }) => record.ctx).find(isWorkerTelemetryContext);
 	if (!context) return;
 	// The run's owner is gone, so this one record gets a writer of its own rather than the run's owned journal.
@@ -103,7 +106,8 @@ export async function settleOrphanedRunJournal(directory: string, facts: EventPa
 		context,
 		writer: await clioWriterVersions(),
 	});
-	writer.enqueue({ kind: "run.settled", data: facts, ctx: context, wallMs: Date.now(), mono: performance.now() });
+	if (!settled)
+		writer.enqueue({ kind: "run.settled", data: facts, ctx: context, wallMs: Date.now(), mono: performance.now() });
 	// The recovered terminal is the run's terminal, so it seals the run scope (#434).
 	await sealAndClose(writer);
 }
@@ -162,8 +166,10 @@ export async function openFleetRootTelemetry(
 			if (closing) return closing;
 			fleetRoots.delete(rootId);
 			// The root's loop ending is its terminal, so it seals the root's run scope (#434).
-			closing = sealAndClose(writer).catch(() => {
+			// A seal that did not land is reported and rejects the close; the caller decides what that fails (#434).
+			closing = sealAndClose(writer).catch((error: unknown) => {
 				writeDiagnostic("[clio-coder:telemetry] fleet root journal close failed; recorded coverage may be incomplete\n");
+				throw error;
 			});
 			return closing;
 		},
@@ -313,14 +319,20 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			if (closing) return closing;
 			journal.closed = true;
 			// A run seals once at its terminal; a writer that closes before run.settled leaves the scope unsealed (#434).
-			closing = (settled ? sealAndClose(writer) : writer.close())
-				.then(reportHealth, (error: unknown) => {
-					reportHealth();
-					throw error;
-				})
-				.catch(() => {
-					writeDiagnostic("[clio-coder:telemetry] run journal close failed; recorded coverage may be incomplete\n");
-				});
+			const diagnose = () =>
+				writeDiagnostic("[clio-coder:telemetry] run journal close failed; recorded coverage may be incomplete\n");
+			closing = settled
+				? sealAndClose(writer).then(reportHealth, (error: unknown) => {
+						reportHealth();
+						diagnose();
+						// The terminal seal's failure reaches the run's closer instead of passing as success (#434).
+						throw error;
+					})
+				: writer.close().then(reportHealth, () => {
+						// An unsettled run has no terminal to seal; a failed close stays a diagnostic.
+						reportHealth();
+						diagnose();
+					});
 			return closing;
 		},
 	};

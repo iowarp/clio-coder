@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
@@ -5,7 +6,12 @@ import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
 import { openCallJournal, ownedCallJournal, readCallJournal } from "./call-journal.js";
-import { telemetryProcessDirectory, telemetryRunDirectory, telemetrySessionDirectory } from "./paths.js";
+import {
+	telemetryBundlePath,
+	telemetryProcessDirectory,
+	telemetryRunDirectory,
+	telemetrySessionDirectory,
+} from "./paths.js";
 
 const publications = new Map<string, Promise<void>>();
 
@@ -39,6 +45,9 @@ export async function publishGateDecision(
 				return;
 			}
 		}
+		// A decision into a scope already sealed, such as a finished run, is the one append outside its lifecycle; the
+		// publication seals it again itself and fails if that seal does not land (#434).
+		const reseal = !existing && existsSync(telemetryBundlePath(directory));
 		let journal = existing;
 		if (!journal) {
 			const pkg = JSON.parse(await readFile(join(resolvePackageRoot(), "package.json"), "utf8")) as {
@@ -63,6 +72,8 @@ export async function publishGateDecision(
 			}
 			if (journal.health().writeErrors > 0 || !(await findDecision()))
 				throw new Error(`gate decision telemetry was not durably written: ${data.decisionId}`);
+			if (reseal && !(await journal.seal()))
+				throw new Error(`gate decision telemetry could not reseal its scope: ${data.decisionId}`);
 		} finally {
 			if (!existing) await journal.close();
 		}

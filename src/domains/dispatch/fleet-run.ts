@@ -402,15 +402,19 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			rootTelemetry,
 		);
 	} finally {
-		await rootTelemetry?.close();
-		await lease.release().catch((error: unknown) => {
-			// The record names this live process, so other processes are refused
-			// here until it exits or its next acquisition retries the release; say
-			// so rather than let the leftover look like a hang.
-			const message = error instanceof Error ? error.message : String(error);
-			input.onNotice?.(`could not release the workspace fleet lock: ${message}`);
-		});
-		unregisterEmergency?.();
+		// The root's seal failing fails the fleet run, after its workspace lock is released (#434).
+		try {
+			await rootTelemetry?.close();
+		} finally {
+			await lease.release().catch((error: unknown) => {
+				// The record names this live process, so other processes are refused
+				// here until it exits or its next acquisition retries the release; say
+				// so rather than let the leftover look like a hang.
+				const message = error instanceof Error ? error.message : String(error);
+				input.onNotice?.(`could not release the workspace fleet lock: ${message}`);
+			});
+			unregisterEmergency?.();
+		}
 	}
 }
 

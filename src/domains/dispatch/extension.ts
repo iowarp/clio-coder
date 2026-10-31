@@ -6858,8 +6858,12 @@ export function createDispatchBundle(
 				});
 				throw error;
 			} finally {
-				await closeRunJournal();
-				leaseSlot.release();
+				// A terminal seal that did not land fails the run, after its slot is released (#434).
+				try {
+					await closeRunJournal();
+				} finally {
+					leaseSlot.release();
+				}
 			}
 		})().then(resolveFinal, rejectFinal);
 		active.set(envelope.id, activeRun);
@@ -9283,9 +9287,13 @@ export function createDispatchBundle(
 				});
 				throw error;
 			} finally {
-				await closeRunJournal();
-				unsubscribeAgentLedger?.();
-				leaseSlot.release();
+				// A terminal seal that did not land fails the run, after its slot is released (#434).
+				try {
+					await closeRunJournal();
+				} finally {
+					unsubscribeAgentLedger?.();
+					leaseSlot.release();
+				}
 			}
 		})().then(resolveFinal, rejectFinal);
 
