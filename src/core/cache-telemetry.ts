@@ -16,19 +16,6 @@ export interface BackendCompletionTimings {
 	source: BackendTimingsSource;
 }
 
-/** Per-session call counts grouped by backend cache verdict. */
-export interface CacheVerdictCounts {
-	hot: number;
-	partial: number;
-	cold: number;
-	small: number;
-	unknown: number;
-}
-
-export function emptyCacheVerdictCounts(): CacheVerdictCounts {
-	return { hot: 0, partial: 0, cold: 0, small: 0, unknown: 0 };
-}
-
 /** Return newly evaluated prefill tokens when the backend reports cache reads. */
 export function uncachedPrefillTokens(backend: BackendCompletionTimings | null | undefined): number | null {
 	if (backend === null || backend === undefined || backend.cachedTokens === null) return null;

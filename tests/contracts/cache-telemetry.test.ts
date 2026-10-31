@@ -6,8 +6,6 @@ import {
 	type CacheRequestStructure,
 } from "../../src/core/cache-telemetry.js";
 import type { CallUsage } from "../../src/core/telemetry/schemas.js";
-import type { SessionEntry } from "../../src/domains/session/entries.js";
-import { foldPromptCacheTelemetry } from "../../src/domains/session/prompt-cache.js";
 import { cachePhysics, firstDivergentSection, serverTimedUsage } from "../../src/domains/telemetry/cache-physics.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 
@@ -153,20 +151,9 @@ test("a server whose usage omits cache reads is judged by its own cache_n, and i
 	strictEqual(serverTimedUsage(read, backend), undefined, "a measured read is the provider's and stands");
 });
 
-test("an omitted cache read leaves the shortfall unknown and is never a break, in new and old ledger rows (#434)", () => {
+test("an omitted cache read leaves the shortfall unknown and is never a break (#434)", () => {
 	const omitted = buildCacheCallObservation({ input: 10_000, cacheRead: null, cacheWrite: 0 }, baseline, [], 60_000);
 	strictEqual(omitted.shortfallTokens, null);
 	strictEqual(omitted.cacheReadTokens, null);
 	strictEqual(omitted.cause, "none");
-	const legacy = buildCacheCallObservation(broken, baseline, [], 60_000);
-	const row = (backendVerdict: string, observation: unknown) =>
-		({
-			kind: "message",
-			role: "assistant",
-			payload: { promptCache: { backendVerdict, observation } },
-		}) as unknown as SessionEntry;
-	const folded = foldPromptCacheTelemetry([row("unknown", legacy), row("unknown", omitted)]);
-	strictEqual(folded.reprefilledTokens, null);
-	strictEqual(folded.cacheBreakCalls, 0);
-	strictEqual(foldPromptCacheTelemetry([row("cold", legacy)]).cacheBreakCalls, 1);
 });

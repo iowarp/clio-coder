@@ -1,5 +1,5 @@
 import { accessSync, chmodSync, constants, type Dirent, existsSync, readdirSync, type Stats, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative as relativePath } from "node:path";
+import { isAbsolute, join, relative as relativePath } from "node:path";
 import { isDevVersion, readClioVersionLabel } from "../../core/build-info.js";
 import type { SettingsScalarRepair } from "../../core/config.js";
 import { formatSettingsIssues, readSettings, validateSettingsFile } from "../../core/config.js";
@@ -8,6 +8,7 @@ import { readClioVersion } from "../../core/package-root.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
 import { repairSettingsCoercions, type SettingsRepairResult } from "../../core/settings-repair.js";
 import { shellQuote } from "../../core/shell-quote.js";
+import type { CacheReportV1 } from "../../core/telemetry/dto.js";
 import { clioDirLayoutProblems, resolveClioDirs } from "../../core/xdg.js";
 import { readSessionFileEntries, type SessionJsonlWarning } from "../../engine/session.js";
 import {
@@ -23,10 +24,11 @@ import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../providers/types/target-descriptor.js";
 import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
-import { isSessionEntry, type SessionEntry } from "../session/entries.js";
-import { foldPromptCacheTelemetry, hasPromptCacheTelemetry, topExpectedColdReason } from "../session/prompt-cache.js";
+import { loadSessionTelemetrySource } from "../session/telemetry-source.js";
 import type { SiteBindingInfo } from "../system-one/types.js";
 import { systemOneRecordingLabel, workspaceTelemetryCapture } from "../telemetry/consent.js";
+import { telemetryJournalFiles, telemetrySessionsDirectory } from "../telemetry/paths.js";
+import { cacheReport } from "../telemetry/read-model.js";
 import { deferredUpdateTarget, readDeferredResult } from "./deferred-update.js";
 import { type Installation, inspectInstallation } from "./install-method.js";
 import { listMigrations, readMigrationManifestResult } from "./migrations/index.js";
@@ -255,60 +257,59 @@ function sessionStoreFinding(stateDir: string, stateMetadataPresent: boolean): D
 	return { ok: false, name: "session store", detail: parts.join("; ") };
 }
 
-interface SessionCacheCandidate {
-	entries: SessionEntry[];
-	ledger: string;
-	sessionId: string;
-	updatedAt: number;
-}
-
-/** Report the latest transcript's durable cache evidence. */
+/**
+ * The newest session's prompt cache as the read model folds it from the session's journal, every number the read
+ * model's display (#434 §11.3). Newest is the session whose journal was written last.
+ */
 function latestSessionCacheFinding(stateDir: string): DoctorFinding | null {
-	const store = join(stateDir, "sessions");
-	const ledgers: string[] = [];
-	const unlistable: string[] = [];
-	collectSessionLedgers(store, ledgers, unlistable);
-	const candidates: SessionCacheCandidate[] = [];
-	for (const ledger of ledgers) {
-		let parsed: unknown[];
-		let modifiedAt: number;
-		try {
-			parsed = readSessionFileEntries(ledger, { onWarning: () => {} });
-			modifiedAt = statSync(ledger).mtimeMs;
-		} catch {
-			continue;
-		}
-		const entries = parsed.filter(isSessionEntry);
-		const entryTimes = entries
-			.map((entry) => Date.parse(entry.timestamp))
-			.filter((timestamp) => Number.isFinite(timestamp));
-		candidates.push({
-			entries,
-			ledger,
-			sessionId: basename(dirname(ledger)),
-			updatedAt: entryTimes.length > 0 ? Math.max(...entryTimes) : modifiedAt,
-		});
+	const root = telemetrySessionsDirectory(stateDir);
+	let latest: { sessionId: string; at: number } | null = null;
+	let names: string[];
+	try {
+		names = readdirSync(root);
+	} catch {
+		// No session has journaled yet, so there is no cache evidence to report.
+		return null;
 	}
-	const latest = candidates.sort(
-		(left, right) => right.updatedAt - left.updatedAt || left.ledger.localeCompare(right.ledger),
-	)[0];
-	if (latest === undefined) return null;
-
-	const telemetry = foldPromptCacheTelemetry(latest.entries);
-	if (!hasPromptCacheTelemetry(telemetry)) {
+	for (const sessionId of names) {
+		try {
+			const directory = join(root, sessionId);
+			for (const segment of telemetryJournalFiles(readdirSync(directory))) {
+				const at = statSync(join(directory, segment)).mtimeMs;
+				if (latest === null || at > latest.at) latest = { sessionId, at };
+			}
+		} catch {
+			// An unlistable scope has its own row in `clio-coder telemetry doctor`; it holds no evidence here.
+		}
+	}
+	if (latest === null) return null;
+	let report: CacheReportV1;
+	try {
+		const source = loadSessionTelemetrySource(stateDir, latest.sessionId);
+		if (source === null) return null;
+		report = cacheReport(source);
+	} catch (error) {
 		return {
 			ok: true,
 			level: "warn",
 			name: "cache telemetry",
-			detail: `last session ${latest.sessionId}: no prompt-cache telemetry recorded`,
+			detail: `last session ${latest.sessionId}: journal unreadable (${error instanceof Error ? error.message : String(error)})`,
 		};
 	}
-	const counts = telemetry.verdictCounts;
-	const topReason = topExpectedColdReason(telemetry);
+	const counts = report.verdicts;
+	if (counts.hot + counts.partial + counts.cold + counts.small + counts.unknown === 0) {
+		return {
+			ok: true,
+			level: "warn",
+			name: "cache telemetry",
+			detail: `last session ${latest.sessionId}: no prompt-cache verdict journaled`,
+		};
+	}
+	const top = [...report.byCause].sort((a, b) => b.breaks - a.breaks || a.cause.localeCompare(b.cause))[0];
 	return {
 		ok: true,
 		name: "cache telemetry",
-		detail: `last session ${latest.sessionId}: hot ${counts.hot} · partial ${counts.partial} · cold ${counts.cold} · small ${counts.small} · unknown ${counts.unknown}; re-prefilled ${telemetry.reprefilledTokens === null ? "not reported" : `${telemetry.reprefilledTokens} tokens (estimate), ${telemetry.cacheBreakCalls} breaks`}; top expected reason ${topReason === null ? "none" : `${topReason.reason} (${topReason.count})`}`,
+		detail: `last session ${latest.sessionId}: hot ${counts.hot} · partial ${counts.partial} · cold ${counts.cold} · small ${counts.small} · unknown ${counts.unknown}; cache read ${report.cacheRead.display} · re-prefilled ${report.rePrefilled.display} in ${report.breaks.length} breaks (${report.breakUsd.display}); top cause ${top ? `${top.cause} (${top.breaks})` : "none"}`,
 	};
 }
 
@@ -686,10 +687,8 @@ export function runDoctor(options: DoctorOptions = {}): DoctorFinding[] {
 
 	const sessionStore = sessionStoreFinding(dirs.state, state !== null);
 	if (sessionStore !== null) findings.push(sessionStore);
-	if (sessionStore?.ok) {
-		const cacheTelemetry = latestSessionCacheFinding(dirs.state);
-		if (cacheTelemetry !== null) findings.push(cacheTelemetry);
-	}
+	const cacheTelemetry = latestSessionCacheFinding(dirs.state);
+	if (cacheTelemetry !== null) findings.push(cacheTelemetry);
 	findings.push(telemetryModeFinding(dirs.state, process.cwd()));
 
 	return findings;
