@@ -2,8 +2,8 @@ import { join } from "node:path";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { StateFileLockTimeoutError } from "../../core/state-file-lock.js";
-import type { TelemetryContext, WorkerTelemetryContext } from "../../core/telemetry/context.js";
-import { isWorkerTelemetryContext } from "../../core/telemetry/context.js";
+import type { RunOwnerTelemetryContext, TelemetryContext } from "../../core/telemetry/context.js";
+import { isRunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import { readWorkerTelemetryFrame } from "../../core/telemetry/forwarder.js";
@@ -16,7 +16,7 @@ import type { RunSettlement } from "./run-settlement.js";
 import { runSettledRecord } from "./run-settlement.js";
 
 export interface RunTelemetryJournal {
-	context: WorkerTelemetryContext;
+	context: RunOwnerTelemetryContext;
 	closed: boolean;
 	/**
 	 * False when the frame is refused. The journal records its own reason: an invalid frame leaves an invalid-record
@@ -80,7 +80,7 @@ const opening = new Map<string, Promise<RunTelemetryJournal>>();
 /** Every attempt opens a journal before it spawns, so the package versions are read once per process (#434). */
 let writerVersions: Promise<{ clioCoderVersion: string; piVersion: string }> | undefined;
 
-export function openRunTelemetry(context: WorkerTelemetryContext, directory: string): Promise<RunTelemetryJournal> {
+export function openRunTelemetry(context: RunOwnerTelemetryContext, directory: string): Promise<RunTelemetryJournal> {
 	const pending = opening.get(context.runId);
 	if (pending)
 		return pending.then((journal) => {
@@ -94,7 +94,7 @@ export function openRunTelemetry(context: WorkerTelemetryContext, directory: str
 
 /**
  * Journal the run.settled a run's host died before writing, from recovery's verdict, and seal the run. Only a journal
- * that exists is written, under the worker context its own run records carry, so its turn stops reading as running
+ * that exists is written, under the owner context its own run records carry, so its turn stops reading as running
  * (#425, #434). A run whose host died after run.settled but before its seal keeps that settlement and gets the seal.
  */
 export function settleOrphanedRunJournal(directory: string, settlement: RunSettlement): Promise<void> {
@@ -118,7 +118,7 @@ async function completeRunJournal(directory: string, settlement: RunSettlement |
 	const settled = read.records.some(({ record }) => record.k === "run.settled");
 	if (settled && read.records.at(-1)?.record.k === "run.sealed" && existsSync(telemetryBundlePath(directory))) return;
 	if (!settled && settlement === null) return;
-	const context = read.records.map(({ record }) => record.ctx).find(isWorkerTelemetryContext);
+	const context = read.records.map(({ record }) => record.ctx).find(isRunOwnerTelemetryContext);
 	if (!context) return;
 	// The run's owner is gone, so this one record gets a writer of its own rather than the run's owned journal.
 	let writer: CallJournal;
@@ -218,7 +218,10 @@ export function fleetRootTelemetryContext(rootId: string | undefined): Telemetry
 }
 
 /** Only dispatch opens owners. Viewers and the display registry never acquire a second writer (#434). */
-async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory: string): Promise<RunTelemetryJournal> {
+async function openOwnedRunTelemetry(
+	context: RunOwnerTelemetryContext,
+	directory: string,
+): Promise<RunTelemetryJournal> {
 	const existing = journals.get(context.runId);
 	if (existing) {
 		if (JSON.stringify(existing.context) !== JSON.stringify(context) || existing.closed)

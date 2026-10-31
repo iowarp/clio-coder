@@ -1,4 +1,4 @@
-import type { WorkerTelemetryContext } from "./context.js";
+import type { RunOwnerTelemetryContext, WorkerTelemetryContext } from "./context.js";
 import { telemetryOwner } from "./context.js";
 import type { ClockOrigin, TelemetryRecord } from "./envelope.js";
 import { makeTelemetryRecord, readTelemetryRecord } from "./envelope.js";
@@ -24,7 +24,7 @@ const workerKinds = new Set([
 ]);
 
 /** The parent owns identity and publication; a worker cannot attribute facts to a different run or session (#434). */
-export function readWorkerTelemetryRecord(value: unknown, expected: WorkerTelemetryContext): TelemetryRecord | null {
+export function readWorkerTelemetryRecord(value: unknown, expected: RunOwnerTelemetryContext): TelemetryRecord | null {
 	if (
 		!value ||
 		typeof value !== "object" ||
@@ -51,7 +51,7 @@ export function readWorkerTelemetryRecord(value: unknown, expected: WorkerTeleme
 	return record;
 }
 
-export function readWorkerTelemetryFrame(value: unknown, expected: WorkerTelemetryContext): PendingTelemetry | null {
+export function readWorkerTelemetryFrame(value: unknown, expected: RunOwnerTelemetryContext): PendingTelemetry | null {
 	const record = readWorkerTelemetryRecord(value, expected);
 	if (!record) return null;
 	return {

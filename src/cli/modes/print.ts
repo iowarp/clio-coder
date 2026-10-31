@@ -12,8 +12,8 @@ import {
 	type SkillActivation,
 	skillActivationFromToolDetails,
 } from "../../core/skill-activation.js";
-import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
-import { workerAgent } from "../../core/telemetry/context.js";
+import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
+import { mainAgent } from "../../core/telemetry/context.js";
 import type { CallRowV1, Quantity } from "../../core/telemetry/dto.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
@@ -825,11 +825,12 @@ async function recordHeadlessMainAgentRun(input: {
 		sessionId,
 	};
 	try {
-		// The run's model calls are journaled in its session; its run scope holds the terminal record and the seal.
-		const context: WorkerTelemetryContext =
+		// The run's model calls are journaled in its session; its run scope holds the terminal record and the seal. The
+		// run is the main agent's own, so its scope names that agent, not a worker (#434).
+		const context: RunOwnerTelemetryContext =
 			sessionId === null
-				? { sessionId: null, runId: envelope.id, agent: workerAgent(envelope.id) }
-				: { sessionId, runId: envelope.id, agent: workerAgent(envelope.id) };
+				? { sessionId: null, runId: envelope.id, agent: mainAgent(envelope.id) }
+				: { sessionId, runId: envelope.id, agent: mainAgent(sessionId) };
 		const journal = await openRunTelemetry(context, telemetryRunDirectory(clioStateDir(), envelope.id));
 		try {
 			const finished = finishRunResult(

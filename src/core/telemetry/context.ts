@@ -37,8 +37,17 @@ export type WorkerTelemetryContext = TelemetryContext & {
 	readonly agent: { readonly role: "worker"; readonly id: string };
 };
 
+/**
+ * The context that owns a run scope: a dispatched worker named by its run, or the main agent of a headless
+ * `clio-coder run` named by its session, else by its run when it has none (#434).
+ */
+export type RunOwnerTelemetryContext = TelemetryContext & {
+	readonly runId: string;
+	readonly agent: { readonly role: "worker" | "main"; readonly id: string };
+};
+
 /** A session's own agent, named by its session (#434). */
-export function mainAgent(sessionId: string): TelemetryAgent {
+export function mainAgent(sessionId: string): { role: "main"; id: string } {
 	return { role: "main", id: sessionId };
 }
 
@@ -63,6 +72,19 @@ export function isWorkerTelemetryContext(value: unknown): value is WorkerTelemet
 		value.runId !== undefined &&
 		value.agent.role === "worker" &&
 		value.agent.id === value.runId &&
+		value.callId === undefined &&
+		value.attemptId === undefined
+	);
+}
+
+/** A run scope's owner, as its writer opens it and recovery finds it in the run's own records (#434). */
+export function isRunOwnerTelemetryContext(value: unknown): value is RunOwnerTelemetryContext {
+	if (isWorkerTelemetryContext(value)) return true;
+	return (
+		Value.Check(TelemetryContextSchema, value) &&
+		value.runId !== undefined &&
+		value.agent.role === "main" &&
+		value.agent.id === (value.sessionId ?? value.runId) &&
 		value.callId === undefined &&
 		value.attemptId === undefined
 	);
