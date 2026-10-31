@@ -280,7 +280,7 @@ export const WorkerGraph = memo(function WorkerGraph({
 										{evidence.has(notice.id) ? (
 											<Link
 												className="agents-notices__link"
-												to={`/evidence/${encodeURIComponent(evidence.get(notice.id)?.evidenceId ?? "")}`}
+												to={`/evidence/${encodeURIComponent(evidence.get(notice.id)?.runId ?? "")}`}
 											>
 												Open evidence
 											</Link>

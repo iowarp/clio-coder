@@ -522,10 +522,7 @@ const fleet = () => {
 			},
 		],
 		["run.failed", { runId: "run-2", agentId: "worker-2", outcome: "error", reason: "tool_failed", durationMs: 12 }],
-		[
-			"evidence.assessed",
-			{ runId: "run-1", evidenceId: "evidence-1", firstPassSuccess: true, findingCount: 2, tags: ["fixture"] },
-		],
+		["evidence.assessed", { runId: "run-1", firstPassSuccess: true, findingCount: 2, tags: ["fixture"] }],
 		["compaction.ended", { trigger: "threshold" }],
 		["context.warning_raised", { warning: "Context window is 85% full." }],
 		[

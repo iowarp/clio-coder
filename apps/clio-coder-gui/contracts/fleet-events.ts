@@ -74,7 +74,6 @@ export const FleetPayloads = {
 	"evidence.ready": Type.Object(
 		{
 			runId: identifier,
-			evidenceId: identifier,
 			firstPassSuccess: Type.Boolean(),
 			findingCount: count,
 			tags: Type.Array(Type.String({ maxLength: 64 }), { maxItems: 32 }),

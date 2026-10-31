@@ -430,7 +430,7 @@ test("the loop guard and evidence facts are reported as notices rather than drop
 	const items = [
 		fact("fleet.started", { runId: "r1", agentId: "a" }),
 		fact("fleet.loopBlocked", { tool: "read", repeatCount: 9, budget: 4, disposition: "lockout", interrupted: false }),
-		fact("evidence.ready", { runId: "r1", evidenceId: "e1", firstPassSuccess: true, findingCount: 3, tags: [] }),
+		fact("evidence.ready", { runId: "r1", firstPassSuccess: true, findingCount: 3, tags: [] }),
 	];
 	assert.equal(foldFleetRuns(items).length, 1);
 	const notices = fleetNotices(items);

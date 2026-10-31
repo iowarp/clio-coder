@@ -450,7 +450,7 @@ export function SessionOverview({
 											: `${row.findingCount} ${row.findingCount === 1 ? "finding" : "findings"}`}
 									</span>
 									<span className="pane-evidence__links">
-										<Link to={`/evidence/${encodeURIComponent(row.evidenceId)}`}>Evidence</Link>
+										<Link to={`/evidence/${encodeURIComponent(row.runId)}`}>Evidence</Link>
 										<Link to={`/fleet/dispatches/${encodeURIComponent(row.runId)}`}>Run</Link>
 									</span>
 								</li>
