@@ -29,8 +29,9 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { recordPackageActivity } from "../core/package-activity.js";
+import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
+import { telemetryHub } from "../core/telemetry/hub.js";
 import type { ToolName } from "../core/tool-names.js";
-import { clioStateDir } from "../core/xdg.js";
 import type {
 	ExtensionReloadCommitted,
 	ExtensionReloadRejection,
@@ -45,12 +46,10 @@ import {
 	type BuildUserHookRegistrationsResult,
 	buildUserHookRegistrations,
 	type CapturedHookSourceSet,
-	createHookReceiptLog,
-	type HookReceiptLog,
+	type HookReceipt,
 	type HookReceiptSink,
 	type MiddlewareContract,
 	type MiddlewareRegistrationConflict,
-	readPersistedHookReceipts,
 	type UserHookCommandRunner,
 } from "../domains/middleware/index.js";
 import { buildExtensionRuntimeToolSpecs } from "../tools/extension-runtime-tools.js";
@@ -149,39 +148,60 @@ export interface ExtensionReloadCoordinator {
 	};
 }
 
-const hookReceiptLogs = new Map<string, HookReceiptLog>();
-
-/**
- * The one writer of `<stateDir>/hook-receipts.json` in this process. It starts
- * from the persisted snapshot, so a command that only answers worker hooks
- * (`fleet run`, `run --agent`) appends to the receipts a session left instead
- * of replacing them with its own.
- */
-export function hookReceiptLog(): HookReceiptLog {
-	const persistPath = path.join(clioStateDir(), "hook-receipts.json");
-	let log = hookReceiptLogs.get(persistPath);
-	if (log === undefined) {
-		let initial: ReturnType<typeof readPersistedHookReceipts> = [];
-		try {
-			initial = readPersistedHookReceipts(persistPath);
-		} catch {
-			// An unreadable snapshot is observability only; the log starts empty and rewrites it.
-		}
-		log = createHookReceiptLog({ persistPath, initial });
-		hookReceiptLogs.set(persistPath, log);
+/** One hook execution as `hook.ran`; the session, run and turn ride the record's context, never its payload (#434). */
+function recordHookRan(receipt: HookReceipt, sessionId: string | undefined): void {
+	try {
+		const ctx = withToolTelemetryContext(
+			{
+				...(sessionId !== undefined ? { sessionId } : {}),
+				...(receipt.runId !== undefined ? { runId: receipt.runId } : {}),
+				...(receipt.turnId !== undefined ? { turnId: receipt.turnId } : {}),
+			},
+			telemetryContext,
+		);
+		const extension = receipt.extension;
+		telemetryHub().emit(
+			"hook.ran",
+			{
+				hookId: receipt.hookId,
+				origin: receipt.origin,
+				sourcePath: receipt.sourcePath.slice(0, 4096),
+				hash: receipt.hash,
+				hook: receipt.hook,
+				kind: receipt.kind,
+				outcome: receipt.outcome,
+				...(receipt.effectKinds !== undefined ? { effectKinds: receipt.effectKinds.slice(0, 32) } : {}),
+				...(receipt.durationMs !== undefined ? { durationMs: Math.max(0, receipt.durationMs) } : {}),
+				...(receipt.exitCode !== undefined ? { exitCode: receipt.exitCode } : {}),
+				...(receipt.outputChars !== undefined ? { outputChars: receipt.outputChars } : {}),
+				...(receipt.toolName !== undefined ? { tool: receipt.toolName } : {}),
+				...(extension
+					? {
+							extension: {
+								id: extension.id,
+								...(receipt.extensionVersion ? { version: receipt.extensionVersion } : {}),
+								scope: extension.scope,
+								contentDigest: extension.contentDigest,
+								generation: extension.generation,
+							},
+						}
+					: {}),
+			},
+			ctx,
+		);
+	} catch {
+		// A hook's record is evidence about the hook, never part of its outcome (#434).
 	}
-	return log;
 }
 
 /**
- * Where a session's hook receipts go: the persisted receipt log, attributed to
- * the session when the receipt names none, and an extension's package
- * activity.
+ * Where a session's hook receipts go: a `hook.ran` journal record under the receipt's own session, run and turn,
+ * attributed to the session when the receipt names none, and an extension's package activity (#434).
  */
-export function extensionHookReceiptSink(log: HookReceiptLog, sessionId: () => string | undefined): HookReceiptSink {
+export function extensionHookReceiptSink(sessionId: () => string | undefined): HookReceiptSink {
 	return (receipt) => {
 		const session = receipt.sessionId ?? sessionId();
-		log.record({ ...receipt, ...(session ? { sessionId: session } : {}) });
+		recordHookRan(receipt, session);
 		if (receipt.extension)
 			recordPackageActivity({
 				kind: `hook:${receipt.hook}`,

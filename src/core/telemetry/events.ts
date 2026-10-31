@@ -193,6 +193,7 @@ export const EVENTS = {
 		cc: "content-free",
 		capture: "providerHeaders",
 	}),
+	"hook.ran": journal(S.HookRanSchema, { tier: "operational", cc: "structural", ambient: true }),
 	"job.changed": live<JobChangedPayload>(),
 	"session.eggs_changed": live<{ sessionId: string | null; active: readonly string[] }>(),
 	"session.started": live<SessionStartPayload>(),

@@ -2,7 +2,7 @@ import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { createExtensionRuntimeHookBridge, type ExtensionsContract } from "../domains/extensions/index.js";
 import type { MiddlewareContract } from "../domains/middleware/index.js";
 import { type ExtensionHost, type ExtensionHostOptions, startExtensionHost } from "./extension-host.js";
-import { createExtensionReloadCoordinator, extensionHookReceiptSink, hookReceiptLog } from "./extension-reload.js";
+import { createExtensionReloadCoordinator, extensionHookReceiptSink } from "./extension-reload.js";
 
 export interface WorkerHookHostOptions {
 	extensions: ExtensionsContract;
@@ -32,13 +32,12 @@ export interface WorkerHookHost {
  */
 export function startWorkerHookHost(options: WorkerHookHostOptions): WorkerHookHost {
 	const runtimeHooks = createExtensionRuntimeHookBridge();
-	const receipts = hookReceiptLog();
 	const reload = createExtensionReloadCoordinator({
 		extensions: options.extensions,
 		middleware: options.middleware,
 		runtimeHooks,
 		cwd: () => process.cwd(),
-		recordReceipt: extensionHookReceiptSink(receipts, () => undefined),
+		recordReceipt: extensionHookReceiptSink(() => undefined),
 		report: options.notify,
 	});
 	reload.applyBoot();
@@ -60,7 +59,6 @@ export function startWorkerHookHost(options: WorkerHookHostOptions): WorkerHookH
 			// A run that ends before startup settles would otherwise report its runtimes' staging as a failed reload.
 			await host.ready.catch(() => undefined);
 			await host.dispose();
-			receipts.flush();
 		},
 	};
 }

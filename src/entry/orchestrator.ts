@@ -371,7 +371,7 @@ import { resizeImage } from "../utils/image-resize.js";
 import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
-import { createExtensionReloadCoordinator, extensionHookReceiptSink, hookReceiptLog } from "./extension-reload.js";
+import { createExtensionReloadCoordinator, extensionHookReceiptSink } from "./extension-reload.js";
 import { createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
 import { createJobHost } from "./job-host.js";
 import { bindSessionPackageActivity } from "./package-activity.js";
@@ -3045,7 +3045,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// so no consumer ever sees extension resources paired with hooks from a
 	// different generation. The owner slot is anchored here, so user hooks
 	// keep evaluating before the protection consumer and assessors below.
-	const hookReceipts = hookReceiptLog();
 	let bootHookNotices = true;
 	const reloadPlugins = () =>
 		reloadPluginResourcesAndNotify(process.cwd(), (event) => bus.emit("plugin.reloaded", event));
@@ -3067,7 +3066,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// The gateway is registered after this coordinator; the lookup runs at call time.
 		mcpOwner: (tool) => toolBootstrap.mcpCapabilities?.ownerIdOf(tool) ?? null,
 		cwd: () => process.cwd(),
-		recordReceipt: extensionHookReceiptSink(hookReceipts, () => session?.current()?.id),
+		recordReceipt: extensionHookReceiptSink(() => session?.current()?.id),
 		report: (line) => {
 			if (reloadClasses.captureIssue(line)) return;
 			if (!interactive) process.stderr.write(`${line}\n`);
@@ -3084,7 +3083,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	middleware.registerHook(protectedArtifactsGuard);
 	bootHookNotices = false;
 	await bootPhaseBoundary?.();
-	termination.onDrain(() => hookReceipts.flush());
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.
 	let activeAcpSessionAutonomy: AutonomyLevel | null = null;

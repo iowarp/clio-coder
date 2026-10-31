@@ -6,9 +6,8 @@ export function inspectConfigGraph(cwd: string): ConfigGraph {
 	const issueCounts = new Map<string, number>();
 	for (const issue of graph.issues) {
 		const category =
-			/^(settings|clio-md|rules|operator-profile|hooks?|hook-receipts|extensions|resources|safety|memory)\b/.exec(
-				issue,
-			)?.[1] ?? "configuration";
+			/^(settings|clio-md|rules|operator-profile|hooks?|extensions|resources|safety|memory)\b/.exec(issue)?.[1] ??
+			"configuration";
 		issueCounts.set(category, (issueCounts.get(category) ?? 0) + 1);
 	}
 	return {

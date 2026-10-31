@@ -13,6 +13,7 @@
 
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
+import { cwdHash } from "../core/cwd-hash.js";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { formatSettingsLayerIssue } from "../core/settings-layer-diagnostics.js";
 import type { SettingsOrigin } from "../core/settings-layers.js";
@@ -27,13 +28,14 @@ import { renderPromptContext } from "../domains/context/prompt-context.js";
 import { extensionSnapshotFor } from "../domains/extensions/snapshot-access.js";
 import { listInstalledExtensions } from "../domains/extensions/state.js";
 import { loadMemoryRecordsSync, memoryStorePath } from "../domains/memory/store.js";
-import { HOOK_RECEIPT_LOG_CAPACITY, readPersistedHookReceipts } from "../domains/middleware/hook-receipts.js";
 import { loadUserHooks } from "../domains/middleware/hooks.js";
 import { readHookSources } from "../domains/middleware/hooks-io.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import { defaultScopedResourceRoots } from "../domains/resources/common-loader.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
+import { HOOK_RUN_WINDOW_DAYS, workspaceHookRuns } from "../domains/telemetry/hook-runs.js";
+import { telemetryRoot } from "../domains/telemetry/paths.js";
 import { capturedHookSourcesFor } from "../entry/extension-hook-sources.js";
 
 export type CustomizationCategory =
@@ -252,38 +254,29 @@ function inspectHooks(cwd: string, graph: CustomizationGraph): void {
 }
 
 /**
- * Rolls up the durable hook-execution receipt log (`<stateDir>/hook-receipts.json`,
- * written by `createHookReceiptLog` in `src/domains/middleware/hook-receipts.ts`)
- * into one entry, since this process never held the live in-memory ring a
- * running session's own invocation writes through. One entry rather than one
- * per receipt: this graph explains configuration provenance, and a couple
- * hundred execution rows would swamp that rather than answer it.
+ * Rolls up the workspace's `hook.ran` journal records over the last few days into one entry. One entry rather than
+ * one per run: this graph explains configuration provenance, and execution rows would swamp that (#434).
  */
-function inspectHookReceipts(graph: CustomizationGraph): void {
-	const path = join(clioStateDir(), "hook-receipts.json");
+function inspectHookRuns(cwd: string, graph: CustomizationGraph): void {
 	try {
-		const receipts = existsSync(path) ? readPersistedHookReceipts(path) : [];
-		const outcomes: Record<string, number> = {};
-		for (const receipt of receipts) outcomes[receipt.outcome] = (outcomes[receipt.outcome] ?? 0) + 1;
-		const last = receipts.at(-1);
+		const runs = workspaceHookRuns(clioStateDir(), cwdHash(cwd));
 		graph.entries.push({
 			category: "hook",
-			id: "hook-receipts",
+			id: "hook-runs",
 			scope: "user",
-			sourcePath: path,
+			sourcePath: telemetryRoot(clioStateDir()),
 			reloadClass: "n/a",
 			trust: "n/a",
 			precedence: "single",
 			detail: {
-				present: existsSync(path),
-				count: receipts.length,
-				capacity: HOOK_RECEIPT_LOG_CAPACITY,
-				outcomes,
-				...(last === undefined ? {} : { mostRecent: { at: last.at, hookId: last.hookId, outcome: last.outcome } }),
+				count: runs.count,
+				windowDays: HOOK_RUN_WINDOW_DAYS,
+				outcomes: runs.outcomes,
+				...(runs.mostRecent === null ? {} : { mostRecent: runs.mostRecent }),
 			},
 		});
 	} catch (err) {
-		graph.issues.push(`hook-receipts: ${err instanceof Error ? err.message : String(err)}`);
+		graph.issues.push(`hook-runs: ${err instanceof Error ? err.message : String(err)}`);
 	}
 }
 
@@ -429,7 +422,7 @@ export function buildCustomizationGraph(cwd: string): CustomizationGraph {
 	inspectRules(cwd, graph);
 	inspectOperatorProfile(cwd, graph);
 	inspectHooks(cwd, graph);
-	inspectHookReceipts(graph);
+	inspectHookRuns(cwd, graph);
 	inspectExtensions(cwd, graph);
 	inspectResourceRoots(cwd, graph);
 	inspectSafetyAndMemory(cwd, graph);

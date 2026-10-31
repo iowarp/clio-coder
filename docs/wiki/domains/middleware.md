@@ -12,7 +12,6 @@ sources:
   - "src/domains/middleware/budget.ts"
   - "src/domains/middleware/hooks.ts"
   - "src/domains/middleware/hooks-io.ts"
-  - "src/domains/middleware/hook-receipts.ts"
   - "src/domains/middleware/snapshot.ts"
   - "src/domains/middleware/validate.ts"
   - "src/domains/middleware/memory-intervention.ts"
@@ -202,7 +201,7 @@ Extension hooks are never read from disk by middleware. They arrive already pars
 
 ### Receipts
 
-Every hook execution emits a `HookReceipt` with source attribution and content hash. The `HookReceiptLog` in `src/domains/middleware/hook-receipts.ts` keeps a bounded in-memory ring (capacity 200) and persists it atomically through `safeResourceWrite`. Writes are throttled to 2 seconds so a per-tool-call cadence never turns into per-call disk I/O. `flush()` forces a final write at shutdown. `clio-coder config inspect` reads the persisted snapshot back with `readPersistedHookReceipts`.
+Every hook execution emits a `HookReceipt` with source attribution and content hash. `extensionHookReceiptSink` in `src/entry/extension-reload.ts` records it as a `hook.ran` journal event under the session, run and turn it ran for, and `clio-coder config inspect` folds a workspace's recent `hook.ran` records through `src/domains/telemetry/hook-runs.ts`.
 
 ## Budget Tracking
 
@@ -317,7 +316,6 @@ The three kinds (prompt, effect, command) are a closed set. Adding a fourth requ
 | `loadUserHooks` | `hooks.ts` | Merges hooks across sources with precedence |
 | `userHookToRegistration` | `hooks.ts` | Turns a normalized hook into a coded registration |
 | `createHookBudgetTracker` | `budget.ts` | Session-scoped budget tracker |
-| `createHookReceiptLog` | `hook-receipts.ts` | Durable receipt log for user hooks |
 | `validateMiddlewareEffect` | `validate.ts` | Validates a raw effect against the closed set |
 | `createMemoryInterventionRegistration` | `memory-intervention.ts` | Proactive task-memory policy |
 | `createReadOnlyExplorationNudgeRegistration` | `dispatch-nudge.ts` | Advises Scout delegation |

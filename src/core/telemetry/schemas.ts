@@ -397,6 +397,45 @@ export const ContextRecalledSchema = Type.Object(
 	closed,
 );
 export const DomainLoadedSchema = Type.Object({ name: ExistingId }, closed);
+/** One user or extension hook execution, under the session, run and turn it ran for (#434). */
+export const HookRanSchema = Type.Object(
+	{
+		hookId: ExistingId,
+		origin: vocabulary(["extension", "user", "project", "project.local"]),
+		sourcePath: text,
+		hash: ExistingId,
+		hook: vocabulary(["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction", "prompt_submit"]),
+		kind: vocabulary(["command", "prompt", "effect", "runtime"]),
+		outcome: vocabulary([
+			"emitted",
+			"command-ok",
+			"command-failed",
+			"command-timeout",
+			"skipped",
+			"runtime-ok",
+			"runtime-failed",
+			"runtime-timeout",
+		]),
+		effectKinds: Type.Optional(Type.Array(ExistingId, { maxItems: 32 })),
+		durationMs: Type.Optional(duration),
+		exitCode: Type.Optional(Type.Integer()),
+		outputChars: Type.Optional(count),
+		tool: Type.Optional(ExistingId),
+		extension: Type.Optional(
+			Type.Object(
+				{
+					id: ExistingId,
+					version: Type.Optional(ExistingId),
+					scope: ExistingId,
+					contentDigest: ExistingId,
+					generation: count,
+				},
+				closed,
+			),
+		),
+	},
+	closed,
+);
 export const DomainFailedSchema = Type.Object({ name: ExistingId }, closed);
 /** A settings reload the watcher rejected, keeping the last good settings, or the reload that ended the rejection. */
 export const ConfigReloadFailedSchema = Type.Object({ state: vocabulary(["rejected", "recovered"]) }, closed);
