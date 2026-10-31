@@ -969,7 +969,7 @@ const trustAxis = (states: readonly string[]) =>
 			state: vocabulary(states),
 			/** The canonical trust word for the state, as the TUI footer prints it. */
 			display: Type.String(),
-			/** Who stands behind the state, e.g. `receipt_integrity_verification`; null for an absent axis. */
+			/** Who stands behind the state, e.g. `run_seal`; null for an absent axis. */
 			authority: Type.Union([text, Type.Null()]),
 		},
 		closed,
@@ -1144,6 +1144,8 @@ export const RunTelemetrySchema = Type.Object(
 				{
 					...RunSettledSchema.properties,
 					at: UtcSchema,
+					/** The run's identity: the digest of its run.settled payload (`run-digest.ts`). */
+					digest: Type.String({ pattern: "^[0-9a-f]{64}$" }),
 					boundKind: Type.Union([RunBoundKind, Type.Null()]),
 					repairRounds: QuantitySchema,
 				},

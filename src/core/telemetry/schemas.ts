@@ -707,10 +707,17 @@ export const RunSettledSchema = Type.Object(
 					strategy: vocabulary(["single", "batch-settled"]),
 					checks: count,
 					failed: count,
+					/** Failing checks that also failed on the task base, so they cannot show the change caused them. */
+					failedOnBase: count,
 				},
 				closed,
 			),
 		),
+		/**
+		 * Whether the briefing, worker context and project context the run was sent were recorded consistently, judged
+		 * when the run settled; their hashes are in `hashes`, their text is never kept.
+		 */
+		contextProvenance: vocabulary(["recorded", "invalid", "not_applicable", "unknown"]),
 		hashes: Type.Array(RunHashSchema, { maxItems: 512 }),
 		result: ObjectRefSchema,
 	},

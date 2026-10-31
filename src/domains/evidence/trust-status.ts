@@ -1,3 +1,5 @@
+import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import type { RunSettled } from "../../core/telemetry/schemas.js";
 import { parseWorkerContextProvenance } from "../../worker/context-seed.js";
 import type { GateDecisionArtifact, GateDecisionVerification } from "../dispatch/gate-decisions.js";
 import { RUN_RECEIPT_INTEGRITY_VERSION, verifyReceiptIntegrity } from "../dispatch/receipt-integrity.js";
@@ -10,6 +12,8 @@ import type {
 	RunResultVerification,
 } from "../dispatch/types.js";
 import { normalizeYoloGateAuthority, normalizeYoloGateOutcome } from "../dispatch/yolo-ids.js";
+import type { SealVerdict } from "../telemetry/seal.js";
+import { describeSealMismatch } from "../telemetry/seal.js";
 
 /** Persisted version of the canonical, deliberately non-scalar trust model. */
 export const TRUST_STATUS_VERSION = 1 as const;
@@ -38,8 +42,8 @@ export const TRUST_STATUS_STATES = {
 } as const satisfies Record<TrustStatusAxis, ReadonlyArray<string>>;
 
 export type TrustStatusSourceKind =
-	| "receipt_integrity_verification"
-	| "run_receipt"
+	| "run_seal"
+	| "run_record"
 	| "gate_decision"
 	| "evidence_bundle"
 	| "finish_contract"
@@ -66,7 +70,7 @@ export interface TrustStatusAuthority {
 }
 
 export type TrustArtifactKind =
-	| "run_receipt"
+	| "run_record"
 	| "validation_result"
 	| "gate_decision"
 	| "briefing"
@@ -141,7 +145,7 @@ export type TrustStatusValidation = { ok: true; status: CanonicalTrustStatus } |
  */
 const SELF_REPORTED_ARTIFACT_KINDS: ReadonlySet<TrustArtifactKind> = new Set([
 	"finish_contract_evidence",
-	"run_receipt",
+	"run_record",
 ]);
 
 const AXIS_STATES: Record<TrustStatusAxis, ReadonlySet<string>> = {
@@ -153,16 +157,16 @@ const AXIS_STATES: Record<TrustStatusAxis, ReadonlySet<string>> = {
 };
 
 const AXIS_SOURCES: Record<TrustStatusAxis, ReadonlySet<TrustStatusSourceKind>> = {
-	artifactIntegrity: new Set(["receipt_integrity_verification", "compatibility"]),
-	validationGrounding: new Set(["run_receipt", "evidence_bundle", "compatibility"]),
+	artifactIntegrity: new Set(["run_seal", "compatibility"]),
+	validationGrounding: new Set(["run_record", "evidence_bundle", "compatibility"]),
 	independentReview: new Set(["gate_decision", "compatibility"]),
-	contextProvenance: new Set(["run_receipt", "evidence_bundle", "compatibility"]),
+	contextProvenance: new Set(["run_record", "evidence_bundle", "compatibility"]),
 	completionEvidence: new Set(["finish_contract", "compatibility"]),
 };
 
 const SOURCE_AUTHORITIES: Record<TrustStatusSourceKind, ReadonlySet<TrustStatusAuthorityKind>> = {
-	receipt_integrity_verification: new Set(["clio"]),
-	run_receipt: new Set(["clio", "validator", "runtime", "external_system", "unknown"]),
+	run_seal: new Set(["clio"]),
+	run_record: new Set(["clio", "validator", "runtime", "external_system", "unknown"]),
 	gate_decision: new Set(["clio", "reviewer", "operator", "unknown"]),
 	evidence_bundle: new Set(["clio"]),
 	finish_contract: new Set(["clio"]),
@@ -177,8 +181,8 @@ const ABSENCE_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 const SOURCE_KINDS: ReadonlySet<string> = new Set([
-	"receipt_integrity_verification",
-	"run_receipt",
+	"run_seal",
+	"run_record",
 	"gate_decision",
 	"evidence_bundle",
 	"finish_contract",
@@ -196,7 +200,7 @@ const AUTHORITY_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 const ARTIFACT_KINDS: ReadonlySet<string> = new Set([
-	"run_receipt",
+	"run_record",
 	"validation_result",
 	"gate_decision",
 	"briefing",
@@ -415,7 +419,7 @@ function sha256Reference(kind: TrustArtifactKind, id: string, digest: string | u
 }
 
 function receiptReference(receipt: PersistedRunResultTrustFacts): TrustArtifactReference {
-	return sha256Reference("run_receipt", receipt.runId, receipt.integrity?.digest);
+	return sha256Reference("run_record", receipt.runId, receipt.integrity?.digest);
 }
 
 function attributed<State extends string>(
@@ -428,7 +432,7 @@ function attributed<State extends string>(
 }
 
 function receiptSource(receipt: PersistedRunResultTrustFacts): TrustStatusSource {
-	return { kind: "run_receipt", id: receipt.runId };
+	return { kind: "run_record", id: receipt.runId };
 }
 
 function compatibilitySource(receipt: PersistedRunResultTrustFacts, field: string): TrustStatusSource {
@@ -547,7 +551,7 @@ export function adaptReceiptIntegrityStatus(
 	}
 	return attributed(
 		verification.ok ? "verified" : "failed",
-		{ kind: "receipt_integrity_verification", id: receipt.runId },
+		{ kind: "run_seal", id: receipt.runId },
 		{
 			kind: "clio",
 			id: verification.ok && verification.ledgerEvicted ? LEDGER_EVICTED_INTEGRITY_AUTHORITY : "receipt-integrity",
@@ -958,4 +962,196 @@ function uniqueBoundedReferences(references: ReadonlyArray<TrustArtifactReferenc
 			index === 0 || compareArtifactReferences(sorted[index - 1] as TrustArtifactReference, reference) !== 0,
 	);
 	return unique.slice(0, TRUST_STATUS_MAX_ARTIFACT_REFERENCES);
+}
+
+/**
+ * The facts a finished run's trust status reads: what its run.settled records, the run's id and the digest of that
+ * record (#434). The producing process reads them from the settlement it built, every other reader from the run DTO.
+ */
+export type RunTrustFacts = Pick<
+	RunSettled,
+	"verification" | "quality" | "validationGrounding" | "hostVerification" | "contextProvenance" | "hashes"
+> & { runId: string; digest: string | null };
+
+/**
+ * Whether a run's record may be read as evidence: verified by its scope's seal, or held by the process that settled
+ * it; unsealed while its scope is open; failed when the seal does not verify.
+ */
+export type RunIntegrity =
+	| { state: "verified"; by: "seal" | "producer" }
+	| { state: "unsealed"; reason: string }
+	| { state: "failed"; reason: string };
+
+/** The integrity a run's seal verdict states (`telemetry/seal.ts`). */
+export function runIntegrityOfSeal(seal: SealVerdict | null): RunIntegrity {
+	if (seal === null) return { state: "unsealed", reason: "run scope unreadable" };
+	if (seal.status === "verified") return { state: "verified", by: "seal" };
+	if (seal.status === "unsealed") return { state: "unsealed", reason: `run scope unsealed (${seal.reason})` };
+	return { state: "failed", reason: `run seal failed: ${describeSealMismatch(seal.mismatch)}` };
+}
+
+function runRecordReference(facts: RunTrustFacts): TrustArtifactReference {
+	return sha256Reference("run_record", facts.runId, facts.digest ?? undefined);
+}
+
+function runRecordSource(facts: RunTrustFacts): TrustStatusSource {
+	return { kind: "run_record", id: facts.runId };
+}
+
+function runIntegrityStatus(facts: RunTrustFacts, integrity: RunIntegrity): ArtifactIntegrityStatus {
+	const artifacts = [runRecordReference(facts)];
+	const source: TrustStatusSource = { kind: "run_seal", id: facts.runId };
+	if (integrity.state === "unsealed") return attributed("unknown", source, { kind: "clio", id: "run-seal" }, artifacts);
+	return attributed(
+		integrity.state === "verified" ? "verified" : "failed",
+		source,
+		{ kind: "clio", id: integrity.state === "verified" && integrity.by === "producer" ? "run-producer" : "run-seal" },
+		artifacts,
+	);
+}
+
+function runValidationArtifacts(facts: RunTrustFacts): TrustArtifactReference[] {
+	const artifacts = [runRecordReference(facts)];
+	for (const fact of facts.quality?.typedValidations ?? [])
+		artifacts.push(sha256Reference("validation_result", fact.sourceId, fact.validatorDigest));
+	const contract = facts.quality?.resultContract;
+	if (contract) artifacts.push(sha256Reference("validation_result", contract.sourceId, contract.validatorDigest));
+	return uniqueBoundedReferences(artifacts);
+}
+
+function settledQualityFails(quality: RunTrustFacts["quality"]): boolean {
+	if (quality === null) return false;
+	if (quality.typedValidations.some((fact) => !fact.passed)) return true;
+	return quality.resultContract?.conformance === "fail" || quality.resultContract?.quality === "fail";
+}
+
+function settledQualityValidates(quality: RunTrustFacts["quality"]): boolean {
+	if (quality === null) return false;
+	if (quality.typedValidations.some((fact) => fact.passed)) return true;
+	return quality.resultContract?.quality === "pass";
+}
+
+/** Correctness-bearing facts before the descriptive verification marker, as the run settled them. */
+function runValidationStatus(facts: RunTrustFacts): ValidationGroundingStatus {
+	const artifacts = runValidationArtifacts(facts);
+	const source = runRecordSource(facts);
+	const host = facts.hostVerification;
+	const hostAuthority: TrustStatusAuthority = { kind: "validator", id: "host-verification" };
+	if (host?.status === "rejected") {
+		// Every failing host check also failed on the task base, so it cannot establish a failure the change caused.
+		if (host.failed > 0 && host.failedOnBase === host.failed)
+			return attributed("unknown", source, { kind: "validator", id: "host-verification-baseline-failed" }, artifacts);
+		return attributed("failed", source, hostAuthority, artifacts);
+	}
+	if (host?.status === "verified") return attributed("validated", source, hostAuthority, artifacts);
+	// A batch member the failure was charged away from has no validator verdict of its own.
+	if (host?.status === "not_implicated") return attributed("unknown", source, hostAuthority, artifacts);
+	if (settledQualityFails(facts.quality))
+		return attributed("failed", source, { kind: "validator", id: "receipt-quality" }, artifacts);
+	const grounding = facts.validationGrounding;
+	if (
+		grounding?.basis === "no-command-executed" &&
+		(grounding.ungrounded.length > 0 || grounding.claimed > grounding.grounded)
+	)
+		return attributed("ungrounded", source, { kind: "validator", id: "command-grounding" }, artifacts);
+	if (settledQualityValidates(facts.quality))
+		return attributed("validated", source, { kind: "validator", id: "receipt-quality" }, artifacts);
+	const verification = facts.verification;
+	if (verification.state === "verified")
+		return attributed("validated", source, { kind: "validator", id: verification.basis }, artifacts);
+	if (verification.state === "unverified") return absentTrustStatus("not_observed");
+	if (verification.state === "not_applicable")
+		return attributed("not_applicable", source, DISPATCH_AUTHORITY, artifacts);
+	return attributed(
+		"unknown",
+		source,
+		verification.basis === "acp-external-unobserved"
+			? { kind: "external_system", id: "acp-delegation" }
+			: { kind: "unknown", id: verification.basis },
+		artifacts,
+	);
+}
+
+const CONTEXT_HASH_KINDS: Partial<Record<RunTrustFacts["hashes"][number]["subject"], TrustArtifactKind>> = {
+	briefing: "briefing",
+	"worker-context-seed": "worker_context",
+	"project-context": "project_context",
+};
+
+function runContextStatus(facts: RunTrustFacts): ContextProvenanceStatus {
+	const artifacts = [runRecordReference(facts)];
+	for (const hash of facts.hashes) {
+		const kind = CONTEXT_HASH_KINDS[hash.subject];
+		if (kind !== undefined) artifacts.push(sha256Reference(kind, `${facts.runId}:${hash.field}`, hash.hash));
+	}
+	return attributed(
+		facts.contextProvenance,
+		runRecordSource(facts),
+		DISPATCH_AUTHORITY,
+		uniqueBoundedReferences(artifacts),
+	);
+}
+
+/**
+ * A finished run's trust status from its settled facts. Only an authenticated record's claims are read: a run whose
+ * seal is open or failed keeps the integrity verdict and reads nothing else (#434).
+ */
+export function adaptRunTrustStatus(facts: RunTrustFacts | null, integrity: RunIntegrity): CanonicalTrustStatus {
+	if (facts === null)
+		return composeTrustStatus({
+			artifactIntegrity: absentTrustStatus("artifact_missing"),
+			validationGrounding: absentTrustStatus("artifact_missing"),
+			contextProvenance: absentTrustStatus("artifact_missing"),
+			independentReview: absentTrustStatus("artifact_missing"),
+			completionEvidence: absentTrustStatus("artifact_missing"),
+		});
+	const authenticated = integrity.state === "verified";
+	return composeTrustStatus({
+		artifactIntegrity: runIntegrityStatus(facts, integrity),
+		validationGrounding: authenticated ? runValidationStatus(facts) : absentTrustStatus("not_observed"),
+		contextProvenance: authenticated ? runContextStatus(facts) : absentTrustStatus("not_observed"),
+		independentReview: absentTrustStatus("not_recorded"),
+		completionEvidence: absentTrustStatus("not_recorded"),
+	});
+}
+
+/**
+ * Whether the context a run was sent was recorded consistently, judged once when the run settles: run.settled keeps
+ * the verdict and the hashes, never the context itself (#434).
+ */
+export function runContextProvenance(
+	result: Pick<RunResult, "briefing" | "workerContext" | "projectContext">,
+): RunSettled["contextProvenance"] {
+	const briefingInvalid = result.briefing !== undefined && !validBriefing(result.briefing);
+	if (briefingInvalid || (result.workerContext !== undefined && !validWorkerContext(result.workerContext)))
+		return "invalid";
+	const context = result.projectContext;
+	const sentContext = result.briefing !== undefined || result.workerContext !== undefined;
+	if (context === undefined) return sentContext ? "recorded" : "unknown";
+	if (context.tier === "none") {
+		if (context.chars === undefined && context.contentHash === undefined && context.sections === undefined)
+			return sentContext ? "recorded" : "not_applicable";
+		return validNoneTierProjectContext(context) ? "recorded" : "invalid";
+	}
+	return validBoundedProjectContext(context) ? "recorded" : "invalid";
+}
+
+export interface RunTrustInspection {
+	integrity: RunIntegrity;
+	status: CanonicalTrustStatus;
+}
+
+/** A persisted run's trust, from the read model's run DTO: its settled facts and its seal verdict (#434). */
+export function inspectRunTrustStatus(
+	record: Pick<RunTelemetryV1, "row" | "settled" | "seal"> | null,
+): RunTrustInspection {
+	if (record === null || record.settled === null) {
+		const integrity: RunIntegrity = { state: "unsealed", reason: "the run has not settled" };
+		return { integrity, status: adaptRunTrustStatus(null, integrity) };
+	}
+	const integrity = runIntegrityOfSeal(record.seal);
+	return {
+		integrity,
+		status: adaptRunTrustStatus({ ...record.settled, runId: record.row.runId, digest: record.settled.digest }, integrity),
+	};
 }

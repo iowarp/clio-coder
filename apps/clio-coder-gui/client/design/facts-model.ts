@@ -60,7 +60,7 @@ export function humanizeKey(key: string): string {
  */
 const VOCABULARY_KEY =
 	/^(kind|state|status|reason|outcome|verdict|level|tier|mode|phase|class|category)$|[a-z0-9](Kind|State|Status|Reason|Outcome|Verdict|Level|Tier|Mode|Phase|Class|Category)$|[_-](kind|state|status|reason|outcome|verdict|level|tier|mode|phase|class|category)$/;
-/** One lowercase wire word: `absent`, `not_observed`, `receipt_integrity_verification`, `next-turn`. */
+/** One lowercase wire word: `absent`, `not_observed`, `run_seal`, `next-turn`. */
 const WIRE_TOKEN = /^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$/;
 
 /** `not_observed` → "Not observed"; `external_system` → "External system"; `acp_adapter` → "ACP adapter". */

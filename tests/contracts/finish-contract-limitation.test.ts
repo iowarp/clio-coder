@@ -287,13 +287,13 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		const trusted = composeTrustStatus({
 			artifactIntegrity: {
 				state: "verified",
-				source: { kind: "receipt_integrity_verification", id: "run-1" },
+				source: { kind: "run_seal", id: "run-1" },
 				authority: { kind: "clio", id: "receipt-integrity" },
 				artifacts: [],
 			},
 			validationGrounding: {
 				state: "validated",
-				source: { kind: "run_receipt", id: "run-1" },
+				source: { kind: "run_record", id: "run-1" },
 				authority: { kind: "validator", id: "receipt-quality" },
 				artifacts: [],
 			},

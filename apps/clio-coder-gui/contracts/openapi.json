@@ -23495,9 +23495,11 @@
 									"findings",
 									"worktree",
 									"hostVerification",
+									"contextProvenance",
 									"hashes",
 									"result",
-									"at"
+									"at",
+									"digest"
 								],
 								"properties": {
 									"version": {
@@ -23970,7 +23972,7 @@
 										"anyOf": [
 											{
 												"type": "object",
-												"required": ["status", "strategy", "checks", "failed"],
+												"required": ["status", "strategy", "checks", "failed", "failedOnBase"],
 												"properties": {
 													"status": {
 														"enum": ["verified", "rejected", "skipped", "not_implicated"]
@@ -23985,6 +23987,10 @@
 													"failed": {
 														"type": "integer",
 														"minimum": 0
+													},
+													"failedOnBase": {
+														"type": "integer",
+														"minimum": 0
 													}
 												},
 												"additionalProperties": false
@@ -23993,6 +23999,9 @@
 												"type": "null"
 											}
 										]
+									},
+									"contextProvenance": {
+										"enum": ["recorded", "invalid", "not_applicable", "unknown"]
 									},
 									"hashes": {
 										"type": "array",
@@ -24078,6 +24087,10 @@
 									"at": {
 										"type": "string",
 										"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+									},
+									"digest": {
+										"type": "string",
+										"pattern": "^[0-9a-f]{64}$"
 									}
 								},
 								"additionalProperties": false
@@ -24311,7 +24324,28 @@
 															"truncated": {
 																"type": "boolean"
 															},
-															"structured": {}
+															"structured": {
+																"type": "object",
+																"required": ["version", "kind", "data"],
+																"properties": {
+																	"version": {
+																		"type": "number",
+																		"const": 1
+																	},
+																	"kind": {
+																		"type": "string",
+																		"minLength": 1,
+																		"maxLength": 512
+																	},
+																	"data": {
+																		"type": "object",
+																		"patternProperties": {
+																			"^.*$": {}
+																		}
+																	}
+																},
+																"additionalProperties": false
+															}
 														},
 														"additionalProperties": false
 													},

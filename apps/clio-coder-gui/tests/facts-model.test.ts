@@ -99,7 +99,7 @@ test("depth is bounded, so a hostile or cyclic-looking record cannot hang a page
 
 test("a vocabulary key reads its wire word as words, and an identifier is never rewritten", () => {
 	assert.equal(scalarText("reason", "not_observed").text, "Not observed");
-	assert.equal(scalarText("kind", "receipt_integrity_verification").text, "Receipt integrity verification");
+	assert.equal(scalarText("kind", "run_seal").text, "Run seal");
 	assert.equal(scalarText("state", "absent").text, "Absent");
 	assert.equal(scalarText("reloadClass", "next-turn").text, "Next turn");
 	assert.equal(scalarText("source_kind", "external_system").text, "External system");

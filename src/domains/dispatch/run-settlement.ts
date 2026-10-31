@@ -6,6 +6,7 @@
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { RunResultObject, RunSettled } from "../../core/telemetry/schemas.js";
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../agents/result-contract.js";
+import { runContextProvenance } from "../evidence/trust-status.js";
 import { redactSecretString } from "../safety/redaction.js";
 import type { ResolvedTerminalReason } from "./outcome.js";
 import { labelledRunHashes } from "./receipt-hashes.js";
@@ -114,8 +115,11 @@ export function settleFinishedRun(
 						strategy: host.strategy ?? "single",
 						checks: host.checks.length,
 						failed: host.checks.filter((check) => check.exitCode !== 0).length,
+						failedOnBase: host.checks.filter((check) => check.exitCode !== 0 && check.baseComparison?.status === "failed")
+							.length,
 					}
 				: null,
+			contextProvenance: runContextProvenance(receipt),
 			hashes: labelledRunHashes(receipt, receipt.agentId),
 		},
 		result: {
@@ -208,6 +212,7 @@ export function settleUnfinishedRun(
 			findings: null,
 			worktree: null,
 			hostVerification: null,
+			contextProvenance: runContextProvenance(run),
 			hashes: [],
 		},
 		result: {

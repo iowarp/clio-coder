@@ -62,6 +62,7 @@ import {
 	TELEMETRY_FOLD_VERSION,
 } from "./folds.js";
 import type { telemetryPromptStructure } from "./objects.js";
+import { runSettledDigest } from "./run-digest.js";
 import type { SealVerdict, TelemetryScopeFiles } from "./seal.js";
 import { verifyTelemetryScope } from "./seal.js";
 
@@ -2777,6 +2778,7 @@ export function runTelemetry(
 			? {
 					...settled.data,
 					at: settled.at,
+					digest: runSettledDigest(settled.data),
 					boundKind: settled.data.boundKind ?? null,
 					repairRounds: quantity(view, { ...base, metric: "repairRounds" }),
 				}
