@@ -26,6 +26,7 @@ clio-coder telemetry import-bundle <bundle-dir> --out <dir>
 clio-coder telemetry prune [--apply] [--days N] [--max-gib N] [--research-days N] [--research-max-gib N]
 clio-coder telemetry prune --receipts [--apply]
 clio-coder telemetry verify <scope-dir> [--json]
+clio-coder telemetry doctor [--json]
 
 consent records, for this operator, that research content capture may run in a
 workspace (default: the current directory) and everything under it. Capture also
@@ -72,6 +73,14 @@ bundle.json lists against its size and sha256, the journal hash chain from the
 first segment header, and the seal record's head, line count and file lists. It
 prints verified, unsealed (live or never sealed) or failed with the first
 mismatch, and exits 0 only when the scope verifies, 2 on a usage error.
+
+doctor shows the effective capture mode for the current directory against what
+settings request, the research content consent that covers it, the newest
+session journal's health through the read model (records, skipped and damaged
+lines, gaps, duplicates), and the seal state of every session, run and process
+scope: a scope with bundle.json is verified as verify does, any other counts as
+unsealed. It exits 1 when a seal fails, the consent store is unreadable or the
+newest journal has damaged lines.
 `;
 
 function formatBytes(bytes: number): string {
@@ -376,6 +385,7 @@ export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<
 	if (argv[0] === "import-bundle") return runImportBundle(argv.slice(1));
 	if (argv[0] === "prune") return runPrune(argv.slice(1));
 	if (argv[0] === "verify") return (await import("./telemetry-verify.js")).runTelemetryVerify(argv.slice(1));
+	if (argv[0] === "doctor") return (await import("./telemetry-doctor.js")).runTelemetryDoctor(argv.slice(1));
 	if (argv[0] !== undefined) printError(`unknown telemetry command: ${argv[0]}`);
 	process.stderr.write(HELP);
 	return 2;
