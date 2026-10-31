@@ -216,6 +216,7 @@ import {
 } from "../safety/worker-permit.js";
 import {
 	type BudgetSpendPricing,
+	budgetSpendText,
 	combineBudgetPricing,
 	SESSION_COST_CEILING_REASON,
 	SessionCostCeilingError,
@@ -4078,13 +4079,13 @@ export function createDispatchBundle(
 	 * carry no trace that the admission gate refused the dispatch.
 	 */
 	function denyDispatchForBudget(
-		preflight: { currentUsd: number; ceilingUsd: number },
+		preflight: { currentUsd: number; ceilingUsd: number; pricing?: BudgetSpendPricing },
 		agentId: string,
 		routeEstimateUsd = 0,
 	): never {
 		const estimateSuffix =
 			routeEstimateUsd > 0 ? ` (includes ${renderCostAmount(routeEstimateUsd, "estimated")} route estimate)` : "";
-		const reason = `budget ceiling crossed: ${renderCostAmount(preflight.currentUsd, "known")} / ${renderCostAmount(preflight.ceilingUsd, "known")}${estimateSuffix}`;
+		const reason = `budget ceiling crossed: ${budgetSpendText(preflight.currentUsd, preflight.pricing)} / ${renderCostAmount(preflight.ceilingUsd, "known")}${estimateSuffix}`;
 		safety.audit.recordToolCall?.({
 			tool: "dispatch",
 			classification: { actionClass: "dispatch", reasons: ["budget admission preflight"] },
@@ -4149,7 +4150,12 @@ export function createDispatchBundle(
 		const estimateUsd = conservativeRouteAdmissionEstimateUsd(pricing, admissionMaxOutputTokens(settings), req, prompt);
 		const intentCeiling = req.routingIntent?.maxCostUsd;
 		if (intentCeiling !== null && intentCeiling !== undefined && estimateUsd > intentCeiling)
-			denyDispatchForBudget({ currentUsd: estimateUsd, ceilingUsd: intentCeiling }, req.agentId, estimateUsd);
+			// The amount compared is the route's conservative estimate, so it is named as one (#434 §6.3).
+			denyDispatchForBudget(
+				{ currentUsd: estimateUsd, ceilingUsd: intentCeiling, pricing: { estimated: true, unpriced: false } },
+				req.agentId,
+				estimateUsd,
+			);
 		if (pricing.rates === null || Object.values(pricing.rates).every((rate) => rate === 0)) return;
 		try {
 			if (scheduling.admitPaidRequest) {

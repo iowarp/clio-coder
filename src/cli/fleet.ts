@@ -86,7 +86,7 @@ import { ResourcesDomainModule } from "../domains/resources/index.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
-import { SchedulingDomainModule } from "../domains/scheduling/index.js";
+import { budgetSpendText, SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
@@ -234,7 +234,7 @@ function preflightPlaybook(playbook: Playbook, deps: FleetPreflightDeps): string
 	if (deps.scheduling) {
 		const budget = deps.scheduling.preflight();
 		if (budget.verdict === "over" || budget.verdict === "at") {
-			return `budget ceiling crossed: ${renderCostAmount(budget.currentUsd, "known")} / ${renderCostAmount(budget.ceilingUsd, "known")}`;
+			return `budget ceiling crossed: ${budgetSpendText(budget.currentUsd, budget.pricing)} / ${renderCostAmount(budget.ceilingUsd, "known")}`;
 		}
 		if (playbook.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;

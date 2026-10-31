@@ -32,6 +32,7 @@ import {
 } from "../agents/index.js";
 import { type AgentSpec, agentSpecFingerprint } from "../agents/spec.js";
 import { foregroundStreamUsage } from "../providers/index.js";
+import { type BudgetSpendPricing, budgetSpendText } from "../scheduling/budget.js";
 import type { DispatchContract, DispatchRequest } from "./contract.js";
 import { bindExecutionPlanEndpoints, type ExecutionPlan, type ExecutionPlanStep } from "./execution-plan.js";
 import { type AgentRoleFactsResolver, requestExecutionRole, withAttemptRole } from "./execution-role.js";
@@ -84,6 +85,8 @@ export interface FleetRunPreviewBudget {
 	currentUsd: number;
 	/** The playbook's own declared ceiling, or null when it declares none. */
 	playbookUsd: number | null;
+	/** How `currentUsd` was priced; absent when no cost tracker said, and then it reads as known (#434 §6.3). */
+	pricing?: BudgetSpendPricing;
 }
 
 export interface FleetRunPreview {
@@ -122,7 +125,7 @@ export interface FleetRunPreviewInput {
 	/** Role facts for the execution role each node runs under. */
 	roleFacts: AgentRoleFactsResolver;
 	/** Session budget state; absent leaves the ceiling unknown and checks nothing. */
-	budget?: { ceilingUsd: number; currentUsd: number; verdict: "under" | "at" | "over" };
+	budget?: { ceilingUsd: number; currentUsd: number; verdict: "under" | "at" | "over"; pricing?: BudgetSpendPricing };
 	/** Effective route for an agent step. Absent or null renders the step without one. */
 	resolveRoute?: (step: {
 		stepId: string;
@@ -320,11 +323,12 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 		ceilingUsd: input.budget?.ceilingUsd ?? 0,
 		currentUsd: input.budget?.currentUsd ?? 0,
 		playbookUsd: playbook.budgetUsd,
+		...(input.budget?.pricing ? { pricing: input.budget.pricing } : {}),
 	};
 	if (input.budget) {
 		if (input.budget.verdict === "over" || input.budget.verdict === "at") {
 			diagnostics.push(
-				`budget ceiling crossed: ${renderCostAmount(budget.currentUsd, "known")} / ${renderCostAmount(budget.ceilingUsd, "known")}`,
+				`budget ceiling crossed: ${budgetSpendText(budget.currentUsd, budget.pricing)} / ${renderCostAmount(budget.ceilingUsd, "known")}`,
 			);
 		} else if (playbook.budgetUsd !== null && budget.ceilingUsd > 0) {
 			const remaining = budget.ceilingUsd - budget.currentUsd;
@@ -391,7 +395,8 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 				recipes: [...recipeFingerprints].sort(([left], [right]) => left.localeCompare(right)),
 				commands: commandBindings,
 				waves,
-				budget,
+				// How the spend was priced only words it, so the identity keeps the amounts it always sealed.
+				budget: { ceilingUsd: budget.ceilingUsd, currentUsd: budget.currentUsd, playbookUsd: budget.playbookUsd },
 				// Absent for a fresh run, so its approval identity is unchanged.
 				...(resume !== undefined
 					? {

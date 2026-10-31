@@ -13,6 +13,7 @@
 
 import type { FleetRunPreview, FleetRunPreviewStep } from "../../domains/dispatch/index.js";
 import { renderCostAmount } from "../../domains/observability/cost.js";
+import { budgetSpendText } from "../../domains/scheduling/budget.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
@@ -90,7 +91,7 @@ export function formatBudgetLine(preview: FleetRunPreview): string {
 		preview.budget.ceilingUsd === 0
 			? "no session ceiling"
 			: `${renderCostAmount(preview.budget.ceilingUsd, "known")} session ceiling`;
-	return `budget: admitted under ${ceiling}, ${renderCostAmount(preview.budget.currentUsd, "known")} spent, ${playbook}`;
+	return `budget: admitted under ${ceiling}, ${budgetSpendText(preview.budget.currentUsd, preview.budget.pricing)} spent, ${playbook}`;
 }
 
 /**

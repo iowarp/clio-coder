@@ -1,4 +1,5 @@
 import { renderCostAmount } from "../../domains/observability/cost.js";
+import { budgetSpendText } from "../../domains/scheduling/index.js";
 import type { AcpFleetPreview, AcpFleetStep } from "./types.js";
 
 export type { AcpFleetPreview, AcpFleetStep } from "./types.js";
@@ -127,9 +128,12 @@ export function projectFleetPreview(result: FleetRunPreviewResult): AcpFleetPrev
 		stepCount: preview.plan.steps.length,
 		waves: waves.filter((wave) => wave.steps.length > 0),
 		budget: {
-			...preview.budget,
+			// The wire budget is closed; how the spend was priced reaches it only through currentDisplay.
+			ceilingUsd: preview.budget.ceilingUsd,
+			currentUsd: preview.budget.currentUsd,
+			playbookUsd: preview.budget.playbookUsd,
 			ceilingDisplay: renderCostAmount(preview.budget.ceilingUsd, "known"),
-			currentDisplay: renderCostAmount(preview.budget.currentUsd, "known"),
+			currentDisplay: budgetSpendText(preview.budget.currentUsd, preview.budget.pricing),
 			...(preview.budget.playbookUsd !== null
 				? { playbookDisplay: renderCostAmount(preview.budget.playbookUsd, "known") }
 				: {}),

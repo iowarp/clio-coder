@@ -22,6 +22,7 @@ import {
 } from "../domains/memory/index.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { renderCostAggregate } from "../domains/observability/index.js";
+import type { BudgetPreflight } from "../domains/scheduling/contract.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
 import { foldRecallTelemetry } from "../domains/session/recall-telemetry.js";
@@ -137,7 +138,7 @@ export interface OverlayGeneralOpenersDeps {
 	/** Recipe registry `/fleet run` resolves every step's agent against. */
 	agents?: AgentsContract;
 	/** Session budget state the run would be admitted under; absent leaves it unknown. */
-	getBudgetPreflight?: () => { ceilingUsd: number; currentUsd: number; verdict: "under" | "at" | "over" };
+	getBudgetPreflight?: () => BudgetPreflight;
 	/**
 	 * True while a turn is streaming. `/fleet run` is refused then, never
 	 * queued: an approved plan describes the workspace as it stands, and a turn
