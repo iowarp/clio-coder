@@ -18,7 +18,7 @@ import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import { validPayload } from "../../src/core/telemetry/events.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
-import { registerTelemetrySink, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
+import { registerProcessTelemetrySink, registerTelemetrySink } from "../../src/core/telemetry/producer.js";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { AuthStorage, resolveAuthTarget } from "../../src/domains/providers/auth/storage.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
@@ -369,11 +369,22 @@ describe("contracts/auth OAuth refresh", () => {
 		strictEqual(refreshed.updatedAtBefore, "2026-01-01T00:00:00.000Z");
 		strictEqual((byOutcome.adopted as { attempted: boolean }).attempted, false);
 		ok(!JSON.stringify(events).includes("access-recorded") && !JSON.stringify(events).includes("refresh-"));
-		// A refresh outside any session or run, such as a quota read's, records nothing and loses nothing.
+		// A refresh outside any session or run, such as model discovery's, is a process fact in the process journal.
 		seed(-1000);
-		const unowned = telemetryProducerHealth().unownedRecords;
-		strictEqual((await open().resolveApiKey("alcf")).apiKey, "access-recorded");
-		strictEqual(telemetryProducerHealth().unownedRecords, unowned);
+		const processRecords: PendingTelemetry[] = [];
+		const releaseProcess = registerProcessTelemetrySink(
+			{ sessionId: null, processId: "prc_auth-events", label: "main" },
+			{ enqueue: (record) => Boolean(processRecords.push(record)) },
+		);
+		try {
+			strictEqual((await open().resolveApiKey("alcf")).apiKey, "access-recorded");
+		} finally {
+			releaseProcess();
+		}
+		deepStrictEqual(
+			processRecords.map((record) => record.kind),
+			["auth.refreshed"],
+		);
 	});
 
 	it("leaves the file byte-identical and reports no key when the refresh is rejected", async () => {
