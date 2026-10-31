@@ -467,7 +467,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			}
 			return sessionCapture.current(origin);
 		},
-		telemetry,
+		read: telemetry,
 		recordResearchTrace(origin, kind, data, preimage) {
 			// Facts can point at live runtime state; the journal keeps what the event saw (#434).
 			let owned: { data: typeof data; preimage: unknown };

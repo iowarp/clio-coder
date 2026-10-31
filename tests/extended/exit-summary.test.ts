@@ -12,7 +12,7 @@ test("the session summary counts what Clio answered while the operator was away 
 	const bus = createTelemetryHub();
 	const telemetry = {
 		subscribe: () => () => {},
-		telemetry: { live: () => telemetryViewOf("session-1", []), subscribe: () => () => {} },
+		read: { live: () => telemetryViewOf("session-1", []), subscribe: () => () => {} },
 	} as unknown as TelemetryContract;
 	const collector = createExitSummaryCollector({
 		bus,

@@ -379,7 +379,7 @@ export function openUsageOverlay(
 	options?: OpenUsageOverlayOptions,
 ): OverlayHandle {
 	const sessionId = options?.sessionId ?? null;
-	const readModel = telemetry.telemetry;
+	const readModel = telemetry.read;
 	const readRecall = () => (options?.getSessionEntries ? foldRecallTelemetry(options.getSessionEntries()) : null);
 	let recall = readRecall();
 	const now = options?.now ?? (() => Date.now());

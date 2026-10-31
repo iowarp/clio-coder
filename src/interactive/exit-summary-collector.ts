@@ -406,7 +406,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			for (const stats of workerTools.values()) {
 				for (const { tool, count } of stats) tools.set(tool, (tools.get(tool) ?? 0) + count);
 			}
-			const spend = exitSpend(deps.telemetry.telemetry?.live(), visitFrom);
+			const spend = exitSpend(deps.telemetry.read?.live(), visitFrom);
 			return {
 				sessionId: session.id,
 				sessionName: session.name ?? null,

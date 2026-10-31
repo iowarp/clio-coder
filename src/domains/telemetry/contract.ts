@@ -205,7 +205,7 @@ export interface TelemetryReadModel {
 
 export interface TelemetryContract extends TelemetryRunProjection {
 	/** Absent on contracts built without the telemetry extension, such as test doubles. */
-	telemetry?: TelemetryReadModel;
+	read?: TelemetryReadModel;
 	recordRunTokens?(
 		runId: string,
 		source: "journal" | "unavailable",

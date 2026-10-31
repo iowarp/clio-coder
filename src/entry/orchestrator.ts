@@ -3972,7 +3972,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		registry: toolRegistry,
 		bus,
 		...(session ? { session } : {}),
-		telemetry: () => telemetry?.telemetry?.live() ?? null,
+		telemetry: () => telemetry?.read?.live() ?? null,
 		cwd: process.cwd(),
 		attended: options.headless === undefined,
 		safety,
@@ -4518,7 +4518,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let projectedUsage: string | null = null;
 	const projectSessionUsage = (): void => {
 		const meta = session?.current();
-		const view = telemetry?.telemetry?.live();
+		const view = telemetry?.read?.live();
 		if (!meta || !session || !view || view.sessionId !== meta.id || view.seeding) return;
 		// Two quantities over the cached analysis, not the whole session DTO, at up to 10 Hz.
 		const tokens = view.quantity(factRef({ scope: "session", owner: meta.id, metric: "total" }));
@@ -4533,7 +4533,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// The resume picker's spend is a convenience; the journal already holds every call.
 		}
 	};
-	const unsubscribeUsageProjection = telemetry?.telemetry?.subscribe("session", projectSessionUsage);
+	const unsubscribeUsageProjection = telemetry?.read?.subscribe("session", projectSessionUsage);
 	if (unsubscribeUsageProjection) termination.onDrain(unsubscribeUsageProjection);
 
 	const turnOutcomeCollector = createTurnOutcomeCollector();
@@ -5740,7 +5740,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// behind its cache, so reopening the view does not spend a provider read.
 				...(telemetry
 					? {
-							...(telemetry.telemetry ? { telemetryReadModel: telemetry.telemetry } : {}),
+							...(telemetry.read ? { telemetryReadModel: telemetry.read } : {}),
 							usage: {
 								resetSession: (sessionId: string) => telemetry.resetSession(sessionId),
 								subscribe: (listener: () => void) => telemetry.subscribe(listener),

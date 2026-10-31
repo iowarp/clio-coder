@@ -232,7 +232,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 				unsubscribed++;
 			};
 		},
-		telemetry: {
+		read: {
 			live: () => view,
 			subscribe: (_topic: string, update: () => void) => {
 				updates.add(update);

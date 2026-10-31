@@ -54,7 +54,7 @@ test("the island's input counts cache reads, so ↑ plus ↓ is the card's proce
 		subscribe: (listener) => projection.subscribe(listener),
 		reconcileRuns: () => projection.reconcileRuns(),
 		setFleetPhase: (runId, phase) => projection.setFleetPhase(runId, phase),
-		telemetry: { live: () => view } as unknown as TelemetryReadModel,
+		read: { live: () => view } as unknown as TelemetryReadModel,
 	});
 	try {
 		bus.emit("run.started", {

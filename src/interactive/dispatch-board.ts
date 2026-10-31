@@ -1349,7 +1349,7 @@ export function dispatchRunUsage(view: TelemetryView | null | undefined, runId: 
 
 /** The board keeps display order and reads every run fact from telemetry; tokens and cost from its read model. */
 export function createDispatchBoardStore(
-	projection: Pick<TelemetryContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "telemetry">,
+	projection: Pick<TelemetryContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "read">,
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;
@@ -1362,7 +1362,7 @@ export function createDispatchBoardStore(
 		current = snapshot;
 	});
 	const projectRows = (activeOnly: boolean): ReadonlyArray<DispatchBoardRow> => {
-		const view = projection.telemetry?.live() ?? null;
+		const view = projection.read?.live() ?? null;
 		return [...current.runs]
 			.reverse()
 			.sort(

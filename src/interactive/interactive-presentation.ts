@@ -354,7 +354,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	if (deps.startsResumed === true) banner.collapseToSessionHeader();
 	const renderTrace = getActiveRenderTrace();
 	const chatPanel = factories.createChatPanel({
-		...(deps.telemetry.telemetry ? { getTelemetry: () => deps.telemetry.telemetry?.live() ?? null } : {}),
+		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
 		requestRender,
@@ -473,7 +473,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		onHeightChange: (rows) => {
 			if (setDockFooterRows(deps.tui, rows)) requestRender();
 		},
-		...(deps.telemetry.telemetry ? { getTelemetry: () => deps.telemetry.telemetry?.live() ?? null } : {}),
+		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getTokenThroughput: () => (liveGeneration ? currentLiveThroughput() : telemetrySnapshot.session.latestThroughput),
 		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 		getContextUsage: () => deps.chat.contextUsage(),
@@ -533,14 +533,14 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		requestRender();
 	};
 	const unsubscribeTelemetry = (["session", "calls", "cost", "runs"] as const).map(
-		(topic) => deps.telemetry.telemetry?.subscribe(topic, repaintSpend) ?? (() => {}),
+		(topic) => deps.telemetry.read?.subscribe(topic, repaintSpend) ?? (() => {}),
 	);
 	// A journal that loses records raises one notice per owner a minute; a rise held by the window is checked when
 	// the window ends, so it is never left unreported (#434 §14).
 	const dropAlerts = createDropAlerts();
 	let dropCheck: NodeJS.Timeout | undefined;
 	const checkDrops = () => {
-		const readModel = deps.telemetry.telemetry;
+		const readModel = deps.telemetry.read;
 		if (!readModel) return;
 		const now = Date.now();
 		const alerts = dropAlerts.observe(readModel.health(), now);
@@ -553,7 +553,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		dropCheck = setTimeout(checkDrops, Math.max(0, due - now));
 		dropCheck.unref();
 	};
-	unsubscribeTelemetry.push(deps.telemetry.telemetry?.subscribe("health", checkDrops) ?? (() => {}));
+	unsubscribeTelemetry.push(deps.telemetry.read?.subscribe("health", checkDrops) ?? (() => {}));
 
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),

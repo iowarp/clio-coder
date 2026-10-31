@@ -261,7 +261,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "health";
 		const systemOne = deps.systemOne?.();
-		deps.transitions.handle = openHealthOverlay(deps.tui, deps.telemetry.telemetry, {
+		deps.transitions.handle = openHealthOverlay(deps.tui, deps.telemetry.read, {
 			getBreakers: () => deps.dispatch.routeBreakers?.() ?? [],
 			...(systemOne?.breakers ? { getSystemOneBreakers: () => systemOne.breakers?.() ?? [] } : {}),
 		});
@@ -274,7 +274,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.handle = openContextOverlayFactory(deps.tui, deps.getContextLedger, {
 			bus: deps.bus,
 			chat: deps.contextChat,
-			...(deps.telemetry.telemetry ? { telemetry: deps.telemetry.telemetry } : {}),
+			...(deps.telemetry.read ? { telemetry: deps.telemetry.read } : {}),
 			getWorkingSet: () => {
 				const readSessionEntries = deps.readSessionEntries;
 				if (!readSessionEntries) return null;
