@@ -1,3 +1,4 @@
+import type { Static } from "typebox";
 import type { AgentAudience } from "../../domains/agents/spec.js";
 import type { ConfigDiff } from "../../domains/config/classify.js";
 import type { RunToolBudgetEnvelope } from "../../domains/dispatch/budget-envelope.js";
@@ -17,7 +18,13 @@ import type { CostAggregate } from "../../domains/telemetry/cost.js";
 import type { ClioSettings } from "../config.js";
 import type { ContextOperation } from "../context-operation.js";
 import type { SkillActivation } from "../skill-activation.js";
-import type { TerminationPhase } from "../termination.js";
+import type {
+	ContextPrunedSchema,
+	ContextRecalledSchema,
+	DomainLoadedSchema,
+	PluginReloadedSchema,
+	ShutdownRequestedSchema,
+} from "./schemas.js";
 
 /**
  * Payload contracts for the live events declared in EVENTS (src/core/telemetry/events.ts). They describe what
@@ -332,34 +339,10 @@ export function isRunAbortedPayload(value: unknown): value is RunAbortedPayload 
 }
 
 /** Payload published on `context.pruned` after projected or summarized context shrinks. */
-export interface ContextPrunedPayload {
-	stage: "mask_observations" | "working_set" | "llm_summary";
-	tokensBefore: number;
-	tokensAfter: number;
-	trigger: string;
-	snapshotIdBefore: string | null;
-	snapshotIdAfter: string;
-	at: number;
-	/** Used/window ratio at trigger time; working-set and legacy-mask stages only. */
-	pressure?: number | null;
-	/** Legacy destructive-mask count. */
-	maskedObservations?: number;
-	/** Thinking blocks stripped from stale assistant messages; legacy mask only. */
-	maskedThinkingBlocks?: number;
-	maskedThinkingChars?: number;
-	/** Working-set policy that selected an applied eviction event. */
-	policyId?: string;
-	/** Number of working-set units evicted by the event. */
-	evictedItems?: number;
-}
+export type ContextPrunedPayload = Static<typeof ContextPrunedSchema>;
 
 /** Payload published on `context.recalled` after an exact working-set recall. */
-export interface ContextRecalledPayload {
-	ref: string;
-	trigger: "tool" | "operator" | "reread";
-	tokensReadmitted: number;
-	at: number;
-}
+export type ContextRecalledPayload = Static<typeof ContextRecalledSchema>;
 
 // ---------------------------------------------------------------------------
 // Session and domain lifecycle
@@ -423,9 +406,7 @@ export interface SessionTurnSwitchedPayload {
 }
 
 /** Published on `domain.loaded` per successfully started domain. */
-export interface DomainLoadedPayload {
-	name: string;
-}
+export type DomainLoadedPayload = Static<typeof DomainLoadedSchema>;
 
 /** Published on `domain.failed` right before the loader throws. */
 export interface DomainFailedPayload {
@@ -775,13 +756,7 @@ export interface CompactionPayload {
 // ---------------------------------------------------------------------------
 
 /** Data-only plugin generation publication, independent of extension hook generations. */
-export interface PluginsReloadedPayload {
-	generation: number;
-	previousGeneration: number;
-	changed: boolean;
-	/** Content identity of the committed snapshot. */
-	digest: string;
-}
+export type PluginsReloadedPayload = Static<typeof PluginReloadedSchema>;
 
 /** Operator diagnostics for skipped extension or project-hook configuration. */
 export interface ExtensionsLoadIssuePayload {
@@ -902,9 +877,4 @@ export interface InternalGitDriftPayload {
 }
 
 /** Published on `shutdown.requested` as draining begins. */
-export interface ShutdownRequestedPayload {
-	phase: TerminationPhase;
-}
-
-/** Channels that mark a phase transition and carry no data. */
-export type EmptyPayload = Record<string, never>;
+export type ShutdownRequestedPayload = Static<typeof ShutdownRequestedSchema>;

@@ -12,8 +12,6 @@ import type {
 	ConfigReloadFailedPayload,
 	ConfigSessionChangePayload,
 	ContextActivityPayload,
-	ContextPrunedPayload,
-	ContextRecalledPayload,
 	ContextSourcesChangedPayload,
 	ContextWarningPayload,
 	DeclaredRuntimeNotice,
@@ -24,8 +22,6 @@ import type {
 	DispatchScopeNoticePayload,
 	DispatchStartedPayload,
 	DomainFailedPayload,
-	DomainLoadedPayload,
-	EmptyPayload,
 	ExtensionsLoadIssuePayload,
 	GitHooksChangedPayload,
 	InternalGitDriftPayload,
@@ -35,7 +31,6 @@ import type {
 	MiddlewareHookFailedPayload,
 	PermissionRequestedPayload,
 	PermissionResolvedPayload,
-	PluginsReloadedPayload,
 	ProviderHealthPayload,
 	ResidencyMutationPayload,
 	RunAbortedPayload,
@@ -47,7 +42,6 @@ import type {
 	SessionResumingPayload,
 	SessionStartPayload,
 	SessionTurnSwitchedPayload,
-	ShutdownRequestedPayload,
 	ToolBudgetExceededPayload,
 } from "./live-events.js";
 import type { CallSettled, ObjectRef } from "./schemas.js";
@@ -71,6 +65,12 @@ export interface JournalDefinition<S extends TSchema = TSchema> {
 	 * the producer applies this before enqueue, so card text and envelope ids never reach the journal (#434).
 	 */
 	readonly project?: (payload: never) => unknown;
+	/**
+	 * A harness fact its emitter records without a telemetry context: emitted with none it belongs to the live
+	 * session, else to the process journal, and one whose session writer closed idle reopens it
+	 * (registerTelemetryFallback, #434).
+	 */
+	readonly ambient?: true;
 }
 
 /** The payload exists only in the type system; live events carry no runtime schema. */
@@ -85,6 +85,7 @@ function journal<
 		tier: Tier;
 		cc: ContentClass;
 		capture?: CaptureFlag;
+		ambient?: true;
 		// biome-ignore lint/suspicious/noExplicitAny: the projection's own annotation names the live payload type.
 		project?: (payload: any) => Static<S>;
 	},
@@ -196,7 +197,7 @@ export const EVENTS = {
 	"session.resume_started": live<SessionResumingPayload>(),
 	"session.reattached": live<SessionResumedPayload>(),
 	"session.turn_switched": live<SessionTurnSwitchedPayload>(),
-	"domain.loaded": live<DomainLoadedPayload>(),
+	"domain.loaded": journal(S.DomainLoadedSchema, { tier: "operational", cc: "structural", ambient: true }),
 	"domain.failed": live<DomainFailedPayload>(),
 	"config.hot_reloaded": live<ConfigChangePayload>(),
 	"config.next_turn_scheduled": live<ConfigChangePayload>(),
@@ -221,22 +222,22 @@ export const EVENTS = {
 	"compaction.started": live<CompactionPayload>(),
 	"compaction.ended": live<CompactionPayload>(),
 	"middleware.hook_failed": live<MiddlewareHookFailedPayload>(),
-	"plugin.reloaded": live<PluginsReloadedPayload>(),
+	"plugin.reloaded": journal(S.PluginReloadedSchema, { tier: "operational", cc: "structural", ambient: true }),
 	"extension.load_failed": live<ExtensionsLoadIssuePayload>(),
 	"context.activity_changed": live<ContextActivityPayload>(),
 	"context.sources_changed": live<ContextSourcesChangedPayload>(),
 	"context.warning_raised": live<ContextWarningPayload>(),
-	"context.pruned": live<ContextPrunedPayload>(),
-	"context.recalled": live<ContextRecalledPayload>(),
+	"context.pruned": journal(S.ContextPrunedSchema, { tier: "operational", cc: "structural", ambient: true }),
+	"context.recalled": journal(S.ContextRecalledSchema, { tier: "operational", cc: "structural", ambient: true }),
 	"memory.step_completed": live<MemoryStepCompletedPayload>(),
 	"memory.guardian_changed": live<MemoryGuardianChangedPayload>(),
 	"agent.status_changed": live<AgentStatusChangedPayload>(),
 	"run.aborted": live<RunAbortedPayload>(),
 	"budget.alerted": live<BudgetAlertPayload>(),
-	"shutdown.requested": live<ShutdownRequestedPayload>(),
-	"shutdown.drained": live<EmptyPayload>(),
-	"shutdown.terminated": live<EmptyPayload>(),
-	"shutdown.persisted": live<EmptyPayload>(),
+	"shutdown.requested": journal(S.ShutdownRequestedSchema, { tier: "operational", cc: "content-free", ambient: true }),
+	"shutdown.drained": journal(S.EmptySchema, { tier: "operational", cc: "content-free", ambient: true }),
+	"shutdown.terminated": journal(S.EmptySchema, { tier: "operational", cc: "content-free", ambient: true }),
+	"shutdown.persisted": journal(S.EmptySchema, { tier: "operational", cc: "content-free", ambient: true }),
 } as const;
 
 export type EventName = keyof typeof EVENTS;

@@ -39,9 +39,21 @@ export interface TelemetrySink {
 	admits?(kind: JournalEventName): boolean;
 }
 
+/**
+ * Where an ambient record goes when its context names no open writer: the telemetry domain answers with the live
+ * session and reopens that session's writer for a record its idle close left without a sink (#434).
+ */
+export interface TelemetryFallback {
+	/** The owner of an ambient record emitted with no telemetry context. */
+	ambient(): TelemetryContext | undefined;
+	/** Takes ownership of a record whose owner has no open writer; false when it cannot reopen that owner. */
+	reopen(record: PendingTelemetry): boolean;
+}
+
 const sinks = new Map<string, TelemetrySink>();
 /** Owns records whose context names neither a session nor a run; the writer stamps its own context on them (#434). */
 let processOwner: { context: TelemetryContext; sink: TelemetrySink } | undefined;
+let fallback: TelemetryFallback | null = null;
 const liveAttempts = new Map<string, TelemetryCall>();
 let unownedRecords = 0;
 let sinkFailures = 0;
@@ -71,6 +83,14 @@ function registerSink(owner: string, sink: TelemetrySink): () => void {
 	};
 }
 
+/** One telemetry domain runs per process; a later registration replaces an earlier one until either is released. */
+export function registerTelemetryFallback(next: TelemetryFallback): () => void {
+	fallback = next;
+	return () => {
+		if (fallback === next) fallback = null;
+	};
+}
+
 export function telemetryProducerHealth(): { unownedRecords: number; sinkFailures: number } {
 	return { unownedRecords, sinkFailures };
 }
@@ -93,6 +113,18 @@ export function telemetryCaptures(kind: JournalEventName, ctx = telemetryContext
 	}
 }
 
+function enqueueInto(sink: TelemetrySink, record: PendingTelemetry): boolean {
+	try {
+		// Not capturing an event the mode excludes is policy, not a drop: it is neither a gap nor a failure (#434, R10).
+		if (!sinkAdmits(sink, record.kind)) return false;
+		return sink.enqueue(record);
+	} catch {
+		// Accounting cannot turn a completed call into a retry (#434).
+		sinkFailures += 1;
+		return false;
+	}
+}
+
 /** No serialization, filesystem access, or locks may enter this call stack (#434, rule13). */
 function enqueueTelemetry(
 	name: EventName,
@@ -101,29 +133,52 @@ function enqueueTelemetry(
 	given: TelemetryContext | undefined,
 ): boolean {
 	if (!isJournalEvent(name)) return false;
-	const ctx = given ?? processOwner?.context;
-	const sink = given ? sinks.get(telemetryOwner(given)) : processOwner?.sink;
-	if (!ctx || !sink) {
+	const definition = journalDefinition(name);
+	const ambient = definition.ambient === true && fallback !== null;
+	// An ambient fact with no context belongs to the live session; with none live, to the process (#434).
+	const owned = given ?? (ambient ? fallback?.ambient() : undefined);
+	const ctx = owned ?? processOwner?.context;
+	const sink = owned ? sinks.get(telemetryOwner(owned)) : processOwner?.sink;
+	if (!ctx) {
+		// An ambient fact emitted before the telemetry domain starts, such as an early domain.loaded, has no journal
+		// to belong to yet; it is unrecorded, not a record a writer lost (#434).
+		if (definition.ambient !== true) unownedRecords += 1;
+		return false;
+	}
+	if (!sink && !(ambient && owned && preimage === undefined)) {
 		unownedRecords += 1;
 		return false;
 	}
 	try {
-		// Not capturing an event the mode excludes is policy, not a drop: it is neither a gap nor a failure (#434, R10).
-		if (!sinkAdmits(sink, name)) return false;
+		if (sink && !sinkAdmits(sink, name)) return false;
 		// A projection keeps only a rich live payload's structural facts; it runs only for a record a sink will take (#434).
-		const project = journalDefinition(name).project;
-		if (project) data = project(data as never);
-		// Two literals keep the standard path at its single allocation (#434, §14).
-		return sink.enqueue(
-			(preimage === undefined
-				? { kind: name, data, ctx, wallMs: Date.now(), mono: performance.now() }
-				: { kind: name, data, ctx, wallMs: Date.now(), mono: performance.now(), preimage }) as PendingTelemetry,
-		);
+		if (definition.project) data = definition.project(data as never);
 	} catch {
-		// Accounting cannot turn a completed call into a retry (#434).
 		sinkFailures += 1;
 		return false;
 	}
+	// Two literals keep the standard path at its single allocation (#434, §14).
+	const record = (
+		preimage === undefined
+			? { kind: name, data, ctx, wallMs: Date.now(), mono: performance.now() }
+			: { kind: name, data, ctx, wallMs: Date.now(), mono: performance.now(), preimage }
+	) as PendingTelemetry;
+	if (sink) return enqueueInto(sink, record);
+	// The live session's writer closed idle; the fallback reopens it for this record (#434).
+	if (fallback?.reopen(record)) return false;
+	unownedRecords += 1;
+	return false;
+}
+
+/**
+ * Enqueue a record the fallback reopened a writer for, stamped and projected when it was emitted. Its owner is looked
+ * up now; a writer that failed to open leaves it unowned (#434).
+ */
+export function enqueueReopenedTelemetry(record: PendingTelemetry): boolean {
+	const sink = sinks.get(telemetryOwner(record.ctx));
+	if (sink) return enqueueInto(sink, record);
+	unownedRecords += 1;
+	return false;
 }
 
 attachJournalRoute({

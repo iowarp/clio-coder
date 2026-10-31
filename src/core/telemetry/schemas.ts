@@ -362,6 +362,50 @@ const lagPercentiles = Type.Array(Type.Object({ p: Type.Number({ minimum: 0, max
  * close as the session reopening (#434 §6.1).
  */
 export const EmptySchema = Type.Object({}, closed);
+/** One context reduction: which stage ran, the tokens it moved, and what it removed (#434). */
+export const ContextPrunedSchema = Type.Object(
+	{
+		stage: vocabulary(["mask_observations", "working_set", "llm_summary"]),
+		tokensBefore: count,
+		tokensAfter: count,
+		trigger: vocabulary(["auto", "force", "overflow"]),
+		snapshotIdBefore: Type.Union([ExistingId, Type.Null()]),
+		snapshotIdAfter: ExistingId,
+		at: duration,
+		/** Used/window ratio at trigger time; working-set and legacy-mask stages only. */
+		pressure: Type.Optional(Type.Union([Type.Number({ minimum: 0 }), Type.Null()])),
+		/** Legacy destructive-mask count. */
+		maskedObservations: Type.Optional(count),
+		/** Thinking blocks stripped from stale assistant messages; legacy mask only. */
+		maskedThinkingBlocks: Type.Optional(count),
+		maskedThinkingChars: Type.Optional(count),
+		/** Working-set policy that selected an applied eviction event. */
+		policyId: Type.Optional(ExistingId),
+		/** Number of working-set units evicted by the event. */
+		evictedItems: Type.Optional(count),
+	},
+	closed,
+);
+/** One working-set unit readmitted to context, by its unit ref (#434). */
+export const ContextRecalledSchema = Type.Object(
+	{
+		ref: ExistingId,
+		trigger: vocabulary(["tool", "operator", "reread"]),
+		tokensReadmitted: count,
+		at: duration,
+	},
+	closed,
+);
+export const DomainLoadedSchema = Type.Object({ name: ExistingId }, closed);
+/** A plugin resource reload: the generation it committed and the snapshot's content identity (#434). */
+export const PluginReloadedSchema = Type.Object(
+	{ generation: count, previousGeneration: count, changed: Type.Boolean(), digest: ExistingId },
+	closed,
+);
+export const ShutdownRequestedSchema = Type.Object(
+	{ phase: vocabulary(["idle", "draining", "terminating", "persisting", "exiting"]) },
+	closed,
+);
 
 export const CallLinkedSchema = Type.Object({ runId: ExistingId, callId: CallIdSchema }, closed);
 export const CompactionSettledSchema = Type.Object(

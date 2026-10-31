@@ -22,7 +22,11 @@ import type {
 	ConfigSessionChangePayload,
 	DispatchCompletedPayload,
 } from "../../core/telemetry/live-events.js";
-import { telemetryCaptures } from "../../core/telemetry/producer.js";
+import {
+	enqueueReopenedTelemetry,
+	registerTelemetryFallback,
+	telemetryCaptures,
+} from "../../core/telemetry/producer.js";
 import { settingsFingerprintCommitment } from "../../core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import type { ConfigContract } from "../config/index.js";
@@ -206,8 +210,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	const sessionContext = (sessionId: string): TelemetryContext => ({ sessionId, label: "main" });
 	const settingsUnavailable = () =>
 		writeDiagnostic("[clio-coder:telemetry] settings record unavailable; coverage is incomplete\n");
-	// Writes of config.changed still storing their documents; shutdown waits for them before closing writers (#434).
-	const pendingSettingsRecords = new Set<Promise<void>>();
+	// Records still on their way to a writer: lifecycle, settings changes and reopened ambient facts. Shutdown waits for
+	// them before closing writers (#434).
+	const pendingRecords = new Set<Promise<void>>();
 	/**
 	 * A session's lifecycle as journal records: opened, resumed and closed. A writer opens for each, so a session
 	 * idle past its writer's close still records them; shutdown waits for them before closing writers (#434).
@@ -229,8 +234,8 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			.catch(() => {
 				// The writer reports its own failure; meta.json keeps endedAt for readers either way.
 			})
-			.finally(() => pendingSettingsRecords.delete(write));
-		pendingSettingsRecords.add(write);
+			.finally(() => pendingRecords.delete(write));
+		pendingRecords.add(write);
 	};
 	// The session the lifecycle records left open. Shutdown stops this domain before the session domain parks it,
 	// so stop() journals its close while the writers still accept records (#434).
@@ -258,8 +263,8 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 				}
 			})
 			.catch(settingsUnavailable)
-			.finally(() => pendingSettingsRecords.delete(write));
-		pendingSettingsRecords.add(write);
+			.finally(() => pendingRecords.delete(write));
+		pendingRecords.add(write);
 	};
 	// Writers still storing the settings they opened under. A change arriving meanwhile is journaled after that
 	// snapshot, so the session neither loses the change nor reads it before the settings it changed (#434).
@@ -340,8 +345,8 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 					telemetryHub().emit("config.changed", { ...data, before, after }, sessionContext(origin.id));
 				})
 				.catch(settingsUnavailable)
-				.finally(() => pendingSettingsRecords.delete(write));
-			pendingSettingsRecords.add(write);
+				.finally(() => pendingRecords.delete(write));
+			pendingRecords.add(write);
 		}
 	};
 	let sessionId: string | null | undefined;
@@ -403,6 +408,30 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 					unsubscribes.push(settings.onChange(kind, recordSettingsChange));
 			}
 			unsubscribes.push(
+				// Ambient facts carry no telemetry context; the live session holds them, and a writer its idle close
+				// shut opens again for them. Shutdown waits for these writes with the lifecycle records (#434).
+				registerTelemetryFallback({
+					ambient: () => (liveSession ? sessionContext(liveSession.id) : undefined),
+					reopen(record) {
+						const origin = liveSession;
+						if (!origin || record.ctx.sessionId !== origin.id || record.ctx.runId !== undefined) return false;
+						const write = journals
+							.acquire(origin, "main")
+							.then(async (lease) => {
+								try {
+									if (lease.journaled) enqueueReopenedTelemetry(record);
+								} finally {
+									await lease.release();
+								}
+							})
+							.catch(() => {
+								// The writer reports its own failure.
+							})
+							.finally(() => pendingRecords.delete(write));
+						pendingRecords.add(write);
+						return true;
+					},
+				}),
 				context.bus.subscribe("config.session_changed", recordSessionSettingsChange),
 				context.bus.subscribe("session.created", ({ sessionId, cwdHash }) => {
 					liveSession = { id: sessionId, cwdHash };
@@ -444,7 +473,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			healthWindows.stop();
 			if (liveSession) recordLifecycle(liveSession, "session.closed", { reason: "completed" });
 			liveSession = null;
-			await Promise.all(pendingSettingsRecords);
+			await Promise.all(pendingRecords);
 			await journals.closeAll();
 			// A process that recorded nothing process-scoped never opened a journal, and closing it writes nothing.
 			await processJournal?.close(typeof process.exitCode === "number" ? process.exitCode : 0);

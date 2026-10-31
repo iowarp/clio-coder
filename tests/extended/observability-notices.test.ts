@@ -70,7 +70,7 @@ describe("telemetry projection notices", () => {
 			stage: "working_set",
 			tokensBefore: 1000,
 			tokensAfter: 500,
-			trigger: "test",
+			trigger: "auto",
 			snapshotIdBefore: null,
 			snapshotIdAfter: "snap-1",
 			at: Date.now(),
