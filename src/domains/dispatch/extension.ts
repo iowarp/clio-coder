@@ -120,6 +120,7 @@ import {
 	discardIdleTaskWorktree,
 	discardTaskWorktree,
 	gitCheckoutRoot,
+	LEFT_UNCOMMITTED_LIST_LIMIT,
 	mergeDestination,
 	previewTaskWorktree,
 	protectedPathsChangedByWorktreeBranch,
@@ -327,6 +328,7 @@ import {
 } from "./failure-classification.js";
 import {
 	cleanupFleetChangeReturn,
+	type FleetChangeImport,
 	type FleetChangeReturn,
 	importFleetChanges,
 	prepareFleetChangeReturn,
@@ -6914,7 +6916,7 @@ export function createDispatchBundle(
 
 		const placement = resolveNode(req) ?? null;
 		let remoteReturn: FleetChangeReturn | undefined;
-		let returnedCommit: string | undefined;
+		let remoteImport: FleetChangeImport | undefined;
 		if (placement?.node.kind === "ssh") {
 			const node = settings?.fleet.nodes.find((item) => item.id === placement.node.id);
 			if (!node) throw new Error("dispatch: node configuration disappeared before project verification");
@@ -8430,10 +8432,25 @@ export function createDispatchBundle(
 					finalDetail = `${detail}; ${permissionDenialDetail}`;
 					failureMessage = permissionDenialDetail;
 				}
+				// The stream drained above, so this is the run's whole write record.
+				const observedRunEffects = runEffects.snapshot();
+				// The commit keeps byproducts out only on the strength of a complete
+				// tool trail. A subprocess runtime publishes no tool events and a
+				// partial trail has holes where a write would sit, so either one cannot
+				// tell a file the worker made from a byproduct and commits every
+				// untracked file instead of dropping the worker's own. The remote
+				// commit of an independent SSH checkout and the local task commit
+				// both take this one answer.
+				const authoredPaths =
+					toolTelemetryCoverageOf(telemetryIngestionErrorsOf(result), snapshotUnfinishedTools(inFlightTools).length) ===
+					"complete"
+						? observedRunEffects.mutatedPaths
+						: null;
 				if (remoteReturn && finalOutcome === "succeeded") {
 					try {
-						returnedCommit = await importFleetChanges(
+						remoteImport = await importFleetChanges(
 							remoteReturn,
+							authoredPaths,
 							lifecycle.pathScope.writeBoundaries,
 							getProtectedArtifactState().artifacts.map((artifact) => {
 								const root = remoteReturn.worktree.root;
@@ -8522,7 +8539,6 @@ export function createDispatchBundle(
 				// acknowledgement after the bounded drain cannot race the sealed facts.
 				const steering = snapshotSteeringProvenance();
 				const capturedOutput = outputCapture.snapshot();
-				const observedRunEffects = runEffects.snapshot();
 				const appliedResultContract = dispatchResultContract(req, lifecycle.recipe) ?? null;
 				// #425: a cut-off loop never reached contract repair, even if its process exited zero.
 				if (
@@ -8684,16 +8700,6 @@ export function createDispatchBundle(
 					const taskCommitMessage =
 						authorship?.commitMessage ?? taskCommitSubject(authorship?.summary ?? null) ?? taskCommitSubject(req.task);
 					const protectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
-					// The commit keeps byproducts out only on the strength of a complete
-					// tool trail. A subprocess runtime publishes no tool events and a
-					// partial trail has holes where a write would sit, so either one cannot
-					// tell a file the worker made from a byproduct and commits every
-					// untracked file instead of dropping the worker's own.
-					const authoredPaths =
-						toolTelemetryCoverageOf(telemetryIngestionErrorsOf(result), snapshotUnfinishedTools(inFlightTools).length) ===
-						"complete"
-							? observedRunEffects.mutatedPaths
-							: null;
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
 						apply: mergeWithheld || hostRejectedMerge ? "preserve" : (req.apply ?? "merge"),
@@ -8928,16 +8934,28 @@ export function createDispatchBundle(
 					}
 				}
 				if (hostVerification !== undefined) receiptDraft.hostVerification = hostVerification;
-				if (remoteReturn && worktreeReceipt)
+				if (remoteReturn && worktreeReceipt) {
+					// The remote commit's byproducts stay on the node, so the local commit never saw them.
+					const remoteLeft = remoteImport?.leftUncommitted;
+					const localLeft = worktreeReceipt.leftUncommitted;
 					worktreeReceipt = {
 						...worktreeReceipt,
+						...(remoteLeft !== undefined
+							? {
+									leftUncommitted: {
+										count: remoteLeft.count + (localLeft?.count ?? 0),
+										paths: [...remoteLeft.paths, ...(localLeft?.paths ?? [])].slice(0, LEFT_UNCOMMITTED_LIST_LIMIT),
+									},
+								}
+							: {}),
 						detail: [
 							worktreeReceipt.detail,
-							`SSH return from ${placed.id}: branch ${remoteReturn.worktree.branch}, path ${remoteReturn.worktree.path}, commit ${returnedCommit ?? "not imported"}; remote work preserved unless the guarded local application succeeds`,
+							`SSH return from ${placed.id}: branch ${remoteReturn.worktree.branch}, path ${remoteReturn.worktree.path}, commit ${remoteImport?.commit ?? "not imported"}; remote work preserved unless the guarded local application succeeds`,
 						]
 							.filter(Boolean)
 							.join("; "),
 					};
+				}
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
@@ -9017,7 +9035,7 @@ export function createDispatchBundle(
 				await ledgerRef.persist();
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
 					try {
-						if (remoteReturn && returnedCommit) await cleanupFleetChangeReturn(remoteReturn, returnedCommit);
+						if (remoteReturn && remoteImport) await cleanupFleetChangeReturn(remoteReturn, remoteImport);
 						// The forced removal would delete whatever arrived after the operator's
 						// preview, which the merge itself refused to land.
 						const drift = mergedPreview !== undefined ? taskWorktreePreviewDrift(req.taskWorktree, mergedPreview) : null;

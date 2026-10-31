@@ -3,15 +3,28 @@ import { internalGitArgv } from "../../core/internal-git.js";
 import { writeRootsCover } from "../../core/path-boundary.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { shellQuote } from "../../core/shell-quote.js";
-import type { TaskWorktree } from "../../tools/task-worktree.js";
+import { LEFT_UNCOMMITTED_LIST_LIMIT, type TaskWorktree } from "../../tools/task-worktree.js";
 import type { SshNodeEndpoint } from "./transport.js";
 import { buildSshArgs } from "./transport.js";
 
-/** Remote operations own only this run's worktree and branch. Nothing removes them on failure. */
+/**
+ * Remote operations own only this run's worktree and branch. Nothing removes them on failure.
+ *
+ * The commit applies the rule of `commitWorktreePath`: tracked changes, what the
+ * worker staged, and the untracked files in `authored` (every one when it is
+ * null). It reports the files it left out and a stamp of them, and cleanup
+ * force-removes the worktree only while that stamp still holds, so a file that
+ * arrived after the import is never deleted.
+ */
 const REMOTE_OPERATION = `
-const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');
-const input=JSON.parse(fs.readFileSync(0,'utf8')),w=input.worktree;
-function git(cwd,...args){const r=cp.spawnSync('git',['-C',cwd,'-c','core.hooksPath=/dev/null',...args],{encoding:'utf8',timeout:30000,maxBuffer:1024*1024});if(r.status!==0)throw Error(r.stderr||'remote git failed');return r.stdout.trim();}
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process'),crypto=require('node:crypto');
+const input=JSON.parse(fs.readFileSync(0,'utf8')),w=input.worktree,NUL=String.fromCharCode(0);
+function raw(cwd,...args){const r=cp.spawnSync('git',['-C',cwd,'-c','core.hooksPath=/dev/null',...args],{encoding:'utf8',timeout:30000,maxBuffer:16*1024*1024});if(r.status!==0)throw Error(r.stderr||'remote git failed');return r.stdout;}
+function git(cwd,...args){return raw(cwd,...args).trim();}
+function untracked(){return raw(w.path,'ls-files','--others','--exclude-standard','-z').split(NUL).filter(Boolean);}
+function untrackedState(){const h=crypto.createHash('sha256');for(const p of untracked()){let s='gone';try{const t=fs.lstatSync(path.join(w.path,p),{bigint:true});s=[t.mode,t.ino,t.size,t.mtimeNs,t.ctimeNs].join(':');}catch{}h.update(p+NUL+s+NUL);}return h.digest('hex');}
+function authoredSet(){if(input.authored===null)return null;const roots=[w.path];try{roots.push(fs.realpathSync(w.path));}catch{}const set=new Set();for(const p of input.authored)for(const r of roots){const x=path.relative(r,path.resolve(p));if(x&&x!=='..'&&!x.startsWith('..'+path.sep)&&!path.isAbsolute(x))set.add(x.split(path.sep).join('/'));}return set;}
+let out;
 function safeParent(){const rel=path.relative(w.root,w.path);if(!rel||rel.startsWith('..')||path.isAbsolute(rel))throw Error('remote worktree must be inside project');let current=w.root;for(const part of rel.split(path.sep).slice(0,-1)){current=path.join(current,part);if(fs.existsSync(current)){if(fs.lstatSync(current).isSymbolicLink()||!fs.statSync(current).isDirectory())throw Error('unsafe worktree parent');}else fs.mkdirSync(current,{mode:448});}}
 const owner=path.join(path.dirname(w.path),w.runId+'.remote-owner.json');
 function ownership(){const found=JSON.parse(fs.readFileSync(owner,'utf8'));for(const key of ['root','path','branch','base','ownerToken'])if(found[key]!==w[key])throw Error('remote worktree ownership changed');if(git(w.path,'symbolic-ref','HEAD')!=='refs/heads/'+w.branch)throw Error('remote worktree branch changed');}
@@ -28,14 +41,19 @@ try {
   ownership();
   if(input.op==='commit'){
    if(git(w.path,'merge-base',w.base,'HEAD')!==w.base)throw Error('remote branch lost its approved baseline');
-   git(w.path,'add','-A','--','.');
+   git(w.path,'add','-u','--','.');
+   const authored=authoredSet(),left=[],take=[];
+   for(const p of untracked())(authored===null||authored.has(p)?take:left).push(p);
+   for(let i=0;i<take.length;i+=256)git(w.path,'add','--',...take.slice(i,i+256).map((p)=>':(top,literal)'+p));
    if(git(w.path,'diff','--cached','--name-only'))git(w.path,'-c','user.name=Clio Coder','-c','user.email=clio-coder-task@local','commit','-m','Clio Coder remote task '+w.runId);
+   out={commit:git(w.path,'rev-parse','HEAD'),untracked:untrackedState(),left:left.slice(0,input.listLimit),leftCount:left.length};
   }else if(input.op==='cleanup'){
-   if(git(w.path,'rev-parse','HEAD')!==input.commit||git(w.path,'status','--porcelain'))throw Error('remote worktree changed after import; preserved');
-   git(w.root,'worktree','remove',w.path);git(w.root,'branch','-D',w.branch);fs.unlinkSync(owner);
+   if(git(w.path,'rev-parse','HEAD')!==input.commit||git(w.path,'status','--porcelain','--untracked-files=no')||untrackedState()!==input.untracked)throw Error('remote worktree changed after import; preserved');
+   git(w.root,'worktree','remove','--force',w.path);git(w.root,'branch','-D',w.branch);fs.unlinkSync(owner);
+   out={commit:input.commit};
   }else throw Error('unknown remote operation');
  }
- console.log(JSON.stringify({commit:input.op==='cleanup'?input.commit:git(w.path,'rev-parse','HEAD')}));
+ console.log(JSON.stringify(out??{commit:git(w.path,'rev-parse','HEAD')}));
 }catch(error){console.error(error.message);process.exit(1);}
 `;
 
@@ -44,13 +62,30 @@ export interface FleetChangeReturn {
 	worktree: TaskWorktree;
 }
 
-async function remote(
-	input: FleetChangeReturn,
-	op: "prepare" | "commit" | "cleanup",
-	commit?: string,
-): Promise<string> {
+/** What the remote commit produced: the commit to import and the untracked files it left on the node. */
+export interface FleetChangeImport {
+	commit: string;
+	/** Stamp of the untracked files beside the commit; cleanup refuses once it no longer holds. */
+	untracked: string;
+	/** Absent when the remote commit left no file out. */
+	leftUncommitted?: { count: number; paths: string[] };
+}
+
+type RemoteRequest =
+	| { op: "prepare" }
+	| { op: "commit"; authored: string[] | null; listLimit: number }
+	| { op: "cleanup"; commit: string; untracked: string };
+
+interface RemoteResponse {
+	commit: string;
+	untracked?: unknown;
+	left?: unknown;
+	leftCount?: unknown;
+}
+
+async function remote(input: FleetChangeReturn, request: RemoteRequest): Promise<RemoteResponse> {
 	const result = await runCommandVector("ssh", buildSshArgs(input.node, `node -e ${shellQuote(REMOTE_OPERATION)}`), {
-		input: JSON.stringify({ op, worktree: input.worktree, commit }),
+		input: JSON.stringify({ ...request, worktree: input.worktree }),
 		timeoutMs: 60_000,
 		maxOutputBytes: 128_000,
 	});
@@ -58,9 +93,38 @@ async function remote(
 		throw new Error(
 			`SSH change return: ${result.stderr.trim()}; remote branch ${input.worktree.branch} and worktree ${input.worktree.path} are preserved for recovery`,
 		);
-	const value = JSON.parse(result.stdout) as { commit: string };
-	if (!/^[a-f0-9]{40,64}$/.test(value.commit)) throw new Error("SSH change return: invalid remote commit");
-	return value.commit;
+	const value = JSON.parse(result.stdout) as RemoteResponse;
+	if (typeof value.commit !== "string" || !/^[a-f0-9]{40,64}$/.test(value.commit))
+		throw new Error("SSH change return: invalid remote commit");
+	return value;
+}
+
+/** The remote commit, read only when every field has the shape the operation writes. */
+async function remoteCommit(
+	input: FleetChangeReturn,
+	authoredPaths: Iterable<string> | null,
+): Promise<FleetChangeImport> {
+	const value = await remote(input, {
+		op: "commit",
+		authored: authoredPaths === null ? null : [...authoredPaths],
+		listLimit: LEFT_UNCOMMITTED_LIST_LIMIT,
+	});
+	const { untracked, left, leftCount } = value;
+	if (
+		typeof untracked !== "string" ||
+		!/^[a-f0-9]{64}$/.test(untracked) ||
+		!Array.isArray(left) ||
+		!left.every((entry): entry is string => typeof entry === "string") ||
+		typeof leftCount !== "number" ||
+		!Number.isSafeInteger(leftCount) ||
+		leftCount < left.length
+	)
+		throw new Error("SSH change return: invalid remote commit report");
+	return {
+		commit: value.commit,
+		untracked,
+		...(leftCount > 0 ? { leftUncommitted: { count: leftCount, paths: left } } : {}),
+	};
 }
 
 export async function prepareFleetChangeReturn(
@@ -68,7 +132,7 @@ export async function prepareFleetChangeReturn(
 	worktree: TaskWorktree,
 ): Promise<FleetChangeReturn> {
 	const input = { node, worktree };
-	await remote(input, "prepare");
+	await remote(input, { op: "prepare" });
 	return input;
 }
 
@@ -86,14 +150,21 @@ async function git(root: string, args: string[], env?: Record<string, string>): 
 	return result.stdout;
 }
 
-/** Fetch into a private ref, validate the exact commit, then fast-forward only the owned local task tree. */
+/**
+ * Commit the remote worktree, fetch into a private ref, validate the exact
+ * commit, then fast-forward only the owned local task tree. `authoredPaths` is
+ * the run's host-observed write record, or null when it has none, as for
+ * `commitWorktreePath`.
+ */
 export async function importFleetChanges(
 	input: FleetChangeReturn,
+	authoredPaths: Iterable<string> | null,
 	writeRoots: ReadonlyArray<string>,
 	protectedPaths: ReadonlyArray<string>,
-): Promise<string> {
+): Promise<FleetChangeImport> {
 	const { node, worktree: w } = input;
-	const commit = await remote(input, "commit");
+	const imported = await remoteCommit(input, authoredPaths);
+	const { commit } = imported;
 	const sshOptions = buildSshArgs(node, "").slice(0, -2);
 	const endpoint = `${node.user ? `${node.user}@` : ""}${node.host.includes(":") ? `[${node.host}]` : node.host}:${w.root}`;
 	const fetchedRef = `refs/clio-coder/remote/${w.runId}`;
@@ -133,10 +204,10 @@ export async function importFleetChanges(
 	)
 		throw new Error("SSH change return: local task worktree changed; remote branch preserved");
 	await git(w.path, ["merge", "--ff-only", "--no-edit", commit]);
-	return commit;
+	return imported;
 }
 
 /** Call only after the existing verification and guarded application succeeded. */
-export async function cleanupFleetChangeReturn(input: FleetChangeReturn, commit: string): Promise<void> {
-	await remote(input, "cleanup", commit);
+export async function cleanupFleetChangeReturn(input: FleetChangeReturn, imported: FleetChangeImport): Promise<void> {
+	await remote(input, { op: "cleanup", commit: imported.commit, untracked: imported.untracked });
 }
