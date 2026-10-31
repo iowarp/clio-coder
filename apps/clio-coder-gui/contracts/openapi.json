@@ -21038,7 +21038,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_at_event_kind_258f6023": {
+			"Object_at_event_kind_cc2d5730": {
 				"type": "object",
 				"required": ["kind", "at", "runId", "event", "terminalReason"],
 				"properties": {
@@ -21056,7 +21056,7 @@
 						"maxLength": 512
 					},
 					"event": {
-						"enum": ["referenced", "settled"]
+						"enum": ["referenced", "enqueued", "started", "settled", "sealed"]
 					},
 					"terminalReason": {
 						"$ref": "#/components/schemas/Union_069a7c9b"
@@ -24688,10 +24688,74 @@
 									"$ref": "#/components/schemas/Object_agent_at_attemptId_88386979"
 								},
 								{
-									"$ref": "#/components/schemas/Object_at_event_kind_258f6023"
+									"$ref": "#/components/schemas/Object_at_event_kind_cc2d5730"
 								},
 								{
 									"$ref": "#/components/schemas/Object_at_count_countShown_c51ef680"
+								},
+								{
+									"type": "object",
+									"required": ["kind", "at", "mode", "posture", "decisionHash", "executed", "differs", "executedAdmissible"],
+									"properties": {
+										"kind": {
+											"type": "string",
+											"const": "route"
+										},
+										"at": {
+											"type": "string",
+											"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+										},
+										"mode": {
+											"enum": ["fixed", "shadow", "active"]
+										},
+										"posture": {
+											"enum": ["manual", "quality", "balanced", "latency", "economy"]
+										},
+										"decisionHash": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 512
+										},
+										"executed": {
+											"type": "object",
+											"required": ["agentId", "targetId", "modelId", "runtimeId", "nodeId"],
+											"properties": {
+												"agentId": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 512
+												},
+												"targetId": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 512
+												},
+												"modelId": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 512
+												},
+												"runtimeId": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 512
+												},
+												"nodeId": {
+													"type": "string",
+													"minLength": 1,
+													"maxLength": 512
+												}
+											},
+											"additionalProperties": false
+										},
+										"differs": {
+											"type": "boolean"
+										},
+										"executedAdmissible": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
 								},
 								{
 									"type": "object",
@@ -28279,7 +28343,7 @@
 									"additionalProperties": false
 								},
 								{
-									"$ref": "#/components/schemas/Object_at_event_kind_258f6023"
+									"$ref": "#/components/schemas/Object_at_event_kind_cc2d5730"
 								},
 								{
 									"type": "object",

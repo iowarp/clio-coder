@@ -145,6 +145,8 @@ export function entryKey(entry: RunTimelineEntry): string {
 			return `gap:${entry.sink}:${entry.reason}:${entry.at}`;
 		case "run":
 			return `run:${entry.event}:${entry.at}`;
+		case "route":
+			return `route:${entry.decisionHash}:${entry.at}`;
 	}
 }
 
@@ -206,6 +208,12 @@ export function entryLabel(entry: RunTimelineEntry): { kind: string; title: stri
 				kind: "run",
 				title: `Run ${entry.event}${entry.terminalReason ? `: ${entry.terminalReason.replaceAll("_", " ")}` : ""}`,
 				tone: entry.terminalReason === "completed" ? "success" : entry.terminalReason ? "fail" : "neutral",
+			};
+		case "route":
+			return {
+				kind: "route",
+				title: `Route ${entry.mode}: ${entry.executed.agentId} on ${entry.executed.targetId}/${entry.executed.modelId}${entry.differs ? " (policy differs)" : ""}`,
+				tone: entry.executedAdmissible ? "neutral" : "fail",
 			};
 	}
 }

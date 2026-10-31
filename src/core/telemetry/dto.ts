@@ -636,7 +636,8 @@ const runEntry = Type.Object(
 		kind: Type.Literal("run"),
 		...at,
 		runId: ExistingId,
-		event: vocabulary(["referenced", "settled"]),
+		/** `referenced` is the session timeline's; a run timeline carries the run's own lifecycle (#434). */
+		event: vocabulary(["referenced", "enqueued", "started", "settled", "sealed"]),
 		terminalReason: Type.Union([RunTerminalReason, Type.Null()]),
 	},
 	closed,
@@ -923,12 +924,30 @@ export type TimelineV1 = Static<typeof TimelineSchema>;
 const spanDisplay = Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed);
 /**
  * One run journal in time order (#434 §11.3): its call attempts, the bounded run feed, the worker process's start
- * and exit, gaps, and the settlement. A run's own entry union, so the session timeline's kinds stay as they are.
+ * and exit, gaps, the run's lifecycle (enqueued, started, settled, sealed) and the route decisions it journaled. A run's own entry union, so the session timeline's kinds stay as they are.
  */
 export const RunTimelineEntrySchema = Type.Union([
 	callEntry,
 	runEntry,
 	gapEntry,
+	/** A route.decided this run's journal holds: a decision its own steps were dispatched under (#434). */
+	Type.Object(
+		{
+			kind: Type.Literal("route"),
+			...at,
+			mode: vocabulary(["fixed", "shadow", "active"]),
+			posture: vocabulary(["manual", "quality", "balanced", "latency", "economy"]),
+			decisionHash: ExistingId,
+			executed: Type.Object(
+				{ agentId: ExistingId, targetId: ExistingId, modelId: ExistingId, runtimeId: ExistingId, nodeId: ExistingId },
+				closed,
+			),
+			/** Whether the policy would have run another route, and whether the route that ran passed every hard filter. */
+			differs: Type.Boolean(),
+			executedAdmissible: Type.Boolean(),
+		},
+		closed,
+	),
 	Type.Object(
 		{
 			kind: Type.Literal("feed"),

@@ -2628,7 +2628,8 @@ function callEntry(
 
 /**
  * One run journal in time order (#434 §11.3): attempts, the bounded run feed, the worker process's start and exit,
- * gaps and the settlement. Entries at the same instant keep journal order within a kind, so feed sequence holds.
+ * gaps, the run's lifecycle and the route decisions it journaled. Entries at the same instant keep journal order
+ * within a kind, so feed sequence holds.
  */
 export function runTimeline(runId: string, source: JournalSource, options: ReadOptions = {}): RunTimelineV1 {
 	const run = analyzeRun(runId, source);
@@ -2659,6 +2660,34 @@ export function runTimeline(runId: string, source: JournalSource, options: ReadO
 			case "journal.gap":
 				entries.push(gapEntry(record));
 				break;
+			// A retry or fleet step's run.enqueued can land in an ancestor's journal; only this run's own counts here.
+			case "run.enqueued":
+				if (record.data.runId === runId) entries.push({ kind: "run", at, runId, event: "enqueued", terminalReason: null });
+				break;
+			case "run.started":
+				entries.push({ kind: "run", at, runId, event: "started", terminalReason: null });
+				break;
+			case "run.sealed":
+				entries.push({ kind: "run", at, runId, event: "sealed", terminalReason: null });
+				break;
+			case "route.decided":
+				entries.push({
+					kind: "route",
+					at,
+					mode: record.data.mode,
+					posture: record.data.posture,
+					decisionHash: record.data.decisionHash,
+					executed: {
+						agentId: record.data.executed.agentId,
+						targetId: record.data.executed.targetId,
+						modelId: record.data.executed.modelId,
+						runtimeId: record.data.executed.runtimeId,
+						nodeId: record.data.executed.nodeId,
+					},
+					differs: record.data.verdict.differs,
+					executedAdmissible: record.data.verdict.executedAdmissible,
+				});
+				break;
 		}
 	}
 	if (run.settled)
@@ -2669,7 +2698,7 @@ export function runTimeline(runId: string, source: JournalSource, options: ReadO
 			event: "settled",
 			terminalReason: run.settled.data.terminalReason,
 		});
-	const order: Record<RunTimelineEntry["kind"], number> = { process: 0, gap: 1, call: 2, feed: 3, run: 4 };
+	const order: Record<RunTimelineEntry["kind"], number> = { route: 0, process: 1, gap: 2, call: 3, feed: 4, run: 5 };
 	return {
 		...header(options),
 		kind: "run-timeline",

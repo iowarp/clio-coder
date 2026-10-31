@@ -205,7 +205,12 @@ test("a run's timeline orders its process, feed and settlement, with a feed dura
 	assert.equal(timeline.kind, "run-timeline");
 	assert.deepEqual(
 		timeline.entries.map((entry) => entry.kind),
-		["process", "feed", "process", "run"],
+		["process", "feed", "process", "run", "run"],
+	);
+	// The run settles, then its scope seals; both are run lifecycle entries (#434).
+	assert.deepEqual(
+		timeline.entries.flatMap((entry) => (entry.kind === "run" ? [entry.event] : [])),
+		["settled", "sealed"],
 	);
 	const feed = timeline.entries.find((entry) => entry.kind === "feed");
 	assert.equal(feed?.kind === "feed" ? feed.duration?.display : null, "1.25s");
