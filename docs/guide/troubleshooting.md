@@ -280,5 +280,5 @@ When encountering unexpected system behavior:
 
 1. **System Health Check**: Run `clio-coder doctor` (or `clio-coder doctor --fix` to repair directory structure, credential permissions and retired or YAML 1.1 settings values, and record fleet preflight results).
 2. **Target Connectivity Probe**: Run `clio-coder targets --probe` to verify authentication and reachability for all configured LLM providers.
-3. **Run Inspection**: Run `clio-coder fleet view <runId>` to read one run's ledger entry, event journal and sealed run record, and `clio-coder telemetry calls <session>` or `clio-coder telemetry why-stopped <session>` to read a session's model calls and why it stopped.
+3. **Run Inspection**: Run `clio-coder fleet view <runId>` to read one run's ledger entry, display feed and sealed run record, and `clio-coder telemetry calls <session>` or `clio-coder telemetry why-stopped <session>` to read a session's model calls and why it stopped.
 4. **Seal Verification**: Run `clio-coder fleet verify <runId> --json`, `/view verify <runId>` or `clio-coder telemetry verify <scope-dir>` to check that a run's or session's sealed telemetry still verifies. `clio-coder telemetry doctor` checks every scope at once.

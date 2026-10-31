@@ -12,7 +12,7 @@ Source of truth:
 - Spec contracts and exit codes: [src/worker/spec-contract.ts](../../src/worker/spec-contract.ts)
 - Orchestrator-side spawn, attestation admission, and the bounded queue: [src/domains/dispatch/worker-spawn.ts](../../src/domains/dispatch/worker-spawn.ts), [src/domains/dispatch/worker-protocol.ts](../../src/domains/dispatch/worker-protocol.ts)
 - Dispatch orchestrator: [src/domains/dispatch/index.ts](../../src/domains/dispatch/index.ts)
-- Run event journal writer, reader and bus bridge: [src/domains/dispatch/run-event-journal.ts](../../src/domains/dispatch/run-event-journal.ts), [src/domains/dispatch/run-event-journal-bridge.ts](../../src/domains/dispatch/run-event-journal-bridge.ts)
+- Run event journal writer, reader and bus bridge: [src/domains/dispatch/run-event-journal.ts](../../src/domains/dispatch/run-event-journal.ts), [src/domains/dispatch/run-event-journal-bridge.ts](../../src/domains/dispatch/run-event-journal-bridge.ts), and the display feed: [src/domains/dispatch/run-feed.ts](../../src/domains/dispatch/run-feed.ts)
 - Engine worker runtime: [src/engine/worker-runtime.ts](../../src/engine/worker-runtime.ts)
 
 ---
@@ -398,37 +398,41 @@ The prefix is `WORKER_PROVIDER_HTTP_STATUS_MARKER` in [spec-contract.ts](../../s
 
 ## Run event journal
 
-Live dispatch events exist only in the orchestrator's memory. A second process can follow a run in flight only through a file, so every dispatched run appends a bounded feed to its own telemetry journal at `<stateDir>/telemetry/runs/<runId>/journal.jsonl` as `run.feed_appended` records, newest last. `clio-coder fleet view`, `fleet view --follow` and the workers dashboard in the workers dock read it. None of them shares memory with the orchestrator, so they work from a second terminal or over SSH. The journal's framing, rotation and seal are described in [journals](telemetry.md#journals).
+Live dispatch events exist only in the orchestrator's memory. A second process can follow a run in flight only through a file, so every dispatched run writes each display row twice: the full row to its display feed, `<stateDir>/runs/<runId>/feed.jsonl` ([run-feed.ts](../../src/domains/dispatch/run-feed.ts)), and its structural projection to its telemetry journal at `<stateDir>/telemetry/runs/<runId>/journal.jsonl` as a `run.feed_appended` record ([run-event-journal.ts](../../src/domains/dispatch/run-event-journal.ts)). `clio-coder fleet view`, `fleet view --follow`, the workers dashboard in the workers dock and `/panes open logs` read the feed. None of them shares memory with the orchestrator, so they work from a second terminal or over SSH. The journal's framing, rotation and seal are described in [journals](telemetry.md#journals).
+
+The feed is run state, like the session ledger, not telemetry. It sits in the run's state directory next to its recordings, is never shared, folded or sealed, and is removed with the run's row when the run leaves the ledger ring. The journal projection is what a sealed run scope keeps and a share can carry.
 
 ### Writer ownership
 
-[run-event-journal-bridge.ts](../../src/domains/dispatch/run-event-journal-bridge.ts) subscribes to the dispatch bus channels `DispatchProgress`, `DispatchCompleted` and `DispatchFailed`. The dispatch domain publishes `DispatchProgress` for every consumer-visible event of every run, so the feed covers attached, detached, batched and retry runs whether or not a caller iterates the run handle. The bridge attaches only when a composition root passes `journalRunEvents: true` to the dispatch domain. The orchestrator entry (`src/entry/orchestrator.ts`, which serves interactive, headless and ACP sessions), `clio-coder run` and `clio-coder fleet run` do. In the same process the model-facing dispatch tool builds its event registry with `journal: null`, so exactly one producer feeds each run. Feed records go to the run's telemetry writer, the same writer that journals the run's calls and its `run.settled`. `fleet.history.journal` (default `true`) turns the feed off for runs dispatched afterwards. A run dispatched with the feed off still has its ledger row and its settled, sealed run record.
+[run-event-journal-bridge.ts](../../src/domains/dispatch/run-event-journal-bridge.ts) subscribes to the dispatch domain's `run.progressed` live event and its terminal pair. The dispatch domain publishes `run.progressed` for every consumer-visible event of every run, so the feed covers attached, detached, batched and retry runs whether or not a caller iterates the run handle. The bridge attaches only when a composition root passes `journalRunEvents: true` to the dispatch domain. The orchestrator entry (`src/entry/orchestrator.ts`, which serves interactive, headless and ACP sessions), `clio-coder run` and `clio-coder fleet run` do. In the same process the model-facing dispatch tool builds its event registry with `journal: null`, so exactly one producer feeds each run. The projection goes to the run's telemetry writer, the same writer that journals the run's calls and its `run.settled`; a run with no open telemetry owner gets no projection but still gets its feed. `fleet.history.journal` (default `true`) turns both off for runs dispatched afterwards. A run dispatched with it off still has its ledger row and its settled, sealed run record.
 
 ### Record format
 
-Each `run.feed_appended` record carries `seq` (per run, starting at 1) and a `body`. The record's own timestamp is the line's time. The body is structural: it names kinds, tools, call ids and outcomes, and never carries prose, arguments, results or reasoning.
+Each feed line is one JSON object, newest last: `v` (`1`), `seq` (per run, starting at 1, increasing by one per line), `at`, `kind` and the row's fields. Rows carry the worker's prose, a tool call's start and finish with its redacted descriptor, outcome and duration, the tokens each model call processed, a reasoning block opening (never its content), and approvals and refusals. Prose deltas are coalesced into one row per 250 ms (`TEXT_COALESCE_MS`). Every string is secret-redacted with the redaction the journals use before it is written, and a prose row holds back its last two words until the next line, so a credential split across two rows is still redacted.
 
-| `body.kind` | Fields | Notes |
+Each `run.feed_appended` journal record carries `seq` and a `body` with only the structural fields: kinds, tools, call ids, outcomes and durations, never prose, arguments, results or reasoning.
+
+| `kind` | Fields | Notes |
 | --- | --- | --- |
 | `open` | `runId`, `agentId` | Written once per run on its first fed event or at its settlement. A run reopened after a resume appends another `open`. |
-| `event` | `type`, optional `tool`, `callId`, `outcome`, `durationMs` | One feed entry. The only kind that can be dropped. |
+| `event` | `type`, optional `tool`, `callId`, `outcome`, `durationMs`, and in the feed the display fields | One feed entry. The only kind that can be dropped. |
 | `journal_truncated` | `reason`, `droppedFromSeq` | Written once, the moment dropping begins. `reason` is `per-run size cap`. |
 | `result` | `outcome`, `exitCode`, optional `attemptRunId` | Written when the run settles. `attemptRunId` is present when the terminal attempt is not the logical run. |
-| `terminal` | `outcome` | Always the last feed record. Later events for the run are discarded. |
+| `terminal` | `outcome` | Always the last record. Later events for the run are discarded. |
 
-`type` is one of `agent_start`, `agent_end`, `attempt_start`, `message_end`, `thinking`, `route_warning`, `clio_coder_tool_start`, `clio_coder_tool_finish`, `clio_coder_tool_observation`, `clio_coder_permission_escalated`, `clio_coder_permission_resolved`, `clio_coder_run_outcome`, `clio_coder_steer_received`, or `unknown` for any other display type. `callId` pairs a tool start with its finish, and `outcome` is `ok`, `error` or `blocked`. Worker prose, text and thinking deltas, heartbeats, `message_start`, `message_update`, `turn_start`, `turn_end` and the `tool_execution_*` events are never fed, because they carry content or the call's literal arguments.
+In the journal, `type` is one of `agent_start`, `agent_end`, `attempt_start`, `message_end`, `thinking`, `route_warning`, `clio_coder_tool_start`, `clio_coder_tool_finish`, `clio_coder_tool_observation`, `clio_coder_permission_escalated`, `clio_coder_permission_resolved`, `clio_coder_run_outcome`, `clio_coder_steer_received`, or `unknown` for any other display type. `callId` pairs a tool start with its finish, and `outcome` is `ok`, `error` or `blocked`.
 
 ### Bounds
 
-The feed is capped at 2 MiB per run (`RUN_EVENT_JOURNAL_CAP_BYTES`). Past the cap `event` records are dropped behind one `journal_truncated` record, while `open`, `result`, `terminal` and the marker are always written, so a capped feed still says what the run was and how it ended. A writer failure never reaches the dispatch. The run's telemetry scope outlives its row in the ledger ring and expires under telemetry [retention](telemetry.md#retention).
+The feed and the journal projection are each capped at 2 MiB per run (`RUN_FEED_CAP_BYTES`, `RUN_EVENT_JOURNAL_CAP_BYTES`). Past the cap `event` rows are dropped behind one `journal_truncated` row, while `open`, `result` and `terminal` are always written, so a capped feed still says what the run was and how it ended. A writer failure never reaches the dispatch. The run's telemetry scope outlives its row in the ledger ring and expires under telemetry [retention](telemetry.md#retention); its feed does not.
 
 ### Readers
 
-`readRunEventJournal` reads at most the last 256 KiB (`RUN_EVENT_JOURNAL_READ_TAIL_BYTES`) of the run's journal segments and discards a leading partial line. It reports `truncated` when the head was skipped, the writer dropped records, or the caller's line limit cut the result. `fleet view` keeps the newest 400 transcript lines. The workers dashboard folds each journal incrementally: it remembers the byte offset it consumed, reads at most 512 KiB per 250 ms poll, restarts a fold when a file shrinks, and keeps 600 stream rows.
+`readRunFeed` reads at most the last 256 KiB (`RUN_FEED_READ_TAIL_BYTES`) of the run's feed and discards a leading partial line. It reports `truncated` when the head was skipped, the writer dropped rows, or the caller's line limit cut the result. `fleet view` keeps the newest 400 transcript lines. The workers dashboard folds each feed incrementally: it remembers the byte offset it consumed, reads at most 512 KiB per 250 ms poll, restarts a fold when a file shrinks, and keeps 600 stream rows. `/panes open logs` runs `tail -n 200 -F` on the newest run's feed.
 
 ### Why the dashboard depends on it
 
-The ledger gives a card its identity, route, budget and lifecycle, and the read model's run DTO over the run's sealed scope gives a finished card its verdict. A running card's current call and last call, and every row of a takeover's stream, come from the feed. Its tool-call count, token total and cost come from the read model's fold over the same run journal. With `fleet.history.journal` off a card still lists, and the takeover says no event journal exists for the run. See [Workers dock and dashboard](../guide/fleet-dispatch.md#workers-dock-and-dashboard) for the operator view.
+The ledger gives a card its identity, route, budget and lifecycle, and the read model's run DTO over the run's sealed scope gives a finished card its verdict. A running card's current call and last call, and every row of a takeover's stream, come from the feed. Its tool-call count, token total and cost come from the read model's fold over the run journal. With `fleet.history.journal` off a card still lists, and the takeover says no display feed exists for the run. See [Workers dock and dashboard](../guide/fleet-dispatch.md#workers-dock-and-dashboard) for the operator view.
 
 ## Route history settled labels
 

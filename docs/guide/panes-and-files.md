@@ -25,8 +25,9 @@ Clio closes its docks and leaves utility panes open:
   mention and returns the keyboard to the prompt. The engine behind it is
   yazi, a vendored file manager installed on request with
   `clio-coder tools install yazi`.
-- **The logs pane.** `/panes open logs` follows the telemetry journal of the
-  dispatched run written to most recently with `tail -n 200 -F`.
+- **The logs pane.** `/panes open logs` follows the display feed
+  (`<stateDir>/runs/<runId>/feed.jsonl`) of the dispatched run whose feed was
+  written most recently, with `tail -n 200 -F`.
 - **The shell pane.** `/panes open shell` opens a login `bash` in the
   workspace.
 - **Coding peer handoff.** `/peer [--cwd <workspace>] <peer> [brief]` opens
@@ -294,7 +295,7 @@ A divider you drag in herdr becomes the dock's new target share, and a dock you 
 | `interface.panes.layout` | `off` | `workers` opens the workers dock at boot; `cockpit` opens the workers dock and, when `interface.panes.files.enabled` is `true`, the files pane, visible. Both close on `/quit`. Takes effect at the next start. Independent of the hidden-at-boot preparation of the files and music docks. |
 | `interface.panes.notifications` | `failures` | Which finished runs raise a herdr toast: `failures` (failed and timed-out runs), `all` or `off`. A failure also leaves a transcript notice unless this is `off`. |
 | `interface.panes.workers.ratio` | `0.34` | Share of the terminal width the workers dock takes, `0.05` through `0.5`, floored at 40 columns. Read when the pane opens. |
-| `fleet.history.journal` | `true` | Whether dispatched runs write their display events into the run's telemetry journal, which the logs and watch panes follow. `/panes` prints it as `journal`. |
+| `fleet.history.journal` | `true` | Whether dispatched runs write their display feed to `<stateDir>/runs/<runId>/feed.jsonl`, which the logs pane, the workers dashboard and `fleet view` follow, and its structural projection to the run's telemetry journal. `/panes` prints it as `journal`. |
 | `integrations.music.enabled` | `false` | Allows `/music`. See [Music](music.md). |
 | `interface.keybindings."clio-coder.files.toggle"` | `alt+e` | Rebind the files key. The leader entry `Ctrl+G` then `e` is fixed. |
 | `interface.keybindings."clio-coder.music.toggle"` | `alt+a` | Rebind the music key. The leader entry `Ctrl+G` then `a` is fixed. |
@@ -347,8 +348,8 @@ ends with the install command, `clio-coder tools install yazi`; run it. If a
 copy is on `PATH`, the message says which version it found and which floor it
 missed.
 
-**`no dispatched run has written a journal under … yet`** on
-`/panes open logs`: the logs pane follows a run's journal and no run has
+**`no dispatched run has written a display feed under … yet`** on
+`/panes open logs`: the logs pane follows a run's display feed and no run has
 started in this state root, or `fleet.history.journal` is `false`. Dispatch something first.
 
 **`the <slot> dock needs <n> cells …`**: the session pane is too small for the dock. Enlarge it and open again.
