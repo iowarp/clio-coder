@@ -16,7 +16,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { subscribeExtensionObservations } from "../../src/domains/extensions/bus-observations.js";
+import {
+	createChatTurnUsage,
+	createTurnObservations,
+	subscribeExtensionObservations,
+} from "../../src/domains/extensions/bus-observations.js";
 import type { ExtensionObservationV2 } from "../../src/domains/extensions/public-api-v2.js";
 import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
 import type { OutOfTurnUsageRow } from "../../src/domains/observability/out-of-turn-usage.js";
@@ -484,6 +488,48 @@ describe("trace mirror tool rows", () => {
 		equal(row.payload.duration_ms, 25);
 		equal(row.startedAt, at(1));
 		equal(row.endedAt, new Date(Date.parse(at(1)) + 25).toISOString());
+	});
+});
+
+describe("turn observations", () => {
+	it("sends a turn's provider-reported usage as turn_end, never an aborted call's display estimate", () => {
+		const observations: ExtensionObservationV2[] = [];
+		const turns = createTurnObservations((observation) => observations.push(observation));
+		const usage = createChatTurnUsage();
+		const settled = (message: Record<string, unknown>) => usage.observe({ type: "message_end", message });
+		usage.observe({ type: "agent_start" });
+		settled({ role: "assistant", model: "m", stopReason: "toolUse", usage: { input: 100, output: 20, cacheRead: 5 } });
+		settled({ role: "toolResult", usage: { input: 999 } });
+		// An interrupted call keeps the provider's zeros; Clio's estimate beside them is for display only.
+		settled({
+			role: "assistant",
+			model: "m",
+			stopReason: "aborted",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			estimatedUsage: { input: 300, output: 40, cacheRead: 0, cacheWrite: 0, estimated: true },
+		});
+		// The terminal reads the fold and takes how the turn ended from its own summary.
+		turns.turnEnd({ ...usage.current(), modelId: "m", targetId: "t", stopReason: "cancelled" });
+		const end = observations.at(-1);
+		deepStrictEqual(end?.event === "turn_end" ? end.usage : null, {
+			inputTokens: 100,
+			outputTokens: 20,
+			cacheReadTokens: 5,
+			cacheWriteTokens: 0,
+			costUsd: null,
+			model: "m",
+			target: "t",
+		});
+		equal(end?.event === "turn_end" ? end.outcome : null, "aborted");
+		usage.observe({ type: "agent_start" });
+		deepStrictEqual(usage.current(), {
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			modelId: "",
+			stopReason: "completed",
+		});
 	});
 });
 
