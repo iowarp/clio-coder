@@ -1141,11 +1141,33 @@ export interface RunTrustInspection {
 	status: CanonicalTrustStatus;
 }
 
-/** A persisted run's trust, from the read model's run DTO: its settled facts and its seal verdict (#434). */
+/**
+ * A persisted run's trust, from the read model's run DTO: its settled facts and its seal verdict. A scope whose seal
+ * fails is failed integrity even when the damage hides its run.settled from the journal reader (#434).
+ */
 export function inspectRunTrustStatus(
 	record: Pick<RunTelemetryV1, "row" | "settled" | "seal"> | null,
 ): RunTrustInspection {
 	if (record === null || record.settled === null) {
+		if (record?.seal?.status === "failed") {
+			const integrity = runIntegrityOfSeal(record.seal);
+			const unread = absentTrustStatus("not_observed");
+			return {
+				integrity,
+				status: composeTrustStatus({
+					artifactIntegrity: attributed(
+						"failed",
+						{ kind: "run_seal", id: record.row.runId },
+						{ kind: "clio", id: "run-seal" },
+						[{ kind: "run_record", id: record.row.runId }],
+					),
+					validationGrounding: unread,
+					contextProvenance: unread,
+					independentReview: absentTrustStatus("not_recorded"),
+					completionEvidence: absentTrustStatus("not_recorded"),
+				}),
+			};
+		}
 		const integrity: RunIntegrity = { state: "unsealed", reason: "the run has not settled" };
 		return { integrity, status: adaptRunTrustStatus(null, integrity) };
 	}

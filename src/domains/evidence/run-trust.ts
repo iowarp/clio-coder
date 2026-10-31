@@ -1,12 +1,14 @@
+import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "../dispatch/gate-decisions.js";
-import type { RunEnvelope, RunResult } from "../dispatch/types.js";
+import type { RunEnvelope } from "../dispatch/types.js";
+import type { SettledRunRecord } from "../telemetry/index.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
 import {
 	adaptGateDecisionReviewStatus,
 	adaptGroundedEvidenceValidationStatus,
 	type CanonicalTrustStatus,
 	composeTrustStatus,
-	inspectRunResultTrustStatus,
+	inspectRunTrustStatus,
 	isTrustStatusIdentifier,
 	type TrustArtifactReference,
 } from "./trust-status.js";
@@ -14,7 +16,10 @@ import { EVIDENCE_VERSION, type EvidenceTrustStatusFile } from "./types.js";
 
 export interface EvidenceRunTrustSource {
 	envelope: RunEnvelope;
-	receipt: RunResult | null;
+	/** The run's record when it settled; its seal decides whether anything it states is read. */
+	run: SettledRunRecord | null;
+	/** The run's record even when it did not settle, so a seal that fails still reads as failed. */
+	record: RunTelemetryV1 | null;
 }
 
 export interface BuildEvidenceTrustStatusInput {
@@ -26,10 +31,10 @@ export interface BuildEvidenceTrustStatusInput {
 
 /**
  * Compose every evidence-linked trust axis at one pure boundary. The run and
- * session builders both call this function, so the same authenticated receipt
- * and gate decision cannot project differently merely because the receipt was
- * bundled through a different entry point. Completion evidence
- * stays receipt-derived so an audit row cannot change one surface alone.
+ * session builders both call this function, so the same verified run record
+ * and gate decision cannot project differently merely because the run was
+ * bundled through a different entry point. Completion evidence stays derived
+ * from the run record so an audit row cannot change one surface alone.
  */
 export function buildEvidenceTrustStatusFile(input: BuildEvidenceTrustStatusInput): EvidenceTrustStatusFile {
 	return {
@@ -56,11 +61,11 @@ interface ComposeEvidenceRunTrustInput {
 }
 
 function composeEvidenceRunTrustStatus(input: ComposeEvidenceRunTrustInput): CanonicalTrustStatus {
-	const inspection = inspectRunResultTrustStatus(input.source.receipt, input.source.envelope);
+	const inspection = inspectRunTrustStatus(input.source.run ?? input.source.record);
 	let status = inspection.status;
 	// Only independently observed executions ground validation. A completion
 	// contract audit row is the run's own self-report and cannot override the
-	// receipt-derived completion axis on this surface alone.
+	// run-derived completion axis on this surface alone.
 	const grounded = input.validationEvidence.filter((artifact) => isTrustStatusIdentifier(artifact.id));
 	if (
 		grounded.length > 0 &&
@@ -79,17 +84,15 @@ function composeEvidenceRunTrustStatus(input: ComposeEvidenceRunTrustInput): Can
 	if (gate !== null) {
 		const artifactVerification = verifyGateDecisionArtifact(gate);
 		const subject = gate.subjects.find((entry) => entry.runId === input.source.envelope.id);
-		const receipt = inspection.integrity.ok ? input.source.receipt : null;
+		// A gate subject cites the run by the digest of its run.settled; only a verified record can answer it (#434).
+		const digest = inspection.integrity.state === "verified" ? (input.source.run?.settled.digest ?? null) : null;
 		const verification =
-			artifactVerification.ok &&
-			subject !== undefined &&
-			receipt?.integrity !== undefined &&
-			subject.digest === receipt.integrity.digest
+			artifactVerification.ok && subject !== undefined && digest !== null && subject.digest === digest
 				? ({ ok: true } as const)
 				: ({
 						ok: false,
 						reason: artifactVerification.ok
-							? "gate subject receipt digest unavailable or mismatched"
+							? "gate subject run digest unavailable or mismatched"
 							: artifactVerification.reason,
 					} as const);
 		status = composeTrustStatus(status, {

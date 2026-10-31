@@ -1,19 +1,20 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { materializePendingGateDecision, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import { evidenceDetailSnapshot } from "../../src/domains/evidence/detail.js";
-import { buildEvidence, inspectEvidence, TRUST_STATUS_AXES } from "../../src/domains/evidence/index.js";
+import { buildEvidence, type inspectEvidence, TRUST_STATUS_AXES } from "../../src/domains/evidence/index.js";
 import { EVIDENCE_INVENTORY_MAX_ARTIFACTS } from "../../src/domains/evidence/inventory.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
+import { telemetryJournalPath, telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { EVIDENCE_TOOL_MAX_BYTES, evidenceTool } from "../../src/tools/evidence.js";
 import type { ToolResult } from "../../src/tools/registry.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
 type EvidenceOutput = Awaited<ReturnType<typeof inspectEvidence>> &
 	Awaited<ReturnType<typeof evidenceDetailSnapshot>> & {
@@ -54,20 +55,28 @@ function output(result: ToolResult): EvidenceOutput {
 	return JSON.parse(result.output);
 }
 
-async function fixture(tampered = false, retired = false, task?: string) {
+/** Settle a run afresh: a sealed run scope built from the draft, replacing any the run had. */
+async function settle(draft: RunResultDraft): Promise<void> {
+	await rm(telemetryRunDirectory(clioStateDir(), draft.runId), { recursive: true, force: true });
+	await writeSettledRun(clioStateDir(), draft);
+}
+
+/** Change one byte of a run's settled record so its seal no longer verifies. */
+async function tamper(runId: string): Promise<void> {
+	const path = telemetryJournalPath(telemetryRunDirectory(clioStateDir(), runId));
+	const text = await readFile(path, "utf8");
+	ok(text.includes('"agentId":"coder"'));
+	await writeFile(path, text.replace('"agentId":"coder"', '"agentId":"codex"'));
+}
+
+async function fixture(tampered = false, task?: string) {
 	const envelope = { ...fixtureEnvelope("fixture"), ...(task === undefined ? {} : { task }) };
-	const receipt = withReceiptIntegrity(
-		{
-			...fixtureReceiptDraft(envelope),
-			validationGrounding: { claimed: 12, grounded: 1, ungrounded: ["typecheck"], basis: "no-command-executed" },
-		},
-		envelope,
-	);
-	if (tampered) receipt.tokenCount = 999999;
-	if (retired) receipt.integrity.version = 1 as typeof receipt.integrity.version;
-	await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
 	await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
-	await writeFile(join(clioStateDir(), "receipts", "fixture.json"), JSON.stringify(receipt));
+	await settle({
+		...fixtureReceiptDraft(envelope),
+		validationGrounding: { claimed: 12, grounded: 1, ungrounded: ["typecheck"], basis: "no-command-executed" },
+	});
+	if (tampered) await tamper(envelope.id);
 	return envelope;
 }
 
@@ -158,18 +167,13 @@ describe("evidence tool", () => {
 		deepStrictEqual(inspected.gateDecisions, []);
 	});
 
-	it("reports agent-managed delegation from an authenticated receipt", async () => {
+	it("reports agent-managed delegation from a verified run", async () => {
 		const envelope = fixtureEnvelope("delegation-bypass");
-		const receipt = withReceiptIntegrity(
-			{
-				...fixtureReceiptDraft(envelope),
-				delegation: { toolGovernance: "agent-managed" } as NonNullable<RunResultDraft["delegation"]>,
-			},
-			envelope,
-		);
-		await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
 		await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
-		await writeFile(join(clioStateDir(), "receipts", `${envelope.id}.json`), JSON.stringify(receipt));
+		await settle({
+			...fixtureReceiptDraft(envelope),
+			delegation: { toolGovernance: "agent-managed" } as NonNullable<RunResultDraft["delegation"]>,
+		});
 		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: envelope.id });
 		ok(built.findings.some((finding) => finding.tag === "external-bypass"));
 	});
@@ -209,7 +213,7 @@ describe("evidence tool", () => {
 		strictEqual(classify({ tool: "evidence", args: { mode: "run", runId: "fixture" } }).actionClass, "read");
 	});
 
-	it("exposes worktree fields only while the run receipt still verifies", async () => {
+	it("exposes worktree fields only while the run seal still verifies", async () => {
 		const worktree = {
 			path: "/workspace/.clio-coder/worktrees/worktree-fixture",
 			branch: "clio-coder/task/worktree-fixture",
@@ -220,11 +224,8 @@ describe("evidence tool", () => {
 			snapshot: "working-tree" as const,
 		};
 		const envelope = { ...fixtureEnvelope("worktree-fixture"), cwd: worktree.path };
-		const receipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), worktree }, envelope);
-		await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
 		await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
-		const receiptPath = join(clioStateDir(), "receipts", "worktree-fixture.json");
-		await writeFile(receiptPath, JSON.stringify(receipt));
+		await settle({ ...fixtureReceiptDraft(envelope), worktree });
 		deepStrictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree, {
 			branch: worktree.branch,
 			changedPaths: worktree.changedPaths,
@@ -242,8 +243,7 @@ describe("evidence tool", () => {
 			applied: false,
 			reason: "worktree_merge_conflict",
 		};
-		const failedReceipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), worktree: failedApply }, envelope);
-		await writeFile(receiptPath, JSON.stringify(failedReceipt));
+		await settle({ ...fixtureReceiptDraft(envelope), worktree: failedApply });
 		strictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree?.reason, "worktree_merge_conflict");
 		const mergedWorktree = {
 			path: worktree.path,
@@ -253,16 +253,12 @@ describe("evidence tool", () => {
 			apply: "merge" as const,
 			applied: true,
 		};
-		const mergedReceipt = withReceiptIntegrity({ ...fixtureReceiptDraft(envelope), worktree: mergedWorktree }, envelope);
-		await writeFile(receiptPath, JSON.stringify(mergedReceipt));
+		await settle({ ...fixtureReceiptDraft(envelope), worktree: mergedWorktree });
 		strictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree?.applied, true);
-		await writeFile(
-			receiptPath,
-			JSON.stringify({ ...mergedReceipt, worktree: { ...mergedReceipt.worktree, branch: "forged" } }),
-		);
+		await tamper(envelope.id);
 		deepStrictEqual(output(await evidence({ mode: "run", runId: envelope.id })).worktree, {
 			status: "withheld",
-			reason: "receipt-integrity",
+			reason: "run-seal",
 		});
 	});
 
@@ -273,7 +269,7 @@ describe("evidence tool", () => {
 
 	it("returns a bounded redacted summary only to the owning session", async () => {
 		const secret = `ghp_${"A".repeat(24)}`;
-		await fixture(false, false, `Check token ${secret}`);
+		await fixture(false, `Check token ${secret}`);
 		const sessionDir = join(clioStateDir(), "sessions", "fixture-cwd", FIXTURE_SESSION);
 		await mkdir(sessionDir, { recursive: true });
 		await writeFile(
@@ -417,15 +413,15 @@ describe("evidence tool", () => {
 		ok(!result.output.includes("\uFFFD"));
 	});
 
-	it("withholds tampered receipt facts and ungrounded counts", async () => {
+	it("withholds a tampered run's facts and ungrounded counts", async () => {
 		await fixture(true);
 		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
 		strictEqual(built.ungroundedClaims, 0);
 		const inspected = output(await evidence({ mode: "inspect", id: built.evidenceId }));
-		strictEqual(inspected.overview.totals.receipts, 0);
+		strictEqual(inspected.overview.totals.runRecords, 0);
 		strictEqual(inspected.overview.totals.tokens, 0);
 		strictEqual(inspected.runs[0]?.verdict, "compromised");
-		ok(inspected.findings.some((finding: { tag: string }) => finding.tag === "receipt-integrity"));
+		ok(inspected.findings.some((finding: { tag: string }) => finding.tag === "run-seal"));
 	});
 
 	it("keeps another session's bundle from another project out of list and inspect", async () => {
@@ -439,12 +435,5 @@ describe("evidence tool", () => {
 		if (refused.kind === "error") match(refused.message, /belongs to another project/);
 		const run = await evidence({ mode: "run", runId: "fixture" }, "session-2");
 		strictEqual(run.kind, "error");
-	});
-
-	it("does not count claims from retired receipts", async () => {
-		await fixture(false, true);
-		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
-		strictEqual(built.ungroundedClaims, 0);
-		strictEqual((await inspectEvidence(clioDataDir(), built.evidenceId)).overview.totals.receipts, 0);
 	});
 });

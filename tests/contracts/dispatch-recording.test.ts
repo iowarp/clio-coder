@@ -9,7 +9,6 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import type { CallStarted } from "../../src/core/telemetry/schemas.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { createRecordingJournal, parseRecordingCast, readRunRecording } from "../../src/domains/dispatch/recording.js";
 import { readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
@@ -25,6 +24,7 @@ import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
 let env: Awaited<ReturnType<typeof isolateClioEnv>>;
 beforeEach(async () => {
@@ -127,18 +127,14 @@ it("reports disk failure without throwing into dispatch", () => {
 	ok(warnings.length > 0);
 });
 
-it("exports recording evidence with exact references and leaves receipt trust intact", async () => {
+it("exports recording evidence with exact references and leaves the run seal intact", async () => {
 	const run = fixtureEnvelope("fixture");
 	const journal = createRecordingJournal();
 	run.recording = journal.start(run.id, node);
 	journal.append(run.id, { at: "", type: "text", detail: "warning\ncorrection\n" });
 	journal.terminal(run.id, "succeeded");
-	mkdirSync(join(clioStateDir(), "receipts"), { recursive: true });
 	writeFileSync(join(clioStateDir(), "runs.json"), JSON.stringify([run]));
-	writeFileSync(
-		join(clioStateDir(), "receipts", `${run.id}.json`),
-		JSON.stringify(withReceiptIntegrity(fixtureReceiptDraft(run), run)),
-	);
+	await writeSettledRun(clioStateDir(), fixtureReceiptDraft(run));
 	const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: run.id });
 	const manifest = built.overview.recordings?.[0];
 	ok(manifest?.castPath);
@@ -151,7 +147,7 @@ it("exports recording evidence with exact references and leaves receipt trust in
 		built.overview.recordings,
 	);
 	equal(
-		built.findings.some((finding) => finding.tag === "receipt-integrity"),
+		built.findings.some((finding) => finding.tag === "run-seal"),
 		false,
 	);
 });

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
+import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
 import { mergeWorktreeBranch } from "../../src/tools/task-worktree.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -88,7 +88,7 @@ test("ACP worktree dispatch records its branch and changed paths for later merge
 		equal(existsSync(join(root, "proof.txt")), false);
 		const stateDir = process.env.CLIO_CODER_STATE_DIR;
 		ok(stateDir);
-		ok(verifyReceiptFileReport(stateDir, run.runId).ok);
+		ok(verifyRunRecordReport(stateDir, run.runId).ok);
 		deepStrictEqual(mergeWorktreeBranch(root, receipt.worktree.branch, "fixture"), { ok: true });
 		equal(readFileSync(join(root, "proof.txt"), "utf8"), "HELLO");
 	} finally {

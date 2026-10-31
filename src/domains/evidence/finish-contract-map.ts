@@ -26,9 +26,9 @@ import type { EvidenceTag } from "./types.js";
  *     (validation present but a weak proxy).
  *   - protected_artifact: a protect action, which the forensic layer records
  *     under `protected-artifact`.
- *   - dispatch_receipt: a passed dispatch receipt, whose forensic concerns are
- *     `receipt-integrity` (the receipt verifies) and `session-linked` (the run
- *     is linked to its session).
+ *   - dispatch_receipt: a passed dispatch run, whose forensic concerns are
+ *     `run-seal` (the run's seal verifies) and `session-linked` (the run is
+ *     linked to its session).
  *   - limitation: a successful `limitation` tool receipt, which the forensic
  *     layer records as the `completion-evidence` info row for a run that
  *     finished limited instead of evidenced.
@@ -36,6 +36,6 @@ import type { EvidenceTag } from "./types.js";
 export const FINISH_CONTRACT_EVIDENCE_TAGS: Record<FinishContractEvidenceKind, readonly EvidenceTag[]> = {
 	validation_command: ["no-validation", "proxy-validation"],
 	protected_artifact: ["protected-artifact"],
-	dispatch_receipt: ["receipt-integrity", "session-linked"],
+	dispatch_receipt: ["run-seal", "session-linked"],
 	limitation: ["completion-evidence"],
 } as const;

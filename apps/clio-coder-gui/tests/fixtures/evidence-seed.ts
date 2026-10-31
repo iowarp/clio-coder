@@ -1,39 +1,34 @@
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { GateDecisionArtifact } from "../../../../src/domains/dispatch/gate-decisions.js";
 import {
 	materializePendingGateDecision,
 	stagePendingGateDecision,
 } from "../../../../src/domains/dispatch/gate-decisions.js";
-import { withReceiptIntegrity } from "../../../../src/domains/dispatch/receipt-integrity.js";
 import { buildEvidence } from "../../../../src/domains/evidence/index.js";
 import { openCallJournal } from "../../../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory } from "../../../../src/domains/telemetry/paths.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../../../../tests/harness/receipt.js";
+import { writeSettledRun } from "../../../../tests/harness/settled-run.js";
 
 const cwd = process.argv[2];
 if (!cwd) throw new Error("Fixture workspace required");
 const dataDir = join(cwd, "data"),
 	stateDir = join(cwd, "state");
-await mkdir(join(stateDir, "receipts"), { recursive: true });
 let existing: unknown[] = [];
 try {
 	existing = JSON.parse(await readFile(join(stateDir, "runs.json"), "utf8"));
 } catch {
 	/* First seed. */
 }
-const envelopes = ["evidence-source", "build-source"].map((id) => ({ ...fixtureEnvelope(id), cwd, sessionId: null }));
+const envelopes = ["evidence-source", "build-source"].map((id) => ({
+	...fixtureEnvelope(id),
+	cwd,
+	sessionId: null,
+	pipeline: { fromRunId: "earlier-run", position: 2, inputBytes: 12, inputTruncated: false },
+}));
 await writeFile(join(stateDir, "runs.json"), JSON.stringify([...existing, ...envelopes]));
-for (const envelope of envelopes) {
-	const receipt = withReceiptIntegrity(
-		{
-			...fixtureReceiptDraft(envelope),
-			pipeline: { fromRunId: "earlier-run", position: 2, inputBytes: 12, inputTruncated: false },
-		},
-		envelope,
-	);
-	await writeFile(join(stateDir, "receipts", `${envelope.id}.json`), JSON.stringify(receipt));
-}
+for (const envelope of envelopes) await writeSettledRun(stateDir, fixtureReceiptDraft(envelope));
 const built = await buildEvidence({ dataDir, stateDir, runId: "evidence-source" });
 const context = {
 	sessionId: null,

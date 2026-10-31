@@ -1,19 +1,12 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
+import type { Fact } from "../../core/telemetry/fact.js";
 import { rawDurationMs } from "../../core/timers.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
-import type {
-	RunEnvelope,
-	RunKind,
-	RunResult,
-	RunResultIntegrity,
-	RunStatus,
-	ToolCallStat,
-} from "../dispatch/index.js";
+import type { RunEnvelope, RunKind, RunStatus } from "../dispatch/index.js";
 import { type ExecutionRole, isExecutionRole, readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
-import { readReceiptText } from "../dispatch/receipt-store.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import { foldDecisionBoard } from "../session/decision-board.js";
 import { type DecisionLedgerEntry, decisionRef, type TaskLedgerValidationEvidence } from "../session/entries.js";
@@ -29,19 +22,21 @@ import {
 import { legacyTaskCompletionRow, TASK_BOARD_COMPLETION_CLAIM_PREFIX } from "../session/task-board.js";
 import { loadRunTelemetrySourceAsync, loadSessionTelemetrySourceAsync } from "../session/telemetry-source.js";
 import { filterEntriesToActivePath } from "../session/tree/active-path.js";
-import { aggregateCostAmounts, callCoverageForRun } from "../telemetry/cost.js";
+import { aggregateCostAmounts, type CostAmount } from "../telemetry/cost.js";
+import type { SettledRunRecord } from "../telemetry/index.js";
+import { readRunRecordAsync } from "../telemetry/index.js";
 import type { AccountabilityRecord, JournalSource } from "../telemetry/read-model.js";
 import { accountabilityRecords } from "../telemetry/read-model.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
 import { renderEvidenceFindingsMarkdown } from "./findings-markdown.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
-import { extractRunProvenance, provenanceTranscriptLines } from "./provenance.js";
+import { provenanceTranscriptLines, runProvenanceOf } from "./provenance.js";
 import { exportEvidenceRecordings } from "./recordings.js";
 import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./redact.js";
 import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { EVIDENCE_FILES, evidenceDirectory, findingsFile } from "./store.js";
 import type { CanonicalTrustStatus, TrustArtifactReference } from "./trust-status.js";
-import { inspectRunResultTrustStatus, retiredIntegrityVersionOf } from "./trust-status.js";
+import { inspectRunTrustStatus } from "./trust-status.js";
 import {
 	EVIDENCE_VERSION,
 	type EvidenceAuditLinkedRow,
@@ -52,7 +47,7 @@ import {
 	type EvidenceLinkConfidence,
 	type EvidenceOverview,
 	type EvidenceProtectedArtifactsFile,
-	type EvidenceReceiptFile,
+	type EvidenceRunFile,
 	type EvidenceRunLink,
 	type EvidenceRunSource,
 	type EvidenceSeverity,
@@ -70,7 +65,7 @@ const MODEL_PRIVATE_MARKER = "[not sent to model]";
 export interface BuildEvidenceOptions {
 	/** Evidence bundles are written under <dataDir>/evidence/. */
 	dataDir: string;
-	/** Run ledger, receipts, sessions, and telemetry journals are read from here. */
+	/** Run ledger, run scopes, sessions, and telemetry journals are read from here. */
 	stateDir: string;
 	runId?: string;
 	sessionId?: string;
@@ -142,13 +137,7 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 	const sorted = [...envelopes].sort(compareRuns);
 	const runSources: EvidenceRunSource[] = [];
 	for (const envelope of sorted) {
-		const receiptResult = await readReceipt(options.stateDir, envelope);
-		runSources.push({
-			envelope,
-			receipt: receiptResult.receipt,
-			receiptError: receiptResult.error,
-			receiptIntegrityFailed: receiptResult.integrityFailed,
-		});
+		runSources.push({ envelope, ...(await readRunSource(options.stateDir, envelope.id)) });
 	}
 
 	const evidenceId =
@@ -173,13 +162,13 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		gateDecisions: gateDecisions.decisions,
 		validationEvidence,
 	});
-	const decisionLinks = resolveReceiptDecisions(runSources, sessionLinks);
+	const decisionLinks = resolveRunDecisions(runSources, sessionLinks);
 	const rawFindings = buildFindings(runSources, trustStatusRaw, sessionLinks, auditLinks, protectedArtifactsRaw);
 	for (const row of decisionLinks.findings)
 		rawFindings.push({ ...row, id: `finding-${String(rawFindings.length + 1).padStart(3, "0")}` });
 	// Export-boundary redaction (cold path): secret-shaped values are scrubbed
-	// from everything the bundle serializes: envelopes, receipts (including
-	// delegation toolCallLog arguments), tool-event previews, and the rendered
+	// from everything the bundle serializes: envelopes, run records (their
+	// result objects included), tool-event previews, and the rendered
 	// transcript. Raw local session files are untouched; the bundle is the
 	// boundary, and the overview's redactionCount keeps the bundle honest about
 	// its filtering. Audit rows and protected-artifact records are counted in
@@ -190,7 +179,8 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 	const redactedRunSources: EvidenceRunSource[] = runSources.map((item) => ({
 		...item,
 		envelope: redactSecretsDeep(item.envelope, tally),
-		receipt: item.receipt === null ? null : redactSecretsDeep(item.receipt, tally),
+		run: item.run === null ? null : redactSecretsDeep(item.run, tally),
+		record: item.record === null ? null : redactSecretsDeep(item.record, tally),
 	}));
 	const redactedToolEvents: EvidenceToolEvent[] = toolEventRows.map((event) => ({
 		...event,
@@ -248,9 +238,32 @@ export async function buildEvidence(options: BuildEvidenceOptions): Promise<Evid
 		findings,
 		trustStatus,
 		ungroundedClaims: runSources.reduce((total, source) => {
-			const grounding = authenticatedReceipt(source)?.validationGrounding;
-			return total + (grounding === undefined ? 0 : Math.max(0, grounding.claimed - grounding.grounded));
+			const grounding = verifiedRun(source)?.settled.validationGrounding;
+			return total + (grounding ? Math.max(0, grounding.claimed - grounding.grounded) : 0);
 		}, 0),
+	};
+}
+
+function factValue(fact: Fact<number>): number | null {
+	return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null;
+}
+
+/** One verified run's spend as a cost amount, worded from its settled pricing fact. */
+function runCostAmount(settled: SettledRunRecord["settled"]): CostAmount {
+	const usd = settled.pricing.usd;
+	const apiCalls = factValue(settled.apiCalls);
+	return {
+		usd: factValue(usd) ?? 0,
+		provenance:
+			usd.kind === "unknown" || usd.kind === "absent"
+				? "unknown"
+				: settled.pricing.pricedBy === "free"
+					? "known_free"
+					: usd.kind === "estimated"
+						? "estimated"
+						: "known",
+		apiCalls: apiCalls ?? 0,
+		...(apiCalls === null ? { unknownCallCoverageRuns: 1 } : {}),
 	};
 }
 
@@ -265,35 +278,24 @@ function buildOverview(
 	protectedArtifacts: EvidenceProtectedArtifactsFile,
 ): EvidenceOverview {
 	const envelopes = runSources.map((item) => item.envelope);
-	const receipts = runSources.flatMap((item) => {
-		const receipt = authenticatedReceipt(item);
-		return receipt === null ? [] : [receipt];
+	const settledRuns = runSources.flatMap((item) => {
+		const run = verifiedRun(item);
+		return run === null ? [] : [run.settled];
 	});
-	// Totals fold only what the bundle seals: each verified receipt's own call fold. A run without one is unknown in
-	// tokens and cost, never zero, so the totals survive journal pruning unchanged (#434, P5).
-	const unverifiedRuns = runSources.length - receipts.length;
+	// Totals fold only what the bundle's verified runs settled. A run without a verified record is unknown in tokens
+	// and cost, never zero (#434, P5).
+	const unverifiedRuns = runSources.length - settledRuns.length;
 	const costSummary = aggregateCostAmounts([
-		...receipts.map((receipt) => ({
-			usd: receipt.costUsd,
-			provenance: receipt.costProvenance ?? "unknown",
-			...callCoverageForRun(receipt),
-			...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
-		})),
+		...settledRuns.map(runCostAmount),
 		...(unverifiedRuns > 0
 			? [{ usd: 0, provenance: "unknown" as const, apiCalls: 0, unknownCallCoverageRuns: unverifiedRuns }]
 			: []),
 	]);
-	const tokenCoverage = receipts.reduce(
-		(coverage, receipt) => {
-			const calls = callCoverageForRun(receipt);
-			return {
-				unknownCalls: coverage.unknownCalls + calls.missingTokenCalls,
-				unknownRuns: coverage.unknownRuns + calls.unknownCallCoverageRuns,
-			};
-		},
-		{ unknownCalls: 0, unknownRuns: unverifiedRuns },
-	);
-	const toolStats = receipts.flatMap((receipt) => receipt.toolStats);
+	const tokenCoverage = {
+		unknownCalls: 0,
+		unknownRuns: unverifiedRuns + settledRuns.filter((settled) => factValue(settled.totalTokens) === null).length,
+	};
+	const toolStats = settledRuns.flatMap((settled) => settled.tools);
 	const runIds = envelopes.map((envelope) => envelope.id).sort(compareStrings);
 	const sessionIds = uniqueStrings(
 		envelopes.flatMap((envelope) => (envelope.sessionId === null ? [] : [envelope.sessionId])),
@@ -322,16 +324,16 @@ function buildOverview(
 		modelIds: uniqueStrings(envelopes.map((envelope) => envelope.wireModelId)),
 		totals: {
 			runs: envelopes.length,
-			receipts: receipts.length,
-			toolCalls: receipts.reduce((total, receipt) => total + receipt.toolCalls, 0),
+			runRecords: settledRuns.length,
+			toolCalls: settledRuns.reduce((total, settled) => total + settled.toolCalls, 0),
 			toolErrors: toolStats.reduce((total, stat) => total + stat.errors, 0),
 			blockedToolCalls: toolStats.reduce((total, stat) => total + stat.blocked, 0),
 			sessionEntries: sessionLinks.entries.length,
 			auditRows: auditLinks.rows.length,
 			toolEvents: toolEventRows.length,
-			linkedToolEvents: toolEventRows.filter((event) => event.source !== "receipt-aggregate").length,
+			linkedToolEvents: toolEventRows.filter((event) => event.source !== "run-aggregate").length,
 			protectedArtifacts: protectedArtifacts.artifacts.length,
-			tokens: receipts.reduce((total, receipt) => total + receipt.tokenCount, 0),
+			tokens: settledRuns.reduce((total, settled) => total + (factValue(settled.totalTokens) ?? 0), 0),
 			tokenCoverage,
 			costUsd: costSummary.knownUsd,
 			costSummary,
@@ -354,15 +356,12 @@ function buildFindings(
 	for (const source of runSources) {
 		const status = trustByRun.get(source.envelope.id);
 		if (status === undefined) throw new Error(`canonical trust status missing for run ${source.envelope.id}`);
-		if (source.receiptError !== null) {
-			// The canonical axis, not the raw reason string, says whether the seal
-			// was retired: `receipt-retired` is the expected state of every run
-			// that predates an integrity bump and is an info row, while
-			// `receipt-integrity` stays the warning for a seal that was checked
-			// and rejected.
-			const retired = retiredIntegrityVersionOf(status.artifactIntegrity) !== null;
-			const tag = retired ? "receipt-retired" : source.receiptIntegrityFailed ? "receipt-integrity" : "unknown";
-			findings.push(finding(findings.length, retired ? "info" : "warn", tag, source.envelope.id, source.receiptError));
+		if (source.runError !== null) {
+			// A seal that was checked and rejected is the security warning; a run that has not settled or sealed yet is
+			// only not evidence.
+			findings.push(
+				finding(findings.length, source.sealFailed ? "warn" : "info", "run-seal", source.envelope.id, source.runError),
+			);
 		}
 		if (
 			isSuccessfulRun(source) &&
@@ -392,8 +391,8 @@ function buildFindings(
 		if (source.envelope.cwd.trim().length === 0) {
 			findings.push(finding(findings.length, "warn", "cwd-missing", source.envelope.id, "run ledger cwd is empty"));
 		}
-		const receipt = authenticatedReceipt(source);
-		const blocked = receipt?.toolStats.reduce((total, stat) => total + stat.blocked, 0) ?? 0;
+		const settled = verifiedRun(source)?.settled;
+		const blocked = settled?.tools.reduce((total, stat) => total + stat.blocked, 0) ?? 0;
 		if (blocked > 0) {
 			findings.push(
 				finding(findings.length, "warn", "blocked-tool", source.envelope.id, `${blocked} blocked tool call(s)`),
@@ -402,7 +401,7 @@ function buildFindings(
 		// An escalation that timed out or was denied is an unresolved permission
 		// ask; surface it the way blocked tool calls are surfaced above. Approved
 		// escalations resolved cleanly and need no finding.
-		const escalation = receipt === null ? undefined : extractRunProvenance(receipt).escalation;
+		const escalation = settled?.escalations ?? undefined;
 		if (escalation !== undefined && (escalation.timedOut > 0 || escalation.denied > 0)) {
 			findings.push(
 				finding(
@@ -414,7 +413,7 @@ function buildFindings(
 				),
 			);
 		}
-		if (receipt?.delegation?.toolGovernance === "agent-managed") {
+		if (settled?.toolGovernance === "agent-managed") {
 			const message = "run used external peer permissions outside Clio policy; Clio safety blocks were not enforced";
 			findings.push(finding(findings.length, "warn", "external-bypass", source.envelope.id, message));
 		}
@@ -427,13 +426,14 @@ function buildFindings(
 				finding(findings.length, "warn", "timeout", source.envelope.id, `run status ${source.envelope.status}`),
 			);
 		}
-		const exitCode = receipt?.exitCode ?? source.envelope.exitCode;
+		const exitCode = settled?.exitCode ?? source.envelope.exitCode;
 		if (exitCode !== null && exitCode !== 0) {
+			const result = verifiedResult(source);
 			const tag = attributeEvidenceFailure({
-				outcome: receipt?.outcome ?? source.envelope.outcome ?? null,
-				outcomeCode: receipt?.outcomeCode ?? source.envelope.outcomeCode ?? null,
-				outcomeDetail: receipt?.outcomeDetail ?? source.envelope.outcomeDetail ?? null,
-				failureMessage: receipt?.failureMessage ?? null,
+				outcome: settled?.outcome ?? source.envelope.outcome ?? null,
+				outcomeCode: settled?.outcomeCode ?? source.envelope.outcomeCode ?? null,
+				outcomeDetail: result?.outcomeDetail ?? settled?.outcomeDetail ?? source.envelope.outcomeDetail ?? null,
+				failureMessage: result?.failureMessage ?? settled?.failureMessage ?? null,
 			});
 			findings.push(finding(findings.length, "warn", tag, source.envelope.id, `run exited with code ${exitCode}`));
 		}
@@ -556,17 +556,22 @@ function validationRunIdFor(linked: LinkedSessionEntry, runSources: ReadonlyArra
 }
 
 function isSuccessfulRun(source: EvidenceRunSource): boolean {
-	const receipt = authenticatedReceipt(source);
-	const outcome = receipt?.outcome ?? source.envelope.outcome ?? null;
+	const settled = verifiedRun(source)?.settled;
+	const outcome = settled?.outcome ?? source.envelope.outcome ?? null;
 	if (outcome !== null) return outcome === "succeeded";
-	const exitCode = receipt?.exitCode ?? source.envelope.exitCode;
+	const exitCode = settled?.exitCode ?? source.envelope.exitCode;
 	return source.envelope.status === "completed" && exitCode === 0;
 }
 
-function authenticatedReceipt(source: EvidenceRunSource): RunResult | null {
-	return source.receipt !== null && source.receiptError === null && !source.receiptIntegrityFailed
-		? source.receipt
-		: null;
+/** The run's record when its seal verified; nothing an unverified record states is read as evidence. */
+function verifiedRun(source: EvidenceRunSource): SettledRunRecord | null {
+	return source.run !== null && source.runError === null && !source.sealFailed ? source.run : null;
+}
+
+/** The verified run's result object, when the scope holds it. */
+function verifiedResult(source: EvidenceRunSource) {
+	const result = verifiedRun(source)?.result;
+	return result?.state === "resolved" ? result.value : null;
 }
 
 function isSuccessfulValidationBashExecution(entry: BashExecutionEntry): boolean {
@@ -664,7 +669,7 @@ async function writeEvidenceFiles(
 		transcript ?? renderTranscript(overview, runSources, sessionLinks, trustStatus, findings),
 	);
 	await writeJsonl(join(directory, "tool-events.jsonl"), toolEventRows);
-	await writeJson(join(directory, "receipt.json"), receiptsFile(runSources));
+	await writeJson(join(directory, "run.json"), runsFile(runSources));
 	await writeJson(join(directory, "gate-decisions.json"), gateDecisions);
 	await writeJson(join(directory, "trust-status.json"), trustStatus);
 	await writeJson(join(directory, "findings.json"), findingsFile(overview.evidenceId, [...findings]));
@@ -681,24 +686,24 @@ function toolEvents(
 	if (fromSession.length > 0) return fromSession;
 	const fromAudit = auditToolEvents(auditLinks.rows);
 	if (fromAudit.length > 0) return fromAudit;
-	return receiptAggregateToolEvents(runSources);
+	return runAggregateToolEvents(runSources);
 }
 
-function receiptAggregateToolEvents(runSources: ReadonlyArray<EvidenceRunSource>): EvidenceToolEvent[] {
+function runAggregateToolEvents(runSources: ReadonlyArray<EvidenceRunSource>): EvidenceToolEvent[] {
 	const events: EvidenceToolEvent[] = [];
 	for (const source of runSources) {
-		const stats = source.receipt?.toolStats ?? [];
+		const stats = source.run?.settled.tools ?? [];
 		for (const stat of [...stats].sort(compareToolStats)) {
 			events.push({
-				source: "receipt-aggregate",
+				source: "run-aggregate",
 				runId: source.envelope.id,
 				sessionId: source.envelope.sessionId,
 				tool: stat.tool,
-				count: stat.count,
+				count: stat.calls,
 				ok: stat.ok,
 				errors: stat.errors,
 				blocked: stat.blocked,
-				totalDurationMs: stat.totalDurationMs,
+				totalDurationMs: 0,
 			});
 		}
 	}
@@ -752,7 +757,8 @@ function sourceSessionIds(source: EvidenceOverview["source"], runSources: Readon
 	const values: string[] = [];
 	for (const item of runSources) {
 		if (item.envelope.sessionId !== null) values.push(item.envelope.sessionId);
-		if (item.receipt?.sessionId !== null && item.receipt?.sessionId !== undefined) values.push(item.receipt.sessionId);
+		const sessionId = item.run?.row.sessionId ?? null;
+		if (sessionId !== null) values.push(sessionId);
 	}
 	return uniqueStrings(values);
 }
@@ -1048,7 +1054,7 @@ async function linkAuditRows(
 	const sessionIds = new Set(sessionLinks.attemptedSessionIds);
 	if (source.kind === "session") sessionIds.add(source.sessionId);
 	const runSessionIds = new Map(
-		runSources.map((item) => [item.envelope.id, item.envelope.sessionId ?? item.receipt?.sessionId ?? null] as const),
+		runSources.map((item) => [item.envelope.id, item.envelope.sessionId ?? item.run?.row.sessionId ?? null] as const),
 	);
 	const readErrors: string[] = [];
 	const unreadable = (scope: string, journal: JournalSource): void => {
@@ -1172,10 +1178,15 @@ function compareAuditLinkedRows(a: EvidenceAuditLinkedRow, b: EvidenceAuditLinke
 	return compareStrings(String(a.row.id ?? ""), String(b.row.id ?? ""));
 }
 
-function receiptsFile(runSources: ReadonlyArray<EvidenceRunSource>): EvidenceReceiptFile {
+function runsFile(runSources: ReadonlyArray<EvidenceRunSource>): EvidenceRunFile {
 	return {
-		version: EVIDENCE_VERSION,
-		receipts: runSources.flatMap((source) => (source.receipt === null ? [] : [source.receipt])),
+		version: 1,
+		runs: runSources.map((source) => ({
+			runId: source.envelope.id,
+			settled: source.run?.settled ?? null,
+			seal: source.run?.seal ?? null,
+			provenance: runProvenanceOf(source.envelope, source.run?.settled.escalations ?? null),
+		})),
 	};
 }
 
@@ -1241,16 +1252,17 @@ function renderTranscript(
 	];
 	for (const source of runSources) {
 		const envelope = source.envelope;
-		const exitCode = source.receipt?.exitCode ?? envelope.exitCode;
+		const exitCode = source.run?.settled.exitCode ?? envelope.exitCode;
 		lines.push(
 			`- ${envelope.id} status=${envelope.status} exit=${exitCode ?? "?"} agent=${envelope.agentId} target=${envelope.targetId}`,
 		);
 		lines.push(`  task: ${truncateText(envelope.task, MAX_TASK_CHARS)}`);
 		// Run section rendering adds a sentence per provenance field the
 		// canonical projection admits; a rejected or retired seal adds none.
-		if (source.receipt !== null) {
+		if (source.run !== null) {
 			const status = trustByRun.get(envelope.id);
-			for (const line of provenanceTranscriptLines(extractRunProvenance(source.receipt), status)) {
+			const view = runProvenanceOf(envelope, source.run.settled.escalations);
+			for (const line of provenanceTranscriptLines(view, status)) {
 				lines.push(`  ${line}`);
 			}
 		}
@@ -1483,7 +1495,7 @@ function axisFindings(offset: number, source: EvidenceRunSource, status: Canonic
 	} else if (review === "inconclusive") {
 		next("info", "independent-review", "independent review was inconclusive");
 	} else if (isSuccessfulRun(source) && (review === "absent" || review === "unknown")) {
-		next("info", "independent-review", "run was not independently reviewed; its result rests on its own receipt");
+		next("info", "independent-review", "run was not independently reviewed; its result rests on its own record");
 	}
 	if (status.contextProvenance.state === "invalid") {
 		next("warn", "context-provenance", "context provenance record is contradictory; see trust-status.json");
@@ -1516,7 +1528,7 @@ async function readRunLedger(stateDir: string): Promise<RunLedgerRows> {
 	return { rows: parsed, path: target };
 }
 
-/** A small placement read from the live sealed receipt, never from a cached evidence bundle. */
+/** A small placement read from the run's live sealed record, never from a cached evidence bundle. */
 export async function authenticatedRunWorktree(
 	stateDir: string,
 	runId: string,
@@ -1530,28 +1542,29 @@ export async function authenticatedRunWorktree(
 			snapshot?: "working-tree" | "unavailable";
 			reason?: string;
 	  }
-	| { status: "withheld"; reason: "receipt-integrity" }
+	| { status: "withheld"; reason: "run-seal" }
 	| null
 > {
 	try {
 		const [envelope] = selectRunEnvelopes(await readRunLedger(stateDir), { kind: "run", runId });
 		if (!envelope) return null;
-		const { receipt, error, integrityFailed } = await readReceipt(stateDir, envelope);
-		if (error !== null) {
+		const { run, runError, sealFailed } = await readRunSource(stateDir, envelope.id);
+		if (runError !== null) {
 			const worktreeSegment = `${sep}.clio-coder${sep}worktrees${sep}${runId}`;
 			const ledgerHasTaskWorktree =
 				envelope.cwd.endsWith(worktreeSegment) || envelope.cwd.includes(`${worktreeSegment}${sep}`);
-			return integrityFailed && ledgerHasTaskWorktree ? { status: "withheld", reason: "receipt-integrity" } : null;
+			return sealFailed && ledgerHasTaskWorktree ? { status: "withheld", reason: "run-seal" } : null;
 		}
-		if (!receipt?.worktree) return null;
-		const { branch } = receipt.worktree;
-		const changedPaths = receipt.worktree.changedPaths;
+		const verdict = run?.settled.worktree;
+		const worktree = run?.result?.state === "resolved" ? run.result.value.worktree : null;
+		if (!verdict || !worktree) return null;
+		const { branch, changedPaths } = worktree;
 		return {
 			branch,
-			apply: receipt.worktree.apply,
-			applied: receipt.worktree.applied,
-			...(receipt.worktree.snapshot !== undefined ? { snapshot: receipt.worktree.snapshot } : {}),
-			...(receipt.worktree.reason !== undefined ? { reason: receipt.worktree.reason } : {}),
+			apply: verdict.apply,
+			applied: verdict.applied,
+			...(verdict.snapshot !== null ? { snapshot: verdict.snapshot } : {}),
+			...(worktree.reason !== undefined ? { reason: worktree.reason } : {}),
 			...(changedPaths === undefined
 				? {}
 				: {
@@ -1587,44 +1600,26 @@ function selectRunEnvelopes(ledger: RunLedgerRows, source: EvidenceSource): RunE
 	});
 }
 
-async function readReceipt(
+/** A run's record as evidence reads it: settled and verified by its seal, or the reason it is not evidence. */
+async function readRunSource(
 	stateDir: string,
-	envelope: RunEnvelope,
-): Promise<{
-	receipt: RunResult | null;
-	error: string | null;
-	integrityFailed: boolean;
-}> {
-	const receiptPath = envelope.receiptPath ?? join(stateDir, "receipts", `${envelope.id}.json`);
-	let raw: string;
+	runId: string,
+): Promise<Pick<EvidenceRunSource, "run" | "record" | "runError" | "sealFailed">> {
+	let record: Awaited<ReturnType<typeof readRunRecordAsync>>;
 	try {
-		raw = await readReceiptText(receiptPath);
-	} catch (error) {
-		const err = error as NodeJS.ErrnoException;
-		if (err.code === "ENOENT") {
-			return { receipt: null, error: "receipt file not found", integrityFailed: false };
-		}
-		return { receipt: null, error: `receipt read error: ${err.message ?? String(err)}`, integrityFailed: false };
-	}
-	let receipt: RunResult;
-	try {
-		const parsed = parseJson(raw, receiptPath);
-		receipt = parseRunResult(parsed, receiptPath);
+		record = await readRunRecordAsync(stateDir, runId);
 	} catch (error) {
 		return {
-			receipt: null,
-			error: `receipt invalid: ${error instanceof Error ? error.message : String(error)}`,
-			integrityFailed: true,
+			run: null,
+			record: null,
+			runError: `run record unreadable: ${error instanceof Error ? error.message : String(error)}`,
+			sealFailed: false,
 		};
 	}
-	const integrity = inspectRunResultTrustStatus(receipt, envelope).integrity;
-	if (!integrity.ok) {
-		// A retired seal is set aside unread, the way a missing receipt is; it
-		// is not a failed one, and its reason already names both versions.
-		if (integrity.retired !== undefined) return { receipt, error: integrity.reason, integrityFailed: false };
-		return { receipt, error: `receipt integrity: ${integrity.reason}`, integrityFailed: true };
-	}
-	return { receipt, error: null, integrityFailed: false };
+	const integrity = inspectRunTrustStatus(record).integrity;
+	const run = record?.settled ? (record as SettledRunRecord) : null;
+	if (integrity.state === "verified") return { run, record, runError: null, sealFailed: false };
+	return { run, record, runError: integrity.reason, sealFailed: integrity.state === "failed" };
 }
 
 function readExecutionRole(value: Record<string, unknown>, source: string): ExecutionRole {
@@ -1636,10 +1631,9 @@ function readExecutionRole(value: Record<string, unknown>, source: string): Exec
 function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
 	const reasoningTokenCount = readOptionalNumber(value, source, "reasoningTokenCount");
-	// Spread the raw row first: integrity verification recomputes digests over
-	// ledger fields this parser does not model (outcome, lineage, identity,
-	// token splits), so dropping them would flag every modern receipt as
-	// tampered. The validated reads below still gate the fields evidence uses.
+	// Spread the raw row first so fields this parser does not model (outcome,
+	// lineage, pipeline, persona override) reach the bundle; the validated reads
+	// below still gate the fields evidence uses.
 	return {
 		...(value as Partial<RunEnvelope>),
 		version: 1,
@@ -1666,76 +1660,7 @@ function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 	};
 }
 
-function parseRunResult(value: unknown, source: string): RunResult {
-	if (!isRecord(value)) throw new Error(`${source}: expected object`);
-	const integrity = value.integrity;
-	if (!isRecord(integrity)) throw new Error(`${source}.integrity: expected object`);
-	const reasoningTokenCount = readOptionalNumber(value, source, "reasoningTokenCount");
-	const failureMessage = readOptionalString(value.failureMessage);
-	// Spread the raw receipt first so integrity verification sees the receipt
-	// as written (outcome, safety, reproducibility, token splits, ...); the
-	// write-time digest covered those fields and a lossy re-parse would make
-	// every clean receipt recompute to a different digest.
-	return {
-		...(value as unknown as RunResult),
-		runId: readString(value, source, "runId"),
-		agentId: readString(value, source, "agentId"),
-		task: readString(value, source, "task"),
-		targetId: readString(value, source, "targetId"),
-		wireModelId: readString(value, source, "wireModelId"),
-		runtimeId: readString(value, source, "runtimeId"),
-		runtimeKind: readRunKind(value, source, "runtimeKind"),
-		startedAt: readString(value, source, "startedAt"),
-		endedAt: readString(value, source, "endedAt"),
-		exitCode: readNumber(value, source, "exitCode"),
-		...(failureMessage !== null ? { failureMessage } : {}),
-		tokenCount: readNumber(value, source, "tokenCount"),
-		...(reasoningTokenCount !== undefined ? { reasoningTokenCount } : {}),
-		costUsd: readNumber(value, source, "costUsd"),
-		compiledPromptHash: readNullableString(value, source, "compiledPromptHash"),
-		staticCompositionHash: readNullableString(value, source, "staticCompositionHash"),
-		clioCoderVersion: readReceiptVersion(value, source),
-		piMonoVersion: readString(value, source, "piMonoVersion"),
-		platform: readString(value, source, "platform"),
-		nodeVersion: readString(value, source, "nodeVersion"),
-		toolCalls: readNumber(value, source, "toolCalls"),
-		toolStats: readToolStats(value, source, "toolStats"),
-		sessionId: readNullableString(value, source, "sessionId"),
-		integrity: {
-			// The ledger commitment stays as written; the verifier checks its shape (#434).
-			...(integrity as unknown as RunResultIntegrity),
-			version: readNumber(integrity, `${source}.integrity`, "version") as RunResultIntegrity["version"],
-			algorithm: readString(integrity, `${source}.integrity`, "algorithm") as "sha256",
-			digest: readString(integrity, `${source}.integrity`, "digest"),
-		},
-	};
-}
-
-function readReceiptVersion(value: Record<string, unknown>, source: string): string {
-	if (typeof value.clioCoderVersion === "string") return value.clioCoderVersion;
-	return readString(value, source, "clioVersion");
-}
-
-function readToolStats(record: Record<string, unknown>, source: string, field: string): ToolCallStat[] {
-	const value = record[field];
-	if (!Array.isArray(value)) throw new Error(`${source}.${field}: expected array`);
-	return value.map((entry, index) => {
-		const itemSource = `${source}.${field}[${index}]`;
-		if (!isRecord(entry)) throw new Error(`${itemSource}: expected object`);
-		return {
-			tool: readString(entry, itemSource, "tool"),
-			count: readNumber(entry, itemSource, "count"),
-			ok: readNumber(entry, itemSource, "ok"),
-			errors: readNumber(entry, itemSource, "errors"),
-			blocked: readNumber(entry, itemSource, "blocked"),
-			totalDurationMs: readNumber(entry, itemSource, "totalDurationMs"),
-		};
-	});
-}
-
 function readRunKind(record: Record<string, unknown>, source: string, field: string): RunKind {
-	// runtimeKind is digest-covered: returning anything other than the value as
-	// written would make integrity verification recompute a different payload.
 	const value = readString(record, source, field);
 	if (value !== "http" && value !== "sdk" && value !== "subprocess" && value !== "acp-delegation") {
 		throw new Error(`${source}.${field}: unexpected runtime kind`);
@@ -1883,7 +1808,7 @@ function durationMs(startedAt: string, endedAt: string | null): number {
 	const start = Date.parse(startedAt);
 	const end = Date.parse(endedAt);
 	if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
-	// Clamped for display, but counted first: a receipt whose endedAt precedes
+	// Clamped for display, but counted first: a run whose endedAt precedes
 	// its startedAt is skew, not a zero-length run.
 	return Math.max(0, rawDurationMs(start, end));
 }
@@ -1919,7 +1844,7 @@ function compareRuns(a: RunEnvelope, b: RunEnvelope): number {
 	return compareStrings(a.id, b.id);
 }
 
-function compareToolStats(a: ToolCallStat, b: ToolCallStat): number {
+function compareToolStats(a: { tool: string }, b: { tool: string }): number {
 	return compareStrings(a.tool, b.tool);
 }
 
@@ -1946,8 +1871,8 @@ function sanitizeEvidenceId(value: string): string {
 	return clean.length === 0 ? "unknown" : clean;
 }
 
-/** Receipt refs authenticate the link, while the session ledger supplies the recorded argument. */
-function resolveReceiptDecisions(
+/** A verified run's ledger refs name the link, while the session ledger supplies the recorded argument. */
+function resolveRunDecisions(
 	runSources: ReadonlyArray<EvidenceRunSource>,
 	sessions: SessionLinkResult,
 ): {
@@ -1957,9 +1882,10 @@ function resolveReceiptDecisions(
 	const decisions: EvidenceDecision[] = [];
 	const findings: EvidenceFinding[] = [];
 	for (const source of runSources) {
-		const receipt = authenticatedReceipt(source);
-		if (!receipt?.decisionRefs?.length) continue;
-		const sessionId = receipt.sessionId;
+		const decisionRefs = verifiedRun(source) === null ? undefined : source.envelope.decisionRefs;
+		if (!decisionRefs?.length) continue;
+		const runId = source.envelope.id;
+		const sessionId = source.envelope.sessionId;
 		const board = sessionId === null ? [] : (sessions.decisionBoards.get(sessionId) ?? []);
 		const records = new Map(
 			board.flatMap((entry) =>
@@ -1972,15 +1898,15 @@ function resolveReceiptDecisions(
 				),
 			),
 		);
-		for (const ref of new Set(receipt.decisionRefs)) {
+		for (const ref of new Set(decisionRefs)) {
 			const record = records.get(ref);
-			if (record && sessionId !== null) decisions.push({ runId: receipt.runId, sessionId, ref, record });
+			if (record && sessionId !== null) decisions.push({ runId, sessionId, ref, record });
 			findings.push(
 				finding(
 					findings.length,
 					record ? "info" : "warn",
 					"context-provenance",
-					receipt.runId,
+					runId,
 					`Decision ref ${ref} ${record ? "resolved" : "does not resolve"} on session ${sessionId ?? "(unlinked)"} active path`,
 				),
 			);

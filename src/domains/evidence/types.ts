@@ -1,7 +1,10 @@
-import type { GateDecisionArtifact, RunEnvelope, RunResult, ToolCallStat } from "../dispatch/index.js";
+import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import type { GateDecisionArtifact, RunEnvelope, ToolCallStat } from "../dispatch/index.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
 import type { DecisionRecord } from "../session/entries.js";
 import type { CostAggregate } from "../telemetry/cost.js";
+import type { SettledRunRecord } from "../telemetry/index.js";
+import type { RunProvenanceView } from "./provenance.js";
 import type { CanonicalTrustStatus } from "./trust-status.js";
 
 export const EVIDENCE_VERSION = 1;
@@ -25,8 +28,7 @@ export const EVIDENCE_TAGS = [
 	"independent-review",
 	"context-provenance",
 	"completion-evidence",
-	"receipt-integrity",
-	"receipt-retired",
+	"run-seal",
 	"protected-artifact",
 	"tool-loop",
 	"test-failure",
@@ -64,7 +66,7 @@ export type EvidenceSource = { kind: "run"; runId: string } | { kind: "session";
 export interface EvidenceTotals {
 	costSummary?: CostAggregate;
 	runs: number;
-	receipts: number;
+	runRecords: number;
 	toolCalls: number;
 	toolErrors: number;
 	blockedToolCalls: number;
@@ -73,11 +75,11 @@ export interface EvidenceTotals {
 	toolEvents: number;
 	linkedToolEvents: number;
 	protectedArtifacts: number;
-	/** The verified receipts' sealed token counts; a lower bound whenever `tokenCoverage` names a gap. */
+	/** The verified runs' settled token counts; a lower bound whenever `tokenCoverage` names a gap. */
 	tokens: number;
 	/**
-	 * What `tokens` cannot cover: calls sealed without usage, and runs whose receipt is missing, failed
-	 * verification, or predates call coverage. Absent on bundles built before it existed (#434, P5).
+	 * What `tokens` cannot cover: runs that have not settled, whose seal did not verify, or whose settled token
+	 * count is unknown (#434, P5).
 	 */
 	tokenCoverage?: { unknownCalls: number; unknownRuns: number };
 	costUsd: number;
@@ -92,9 +94,9 @@ export interface EvidenceDecision {
 }
 
 export interface EvidenceOverview {
-	/** Display artifacts locate activity; sealed receipts retain authority. */
+	/** Display artifacts locate activity; sealed run records retain authority. */
 	recordings?: import("../dispatch/index.js").RecordingManifest[];
-	/** Recorded arguments resolved from authenticated receipts on the linked active session path. */
+	/** Recorded arguments resolved from verified runs on the linked active session path. */
 	decisions?: EvidenceDecision[];
 	version: 1;
 	evidenceId: string;
@@ -151,7 +153,7 @@ export interface EvidenceBuildResult {
 	overview: EvidenceOverview;
 	findings: EvidenceFinding[];
 	trustStatus: EvidenceTrustStatusFile;
-	/** Total claims without matching commands, from integrity-verified receipts only. */
+	/** Total claims without matching commands, from runs whose seal verified only. */
 	ungroundedClaims: number;
 }
 
@@ -186,10 +188,14 @@ export type EvidenceTrustStatusView = EvidenceTrustStatusFile | HistoricalEviden
 
 export interface EvidenceRunSource {
 	envelope: RunEnvelope;
-	receipt: RunResult | null;
-	receiptError: string | null;
-	/** True when the receipt was readable but failed cryptographic/ledger integrity verification. */
-	receiptIntegrityFailed: boolean;
+	/** The run's record through the read model when it settled; null when it has not. */
+	run: SettledRunRecord | null;
+	/** The run's record whether or not it settled; null with no run scope to read. */
+	record: RunTelemetryV1 | null;
+	/** Why the run's record is not evidence: not settled, unsealed, or a seal that did not verify. */
+	runError: string | null;
+	/** True when the run's seal was checked and did not verify. */
+	sealFailed: boolean;
 }
 
 export type EvidenceLinkConfidence = "exact" | "best-effort";
@@ -208,7 +214,7 @@ export interface EvidenceRunLink {
 	candidateRunIds?: string[];
 }
 
-export type EvidenceToolEventSource = "session-entry" | "audit-row" | "receipt-aggregate";
+export type EvidenceToolEventSource = "session-entry" | "audit-row" | "run-aggregate";
 
 export interface EvidenceToolEvent {
 	source: EvidenceToolEventSource;
@@ -245,9 +251,15 @@ export interface EvidenceAuditLinkedRow {
 	row: Record<string, unknown>;
 }
 
-export interface EvidenceReceiptFile {
+/** `run.json`: each run's settled record and seal verdict as the bundle read them. */
+export interface EvidenceRunFile {
 	version: 1;
-	receipts: RunResult[];
+	runs: Array<{
+		runId: string;
+		settled: SettledRunRecord["settled"] | null;
+		seal: SettledRunRecord["seal"];
+		provenance: RunProvenanceView;
+	}>;
 }
 
 export interface EvidenceProtectedArtifactEvent {

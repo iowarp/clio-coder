@@ -23,7 +23,7 @@ import {
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
-import { verifyReceiptFileReport } from "../domains/session/view-artifacts.js";
+import { verifyRunRecordReport } from "../domains/session/view-artifacts.js";
 import { archiveCommandHost, type ShareContract } from "../domains/share/index.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
@@ -901,7 +901,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				})
 				.finally(deps.requestRender);
 		},
-		verifyReceipt: (runId) => verifyReceiptFileReport(deps.stateDir, runId),
+		verifyReceipt: (runId) => verifyRunRecordReport(deps.stateDir, runId),
 		...(deps.listWorkerRuns ? { listWorkerRuns: deps.listWorkerRuns } : {}),
 		// The user-turn path, minus expansion. A worker's answer is literal text:
 		// running it through the prompt, skill, and @file expanders would let a

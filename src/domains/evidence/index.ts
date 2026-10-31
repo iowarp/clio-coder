@@ -99,7 +99,7 @@ export type {
 	EvidenceOverview,
 	EvidenceProtectedArtifactEvent,
 	EvidenceProtectedArtifactsFile,
-	EvidenceReceiptFile,
+	EvidenceRunFile,
 	EvidenceRunSource,
 	EvidenceRunTrustStatus,
 	EvidenceSeverity,

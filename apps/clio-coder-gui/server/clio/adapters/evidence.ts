@@ -42,7 +42,7 @@ function verdict(trust: EvidenceTrustStatusView) {
 	return worstTrustVerdict(trust.runs.map((run) => trustVerdict(run.status)));
 }
 /**
- * A bundle's totals are the ones its receipts sealed; the server words tokens as a lower bound with the coverage
+ * A bundle's totals are the ones its verified runs settled; the server words tokens as a lower bound with the coverage
  * marker and cost through the shared renderer, so the browser shows strings and sums nothing (#434).
  */
 function displayOverview(overview: Awaited<ReturnType<typeof listEvidenceOverviews>>[number]) {
@@ -135,7 +135,7 @@ export async function readEvidence(input: EvidenceRequest): Promise<unknown> {
 		"overview.json",
 		"findings.json",
 		"trust-status.json",
-		"receipt.json",
+		"run.json",
 		"gate-decisions.json",
 		"tool-events.jsonl",
 	]);

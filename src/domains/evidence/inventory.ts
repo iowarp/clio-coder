@@ -45,7 +45,7 @@ export interface EvidenceInventoryArtifact {
 	readonly tags: readonly EvidenceTag[];
 	readonly totals: Readonly<{
 		runs: number;
-		receipts: number;
+		runRecords: number;
 		toolCalls: number;
 		toolErrors: number;
 		blockedToolCalls: number;
@@ -158,7 +158,7 @@ export async function evidenceInventorySnapshot(
 			tags: overview.tags.filter((tag) => EVIDENCE_TAGS.includes(tag)),
 			totals: {
 				runs: tally(overview.totals.runs),
-				receipts: tally(overview.totals.receipts),
+				runRecords: tally(overview.totals.runRecords),
 				toolCalls: tally(overview.totals.toolCalls),
 				toolErrors: tally(overview.totals.toolErrors),
 				blockedToolCalls: tally(overview.totals.blockedToolCalls),

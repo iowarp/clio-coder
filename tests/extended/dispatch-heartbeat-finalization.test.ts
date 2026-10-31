@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { withStateFileLock } from "../../src/core/state-file-lock.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import type { SpawnedWorker, SpawnedWorkerResult } from "../../src/domains/dispatch/worker-spawn.js";
-import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
+import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -127,7 +127,7 @@ it("keeps parallel receipts sealed while heartbeat ticks during contended final 
 			strictEqual(receipt.outcome, "succeeded");
 			strictEqual(receipt.hostVerification?.status, "verified");
 			strictEqual(receipt.hostVerification?.strategy, "batch-settled");
-			const verification = verifyReceiptFileReport(stateDir, receipt.runId);
+			const verification = verifyRunRecordReport(stateDir, receipt.runId);
 			ok(verification.ok, JSON.stringify(verification));
 		}
 		deepStrictEqual(

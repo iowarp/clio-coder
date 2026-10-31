@@ -11,7 +11,7 @@ import {
 	WORKER_PROTOCOL_VERSION,
 } from "../../src/domains/dispatch/worker-protocol.js";
 import { type SpawnedWorker, spawnWorkerProcess } from "../../src/domains/dispatch/worker-spawn.js";
-import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
+import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -115,7 +115,7 @@ for (const scenario of [
 			strictEqual(envelope.outcomeDetail, receipt.outcomeDetail);
 			const stateDir = process.env.CLIO_CODER_STATE_DIR;
 			ok(stateDir);
-			const integrity = verifyReceiptFileReport(stateDir, run.runId);
+			const integrity = verifyRunRecordReport(stateDir, run.runId);
 			ok(integrity.ok, JSON.stringify(integrity));
 			deepStrictEqual(bundle.contract.snapshot().running, []);
 			deepStrictEqual(bundle.contract.snapshot().retrying, []);

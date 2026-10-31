@@ -8,7 +8,7 @@ import { runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usa
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
-import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
+import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -174,7 +174,7 @@ for (const scenario of [
 			strictEqual(receipt.costUsd, replayed.costUsd);
 			if (aggregate.data.usage.cacheRead.kind === "unknown") strictEqual(receipt.cacheReadTokenCount, undefined);
 			if (aggregate.data.apiCalls.kind === "unknown") strictEqual(receipt.apiCalls, 0);
-			const integrity = verifyReceiptFileReport(stateDir, run.runId);
+			const integrity = verifyRunRecordReport(stateDir, run.runId);
 			ok(integrity.ok, JSON.stringify(integrity));
 			const facts = {
 				tokenCount: receipt.tokenCount,

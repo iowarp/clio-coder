@@ -71,7 +71,7 @@ export const EvidenceOverview = Type.Object(
 		totals: Type.Object(
 			{
 				runs: Type.Number(),
-				receipts: Type.Number(),
+				runRecords: Type.Number(),
 				toolCalls: Type.Number(),
 				toolErrors: Type.Number(),
 				blockedToolCalls: Type.Number(),

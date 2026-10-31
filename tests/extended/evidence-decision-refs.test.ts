@@ -1,9 +1,8 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { buildEvidence, inspectEvidence } from "../../src/domains/evidence/index.js";
 import { activeDecisionRefs, createDecisionBoardStore } from "../../src/domains/session/decision-board.js";
 import {
@@ -12,10 +11,12 @@ import {
 	type MessageEntry,
 	type SessionEntry,
 } from "../../src/domains/session/entries.js";
+import { telemetryJournalPath, telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { createDecideTool } from "../../src/tools/decide.js";
 import { agentDecision } from "../harness/decision.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
 function message(turnId: string, parentTurnId: string | null): MessageEntry {
 	return {
@@ -30,18 +31,18 @@ function message(turnId: string, parentTurnId: string | null): MessageEntry {
 async function bundle(
 	entries: SessionEntry[],
 	refs?: string[],
-	options: { tamper?: boolean; pinnedLeaf?: string; retired?: boolean; session?: boolean } = {},
+	options: { tamper?: boolean; pinnedLeaf?: string; session?: boolean } = {},
 ) {
 	const envelope = { ...fixtureEnvelope("decisions"), ...(refs ? { decisionRefs: refs } : {}) };
-	const receipt = withReceiptIntegrity(
-		{ ...fixtureReceiptDraft(envelope), ...(refs ? { decisionRefs: refs } : {}) },
-		envelope,
-	);
-	if (options.tamper) receipt.decisionRefs = ["forged/ref"];
-	if (options.retired) receipt.integrity.version = 1 as typeof receipt.integrity.version;
-	await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
 	await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
-	await writeFile(join(clioStateDir(), "receipts", "decisions.json"), JSON.stringify(receipt));
+	const scope = telemetryRunDirectory(clioStateDir(), envelope.id);
+	await rm(scope, { recursive: true, force: true });
+	await writeSettledRun(clioStateDir(), { ...fixtureReceiptDraft(envelope), ...(refs ? { decisionRefs: refs } : {}) });
+	if (options.tamper) {
+		// One changed byte in the settled record: the run's seal no longer verifies.
+		const path = telemetryJournalPath(scope);
+		await writeFile(path, (await readFile(path, "utf8")).replace('"agentId":"coder"', '"agentId":"codex"'));
+	}
 	const dir = join(clioStateDir(), "sessions", "workspace", "session-1");
 	await mkdir(dir, { recursive: true });
 	await writeFile(join(dir, "current.jsonl"), entries.map((entry) => JSON.stringify(entry)).join("\n"));
@@ -58,7 +59,7 @@ async function bundle(
 	return { ...read, transcript, findingsText: findings };
 }
 
-describe("receipt decision provenance", () => {
+describe("run decision provenance", () => {
 	let isolated: Awaited<ReturnType<typeof isolateClioEnv>>;
 	beforeEach(async () => {
 		isolated = await isolateClioEnv();
@@ -179,15 +180,11 @@ describe("receipt decision provenance", () => {
 		);
 		deepStrictEqual(linearPinned.overview.decisions, []);
 	});
-	it("does not promote refs from tampered or retired receipts, or invent refs on legacy receipts", async () => {
+	it("does not promote refs from a run whose seal fails, or invent refs a run never recorded", async () => {
 		const decision = await agentDecision();
 		const entries = [message("root", null), decision];
-		for (const options of [{ tamper: true }, { retired: true }, {}]) {
-			const result = await bundle(
-				entries,
-				"tamper" in options || "retired" in options ? activeDecisionRefs([decision]) : undefined,
-				options,
-			);
+		for (const options of [{ tamper: true }, {}]) {
+			const result = await bundle(entries, "tamper" in options ? activeDecisionRefs([decision]) : undefined, options);
 			deepStrictEqual(result.overview.decisions, []);
 			doesNotMatch(result.transcript, /## Decision provenance/u);
 			ok(!result.findings.some((row) => row.message.startsWith("Decision ref ")));

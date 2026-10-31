@@ -65,7 +65,7 @@ export const TRUST_STATE_WORDS: { [Axis in TrustStatusAxis]: Record<AxisStates[A
 	artifactIntegrity: {
 		verified: "sealed",
 		failed: "seal broken",
-		absent: "no receipt",
+		absent: "no run record",
 		unknown: "seal unchecked",
 		not_applicable: "seal not applicable",
 	},

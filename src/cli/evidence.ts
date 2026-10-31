@@ -130,16 +130,15 @@ export async function runEvidenceCommand(args: ReadonlyArray<string>): Promise<n
 				...(parsed.sessionId === undefined ? {} : { sessionId: parsed.sessionId }),
 			});
 			// The artifact is still written (the finding is part of the evidence),
-			// but the verdict line and exit code must not say ok over a receipt
-			// that failed integrity verification.
-			const integrityFailures = result.findings.filter((entry) => entry.tag === "receipt-integrity");
-			// A retired seal is the expected state of every run that predates an
-			// integrity bump: the receipt is set aside unread, as a missing one
-			// is, so it is a note beside the verdict and leaves the exit code alone.
-			const retiredSeals = result.findings.filter((entry) => entry.tag === "receipt-retired");
+			// but the verdict line and exit code must not say ok over a run whose
+			// seal was checked and rejected.
+			const integrityFailures = result.findings.filter((entry) => entry.tag === "run-seal" && entry.severity === "warn");
+			// A run that has not settled or sealed yet is not evidence, which is a
+			// note beside the verdict and leaves the exit code alone.
+			const unsealed = result.findings.filter((entry) => entry.tag === "run-seal" && entry.severity === "info");
 			if (integrityFailures.length > 0) process.stdout.write(`wrote ${result.evidenceId} ${result.directory}\n`);
 			else printOk(`wrote ${result.evidenceId} ${result.directory}`);
-			for (const entry of retiredSeals) {
+			for (const entry of unsealed) {
 				printNote(`${entry.runId !== null ? `run ${entry.runId}: ` : ""}${entry.message}`);
 			}
 			for (const failure of integrityFailures) {
@@ -184,7 +183,7 @@ function renderEvidence(
 	process.stdout.write(`source: ${formatSource(overview)}\n`);
 	process.stdout.write(`generated: ${overview.generatedAt}\n`);
 	process.stdout.write(`runs: ${overview.totals.runs}\n`);
-	process.stdout.write(`receipts: ${overview.totals.receipts}\n`);
+	process.stdout.write(`run records: ${overview.totals.runRecords}\n`);
 	process.stdout.write(`tool calls: ${overview.totals.toolCalls}\n`);
 	process.stdout.write(`blocked tools: ${overview.totals.blockedToolCalls}\n`);
 	process.stdout.write(`tags: ${formatList(overview.tags)}\n`);

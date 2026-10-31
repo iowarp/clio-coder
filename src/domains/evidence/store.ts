@@ -25,7 +25,7 @@ export const EVIDENCE_FILES = [
 	"overview.json",
 	"transcript.md",
 	"tool-events.jsonl",
-	"receipt.json",
+	"run.json",
 	"gate-decisions.json",
 	"trust-status.json",
 	"findings.json",
@@ -127,25 +127,24 @@ export interface EvidenceRunProvenance {
 }
 
 /**
- * Read per-run provenance views from a bundle's `receipt.json`. Only runs whose
- * receipt carries at least one provenance field set are returned. A missing
- * receipt file produces an empty provenance list.
+ * Read per-run provenance views from a bundle's `run.json`. Only runs that carry at least one provenance field set
+ * are returned. A missing file produces an empty provenance list.
  */
 export async function loadEvidenceRunProvenance(dataDir: string, evidenceId: string): Promise<EvidenceRunProvenance[]> {
 	let raw: string;
 	try {
-		raw = await readFile(join(evidenceDirectory(dataDir, evidenceId), "receipt.json"), "utf8");
+		raw = await readFile(join(evidenceDirectory(dataDir, evidenceId), "run.json"), "utf8");
 	} catch (error) {
 		const err = error as NodeJS.ErrnoException;
 		if (err.code === "ENOENT") return [];
 		throw error;
 	}
-	const parsed = parseJson(raw, `${evidenceId}/receipt.json`);
-	if (!isRecord(parsed) || !Array.isArray(parsed.receipts)) return [];
+	const parsed = parseJson(raw, `${evidenceId}/run.json`);
+	if (!isRecord(parsed) || !Array.isArray(parsed.runs)) return [];
 	const out: EvidenceRunProvenance[] = [];
-	for (const entry of parsed.receipts) {
+	for (const entry of parsed.runs) {
 		if (!isRecord(entry) || typeof entry.runId !== "string") continue;
-		const view = runProvenanceFromUnknown(entry);
+		const view = runProvenanceFromUnknown(entry.provenance);
 		if (hasRunProvenance(view)) out.push({ runId: entry.runId, view });
 	}
 	return out;
@@ -275,7 +274,7 @@ function readTotals(value: unknown, source: string): EvidenceOverview["totals"] 
 			? {}
 			: { costSummary: readCostSummary(value.costSummary, `${source}.costSummary`) }),
 		runs: readNumber(value, source, "runs"),
-		receipts: readNumber(value, source, "receipts"),
+		runRecords: readNumber(value, source, "runRecords"),
 		toolCalls: readNumber(value, source, "toolCalls"),
 		toolErrors: readNumber(value, source, "toolErrors"),
 		blockedToolCalls: readNumber(value, source, "blockedToolCalls"),

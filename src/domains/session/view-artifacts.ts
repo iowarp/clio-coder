@@ -1,28 +1,23 @@
 import { createReadStream, readFileSync, statSync } from "node:fs";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { formatFooterTokens } from "../../core/display-units.js";
 import { clockLocal } from "../../core/format-time.js";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
+import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import type { Fact } from "../../core/telemetry/fact.js";
+import type { RunResultObject } from "../../core/telemetry/schemas.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
 import { expandChainMessages } from "../../tools/surface.js";
 import type { DispatchContract } from "../dispatch/contract.js";
 import type { DispatchOwnership } from "../dispatch/ownership.js";
 import { dispatchOwnership } from "../dispatch/ownership.js";
-import { isReceiptIntegrity, verifyReceiptIntegrity } from "../dispatch/receipt-integrity.js";
-import { readReceiptText, readReceiptTextSync } from "../dispatch/receipt-store.js";
-import type { RunEnvelope, RunResult } from "../dispatch/types.js";
+import type { RunEnvelope } from "../dispatch/types.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../evidence/store.js";
 import { renderEvidenceTokens } from "../evidence/totals-display.js";
 import { formatTrustSummaryLine, trustStateWord } from "../evidence/trust-projection.js";
-import type { CanonicalTrustStatus, ReceiptIntegrityOutcome, TrustStatusAxis } from "../evidence/trust-status.js";
-import {
-	inspectRunResultTrustStatus,
-	retiredIntegrityVersionOf,
-	retiredReceiptIntegrity,
-	retiredReceiptIntegrityReason,
-	TRUST_STATUS_AXES,
-} from "../evidence/trust-status.js";
+import type { CanonicalTrustStatus, TrustStatusAxis } from "../evidence/trust-status.js";
+import { inspectRunTrustStatus, TRUST_STATUS_AXES } from "../evidence/trust-status.js";
 import type { EvidenceFinding, EvidenceInspectable, EvidenceOverview, EvidenceSource } from "../evidence/types.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { redactSecretString } from "../safety/redaction.js";
@@ -30,8 +25,11 @@ import { renderCostAggregate, renderCostAmount } from "../telemetry/cost.js";
 import type { AccountabilitySummary } from "../telemetry/index.js";
 import {
 	readEvidenceIndex,
+	readRunRecord,
+	readRunRecordAsync,
 	summarizeEvidenceIndex,
 	telemetryJournalPath,
+	telemetryRunDirectory,
 	telemetrySessionDirectory,
 } from "../telemetry/index.js";
 import type { AccountabilityRecord, JournalSource, SessionSource } from "../telemetry/read-model.js";
@@ -149,63 +147,30 @@ export const VIEW_ARTIFACT_CATEGORIES: readonly ViewArtifactCategory[] = [
 const ACCOUNTABILITY_TOP_CAUSES = 8;
 
 export const VIEW_ARTIFACT_LINE_CAP = 50_000;
-const JSON_PRETTY_MAX_BYTES = 10 * 1024 * 1024;
 
-export type ReceiptVerifyResult = ReceiptIntegrityOutcome;
-
-export interface ReceiptVerificationCheck {
+export interface RunRecordVerificationCheck {
 	name: string;
 	ok: boolean;
 	evidence: string;
 }
 
-export type ReceiptVerificationReport = ReceiptIntegrityOutcome & {
-	receiptPath: string;
+/** What `/view verify` reports for a run: its seal verdict, the checks behind it and the trust it supports (#434). */
+export type RunRecordVerificationReport = ({ ok: true } | { ok: false; reason: string }) & {
+	runDirectory: string;
+	/** The run's identity: the digest of its run.settled; null before it settles. */
 	sealedDigest: string | null;
 	trustSummary: string | null;
 	verificationSummary: string | null;
 	compromised: boolean;
-	checks: ReceiptVerificationCheck[];
+	checks: RunRecordVerificationCheck[];
 };
 
 /**
- * What a verify action reports. `retired` marks a seal this build does not
- * verify because its integrity version was retired: not a pass, and not the
- * failure a tampered receipt reports.
+ * What a verify action reports: the run seal verified, or why it did not.
  */
 export type ViewArtifactVerification =
 	| { ok: true; detail: string; compromised?: boolean }
 	| { ok: false; detail: string; retired?: true };
-
-const RECEIPT_REQUIRED_KEYS = [
-	"runId",
-	"agentId",
-	"task",
-	"targetId",
-	"wireModelId",
-	"runtimeId",
-	"runtimeKind",
-	"startedAt",
-	"endedAt",
-	"exitCode",
-	"tokenCount",
-	"costUsd",
-	"compiledPromptHash",
-	"staticCompositionHash",
-	"piMonoVersion",
-	"platform",
-	"nodeVersion",
-	"toolCalls",
-	"toolStats",
-	"sessionId",
-	"integrity",
-] as const;
-
-const ISO_8601_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-
-function isIso8601(value: unknown): value is string {
-	return typeof value === "string" && ISO_8601_REGEX.test(value) && !Number.isNaN(Date.parse(value));
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
@@ -213,18 +178,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0;
-}
-
-function isNonNegativeInteger(value: unknown): value is number {
-	return typeof value === "number" && Number.isInteger(value) && value >= 0;
-}
-
-function isNonNegativeFiniteNumber(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-function isNullableString(value: unknown): value is string | null {
-	return value === null || typeof value === "string";
 }
 
 function parseTime(value: string | null | undefined): number {
@@ -291,10 +244,6 @@ function protectedArtifactPath(path: string): string | undefined {
 	return isAbsolute(path) ? path : undefined;
 }
 
-export function receiptFilePath(stateDir: string, runId: string): string {
-	return join(stateDir, "receipts", `${runId}.json`);
-}
-
 function runLedgerPath(stateDir: string): string {
 	return join(stateDir, "runs.json");
 }
@@ -312,7 +261,7 @@ function readRunLedger(stateDir: string): RunEnvelope[] {
 
 /**
  * The session the overlay was opened in, as ownership.ts reads it. The run
- * ledger, receipts, and evidence bundles are machine-wide, so every category
+ * ledger, run journals, and evidence bundles are machine-wide, so every category
  * built from them keeps only what this session or this project produced.
  */
 function viewOwnership(deps: ArtifactProviderDeps): DispatchOwnership {
@@ -321,7 +270,7 @@ function viewOwnership(deps: ArtifactProviderDeps): DispatchOwnership {
 
 function listRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {
 	// The in-process dispatch ledger only sees runs created by this process.
-	// A headless `clio-coder run` in another process writes runs.json and receipts/
+	// A headless `clio-coder run` in another process writes runs.json and run journals
 	// directly, so every listing re-reads the disk ledger and merges runs the
 	// in-memory mirror has not hydrated.
 	let fromMemory: RunEnvelope[] = [];
@@ -336,171 +285,7 @@ function listRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {
 	return [...fromMemory, ...fromDisk].filter((env) => ownership.seesRun(env));
 }
 
-function validateToolStats(value: unknown): ReceiptVerifyResult {
-	if (!Array.isArray(value)) {
-		return { ok: false, reason: `toolStats not an array: ${String(value)}` };
-	}
-	for (let i = 0; i < value.length; i++) {
-		const entry = value[i];
-		if (!isRecord(entry)) {
-			return { ok: false, reason: `toolStats[${i}] not an object` };
-		}
-		if (!isNonEmptyString(entry.tool)) {
-			return { ok: false, reason: `toolStats[${i}].tool invalid: ${String(entry.tool)}` };
-		}
-		for (const key of ["count", "ok", "errors", "blocked"] as const) {
-			if (!isNonNegativeInteger(entry[key])) {
-				return { ok: false, reason: `toolStats[${i}].${key} invalid: ${String(entry[key])}` };
-			}
-		}
-		if (!isNonNegativeFiniteNumber(entry.totalDurationMs)) {
-			return { ok: false, reason: `toolStats[${i}].totalDurationMs invalid: ${String(entry.totalDurationMs)}` };
-		}
-	}
-	return { ok: true };
-}
-
-type ReadLedgerResult = { ok: true; envelope: RunEnvelope } | { ok: false; reason: string };
-
-function readRunEnvelope(stateDir: string, runId: string): ReadLedgerResult {
-	const runs = readRunLedger(stateDir);
-	for (const entry of runs) {
-		if (entry.id === runId) return { ok: true, envelope: entry };
-	}
-	return { ok: false, reason: runs.length === 0 ? "run ledger not found" : "run not found in ledger" };
-}
-
-function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerifyResult {
-	const target = receiptFilePath(stateDir, runId);
-	let raw: string;
-	try {
-		raw = readReceiptTextSync(target);
-	} catch (err) {
-		const e = err as NodeJS.ErrnoException;
-		if (e.code === "ENOENT") return { ok: false, reason: "receipt file not found" };
-		return { ok: false, reason: `read error: ${e.message ?? String(e)}` };
-	}
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw);
-	} catch (err) {
-		return { ok: false, reason: `invalid json: ${(err as Error).message}` };
-	}
-	if (!isRecord(parsed)) {
-		return { ok: false, reason: "receipt is not an object" };
-	}
-	const r = parsed;
-	for (const key of RECEIPT_REQUIRED_KEYS) {
-		if (!(key in r)) return { ok: false, reason: `missing field: ${key}` };
-	}
-	if (!("clioCoderVersion" in r) && !("clioVersion" in r)) {
-		return { ok: false, reason: "missing field: clioCoderVersion" };
-	}
-	if (!isNonEmptyString(r.runId)) {
-		return { ok: false, reason: `runId invalid: ${String(r.runId)}` };
-	}
-	if (r.runId !== runId) {
-		return { ok: false, reason: `runId mismatch: file has ${String(r.runId)}` };
-	}
-	if (!isNonEmptyString(r.agentId)) {
-		return { ok: false, reason: `agentId invalid: ${String(r.agentId)}` };
-	}
-	if (!isNonEmptyString(r.task)) {
-		return { ok: false, reason: `task invalid: ${String(r.task)}` };
-	}
-	if (!isNonEmptyString(r.targetId)) {
-		return { ok: false, reason: `targetId invalid: ${String(r.targetId)}` };
-	}
-	if (!isNonEmptyString(r.wireModelId)) {
-		return { ok: false, reason: `wireModelId invalid: ${String(r.wireModelId)}` };
-	}
-	if (!isNonEmptyString(r.runtimeId)) {
-		return { ok: false, reason: `runtimeId invalid: ${String(r.runtimeId)}` };
-	}
-	if (
-		r.runtimeKind !== "http" &&
-		r.runtimeKind !== "sdk" &&
-		r.runtimeKind !== "subprocess" &&
-		r.runtimeKind !== "acp-delegation"
-	) {
-		return { ok: false, reason: `runtimeKind invalid: ${String(r.runtimeKind)}` };
-	}
-	const exitCode = r.exitCode;
-	if (typeof exitCode !== "number" || !(exitCode === 0 || exitCode === 1 || exitCode === 2)) {
-		return { ok: false, reason: `exitCode out of range: ${String(exitCode)}` };
-	}
-	const tokenCount = r.tokenCount;
-	if (typeof tokenCount !== "number" || !Number.isFinite(tokenCount) || tokenCount < 0) {
-		return { ok: false, reason: `tokenCount out of range: ${String(tokenCount)}` };
-	}
-	for (const key of ["inputTokenCount", "outputTokenCount", "cacheReadTokenCount", "cacheWriteTokenCount"] as const) {
-		if (key in r && !isNonNegativeFiniteNumber(r[key])) {
-			return { ok: false, reason: `${key} out of range: ${String(r[key])}` };
-		}
-	}
-	const costUsd = r.costUsd;
-	if (typeof costUsd !== "number" || !Number.isFinite(costUsd) || costUsd < 0) {
-		return { ok: false, reason: `costUsd out of range: ${String(costUsd)}` };
-	}
-	if ("reasoningTokenCount" in r && !isNonNegativeFiniteNumber(r.reasoningTokenCount)) {
-		return { ok: false, reason: `reasoningTokenCount out of range: ${String(r.reasoningTokenCount)}` };
-	}
-	if (!isIso8601(r.startedAt)) {
-		return { ok: false, reason: `startedAt not ISO-8601: ${String(r.startedAt)}` };
-	}
-	if (!isIso8601(r.endedAt)) {
-		return { ok: false, reason: `endedAt not ISO-8601: ${String(r.endedAt)}` };
-	}
-	const clioCoderVersion = r.clioCoderVersion ?? r.clioVersion;
-	if (typeof clioCoderVersion !== "string" || clioCoderVersion.length === 0) {
-		return { ok: false, reason: "clioCoderVersion empty" };
-	}
-	if (!isNonEmptyString(r.piMonoVersion)) {
-		return { ok: false, reason: `piMonoVersion invalid: ${String(r.piMonoVersion)}` };
-	}
-	if (!isNonEmptyString(r.platform)) {
-		return { ok: false, reason: `platform invalid: ${String(r.platform)}` };
-	}
-	if (!isNonEmptyString(r.nodeVersion)) {
-		return { ok: false, reason: `nodeVersion invalid: ${String(r.nodeVersion)}` };
-	}
-	if (typeof r.toolCalls !== "number" || !Number.isInteger(r.toolCalls) || r.toolCalls < 0) {
-		return { ok: false, reason: `toolCalls out of range: ${String(r.toolCalls)}` };
-	}
-	const toolStatsCheck = validateToolStats(r.toolStats);
-	if (!toolStatsCheck.ok) return toolStatsCheck;
-	if (!isNullableString(r.compiledPromptHash)) {
-		return { ok: false, reason: `compiledPromptHash invalid: ${String(r.compiledPromptHash)}` };
-	}
-	if (!isNullableString(r.staticCompositionHash)) {
-		return { ok: false, reason: `staticCompositionHash invalid: ${String(r.staticCompositionHash)}` };
-	}
-	if (!isNullableString(r.sessionId)) {
-		return { ok: false, reason: `sessionId invalid: ${String(r.sessionId)}` };
-	}
-	// A retired seal is diagnosed ahead of the shape check, which would
-	// otherwise report the older version as an invalid integrity block.
-	const retired = retiredReceiptIntegrity(r.integrity);
-	if (retired !== null) return { ok: false, reason: retiredReceiptIntegrityReason(retired), retired };
-	if (!isReceiptIntegrity(r.integrity)) {
-		return { ok: false, reason: "integrity invalid" };
-	}
-	// A row the ring evicted leaves the seal verifiable on its own (#434).
-	const ledger = readRunEnvelope(stateDir, runId);
-	return verifyReceiptIntegrity(r as unknown as RunResult, ledger.ok ? ledger.envelope : null);
-}
-
-const RECEIPT_FILE_FAILURE = /^(?:receipt file not found|read error:)/u;
-const RECEIPT_CONTRACT_FAILURE =
-	/^(?:invalid json:|receipt is not an object|missing field:|runId invalid:|runId mismatch:|agentId invalid:|task invalid:|targetId invalid:|wireModelId invalid:|runtimeId invalid:|runtimeKind invalid:|exitCode out of range:|tokenCount out of range:|inputTokenCount out of range:|outputTokenCount out of range:|cacheReadTokenCount out of range:|cacheWriteTokenCount out of range:|costUsd out of range:|reasoningTokenCount out of range:|startedAt not ISO-8601:|endedAt not ISO-8601:|clioCoderVersion empty|piMonoVersion invalid:|platform invalid:|nodeVersion invalid:|toolCalls out of range:|toolStats\[|compiledPromptHash invalid:|staticCompositionHash invalid:|sessionId invalid:|integrity invalid|execution role invalid|routing intent invalid|route decision invalid)/u;
-const LEDGER_FAILURE = /^(?:run ledger not found|run not found in ledger|ledger mismatch:)/u;
-
-function receiptIntegrityDigest(value: unknown): string | null {
-	if (!isRecord(value) || value.algorithm !== "sha256" || !isNonEmptyString(value.digest)) return null;
-	return `sha256:${value.digest}`;
-}
-
-function trustCheckEvidence(status: ReturnType<typeof inspectRunResultTrustStatus>["status"], axis: string): string {
+function trustCheckEvidence(status: CanonicalTrustStatus, axis: string): string {
 	const entry = status[axis as keyof typeof status];
 	if (typeof entry !== "object" || entry === null || !("state" in entry)) return "canonical trust projection";
 	if (entry.state === "absent") return `reason=${entry.reason}`;
@@ -508,7 +293,7 @@ function trustCheckEvidence(status: ReturnType<typeof inspectRunResultTrustStatu
 	return refs.length > 0 ? refs.join(", ") : `${entry.authority.kind}:${entry.authority.id}`;
 }
 
-function compromisedTrustAxes(status: ReturnType<typeof inspectRunResultTrustStatus>["status"]): TrustStatusAxis[] {
+function compromisedTrustAxes(status: CanonicalTrustStatus): TrustStatusAxis[] {
 	return TRUST_STATUS_AXES.filter((axis) => {
 		const state = status[axis].state;
 		if (axis === "artifactIntegrity") return state === "failed";
@@ -519,76 +304,61 @@ function compromisedTrustAxes(status: ReturnType<typeof inspectRunResultTrustSta
 	});
 }
 
-/** Actionable `/view verify` report without changing the low-level verifier contract. */
-export function verifyReceiptFileReport(stateDir: string, runId: string): ReceiptVerificationReport {
-	const receiptPath = receiptFilePath(stateDir, runId);
-	const result = verifyReceiptFile(stateDir, runId);
-	let receipt: RunResult | null = null;
+/** Actionable `/view verify` report: the run's sealed scope checked again from its own files (#434). */
+export function verifyRunRecordReport(stateDir: string, runId: string): RunRecordVerificationReport {
+	const runDirectory = telemetryRunDirectory(stateDir, runId);
+	let record: RunTelemetryV1 | null = null;
+	let readError: string | null = null;
 	try {
-		receipt = JSON.parse(readReceiptTextSync(receiptPath)) as RunResult;
-	} catch {
-		// The verifier's named file or JSON check below retains the actionable error.
+		record = readRunRecord(stateDir, runId);
+	} catch (error) {
+		readError = error instanceof Error ? error.message : String(error);
 	}
-	const sealedDigest = receiptIntegrityDigest(receipt?.integrity);
-	const ledger = readRunEnvelope(stateDir, runId);
-	const inspection = receipt === null ? null : inspectRunResultTrustStatus(receipt, ledger.ok ? ledger.envelope : null);
-	const trustSummary = inspection === null ? null : formatTrustSummaryLine(inspection.status);
-	const compromiseAxes = inspection === null ? [] : compromisedTrustAxes(inspection.status);
-	const checks: ReceiptVerificationCheck[] = [];
-
-	if (!result.ok && RECEIPT_FILE_FAILURE.test(result.reason)) {
-		checks.push({ name: "receipt file", ok: false, evidence: `${receiptPath}: ${result.reason}` });
+	const inspection = inspectRunTrustStatus(record);
+	const checks: RunRecordVerificationCheck[] = [];
+	if (record === null) {
+		checks.push({ name: "run journal", ok: false, evidence: `${runDirectory}: ${readError ?? "no run journal"}` });
 	} else {
-		checks.push({ name: "receipt file", ok: true, evidence: receiptPath });
-		if (!result.ok && (RECEIPT_CONTRACT_FAILURE.test(result.reason) || result.retired !== undefined)) {
-			checks.push({ name: "receipt contract", ok: false, evidence: result.reason });
+		checks.push({ name: "run journal", ok: true, evidence: runDirectory });
+		if (record.settled === null) {
+			checks.push({ name: "run settled", ok: false, evidence: "the run has not settled" });
 		} else {
-			checks.push({
-				name: "receipt contract",
-				ok: true,
-				evidence: `current integrity v${receipt?.integrity.version ?? "unknown"}`,
-			});
-			if (!result.ok && LEDGER_FAILURE.test(result.reason)) {
-				checks.push({ name: "run ledger", ok: false, evidence: result.reason });
-			} else if (result.ok && result.ledgerEvicted) {
-				checks.push({
-					name: "run ledger",
-					ok: true,
-					// A missing runs.json is not an eviction; say which absence it was (#434).
-					evidence: `${!ledger.ok && ledger.reason === "run ledger not found" ? "no run ledger on this state dir" : `run ${runId} evicted from the ledger ring`}; sealed ledger commitment not compared`,
-				});
-				checks.push({
-					name: "sealed digest",
-					ok: true,
-					evidence: `${sealedDigest ?? "digest unavailable"} matches receipt and its sealed ledger commitment`,
-				});
-			} else {
-				checks.push({ name: "run ledger", ok: true, evidence: `run ${runId} fields match` });
-				checks.push({
-					name: "sealed digest",
-					ok: result.ok,
-					evidence: result.ok ? `${sealedDigest ?? "digest unavailable"} matches receipt and ledger` : result.reason,
-				});
-			}
+			checks.push({ name: "run settled", ok: true, evidence: `run.settled at ${record.settled.at}` });
+			const seal = record.seal;
+			checks.push(
+				seal?.status === "verified"
+					? {
+							name: "run seal",
+							ok: true,
+							evidence: `sealed at ${seal.sealedAt}; ${seal.records} records, ${seal.segments} segments and ${seal.objects} objects verify`,
+						}
+					: {
+							name: "run seal",
+							ok: false,
+							evidence: inspection.integrity.state === "verified" ? "verified" : inspection.integrity.reason,
+						},
+			);
 		}
 	}
-
-	if (inspection !== null) {
-		for (const axis of compromiseAxes) {
-			checks.push({
-				name: `trust ${axis}`,
-				ok: false,
-				evidence: `${trustStateWord(axis, inspection.status[axis].state)}; ${trustCheckEvidence(inspection.status, axis)}`,
-			});
-		}
+	const settled = record?.settled ?? null;
+	const compromiseAxes = settled === null ? [] : compromisedTrustAxes(inspection.status);
+	for (const axis of compromiseAxes) {
+		checks.push({
+			name: `trust ${axis}`,
+			ok: false,
+			evidence: `${trustStateWord(axis, inspection.status[axis].state)}; ${trustCheckEvidence(inspection.status, axis)}`,
+		});
 	}
-
+	const outcome =
+		inspection.integrity.state === "verified"
+			? ({ ok: true } as const)
+			: ({ ok: false, reason: record === null ? (readError ?? "no run journal") : inspection.integrity.reason } as const);
 	return {
-		...result,
-		receiptPath,
-		sealedDigest,
-		trustSummary,
-		verificationSummary: inspection === null ? null : readableVerification(inspection.status),
+		...outcome,
+		runDirectory,
+		sealedDigest: settled === null ? null : `sha256:${settled.digest}`,
+		trustSummary: settled === null ? null : formatTrustSummaryLine(inspection.status),
+		verificationSummary: settled === null ? null : readableVerification(inspection.status),
 		compromised: compromiseAxes.length > 0,
 		checks,
 	};
@@ -635,27 +405,6 @@ function splitLinesCapped(text: string, path?: string, maxLines = VIEW_ARTIFACT_
 	const lines = text.split(/\r?\n/);
 	if (lines.length <= maxLines) return lines;
 	return [...lines.slice(0, maxLines), `[truncated, open file directly${path ? `: ${path}` : ""}]`];
-}
-
-async function loadJsonFileLines(path: string): Promise<ViewArtifactLoadResult> {
-	let canPrettyPrint = false;
-	try {
-		const info = await stat(path);
-		canPrettyPrint = info.size <= JSON_PRETTY_MAX_BYTES;
-	} catch {
-		return { lines: [`unable to read ${path}`], format: "text" };
-	}
-	if (canPrettyPrint) {
-		try {
-			const raw = await readFile(path, "utf8");
-			const pretty = JSON.stringify(JSON.parse(raw), null, 2);
-			return { lines: splitLinesCapped(pretty, path), format: "json" };
-		} catch {
-			return loadTextPath(path);
-		}
-	}
-	const { lines } = await readTextFileLinesCapped(path);
-	return { lines, format: "json" };
 }
 
 async function loadTextPath(path: string): Promise<ViewArtifactLoadResult> {
@@ -729,7 +478,7 @@ function renderEvidenceMarkdown(
 		"## Totals",
 		"",
 		`- runs: ${overview.totals.runs}`,
-		`- receipts: ${overview.totals.receipts}`,
+		`- run records: ${overview.totals.runRecords}`,
 		`- tool calls: ${overview.totals.toolCalls}`,
 		`- tool errors: ${overview.totals.toolErrors}`,
 		`- blocked tool calls: ${overview.totals.blockedToolCalls}`,
@@ -778,23 +527,40 @@ function readableVerification(status: CanonicalTrustStatus): string {
 				: authority === "host-verification-baseline-failed"
 					? "check also failed on the task base; change validation unknown"
 					: trustStateWord("validationGrounding", validation.state);
-	const retiredVersion = retiredIntegrityVersionOf(status.artifactIntegrity);
 	return [
-		retiredVersion !== null
-			? `receipt seal v${retiredVersion} not checked`
-			: status.artifactIntegrity.state === "verified"
-				? "receipt seal valid"
-				: trustStateWord("artifactIntegrity", status.artifactIntegrity.state),
+		status.artifactIntegrity.state === "verified"
+			? "run seal valid"
+			: trustStateWord("artifactIntegrity", status.artifactIntegrity.state),
 		validationText,
 		trustStateWord("independentReview", status.independentReview.state),
 		...(status.contextProvenance.state === "invalid" ? ["context record invalid"] : []),
 	].join("; ");
 }
 
+/** A settled run as the `/view` summaries read it: its settled facts and the result object they name. */
+interface SettledRunView {
+	runId: string;
+	settled: NonNullable<RunTelemetryV1["settled"]>;
+	result: RunResultObject | null;
+}
+
+function settledRunView(runId: string, record: RunTelemetryV1 | null): SettledRunView | null {
+	if (record?.settled == null) return null;
+	return {
+		runId,
+		settled: record.settled,
+		result: record.result?.state === "resolved" ? record.result.value : null,
+	};
+}
+
+function factValue(fact: Fact<number>): number | null {
+	return fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null;
+}
+
 function renderEvidenceSummary(
 	inspected: EvidenceInspectable,
-	receipts: ReadonlyArray<RunResult>,
-	receiptError?: string,
+	runs: ReadonlyArray<SettledRunView>,
+	runError?: string,
 ): string[] {
 	const { overview, findings, trustStatus } = inspected;
 	return [
@@ -808,19 +574,13 @@ function renderEvidenceSummary(
 			: ["Verification: no recorded verification for this bundle."]),
 		"",
 		"## What changed",
-		...(receipts.length > 0
-			? receipts.flatMap((receipt) => [
-					...(receipts.length > 1 ? [`### Run ${receipt.runId}`] : []),
-					...renderReceiptChanges(receipt),
-				])
+		...(runs.length > 0
+			? runs.flatMap((run) => [...(runs.length > 1 ? [`### Run ${run.runId}`] : []), ...renderRunChanges(run)])
 			: ["Changed paths were not recorded."]),
 		"",
 		"## Checks and findings",
-		...receipts.flatMap((receipt) => [
-			...(receipts.length > 1 ? [`### Run ${receipt.runId}`] : []),
-			...renderReceiptChecks(receipt),
-		]),
-		...(receiptError ? [receiptError] : []),
+		...runs.flatMap((run) => [...(runs.length > 1 ? [`### Run ${run.runId}`] : []), ...renderRunChecks(run)]),
+		...(runError ? [runError] : []),
 		...(findings.length > 0
 			? findings.map(
 					(finding) => `- ${finding.message}${finding.runId && overview.runIds.length > 1 ? ` (run ${finding.runId})` : ""}`,
@@ -835,15 +595,16 @@ function renderEvidenceSummary(
 	];
 }
 
-function receiptVerificationLine(report: ReceiptVerificationReport): string {
-	if (!report.ok) return `Verification: ${report.retired ? "not checked" : "failed"}. ${report.reason}`;
-	return `Verification: ${report.verificationSummary ?? "receipt seal verified; result validation unknown"}`;
+function runVerificationLine(report: RunRecordVerificationReport): string {
+	if (!report.ok) return `Verification: failed. ${report.reason}`;
+	return `Verification: ${report.verificationSummary ?? "run seal verified; result validation unknown"}`;
 }
 
-function renderReceiptChanges(receipt: RunResult): string[] {
-	const observed = receipt.worktree?.changedPaths ?? receipt.checkoutChanges?.changedPaths;
-	const output = receipt.output;
-	const contract = receipt.quality?.resultContract;
+function renderRunChanges(run: SettledRunView): string[] {
+	const result = run.result;
+	const observed = result?.worktree?.changedPaths ?? result?.checkoutChanges?.changedPaths;
+	const output = result?.output;
+	const contract = run.settled.quality?.resultContract;
 	const kind =
 		output?.structured?.kind ?? (contract?.conformance === "pass" ? contract.sourceId.split(":")[1] : undefined);
 	const parsed =
@@ -857,6 +618,7 @@ function renderReceiptChanges(receipt: RunResult): string[] {
 			? parsed.value.mutatedPaths.filter((path): path is string => typeof path === "string" && path.trim().length > 0)
 			: undefined;
 	const changed = observed ?? (reported?.length ? reported : undefined);
+	const worktree = run.settled.worktree;
 	return [
 		...(observed === undefined && changed !== undefined ? ["Paths reported by the worker:"] : []),
 		...(changed === undefined
@@ -873,94 +635,109 @@ function renderReceiptChanges(receipt: RunResult): string[] {
 						const pad = /^`|`$/.test(clean) || (/^ .* $/s.test(clean) && clean.trim().length > 0) ? " " : "";
 						return `- ${fence}${pad}${clean}${pad}${fence}`;
 					})),
-		...(receipt.worktree
+		...(worktree
 			? [
-					receipt.worktree.applied
+					worktree.applied
 						? "Changes applied to the source checkout."
-						: `Changes kept in the worktree${receipt.worktree.reason ? `: ${receipt.worktree.reason}` : "."}`,
+						: `Changes kept in the worktree${result?.worktree?.reason ? `: ${result.worktree.reason}` : "."}`,
 				]
 			: []),
-		...(receipt.checkoutChanges ? ["Observed checkout changes; concurrent edits may be included."] : []),
+		...(result?.checkoutChanges ? ["Observed checkout changes; concurrent edits may be included."] : []),
 	];
 }
 
-function renderReceiptChecks(receipt: RunResult): string[] {
-	const checks = receipt.hostVerification?.checks ?? [];
+function renderRunChecks(run: SettledRunView): string[] {
+	const checks = run.result?.hostVerification?.checks ?? [];
+	const failedOnBase = run.settled.hostVerification?.failedOnBase ?? 0;
 	return [
 		...(checks.length > 0
 			? checks.map(
 					(check) =>
-						`- ${check.exitCode === 0 ? "Passed" : "Failed"}: ${check.check} (exit ${check.exitCode})${check.memo ? "; reused result" : ""}${check.baseComparison?.status === "failed" ? "; also failed on task base" : ""}`,
+						`- ${check.exitCode === 0 ? "Passed" : "Failed"}: ${check.check} (exit ${check.exitCode})${check.memo ? "; reused result" : ""}`,
 				)
 			: ["No host-run checks recorded."]),
-		...(receipt.hostVerification?.reason ? [receipt.hostVerification.reason] : []),
-		...(receipt.toolStats ?? []).map(
+		...(failedOnBase > 0 ? [`${failedOnBase} failing check(s) also failed on the task base.`] : []),
+		...(run.result?.hostVerification?.reason ? [run.result.hostVerification.reason] : []),
+		...run.settled.tools.map(
 			(stat) => `- ${stat.tool}: ${stat.ok} succeeded, ${stat.errors} failed, ${stat.blocked} blocked`,
 		),
 	];
 }
 
-function renderReceiptSummary(receipt: RunResult, report: ReceiptVerificationReport): string[] {
+/** A run's settled spend in the canonical cost wording. */
+function renderRunCost(settled: SettledRunView["settled"]): string {
+	const usd = settled.pricing.usd;
+	return renderCostAmount(
+		factValue(usd) ?? 0,
+		usd.kind === "unknown" || usd.kind === "absent"
+			? "unknown"
+			: settled.pricing.pricedBy === "free"
+				? "known_free"
+				: usd.kind === "estimated"
+					? "estimated"
+					: "known",
+	);
+}
+
+function renderRunSummary(run: SettledRunView, report: RunRecordVerificationReport): string[] {
+	const { settled, result } = run;
+	const tokens = factValue(settled.totalTokens);
 	return [
-		`Agent: ${receipt.agentId} · Run: ${receipt.runId}`,
-		`Model: ${receipt.wireModelId} (${receipt.targetId})`,
-		...(receipt.failureMessage ? [receipt.failureMessage] : []),
-		...(receipt.outcomeDetail ? [receipt.outcomeDetail] : []),
+		`Agent: ${settled.agentId} · Run: ${run.runId}`,
+		`Model: ${settled.route.wireModelId} (${settled.route.targetId})`,
+		...(result?.failureMessage ? [result.failureMessage] : []),
+		...(result?.outcomeDetail ? [result.outcomeDetail] : []),
 		"",
-		receiptVerificationLine(report),
+		runVerificationLine(report),
 		...(!report.ok ? ["The recorded claims below could not be verified."] : []),
 		"",
 		"## What changed",
-		...renderReceiptChanges(receipt),
+		...renderRunChanges(run),
 		"",
 		"## Checks",
-		...renderReceiptChecks(receipt),
+		...renderRunChecks(run),
 		"",
-		`${formatDurationMs(parseTime(receipt.endedAt) - parseTime(receipt.startedAt))} · ${formatFooterTokens(receipt.tokenCount)} tokens · ${renderCostAmount(receipt.costUsd, receipt.costProvenance, receipt.costSummary)}`,
+		`${formatDurationMs(parseTime(settled.endedAt) - parseTime(settled.startedAt))} · ${tokens === null ? "unknown" : formatFooterTokens(tokens)} tokens · ${renderRunCost(settled)}`,
 		"",
-		...(receipt.output
+		...(result?.output
 			? [
-					receipt.output.state === "partial" ? "## Partial result" : "## Result",
-					receipt.output.text,
-					...(receipt.output.truncated ? ["Stored result was truncated."] : []),
+					result.output.state === "partial" ? "## Partial result" : "## Result",
+					result.output.text,
+					...(result.output.truncated ? ["Stored result was truncated."] : []),
 					"",
 				]
 			: []),
-		"Press i for the full receipt and verification checks. Press v to verify again.",
+		"Press i for the full run record and verification checks. Press v to verify again.",
 	];
 }
 
-async function loadReceiptSummary(path: string, stateDir: string, runId: string): Promise<ViewArtifactLoadResult> {
-	const details = await loadJsonFileLines(path);
+async function loadRunRecordSummary(stateDir: string, runId: string): Promise<ViewArtifactLoadResult> {
 	try {
-		if ((await stat(path)).size > JSON_PRETTY_MAX_BYTES)
-			return { format: "text", lines: ["Receipt is too large to summarize. Press i for the stored content."], details };
-		const receipt = JSON.parse(await readReceiptText(path)) as RunResult;
-		const report = verifyReceiptFileReport(stateDir, runId);
+		const record = await readRunRecordAsync(stateDir, runId);
+		const run = settledRunView(runId, record);
+		if (run === null)
+			return { format: "text", lines: [`Run ${runId} has not settled; it has no run record to summarize.`] };
+		const report = verifyRunRecordReport(stateDir, runId);
 		return {
 			format: "markdown",
-			lines: renderReceiptSummary(receipt, report),
+			lines: renderRunSummary(run, report),
 			details: {
 				format: "text",
 				lines: [
-					receiptVerificationLine(report),
+					runVerificationLine(report),
 					...(report.trustSummary ? [report.trustSummary] : []),
 					...report.checks.map((check) => `${check.ok ? "Passed" : "Failed"}: ${check.name}: ${check.evidence}`),
 					"",
-					"Full receipt",
+					"Full run record",
 					"",
-					...details.lines,
+					...JSON.stringify({ settled: record?.settled, seal: record?.seal, result: record?.result }, null, 2).split("\n"),
 				],
 			},
 		};
 	} catch (err) {
 		return {
 			format: "text",
-			lines: [
-				`Receipt summary unavailable: ${err instanceof Error ? err.message : String(err)}`,
-				"Press i to inspect the stored receipt.",
-			],
-			details,
+			lines: [`Run record summary unavailable: ${err instanceof Error ? err.message : String(err)}`],
 		};
 	}
 }
@@ -1009,20 +786,19 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 				load: async () => {
 					try {
 						const inspected = await inspectEvidence(dataDir, overview.evidenceId);
-						let receipts: RunResult[] = [];
-						let receiptError: string | undefined;
+						const runs: SettledRunView[] = [];
+						let runError: string | undefined;
 						try {
-							const receiptPath = join(evidenceDirectory(dataDir, overview.evidenceId), "receipt.json");
-							if ((await stat(receiptPath)).size > JSON_PRETTY_MAX_BYTES)
-								throw new Error("receipt file is too large to summarize");
-							const stored = JSON.parse(await readFile(receiptPath, "utf8")) as { receipts?: RunResult[] };
-							receipts = (stored.receipts ?? []).filter((receipt) => inspected.overview.runIds.includes(receipt.runId));
+							for (const runId of inspected.overview.runIds) {
+								const run = settledRunView(runId, await readRunRecordAsync(this.deps.stateDir, runId));
+								if (run !== null) runs.push(run);
+							}
 						} catch (err) {
-							receiptError = `Recorded changes and checks unavailable: ${err instanceof Error ? err.message : String(err)}`;
+							runError = `Recorded changes and checks unavailable: ${err instanceof Error ? err.message : String(err)}`;
 						}
 						return {
 							format: "markdown" as const,
-							lines: renderEvidenceSummary(inspected, receipts, receiptError),
+							lines: renderEvidenceSummary(inspected, runs, runError),
 							details: {
 								format: "markdown",
 								lines: [
@@ -1053,11 +829,12 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 	}
 }
 
-function receiptTitle(env: RunEnvelope): string {
+function runTitle(env: RunEnvelope): string {
 	return safeTitle(`${env.outcome ?? env.status} · ${env.agentId} · ${env.task}`, env.id);
 }
 
-export class ReceiptArtifactProvider implements ArtifactProvider {
+/** Finished runs by their sealed run record: the `receipt` category, whose id `/view verify` names (#434). */
+export class RunRecordArtifactProvider implements ArtifactProvider {
 	readonly category = "receipt" as const;
 
 	constructor(private readonly deps: ArtifactProviderDeps) {}
@@ -1066,14 +843,16 @@ export class ReceiptArtifactProvider implements ArtifactProvider {
 		const runs = listRunEnvelopes(this.deps);
 		return runs
 			.filter(
-				(env) => env.receiptPath !== null || maybeSizeBytes(receiptFilePath(this.deps.stateDir, env.id)) !== undefined,
+				(env) =>
+					env.endedAt !== null &&
+					maybeSizeBytes(telemetryJournalPath(telemetryRunDirectory(this.deps.stateDir, env.id))) !== undefined,
 			)
 			.map((env) => {
-				const path = env.receiptPath ?? receiptFilePath(this.deps.stateDir, env.id);
+				const path = telemetryJournalPath(telemetryRunDirectory(this.deps.stateDir, env.id));
 				return {
 					id: env.id,
 					category: this.category,
-					title: receiptTitle(env),
+					title: runTitle(env),
 					timestamp: parseTime(env.endedAt ?? env.startedAt),
 					sizeBytes: maybeSizeBytes(path),
 					path,
@@ -1081,16 +860,14 @@ export class ReceiptArtifactProvider implements ArtifactProvider {
 					runId: env.id,
 					...(env.sessionId ? { sessionId: env.sessionId } : {}),
 					searchText: [env.id, env.agentId, env.task, env.targetId, env.runtimeId, env.runtimeKind, env.cwd],
-					load: () => loadReceiptSummary(path, this.deps.stateDir, env.id),
+					load: () => loadRunRecordSummary(this.deps.stateDir, env.id),
 					verify: async () => {
-						const result = verifyReceiptFileReport(this.deps.stateDir, env.id);
-						if (!result.ok) {
-							return { ok: false, detail: result.reason, ...(result.retired !== undefined ? { retired: true } : {}) };
-						}
+						const result = verifyRunRecordReport(this.deps.stateDir, env.id);
+						if (!result.ok) return { ok: false, detail: result.reason };
 						// A valid seal and a checked result are separate facts.
 						return {
 							ok: true,
-							detail: result.verificationSummary ?? "receipt seal valid; result validation unknown",
+							detail: result.verificationSummary ?? "run seal valid; result validation unknown",
 							compromised: result.compromised,
 						};
 					},
@@ -1172,12 +949,12 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 		const entries = sessionEntries(this.deps);
 		const ledgerPath = runLedgerPath(this.deps.stateDir);
 		return runs.map((env) => {
-			const receiptPath = env.receiptPath ?? receiptFilePath(this.deps.stateDir, env.id);
-			const path = maybeSizeBytes(receiptPath) !== undefined ? receiptPath : ledgerPath;
+			const journalPath = telemetryJournalPath(telemetryRunDirectory(this.deps.stateDir, env.id));
+			const path = maybeSizeBytes(journalPath) !== undefined ? journalPath : ledgerPath;
 			return {
 				id: env.id,
 				category: this.category,
-				title: receiptTitle(env),
+				title: runTitle(env),
 				timestamp: parseTime(env.endedAt ?? env.startedAt),
 				sizeBytes: maybeSizeBytes(path),
 				path,
@@ -1186,17 +963,13 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 				...(env.sessionId ? { sessionId: env.sessionId } : {}),
 				searchText: [env.id, env.agentId, env.task, env.targetId, env.runtimeId, env.runtimeKind, env.cwd],
 				load: async () => {
-					let receipt: RunResult | undefined;
-					let receiptTooLarge = false;
+					let run: SettledRunView | null = null;
 					try {
-						receiptTooLarge = (await stat(receiptPath)).size > JSON_PRETTY_MAX_BYTES;
-						if (!receiptTooLarge) {
-							receipt = JSON.parse(await readReceiptText(receiptPath)) as RunResult;
-						}
+						run = settledRunView(env.id, await readRunRecordAsync(this.deps.stateDir, env.id));
 					} catch {
-						// A missing or unreadable receipt can still have session tool output to show.
+						// A run whose record cannot be read can still have session tool output to show.
 					}
-					const output = receipt?.output;
+					const output = run?.result?.output;
 					const text = output?.text ?? dispatchResultForRun(entries, env.id);
 					const lines = [
 						`Dispatch run ${env.id}`,
@@ -1212,16 +985,10 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 						`ended: ${env.endedAt ? formatLocalTime(env.endedAt) : "running"}`,
 						`tokens: ${formatFooterTokens(env.tokenCount)}`,
 						`cost: ${renderCostAmount(env.costUsd, env.costProvenance, env.costSummary)}`,
-						`receipt: ${env.receiptPath ?? receiptFilePath(this.deps.stateDir, env.id)}`,
+						`run journal: ${journalPath}`,
 						"",
 						"## What changed",
-						...(receipt
-							? renderReceiptChanges(receipt)
-							: [
-									receiptTooLarge
-										? "Receipt was too large to read; changed paths could not be summarized."
-										: "Changed paths were not recorded.",
-								]),
+						...(run ? renderRunChanges(run) : ["Changed paths were not recorded."]),
 						"",
 						output?.state === "partial" ? "agent output (partial):" : "agent output:",
 						...(text ? text.split(/\r?\n/) : ["(no recorded agent output found)"]),
@@ -1809,7 +1576,7 @@ export class SafetyAuditArtifactProvider implements ArtifactProvider {
 		if (!sessionId) return [];
 		let source: SessionSource | null;
 		try {
-			// The journal loader reaches receipts and dispatch; the /view list loads it only when opened.
+			// The journal loader reaches run records and dispatch; the /view list loads it only when opened.
 			const { loadSessionTelemetrySourceAsync } = await import("./telemetry-source.js");
 			source = await loadSessionTelemetrySourceAsync(this.deps.stateDir, sessionId);
 		} catch {
@@ -1854,7 +1621,7 @@ export function createDefaultArtifactProviders(deps: ArtifactProviderDeps): Arti
 		{ category: "transcript", list: async () => deps.readTranscript?.() ?? [] },
 		new AccountabilityArtifactProvider(deps),
 		new EvidenceArtifactProvider(deps),
-		new ReceiptArtifactProvider(deps),
+		new RunRecordArtifactProvider(deps),
 		new DispatchArtifactProvider(deps),
 		new TaskLedgerArtifactProvider(deps),
 		new WorkspaceArtifactProvider(deps),

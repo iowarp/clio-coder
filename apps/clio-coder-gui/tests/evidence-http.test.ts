@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Static } from "typebox";
@@ -43,7 +43,7 @@ test("evidence REST preserves all 40 artifacts, historical unknown, provenance a
 			[
 				{ source: "session-entry", confidence: "exact", resultPreview: "private event text" },
 				{ source: "audit-row", confidence: "best-effort" },
-				{ source: "receipt-aggregate" },
+				{ source: "run-aggregate" },
 			]
 				.map((row) => JSON.stringify(row))
 				.join("\n"),
@@ -84,7 +84,7 @@ test("evidence REST preserves all 40 artifacts, historical unknown, provenance a
 	}
 });
 
-test("real CLI builds evidence once per key, follows typed storage, and rechecks a tampered receipt truthfully", async () => {
+test("real CLI builds evidence once per key, follows typed storage, and rechecks a tampered run seal truthfully", async () => {
 	const h = await harness();
 	try {
 		const seeded = await seedEvidence(h.home.path, h.home.env);
@@ -116,14 +116,15 @@ test("real CLI builds evidence once per key, follows typed storage, and rechecks
 			return operation.result.verification;
 		};
 		assert.equal((await verify()).state, "verified");
-		const receiptPath = join(h.home.path, "state/receipts", `${seeded.runId}.json`);
-		const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
-		receipt.tokenCount += 1;
-		await writeFile(receiptPath, JSON.stringify(receipt));
+		// A rewritten result object: the seal lists the object's digest, which no longer matches (#434).
+		const objects = join(h.home.path, "state/telemetry/runs", seeded.runId, "objects");
+		const [object] = await readdir(objects);
+		assert.ok(object);
+		const stored = await readFile(join(objects, object), "utf8");
+		await writeFile(join(objects, object), stored.replace('"version":1', '"version":2'));
 		const failed = await verify();
 		assert.equal(failed.state, "failed");
-		// The v21 seal covers the receipt's own fields and is checked before the ledger row (#434).
-		assert.equal(failed.reason, "integrity-mismatch");
+		assert.equal(failed.reason, "object-mismatch");
 		assert.equal((await h.post(path, { argv: ["--session", "escape"] })).status, 422);
 		assert.equal(h.cli.activeCount, 0);
 	} finally {

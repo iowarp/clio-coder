@@ -9,7 +9,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { closeAgentLedger, openAgentLedger, readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import codexCliRuntime from "../../src/domains/providers/runtimes/codex/codex-cli.js";
 import { piCliRuntime } from "../../src/domains/providers/runtimes/external-cli-peers.js";
-import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
+import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -123,7 +123,7 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 		deepStrictEqual(JSON.parse(readFileSync(path, "utf8")), receipt);
 		const stateDir = process.env.CLIO_CODER_STATE_DIR;
 		ok(stateDir);
-		ok(verifyReceiptFileReport(stateDir, success.runId).ok);
+		ok(verifyRunRecordReport(stateDir, success.runId).ok);
 
 		writeFileSync(join(root, "scenario.json"), JSON.stringify({ hang: true }));
 		rmSync(join(root, "started"), { force: true });
@@ -138,7 +138,7 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 		equal(canceled.outcome, "canceled");
 		ok(canceled.exitCode !== 0);
 		equal(canceled.externalTelemetry?.exitReason, "aborted");
-		ok(verifyReceiptFileReport(stateDir, hanging.runId).ok);
+		ok(verifyRunRecordReport(stateDir, hanging.runId).ok);
 		deepStrictEqual(bundle.contract.snapshot().running, []);
 		await closeAgentLedger("external-board");
 		const reports = readAgentLedger("external-board")?.entries ?? [];
@@ -217,7 +217,7 @@ for (const event of [
 		});
 		const stateDir = process.env.CLIO_CODER_STATE_DIR;
 		ok(stateDir);
-		ok(verifyReceiptFileReport(stateDir, run.runId).ok);
+		ok(verifyRunRecordReport(stateDir, run.runId).ok);
 	} finally {
 		await bundle.extension.stop?.();
 	}
@@ -326,8 +326,8 @@ test("external edits distinguish current checkout, preserved worktree, and faile
 		ok(existsSync(join(failedReceipt.worktree.path, "failed.txt")));
 		const stateDir = process.env.CLIO_CODER_STATE_DIR;
 		ok(stateDir);
-		ok(verifyReceiptFileReport(stateDir, isolated.runId).ok);
-		ok(verifyReceiptFileReport(stateDir, failed.runId).ok);
+		ok(verifyRunRecordReport(stateDir, isolated.runId).ok);
+		ok(verifyRunRecordReport(stateDir, failed.runId).ok);
 	} finally {
 		await bundle.extension.stop?.();
 	}

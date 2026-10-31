@@ -1,6 +1,4 @@
 import { deepStrictEqual, rejects, strictEqual } from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { test } from "node:test";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
@@ -9,12 +7,13 @@ import { clioStateDir } from "../../src/core/xdg.js";
 import { suggestedSessionCostCeilingUsd } from "../../src/domains/scheduling/budget.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
-import { receiptFilePath } from "../../src/domains/session/view-artifacts.js";
 import type { AcpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { budgetAlertNotice } from "../../src/interactive/bus-notices.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 import { readModelOf, telemetryCall } from "../harness/telemetry-view.js";
 
 function fixture(
@@ -435,17 +434,34 @@ test("ACP prompt usage writes cost provenance that the delegation adapter reads"
 	}
 });
 
-test("a reloaded session replays a finished run's tokens with its receipt's call coverage, as the live frame words them (#434)", async () => {
+test("a reloaded session replays a finished run's tokens with its settled call coverage, as the live frame words them (#434)", async () => {
 	const timestamp = "2026-09-25T12:00:00.000Z";
-	const receipt = (runId: string, outcome: string, coverage: Record<string, number>) =>
-		writeFileSync(
-			receiptFilePath(clioStateDir(), runId),
-			JSON.stringify({ outcome, tokenCount: 1_200, startedAt: timestamp, endedAt: timestamp, ...coverage }),
+	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
+	const settle = (runId: string, outcome: "succeeded" | "failed", apiCalls: number | null) =>
+		writeSettledRun(
+			clioStateDir(),
+			{
+				...fixtureReceiptDraft({ ...fixtureEnvelope(runId), startedAt: timestamp, endedAt: timestamp }),
+				outcome,
+				exitCode: outcome === "succeeded" ? 0 : 1,
+			},
+			{
+				usage: {
+					input: measured(1_000),
+					output: measured(200),
+					cacheRead: measured(0),
+					cacheWrite: measured(0),
+					cacheWrite1h: measured(0),
+					reasoning: measured(0),
+				},
+				totalTokens: measured(1_200),
+				apiCalls: apiCalls === null ? { kind: "unknown", reason: "not-observed" } : measured(apiCalls),
+				pricing: { usd: measured(0), pricedBy: "none" },
+			},
 		);
-	mkdirSync(join(clioStateDir(), "receipts"), { recursive: true });
-	receipt("replay-partial", "succeeded", { apiCalls: 3, missingTokenCalls: 1 });
-	receipt("replay-failed", "failed", { apiCalls: 2, missingTokenCalls: 0 });
-	receipt("replay-legacy", "succeeded", {});
+	await settle("replay-partial", "succeeded", 3);
+	await settle("replay-failed", "failed", 2);
+	await settle("replay-legacy", "succeeded", null);
 	const worker = (runId: string, index: number): SessionEntry =>
 		({
 			kind: "workerRun",
@@ -483,16 +499,16 @@ test("a reloaded session replays a finished run's tokens with its receipt's call
 					runId: "replay-partial",
 					tokenCount: 1_200,
 					apiCalls: 3,
-					missingTokenCalls: 1,
-					tokenDisplay: "≥1,200 (1 call unknown)",
+					missingTokenCalls: null,
+					tokenDisplay: "≥1,200 (call coverage not recorded)",
 				},
 				{
 					kind: "run.failed",
 					runId: "replay-failed",
 					tokenCount: 1_200,
 					apiCalls: 2,
-					missingTokenCalls: 0,
-					tokenDisplay: "1,200",
+					missingTokenCalls: null,
+					tokenDisplay: "≥1,200 (call coverage not recorded)",
 				},
 				{
 					kind: "run.completed",

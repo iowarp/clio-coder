@@ -191,7 +191,7 @@ function avoidWhen(overview: EvidenceOverview): string[] {
 function confidenceForEvidence(overview: EvidenceOverview, findings: ReadonlyArray<EvidenceFinding>): number {
 	let value = 0.45;
 	if (overview.totals.runs > 0) value += 0.05;
-	if (overview.totals.receipts > 0) value += 0.05;
+	if (overview.totals.runRecords > 0) value += 0.05;
 	if (overview.tags.length > 0) value += 0.05;
 	if (findings.some((finding) => finding.severity === "warn")) value += 0.05;
 	if (overview.totals.linkedToolEvents > 0 || overview.totals.toolEvents > 0) value += 0.05;

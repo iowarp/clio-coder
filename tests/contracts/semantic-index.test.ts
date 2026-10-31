@@ -309,7 +309,7 @@ test("project extraction uses typed codemap/wiki and excludes unapproved or fore
 			modelIds: [],
 			totals: {
 				runs: 1,
-				receipts: 0,
+				runRecords: 0,
 				toolCalls: 0,
 				toolErrors: 0,
 				blockedToolCalls: 0,

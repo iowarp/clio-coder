@@ -1,84 +1,95 @@
 import { deepStrictEqual, ok } from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { RunEnvelope } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResultDraft } from "../../src/domains/dispatch/types.js";
 import type { SessionMeta } from "../../src/domains/session/contract.js";
-import { DispatchArtifactProvider, ReceiptArtifactProvider } from "../../src/domains/session/view-artifacts.js";
+import { DispatchArtifactProvider, RunRecordArtifactProvider } from "../../src/domains/session/view-artifacts.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
-test("dispatch and receipt views read a /run worker's sealed output and mutation paths without a dispatch tool entry", async () => {
+test("dispatch and run record views read a /run worker's settled output and mutation paths without a dispatch tool entry", async () => {
 	const scratch = await isolateClioEnv("clio-coder-view-dispatch-");
 	try {
 		const stateDir = join(scratch.dir, "state");
-		const receiptPath = join(stateDir, "receipts", "run-view.json");
-		mkdirSync(join(stateDir, "receipts"), { recursive: true });
 		const result = {
 			mutatedPaths: ["src/rates.mjs", "src/injected\n## Forged\u001b[31m.mjs", "src/`tick`.mjs"],
 			validations: [],
 			summary: "Added the percent JSDoc.",
 		};
-		const text = JSON.stringify(result);
-		writeFileSync(
-			receiptPath,
-			JSON.stringify({
-				runId: "run-view",
-				agentId: "coder",
-				wireModelId: "fake",
-				targetId: "fake",
-				startedAt: "2026-10-16T12:00:00Z",
-				endedAt: "2026-10-16T12:00:01Z",
-				tokenCount: 100,
-				costUsd: 0,
-				toolStats: [],
+		const rows: RunEnvelope[] = [];
+		const seed = async (runId: string, change: (draft: RunResultDraft) => RunResultDraft) => {
+			const row: RunEnvelope = {
+				...fixtureEnvelope(runId),
+				task: "Add JSDoc",
+				cwd: scratch.dir,
+				sessionId: null,
+				startedAt: "2026-10-16T12:00:00.000Z",
+				endedAt: "2026-10-16T12:00:01.000Z",
+			};
+			rows.push(row);
+			const text = JSON.stringify(result);
+			await writeSettledRun(
+				stateDir,
+				change({
+					...fixtureReceiptDraft(row),
+					output: {
+						state: "final",
+						text,
+						bytes: Buffer.byteLength(text),
+						truncated: false,
+						structured: { version: 1, kind: "mutation-report", data: structuredClone(result) },
+					},
+				}),
+			);
+			return text;
+		};
+		const text = await seed("run-view", (draft) => draft);
+		await seed("run-observed", (draft) => ({
+			...draft,
+			checkoutChanges: {
+				cwd: scratch.dir,
+				changedPaths: ["src/observed\n## Forged\u001b[31m.mjs"],
+				attribution: "observed-delta",
+			},
+		}));
+		await seed("run-empty-reported", (draft) => {
+			const output = draft.output;
+			ok(output);
+			return {
+				...draft,
 				output: {
-					state: "final",
-					text,
-					bytes: Buffer.byteLength(text),
-					truncated: false,
-					structured: { version: 1, kind: "mutation-report", data: result },
+					...output,
+					structured: { version: 1, kind: "mutation-report", data: { ...result, mutatedPaths: [] } },
 				},
-			}),
-		);
-		const row = {
-			id: "run-view",
-			agentId: "coder",
-			task: "Add JSDoc",
-			cwd: scratch.dir,
-			sessionId: null,
-			status: "succeeded",
-			outcome: "succeeded",
-			exitCode: 0,
-			targetId: "fake",
-			wireModelId: "fake",
-			runtimeKind: "native",
-			runtimeId: "fake",
-			startedAt: "2026-10-16T12:00:00Z",
-			endedAt: "2026-10-16T12:00:01Z",
-			tokenCount: 100,
-			costUsd: 0,
-			receiptPath,
-		} as unknown as RunEnvelope;
+			};
+		});
+		await seed("run-empty-observed", (draft) => ({
+			...draft,
+			checkoutChanges: { cwd: scratch.dir, changedPaths: [], attribution: "observed-delta" },
+		}));
 		const deps = {
 			stateDir,
-			dispatch: { listRuns: () => [row], getRun: () => row },
+			dispatch: { listRuns: () => rows, getRun: (id: string) => rows.find((row) => row.id === id) ?? null },
 			readSessionEntries: () => [],
 			sessionMeta: { id: "view-session", cwd: scratch.dir } as SessionMeta,
 		};
-		const dispatch = (await new DispatchArtifactProvider(deps).list())[0];
-		const receipt = (await new ReceiptArtifactProvider(deps).list())[0];
-		ok(dispatch && receipt);
+		const byId = async <T extends { id: string }>(list: Promise<T[]>, id: string) =>
+			(await list).find((a) => a.id === id);
+		const dispatch = await byId(new DispatchArtifactProvider(deps).list(), "run-view");
+		const record = await byId(new RunRecordArtifactProvider(deps).list(), "run-view");
+		ok(dispatch && record);
 		const dispatchBody = (await dispatch.load()).lines.join("\n");
-		const receiptBody = (await receipt.load()).lines.join("\n");
+		const recordBody = (await record.load()).lines.join("\n");
 		deepStrictEqual(
 			[
 				dispatchBody.includes(text),
-				receiptBody.includes("- `src/rates.mjs`"),
-				receiptBody.includes("Changed paths were not recorded"),
+				recordBody.includes("- `src/rates.mjs`"),
+				recordBody.includes("Changed paths were not recorded"),
 			],
 			[true, true, false],
 		);
-		for (const body of [dispatchBody, receiptBody]) {
+		for (const body of [dispatchBody, recordBody]) {
 			ok(body.includes("## What changed"));
 			ok(body.includes("Paths reported by the worker:"));
 			ok(body.includes("- `src/rates.mjs`"));
@@ -86,27 +97,27 @@ test("dispatch and receipt views read a /run worker's sealed output and mutation
 			ok(body.includes("- ``src/`tick`.mjs``"));
 			ok(!body.includes("\n## Forged"));
 		}
-		const stored = JSON.parse(readFileSync(receiptPath, "utf8"));
-		stored.checkoutChanges = { changedPaths: ["src/observed\n## Forged\u001b[31m.mjs"] };
-		writeFileSync(receiptPath, JSON.stringify(stored));
-		for (const artifact of [dispatch, receipt]) {
+		for (const artifact of [
+			await byId(new DispatchArtifactProvider(deps).list(), "run-observed"),
+			await byId(new RunRecordArtifactProvider(deps).list(), "run-observed"),
+		]) {
+			ok(artifact);
 			const body = (await artifact.load()).lines.join("\n");
 			const changes = body.split("## What changed")[1]?.split(/\nagent output:|\n## /u)[0] ?? "";
 			ok(changes.includes("- `src/observed ## Forged.mjs`"));
 			ok(!changes.includes("Paths reported by the worker:"));
 			ok(!changes.includes("src/rates.mjs"));
 		}
-		delete stored.checkoutChanges;
-		stored.output.structured.data.mutatedPaths = [];
-		writeFileSync(receiptPath, JSON.stringify(stored));
-		const emptyReported = (await receipt.load()).lines.join("\n");
-		ok(emptyReported.includes("Changed paths were not recorded."));
-		ok(!emptyReported.includes("No changed paths recorded."));
-		stored.checkoutChanges = { changedPaths: [] };
-		writeFileSync(receiptPath, JSON.stringify(stored));
-		const emptyObserved = (await receipt.load()).lines.join("\n");
-		ok(emptyObserved.includes("No changed paths recorded."));
-		ok(!emptyObserved.includes("Changed paths were not recorded."));
+		const emptyReported = await byId(new RunRecordArtifactProvider(deps).list(), "run-empty-reported");
+		ok(emptyReported);
+		const emptyReportedBody = (await emptyReported.load()).lines.join("\n");
+		ok(emptyReportedBody.includes("Changed paths were not recorded."));
+		ok(!emptyReportedBody.includes("No changed paths recorded."));
+		const emptyObserved = await byId(new RunRecordArtifactProvider(deps).list(), "run-empty-observed");
+		ok(emptyObserved);
+		const emptyObservedBody = (await emptyObserved.load()).lines.join("\n");
+		ok(emptyObservedBody.includes("No changed paths recorded."));
+		ok(!emptyObservedBody.includes("Changed paths were not recorded."));
 	} finally {
 		scratch.restore();
 	}
