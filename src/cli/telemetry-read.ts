@@ -1,5 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
+import { cwdHash } from "../core/cwd-hash.js";
 import type {
 	CacheReportV1,
 	CallFilter,
@@ -21,6 +22,7 @@ import {
 	callsReport,
 	costReport,
 	explain,
+	repoCostReport,
 	runCallsReport,
 	runCostReport,
 	runTelemetry,
@@ -28,7 +30,7 @@ import {
 	timeline,
 	whyStopped,
 } from "../domains/observability/read-model.js";
-import { explainRepoRef, isRepoRef } from "../domains/observability/usage-window.js";
+import { explainRepoRef, isRepoRef, usageWindow } from "../domains/observability/usage-window.js";
 import {
 	loadRunReceiptEvidence,
 	loadRunTelemetrySource,
@@ -47,6 +49,7 @@ clio-coder telemetry inspect --run <run-id> [--json]
 clio-coder telemetry calls <session> [--run <run-id>] [--label <l,..>] [--disposition <d,..>]
                            [--turn <id,..>] [--from <iso>] [--to <iso>] [--limit <n>] [--json]
 clio-coder telemetry cost <session> | --run <run-id> [--by label|model|turn] [--json]
+clio-coder telemetry cost [--repo <path>] --days <n> [--by label|model|turn] [--json]
 clio-coder telemetry cache <session> [--json]
 clio-coder telemetry timeline <session> [--from <iso> --to <iso>] [--json]
 clio-coder telemetry why-stopped <session> [--json]
@@ -57,6 +60,8 @@ the session's journal owns on every branch, plus the worker runs it referenced;
 a fork child folds its own calls, and inspect adds the lineage total. --json
 emits the read-model DTO the TUI, ACP and GUI serve. explain also takes a
 usage report's repo:<window> reference, refolded over that window ending now.
+cost --days folds the window usage report reads: the sessions and runs of one
+repository (--repo) or of every repository, over the last <n> days.
 `;
 
 interface Args {
@@ -66,7 +71,7 @@ interface Args {
 	json: boolean;
 }
 
-const VALUE_FLAGS = new Set(["run", "label", "disposition", "turn", "from", "to", "limit", "by"]);
+const VALUE_FLAGS = new Set(["run", "label", "disposition", "turn", "from", "to", "limit", "by", "repo", "days"]);
 
 function parse(argv: ReadonlyArray<string>): Args | string {
 	const [command = "", ...rest] = argv;
@@ -222,7 +227,7 @@ function printCost(dto: CostReportV1): string {
 			? `session ${dto.scope.sessionId}`
 			: "runId" in dto.scope
 				? `run ${dto.scope.runId}`
-				: "repo";
+				: `${dto.scope.repo === "all" ? "every repository" : `repo ${dto.scope.repo}`} over ${dto.scope.days} d`;
 	return `${scope} · ${show(dto.total.calls)} calls · ${show(dto.total.tokens)} tokens · ${show(dto.total.usd)}\n\n${formatColumns(
 		[
 			[dto.groupBy, "calls", "tokens", "cost"],
@@ -384,6 +389,33 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 				}
 				return emit(runCostReport(runId, run, by), args.json, printCost);
 			}
+		}
+		if (args.command === "cost" && (args.values.has("repo") || args.values.has("days"))) {
+			if (target !== undefined || runId !== undefined) {
+				printError("cost takes a session, --run, or a --repo/--days window, one at a time");
+				return 2;
+			}
+			const daysArg = args.values.get("days");
+			const days = daysArg !== undefined && /^\d+$/.test(daysArg) ? Number.parseInt(daysArg, 10) : Number.NaN;
+			if (!Number.isSafeInteger(days) || days <= 0) {
+				printError("a repository window needs --days <n>, a positive whole number of days");
+				return 2;
+			}
+			const by = args.values.get("by") ?? "label";
+			if (by !== "label" && by !== "model" && by !== "turn") {
+				printError(`--by does not accept ${by}`);
+				return 2;
+			}
+			// The window usage report folds, attributed the same way, so the two print the same spend (#434 §11.1).
+			const repoArg = args.values.get("repo");
+			const repoPath = repoArg === undefined ? undefined : resolve(repoArg);
+			const { repo } = await usageWindow(
+				stateDir,
+				repoPath === undefined ? null : { hash: cwdHash(repoPath), inRepo: (cwd) => cwd === repoPath },
+				days,
+				Date.now(),
+			);
+			return emit(repoCostReport(repo, { repo: repoPath ?? "all", days }, by), args.json, printCost);
 		}
 		if (target === undefined && args.command !== "calls") {
 			printError(`${args.command} needs a session id or directory`);

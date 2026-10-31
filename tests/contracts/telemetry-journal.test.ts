@@ -1784,6 +1784,22 @@ test("usage report discovers a standalone run journal that has no session and no
 		const explanation = JSON.parse(explained.stdout) as ExplanationV1;
 		strictEqual(explanation.value.display, "21");
 		deepStrictEqual(explanation.from.runIds, [owner.runId]);
+		// `telemetry cost --days` folds the same window under the same reference (#434 §11.3).
+		const windowed = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				"tsx",
+				"--input-type=module",
+				"-e",
+				`import {runTelemetryReadCommand} from ${JSON.stringify(read)}; process.exitCode = await runTelemetryReadCommand(['cost','--days','30','--json']);`,
+			],
+			{ encoding: "utf8", env: { ...process.env, ...scratchClioEnvVars(scratch) } },
+		);
+		strictEqual(windowed.status, 0, windowed.stderr);
+		const windowCost = JSON.parse(windowed.stdout) as CostReportV1;
+		deepStrictEqual(windowCost.scope, { repo: "all", days: 30 });
+		deepStrictEqual(windowCost.total.tokens, cost?.total.tokens);
 	} finally {
 		await run.close();
 		await rm(scratch, { recursive: true, force: true });
