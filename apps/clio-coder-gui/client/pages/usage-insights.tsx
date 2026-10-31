@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { UsageReport } from "../../contracts/reports.js";
+import type { Client } from "../api/client.js";
 import { Facts } from "../design/facts.js";
 import { Icon } from "../design/icons.js";
+import { Explained } from "../telemetry/Explained.js";
 import { countText } from "../telemetry/quantity-model.js";
 import type { UsageMetric } from "./usage-insights-model.js";
 import {
@@ -14,7 +16,7 @@ import {
 	usageModelInsights,
 } from "./usage-insights-model.js";
 
-export function UsageInsights({ report }: { report: UsageReport }) {
+export function UsageInsights({ client, report }: { client: Client; report: UsageReport }) {
 	const [metric, setMetric] = useState<UsageMetric>("calls");
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const [query, setQuery] = useState("");
@@ -158,7 +160,12 @@ export function UsageInsights({ report }: { report: UsageReport }) {
 								<div key={item.id}>
 									<dt>{item.label}</dt>
 									<dd>
-										{usageAmountText(selected[item.id])}
+										<Explained
+											client={client}
+											label={`${item.label}, ${selected.model}`}
+											value={usageAmountText(selected[item.id])}
+											ref={selected[item.id].ref}
+										/>
 										<small>{selected[item.id].label}</small>
 									</dd>
 								</div>

@@ -759,6 +759,20 @@ try {
 		await check("usage-dark");
 		await dark(false);
 		await check("usage");
+		// A repository figure explains to the window `usage report` folded, rebuilt ending now (#434 §11.4).
+		const windowTokens = page
+			.locator("main .usage-totals article", { hasText: "Recorded tokens" })
+			.locator("details.explain");
+		await windowTokens.locator("summary").click();
+		const windowExplanation = windowTokens.locator(".explain__panel");
+		await windowExplanation.locator("dt", { hasText: /^Coverage$/ }).waitFor();
+		assert.equal(
+			(await windowExplanation.locator("dd").first().innerText()).trim(),
+			(await windowTokens.locator("summary").innerText()).trim(),
+			"the window's explanation states the figure it explains",
+		);
+		await check("usage-explain");
+		await page.keyboard.press("Escape");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `usage-${width}.png`), fullPage: true });
 		await navigate("Library");

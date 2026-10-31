@@ -22,6 +22,8 @@ export interface UsageAmount {
 	label: string;
 	/** The canonical renderer's wording; the only text shown for the amount (#434). */
 	display: string;
+	/** The reference explain() resolves for the amount. */
+	ref: string | null;
 }
 export interface UsageModelInsight {
 	id: string;
@@ -56,7 +58,7 @@ function amountOf(quantity: Quantity, metric: UsageMetric, pricedBy: CostGroup["
 						? "Unpriced"
 						: "Not recorded"
 					: `${estimated ? "Estimated" : free > 0 && Object.values(priced).every((count) => count === 0) ? "Known free" : "Reported"}${partial ? " · unpriced calls" : ""}`;
-	return { value: parts.amount, partial, estimated, label, display: quantity.display };
+	return { value: parts.amount, partial, estimated, label, display: quantity.display, ref: quantity.ref ?? null };
 }
 
 /** A model group's key is `<target>/<model>`; a target id holds no slash, while a model id may. */

@@ -8,17 +8,15 @@ import type { CacheReportV1, CostReportV1, SessionTelemetryV1 } from "../../cont
 import { formatDay } from "../api/clock.js";
 import { humanizeKey, scalarText } from "../design/facts-model.js";
 import { emptyState } from "../design/panel-model.js";
-import { countText, quantityParts } from "../telemetry/quantity-model.js";
+import { countText, type Explainable, explainable, quantityParts } from "../telemetry/quantity-model.js";
 
-export interface UsageFigure {
+export interface UsageFigure extends Explainable {
 	label: string;
-	value: string;
 	note?: string;
 }
 
-export interface UsageBar {
+export interface UsageBar extends Explainable {
 	label: string;
-	value: string;
 	/** Width relative to the largest bar, 0 to 1. Never a share of the total: these fields overlap. */
 	share: number;
 }
@@ -228,18 +226,18 @@ export function usageView(report: UsageReport): UsageView {
 	const store = (name: string, missing: string, label: string): UsageFigure => {
 		const row = first(name);
 		const count = number(row?.value);
-		if (first(missing) || count === null) return { label, value: "—", note: emptyState.dash() };
-		return { label, value: countText(count) };
+		if (first(missing) || count === null) return { label, value: "—", note: emptyState.dash(), ref: null };
+		return { label, value: countText(count), ref: null };
 	};
 
 	const total = byOrigin?.total;
 	const headline: UsageFigure[] = [
 		total
-			? { label: "Tokens", value: total.tokens.display, note: `API calls: ${total.calls.display}` }
-			: { label: "Tokens", value: countText(null) },
+			? { label: "Tokens", ...explainable(total.tokens), note: `API calls: ${total.calls.display}` }
+			: { label: "Tokens", value: countText(null), ref: null },
 		total
-			? { label: "Cost", value: total.usd.display, note: costNote(total) }
-			: { label: "Cost", value: "not measured", note: "No spend was measured in this window" },
+			? { label: "Cost", ...explainable(total.usd), note: costNote(total) }
+			: { label: "Cost", value: "not measured", note: "No spend was measured in this window", ref: null },
 		store("sessions", "session-store-missing", "Sessions"),
 		store("dispatch-runs", "receipt-store-missing", "Dispatch runs"),
 	];
@@ -253,7 +251,7 @@ export function usageView(report: UsageReport): UsageView {
 		const amount = amounts[index] ?? null;
 		return {
 			label: field.label,
-			value: field.quantity?.display ?? countText(null),
+			...explainable(field.quantity, countText(null)),
 			share: amount !== null && widest > 0 ? amount / widest : 0,
 		};
 	});
@@ -261,7 +259,7 @@ export function usageView(report: UsageReport): UsageView {
 
 	const origins = (byOrigin?.groups ?? []).map((group) => ({
 		label: Object.hasOwn(ORIGINS, group.key) ? (ORIGINS[group.key] as string) : humanizeKey(group.key),
-		value: group.calls.display,
+		...explainable(group.calls),
 	}));
 	const leftover = tablesOf(rows.filter((row) => !CLAIMED.has(row.name)));
 	return {

@@ -15,6 +15,7 @@ import {
 	timeline,
 	whyStopped,
 } from "../../../../../src/domains/observability/read-model.js";
+import { explainRepoRef, isRepoRef } from "../../../../../src/domains/observability/usage-window.js";
 import type { RunListCursor } from "../../../../../src/domains/session/telemetry-source.js";
 import {
 	listRunTelemetrySources,
@@ -32,14 +33,18 @@ import { preflightLedger } from "./sessions.js";
  * and folds the CLI uses, so a number served here is the number `clio-coder telemetry … --json` prints. Nothing
  * here sums, prices or words a value; the DTOs come back as the read model built them.
  */
-export function readTelemetry(input: TelemetryRequest): unknown {
+export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 	const state = clioStateDir();
 	if (input.kind === "explain") {
 		const ref = parseFactRef(input.ref);
-		if (!ref || !Value.Check(Id, ref.owner)) throw new AppProblem("validation", "Invalid telemetry reference.");
-		if (ref.scope !== "run" && !preflightLedger()) throw notFound();
-		const explained =
-			ref.scope === "run"
+		if (!ref) throw new AppProblem("validation", "Invalid telemetry reference.");
+		// A repository window is rebuilt the way `usage report` folds it, ending now, exactly as the CLI's explain does.
+		const repo = isRepoRef(ref);
+		if (!repo && !Value.Check(Id, ref.owner)) throw new AppProblem("validation", "Invalid telemetry reference.");
+		if (!repo && ref.scope !== "run" && !preflightLedger()) throw notFound();
+		const explained = repo
+			? await explainRepoRef(state, input.ref, ref.owner)
+			: ref.scope === "run"
 				? explain(input.ref, { runId: ref.owner, run: loadRunTelemetrySource(state, ref.owner) })
 				: resolveSession(state, ref.owner, false, (session) => explain(input.ref, { session }));
 		if (!explained) throw new AppProblem("not_found", "Nothing in the journals resolves that telemetry reference.");

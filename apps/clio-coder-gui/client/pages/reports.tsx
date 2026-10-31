@@ -9,6 +9,7 @@ import { Facts } from "../design/facts.js";
 import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
+import { Explained } from "../telemetry/Explained.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 import { UsageInsights } from "./usage-insights.js";
 import { usageCacheEvidence } from "./usage-insights-model.js";
@@ -74,7 +75,9 @@ export function UsagePage({ client }: { client: Client }) {
 									<Icon name={index === 0 ? "layers" : index === 1 ? "usage" : index === 2 ? "sessions" : "fleet"} />
 									{figure.label === "Tokens" ? "Recorded tokens" : figure.label === "Cost" ? "Known cost · USD" : figure.label}
 								</p>
-								<p className="usage-total-value">{figure.value}</p>
+								<p className="usage-total-value">
+									<Explained client={client} {...figure} />
+								</p>
 								{figure.note && <small>{figure.note}</small>}
 							</article>
 						))}
@@ -91,7 +94,7 @@ export function UsagePage({ client }: { client: Client }) {
 							{view.knownSubtotals}
 						</p>
 					)}
-					<UsageInsights key={selection.id} report={query.data} />
+					<UsageInsights key={selection.id} client={client} report={query.data} />
 					<div className="usage-secondary">
 						<section aria-labelledby="usage-token-fields">
 							<p className="usage-kicker">03 / Token accounting</p>
@@ -103,7 +106,9 @@ export function UsagePage({ client }: { client: Client }) {
 										<span className="usage-bar__track" aria-hidden="true">
 											<i style={{ width: `${bar.share * 100}%` }} />
 										</span>
-										<span className="usage-bar__value">{bar.value}</span>
+										<span className="usage-bar__value">
+											<Explained client={client} label={`${bar.label} tokens`} value={bar.value} ref={bar.ref} />
+										</span>
 									</li>
 								))}
 							</ul>
@@ -117,7 +122,9 @@ export function UsagePage({ client }: { client: Client }) {
 									{view.origins.map((origin) => (
 										<div key={origin.label}>
 											<dt>{origin.label}</dt>
-											<dd>{origin.value}</dd>
+											<dd>
+												<Explained client={client} label={`${origin.label} calls`} value={origin.value} ref={origin.ref} />
+											</dd>
 										</div>
 									))}
 								</dl>

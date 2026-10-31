@@ -174,6 +174,6 @@ Older stores and receipts use the vocabularies on the left. New records use the 
 
 These parts of the design are not in this build yet:
 
-- The GUI explain popover and timeline view.
+- The GUI timeline view.
 
 Startup diagnostics stay in their own `startup/<date>.jsonl` file; they are not journal records.

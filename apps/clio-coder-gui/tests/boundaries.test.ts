@@ -89,6 +89,8 @@ const adapters = new Set([
 	// The telemetry read model and its cold loader; the adapter serves their DTOs unchanged (#434).
 	"src/domains/observability/read-model.ts",
 	"src/domains/session/telemetry-source.ts",
+	// The repository window `usage report` folds, so a repo reference explains to the CLI's number (#434 §11.4).
+	"src/domains/observability/usage-window.ts",
 ]);
 // Test-only root seams are intentionally enumerated independently of production.
 const testModules = new Set([

@@ -119,6 +119,15 @@ test("telemetry routes refuse what the journals cannot answer with problems, nev
 	);
 	assert.match(gone.value.display, /unknown|not measured/);
 	assert.match(gone.rule, /unreadable/);
+	// A repository reference names the window `usage report` folds, rebuilt ending now, as the CLI's explain does.
+	for (const ref of ["repo:all-30d#usd", "own:all-30d#calls"]) {
+		const window = await json(
+			await h.request(`/api/telemetry/explain?ref=${encodeURIComponent(ref)}`),
+			routes.telemetryExplain.response,
+		);
+		assert.equal(window.ref, ref);
+	}
+	assert.equal((await h.request("/api/telemetry/explain?ref=repo:not-a-window%23usd")).status, 404);
 });
 
 test("run routes list run journals newest first as read-model rows and serve one run's telemetry", async (t) => {
