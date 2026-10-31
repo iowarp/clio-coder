@@ -3,8 +3,8 @@ title: "Domains evidence"
 summary: "How Clio builds and reads forensic evidence bundles: the fixed eight-file layout, the canonical five-axis trust model, provenance admission, export-boundary redaction, and the CLI, tool, and observability entry points."
 sources:
   - "src/domains/evidence/index.ts"
-  - "src/domains/evidence/build.ts"
-  - "src/domains/evidence/store.ts"
+  - "src/domains/evidence/assessment.ts"
+  - "src/domains/evidence/run-evidence.ts"
   - "src/domains/evidence/trust-status.ts"
   - "src/domains/evidence/trust-projection.ts"
   - "src/domains/evidence/provenance.ts"
@@ -36,7 +36,7 @@ invariants:
   - "Self-reported artifact kinds can never ground the validationGrounding axis of the run they describe."
   - "The evidence tool never returns a bundle's contents to a session that does not own that bundle's session or project cwd."
 validate:
-  - "pnpm run test:file -- tests/contracts/evidence-tool.test.ts tests/contracts/evidence-bundle-files.test.ts"
+  - "pnpm run test:file -- tests/contracts/evidence-tool.test.ts"
 ---
 
 # Domains evidence
@@ -63,24 +63,24 @@ The domain has three consumers:
 | File | Owns |
 | --- | --- |
 | `src/domains/evidence/index.ts` | Barrel: re-exports the builder, store accessors, trust-status model, trust projection, provenance helpers, and all public types. |
-| `src/domains/evidence/build.ts` | `buildEvidence` (the aggregator), `BuildEvidenceOptions`, `authenticatedRunWorktree`, `hasSessionRunEvidence`. |
-| `src/domains/evidence/store.ts` | `EVIDENCE_FILES` (the fixed bundle layout), `evidenceDirectory`, `inspectEvidence`, `loadEvidenceTrustStatus`, `loadEvidenceRunProvenance`, `loadEvidenceGateDecisions`, `listEvidenceOverviews`, `EvidenceNotFoundError`, `findingsFile`. |
+| `src/domains/evidence/assessment.ts` | `buildEvidence` (the aggregator), `BuildEvidenceOptions`, `authenticatedRunWorktree`, `hasSessionRunEvidence`. |
+| `src/domains/evidence/run-evidence.ts` | `EVIDENCE_FILES` (the fixed bundle layout), `evidenceDirectory`, `inspectEvidence`, `loadEvidenceTrustStatus`, `loadEvidenceRunProvenance`, `loadEvidenceGateDecisions`, `listEvidenceOverviews`, `EvidenceNotFoundError`, `findingsFile`. |
 | `src/domains/evidence/trust-status.ts` | The canonical five-axis model: `TRUST_STATUS_AXES`, `TRUST_STATUS_STATES`, `normalizeTrustStatus`, `composeTrustStatus`, `adaptReceiptIntegrityStatus`, `adaptRunReceiptValidationStatus`, `adaptRunReceiptContextStatus`, `adaptGateDecisionReviewStatus`, `adaptGroundedEvidenceValidationStatus`, `inspectRunReceiptTrustStatus`, `verifyReceiptIntegrityOutcome`, retired-seal diagnostics. |
 | `src/domains/evidence/trust-projection.ts` | The operator projection: `trustVerdict`, `formatTrustSummary`, `formatTrustAxes`, `summarizeTrustStatus`, `TRUST_STATE_WORDS`. |
 | `src/domains/evidence/provenance.ts` | `extractRunProvenance`, `admitRunProvenance`, `hasRunProvenance`, `runProvenanceFromUnknown`, `provenanceTranscriptLines`, `provenanceCompactSuffix`, `PERSONA_HASH_PREFIX_CHARS`. |
 | `src/domains/evidence/inventory.ts` | `evidenceInventorySnapshot` (the fixed read a GUI host can invoke blind), `EvidenceInventoryArtifact`, bounds constants. |
 | `src/domains/evidence/detail.ts` | `evidenceDetailSnapshot` (one bundle's runs with verdict and per-axis states). |
 | `src/domains/evidence/types.ts` | `EVIDENCE_VERSION`, `EVIDENCE_TAGS` (the 29-tag taxonomy), `FAILURE_CAUSE_TAG_ORDER`, `EvidenceOverview`, `EvidenceFinding`, `EvidenceBuildResult`, and all bundle file shapes. |
-| `src/domains/evidence/run-trust.ts` | `buildEvidenceTrustStatusFile`, the single pure boundary that composes every evidence-linked trust axis for the bundle. |
+| `src/domains/evidence/assessment.ts` | `buildEvidenceTrustStatusFile`, the single pure boundary that composes every evidence-linked trust axis for the bundle. |
 | `src/domains/evidence/redact.ts` | `createRedactionTally`, `redactSecretsText`, `redactSecretsDeep`, `SECRET_PATTERNS`. |
 | `src/domains/evidence/failure-attribution.ts` | `attributeEvidenceFailure`, which maps termination facts onto the failure-cause tag subset. |
-| `src/domains/evidence/findings-markdown.ts` | `renderEvidenceFindingsMarkdown`, the human rendering inside `findings.md`. |
+| `src/domains/evidence/assessment.ts` | `renderEvidenceFindingsMarkdown`, the human rendering inside `findings.md`. |
 | `src/domains/evidence/finish-contract-map.ts` | `FINISH_CONTRACT_EVIDENCE_TAGS`, the pure mapping from the live finish-contract kinds onto forensic tags. |
 | `src/domains/evidence/ordering.ts` | `compareCodepoints`, the codepoint ordering used for deterministic bundle contents. |
 
 ## Building a bundle: `buildEvidence`
 
-`buildEvidence(options)` in `src/domains/evidence/build.ts` accepts
+`buildEvidence(options)` in `src/domains/evidence/assessment.ts` accepts
 `BuildEvidenceOptions` with `dataDir`, `stateDir`, and exactly one of `runId` or
 `sessionId` (both or neither is an error). It returns `EvidenceBuildResult` with
 the `evidenceId`, the bundle directory, the `EvidenceOverview`, the findings, the
@@ -134,7 +134,7 @@ The build pipeline:
    (`bash` with a command, or `verify` with a check name) and the result was not
    an error. A multi-run bundle credits an ambiguous entry to nobody
    (`validationRunIdFor` returns null unless the bundle covers exactly one run).
-7. **Trust composition.** `buildEvidenceTrustStatusFile` (`src/domains/evidence/run-trust.ts`)
+7. **Trust composition.** `buildEvidenceTrustStatusFile` (`src/domains/evidence/assessment.ts`)
    composes, per run, the receipt-derived status from
    `inspectRunReceiptTrustStatus`, optionally upgrades `validationGrounding` when
    grounded evidence exists (`adaptGroundedEvidenceValidationStatus`), and applies
@@ -153,7 +153,7 @@ The build pipeline:
    `overview.redactionCount` records the total. Raw session files are never
    touched; only the bundle is scrubbed.
 10. **Writing.** `writeEvidenceFiles` writes exactly the eight files in
-    `EVIDENCE_FILES` (`src/domains/evidence/store.ts`): `overview.json`,
+    `EVIDENCE_FILES` (`src/domains/evidence/run-evidence.ts`): `overview.json`,
     `transcript.md`, `tool-events.jsonl`, `receipt.json`, `gate-decisions.json`,
     `trust-status.json`, `findings.json`, `findings.md`.
 
@@ -177,7 +177,7 @@ sequenceDiagram
 
 ### Finding rules
 
-`buildFindings` in `src/domains/evidence/build.ts` emits, per run: a
+`buildFindings` in `src/domains/evidence/assessment.ts` emits, per run: a
 `receipt-retired` info row for a retired seal, `receipt-integrity` warn for a
 failed seal, `no-validation` warn for a successful run whose
 `validationGrounding` is absent/unknown, `proxy-validation` warn for an
@@ -257,7 +257,7 @@ field instead of throwing).
 ## Store layout and reads
 
 The bundle directory layout is fixed by `EVIDENCE_FILES` in
-`src/domains/evidence/store.ts`. `evidenceDirectory(dataDir, evidenceId)` asserts
+`src/domains/evidence/run-evidence.ts`. `evidenceDirectory(dataDir, evidenceId)` asserts
 the id is safe (`assertSafeId`) and joins `<dataDir>/evidence/<id>`. Reads:
 
 - `inspectEvidence(dataDir, evidenceId)` loads `overview.json`, `findings.json`,
@@ -289,7 +289,7 @@ one-shot run still lands its bundle. `DispatchFailed` builds only when
 `dispatchHasEvidenceLedger(payload)` (the payload carries a lineage), because
 pre-admission failures never create a run ledger. After the build, a sidecar row
 goes to `<stateDir>/evidence-index.json` through
-`writeEvidenceIndexRowQueued` (`src/domains/telemetry/evidence-index.ts`),
+`writeEvidenceIndexRowQueued` (`src/domains/telemetry/accountability.ts`),
 and the extension emits `BusChannels.AccountabilityEvidenceReady`. The row's
 `firstPassSuccess` is true only when the run succeeded, had lineage attempt 0,
 and the bundle carries no `no-validation` tag.
@@ -359,7 +359,7 @@ scratch environment and demonstrates:
 - UTF-8-safe truncation that keeps the envelope valid JSON at 16 KiB
   (`bounds UTF-8 output while keeping the truncation envelope valid JSON`).
 
-`tests/contracts/evidence-bundle-files.test.ts` proves the layout contract:
+`tests/extended/evidence-decision-refs.test.ts` proves the layout contract:
 
 - a fresh build writes exactly the `EVIDENCE_FILES` names and none of the four
   retired files (`writes exactly the files the overview lists and none of the retired ones`);
@@ -368,11 +368,11 @@ scratch environment and demonstrates:
   `listEvidenceOverviews` (`still reads a bundle an earlier build wrote with the retired files`).
 
 Both run under the `pnpm test` contracts gate; the narrowest non-destructive
-check is `pnpm run test:file -- tests/contracts/evidence-tool.test.ts tests/contracts/evidence-bundle-files.test.ts`.
+check is `pnpm run test:file -- tests/contracts/evidence-tool.test.ts`.
 
 ## Extension seams
 
-- **New evidence tag**: add it to `EVIDENCE_TAGS` in `src/domains/evidence/types.ts`; add it to `FAILURE_CAUSE_TAG_ORDER` only when it is a canonical failure cause; add the emitting rule to `buildFindings` in `src/domains/evidence/build.ts` (or `classifyTags` in `src/domains/dispatch/receipt-findings.ts` for the cheap receipt-time classifier).
+- **New evidence tag**: add it to `EVIDENCE_TAGS` in `src/domains/evidence/types.ts`; add it to `FAILURE_CAUSE_TAG_ORDER` only when it is a canonical failure cause; add the emitting rule to `buildFindings` in `src/domains/evidence/assessment.ts` (or `classifyTags` in `src/domains/dispatch/receipt-findings.ts` for the cheap receipt-time classifier).
 - **New trust axis state**: extend `TRUST_STATUS_STATES` in `src/domains/evidence/trust-status.ts` and, when a new source kind participates, its rows in `AXIS_SOURCES` and `SOURCE_AUTHORITIES`.
 - **New redaction shape**: add a `SECRET_PATTERNS` entry in `src/domains/evidence/redact.ts`; `overview.redactionCount` self-describes the bundle afterward.
 - **New provenance field**: widen `ProvenanceReceipt` (`Pick<RunReceipt, ...>`) and `RunProvenanceView` in `src/domains/evidence/provenance.ts`, plus the validators in `runProvenanceFromUnknown`; `admitRunProvenance` gates it on verified integrity automatically.
@@ -390,7 +390,7 @@ under.
 ## Things to watch when editing
 
 - **Do not remove the raw-row spread in `parseRunEnvelope` and `parseRunReceipt`**
-  (`src/domains/evidence/build.ts`). Integrity verification recomputes digests
+  (`src/domains/evidence/assessment.ts`). Integrity verification recomputes digests
   over ledger fields the parsers do not model (outcome, lineage, identity, token
   splits); a lossy re-parse makes every clean receipt recompute to a different
   digest and fail.
