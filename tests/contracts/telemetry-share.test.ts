@@ -45,6 +45,14 @@ const MODEL_PATH = "/srv/models/ledger-forecast-q4.gguf";
 const ENUM_PATH = "/srv/vault/ledger-root";
 const CONST_PROSE = "Quarterly Nightingale churn forecast";
 const CONFIG_KEY = "/srv/lmstudio/ledger-private.gguf";
+// Expanded flow recipients name an endpoint URL and an MCP server's command, directory and environment, and a tool
+// schema's property name can be any string, a path included: each is an identity or a key, never kept (#434).
+const PRIVATE_HOST = "private-operator.corp.internal";
+const RECIPIENTS = [
+	`target:ledger@openai-compat=https://${PRIVATE_HOST}/customer-acquisition`,
+	`mcp:ledger={"command":"/home/${USER}/customer-acquisition/bin/ledger","cwd":"/home/${USER}/customer-acquisition","env":{"PASSWORD":"${PASSWORD}"}}`,
+];
+const PROPERTY_PATH = "/home/confidential-operator/acquisition/customer-ledger.csv";
 const GOLDEN_RUN = new URL(
 	"../fixtures/telemetry/golden/vccap2ywu7n8/runs/21ee9qwrugeq/journal.jsonl",
 	import.meta.url,
@@ -143,8 +151,9 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 					properties: {
 						root: { type: "string", enum: [ENUM_PATH] },
 						mode: { const: { note: CONST_PROSE } },
+						[PROPERTY_PATH]: { type: "string" },
 					},
-					required: ["root"],
+					required: ["root", PROPERTY_PATH],
 				},
 			},
 		]);
@@ -167,6 +176,10 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 					route: { ...(golden.record.data as EventPayload<"run.settled">).route, wireModelId: MODEL_PATH },
 					outcomeDetail: `could not read ${PRIVATE_PATH}`,
 					validationGrounding: { claimed: 1, grounded: 0, ungrounded: [CLAIM], basis: "unmatched-command" },
+					flowRestrictions: {
+						version: 1,
+						restrictions: [{ ruleId: "ledger", policyHash: hash, sourceRef: "policy.yaml", recipients: RECIPIENTS }],
+					},
 				},
 				context,
 				at,
@@ -218,7 +231,7 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 		ok(!unpacked.includes(HOST), "the source hostname left in the archive");
 		ok(unpacked.includes("config.changed"));
 		ok(unpacked.includes("run.settled"));
-		for (const leak of [CLAIM, USER, PRIVATE_PATH, MODEL_PATH, "ledger-private"])
+		for (const leak of [CLAIM, USER, PRIVATE_PATH, MODEL_PATH, "ledger-private", PRIVATE_HOST, PASSWORD, "horse"])
 			ok(!unpacked.includes(leak), `${leak} left in the archive`);
 		// A provider's plain model id is no path and stays readable.
 		ok(unpacked.includes((golden.record.data as EventPayload<"run.settled">).route.targetId));
@@ -260,9 +273,13 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 			ENUM_PATH,
 			CONST_PROSE,
 			"ledger-private",
+			PRIVATE_HOST,
+			PROPERTY_PATH,
+			"confidential-operator",
 		])
 			ok(!structuralBytes.includes(leak), `${leak} left in the structural archive`);
 		strictEqual(verifyShareArchive(structuralArchive).failure, null);
+		await importShareArchive(join(root, "structural-maintainer"), structuralArchive);
 
 		// The object store redacts a credential-named property whole, whatever its shape.
 		const store = join(root, "store");
