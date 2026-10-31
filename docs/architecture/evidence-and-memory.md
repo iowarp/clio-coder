@@ -134,32 +134,18 @@ Clio Coder classifies every run using a closed set of 22 canonical tags (`EVIDEN
 
 ### Failure-Cause Tag Subset
 
-A subset of the taxonomy represents actual failure causes (governed by the `FAILURE_CAUSE_TAG_ORDER` array). These are the only tags included in the run findings summary and the TUI failure-cause histograms:
+A subset of the taxonomy represents actual failure causes (`FAILURE_CAUSE_TAG_ORDER`): `timeout`, `auth-failure`, `missing-dependency`, `build-failure`, `test-failure` and `blocked-tool`. The accountability summary counts only these tags in its failure-cause histogram ([accountability.ts](../../src/domains/telemetry/accountability.ts)).
 
-1. **`timeout`**: Triggered if the run outcome is `"timed_out"` or `"stalled"`, or if the error/failure text contains `"timed out"` or `"timeout"`.
-2. **`auth-failure`**: Triggered if failure text contains keywords like `"auth"`, `"api key"`, `"credential"`, or `"unauthorized"`.
-3. **`missing-dependency`**: Triggered if failure logs contain `"module not found"`, `"missing package"`, or `"missing dependency"`.
-4. **`build-failure`**: Triggered in the findings summary when a non-zero exit is paired with build tool names in `toolStats` (e.g. `build`, `compile`, `make`, `cmake`, `cargo`, `gradle`, `ninja`, `tsc`). The assessment may also classify it from termination diagnostics in `outcomeDetail` or the recorded failure message. The task text is never causal evidence.
-5. **`test-failure`**: Triggered in the findings summary when a non-zero exit is paired with test or lint tool names in `toolStats` (e.g. `pytest`, `ctest`, `jest`, `vitest`, `test`, `lint`, `typecheck`). The assessment may also classify it from termination diagnostics in `outcomeDetail` or the recorded failure message. Validation words in the task text are never causal evidence.
-6. **`blocked-tool`**: Triggered if tool execution statistics show a blocked count greater than `0`.
+A run that exited non-zero gets one `warn` finding whose tag `attributeEvidenceFailure` ([failure-attribution.ts](../../src/domains/evidence/failure-attribution.ts)) picks from termination facts only, and the same tag is the assessment's `failureCause`. Typed outcome codes decide first: `worker_context_exhausted` is `context-overflow`, a tool-call cap or a loop guard that disabled tools is `tool-loop`, `worker_mutation_blocked` is `blocked-tool`, and a `timed_out` or `stalled` outcome is `timeout`. Otherwise the outcome detail and the recorded failure message are matched in order for `auth-failure` (401, 403, unauthorized, invalid API key), `provider-transient` (429, rate limits, 502 to 504), `context-overflow`, `missing-dependency`, `wrong-runtime`, `test-failure` and `build-failure`. A run with no diagnostic text, or text that matches none of them, is `unknown`. The task text is never causal evidence. Separately, any blocked tool call adds a `blocked-tool` warning.
 
 ---
 
-## Run findings summary
+## Run findings
 
-Each `run.settled` record carries an optional `findings` block, a cheap summary of the run's findings that the seal covers:
+A run's findings are its assessment's. `run.settled` carries no findings block: the run's result quality and verification facts are derived from its in-memory result draft at settlement ([run-findings.ts](../../src/domains/dispatch/run-findings.ts)), and every finding, tag and first-pass verdict comes from the `evidence.assessed` record that follows it ([assessment.ts](../../src/domains/evidence/assessment.ts)).
 
-```json
-"findings": {
-  "tags": ["test-failure"],
-  "firstPassSuccess": false,
-  "findingCount": 1
-}
-```
-
-### Computation and Lifecycle
-- **Computed in memory**: `findings` is calculated at settlement from the run's result draft and tool statistics (in [run-findings.ts](../../src/domains/dispatch/run-findings.ts)). It never reads from disk and never waits on the assessment.
-- **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected. The assessment computes its own `firstPassSuccess`, and that value is the authority for accountability rates.
+- **Findings**: `no-validation` for a succeeded run with absent or unknown validation grounding, `proxy-validation` for ungrounded validation, `blocked-tool`, `escalation` for a timed-out or denied permission ask, `external-bypass` for a run under agent-managed peer permissions, the independent-review finding, `context-provenance` for a contradictory context record or a cited decision ref, `completion-evidence`, and the failure cause of a non-zero exit. A reader adds a `run-seal` finding when the seal did not verify.
+- **First-pass success**: `true` only when the run succeeded on lineage attempt 0 and no `no-validation` finding was raised. The accountability read model folds this value into its first-pass success rate.
 - **Integrity**: A run's record is trusted only when its scope's seal verifies. The seal covers every journal line, `run.settled` and `evidence.assessed` included, through the hash chain and `bundle.json`; [Verify](telemetry.md#verify) describes the check. The chain catches an edited record, but a scope rewritten together with a recomputed chain and bundle is not detected, because the seal is not a signature.
 
 Seal verification and validation evidence answer different questions. The
@@ -209,9 +195,9 @@ For a run whose record is authenticated, `adaptRunTrustStatus` reads the run's s
 1. No run record: `absent` with `artifact_missing`.
 2. Host verification `rejected`: `failed` by `host-verification`. When every failing host check also failed on the task base, the change did not cause the failure, so the state is `unknown` by `host-verification-baseline-failed` and the human clause reads `check also failed on task base; change validation unknown`.
 3. Host verification `verified`: `validated` by `host-verification`. Host verification `not_implicated` (a batch member the failure was charged away from): `unknown` by `host-verification`.
-4. The settled quality carries a failed typed validation or a failing result contract: `failed` by `receipt-quality`.
+4. The settled quality carries a failed typed validation or a failing result contract: `failed` by `result-quality`.
 5. Command grounding: the run's `validationGrounding.basis` is `no-command-executed` and it claims more than it grounded, or lists ungrounded claims: `ungrounded` by `command-grounding`. A report that names the typed `verify` tool is grounded by the successful `verify` tool result the run recorded, not by a shell command.
-6. A passed typed validation or a passing result contract: `validated` by `receipt-quality`.
+6. A passed typed validation or a passing result contract: `validated` by `result-quality`.
 7. The run's `verification` fact: `verified` is `validated` by the recorded basis, `unverified` is `absent` with `not_observed`, and `not_applicable` carries through.
 8. Otherwise `unknown`, attributed to the recorded basis; an ACP delegation the host could not observe is attributed to `acp-delegation`.
 
