@@ -408,7 +408,6 @@ export function receiptIntegrity(evidence: ReceiptEvidenceV1): ReceiptIntegrity 
 	const { integrity } = evidence;
 	const detail = integrity.detail ? ` ${integrity.detail}` : "";
 	if (evidence.receipt === "missing")
-		// The read model also reads a pruned receipt whose evidence copy is gone as missing, so this claims no more (#434).
 		return { tone: "neutral", word: integrity.display, meaning: "No saved receipt was found for this run." };
 	if (evidence.receipt === "unreadable")
 		return { tone: "fail", word: integrity.display, meaning: `The saved receipt cannot be read.${detail}` };

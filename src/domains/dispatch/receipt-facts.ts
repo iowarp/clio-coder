@@ -482,8 +482,10 @@ export function readReceiptEvidence(
 ): ReceiptEvidenceV1 {
 	let receipt: Record<string, unknown> | null = null;
 	let state: ReceiptEvidenceV1["receipt"] = "missing";
+	let unreadableReason: string | null = null;
+	const path = receiptFilePath(stateDir, runId);
 	try {
-		const parsed: unknown = JSON.parse(readReceiptTextSync(receiptFilePath(stateDir, runId)));
+		const parsed: unknown = JSON.parse(readReceiptTextSync(path));
 		if (isRecord(parsed) && optionalString(parsed.runId) === runId) {
 			receipt = parsed;
 			// Whether the seal verifies is the integrity check's to say; this only tells a file that carries none.
@@ -492,6 +494,12 @@ export function readReceiptEvidence(
 	} catch (error) {
 		// Any read or parse failure other than a missing file is a receipt that exists but cannot be read.
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") state = "unreadable";
+		// A pruned receipt whose evidence copy is gone resolves as missing though its tombstone is on disk: it was saved
+		// and cannot be read, and the resolver's reason says why (#434).
+		else if (existsSync(path)) {
+			state = "unreadable";
+			unreadableReason = error instanceof Error ? error.message : String(error);
+		}
 	}
 	const row = receipt ? findRunRow(runId, stateDir) : null;
 	const inspection = inspectRunReceiptTrustStatus(
@@ -501,7 +509,11 @@ export function readReceiptEvidence(
 	const outcome = inspection.integrity;
 	const integrity: ReceiptEvidenceV1["integrity"] =
 		receipt === null
-			? { state: "unavailable", display: integrityClause(inspection.status), detail: `receipt ${state}` }
+			? {
+					state: "unavailable",
+					display: integrityClause(inspection.status),
+					detail: unreadableReason === null ? `receipt ${state}` : clip(unreadableReason),
+				}
 			: outcome.ok
 				? {
 						state: outcome.ledgerEvicted ? "verified-ledger-evicted" : "verified",

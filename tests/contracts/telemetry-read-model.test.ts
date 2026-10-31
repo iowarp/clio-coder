@@ -7,7 +7,7 @@
  * its closed vocabulary). The detectors live in tests/harness/telemetry-lies.ts so the GUI route tests run the same
  * ones over the DTOs they serve.
  */
-import { deepStrictEqual, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -348,7 +348,12 @@ test("a run's receipt evidence carries sealed checks only under a seal that veri
 		"measured",
 	);
 	rmSync(join(clioDataDir(), "evidence", evidenceId), { recursive: true });
-	strictEqual(read().receipt, "missing", "a tombstone whose copy is gone reads as a missing receipt");
+	strictEqual(
+		read().receipt,
+		"unreadable",
+		"a tombstone whose copy is gone reads as a saved receipt that cannot be read",
+	);
+	match(read().integrity.detail ?? "", /was pruned and evidence .* no longer holds it/);
 });
 
 test("the timeline and why-stopped carry config, budget and quota records, spend marked as its calls were priced (#434 §8, §12.6)", () => {
