@@ -854,7 +854,7 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 			["reasoning", "Reasoning", "Usage"],
 			["cacheRead", "Cache read", "Cache"],
 			["cacheWrite", "Cache write", "Cache"],
-			["ttft", "First token", "Speed"],
+			["firstToken", "First token", "Speed"],
 			["usd", "Cost", "Cost"],
 		] as const)
 			breakdown.push({ group, label, value: quantities[key].display, factRef: quantities[key].ref });

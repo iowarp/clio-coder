@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { createBoardSource } from "../../src/cli/fleet-board-model.js";
 import type { Quantity } from "../../src/core/telemetry/dto.js";
+import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import { renderCompactCount } from "../../src/core/telemetry/render.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { loadRepoTelemetrySources } from "../../src/domains/session/telemetry-source.js";
@@ -35,7 +36,14 @@ import { exitSpend } from "../../src/interactive/exit-summary-collector.js";
 import { footerTelemetry } from "../../src/interactive/footer/spend.js";
 import { openUsageOverlay } from "../../src/interactive/usage-overlay.js";
 import { dtoLies } from "../harness/telemetry-lies.js";
-import { coldParityDtos, PARITY_RUN, PARITY_SESSION, seedParitySession } from "../harness/telemetry-view.js";
+import {
+	coldParityDtos,
+	PARITY_RUN,
+	PARITY_SESSION,
+	seedParitySession,
+	telemetryCall,
+	telemetryViewOf,
+} from "../harness/telemetry-view.js";
 
 let stateDir = "";
 let model: LiveTelemetryModel;
@@ -196,6 +204,25 @@ test("ACP's prompt usage block words the prompt's operator turn as the read mode
 	strictEqual(usage.totalTokens, knownPart(turn.tokens));
 	ok(partial(turn.tokens), "the turn's unreported calls keep its tokens a lower bound");
 	strictEqual(usage.missingTokenCalls, "kind" in turn.tokens.fact ? undefined : turn.tokens.fact.unknownCount);
+	const records: TelemetryRecord[] = [100, 900].flatMap((ttft, index) =>
+		telemetryCall(PARITY_SESSION, { turnId: "first-token", at: `2026-10-30T00:00:0${index}.000Z` }).map((record) =>
+			record.k === "call.settled"
+				? {
+						...record,
+						data: { ...record.data, stages: { send: { start: 0, end: 20 }, firstToken: 20 + ttft, settle: 2000 } },
+					}
+				: record,
+		),
+	);
+	records.push(...telemetryCall(PARITY_SESSION, { role: "worker", turnId: "first-token" }));
+	const promptView = telemetryViewOf(PARITY_SESSION, records);
+	const prompt = turnUsageMeta(promptView, { turnIds: new Set(["first-token"]), attemptIds: new Set() });
+	ok("quantities" in prompt && prompt.quantities);
+	const firstToken = prompt.quantities.firstToken;
+	ok(firstToken);
+	deepStrictEqual(firstToken.fact, { kind: "measured", value: 100, source: "local-clock" });
+	deepStrictEqual(promptView.explain(firstToken.ref)?.value, firstToken);
+	strictEqual(promptView.explain(firstToken.ref)?.from.attemptIds.length, 1);
 });
 
 test("the usage report folds a window the fixture fills to the session's own totals and groups", () => {

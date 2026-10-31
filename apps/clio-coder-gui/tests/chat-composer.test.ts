@@ -367,7 +367,7 @@ const usage: Usage = {
 		prompt: quantity("12,436"),
 		total: quantity("13,114"),
 		calls: quantity("1"),
-		ttft: quantity("0 ms"),
+		firstToken: quantity("0 ms"),
 		usd: quantity("not measured"),
 	},
 };
@@ -391,7 +391,7 @@ test("usage shows two numbers and carries five in the tooltip", () => {
 	assert.equal(usageSummary(usage), "12,345 in · 678 out");
 	assert.equal(
 		usageTitle(usage),
-		"input 12,345 · output 678 · cacheRead 90 · cacheWrite 1 · reasoning 234 · prompt 12,436 · total 13,114 · calls 1 · ttft 0 ms · usd not measured",
+		"input 12,345 · output 678 · cacheRead 90 · cacheWrite 1 · reasoning 234 · prompt 12,436 · total 13,114 · calls 1 · firstToken 0 ms · usd not measured",
 	);
 });
 

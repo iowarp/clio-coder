@@ -20,6 +20,7 @@ import {
 	quotaReadingFromMessage,
 } from "../../src/domains/quota/index.js";
 import type { QuotaProvider } from "../../src/domains/quota/types.js";
+import { quotaAccount } from "../../src/domains/telemetry/read-model.js";
 import { codexAccountScope, parseCodexQuotaEvent } from "../../src/engine/apis/codex-quota.js";
 import { observeResponsesModelId } from "../../src/engine/apis/responses-model-id.js";
 import type { CodexQuotaObservation } from "../../src/engine/types.js";
@@ -379,5 +380,12 @@ it("journals a codex.rate_limits event as one quota reading whose identity ignor
 	const drifted = quotaReadingFromMessage({ codexQuota: later }, "openai-codex", "codex-target");
 	assert.ok(drifted);
 	assert.equal(quotaReadingFingerprint(drifted), quotaReadingFingerprint(reading));
+	assert.equal(quotaAccount(reading), "codex:codex-target");
+	const polled = { ...reading, source: "poll" as const, targetId: "codex" };
+	assert.equal(quotaAccount(polled), "codex");
+	assert.notEqual(
+		quotaReadingFingerprint(polled),
+		quotaReadingFingerprint({ ...polled, observedAt: "2026-01-01T00:10:00.000Z" }),
+	);
 	assert.equal(quotaReadingFromMessage({ codexQuota: first }, "openai", "codex-target"), null);
 });

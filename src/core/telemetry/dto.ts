@@ -81,6 +81,7 @@ export const FACT_METRICS = [
 	"apiCalls",
 	"missingTokenCalls",
 	"ttft",
+	"firstToken",
 	"modelTime",
 	"settle",
 	"admissionWait",
@@ -211,7 +212,7 @@ export const TurnQuantitiesSchema = Type.Object(
 		total: QuantitySchema,
 		usd: QuantitySchema,
 		calls: QuantitySchema,
-		ttft: QuantitySchema,
+		firstToken: QuantitySchema,
 	},
 	closed,
 );

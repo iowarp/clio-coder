@@ -3,10 +3,12 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { ANTHROPIC_OAUTH_BETA, ANTHROPIC_USAGE_URL } from "../../src/domains/quota/anthropic-usage.js";
 import { createQuotaCache, DEFAULT_QUOTA_CACHE_TTL_MS } from "../../src/domains/quota/cache.js";
 import type { ClaudeCodeCredentials } from "../../src/domains/quota/claude-code-provider.js";
 import { createClaudeCodeQuotaProvider, parseClaudeCredentials } from "../../src/domains/quota/claude-code-provider.js";
+import type { QuotaReading } from "../../src/domains/quota/reading.js";
 import { buildQuotaProviders } from "../../src/domains/quota/registry.js";
 import type { QuotaProvider, UsageSnapshot } from "../../src/domains/quota/types.js";
 import { formatPlan, parseRetryAfterSeconds } from "../../src/domains/quota/types.js";
@@ -294,7 +296,13 @@ function okSnapshot(usedPct: number): UsageSnapshot {
 	};
 }
 
-it("serves a cached snapshot inside the TTL and refetches after it expires", async () => {
+it("serves a cached snapshot inside the TTL and refetches after it expires", async (t) => {
+	const readings: QuotaReading[] = [];
+	t.after(
+		telemetryHub().subscribe("quota.read", (reading) => {
+			readings.push(reading);
+		}),
+	);
 	let clock = 1_000;
 	const cache = createQuotaCache({ ttlMs: 60_000, now: () => clock });
 	const { provider: source, calls } = countingProvider([okSnapshot(10), okSnapshot(80)]);
@@ -314,6 +322,14 @@ it("serves a cached snapshot inside the TTL and refetches after it expires", asy
 	const refreshed = await cache.resolve(source);
 	assert.equal(refreshed.windows[0]?.usedPct, 80);
 	assert.equal(calls(), 2);
+	assert.deepEqual(
+		readings.map((reading) => reading.windows[0]?.usedPct),
+		[
+			{ kind: "measured", value: 10, source: "provider" },
+			{ kind: "measured", value: 80, source: "provider" },
+		],
+	);
+	assert.ok(readings.every((reading) => reading.source === "poll" && reading.provider === "claude-code"));
 });
 
 it("falls back to the last good snapshot when a refresh fails", async () => {

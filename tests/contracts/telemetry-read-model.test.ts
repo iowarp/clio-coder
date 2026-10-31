@@ -476,12 +476,12 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 					messages: 1,
 					reserve: 0,
 					free: 0,
-					streaming: 0,
+					streaming: 500,
 				},
-				window: { desired: 200_000, effective: 200_000, source: "catalog" },
+				window: { desired: 10_000, effective: 10_000, source: "catalog" },
 				source: "reconciled",
-				estimatedTokens: 9100,
-				reconciledTokens: 9342,
+				estimatedTokens: 900,
+				reconciledTokens: 1000,
 			},
 			ctx,
 			clock(3),
@@ -521,16 +521,13 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 			clock(8),
 		),
 	];
-	const dto = timeline(
-		{
-			...source,
-			sessionId: "timeline-signals",
-			journal: { ...source.journal, records },
-			runs: new Map([["run-signals", { present: true, records: run, modes: ["standard"], skipped: 0, damaged: 0 }]]),
-		},
-		null,
-		now,
-	);
+	const recorded: SessionSource = {
+		...source,
+		sessionId: "timeline-signals",
+		journal: { ...source.journal, records },
+		runs: new Map([["run-signals", { present: true, records: run, modes: ["standard"], skipped: 0, damaged: 0 }]]),
+	};
+	const dto = timeline(recorded, null, now);
 	ok(Value.Check(TimelineSchema, dto), [...Value.Errors(TimelineSchema, dto)][0]?.message);
 	deepStrictEqual(
 		dto.entries.map((entry) => entry.kind),
@@ -539,11 +536,27 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 	const tool = dto.entries.find((entry) => entry.kind === "tool");
 	strictEqual(tool?.kind === "tool" ? tool.duration.display : null, "1.25s");
 	const context = dto.entries.find((entry) => entry.kind === "context");
-	strictEqual(context?.kind === "context" ? context.estimated?.display : null, "~9,100 (chars/4)");
+	strictEqual(context?.kind === "context" ? context.estimated?.display : null, "~900 (chars/4)");
 	deepStrictEqual(context?.kind === "context" ? context.window.display : null, {
-		desired: "200,000",
-		effective: "200,000",
+		desired: "10,000",
+		effective: "10,000",
 	});
+	const occupied = sessionTelemetry(recorded, now).context;
+	deepStrictEqual(occupied.used.fact, { kind: "measured", value: 1500, source: "provider" });
+	deepStrictEqual(occupied.share.fact, { kind: "measured", value: 15, source: "provider" });
+	deepStrictEqual(explain(occupied.used.ref, { session: recorded }, now)?.value, occupied.used);
+	deepStrictEqual(explain(occupied.share.ref, { session: recorded }, now)?.value, occupied.share);
+	const estimatedRecords = records.map((record) => {
+		if (record.k !== "context.snapshotted") return record;
+		const { reconciledTokens: _reconciled, ...data } = record.data;
+		return { ...record, data };
+	});
+	const estimated = sessionTelemetry(
+		{ ...recorded, journal: { ...recorded.journal, records: estimatedRecords } },
+		now,
+	).context;
+	deepStrictEqual(estimated.used.fact, { kind: "estimated", value: 1400, method: "chars/4" });
+	deepStrictEqual(estimated.share.fact, { kind: "estimated", value: 14, method: "chars/4" });
 	const prompt = dto.entries.find((entry) => entry.kind === "prompt");
 	strictEqual(prompt?.kind === "prompt" ? prompt.sectionsShown.display : null, "12");
 });

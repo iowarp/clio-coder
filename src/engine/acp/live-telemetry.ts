@@ -57,8 +57,8 @@ const known = (sum: FactSum) => sum.measured + sum.estimated;
 
 /**
  * `_meta["clio-coder/usage"]` on the prompt response and on in-turn `usage_update` frames: one shape, so the last frame
- * equals the response. Every number is the known part of the read model's sum over the prompt's operator turns, their
- * workers included, as the footer and the transcript receipt read them (#434 §11.3). v1 forces the five token
+ * equals the response. Totals are the known part of the read model's sum over the prompt's operator turns, their
+ * workers included; firstToken names its first main-agent response alone (#434 §11.3). v1 forces the five token
  * counts; with no view of the session nothing else is claimed.
  */
 export function turnUsageMeta(view: TelemetryView | null, turn: AcpPromptTurn) {
@@ -81,20 +81,33 @@ export function turnUsageMeta(view: TelemetryView | null, turn: AcpPromptTurn) {
 	return {
 		quantities: Object.fromEntries(
 			(
-				["input", "output", "cacheRead", "cacheWrite", "reasoning", "prompt", "total", "usd", "calls", "ttft"] as const
+				[
+					"input",
+					"output",
+					"cacheRead",
+					"cacheWrite",
+					"reasoning",
+					"prompt",
+					"total",
+					"usd",
+					"calls",
+					"firstToken",
+				] as const
 			).map((metric) => {
+				const ref = factRef({
+					scope: "session",
+					owner: view.sessionId,
+					metric,
+					group: { by: "turns", key: turnIds.sort().join(",") || "-" },
+				});
+				if (metric === "firstToken") return [metric, view.quantity(ref)];
 				const q = sum(metric);
 				return [
 					metric,
 					{
 						fact: q.fact,
 						display: q.display,
-						ref: factRef({
-							scope: "session",
-							owner: view.sessionId,
-							metric,
-							group: { by: "turns", key: turnIds.sort().join(",") || "-" },
-						}),
+						ref,
 					},
 				];
 			}),

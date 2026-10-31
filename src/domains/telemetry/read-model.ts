@@ -1009,6 +1009,7 @@ const FAMILY: Record<FactMetric, Family> = {
 	apiCalls: "count",
 	missingTokenCalls: "count",
 	ttft: "duration",
+	firstToken: "duration",
 	modelTime: "duration",
 	settle: "duration",
 	admissionWait: "duration",
@@ -1038,7 +1039,7 @@ const FAMILY: Record<FactMetric, Family> = {
 	roundTripTax: "count",
 };
 const RULES: Record<FactMetric, string> = {
-	contextUsed: "latest context snapshot reconciledTokens or estimatedTokens",
+	contextUsed: "latest context snapshot (reconciledTokens or estimatedTokens) + categories.streaming",
 	contextWindow: "latest context snapshot effective window",
 	contextFree: "latest context snapshot free tokens",
 	contextReserve: "latest context snapshot reserve tokens",
@@ -1068,6 +1069,7 @@ const RULES: Record<FactMetric, string> = {
 	apiCalls: "count(attempts that reached the provider)",
 	missingTokenCalls: "count(sent attempts whose token usage is unknown)",
 	ttft: "stages.firstToken − stages.send.end, per attempt",
+	firstToken: "stages.firstToken − stages.send.end for the first main-agent response in start order",
 	modelTime: "stages.settle − stages.firstToken, per attempt",
 	settle: "stages.settle, per attempt",
 	admissionWait: "stages.admission.end − stages.admission.start, per attempt",
@@ -1358,6 +1360,31 @@ function latestContext(source: SessionSource): TelemetryRecord<"context.snapshot
 }
 
 function measure(view: View, ref: ParsedFactRef): Measurement | null {
+	if (ref.metric === "firstToken") {
+		if (!("session" in view) || ref.scope !== "session" || ref.owner !== view.session.sessionId || ref.attemptId)
+			return null;
+		if (ref.group && ref.group.by !== "turns" && ref.group.by !== "turn") return null;
+		const analysis = analyze(view.session);
+		const turns = ref.group?.by === "turns" ? new Set(ref.group.key === "-" ? [] : ref.group.key.split(",")) : null;
+		const first = analysis.attempts.find(
+			(attempt) =>
+				attempt.agent.role === "main" &&
+				(turns ? turns.has(attempt.ctx?.turnId ?? "-") : !ref.group || attemptInGroup(attempt, ref.group)) &&
+				(attempt.settled?.disposition === "settled" ||
+					attempt.settled?.disposition === "settled_no_usage" ||
+					attempt.settled?.stages.firstToken !== undefined),
+		);
+		// A missing earlier record could own the first response, so a journal gap cannot establish this fact (#434).
+		const fact: Fact<number> =
+			analysis.gap > 0 ? { kind: "unknown", reason: "writer-gap" } : first ? attemptFact(first, "ttft") : unobserved;
+		return {
+			quantity: { fact, display: display(ref.metric, fact, false), ref: factRef(ref) },
+			selection: {
+				parts: [{ attempts: first ? [first] : [], gap: analysis.gap }],
+				describe: "the prompt's first main-agent response, excluding follow-up calls and worker runs",
+			},
+		};
+	}
 	if (ref.scope === "context") {
 		if (
 			!["contextUsed", "contextWindow", "contextFree", "contextReserve", "contextShare", "contextTokens"].includes(
@@ -1369,10 +1396,13 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 		const snapshot = latestContext(view.session);
 		const data = snapshot?.k === "context.snapshotted" ? snapshot.data : null;
 		const category = ref.group?.by === "category" ? ref.group.key : null;
+		const promptTokens = data?.reconciledTokens ?? data?.estimatedTokens;
 		const tokens = data
 			? category
 				? data.categories[category as keyof typeof data.categories]
-				: (data.reconciledTokens ?? data.estimatedTokens)
+				: promptTokens === undefined
+					? undefined
+					: promptTokens + data.categories.streaming
 			: undefined;
 		const value = !data
 			? undefined
@@ -2198,9 +2228,9 @@ function quotaEntry(record: Extract<TelemetryRecord, { k: "quota.read" }>): Quot
 }
 
 type QuotaReading = Extract<TelemetryRecord, { k: "quota.read" }>["data"];
-/** The account a reading names, as the process's own observations key it: Codex readings are per target. */
+/** Match observed account keys: streamed Codex readings are per target, polls read the credential adapter (#434). */
 export const quotaAccount = (reading: QuotaReading): string =>
-	reading.provider === "codex" ? `codex:${reading.targetId}` : reading.provider;
+	reading.provider === "codex" && reading.source !== "poll" ? `codex:${reading.targetId}` : reading.provider;
 
 /** A provider reports a window's reset with drift between readings; a reset that moved further began a new window. */
 const QUOTA_RESET_DRIFT_MS = 5 * 60_000;
@@ -2913,9 +2943,11 @@ export function explain(
 		ref: factRef(parsed),
 		value: measured.quantity,
 		coverage: renderCoverage(measured.quantity.fact),
-		rule: `${RULES[parsed.metric]} over ${measured.selection.describe}; a never_sent attempt contributes nothing (R2), and unknown, unsettled or unreadable contributions keep the sum partial${
-			gaps > 0 ? ` (${renderCount(gaps)} unreadable or unattributed ${gaps === 1 ? "source" : "sources"})` : ""
-		}`,
+		rule: `${RULES[parsed.metric]} over ${measured.selection.describe}; ${
+			parsed.metric === "firstToken"
+				? "never_sent attempts are excluded (R2); missing timing or an unreadable journal keeps the value unknown"
+				: "a never_sent attempt contributes nothing (R2), and unknown, unsettled or unreadable contributions keep the sum partial"
+		}${gaps > 0 ? ` (${renderCount(gaps)} unreadable or unattributed ${gaps === 1 ? "source" : "sources"})` : ""}`,
 		from: {
 			callIds: [...new Set(listed.map((attempt) => attempt.started.callId))].sort() as ExplanationV1["from"]["callIds"],
 			attemptIds: listed.map((attempt) => attempt.started.attemptId).sort() as ExplanationV1["from"]["attemptIds"],

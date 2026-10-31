@@ -506,6 +506,8 @@ export interface ClioAcpServerOptions {
 	aside?: AcpAsideControl;
 	/** The telemetry read model for pull methods and live quantities (#434). */
 	telemetryReadModel?: TelemetryReadModel;
+	/** Lazy provider quota production for telemetry quota requests (#434). */
+	refreshQuota?: () => Promise<void>;
 	/** Bind the domain projection and its live read model to the hosted session (#434). */
 	bindTelemetrySession?: (sessionId: string) => void;
 	/**
@@ -5471,6 +5473,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	if (options.telemetryReadModel) {
 		const handlers = telemetryRequestHandlers({
 			model: options.telemetryReadModel,
+			...(options.refreshQuota ? { refreshQuota: options.refreshQuota } : {}),
 			params: assertParamKeys,
 			session: getSession,
 		});

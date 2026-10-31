@@ -21,6 +21,8 @@ const GROUP_BY: ReadonlySet<CostReportV1["groupBy"]> = new Set(["role", "model",
 
 export interface AcpTelemetryRequestDeps {
 	model: TelemetryReadModel;
+	/** Refresh provider readings through the quota domain before reading their telemetry DTO (#434). */
+	refreshQuota?: () => Promise<void>;
 	/** The server's own parameter check: unknown keys refuse the request. */
 	params(params: unknown, allowed: ReadonlySet<string>): Record<string, unknown>;
 	/** The ACP session a request names, refusing one this server does not hold. */
@@ -92,7 +94,9 @@ export function telemetryRequestHandlers(
 		}),
 		[ACP_TELEMETRY_METHODS.quota]: async (params) => {
 			const request = deps.params(params, new Set(["provider"]));
-			return deps.model.quota(text(request.provider, "provider"));
+			const provider = text(request.provider, "provider");
+			await deps.refreshQuota?.();
+			return deps.model.quota(provider);
 		},
 		[ACP_TELEMETRY_METHODS.health]: async (params) => {
 			deps.params(params, new Set());

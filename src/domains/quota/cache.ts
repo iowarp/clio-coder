@@ -8,6 +8,7 @@
  */
 
 import { noteQuotaRead } from "./observed.js";
+import { journalPolledQuota } from "./reading.js";
 import type { QuotaProvider, UsageSnapshot } from "./types.js";
 
 export const DEFAULT_QUOTA_CACHE_TTL_MS = 5 * 60_000;
@@ -75,6 +76,7 @@ export function createQuotaCache(options: QuotaCacheOptions = {}): QuotaCache {
 
 			const snapshot = await provider.fetch();
 			noteQuotaRead(snapshot, ttlMs, now());
+			journalPolledQuota(snapshot);
 			if (snapshot.status === "ok") {
 				entries.set(provider.id, { snapshot, storedAtMs: now() });
 				return snapshot;

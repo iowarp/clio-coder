@@ -3,7 +3,7 @@ import { telemetryHub } from "../../core/telemetry/hub.js";
 import type { AnthropicResponseObservation, CodexQuotaObservation } from "../../engine/types.js";
 import { parseAnthropicHeaders } from "./anthropic-headers.js";
 import { codexStreamSnapshot } from "./observed.js";
-import type { UsageWindow } from "./types.js";
+import type { UsageSnapshot, UsageWindow } from "./types.js";
 
 export type QuotaReading = EventPayload<"quota.read">;
 
@@ -21,6 +21,20 @@ function readingWindows(windows: ReadonlyArray<UsageWindow>): QuotaReading["wind
 				]
 			: [],
 	);
+}
+
+/** Provider polling reads an adapter's credential account, independently of any configured target (#434). */
+export function journalPolledQuota(snapshot: UsageSnapshot): boolean {
+	if (snapshot.status !== "ok" || snapshot.fetchedAt === null || !utc.test(snapshot.fetchedAt)) return false;
+	const windows = readingWindows(snapshot.windows);
+	if (windows.length === 0) return false;
+	return journalAccountQuota({
+		provider: snapshot.providerId,
+		targetId: snapshot.providerId,
+		source: "poll",
+		observedAt: snapshot.fetchedAt,
+		windows,
+	});
 }
 
 /**
@@ -67,9 +81,10 @@ export function quotaReadingFromMessage(message: unknown, runtimeId: string, tar
 	return reading && reading.windows.length > 0 && utc.test(reading.observedAt) ? reading : null;
 }
 
-/** What makes two readings the same for the journal: usage and reset instants to the minute, which drift by seconds. */
+/** Window observations deduplicate drift; each fresh poll also establishes the account reading's freshness (#434). */
 export function quotaReadingFingerprint(reading: QuotaReading): string {
 	return JSON.stringify([
+		...(reading.source === "poll" ? [reading.observedAt] : []),
 		reading.limitReached ?? null,
 		reading.windows.map((window) => [
 			window.key,
