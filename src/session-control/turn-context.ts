@@ -399,7 +399,10 @@ export interface TurnContext {
 	emitContextWindowWarningTransition(warning: string | null): void;
 	/** Record one known cache disturbance for the current or next call. */
 	noteColdReason(reason: ExpectedColdReason): void;
-	noteCacheRequestToolChoice(toolChoice: string): void;
+	/** Record a disturbance the running loop never sends, for the first request of the next run (#434). */
+	noteNextRunColdReason(reason: ExpectedColdReason): void;
+	/** The tool choice a request sends; `afterRejection` marks the #426 retry of a request the provider rejected. */
+	noteCacheRequestToolChoice(toolChoice: string, afterRejection?: boolean): void;
 	/** Consume disturbances since the last settled run (T3.3 honesty). */
 	consumeExpectedColdReasons(runtimeId: string): void;
 	/** Disturbances since the last main request was sent; the journal stamps them on the next one (#434). */
@@ -695,6 +698,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let cacheCallBaseline: CacheCallBaseline | null = null;
 	let cacheCallBaselineLoaded = false;
 	let cacheRequestToolChoice = "auto";
+	// The tool choice of the last request on its target and wire model, and of the one before it, which a #426 retry
+	// compares with because the provider rejected the request between them (#434).
+	let sentToolChoice: { route: string; toolChoice: string } | undefined;
+	let priorSentToolChoice: { route: string; toolChoice: string } | undefined;
 	let nextChangedSection: string | undefined;
 	let previousPromptSections: SessionPromptCompileRecord["sections"] | null = null;
 	let idleReuseNoticeStamp: string | null = null;
@@ -3247,6 +3254,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		noteColdReason,
 
+		noteNextRunColdReason(reason): void {
+			pendingColdReasons.add(reason);
+		},
+
 		consumeExpectedColdReasons(runtimeId: string): void {
 			// Cache-disturbance honesty (T3.3): consume disturbances since
 			// the last settled run. Only single-slot local backends lose their
@@ -3275,8 +3286,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		cacheGeneration: () => cacheGeneration,
 
-		noteCacheRequestToolChoice(toolChoice): void {
+		noteCacheRequestToolChoice(toolChoice, afterRejection = false): void {
 			cacheRequestToolChoice = toolChoice;
+			const route = JSON.stringify([state.runtime?.targetId, state.runtime?.wireModelId]);
+			const previous = afterRejection ? priorSentToolChoice : sentToolChoice;
+			if (previous?.route === route && previous.toolChoice !== toolChoice) noteColdReason("tool_choice_change");
+			if (!afterRejection) priorSentToolChoice = sentToolChoice;
+			sentToolChoice = { route, toolChoice };
 		},
 
 		promptCachePayloadForAssistant(
@@ -3437,6 +3453,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (state.runtime) setEngineCodexConfiguration(state.runtime.agent, undefined);
 			thinkingUsesConfigurationUpdate = false;
 			cacheRequestToolChoice = "auto";
+			sentToolChoice = undefined;
+			priorSentToolChoice = undefined;
 			nextChangedSection = undefined;
 			previousPromptSections = null;
 			postureGeneration = null;

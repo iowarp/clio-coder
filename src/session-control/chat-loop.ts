@@ -177,7 +177,7 @@ import {
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { NoticeSource } from "./notice-source.js";
 import type { runPrewarmRound } from "./prewarm.js";
-import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
+import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
 import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
 import type { AgentStatusEvent } from "./status-types.js";
 import {
@@ -1656,6 +1656,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		removeQueuedMirrorEntry: (text) => queues.acknowledgeInjected(text)?.origin,
 		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport) =>
 			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport),
+		noteNextRunColdReason: (reason) => context.noteNextRunColdReason(reason),
 		observability: deps.observability,
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
@@ -2713,7 +2714,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						: snapshotTurnConstraints(narrowTurnConstraints(promptToolLimits, options.constraints));
 				const previousRunSnapshot = state.lastRunSnapshot;
 				let previousThinkingLevel: string | undefined = previousRunSnapshot?.runtimeResolution?.effectiveThinkingLevel;
-				if (previousThinkingLevel === undefined) {
+				let previousModel: { targetId: string; modelId: string } | undefined = previousRunSnapshot
+					? { targetId: previousRunSnapshot.targetId, modelId: previousRunSnapshot.wireModelId }
+					: undefined;
+				if (previousThinkingLevel === undefined || previousModel === undefined) {
 					// #423: resume can append the newly requested dial before this loop boots.
 					// Recover what the last call used, ignoring changes after that call.
 					const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
@@ -2721,9 +2725,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					const lastCall = entry ? entries.indexOf(entry) : -1;
 					if (entry?.kind === "message") {
 						const payload = entry.payload as {
-							promptCache?: { observation?: { requestFingerprint?: { thinkingLevel?: string } } };
+							promptCache?: {
+								observation?: { requestFingerprint?: { thinkingLevel?: string; targetId?: string; modelId?: string } };
+							};
 						} | null;
-						previousThinkingLevel = payload?.promptCache?.observation?.requestFingerprint?.thinkingLevel;
+						const fingerprint = payload?.promptCache?.observation?.requestFingerprint;
+						if (previousModel === undefined && fingerprint?.targetId !== undefined && fingerprint.modelId !== undefined)
+							previousModel = { targetId: fingerprint.targetId, modelId: fingerprint.modelId };
+						previousThinkingLevel ??= fingerprint?.thinkingLevel;
 						if (previousThinkingLevel === undefined) {
 							const meta = deps.session?.current();
 							const compile = meta
@@ -3229,6 +3238,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				) {
 					context.noteColdReason("tool_surface_change");
 				}
+				// A request on another target or wire model shares no cached prefix with the previous call's (#434).
+				if (
+					previousModel !== undefined &&
+					(previousModel.targetId !== agentRuntime.targetId || previousModel.modelId !== agentRuntime.wireModelId)
+				) {
+					context.noteColdReason("model_changed");
+				}
 				turnSnapshot = { ...turnSnapshot, turnId: userTurnId ?? "unknown" };
 				context.setCurrentSnapshot(turnSnapshot);
 				context.persistContextSnapshot(turnSnapshot);
@@ -3275,7 +3291,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					const retired = retireActiveUserContextForNextOperator(prior, deps.readSessionEntries(), {
 						...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
 					});
-					if (retired.length < prior.length) replaceEngineMessages(agentRuntime.agent, retired);
+					if (retired.length < prior.length) {
+						replaceEngineMessages(agentRuntime.agent, retired);
+						// Retiring replayed instructions a request already carried rewrites the history it sent (#434).
+						if (retiredUserContextWasSent(prior, retired)) context.noteColdReason("input_changed");
+					}
 				}
 				terminalTurnFailure = undefined;
 				turnRetryAttempts = 0;

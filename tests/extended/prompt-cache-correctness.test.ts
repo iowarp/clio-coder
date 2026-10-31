@@ -16,6 +16,7 @@ import {
 	readPromptCompileManifest,
 } from "../../src/domains/session/prompt-manifest.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
+import type { AgentMessage } from "../../src/engine/types.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
 import { toolSignatureFromState } from "../../src/session-control/chat-loop-messages.js";
 import {
@@ -24,6 +25,7 @@ import {
 	type MainPromptCacheIdentityInput,
 	mainPromptCacheIdentity,
 } from "../../src/session-control/prompt-cache-identity.js";
+import { retiredUserContextWasSent } from "../../src/session-control/session-replay-messages.js";
 import { createTurnContext } from "../../src/session-control/turn-context.js";
 import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/session-control/turn-state.js";
@@ -518,6 +520,49 @@ describe("session replay prefix stability", () => {
 		];
 		deepStrictEqual(toolCallIds(buildReplayAgentMessagesFromTurns(orphaned)), ["call-a", "call-b", "call-c", "call-d"]);
 	});
+
+	it("rewrites sent history only when a reply followed the retired instructions (#434)", () => {
+		const text = (role: "user" | "assistant", body: string, timestamp: number) =>
+			({ role, content: [{ type: "text", text: body }], timestamp }) as unknown as AgentMessage;
+		const kept = text("assistant", "kept from before the checkpoint", 1);
+		const block = text("user", "Active user instructions (verbatim):\nship it", 5);
+		const operator = text("user", "next request", 9);
+		strictEqual(retiredUserContextWasSent([kept, block, operator], [kept, operator]), false);
+		const replied = text("assistant", "answered after the checkpoint", 7);
+		strictEqual(retiredUserContextWasSent([kept, block, replied, operator], [kept, replied, operator]), true);
+	});
+});
+
+it("a changed tool choice is a cold reason for the request that sends it, and a #426 retry compares past the rejection (#434)", () => {
+	const state = createTurnState("off");
+	const runtime = { targetId: "cloud", runtimeId: "fixture", wireModelId: "chat" } as unknown as AgentRuntime;
+	state.runtime = runtime;
+	state.streaming = true;
+	const notices: string[][] = [];
+	const context = createTurnContext({
+		state,
+		getSettings: () => ({ safety: { autonomy: "default" }, context: { semantic: { enabled: false } } }) as never,
+		providers: { getRuntime: () => undefined } as unknown as ProvidersContract,
+		prompts: {} as PromptsContract,
+		middleware: {} as TurnMiddleware,
+		emitNotice: () => {},
+		emitCacheNotice: (reasons) => notices.push([...reasons]),
+	});
+	const send = (toolChoice: unknown, afterRejection = false) => {
+		context.noteCacheRequestToolChoice(JSON.stringify(toolChoice), afterRejection);
+		return context.takeCallColdReasons?.() ?? [];
+	};
+	deepStrictEqual(send("auto"), []);
+	deepStrictEqual(send("auto"), []);
+	deepStrictEqual(send({ type: "function", name: "read" }), ["tool_choice_change"]);
+	// The provider rejected the forced request, so the retry's "auto" matches the request before it.
+	deepStrictEqual(send("auto", true), []);
+	deepStrictEqual(send("auto"), []);
+	// Another wire model shares no cache with the previous request; model_changed names that, not the tool choice.
+	state.runtime = { ...runtime, wireModelId: "other" } as AgentRuntime;
+	deepStrictEqual(send("none"), []);
+	deepStrictEqual(notices, [["tool_choice_change"]]);
+	context.dispose();
 });
 
 it("prompt layout v4 preserves readable provenance from unversioned and v2 manifests", (t) => {

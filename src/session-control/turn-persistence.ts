@@ -53,7 +53,8 @@ import {
 	terminalFailureFromAssistantMessage,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
-import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
+import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
+import type { ExpectedColdReason } from "./turn-context.js";
 import type { RetryStatusPayload } from "./turn-recovery.js";
 import type { AgentRuntime, ChatLoopTarget, ChatTurnState } from "./turn-state.js";
 
@@ -76,6 +77,8 @@ export interface TurnPersistenceDeps {
 		anthropicResponse?: AnthropicResponseObservation,
 		transport?: CodexTransportObservation,
 	) => Record<string, unknown>;
+	/** Stamp a disturbance on the first request of the next run, which is the first to send it (#434). */
+	noteNextRunColdReason?: (reason: ExpectedColdReason) => void;
 	/**
 	 * Second sink for the same rows, mirroring the operator's own turns into the
 	 * trace database beside the runs this session dispatched. Optional: absent
@@ -507,7 +510,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				const retired = retireActiveUserContextForNextOperator(prior, deps.readSessionEntries(), {
 					activeLeafTurnId: userTurn.id,
 				});
-				if (retired.length < prior.length) replaceEngineMessages(state.runtime.agent, retired);
+				if (retired.length < prior.length) {
+					replaceEngineMessages(state.runtime.agent, retired);
+					// The running loop keeps its own copy of the history, so the rewrite first reaches the next run (#434).
+					if (retiredUserContextWasSent(prior, retired)) deps.noteNextRunColdReason?.("input_changed");
+				}
 			}
 			state.synthesisToolLock = false;
 			state.toolBudgetLock = false;

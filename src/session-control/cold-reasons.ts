@@ -23,6 +23,14 @@ export function coldReasonText(reason: string): string {
 			return "prompt recompiled";
 		case "background_memory":
 			return "background memory step";
+		case "model_changed":
+			return "model change";
+		case "input_changed":
+			return "history rewrite";
+		case "tool_choice_change":
+			return "tool-choice change";
+		case "transport_reset":
+			return "transport reset";
 		default:
 			return reason.replace(/_/gu, " ");
 	}

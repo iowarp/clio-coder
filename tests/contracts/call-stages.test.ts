@@ -389,3 +389,160 @@ it("a side call whose session writer cannot open settles no call id, so its spen
 		env.restore();
 	}
 });
+
+it("a main call journals the model change and the Codex transport resets the host measured before it (#434)", async () => {
+	const env = await isolateClioEnv("clio-coder-call-stages-");
+	const faux = registerEngineFauxProvider({
+		api: "cold-reasons-fixture",
+		models: [{ id: "chat" }, { id: "other" }],
+		tokensPerSecond: 0,
+	});
+	const reply = (recovery?: "cooldown_reset" | "auth_reset") => ({
+		role: "assistant" as const,
+		content: [{ type: "text" as const, text: "answered" }],
+		api: faux.api,
+		provider: "fixture",
+		model: "chat",
+		stopReason: "stop" as const,
+		timestamp: Date.now(),
+		usage: {
+			input: 3,
+			output: 2,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 5,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		...(recovery
+			? { codexTransport: { mode: "websocket", request: "full", recovery: { action: recovery, outcome: "recovered" } } }
+			: {}),
+	});
+	// The cooldown reset closes the socket before its own call; the auth reset closes it after, so the next call pays.
+	faux.setResponses([reply(), reply("cooldown_reset"), reply("auth_reset"), reply()]);
+	const capabilities = { chat: true, tools: true, reasoning: false, contextWindow: 131072, maxTokens: 8192 };
+	const runtime = {
+		id: "fixture",
+		displayName: "Fixture",
+		kind: "http",
+		tier: "cloud",
+		apiFamily: "openai-completions",
+		auth: "api-key",
+		defaultCapabilities: capabilities,
+		synthesizeModel: (_target: unknown, id: string) => faux.getModel(id),
+	} as unknown as RuntimeDescriptor;
+	const target = {
+		id: "chat-target",
+		runtime: "fixture",
+		url: "https://chat.invalid/v1",
+		defaultModel: "chat",
+		capabilities: { contextWindow: 131072 },
+	};
+	const providers = {
+		list: () => [
+			{
+				target,
+				runtime,
+				available: true,
+				capabilities,
+				discoveredModels: ["chat", "other"],
+				discoveredModelsSource: "probe",
+			},
+		],
+		getTarget: () => target,
+		getRuntime: () => runtime,
+		getDetectedReasoning: () => false,
+		auth: {
+			resolveForTarget: async () => ({
+				providerId: "fixture",
+				available: true,
+				credentialType: "api-key",
+				source: "env",
+				detail: "fixture",
+				apiKey: "fixture-key",
+			}),
+		},
+	} as unknown as ProvidersContract;
+	const entries: SessionEntry[] = [];
+	const session = {
+		current: () => ({ id: "cold-session", cwd: env.dir, cwdHash: "cold-repo" }),
+		tree: () => ({ leafId: entries.at(-1)?.turnId ?? null }),
+		append(turn: TurnInput) {
+			const id = `turn-${entries.length + 1}`;
+			entries.push({
+				kind: "message",
+				turnId: id,
+				parentTurnId: turn.parentId,
+				timestamp: new Date().toISOString(),
+				role: turn.kind,
+				payload: turn.payload,
+			} as SessionEntry);
+			return { id };
+		},
+		appendEntry(entry: Parameters<SessionContract["appendEntry"]>[0]) {
+			const row = { ...entry, turnId: `entry-${entries.length + 1}`, timestamp: new Date().toISOString() };
+			entries.push(row as SessionEntry);
+			return row;
+		},
+	} as unknown as SessionContract;
+	const journals = createSessionJournals(clioStateDir(), () => {
+		throw new Error("fixture journal unavailable");
+	});
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.target = target.id;
+	settings.chat.model = "chat";
+	settings.chat.thinkingLevel = "off";
+	settings.chat.prewarm = false;
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		providers,
+		session,
+		readSessionEntries: () => entries,
+		middleware: {
+			registerHook: () => {},
+			runHook: () => ({ effects: [], ruleIds: [] }),
+		} as unknown as MiddlewareContract,
+		knownTargets: () => new Set([target.id]),
+		observability: {
+			acquireTelemetrySession: journals.acquire,
+			recordSessionTurn() {},
+			recordTokens() {},
+			recordTokenThroughput() {},
+			recordNeverSentCalls() {},
+		} as unknown as ObservabilityContract,
+		prompts: {
+			inputEpoch: () => 0,
+			compileSessionPrompt: async () => ({
+				systemPrompt: "fixture prompt",
+				systemPromptHash: "fixture",
+				tokenEstimate: 1,
+				sections: [{ id: "identity", tokenEstimate: 1, contentHash: "identity" }],
+				fragmentManifest: [],
+			}),
+		} as unknown as PromptsContract,
+	});
+	try {
+		await loop.submit("first");
+		await loop.submit("cooldown");
+		await loop.submit("auth");
+		settings.chat.model = "other";
+		await loop.submit("switched");
+		await journals.flush();
+		const journal = await readCallJournal(join(clioStateDir(), "sessions", "cold-repo", "cold-session"));
+		const calls = journal.records.flatMap(({ record }) => (record.k === "call.settled" ? [record.data] : []));
+		deepStrictEqual(
+			calls.map((call) => [call.disposition, [...call.cache.expectedColdReasons].sort()]),
+			[
+				["settled", []],
+				["settled", ["transport_reset"]],
+				["settled", []],
+				["settled", ["model_changed", "transport_reset"]],
+			],
+			JSON.stringify(calls.map((call) => call.transport)),
+		);
+	} finally {
+		loop.dispose();
+		faux.unregister();
+		await journals.flush();
+		env.restore();
+	}
+});

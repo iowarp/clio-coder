@@ -640,6 +640,15 @@ export function retireActiveUserContextForNextOperator(
 	);
 }
 
+/** Whether a request carried the block `retired` left out: a reply arrived after the checkpoint installed it (#434). */
+export function retiredUserContextWasSent(messages: AgentMessage[], retired: AgentMessage[]): boolean {
+	const kept = new Set(retired);
+	const block = messages.find((message) => !kept.has(message));
+	return (
+		block !== undefined && messages.some((message) => message.role === "assistant" && message.timestamp > block.timestamp)
+	);
+}
+
 function dropLegacyToolResultAssistantDuplicates(entries: ReadonlyArray<SessionEntry>): SessionEntry[] {
 	const out: SessionEntry[] = [];
 	for (const entry of entries) {

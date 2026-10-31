@@ -334,8 +334,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	// cache comparison, so the journal compares within one context generation as #423 does (#434).
 	const cacheBaselines = new Map<string, CacheBaseline>();
 	let cacheBaselineGeneration: number | undefined;
-	// Disturbances taken for a request that never left still precede the next one that does (#434).
-	let unsentColdReasons: ExpectedColdReason[] = [];
+	// Disturbances owed to the next request that leaves: those taken for one that never left, and a Codex auth reset
+	// that closed the socket after its call, so the next call sends the recovery frame (#434).
+	let carriedColdReasons: ExpectedColdReason[] = [];
 	// The last quota reading journaled per provider and target. A reading is journaled at its turn's first sight of it
 	// and whenever it changes, never once per call (#434).
 	const journaledQuota = new Map<string, { fingerprint: string; turnId: string | undefined }>();
@@ -693,8 +694,18 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			const request = attemptRequest;
 			attemptRequest = undefined;
 			const sent = settlement.disposition !== "never_sent";
-			const reasons = request?.coldReasons ?? [];
-			if (!sent) unsentColdReasons = [...new Set([...unsentColdReasons, ...reasons])];
+			// A cooldown reset closed the Codex socket before this call, so its own full frame rebuilt the continuation;
+			// an auth reset closed it after, so the next call's does. The SSE pin has no measured reset behind it (#423).
+			const recovery = settlement.transport.recovery?.action;
+			const reasons: ExpectedColdReason[] = [
+				...new Set([
+					...(request?.coldReasons ?? []),
+					...(recovery === "cooldown_reset" ? ["transport_reset" as const] : []),
+				]),
+			];
+			if (!sent) carriedColdReasons = [...new Set([...carriedColdReasons, ...reasons])];
+			if (recovery === "auth_reset")
+				carriedColdReasons = [...new Set([...carriedColdReasons, "transport_reset" as const])];
 			const generation = context.cacheGeneration?.() ?? 0;
 			if (generation !== cacheBaselineGeneration) {
 				cacheBaselines.clear();
@@ -739,7 +750,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			facts: CallSettled | undefined,
 		): void => {
 			if (facts?.disposition === "never_sent" && settlement.disposition !== "never_sent")
-				unsentColdReasons = [...new Set([...unsentColdReasons, ...settlement.cache.expectedColdReasons])];
+				carriedColdReasons = [...new Set([...carriedColdReasons, ...settlement.cache.expectedColdReasons])];
 		};
 		const recordSettledCall = (
 			facts: CallSettled | undefined,
@@ -907,13 +918,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					currentModel,
 					controlled,
 					(request) => {
-						if (invokedAttempt && modelCall) modelCall = modelCall.nextAttempt({ toolChoice: "auto" }) ?? modelCall;
+						const retry = invokedAttempt;
+						if (retry && modelCall) modelCall = modelCall.nextAttempt({ toolChoice: "auto" }) ?? modelCall;
 						invokedAttempt = true;
 						const attempt = modelCall;
 						// The first attempt's send opened at onStreamInvocation; a #426 retry opens its own here.
 						attempt?.stage("send", "start");
 						// #423: fingerprint the control this attempt sends, including a #426 recovery retry.
-						context.noteCacheRequestToolChoice?.(JSON.stringify(request.options?.toolChoice ?? "auto"));
+						context.noteCacheRequestToolChoice?.(JSON.stringify(request.options?.toolChoice ?? "auto"), retry);
 						delete localRuntime.lastProviderStatus;
 						const requestOptions = {
 							...request.options,
@@ -938,9 +950,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								model: currentModel,
 								context: sent,
 								compiled: context.compiledSessionPrompt?.() ?? null,
-								coldReasons: [...new Set([...unsentColdReasons, ...(context.takeCallColdReasons?.() ?? [])])],
+								coldReasons: [...new Set([...carriedColdReasons, ...(context.takeCallColdReasons?.() ?? [])])],
 							};
-							unsentColdReasons = [];
+							carriedColdReasons = [];
 							// Research capture: the prefix exactly as this attempt sends it, hashed (#423, #434).
 							attempt.withContext(() => {
 								if (!telemetryCaptures("prefix.blocks")) return;
