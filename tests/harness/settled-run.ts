@@ -4,12 +4,13 @@
  */
 
 import type { WorkerTelemetryContext } from "../../src/core/telemetry/context.js";
+import type { RunUsageFacts } from "../../src/domains/dispatch/run-call-usage.js";
 import { runSettledRecord, settleFinishedRun } from "../../src/domains/dispatch/run-settlement.js";
 import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 
-export async function writeSettledRun(stateDir: string, draft: RunResultDraft): Promise<void> {
+export async function writeSettledRun(stateDir: string, draft: RunResultDraft, usage?: RunUsageFacts): Promise<void> {
 	const context: WorkerTelemetryContext =
 		draft.sessionId === null
 			? { sessionId: null, runId: draft.runId, label: "worker" }
@@ -24,7 +25,7 @@ export async function writeSettledRun(stateDir: string, draft: RunResultDraft): 
 			terminal: { terminalReason: draft.terminalReason ?? "completed" },
 			processExitCode: draft.exitCode,
 			frameType: null,
-			usage: undefined,
+			usage,
 		});
 		const result = await writer.storeObject("run-result", settlement.result);
 		writer.enqueue({

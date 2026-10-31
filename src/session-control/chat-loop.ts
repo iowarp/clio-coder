@@ -10,11 +10,11 @@ import {
 } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
-import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
+import { readSettledRun } from "../domains/telemetry/run-record.js";
 import type { TelemetrySessionLease } from "../domains/telemetry/session-journals.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
@@ -62,7 +62,6 @@ import { ContinuityController } from "./continuity-controller.js";
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { realpathSync } from "node:fs";
-import { join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { formatFooterTokens } from "../core/display-units.js";
 import {
@@ -77,8 +76,10 @@ import {
 	skillSurfaceNames,
 	withModelSkillActivation,
 } from "../core/skill-activation.js";
+import type { Fact } from "../core/telemetry/fact.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { TurnAbortSource } from "../core/telemetry/live-events.js";
+import type { RunSettled } from "../core/telemetry/schemas.js";
 import {
 	narrowTurnConstraints,
 	snapshotTurnConstraints,
@@ -376,18 +377,16 @@ function noOutcomeUsage(): TokenSplit {
 	return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0, provenance: "none" };
 }
 
-function readWorkerReceipt(
+/** A worker run's settled record once its journal holds run.settled; null while it has not settled (#434). */
+function readWorkerSettlement(
 	runId: string,
 	dispatch: Pick<DispatchContract, "getRun"> | undefined,
-): Record<string, unknown> | null {
+): Pick<RunSettled, "usage" | "totalTokens"> | null {
 	try {
-		const envelope = dispatch?.getRun(runId);
-		if (!envelope) return null;
-		const path = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${runId}.json`);
-		const receipt = JSON.parse(readReceiptTextSync(path)) as Record<string, unknown>;
-		return receipt.runId === runId ? receipt : null;
+		if (!dispatch?.getRun(runId)) return null;
+		return readSettledRun(clioStateDir(), runId)?.settled ?? null;
 	} catch {
-		// A run without a sealed receipt yet reads as absent; the caller marks it partial.
+		// A run that has not settled yet reads as absent; the caller marks it partial.
 		return null;
 	}
 }
@@ -413,12 +412,12 @@ async function awaitWorkerReceipts(
 ): Promise<string[]> {
 	if (!dispatch) return [];
 	const pending = new Set(
-		runIds.filter((runId) => dispatch.getRun(runId) !== null && readWorkerReceipt(runId, dispatch) === null),
+		runIds.filter((runId) => dispatch.getRun(runId) !== null && readWorkerSettlement(runId, dispatch) === null),
 	);
 	const deadline = Date.now() + WORKER_RECEIPT_SEAL_WAIT_MS;
 	while (pending.size > 0 && Date.now() < deadline) {
 		await new Promise<void>((resolve) => setTimeout(resolve, WORKER_RECEIPT_SEAL_POLL_MS));
-		for (const runId of [...pending]) if (readWorkerReceipt(runId, dispatch) !== null) pending.delete(runId);
+		for (const runId of [...pending]) if (readWorkerSettlement(runId, dispatch) !== null) pending.delete(runId);
 	}
 	return [...pending];
 }
@@ -439,7 +438,7 @@ function watchLateWorkerReceipts(input: {
 	const pending = new Set(input.missing);
 	const started = performance.now();
 	const timer = setInterval(() => {
-		for (const runId of [...pending]) if (readWorkerReceipt(runId, input.dispatch) !== null) pending.delete(runId);
+		for (const runId of [...pending]) if (readWorkerSettlement(runId, input.dispatch) !== null) pending.delete(runId);
 		const elapsed = performance.now() - started;
 		if (pending.size > 0 && elapsed < WORKER_RECEIPT_LATE_WATCH_MS) return;
 		clearInterval(timer);
@@ -465,25 +464,22 @@ function workerOutcomeUsage(
 	let available = 0;
 	let missing = 0;
 	const ids = [...new Set(runIds)];
+	const known = (fact: Fact<number>) => (fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null);
 	for (const runId of ids) {
-		const receipt = readWorkerReceipt(runId, dispatch);
-		if (receipt === null) {
+		const settled = readWorkerSettlement(runId, dispatch);
+		if (settled === null) {
 			missing += 1;
 			continue;
 		}
-		const count = (key: string) =>
-			typeof receipt[key] === "number" && Number.isFinite(receipt[key]) ? (receipt[key] as number) : 0;
-		inputTokens += count("inputTokenCount");
-		outputTokens += count("outputTokenCount");
-		cacheReadTokens += count("cacheReadTokenCount");
-		totalTokens += count("tokenCount");
-		if (typeof receipt.inputTokenCount === "number" || typeof receipt.outputTokenCount === "number") available += 1;
-		if (
-			typeof receipt.inputTokenCount === "number" &&
-			typeof receipt.outputTokenCount === "number" &&
-			typeof receipt.tokenCount === "number"
-		)
-			reported += 1;
+		const input = known(settled.usage.input);
+		const output = known(settled.usage.output);
+		const total = known(settled.totalTokens);
+		inputTokens += input ?? 0;
+		outputTokens += output ?? 0;
+		cacheReadTokens += known(settled.usage.cacheRead) ?? 0;
+		totalTokens += total ?? 0;
+		if (input !== null || output !== null) available += 1;
+		if (input !== null && output !== null && total !== null) reported += 1;
 	}
 	return {
 		inputTokens,

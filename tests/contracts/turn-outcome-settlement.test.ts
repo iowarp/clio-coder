@@ -1,6 +1,4 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -19,7 +17,9 @@ import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js"
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createTurnOutcomeCollector } from "../../src/session-control/turn-outcome-collector.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
 for (const continuation of [false, true])
 	it(
@@ -212,7 +212,7 @@ interface CancelledRun {
 	reservedId: string;
 }
 
-/** Cancels a turn during the orientation act, before admission, with the Scout's receipt sealing `sealAfterMs` later. */
+/** Cancels a turn during the orientation act, before admission, with the Scout's run settling `sealAfterMs` later. */
 async function cancelBeforeAdmission(sealAfterMs: number, check: (run: CancelledRun) => Promise<void>): Promise<void> {
 	const scratch = await isolateClioEnv("clio-coder-turn-outcome-cancel-");
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -238,9 +238,8 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 		started = resolve;
 	});
 	let reservedId = "";
-	const receiptPath = join(scratch.dir, "scout-receipt.json");
 	const loop = createChatLoop({
-		outcomeDispatch: { getRun: () => ({ receiptPath }) as unknown as ReturnType<DispatchContract["getRun"]> },
+		outcomeDispatch: { getRun: () => ({ id: "scout-1" }) as unknown as ReturnType<DispatchContract["getRun"]> },
 		getSettings: () => settings,
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
@@ -286,12 +285,22 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 		const submitted = loop.submit("Give me a tour of this codebase.");
 		await runStarted;
 		loop.cancel();
+		const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
 		setTimeout(
 			() =>
-				writeFileSync(
-					receiptPath,
-					JSON.stringify({ runId: "scout-1", inputTokenCount: 40, outputTokenCount: 2, tokenCount: 42 }),
-				),
+				void writeSettledRun(clioStateDir(), fixtureReceiptDraft(fixtureEnvelope("scout-1")), {
+					usage: {
+						input: measured(40),
+						output: measured(2),
+						cacheRead: measured(0),
+						cacheWrite: measured(0),
+						cacheWrite1h: measured(0),
+						reasoning: measured(0),
+					},
+					totalTokens: measured(42),
+					apiCalls: measured(1),
+					pricing: { usd: measured(0), pricedBy: "none" },
+				}),
 			sealAfterMs,
 		);
 		await submitted;
