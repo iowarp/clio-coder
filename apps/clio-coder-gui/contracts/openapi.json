@@ -10834,6 +10834,115 @@
 												}
 											},
 											"additionalProperties": false
+										},
+										"telemetryQuota": {
+											"type": "object",
+											"required": ["v", "foldVersion", "generatedAt", "kind", "providers"],
+											"properties": {
+												"v": {
+													"type": "number",
+													"const": 1
+												},
+												"foldVersion": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"generatedAt": {
+													"type": "string",
+													"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+												},
+												"kind": {
+													"type": "string",
+													"const": "quota"
+												},
+												"providers": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["provider", "source", "observedAt", "stale", "windows"],
+														"properties": {
+															"provider": {
+																"type": "string",
+																"minLength": 1,
+																"maxLength": 512
+															},
+															"source": {
+																"enum": ["response-headers", "stream-event", "poll", "unknown"]
+															},
+															"observedAt": {
+																"$ref": "#/components/schemas/Union_9d36f13d"
+															},
+															"stale": {
+																"type": "boolean"
+															},
+															"windows": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["key", "label", "usedPct", "resetsAt"],
+																	"properties": {
+																		"key": {
+																			"type": "string",
+																			"minLength": 1,
+																			"maxLength": 512
+																		},
+																		"label": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"maxLength": 4096
+																				},
+																				{
+																					"type": "null"
+																				}
+																			]
+																		},
+																		"usedPct": {
+																			"$ref": "#/components/schemas/Object_display_fact_6fc3c8f8"
+																		},
+																		"resetsAt": {
+																			"$ref": "#/components/schemas/Union_9d36f13d"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															}
+														},
+														"additionalProperties": false
+													}
+												}
+											},
+											"additionalProperties": false
+										},
+										"quotaDisplay": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["windows", "credits"],
+												"properties": {
+													"windows": {
+														"type": "array",
+														"items": {
+															"type": "string",
+															"maxLength": 64
+														},
+														"maxItems": 8
+													},
+													"credits": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 64
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 16
 										}
 									},
 									"additionalProperties": false

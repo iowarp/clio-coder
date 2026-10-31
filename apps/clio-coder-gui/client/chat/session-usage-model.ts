@@ -234,39 +234,85 @@ export interface QuotaCard {
 	windows: Array<{ label: string; used: string; share: number; resetsAt: string | null; binding: boolean }>;
 }
 
+type QuotaWindow = QuotaCard["windows"][number];
+type FoldedQuota = NonNullable<SessionUsage["telemetryQuota"]>["providers"][number];
+
+/** A folded window's fill: its share when one is known; an unknown share draws an empty bar beside its words. */
+const fill = (usedPct: FoldedQuota["windows"][number]["usedPct"]) =>
+	usedPct.fact.kind === "measured" || usedPct.fact.kind === "estimated" ? usedPct.fact.value : 0;
+
+function foldedWindows(row: FoldedQuota, bound: (label: string | null) => boolean): QuotaWindow[] {
+	return row.windows.map((window) => ({
+		label: window.label ?? window.key,
+		used: window.usedPct.display,
+		share: fill(window.usedPct),
+		resetsAt: window.resetsAt,
+		binding: bound(window.label),
+	}));
+}
+
+/**
+ * One card per provider. A window's share is the read model's quota fold wherever it holds the provider, so quota
+ * reads like every other spend figure (#434); the v1 read names the card's status, plan and credits, and its own
+ * shares, worded on the server, stand only for an agent that sends no fold. An account only the session's journal
+ * still holds, such as one a resumed session last saw, keeps its own card.
+ */
 export function quotaCards(
 	usage: SessionUsage,
 ): { status: "read"; cards: QuotaCard[] } | { status: "failed"; reason: string } {
-	if (usage.quota.status === "failed")
+	const folded = usage.telemetryQuota?.providers ?? [];
+	const providers = usage.quota.status === "read" ? usage.quota.providers : [];
+	if (usage.quota.status === "failed" && folded.length === 0)
 		return { status: "failed", reason: `Quota could not be read: ${usage.quota.reason}` };
+	const journaledOnly = folded
+		.filter((row) => !providers.some((provider) => provider.provider === row.provider))
+		.map(
+			(row): QuotaCard => ({
+				key: row.provider,
+				name: row.provider,
+				word: row.stale ? "Last reading" : "Read",
+				tone: row.stale ? "neutral" : "success",
+				note: row.stale ? "last recorded reading, not refreshed" : null,
+				message: null,
+				credits: null,
+				windows: foldedWindows(row, () => false),
+			}),
+		);
 	return {
 		status: "read",
-		cards: usage.quota.providers.map((provider) => {
-			const [tone, word] = STATUS[provider.status] ?? (["neutral", provider.status] as [StatusTone, string]);
-			const note = [
-				...(provider.plan ? [provider.plan] : []),
-				...(provider.stale ? ["last good reading, not refreshed"] : []),
-				...(provider.retryAfterSeconds !== null ? [`provider asked to wait ${provider.retryAfterSeconds}s`] : []),
-			].join(" · ");
-			return {
-				key: provider.provider,
-				name: provider.name,
-				word,
-				tone,
-				note: note === "" ? null : note,
-				message: provider.message,
-				credits: provider.credits
-					? `${provider.credits.display}${provider.credits.usedPct === null ? "" : ` · ${Math.round(provider.credits.usedPct)}% used`}`
-					: null,
-				windows: provider.windows.map((window) => ({
-					label: window.scope ? `${window.label} (${window.scope})` : window.label,
-					used: `${Math.round(window.usedPct)}%`,
-					share: window.usedPct,
-					resetsAt: window.resetsAt,
-					binding: window.active,
-				})),
-			};
-		}),
+		cards: [
+			...providers.map((provider, index): QuotaCard => {
+				const [tone, word] = STATUS[provider.status] ?? (["neutral", provider.status] as [StatusTone, string]);
+				const note = [
+					...(provider.plan ? [provider.plan] : []),
+					...(provider.stale ? ["last good reading, not refreshed"] : []),
+					...(provider.retryAfterSeconds !== null ? [`provider asked to wait ${provider.retryAfterSeconds}s`] : []),
+				].join(" · ");
+				const words = usage.quotaDisplay?.[index];
+				const row = folded.find((entry) => entry.provider === provider.provider);
+				return {
+					key: provider.provider,
+					name: provider.name,
+					word,
+					tone,
+					note: note === "" ? null : note,
+					message: provider.message,
+					credits: provider.credits
+						? `${provider.credits.display}${words?.credits ? ` · ${words.credits} used` : ""}`
+						: null,
+					windows: row
+						? foldedWindows(row, (label) => provider.windows.some((window) => window.label === label && window.active))
+						: provider.windows.map((window, at) => ({
+								label: window.scope ? `${window.label} (${window.scope})` : window.label,
+								used: words?.windows[at] ?? "share not reported",
+								share: window.usedPct,
+								resetsAt: window.resetsAt,
+								binding: window.active,
+							})),
+				};
+			}),
+			...journaledOnly,
+		],
 	};
 }
 

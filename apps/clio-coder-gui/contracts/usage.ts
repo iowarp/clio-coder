@@ -1,6 +1,6 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
-import { TelemetryCost, TelemetrySession } from "./telemetry.js";
+import { TelemetryCost, TelemetryQuota, TelemetrySession } from "./telemetry.js";
 import { AcpSessionUsageSchema, AcpUsageCapability as UsageCapability } from "./wire.js";
 
 export { UsageCapability };
@@ -18,6 +18,24 @@ export const SessionUsage = Type.Object(
 		...v1,
 		telemetry: Type.Optional(
 			Type.Object({ session: TelemetrySession, cost: TelemetryCost }, { additionalProperties: false }),
+		),
+		/** The read model's quota fold, every window's share worded by the server; absent from an agent without telemetry. */
+		telemetryQuota: Type.Optional(TelemetryQuota),
+		/**
+		 * The v1 quota shares worded on the server, one entry per provider of `quota.providers` in its order: the fallback
+		 * an agent with no telemetry leaves, so the browser never words a percentage (#434).
+		 */
+		quotaDisplay: Type.Optional(
+			Type.Array(
+				Type.Object(
+					{
+						windows: Type.Array(Type.String({ maxLength: 64 }), { maxItems: 8 }),
+						credits: Type.Union([Type.String({ maxLength: 64 }), Type.Null()]),
+					},
+					{ additionalProperties: false },
+				),
+				{ maxItems: 16 },
+			),
 		),
 	},
 	{ additionalProperties: false },

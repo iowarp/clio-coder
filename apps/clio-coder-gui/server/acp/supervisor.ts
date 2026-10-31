@@ -64,7 +64,7 @@ import {
 	SteerResult,
 } from "../../contracts/steering.js";
 import { SessionTargets, TargetProbe } from "../../contracts/targets.js";
-import { TelemetryUpdate } from "../../contracts/telemetry.js";
+import { TelemetryQuota, TelemetryUpdate } from "../../contracts/telemetry.js";
 import { SessionUsage } from "../../contracts/usage.js";
 import type { AcpSafeSettingsPatch as SafeSettingsPatch } from "../../contracts/wire.js";
 import {
@@ -125,6 +125,7 @@ import { withLedgerDisplay } from "../services/context-display.js";
 import { turnCostDisplays, withCostDisplay } from "../services/cost-display.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
+import { withQuotaDisplay } from "../services/usage-display.js";
 import type { WorkspaceService } from "../services/workspaces.js";
 import type { AppFiles } from "../state/files.js";
 import { type ChildRow, ChildrenFile } from "./children-file.js";
@@ -1385,12 +1386,20 @@ export class Supervisor {
 			throw new AppProblem("conflict", "This Clio build does not expose session artifacts.");
 		return this.projected(id, ACP_ARTIFACTS_READ_METHOD, { sessionId: id, ...body }, ArtifactPage, BRANCH_TIMEOUT_MS);
 	}
-	usage(id: string) {
+	async usage(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.usage)
 			throw new AppProblem("conflict", "This Clio Coder build does not report its usage.");
-		// A quota read may reach each signed-in provider once its cache has expired.
-		return this.projected(id, ACP_USAGE_READ_METHOD, { sessionId: id }, SessionUsage, BRANCH_TIMEOUT_MS);
+		const quotaMethod = entry.client.capabilities.telemetry?.methods.quota;
+		const [usage, telemetryQuota] = await Promise.all([
+			// A quota read may reach each signed-in provider once its cache has expired.
+			this.projected(id, ACP_USAGE_READ_METHOD, { sessionId: id }, SessionUsage, BRANCH_TIMEOUT_MS),
+			// The read model's quota fold; when it cannot be read, the v1 shares worded here stand (#434).
+			quotaMethod
+				? this.projected(id, quotaMethod, {}, TelemetryQuota, BRANCH_TIMEOUT_MS).catch(() => undefined)
+				: undefined,
+		]);
+		return withQuotaDisplay(usage, telemetryQuota);
 	}
 	private asiding(id: string) {
 		const entry = this.active(id);

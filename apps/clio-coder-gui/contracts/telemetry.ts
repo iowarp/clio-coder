@@ -23,6 +23,7 @@ export const TelemetryCache = TELEMETRY_DTO_SCHEMAS.cache;
 export const TelemetryTimeline = TELEMETRY_DTO_SCHEMAS.timeline;
 export const TelemetryWhyStopped = TELEMETRY_DTO_SCHEMAS.whyStopped;
 export const TelemetryExplanation = TELEMETRY_DTO_SCHEMAS.explanation;
+export const TelemetryQuota = TELEMETRY_DTO_SCHEMAS.quota;
 export const TelemetryUpdate = TELEMETRY_DTO_SCHEMAS.update;
 
 /** Query strings are flat, so list filters arrive comma-separated; the service rebuilds and checks the CallFilter. */

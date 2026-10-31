@@ -13,6 +13,7 @@ import {
 import type { SessionSnapshot } from "../contracts/sessions.js";
 import type { SessionUsage } from "../contracts/usage.js";
 import { renderCostAggregate } from "../server/clio/http-shims.js";
+import { withQuotaDisplay } from "../server/services/usage-display.js";
 
 const cost = (knownUsd: number, extra: Partial<SessionUsage["session"]["cost"]> = {}) => {
 	const value = { knownUsd, calls: 2, estimated: false, unknown: false, free: false, ...extra };
@@ -237,7 +238,8 @@ test("the read model's displays win over the v1 counts wherever the usage read c
 });
 
 test("quota cards say what each provider reported, and a stale reading says so", () => {
-	const cards = quotaCards(usage);
+	// Served as the server words it: an agent without a quota fold leaves only the v1 shares, worded there.
+	const cards = quotaCards(withQuotaDisplay(usage, undefined));
 	assert.deepEqual(cards.status, "read");
 	assert.deepEqual(
 		cards.status === "read" ? cards.cards.map((card) => [card.name, card.word, card.tone, card.note]) : [],
@@ -247,12 +249,54 @@ test("quota cards say what each provider reported, and a stale reading says so",
 		],
 	);
 	assert.deepEqual(cards.status === "read" ? cards.cards[0]?.windows : [], [
-		{ label: "5h", used: "71%", share: 71.4, resetsAt: "2026-09-26T13:00:00.000Z", binding: true },
+		{ label: "5h", used: "71.4%", share: 71.4, resetsAt: "2026-09-26T13:00:00.000Z", binding: true },
 	]);
 	assert.deepEqual(quotaCards({ ...usage, quota: { status: "failed", reason: "quota cache locked" } }), {
 		status: "failed",
 		reason: "Quota could not be read: quota cache locked",
 	});
+	// The read model's fold wins wherever it holds the provider, and an account only the journal still holds keeps a card.
+	const window = (key: string, label: string | null, value: number) => ({
+		key,
+		label,
+		usedPct: { fact: { kind: "measured" as const, value, source: "provider" as const }, display: `${value.toFixed(1)}%` },
+		resetsAt: null,
+	});
+	const folded = quotaCards(
+		withQuotaDisplay(usage, {
+			v: 1,
+			foldVersion: 1,
+			generatedAt: "2026-09-26T10:05:00.000Z",
+			kind: "quota",
+			providers: [
+				{
+					provider: "anthropic-max",
+					source: "response-headers",
+					observedAt: "2026-09-26T10:04:00.000Z",
+					stale: false,
+					windows: [window("five_hour", "5h", 80)],
+				},
+				{
+					provider: "gemini",
+					source: "stream-event",
+					observedAt: "2026-09-25T10:00:00.000Z",
+					stale: true,
+					windows: [window("daily", null, 12)],
+				},
+			],
+		} as unknown as Parameters<typeof withQuotaDisplay>[1]),
+	);
+	assert.deepEqual(folded.status === "read" ? folded.cards[0]?.windows : [], [
+		{ label: "5h", used: "80.0%", share: 80, resetsAt: null, binding: true },
+	]);
+	assert.deepEqual(
+		folded.status === "read" ? folded.cards.map((card) => [card.key, card.word, card.windows[0]?.label ?? null]) : [],
+		[
+			["anthropic-max", "Read", "5h"],
+			["codex", "Not signed in", null],
+			["gemini", "Last reading", "daily"],
+		],
+	);
 });
 
 test("parked usage shows recorded totals without exposing live model details or quota", () => {
