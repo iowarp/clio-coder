@@ -96,14 +96,13 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Source labels, approved destinations, worker admission, and refusal recovery | [Information Flow](guide/information-flow.md) |
 | System One decision sites, record-only safety observations, calibration, shadow mode, and the opt-in dataset | [System One](guide/system-one.md) |
 | Required checks by changed path, fresh verification snapshots, and completion findings | [Project Quality Policies](guide/quality-policy.md) |
-| The `/view` artifact viewer, trace retention, the evidence spine, cross-session usage facts, the accountability panel, and receipt integrity | [Observability](architecture/observability.md) |
-| Durable evidence bundles, findings, and reviewed memory | [Evidence and Memory](architecture/evidence-and-memory.md) |
-| SQLite trace mirror, schemas, cursors, and rebuildability | [Trace Store](architecture/trace-store.md) |
-| The call journal's rules, record format, fact vocabulary, capture modes and consent, objects, export, and retention | [Telemetry](architecture/telemetry.md) |
+| The `/view` artifact viewer | [Observability](architecture/observability.md#view) |
+| Run evidence assessments, findings, and reviewed memory | [Evidence and Memory](architecture/evidence-and-memory.md) |
+| Telemetry events, per-scope journals, capture modes and consent, objects, seals and bundles, verify, share and import, retention, and the read model | [Telemetry](architecture/telemetry.md) |
 | Where generated files live and who should read them | [Artifact Placement](architecture/artifact-placement.md) |
 | Versioned artifact schemas and migration policy | [Artifact Versions](architecture/artifact-versions.md) |
 
-Receipts link execution observations to tool activity and results. Project checks,
+Run journals link execution observations to tool activity and results. Project checks,
 reference data, and review define the acceptance criteria for a change.
 
 ## Delegation and fleets
@@ -111,12 +110,12 @@ reference data, and review define the acceptance criteria for a change.
 | Topic | Guide |
 | --- | --- |
 | Built-in worker agents, discovery, frontmatter, and admission | [Built-in Agents](guide/built-in-agents.md) |
-| Playbooks, local and multi-node fleet execution, placement, gates, and receipts | [Fleet Dispatch](guide/fleet-dispatch.md) |
+| Playbooks, local and multi-node fleet execution, placement, gates, and run records | [Fleet Dispatch](guide/fleet-dispatch.md) |
 | Capacity leases, heartbeats, locks, and node drain control | [Capacity and Scheduling](architecture/capacity-and-scheduling.md) |
 | Worker process protocol, watchdogs, exit mapping, the refusal limit and denial format, failure classification and retries, and route history labels | [Worker Dispatch Mechanics](architecture/worker-dispatch-mechanics.md) |
 | Worker context inheritance, fork, and splice modes | [Worker Context](architecture/worker-context.md) |
 | Typed dispatch intent and compatibility boundaries | [Dispatch Typed Intent](architecture/dispatch-typed-intent.md) |
-| The contracts the dispatch domain shares: plan compilation, reservation, attempt identity, admission, write attribution, receipt authority, and import direction | [Dispatch Domain Boundaries](architecture/dispatch-architecture-rationale.md) |
+| The contracts the dispatch domain shares: plan compilation, reservation, attempt identity, admission, write attribution, run record authority, and import direction | [Dispatch Domain Boundaries](architecture/dispatch-architecture-rationale.md) |
 
 ## Automation and integration
 
