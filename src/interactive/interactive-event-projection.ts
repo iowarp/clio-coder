@@ -138,6 +138,13 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				// The compaction receipt follows them: the operation's result card now
 				// carries the measured reduction in the transcript (p9/D3).
 				if (event.level === "info" && event.text.startsWith("[context engine] ")) {
+					// The card already records masked observations and tokens; dropped
+					// thinking is the only extra fact in a mask receipt (D6f).
+					if (
+						event.text.startsWith("[context engine] mask_observations: ") &&
+						!event.text.includes(" thinking blocks dropped")
+					)
+						return;
 					deps.notify("info", event.text, "compaction-notice");
 					return;
 				}
