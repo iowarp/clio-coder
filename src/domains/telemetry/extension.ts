@@ -212,7 +212,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			.acquire(origin, "main")
 			.then(async (lease) => {
 				try {
-					if (lease.journaled) telemetryHub().emit(kind, data, lease.context);
+					// A session seals at every close; a resume continues the chain past the seal (#434).
+					if (lease.journaled && telemetryHub().emit(kind, data, lease.context) && kind === "session.closed")
+						await lease.seal?.();
 				} finally {
 					await lease.release();
 				}

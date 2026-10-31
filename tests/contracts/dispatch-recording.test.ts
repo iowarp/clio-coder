@@ -302,16 +302,16 @@ it("dispatch preserves the explicit capture option with journal history disabled
 			equal(journal.damaged, 0);
 			deepStrictEqual(
 				journal.records.map(({ record }) => record.k),
-				["call.started", "call.settled", "run.settled"],
+				["run.started", "call.started", "call.settled", "run.settled", "run.sealed"],
 			);
-			const settled = journal.records[2]?.record;
+			const settled = journal.records[3]?.record;
 			ok(settled?.k === "run.settled");
 			equal(settled.data.terminalReason, receipt.terminalReason);
 			deepStrictEqual(settled.data.callIds, receipt.callIds);
-			deepStrictEqual(receipt.callIds, [journal.records[0]?.record.ctx.callId]);
+			deepStrictEqual(receipt.callIds, [journal.records[1]?.record.ctx.callId]);
 			ok(
 				journal.records
-					.slice(0, 2)
+					.slice(1, 3)
 					.every(
 						({ record, origin }) =>
 							record.ctx.sessionId === (placed ? null : "original-session") &&
@@ -326,7 +326,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 				const reference = references[0]?.record;
 				ok(reference?.k === "call.linked");
 				equal(reference.data.runId, handle.runId);
-				equal(reference.data.callId, journal.records[0]?.record.ctx.callId);
+				equal(reference.data.callId, journal.records[1]?.record.ctx.callId);
 				equal(reference.ctx.runId, undefined, "references use the session writer, never the run writer");
 			}
 			equal(
@@ -423,15 +423,17 @@ it("a worker killed mid-call keeps the calls it settled and settles its open att
 		deepStrictEqual(
 			records.map((record) => (record.k === "journal.gap" ? `gap:${record.data.reason}` : record.k)),
 			[
+				"run.started",
 				...Array.from({ length: 3 }, () => ["call.started", "call.settled"]).flat(),
 				"call.started",
 				"gap:writer-drop",
 				"call.settled",
 				"run.settled",
+				"run.sealed",
 			],
 		);
-		const open = records[6];
-		const settled = records[8];
+		const open = records[7];
+		const settled = records[9];
 		ok(open?.k === "call.started" && settled?.k === "call.settled");
 		equal(settled.data.attemptId, open.data.attemptId);
 		equal(settled.data.disposition, "sent_unsettled");

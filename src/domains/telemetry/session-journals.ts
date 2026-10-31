@@ -40,6 +40,8 @@ export interface TelemetrySessionLease {
 		facts: Omit<EventPayload<"prompt.compiled">, "structure">,
 		ctx: TelemetryContext,
 	): void;
+	/** Seal the session scope at its close; records the lease writes afterwards make it live again (#434). */
+	seal?(): Promise<boolean>;
 	release(): Promise<void>;
 }
 
@@ -64,6 +66,8 @@ interface Entry {
 	closing?: Promise<void>;
 	/** Pending close of a writer no work holds; the next lease cancels it (#434). */
 	idle?: NodeJS.Timeout | undefined;
+	/** The session sealed under this writer; the last release closes it at once instead of idling (#434). */
+	sealed?: boolean;
 }
 
 /**
@@ -225,6 +229,13 @@ export function createSessionJournals(
 				}
 				return refs;
 			},
+			async seal() {
+				const journal = released ? null : await owned.journal;
+				if (!journal) return false;
+				// An idle writer still receives health samples, and any later record would make the closed session live.
+				owned.sealed = true;
+				return journal.seal();
+			},
 			recordPromptCompiled(structure, facts, callContext) {
 				if (released || owned.promptStructures.has(structure.id)) return;
 				if (telemetryHub().emit("prompt.compiled", { ...facts, structure }, callContext))
@@ -242,6 +253,10 @@ export function createSessionJournals(
 					report();
 				}
 				if (owned.users !== 0 || owned.closing || owned.idle) return;
+				if (owned.sealed) {
+					await close(origin.id, owned);
+					return;
+				}
 				owned.idle = setTimeout(() => {
 					owned.idle = undefined;
 					if (owned.users === 0) void close(origin.id, owned);

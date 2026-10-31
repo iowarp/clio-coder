@@ -137,12 +137,13 @@ it("a session's lifecycle events journal opening, resuming, parking and closing 
 			"session.parked",
 			"session.parked",
 			"session.resumed",
+			"session.sealed",
 		]);
 		ok(records.every((record) => record.ctx.sessionId === origin.id));
 		const liveRecords = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), live.id))).records;
 		deepStrictEqual(
 			liveRecords.flatMap(({ record }) => (record.k.startsWith("session.") ? [record.k] : [])),
-			["session.opened", "session.closed"],
+			["session.opened", "session.closed", "session.sealed"],
 		);
 		const sessionChange = liveRecords.find(({ record }) => record.k === "config.changed")?.record.data as
 			| EventPayload<"config.changed">

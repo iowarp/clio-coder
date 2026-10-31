@@ -104,6 +104,8 @@ export async function settleOrphanedRunJournal(directory: string, facts: EventPa
 		writer: await clioWriterVersions(),
 	});
 	writer.enqueue({ kind: "run.settled", data: facts, ctx: context, wallMs: Date.now(), mono: performance.now() });
+	// The recovered terminal is the run's terminal, so it seals the run scope (#434).
+	await writer.seal();
 	await writer.close();
 }
 
@@ -153,9 +155,13 @@ export async function openFleetRootTelemetry(
 		close() {
 			if (closing) return closing;
 			fleetRoots.delete(rootId);
-			closing = writer.close().catch(() => {
-				writeDiagnostic("[clio-coder:telemetry] fleet root journal close failed; recorded coverage may be incomplete\n");
-			});
+			// The root's loop ending is its terminal, so it seals the root's run scope (#434).
+			closing = writer
+				.seal()
+				.then(() => writer.close())
+				.catch(() => {
+					writeDiagnostic("[clio-coder:telemetry] fleet root journal close failed; recorded coverage may be incomplete\n");
+				});
 			return closing;
 		},
 	};
@@ -303,12 +309,10 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 		close() {
 			if (closing) return closing;
 			journal.closed = true;
-			closing = writer
-				.close()
-				.then(reportHealth)
-				.catch(() => {
-					writeDiagnostic("[clio-coder:telemetry] run journal close failed; recorded coverage may be incomplete\n");
-				});
+			// A run seals once at its terminal; a writer that closes before run.settled leaves the scope unsealed (#434).
+			closing = (settled ? writer.seal().then(() => writer.close()) : writer.close()).then(reportHealth).catch(() => {
+				writeDiagnostic("[clio-coder:telemetry] run journal close failed; recorded coverage may be incomplete\n");
+			});
 			return closing;
 		},
 	};

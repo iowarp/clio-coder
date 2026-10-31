@@ -27,7 +27,7 @@ export interface ProcessJournal {
 	readonly processId: string;
 	/** Flush what reached the writer. */
 	flush(): Promise<void>;
-	/** Write `process.exited` when the journal opened, then release it; a journal that never opened stays absent. */
+	/** Write `process.exited` and seal when the journal opened, then release it; one that never opened stays absent. */
 	close(exitCode: number): Promise<void>;
 }
 
@@ -124,6 +124,8 @@ export function createProcessJournal(
 			if (!journal) return;
 			if (dropped > 0) unavailable();
 			journal.enqueue(stamp("process.exited", { exitCode }));
+			// An orderly exit seals the process scope (#434).
+			await journal.seal();
 			await journal.close();
 		},
 	};
