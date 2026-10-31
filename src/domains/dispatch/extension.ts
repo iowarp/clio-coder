@@ -4755,10 +4755,9 @@ export function createDispatchBundle(
 				depth: run.lineage.depth,
 			},
 		};
-		// A run-id hint names only the first attempt (and, for task worktrees,
-		// the worktree it created). A retry shares the assignment lineage but
-		// must receive its own ledger/run identity.
-		delete retryReq.runIdHint;
+		// Every retry needs a fresh identity before preparation so its worker and
+		// settlement share one run journal, independently of assignment lineage (#434).
+		retryReq.runIdHint = newRunId();
 		let terminal: Promise<RunResult> | undefined;
 		const reasonKey = retryReasonKey(controlRootFor(run.runId), attempt);
 		retryReasons.set(reasonKey, reason);
@@ -9387,11 +9386,9 @@ export function createDispatchBundle(
 			// Validate before creating worktrees or acquiring writer/capacity leases.
 			previewFixed(req);
 		}
-		// A retry joins its first attempt's writer group through lineage.rootRunId,
-		// which is the first attempt's run id, so a top-level run takes that id
-		// before the writer lease. dispatchAttempt would otherwise assign it later.
-		if (req.lineage === undefined && req.runIdHint === undefined && req.worktree !== true)
-			req = { ...req, runIdHint: newRunId() };
+		// Every attempt takes its own run identity before the writer lease; retries
+		// join the original writer group through lineage.rootRunId (#434).
+		if (req.runIdHint === undefined && req.worktree !== true) req = { ...req, runIdHint: newRunId() };
 		let prepared =
 			preparation?.deadlineAt === undefined
 				? req
