@@ -99,8 +99,8 @@ function lockfileAgeMs(lockPath: string): number | null {
 	}
 }
 
-/** True once the lock is ours. Steals only from an owner that is provably gone. */
-function tryAcquire(lockPath: string): boolean {
+/** Create the lock file exclusively; false when it already exists. */
+function createLock(lockPath: string): boolean {
 	try {
 		const fd = openSync(lockPath, "wx", 0o600);
 		try {
@@ -114,18 +114,25 @@ function tryAcquire(lockPath: string): boolean {
 		return true;
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+		return false;
 	}
+}
+
+/** True once the lock is ours. Steals only from an owner that is provably gone. */
+function tryAcquire(lockPath: string): boolean {
+	if (createLock(lockPath)) return true;
 	const owner = readLockOwner(lockPath);
 	const ageMs = lockfileAgeMs(lockPath);
 	const abandoned = owner !== null ? !ownerIsAlive(owner) : ageMs !== null && ageMs > STALE_LOCK_MS;
-	if (abandoned) {
-		try {
-			unlinkSync(lockPath);
-		} catch {
-			// Another waiter reclaimed it first; the next attempt races normally.
-		}
+	if (!abandoned) return false;
+	try {
+		unlinkSync(lockPath);
+	} catch {
+		// Another waiter reclaimed it first; the attempt below races normally.
 	}
-	return false;
+	// Acquire in the same attempt as the reclaim: a caller with no wait budget, such as a recovery writer, would
+	// otherwise reclaim a dead owner's lock and still give up (#434).
+	return createLock(lockPath);
 }
 
 /** The acquisition budget ran out while another holder kept the lock. Callers that refuse on it can tell it from a failure. */
