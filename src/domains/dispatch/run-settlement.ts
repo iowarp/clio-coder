@@ -6,6 +6,7 @@
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { RunResultObject, RunSettled } from "../../core/telemetry/schemas.js";
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../agents/result-contract.js";
+import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
 import { runContextProvenance } from "../evidence/trust-status.js";
 import { redactSecretString } from "../safety/redaction.js";
 import { telemetryObjectRef } from "../telemetry/objects.js";
@@ -115,7 +116,7 @@ export function settleFinishedRun(
 ): RunSettlement {
 	const usage = input.usage ?? unobservedRunUsageFacts();
 	const host = receipt.hostVerification;
-	return {
+	return redactedSettlement({
 		facts: {
 			version: 1,
 			agentId: receipt.agentId,
@@ -276,7 +277,7 @@ export function settleFinishedRun(
 					}
 				: null,
 		},
-	};
+	});
 }
 
 /**
@@ -293,7 +294,7 @@ export function settleUnfinishedRun(
 		processExitCode: number | null;
 	},
 ): RunSettlement {
-	return {
+	return redactedSettlement({
 		facts: {
 			version: 1,
 			agentId: run.agentId,
@@ -348,12 +349,20 @@ export function settleUnfinishedRun(
 			checkoutChanges: null,
 			hostVerification: null,
 		},
-	};
+	});
 }
 
 /** The record the journal writes once the result object is stored. */
 export function runSettledRecord(settlement: RunSettlement, result: RunSettled["result"]): EventPayload<"run.settled"> {
 	return { ...settlement.facts, result };
+}
+
+/**
+ * The journal deep-redacts every record it writes. Settling facts that already passed the same redaction makes that
+ * pass leave them unchanged, so the digest a producer computes names the payload the journal persists (#434).
+ */
+function redactedSettlement(settlement: RunSettlement): RunSettlement {
+	return { ...settlement, facts: redactSecretsDeep(settlement.facts, createRedactionTally()) };
 }
 
 /** A finished run as dispatch hands it to its caller, and the settlement its journal records from the same facts. */
