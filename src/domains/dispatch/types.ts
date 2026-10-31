@@ -932,13 +932,10 @@ export interface RunHostVerification {
 	reason?: string;
 	checks: RunHostVerificationCheck[];
 	/**
-	 * How the declared checks were run. Absent means the single-run strategy every
-	 * receipt carried before batch settlement existed: the checks ran for this run
-	 * alone, straight after it finished. `batch-settled` means they ran once for
-	 * the whole parallel batch after every live member had finished. The field is
-	 * omitted rather than stamped `"single"` so a single-task receipt digests
-	 * exactly as it did before (`receipt-integrity.ts:145-147` is the same
-	 * reasoning applied one field over).
+	 * How the declared checks were run. Absent means the single-run strategy: the
+	 * checks ran for this run alone, straight after it finished. `batch-settled`
+	 * means they ran once for the whole parallel batch after every live member had
+	 * finished.
 	 */
 	strategy?: "batch-settled";
 	/** Per-failing-check attribution for a batch-settled run; absent when nothing failed. */

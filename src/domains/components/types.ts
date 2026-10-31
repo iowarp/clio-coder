@@ -9,7 +9,7 @@ export const COMPONENT_KINDS = [
 	"safety-rule-pack",
 	"config-schema",
 	"session-schema",
-	"receipt-schema",
+	"run-schema",
 	"memory",
 	"doc-spec",
 ] as const;

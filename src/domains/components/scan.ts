@@ -21,7 +21,7 @@ const KIND_ORDER: ReadonlyArray<ComponentKind> = [
 	"safety-rule-pack",
 	"config-schema",
 	"session-schema",
-	"receipt-schema",
+	"run-schema",
 	"context-file",
 	"doc-spec",
 	"middleware",
@@ -39,7 +39,7 @@ const AUTHORITY_BY_KIND: Record<ComponentKind, ComponentAuthority> = {
 	"safety-rule-pack": "enforcing",
 	"config-schema": "runtime-critical",
 	"session-schema": "runtime-critical",
-	"receipt-schema": "runtime-critical",
+	"run-schema": "runtime-critical",
 	memory: "advisory",
 	"doc-spec": "descriptive",
 };
@@ -55,7 +55,7 @@ const RELOAD_BY_KIND: Record<ComponentKind, ComponentReloadClass> = {
 	"safety-rule-pack": "restart-required",
 	"config-schema": "restart-required",
 	"session-schema": "restart-required",
-	"receipt-schema": "restart-required",
+	"run-schema": "restart-required",
 	memory: "hot",
 	"doc-spec": "static",
 };
@@ -71,7 +71,7 @@ const OWNER_BY_KIND: Record<ComponentKind, string> = {
 	"safety-rule-pack": "safety",
 	"config-schema": "config",
 	"session-schema": "session",
-	"receipt-schema": "dispatch",
+	"run-schema": "dispatch",
 	memory: "memory",
 	"doc-spec": "docs",
 };
@@ -90,10 +90,7 @@ const SESSION_SCHEMA_FILES: ReadonlyArray<string> = [
 	"src/engine/session.ts",
 ];
 
-const RECEIPT_SCHEMA_FILES: ReadonlyArray<string> = [
-	"src/domains/dispatch/types.ts",
-	"src/domains/dispatch/receipt-integrity.ts",
-];
+const RUN_SCHEMA_FILES: ReadonlyArray<string> = ["src/domains/dispatch/types.ts", "src/domains/telemetry/seal.ts"];
 
 const CONTEXT_FILES: ReadonlyArray<string> = ["CLIO-CODER.md", "CONTRIBUTING.md", "SECURITY.md"];
 
@@ -114,7 +111,7 @@ async function scanComponents(root: string): Promise<HarnessComponent[]> {
 	components.push(...(await collectSafetyRulePacks(absoluteRoot)));
 	components.push(...(await collectKnownFiles(absoluteRoot, CONFIG_SCHEMA_FILES, "config-schema")));
 	components.push(...(await collectKnownFiles(absoluteRoot, SESSION_SCHEMA_FILES, "session-schema")));
-	components.push(...(await collectKnownFiles(absoluteRoot, RECEIPT_SCHEMA_FILES, "receipt-schema")));
+	components.push(...(await collectKnownFiles(absoluteRoot, RUN_SCHEMA_FILES, "run-schema")));
 	components.push(...(await collectKnownFiles(absoluteRoot, CONTEXT_FILES, "context-file")));
 	components.push(...(await collectRecursive(absoluteRoot, "docs/specs", ".md", "doc-spec")));
 	return sortComponents(components);
