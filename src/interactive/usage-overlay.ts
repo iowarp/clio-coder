@@ -10,7 +10,7 @@ import type { GitChanges } from "../domains/session/workspace/git-probe.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
-import { matchesKey, wrapTextWithAnsi } from "../engine/tui.js";
+import { matchesKey, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { ACTIVITY_SPAN_DAYS, bucketActivity, renderActivityHeatmap } from "./activity-view.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
@@ -68,18 +68,25 @@ function contributed(quantity: Quantity): boolean {
  */
 const REASONING_NOTE = "provider-reported only";
 
-// A block of key-value rows in the design-system grammar: a dim padded key and
-// a muted value. Primary values are right-aligned inside the block so the
-// Numbers line up under one another; an optional annotation uses supporting ink after
-// its value and stays outside the alignment math, so a long aside never drags
-// the whole column right.
-function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>): string[] {
+function kvBlock(entries: ReadonlyArray<readonly [string, string, string?]>, contentWidth: number): string[] {
 	const theme = clioTheme();
-	const keyWidth = entries.reduce((max, [key]) => Math.max(max, key.length), 0);
-	const valueWidth = entries.reduce((max, [, value]) => Math.max(max, value.length), 0);
-	return entries.map(([key, value, annotation]) => {
-		const row = `${theme.fg("fieldName", key.padEnd(keyWidth))}  ${theme.fg("counter", value.padStart(valueWidth))}`;
-		return annotation ? `${row} ${theme.fg("annotation", annotation)}` : row;
+	const keyWidth = entries.reduce((max, [key]) => Math.max(max, visibleWidth(key)), 0);
+	const columnLimit = Math.min(12, Math.max(0, contentWidth - keyWidth - 2));
+	const valueWidth = entries.reduce((max, [, value]) => {
+		const width = visibleWidth(value);
+		return width <= columnLimit ? Math.max(max, width) : max;
+	}, 0);
+	return entries.flatMap(([key, value, annotation]) => {
+		const text = `${theme.fg("counter", value)}${annotation ? ` ${theme.fg("annotation", annotation)}` : ""}`;
+		const textWidth = visibleWidth(text);
+		const rowKeyWidth =
+			visibleWidth(key) + 2 + textWidth <= contentWidth ? Math.min(keyWidth, contentWidth - textWidth - 2) : keyWidth;
+		const prefix = `${theme.fg("fieldName", padAnsi(key, rowKeyWidth))}  `;
+		const availableWidth = Math.max(1, contentWidth - rowKeyWidth - 2);
+		const padding = Math.max(0, Math.min(valueWidth - visibleWidth(value), availableWidth - textWidth));
+		return wrapTextWithAnsi(`${" ".repeat(padding)}${text}`, availableWidth).map(
+			(line, index) => `${index === 0 ? prefix : " ".repeat(rowKeyWidth + 2)}${line}`,
+		);
 	});
 }
 
@@ -118,7 +125,7 @@ function tokenRows(view: TelemetryView, model?: string): Array<readonly [string,
  * The Session tab: every call this session paid for, across every branch, as the telemetry read model folds it
  * (#434 §11.3). Nothing here adds or subtracts; an unknown cache read reads `unknown`, never `0`.
  */
-function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null): string[] {
+function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null, contentWidth: number): string[] {
 	const session = view.session();
 	const byRole = view.cost("role");
 	const cache = view.cache();
@@ -130,34 +137,37 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null): stri
 	// A measured zero read is a cache that served nothing, which the rows say; only a session no call fed hides them.
 	const cached = contributed(cache.cacheRead) || contributed(cache.cacheWrite) || contributed(cache.rePrefilled);
 	const v = cache.verdicts;
-	return kvBlock([
-		...groups.map(
-			(group) => [ROLE_CAPTION[group.key as AgentRole] ?? `${group.key} calls`, group.calls.display] as const,
-		),
-		["model calls", byRole.total.calls.display],
-		["harness overhead", session.overhead.share.display],
-		...(hasUnknown(tokenCoverage) ? [["token coverage", renderCoverage(tokenCoverage.fact)] as const] : []),
-		...(nonZero(neverSent) ? [["never sent", `${neverSent.display} calls`] as const] : []),
-		...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
-		...tokenRows(view),
-		...(cached
-			? [
-					["uncached prefill", cache.uncachedPrefill.display] as const,
-					["re-prefilled", cache.rePrefilled.display, `${cache.breaks.length} breaks`] as const,
-					["cache-break bill", cache.breakUsd.display] as const,
-					[
-						"cache verdicts",
-						`hot ${v.hot} · partial ${v.partial} · cold ${v.cold} · small ${v.small} · unknown ${v.unknown}`,
-					] as const,
-				]
-			: []),
-		// #422: a recalled body is written to the cache once and read on every later
-		// request, the same as if it had never left; the tokens here are what the
-		// model asked back, not the recall requests' own prefix reads.
-		...(recall !== null && hasRecallTelemetry(recall)
-			? [["recalled into context", formatRecallTelemetry(recall), "estimate · excludes operator recalls"] as const]
-			: []),
-	]);
+	return kvBlock(
+		[
+			...groups.map(
+				(group) => [ROLE_CAPTION[group.key as AgentRole] ?? `${group.key} calls`, group.calls.display] as const,
+			),
+			["model calls", byRole.total.calls.display],
+			["harness overhead", session.overhead.share.display],
+			...(hasUnknown(tokenCoverage) ? [["token coverage", renderCoverage(tokenCoverage.fact)] as const] : []),
+			...(nonZero(neverSent) ? [["never sent", `${neverSent.display} calls`] as const] : []),
+			...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
+			...tokenRows(view),
+			...(cached
+				? [
+						["uncached prefill", cache.uncachedPrefill.display] as const,
+						["re-prefilled", cache.rePrefilled.display, `${cache.breaks.length} breaks`] as const,
+						["cache-break bill", cache.breakUsd.display] as const,
+						[
+							"cache verdicts",
+							`hot ${v.hot} · partial ${v.partial} · cold ${v.cold} · small ${v.small} · unknown ${v.unknown}`,
+						] as const,
+					]
+				: []),
+			// #422: a recalled body is written to the cache once and read on every later
+			// request, the same as if it had never left; the tokens here are what the
+			// model asked back, not the recall requests' own prefix reads.
+			...(recall !== null && hasRecallTelemetry(recall)
+				? [["recalled into context", formatRecallTelemetry(recall), "estimate · excludes operator recalls"] as const]
+				: []),
+		],
+		contentWidth,
+	);
 }
 
 /** The Models tab: one block per `target/model`, the reported model where the provider named one. */
@@ -170,11 +180,14 @@ function modelLines(view: TelemetryView, contentWidth: number): string[] {
 		if (index > 0) lines.push("");
 		lines.push(theme.style("modelIdentity", group.key, { bold: true }));
 		lines.push(
-			...kvBlock([
-				["model calls", group.calls.display],
-				...(contributed(group.usd) ? [["cost", group.usd.display] as const] : []),
-				...tokenRows(view, group.key),
-			]),
+			...kvBlock(
+				[
+					["model calls", group.calls.display],
+					...(contributed(group.usd) ? [["cost", group.usd.display] as const] : []),
+					...tokenRows(view, group.key),
+				],
+				contentWidth,
+			),
 		);
 	}
 	return [rule(theme, contentWidth), ...lines];
@@ -342,7 +355,7 @@ class UsageOverlayBody implements Component {
 				theme.style("sectionHeading", "Session tokens & cost", { bold: true }),
 				theme.fg("annotation", "Every call this session paid for, across every branch · estimates and gaps are marked"),
 				"",
-				...(data.view ? summaryBlock(data.view, data.recall) : [theme.fg("annotation", NOT_AVAILABLE)]),
+				...(data.view ? summaryBlock(data.view, data.recall, contentWidth) : [theme.fg("annotation", NOT_AVAILABLE)]),
 				"",
 				rule(theme, contentWidth),
 				theme.fg("annotation", "Session tokens cannot be converted to subscription percentages."),
