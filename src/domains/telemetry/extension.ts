@@ -37,6 +37,8 @@ import { createHealthWindows } from "./health-window.js";
 import { storeTelemetryObject } from "./objects.js";
 import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
 import { telemetrySessionDirectory } from "./paths.js";
+import type { ProcessJournal } from "./process-journal.js";
+import { createProcessJournal } from "./process-journal.js";
 import { createTelemetryProjection } from "./projection.js";
 import type { SessionCapture, TelemetrySessionOrigin } from "./session-journals.js";
 import { createSessionJournals } from "./session-journals.js";
@@ -301,6 +303,8 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		},
 	);
 	const telemetry = createLiveTelemetryModel({ stateDir: clioStateDir });
+	// Every host that boots this domain (TUI, ACP, headless run, fleet) owns one process journal, opened lazily (#434).
+	let processJournal: ProcessJournal | undefined;
 	// A change touching several effect kinds reaches each listener with one payload; it is one change (#434).
 	const recordedChanges = new WeakSet<object>();
 	const settingsChangeData = (
@@ -386,6 +390,13 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 
 	const extension: DomainExtension = {
 		async start() {
+			try {
+				processJournal ??= createProcessJournal(clioStateDir(), () =>
+					writeDiagnostic("[clio-coder:telemetry] process journal unavailable; coverage is incomplete\n"),
+				);
+			} catch {
+				// Another bundle in this process already owns the process journal; one per process (#434).
+			}
 			const settings = config();
 			if (settings) {
 				for (const kind of ["hotReload", "nextTurn", "restartRequired"] as const)
@@ -435,6 +446,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			liveSession = null;
 			await Promise.all(pendingSettingsRecords);
 			await journals.closeAll();
+			// A process that recorded nothing process-scoped never opened a journal, and closing it writes nothing.
+			await processJournal?.close(typeof process.exitCode === "number" ? process.exitCode : 0);
+			processJournal = undefined;
 			telemetry.stop();
 			for (const off of unsubscribes) off();
 			unsubscribes.length = 0;

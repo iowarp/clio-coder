@@ -23,6 +23,11 @@ export const TelemetryContextSchema = Type.Union([
 		{ additionalProperties: false },
 	),
 	Type.Object({ ...contextFields, sessionId: Type.Null(), runId: ExistingId }, { additionalProperties: false }),
+	// A record that names neither a session nor a run belongs to the process that wrote it (#434).
+	Type.Object(
+		{ ...contextFields, sessionId: Type.Null(), runId: Type.Optional(Type.Never()), processId: ExistingId },
+		{ additionalProperties: false },
+	),
 ]);
 export type TelemetryContext = Readonly<Static<typeof TelemetryContextSchema>>;
 export type WorkerTelemetryContext = TelemetryContext & { readonly runId: string; readonly label: "worker" };
@@ -40,6 +45,7 @@ export function isWorkerTelemetryContext(value: unknown): value is WorkerTelemet
 
 /** Run facts belong to their run even when a parent session exists (#434). */
 export function telemetryOwner(context: TelemetryContext): string {
+	if ("processId" in context) return `process:${context.processId}`;
 	return context.runId !== undefined ? `run:${context.runId}` : `session:${context.sessionId}`;
 }
 

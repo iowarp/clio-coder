@@ -40,6 +40,8 @@ export interface TelemetrySink {
 }
 
 const sinks = new Map<string, TelemetrySink>();
+/** Owns records whose context names neither a session nor a run; the writer stamps its own context on them (#434). */
+let processOwner: { context: TelemetryContext; sink: TelemetrySink } | undefined;
 const liveAttempts = new Map<string, TelemetryCall>();
 let unownedRecords = 0;
 let sinkFailures = 0;
@@ -50,6 +52,15 @@ export function registerTelemetrySink(sessionId: string, sink: TelemetrySink): (
 
 export function registerRunTelemetrySink(runId: string, sink: TelemetrySink): () => void {
 	return registerSink(`run:${runId}`, sink);
+}
+
+export function registerProcessTelemetrySink(context: TelemetryContext, sink: TelemetrySink): () => void {
+	if (processOwner) throw new Error("telemetry already has a process owner");
+	const owner = { context, sink };
+	processOwner = owner;
+	return () => {
+		if (processOwner === owner) processOwner = undefined;
+	};
 }
 
 function registerSink(owner: string, sink: TelemetrySink): () => void {
@@ -73,7 +84,7 @@ function sinkAdmits(sink: TelemetrySink, kind: JournalEventName): boolean {
  * the mode drops (#434). It answers for this moment only: the record itself is still filtered when it is enqueued.
  */
 export function telemetryCaptures(kind: JournalEventName, ctx = telemetryContext()): boolean {
-	const sink = ctx ? sinks.get(telemetryOwner(ctx)) : undefined;
+	const sink = ctx ? sinks.get(telemetryOwner(ctx)) : processOwner?.sink;
 	if (!sink) return false;
 	try {
 		return sinkAdmits(sink, kind);
@@ -87,10 +98,11 @@ function enqueueTelemetry(
 	name: EventName,
 	data: unknown,
 	preimage: unknown,
-	ctx: TelemetryContext | undefined,
+	given: TelemetryContext | undefined,
 ): boolean {
 	if (!isJournalEvent(name)) return false;
-	const sink = ctx ? sinks.get(telemetryOwner(ctx)) : undefined;
+	const ctx = given ?? processOwner?.context;
+	const sink = given ? sinks.get(telemetryOwner(given)) : processOwner?.sink;
 	if (!ctx || !sink) {
 		unownedRecords += 1;
 		return false;

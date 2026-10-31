@@ -526,7 +526,9 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 					return closing;
 				},
 			};
-			if (options.context.runId !== undefined) unregister = registerRunTelemetrySink(options.context.runId, journal);
+			// The process journal's lazy owner holds the producer's process registration itself (process-journal.ts).
+			if ("processId" in options.context) unregister = undefined;
+			else if (options.context.runId !== undefined) unregister = registerRunTelemetrySink(options.context.runId, journal);
 			else if (options.context.sessionId !== null) unregister = registerTelemetrySink(options.context.sessionId, journal);
 			else throw new Error("telemetry journal requires a session or run owner");
 			openJournalHealth.set(hubOwner, health);

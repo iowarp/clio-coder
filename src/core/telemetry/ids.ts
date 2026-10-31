@@ -17,6 +17,8 @@ function uuidV7(bytes = randomBytes(16), epochMs = Date.now()): string {
 export const newCallId = (): CallId => `cal_${uuidV7()}` as CallId;
 export const newAttemptId = (): AttemptId => `att_${uuidV7()}` as AttemptId;
 export const newRecordId = (): RecordId => `rec_${uuidV7()}` as RecordId;
+/** Minted once per process; names the process journal (#434). */
+export const newProcessId = (): string => `prc_${uuidV7()}`;
 
 /**
  * Stable ids for facts rebuilt from records that already carry identity, such as legacy ledger entries: the same
