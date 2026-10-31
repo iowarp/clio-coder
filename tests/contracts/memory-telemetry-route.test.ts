@@ -23,8 +23,8 @@ const STEP: TaskMemoryTelemetryStep = {
 	bankOperations: 0,
 	droppedOperations: 0,
 	citedEntries: 0,
-	inputTokens: 1_317,
-	outputTokens: 12,
+	inputTokens: { kind: "measured", value: 1_317, source: "provider" },
+	outputTokens: { kind: "measured", value: 12, source: "provider" },
 	latencyMs: 40,
 };
 
@@ -126,9 +126,9 @@ test("linked memory spend follows late journal settlements and deduplicates repe
 		sink.record(step);
 		await journal.flush();
 		const pending = readTaskMemorySpendSummary(home.dir);
-		strictEqual(pending.totalTokens, 0);
+		strictEqual(pending.totalTokens.measured, 0);
 		strictEqual(pending.unresolvedCalls, 1);
-		strictEqual(pending.missingTokenCalls, 0, "an open attempt does not prove an invocation");
+		strictEqual(pending.totalTokens.unknownCount, 1, "an open attempt leaves usage unknown");
 		strictEqual(readTaskMemorySpendSummary(home.dir), pending);
 		call.settle(
 			callSettlementFromMessage(
@@ -141,7 +141,7 @@ test("linked memory spend follows late journal settlements and deduplicates repe
 		);
 		await journal.flush();
 		const settled = readTaskMemorySpendSummary(home.dir);
-		strictEqual(settled.totalTokens, 7);
+		strictEqual(settled.totalTokens.measured, 7);
 		strictEqual(settled.llmSteps, 2);
 		strictEqual(settled.unresolvedCalls ?? 0, 0);
 		strictEqual(readTaskMemorySpendSummary(home.dir), settled);

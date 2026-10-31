@@ -1,5 +1,6 @@
 import { deepStrictEqual, doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
+import { sumFacts } from "../../src/core/telemetry/pricing.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import { emptyTaskMemorySpendSummary } from "../../src/domains/memory/task-memory-spend.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
@@ -75,10 +76,25 @@ test("memory history warnings survive 96-column rendering and cache changes with
 	view.handleInput("\u001b[B");
 	const unavailable = view.render(96);
 	match(unavailable.map(stripTerminalSequences).join(" "), /partial retained spend.*unreadable.*unavailable/u);
-	spend = { ...spend, readableFiles: 1, llmSteps: 312, totalTokens: 165_499, invalidRows: 1, missingTokenCalls: 2 };
+	spend = {
+		...spend,
+		readableFiles: 1,
+		llmSteps: 312,
+		totalTokens: sumFacts([
+			{ kind: "measured", value: 165_499, source: "provider" },
+			{ kind: "unknown", reason: "not-observed" },
+			{ kind: "unknown", reason: "not-observed" },
+		]),
+		invalidRows: 1,
+	};
 	const partial = view.render(96);
 	match(partial.map(stripTerminalSequences).join(" "), /partial retained spend.*unreadable/u);
-	spend = { ...spend, unreadableFiles: 0, invalidRows: 0, missingTokenCalls: 0 };
+	spend = {
+		...spend,
+		unreadableFiles: 0,
+		invalidRows: 0,
+		totalTokens: sumFacts([{ kind: "measured", value: 165_499, source: "provider" }]),
+	};
 	const recovered = view.render(96);
 	doesNotMatch(recovered.map(stripTerminalSequences).join("\n"), /partial|unreadable/u);
 	for (const row of [...unavailable, ...partial, ...recovered]) ok(visibleWidth(row) <= 96);

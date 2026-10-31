@@ -71,7 +71,7 @@ for (const role of ["memory", "compaction"] as const) {
 				});
 				strictEqual(f.fixture.requests[0]?.max_tokens, 1024, "fresh discovered output limit bounds memory");
 				strictEqual(result.text, "323");
-				strictEqual(result.usage?.reasoning, 0);
+				deepStrictEqual(result.usage?.reasoning, { kind: "measured", value: 0, source: "provider" });
 			} else {
 				const state = startSession({ cwd: f.env.dir, target: "chat", model: f.settings.chat.model });
 				let leaf: string | null = null;
@@ -157,9 +157,8 @@ for (const ending of ["deadline", "cancelled"] as const) {
 			const [step] = usage;
 			ok(step);
 			strictEqual(step.failure?.invoked, false, "metadata is not model usage");
-			strictEqual(step.totalTokens, 0);
-			strictEqual(step.costUsd, 0);
-			strictEqual(step.missingTokenCalls, undefined);
+			deepStrictEqual(step.totalTokens, { kind: "absent", reason: "not-applicable" });
+			deepStrictEqual(step.pricing, { usd: { kind: "absent", reason: "not-applicable" }, pricedBy: "none" });
 			strictEqual(f.providers.list()[0]?.health.lastCheckAt, null, "abort is not endpoint-down evidence");
 			const recovered = await route.client.complete({
 				systemPrompt: "fixture",
@@ -167,7 +166,7 @@ for (const ending of ["deadline", "cancelled"] as const) {
 				maxTokens: 512,
 				signal: new AbortController().signal,
 			});
-			strictEqual(recovered.usage?.reasoning, 0);
+			deepStrictEqual(recovered.usage?.reasoning, { kind: "measured", value: 0, source: "provider" });
 			strictEqual(f.fixture.requests.length, 1, "fresh generation can discover and complete");
 		} finally {
 			release();
@@ -188,7 +187,11 @@ test("successful unknown background metadata remains unknown and is not repeated
 				maxTokens: 512,
 				signal: new AbortController().signal,
 			});
-			strictEqual(result.usage?.reasoning, 8, "returned reasoning remains observable");
+			deepStrictEqual(
+				result.usage?.reasoning,
+				{ kind: "measured", value: 8, source: "provider" },
+				"returned reasoning remains observable",
+			);
 			strictEqual(f.fixture.requests.at(-1)?.reasoning_effort, undefined);
 			strictEqual(f.fixture.requests.at(-1)?.allowed_openai_params, undefined);
 		}
@@ -355,7 +358,7 @@ for (const stage of ["metadata", "auth"] as const) {
 					strictEqual(result.usage, null);
 					strictEqual(telemetry.at(-1)?.decision, "dropped");
 				} else {
-					strictEqual(result.usage?.reasoning, 0);
+					deepStrictEqual(result.usage?.reasoning, { kind: "measured", value: 0, source: "provider" });
 					strictEqual(f.fixture.requests[0]?.reasoning_effort, "none");
 				}
 			} finally {

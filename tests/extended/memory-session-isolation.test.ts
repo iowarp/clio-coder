@@ -179,14 +179,14 @@ const response: TaskMemoryModelResponse = {
 	usage: {
 		targetId: "fixture",
 		attributedModelId: "fixture",
-		input: 7,
-		output: 3,
-		cacheRead: 0,
-		cacheWrite: 0,
-		reasoning: 0,
-		totalTokens: 10,
-		costUsd: 0.01,
-		costProvenance: "known",
+		input: { kind: "measured", value: 7, source: "provider" },
+		output: { kind: "measured", value: 3, source: "provider" },
+		cacheRead: { kind: "measured", value: 0, source: "provider" },
+		cacheWrite1h: { kind: "unknown", reason: "provider-omitted" },
+		cacheWrite: { kind: "measured", value: 0, source: "provider" },
+		reasoning: { kind: "measured", value: 0, source: "provider" },
+		totalTokens: { kind: "measured", value: 10, source: "provider" },
+		pricing: { usd: { kind: "measured", value: 0.01, source: "provider" }, pricedBy: "provider" },
 		durationMs: 25,
 		backend: null,
 	},
@@ -387,7 +387,7 @@ test("generation authority blocks bank writes even without cancellation", async 
 	const settled = await result;
 	assert.equal(settled.reason, "scope_changed");
 	assert.equal(settled.bankOperations, 0);
-	assert.equal(settled.usage?.totalTokens, 10);
+	assert.deepEqual(settled.usage?.totalTokens, { kind: "measured", value: 10, source: "provider" });
 	assert.equal(bank.snapshot().knowledge.length, 0);
 });
 

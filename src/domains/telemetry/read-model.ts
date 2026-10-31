@@ -3204,9 +3204,9 @@ export interface TaskMemorySpendSummary {
 	injections: number;
 	/** Injections over llm steps, 0 when no llm step has run. */
 	hitRate: number;
-	inputTokens: number;
-	outputTokens: number;
-	totalTokens: number;
+	inputTokens: FactSum;
+	outputTokens: FactSum;
+	totalTokens: FactSum;
 	/** Cumulative llm-tier step latency. */
 	modelMs: number;
 	/** Slowest single llm-tier step, which is what a deadline has to answer for. */
@@ -3222,10 +3222,6 @@ export interface TaskMemorySpendSummary {
 	unreadableFiles: number;
 	/** Nonblank rows that could not be parsed as supported telemetry. */
 	invalidRows: number;
-	/** Calls explicitly recorded as missing provider usage; historical zeros alone cannot establish this. */
-	missingTokenCalls: number;
-	/** Llm-tier steps with no observation of provider usage coverage. */
-	unreportedUsageSteps: number;
 }
 
 export function emptyTaskMemorySpendSummary(): TaskMemorySpendSummary {
@@ -3233,9 +3229,9 @@ export function emptyTaskMemorySpendSummary(): TaskMemorySpendSummary {
 		llmSteps: 0,
 		injections: 0,
 		hitRate: 0,
-		inputTokens: 0,
-		outputTokens: 0,
-		totalTokens: 0,
+		inputTokens: emptyFactSum(),
+		outputTokens: emptyFactSum(),
+		totalTokens: emptyFactSum(),
 		modelMs: 0,
 		slowestStepMs: 0,
 		timeouts: 0,
@@ -3245,8 +3241,6 @@ export function emptyTaskMemorySpendSummary(): TaskMemorySpendSummary {
 		readableFiles: 0,
 		unreadableFiles: 0,
 		invalidRows: 0,
-		missingTokenCalls: 0,
-		unreportedUsageSteps: 0,
 	};
 }
 
@@ -3276,26 +3270,22 @@ export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMe
 				seen.add(key);
 				const attempt = attempts.get(ref.attemptId);
 				if (attempt?.started.callId === ref.callId) linked.push(attempt);
+				else {
+					summary.inputTokens = sumFactSums([summary.inputTokens, unknownSum(1)]);
+					summary.outputTokens = sumFactSums([summary.outputTokens, unknownSum(1)]);
+					summary.totalTokens = sumFactSums([summary.totalTokens, unknownSum(1)]);
+				}
 				if (!attempt || attempt.started.callId !== ref.callId || attempt.settled === null)
 					summary.unresolvedCalls = (summary.unresolvedCalls ?? 0) + 1;
 			}
 			const totals = foldCalls(linked);
-			summary.inputTokens += totals.usage.input.measured + totals.usage.input.estimated;
-			summary.outputTokens += totals.usage.output.measured + totals.usage.output.estimated;
-			summary.totalTokens += totals.totalTokens.measured + totals.totalTokens.estimated;
-			summary.missingTokenCalls += foldCalls(
-				linked.filter((attempt) => attempt.settled !== null),
-			).totalTokens.unknownCount;
+			summary.inputTokens = sumFactSums([summary.inputTokens, totals.usage.input]);
+			summary.outputTokens = sumFactSums([summary.outputTokens, totals.usage.output]);
+			summary.totalTokens = sumFactSums([summary.totalTokens, totals.totalTokens]);
 		} else {
-			summary.inputTokens += value(record.inputTokens);
-			summary.outputTokens += value(record.outputTokens);
-			summary.totalTokens += value(record.inputTokens) + value(record.outputTokens);
-			summary.missingTokenCalls += record.missingTokenCalls ?? 0;
-			if (
-				record.missingTokenCalls === undefined &&
-				(record.inputTokens.kind === "unknown" || record.outputTokens.kind === "unknown")
-			)
-				summary.unreportedUsageSteps += 1;
+			addGroup(summary.inputTokens, [record.inputTokens]);
+			addGroup(summary.outputTokens, [record.outputTokens]);
+			addGroup(summary.totalTokens, [record.inputTokens, record.outputTokens]);
 		}
 		summary.modelMs += value(record.latencyMs);
 		summary.slowestStepMs = Math.max(summary.slowestStepMs, value(record.latencyMs));

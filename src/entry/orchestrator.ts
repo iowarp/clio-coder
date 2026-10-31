@@ -64,9 +64,11 @@ import { StartupTimer } from "../core/startup-timer.js";
 import { captureAdmits, effectiveTelemetryCapture, systemOneDatasetRecording } from "../core/telemetry/capture.js";
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { EventPayload } from "../core/telemetry/events.js";
+import type { Fact } from "../core/telemetry/fact.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
-import { pricesCalls } from "../core/telemetry/pricing.js";
+import { noCallRunUsageFacts, pricesCalls, unobservedRunUsageFacts } from "../core/telemetry/pricing.js";
 import { registerResearchTraceSink } from "../core/telemetry/research-trace.js";
+import type { CallUsage } from "../core/telemetry/schemas.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { yieldToEventLoop } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
@@ -213,7 +215,6 @@ import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
-import { costProvenanceOf } from "../domains/providers/types/cost-provenance.js";
 import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
 import {
 	anthropicQuotaNotice,
@@ -306,6 +307,7 @@ import { createFollowUpTracker, observePermissionOutcomes } from "../domains/sys
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
 import { TURN_SITE } from "../domains/system-one/sites/turn.js";
+import { callSettlementFromMessage } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { openCallScope } from "../domains/telemetry/call-scope.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
@@ -986,7 +988,6 @@ function prepareBackgroundMemoryRoute(
 						if (!(model.contextWindow > 0) || inputTokens + request.maxTokens + 64 > model.contextWindow)
 							throw new TaskMemoryBudgetSkipError("time_budget");
 					}
-					const costProvenance = costProvenanceOf(refined.pricedBy);
 					const sideAuth = await resolveSideCallAuth(
 						providers.auth,
 						refined.target,
@@ -1014,19 +1015,39 @@ function prepareBackgroundMemoryRoute(
 						async (request: TaskMemoryModelRequest) => {
 							const startedAt = performance.now();
 							let observedUsage: TaskMemoryStepUsage | undefined;
+							let facts = unobservedRunUsageFacts();
+							const observer = request.callTelemetry;
+							const callTelemetry = {
+								startAttempt: () => observer?.startAttempt(),
+								withContext: <T>(work: () => T): T => (observer ? observer.withContext(work) : work()),
+								settle(message: unknown) {
+									const settled = callSettlementFromMessage(message, refined.pricedBy);
+									facts =
+										settled.usage === null
+											? noCallRunUsageFacts()
+											: {
+													usage: settled.usage,
+													totalTokens: memoryTotalTokens(settled.usage),
+													apiCalls: { kind: "measured", value: 1, source: "local-count" },
+													pricing: settled.pricing,
+												};
+									observer?.settle(message);
+								},
+							};
 							const mapUsage = (
 								completion: Pick<EngineTextCompletionResult, "usage" | "backend" | "failure">,
 							): TaskMemoryStepUsage => ({
-								...completion.usage,
+								...facts.usage,
+								totalTokens: facts.totalTokens,
+								pricing: facts.pricing,
 								...(completion.failure === undefined ? {} : { failure: completion.failure }),
 								targetId,
 								attributedModelId: refined.wireModelId,
-								costProvenance: completion.usage.missingTokenCalls ? "unknown" : costProvenance,
 								durationMs: performance.now() - startedAt,
 								backend: completion.backend,
 							});
 							const completion = await completeEngineText({
-								...(request.callTelemetry ? { callTelemetry: request.callTelemetry } : {}),
+								callTelemetry,
 								model,
 								systemPrompt: request.systemPrompt,
 								userPrompt: request.userPrompt,
@@ -1058,8 +1079,8 @@ function prepareBackgroundMemoryRoute(
 							// same prefill as one that produced a reminder.
 							return {
 								text: completion.text,
-								inputTokens: completion.inputTokens,
-								outputTokens: completion.outputTokens,
+								inputTokens: facts.usage.input,
+								outputTokens: facts.usage.output,
 								usage: observedUsage ?? mapUsage(completion),
 							};
 						},
@@ -1074,14 +1095,9 @@ function prepareBackgroundMemoryRoute(
 						request.onUsage?.({
 							targetId,
 							attributedModelId: initial.refined.wireModelId,
-							input: 0,
-							output: 0,
-							cacheRead: 0,
-							cacheWrite: 0,
-							reasoning: 0,
-							totalTokens: 0,
-							costUsd: 0,
-							costProvenance: "unknown",
+							...noCallRunUsageFacts().usage,
+							totalTokens: noCallRunUsageFacts().totalTokens,
+							pricing: noCallRunUsageFacts().pricing,
 							durationMs: 0,
 							backend: null,
 							failure: classifyCallFailure(error, { invoked: false, aborted: request.signal.aborted }),
@@ -1091,6 +1107,18 @@ function prepareBackgroundMemoryRoute(
 			},
 		},
 	};
+}
+
+function memoryTotalTokens(usage: CallUsage): Fact<number> {
+	if (usage.total) return usage.total;
+	const fields = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
+	const unknown = fields.find((fact) => fact.kind === "unknown" || fact.kind === "absent");
+	if (unknown) return unknown;
+	const estimated = fields.find((fact) => fact.kind === "estimated");
+	const value = fields.reduce((sum, fact) => sum + ("value" in fact ? fact.value : 0), 0);
+	return estimated?.kind === "estimated"
+		? { kind: "estimated", value, method: estimated.method }
+		: { kind: "measured", value, source: "provider" };
 }
 
 const emitMemoryFlowNotice = declareRuntimeNoticeProducer("background-memory-flow", ["memory-flow-blocked"]);

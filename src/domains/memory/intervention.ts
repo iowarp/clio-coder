@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
+import type { Fact } from "../../core/telemetry/fact.js";
 import { ToolNames } from "../../core/tool-names.js";
 import {
 	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
@@ -53,6 +54,8 @@ import {
 	type TaskMemoryTrajectoryStep,
 } from "./task-memory-policy.js";
 import type { TaskMemoryActivityEvent } from "./task-memory-status.js";
+
+const noTokens: Fact<number> = { kind: "absent", reason: "not-applicable" };
 
 export const MEMORY_INTERVENTION_REGISTRATION_ID = "observer.memory-intervention";
 export const MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS = 8;
@@ -694,8 +697,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							effects.length > 0 ? "injected" : "silent",
 							effects.length > 0 ? "intervened" : "no_repeated_failure",
 							citedEntryCount(effects[0]?.kind === "inject_reminder" ? effects[0].message : null),
-							0,
-							0,
+							noTokens,
+							noTokens,
 							started,
 						);
 						return effects;
@@ -729,8 +732,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 								effects.length > 0 ? "injected" : "silent",
 								effects.length > 0 ? "intervened" : "bank_empty",
 								citedEntryCount(effects[0]?.kind === "inject_reminder" ? effects[0].message : null),
-								0,
-								0,
+								noTokens,
+								noTokens,
 								started,
 							);
 						}
@@ -771,7 +774,16 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			// One row rather than none, so a headless operator reading the log sees
 			// why the tier never ran instead of finding nothing and guessing.
 			if (deps.deliversDeferredReminders === false) {
-				emitTelemetry([...pendingTriggers], "rules", "silent", "no_consumer", 0, 0, 0, process.hrtime.bigint());
+				emitTelemetry(
+					[...pendingTriggers],
+					"rules",
+					"silent",
+					"no_consumer",
+					0,
+					noTokens,
+					noTokens,
+					process.hrtime.bigint(),
+				);
 				pendingTriggers.clear();
 				return NO_EFFECTS;
 			}
@@ -788,8 +800,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					"dropped",
 					"step_in_flight",
 					0,
-					0,
-					0,
+					noTokens,
+					noTokens,
 					process.hrtime.bigint(),
 				);
 				return NO_EFFECTS;
@@ -1144,7 +1156,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		rulesInjectedSincePromptedStep = false;
 		annotatedSinceTurnEnd = false;
 		lastDecision = "silent";
-		emitTelemetry(["turn_end"], tier, "silent", "scope_changed", 0, 0, 0, process.hrtime.bigint());
+		emitTelemetry(["turn_end"], tier, "silent", "scope_changed", 0, noTokens, noTokens, process.hrtime.bigint());
 	}
 
 	function reset(): void {
@@ -1227,8 +1239,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			bankOperations: 0,
 			droppedOperations: 0,
 			reminder: null,
-			inputTokens: 0,
-			outputTokens: 0,
+			inputTokens: { kind: "absent", reason: "not-applicable" },
+			outputTokens: { kind: "absent", reason: "not-applicable" },
 			usage: null,
 			presentedEntries: [],
 			effects: NO_EFFECTS,
@@ -1353,7 +1365,6 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 									...(promptedResult.calls === undefined ? {} : { calls: promptedResult.calls }),
 									bankOperations: promptedResult.bankOperations,
 									droppedOperations: promptedResult.droppedOperations,
-									...(promptedResult.usage === null ? {} : { missingTokenCalls: promptedResult.usage.missingTokenCalls ?? 0 }),
 									...(promptedResult.refusalReason === undefined ? {} : { refusalReason: promptedResult.refusalReason }),
 								},
 								attemptRoute,
@@ -1441,7 +1452,6 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				...(promptedResult.calls === undefined ? {} : { calls: promptedResult.calls }),
 				bankOperations: promptedResult.bankOperations,
 				droppedOperations: promptedResult.droppedOperations,
-				...(promptedResult.usage === null ? {} : { missingTokenCalls: promptedResult.usage.missingTokenCalls ?? 0 }),
 				...(promptedResult.refusalReason === undefined ? {} : { refusalReason: promptedResult.refusalReason }),
 				...(promptedResult.resumeAt === undefined ? {} : { resumeAt: promptedResult.resumeAt }),
 			},
@@ -1472,8 +1482,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		decision: TaskMemoryTelemetryDecision,
 		reason: TaskMemoryPolicyReason,
 		citedEntries: number,
-		inputTokens: number,
-		outputTokens: number,
+		inputTokens: Fact<number>,
+		outputTokens: Fact<number>,
 		started: bigint,
 		operations: {
 			calls?: TaskMemoryPolicyResult["calls"];
@@ -1481,7 +1491,6 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			droppedOperations: number;
 			refusalReason?: string;
 			resumeAt?: string;
-			missingTokenCalls?: number;
 		} = {
 			bankOperations: 0,
 			droppedOperations: 0,
@@ -1508,7 +1517,6 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				citedEntries,
 				inputTokens,
 				outputTokens,
-				...(operations.missingTokenCalls === undefined ? {} : { missingTokenCalls: operations.missingTokenCalls }),
 				latencyMs,
 				...(route === undefined ? {} : { route }),
 				...(operations.resumeAt === undefined ? {} : { resumeAt: operations.resumeAt }),
@@ -1929,7 +1937,16 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (offer === null) return NO_EFFECTS;
 		for (const lesson of chosen) offeredLessons.add(lesson.id);
 		lastDecision = "injected";
-		emitTelemetry([trigger], "rules", "injected", "intervened", chosen.length, 0, 0, process.hrtime.bigint());
+		emitTelemetry(
+			[trigger],
+			"rules",
+			"injected",
+			"intervened",
+			chosen.length,
+			noTokens,
+			noTokens,
+			process.hrtime.bigint(),
+		);
 		return [{ kind: "annotate_tool_result", message: offer.content, severity: "info" }];
 	}
 
@@ -2036,7 +2053,16 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		lastDecision = "injected";
 		rulesInjectedSincePromptedStep = true;
 		annotatedSinceTurnEnd = true;
-		emitTelemetry(["repeated_failure"], "rules", "injected", "intervened", 1, 0, 0, process.hrtime.bigint());
+		emitTelemetry(
+			["repeated_failure"],
+			"rules",
+			"injected",
+			"intervened",
+			1,
+			noTokens,
+			noTokens,
+			process.hrtime.bigint(),
+		);
 		return [{ kind: "annotate_tool_result", message: offer.content, severity: "warn" }];
 	}
 

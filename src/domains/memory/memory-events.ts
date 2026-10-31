@@ -64,9 +64,8 @@ export interface TaskMemoryTelemetryStep {
 	bankOperations: number;
 	droppedOperations: number;
 	citedEntries: number;
-	inputTokens: number;
-	outputTokens: number;
-	missingTokenCalls?: number;
+	inputTokens: Fact<number>;
+	outputTokens: Fact<number>;
 	latencyMs: number;
 	/** Resolved route of the attempt, present only when a model client was resolved. */
 	route?: TaskMemoryRoute;
@@ -99,11 +98,10 @@ export function createTaskMemoryTelemetrySink(): TaskMemoryTelemetrySink {
 					bankOperations: step.bankOperations,
 					droppedOperations: step.droppedOperations,
 					citedEntries: step.citedEntries,
-					inputTokens: tokenFact(step.inputTokens, step.missingTokenCalls),
-					outputTokens: tokenFact(step.outputTokens, step.missingTokenCalls),
+					inputTokens: step.inputTokens,
+					outputTokens: step.outputTokens,
 					latencyMs: { kind: "measured", value: step.latencyMs, source: "local-clock" },
 					...(step.calls === undefined ? {} : { calls: step.calls.map(({ callId, attemptId }) => ({ callId, attemptId })) }),
-					...(step.missingTokenCalls === undefined ? {} : { missingTokenCalls: step.missingTokenCalls }),
 					...(step.route === undefined ? {} : { route: step.route }),
 					...(step.resumeAt === undefined ? {} : { resumeAt: step.resumeAt }),
 				},
@@ -111,12 +109,6 @@ export function createTaskMemoryTelemetrySink(): TaskMemoryTelemetrySink {
 			);
 		},
 	};
-}
-
-function tokenFact(value: number, missing: number | undefined): Fact<number> {
-	return value > 0 || missing === 0
-		? { kind: "measured", value, source: "provider" }
-		: { kind: "unknown", reason: "not-observed" };
 }
 
 export function taskMemoryBankDelta(before: TaskMemorySnapshot, after: TaskMemorySnapshot): TaskMemoryBankDelta {

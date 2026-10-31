@@ -1,3 +1,4 @@
+import { renderCompactCount } from "../../core/telemetry/render.js";
 import type { TaskMemorySpendSummary } from "../telemetry/index.js";
 
 export {
@@ -12,8 +13,9 @@ export function formatTaskMemorySpend(summary: TaskMemorySpendSummary): string {
 		...((summary.unresolvedCalls ?? 0) > 0 ? [`${summary.unresolvedCalls} call records unresolved`] : []),
 		...(summary.unreadableFiles > 0 ? [`${summary.unreadableFiles} unreadable files`] : []),
 		...(summary.invalidRows > 0 ? [`${summary.invalidRows} invalid rows`] : []),
-		...(summary.missingTokenCalls > 0 ? [`${summary.missingTokenCalls} calls missing usage`] : []),
-		...(summary.unreportedUsageSteps > 0 ? [`usage coverage unreported for ${summary.unreportedUsageSteps} steps`] : []),
+		...(summary.totalTokens.unknownCount > 0
+			? [`${summary.totalTokens.unknownCount} contributions with unknown usage`]
+			: []),
 	];
 	const scope = missing.length > 0 ? `partial retained spend (${missing.join(", ")})` : "retained spend";
 	if (summary.llmSteps === 0) {
@@ -21,10 +23,9 @@ export function formatTaskMemorySpend(summary: TaskMemorySpendSummary): string {
 		if (missing.length > 0) return `${scope} · no readable LLM steps`;
 		return `${scope} · ${summary.readableFiles === 0 ? "no history" : "no LLM steps"}`;
 	}
-	const tokens =
-		summary.totalTokens >= 1_000 ? `${(summary.totalTokens / 1_000).toFixed(1)}k tok` : `${summary.totalTokens} tok`;
+	const tokens = `${renderCompactCount(summary.totalTokens)} tok`;
 	const seconds = summary.modelMs / 1_000;
 	const time = seconds >= 60 ? `${(seconds / 60).toFixed(1)}m` : `${seconds.toFixed(1)}s`;
 	const rate = `${Math.round(summary.hitRate * 100)}%`;
-	return `${scope} ${summary.llmSteps} steps · known ${tokens} · ${time} · hit ${summary.injections}/${summary.llmSteps} (${rate})`;
+	return `${scope} ${summary.llmSteps} steps · ${tokens} · ${time} · hit ${summary.injections}/${summary.llmSteps} (${rate})`;
 }

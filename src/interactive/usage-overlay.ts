@@ -47,6 +47,10 @@ function nonZero(quantity: Quantity | null | undefined): quantity is Quantity {
 		: fact.unknownCount > 0 || factKnownValue(fact) > 0;
 }
 
+function hasUnknown(quantity: Quantity): boolean {
+	return "kind" in quantity.fact ? quantity.fact.kind === "unknown" : quantity.fact.unknownCount > 0;
+}
+
 /** Some call fed this sum, so its value (a measured zero, a local `$0.00`, or `not measured`) is worth a row. */
 function contributed(quantity: Quantity): boolean {
 	const fact = quantity.fact;
@@ -132,7 +136,7 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null): stri
 		),
 		["model calls", byRole.total.calls.display],
 		["harness overhead", session.overhead.share.display],
-		["token coverage", renderCoverage(tokenCoverage.fact)],
+		...(hasUnknown(tokenCoverage) ? [["token coverage", renderCoverage(tokenCoverage.fact)] as const] : []),
 		...(nonZero(neverSent) ? [["never sent", `${neverSent.display} calls`] as const] : []),
 		...(contributed(byRole.total.usd) ? [["cost", byRole.total.usd.display] as const] : []),
 		...tokenRows(view),
@@ -237,7 +241,7 @@ function renderActivity(
 		const totals = view.session().totals;
 		const cost = contributed(totals.usd) ? `${totals.usd.display} · ` : "";
 		lines.push(`${label("Session")}${cost}${theme.fg("counter", tokensText(totals.tokens.display))}${elapsed}`);
-		const tokenCoverage = renderCoverage(totals.tokens.fact);
+		const tokenCoverage = hasUnknown(totals.tokens) ? renderCoverage(totals.tokens.fact) : null;
 		const neverSent = view.session().own.counts.dispositions.neverSent;
 		const usage = [tokenCoverage, nonZero(neverSent) ? `${neverSent.display} never sent` : null].filter(
 			(part) => part !== null,

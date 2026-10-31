@@ -2,13 +2,14 @@ import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { BackendCompletionTimings } from "../../core/cache-telemetry.js";
 import type { CallFailureRecord } from "../../core/call-failure.js";
+import type { Fact } from "../../core/telemetry/fact.js";
 import type { CallMessageObserver } from "../../core/telemetry/producer.js";
+import type { CallUsage, Pricing } from "../../core/telemetry/schemas.js";
 import type { ToolResultDigestProvenance } from "../../tools/result-disposition.js";
 import {
 	buildMemoryInterventionUserPrompt,
 	MEMORY_INTERVENTION_SYSTEM_PROMPT,
 } from "../prompts/memory-intervention.js";
-import type { CostProvenance } from "../providers/index.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
 import {
 	renderTaskMemoryEntries,
@@ -97,22 +98,15 @@ export interface TaskMemoryModelRequest {
  * nowhere an operator could read: 137,205 tokens over 14 days appeared in no
  * `/cost` row and in no usage report (#229).
  */
-export interface TaskMemoryStepUsage {
+export interface TaskMemoryStepUsage extends CallUsage {
 	callId?: string;
 	attemptId?: string;
 	/** Target the step ran against, used as the cost row's provider id. */
 	targetId: string;
 	attributedModelId: string;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoning: number;
-	totalTokens: number;
-	missingTokenCalls?: number;
+	totalTokens: Fact<number>;
 	failure?: CallFailureRecord;
-	costUsd: number;
-	costProvenance: CostProvenance;
+	pricing: Pricing;
 	/** Wall time of the model call itself, measured by the client. */
 	durationMs: number;
 	/** Backend prefill facts when the serving runtime reported them (#247). */
@@ -121,8 +115,8 @@ export interface TaskMemoryStepUsage {
 
 export interface TaskMemoryModelResponse {
 	text: string;
-	inputTokens?: number;
-	outputTokens?: number;
+	inputTokens?: Fact<number>;
+	outputTokens?: Fact<number>;
 	/** Provider-reported spend for this call. Absent on clients that report none. */
 	usage?: TaskMemoryStepUsage;
 }
@@ -314,8 +308,8 @@ export interface TaskMemoryPolicyResult {
 	/** Operations the bank refused. Nonzero with `bankOperations` at zero is a total loss. */
 	droppedOperations: number;
 	reminder: string | null;
-	inputTokens: number;
-	outputTokens: number;
+	inputTokens: Fact<number>;
+	outputTokens: Fact<number>;
 	/** Provider-reported spend, when the client reported any. Null on every path that made no call. */
 	usage: TaskMemoryStepUsage | null;
 	/** Kept lessons the pass asked to delete because the turn showed them wrong. */
@@ -433,8 +427,8 @@ export async function runTaskMemoryPolicy(
 			bankOperations: parts.bankOperations ?? 0,
 			droppedOperations: parts.droppedOperations ?? 0,
 			reminder: parts.reminder ?? null,
-			inputTokens: parts.inputTokens ?? stepUsage?.input ?? 0,
-			outputTokens: parts.outputTokens ?? stepUsage?.output ?? 0,
+			inputTokens: parts.inputTokens ?? stepUsage?.input ?? { kind: "unknown", reason: "not-observed" },
+			outputTokens: parts.outputTokens ?? stepUsage?.output ?? { kind: "unknown", reason: "not-observed" },
 			usage: stepUsage,
 			...(calls.length ? { calls: [...calls] } : {}),
 			...(parts.refusalReason === undefined ? {} : { refusalReason: parts.refusalReason }),
@@ -503,9 +497,9 @@ export async function runTaskMemoryPolicy(
 		}
 		rawResponse = typeof response.text === "string" ? response.text : "";
 		stepUsage = response.usage ?? stepUsage;
-		const usage = {
-			inputTokens: nonNegativeInteger(response.inputTokens ?? stepUsage?.input),
-			outputTokens: nonNegativeInteger(response.outputTokens ?? stepUsage?.output),
+		const usage: Pick<TaskMemoryPolicyResult, "inputTokens" | "outputTokens"> = {
+			inputTokens: response.inputTokens ?? stepUsage?.input ?? { kind: "unknown", reason: "provider-omitted" },
+			outputTokens: response.outputTokens ?? stepUsage?.output ?? { kind: "unknown", reason: "provider-omitted" },
 		};
 		if (input.signal?.aborted || input.isCurrent?.() === false) return settle("silent", "scope_changed", usage);
 		const read = readPolicyStep(
@@ -1077,10 +1071,6 @@ function nonEmptyString(value: unknown): value is string {
 
 function positiveInteger(value: number | undefined, fallback: number): number {
 	return value !== undefined && Number.isInteger(value) && value > 0 ? value : fallback;
-}
-
-function nonNegativeInteger(value: number | undefined): number {
-	return value !== undefined && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 /**

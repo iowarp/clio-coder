@@ -224,8 +224,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 						),
 					);
 					const spend = readTaskMemorySpendSummary(join(env.dir, "state"));
-					assert.equal(spend.missingTokenCalls, ending === "stop" ? 0 : 1);
-					assert.equal(spend.unreportedUsageSteps, 0);
+					assert.equal(spend.totalTokens.unknownCount, ending === "stop" ? 0 : 1);
 				}
 				// Counts a provider reported before a failed ending are a measured lower bound (#434).
 				assert.deepEqual(live, switched ? [] : [ending === "no-usage" ? 0 : 17]);
@@ -576,14 +575,14 @@ test("fallback shares the original deadline and cancellation discards its late c
 	const known: TaskMemoryStepUsage = {
 		targetId: "chat",
 		attributedModelId: "chat-model",
-		input: 7,
-		output: 3,
-		cacheRead: 0,
-		cacheWrite: 0,
-		reasoning: 0,
-		totalTokens: 10,
-		costUsd: 0,
-		costProvenance: "unknown",
+		input: { kind: "measured", value: 7, source: "provider" },
+		output: { kind: "measured", value: 3, source: "provider" },
+		cacheRead: { kind: "measured", value: 0, source: "provider" },
+		cacheWrite1h: { kind: "unknown", reason: "provider-omitted" },
+		cacheWrite: { kind: "measured", value: 0, source: "provider" },
+		reasoning: { kind: "measured", value: 0, source: "provider" },
+		totalTokens: { kind: "measured", value: 10, source: "provider" },
+		pricing: { usd: { kind: "unknown", reason: "not-observed" }, pricedBy: "none" },
 		durationMs: 15,
 		backend: null,
 	};
@@ -598,14 +597,14 @@ test("a failed fallback capacity read preserves the dedicated call's result and 
 	const known: TaskMemoryStepUsage = {
 		targetId: "dedicated",
 		attributedModelId: "memory",
-		input: 7,
-		output: 3,
-		cacheRead: 0,
-		cacheWrite: 0,
-		reasoning: 0,
-		totalTokens: 10,
-		costUsd: 0,
-		costProvenance: "unknown",
+		input: { kind: "measured", value: 7, source: "provider" },
+		output: { kind: "measured", value: 3, source: "provider" },
+		cacheRead: { kind: "measured", value: 0, source: "provider" },
+		cacheWrite1h: { kind: "unknown", reason: "provider-omitted" },
+		cacheWrite: { kind: "measured", value: 0, source: "provider" },
+		reasoning: { kind: "measured", value: 0, source: "provider" },
+		totalTokens: { kind: "measured", value: 10, source: "provider" },
+		pricing: { usd: { kind: "unknown", reason: "not-observed" }, pricedBy: "none" },
 		durationMs: 1,
 		backend: null,
 	};
@@ -634,7 +633,7 @@ test("a failed fallback capacity read preserves the dedicated call's result and 
 	const result = await registration.runPromptedStep({ deterministicTrigger: true });
 	assert.equal(result.reason, "client_error");
 	assert.equal(result.usage, known);
-	assert.equal(result.inputTokens, 7);
+	assert.deepEqual(result.inputTokens, { kind: "measured", value: 7, source: "provider" });
 	assert.equal(fallbackCalls, 0);
 });
 
@@ -690,15 +689,14 @@ test("the history guardian retains an explicit missing-usage observation in its 
 					usage: {
 						targetId: "history-target",
 						attributedModelId: "history-model",
-						input: 0,
-						output: 0,
-						cacheRead: 0,
-						cacheWrite: 0,
-						reasoning: 0,
-						totalTokens: 0,
-						missingTokenCalls: 1,
-						costUsd: 0,
-						costProvenance: "unknown",
+						input: { kind: "unknown", reason: "provider-omitted" },
+						output: { kind: "unknown", reason: "provider-omitted" },
+						cacheRead: { kind: "unknown", reason: "provider-omitted" },
+						cacheWrite1h: { kind: "unknown", reason: "provider-omitted" },
+						cacheWrite: { kind: "unknown", reason: "provider-omitted" },
+						reasoning: { kind: "unknown", reason: "provider-omitted" },
+						totalTokens: { kind: "unknown", reason: "provider-omitted" },
+						pricing: { usd: { kind: "unknown", reason: "not-observed" }, pricedBy: "none" },
 						durationMs: 1,
 						backend: null,
 					},
@@ -728,6 +726,5 @@ test("the history guardian retains an explicit missing-usage observation in its 
 	await journal.flush();
 	const spend = readTaskMemorySpendSummary(stateDir);
 	assert.equal(spend.llmSteps, 1);
-	assert.equal(spend.missingTokenCalls, 1);
-	assert.equal(spend.unreportedUsageSteps, 0);
+	assert.equal(spend.totalTokens.unknownCount, 1);
 });
