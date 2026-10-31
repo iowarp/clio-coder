@@ -212,8 +212,10 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			.then(async (lease) => {
 				try {
 					// A session seals at every close, once its last lease drains; a resume continues the chain (#434).
-					if (lease.journaled && telemetryHub().emit(kind, data, lease.context) && kind === "session.closed")
-						lease.requestSeal?.();
+					if (lease.journaled && telemetryHub().emit(kind, data, lease.context)) {
+						if (kind === "session.closed") lease.requestSeal?.();
+						else lease.cancelSeal?.();
+					}
 				} finally {
 					await lease.release();
 				}

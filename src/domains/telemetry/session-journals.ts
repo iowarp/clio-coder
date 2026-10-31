@@ -45,6 +45,8 @@ export interface TelemetrySessionLease {
 	 * drain, never while another lease is live (#434).
 	 */
 	requestSeal?(): void;
+	/** A resume makes the session live again: it withdraws a close's seal that has not landed yet (#434). */
+	cancelSeal?(): void;
 	/** Store a session object through the writer, so it never lands behind the session's seal (#434). */
 	storeObject?(subject: Parameters<typeof storeTelemetryObject>[1], value: unknown): Promise<ObjectRef>;
 	release(): Promise<void>;
@@ -239,6 +241,9 @@ export function createSessionJournals(
 			requestSeal() {
 				if (!released) owned.sealRequested = true;
 			},
+			cancelSeal() {
+				if (!released) owned.sealRequested = false;
+			},
 			async storeObject(subject, value) {
 				const journal = released ? null : await owned.journal;
 				if (!journal) throw new Error("session telemetry writer is not open");
@@ -312,9 +317,12 @@ export function createSessionJournals(
 				}),
 			);
 		},
-		/** Shutdown: every writer closes and releases its lease, held leases included. */
+		/**
+		 * Shutdown: every writer closes and releases its lease, held leases included. Shutdown tears those leases down,
+		 * so a session whose close requested its seal is sealed now; nothing else is (#434).
+		 */
 		async closeAll(): Promise<void> {
-			await Promise.all([...entries.entries()].map(([id, entry]) => close(id, entry)));
+			await Promise.all([...entries.entries()].map(([id, entry]) => close(id, entry, entry.sealRequested === true)));
 		},
 	};
 }

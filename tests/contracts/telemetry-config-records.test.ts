@@ -137,8 +137,8 @@ it("a session's lifecycle events journal opening, resuming, parking and closing 
 			"session.parked",
 			"session.parked",
 			"session.resumed",
-			"session.sealed",
 		]);
+		// The resume withdrew the close's seal and no later close came, so the session ends live and unsealed.
 		ok(records.every((record) => record.ctx.sessionId === origin.id));
 		const liveRecords = (await readCallJournal(telemetrySessionDirectory(clioStateDir(), live.id))).records;
 		deepStrictEqual(
