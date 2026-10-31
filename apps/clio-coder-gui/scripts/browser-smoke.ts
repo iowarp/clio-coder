@@ -774,6 +774,18 @@ try {
 		);
 		await check("usage-explain");
 		await page.keyboard.press("Escape");
+		// A model's accounting splits into the sessions' own calls and the worker runs, each explained (#434 §11.3).
+		await page.locator("main .usage-model-row", { hasText: "fixture-model" }).click();
+		const audience = page.locator("main .usage-model-audience");
+		await audience.getByRole("heading", { name: "Sessions' own calls", exact: true }).waitFor();
+		const workerCalls = audience
+			.locator("div", { has: page.getByRole("heading", { name: "Worker runs", exact: true }) })
+			.locator("details.explain")
+			.first();
+		await workerCalls.locator("summary").click();
+		await workerCalls.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
+		await check("usage-audience");
+		await workerCalls.locator("summary").click();
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `usage-${width}.png`), fullPage: true });
 		await navigate("Library");

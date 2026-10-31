@@ -289,6 +289,18 @@
 .usage-model-measures small {
 	font-family: var(--font-ui);
 }
+/* The selected model's spend by who spent it: the sessions' own calls, then the worker runs. */
+.usage-model-audience > div {
+	border-top: 1px solid var(--line);
+	margin-top: var(--space-3);
+	padding-top: var(--space-3);
+}
+.usage-model-audience h4 {
+	margin: 0 0 var(--space-2);
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+	font-weight: 500;
+}
 .usage-source-fact {
 	border-top: 1px solid var(--line);
 	margin-top: var(--space-4);

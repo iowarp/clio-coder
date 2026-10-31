@@ -135,3 +135,28 @@ test("prompt-cache evidence reads each session's cache report displays", () => {
 		},
 	]);
 });
+
+test("a model row splits by who spent it, each side the server's fold with its own reference (#434 §11.3)", () => {
+	const side = (calls: string, ref: string) => ({
+		calls: { ...quantity(calls, Number(calls)), ref: `${ref}#calls` },
+		tokens: { ...quantity("100", 100), ref: `${ref}#total` },
+		usd: { ...quantity("$0.01", 0.01), ref: `${ref}#usd` },
+	});
+	const split = {
+		...group("anthropic/sonnet", quantity("12", 12)),
+		audience: { session: side("9", "repo:all-30d:own"), worker: side("3", "repo:all-30d:runs") },
+	};
+	const [row] = usageModelInsights(report([byModel(quantity("12", 12), [split])]));
+	assert.deepEqual(
+		row?.audience?.map((audience) => [audience.label, audience.measures.calls.value, audience.measures.calls.ref]),
+		[
+			["Sessions' own calls", "9", "repo:all-30d:own#calls"],
+			["Worker runs", "3", "repo:all-30d:runs#calls"],
+		],
+	);
+	// A group the server sent without a split has none to draw.
+	assert.equal(
+		usageModelInsights(report([byModel(quantity("12", 12), [group("a/b", quantity("12", 12))])]))[0]?.audience,
+		null,
+	);
+});

@@ -171,6 +171,29 @@ export function UsageInsights({ client, report }: { client: Client; report: Usag
 								</div>
 							))}
 						</dl>
+						{selected.audience ? (
+							<section className="usage-model-audience" aria-label={`Who spent ${selected.model}`}>
+								{selected.audience.map((side) => (
+									<div key={side.id}>
+										<h4>{side.label}</h4>
+										<dl className="usage-model-measures">
+											{USAGE_METRICS.map((item) => (
+												<div key={item.id}>
+													<dt>{item.label}</dt>
+													<dd>
+														<Explained
+															client={client}
+															label={`${item.label}, ${side.label}, ${selected.model}`}
+															{...side.measures[item.id]}
+														/>
+													</dd>
+												</div>
+											))}
+										</dl>
+									</div>
+								))}
+							</section>
+						) : null}
 						<details>
 							<summary>
 								Model provenance · {selected.facts.length} source {selected.facts.length === 1 ? "fact" : "facts"}

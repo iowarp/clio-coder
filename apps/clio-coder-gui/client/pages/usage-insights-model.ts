@@ -1,6 +1,6 @@
 import type { UsageReport } from "../../contracts/reports.js";
 import type { CostReportV1, Quantity } from "../../contracts/wire.js";
-import { countText, quantityParts } from "../telemetry/quantity-model.js";
+import { countText, type Explainable, explainable, quantityParts } from "../telemetry/quantity-model.js";
 import { cacheReportsOf, costReportOf } from "./usage-model.js";
 
 export type UsageMetric = "calls" | "tokens" | "cost";
@@ -25,6 +25,12 @@ export interface UsageAmount {
 	/** The reference explain() resolves for the amount. */
 	ref: string | null;
 }
+/** One side of a model's spend, by who spent it: the sessions' own calls or the worker runs (#434 §11.3). */
+export interface UsageAudience {
+	id: "session" | "worker";
+	label: string;
+	measures: Record<UsageMetric, Explainable>;
+}
 export interface UsageModelInsight {
 	id: string;
 	model: string;
@@ -33,6 +39,8 @@ export interface UsageModelInsight {
 	calls: UsageAmount;
 	tokens: UsageAmount;
 	cost: UsageAmount;
+	/** The row split by who spent it, each side the server's own fold; null when the report carries no split. */
+	audience: UsageAudience[] | null;
 }
 
 type CostGroup = CostReportV1["groups"][number];
@@ -82,8 +90,27 @@ export function usageModelInsights(report: UsageReport): UsageModelInsight[] {
 		calls: amountOf(group.calls, "calls", group.pricedBy),
 		tokens: amountOf(group.tokens, "tokens", group.pricedBy),
 		cost: amountOf(group.usd, "cost", group.pricedBy),
+		audience: group.audience
+			? AUDIENCES.map(({ id, label }) => {
+					const share = group.audience?.[id];
+					return {
+						id,
+						label,
+						measures: {
+							calls: explainable(share?.calls),
+							tokens: explainable(share?.tokens),
+							cost: explainable(share?.usd),
+						},
+					};
+				})
+			: null,
 	}));
 }
+
+const AUDIENCES = [
+	{ id: "session", label: "Sessions' own calls" },
+	{ id: "worker", label: "Worker runs" },
+] as const;
 
 export function usageAmountText(amount: UsageAmount): string {
 	return amount.display;
