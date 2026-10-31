@@ -1,4 +1,5 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,16 +8,24 @@ import { gunzipSync } from "node:zlib";
 import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import type { SegmentHeader } from "../../src/core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import type { EventPayload } from "../../src/core/telemetry/events.js";
+import type { ObjectRef } from "../../src/core/telemetry/schemas.js";
 import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
-import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
+import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
+import { canonicalJson } from "../../src/domains/prompts/hash.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
-import { telemetryCommitment } from "../../src/domains/telemetry/objects.js";
-import { telemetryImportedStateDir, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { storeTelemetryObject, telemetryCommitment } from "../../src/domains/telemetry/objects.js";
+import {
+	telemetryImportedStateDir,
+	telemetryObjectsDirectory,
+	telemetrySessionDirectory,
+} from "../../src/domains/telemetry/paths.js";
 import { readTelemetryScopeFiles, verifyTelemetryScope } from "../../src/domains/telemetry/seal.js";
 import {
 	importShareArchive,
 	planShare,
 	resolveShareScopes,
+	sealSharedScope,
 	telemetryShareSource,
 	verifyShareArchive,
 	writeShare,
@@ -24,6 +33,16 @@ import {
 
 const SECRET = "sk-proj-0123456789abcdefghijklmnop";
 const HOST = "operator-laptop.example";
+// What a run said about itself, a private handbook path and its username, and a passphrase that matches no value
+// pattern: none may leave below research, in a record or in an object (#434).
+const CLAIM = "Validated confidential Project Nightingale acquisition customer migration";
+const USER = "private-operator";
+const PRIVATE_PATH = `/home/${USER}/customer-acquisition/CLIO-CODER.md`;
+const PASSWORD = "correct horse battery staple";
+const GOLDEN_RUN = new URL(
+	"../fixtures/telemetry/golden/vccap2ywu7n8/runs/21ee9qwrugeq/journal.jsonl",
+	import.meta.url,
+);
 const writer = { clioCoderVersion: "0.0.0-test", piVersion: "test" };
 
 test("a content-free share drops a planted secret, verifies as an archive, and imports verified (#434)", async () => {
@@ -55,8 +74,84 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 			context,
 			{ t: new Date().toISOString(), mono: 1 },
 		);
-		await mkdir(directory, { recursive: true });
-		await writeFile(join(directory, "journal.jsonl"), Buffer.concat([header, planted].map(encodeTelemetryLine)));
+		const objects = telemetryObjectsDirectory(directory);
+		await mkdir(objects, { recursive: true });
+		// Objects as an older store left them, before credential-named properties were redacted whole.
+		const plantObject = async (subject: ObjectRef["subject"], value: unknown): Promise<ObjectRef> => {
+			const bytes = canonicalJson(value);
+			const id = `obj_${createHash("sha256").update(bytes).digest("hex")}`;
+			await writeFile(join(objects, `${id}.json`), bytes);
+			return { label: "resolvable", function: "sha256", canonicalization: "json-sorted-v1", subject, id };
+		};
+		const hash = "a".repeat(64);
+		const structure = await plantObject("prompt-structure", {
+			sections: [{ id: "identity", tokenEstimate: 10 }],
+			fragments: [{ id: "identity.core", relPath: "identity/core.md", contentHash: hash, dynamic: false }],
+			compile: {
+				version: 1,
+				at: new Date().toISOString(),
+				previousHash: null,
+				systemPromptHash: hash,
+				tokenEstimate: 10,
+				thinkingLevel: null,
+				contextWindow: null,
+				contextWindowSource: null,
+				projectPreload: {
+					mode: "full",
+					chars: 10,
+					lines: 1,
+					reason: null,
+					nearLimit: false,
+					label: PRIVATE_PATH,
+					sources: [
+						{
+							path: PRIVATE_PATH,
+							contentHash: hash,
+							availableChars: 10,
+							availableLines: 1,
+							includedChars: 10,
+							includedLines: 1,
+							includedRange: [1, 1],
+							omittedRange: null,
+							omissionReason: null,
+						},
+					],
+				},
+			},
+		});
+		const settings = await plantObject("config", {
+			providers: { local: { password: PASSWORD } },
+			workspace: PRIVATE_PATH,
+		});
+		const golden = scanTelemetrySegment(await readFile(GOLDEN_RUN)).rows.find(
+			(row) => row.kind === "record" && row.record.k === "run.settled",
+		);
+		ok(golden?.kind === "record");
+		const at = { t: new Date().toISOString(), mono: 2 };
+		const records = [
+			makeTelemetryRecord(
+				"run.settled",
+				{
+					...(golden.record.data as EventPayload<"run.settled">),
+					identity: { host: HOST, user: USER },
+					outcomeDetail: `could not read ${PRIVATE_PATH}`,
+					validationGrounding: { claimed: 1, grounded: 0, ungrounded: [CLAIM], basis: "unmatched-command" },
+				},
+				context,
+				at,
+			),
+			makeTelemetryRecord("prompt.compiled", { structure, layoutVersion: 1, tokenEstimate: 10, sections: 1 }, context, at),
+			makeTelemetryRecord(
+				"config.snapshotted",
+				{ settings, settingsFingerprint: settingsFingerprintCommitment("0".repeat(64)) },
+				context,
+				at,
+			),
+		];
+		await writeFile(
+			join(directory, "journal.jsonl"),
+			Buffer.concat([header, planted, ...records].map(encodeTelemetryLine)),
+		);
 		const journal = await openCallJournal({ directory, context, writer });
 		journal.enqueue({
 			kind: "session.closed",
@@ -85,6 +180,8 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 		ok(!unpacked.includes(SECRET), "the planted secret left in the archive");
 		ok(!unpacked.includes(HOST), "the source hostname left in the archive");
 		ok(unpacked.includes("config.changed"));
+		ok(unpacked.includes("run.settled"));
+		for (const leak of [CLAIM, USER, PRIVATE_PATH]) ok(!unpacked.includes(leak), `${leak} left in the archive`);
 		const check = verifyShareArchive(archive);
 		strictEqual(check.failure, null);
 		strictEqual(check.manifest?.installId, installId);
@@ -103,6 +200,80 @@ test("a content-free share drops a planted secret, verifies as an archive, and i
 			again.existing.map(({ id, identical }) => ({ id, identical })),
 			[{ id: sessionId, identical: true }],
 		);
+
+		// A structural share carries the prompt structure and settings, projected before their ids are computed.
+		const structural = planShare({ scopes, skipped, profile: "structural", source, writer });
+		strictEqual(structural.scopes[0]?.objects.length, 2);
+		const structuralPath = join(root, "structural.tar.gz");
+		await writeShare(structural, structuralPath);
+		const structuralArchive = await readFile(structuralPath);
+		const structuralBytes = gunzipSync(structuralArchive).toString("utf8");
+		for (const leak of [SECRET, HOST, CLAIM, USER, PRIVATE_PATH, PASSWORD, "horse"])
+			ok(!structuralBytes.includes(leak), `${leak} left in the structural archive`);
+		strictEqual(verifyShareArchive(structuralArchive).failure, null);
+
+		// The object store redacts a credential-named property whole, whatever its shape.
+		const store = join(root, "store");
+		const stored = await storeTelemetryObject(store, "config", { password: PASSWORD });
+		ok(!(await readFile(join(telemetryObjectsDirectory(store), `${stored.id}.json`), "utf8")).includes("horse"));
+
+		// A sealed archive holding what its profile's projection withholds, in a record or an object, fails verify and import.
+		const tamper = async (
+			shared: typeof plan,
+			edit: (line: Parameters<typeof sealSharedScope>[0]["lines"][number]) => unknown,
+			objectsOf: (objects: Array<{ id: string; bytes: Buffer }>) => Array<{ id: string; bytes: Buffer }>,
+		): Promise<Buffer> => {
+			const scope = shared.scopes[0];
+			ok(scope);
+			const rows = scanTelemetrySegment(scope.journal).rows;
+			const closing = rows.at(-2);
+			const seal = rows.at(-1);
+			ok(closing?.kind === "header" && seal?.kind === "record");
+			const lines = rows.slice(0, -2).map((row) => {
+				ok(row.kind !== "skipped");
+				return edit(row.kind === "header" ? row.header : row.record);
+			});
+			const carried = objectsOf(scope.objects);
+			const resealed = sealSharedScope({
+				scope: { kind: scope.kind, id: scope.id },
+				lines: lines as Parameters<typeof sealSharedScope>[0]["lines"],
+				objects: carried,
+				profile: scope.profile,
+				installId,
+				writer,
+				header: closing.header,
+				ctx: seal.record.ctx,
+				now: new Date(),
+			});
+			const path = join(root, `tampered-${scope.profile}.tar.gz`);
+			await writeShare({ ...shared, scopes: [{ ...scope, ...resealed, objects: carried }] }, path);
+			return readFile(path);
+		};
+		const claimed = await tamper(
+			plan,
+			(line) => {
+				if (line.k !== "run.settled") return line;
+				const data = line.data as EventPayload<"run.settled">;
+				return { ...line, data: { ...data, validationGrounding: { ...data.validationGrounding, ungrounded: [CLAIM] } } };
+			},
+			(objects) => objects,
+		);
+		match(verifyShareArchive(claimed).failure ?? "", /run\.settled with fields beyond the content-free projection/);
+		await rejects(importShareArchive(join(root, "rejecting"), claimed), /beyond the content-free projection/);
+		const raw = await readFile(join(objects, `${structure.id}.json`));
+		const rawId = `obj_${createHash("sha256").update(raw).digest("hex")}`;
+		let projectedId = "";
+		const unprojected = await tamper(
+			structural,
+			(line) => {
+				if (line.k !== "prompt.compiled") return line;
+				const data = line.data as EventPayload<"prompt.compiled">;
+				projectedId = data.structure.id;
+				return { ...line, data: { ...data, structure: { ...data.structure, id: rawId } } };
+			},
+			(objects) => objects.map((object) => (object.id === projectedId ? { id: rawId, bytes: raw } : object)),
+		);
+		match(verifyShareArchive(unprojected).failure ?? "", /prompt-structure object .* beyond the structural projection/);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
