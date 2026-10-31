@@ -5,6 +5,7 @@ import { Value } from "typebox/value";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
 import { councilTopologies } from "../../../../../src/domains/dispatch/council-topology.js";
 import { gateTopology } from "../../../../../src/domains/dispatch/gate-topology.js";
+import { readReceiptTextSync } from "../../../../../src/domains/dispatch/receipt-store.js";
 import { type FleetRunRecord, openLedger, readFleetRun } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
 import { runRowTelemetry } from "../../../../../src/domains/observability/read-model.js";
@@ -20,7 +21,7 @@ import {
 } from "../../../contracts/fleet.js";
 import { reportCostDisplays, withCostDisplay } from "../../services/cost-display.js";
 import { AppProblem } from "../../services/problem.js";
-import { artifactPage, containedFile, readArtifact } from "./storage.js";
+import { artifactPage, containedFile } from "./storage.js";
 
 function checked<S extends TSchema>(schema: S, raw: unknown): Static<S> {
 	const value = Value.Clean(schema, structuredClone(raw));
@@ -42,7 +43,14 @@ function dispatchSummary(row: RunEnvelope): DispatchRun {
 	});
 }
 function receipt(id: string) {
-	const raw = readArtifact(clioStateDir(), "receipts", `${id}.json`);
+	const path = containedFile(clioStateDir(), "receipts", `${id}.json`);
+	let raw: unknown = null;
+	try {
+		// A pruned receipt's tombstone reads back as its verified evidence copy; a copy that is gone is no receipt (#434).
+		raw = path ? JSON.parse(readReceiptTextSync(path)) : null;
+	} catch {
+		raw = null;
+	}
 	// Nested route bounds and caps need their own displays beside the receipt's cost (#434).
 	return raw && typeof raw === "object" && !Array.isArray(raw)
 		? withCostDisplay(reportCostDisplays(raw) as Record<string, unknown>)

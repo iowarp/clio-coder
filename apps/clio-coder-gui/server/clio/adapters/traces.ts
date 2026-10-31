@@ -1,9 +1,10 @@
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
+import { readReceiptTextSync } from "../../../../../src/domains/dispatch/receipt-store.js";
 import { openLedger } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
 import { readEvidenceIndex } from "../../../../../src/domains/observability/evidence-index.js";
@@ -203,7 +204,8 @@ export class TraceAdapter {
 		let evidence: unknown = null;
 		try {
 			const path = contained(state, "receipts", `${runId}.json`);
-			const data: unknown = JSON.parse(readFileSync(path, "utf8"));
+			// A pruned receipt's tombstone reads back as its verified evidence copy (#434).
+			const data: unknown = JSON.parse(readReceiptTextSync(path));
 			if (data && typeof data === "object" && !Array.isArray(data)) receipt = data as Record<string, unknown>;
 		} catch (error) {
 			if (error instanceof AppProblem) throw error;

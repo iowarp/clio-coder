@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { routes } from "../contracts/routes.js";
@@ -50,6 +50,29 @@ test("trace history lists run journals joined to the ledger, with read-model row
 		assert.ok(key in (full.receipt ?? {}));
 	}
 	assert.equal(brief.evidence?.evidenceId, "evidence-1");
+	// A pruned receipt reads back from its verified evidence copy, never as the tombstone it left (#434).
+	const sealed = readFileSync(join(state, "receipts/run-0000.json"), "utf8");
+	mkdirSync(join(h.home.path, "data/evidence/evidence-1"), { recursive: true });
+	writeFileSync(
+		join(h.home.path, "data/evidence/evidence-1/receipt.json"),
+		JSON.stringify({ version: 1, receipts: [JSON.parse(sealed)] }),
+	);
+	writeFileSync(
+		join(state, "receipts/run-0000.json"),
+		JSON.stringify({
+			format: "clio-receipt-tombstone/1",
+			runId: "run-0000",
+			evidenceId: "evidence-1",
+			digest: "fixture-receipt-digest",
+			prunedAt: "2026-10-30T00:00:00.000Z",
+		}),
+	);
+	const pruned = await json(
+		await h.request("/api/traces/runs/run-0000/receipt?include=full"),
+		routes.traceReceipt.response,
+	);
+	assert.deepEqual(pruned.receipt, full.receipt);
+	writeFileSync(join(state, "receipts/run-0000.json"), sealed);
 	assert.equal((await h.request("/api/traces/runs/missing")).status, 404);
 	assert.equal((await h.post("/api/traces/runs")).status, 405);
 	const head = await h.request("/api/traces/runs/run-0000", { method: "HEAD" });

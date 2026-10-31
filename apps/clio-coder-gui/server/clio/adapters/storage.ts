@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { Value } from "typebox/value";
 import { Id } from "../../../contracts/common.js";
@@ -14,15 +14,6 @@ export function containedFile(root: string, ...parts: string[]): string | null {
 		if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`) || !stat.isFile() || stat.size > 8 * 1024 * 1024)
 			return null;
 		return path;
-	} catch {
-		return null;
-	}
-}
-export function readArtifact(root: string, ...parts: string[]): unknown {
-	const path = containedFile(root, ...parts);
-	if (!path) return null;
-	try {
-		return JSON.parse(readFileSync(path, "utf8"));
 	} catch {
 		return null;
 	}

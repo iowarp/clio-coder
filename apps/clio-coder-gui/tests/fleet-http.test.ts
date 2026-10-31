@@ -43,6 +43,27 @@ test("fleet REST: every durable root paginates once beyond 64 entries, corrupt r
 			(await json(await h.request("/api/fleet/receipts/member-two"), FleetReceipt)).receipt?.runId,
 			"member-two",
 		);
+		// A pruned receipt serves its verified evidence copy, never the tombstone it left; a copy that is gone is none.
+		const receiptPath = join(h.home.path, "state/receipts/member-two.json");
+		const copy = { ...JSON.parse(await readFile(receiptPath, "utf8")), integrity: { digest: "pruned-copy" } };
+		await mkdir(join(h.home.path, "data/evidence/evidence-pruned"), { recursive: true });
+		await writeFile(
+			join(h.home.path, "data/evidence/evidence-pruned/receipt.json"),
+			JSON.stringify({ version: 1, receipts: [copy] }),
+		);
+		const tombstone = {
+			format: "clio-receipt-tombstone/1",
+			runId: "member-two",
+			evidenceId: "evidence-pruned",
+			digest: "pruned-copy",
+			prunedAt: "2026-10-30T00:00:00.000Z",
+		};
+		await writeFile(receiptPath, JSON.stringify(tombstone));
+		const pruned = (await json(await h.request("/api/fleet/receipts/member-two"), FleetReceipt)).receipt;
+		assert.equal(pruned?.runId, "member-two");
+		assert.deepEqual(pruned?.integrity, { digest: "pruned-copy" });
+		await writeFile(receiptPath, JSON.stringify({ ...tombstone, digest: "another-seal" }));
+		assert.equal((await json(await h.request("/api/fleet/receipts/member-two"), FleetReceipt)).receipt, null);
 		// "escape" is in no listing, so the served-id window refuses it before the
 		// adapter runs; the symlink containment is asserted where it now lives.
 		assert.equal((await h.request("/api/fleet/receipts/escape")).status, 403);
