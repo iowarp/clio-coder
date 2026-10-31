@@ -1,5 +1,5 @@
+import type { ContextOperation } from "../../core/context-operation.js";
 import { wrapTextWithAnsi } from "../../engine/tui.js";
-import type { ContextOperationResult } from "../context-operation-view.js";
 import {
 	CONTEXT_KIND_TITLES,
 	compactionQualifier,
@@ -13,10 +13,11 @@ import {
 import { clioTheme, formatCompactMs, frame, GLYPH } from "../theme/index.js";
 
 /**
- * The transcript card shares persisted facts with replay. Live unchanged
- * results also retain the explanation carried only by terminal activity (D6f).
+ * The transcript card for a settled context operation. Live results and
+ * resumed sessions both render it from the same persisted operation, so the two
+ * cannot disagree about what happened.
  */
-export function renderContextOperationResult(operation: ContextOperationResult, width: number): string[] {
+export function renderContextOperationResult(operation: ContextOperation, width: number): string[] {
 	const theme = clioTheme();
 	const outcome = operation.outcome ?? "completed";
 	const tone = outcomeTone(outcome);
@@ -28,9 +29,6 @@ export function renderContextOperationResult(operation: ContextOperationResult, 
 
 	const room = Math.max(1, width - 4);
 	const body: string[] = [];
-	if (outcome === "unchanged" && operation.conclusion) {
-		for (const line of wrapTextWithAnsi(plain(operation.conclusion), room)) body.push(theme.fg("body", line));
-	}
 	const { cause, warnings } = splitWarnings(operation);
 	if (cause) {
 		for (const line of wrapTextWithAnsi(cause, room)) body.push(theme.fg(tone, line));
