@@ -32,8 +32,6 @@ export interface ContextOperation {
 	startedAt: string;
 	elapsedMs?: number;
 	outcome?: ContextOperationOutcome;
-	/** Terminal explanation retained when the live activity is no longer available. */
-	conclusion?: string;
 	facts?: readonly ContextOperationFact[];
 	warnings?: readonly string[];
 	/** Estimates from the same runtime accounting on both sides; not provider measurements. */
@@ -135,7 +133,6 @@ export function readContextOperation(value: unknown): ContextOperation | null {
 	)
 		return null;
 	if (op.elapsedMs !== undefined && (!Number.isFinite(op.elapsedMs) || op.elapsedMs < 0)) return null;
-	if (op.conclusion !== undefined && typeof op.conclusion !== "string") return null;
 	if (op.outcome !== undefined && !["completed", "previewed", "unchanged", "cancelled", "failed"].includes(op.outcome))
 		return null;
 	if (
@@ -185,7 +182,6 @@ export function readContextOperation(value: unknown): ContextOperation | null {
 		startedAt: op.startedAt,
 		...(op.elapsedMs === undefined ? {} : { elapsedMs: op.elapsedMs }),
 		...(op.outcome === undefined ? {} : { outcome: op.outcome }),
-		...(op.conclusion === undefined ? {} : { conclusion: boundedExternalDiagnostic(op.conclusion, 1024) }),
 		...(op.facts === undefined
 			? {}
 			: {

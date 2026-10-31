@@ -1,4 +1,3 @@
-import type { ContextOperation } from "../core/context-operation.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { DispatchRunIdentity } from "../core/telemetry/live-events.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -11,6 +10,7 @@ import {
 	type WorkerStream,
 	type WorkerStreamChange,
 } from "../session-control/worker-stream.js";
+import type { ContextOperationResult } from "./context-operation-view.js";
 import { showsContextResult } from "./context-operation-view.js";
 import {
 	type WorkerRunEntryFields,
@@ -26,7 +26,7 @@ const WORKER_PAINT_INTERVAL_MS = 16;
 export interface InteractiveSubscriptionsDeps {
 	bus: TelemetryHub;
 	getSessionId?: () => string | null;
-	contextResult?: (operation: ContextOperation) => void;
+	contextResult?: (operation: ContextOperationResult) => void;
 	refreshFooter: () => void;
 	renderTaskIsland: () => void;
 	renderContextIsland: () => void;
