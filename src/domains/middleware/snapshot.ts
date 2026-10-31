@@ -1,5 +1,6 @@
 import { createHookBudgetTracker, resolveHookBudgetsFromEnv, resolveHookBudgetTunablesFromEnv } from "./budget.js";
 import type { MiddlewareContract } from "./contract.js";
+import { recordFiredRules } from "./fired-record.js";
 import { createMiddlewareRegistrationTable } from "./registrations.js";
 import { cloneMiddlewareRule, listMiddlewareRuleDefinitions, listMiddlewareRules } from "./rules.js";
 import {
@@ -62,10 +63,13 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 	return {
 		runHook(input) {
 			const registrations = table.list();
-			return runMiddlewareRegistrations(input, registrations, {
-				budgetTracker,
-				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
-			});
+			return recordFiredRules(
+				runMiddlewareRegistrations(input, registrations, {
+					budgetTracker,
+					...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
+				}),
+				"sync",
+			);
 		},
 		// A worker's awaited registrations are its proxies for the dispatching
 		// session's extension hooks (src/engine/worker-extension-hooks.ts).
@@ -79,11 +83,14 @@ export function createMiddlewareContractFromSnapshot(snapshot: MiddlewareSnapsho
 						registrationMatchesTool(registration, toolName),
 				);
 		},
-		runAwaitedHook(input, priorEffects = []) {
-			return runMiddlewareAsyncRegistrations(input, table.list(), priorEffects, {
-				include: (registration) => registration.awaited === true,
-				...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
-			});
+		async runAwaitedHook(input, priorEffects = []) {
+			return recordFiredRules(
+				await runMiddlewareAsyncRegistrations(input, table.list(), priorEffects, {
+					include: (registration) => registration.awaited === true,
+					...(diagnosticSink !== undefined ? { onDiagnostic: diagnosticSink } : {}),
+				}),
+				"awaited",
+			);
 		},
 		snapshot() {
 			return createMiddlewareSnapshot(definitions.map((definition) => definition.rule));

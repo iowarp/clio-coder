@@ -291,6 +291,7 @@ export function createUnbackedWorkerClaimRegistration(): MiddlewareHookRegistrat
 		id: UNBACKED_WORKER_CLAIM_REGISTRATION_ID,
 		description: "contradict a worker/scout result claim that no dispatch call in the turn backs",
 		hooks: ["after_tool", "turn_end"],
+		evidence: "regex:WORKER_CLAIM_PATTERNS@assistant-text",
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			const key = turnKey(input);
 			if (input.hook === "after_tool") {
@@ -455,6 +456,7 @@ export function createDetachedDispatchNudgeRegistration(
 		description:
 			"request continuation so the turn controller collects finished detached results before the next model call",
 		hooks: ["turn_end"],
+		evidence: "count:ready-detached-batches@turn-end",
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook !== "turn_end") return [];
 			// Only settled stop turns are candidates; aborted and errored turns
