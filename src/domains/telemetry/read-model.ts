@@ -1565,6 +1565,21 @@ export function turnsSum(source: SessionSource, turnIds: readonly string[], metr
 	return { fact, display: display(metric, fact, free), free };
 }
 
+/**
+ * Some of a session's own attempts read as one, such as the calls one agent segment of a headless run made. An id the
+ * journal does not hold yet is one unknown contribution, so the sum is partial rather than short (#434).
+ */
+export function attemptsTotal(source: SessionSource, attemptIds: readonly string[], metric: FactMetric): TurnsSum {
+	const analysis = analyze(source);
+	const wanted = new Set(attemptIds);
+	const attempts = analysis.attempts.filter((attempt) => wanted.has(attempt.started.attemptId));
+	const missing = wanted.size - new Set(attempts.map((attempt) => attempt.started.attemptId)).size;
+	const fact = withGap(attemptsSum(attempts, metric), missing + (wanted.size > 0 ? analysis.gap : 0));
+	const part: Part = { attempts, gap: 0 };
+	const free = allFree([part]);
+	return { fact, display: display(metric, fact, free), free };
+}
+
 function quantity(view: View, ref: ParsedFactRef): Quantity {
 	const measured = measure(view, ref);
 	if (!measured) throw new Error(`read model cannot resolve its own reference ${factRef(ref)}`);

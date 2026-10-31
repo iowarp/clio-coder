@@ -60,7 +60,7 @@ import {
 } from "./headless-dispatched-runs.js";
 import { createHeadlessJsonProjector } from "./json-stream.js";
 import { writeFrame } from "./jsonl.js";
-import type { RunJsonMainFrame, RunJsonMainSessionFrame } from "./run-json-schema.js";
+import type { RunJsonMainFrame, RunJsonMainSessionFrame, RunJsonSegmentUsage } from "./run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./run-json-schema.js";
 
 export interface HeadlessSamplingOverrides {
@@ -124,6 +124,11 @@ export interface HeadlessMainAgentOptions {
 	 * the turn's event stream, so the ones journaled during the run are folded into its receipt from here (#434).
 	 */
 	compactionCalls?: (from: string) => Promise<readonly CallRowV1[]>;
+	/**
+	 * One agent segment's usage as the read model folds its calls once they are journaled, an interrupted call's
+	 * estimate included; null when the read model has none, and the message fold stands (#434).
+	 */
+	segmentUsage?: (messages: ReadonlyArray<AgentMessage>) => Promise<RunJsonSegmentUsage | null>;
 	/** `clio-coder run --max-cost-usd`: the cap the receipt records. */
 	costCap?: RunReceiptCostCap;
 }
@@ -636,6 +641,8 @@ export function prefixHeadlessFailure(
  * event of the same name carries the turn's assistant message instead. Letting
  * both through would put two different shapes behind one `type` on one stream.
  */
+/** How long an agent_end frame waits for the journal to hold its calls before it reports the message fold. */
+const SEGMENT_USAGE_WAIT_MS = 5_000;
 const TERMINAL_JSON_EVENT_TYPES = new Set(["agent_end", "notice"]);
 
 function isMainAgentRunKind(value: string): value is RunKind {
@@ -904,32 +911,66 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 					status: "interrupted",
 					failureMessage: result.abortReason ?? "clio-coder run: interrupted before the turn completed",
 				};
+	// Every `--json` frame reaches stdout through this one chain, in the order it was queued. An agent_end frame waits
+	// in it for the read model's account of its segment, so nothing behind it can overtake it (#434).
+	type QueuedFrame = RunJsonMainFrame | RunJsonMainSessionFrame | (() => Promise<RunJsonMainFrame>);
+	let frameChain: Promise<void> = Promise.resolve();
+	const queueFrame = (frame: QueuedFrame): void => {
+		frameChain = frameChain.then(async () => {
+			try {
+				writeFrame(typeof frame === "function" ? await frame() : frame);
+			} catch (error) {
+				process.stderr.write(
+					`clio-coder run: json frame write failed: ${error instanceof Error ? error.message : String(error)}\n`,
+				);
+			}
+		});
+	};
+	const segmentFrame = (frame: RunJsonMainFrame, messages: ReadonlyArray<AgentMessage>): QueuedFrame => {
+		const read = options.segmentUsage;
+		if (frame.type !== "agent_end" || read === undefined) return frame;
+		return async () => {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			// A journal that cannot flush still lets the stream finish, with the message fold's account (#434).
+			const timeout = new Promise<null>((resolve) => {
+				timer = setTimeout(() => resolve(null), SEGMENT_USAGE_WAIT_MS);
+			});
+			try {
+				const usage = await Promise.race([read(messages), timeout]).catch(() => null);
+				return usage ? { ...frame, usage } : frame;
+			} finally {
+				clearTimeout(timer);
+			}
+		};
+	};
+
 	// Registered after the composition root's chat drain hook, which disposes
 	// the loop and awaits settlement, so the stats folded below are final by
-	// the time this runs.
+	// the time this runs. Queued frames reach stdout before the seal.
 	termination.onDrain(async () => {
+		await frameChain;
 		await sealReceipt(interruptedTerminal());
 	});
 
 	// Fresh sessions acquire their identity during submit, after admission notices
 	// and terminal turn_start can arrive. Keep those frames behind their header.
-	const pendingJsonFrames: RunJsonMainFrame[] = [];
+	const pendingJsonFrames: QueuedFrame[] = [];
 	let jsonHeaderWritten = false;
-	const writeMainFrame = (frame: RunJsonMainFrame): void => {
+	const writeMainFrame = (frame: QueuedFrame): void => {
 		if (!jsonHeaderWritten) pendingJsonFrames.push(frame);
-		else writeFrame(frame);
+		else queueFrame(frame);
 	};
 	const writeJsonHeader = (allowFallback: boolean, allowPending = false): void => {
 		if (jsonHeaderWritten) return;
 		const header = options.getSessionHeader?.();
 		if (header !== undefined && header !== null) {
-			writeFrame(header);
+			queueFrame(header);
 		} else {
 			if (!allowFallback) return;
 			const sessionId = chat.getSessionId();
 			if (sessionId === null) {
 				if (!allowPending || pendingJsonFrames.length === 0) return;
-				writeFrame({
+				queueFrame({
 					type: "session",
 					schemaVersion: RUN_JSON_SCHEMA_VERSION,
 					mode: "main",
@@ -939,7 +980,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 					cwd: process.cwd(),
 				});
 			} else {
-				writeFrame({
+				queueFrame({
 					type: "session",
 					schemaVersion: RUN_JSON_SCHEMA_VERSION,
 					mode: "main",
@@ -950,7 +991,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			}
 		}
 		jsonHeaderWritten = true;
-		for (const frame of pendingJsonFrames) writeFrame(frame);
+		for (const frame of pendingJsonFrames) queueFrame(frame);
 		pendingJsonFrames.length = 0;
 	};
 	let terminalTurnStartWritten = false;
@@ -975,7 +1016,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	const unsubscribe = chat.onEvent((event) => {
 		writeTextSessionId();
 		if (mode === "json") {
-			const frames = jsonProjector.project(event);
+			const messages = event.type === "agent_end" ? event.messages : [];
+			const frames = jsonProjector.project(event).map((frame) => segmentFrame(frame, messages));
 			if (jsonEvents === "terminal") {
 				writeTerminalTurnStart();
 				writeJsonHeader(true);
@@ -1220,6 +1262,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		});
 	}
 
+	await frameChain;
 	await sealReceipt(terminal);
 
 	if (stderrMessage !== null) {
@@ -1229,6 +1272,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		writeRawStdout(`${stdoutMessage}\n`);
 	}
 	if (mode === "json") writeJsonHeader(true, true);
+	await frameChain;
 	await flushRawStdout();
 	return exitCode;
 }

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
 import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-generate.js";
+import { segmentUsageFromView } from "../cli/modes/json-stream.js";
 import { runHeadlessMainAgent } from "../cli/modes/print.js";
 import type { RunJsonMainSessionFrame } from "../cli/modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "../cli/modes/run-json-schema.js";
@@ -5965,6 +5966,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								// Every queued settlement is written and the live fold seeded before the calls are read (#434).
 								await telemetry.settledSessionSpend();
 								return telemetry.read?.live()?.calls({ roles: ["compaction"], from }).calls ?? [];
+							},
+							segmentUsage: async (messages) => {
+								// The segment's calls are journaled and the live fold seeded before they are read (#434).
+								await telemetry.settledSessionSpend();
+								const view = telemetry.read?.live();
+								return view ? segmentUsageFromView(view, messages) : null;
 							},
 						}
 					: {}),

@@ -25,6 +25,7 @@ import { TELEMETRY_FOLD_VERSION } from "./folds.js";
 import { telemetryProcessId } from "./process-journal.js";
 import type { AccountQuota, JournalSource, SessionSource } from "./read-model.js";
 import {
+	attemptsTotal,
 	cacheReport,
 	callsReport,
 	continueSource,
@@ -115,6 +116,7 @@ export function telemetryView(
 		explain: (ref) => explain(ref, { session: source }),
 		quantity: (ref) => quantityOf(ref, source),
 		turns: (turnIds, metric) => turnsSum(source, turnIds, metric),
+		attempts: (attemptIds, metric) => attemptsTotal(source, attemptIds, metric),
 	};
 }
 

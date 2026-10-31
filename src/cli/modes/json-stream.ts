@@ -40,7 +40,9 @@ import { messageUsageForAccounting } from "../../core/message-accounting.js";
  * The frame types these rules produce are declared in `run-json-schema.ts`.
  */
 
+import type { FactMetric } from "../../core/telemetry/dto.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
+import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent } from "../../session-control/chat-loop.js";
 import { sumRunUsage } from "../../session-control/chat-loop-messages.js";
@@ -56,6 +58,7 @@ import type {
 	RunJsonChatLoopFrame,
 	RunJsonMessage,
 	RunJsonOpaqueWorkerEventFrame,
+	RunJsonSegmentUsage,
 	RunJsonToolExecutionEndFrame,
 	RunJsonToolExecutionStartFrame,
 	RunJsonWorkerAgentEndFrame,
@@ -206,6 +209,46 @@ export function projectDispatchJsonEvent(
 	if (event.type !== "agent_end" || !Array.isArray(event.messages)) return { ...event, type: event.type };
 	const { messages: _messages, ...rest } = event;
 	return { ...rest, ...segmentSummary(event.messages as AgentMessage[]) };
+}
+
+/** The attempts one agent segment's assistant messages settled, as the turn runtime stamped them. */
+function segmentAttemptIds(messages: ReadonlyArray<AgentMessage>): string[] {
+	return messages.flatMap((message) => {
+		const attemptId = message.role === "assistant" ? (message as { attemptId?: unknown }).attemptId : undefined;
+		return typeof attemptId === "string" ? [attemptId] : [];
+	});
+}
+
+/**
+ * One agent segment's usage as the read model folds its calls, an interrupted call's estimate included: each number is
+ * the known part of its quantity, `measured` only when nothing in it is estimated or unknown (#430, #434). Null for a
+ * segment that settled no call, which the message fold already reports as empty.
+ */
+export function segmentUsageFromView(
+	view: TelemetryView,
+	messages: ReadonlyArray<AgentMessage>,
+): RunJsonSegmentUsage | null {
+	const attemptIds = segmentAttemptIds(messages);
+	if (attemptIds.length === 0) return null;
+	const read = (metric: FactMetric) => view.attempts(attemptIds, metric).fact;
+	const known = (metric: FactMetric) => {
+		const fact = read(metric);
+		return fact.measured + fact.estimated;
+	};
+	const total = read("total");
+	const estimated = total.estimated > 0 || total.coverage.estimated > 0;
+	return {
+		input: known("input"),
+		output: known("output"),
+		cacheRead: known("cacheRead"),
+		cacheWrite: known("cacheWrite"),
+		reasoning: known("reasoning"),
+		totalTokens: total.measured + total.estimated,
+		costUsd: known("usd"),
+		apiCalls: known("apiCalls"),
+		measured: total.unknownCount === 0 && !estimated && total.coverage.measured > 0,
+		...(estimated ? { estimated: true as const } : {}),
+	};
 }
 
 /** An assistant call that reached the provider and came back without usage (#423). */
