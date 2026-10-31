@@ -1,14 +1,20 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { CallLabel, Disposition } from "../../src/core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
+import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { Fact } from "../../src/core/telemetry/fact.js";
 import { newAttemptId, newCallId, newRecordId } from "../../src/core/telemetry/ids.js";
+import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
+import { openCallJournal } from "../../src/domains/observability/call-journal.js";
 import type { TelemetryReadModel, TelemetryView } from "../../src/domains/observability/contract.js";
 import type { JournalSource } from "../../src/domains/observability/read-model.js";
+import { callsReport, costReport, runsReport, sessionTelemetry } from "../../src/domains/observability/read-model.js";
 import { telemetryView } from "../../src/domains/observability/telemetry-live.js";
 import { isSessionEntry } from "../../src/domains/session/entries.js";
 import { importLegacySession } from "../../src/domains/session/legacy-import.js";
+import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import type { DispatchRunUsage } from "../../src/interactive/dispatch-board.js";
 import { dispatchRunUsage } from "../../src/interactive/dispatch-board.js";
 
@@ -163,4 +169,101 @@ export function readModelOf(
 		open: async (id: string) => viewOf(id),
 		subscribe: () => () => {},
 	} as unknown as TelemetryReadModel;
+}
+
+export const PARITY_SESSION = "parity";
+export const PARITY_RUN = "parity-run";
+
+/**
+ * The cross-surface parity fixture (#434 §13.2) as journals on disk, where the CLI, the GUI and the live model each
+ * read it: the golden P0 calls, a catalog-estimated side call, a newest main call whose output and price went
+ * unreported, and a referenced worker run with one priced call and one unpriced. Every provenance a surface must
+ * carry through appears at least once.
+ */
+export async function seedParitySession(stateDir: string): Promise<void> {
+	const golden = goldenTelemetryRecords(PARITY_SESSION);
+	const last = Math.max(...golden.map((record) => Date.parse(record.t)));
+	const at = (minutes: number) => new Date(last + minutes * 60_000).toISOString();
+	const side = telemetryCall(PARITY_SESSION, {
+		label: "memory",
+		usage: { input: 120, output: 30 },
+		usd: 0.002,
+		pricedBy: "catalog",
+		at: at(1),
+	});
+	const main = telemetryCall(PARITY_SESSION, {
+		turnId: "turn-parity",
+		usage: { input: 7, output: null, cacheRead: 900 },
+		usd: null,
+		at: at(3),
+	});
+	// The newest main call read 900 cached tokens and prefilled 7, so /context has a verdict and its numbers to show.
+	const settled = main[1] as Extract<TelemetryRecord, { k: "call.settled" }>;
+	const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
+	main[1] = {
+		...settled,
+		data: {
+			...settled.data,
+			cache: {
+				...settled.data.cache,
+				verdict: "small",
+				uncachedPrefillTokens: measured(7),
+				rePrefilledTokens: measured(0),
+			},
+		},
+	};
+	const ref = makeTelemetryRecord("run.ref", { runId: PARITY_RUN }, settled.ctx, { t: at(2), mono: 0 });
+	const worker = [
+		...telemetryCall(PARITY_SESSION, { label: "worker", usage: { input: 50, output: 10 }, usd: 0.25, at: at(2) }),
+		...telemetryCall(PARITY_SESSION, { label: "worker", usage: { input: 20, output: null }, usd: null, at: at(2) }),
+	].map((record) => ({ ...record, ctx: { ...record.ctx, runId: PARITY_RUN } }) as TelemetryRecord);
+	const write = async (
+		directory: string,
+		fileName: "calls.jsonl" | "events.ndjson",
+		context: TelemetryRecord["ctx"],
+		records: TelemetryRecord[],
+	) => {
+		const journal = await openCallJournal({
+			sessionDirectory: directory,
+			fileName,
+			context,
+			writer: { clioCoderVersion: "test", piVersion: "test" },
+		});
+		for (const record of records)
+			journal.enqueue({
+				kind: record.k,
+				data: record.data,
+				ctx: record.ctx,
+				wallMs: Date.parse(record.t),
+				mono: record.mono,
+				recordId: record.id,
+			} as PendingTelemetry);
+		await journal.close();
+	};
+	await write(join(stateDir, "sessions", "parity-workspace", PARITY_SESSION), "calls.jsonl", settled.ctx, [
+		...golden,
+		...side,
+		ref,
+		...main,
+	]);
+	await write(
+		join(stateDir, "runs", PARITY_RUN),
+		"events.ndjson",
+		{ ...settled.ctx, runId: PARITY_RUN, label: "worker" },
+		worker,
+	);
+}
+
+/** The parity fixture's DTOs as the CLI's `--json` and the GUI's routes read them: cold, from the journals. */
+export function coldParityDtos(stateDir: string) {
+	const source = loadSessionTelemetrySource(stateDir, PARITY_SESSION);
+	if (!source) throw new Error("the parity fixture has no session on disk");
+	return {
+		source,
+		session: sessionTelemetry(source),
+		costByModel: costReport(source, "model"),
+		costByLabel: costReport(source, "label"),
+		calls: callsReport(source),
+		runs: runsReport(source),
+	};
 }

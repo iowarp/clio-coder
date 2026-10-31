@@ -6,7 +6,8 @@ import { openCallJournal } from "../../../../src/domains/observability/call-jour
 type PendingTelemetry = Parameters<Awaited<ReturnType<typeof openCallJournal>>["enqueue"]>[0];
 type Kind = PendingTelemetry["kind"];
 
-export { quantitiesOf, telemetryLies } from "../../../../tests/harness/telemetry-lies.js";
+export { dtoLies, quantitiesOf, telemetryLies } from "../../../../tests/harness/telemetry-lies.js";
+export { coldParityDtos, PARITY_SESSION, seedParitySession } from "../../../../tests/harness/telemetry-view.js";
 
 /**
  * The golden P0 ledger as a session on disk, where the read model's cold loader finds it: a ledger written before

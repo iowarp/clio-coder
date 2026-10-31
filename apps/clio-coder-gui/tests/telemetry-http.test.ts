@@ -3,7 +3,16 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { routes } from "../contracts/routes.js";
 import { harness, json } from "./harness/app.js";
-import { quantitiesOf, seedGoldenSession, seedRunJournal, telemetryLies } from "./harness/telemetry-fixture.js";
+import {
+	coldParityDtos,
+	dtoLies,
+	PARITY_SESSION,
+	quantitiesOf,
+	seedGoldenSession,
+	seedParitySession,
+	seedRunJournal,
+	telemetryLies,
+} from "./harness/telemetry-fixture.js";
 
 test("telemetry routes serve the read-model DTOs; every quantity passes the lie detectors and explains to itself", async (t) => {
 	const h = await harness();
@@ -42,6 +51,33 @@ test("telemetry routes serve the read-model DTOs; every quantity passes the lie 
 		assert.equal(explained.ref, ref);
 	}
 	assert.ok(!JSON.stringify(served).includes(state), "no state path leaks into a DTO");
+});
+
+test("the GUI serves the parity fixture's DTOs as the CLI reads them, and none tells a lie (#434 §13.2)", async (t) => {
+	const h = await harness();
+	t.after(() => h.close());
+	const state = join(h.home.path, "state");
+	await seedParitySession(state);
+	const cold = coldParityDtos(state);
+	const base = `/api/telemetry/sessions/${PARITY_SESSION}`;
+	const timeless = (dto: unknown) =>
+		JSON.parse(JSON.stringify(dto, (key, value: unknown) => (key === "generatedAt" ? undefined : value))) as unknown;
+	const session = await json(await h.request(base), routes.telemetrySession.response);
+	const byModel = await json(await h.request(`${base}/cost?by=model`), routes.telemetryCost.response);
+	const byLabel = await json(await h.request(`${base}/cost?by=label`), routes.telemetryCost.response);
+	assert.deepEqual(timeless(session), timeless(cold.session));
+	assert.deepEqual(timeless(byModel), timeless(cold.costByModel));
+	assert.deepEqual(timeless(byLabel), timeless(cold.costByLabel));
+	const served = [
+		session,
+		byModel,
+		byLabel,
+		await json(await h.request(`${base}/calls`), routes.telemetryCalls.response),
+		await json(await h.request(`${base}/cache`), routes.telemetryCache.response),
+		await json(await h.request(`${base}/timeline`), routes.telemetryTimeline.response),
+		await json(await h.request(`${base}/why-stopped`), routes.telemetryWhyStopped.response),
+	];
+	for (const dto of served) assert.deepEqual(dtoLies(dto), []);
 });
 
 test("telemetry routes refuse what the journals cannot answer with problems, never with zeros", async (t) => {
