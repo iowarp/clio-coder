@@ -621,6 +621,26 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 	}
 });
 
+test("a flush returns only after the batch a sibling flush started behind the one in flight is written (#434)", async () => {
+	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const journal = await openCallJournal({ sessionDirectory, context, writer });
+	try {
+		recordTelemetry("session.opened", {}, context);
+		const first = journal.flush();
+		// Queued while the first batch is in flight: the first flush waiting on it writes this one as its own batch.
+		recordTelemetry("session.opened", {}, context);
+		const second = journal.flush();
+		const third = journal.flush();
+		await third;
+		// A batch counts as persisted only once its fsync's callback ran, which no flush resolving in the same
+		// microtask drain as the batch's start can have seen, so this holds without depending on timing.
+		deepStrictEqual([journal.health().persisted, journal.health().queueDepth], [2, 0]);
+		await Promise.all([first, second]);
+	} finally {
+		await journal.close();
+	}
+});
+
 test("journal overflow and invalid records produce gaps, rotation preserves records, and secrets are redacted", async () => {
 	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
 	const journal = await openCallJournal({ sessionDirectory, context, writer, queueCapacity: 2, segmentBytes: 1 });

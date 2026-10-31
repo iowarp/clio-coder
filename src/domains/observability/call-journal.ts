@@ -326,10 +326,9 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			};
 			const flush = (): Promise<void> => {
 				if (failed) return Promise.resolve();
-				if (flushing)
-					return flushing.then(() =>
-						count > 0 || dropped > reportedDrops || capped > reportedCapped ? flush() : undefined,
-					);
+				// Behind a batch in flight, check again once it lands: another waiter may have started the next batch with
+				// the records queued meanwhile, and this flush must not return before that batch is written either (#434).
+				if (flushing) return flushing.then(flush);
 				if (count === 0 && dropped === reportedDrops && capped === reportedCapped) return Promise.resolve();
 				if (scheduled) {
 					clearImmediate(scheduled);
