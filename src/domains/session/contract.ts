@@ -1,7 +1,5 @@
 import type { SkillActivation } from "../../core/skill-activation.js";
-import type { Quantity } from "../../core/telemetry/dto.js";
 import type { ClioSessionMeta, ClioTurnRecord } from "../../engine/session.js";
-import type { CostAggregate } from "../telemetry/cost.js";
 import type { SessionEntry } from "./entries.js";
 import type { TreeSnapshot } from "./tree/navigator.js";
 import type { WorkspaceSnapshot } from "./workspace/index.js";
@@ -51,11 +49,6 @@ export type ClioSessionMetaExtension = {
 	/** Ordered record of skills activated in this session. */
 	skillActivations?: SkillActivation[];
 	/**
-	 * The session's spend for the resume picker: a projection of the read model's whole-session totals, every branch
-	 * and referenced run, never a source. A meta written before it keeps a running total (#434 §10).
-	 */
-	usage?: SessionUsageProjection | LegacySessionUsage;
-	/**
 	 * The turn `/tree` last switched the append point to, persisted so it
 	 * survives quit + resume. `resume()`/`switchBranch()` prefer this over
 	 * inferring the leaf from timestamps (`computeLeafId`) when it still
@@ -64,22 +57,6 @@ export type ClioSessionMetaExtension = {
 	 */
 	pinnedLeafTurnId?: string | null;
 };
-
-/**
- * meta.json `usage` as the read model projects it: the whole-session quantities and the fold version that made them.
- * The running-total fields beside them hold the quantities' known part for an older build sharing the state dir,
- * and current readers prefer the quantities (#434 §10, #439).
- */
-export interface SessionUsageProjection extends LegacySessionUsage {
-	foldVersion: number;
-	quantities: { tokens: Quantity; usd: Quantity };
-}
-/** The running total a meta written before the projection kept, and the fields an older build still reads (#434 §10). */
-export interface LegacySessionUsage {
-	tokens: number;
-	cost: CostAggregate;
-	foldVersion?: number;
-}
 
 export type SessionMeta = ClioSessionMeta & ClioSessionMetaExtension;
 
@@ -130,8 +107,6 @@ export interface SessionContract {
 	replaceEntries(entries: ReadonlyArray<SessionEntry>): void;
 	/** Append a skill activation ledger entry and mirror it into meta.json. */
 	recordSkillActivation(activation: SkillActivation): SkillActivation;
-	/** Replace the current session's meta.json `usage` with the read model's whole-session projection. */
-	projectUsage(usage: Pick<SessionUsageProjection, "foldVersion" | "quantities">): void;
 	/** Write atomic checkpoint (current.jsonl flush, tree.json persist, meta update). */
 	checkpoint(reason?: string): Promise<void>;
 	/** Synchronously make current.jsonl appends durable; used by write-ahead safety journals. */

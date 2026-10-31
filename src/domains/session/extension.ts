@@ -25,7 +25,6 @@ import { forkFromState } from "./tree/fork.js";
 import { appendEntryToSessionFile, readTreeBundle, removeSessionDirectory, tombstoneSession } from "./tree/manager.js";
 import { buildTreeSnapshot, computeLeafId, type TreeInputNode, type TreeSnapshot } from "./tree/navigator.js";
 import { buildTurnPreview } from "./tree/preview.js";
-import { sessionUsageProjection } from "./usage-meta.js";
 import { probeWorkspace, WORKSPACE_PROBE_REUSE_MS } from "./workspace/index.js";
 
 /**
@@ -259,11 +258,6 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 					outcome: "loaded",
 				});
 			return activation;
-		},
-		projectUsage(usage) {
-			if (!state) throw new Error("session.projectUsage: no current session");
-			state.meta.usage = sessionUsageProjection(usage.foldVersion, usage.quantities);
-			persistSessionMeta(state);
 		},
 		async checkpoint(reason) {
 			if (!state) throw new Error("session.checkpoint: no current session");

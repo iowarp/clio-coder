@@ -1,11 +1,7 @@
 import { basename } from "node:path";
-import { formatFooterTokens } from "../../core/display-units.js";
-import { renderCompactCount } from "../../core/telemetry/render.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/index.js";
 import { liveSessionOwner } from "../../domains/session/live-owner.js";
-import { projectedUsageQuantities } from "../../domains/session/usage-meta.js";
-import { formatCostAggregate } from "../../domains/telemetry/cost.js";
 import type { TuiMouseEvent, TuiMouseEventResult } from "../../engine/tui.js";
 import {
 	getKeybindings,
@@ -106,15 +102,8 @@ function metaStrip(meta: SessionMeta, now: number): string {
 	const count = typeof meta.messageCount === "number" ? meta.messageCount : 0;
 	const countLabel = count === 1 ? "1 turn" : `${count} turns`;
 	const folder = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "") || "no folder";
-	const base = `${status} ${when} · ${countLabel} · ${folder} · ${shortTarget(meta)}`;
-	const usage = meta.usage;
-	if (!usage) return base;
-	// The read model's projection is already worded by the canonical renderers; an older meta keeps its running total.
-	const projected = projectedUsageQuantities(usage);
-	if (projected) return `${base} · ${renderCompactCount(projected.tokens.fact)} tok · ${projected.usd.display}`;
-	if (typeof usage.tokens !== "number" || !usage.cost) return base;
-	const cost = formatCostAggregate(usage.cost);
-	return `${base} · ${formatFooterTokens(usage.tokens)} tok${cost !== null ? ` · ${cost}` : ""}`;
+	// meta.json describes the session, not its spend; the picker shows no spend (#434).
+	return `${status} ${when} · ${countLabel} · ${folder} · ${shortTarget(meta)}`;
 }
 
 /**

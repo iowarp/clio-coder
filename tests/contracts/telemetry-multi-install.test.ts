@@ -17,7 +17,6 @@ import { newRecordId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
 import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
-import { rebuildUsageProjections } from "../../src/domains/session/usage-projection.js";
 import { callJournalHeader, openCallJournal, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import {
 	telemetryJournalFiles,
@@ -109,10 +108,6 @@ test("two installs append to and read one state dir; neither retires the other's
 		const usd = session.totals.usd.fact as FactSum;
 		ok(Math.abs(usd.measured - 0.875) < 1e-9, "both installs' spend folds");
 		await holdsTheirs("after reading");
-
-		const [rebuilt] = rebuildUsageProjections(stateDir, { apply: true });
-		strictEqual(rebuilt?.state, "drifted");
-		await holdsTheirs("after rebuilding the projection");
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
 	}

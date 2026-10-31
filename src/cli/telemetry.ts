@@ -25,7 +25,6 @@ clio-coder telemetry export <session-id> --out <dir> [--content-free | --structu
 clio-coder telemetry import-bundle <bundle-dir> --out <dir>
 clio-coder telemetry prune [--apply] [--days N] [--max-gib N] [--research-days N] [--research-max-gib N]
 clio-coder telemetry prune --receipts [--apply]
-clio-coder telemetry rebuild [--session <id>] [--apply]
 
 consent records, for this operator, that research content capture may run in a
 workspace (default: the current directory) and everything under it. Capture also
@@ -65,14 +64,6 @@ run's evidence bundle holds a copy under the same seal that verifies, and with
 --apply replaces that receipt with a tombstone naming the copy, which every
 receipt reader follows. A receipt of an open run, an unsealed one, or one with
 no verified copy stays, with the reason printed.
-
-rebuild re-projects each session's meta.json usage, the spend the resume picker
-shows, from its journals through the read model, and lists every session whose
-stored projection drifted: its old and new totals and the fold versions that
-made them. A meta written before the projection has no fold version and always
-drifts. Nothing is written without --apply. A live session's own process owns
-its meta.json, so rebuild lists it and leaves it alone. --session limits the
-pass to one session.
 `;
 
 function formatBytes(bytes: number): string {
@@ -168,42 +159,6 @@ async function runPrune(argv: ReadonlyArray<string>): Promise<number> {
 	const removed = result.removed.reduce((sum, action) => sum + action.bytes, 0);
 	process.stdout.write(
 		`removed ${result.removed.length} file(s), ${formatBytes(removed)}; skipped ${result.skipped.length}\n`,
-	);
-	return 0;
-}
-
-/**
- * Re-project each session's meta.json usage from its journals through the read model and list where the stored
- * projection drifted from what the current fold makes of the same records (#434 §10, P5).
- */
-async function runRebuild(argv: ReadonlyArray<string>): Promise<number> {
-	let apply = false;
-	let only: string | undefined;
-	for (let index = 0; index < argv.length; index += 1) {
-		const arg = argv[index] as string;
-		if (arg === "--apply") apply = true;
-		else if (arg === "--session" && only === undefined && /^[a-zA-Z0-9_-]+$/.test(argv[index + 1] ?? "")) {
-			only = argv[index + 1];
-			index += 1;
-		} else {
-			process.stderr.write(HELP);
-			return 2;
-		}
-	}
-	const { rebuildUsageProjections } = await import("../domains/session/usage-projection.js");
-	const report = rebuildUsageProjections(clioStateDir(), { apply, ...(only !== undefined ? { only } : {}) });
-	let drifted = 0;
-	for (const row of report) {
-		if (row.state === "live") process.stdout.write(`kept ${row.sessionId} (live; its own process projects its usage)\n`);
-		else if (row.state === "unreadable") process.stdout.write(`kept ${row.sessionId} (its journals could not be read)\n`);
-		else if (row.state === "drifted") {
-			drifted += 1;
-			process.stdout.write(`${apply ? "rebuilt" : "would rebuild"} ${row.sessionId}: ${row.before} -> ${row.after}\n`);
-		}
-	}
-	const count = (state: string) => report.filter((row) => row.state === state).length;
-	process.stdout.write(
-		`${apply ? "rebuilt" : "dry run:"} ${drifted} session(s) drifted, ${count("unchanged")} unchanged, ${count("live")} live, ${count("unreadable")} unreadable${apply ? "" : "; nothing written (pass --apply)"}\n`,
 	);
 	return 0;
 }
@@ -412,7 +367,6 @@ export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<
 	if (argv[0] === "export") return runExport(argv.slice(1));
 	if (argv[0] === "import-bundle") return runImportBundle(argv.slice(1));
 	if (argv[0] === "prune") return runPrune(argv.slice(1));
-	if (argv[0] === "rebuild") return runRebuild(argv.slice(1));
 	if (argv[0] !== undefined) printError(`unknown telemetry command: ${argv[0]}`);
 	process.stderr.write(HELP);
 	return 2;
