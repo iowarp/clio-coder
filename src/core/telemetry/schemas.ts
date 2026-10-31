@@ -656,7 +656,7 @@ export const ScopeSealedSchema = Type.Object(
 		records: count,
 		segments: Type.Array(
 			Type.Object(
-				{ name: Type.String({ pattern: "^journal(\\.rec_[0-9a-f-]+)?\\.jsonl$" }), sha256: sha256Hex, bytes: count },
+				{ name: Type.String({ pattern: "^journal(\\.[0-9]{10})?\\.jsonl$" }), sha256: sha256Hex, bytes: count },
 				closed,
 			),
 		),

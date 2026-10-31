@@ -51,7 +51,7 @@ test("a sealed session scope verifies from its own files and fails on one flippe
 	ok(verdict.segments > 1);
 	strictEqual(verdict.objects, 1);
 
-	const segments = (await readdir(directory)).filter((name) => name.startsWith("journal.rec_")).sort();
+	const segments = (await readdir(directory)).filter((name) => /^journal\.[0-9]{10}\.jsonl$/.test(name)).sort();
 	const rotated = join(directory, segments[0] as string);
 	const segmentBytes = await flipByte(rotated, 20);
 	deepStrictEqual(seal(await readTelemetryScopeFiles(directory)), {

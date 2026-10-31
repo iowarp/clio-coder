@@ -6,7 +6,7 @@ import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
-import type { SegmentHeader } from "../../core/telemetry/envelope.js";
+import type { SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { ScopeSealed } from "../../core/telemetry/schemas.js";
 import { ScopeSealedSchema } from "../../core/telemetry/schemas.js";
 import type { TelemetryChain } from "../../core/telemetry/segment.js";
@@ -70,7 +70,7 @@ export function telemetryScopeOf(context: TelemetryContext): { kind: TelemetrySc
 	return { kind: "session", id: context.sessionId };
 }
 
-export function sha256Of(bytes: Uint8Array): string {
+function sha256Of(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
@@ -100,7 +100,10 @@ export async function listScopeObjects(scopeDirectory: string): Promise<ScopeObj
 		const id = OBJECT_FILE.exec(name)?.[1];
 		if (id === undefined) continue;
 		const bytes = await readRegularFile(join(telemetryObjectsDirectory(scopeDirectory), name));
-		entries.push({ id, sha256: sha256Of(bytes), bytes: bytes.length });
+		const sha256 = sha256Of(bytes);
+		// Objects are content-addressed; a seal never blesses bytes that are not the preimage their id names (#434).
+		if (sha256 !== id.slice(4)) throw new Error(`telemetry object ${id} does not match its id`);
+		entries.push({ id, sha256, bytes: bytes.length });
 	}
 	return entries;
 }
@@ -174,6 +177,137 @@ export type SealVerdict =
 	| { status: "unsealed"; reason: "no-bundle" | "no-journal" }
 	| { status: "failed"; mismatch: SealMismatch };
 
+/** One seal the chain holds, with the chain and the segment header it was written under. */
+export interface ChainSeal {
+	record: TelemetryRecord;
+	/** Index of the segment holding the seal line. */
+	segment: number;
+	header: SegmentHeader;
+	/** Chain head after the seal line. */
+	headAfter: string;
+}
+
+export interface ChainWalk {
+	chain: TelemetryChain;
+	/** Every seal in chain order; each was checked against the prefix it covers. */
+	seals: ChainSeal[];
+	/** Whether the chain's last line is a seal. */
+	tipIsSeal: boolean;
+	/** Each walked segment's name, sha256 and size. */
+	segments: ScopeFileEntry[];
+}
+
+const SEAL_KINDS: ReadonlySet<string> = new Set(Object.values(SEAL_EVENTS));
+
+function sealOwner(record: TelemetryRecord, kind: TelemetryScopeKind): string | undefined {
+	const ctx = record.ctx;
+	if ("processId" in ctx) return kind === "process" ? ctx.processId : undefined;
+	return kind === "run" ? ctx.runId : kind === "session" ? (ctx.sessionId ?? undefined) : undefined;
+}
+
+function sameEntries<T>(left: readonly T[], right: readonly T[]): boolean {
+	return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * Replay a scope's chain over its segments, oldest first, and check every seal it holds against the prefix that seal
+ * covers: its head, its line count, the segments before it and its own segment's bytes before the seal line (#434).
+ * An earlier seal stays a commitment to the history before it, so a resealed scope cannot launder an edit. `scope`
+ * also binds each seal to the scope; `objects` checks each seal's object list against the current objects.
+ */
+export function walkTelemetryChain(
+	files: ReadonlyArray<{ name: string; bytes: Buffer }>,
+	check: { scope?: { kind: TelemetryScopeKind; id: string }; objects?: ReadonlyMap<string, ScopeObjectEntry> } = {},
+): ChainWalk | { mismatch: SealMismatch } {
+	let chain: TelemetryChain = EMPTY_TELEMETRY_CHAIN;
+	const seals: ChainSeal[] = [];
+	const segments: ScopeFileEntry[] = files.map(({ name, bytes }) => ({
+		name,
+		sha256: sha256Of(bytes),
+		bytes: bytes.length,
+	}));
+	let tipIsSeal = false;
+	for (const [index, segment] of files.entries()) {
+		const scan = scanTelemetrySegment(segment.bytes);
+		if (scan.corruptOffset !== null || scan.tornTailBytes > 0 || scan.validBytes !== segment.bytes.length)
+			return {
+				mismatch: { kind: "chain", name: segment.name, line: scan.rows.length + 1, detail: "segment has a damaged line" },
+			};
+		let offset = 0;
+		let header: SegmentHeader | undefined;
+		for (const [line, row] of scan.rows.entries()) {
+			const end = segment.bytes.indexOf(0x0a, offset);
+			const at = { kind: "chain" as const, name: segment.name, line: line + 1 };
+			if (line === 0) {
+				if (row.kind !== "header") return { mismatch: { ...at, detail: "segment does not open with a header" } };
+				const expected = index === 0 ? undefined : telemetryChainHead(chain);
+				if (row.header.chainHead !== expected)
+					return {
+						mismatch: {
+							...at,
+							detail: index === 0 ? "first segment claims a prior chain" : "segment does not continue the chain",
+						},
+					};
+			} else if (
+				row.kind === "header" &&
+				row.header.chainHead !== undefined &&
+				row.header.chainHead !== telemetryChainHead(chain)
+			)
+				return { mismatch: { ...at, detail: "header chain head differs from the chain" } };
+			if (row.kind === "header") header = row.header;
+			const sealRow = row.kind === "record" && SEAL_KINDS.has(row.record.k) ? row.record : null;
+			if (sealRow) {
+				const data = sealRow.data as ScopeSealed;
+				const label = `seal ${sealRow.id}`;
+				if (check.scope) {
+					if (sealRow.k !== SEAL_EVENTS[check.scope.kind])
+						return { mismatch: { kind: "seal", detail: `${label} is ${sealRow.k}, not ${SEAL_EVENTS[check.scope.kind]}` } };
+					if (sealOwner(sealRow, check.scope.kind) !== check.scope.id)
+						return { mismatch: { kind: "seal", detail: `${label} names another scope` } };
+				}
+				if (data.head !== telemetryChainHead(chain))
+					return { mismatch: { kind: "seal", detail: `${label} head differs from the recomputed chain` } };
+				if (data.records !== chain.lines)
+					return { mismatch: { kind: "seal", detail: `${label} covers ${data.records} lines, chain has ${chain.lines}` } };
+				const expected = [
+					...segments.slice(0, index),
+					{ name: TELEMETRY_JOURNAL_FILE, sha256: sha256Of(segment.bytes.subarray(0, offset)), bytes: offset },
+				];
+				if (!sameEntries(data.segments, expected))
+					return { mismatch: { kind: "seal", detail: `${label} segment list differs from the files` } };
+				for (const object of data.objects) {
+					if (object.sha256 !== object.id.slice(4))
+						return { mismatch: { kind: "object", name: `${object.id}.json`, detail: "sealed sha256 does not match its id" } };
+					const present = check.objects?.get(object.id);
+					if (check.objects && (present?.sha256 !== object.sha256 || present.bytes !== object.bytes))
+						return { mismatch: { kind: "seal", detail: `${label} lists ${object.id}, which the bundle does not hold` } };
+				}
+				if (!header) return { mismatch: { ...at, detail: "seal precedes any header" } };
+			}
+			chain = chainTelemetryLine(chain, segment.bytes.subarray(offset, end));
+			if (sealRow && header)
+				seals.push({ record: sealRow, segment: index, header, headAfter: telemetryChainHead(chain) as string });
+			tipIsSeal = sealRow !== null;
+			offset = end + 1;
+		}
+	}
+	return { chain, seals, tipIsSeal, segments };
+}
+
+/** One line naming a mismatch, for diagnostics and the CLI. */
+export function describeSealMismatch(mismatch: SealMismatch): string {
+	switch (mismatch.kind) {
+		case "manifest":
+		case "seal":
+			return `${mismatch.kind}: ${mismatch.detail}`;
+		case "segment":
+		case "object":
+			return `${mismatch.kind} ${mismatch.name}: ${mismatch.detail}`;
+		case "chain":
+			return `chain at ${mismatch.name} line ${mismatch.line}: ${mismatch.detail}`;
+	}
+}
+
 function failed(mismatch: SealMismatch): SealVerdict {
 	return { status: "failed", mismatch };
 }
@@ -196,14 +330,11 @@ function fileMismatch(
 	return null;
 }
 
-function sameEntries<T>(left: readonly T[], right: readonly T[]): boolean {
-	return JSON.stringify(left) === JSON.stringify(right);
-}
-
 /**
  * The seal verdict for a scope's files (#434). Pure: it checks every listed segment and object against its size and
- * sha256, recomputes the chain from the first segment header, and compares the seal record's head, line count and
- * file lists. The first mismatch fails the scope; a scope without `bundle.json` is unsealed.
+ * sha256 and every object against its content-addressed id, replays the chain checking every seal against its prefix,
+ * and binds the manifest to the last seal: its record, head, file lists, timestamp, host and writer version. The first
+ * mismatch fails the scope; a scope without `bundle.json` is unsealed.
  */
 export function verifyTelemetryScope(files: TelemetryScopeFiles): SealVerdict {
 	if (files.manifest === null)
@@ -219,90 +350,50 @@ export function verifyTelemetryScope(files: TelemetryScopeFiles): SealVerdict {
 	}
 	const segmentFiles = fileMismatch(manifest.segments, files.segments);
 	if (segmentFiles) return failed({ kind: "segment", ...segmentFiles });
+	for (const object of manifest.objects)
+		if (object.sha256 !== object.id.slice(4))
+			return failed({ kind: "object", name: `${object.id}.json`, detail: "sealed sha256 does not match its id" });
 	const objectFiles = fileMismatch(
 		manifest.objects.map(({ id, sha256, bytes }) => ({ name: `${id}.json`, sha256, bytes })),
 		files.objects,
 	);
 	if (objectFiles) return failed({ kind: "object", ...objectFiles });
-	const order = files.segments.map(({ name }) => name);
 	if (
 		!sameEntries(
-			order,
+			files.segments.map(({ name }) => name),
 			manifest.segments.map(({ name }) => name),
 		)
 	)
 		return failed({ kind: "manifest", detail: "segments are not listed oldest first" });
-
-	const sealKind = SEAL_EVENTS[manifest.scope.kind];
-	let chain: TelemetryChain = EMPTY_TELEMETRY_CHAIN;
-	let sealed: { segment: number } | null = null;
-	for (const [index, segment] of files.segments.entries()) {
-		const scan = scanTelemetrySegment(segment.bytes);
-		if (scan.corruptOffset !== null || scan.tornTailBytes > 0 || scan.validBytes !== segment.bytes.length)
-			return failed({
-				kind: "chain",
-				name: segment.name,
-				line: scan.rows.length + 1,
-				detail: "segment has a damaged line",
-			});
-		let offset = 0;
-		for (const [line, row] of scan.rows.entries()) {
-			const end = segment.bytes.indexOf(0x0a, offset);
-			const bytes = segment.bytes.subarray(offset, end);
-			const at = { name: segment.name, line: line + 1 };
-			if (sealed !== null) return failed({ kind: "chain", ...at, detail: "lines follow the seal" });
-			if (line === 0) {
-				if (row.kind !== "header") return failed({ kind: "chain", ...at, detail: "segment does not open with a header" });
-				const expected = index === 0 ? undefined : telemetryChainHead(chain);
-				if (row.header.chainHead !== expected)
-					return failed({
-						kind: "chain",
-						...at,
-						detail: index === 0 ? "first segment claims a prior chain" : "segment does not continue the chain",
-					});
-			} else if (
-				row.kind === "header" &&
-				row.header.chainHead !== undefined &&
-				row.header.chainHead !== telemetryChainHead(chain)
-			)
-				return failed({ kind: "chain", ...at, detail: "header chain head differs from the chain" });
-			if (row.kind === "record" && row.record.id === manifest.seal.recordId) {
-				const record = row.record;
-				if (record.k !== sealKind) return failed({ kind: "seal", detail: `seal record is ${record.k}, not ${sealKind}` });
-				const ctx = record.ctx;
-				const owner =
-					"processId" in ctx ? ctx.processId : manifest.scope.kind === "run" ? ctx.runId : (ctx.sessionId ?? undefined);
-				if (owner !== manifest.scope.id) return failed({ kind: "seal", detail: "seal record names another scope" });
-				const data = record.data as ScopeSealed;
-				if (data.head !== telemetryChainHead(chain))
-					return failed({ kind: "seal", detail: "seal head differs from the recomputed chain" });
-				if (data.records !== chain.lines)
-					return failed({ kind: "seal", detail: `seal covers ${data.records} lines, chain has ${chain.lines}` });
-				const expectedSegments = [
-					...manifest.segments.slice(0, index),
-					{ name: segment.name, sha256: sha256Of(segment.bytes.subarray(0, offset)), bytes: offset },
-				];
-				if (!sameEntries(data.segments, expectedSegments))
-					return failed({ kind: "seal", detail: "seal segment list differs from the files" });
-				if (!sameEntries(data.objects, manifest.objects))
-					return failed({ kind: "seal", detail: "seal object list differs from the bundle" });
-				sealed = { segment: index };
-			}
-			chain = chainTelemetryLine(chain, bytes);
-			offset = end + 1;
-		}
-	}
-	if (sealed === null) return failed({ kind: "seal", detail: `seal record ${manifest.seal.recordId} not found` });
-	if (sealed.segment !== files.segments.length - 1 || files.segments.at(-1)?.name !== TELEMETRY_JOURNAL_FILE)
+	const walk = walkTelemetryChain(files.segments, {
+		scope: manifest.scope,
+		objects: new Map(manifest.objects.map((object) => [object.id, object])),
+	});
+	if ("mismatch" in walk) return failed(walk.mismatch);
+	const last = walk.seals.at(-1);
+	if (!last) return failed({ kind: "seal", detail: `seal record ${manifest.seal.recordId} not found` });
+	if (last.record.id !== manifest.seal.recordId)
+		return failed({ kind: "seal", detail: `bundle names ${manifest.seal.recordId}, the last seal is ${last.record.id}` });
+	if (!walk.tipIsSeal) return failed({ kind: "seal", detail: "lines follow the seal" });
+	if (last.segment !== files.segments.length - 1 || files.segments.at(-1)?.name !== TELEMETRY_JOURNAL_FILE)
 		return failed({ kind: "seal", detail: "seal is not in the live segment" });
-	if (telemetryChainHead(chain) !== manifest.seal.head)
+	if (!sameEntries((last.record.data as ScopeSealed).objects, manifest.objects))
+		return failed({ kind: "seal", detail: "seal object list differs from the bundle" });
+	if (last.headAfter !== manifest.seal.head)
 		return failed({ kind: "seal", detail: "bundle head differs from the chain after the seal" });
+	// The manifest's provenance is a copy of what the chain committed; a copy that disagrees is forged (#434).
+	if (manifest.sealedAt !== last.record.t)
+		return failed({ kind: "manifest", detail: "sealedAt differs from the seal record" });
+	if (manifest.host !== last.header.clockOrigin.host)
+		return failed({ kind: "manifest", detail: "host differs from the segment that holds the seal" });
+	if (manifest.clioCoderVersion !== last.header.writer.clioCoderVersion)
+		return failed({ kind: "manifest", detail: "clioCoderVersion differs from the segment that holds the seal" });
 	return {
 		status: "verified",
 		scope: manifest.scope,
 		sealedAt: manifest.sealedAt,
 		seal: manifest.seal,
-		records: chain.lines,
+		records: walk.chain.lines,
 		segments: files.segments.length,
 		objects: files.objects.length,
 	};

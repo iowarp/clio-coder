@@ -17,13 +17,13 @@ import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/tel
 import { makeTelemetryRecord, readTelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload, JournalEventName, PreimageEventName } from "../../core/telemetry/events.js";
 import { PREIMAGE_SUBJECTS } from "../../core/telemetry/events.js";
-import { newRecordId } from "../../core/telemetry/ids.js";
 import type { PendingTelemetry, TelemetrySink } from "../../core/telemetry/producer.js";
 import {
 	registerProcessJournalSink,
 	registerRunTelemetrySink,
 	registerTelemetrySink,
 } from "../../core/telemetry/producer.js";
+import type { ObjectRef } from "../../core/telemetry/schemas.js";
 import type { SegmentScan, TelemetryChain } from "../../core/telemetry/segment.js";
 import {
 	chainTelemetryBytes,
@@ -41,10 +41,20 @@ import {
 	telemetryJournalFiles,
 	telemetryJournalPath,
 	telemetrySegmentFile,
+	telemetrySegmentSequence,
 	telemetrySessionDirectory,
 } from "./paths.js";
 import type { ScopeFileEntry } from "./seal.js";
-import { listScopeObjects, SEAL_EVENTS, scopeBundleManifest, sha256Of, telemetryScopeOf } from "./seal.js";
+import {
+	describeSealMismatch,
+	listScopeObjects,
+	readTelemetryScopeFiles,
+	SEAL_EVENTS,
+	scopeBundleManifest,
+	telemetryScopeOf,
+	verifyTelemetryScope,
+	walkTelemetryChain,
+} from "./seal.js";
 
 export interface JournalHealth {
 	queueDepth: number;
@@ -74,6 +84,11 @@ export interface CallJournal extends TelemetrySink {
 	 * after a seal remove `bundle.json` first, so the scope reads live until the next seal.
 	 */
 	seal(): Promise<boolean>;
+	/**
+	 * Store an object in the scope's `objects/` behind any seal in progress, removing a current `bundle.json` first so
+	 * a sealed scope never holds an object its seal does not list (#434).
+	 */
+	storeObject(subject: Parameters<typeof storeTelemetryObject>[1], value: unknown): Promise<ObjectRef>;
 }
 export interface CallJournalOptions {
 	/** The scope directory from `paths.ts`: a session's, a run's or the process's. */
@@ -282,27 +297,37 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 			}
 			// The chain is a function of the bytes alone: replay the rotated segments, then the live prefix (#434).
 			let rotated: Array<{ name: string; bytes: Buffer }> = [];
-			let rotatedScans: SegmentScan[] = [];
 			let rotatedRead = true;
 			try {
 				rotated = await readRotatedSegments(options.directory);
-				rotatedScans = rotated.map((segment) => scanTelemetrySegment(segment.bytes));
 			} catch {
-				// An unreadable rotated segment leaves research capture at its cap; a seal then cannot match the files.
+				// An unreadable rotated segment leaves research capture at its cap, and the scope cannot be sealed.
 				rotatedRead = false;
 			}
-			let chain: TelemetryChain = EMPTY_TELEMETRY_CHAIN;
-			for (const [index, segment] of rotated.entries())
-				chain = chainTelemetryBytes(chain, segment.bytes.subarray(0, rotatedScans[index]?.validBytes ?? 0));
-			const segments: ScopeFileEntry[] = rotated.map(({ name, bytes }) => ({
-				name,
-				sha256: sha256Of(bytes),
-				bytes: bytes.length,
-			}));
+			const rotatedScans = rotated.map((segment) => scanTelemetrySegment(segment.bytes));
 			const bundlePath = telemetryBundlePath(options.directory);
+			// A sealed scope must still verify before this writer makes it live, so reopening never launders an edit.
+			if (existsSync(bundlePath)) {
+				const verdict = verifyTelemetryScope(await readTelemetryScopeFiles(options.directory));
+				if (verdict.status === "failed")
+					throw new Error(`sealed telemetry scope does not verify: ${describeSealMismatch(verdict.mismatch)}`);
+			}
+			const prefix = bytes.subarray(0, scan.validBytes);
+			// Every earlier seal must still match the history it covers, with or without a manifest (#434).
+			const walk = rotatedRead
+				? walkTelemetryChain([...rotated, ...(prefix.length > 0 ? [{ name: TELEMETRY_JOURNAL_FILE, bytes: prefix }] : [])])
+				: null;
+			if (walk && "mismatch" in walk)
+				throw new Error(`telemetry chain does not verify: ${describeSealMismatch(walk.mismatch)}`);
+			let chain: TelemetryChain = walk ? walk.chain : EMPTY_TELEMETRY_CHAIN;
+			const segments: ScopeFileEntry[] = walk ? walk.segments.slice(0, rotated.length) : [];
+			// A scope reopened after its seal is resealed when this writer closes, as a resumed session is (#434).
+			const resealOnClose = walk?.tipIsSeal ?? false;
+			let sequence = rotated.reduce((max, { name }) => Math.max(max, telemetrySegmentSequence(name) ?? 0), 0);
 			// Appending makes a sealed scope live again; its manifest goes before the first new byte (#434).
 			await rm(bundlePath, { force: true });
-			let bundled = false;
+			/** Whether this writer's seal is the scope's tip and its `bundle.json` is on disk. */
+			let sealCurrent = false;
 			const gap = (
 				reason: "torn-tail" | "writer-drop" | "invalid-record" | "mode-filtered" | "research-cap",
 				count: number,
@@ -313,10 +338,10 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				});
 			// Initial creation and tail repair use the durable replacement primitive. Normal batches
 			// append with a checked async write and fsync under this exclusive lease (#434).
-			const prefix = bytes.subarray(0, scan.validBytes);
-			chain = chainTelemetryBytes(chain, prefix);
+			// A live segment opened after rotated ones continues their chain, as a rotation would have (#434).
+			const recovered = bytes.length === 0 ? telemetryChainHead(chain) : null;
 			const opening = Buffer.concat([
-				encodeTelemetryLine(header),
+				encodeTelemetryLine(recovered ? { ...header, chainHead: recovered } : header),
 				...(scan.tornTailBytes ? [encodeTelemetryLine(gap("torn-tail", 1))] : []),
 			]);
 			if (bytes.length === 0 || scan.tornTailBytes > 0) {
@@ -388,6 +413,11 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 					let batchCount = 0;
 					let dequeued = 0;
 					try {
+						if (sealCurrent) {
+							// Content stored below and every line after it postdate the seal.
+							await rm(bundlePath, { force: true });
+							sealCurrent = false;
+						}
 						const lines: Buffer[] = [];
 						// Records already queued are written under the new mode, so a change record enqueued after
 						// the settings changed is the first record of the new segment (#434).
@@ -486,10 +516,6 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							reportedCapped = capped;
 						}
 						if (!handle) throw new Error("call journal closed before flush");
-						if (bundled && lines.length > 0) {
-							await rm(bundlePath, { force: true });
-							bundled = false;
-						}
 						let rotation: Buffer[] = [];
 						if (size >= (options.segmentBytes ?? 32 * 1024 * 1024)) {
 							const closing = encodeTelemetryLine(
@@ -502,7 +528,8 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 							await handle.sync();
 							await handle.close();
 							handle = undefined;
-							const name = telemetrySegmentFile(newRecordId());
+							sequence += 1;
+							const name = telemetrySegmentFile(sequence);
 							await rename(path, join(options.directory, name));
 							chain = chainTelemetryBytes(chain, closing);
 							segments.push({ name, sha256: live.update(closing).digest("hex"), bytes: size + closing.length });
@@ -556,66 +583,107 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				return flushing;
 			};
 			const scope = telemetryScopeOf(options.context);
-			const seal = async (): Promise<boolean> => {
-				await flush();
-				// Records queued while the last batch landed are written before the seal covers the chain.
-				if (count > 0 || dropped > reportedDrops || capped > reportedCapped) return seal();
+			const pending = () => count > 0 || dropped > reportedDrops || capped > reportedCapped;
+			/** Seals, object stores and close run one at a time, in call order (#434). */
+			let exclusive: Promise<unknown> = Promise.resolve();
+			const exclusively = <T>(work: () => Promise<T>): Promise<T> => {
+				const run = exclusive.then(work);
+				exclusive = run.then(
+					() => undefined,
+					() => undefined,
+				);
+				return run;
+			};
+			/**
+			 * Write everything queued, then hold the batch slot so no batch lands while `work` runs. A failed writer
+			 * stops draining at once: its counters no longer advance (#434).
+			 */
+			const holdingBatches = async <T>(work: () => Promise<T>): Promise<T> => {
+				for (;;) {
+					await flush();
+					if (!flushing && (failed || !pending())) break;
+				}
+				let done!: () => void;
+				flushing = new Promise<void>((resolve) => {
+					done = resolve;
+				});
+				try {
+					return await work();
+				} finally {
+					flushing = undefined;
+					done();
+					if (pending()) schedule();
+				}
+			};
+			const sealNow = async (): Promise<boolean> => {
 				// Without every rotated segment's bytes the seal could not list the files it covers.
-				if (failed || closed || !handle || !rotatedRead) return false;
+				if (failed || !handle || !rotatedRead) return false;
+				if (sealCurrent) return true;
 				const current = handle;
-				const sealing = (async () => {
-					try {
-						const head = telemetryChainHead(chain);
-						if (head === null) throw new Error("telemetry chain is empty");
-						const objects = await listScopeObjects(options.directory);
-						const record = makeTelemetryRecord(
-							SEAL_EVENTS[scope.kind],
-							{
-								head,
-								records: chain.lines,
-								segments: [...segments, { name: TELEMETRY_JOURNAL_FILE, sha256: live.copy().digest("hex"), bytes: size }],
-								objects,
-							},
-							options.context,
-							{ t: new Date().toISOString(), mono: performance.now() },
-						);
-						const line = encodeTelemetryLine(record);
-						await appendAll(current, line);
-						await current.sync();
-						size += line.length;
-						chain = chainTelemetryBytes(chain, line);
-						live.update(line);
-						const manifest = scopeBundleManifest({
-							scope,
-							sealedAt: record.t,
-							writer: options.writer,
-							host: hostname(),
+				let objects: Awaited<ReturnType<typeof listScopeObjects>>;
+				try {
+					objects = await listScopeObjects(options.directory);
+				} catch {
+					// An object that cannot be read or does not match its id refuses the seal; nothing was written.
+					return false;
+				}
+				try {
+					const head = telemetryChainHead(chain);
+					if (head === null) throw new Error("telemetry chain is empty");
+					const record = makeTelemetryRecord(
+						SEAL_EVENTS[scope.kind],
+						{
+							head,
+							records: chain.lines,
 							segments: [...segments, { name: TELEMETRY_JOURNAL_FILE, sha256: live.copy().digest("hex"), bytes: size }],
 							objects,
-							seal: { recordId: record.id, head: telemetryChainHead(chain) as string },
-						});
-						await safeResourceWriteAsync(bundlePath, `${JSON.stringify(manifest, null, "\t")}\n`, { mode: 0o600 });
-						bundled = true;
-						if (subscribed(hubOwner))
-							publishPersisted(hubOwner, { kind: "appended", bytes: line, origin: header.clockOrigin });
-						return true;
-					} catch {
-						// A seal that did not land leaves the scope unsealed; nothing appends behind an uncertain tail.
-						writeErrors += 1;
-						failed = true;
-						if (subscribed(hubOwner)) publishPersisted(hubOwner, { kind: "failed" });
-						return false;
-					}
-				})();
-				flushing = sealing.then(() => undefined);
-				void flushing.finally(() => {
-					flushing = undefined;
-					if (count > 0 || dropped > reportedDrops || capped > reportedCapped) schedule();
-				});
-				return sealing;
+						},
+						options.context,
+						{ t: new Date().toISOString(), mono: performance.now() },
+					);
+					const line = encodeTelemetryLine(record);
+					await appendAll(current, line);
+					await current.sync();
+					size += line.length;
+					chain = chainTelemetryBytes(chain, line);
+					live.update(line);
+					const manifest = scopeBundleManifest({
+						scope,
+						sealedAt: record.t,
+						writer: options.writer,
+						host: header.clockOrigin.host,
+						segments: [...segments, { name: TELEMETRY_JOURNAL_FILE, sha256: live.copy().digest("hex"), bytes: size }],
+						objects,
+						seal: { recordId: record.id, head: telemetryChainHead(chain) as string },
+					});
+					await safeResourceWriteAsync(bundlePath, `${JSON.stringify(manifest, null, "\t")}\n`, { mode: 0o600 });
+					sealCurrent = true;
+					if (subscribed(hubOwner))
+						publishPersisted(hubOwner, { kind: "appended", bytes: line, origin: header.clockOrigin });
+					return true;
+				} catch {
+					// A seal that did not land leaves the scope unsealed; nothing appends behind an uncertain tail.
+					writeErrors += 1;
+					failed = true;
+					if (subscribed(hubOwner)) publishPersisted(hubOwner, { kind: "failed" });
+					return false;
+				}
 			};
 			const journal: CallJournal = {
-				seal,
+				seal() {
+					if (closed) return Promise.resolve(false);
+					return exclusively(() => holdingBatches(sealNow));
+				},
+				storeObject(subject, value) {
+					if (closed || failed) return Promise.reject(new Error("call journal is closed"));
+					return exclusively(async () => {
+						if (sealCurrent) {
+							await rm(bundlePath, { force: true });
+							sealCurrent = false;
+						}
+						return storeTelemetryObject(options.directory, subject, value);
+					});
+				},
 				admits(kind) {
 					return captureAdmits(captureNow(), kind);
 				},
@@ -647,7 +715,11 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 					closed = true;
 					unregister?.();
 					closing = (async () => {
-						await flush();
+						await exclusively(() =>
+							holdingBatches(async () => {
+								if (resealOnClose && !sealCurrent) await sealNow();
+							}),
+						);
 						if (scheduled) clearImmediate(scheduled);
 						release();
 						await owner;

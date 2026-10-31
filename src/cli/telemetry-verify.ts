@@ -1,26 +1,13 @@
 import { resolve } from "node:path";
 import { seal } from "../domains/telemetry/read-model.js";
-import type { SealMismatch, SealVerdict } from "../domains/telemetry/seal.js";
-import { readTelemetryScopeFiles } from "../domains/telemetry/seal.js";
+import type { SealVerdict } from "../domains/telemetry/seal.js";
+import { describeSealMismatch, readTelemetryScopeFiles } from "../domains/telemetry/seal.js";
 import { printError } from "./shared.js";
-
-function describeMismatch(mismatch: SealMismatch): string {
-	switch (mismatch.kind) {
-		case "manifest":
-		case "seal":
-			return `${mismatch.kind}: ${mismatch.detail}`;
-		case "segment":
-		case "object":
-			return `${mismatch.kind} ${mismatch.name}: ${mismatch.detail}`;
-		case "chain":
-			return `chain at ${mismatch.name} line ${mismatch.line}: ${mismatch.detail}`;
-	}
-}
 
 function describe(path: string, verdict: SealVerdict): string {
 	if (verdict.status === "unsealed")
 		return `unsealed ${path}: ${verdict.reason === "no-journal" ? "no journal" : "no bundle.json (live or never sealed)"}`;
-	if (verdict.status === "failed") return `failed ${path}: ${describeMismatch(verdict.mismatch)}`;
+	if (verdict.status === "failed") return `failed ${path}: ${describeSealMismatch(verdict.mismatch)}`;
 	return `verified ${verdict.scope.kind} ${verdict.scope.id}: sealed ${verdict.sealedAt}, ${verdict.records} lines in ${verdict.segments} segment(s), ${verdict.objects} object(s), head ${verdict.seal.head}`;
 }
 

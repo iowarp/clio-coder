@@ -10,12 +10,12 @@ import { assertSafeId } from "../../core/safe-id.js";
  *   <scope>/bundle.json                  only while the scope is sealed
  *   consent.json
  *
- * Every scope names its journal `journal.jsonl` and rotates it as `journal.<recId>.jsonl`. Nothing outside the
+ * Every scope names its journal `journal.jsonl` and rotates it as `journal.<sequence>.jsonl`. Nothing outside the
  * telemetry domain writes under this root (rule11 in tests/boundaries/check-boundaries.ts).
  */
 
 export const TELEMETRY_JOURNAL_FILE = "journal.jsonl";
-const SEGMENT_FILE = /^journal\.rec_[0-9a-f-]+\.jsonl$/u;
+const SEGMENT_FILE = /^journal\.([0-9]{10})\.jsonl$/u;
 
 /** Ids are existing path components; one that could leave its scope directory is refused, not resolved (#434). */
 function scopeId(id: string, scope: string): string {
@@ -56,9 +56,20 @@ export function telemetryJournalPath(scopeDirectory: string): string {
 	return join(scopeDirectory, TELEMETRY_JOURNAL_FILE);
 }
 
-/** The name a rotated segment takes; record ids are UUIDv7, so names sort oldest first. */
-export function telemetrySegmentFile(recordId: string): string {
-	return `journal.${recordId}.jsonl`;
+/**
+ * The name a rotated segment takes. The sequence is the scope's own, one past its newest rotated segment, so names
+ * sort in chain order whatever the clock does; ids minted in one millisecond or after a clock step do not (#434).
+ */
+export function telemetrySegmentFile(sequence: number): string {
+	if (!Number.isSafeInteger(sequence) || sequence < 1 || sequence > 9_999_999_999)
+		throw new Error("telemetry segment sequence out of range");
+	return `journal.${String(sequence).padStart(10, "0")}.jsonl`;
+}
+
+/** The sequence a rotated segment's name carries, or null for any other name. */
+export function telemetrySegmentSequence(name: string): number | null {
+	const match = SEGMENT_FILE.exec(name);
+	return match ? Number(match[1]) : null;
 }
 
 /** A scope's journal segments among a directory listing, oldest first, the live segment last. */
