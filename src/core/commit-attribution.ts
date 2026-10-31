@@ -17,7 +17,7 @@ export const CLIO_COMMIT_TRAILERS = {
 
 export const CLIO_DECISION_TRAILER_KEY = "Clio-Decision";
 
-/** Most `Clio-Decision:` trailers one commit carries; matches the receipt cap. */
+/** Most `Clio-Decision:` trailers one commit carries; matches the run's decision-ref cap. */
 export const CLIO_DECISION_TRAILER_CAP = 32;
 
 /**
@@ -30,13 +30,14 @@ export const CLIO_DECISION_TRAILER_CAP = 32;
  */
 export const DECISION_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}\/[a-z0-9]+(?:[_-][a-z0-9]+)*$/u;
 
-export interface CommitReceiptEvidence {
-	version: 21;
+/** A finished run's identity, the digest of its run.settled, for a commit the run directly accounts for (#434). */
+export interface CommitRunEvidence {
+	version: 1;
 	algorithm: "sha256";
 	digest: string;
-	/** The receipt was checked against its run-ledger envelope. */
+	/** The run was held by its producer or read back under a seal that verified. */
 	integrityValid: boolean;
-	/** The receipt describes work or a verdict directly relevant to this commit. */
+	/** The run did work or gave a verdict directly relevant to this commit. */
 	directlyRelevant: boolean;
 }
 
@@ -50,11 +51,11 @@ export interface CommitAttributionEvidence {
 	independentReviewPassed?: boolean;
 	/** Clio materially authored part of the committed change. */
 	materiallyAuthored?: boolean;
-	/** Optional sealed receipt for a directly relevant fact above. */
-	receipt?: CommitReceiptEvidence;
+	/** Optional settled run for a directly relevant fact above. */
+	run?: CommitRunEvidence;
 	/**
 	 * Decision refs (`<interviewId>/<key>`) the committed work was done under,
-	 * read from the session decision board or a sealed receipt's
+	 * read from the session decision board or a dispatched run's
 	 * `decisionRefs`. Each becomes one `Clio-Decision:` trailer.
 	 */
 	decisions?: ReadonlyArray<string>;
@@ -82,7 +83,7 @@ function isClioTrailer(key: string): boolean {
 	return (
 		KNOWN_CLIO_TRAILERS.has(key) ||
 		// Earlier seals stay recognized so an amended message never keeps a stale managed trailer (#434).
-		/^clio-evidence:receipt-v\d+\/sha256:/u.test(key) ||
+		/^clio-evidence:run-v\d+\/sha256:/u.test(key) ||
 		key.startsWith(`${CLIO_DECISION_TRAILER_KEY.toLowerCase()}:`)
 	);
 }
@@ -125,17 +126,17 @@ function trailerBlockStart(lines: ReadonlyArray<string>): number | null {
 	return sawTrailer ? first : null;
 }
 
-function receiptTrailer(receipt: CommitReceiptEvidence | undefined): string | null {
+function runTrailer(run: CommitRunEvidence | undefined): string | null {
 	if (
-		receipt?.version !== 21 ||
-		receipt.algorithm !== "sha256" ||
-		receipt.integrityValid !== true ||
-		receipt.directlyRelevant !== true ||
-		!SHA256.test(receipt.digest)
+		run?.version !== 1 ||
+		run.algorithm !== "sha256" ||
+		run.integrityValid !== true ||
+		run.directlyRelevant !== true ||
+		!SHA256.test(run.digest)
 	) {
 		return null;
 	}
-	return `Clio-Evidence: receipt-v${receipt.version}/sha256:${receipt.digest}`;
+	return `Clio-Evidence: run-v${run.version}/sha256:${run.digest}`;
 }
 
 /**
@@ -176,8 +177,8 @@ export function attributeCommitMessage(
 	if (evidence.validationSucceeded === true) desired.push(CLIO_COMMIT_TRAILERS.tested);
 	if (evidence.independentReviewPassed === true) desired.push(CLIO_COMMIT_TRAILERS.reviewed);
 	if (evidence.materiallyAuthored === true) desired.push(CLIO_COMMIT_TRAILERS.coAuthored);
-	const receipt = receiptTrailer(evidence.receipt);
-	if (receipt !== null) desired.push(receipt);
+	const runEvidence = runTrailer(evidence.run);
+	if (runEvidence !== null) desired.push(runEvidence);
 	for (const ref of decisionTrailerRefs(evidence.decisions)) desired.push(decisionTrailer(ref));
 
 	const existing = new Set(

@@ -1,37 +1,24 @@
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
 import { messageUsageForAccounting } from "../../core/message-accounting.js";
-import { readClioVersion } from "../../core/package-root.js";
 import {
 	addResponseModelIdObservationCounts,
 	emptyResponseModelIdObservationCounts,
 } from "../../core/response-model-id.js";
 import { withRunOverrides } from "../../core/run-overrides.js";
-import {
-	type PendingSkillRequest,
-	type SkillActivation,
-	skillActivationFromToolDetails,
-} from "../../core/skill-activation.js";
+import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { CallRowV1, Quantity } from "../../core/telemetry/dto.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
-import { runStatusForOutcome, terminalReasonForOutcome } from "../../domains/dispatch/outcome.js";
-import {
-	createRunResultQuality,
-	deriveReceiptVerification,
-	typedValidationFactsFromVerifyCalls,
-	type VerifyCallOutcome,
-	verifyCheckIdentity,
-} from "../../domains/dispatch/receipt-findings.js";
+import { runStatusForOutcome } from "../../domains/dispatch/outcome.js";
 import { newRunId, openLedger } from "../../domains/dispatch/state.js";
 import type {
 	RunKind,
 	RunOutcome,
 	RunResultCostCap,
-	RunResultDraft,
 	RunResultSafetySummary,
 	RunStatus,
 	SafetyBlockedAttempt,
@@ -43,7 +30,6 @@ import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import type { CostAmount } from "../../domains/telemetry/cost.js";
 import { aggregateCostAmounts } from "../../domains/telemetry/cost.js";
-import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
@@ -75,7 +61,7 @@ export interface HeadlessSamplingOverrides {
 
 /**
  * The shutdown seam a headless turn needs: somewhere to register the drain
- * hook that seals an interrupted run's receipt, and the exit code that
+ * hook that records an interrupted run's ledger row, and the exit code that
  * shutdown will report. Defaults to the process termination coordinator.
  */
 export interface HeadlessShutdownHooks {
@@ -121,7 +107,7 @@ export interface HeadlessMainAgentOptions {
 	scopeNotices?: (listener: (payload: unknown) => void) => () => void;
 	/**
 	 * The session's compaction calls the read model holds from `from` on. Compaction runs its own model calls outside
-	 * the turn's event stream, so the ones journaled during the run are folded into its receipt from here (#434).
+	 * the turn's event stream, so the ones journaled during the run are folded into its accounting from here (#434).
 	 */
 	compactionCalls?: (from: string) => Promise<readonly CallRowV1[]>;
 	/**
@@ -129,7 +115,7 @@ export interface HeadlessMainAgentOptions {
 	 * estimate included; null when the read model has none, and the message fold stands (#434).
 	 */
 	segmentUsage?: (messages: ReadonlyArray<AgentMessage>) => Promise<RunJsonSegmentUsage | null>;
-	/** `clio-coder run --max-cost-usd`: the cap the receipt records. */
+	/** `clio-coder run --max-cost-usd`: the cap the run ran under. */
 	costCap?: RunResultCostCap;
 }
 
@@ -148,8 +134,8 @@ const PROVENANCE_BY_PRICER: Record<CallRowV1["pricedBy"], CostAmount["provenance
 	none: "unknown",
 };
 
-/** Folds the compaction calls the run made, as the read model holds them, into its receipt (#434). */
-function foldRunOwnedCosts(stats: HeadlessMainAgentReceiptStats, calls: readonly CallRowV1[]): void {
+/** Folds the compaction calls the run made, as the read model holds them, into its accounting (#434). */
+function foldRunOwnedCosts(stats: HeadlessMainAgentRunStats, calls: readonly CallRowV1[]): void {
 	for (const call of calls) {
 		if (call.disposition === "never_sent") continue;
 		const usd = knownAmount(call.usd);
@@ -218,18 +204,15 @@ interface HeadlessMainAgentResult {
 	admissionRefused: boolean;
 }
 
-interface HeadlessMainAgentReceiptStats {
+interface HeadlessMainAgentRunStats {
 	toolRounds: ToolRoundRecord[];
 	toolStats: Map<string, ToolCallStat>;
 	pendingCapabilities: Map<string, string>;
-	pendingVerifyCalls: Map<string, string | null>;
-	verifyCalls: VerifyCallOutcome[];
-	skillActivations: SkillActivation[];
 	usage: RunUsageSummary | null;
 	costAmounts: CostAmount[];
-	/** The decision axis, counted the way a worker receipt counts it. */
+	/** The decision axis, counted the way a worker's settled run counts it. */
 	decisions: RunResultSafetySummary["decisions"];
-	/** Every call whose outcome was blocked, in the worker receipt's shape, up to `BLOCKED_ATTEMPTS_LIMIT`. */
+	/** Every call whose outcome was blocked, in a worker's settled shape, up to `BLOCKED_ATTEMPTS_LIMIT`. */
 	blockedAttempts: SafetyBlockedAttempt[];
 	/** Blocked attempts past `BLOCKED_ATTEMPTS_LIMIT`, counted but not listed. */
 	blockedAttemptsTruncated: number;
@@ -264,7 +247,7 @@ const MUTATING_ACTION_CLASS: ActionClass = "write";
 export const BLOCKED_ATTEMPTS_LIMIT = 50;
 export const BLOCKED_ATTEMPT_REASON_MAX_CHARS = 500;
 
-/** Append one blocked attempt within the receipt bounds above. */
+/** Append one blocked attempt within the bounds above. */
 export function recordBlockedAttempt(
 	stats: { blockedAttempts: SafetyBlockedAttempt[]; blockedAttemptsTruncated: number },
 	attempt: SafetyBlockedAttempt,
@@ -374,12 +357,10 @@ function durationMsFromEvent(event: ChatLoopEvent): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEvent): void {
+function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): void {
 	if (event.type === "tool_execution_start") {
 		const call = effectiveToolCall(event.toolName, event.args);
 		stats.pendingCapabilities.set(event.toolCallId, call.toolName);
-		if (call.toolName === ToolNames.Verify)
-			stats.pendingVerifyCalls.set(event.toolCallId, verifyCheckIdentity(call.args));
 		return;
 	}
 	if (event.type !== "tool_execution_end") return;
@@ -389,7 +370,6 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	// session history retain the real aggregate call/result pair.
 	for (const child of gatewayChainReceipts(event.toolName, event.result)) {
 		const toolCallId = `${event.toolCallId}:${child.id}`;
-		if (child.capability === ToolNames.Verify) stats.pendingVerifyCalls.set(toolCallId, verifyCheckIdentity(child.args));
 		recordToolEnd(stats, {
 			type: "tool_execution_end",
 			toolCallId,
@@ -405,20 +385,6 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	if (durationMs !== undefined) stat.totalDurationMs += durationMs;
 	// Registry settlement is authoritative; legacy producers only expose isError.
 	const outcome = (event as { outcome?: unknown }).outcome;
-	if (tool === ToolNames.Verify) {
-		stats.verifyCalls.push({
-			check: stats.pendingVerifyCalls.get(event.toolCallId) ?? null,
-			outcome:
-				outcome === "ok" || outcome === "error" || outcome === "blocked"
-					? outcome
-					: outcome === undefined
-						? event.isError
-							? "error"
-							: "ok"
-						: null,
-		});
-		stats.pendingVerifyCalls.delete(event.toolCallId);
-	}
 	if (outcome === "blocked") stat.blocked += 1;
 	else if (outcome === "error") stat.errors += 1;
 	else if (outcome === "ok") stat.ok += 1;
@@ -427,8 +393,8 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 		else stat.ok += 1;
 	}
 	stats.toolStats.set(tool, stat);
-	// Safety bookkeeping mirrors the worker receipt's fold of its own tool
-	// finish events (domains/dispatch/extension.ts), so the two receipts carry
+	// Safety bookkeeping mirrors a worker's fold of its own tool
+	// finish events (domains/dispatch/extension.ts), so the two runs carry
 	// the same facts under the same names.
 	const detail = event as {
 		ruleId?: unknown;
@@ -488,7 +454,7 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	// The host's read-only ceiling refuses every call that is not a read, by
 	// the operator's own choice: `run --read-only "explain X"` asked for an
 	// answer, not a change, so a write or command the model tried is no unmet
-	// part of the task. The refusal stays in the receipt's blocked attempts.
+	// part of the task. The refusal stays in the run's blocked attempts.
 	const readOnlyCeiling = detail.reasonCode === "task:read_only" || detail.denial?.code === "task:read_only";
 	if (outcome === "blocked" || decision === "blocked") {
 		if (!withheldDuplicateRead && !readOnlyCeiling) stats.unresolvedBlocks.add(action);
@@ -519,15 +485,6 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS && !terminating) stats.mutatingSucceeded += 1;
 	if (outcome === "ok" && tool === ToolNames.Dispatch)
 		stats.mergedTaskWorktrees += mergedTaskWorktreeCount(event.result);
-	if (tool === ToolNames.Context) {
-		const rawTurnId = (event as { turnId?: unknown }).turnId;
-		const turnId = typeof rawTurnId === "string" ? rawTurnId : undefined;
-		const activation = skillActivationFromToolDetails(
-			(event.result as { details?: unknown } | undefined)?.details,
-			turnId,
-		);
-		if (activation) stats.skillActivations.push(activation);
-	}
 }
 
 function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSummary {
@@ -556,12 +513,12 @@ function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSum
 
 /**
  * Ticket #378: a run whose every write was denied, and whose model then wrote
- * an apology, used to seal as a success. The receipt now says so in one bit.
+ * an apology, used to read as a success. The terminal frame now says so in one bit.
  * A run is a no-op when a block remains unresolved and no mutating call succeeded, or
  * when it ran tools and none of them succeeded. A run that called no tool and
  * answered in prose is not a no-op; answering a question is a legitimate run.
  */
-function headlessNoop(stats: HeadlessMainAgentReceiptStats): boolean {
+function headlessNoop(stats: HeadlessMainAgentRunStats): boolean {
 	const totals = toolTotals(stats.toolStats);
 	if (stats.unresolvedBlocks.size > 0 && !changedWorkspace(stats)) return true;
 	return totals.calls > 0 && totals.succeeded === 0;
@@ -582,7 +539,7 @@ function mergedTaskWorktreeCount(result: unknown): number {
 	}).length;
 }
 
-function changedWorkspace(stats: HeadlessMainAgentReceiptStats): boolean {
+function changedWorkspace(stats: HeadlessMainAgentRunStats): boolean {
 	return stats.mutatingSucceeded > 0 || stats.mergedTaskWorktrees > 0;
 }
 
@@ -596,23 +553,13 @@ function toolTotals(stats: Map<string, ToolCallStat>): { calls: number; succeede
 	return totals;
 }
 
-function noopFailureMessage(stats: HeadlessMainAgentReceiptStats, failOnNoop: boolean): string {
+function noopFailureMessage(stats: HeadlessMainAgentRunStats, failOnNoop: boolean): string {
 	const totals = toolTotals(stats.toolStats);
 	const cause =
 		stats.unresolvedBlocks.size > 0 && !changedWorkspace(stats)
 			? `${totals.blocked} tool call${totals.blocked === 1 ? " was" : "s were"} blocked without recovery and no write succeeded`
 			: `${totals.calls} tool call${totals.calls === 1 ? "" : "s"} ran and none succeeded`;
 	return `clio-coder run: no-op${failOnNoop ? " under --fail-on-noop" : ""}: ${cause}`;
-}
-
-function sortedToolStats(stats: Map<string, ToolCallStat>): ToolCallStat[] {
-	return [...stats.values()].sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
-}
-
-function countToolStats(stats: Map<string, ToolCallStat>): number {
-	let count = 0;
-	for (const stat of stats.values()) count += stat.count;
-	return count;
 }
 
 export function prefixHeadlessFailure(
@@ -659,18 +606,22 @@ interface HeadlessTerminalOutcome {
 	outcome: RunOutcome;
 	status: RunStatus;
 	failureMessage: string | null;
-	/** Machine-readable receipt detail; absent means the failure message is the detail. */
+	/** Machine-readable outcome detail; absent means the failure message is the detail. */
 	outcomeDetail?: string;
 }
 
-async function recordHeadlessMainAgentReceipt(input: {
+/**
+ * The main-agent run's ledger row. Its record is the session journal's turn and session facts; a main-agent run
+ * settles no run result of its own (#434).
+ */
+async function recordHeadlessMainAgentRun(input: {
 	runId: string;
 	chat: ChatLoop;
 	task: string;
 	startedAt: string;
 	endedAt: string;
 	terminal: HeadlessTerminalOutcome;
-	stats: HeadlessMainAgentReceiptStats;
+	stats: HeadlessMainAgentRunStats;
 	costCap?: RunResultCostCap;
 }): Promise<void> {
 	const snapshot = input.chat.lastRunSnapshot?.();
@@ -685,14 +636,6 @@ async function recordHeadlessMainAgentReceipt(input: {
 	const reasoningTokenCount = usage?.reasoning ?? 0;
 	const costUsd = usage?.costUsd ?? 0;
 	const cost = aggregateCostAmounts(input.stats.costAmounts);
-	const costProvenance =
-		cost.calls === 0 || cost.hasUnknown
-			? "unknown"
-			: cost.hasEstimated
-				? "estimated"
-				: cost.allKnownFree
-					? "known_free"
-					: "known";
 	const { exitCode, outcome, status } = input.terminal;
 	const outcomeDetail = input.terminal.outcomeDetail ?? input.terminal.failureMessage;
 	const outcomeCode = outcome === "failed" ? snapshot.outcomeCode : undefined;
@@ -740,80 +683,6 @@ async function recordHeadlessMainAgentReceipt(input: {
 		toolSignature: snapshot.toolSignature,
 	});
 	if (!updated) return;
-	const toolStats = sortedToolStats(input.stats.toolStats);
-	const typedValidations = typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls);
-	const receipt: RunResultDraft = {
-		runId: envelope.id,
-		cwd: snapshot.cwd,
-		agentId: "main-agent",
-		executionRole: "builder",
-		requestOrigin: "user",
-		task: input.task,
-		targetId: snapshot.targetId,
-		wireModelId: snapshot.wireModelId,
-		runtimeId: snapshot.runtimeId,
-		runtimeKind: snapshot.runtimeKind,
-		outcome,
-		outcomeDetail,
-		...(outcomeCode === undefined ? {} : { outcomeCode }),
-		lineage,
-		// Host checks belong to this run, independently of any worker it dispatched.
-		verification: deriveReceiptVerification({ toolStats, typedValidations }),
-		routingIntent: {
-			posture: "manual",
-			maxCostUsd: null,
-			deadlineMs: null,
-			minimumQuality: null,
-			requiredCapabilities: [],
-			locality: "any",
-			failover: "none",
-		},
-		quality: createRunResultQuality({ runtimeEnforceable: false, enforcementPassed: null, typedValidations }),
-		costProvenance,
-		startedAt: input.startedAt,
-		endedAt: input.endedAt,
-		exitCode,
-		...(input.terminal.failureMessage !== null ? { failureMessage: input.terminal.failureMessage } : {}),
-		tokenCount,
-		apiCalls: usage?.apiCalls ?? 0,
-		...(input.stats.toolRounds.length > 0 ? { toolRounds: input.stats.toolRounds } : {}),
-		missingTokenCalls: usage?.missingTokenCalls ?? 0,
-		costSummary: cost,
-		inputTokenCount,
-		outputTokenCount,
-		cacheReadTokenCount,
-		cacheWriteTokenCount,
-		reasoningTokenCount,
-		costUsd,
-		compiledPromptHash: snapshot.compiledPromptHash,
-		staticCompositionHash: snapshot.staticCompositionHash,
-		promptSignature: snapshot.promptSignature,
-		toolSignature: snapshot.toolSignature,
-		clioCoderVersion: readClioVersion(),
-		piMonoVersion: readPiMonoVersion(),
-		platform: process.platform,
-		nodeVersion: process.version,
-		toolCalls: countToolStats(input.stats.toolStats),
-		toolStats,
-		skillActivations: input.stats.skillActivations,
-		autonomy: snapshot.autonomy,
-		// Sealed on every main-agent receipt, flag or no flag, so a driver can
-		// apply its own no-op rule to a run that exited 0.
-		safety: {
-			decisions: { ...input.stats.decisions },
-			blockedAttempts: [...input.stats.blockedAttempts],
-			...(input.stats.blockedAttemptsTruncated > 0
-				? { blockedAttemptsTruncated: input.stats.blockedAttemptsTruncated }
-				: {}),
-		},
-		noop: headlessNoop(input.stats),
-		...(input.costCap !== undefined ? { costCap: input.costCap } : {}),
-		...(snapshot.runtimeResolution ? { runtimeResolution: snapshot.runtimeResolution } : {}),
-		// Call ids stay omitted: this receipt folds cost entries, not the session journal's attempts (#434).
-		terminalReason: terminalReasonForOutcome(outcome),
-		sessionId: snapshot.sessionId ?? input.chat.getSessionId(),
-	};
-	ledger.recordReceipt(envelope.id, receipt);
 	await ledger.persist();
 }
 
@@ -843,13 +712,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		lastNotice: null,
 		admissionRefused: false,
 	};
-	const receiptStats: HeadlessMainAgentReceiptStats = {
+	const runStats: HeadlessMainAgentRunStats = {
 		toolRounds: [],
 		toolStats: new Map<string, ToolCallStat>(),
 		pendingCapabilities: new Map(),
-		pendingVerifyCalls: new Map(),
-		verifyCalls: [],
-		skillActivations: [],
 		usage: null,
 		costAmounts: [],
 		decisions: { allowed: 0, blocked: 0, permissionRequested: 0 },
@@ -859,7 +725,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		mergedTaskWorktrees: 0,
 		unresolvedBlocks: new Set<string>(),
 	};
-	// The receipt is this run's accounting, so it has to exist on the costly
+	// The ledger row is this run's accounting, so it has to exist on the costly
 	// failure paths too. Two callers can reach it: the turn's own completion
 	// path, and the coordinated shutdown a SIGINT/SIGTERM starts. The signal
 	// handler exits the process from inside shutdown, strictly before the
@@ -867,24 +733,24 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// phase instead of losing the whole run's usage. Whichever caller arrives
 	// first seals; the other awaits that same seal.
 	let sealed: Promise<void> | null = null;
-	const sealReceipt = (terminal: HeadlessTerminalOutcome): Promise<void> => {
+	const recordRun = (terminal: HeadlessTerminalOutcome): Promise<void> => {
 		if (sealed !== null) return sealed;
 		const endedAt = new Date().toISOString();
 		sealed = (async () => {
-			foldRunOwnedCosts(receiptStats, (await options.compactionCalls?.(startedAt)) ?? []);
-			await recordHeadlessMainAgentReceipt({
+			foldRunOwnedCosts(runStats, (await options.compactionCalls?.(startedAt)) ?? []);
+			await recordHeadlessMainAgentRun({
 				runId,
 				chat,
 				task: options.prompt,
 				startedAt,
 				endedAt,
 				terminal,
-				stats: receiptStats,
+				stats: runStats,
 				...(options.costCap !== undefined ? { costCap: options.costCap } : {}),
 			});
 		})().catch((error: unknown) => {
 			process.stderr.write(
-				`clio-coder run: receipt write failed: ${error instanceof Error ? error.message : String(error)}\n`,
+				`clio-coder run: run ledger write failed: ${error instanceof Error ? error.message : String(error)}\n`,
 			);
 		});
 		return sealed;
@@ -899,9 +765,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			? {
 					exitCode: termination.getExitCode(),
 					outcome: "timed_out",
-					// The status a dispatched worker's timed_out receipt seals with.
-					// Orphan recovery re-derives the status from the outcome with
-					// this same mapping when it re-verifies a receipt.
+					// The status a dispatched worker's timed_out run settles with.
 					status: runStatusForOutcome("timed_out"),
 					failureMessage: `clio-coder run: timed out after ${options.deadline.seconds}s (--timeout)`,
 				}
@@ -949,7 +813,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// the time this runs. Queued frames reach stdout before the seal.
 	termination.onDrain(async () => {
 		await frameChain;
-		await sealReceipt(interruptedTerminal());
+		await recordRun(interruptedTerminal());
 	});
 
 	// Fresh sessions acquire their identity during submit, after admission notices
@@ -1032,9 +896,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		if (mode === "text" && event.type === "notice" && event.surface === "transcript") {
 			process.stderr.write(`clio-coder run: ${event.text}\n`);
 		}
-		recordToolEnd(receiptStats, event);
+		recordToolEnd(runStats, event);
 		if (event.type === "message_end") {
-			if (event.message.role === "assistant") receiptStats.toolRounds.push(...readToolRounds(event.message));
+			if (event.message.role === "assistant") runStats.toolRounds.push(...readToolRounds(event.message));
 			// Usage is accrued per completed assistant message, the one place a
 			// token count appears exactly once. Accruing at `agent_end` instead
 			// loses everything the process was told when a run is interrupted
@@ -1053,7 +917,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 						costUsd: rawUsage.estimated === true ? 0 : usageSummary.costUsd,
 					});
 				}
-				receiptStats.costAmounts.push({
+				runStats.costAmounts.push({
 					usd: usageSummary.costUsd,
 					apiCalls: usageSummary.apiCalls,
 					...(usageSummary.costSummary ? { costSummary: usageSummary.costSummary } : {}),
@@ -1063,7 +927,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 							: resolveCostProvenance(rawUsage.costProvenance, chat.lastRunSnapshot?.()?.costProvenance ?? "unknown"),
 					missingTokenCalls: usageSummary.missingTokenCalls ?? 0,
 				});
-				receiptStats.usage = receiptStats.usage === null ? usageSummary : addRunUsage(receiptStats.usage, usageSummary);
+				runStats.usage = runStats.usage === null ? usageSummary : addRunUsage(runStats.usage, usageSummary);
 			}
 		}
 		result = resultFromEvent(event, result);
@@ -1151,7 +1015,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// seals the same canceled outcome with the status the process exits with.
 		terminal = interruptedTerminal();
 		// The deadline timer reports expiry even if shutdown precedes chat boot.
-		// Keep the receipt detail, but emit that diagnostic only at the timer.
+		// Keep the outcome detail, but emit that diagnostic only at the timer.
 		stderrMessage =
 			settlement.live.length > 0
 				? `clio-coder run: canceling ${settlement.live.length} dispatched run(s) still in flight: ${describeRuns(settlement.live)}`
@@ -1162,7 +1026,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	} else if (result.abortReason !== null) {
 		// An interrupted turn never answered, no matter what partial text or
 		// internal error the abort left behind: nonzero exit, abort reason. It
-		// was canceled, not failed, and its receipt says so.
+		// was canceled, not failed, and its ledger row says so.
 		terminal = { exitCode: 1, outcome: "canceled", status: "interrupted", failureMessage: result.abortReason };
 		stderrMessage = result.abortReason;
 	} else if (result.error) {
@@ -1197,12 +1061,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// A normal provider stop does not erase an explicit limitation or a
 		// block with no applied change. Judge settled tool outcomes, not prose
 		// or the presence of a validation contract. Recovered failures may succeed.
-		const limited = (receiptStats.toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0;
-		const blockedWithoutChange = receiptStats.unresolvedBlocks.size > 0 && !changedWorkspace(receiptStats);
-		if (limited || blockedWithoutChange || (options.failOnNoop === true && headlessNoop(receiptStats))) {
+		const limited = (runStats.toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0;
+		const blockedWithoutChange = runStats.unresolvedBlocks.size > 0 && !changedWorkspace(runStats);
+		if (limited || blockedWithoutChange || (options.failOnNoop === true && headlessNoop(runStats))) {
 			const failureMessage = limited
 				? "clio-coder run: the agent recorded an explicit limitation; the task is incomplete"
-				: noopFailureMessage(receiptStats, options.failOnNoop === true);
+				: noopFailureMessage(runStats, options.failOnNoop === true);
 			terminal = {
 				exitCode: 1,
 				outcome: "failed",
@@ -1247,23 +1111,23 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			exitCode,
 			text: result.sawTerminatingToolResult ? result.terminatingToolText : result.text,
 			...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
-			// The receipt's own verdict, so a host bridge reads why the run ended,
+			// The run's own verdict, so a host bridge reads why the run ended,
 			// and which calls a headless run refused, without parsing prose.
 			outcome: terminal.outcome,
 			...(terminal.outcomeDetail !== undefined ? { outcomeDetail: terminal.outcomeDetail } : {}),
-			...(receiptStats.toolRounds.length > 0 ? { toolRounds: receiptStats.toolRounds } : {}),
+			...(runStats.toolRounds.length > 0 ? { toolRounds: runStats.toolRounds } : {}),
 			safety: {
-				decisions: { ...receiptStats.decisions },
-				blockedAttempts: [...receiptStats.blockedAttempts],
-				...(receiptStats.blockedAttemptsTruncated > 0
-					? { blockedAttemptsTruncated: receiptStats.blockedAttemptsTruncated }
+				decisions: { ...runStats.decisions },
+				blockedAttempts: [...runStats.blockedAttempts],
+				...(runStats.blockedAttemptsTruncated > 0
+					? { blockedAttemptsTruncated: runStats.blockedAttemptsTruncated }
 					: {}),
 			},
 		});
 	}
 
 	await frameChain;
-	await sealReceipt(terminal);
+	await recordRun(terminal);
 
 	if (stderrMessage !== null) {
 		process.stderr.write(`${stderrMessage}\n`);

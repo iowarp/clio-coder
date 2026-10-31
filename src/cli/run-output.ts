@@ -91,7 +91,7 @@ function limitationLine(item: string): string {
 /**
  * The sealed result's own prose, for a native worker that delivered its answer
  * only through the result contract and wrote no assistant text (DF-6: a read-only
- * coder's explanation reached stdout as a bare receipt line).
+ * coder's explanation reached stdout as a bare result line).
  */
 function sealedResultAnswer(receipt: RunResult): string {
 	const output = receipt.output;
@@ -135,7 +135,7 @@ function sealedResultAnswer(receipt: RunResult): string {
 	return lines.length > 0 ? lines.join("\n") : output.text.trim();
 }
 
-/** The human answer, sealed evidence limits, and execution receipt in that order. */
+/** The human answer, settled evidence limits, and the run result line in that order. */
 export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunResult): string {
 	const answer = streamedAnswer.length > 0 ? streamedAnswer : sealedResultAnswer(receipt);
 	const limitations = sealedResultLimitations(receipt);
@@ -143,15 +143,15 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 		limitations.length > 0
 			? `\nNot verified:\n${limitations.map((item) => `- ${limitationLine(item)}`).join("\n")}\n`
 			: "";
-	return `${answer.length > 0 ? `${answer}\n` : ""}${block}${formatReceipt(receipt, limitations.length)}\n`;
+	return `${answer.length > 0 ? `${answer}\n` : ""}${block}${formatResultLine(receipt, limitations.length)}\n`;
 }
 
-function formatReceipt(r: RunResult, notVerified: number): string {
+function formatResultLine(r: RunResult, notVerified: number): string {
 	const reasoning =
 		typeof r.reasoningTokenCount === "number" && r.reasoningTokenCount > 0 ? ` reasoning=${r.reasoningTokenCount}` : "";
 	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";
 	const verification = notVerified > 0 ? ` verification=unverified not_verified=${notVerified}` : "";
 	const responseModelIdObservation = runResponseModelIdObservationLabel(r);
 	const gatewayRouting = runGatewayRoutingLabel(r);
-	return `receipt: ${r.runId} agent=${r.agentId} exit=${r.exitCode}${verification} target=${r.targetId} requested_model_id=${r.wireModelId}${responseModelIdObservation ? ` ${responseModelIdObservation}` : ""}${gatewayRouting ? ` ${gatewayRouting}` : ""} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
+	return `result: ${r.runId} agent=${r.agentId} exit=${r.exitCode}${verification} target=${r.targetId} requested_model_id=${r.wireModelId}${responseModelIdObservation ? ` ${responseModelIdObservation}` : ""}${gatewayRouting ? ` ${gatewayRouting}` : ""} tokens=${r.tokenCount}${reasoning}${failure} start=${r.startedAt} end=${r.endedAt}`;
 }

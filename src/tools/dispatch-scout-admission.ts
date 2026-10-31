@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import { parseScoutResult, resultContractSourceId, type ScoutResult } from "../domains/agents/result-contract.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
@@ -12,12 +10,12 @@ import type {
 import { type ExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
 import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
-import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
-import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import type { RoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { compileScoutTransition, type ScoutAgentBinding } from "../domains/dispatch/scout-transition.js";
-import type { RunEnvelope, RunResult } from "../domains/dispatch/types.js";
+import type { RunEnvelope } from "../domains/dispatch/types.js";
+import { readVerifiedRun } from "../domains/telemetry/index.js";
 import type { ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
+import type { FinishedRun } from "./worker-evidence.js";
 
 export interface ScoutContinuationRef {
 	runId: string;
@@ -26,7 +24,8 @@ export interface ScoutContinuationRef {
 
 export interface VerifiedScoutSource {
 	envelope: RunEnvelope;
-	receipt: RunResult;
+	/** The Scout run as it settled; its digest is the identity a continuation cites. */
+	run: FinishedRun & { digest: string };
 	scout: ScoutResult;
 	spec: AgentSpec;
 }
@@ -65,30 +64,35 @@ export function scoutContinuationRefFromArgs(
 	return { ok: true, ref: { runId: value.run_id.trim(), receiptDigest: value.receipt_digest } };
 }
 
-function validateScoutSource(
-	receipt: RunResult,
+/**
+ * A Scout run its continuation may build on: authenticated (held by its producer, or read back under a seal that
+ * verifies), succeeded, and carrying an exact passing scout-report under the strict contract.
+ */
+export function validateScoutSource(
+	run: FinishedRun,
 	envelope: RunEnvelope,
 	agentSpecs: ReadonlyArray<AgentSpec>,
 ): VerifiedScoutSource {
-	const integrity = verifyReceiptIntegrity(receipt, envelope);
-	if (!integrity.ok) throw new Error(`dispatch: Scout source receipt failed integrity: ${integrity.reason}`);
-	if (receipt.exitCode !== 0 || (receipt.outcome !== undefined && receipt.outcome !== "succeeded")) {
+	if (run.digest === null) throw new Error("dispatch: Scout source has not settled");
+	if (run.facts.exitCode !== 0 || run.facts.outcome !== "succeeded") {
 		throw new Error("dispatch: Scout source did not succeed");
 	}
-	const spec = agentSpecs.find((candidate) => candidate.id === receipt.agentId);
+	const spec = agentSpecs.find((candidate) => candidate.id === run.facts.agentId);
 	if (spec === undefined || spec.resultContract.kind !== "scout-report") {
 		throw new Error("dispatch: Scout source agent no longer declares scout-report");
 	}
-	const fact = receipt.quality.resultContract;
+	const fact = run.facts.quality?.resultContract ?? null;
 	if (fact === null || fact.conformance !== "pass" || fact.sourceId !== resultContractSourceId(spec.resultContract)) {
 		throw new Error("dispatch: Scout source lacks an exact passing result-contract fact");
 	}
-	if (receipt.output?.state !== "final") throw new Error("dispatch: Scout source has no sealed final output");
-	const scout = parseScoutResult(receipt.output.text);
+	const output = run.delivered?.output;
+	if (output?.state !== "final") throw new Error("dispatch: Scout source has no settled final output");
+	const scout = parseScoutResult(output.text);
 	if (scout === null) throw new Error("dispatch: Scout source output does not match the current strict contract");
-	return { envelope, receipt, scout, spec };
+	return { envelope, run: { ...run, digest: run.digest }, scout, spec };
 }
 
+/** Load a Scout source from its sealed run scope; its seal must verify and its settled digest match the cited one. */
 export function loadVerifiedScoutSource(input: {
 	ref: ScoutContinuationRef;
 	dispatch: Pick<DispatchContract, "getRun" | "owner">;
@@ -102,22 +106,19 @@ export function loadVerifiedScoutSource(input: {
 	if (!dispatchOwnership(dispatchOwnerOf(input.dispatch)).ownsRun(envelope)) {
 		throw new Error(`dispatch: Scout source run '${input.ref.runId}' belongs to another session`);
 	}
-	const receiptPath = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${input.ref.runId}.json`);
-	if (!existsSync(receiptPath)) throw new Error(`dispatch: Scout source receipt '${input.ref.runId}' is unavailable`);
-	let receipt: RunResult;
-	try {
-		receipt = JSON.parse(readReceiptTextSync(receiptPath)) as RunResult;
-	} catch (error) {
-		throw new Error(
-			`dispatch: Scout source receipt is unreadable: ${error instanceof Error ? error.message : String(error)}`,
-		);
-	}
-	if (receipt.runId !== input.ref.runId) throw new Error("dispatch: Scout source receipt contains another run id");
-	const source = validateScoutSource(receipt, envelope, input.agentSpecs);
-	if (receipt.integrity.digest !== input.ref.receiptDigest) {
-		throw new Error("dispatch: Scout source receipt digest does not match");
-	}
-	return source;
+	const record = readVerifiedRun(clioStateDir(), input.ref.runId, input.ref.receiptDigest);
+	if (record === null)
+		throw new Error(`dispatch: Scout source '${input.ref.runId}' has no sealed record under the cited digest`);
+	return validateScoutSource(
+		{
+			runId: input.ref.runId,
+			digest: record.settled.digest,
+			facts: record.settled,
+			delivered: record.result?.state === "resolved" ? record.result.value : null,
+		},
+		envelope,
+		input.agentSpecs,
+	);
 }
 
 export function prepareScoutContinuation(input: {
@@ -145,7 +146,7 @@ export function prepareScoutContinuation(input: {
 	)
 		throw new Error("split refused: harness orientation permits read-only subtasks only");
 	for (const subtask of input.source.scout.proposedSubtasks) {
-		const sourceIntent = input.source.receipt.routingIntent;
+		const sourceIntent = input.source.run.facts.routingIntent;
 		const routingIntent: RoutingIntent =
 			input.authorization === "yolo-policy"
 				? { ...sourceIntent, requiredCapabilities: [...sourceIntent.requiredCapabilities], failover: "approved" }
@@ -158,7 +159,7 @@ export function prepareScoutContinuation(input: {
 						failover: "approved",
 					};
 		const request: DispatchRequest = {
-			agentId: input.source.receipt.agentId,
+			agentId: input.source.run.facts.agentId,
 			executionRole: "researcher",
 			task: subtask.task,
 			cwd: input.source.envelope.cwd,
@@ -169,9 +170,9 @@ export function prepareScoutContinuation(input: {
 			failover: "approved",
 			...(input.authorization === "yolo-policy" && sourceIntent.posture === "manual"
 				? {
-						target: input.source.receipt.targetId,
-						model: input.source.receipt.wireModelId,
-						node: input.source.receipt.node?.id ?? "local",
+						target: input.source.run.facts.route.targetId,
+						model: input.source.run.facts.route.wireModelId,
+						node: input.source.run.facts.node?.id ?? "local",
 					}
 				: {}),
 		};
@@ -186,7 +187,7 @@ export function prepareScoutContinuation(input: {
 			routingIntent,
 		});
 	}
-	const explicitCostCeiling = input.source.receipt.routingIntent.maxCostUsd;
+	const explicitCostCeiling = input.source.run.facts.routingIntent.maxCostUsd;
 	const bindings: ScoutAgentBinding[] = proposals.map(({ subtask, agentSpec }) => ({
 		subtaskId: subtask.id,
 		spec: agentSpec,
@@ -196,8 +197,8 @@ export function prepareScoutContinuation(input: {
 	];
 	const transition = compileScoutTransition({
 		scout: input.source.scout,
-		sourceReceiptDigest: input.source.receipt.integrity.digest,
-		rootTask: input.source.receipt.task,
+		sourceReceiptDigest: input.source.run.digest,
+		rootTask: input.source.envelope.task,
 		bindings,
 		authority: {
 			basis: input.authorization,
@@ -216,7 +217,7 @@ export function prepareScoutContinuation(input: {
 	}
 	const plan = transition.plan;
 	// Route estimates are advisory. Only a caller-supplied deadline grants stop authority.
-	const deadlineMs = input.source.receipt.routingIntent.deadlineMs;
+	const deadlineMs = input.source.run.facts.routingIntent.deadlineMs;
 	const requests: DispatchRequest[] = [];
 	const resolutions: DispatchPlanTaskResolution[] = [];
 	const tasks = requireAgentSteps(plan.steps).map((step, index): ResolvedDispatchPlanArtifact["tasks"][number] => {
@@ -226,7 +227,7 @@ export function prepareScoutContinuation(input: {
 		const selection: NonNullable<DispatchRequest["agentSelection"]> = {
 			version: 1,
 			mode: "auto",
-			baselineAgentId: input.source.receipt.agentId,
+			baselineAgentId: input.source.run.facts.agentId,
 			approvedAuthorities: [step.requestedAuthority],
 			authorityBasis: input.authorization,
 		};
@@ -277,8 +278,8 @@ export function prepareScoutContinuation(input: {
 			topology: "fleet",
 			source: {
 				kind: "scout-transition",
-				runId: input.source.receipt.runId,
-				receiptDigest: input.source.receipt.integrity.digest,
+				runId: input.source.run.runId,
+				receiptDigest: input.source.run.digest,
 				executionPlanHash: plan.hash,
 			},
 			maxWorkers: plan.maxWorkers,

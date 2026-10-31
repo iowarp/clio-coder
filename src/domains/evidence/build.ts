@@ -1651,7 +1651,6 @@ function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 		exitCode: readNullableNumber(value, source, "exitCode"),
 		pid: readNullableNumber(value, source, "pid"),
 		heartbeatAt: readNullableString(value, source, "heartbeatAt"),
-		receiptPath: readNullableString(value, source, "receiptPath"),
 		sessionId: readNullableString(value, source, "sessionId"),
 		cwd: readString(value, source, "cwd"),
 		tokenCount: readNumber(value, source, "tokenCount"),

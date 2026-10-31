@@ -137,7 +137,7 @@ export function createDispatchRunEventRegistry(
 		// of every dispatch, and a receipt that is missing a block it is typed to
 		// have (a stubbed contract, a truncated read) must degrade the transcript,
 		// never reject the completion the caller is awaiting.
-		const digest = receipt.integrity?.digest;
+		const digest = receipt.digest;
 		const outcome = typeof receipt.outcome === "string" ? receipt.outcome : REGISTRY_UNKNOWN_OUTCOME;
 		journal.receipt(logicalRunId, {
 			outcome,

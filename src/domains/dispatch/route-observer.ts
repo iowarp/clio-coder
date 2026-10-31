@@ -27,7 +27,7 @@ import {
 	createDurableQualitySourceCache,
 	type DurableQualitySourceCache,
 	type DurableQualitySources,
-	type DurableReceiptSource,
+	type DurableRunSource,
 } from "./durable-quality-sources.js";
 import {
 	evaluateRouteDecision,
@@ -37,11 +37,10 @@ import {
 	type RouteEvaluation,
 	type RouteRealizedOutcome,
 	routeCandidateKey,
-	routeConstraintValidity,
 } from "./route-decision.js";
 import { createRouteHistoryStore, type RouteHistoryStore, routeSettledLabel } from "./route-history.js";
 import { type RouteObservation, routeObservationFromHistory } from "./route-policy.js";
-import { type RouteQualityReduction, receiptSourceAuthenticated, reduceRouteQuality } from "./route-quality.js";
+import { type RouteQualityReduction, reduceRouteQuality } from "./route-quality.js";
 import type { RunEnvelope, RunResult } from "./types.js";
 
 function receiptHasUnknownCost(receipt: RunResult): boolean {
@@ -53,6 +52,12 @@ function receiptHasUnknownCost(receipt: RunResult): boolean {
 function receiptPricedCoverage(receipt: RunResult): "complete" | "partial" | "unknown" {
 	if (!receiptHasUnknownCost(receipt)) return "complete";
 	return (receipt.costSummary?.knownUsd ?? 0) > 0 ? "partial" : "unknown";
+}
+
+/** A settled run's priced spend, or null when any part of it went unpriced: route cost never reads unknown as free. */
+function settledPricedCostUsd(settled: DurableRunSource["settled"]): number | null {
+	const usd = settled.pricing.usd;
+	return usd.kind === "measured" || usd.kind === "estimated" ? usd.value : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +234,7 @@ export interface CreateRouteObserverOptions {
 
 /**
  * Identity of everything a history record's quality reduction can read beyond
- * its own receipt. Gates are the only path by which another receipt matters,
+ * its own run. Gates are the only path by which another run matters,
  * so with no gate artifacts the key is empty and a reduction depends on the
  * subject alone.
  */
@@ -241,8 +246,8 @@ function gateEvidenceKey(sources: DurableQualitySources, serialOf: (value: objec
 		if (gate.decider !== undefined) referenced.add(gate.decider.runId);
 	}
 	const parts = sources.gates.map((gate) => `g${serialOf(gate)}`);
-	for (const source of sources.receipts) {
-		if (referenced.has(source.receipt.runId)) parts.push(`r${serialOf(source)}`);
+	for (const source of sources.runs) {
+		if (referenced.has(source.runId)) parts.push(`r${serialOf(source)}`);
 	}
 	return parts.join(",");
 }
@@ -342,22 +347,22 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 		}
 		return serial;
 	};
-	// Per receipt digest: the inputs of the last reconciliation and the record it
+	// Per run digest: the inputs of the last reconciliation and the record it
 	// left behind. Matching inputs and an unchanged record skip the reduction and
 	// the locked history write, so a dispatch pays only for new evidence.
-	const reconciled = new Map<string, { subject: DurableReceiptSource; gateKey: string; recordJson: string }>();
-	let indexed: { version: number; byDigest: Map<string, DurableReceiptSource> } | null = null;
-	const digestIndex = (sources: DurableQualitySources): Map<string, DurableReceiptSource> => {
+	const reconciled = new Map<string, { subject: DurableRunSource; gateKey: string; recordJson: string }>();
+	let indexed: { version: number; byDigest: Map<string, DurableRunSource> } | null = null;
+	const digestIndex = (sources: DurableQualitySources): Map<string, DurableRunSource> => {
 		if (indexed?.version !== sources.version) {
 			indexed = {
 				version: sources.version,
-				byDigest: new Map(sources.receipts.map((source) => [source.receipt.integrity.digest, source])),
+				byDigest: new Map(sources.runs.map((source) => [source.digest, source])),
 			};
 		}
 		return indexed.byDigest;
 	};
 	const reconcileHistory = (sources: DurableQualitySources): void => {
-		if (sources.receipts.length === 0) return;
+		if (sources.runs.length === 0) return;
 		const byDigest = digestIndex(sources);
 		const gateKey = gateEvidenceKey(sources, serialOf);
 		for (const record of history.all()) {
@@ -375,17 +380,17 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 			}
 			const quality = reduceRouteQuality({
 				subject,
-				receipts: sources.receipts,
+				runs: sources.runs,
 				gateArtifacts: sources.gates,
 			});
 			const completed = record.reliability === "success" && quality.label !== "fail";
+			const pricedUsd = settledPricedCostUsd(subject.settled);
 			const next = {
 				...record,
-				// Records settled before the label existed take it from their receipt.
-				settled: record.settled ?? routeSettledLabel(subject.receipt),
+				settled: record.settled ?? routeSettledLabel(subject.settled),
 				qualityLabel: quality.label,
-				completedCostUsd: completed && !receiptHasUnknownCost(subject.receipt) ? subject.receipt.costUsd : null,
-				pricedCoverage: receiptPricedCoverage(subject.receipt),
+				completedCostUsd: completed ? pricedUsd : null,
+				pricedCoverage: pricedUsd === null ? ("unknown" as const) : ("complete" as const),
 				completedPhaseTiming: completed ? record.completedPhaseTiming : null,
 				sourceDigests: quality.sourceDigests,
 			};
@@ -405,14 +410,13 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				let validConstraints = 0;
 				const durations: number[] = [];
 				for (const record of records) {
-					const source = byDigest.get(record.receiptDigest);
-					const decision = source?.receipt.routeDecision;
-					if (source === undefined || decision === undefined || !receiptSourceAuthenticated(source)) {
+					const decision = byDigest.get(record.receiptDigest)?.settled.routeDecision ?? null;
+					if (decision === null) {
 						integrityFailures += 1;
 						continue;
 					}
-					if (routeConstraintValidity(decision).valid) validConstraints += 1;
-					durations.push(decision.decisionDurationMs);
+					if (decision.constraintsValid) validConstraints += 1;
+					durations.push(decision.durationMs);
 				}
 				return {
 					observations: records.map(routeObservationFromHistory),
@@ -500,7 +504,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				samples?.record(realized.route, sample);
 				history.upsert({
 					version: 4,
-					receiptDigest: outcome.receipt.integrity.digest,
+					receiptDigest: outcome.receipt.digest,
 					assignmentId: outcome.assignmentId ?? outcome.receipt.lineage?.rootRunId ?? outcome.receipt.runId,
 					route: realized.route,
 					executionRole: realized.route.executionRole,

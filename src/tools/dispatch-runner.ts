@@ -1,6 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import { workerMcpNoNetworkNotice } from "../core/sandbox/worker-policy.js";
 import { evaluateSkillToolSurface } from "../core/skill-activation.js";
@@ -55,8 +53,6 @@ import {
 import { narrowDispatchIntentToReadOnly } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
-import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
-import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
 import { newRunId } from "../domains/dispatch/state.js";
 import type {
@@ -810,16 +806,16 @@ function newGateGroupId(prefix: string): string {
 	return `${prefix}-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
 }
 
-function subjectRef(receipt: RunResult): RunGateSubjectRef {
-	return { runId: receipt.runId, digest: receipt.integrity?.digest ?? null };
+function subjectRef(receipt: Pick<GateRunFacts, "runId" | "digest">): RunGateSubjectRef {
+	return { runId: receipt.runId, digest: receipt.digest };
 }
 
 /**
  * Sealed correlation between a decider route and the subject route it graded.
  * Reported on every decision, including when no independent route exists.
  */
-function gateCorrelationOf(subject: RunResult, decider: RunResult): GateDecisionCorrelation {
-	const facts = (receipt: RunResult): RouteCorrelationFacts => ({
+function gateCorrelationOf(subject: GateRunFacts, decider: GateRunFacts): GateDecisionCorrelation {
+	const facts = (receipt: GateRunFacts): RouteCorrelationFacts => ({
 		agentId: receipt.agentId,
 		targetId: receipt.targetId,
 		wireModelId: receipt.wireModelId,
@@ -1072,22 +1068,32 @@ async function runReviewGated(
 	}
 }
 
-function readVerifiedGateReceipt(deps: DispatchToolDeps, runId: string): RunResult | null {
-	const envelope = deps.dispatch.getRun(runId);
-	if (envelope === null) return null;
-	const path = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${runId}.json`);
-	if (!existsSync(path)) return null;
-	let receipt: RunResult;
-	try {
-		receipt = JSON.parse(readReceiptTextSync(path)) as RunResult;
-	} catch (error) {
-		throw new Error(`pending gate receipt ${runId} is unreadable: ${competeErrorMessage(error)}`);
-	}
-	if (receipt.runId !== runId) throw new Error(`pending gate receipt path for ${runId} contains ${receipt.runId}`);
-	const verification = verifyReceiptIntegrity(receipt, envelope);
-	if (!verification.ok) throw new Error(`pending gate receipt ${runId} failed integrity: ${verification.reason}`);
-	if (receipt.integrity?.digest === undefined) throw new Error(`pending gate receipt ${runId} has no integrity digest`);
-	return receipt;
+/** What gate decisions read of a finished run: its identity, route and verdict. A run in memory and a sealed run both carry it. */
+type GateRunFacts = Pick<
+	RunResult,
+	"runId" | "digest" | "agentId" | "targetId" | "wireModelId" | "runtimeId" | "outcome"
+> & {
+	exitCode: number | null;
+	node?: { id: string };
+};
+
+/** A finished run read back from its sealed run scope for gate recovery; null when it has not settled under a verified seal. */
+function readVerifiedGateRun(deps: DispatchToolDeps, runId: string): GateRunFacts | null {
+	if (deps.dispatch.getRun(runId) === null) return null;
+	const run = readVerifiedRun(clioStateDir(), runId);
+	if (run === null) return null;
+	const settled = run.settled;
+	return {
+		runId,
+		digest: settled.digest,
+		agentId: settled.agentId,
+		targetId: settled.route.targetId,
+		wireModelId: settled.route.wireModelId,
+		runtimeId: settled.route.runtimeId,
+		outcome: settled.outcome,
+		exitCode: settled.exitCode,
+		...(settled.node ? { node: { id: settled.node.id } } : {}),
+	};
 }
 
 function ledgerProjectionFor(deps: DispatchToolDeps, ledgerId: string) {
@@ -1107,10 +1113,10 @@ function ledgerProjectionFor(deps: DispatchToolDeps, ledgerId: string) {
 function recoveredCorrelation(
 	deps: DispatchToolDeps,
 	subjects: ReadonlyArray<RunGateSubjectRef>,
-	decider: RunResult,
+	decider: GateRunFacts,
 ): GateDecisionCorrelation {
 	const first = subjects[0];
-	const subject = first === undefined ? null : readVerifiedGateReceipt(deps, first.runId);
+	const subject = first === undefined ? null : readVerifiedGateRun(deps, first.runId);
 	if (subject === null) throw new Error("recovered gate decision has no verified subject receipt for correlation");
 	return gateCorrelationOf(subject, decider);
 }
@@ -1152,7 +1158,7 @@ async function recoverPendingGateEvidence(deps: DispatchToolDeps): Promise<void>
 	for (const handle of recovery.unresolved) {
 		if (handle.record.kind !== "output") continue;
 		const record = handle.record;
-		const deciderReceipt = readVerifiedGateReceipt(deps, record.deciderRunId);
+		const deciderReceipt = readVerifiedGateRun(deps, record.deciderRunId);
 		if (deciderReceipt === null) {
 			throw new Error(
 				`pending ${record.topology} decision ${record.id} has no verified decider receipt for ${record.deciderRunId}`,
@@ -1192,7 +1198,7 @@ async function recoverPendingGateEvidence(deps: DispatchToolDeps): Promise<void>
 			: parseCompeteGateResult(record.finalOutput, record.subjects.length);
 		const pick = judged?.ok ? judged.result.winner : null;
 		const pickedSubject = pick === null ? undefined : record.subjects[pick - 1];
-		const candidateReceipt = pickedSubject === undefined ? null : readVerifiedGateReceipt(deps, pickedSubject.runId);
+		const candidateReceipt = pickedSubject === undefined ? null : readVerifiedGateRun(deps, pickedSubject.runId);
 		const root = record.resourceRoot ?? process.cwd();
 		const pickedBranch = pick === null ? null : competeBranchForCandidate(root, record.group, pick);
 		if (pickedSubject !== undefined && candidateReceipt === null) {
@@ -2902,12 +2908,12 @@ async function runSequential(
 }
 
 /** A pipeline step failed when its worker exited nonzero or its outcome is not success. */
-function isPipelineStepFailure(receipt: RunResult): boolean {
+function isPipelineStepFailure(receipt: Pick<GateRunFacts, "exitCode" | "outcome">): boolean {
 	if (receipt.exitCode !== 0) return true;
 	return receipt.outcome !== undefined && receipt.outcome !== "succeeded";
 }
 
-function pipelineFailureReason(receipt: RunResult): string {
+function pipelineFailureReason(receipt: Pick<GateRunFacts, "exitCode" | "outcome">): string {
 	if (receipt.outcome !== undefined && receipt.outcome !== "succeeded") return `outcome=${receipt.outcome}`;
 	return `exit=${receipt.exitCode}`;
 }

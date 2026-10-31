@@ -29,9 +29,9 @@ export interface RunTelemetryJournal {
 	gap(reason: "invalid-record" | "writer-drop", count?: number): void;
 	/**
 	 * The run's one terminal accountability record, written beside its call facts once its result object is stored, so
-	 * the seal covers both (#425, #434). A close waits for it.
+	 * the seal covers both (#425, #434). Resolves once the record is durable; a close waits for it too.
 	 */
-	settle(settlement: RunSettlement): void;
+	settle(settlement: RunSettlement): Promise<void>;
 	/** A channel failure the host saw, after exit included; a closed journal records nothing (#425). */
 	channel(data: EventPayload<"worker.channel_failed">): void;
 	feed(body: RunEventJournalBody, capBytes: number): void;
@@ -313,7 +313,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			});
 		},
 		settle(settlement) {
-			if (journal.closed || settled) return;
+			if (journal.closed || settled) return settling;
 			settled = true;
 			const wallMs = Date.now();
 			const mono = performance.now();
@@ -327,6 +327,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 					writeDiagnostic("[clio-coder:telemetry] run result object could not be stored; the run stays unsealed\n");
 				},
 			);
+			return settling.then(() => writer.flush());
 		},
 		channel(data) {
 			if (journal.closed) return;

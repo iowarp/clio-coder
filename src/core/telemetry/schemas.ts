@@ -600,6 +600,31 @@ export const RunSettledSchema = Type.Object(
 			closed,
 		),
 		node: nullable(Type.Object({ id: ExistingId, kind: vocabulary(["local", "ssh"]) }, closed)),
+		/** The route decision the run executed under, as route readiness reads it; null when none was observed. */
+		routeDecision: nullable(
+			Type.Object(
+				{
+					decisionHash: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+					mode: vocabulary(["fixed", "shadow", "active"]),
+					durationMs: duration,
+					constraintsValid: Type.Boolean(),
+				},
+				closed,
+			),
+		),
+		/** The routing request the run was admitted under, which a continuation it seeds inherits. */
+		routingIntent: Type.Object(
+			{
+				posture: vocabulary(["manual", "quality", "balanced", "latency", "economy"]),
+				maxCostUsd: nullable(Type.Number({ minimum: 0 })),
+				deadlineMs: nullable(duration),
+				minimumQuality: nullable(Type.Number()),
+				requiredCapabilities: Type.Array(ExistingId, { maxItems: 64 }),
+				locality: vocabulary(["local-only", "prefer-local", "any"]),
+				failover: vocabulary(["none", "approved"]),
+			},
+			closed,
+		),
 		startedAt: utc,
 		endedAt: utc,
 		outcome: RunOutcome,

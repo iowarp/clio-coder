@@ -370,7 +370,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 								throw new Error("split refused: harness orientation permits read-only subtasks only");
 							const source = loadVerifiedScoutSource({
 								dispatch,
-								ref: { runId: handle.runId, receiptDigest: receipt.integrity.digest },
+								ref: { runId: handle.runId, receiptDigest: receipt.digest },
 								agentSpecs: specs,
 							});
 							const ceiling = settings.orientation.maxCostUsdPerTurn ?? dispatch.costCeilingUsd?.();
@@ -419,7 +419,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 					cited = findings.length;
 					block = renderOrientationBlock({
 						runId: handle.runId,
-						receiptDigest: receipt.integrity.digest,
+						receiptDigest: receipt.digest,
 						findings,
 						ungrounded,
 						toolCalls: results.reduce((sum, item) => sum + item.toolCalls, 0),
@@ -432,7 +432,7 @@ export function createTurnControlRunner(deps: TurnControlRunnerDeps): TurnContro
 				deps.emitNotice(
 					`[Orientation] Scout run ${handle.runId} settled: ${succeeded ? `${cited} cited findings` : (receipt.outcome ?? "failed")}`,
 				);
-				prior = { runId: handle.runId, receiptDigest: receipt.integrity.digest, fingerprint: facts.workspace, block };
+				prior = { runId: handle.runId, receiptDigest: receipt.digest, fingerprint: facts.workspace, block };
 				acted = true;
 				deps.rememberOrientation?.(input.userTurnId, handle.runId, succeeded);
 				record = {

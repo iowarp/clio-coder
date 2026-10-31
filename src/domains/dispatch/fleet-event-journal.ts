@@ -42,7 +42,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
-import { canonicalJson } from "./receipt-integrity.js";
+import { canonicalJson } from "../prompts/hash.js";
 
 export const FLEET_EVENT_JOURNAL_VERSION = 1;
 

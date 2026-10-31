@@ -901,7 +901,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				})
 				.finally(deps.requestRender);
 		},
-		verifyReceipt: (runId) => verifyRunRecordReport(deps.stateDir, runId),
+		verifyRun: (runId) => verifyRunRecordReport(deps.stateDir, runId),
 		...(deps.listWorkerRuns ? { listWorkerRuns: deps.listWorkerRuns } : {}),
 		// The user-turn path, minus expansion. A worker's answer is literal text:
 		// running it through the prompt, skill, and @file expanders would let a

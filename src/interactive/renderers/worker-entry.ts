@@ -14,7 +14,6 @@ import {
 /** Bounded worker summaries share the main transcript's output style. */
 
 import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
-import { retiredIntegrityVersionOf } from "../../domains/evidence/trust-status.js";
 import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -694,7 +693,7 @@ export function renderWorkerEntryLines(
 		isPending(entry) || integrity?.artifactIntegrity.state === "verified"
 			? []
 			: railLines(
-					`receipt: ${integrity ? (retiredIntegrityVersionOf(integrity.artifactIntegrity) !== null ? "seal retired" : trustStateWord("artifactIntegrity", integrity.artifactIntegrity.state)) : "integrity unavailable"}; raw output, not admitted as evidence`,
+					`run: ${integrity ? trustStateWord("artifactIntegrity", integrity.artifactIntegrity.state) : "integrity unavailable"}; raw output, not admitted as evidence`,
 					"warning",
 					safeWidth,
 				);

@@ -2,33 +2,35 @@
  * Durable route-quality sources, read incrementally.
  *
  * Dispatch admission asks the route observer for a readiness window on every
- * dispatch, and the window needs every terminal receipt plus every gate
- * decision artifact. Reading them all each time measured 201ms at 174 receipts
- * (6.4 MB), about 1.2ms per receipt, synchronously on the event loop. This
- * cache stats each file and re-reads only the ones whose identity changed, so
- * a dispatch pays for the receipts written since the previous one.
+ * dispatch, and the window needs every settled run plus every gate decision
+ * artifact. This cache stats each run's sealed bundle and each gate artifact
+ * and re-reads only the ones whose identity changed, so a dispatch pays for the
+ * runs sealed since the previous one (#434).
  *
- * A file's identity is its inode, size and mtime. Receipts, `runs.json` and
- * gate artifacts are all written by tmp-and-rename, so every rewrite lands on
- * a new inode even inside one mtime tick. An unchanged file keeps returning
- * the same parsed object, which is what lets the object-keyed integrity
+ * A file's identity is its inode, size and mtime. A run scope's `bundle.json`,
+ * `runs.json` and gate artifacts are all written by tmp-and-rename, so every
+ * rewrite lands on a new inode even inside one mtime tick. An unchanged file
+ * keeps returning the same object, which is what lets the object-keyed gate
  * verdicts in `route-quality.ts` stay warm across dispatches. A changed file
  * yields a fresh object and is verified again.
  */
 
 import { existsSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { join } from "node:path";
+import type { SettledRunRecord } from "../telemetry/index.js";
+import { readVerifiedRun, telemetryRunDirectory } from "../telemetry/index.js";
 import { type GateDecisionArtifact, gateDecisionsDirectory, verifyGateDecisionArtifact } from "./gate-decisions.js";
-import { readReceiptTextSync } from "./receipt-store.js";
-import type { RunEnvelope, RunResult } from "./types.js";
+import type { RouteQualityRun } from "./route-quality.js";
+import type { RunEnvelope } from "./types.js";
 
-export interface DurableReceiptSource {
-	receipt: RunResult;
+/** A run sealed under a verified seal, as route quality and route readiness read it. */
+export interface DurableRunSource extends RouteQualityRun {
+	settled: SettledRunRecord["settled"];
 	envelope: RunEnvelope;
 }
 
 export interface DurableQualitySources {
-	receipts: ReadonlyArray<DurableReceiptSource>;
+	runs: ReadonlyArray<DurableRunSource>;
 	gates: ReadonlyArray<GateDecisionArtifact>;
 	/** Changes whenever any source file was added, rewritten or removed since the last read. */
 	version: number;
@@ -68,11 +70,28 @@ function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-interface ReceiptEntry {
+interface RunEntry {
 	identity: FileIdentity;
 	/** The envelope the cached source was paired with, serialized for comparison. */
 	envelopeJson: string;
-	source: DurableReceiptSource | null;
+	source: DurableRunSource | null;
+}
+
+function durableRun(settled: SettledRunRecord["settled"], envelope: RunEnvelope): DurableRunSource {
+	return {
+		runId: envelope.id,
+		digest: settled.digest,
+		agentId: settled.agentId,
+		route: {
+			targetId: settled.route.targetId,
+			wireModelId: settled.route.wireModelId,
+			runtimeId: settled.route.runtimeId,
+		},
+		node: settled.node ? { id: settled.node.id } : null,
+		quality: settled.quality,
+		settled,
+		envelope,
+	};
 }
 
 interface GateEntry {
@@ -86,8 +105,8 @@ export function createDurableQualitySourceCache(
 	const readFile = (path: string): string => readFileSync(path, "utf8");
 	const runsPath = join(options.stateDir, "runs.json");
 	const gatesDir = gateDecisionsDirectory(options.stateDir);
-	let runs: { identity: FileIdentity; envelopes: RunEnvelope[] } | null = null;
-	const receipts = new Map<string, ReceiptEntry>();
+	let ledger: { identity: FileIdentity; envelopes: RunEnvelope[] } | null = null;
+	const runs = new Map<string, RunEntry>();
 	const gates = new Map<string, GateEntry>();
 	let version = 0;
 	let last: DurableQualitySources | null = null;
@@ -95,12 +114,13 @@ export function createDurableQualitySourceCache(
 	const readEnvelopes = (): { envelopes: RunEnvelope[]; changed: boolean } => {
 		const stats = statOrNull(runsPath);
 		if (stats === null) {
-			const changed = runs !== null;
-			runs = null;
+			const changed = ledger !== null;
+			ledger = null;
 			return { envelopes: [], changed };
 		}
 		const identity = identityOf(stats);
-		if (runs !== null && sameIdentity(runs.identity, identity)) return { envelopes: runs.envelopes, changed: false };
+		if (ledger !== null && sameIdentity(ledger.identity, identity))
+			return { envelopes: ledger.envelopes, changed: false };
 		let envelopes: RunEnvelope[] = [];
 		try {
 			const parsed = JSON.parse(readFile(runsPath)) as unknown;
@@ -108,27 +128,28 @@ export function createDurableQualitySourceCache(
 		} catch {
 			envelopes = [];
 		}
-		runs = { identity, envelopes };
+		ledger = { identity, envelopes };
 		return { envelopes, changed: true };
 	};
 
-	const readReceipts = (
+	const readRuns = (
 		envelopes: ReadonlyArray<RunEnvelope>,
 		envelopesChanged: boolean,
-	): { sources: DurableReceiptSource[]; changed: boolean } => {
+	): { sources: DurableRunSource[]; changed: boolean } => {
 		let changed = false;
 		const seen = new Set<string>();
-		const sources: DurableReceiptSource[] = [];
+		const sources: DurableRunSource[] = [];
 		for (const envelope of envelopes) {
-			const path = envelope.receiptPath ?? join(options.stateDir, "receipts", `${envelope.id}.json`);
+			// A scope's bundle.json is written when it seals, so its identity changes exactly when the seal does.
+			const path = join(telemetryRunDirectory(options.stateDir, envelope.id), "bundle.json");
 			seen.add(path);
 			const stats = statOrNull(path);
 			if (stats === null) {
-				if (receipts.delete(path)) changed = true;
+				if (runs.delete(path)) changed = true;
 				continue;
 			}
 			const identity = identityOf(stats);
-			const cached = receipts.get(path);
+			const cached = runs.get(path);
 			// An unchanged runs.json hands back the same envelope objects, so the
 			// pairing can only have moved when the ledger itself was re-read.
 			const envelopeJson = envelopesChanged || cached === undefined ? JSON.stringify(envelope) : cached.envelopeJson;
@@ -137,19 +158,20 @@ export function createDurableQualitySourceCache(
 				continue;
 			}
 			changed = true;
-			let source: DurableReceiptSource | null = null;
+			let source: DurableRunSource | null = null;
 			try {
-				const receipt = JSON.parse(readReceiptTextSync(path)) as unknown;
-				if (isObject(receipt)) source = { receipt: receipt as unknown as RunResult, envelope };
+				const record = readVerifiedRun(options.stateDir, envelope.id);
+				source = record === null ? null : durableRun(record.settled, envelope);
 			} catch {
+				// An unreadable run scope contributes no evidence.
 				source = null;
 			}
-			receipts.set(path, { identity, envelopeJson, source });
+			runs.set(path, { identity, envelopeJson, source });
 			if (source !== null) sources.push(source);
 		}
-		for (const path of [...receipts.keys()]) {
+		for (const path of [...runs.keys()]) {
 			if (seen.has(path)) continue;
-			receipts.delete(path);
+			runs.delete(path);
 			changed = true;
 		}
 		return { sources, changed };
@@ -198,12 +220,12 @@ export function createDurableQualitySourceCache(
 
 	return {
 		read() {
-			const ledger = readEnvelopes();
-			const receiptRead = readReceipts(ledger.envelopes, ledger.changed);
+			const current = readEnvelopes();
+			const runRead = readRuns(current.envelopes, current.changed);
 			const gateRead = readGates();
-			if (last !== null && !receiptRead.changed && !gateRead.changed) return last;
+			if (last !== null && !runRead.changed && !gateRead.changed) return last;
 			version += 1;
-			last = { receipts: receiptRead.sources, gates: gateRead.artifacts, version };
+			last = { runs: runRead.sources, gates: gateRead.artifacts, version };
 			return last;
 		},
 	};

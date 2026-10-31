@@ -1,7 +1,6 @@
 import { gateRouteCorrelation } from "./execution-role.js";
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "./gate-decisions.js";
-import { verifyReceiptIntegrity } from "./receipt-integrity.js";
-import type { RunEnvelope, RunResult } from "./types.js";
+import type { RunResult } from "./types.js";
 
 /** A routing label is deliberately separate from the descriptive receipt verification state. */
 export type RouteQualityLabel = "pass" | "fail" | "unmeasured";
@@ -30,15 +29,38 @@ export interface RouteQualityReduction {
 	sourceDigests: string[];
 }
 
-export interface RouteQualityReceiptSource {
-	receipt: RunResult;
-	envelope: RunEnvelope;
+/**
+ * What route quality reads of a finished run: its identity, route and quality facts. A run its producer holds and a
+ * run read back under a verified seal both carry them, so a reduction never reads a run that is not authentic (#434).
+ */
+export interface RouteQualityRun {
+	runId: string;
+	digest: string;
+	agentId: string;
+	route: { targetId: string; wireModelId: string; runtimeId: string };
+	node: { id: string } | null;
+	quality: {
+		typedValidations: ReadonlyArray<{ passed: boolean }>;
+		resultContract: { quality: "pass" | "fail" | "unmeasured" } | null;
+	} | null;
+}
+
+/** The route-quality view of a result its producer holds. */
+export function routeQualityRun(result: RunResult): RouteQualityRun {
+	return {
+		runId: result.runId,
+		digest: result.digest,
+		agentId: result.agentId,
+		route: { targetId: result.targetId, wireModelId: result.wireModelId, runtimeId: result.runtimeId },
+		node: result.node ? { id: result.node.id } : null,
+		quality: result.quality,
+	};
 }
 
 export interface ReduceRouteQualityInput {
-	subject: RouteQualityReceiptSource;
-	/** Receipts referenced by later evidence, including the subject. */
-	receipts: ReadonlyArray<RouteQualityReceiptSource>;
+	subject: RouteQualityRun;
+	/** Runs referenced by later evidence, including the subject. */
+	runs: ReadonlyArray<RouteQualityRun>;
 	gateArtifacts?: ReadonlyArray<GateDecisionArtifact>;
 }
 
@@ -47,27 +69,9 @@ function compareStrings(left: string, right: string): number {
 }
 
 /**
- * Integrity verdicts held against the receipt object that produced them.
- *
- * Verification canonically serializes and hashes a receipt and its envelope,
- * and `reduceRouteQuality` verifies the whole receipt set on every call. That
- * is fine for one subject and quadratic for a batch. Reconciling route history
- * is a batch: 359 records against a 1247-receipt ledger is 447,673
- * verifications of files averaging 23KB, which measured 70 seconds of CPU on
- * the dispatch decision path and pushed every dispatch on this machine past
- * its 60-second admission deadline. Dispatch had stopped working, and the
- * error it reported was that no worker slots were free while zero were in use.
- *
- * The key is the receipt object, not its digest. A digest key would let a
- * forged receipt claiming a known-good digest inherit that receipt's verdict,
- * which is the thing verification exists to catch. Object identity can only be
- * shared by a receipt that was already verified in this process, and a durable
- * re-read produces fresh objects, so a ledger that changed on disk is verified
- * again.
+ * Gate verdicts held against the artifact object that produced them: a durable re-read produces fresh objects, so an
+ * artifact that changed on disk is verified again, and a forged one never inherits a known-good verdict.
  */
-const integrityVerdicts = new WeakMap<object, boolean>();
-
-/** Gate artifacts are verified under the same object-identity rule as receipts. */
 const gateVerdicts = new WeakMap<object, boolean>();
 
 function gateAuthenticated(artifact: GateDecisionArtifact): boolean {
@@ -78,32 +82,13 @@ function gateAuthenticated(artifact: GateDecisionArtifact): boolean {
 	return verdict;
 }
 
-/** Cached integrity verdict for one receipt object and the envelope it was read with. */
-export function receiptSourceAuthenticated(source: RouteQualityReceiptSource): boolean {
-	const cached = integrityVerdicts.get(source.receipt);
-	if (cached !== undefined) return cached;
-	const verdict = verifyReceiptIntegrity(source.receipt, source.envelope).ok;
-	integrityVerdicts.set(source.receipt, verdict);
-	return verdict;
+function runsByRunId(runs: ReadonlyArray<RouteQualityRun>): Map<string, RouteQualityRun> {
+	return new Map(runs.map((run) => [run.runId, run]));
 }
 
-function receiptSourcesByRunId(
-	sources: ReadonlyArray<RouteQualityReceiptSource>,
-): Map<string, RouteQualityReceiptSource> {
-	const result = new Map<string, RouteQualityReceiptSource>();
-	for (const source of sources) {
-		if (!receiptSourceAuthenticated(source)) continue;
-		result.set(source.receipt.runId, source);
-	}
-	return result;
-}
-
-function gateReferencesMatch(
-	artifact: GateDecisionArtifact,
-	receipts: ReadonlyMap<string, RouteQualityReceiptSource>,
-): boolean {
+function gateReferencesMatch(artifact: GateDecisionArtifact, runs: ReadonlyMap<string, RouteQualityRun>): boolean {
 	const references = [...artifact.subjects, ...(artifact.decider === undefined ? [] : [artifact.decider])];
-	return references.every((reference) => receipts.get(reference.runId)?.receipt.integrity.digest === reference.digest);
+	return references.every((reference) => runs.get(reference.runId)?.digest === reference.digest);
 }
 
 function gateOutcome(artifact: GateDecisionArtifact): "pass" | "fail" | null {
@@ -115,19 +100,19 @@ function gateOutcome(artifact: GateDecisionArtifact): "pass" | "fail" | null {
 	return null;
 }
 
-function correlationFacts(receipt: RunResult): Parameters<typeof gateRouteCorrelation>[0] {
+function correlationFacts(run: RouteQualityRun): Parameters<typeof gateRouteCorrelation>[0] {
 	return {
-		agentId: receipt.agentId,
-		targetId: receipt.targetId,
-		wireModelId: receipt.wireModelId,
-		runtimeId: receipt.runtimeId,
-		nodeId: receipt.node?.id ?? "local",
+		agentId: run.agentId,
+		targetId: run.route.targetId,
+		wireModelId: run.route.wireModelId,
+		runtimeId: run.route.runtimeId,
+		nodeId: run.node?.id ?? "local",
 	};
 }
 
 function gateCorrelation(
-	subject: RunResult,
-	decider: RunResult,
+	subject: RouteQualityRun,
+	decider: RouteQualityRun,
 ): Pick<CorrelatedGateEvidence, "reason" | "dimensions"> | null {
 	const correlation = gateRouteCorrelation(correlationFacts(subject), correlationFacts(decider));
 	if (correlation.independent) return null;
@@ -138,43 +123,38 @@ function gateCorrelation(
 }
 
 /**
- * Reduce integrity-valid receipt and gate artifacts into one routing quality
- * label. It is intentionally pure: callers own durable reads and persistence,
- * so replaying the same authenticated inputs is byte-identical.
+ * Reduce authenticated runs and gate artifacts into one routing quality label. It is intentionally pure: callers own
+ * durable reads and persistence, so replaying the same authenticated inputs is byte-identical.
  */
 export function reduceRouteQuality(input: ReduceRouteQualityInput): RouteQualityReduction {
-	if (!receiptSourceAuthenticated(input.subject)) {
-		return { label: "unmeasured", checks: [], correlatedGates: [], sourceDigests: [] };
-	}
-
-	const subject = input.subject.receipt;
-	const receipts = receiptSourcesByRunId([input.subject, ...input.receipts]);
+	const subject = input.subject;
+	const runs = runsByRunId([input.subject, ...input.runs]);
 	const checks: RouteQualityCheck[] = [];
 	const correlatedGates: CorrelatedGateEvidence[] = [];
-	const sourceDigests = new Set<string>([subject.integrity.digest]);
+	const sourceDigests = new Set<string>([subject.digest]);
 
-	for (const fact of subject.quality.typedValidations) {
+	for (const fact of subject.quality?.typedValidations ?? []) {
 		checks.push({
 			kind: "typed-validation",
-			sourceDigest: subject.integrity.digest,
+			sourceDigest: subject.digest,
 			passed: fact.passed,
 		});
 	}
-	const resultContract = subject.quality.resultContract;
+	const resultContract = subject.quality?.resultContract ?? null;
 	if (resultContract !== null && resultContract.quality !== "unmeasured") {
 		checks.push({
 			kind: "result-contract",
-			sourceDigest: subject.integrity.digest,
+			sourceDigest: subject.digest,
 			passed: resultContract.quality === "pass",
 		});
 	}
 
 	for (const artifact of input.gateArtifacts ?? []) {
-		if (!gateAuthenticated(artifact) || !gateReferencesMatch(artifact, receipts)) continue;
+		if (!gateAuthenticated(artifact) || !gateReferencesMatch(artifact, runs)) continue;
 		const verdict = gateOutcome(artifact);
 		if (verdict === null || artifact.decider === undefined) continue;
 		const subjectReference = artifact.subjects.find(
-			(reference) => reference.runId === subject.runId && reference.digest === subject.integrity.digest,
+			(reference) => reference.runId === subject.runId && reference.digest === subject.digest,
 		);
 		if (subjectReference === undefined) continue;
 		const operatorConfirmed = artifact.outcome === "operator-confirmed" && artifact.confirmation !== undefined;
@@ -182,10 +162,10 @@ export function reduceRouteQuality(input: ReduceRouteQualityInput): RouteQuality
 			operatorConfirmed &&
 			(artifact.winner === undefined ||
 				artifact.winner.subject.runId !== subject.runId ||
-				artifact.winner.subject.digest !== subject.integrity.digest)
+				artifact.winner.subject.digest !== subject.digest)
 		)
 			continue;
-		const decider = receipts.get(artifact.decider.runId)?.receipt;
+		const decider = runs.get(artifact.decider.runId);
 		if (decider === undefined) continue;
 		const correlation = gateCorrelation(subject, decider);
 		sourceDigests.add(artifact.integrity.digest);

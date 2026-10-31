@@ -30,6 +30,7 @@ import { activeDecisionRefs } from "../session/decision-board.js";
 import type { DecisionLedgerEntry } from "../session/entries.js";
 import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../telemetry/cost.js";
 import { telemetryJournalPath, telemetryRunDirectory } from "../telemetry/paths.js";
+import { readVerifiedRun } from "../telemetry/run-record.js";
 import {
 	assignmentProcessOwnerAlive,
 	claimAssignmentVerdict,
@@ -72,8 +73,6 @@ import {
 	stagePendingGateDecision,
 } from "./gate-decisions.js";
 import { type DispatchIntent, declaredScopeIntent } from "./intent.js";
-import { verifyReceiptIntegrity } from "./receipt-integrity.js";
-import { readReceiptTextSync } from "./receipt-store.js";
 import { type FleetRootTelemetry, openFleetRootTelemetry } from "./run-telemetry.js";
 import { type FleetRunRecord, writeFleetRun, writeFleetRunSync } from "./state.js";
 import type { RunResult } from "./types.js";
@@ -299,13 +298,75 @@ export interface FleetRunOutcome {
 }
 
 /** Sealed independence facts between the work under review and its reviewer. */
-function fleetGateCorrelation(subject: RunResult, decider: RunResult): GateDecisionCorrelation {
-	const facts = (receipt: RunResult) => ({
-		agentId: receipt.agentId,
-		targetId: receipt.targetId,
-		wireModelId: receipt.wireModelId,
-		runtimeId: receipt.runtimeId,
-		nodeId: receipt.node?.id ?? "local",
+/**
+ * What later steps read of a finished agent step: its identity, route, changed paths and spend. A step that ran in
+ * this process carries its result; a replayed one is read back from its sealed run scope, cited by the step's digest.
+ */
+interface StepRun {
+	runId: string;
+	digest: string;
+	agentId: string;
+	targetId: string;
+	wireModelId: string;
+	runtimeId: string;
+	nodeId: string;
+	changedPaths: ReadonlyArray<string>;
+	costUsd: number;
+	costProvenance: RunResult["costProvenance"];
+	costSummary?: RunResult["costSummary"];
+}
+
+function stepRunOf(result: RunResult): StepRun {
+	return {
+		runId: result.runId,
+		digest: result.digest,
+		agentId: result.agentId,
+		targetId: result.targetId,
+		wireModelId: result.wireModelId,
+		runtimeId: result.runtimeId,
+		nodeId: result.node?.id ?? "local",
+		changedPaths: [...(result.worktree?.changedPaths ?? []), ...(result.checkoutChanges?.changedPaths ?? [])],
+		costUsd: result.costUsd,
+		costProvenance: result.costProvenance,
+		...(result.costSummary ? { costSummary: result.costSummary } : {}),
+	};
+}
+
+/** A replayed step's run from its sealed scope; null when it never settled under the digest the fleet recorded. */
+function replayedStepRun(runId: string, digest: string): StepRun | null {
+	const record = readVerifiedRun(clioStateDir(), runId, digest);
+	if (record === null) return null;
+	const settled = record.settled;
+	const delivered = record.result?.state === "resolved" ? record.result.value : null;
+	const usd = settled.pricing.usd;
+	const priced = usd.kind === "measured" || usd.kind === "estimated";
+	return {
+		runId,
+		digest: settled.digest,
+		agentId: settled.agentId,
+		targetId: settled.route.targetId,
+		wireModelId: settled.route.wireModelId,
+		runtimeId: settled.route.runtimeId,
+		nodeId: settled.node?.id ?? "local",
+		changedPaths: [...(delivered?.worktree?.changedPaths ?? []), ...(delivered?.checkoutChanges?.changedPaths ?? [])],
+		costUsd: priced ? usd.value : 0,
+		costProvenance: !priced
+			? "unknown"
+			: usd.kind === "estimated"
+				? "estimated"
+				: settled.pricing.pricedBy === "free"
+					? "known_free"
+					: "known",
+	};
+}
+
+function fleetGateCorrelation(subject: StepRun, decider: StepRun): GateDecisionCorrelation {
+	const facts = (run: StepRun) => ({
+		agentId: run.agentId,
+		targetId: run.targetId,
+		wireModelId: run.wireModelId,
+		runtimeId: run.runtimeId,
+		nodeId: run.nodeId,
 	});
 	const { agent, target, modelFamily, runtime, node, independent } = gateRouteCorrelation(
 		facts(subject),
@@ -584,7 +645,7 @@ async function runFleetHoldingWorkspace(
 		},
 	});
 	const receipts: RunResult[] = [];
-	const receiptsByStep = new Map<string, RunResult>();
+	const receiptsByStep = new Map<string, StepRun>();
 	// Paths a workspace code step created or edited, so a later loop check runs
 	// a test it generated exactly as it runs an agent ancestor's changed tests.
 	// Null marks a step whose changes could not be measured (no git status).
@@ -612,12 +673,10 @@ async function runFleetHoldingWorkspace(
 		recordMemberReceipts(await memberReceipts(runId, firstReceipt), stepId);
 	for (const [stepId, replayedResult] of replayed) {
 		try {
-			const receipt = JSON.parse(
-				readReceiptTextSync(join(clioStateDir(), "receipts", `${replayedResult.terminalRunId}.json`)),
-			) as RunResult;
-			receiptsByStep.set(stepId, receipt);
+			const run = replayedStepRun(replayedResult.terminalRunId, replayedResult.receiptDigest);
+			if (run !== null) receiptsByStep.set(stepId, run);
 		} catch {
-			// Deterministic results and unavailable historical receipts need no receipt projection.
+			// Deterministic results and runs whose scope cannot be read carry no run projection.
 		}
 		const step = livePlan.steps.find((entry) => entry.id === stepId);
 		if (step === undefined) continue;
@@ -636,8 +695,8 @@ async function runFleetHoldingWorkspace(
 			succeeded: true,
 			terminalRunId: replayedResult.terminalRunId,
 			costUsd: receiptsByStep.get(stepId)?.costUsd ?? 0,
-			// A replay whose receipt no longer exists on disk has no cost claim at
-			// all, which is `unknown` rather than a zero the projection invented.
+			// A replay whose run cannot be read back has no cost claim at all,
+			// which is `unknown` rather than a zero the projection invented.
 			costProvenance: receiptsByStep.get(stepId)?.costProvenance ?? "unknown",
 			...(replayedCostSummary ? { costSummary: replayedCostSummary } : {}),
 			result: replayedResult,
@@ -935,9 +994,9 @@ async function runFleetHoldingWorkspace(
 							validationFresh = false;
 							independentReviewFresh = false;
 						}
-						receiptsByStep.set(step.id, receipt);
-						const envelope = dispatch.getRun(receipt.runId);
-						const integrityValid = envelope !== null && verifyReceiptIntegrity(receipt, envelope).ok;
+						receiptsByStep.set(step.id, stepRunOf(receipt));
+						// The result is the one dispatch handed back in memory: authentic as held.
+						const integrityValid = true;
 						const succeeded = receipt.exitCode === 0 && (receipt.outcome === undefined || receipt.outcome === "succeeded");
 						let stepSucceeded = succeeded;
 						let failureReason: string | undefined = succeeded
@@ -1020,7 +1079,7 @@ async function runFleetHoldingWorkspace(
 							stepId: step.id,
 							assignmentId: handle.runId,
 							terminalRunId: receipt.runId,
-							receiptDigest: receipt.integrity.digest,
+							receiptDigest: receipt.digest,
 							output: receipt.output?.state === "final" ? receipt.output.text : "",
 							succeeded: stepSucceeded,
 							integrityValid,
@@ -1072,11 +1131,7 @@ async function runFleetHoldingWorkspace(
 							source.expectedResultContract === "mutation-report"
 								? mutationReportPaths({ kind: "mutation-report" }, result.output)
 								: [];
-						for (const filename of [
-							...paths,
-							...(receipt?.worktree?.changedPaths ?? []),
-							...(receipt?.checkoutChanges?.changedPaths ?? []),
-						]) {
+						for (const filename of [...paths, ...(receipt?.changedPaths ?? [])]) {
 							mutatedPaths.add(filename);
 						}
 					}
@@ -1180,7 +1235,7 @@ async function runFleetHoldingWorkspace(
 				// because a loop's declared dependency is another loop's deterministic
 				// check, which produced no receipt at all.
 				const ancestors = executionPlanAncestors(livePlan, step.id);
-				let subject: RunResult | undefined;
+				let subject: StepRun | undefined;
 				for (const [stepId, receipt] of receiptsByStep) {
 					if (ancestors.has(stepId)) subject = receipt;
 				}
@@ -1196,8 +1251,8 @@ async function runFleetHoldingWorkspace(
 					group: `${fleetRootId}:${loop.id}`,
 					cycle: attempt,
 					terminalCycle: terminalAttempt,
-					subjects: [{ runId: subject.runId, digest: subject.integrity.digest }],
-					decider: { runId: decider.runId, digest: decider.integrity.digest },
+					subjects: [{ runId: subject.runId, digest: subject.digest }],
+					decider: { runId: decider.runId, digest: decider.digest },
 					correlation,
 					output: stepResult.output,
 				});

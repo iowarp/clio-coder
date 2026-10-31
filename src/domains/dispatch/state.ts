@@ -3,19 +3,16 @@
  *
  * On-disk layout under `clioStateDir()`:
  *   runs.json                    JSON array of RunEnvelope, newest first
- *   receipts/<runId>.json        per-run RunResult
  *
  * The ledger holds an in-memory mirror of runs.json. `create()` and `update()`
  * mutate memory only; `persist()` writes the settings-bounded ring (default
  * 1000) atomically via safeResourceWriteAsync.
  *
  * This module owns persistence. The dispatch extension wires worker spawning,
- * cross-domain coordination, and event emission around this ledger.
- *
- * A crash between recordReceipt and persist leaves the receipt JSON on disk
- * without a ledger entry. The dispatch extension closes that gap at startup by
- * scanning receipts/ and adopting verified orphans back into the ledger via
- * adopt() (see orphan-recovery.ts).
+ * cross-domain coordination, and event emission around this ledger. A finished
+ * run's record is its run journal's run.settled, not a row here; a row whose
+ * host died before its terminal patch persisted is settled from that record at
+ * startup (orphan-recovery.ts).
  */
 
 import { randomBytes } from "node:crypto";
@@ -29,9 +26,7 @@ import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { removeRunTelemetry } from "../telemetry/retention.js";
 import type { ExecutionStepResult } from "./execution-scheduler.js";
-import { computeReceiptFindingsSummary } from "./receipt-findings.js";
-import { withReceiptIntegrity } from "./receipt-integrity.js";
-import type { RunEnvelope, RunResult, RunResultDraft, RunStatus } from "./types.js";
+import type { RunEnvelope, RunStatus } from "./types.js";
 
 /**
  * One fleet root's durable record. Records written by earlier builds may also
@@ -62,17 +57,7 @@ export interface LedgerOptions {
 
 export type CreateRunInput = Omit<
 	RunEnvelope,
-	| "version"
-	| "id"
-	| "startedAt"
-	| "endedAt"
-	| "exitCode"
-	| "status"
-	| "pid"
-	| "heartbeatAt"
-	| "receiptPath"
-	| "tokenCount"
-	| "costUsd"
+	"version" | "id" | "startedAt" | "endedAt" | "exitCode" | "status" | "pid" | "heartbeatAt" | "tokenCount" | "costUsd"
 > & { id?: string };
 
 export interface Ledger {
@@ -80,15 +65,6 @@ export interface Ledger {
 	update(id: string, patch: Partial<RunEnvelope>): RunEnvelope | null;
 	get(id: string): RunEnvelope | null;
 	list(opts?: { status?: RunStatus; limit?: number }): ReadonlyArray<RunEnvelope>;
-	recordReceipt(id: string, receipt: RunResultDraft): RunResult;
-	/**
-	 * `terminalPatch` lands on the row in the same step as `receiptPath`, never
-	 * before the receipt file exists: a persist during the awaited write would
-	 * otherwise store a terminal row with no receipt (#428).
-	 */
-	recordReceiptAsync(id: string, receipt: RunResultDraft, terminalPatch?: Partial<RunEnvelope>): Promise<RunResult>;
-	/** Insert a fully-formed envelope recovered from a durable artifact. Returns false when the id already exists. */
-	adopt(envelope: RunEnvelope): boolean;
 	persist(): Promise<void>;
 	reload(): void;
 }
@@ -102,10 +78,6 @@ export function newRunId(): string {
 
 function runsPath(): string {
 	return join(clioStateDir(), "runs.json");
-}
-
-function receiptPathFor(runId: string): string {
-	return join(clioStateDir(), "receipts", `${runId}.json`);
 }
 
 function fleetRunPath(runId: string): string {
@@ -294,33 +266,6 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 		return runs.findIndex((r) => r.id === id);
 	}
 
-	function prepareReceipt(id: string, receipt: RunResultDraft, terminalPatch?: Partial<RunEnvelope>): RunResult {
-		const row = runs[findIndex(id)];
-		if (!row) throw new Error(`dispatch ledger missing run for receipt '${id}'`);
-		// Sealed against the row as it will be committed, terminal patch included.
-		const current = terminalPatch === undefined ? row : applyPatch(row, terminalPatch);
-		// Fold the durable findings summary onto the draft before sealing so both
-		// the ACP and worker finalizers get it for free and receipt integrity
-		// digest covers it. Computed cheaply from in-memory fields; never reads
-		// disk or calls buildEvidence.
-		const draft: RunResultDraft =
-			receipt.findingsSummary === undefined
-				? { ...receipt, findingsSummary: computeReceiptFindingsSummary(receipt, current) }
-				: receipt;
-		return withReceiptIntegrity(draft, current);
-	}
-
-	function attachReceipt(id: string, target: string | null, terminalPatch?: Partial<RunEnvelope>): void {
-		// Async receipt writes must preserve updates and reordered rows (#428).
-		const index = findIndex(id);
-		const current = runs[index];
-		if (current) {
-			const next = terminalPatch === undefined ? current : applyPatch(current, terminalPatch);
-			runs[index] = target === null ? next : { ...next, receiptPath: target };
-			dirty.add(id);
-		}
-	}
-
 	return {
 		create(input: CreateRunInput): RunEnvelope {
 			const envelope: RunEnvelope = {
@@ -347,7 +292,6 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				exitCode: null,
 				pid: null,
 				heartbeatAt: null,
-				receiptPath: null,
 				sessionId: input.sessionId,
 				cwd: input.cwd,
 				tokenCount: 0,
@@ -392,66 +336,6 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				filtered = filtered.slice(0, opts.limit);
 			}
 			return Object.freeze(filtered.map((envelope) => cloneEnvelope(envelope)));
-		},
-
-		recordReceipt(id: string, receipt: RunResultDraft): RunResult {
-			const sealed = prepareReceipt(id, receipt);
-			// The sealed receipt is still returned to the finalizer that asked for
-			// it; what it must not do is write the state root back into existence
-			// under an uninstall. receiptPath stays null because no file was made.
-			if (stateRootRemoved()) return sealed;
-			const target = receiptPathFor(id);
-			atomicWrite(target, JSON.stringify(sealed, null, 2));
-			attachReceipt(id, target);
-			return sealed;
-		},
-
-		async recordReceiptAsync(
-			id: string,
-			receipt: RunResultDraft,
-			terminalPatch?: Partial<RunEnvelope>,
-		): Promise<RunResult> {
-			const sealed = prepareReceipt(id, receipt, terminalPatch);
-			// Same uninstall contract as recordReceipt: return the sealed receipt,
-			// write nothing, and leave receiptPath null.
-			if (stateRootRemoved()) {
-				attachReceipt(id, null, terminalPatch);
-				return sealed;
-			}
-			const target = receiptPathFor(id);
-			let skipped = false;
-			try {
-				await safeResourceWriteAsync(target, JSON.stringify(sealed, null, 2), {
-					// The awaited write and fsync are a window an uninstall can land in,
-					// so check again in the same tick as the rename (#428).
-					withRename: (commit) => {
-						if (stateRootRemoved()) skipped = true;
-						else {
-							commit();
-							// Same tick as the rename: once the receipt file exists the row is
-							// terminal, and never before it, for any persist or reader (#428).
-							attachReceipt(id, target, terminalPatch);
-						}
-					},
-				});
-			} catch (error) {
-				// Decided from the skip itself: a sibling lock can mkdir the root back
-				// before a second poll, which would turn a real outcome into a failure.
-				if (skipped) {
-					attachReceipt(id, null, terminalPatch);
-					return sealed;
-				}
-				throw error;
-			}
-			return sealed;
-		},
-
-		adopt(envelope: RunEnvelope): boolean {
-			if (findIndex(envelope.id) !== -1) return false;
-			runs.push(cloneEnvelope(envelope));
-			runs.sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0));
-			dirty.add(envelope.id);
-			return true;
 		},
 
 		async persist(): Promise<void> {

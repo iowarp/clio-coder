@@ -1,14 +1,15 @@
 /** Authenticated two-call Scout continuation protocol. */
 
-import { parseScoutResult, resultContractSourceId, type ScoutResult } from "../domains/agents/result-contract.js";
+import type { ScoutResult } from "../domains/agents/result-contract.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { executePlan } from "../domains/dispatch/execution-scheduler.js";
-import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunResult } from "../domains/dispatch/types.js";
 import { normalizeYoloAuthorityBasis } from "../domains/dispatch/yolo-ids.js";
 import type { ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
+import { validateScoutSource } from "./dispatch-scout-admission.js";
+import { finishedRun } from "./worker-evidence.js";
 
 export type ScoutTransitionDetail =
 	| {
@@ -25,58 +26,27 @@ export type ScoutTransitionDetail =
 			continueWith: { from_scout: { run_id: string; receipt_digest: string } };
 	  };
 
-interface VerifiedScoutSource {
-	envelope: RunEnvelope;
-	receipt: RunResult;
-	scout: ScoutResult;
-	spec: AgentSpec;
-}
-
-function validateScoutSource(
-	receipt: RunResult,
-	envelope: RunEnvelope,
-	agentSpecs: ReadonlyArray<AgentSpec>,
-): VerifiedScoutSource {
-	const integrity = verifyReceiptIntegrity(receipt, envelope);
-	if (!integrity.ok) throw new Error(`dispatch: Scout source receipt failed integrity: ${integrity.reason}`);
-	if (receipt.exitCode !== 0 || (receipt.outcome !== undefined && receipt.outcome !== "succeeded")) {
-		throw new Error("dispatch: Scout source did not succeed");
-	}
-	const spec = agentSpecs.find((candidate) => candidate.id === receipt.agentId);
-	if (spec === undefined || spec.resultContract.kind !== "scout-report") {
-		throw new Error("dispatch: Scout source agent no longer declares scout-report");
-	}
-	const fact = receipt.quality.resultContract;
-	if (fact === null || fact.conformance !== "pass" || fact.sourceId !== resultContractSourceId(spec.resultContract)) {
-		throw new Error("dispatch: Scout source lacks an exact passing result-contract fact");
-	}
-	if (receipt.output?.state !== "final") throw new Error("dispatch: Scout source has no sealed final output");
-	const scout = parseScoutResult(receipt.output.text);
-	if (scout === null) throw new Error("dispatch: Scout source output does not match the current strict contract");
-	return { envelope, receipt, scout, spec };
-}
-
 export function scoutTransitionDetail(input: {
 	receipt: RunResult;
 	envelope: RunEnvelope;
 	agentSpecs: ReadonlyArray<AgentSpec>;
 }): ScoutTransitionDetail | null {
 	try {
-		const source = validateScoutSource(input.receipt, input.envelope, input.agentSpecs);
+		const source = validateScoutSource(finishedRun(input.receipt), input.envelope, input.agentSpecs);
 		return source.scout.needsSplit
 			? {
 					kind: "proposed",
-					sourceRunId: source.receipt.runId,
-					sourceReceiptDigest: source.receipt.integrity.digest,
+					sourceRunId: source.run.runId,
+					sourceReceiptDigest: source.run.digest,
 					subtaskCount: source.scout.proposedSubtasks.length,
 					continueWith: {
-						from_scout: { run_id: source.receipt.runId, receipt_digest: source.receipt.integrity.digest },
+						from_scout: { run_id: source.run.runId, receipt_digest: source.run.digest },
 					},
 				}
 			: {
 					kind: "settled",
-					sourceRunId: source.receipt.runId,
-					sourceReceiptDigest: source.receipt.integrity.digest,
+					sourceRunId: source.run.runId,
+					sourceReceiptDigest: source.run.digest,
 					findings: source.scout.findings.map((finding) => ({ ...finding })),
 				};
 	} catch {
@@ -172,7 +142,7 @@ export async function runScoutContinuationPlan<T, S>(input: {
 							stepId: step.id,
 							assignmentId: handle.runId,
 							terminalRunId: receipt.runId,
-							receiptDigest: receipt.integrity.digest,
+							receiptDigest: receipt.digest,
 							output: receipt.output?.state === "final" ? receipt.output.text : "",
 							succeeded: receipt.exitCode === 0 && (receipt.outcome === undefined || receipt.outcome === "succeeded"),
 							integrityValid: completed.integrityValid,

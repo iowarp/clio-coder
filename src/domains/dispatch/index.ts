@@ -152,7 +152,6 @@ export {
 	isSupportedDispatchIntentVersion,
 } from "./intent-compatibility.js";
 export { DispatchManifest } from "./manifest.js";
-export { verifyReceiptIntegrity } from "./receipt-integrity.js";
 export type { RecordingManifest, RecordingReference } from "./recording.js";
 export { parseRecordingManifest, readRunRecording } from "./recording.js";
 export { createRouteHistoryStore } from "./route-history.js";
@@ -171,7 +170,6 @@ export type {
 	RunKind,
 	RunOutcomeCode,
 	RunResult,
-	RunResultIntegrity,
 	RunResultQuality,
 	RunResultVerification,
 	RunStatus,

@@ -19,7 +19,6 @@ import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.
 import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
-import type { ReceiptIntegrityOutcome } from "../domains/evidence/trust-status.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
 import { isExtensionCommandToken, promptRefs } from "../domains/extensions/operator-commands.js";
 import type { OperatorCommandOutput, OperatorExtensions } from "../domains/extensions/operator-extensions.js";
@@ -962,12 +961,11 @@ export interface SessionCommandContext {
 	runHandoffRecovery?: (handoffId: string, action: "reduce" | "deliver") => void;
 	runCompact: (instructions: string | undefined) => void;
 	/**
-	 * Escape hatch for the `view verify` entry: verify a receipt file on disk
+	 * Escape hatch for the `view verify` entry: verify a run's sealed run scope
 	 * and emit an actionable verification block. Kept on the context so the registry does
 	 * not import the overlay module.
 	 */
-	verifyReceipt?: (runId: string) => ReceiptIntegrityOutcome & {
-		receiptPath?: string;
+	verifyRun?: (runId: string) => ({ ok: true } | { ok: false; reason: string }) & {
 		sealedDigest?: string | null;
 		trustSummary?: string | null;
 		verificationSummary?: string | null;
@@ -987,13 +985,13 @@ export interface SessionCommandContext {
 
 export type SlashCommandContext = SessionCommandContext;
 
-type SlashReceiptVerification = ReturnType<NonNullable<SlashCommandContext["verifyReceipt"]>>;
+type SlashRunVerification = ReturnType<NonNullable<SlashCommandContext["verifyRun"]>>;
 
 /** The full receipt and individual checks remain in the viewer's details. */
-function formatReceiptVerificationBlock(runId: string, result: SlashReceiptVerification): string {
+function formatRunVerificationBlock(runId: string, result: SlashRunVerification): string {
 	const verdict = result.ok
-		? (result.verificationSummary ?? result.trustSummary ?? "receipt seal verified; result validation unknown")
-		: `${result.retired ? "not checked" : "failed"}. ${result.reason}`;
+		? (result.verificationSummary ?? result.trustSummary ?? "run seal verified; result validation unknown")
+		: `failed. ${result.reason}`;
 	return `Verification for ${runId}: ${verdict}\n/view receipt:${runId} · press i for full details and checks.`;
 }
 
@@ -2491,22 +2489,14 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind !== "view-verify") return;
-			if (!ctx.verifyReceipt) {
-				ctx.notice("warn", "Receipt verification is unavailable on this surface");
+			if (!ctx.verifyRun) {
+				ctx.notice("warn", "Run verification is unavailable on this surface");
 				return "rejected";
 			}
-			const result = ctx.verifyReceipt(command.runId);
-			const block = formatReceiptVerificationBlock(command.runId, result);
-			if (result.ok) {
-				ctx.notice(result.compromised ? "warn" : "success", block);
-			} else if (result.retired !== undefined) {
-				// A retired seal is the expected state of a run from the previous
-				// release, so it is a warning that names the versions, never the
-				// failure a tampered receipt gets.
-				ctx.notice("warn", block);
-			} else {
-				ctx.notice("error", block);
-			}
+			const result = ctx.verifyRun(command.runId);
+			const block = formatRunVerificationBlock(command.runId, result);
+			if (result.ok) ctx.notice(result.compromised ? "warn" : "success", block);
+			else ctx.notice("error", block);
 		},
 	},
 	{

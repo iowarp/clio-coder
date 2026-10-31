@@ -226,11 +226,11 @@ export interface RunJsonTerminalTurnEndFrame {
 	exitCode: number;
 	text: string;
 	error?: string;
-	/** The sealed receipt's outcome: `succeeded`, `failed`, `canceled` or `timed_out`. */
+	/** The run's outcome: `succeeded`, `failed`, `canceled` or `timed_out`. */
 	outcome?: RunResult["outcome"];
 	/** Machine-readable failure detail such as `noop` or `limitation`. */
 	outcomeDetail?: string;
-	/** The receipt's safety summary; a `permissionRequired` attempt needed an approval the run could not give. */
+	/** The run's safety summary; a `permissionRequired` attempt needed an approval the run could not give. */
 	safety?: Pick<NonNullable<RunResult["safety"]>, "decisions" | "blockedAttempts" | "blockedAttemptsTruncated">;
 }
 
@@ -278,12 +278,12 @@ export interface RunJsonOpaqueWorkerEventFrame {
 	event: unknown;
 }
 
-/** The sealed receipt, always the last frame of a `run --agent --json` stream. */
-export interface RunJsonReceiptFrame {
-	/** Display-only reference relative to the Clio state root; outside receipt authority. */
+/** The dispatched run's result, always the last frame of a `run --agent --json` stream. */
+export interface RunJsonResultFrame {
+	/** Display-only reference relative to the Clio state root; outside the run's settled record. */
 	recording?: import("../../domains/dispatch/index.js").RecordingReference;
-	type: "receipt";
-	receipt: RunResult;
+	type: "result";
+	result: RunResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +303,7 @@ export type RunJsonMainFrame =
 /**
  * Frames of a `run --agent --json` stream. `RunJsonWorkerEventFrame` is open,
  * so narrow on the closed members first (`session`, `dispatch_scope_notice`,
- * `receipt`) and treat the rest as worker events.
+ * `result`) and treat the rest as worker events.
  */
 export type RunJsonAgentFrame =
 	| RunJsonAgentSessionFrame
@@ -311,6 +311,6 @@ export type RunJsonAgentFrame =
 	| RunJsonWorkerEventFrame
 	| RunJsonWorkerAgentEndFrame
 	| RunJsonOpaqueWorkerEventFrame
-	| RunJsonReceiptFrame;
+	| RunJsonResultFrame;
 
 export type RunJsonFrame = RunJsonMainFrame | RunJsonAgentFrame;

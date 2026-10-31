@@ -94,6 +94,7 @@ export function durableRunEvidence(envelope: RunEnvelope | null): DurableRunEvid
 	return {
 		run: {
 			runId: record.row.runId,
+			digest: settled.digest,
 			facts: settled,
 			delivered: record.result?.state === "resolved" ? record.result.value : null,
 		},

@@ -68,7 +68,7 @@ import {
 } from "../../core/sandbox/worker-policy.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { emitApproval } from "../../core/telemetry/approvals.js";
-import type { TelemetryContext } from "../../core/telemetry/context.js";
+import type { TelemetryContext, WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { workerAgent } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { DispatchCompletedPayload, DispatchRunIdentity } from "../../core/telemetry/live-events.js";
@@ -410,14 +410,14 @@ import {
 	toRouteCandidate,
 } from "./route-decision.js";
 import { createRouteObserver, type RouteObservationHandle, type RouteObserver } from "./route-observer.js";
-import { reduceRouteQuality } from "./route-quality.js";
+import { reduceRouteQuality, routeQualityRun } from "./route-quality.js";
 import { defaultRoutingIntent } from "./routing-intent.js";
 import type { RunCallUsage } from "./run-call-usage.js";
 import { createRunCallUsage } from "./run-call-usage.js";
 import { defaultRunEventJournal } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
-import { settleFinishedRun, settleUnfinishedRun } from "./run-settlement.js";
+import { finishRunResult, settleUnfinishedRun } from "./run-settlement.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
 import {
 	fleetRootTelemetryContext,
@@ -766,6 +766,26 @@ const ACP_SPEC_FINGERPRINT = "acp:unobservable";
  */
 const LOCAL_RUN_NODE: RunNodeIdentity = { id: "local", kind: "local" };
 /** v21 receipt fields; call ids are omitted, never empty, when no call telemetry reached the host (#434). */
+/**
+ * Finish a run: build its result and settlement in one step, make its run.settled durable, and only then let the
+ * ledger row read terminal, so no reader sees a finished row whose record is not on disk (#428, #434).
+ */
+async function settleRunResult(
+	ledger: Ledger,
+	runId: string,
+	draft: RunResultDraft,
+	terminalPatch: Partial<RunEnvelope>,
+	journal: RunTelemetryJournal,
+	input: Parameters<typeof finishRunResult>[2],
+): Promise<RunResult> {
+	const row = ledger.get(runId);
+	if (row === null) throw new Error(`dispatch ledger missing run '${runId}'`);
+	const finished = finishRunResult(draft, { ...row, ...terminalPatch }, input);
+	await journal.settle(finished.settlement);
+	ledger.update(runId, terminalPatch);
+	return finished.result;
+}
+
 function runSettlementReceiptFields(
 	terminal: ResolvedTerminalReason,
 	usage: RunCallUsage | undefined,
@@ -4670,7 +4690,7 @@ export function createDispatchBundle(
 			attempt: run.lineage.attempt,
 			outcome,
 			node: run.node,
-			receiptDigest: receipt.integrity.digest,
+			receiptDigest: receipt.digest,
 			retryReason,
 		});
 		persistAssignment(recordAssignmentAttempt(assignment.id, run.runId), `${assignment.id}:attempt:${run.runId}`);
@@ -6757,20 +6777,15 @@ export function createDispatchBundle(
 					reasoningTokenCount: receiptDraft.reasoningTokenCount ?? 0,
 					heartbeatAt: heartbeatIso(acp.heartbeatAt),
 				};
-				// The terminal patch commits with receiptPath, after the receipt exists (#428).
 				activeRun.sealing = true;
-				const receipt = await ledgerRef.recordReceiptAsync(
+				if (runJournal === undefined) throw new Error(`run ${envelope.id} has no run journal to settle in`);
+				const receipt = await settleRunResult(
+					ledgerRef,
 					envelope.id,
 					sealRouteDecision(receiptDraft, routeDecision),
 					ledgerPatch,
-				);
-				runJournal?.settle(
-					settleFinishedRun(receipt, {
-						terminal,
-						processExitCode: result.exitCode,
-						frameType: null,
-						usage: callUsage?.snapshot()?.facts,
-					}),
+					runJournal,
+					{ terminal, processExitCode: result.exitCode, frameType: null, usage: callUsage?.snapshot()?.facts },
 				);
 				await ledgerRef.persist();
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
@@ -6973,10 +6988,8 @@ export function createDispatchBundle(
 					if (envelope === null || envelope === undefined) return;
 					const outcome = receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed");
 					const assignmentId = assignmentRootFor(receipt.runId);
-					const quality = reduceRouteQuality({
-						subject: { receipt, envelope },
-						receipts: [{ receipt, envelope }],
-					});
+					const run = routeQualityRun(receipt);
+					const quality = reduceRouteQuality({ subject: run, runs: [run] });
 					routeObserver.recordOutcome(observation.id, {
 						assignmentId,
 						route: observation.decision.executedRoute,
@@ -9134,20 +9147,20 @@ export function createDispatchBundle(
 				if (receiptDraft.reasoningTokenCount !== undefined) {
 					ledgerPatch.reasoningTokenCount = receiptDraft.reasoningTokenCount;
 				}
-				// The terminal patch commits with receiptPath, after the receipt exists (#428).
 				activeRun.sealing = true;
-				const receipt = await ledgerRef.recordReceiptAsync(
+				if (runJournal === undefined) throw new Error(`run ${envelope.id} has no run journal to settle in`);
+				const receipt = await settleRunResult(
+					ledgerRef,
 					envelope.id,
 					sealRouteDecision(receiptDraft, routeObservation.decision),
 					ledgerPatch,
-				);
-				runJournal?.settle(
-					settleFinishedRun(receipt, {
+					runJournal,
+					{
 						terminal,
 						processExitCode: result.exitCode,
 						frameType: result.channelFailure ?? null,
 						usage: finalCallUsage?.facts,
-					}),
+					},
 				);
 				if (lifecycle.runtimeKind !== "http" && agentLedgerId !== null && agentLedgerAttribution !== null) {
 					void appendAgentLedgerReport(agentLedgerId, agentLedgerAttribution, receipt)
@@ -10166,52 +10179,66 @@ export function createDispatchBundle(
 			council,
 		};
 		try {
-			const receipt = await l.recordReceiptAsync(
-				runId,
-				{
+			// The synthesis never ran as a worker, so its run journal is opened here to settle it (#434).
+			const synthesisContext: WorkerTelemetryContext =
+				input.template.sessionId === null
+					? { sessionId: null, runId, label: "worker" }
+					: { sessionId: input.template.sessionId, runId, label: "worker" };
+			const synthesisJournal = await openRunTelemetry(synthesisContext, telemetryRunDirectory(clioStateDir(), runId));
+			let receipt: RunResult;
+			try {
+				receipt = await settleRunResult(
+					l,
 					runId,
-					agentId: "council-synthesis",
-					executionRole: "judge",
-					requestOrigin: origin,
-					task,
-					targetId: input.template.targetId,
-					wireModelId: input.template.wireModelId,
-					runtimeId: input.template.runtimeId,
-					runtimeKind: input.template.runtimeKind,
-					startedAt: created.startedAt,
-					endedAt,
-					outcome: "succeeded",
-					outcomeDetail: null,
-					exitCode: 0,
-					tokenCount: 0,
-					inputTokenCount: 0,
-					outputTokenCount: 0,
-					reasoningTokenCount: 0,
-					cacheReadTokenCount: 0,
-					cacheWriteTokenCount: 0,
-					output: { state: "final", text: input.text, bytes: Buffer.byteLength(input.text, "utf8"), truncated: false },
-					costUsd: 0,
-					costProvenance: "unknown",
-					compiledPromptHash: null,
-					staticCompositionHash: null,
-					clioCoderVersion: readClioVersion(),
-					piMonoVersion: readPiMonoVersion(),
-					platform: process.platform,
-					nodeVersion: process.version,
-					toolCalls: 0,
-					toolStats: [],
-					verification: { state: "unverified", basis: "no-validation-tool" },
-					routingIntent: defaultRoutingIntent({}),
-					quality: createRunResultQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
-					reproducibility: collectReproducibility(input.template.reproducibility?.cwd ?? process.cwd(), null),
-					sessionId: input.template.sessionId,
-					gate,
-					council,
-					...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
-					...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
-				},
-				terminalPatch,
-			);
+					{
+						runId,
+						agentId: "council-synthesis",
+						executionRole: "judge",
+						requestOrigin: origin,
+						task,
+						targetId: input.template.targetId,
+						wireModelId: input.template.wireModelId,
+						runtimeId: input.template.runtimeId,
+						runtimeKind: input.template.runtimeKind,
+						startedAt: created.startedAt,
+						endedAt,
+						outcome: "succeeded",
+						outcomeDetail: null,
+						exitCode: 0,
+						tokenCount: 0,
+						inputTokenCount: 0,
+						outputTokenCount: 0,
+						reasoningTokenCount: 0,
+						cacheReadTokenCount: 0,
+						cacheWriteTokenCount: 0,
+						output: { state: "final", text: input.text, bytes: Buffer.byteLength(input.text, "utf8"), truncated: false },
+						costUsd: 0,
+						costProvenance: "unknown",
+						compiledPromptHash: null,
+						staticCompositionHash: null,
+						clioCoderVersion: readClioVersion(),
+						piMonoVersion: readPiMonoVersion(),
+						platform: process.platform,
+						nodeVersion: process.version,
+						toolCalls: 0,
+						toolStats: [],
+						verification: { state: "unverified", basis: "no-validation-tool" },
+						routingIntent: defaultRoutingIntent({}),
+						quality: createRunResultQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
+						reproducibility: collectReproducibility(input.template.reproducibility?.cwd ?? process.cwd(), null),
+						sessionId: input.template.sessionId,
+						gate,
+						council,
+						...(input.template.lineage !== undefined ? { lineage: { ...input.template.lineage } } : {}),
+						...(input.template.plan !== undefined ? { plan: input.template.plan } : {}),
+					},
+					terminalPatch,
+					synthesisJournal,
+					{ terminal: { terminalReason: "completed" }, processExitCode: null, frameType: null, usage: undefined },
+				);
+			} finally {
+				await synthesisJournal.close();
+			}
 			await l.persist();
 			// The synthesis never ran as a worker, so nothing else publishes its
 			// lifecycle. The Fleet Runs board and /share are built from these

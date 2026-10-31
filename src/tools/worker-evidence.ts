@@ -9,7 +9,7 @@ import {
 } from "../domains/agents/result-contract.js";
 import { hostCheckBaseNote } from "../domains/dispatch/host-verification-note.js";
 import { settleFinishedRun } from "../domains/dispatch/run-settlement.js";
-import type { RunResultDraft } from "../domains/dispatch/types.js";
+import type { RunResult, RunResultDraft } from "../domains/dispatch/types.js";
 import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
 import { adaptRunTrustStatus, type CanonicalTrustStatus, type RunIntegrity } from "../domains/evidence/trust-status.js";
 import { telemetryObjectRef } from "../domains/telemetry/objects.js";
@@ -22,8 +22,13 @@ import { truncateUtf8 } from "./truncate-utf8.js";
  */
 export interface FinishedRun {
 	runId: string;
+	/** The run's identity, the digest of its run.settled; null for a view built before the run settled. */
+	digest: string | null;
 	facts: Pick<
 		RunSettled,
+		| "route"
+		| "node"
+		| "routingIntent"
 		| "agentId"
 		| "executionRole"
 		| "outcome"
@@ -410,14 +415,19 @@ export function workerTextNonEvidenceNotices(
 }
 
 /** The producing process's view of a run it just settled: the same facts and result object its run.settled holds. */
-export function finishedRun(result: RunResultDraft): FinishedRun {
+export function finishedRun(result: RunResultDraft | RunResult): FinishedRun {
 	const settlement = settleFinishedRun(result, {
 		terminal: { terminalReason: result.terminalReason ?? "worker_failed" },
 		processExitCode: result.exitCode,
 		frameType: null,
 		usage: undefined,
 	});
-	return { runId: result.runId, facts: settlement.facts, delivered: settlement.result };
+	return {
+		runId: result.runId,
+		digest: "digest" in result ? result.digest : null,
+		facts: settlement.facts,
+		delivered: settlement.result,
+	};
 }
 
 /** A run its producer holds in memory is authentic by construction; nothing about it was read back. */

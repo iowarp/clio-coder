@@ -15,11 +15,16 @@ import {
 	formatEffectiveBudget,
 } from "./budget-envelope.js";
 import type { ResolvedTerminalReason } from "./outcome.js";
-import { labelledRunHashes } from "./receipt-hashes.js";
 import type { RunUsageFacts } from "./run-call-usage.js";
 import { unobservedRunUsageFacts } from "./run-call-usage.js";
 import { runGatewayRoutingLabel, runResponseModelIdObservationLabel } from "./run-upstream.js";
-import type { RunEnvelope, RunOutcome, RunResultDraft } from "./types.js";
+import { routeConstraintValidity } from "./route-decision.js";
+import { defaultRoutingIntent, type RoutingIntent } from "./routing-intent.js";
+import type { RunEnvelope, RunOutcome, RunResult, RunResultDraft } from "./types.js";
+import { computeReceiptFindingsSummary } from "./receipt-findings.js";
+import { labelledRunHashes, undeclaredReceiptHashes } from "./receipt-hashes.js";
+import { telemetryObjectRef } from "../telemetry/objects.js";
+import { runSettledDigest } from "../telemetry/run-digest.js";
 
 /** The facts and the object a run settles with; the journal adds the object's reference as `result`. */
 export interface RunSettlement {
@@ -59,6 +64,10 @@ function nodeOf(run: Pick<RunEnvelope, "node">): RunSettled["node"] {
 
 function identityOf(run: Pick<RunEnvelope, "identity">): RunSettled["identity"] {
 	return run.identity ? { host: run.identity.host, user: run.identity.user } : null;
+}
+
+function routingIntentOf(intent: RoutingIntent): RunSettled["routingIntent"] {
+	return { ...intent, requiredCapabilities: [...intent.requiredCapabilities] };
 }
 
 function contextOf(
@@ -115,6 +124,15 @@ export function settleFinishedRun(
 			identity: identityOf(receipt),
 			route: routeOf(receipt),
 			node: nodeOf(receipt),
+			routeDecision: receipt.routeDecision
+				? {
+						decisionHash: receipt.routeDecision.decisionHash,
+						mode: receipt.routeDecision.mode,
+						durationMs: receipt.routeDecision.decisionDurationMs,
+						constraintsValid: routeConstraintValidity(receipt.routeDecision).valid,
+					}
+				: null,
+			routingIntent: routingIntentOf(receipt.routingIntent ?? defaultRoutingIntent({})),
 			startedAt: receipt.startedAt,
 			endedAt: receipt.endedAt,
 			outcome: receipt.outcome,
@@ -284,6 +302,8 @@ export function settleUnfinishedRun(
 			identity: identityOf(run),
 			route: routeOf(run),
 			node: nodeOf(run),
+			routeDecision: null,
+			routingIntent: routingIntentOf(defaultRoutingIntent({})),
 			startedAt: run.startedAt,
 			endedAt: input.endedAt,
 			outcome: input.outcome,
@@ -334,4 +354,39 @@ export function settleUnfinishedRun(
 /** The record the journal writes once the result object is stored. */
 export function runSettledRecord(settlement: RunSettlement, result: RunSettled["result"]): EventPayload<"run.settled"> {
 	return { ...settlement.facts, result };
+}
+
+/** A finished run as dispatch hands it to its caller, and the settlement its journal records from the same facts. */
+export interface FinishedRunResult {
+	result: RunResult;
+	settlement: RunSettlement;
+}
+
+/**
+ * The one function that finishes a run (#434): it seals the findings summary onto the result, builds the settlement
+ * run.settled records from it, and names the result by the digest of that record, so the value dispatch hands its
+ * caller and the record its journal keeps never disagree. `row` is the run ledger row as the terminal patch leaves it.
+ */
+export function finishRunResult(
+	draft: RunResultDraft,
+	row: RunEnvelope,
+	input: {
+		terminal: ResolvedTerminalReason;
+		processExitCode: number | null;
+		frameType: string | null;
+		usage: RunUsageFacts | undefined;
+	},
+): FinishedRunResult {
+	if (draft.routingIntent === undefined) throw new Error(`run ${draft.runId} has no routing intent`);
+	// R7: a hash without a declared function, canonicalization, subject and label is never settled (#434).
+	const undeclared = undeclaredReceiptHashes(draft, draft.agentId);
+	if (undeclared.length > 0) throw new Error(`run ${draft.runId} carries undeclared hashes ${undeclared.join(", ")}`);
+	const sealed: RunResultDraft =
+		draft.findingsSummary === undefined ? { ...draft, findingsSummary: computeReceiptFindingsSummary(draft, row) } : draft;
+	const settlement = settleFinishedRun(sealed, input);
+	const record = runSettledRecord(settlement, telemetryObjectRef("run-result", settlement.result));
+	return {
+		result: { ...sealed, routingIntent: draft.routingIntent, digest: runSettledDigest(record) },
+		settlement,
+	};
 }

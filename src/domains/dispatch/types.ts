@@ -29,7 +29,6 @@ import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { ExecutionRole, GateTopologyRole } from "./execution-role.js";
 import type { DispatchIntent } from "./intent.js";
 import type { DispatchPathScopeProvenance } from "./path-scope.js";
-import type { RECEIPT_HASH_SET } from "./receipt-hashes.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
 import type { RoutingIntent } from "./routing-intent.js";
 import type { DispatchFailoverMode } from "./validation.js";
@@ -336,33 +335,6 @@ export interface RunPhaseDurations {
 	totalEndToEndMs: number | null;
 }
 
-/**
- * The one receipt integrity version. Clio is pre-1.0 with no installed base, so
- * there is nothing to keep verifying: a receipt is this version or it is not a
- * receipt. `receipt-integrity.ts` annotates its constant against this type, so
- * bumping one without the other is a compile error.
- */
-export interface RunResultIntegrity {
-	version: 21;
-	algorithm: "sha256";
-	digest: string;
-	/**
-	 * The run-ledger projection this receipt was sealed against. The digest covers
-	 * the commitment, so the receipt still verifies after the ring evicts its row,
-	 * reported as verified with the ledger evicted (#434).
-	 */
-	ledger: RunResultLedgerCommitment;
-}
-
-/** An R7-labelled commitment: the preimage lives in `runs.json` only while the ring keeps the row (#434). */
-export interface RunResultLedgerCommitment {
-	label: "commitment";
-	function: "sha256";
-	canonicalization: "json-sorted-v1";
-	subject: "run-ledger-projection";
-	digest: string;
-}
-
 /** One correctness-bearing validation result sealed at receipt finalization. */
 export interface RunResultTypedValidationFact {
 	sourceId: string;
@@ -520,7 +492,6 @@ export interface RunEnvelope {
 	exitCode: number | null;
 	pid: number | null;
 	heartbeatAt: string | null;
-	receiptPath: string | null;
 	sessionId: string | null;
 	cwd: string;
 	tokenCount: number;
@@ -1196,13 +1167,15 @@ export interface RunResult {
 	callIds?: string[];
 	/** How the worker loop ended; the verdict on its result stays in `outcome` and `outcomeCode` (#425, #434). */
 	terminalReason?: RunTerminalReason;
-	/** The R7 declaration set naming every hash this receipt carries (`receipt-hashes.ts`, #434). */
-	hashSet?: typeof RECEIPT_HASH_SET;
 	sessionId: string | null;
-	integrity: RunResultIntegrity;
+	/**
+	 * The run's identity: the digest of the run.settled record its journal keeps (`run-digest.ts`). Gate subjects,
+	 * Scout sources and plan sources cite it, and a reader checks it against the sealed record (#434).
+	 */
+	digest: string;
 }
 
-export type RunResultDraft = Omit<RunResult, "integrity" | "routingIntent"> & Partial<Pick<RunResult, "routingIntent">>;
+export type RunResultDraft = Omit<RunResult, "digest" | "routingIntent"> & Partial<Pick<RunResult, "routingIntent">>;
 
 /** Keep routing evidence bounded when it crosses the worker IPC boundary (#426). */
 export function readToolRounds(record: unknown): ToolRoundRecord[] {

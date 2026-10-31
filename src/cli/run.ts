@@ -83,7 +83,7 @@ Flags:
   --repeat-penalty <N>      one-run repeat penalty override
   --max-context-tokens <N>  cap this run's context budget without enlarging the server window
   --json                    stream JSONL frames, one JSON object per line; the first is a "session" header
-                           carrying schemaVersion, and with --agent the last is {"type":"receipt",...}
+                           carrying schemaVersion, and with --agent the last is {"type":"result",...}
   --json-events <mode>      full: progress and final answer in turn_end.message.content
                            terminal: accounting and final answer in turn_end.text
                            implies --json; refused with --agent
@@ -126,8 +126,8 @@ There is no operator in a headless run: permission asks are denied, and the
 ask_user interview tool is not registered. Skills that interview fall back to
 their stated defaults; supply decisions in the task prompt instead.
 
-Every main-agent receipt records blocked calls under safety.blockedAttempts and
-a noop flag. A run is a no-op when a block remains unresolved and no write
+The main agent's terminal frame records blocked calls under safety.blockedAttempts
+and a noop flag. A run is a no-op when a block remains unresolved and no write
 succeeded, or when it ran tools and none succeeded; a run that called no tool
 is not. The main agent's own write-class calls count as writes, and so does a
 dispatch whose task worktree merged; an artifact report, bash, and other
@@ -142,12 +142,12 @@ The flag applies to the main agent only.
 
 --timeout <seconds> bounds the whole run, boot included. On expiry the run
 starts the same coordinated shutdown a SIGTERM does: the turn is aborted, a
-running bash tool's process group is signalled, and the receipt is sealed with
+running bash tool's process group is signalled, and the run is recorded with
 outcome "timed_out" before the process exits 124, the code timeout(1) uses. An
 external SIGTERM still seals "canceled" with exit 143. A timeout during boot,
-before the turn starts, exits 124 with no receipt. Main agent only.
+before the turn starts, exits 124 with no run recorded. Main agent only.
 
-With --agent the exit code is the dispatch receipt's: 0 on success, 2 for a
+With --agent the exit code is the dispatched run's: 0 on success, 2 for a
 usage or admission error, 3 when the worker stopped on a refused permission
 (outcome "failed" with permission_required detail), 4 when the session cost ceiling ended the
 run, and 1 for every other failure.
@@ -163,7 +163,7 @@ artifact content itself in the event stream.
  * resolves against the working directory reads `process.cwd()`: layered
  * settings, context files, skill discovery, `@file` references, the session
  * ledger, and every tool path (`src/tools/path-utils.ts`). So the chdir happens
- * before any of that, and the path is canonicalized first so the receipt and
+ * before any of that, and the path is canonicalized first so the run ledger and
  * every later comparison name the same physical directory. Returns null on
  * success, or the resolved path that could not be entered.
  */
@@ -183,8 +183,8 @@ const RUN_TIMEOUT_EXIT_CODE = 124;
 /**
  * Arm `--timeout`. On expiry the timer starts the process's coordinated
  * shutdown, the path a SIGTERM takes, so the headless drain hook aborts the
- * turn, bash-exec signals any running tool's process group, and the receipt is
- * sealed before exit. A shutdown that is already under way (a signal, or the
+ * turn, bash-exec signals any running tool's process group, and the run is
+ * recorded before exit. A shutdown that is already under way (a signal, or the
  * run settling on its own) owns the exit code, so the timer then does nothing.
  * The timer is unref'd: it bounds the run and never keeps the process alive.
  */
@@ -470,7 +470,7 @@ async function executeRunCommand(
 				process.stderr.write(USAGE);
 				return 2;
 			}
-			// A worker's receipt is sealed inside the dispatch domain, where a
+			// A worker's run settles inside the dispatch domain, where a
 			// failed outcome also feeds retry policy, so the no-op verdict stays a
 			// main-agent contract rather than a flag --agent would silently ignore.
 			if (parsed.maxCostUsd !== undefined && parsed.agentId !== undefined) {
@@ -483,7 +483,7 @@ async function executeRunCommand(
 				process.stderr.write(USAGE);
 				return 2;
 			}
-			// A worker's receipt is sealed inside the dispatch domain, where a
+			// A worker's run settles inside the dispatch domain, where a
 			// timeout abort seals "canceled" by design (DispatchContract.abort), so
 			// --timeout is a main-agent contract for now.
 			if (parsed.timeoutSeconds !== undefined && parsed.agentId !== undefined) {
@@ -829,7 +829,7 @@ async function runDispatch(
 		process.on("SIGINT", onSignal);
 		process.on("SIGTERM", onSignal);
 
-		// Human output is the worker's final answer, sealed limits, and receipt. Native
+		// Human output is the worker's final answer, settled limits, and result line. Native
 		// workers carry the answer in the last assistant message_end event;
 		// acp-delegation runs stream it as text_delta increments instead, so the
 		// accumulated deltas serve as the fallback. Raw event names are noise for
@@ -843,7 +843,7 @@ async function runDispatch(
 			}
 			const e = event as { type?: string; text?: string };
 			// A failover hop supersedes the previous attempt: its text is not the
-			// assignment's answer, and the terminal receipt describes the last one.
+			// assignment's answer, and the terminal result describes the last one.
 			if (e.type === "attempt_start") {
 				accumulatedText = "";
 				lastAssistantText = "";
@@ -864,7 +864,7 @@ async function runDispatch(
 		}
 		const recording = parsed.record === true ? dispatch.getRun(receipt.runId)?.recording : undefined;
 		if (parsed.json) {
-			writeAgentFrame({ type: "receipt", receipt, ...(recording !== undefined ? { recording } : {}) });
+			writeAgentFrame({ type: "result", result: receipt, ...(recording !== undefined ? { recording } : {}) });
 		} else {
 			const answer = lastAssistantText.length > 0 ? lastAssistantText : accumulatedText.trim();
 			process.stdout.write(formatDispatchHumanOutput(answer, receipt));
@@ -919,7 +919,7 @@ function shadowStandInCommand(parsed: RunCliArgs): string {
 	return parts.join(" ");
 }
 
-/** Exit codes a dispatch receipt passes to the shell unchanged; every other failure is 1. */
+/** Exit codes a dispatched run's result passes to the shell unchanged; every other failure is 1. */
 const PASS_THROUGH_EXIT_CODES: ReadonlySet<number> = new Set([
 	0,
 	2,
