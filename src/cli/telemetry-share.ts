@@ -70,7 +70,16 @@ function preview(plan: SharePlan): string {
 	];
 	const byTier: Record<string, number> = {};
 	const byEvent: Record<string, number> = {};
-	const dropped = { tier: 0, contentClass: 0, unreadable: 0, seals: 0, objects: 0, missingObjects: 0, projected: 0 };
+	const dropped = {
+		tier: 0,
+		contentClass: 0,
+		unreadable: 0,
+		seals: 0,
+		objects: 0,
+		missingObjects: 0,
+		unlisted: 0,
+		projected: 0,
+	};
 	let objects = 0;
 	let objectBytes = 0;
 	let redactions = 0;
@@ -92,7 +101,7 @@ function preview(plan: SharePlan): string {
 	lines.push(`objects: ${objects} (${formatBytes(objectBytes)}); secrets redacted: ${redactions}`);
 	lines.push(`archive: ${formatBytes(plan.archiveBytes)} uncompressed`);
 	lines.push(
-		`the profile drops: ${dropped.tier} record(s) by tier, ${dropped.contentClass} by content class, ${dropped.unreadable} unreadable line(s), ${dropped.objects} object(s); ${dropped.projected} kept record(s) have run identity, diagnostics or paths withheld; ${dropped.seals} source seal(s) are replaced by share seals; ${dropped.missingObjects} cited object(s) were already missing`,
+		`the profile drops: ${dropped.tier} record(s) by tier, ${dropped.contentClass} by content class, ${dropped.unreadable} unreadable line(s), ${dropped.unlisted} of an event its projection does not admit, ${dropped.objects} object(s); ${dropped.projected} kept record(s) have prose withheld or identities and paths anonymized; ${dropped.seals} source seal(s) are replaced by share seals; ${dropped.missingObjects} cited object(s) were already missing`,
 	);
 	if (downgraded.length > 0)
 		lines.push(`captured without research consent, so shared as structural: ${downgraded.join(", ")}`);
