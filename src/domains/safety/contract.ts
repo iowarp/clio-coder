@@ -45,9 +45,8 @@ export interface SafetyContract {
 	classify(call: ClassifierCall): Classification;
 
 	/**
-	 * Full evaluation: classify + damage-control match + decision. Records the
-	 * net's `tool.decided` and emits safety.blocked on a block. Registry admission records any final autonomy disposition
-	 * through `audit.recordToolCall`. `scope` is present only for the main
+	 * Full evaluation: classify + damage-control match + decision. Emits safety.blocked on a block; the admitting
+	 * runtime records the final disposition through `audit.recordToolCall` (#434). `scope` is present only for the main
 	 * session's own calls (#419, Phase 2c) and for a worker whose permit
 	 * inherited the operator's yolo (#407). At yolo the net holds only the
 	 * yolo floor, operator-authored rules and the run's ceilings; at default it

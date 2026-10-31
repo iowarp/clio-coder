@@ -23,6 +23,9 @@ export interface ToolDecisionInput {
 	requestId?: string;
 	posture?: string;
 	policy?: SafetyPolicyDecision;
+	/** The final axis may apply a different rule than the classifier (#434). */
+	ruleId?: string;
+	policySource?: string;
 	/**
 	 * Reason code of the final decision. Set this when the decision was made by a later axis than the policy engine
 	 * (autonomy denial, budget admission): the policy's own reasonCode describes a net pass ("allowed") and would
@@ -33,16 +36,19 @@ export interface ToolDecisionInput {
 
 export function toolDecidedPayload(input: ToolDecisionInput): EventPayload<"tool.decided"> {
 	const reasonCode = input.reasonCode ?? input.policy?.reasonCode;
+	const ruleId = input.ruleId ?? input.policy?.ruleId;
+	const policySource = input.policySource ?? input.policy?.policySource;
+	const posture = input.posture ?? input.policy?.posture;
 	return {
 		tool: input.tool,
 		actionClass: input.classification.actionClass,
 		decision: input.decision,
 		...(input.classification.exposure !== undefined ? { exposure: input.classification.exposure } : {}),
-		...(input.posture !== undefined ? { posture: input.posture } : {}),
+		...(posture !== undefined ? { posture } : {}),
 		...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
-		...(input.policy?.ruleId !== undefined ? { ruleId: input.policy.ruleId } : {}),
+		...(ruleId !== undefined ? { ruleId } : {}),
 		...(reasonCode !== undefined ? { reasonCode } : {}),
-		...(input.policy?.policySource !== undefined ? { policySource: input.policy.policySource } : {}),
+		...(policySource !== undefined ? { policySource } : {}),
 		...(input.policy?.policyHash !== undefined ? { policyHash: input.policy.policyHash } : {}),
 	};
 }

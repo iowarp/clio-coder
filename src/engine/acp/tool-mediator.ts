@@ -662,6 +662,14 @@ export class AcpToolMediator {
 		}
 		if (decision === "approved") this.approved += 1;
 		else this.denied += 1;
+		if (safetyDecision !== undefined)
+			this.input.safety.audit.recordToolCall?.({
+				tool: mapped.tool,
+				classification: safetyDecision.classification,
+				decision: decision === "approved" ? "allowed" : "denied",
+				...(safetyDecision.policy !== undefined ? { policy: safetyDecision.policy } : {}),
+				...(decision === "denied" ? { reasonCode: noAllowOnce ? "acp:no-allow-once" : "acp:non-stall-denial" } : {}),
+			});
 		const loggedSafety = logSafety(safetyDecision);
 		const callId = toolCall?.toolCallId ?? `permission-${this.requested}`;
 		this.log.push({

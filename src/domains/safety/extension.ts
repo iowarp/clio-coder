@@ -65,14 +65,6 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 			const classification = policy.classification;
 
 			if (policy.kind === "block") {
-				const decided: ToolDecisionInput = {
-					tool: call.tool,
-					classification,
-					decision: "blocked",
-					policy,
-				};
-				if (posture !== undefined) decided.posture = posture;
-				recordToolDecision(decided);
 				context.bus.emit("safety.blocked", {
 					tool: call.tool,
 					actionClass: classification.actionClass,
@@ -92,14 +84,6 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				return decision;
 			}
 			if (policy.kind === "ask") {
-				const decided: ToolDecisionInput = {
-					tool: call.tool,
-					classification,
-					decision: "classified",
-					policy,
-				};
-				if (posture !== undefined) decided.posture = posture;
-				recordToolDecision(decided);
 				const decision: SafetyDecision = {
 					kind: "ask",
 					classification,
@@ -110,16 +94,6 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 				return decision;
 			}
 
-			const decided: ToolDecisionInput = {
-				tool: call.tool,
-				classification,
-				// Non-confirmed net passes are not final: registry admission still
-				// applies autonomy and records the resolved allowed/park/denied decision.
-				decision: posture === "confirmed" ? "allowed" : "classified",
-				policy,
-			};
-			if (posture !== undefined) decided.posture = posture;
-			recordToolDecision(decided);
 			return { kind: "allow", classification, policy };
 		},
 		observeLoop(key, now) {

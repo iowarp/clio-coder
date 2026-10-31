@@ -1649,6 +1649,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			...(deps.hookDrift !== undefined && (deps.principal ?? "main") === "main" ? { hookDrift: deps.hookDrift } : {}),
 		});
 		if (admission.kind === "deny" && admission.code === "safety_net") {
+			recordRegistryDisposition(call, admission.decision, "blocked");
 			const policy = admission.decision.policy;
 			const allowedBy =
 				policy?.policySource === "project-policy"
@@ -1681,8 +1682,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					source: "session-consent",
 				};
 			}
-			// A confirmed re-admission keeps the `allowed` row safety.evaluate wrote.
-			if (!admission.authorized) recordRegistryDisposition(call, admission.decision, "allowed");
+			recordRegistryDisposition(call, admission.decision, "allowed");
 			return { kind: "execute", spec, decision: admission.decision };
 		}
 		const askDecision =
@@ -1950,12 +1950,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		auditDecision: "allowed" | "blocked" | "permission_requested" | "denied",
 		overrides?: { reasonCode?: string; requestId?: string },
 	): void => {
-		// Record sequence for net-pass calls: safety.evaluate records `classified`;
-		// registry admission records the final autonomy disposition. Confirmed
-		// re-admissions keep their existing `allowed` record from safety.evaluate.
-		// When the registry, not the policy engine, made the final call, the
-		// caller passes a reasonCode override so the record does not repeat the
-		// net pass's "allowed" code on a non-allowed decision.
+		// Evaluation records nothing: admission keeps the final disposition and the classification together (#434).
 		deps.safety.audit.recordToolCall?.({
 			tool: call.tool,
 			classification: decision.classification,
@@ -2268,12 +2263,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				...(outcome.dispatchPlan !== undefined ? { dispatchPlan: outcome.dispatchPlan } : {}),
 				...judgeGate,
 			};
-			recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", {
-				requestId: meta.requestId,
-				...(outcome.decision.kind === "ask" && outcome.decision.confirmationRuleId !== undefined
-					? { reasonCode: `confirmation:${outcome.decision.confirmationRuleId}` }
-					: {}),
-			});
+			// A worker's host handoff decides whether an ask is delivered or refused locally (#434).
+			if (deps.principal !== "worker")
+				recordRegistryDisposition(admissionCall, outcome.decision, "permission_requested", {
+					requestId: meta.requestId,
+					...(outcome.decision.kind === "ask" && outcome.decision.confirmationRuleId !== undefined
+						? { reasonCode: `confirmation:${outcome.decision.confirmationRuleId}` }
+						: {}),
+				});
 			// The park ends when the operator decides, not when the verdict
 			// resolves: an approved call runs its body inside the resume pass,
 			// so measuring to the resolve would fold the tool's own execution

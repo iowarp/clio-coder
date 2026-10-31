@@ -109,30 +109,11 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 					rejection,
 					...(posture !== undefined ? { posture } : {}),
 				};
-				recordToolDecision({
-					tool: call.tool,
-					classification,
-					decision: "blocked",
-					policy,
-					...(posture !== undefined ? { posture } : {}),
-				});
 				return { kind: "block", classification, rejection, policy };
 			}
 			// A permit that inherited the operator's yolo is judged the true yolo way (#407).
 			const policy = policyEngine.evaluate(call, posture, scope);
 			const classification = policy.classification;
-			recordToolDecision({
-				tool: call.tool,
-				classification,
-				decision:
-					policy.kind === "block"
-						? "blocked"
-						: policy.kind === "allow" && posture === "confirmed"
-							? "allowed"
-							: "classified",
-				policy,
-				...(posture !== undefined ? { posture } : {}),
-			});
 			if (policy.kind === "block") {
 				const decision: SafetyDecision = {
 					kind: "block",

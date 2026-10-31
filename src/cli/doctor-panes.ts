@@ -1,9 +1,9 @@
 import { accessSync, constants } from "node:fs";
-import { join } from "node:path";
 import { readSettings } from "../core/config.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import { detectMux, MUX_METHOD_MIN_PROTOCOL, resolveSocketCandidates } from "../domains/mux/index.js";
+import { telemetryRunsDirectory } from "../domains/telemetry/index.js";
 import { describeResolution, findPinnedTool, toolStatus } from "../domains/toolchain/index.js";
 
 /**
@@ -26,7 +26,7 @@ const PANE_HOST_TOOL_ID = "herdr";
 /** Highest protocol any method Clio drives requires, for the version row. */
 const REQUIRED_PROTOCOL = Math.max(...Object.values(MUX_METHOD_MIN_PROTOCOL));
 
-function journalWritabilityFinding(root = join(resolveClioDirs().state, "runs")): DoctorFinding {
+function journalWritabilityFinding(root = telemetryRunsDirectory(resolveClioDirs().state)): DoctorFinding {
 	try {
 		accessSync(root, constants.W_OK);
 		return { ok: true, name: "panes journal dir", detail: `${root} is writable` };

@@ -44,17 +44,51 @@ export interface TelemetryHub {
 
 /**
  * How a journal event reaches its sink. The producer attaches it when it loads, so the hub, which Stage 0 loads
- * through termination, never pulls the registry's schemas into the first frame (#434). Before the producer loads no
- * sink can be registered, so nothing a journal would have kept is lost.
+ * through termination, never pulls the registry's schemas into the first frame (#434). Early emissions wait in a
+ * bounded queue until the producer can classify their durability and scope; overflow is accounted by that route.
  */
 export interface JournalRoute {
-	journal(name: EventName, payload: unknown, preimage: unknown, ctx: TelemetryContext | undefined): boolean;
+	journal(
+		name: EventName,
+		payload: unknown,
+		preimage: unknown,
+		ctx: TelemetryContext | undefined,
+		timing?: JournalEmissionTiming,
+	): boolean;
+	dropped(name: EventName, count: number): void;
 }
 
+export interface JournalEmissionTiming {
+	wallMs: number;
+	mono: number;
+}
+
+export const EARLY_JOURNAL_LIMIT = 4096;
+type EarlyEmission = JournalEmissionTiming & {
+	name: EventName;
+	payload: unknown;
+	preimage: unknown;
+	ctx: TelemetryContext | undefined;
+};
+
 let journalRoute: JournalRoute | null = null;
+const earlyEmissions: EarlyEmission[] = [];
+const earlyDrops = new Map<EventName, number>();
 
 export function attachJournalRoute(route: JournalRoute): void {
 	journalRoute = route;
+	for (const [name, count] of earlyDrops) route.dropped(name, count);
+	earlyDrops.clear();
+	for (const emission of earlyEmissions.splice(0))
+		route.journal(emission.name, emission.payload, emission.preimage, emission.ctx, emission);
+}
+
+function journal(name: EventName, payload: unknown, preimage: unknown, ctx: TelemetryContext | undefined): boolean {
+	if (journalRoute) return journalRoute.journal(name, payload, preimage, ctx);
+	if (earlyEmissions.length < EARLY_JOURNAL_LIMIT)
+		earlyEmissions.push({ name, payload, preimage, ctx, wallMs: Date.now(), mono: performance.now() });
+	else earlyDrops.set(name, (earlyDrops.get(name) ?? 0) + 1);
+	return false;
 }
 
 /** Internal erased listener shape; payloads are typed at the hub seam only. */
@@ -89,13 +123,13 @@ export function createTelemetryHub(): TelemetryHub {
 
 	return {
 		emit(name, payload, ctx) {
-			const journaled = journalRoute?.journal(name, payload, undefined, ctx) ?? false;
+			const journaled = journal(name, payload, undefined, ctx);
 			deliver(name, payload);
 			return journaled;
 		},
 		// Content reaches the writer alone, never a subscriber: consent and the research cap govern it there (#434).
 		emitContent(name, payload, preimage, ctx) {
-			return journalRoute?.journal(name, payload, preimage, ctx) ?? false;
+			return journal(name, payload, preimage, ctx);
 		},
 		subscribe(name, listener) {
 			const set = registry.get(name) ?? new Set<StoredListener>();

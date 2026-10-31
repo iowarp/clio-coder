@@ -5,7 +5,8 @@ import type { FailureCause } from "./enums.js";
 import type { ClockOrigin } from "./envelope.js";
 import type { EventName, JournalEventName, JournalPayload } from "./events.js";
 import { isJournalEvent, journalDefinition } from "./events.js";
-import { attachJournalRoute, telemetryHub } from "./hub.js";
+import type { JournalEmissionTiming } from "./hub.js";
+import { attachJournalRoute, EARLY_JOURNAL_LIMIT, telemetryHub } from "./hub.js";
 import { newAttemptId, newCallId } from "./ids.js";
 import type { CallSettled, CallStarted } from "./schemas.js";
 import { DELTA_GAP_BOUNDS_MS } from "./schemas.js";
@@ -37,6 +38,8 @@ export interface TelemetrySink {
 	enqueue(record: PendingTelemetry): boolean;
 	/** Whether the owner's current mode captures this kind. A sink without it captures standard kinds only (#434). */
 	admits?(kind: JournalEventName): boolean;
+	/** Fold overflow before process ownership into the process journal's opening gap (#434). */
+	recordOpeningDrops?(count: number): void;
 }
 
 /**
@@ -48,6 +51,13 @@ export type TelemetryReopener = (record: PendingTelemetry) => boolean;
 const sinks = new Map<string, TelemetrySink>();
 /** Owns records whose context names neither a session nor a run; the writer stamps its own context on them (#434). */
 let processOwner: { context: TelemetryContext; sink: TelemetrySink } | undefined;
+const earlyProcessRecords: Array<{
+	name: JournalEventName;
+	data: unknown;
+	preimage: unknown;
+	timing: JournalEmissionTiming;
+}> = [];
+let earlyProcessDrops = 0;
 let reopener: TelemetryReopener | null = null;
 const liveAttempts = new Map<string, TelemetryCall>();
 let unownedRecords = 0;
@@ -70,6 +80,19 @@ export function registerProcessTelemetrySink(context: TelemetryContext, sink: Te
 	if (processOwner) throw new Error("telemetry already has a process owner");
 	const owner = { context, sink };
 	processOwner = owner;
+	if (earlyProcessDrops > 0) {
+		if (sink.recordOpeningDrops) sink.recordOpeningDrops(earlyProcessDrops);
+		else
+			enqueueTelemetry(
+				"journal.gap",
+				{ sink: "journal.jsonl", reason: "writer-drop", count: earlyProcessDrops },
+				undefined,
+				context,
+			);
+		earlyProcessDrops = 0;
+	}
+	for (const record of earlyProcessRecords.splice(0))
+		enqueueTelemetry(record.name, record.data, record.preimage, context, record.timing);
 	return () => {
 		if (processOwner === owner) processOwner = undefined;
 	};
@@ -146,6 +169,7 @@ function enqueueTelemetry(
 	data: unknown,
 	preimage: unknown,
 	given: TelemetryContext | undefined,
+	timing?: JournalEmissionTiming,
 ): boolean {
 	if (!isJournalEvent(name)) {
 		// The bus trace is a registry feature: a live event is journaled by name where research mode keeps it (#434).
@@ -156,8 +180,15 @@ function enqueueTelemetry(
 	if (definition.scope === "process") {
 		given = processOwner?.context;
 		if (!given) {
-			// A process fact emitted before the telemetry domain opens the process journal, such as the domain.loaded of
-			// a domain that starts ahead of it, has no journal to belong to yet; it is unrecorded, not lost (#434).
+			// Domains may load before telemetry; preserve their process facts and count every overflow (#434).
+			if (earlyProcessRecords.length < EARLY_JOURNAL_LIMIT)
+				earlyProcessRecords.push({
+					name,
+					data,
+					preimage,
+					timing: timing ?? { wallMs: Date.now(), mono: performance.now() },
+				});
+			else earlyProcessDrops += 1;
 			return false;
 		}
 	}
@@ -182,10 +213,10 @@ function enqueueTelemetry(
 		return false;
 	}
 	// Two literals keep the standard path at its single allocation (#434, §14).
+	const wallMs = timing?.wallMs ?? Date.now();
+	const mono = timing?.mono ?? performance.now();
 	const record = (
-		preimage === undefined
-			? { kind: name, data, ctx, wallMs: Date.now(), mono: performance.now() }
-			: { kind: name, data, ctx, wallMs: Date.now(), mono: performance.now(), preimage }
+		preimage === undefined ? { kind: name, data, ctx, wallMs, mono } : { kind: name, data, ctx, wallMs, mono, preimage }
 	) as PendingTelemetry;
 	if (sink) return enqueueInto(sink, record);
 	// The named session's writer closed idle; the telemetry domain reopens it for this record (#434).
@@ -219,7 +250,13 @@ function traceLiveEvent(name: EventName, given: TelemetryContext | undefined): v
 }
 
 attachJournalRoute({
-	journal: (name, data, preimage, ctx) => enqueueTelemetry(name, data, preimage, ctx ?? telemetryContext()),
+	journal: (name, data, preimage, ctx, timing) =>
+		enqueueTelemetry(name, data, preimage, ctx ?? telemetryContext(), timing),
+	dropped(name, count) {
+		if (!isJournalEvent(name)) return;
+		if (journalDefinition(name).scope === "process") earlyProcessDrops += count;
+		else unownedRecords += count;
+	},
 });
 
 type Stage = "admission" | "auth" | "transform" | "connect" | "send";

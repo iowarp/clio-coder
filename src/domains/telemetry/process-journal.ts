@@ -89,6 +89,10 @@ export function createProcessJournal(
 				return null;
 			}));
 	const sink: TelemetrySink = {
+		recordOpeningDrops(count) {
+			dropped += count;
+			void open();
+		},
 		enqueue(record) {
 			if (closed) return false;
 			if (ready) return ready.enqueue(record);

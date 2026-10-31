@@ -2165,9 +2165,20 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 
 	const unsubscribePermission = registry.onPermissionRequired((call, decision, meta) => {
 		const actionClass = decision.classification.actionClass;
+		const recordPermissionDecision = (disposition: "denied" | "permission_requested", rule?: string): void => {
+			safety.audit.recordToolCall?.({
+				tool: call.tool,
+				classification: decision.classification,
+				decision: disposition,
+				...(decision.policy !== undefined ? { policy: decision.policy } : {}),
+				...(disposition === "permission_requested" ? { requestId: meta.requestId } : {}),
+				...(rule !== undefined ? { ruleId: rule, reasonCode: rule, policySource: "fleet-permissions" } : {}),
+			});
+		};
 		if (escalationConfig) {
 			const callKey = workerPermissionCacheKey(call, decision, meta.axis);
 			if (consumedRequestIds.has(meta.requestId)) {
+				recordPermissionDecision("denied", "approval:consumed");
 				// The approval was delivered and consumed; admission still refused the
 				// call, so it is denied here instead of asking a second time.
 				const reason = `permission denied: the approval for ${call.tool} did not admit the call under the worker's permit, and it was not executed`;
@@ -2188,6 +2199,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 			const remembered = deniedEscalations.get(callKey);
 			if (remembered !== undefined) {
+				recordPermissionDecision("denied", "approval:remembered-denial");
 				const decider =
 					remembered.source === "timeout"
 						? "escalation timeout fallback"
@@ -2221,6 +2233,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			const requestId = meta.requestId;
 			const authority: ApprovalAuthority = grantBinding === undefined ? "operator" : meta.approvalAuthority;
 			if (grantBinding !== undefined && authority === "operator" && operatorUnattended) {
+				recordPermissionDecision("denied", "approval:operator-unavailable");
 				// Only a person clears an operator rail, and nobody can answer here.
 				const reason = `permission denied by policy: ${call.tool} raised an operator-authority ask and no operator can answer worker asks for this dispatch; ${call.tool} requires ${actionClass} confirmation`;
 				emit({
@@ -2304,6 +2317,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					Buffer.byteLength(JSON.stringify(withConsequence), "utf8") <= GRANT_REQUEST_FRAME_BUDGET_BYTES;
 				input.emitGrantRequest?.(fits ? (carriesConsequence ? withConsequence : frame) : { ...frame, effect: null });
 			}
+			recordPermissionDecision("permission_requested");
 			return;
 		}
 		// The policy's own reasons name the remedy ("one command per bash call",
@@ -2339,6 +2353,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					: deniedHead;
 		const refusalLimitReached = executeRefusals.length >= WORKER_REFUSAL_LIMIT;
 		const reason = refusalLimitReached ? workerRefusalLimitReason(executeRefusals) : deniedReason;
+		recordPermissionDecision("denied", `fleet.permissions.mode:${onPermission}`);
 		emit({
 			type: "clio_coder_permission_resolved",
 			payload: {

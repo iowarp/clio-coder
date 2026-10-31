@@ -227,12 +227,6 @@ function budgetDenial(
 	const classification = input.safety.classify(call);
 	const rejection: RejectionMessage = { short: reason, detail: reason, hints: [] };
 	const blocked: SafetyDecision = { kind: "block", classification, rejection };
-	input.safety.audit.recordToolCall?.({
-		tool: mapped.clioToolName,
-		classification,
-		decision: "denied",
-		reasonCode: "worker-budget",
-	});
 	return {
 		kind: "deny",
 		mapped,
@@ -283,11 +277,10 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 			approvalAuthority: admission.approvalAuthority,
 		};
 	}
-	return deniedDecision(input, mapped, call, admission);
+	return deniedDecision(mapped, call, admission);
 }
 
 function deniedDecision(
-	input: EvaluateClaudeToolPermissionInput,
 	mapped: MappedClaudeToolCall,
 	call: ClassifierCall,
 	admission: Extract<AdmissionDisposition, { kind: "deny" }>,
@@ -326,12 +319,6 @@ function deniedDecision(
 		rejection,
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
-	input.safety.audit.recordToolCall?.({
-		tool: mapped.clioToolName,
-		classification: decision.classification,
-		decision: "denied",
-		reasonCode,
-	});
 	return { kind: "deny", mapped, decision: blocked, reason: rejection.short, reasonCode, permissionRequired: false };
 }
 
@@ -379,6 +366,21 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	const startedAt = Date.now();
 	const startedAtClock = performance.now();
 	const decision = evaluateClaudeToolPermission(input);
+	input.safety.audit.recordToolCall?.({
+		tool: decision.mapped.clioToolName,
+		classification: decision.decision.classification,
+		decision: decision.kind === "allow" ? "allowed" : decision.decision.kind === "block" ? "blocked" : "denied",
+		...(decision.decision.policy !== undefined ? { policy: decision.decision.policy } : {}),
+		...(decision.kind === "deny" && decision.permissionRequired
+			? {
+					ruleId: `fleet.permissions.mode:${input.onPermission ?? "deny"}`,
+					reasonCode: `fleet.permissions.mode:${input.onPermission ?? "deny"}`,
+					policySource: "fleet-permissions",
+				}
+			: decision.reasonCode !== undefined
+				? { reasonCode: decision.reasonCode }
+				: {}),
+	});
 	const toolCallId = input.toolCallId?.trim() ? input.toolCallId : undefined;
 	// Mapped args are this side's own translation of the subprocess call, so the
 	// descriptor is composed from them here rather than downstream of the seam.

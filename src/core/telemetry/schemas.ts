@@ -794,15 +794,14 @@ export const ToolSettledSchema = Type.Object(
 	closed,
 );
 /**
- * One safety decision about a tool call, from classification to the final autonomy or budget disposition. A
- * `classified` record is a net pass that a later axis still decides; the command, arguments and policy prose stay
- * out of the journal (#434).
+ * One final safety disposition at a tool decision point, carrying its classification and policy facts. Commands,
+ * arguments and policy prose stay out of the journal (#434).
  */
 export const ToolDecidedSchema = Type.Object(
 	{
 		tool: ExistingId,
 		actionClass: ExistingId,
-		decision: vocabulary(["allowed", "blocked", "permission_requested", "classified", "denied"]),
+		decision: vocabulary(["allowed", "blocked", "permission_requested", "denied"]),
 		exposure: Type.Optional(Type.Literal("outward")),
 		posture: Type.Optional(ExistingId),
 		requestId: Type.Optional(ExistingId),
