@@ -90,6 +90,7 @@ export type SessionSummary = Static<typeof SessionSummary>;
 export const Usage = Type.Pick(
 	AcpUsageMetaSchema,
 	[
+		"quantities",
 		"input",
 		"output",
 		"cacheRead",

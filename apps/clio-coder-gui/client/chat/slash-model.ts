@@ -178,7 +178,7 @@ const PANES: readonly PaneSpec[] = [
 		name: "usage",
 		view: "usage",
 		summary: "Open usage and quota beside the conversation",
-		supported: (capabilities) => !!capabilities.usage,
+		supported: (capabilities) => !!capabilities.telemetry,
 	},
 	{
 		id: "tasks",

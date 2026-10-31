@@ -131,6 +131,14 @@ export type {
 	TaskBoardTask,
 } from "./task-board.js";
 export { createTaskBoardStore, foldTaskBoard, taskBoardCounts, toTaskLedgerEntryFields } from "./task-board.js";
+export type { RunListCursor } from "./telemetry-source.js";
+export {
+	listRunTelemetrySources,
+	loadRunReceiptEvidence,
+	loadRunTelemetrySource,
+	loadSessionTelemetrySource,
+	runTelemetryDirectoryExists,
+} from "./telemetry-source.js";
 // The tree/ module is a domain-internal building block. Only the
 // overlay-facing types surface here; callers that need deeper helpers import
 // from the concrete submodules directly (session domain only).

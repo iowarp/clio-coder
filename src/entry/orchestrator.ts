@@ -5161,7 +5161,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		let acpExtensionHostStart: Promise<void> | undefined;
 		// Built on the first usage read: provider adapters and the quota cache are
 		// not worth constructing for a session that never opens the view.
-		let acpQuota: { read(): Promise<ReadonlyArray<import("../domains/quota/types.js").UsageSnapshot>> } | null = null;
 		// The fleet this ACP agent started and has not seen settle. A second start
 		// is refused while one runs, as the terminal's /fleet run refuses it, since
 		// two fleets would race over one workspace.
@@ -5674,23 +5673,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							},
 						}
 					: {}),
-				// /usage: the read model's session view, and the quota service
-				// behind its cache, so reopening the view does not spend a provider read.
-				...(telemetry
-					? {
-							...(telemetry.read ? { telemetryReadModel: telemetry.read } : {}),
-							usage: {
-								resetSession: (sessionId: string) => telemetry.resetSession(sessionId),
-								subscribe: (listener: () => void) => telemetry.subscribe(listener),
-								quota: async () => {
-									if (acpQuota === null) {
-										const { createQuotaService } = await import("../domains/quota/service.js");
-										acpQuota = createQuotaService();
-									}
-									return acpQuota.read();
-								},
-							},
-						}
+				...(telemetry?.read
+					? { telemetryReadModel: telemetry.read, bindTelemetrySession: (id: string) => telemetry.resetSession(id) }
 					: {}),
 				// /btw and /draft run the chat loop's own out-of-turn rounds, and a
 				// draft is judged by the same `drafts` System One site the overlay uses.

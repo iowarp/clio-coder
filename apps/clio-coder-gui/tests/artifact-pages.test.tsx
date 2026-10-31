@@ -44,6 +44,7 @@ function listed(staleTime: number) {
 							generatedAt: "2026-09-24T00:00:00.000Z",
 							tasks: [],
 							totals: { runs: 1, receipts: 1 },
+							quantities: {},
 						},
 					},
 				],

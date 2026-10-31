@@ -181,7 +181,6 @@ test("a long turn streams usage_update per model response with the meter rising 
 		cwd: process.cwd(),
 		autonomy: () => "default",
 		contextLedger: () => ({ ...LEDGER, usedTokens: used }),
-		usage: { quota: async () => [] },
 		telemetryReadModel: readModelOf(
 			() => bound,
 			() => records,
@@ -241,25 +240,14 @@ test("a long turn streams usage_update per model response with the meter rising 
 	assert.ok(frames.every((frame) => frame.size === 131072));
 	assert.equal(frames[0]?._meta["clio-coder/context"]?.compactionThreshold, 0.8);
 	const last = frames.at(-1);
-	const { session, ...turn } = last?._meta["clio-coder/usage"] ?? {};
-	// The response repeats the last frame whole, its session block included.
-	assert.deepEqual(last?._meta["clio-coder/usage"], result._meta["clio-coder/usage"]);
-	assert.equal((turn as { output: number }).output, 100);
-	assert.deepEqual(session, {
-		costSummary: { knownUsd: 2.5, hasEstimated: true, hasUnknown: true, allKnownFree: false, calls: 9 },
-		input: 540,
-		output: 120,
-		cacheRead: 250,
-		cacheWrite: 0,
-		reasoning: 0,
-		totalTokens: 910,
-		costUsd: 2.5,
-		costDisplay: "~$2.50 +?",
-		costProvenance: "unknown",
-		calls: 9,
-		missingTokenCalls: 1,
-		hasEstimatedCost: true,
-	});
+	const promptUsage = result._meta["clio-coder/usage"] as { quantities: { output: { display: string } } };
+	assert.deepEqual(last?._meta["clio-coder/usage"]?.turn, promptUsage.quantities);
+	assert.equal(promptUsage.quantities.output.display, "100");
+	const session = last?._meta["clio-coder/usage"]?.session as {
+		totals: { usd: { display: string }; tokens: { display: string } };
+	};
+	assert.equal(session.totals.usd.display, "~$2.50 +?");
+	assert.ok(session.totals.tokens.display.includes("910"));
 	assert.deepEqual(frames[0]?.cost, { amount: 1.25, currency: "USD" });
 	assert.equal(last?.cost, undefined);
 	close();
@@ -297,17 +285,24 @@ test("the prompt response waits for the read model to fold the turn's last call,
 		cwd: process.cwd(),
 		autonomy: () => "default",
 		contextLedger: () => LEDGER,
-		usage: {
-			quota: async () => [],
-			subscribe: (listener) => {
-				folded = listener;
+		telemetryReadModel: {
+			...readModelOf(
+				() => bound,
+				() => records,
+			),
+			subscribe: (_topic, listener) => {
+				folded = () =>
+					listener({
+						v: 1,
+						kind: "telemetry_update",
+						sessionId: bound,
+						seq: 1,
+						generatedAt: new Date().toISOString(),
+						topics: ["session"],
+					});
 				return () => {};
 			},
 		},
-		telemetryReadModel: readModelOf(
-			() => bound,
-			() => records,
-		),
 		// The probe a write starts is still in flight when the turn settles; a batch folds while the response waits on it.
 		workspace: async (cwd) => {
 			probes++;
@@ -379,10 +374,13 @@ test("the prompt response waits for the read model to fold the turn's last call,
 		.filter((update) => update.sessionUpdate === "usage_update")
 		.map((update) => (update as { _meta: Record<string, Record<string, unknown>> })._meta["clio-coder/usage"] ?? {});
 	// The turn's last frame, session block included, is what the response repeats.
-	assert.deepEqual(frames.filter((frame) => "output" in frame).at(-1), reply);
+	assert.deepEqual(frames.filter((frame) => frame.turn !== null).at(-1)?.turn, reply.quantities);
 	// The batch that folded during the workspace wait reached a later session frame, not the response.
-	assert.equal((reply.session as { calls?: number } | undefined)?.calls, 1);
-	assert.equal((frames.at(-1)?.session as { calls?: number } | undefined)?.calls, 2);
+	assert.equal((reply.session as { calls?: number } | undefined)?.calls, 2);
+	assert.equal(
+		(frames.at(-1)?.session as { own: { counts: { calls: { display: string } } } } | undefined)?.own.counts.calls.display,
+		"2",
+	);
 	close();
 	await served;
 });

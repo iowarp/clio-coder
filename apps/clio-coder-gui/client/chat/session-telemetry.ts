@@ -109,9 +109,6 @@ export function useTelemetrySession(client: Client, sessionId: string, enabled: 
 }
 
 export function spendLine(spend: Spend): string | null {
-	const missing = spend.missingTokenCalls
-		? ` (${spend.missingTokenCalls} ${spend.missingTokenCalls === 1 ? "call" : "calls"} missing usage)`
-		: "";
-	const parts = [spend.tokens === null ? null : `${tokensText(spend.tokens)}${missing}`, spend.cost].filter(Boolean);
+	const parts = [spend.tokens === null ? null : tokensText(spend.tokens), spend.cost].filter(Boolean);
 	return parts.length > 0 ? parts.join(" · ") : null;
 }

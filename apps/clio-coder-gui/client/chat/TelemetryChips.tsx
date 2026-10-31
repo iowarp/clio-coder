@@ -1,11 +1,11 @@
 import { memo } from "react";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
+import { Explained } from "../telemetry/Explained.js";
 import { contextMeter } from "./overview-model.js";
 import type { PaneView } from "./pane-model.js";
 import {
 	settledTurns,
-	spendLine,
 	useContextLedger,
 	useSessionCapabilities,
 	useSessionTelemetry,
@@ -18,7 +18,6 @@ import { sessionSpend, tokensText } from "./session-usage-model.js";
 const RING = 2 * Math.PI * 6;
 const SOURCE_TITLE: Record<Spend["source"], string> = {
 	telemetry: "The read model's figures for this chat",
-	legacy: "Clio's v1 accounting for this chat (legacy counts)",
 	none: "The recorded cost for this chat",
 };
 
@@ -31,7 +30,6 @@ export const TelemetryChips = memo(function TelemetryChips({
 	sessionId,
 	state,
 	turns,
-	onOpen,
 }: {
 	client: Client;
 	sessionId: string;
@@ -43,12 +41,13 @@ export const TelemetryChips = memo(function TelemetryChips({
 	const capabilities = useSessionCapabilities(client, sessionId, open);
 	const settled = settledTurns(turns);
 	const ledger = useContextLedger(client, sessionId, settled, open && !!capabilities.data?.context);
-	const usage = useSessionUsage(client, sessionId, settled, open && !!capabilities.data?.usage);
+	const usage = useSessionUsage(client, sessionId, settled, open && !!capabilities.data?.telemetry);
 	const telemetry = useSessionTelemetry(client, sessionId);
 	// The live hint's ledger carries the same server displays as the ledger read (#434).
 	const live = telemetry?.usage?.context;
 	const meter = ledger.data ? contextMeter(ledger.data) : live ? contextMeter(live) : null;
-	const cold = useTelemetrySession(client, sessionId, !open);
+	const cold = useTelemetrySession(client, sessionId, true);
+	const context = telemetry?.usage?.session?.context ?? cold.data?.context;
 	const spend = sessionSpend({
 		usage: usage.data,
 		live: turns.at(-1)?.status === "running" || !usage.data || usage.isPlaceholderData ? telemetry?.usage : undefined,
@@ -59,15 +58,7 @@ export const TelemetryChips = memo(function TelemetryChips({
 	return (
 		<>
 			{meter ? (
-				<button
-					id={contextId}
-					type="button"
-					className="wb-chip wb-chip--meter"
-					data-tone={meter.tone}
-					aria-label={`${meter.text}. Open the context window.`}
-					title={meter.text}
-					onClick={() => onOpen("context", contextId)}
-				>
+				<div id={contextId} className="wb-chip wb-chip--meter" data-tone={meter.tone}>
 					<svg className="wb-ring" viewBox="0 0 16 16" aria-hidden="true">
 						<circle cx="8" cy="8" r="6" className="wb-ring__track" />
 						<circle
@@ -78,26 +69,21 @@ export const TelemetryChips = memo(function TelemetryChips({
 							strokeDasharray={`${(meter.percent / 100) * RING} ${RING}`}
 						/>
 					</svg>
-					{meter.figure !== null ? <span>{meter.figure}</span> : null}
-				</button>
+					<Explained
+						client={client}
+						label="Context share"
+						value={context?.share.display ?? "not journaled"}
+						factRef={context?.share.ref ?? null}
+					/>
+				</div>
 			) : null}
 			{spend.cost || spend.tokens !== null ? (
-				<button
-					id={spendId}
-					type="button"
-					className="wb-chip wb-chip--figure"
-					aria-label={`${spendLine(spend) ?? "Usage"}. Open usage.`}
-					title={SOURCE_TITLE[spend.source]}
-					onClick={() => onOpen("usage", spendId)}
-				>
+				<div id={spendId} className="wb-chip wb-chip--figure" title={SOURCE_TITLE[spend.source]}>
 					{spend.tokens !== null ? (
-						<span className="wb-chip__tokens">
-							{tokensText(spend.tokens, "tok")}
-							{spend.missingTokenCalls ? ` (${spend.missingTokenCalls} missing usage)` : ""}
-						</span>
+						<Explained client={client} label="Tokens" value={tokensText(spend.tokens, "tok")} factRef={spend.refs.tokens} />
 					) : null}
-					{spend.cost ? <span>{spend.cost}</span> : null}
-				</button>
+					{spend.cost ? <Explained client={client} label="Cost" value={spend.cost} factRef={spend.refs.cost} /> : null}
+				</div>
 			) : null}
 		</>
 	);

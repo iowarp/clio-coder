@@ -34,7 +34,6 @@ import { FleetCapability } from "./fleet-run.js";
 import { HandoffCapability } from "./handoff.js";
 import { InterviewCapability } from "./interviews.js";
 import { TelemetryCapability } from "./telemetry.js";
-import { UsageCapability } from "./usage.js";
 
 const closed = { additionalProperties: false };
 
@@ -92,7 +91,6 @@ export const AgentCapabilities = Type.Object(
 		/** A side question and parallel drafts, answered beside the conversation. */
 		aside: Type.Optional(AsideCapability),
 		/** The conversation's spend and each provider's quota, read for the Usage view. */
-		usage: Type.Optional(UsageCapability),
 		/** The telemetry read model over ACP and its coalesced update notification (#434). */
 		telemetry: Type.Optional(TelemetryCapability),
 		interviews: Type.Optional(InterviewCapability),

@@ -36,6 +36,7 @@ export interface UsageModelInsight {
 	model: string;
 	target: string;
 	facts: UsageReport["facts"];
+	callShare: Quantity;
 	calls: UsageAmount;
 	tokens: UsageAmount;
 	cost: UsageAmount;
@@ -87,6 +88,7 @@ export function usageModelInsights(report: UsageReport): UsageModelInsight[] {
 		id: group.key,
 		...identity(group.key),
 		facts: [{ name: "telemetry-cost", values: group }],
+		callShare: group.callShare,
 		calls: amountOf(group.calls, "calls", group.pricedBy),
 		tokens: amountOf(group.tokens, "tokens", group.pricedBy),
 		cost: amountOf(group.usd, "cost", group.pricedBy),
@@ -141,19 +143,31 @@ export function attributedCalls(report: UsageReport): number | null {
 
 /** Shares of the model total; null until every row's count is exact and the rows partition the total. */
 export function usageCallShares(models: UsageModelInsight[], total: number | null) {
-	if (total === null || total <= 0) return null;
-	if (!models.length || models.some((row) => row.calls.value === null || row.calls.partial)) return null;
+	if (
+		total === null ||
+		!models.length ||
+		models.some((row) => !("kind" in row.callShare.fact) || row.callShare.fact.kind !== "measured")
+	)
+		return null;
 	let offset = 0;
-	const segments = models
-		.filter((row) => (row.calls.value ?? 0) > 0)
-		.map((row) => {
-			const share = (row.calls.value ?? 0) / total;
-			const segment = { id: row.id, model: row.model, target: row.target, calls: row.calls.value, share, offset };
-			offset += share;
-			return segment;
-		});
-	// A call that failed over to another model is one call in each group; such groups overlap and make no pie.
-	return offset > 1 + 1e-9 ? null : { total, segments };
+	const segments = models.map((row) => {
+		const share = "value" in row.callShare.fact ? row.callShare.fact.value / 100 : 0;
+		const segment = {
+			id: row.id,
+			model: row.model,
+			target: row.target,
+			calls: row.calls.value,
+			share,
+			offset,
+			display: row.callShare.display,
+			factRef: row.callShare.ref ?? null,
+			callsDisplay: row.calls.display,
+			callsRef: row.calls.factRef,
+		};
+		offset += share;
+		return segment;
+	});
+	return { total, segments };
 }
 
 export function filterUsageModels(

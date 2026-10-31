@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id } from "./common.js";
+import { TELEMETRY_DTO_SCHEMAS } from "./wire.js";
 
 const closed = { additionalProperties: false };
 const strings = Type.Array(Type.String());
@@ -56,6 +57,17 @@ export const EvidenceOverview = Type.Object(
 		modelIds: strings,
 		tags: strings,
 		files: strings,
+		quantities: Type.Object(
+			{
+				runs: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
+				receipts: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
+				toolCalls: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
+				toolErrors: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
+				total: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.tokens,
+				usd: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.usd,
+			},
+			closed,
+		),
 		totals: Type.Object(
 			{
 				runs: Type.Number(),
@@ -70,10 +82,7 @@ export const EvidenceOverview = Type.Object(
 				protectedArtifacts: Type.Number(),
 				tokens: Type.Number(),
 				tokenCoverage: Type.Optional(Type.Object({ unknownCalls: Type.Number(), unknownRuns: Type.Number() }, closed)),
-				/** The sealed total as the server words it: a lower bound with its coverage marker when receipts leave a gap. */
-				tokensDisplay: Type.String(),
 				costUsd: Type.Number(),
-				costDisplay: Type.String(),
 				wallTimeMs: Type.Number(),
 			},
 			closed,

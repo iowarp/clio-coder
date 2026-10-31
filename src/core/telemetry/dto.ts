@@ -97,12 +97,33 @@ export const FACT_METRICS = [
 	"toolTime",
 	"bookkeepingRounds",
 	"roundTripTax",
+	"harnessShare",
+	"callShare",
+	"contextUsed",
+	"contextWindow",
+	"contextFree",
+	"contextReserve",
+	"contextShare",
+	"contextTokens",
+	"receipts",
+	"toolCalls",
+	"toolErrors",
 ] as const;
 export type FactMetric = (typeof FACT_METRICS)[number];
 /** `cause` selects a closed failure cause, `wait` an admission hold, `cold` an expected cold reason. */
-export const FACT_GROUPS = ["role", "model", "turn", "run", "cause", "wait", "cold"] as const;
+export const FACT_GROUPS = ["role", "model", "turn", "run", "cause", "wait", "cold", "category", "turns"] as const;
 export type FactGroup = (typeof FACT_GROUPS)[number];
-export const FACT_SCOPES = ["own", "runs", "session", "lineage", "run", "repo", "process"] as const;
+export const FACT_SCOPES = [
+	"own",
+	"runs",
+	"session",
+	"lineage",
+	"run",
+	"repo",
+	"process",
+	"context",
+	"evidence",
+] as const;
 export type FactScope = (typeof FACT_SCOPES)[number];
 
 /**
@@ -110,7 +131,9 @@ export type FactScope = (typeof FACT_SCOPES)[number];
  * session's journal owns; `runs` the worker runs it referenced; `session` both, what the account was charged; `lineage`
  * a session with its fork ancestors; `run` one run journal; `repo` a repository's sessions and runs over a window, owned
  * as `<cwdHash>-<days>d` or `all-<days>d`; `process` the calls one process's journal owns, those no session or run
- * owned. `own` and `runs` also take a `repo` owner, splitting its window into the sessions' own calls and the worker
+ * owned. `context` names a session's latest journaled snapshot; `evidence` names a sealed evidence bundle. The
+ * `turns` group names the comma-separated operator turns one prompt ran. `own` and `runs` also take a `repo` owner,
+ * splitting its window into the sessions' own calls and the worker
  * runs. An attempt narrows `own`, `run` or `process` to one attempt.
  */
 const REF_PATTERN = new RegExp(
@@ -176,6 +199,23 @@ const tokens = Type.Object(
 	},
 	closed,
 );
+/** Quantities for the operator turns one prompt ran (#434). */
+export const TurnQuantitiesSchema = Type.Object(
+	{
+		input: QuantitySchema,
+		output: QuantitySchema,
+		cacheRead: QuantitySchema,
+		cacheWrite: QuantitySchema,
+		reasoning: QuantitySchema,
+		prompt: QuantitySchema,
+		total: QuantitySchema,
+		usd: QuantitySchema,
+		calls: QuantitySchema,
+		ttft: QuantitySchema,
+	},
+	closed,
+);
+
 const pricedBy = Type.Object(
 	{ provider: count, "target-rates": count, catalog: count, free: count, none: count },
 	closed,
@@ -284,6 +324,21 @@ export const SessionTelemetrySchema = Type.Object(
 		),
 		/** Own calls plus referenced runs: what the account was charged for this session. */
 		totals,
+		context: Type.Object(
+			{
+				used: QuantitySchema,
+				window: QuantitySchema,
+				free: QuantitySchema,
+				reserve: QuantitySchema,
+				share: QuantitySchema,
+				groups: Type.Array(Type.Object({ key: text, tokens: QuantitySchema, share: QuantitySchema }, closed)),
+				cache: Type.Union([
+					Type.Object({ cacheRead: QuantitySchema, cacheWrite: QuantitySchema, input: QuantitySchema }, closed),
+					Type.Null(),
+				]),
+			},
+			closed,
+		),
 		/**
 		 * The main loop's wall time split into the harness's own work, network, model and tools, and its bookkeeping-only
 		 * rounds with the prompt tokens they re-read beside the main loop's whole prompt (#434 §12.3, §12.4).
@@ -291,6 +346,7 @@ export const SessionTelemetrySchema = Type.Object(
 		overhead: Type.Object(
 			{
 				harness: QuantitySchema,
+				share: QuantitySchema,
 				network: QuantitySchema,
 				model: QuantitySchema,
 				tool: QuantitySchema,
@@ -453,6 +509,7 @@ const costGroup = Type.Object(
 		tokens: QuantitySchema,
 		usd: QuantitySchema,
 		pricedBy,
+		callShare: QuantitySchema,
 		/**
 		 * The group split by who spent it: the sessions' own calls (`own` refs) and the worker runs (`runs` refs). Null
 		 * when grouped by agent role, whose `worker` row already is the split, and for one run, which is all worker spend.

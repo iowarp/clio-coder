@@ -43,24 +43,6 @@ export function sessionResultTelemetry(result: unknown): SessionTelemetry {
 	};
 }
 
-const known = (value: unknown) => (value === null || value === undefined ? null : value);
-const TOKEN_FIELDS = ["input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens"] as const;
-/**
- * The v1 session counts, with what the frame itself says it could not count made null instead of a 0 (R1): every
- * token count when every call it counted reported no usage, and the amount when the cost is unknown. A partial count
- * stays a number beside its `missingTokenCalls`, which surfaces name as a lower bound.
- */
-function liveSession(session: Record<string, unknown>): Record<string, unknown> {
-	const calls = typeof session.calls === "number" ? session.calls : null;
-	const missing = typeof session.missingTokenCalls === "number" ? session.missingTokenCalls : 0;
-	const uncounted = calls !== null && calls > 0 && missing >= calls;
-	return {
-		...session,
-		...Object.fromEntries(TOKEN_FIELDS.map((key) => [key, uncounted ? null : known(session[key])])),
-		costUsd: session.costProvenance === "unknown" ? null : known(session.costUsd),
-	};
-}
-
 export function sessionUpdateTelemetry(update: Record<string, unknown>): SessionTelemetry | null {
 	const meta = record(update._meta);
 	if (update.sessionUpdate === "session_info_update" && meta[ACP_EGGS_META_KEY] !== undefined)
@@ -71,14 +53,11 @@ export function sessionUpdateTelemetry(update: Record<string, unknown>): Session
 		const usage = record(meta[ACP_USAGE_META_KEY]);
 		return {
 			usage: projectTelemetryValue(LiveUsage, {
-				used: known(update.used),
-				// The v1 frame sends a window it does not know as 0 (src/engine/acp/context-ledger.ts).
-				size: known(update.size) === 0 ? null : known(update.size),
-				...(update.cost !== undefined ? { cost: update.cost } : {}),
+				turn: usage.turn ?? null,
+				session: usage.session ?? null,
 				...(meta[ACP_CONTEXT_META_KEY] !== undefined
 					? { context: withLedgerDisplay(projectTelemetryValue(WireContextLedger, meta[ACP_CONTEXT_META_KEY])) }
 					: {}),
-				...(usage.session != null ? { session: liveSession(record(usage.session)) } : {}),
 			}),
 		};
 	}

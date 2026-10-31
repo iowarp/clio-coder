@@ -10,6 +10,8 @@ import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { InspectionError, InspectionSummary } from "../design/run-inspection.js";
 import { StatusMark } from "../design/status.js";
+import { Explained } from "../telemetry/Explained.js";
+import { explainable } from "../telemetry/quantity-model.js";
 import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages, retainedLinksLive } from "./artifact-pagination.js";
 import {
 	evidenceVerdictTone,
@@ -402,8 +404,11 @@ export function EvidencePage({ client }: { client: Client }) {
 						<p className="inspection-id">{overview.evidenceId}</p>
 						{overview.tasks.length > 1 && <p>{overview.tasks.slice(1).join(" · ")}</p>}
 						<p>
-							{overview.totals.runs} runs · {overview.totals.receipts} receipts · {overview.totals.tokensDisplay} tokens ·{" "}
-							{overview.totals.costDisplay}
+							{Object.entries(overview.quantities).map(([key, q]) => (
+								<span key={key}>
+									{key}: <Explained client={client} label={key} {...explainable(q)} />{" "}
+								</span>
+							))}
 						</p>
 					</article>
 				))}
@@ -459,18 +464,16 @@ export function EvidenceDetail({ client }: { client: Client }) {
 						<a href="#evidence-provenance">Provenance</a>
 						<a href="#evidence-gates">Gate decisions</a>
 					</nav>
-					<InspectionSummary
-						figures={[
-							{ label: "Runs in bundle", value: data.overview.totals.runs },
-							{ label: "Saved receipts", value: data.overview.totals.receipts },
-							{
-								label: "Tool calls / errors",
-								value: `${data.overview.totals.toolCalls} / ${data.overview.totals.toolErrors}`,
-							},
-							{ label: "Tokens", value: data.overview.totals.tokensDisplay },
-							{ label: "Cost", value: data.overview.totals.costDisplay },
-						]}
-					/>
+					<dl className="drill__facts">
+						{Object.entries(data.overview.quantities).map(([key, q]) => (
+							<div key={key}>
+								<dt>{key}</dt>
+								<dd>
+									<Explained client={client} label={key} {...explainable(q)} />
+								</dd>
+							</div>
+						))}
+					</dl>
 					<details className="trace-panel">
 						<summary>Bundle identity & source records</summary>
 						<p className="inspection-id">{id}</p>

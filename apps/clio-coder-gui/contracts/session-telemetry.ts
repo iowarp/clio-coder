@@ -3,48 +3,21 @@ import { Type } from "typebox";
 import { Autonomy } from "./autonomy.js";
 import { ContextLedger } from "./context-ledger.js";
 
+import { TelemetrySession } from "./telemetry.js";
+import { AcpUsageMetaSchema } from "./wire.js";
+
 const closed = { additionalProperties: false };
 const text = Type.String({ maxLength: 4096 });
 const nullableText = Type.Union([text, Type.Null()]);
 const count = Type.Integer({ minimum: 0 });
 const nullableCount = Type.Union([count, Type.Null()]);
 
-/**
- * The live hint a `usage_update` carries between cold reads of the session DTO, which is the authoritative spend
- * (#434 §11.2). Every count is nullable: null is a value the frame could not vouch for, a window the agent did not
- * know or tokens from calls that reported none, and is drawn as not recorded, never as 0 (R1).
- */
+/** Live usage preserves the read model's quantities and displays (#434). */
 export const LiveUsage = Type.Object(
 	{
-		used: nullableCount,
-		size: nullableCount,
-		cost: Type.Optional(Type.Object({ amount: Type.Number({ minimum: 0 }), currency: text }, closed)),
 		context: Type.Optional(ContextLedger),
-		session: Type.Optional(
-			Type.Object(
-				{
-					input: nullableCount,
-					output: nullableCount,
-					cacheRead: nullableCount,
-					cacheWrite: nullableCount,
-					reasoning: nullableCount,
-					totalTokens: nullableCount,
-					calls: Type.Optional(count),
-					unknownCallCoverageRuns: Type.Optional(count),
-					missingTokenCalls: Type.Optional(count),
-					hasEstimatedCost: Type.Optional(Type.Boolean()),
-					costUsd: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
-					costDisplay: Type.Optional(text),
-					costProvenance: Type.Union([
-						Type.Literal("known"),
-						Type.Literal("known_free"),
-						Type.Literal("estimated"),
-						Type.Literal("unknown"),
-					]),
-				},
-				closed,
-			),
-		),
+		turn: Type.Union([AcpUsageMetaSchema.properties.quantities, Type.Null()]),
+		session: Type.Union([TelemetrySession, Type.Null()]),
 	},
 	closed,
 );

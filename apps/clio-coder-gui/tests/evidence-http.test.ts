@@ -28,8 +28,8 @@ test("evidence REST preserves all 40 artifacts, historical unknown, provenance a
 			visited.push(...page.items.map((row) => row.overview.evidenceId));
 			// Sealed totals arrive worded by the server; the browser shows the strings and sums nothing (#434).
 			for (const row of page.items) {
-				assert.equal(typeof row.overview.totals.tokensDisplay, "string");
-				assert.equal(typeof row.overview.totals.costDisplay, "string");
+				assert.equal(typeof row.overview.quantities.total?.display, "string");
+				assert.equal(typeof row.overview.quantities.usd?.display, "string");
 			}
 			unknown.push(...page.items.filter((row) => row.verdict === "unknown").map((row) => row.overview.evidenceId));
 			cursor = page.nextCursor;

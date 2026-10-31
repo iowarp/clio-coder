@@ -268,7 +268,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 				{/* One quiet line closes the turn: its outcome, then what can be done with the response. */}
 				<div className="chat-response__footer">
 					{row !== undefined && row.status !== "running" ? (
-						<TurnOutcome outcome={turnOutcome(row, toolCount(turn))} formatClock={formatClock} />
+						<TurnOutcome client={client} outcome={turnOutcome(row, toolCount(turn))} formatClock={formatClock} />
 					) : null}
 					<MessageActions
 						sessionId={session.id}

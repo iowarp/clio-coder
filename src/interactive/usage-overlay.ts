@@ -127,6 +127,7 @@ function summaryBlock(view: TelemetryView, recall: RecallTelemetry | null): stri
 			(group) => [ROLE_CAPTION[group.key as AgentRole] ?? `${group.key} calls`, group.calls.display] as const,
 		),
 		["model calls", byRole.total.calls.display],
+		["harness overhead", session.overhead.share.display],
 		...(nonZero(missing)
 			? [["unknown token usage", `${missing.display} calls`, "token amounts are lower bounds"] as const]
 			: []),

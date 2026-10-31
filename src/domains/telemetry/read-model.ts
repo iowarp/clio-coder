@@ -41,6 +41,7 @@ import {
 } from "../../core/telemetry/render.js";
 import type { CallSettled, CallUsage, ObjectRef } from "../../core/telemetry/schemas.js";
 import { ToolNames } from "../../core/tool-names.js";
+import type { EvidenceOverview } from "../evidence/index.js";
 import type { ContextSnapshot } from "../session/context-accounting.js";
 import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
 import type { CallJournalFolder, CallTotals, FoldedAttempt, FoldOptions, JournalFold } from "./folds.js";
@@ -838,6 +839,8 @@ function attemptInGroup(attempt: Attempt, group: { by: FactGroup; key: string })
 		case "cold":
 			return isBreak(attempt) && coldKeys(attempt).includes(group.key);
 		case "run":
+		case "category":
+		case "turns":
 			return false;
 	}
 }
@@ -921,6 +924,16 @@ function select(view: View, ref: ParsedFactRef): Selection | null {
 		const attempt = analysis.byAttempt.get(ref.attemptId);
 		return attempt ? { parts: [{ attempts: [attempt], gap: 0 }], attempt, describe: "one attempt" } : null;
 	}
+	if (group?.by === "turns") {
+		const keys = new Set(group.key === "-" ? [] : group.key.split(","));
+		const parts: Part[] = [...keys].map((key) => {
+			const selection = selectionOf(analysis, { by: "turn", key });
+			return { attempts: selection.members, selection, gap: 0 };
+		});
+		if (parts[0]) parts[0].gap = analysis.gap;
+		for (const run of analysis.runs.values()) if (keys.has(run.turnId ?? "-")) parts.push({ run, gap: runGap(run) });
+		return { parts, describe: "the prompt's operator turns and referenced runs" };
+	}
 	const parts: Part[] = [];
 	const described: string[] = [];
 	if (ref.scope !== "runs") {
@@ -975,7 +988,7 @@ function selectRepo(
 
 // ---- measurement ----
 
-type Family = "count" | "usd" | "duration";
+type Family = "count" | "usd" | "duration" | "percent";
 const FAMILY: Record<FactMetric, Family> = {
 	calls: "count",
 	attempts: "count",
@@ -1007,6 +1020,17 @@ const FAMILY: Record<FactMetric, Family> = {
 	breakUsd: "usd",
 	repairRounds: "count",
 	runs: "count",
+	contextUsed: "count",
+	contextWindow: "count",
+	contextFree: "count",
+	contextReserve: "count",
+	contextShare: "percent",
+	contextTokens: "count",
+	receipts: "count",
+	toolCalls: "count",
+	toolErrors: "count",
+	harnessShare: "percent",
+	callShare: "percent",
 	harnessTime: "duration",
 	networkTime: "duration",
 	toolTime: "duration",
@@ -1014,6 +1038,17 @@ const FAMILY: Record<FactMetric, Family> = {
 	roundTripTax: "count",
 };
 const RULES: Record<FactMetric, string> = {
+	contextUsed: "latest context snapshot reconciledTokens or estimatedTokens",
+	contextWindow: "latest context snapshot effective window",
+	contextFree: "latest context snapshot free tokens",
+	contextReserve: "latest context snapshot reserve tokens",
+	contextShare: "100 × context tokens / effective window",
+	contextTokens: "latest context snapshot category tokens",
+	receipts: "sealed evidence receipts",
+	toolCalls: "sealed evidence tool calls",
+	toolErrors: "sealed evidence tool errors",
+	harnessShare: "100 × harnessTime / (harnessTime + networkTime + modelTime + toolTime), main-loop calls only",
+	callShare: "100 × group calls / whole-scope calls; unknown when model groups overlap",
 	calls: "count(distinct callId); a run contributes its API calls",
 	attempts: "count(attempts)",
 	neverSent: "count(attempts where disposition=never_sent)",
@@ -1291,7 +1326,7 @@ function display(metric: FactMetric, fact: Fact<number> | FactSum, free: boolean
 	const family = FAMILY[metric];
 	if ("kind" in fact) {
 		if (family === "usd") return renderUsdFact(fact, pricedBy);
-		return renderFact(fact, family === "duration" ? "duration" : "count");
+		return renderFact(fact, family === "duration" ? "duration" : family === "percent" ? "percent" : "count");
 	}
 	if (family === "usd") return renderUsdSum(fact, free);
 	if (family === "duration") return renderDurationSum(fact);
@@ -1303,7 +1338,122 @@ interface Measurement {
 	selection: Selection;
 }
 
+const latestContexts = new WeakMap<
+	SessionSource,
+	{ length: number; record: TelemetryRecord<"context.snapshotted"> | null }
+>();
+function latestContext(source: SessionSource): TelemetryRecord<"context.snapshotted"> | null {
+	const cached = latestContexts.get(source);
+	if (cached?.length === source.journal.records.length) return cached.record;
+	let latest: TelemetryRecord<"context.snapshotted"> | null = null;
+	for (let index = source.journal.records.length - 1; index >= 0; index--) {
+		const record = source.journal.records[index];
+		if (record?.k === "context.snapshotted") {
+			latest = record;
+			break;
+		}
+	}
+	latestContexts.set(source, { length: source.journal.records.length, record: latest });
+	return latest;
+}
+
 function measure(view: View, ref: ParsedFactRef): Measurement | null {
+	if (ref.scope === "context") {
+		if (
+			!["contextUsed", "contextWindow", "contextFree", "contextReserve", "contextShare", "contextTokens"].includes(
+				ref.metric,
+			)
+		)
+			return null;
+		if (!("session" in view) || view.session.sessionId !== ref.owner) return null;
+		const snapshot = latestContext(view.session);
+		const data = snapshot?.k === "context.snapshotted" ? snapshot.data : null;
+		const category = ref.group?.by === "category" ? ref.group.key : null;
+		const tokens = data
+			? category
+				? data.categories[category as keyof typeof data.categories]
+				: (data.reconciledTokens ?? data.estimatedTokens)
+			: undefined;
+		const value = !data
+			? undefined
+			: ref.metric === "contextWindow"
+				? data.window.effective
+				: ref.metric === "contextFree"
+					? data.categories.free
+					: ref.metric === "contextReserve"
+						? data.categories.reserve
+						: ref.metric === "contextShare"
+							? tokens === undefined || data.window.effective <= 0
+								? undefined
+								: (100 * tokens) / data.window.effective
+							: tokens;
+		const measured =
+			data?.reconciledTokens !== undefined &&
+			category === null &&
+			(ref.metric === "contextUsed" || ref.metric === "contextShare");
+		const fact: Fact<number> =
+			value === undefined
+				? unobserved
+				: ref.metric === "contextWindow"
+					? localCount(value)
+					: measured && !category
+						? { kind: "measured", value, source: "provider" }
+						: { kind: "estimated", value, method: "chars/4" };
+		return {
+			quantity: {
+				fact,
+				display: renderFact(fact, ref.metric === "contextShare" ? "percent" : "count"),
+				ref: factRef(ref),
+			},
+			selection: { parts: [], describe: "the latest journaled context snapshot" },
+		};
+	}
+
+	if (ref.metric === "harnessShare" || ref.metric === "callShare") {
+		const base = ref.metric === "harnessShare" ? { ...ref, group: { by: "role" as const, key: "main" } } : ref;
+		const selection = select(view, base);
+		if (!selection) return null;
+		const read = (metric: FactMetric, group = base.group) =>
+			measure(view, { ...base, metric, ...(group ? { group } : {}) })?.quantity;
+		const exact = (q: Quantity | undefined): number | null => {
+			if (!q) return null;
+			const f = q.fact;
+			if ("kind" in f) return f.kind === "measured" ? f.value : null;
+			return f.unknownCount === 0 && f.coverage.estimated === 0 ? f.measured : null;
+		};
+		let value: number | null = null;
+		if (ref.metric === "harnessShare") {
+			const values = ["harnessTime", "networkTime", "modelTime", "toolTime"].map((metric) =>
+				exact(read(metric as FactMetric)),
+			);
+			if (values.every((part) => part !== null)) {
+				const total = values.reduce<number>((sum, part) => sum + (part ?? 0), 0);
+				if (total > 0) value = (100 * (values[0] ?? 0)) / total;
+			}
+		} else {
+			const numerator = exact(read("calls"));
+			const wholeRef = { ...ref, metric: "calls" as const };
+			delete wholeRef.group;
+			const denominator = exact(measure(view, wholeRef)?.quantity);
+			// A call can fail over between models; overlapping groups do not partition a pie (#434).
+			const groupParts = ref.group?.by === "model" ? selection.parts : [];
+			const selectedIds = new Set(
+				groupParts.flatMap((part) => part.attempts ?? part.run?.attempts ?? []).map((attempt) => attempt.started.callId),
+			);
+			const all = select(view, wholeRef);
+			const outside = all?.parts
+				.flatMap((part) => part.attempts ?? part.run?.attempts ?? [])
+				.some(
+					(attempt) =>
+						selectedIds.has(attempt.started.callId) && ref.group !== undefined && !attemptInGroup(attempt, ref.group),
+				);
+			if (!outside && numerator !== null && denominator !== null && denominator > 0)
+				value = (100 * numerator) / denominator;
+		}
+		const fact: Fact<number> = value === null ? { kind: "unknown", reason: "not-observed" } : localCount(value);
+		return { quantity: { fact, display: renderFact(fact, "percent"), ref: factRef(ref) }, selection };
+	}
+
 	const selection = select(view, ref);
 	if (!selection) return null;
 	const encoded = factRef(ref);
@@ -1347,7 +1497,7 @@ export interface TurnsSum {
 /**
  * Several of a session's operator turns read as one, such as the turns one ACP prompt ran: each turn's own attempts
  * and the runs it referenced, the session's read gap counted once. One turn sums exactly as its `@turn=` quantity
- * does. No ref names a set of turns, so the sum carries its fact and display without one (#434 §11.3).
+ * does. Prompt quantities name this same selection with the `turns` group (#434 §11.3).
  */
 export function turnsSum(source: SessionSource, turnIds: readonly string[], metric: FactMetric): TurnsSum {
 	const analysis = analyze(source);
@@ -1519,8 +1669,28 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 			usd: quantity(view, { scope: "runs", owner: id, metric: "usd" }),
 		},
 		totals: { tokens: session("total"), usd: session("usd") },
+		context: {
+			cache: latest
+				? {
+						cacheRead: quantity(view, own(id, "cacheRead", { attemptId: latest.started.attemptId })),
+						cacheWrite: quantity(view, own(id, "cacheWrite", { attemptId: latest.started.attemptId })),
+						input: quantity(view, own(id, "input", { attemptId: latest.started.attemptId })),
+					}
+				: null,
+			used: quantity(view, { scope: "context", owner: id, metric: "contextUsed" }),
+			window: quantity(view, { scope: "context", owner: id, metric: "contextWindow" }),
+			free: quantity(view, { scope: "context", owner: id, metric: "contextFree" }),
+			reserve: quantity(view, { scope: "context", owner: id, metric: "contextReserve" }),
+			share: quantity(view, { scope: "context", owner: id, metric: "contextShare" }),
+			groups: Object.keys(latestContext(source)?.data.categories ?? {}).map((key) => ({
+				key,
+				tokens: quantity(view, { scope: "context", owner: id, metric: "contextTokens", group: { by: "category", key } }),
+				share: quantity(view, { scope: "context", owner: id, metric: "contextShare", group: { by: "category", key } }),
+			})),
+		},
 		overhead: {
 			harness: mainLoop("harnessTime"),
+			share: quantity(view, { scope: "session", owner: source.sessionId, metric: "harnessShare" }),
 			network: mainLoop("networkTime"),
 			model: mainLoop("modelTime"),
 			tool: mainLoop("toolTime"),
@@ -1727,6 +1897,7 @@ function costGroups(view: View, base: Omit<ParsedFactRef, "metric">, keys: reado
 		});
 		return {
 			key,
+			callShare: quantity(view, ref("callShare")),
 			calls: quantity(view, ref("calls")),
 			tokens: quantity(view, ref("total")),
 			usd: quantity(view, ref("usd")),
@@ -2696,11 +2867,30 @@ const EXPLAIN_CAP = 500;
 /** Resolve a reference against a session (any scope it can see) or a standalone run. */
 export function explain(
 	ref: FactRef,
-	source: { session: SessionSource } | { runId: string; run: JournalSource } | { repo: RepoSource },
+	source:
+		| { session: SessionSource }
+		| { runId: string; run: JournalSource }
+		| { repo: RepoSource }
+		| { evidence: EvidenceOverview },
 	options: ReadOptions = {},
 ): ExplanationV1 | null {
 	const parsed = parseFactRef(ref);
 	if (!parsed) return null;
+	if ("evidence" in source) {
+		if (parsed.scope !== "evidence" || parsed.owner !== source.evidence.evidenceId) return null;
+		const value = evidenceQuantities(source.evidence)[parsed.metric as keyof ReturnType<typeof evidenceQuantities>];
+		return value
+			? {
+					...header(options),
+					kind: "explanation",
+					ref,
+					value,
+					coverage: renderCoverage(value.fact),
+					rule: "The evidence bundle's sealed totals, with missing receipt coverage retained (#434).",
+					from: { callIds: [], attemptIds: [], runIds: source.evidence.runIds, recordIds: [], omitted: 0 },
+				}
+			: null;
+	}
 	const view: View =
 		"session" in source
 			? { session: source.session }
@@ -2715,6 +2905,7 @@ export function explain(
 		(total, part) => total + part.gap + (part.run && !part.run.source.present ? 1 : 0),
 		0,
 	);
+	const contextRecord = parsed.scope === "context" && "session" in source ? latestContext(source.session) : null;
 	const listed = attempts.slice(0, EXPLAIN_CAP);
 	return {
 		...header(options),
@@ -2729,7 +2920,9 @@ export function explain(
 			callIds: [...new Set(listed.map((attempt) => attempt.started.callId))].sort() as ExplanationV1["from"]["callIds"],
 			attemptIds: listed.map((attempt) => attempt.started.attemptId).sort() as ExplanationV1["from"]["attemptIds"],
 			runIds: [...new Set(runIds)].sort(),
-			recordIds: [...new Set(listed.flatMap((attempt) => attempt.recordIds))].sort(),
+			recordIds: [
+				...new Set([...listed.flatMap((attempt) => attempt.recordIds), ...(contextRecord ? [contextRecord.id] : [])]),
+			].sort(),
 			omitted: attempts.length - listed.length,
 		},
 	};
@@ -2908,4 +3101,38 @@ export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMe
  */
 export function seal(scope: TelemetryScopeFiles): SealVerdict {
 	return verifyTelemetryScope(scope);
+}
+
+/** A sealed evidence bundle owns its totals; its reference never names a changing live session (#434). */
+export function evidenceQuantities(overview: EvidenceOverview) {
+	const q = (metric: FactMetric, fact: Fact<number> | FactSum): Quantity => ({
+		fact,
+		display: display(metric, fact, overview.totals.costSummary?.allKnownFree === true),
+		ref: factRef({ scope: "evidence", owner: overview.evidenceId, metric }),
+	});
+	const totals = overview.totals;
+	const gap = totals.tokenCoverage;
+	const tokenFact = withGap(counted(totals.tokens), gap ? gap.unknownCalls + gap.unknownRuns : 1);
+	const summary = totals.costSummary;
+	const costFact: FactSum = summary
+		? {
+				measured: summary.hasEstimated ? 0 : summary.knownUsd,
+				estimated: summary.hasEstimated ? summary.knownUsd : 0,
+				unknownCount: summary.hasUnknown ? 1 : 0,
+				absentCount: 0,
+				coverage: {
+					measured: summary.hasEstimated ? 0 : 1,
+					estimated: summary.hasEstimated ? 1 : 0,
+					unknown: summary.hasUnknown ? 1 : 0,
+				},
+			}
+		: unknownSum(1);
+	return {
+		runs: q("runs", counted(totals.runs)),
+		receipts: q("receipts", counted(totals.receipts)),
+		toolCalls: q("toolCalls", counted(totals.toolCalls)),
+		toolErrors: q("toolErrors", counted(totals.toolErrors)),
+		total: q("total", tokenFact),
+		usd: q("usd", costFact),
+	};
 }

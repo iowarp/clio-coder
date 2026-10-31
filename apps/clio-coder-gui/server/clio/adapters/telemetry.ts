@@ -1,19 +1,22 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { clioStateDir } from "../../../../../src/core/xdg.js";
-import type { RunListCursor } from "../../../../../src/domains/session/telemetry-source.js";
+import { clioDataDir, clioStateDir } from "../../../../../src/core/xdg.js";
+import { inspectEvidence } from "../../../../../src/domains/evidence/index.js";
+import type { RunListCursor } from "../../../../../src/domains/session/index.js";
 import {
 	listRunTelemetrySources,
 	loadRunReceiptEvidence,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
 	runTelemetryDirectoryExists,
-} from "../../../../../src/domains/session/telemetry-source.js";
+} from "../../../../../src/domains/session/index.js";
 import {
 	cacheReport,
 	callsReport,
 	costReport,
 	explain,
+	explainRepoRef,
+	isRepoRef,
 	runCostReport,
 	runRowTelemetry,
 	runTelemetry,
@@ -21,8 +24,7 @@ import {
 	sessionTelemetry,
 	timeline,
 	whyStopped,
-} from "../../../../../src/domains/telemetry/read-model.js";
-import { explainRepoRef, isRepoRef } from "../../../../../src/domains/telemetry/usage-window.js";
+} from "../../../../../src/domains/telemetry/index.js";
 import { Id } from "../../../contracts/common.js";
 import type { TelemetryRequest } from "../../../contracts/telemetry.js";
 import { parseFactRef } from "../../../contracts/wire.js";
@@ -39,6 +41,12 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 	if (input.kind === "explain") {
 		const ref = parseFactRef(input.ref);
 		if (!ref) throw new AppProblem("validation", "Invalid telemetry reference.");
+		if (ref.scope === "evidence") {
+			const detail = await inspectEvidence(clioDataDir(), ref.owner);
+			const explained = explain(input.ref, { evidence: detail.overview });
+			if (!explained) throw notFound();
+			return explained;
+		}
 		// A repository window is rebuilt the way `usage report` folds it, ending now, exactly as the CLI's explain does.
 		const repo = isRepoRef(ref);
 		if (!repo && !Value.Check(Id, ref.owner)) throw new AppProblem("validation", "Invalid telemetry reference.");

@@ -88,6 +88,9 @@ const adapters = new Set([
 	"src/domains/telemetry/evidence-index.ts",
 	"src/domains/session/history.ts",
 	// The telemetry read model and its cold loader; the adapter serves their DTOs unchanged (#434).
+	"src/domains/telemetry/index.ts",
+	"src/domains/session/index.ts",
+	"src/domains/evidence/index.ts",
 	"src/domains/telemetry/read-model.ts",
 	"src/domains/session/telemetry-source.ts",
 	// The repository window `usage report` folds, so a repo reference explains to the CLI's number (#434 §11.4).
@@ -286,17 +289,22 @@ test("the browser contract reaches no Node builtin through its value imports, ro
 	assert.deepEqual(reached, []);
 });
 
-test("the browser sums no telemetry quantity: no accumulation over tokens, cost, calls or missing-usage counts", () => {
+test("the client and server sum no telemetry quantity: no accumulation over tokens, cost, calls or missing-usage counts", () => {
 	const sums: string[] = [];
 	// The read model's quantity names; plain counters such as a tool tally or an attachment size are not these.
-	const telemetry = /\b(?:tokens|totalTokens|tokenCount|usd|costUsd|knownUsd|missingTokenCalls|apiCalls)\b/;
-	for (const file of files(resolve(app, "client"))) {
+	const telemetry =
+		/\b(?:tokens|totalTokens|tokenCount|input|output|cacheRead|cacheWrite|reasoning|usd|costUsd|knownUsd|missingTokenCalls|apiCalls)\b/;
+	for (const file of [...files(resolve(app, "client")), ...files(resolve(app, "server"))]) {
 		const tree = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
 		const walk = (node: ts.Node) => {
 			if (
 				ts.isBinaryExpression(node) &&
-				node.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken &&
-				telemetry.test(node.left.getText(tree))
+				(node.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken ||
+					node.operatorToken.kind === ts.SyntaxKind.PlusToken) &&
+				!ts.isStringLiteral(node.left) &&
+				!ts.isStringLiteral(node.right) &&
+				(telemetry.test(node.left.getText(tree)) ||
+					(node.operatorToken.kind === ts.SyntaxKind.PlusToken && telemetry.test(node.right.getText(tree))))
 			)
 				sums.push(`${relative(app, file)}: ${node.getText(tree)}`);
 			if (

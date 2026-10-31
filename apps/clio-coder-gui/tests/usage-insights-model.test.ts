@@ -33,6 +33,11 @@ const quantity = (display: string, measured: number, unknownCount = 0) => ({
 const pricedBy = { provider: 0, "target-rates": 1, catalog: 0, free: 0, none: 0 };
 const group = (key: string, calls: ReturnType<typeof quantity>, tokens = quantity("100", 100)) => ({
 	key,
+	callShare: {
+		fact: { kind: "measured", value: key.endsWith("big") ? 75 : 25, source: "local-count" },
+		display: "server share",
+		ref: "repo:all-30d#callShare",
+	},
 	calls,
 	tokens,
 	usd: quantity("$0.01", 0.01),
@@ -82,7 +87,7 @@ test("a model's session calls and worker runs are one server row, read as the se
 	);
 });
 
-test("call shares divide by the model report's own total, and stay absent unless the groups partition it", () => {
+test("call shares render the server distribution", () => {
 	const big = group("a/big", quantity("9", 9));
 	const groups = [big, group("a/small", quantity("3", 3))];
 	const facts = [byModel(quantity("12", 12), groups)];
@@ -98,11 +103,6 @@ test("call shares divide by the model report's own total, and stay absent unless
 	assert.equal(attributedCalls(report([])), null, "no model report, no denominator");
 	const partialTotal = [byModel(quantity("≥12 (1 call unknown)", 12, 1), groups)];
 	assert.equal(attributedCalls(report(partialTotal)), null, "a lower-bound total divides nothing");
-	const partialRow = [byModel(quantity("12", 12), [big, group("a/small", quantity("≥3 (1 call unknown)", 3, 1))])];
-	assert.equal(usageCallShares(usageModelInsights(report(partialRow)), 12), null, "a partial row makes no share");
-	// A call that failed over is one call in each model's group, so the groups overlap the total.
-	const overlap = [byModel(quantity("12", 12), [big, group("a/small", quantity("6", 6))])];
-	assert.equal(usageCallShares(usageModelInsights(report(overlap)), attributedCalls(report(overlap))), null);
 });
 
 test("prompt-cache evidence reads each session's cache report displays", () => {

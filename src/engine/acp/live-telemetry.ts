@@ -15,7 +15,7 @@ export { ACP_PLAN_META_KEY, ACP_WORKSPACE_META_KEY } from "./types.js";
  * schedules one coalesced `usage_update`, a settled tool call re-reads the
  * plan, and a tool that can write re-probes the workspace off the loop with at
  * most one probe in flight. The pull methods (`_clio-coder/context/ledger`,
- * `_clio-coder/usage/read`, `_clio-coder/session/board`) stay the full views;
+ * `_clio-coder/telemetry/session`, `_clio-coder/session/board`) stay the full views;
  * these frames carry what a live meter, plan list and branch chip need.
  *
  * None of these frames count toward a turn's `updatesSent`: that counter is
@@ -79,6 +79,26 @@ export function turnUsageMeta(view: TelemetryView | null, turn: AcpPromptTurn) {
 	const apiCalls = known(sum("apiCalls").fact);
 	const missingTokenCalls = known(sum("missingTokenCalls").fact);
 	return {
+		quantities: Object.fromEntries(
+			(
+				["input", "output", "cacheRead", "cacheWrite", "reasoning", "prompt", "total", "usd", "calls", "ttft"] as const
+			).map((metric) => {
+				const q = sum(metric);
+				return [
+					metric,
+					{
+						fact: q.fact,
+						display: q.display,
+						ref: factRef({
+							scope: "session",
+							owner: view.sessionId,
+							metric,
+							group: { by: "turns", key: turnIds.sort().join(",") || "-" },
+						}),
+					},
+				];
+			}),
+		),
 		input: known(sum("input").fact),
 		output: known(sum("output").fact),
 		cacheRead: known(sum("cacheRead").fact),
@@ -174,6 +194,10 @@ function projectAcpPlan(plan: TaskBoardSnapshot | null) {
 		},
 	};
 }
+
+// A read timestamp changes without changing any fact in a live usage frame (#434).
+const usageSignatureOf = (value: unknown) =>
+	JSON.stringify(value, (key, item) => (key === "generatedAt" ? undefined : item));
 
 const EMPTY_PLAN_SIGNATURE = JSON.stringify(projectAcpPlan(null));
 
@@ -305,7 +329,8 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		const session = view === null ? null : sessionUsageTotals(view);
 		framedTurn = turn === null ? null : turnUsageMeta(view, turn);
 		framedSession = session;
-		accountingSignature = JSON.stringify(session);
+		const sessionView = view?.session() ?? null;
+		accountingSignature = usageSignatureOf(sessionView);
 		// ACP `cost` is a plain amount, so an unknown price stays absent rather than reading as zero.
 		const knownCost = session !== null && session.calls > 0;
 		return {
@@ -317,7 +342,10 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 				: {}),
 			_meta: {
 				[ACP_CONTEXT_META_KEY]: context,
-				[ACP_USAGE_META_KEY]: { ...framedTurn, session },
+				[ACP_USAGE_META_KEY]: {
+					turn: framedTurn && "quantities" in framedTurn ? framedTurn.quantities : null,
+					session: sessionView,
+				},
 			},
 		};
 	};
@@ -329,7 +357,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		}
 		const frame = usageFrame();
 		if (frame === null) return;
-		const signature = JSON.stringify(frame);
+		const signature = usageSignatureOf(frame);
 		if (signature === usageSignature) return;
 		usageSignature = signature;
 		if (emit) send(frame);
@@ -422,7 +450,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		for (const waiter of [...foldWaiters]) waiter.check();
 		if (disposed || !deps.sessionTelemetry || deps.sessionId() === null || pendingUsage !== null) return;
 		const view = deps.sessionTelemetry();
-		if (view === null || JSON.stringify(sessionUsageTotals(view)) === accountingSignature) return;
+		if (view === null || usageSignatureOf(view.session()) === accountingSignature) return;
 		pendingUsage = setImmediate(() => {
 			pendingUsage = null;
 			flushUsage(true);

@@ -228,8 +228,6 @@ test("a side question and drafts answer beside the conversation and never become
 	]);
 	assert.equal(drafts.status === "drafted" && drafts.judgment?.status, "unjudged");
 	assert.equal(h.supervisor.get(session.id).turns.length, 0, "an aside is not a turn");
-	const usage = await json(await h.request(`/api/sessions/${session.id}/usage`), routes.sessionUsage.response);
-	assert.deepEqual([usage.session.tokens, usage.session.cost.calls, usage.quota.status], [5200, 3, "read"]);
 	assert.deepEqual(await json(await h.post(`${base}/cancel`), routes.cancelAside.response), { cancelled: false });
 	assert.equal((await h.post(`${base}/draft`, { request: "x", count: 5 })).status, 422);
 	assert.equal((await h.post(`${base}/ask`, { question: "   " })).status, 422);

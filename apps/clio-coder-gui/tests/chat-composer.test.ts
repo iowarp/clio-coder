@@ -347,7 +347,30 @@ test("copy is offered only for text that exists", () => {
 
 // --- the outcome footer ----------------------------------------------------
 
-const usage: Usage = { input: 12345, output: 678, cacheRead: 90, cacheWrite: 1, reasoning: 234 };
+const quantity = (display: string) => ({
+	fact: { kind: "measured" as const, value: 0, source: "local-count" as const },
+	display,
+	ref: "session:s1#input",
+});
+const usage: Usage = {
+	input: 12345,
+	output: 678,
+	cacheRead: 90,
+	cacheWrite: 1,
+	reasoning: 234,
+	quantities: {
+		input: quantity("12,345"),
+		output: quantity("678"),
+		cacheRead: quantity("90"),
+		cacheWrite: quantity("1"),
+		reasoning: quantity("234"),
+		prompt: quantity("12,436"),
+		total: quantity("13,114"),
+		calls: quantity("1"),
+		ttft: quantity("0 ms"),
+		usd: quantity("not measured"),
+	},
+};
 
 function turn(overrides: Partial<Turn> = {}): Turn {
 	return {
@@ -366,7 +389,10 @@ function turn(overrides: Partial<Turn> = {}): Turn {
 
 test("usage shows two numbers and carries five in the tooltip", () => {
 	assert.equal(usageSummary(usage), "12,345 in · 678 out");
-	assert.equal(usageTitle(usage), "input 12,345 · output 678 · cache read 90 · cache write 1 · reasoning 234");
+	assert.equal(
+		usageTitle(usage),
+		"input 12,345 · output 678 · cacheRead 90 · cacheWrite 1 · reasoning 234 · prompt 12,436 · total 13,114 · calls 1 · ttft 0 ms · usd not measured",
+	);
 });
 
 test("a completed turn footer carries its reported tool count and spend, and nothing else", () => {
@@ -375,7 +401,7 @@ test("a completed turn footer carries its reported tool count and spend, and not
 	assert.equal(view.label, "Done");
 	assert.deepEqual(view.facts, ["12s", "not measured", "3 tool calls"]);
 	assert.deepEqual(view.breakdown.at(-1), { group: "Tools", label: "Calls", value: "3" });
-	assert.equal(view.usageLabel, "12K in / 678 out");
+	assert.equal(view.usageLabel, "12,436 in / 678 out");
 	assert.equal(view.usage, usage, "the full reported accounting stays reachable from the compact outcome");
 	assert.equal(view.detail, null);
 	assert.equal(view.stopReason, null, "a stop reason on a successful turn is noise");
@@ -510,15 +536,27 @@ for (const [name, accounting, expected] of [
 	],
 ] satisfies Array<[string, Partial<Usage>, string | null]>) {
 	test(`completed turn cost: ${name}`, () => {
-		const outcome = turnOutcome(turn({ startedAt: null, usage: withCostDisplay({ ...usage, ...accounting }) }), 0);
+		const outcome = turnOutcome(
+			turn({
+				startedAt: null,
+				usage: {
+					...withCostDisplay({ ...usage, ...accounting }),
+					quantities: {
+						...(usage.quantities as NonNullable<Usage["quantities"]>),
+						usd: quantity(expected ?? "not measured"),
+					},
+				},
+			}),
+			0,
+		);
 		assert.deepEqual(outcome.facts, expected === null ? [] : [expected]);
-		assert.equal(outcome.usageLabel, "12K in / 678 out", "pricing provenance does not change reported tokens");
+		assert.equal(outcome.usageLabel, "12,436 in / 678 out", "pricing provenance does not change reported tokens");
 		assert.deepEqual(
 			outcome.breakdown.filter((row) => row.group === "Usage"),
 			[
-				{ group: "Usage", label: "Input", value: "12,345" },
-				{ group: "Usage", label: "Output", value: "678" },
-				{ group: "Usage", label: "Reasoning", value: "234" },
+				{ group: "Usage", label: "Input", value: "12,345", factRef: "session:s1#input" },
+				{ group: "Usage", label: "Output", value: "678", factRef: "session:s1#input" },
+				{ group: "Usage", label: "Reasoning", value: "234", factRef: "session:s1#input" },
 			],
 		);
 		assert.deepEqual(
@@ -546,7 +584,7 @@ test("known-free pricing does not invent tokens when usage is missing", () => {
 		}),
 		0,
 	);
-	assert.deepEqual(outcome.facts, ["$0.00 local"]);
+	assert.deepEqual(outcome.facts, []);
 	assert.equal(outcome.usageLabel, null);
 	assert.deepEqual(
 		outcome.breakdown.filter((row) => row.group === "Usage"),

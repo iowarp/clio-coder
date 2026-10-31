@@ -205,7 +205,7 @@ export function SessionOverview({
 	const branches = tree.data ? branchView(tree.data) : null;
 	const tip = branches?.rows.filter((row) => row.tip && row.active).at(-1) ?? null;
 	const ledger = useContextLedger(client, session.id, settled, active && more && open && !!capabilities.data?.context);
-	const usage = useSessionUsage(client, session.id, settled, active && more && open && !!capabilities.data?.usage);
+	const usage = useSessionUsage(client, session.id, settled, active && more && open && !!capabilities.data?.telemetry);
 	const view = board.data ? boardView(board.data) : null;
 	const plan = session.telemetry?.plan ? livePlanView(session.telemetry.plan) : (view?.plan ?? null);
 	const workspace = session.telemetry?.workspace;
@@ -559,7 +559,7 @@ export function SessionOverview({
 							title="Usage"
 							icon="usage"
 							summary={used || "No usage reported"}
-							{...(capabilities.data?.usage ? { open: () => onOpen("usage") } : {})}
+							{...(capabilities.data?.telemetry ? { open: () => onOpen("usage") } : {})}
 						>
 							{used ? (
 								<dl className="pane-usage-stats">
@@ -572,7 +572,6 @@ export function SessionOverview({
 												value={spend.tokens ?? "not recorded"}
 												factRef={spend.refs.tokens}
 											/>
-											{spend.missingTokenCalls ? ` (${spend.missingTokenCalls} missing usage)` : ""}
 										</dd>
 									</div>
 									<div>

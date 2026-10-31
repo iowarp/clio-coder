@@ -26,7 +26,6 @@ import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-
 import { sessionUsageTotals, turnUsageMeta } from "../../src/engine/acp/live-telemetry.js";
 import { telemetryRequestHandlers } from "../../src/engine/acp/telemetry-methods.js";
 import { ACP_TELEMETRY_METHODS } from "../../src/engine/acp/types.js";
-import { sessionUsageV1 } from "../../src/engine/acp/usage.js";
 import type { TUI } from "../../src/engine/tui.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { openContextOverlay } from "../../src/interactive/context-overlay.js";
@@ -166,14 +165,7 @@ test("the dispatch board shows a run's tokens and cost as the same quantities th
 	ok(partial(usage.total), "the unpriced worker call keeps the run's tokens a lower bound");
 });
 
-test("ACP's v1 usage, its live totals and its telemetry methods carry the same value and provenance", async () => {
-	const total = cold.costByModel.total;
-	const v1 = sessionUsageV1(view);
-	strictEqual(v1.cost.display, total.usd.display);
-	strictEqual(v1.cost.knownUsd, knownPart(total.usd));
-	strictEqual(v1.cost.estimated, estimated(total.usd));
-	strictEqual(v1.cost.unknown, partial(total.usd));
-	strictEqual(v1.tokens, knownPart(total.tokens));
+test("ACP's live totals and its telemetry methods carry the same value and provenance", async () => {
 	const live = sessionUsageTotals(view);
 	strictEqual(live.costDisplay, cold.session.totals.usd.display);
 	strictEqual(live.costSummary.knownUsd, knownPart(cold.session.totals.usd));

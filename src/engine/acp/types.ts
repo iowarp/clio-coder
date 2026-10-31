@@ -1,5 +1,6 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import { TurnQuantitiesSchema } from "../../core/telemetry/dto.js";
 import type { ProjectTrustSurface, WorkspaceTrustVerdict } from "../../core/workspace-trust.js";
 import type { CostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ViewArtifactCategory, ViewArtifactFormat } from "../../domains/session/view-artifacts.js";
@@ -154,8 +155,6 @@ export const ACP_ASIDE_META_KEY = "clio-coder/aside";
 export const ACP_ASIDE_ASK_METHOD = "_clio-coder/aside/ask";
 export const ACP_ASIDE_DRAFT_METHOD = "_clio-coder/aside/draft";
 export const ACP_ASIDE_CANCEL_METHOD = "_clio-coder/aside/cancel";
-export const ACP_ACCOUNTING_META_KEY = "clio-coder/accounting";
-export const ACP_USAGE_READ_METHOD = "_clio-coder/usage/read";
 /** `_clio-coder/telemetry/*`: the telemetry read model's DTOs, every quantity `{fact, display, ref}` (#434 §11.3). */
 export const ACP_TELEMETRY_META_KEY = "clio-coder/telemetry";
 export const ACP_TELEMETRY_METHODS = {
@@ -685,9 +684,6 @@ export const AcpAsideCapability = Type.Object(
 	closed,
 );
 export type AcpAsideCapability = Static<typeof AcpAsideCapability>;
-/** `agentCapabilities._meta["clio-coder/accounting"]`. */
-export const AcpUsageCapability = Type.Object({ version: Type.Literal(1), read: wireMethod }, closed);
-export type AcpUsageCapability = Static<typeof AcpUsageCapability>;
 /** Additive bridge: the runtime announces it only to a client that opted in at initialize. */
 export const AcpInterviewsCapability = Type.Object(
 	{
@@ -790,7 +786,6 @@ export interface AcpAgentCapabilitiesMeta {
 	[ACP_BRANCHES_META_KEY]?: AcpBranchesCapability;
 	[ACP_EXTENSIONS_META_KEY]?: AcpExtensionsCapability;
 	[ACP_LIBRARY_META_KEY]?: AcpLibraryCapability;
-	[ACP_ACCOUNTING_META_KEY]?: AcpUsageCapability;
 	[ACP_WORKSPACE_META_KEY]?: { version: 1; update: "session_info_update" };
 	[ACP_ASIDE_META_KEY]?: AcpAsideCapability;
 	[ACP_INTERVIEWS_META_KEY]?: AcpInterviewsCapability;
@@ -1478,48 +1473,6 @@ export interface AcpCostAggregate {
 	calls: number;
 }
 
-export interface AcpUsageRow {
-	providerId: string;
-	attributedModelId: string;
-	runs: number;
-	apiCalls: number;
-	tokens: number;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoningTokens: number;
-	sideQuestions: number;
-	handoffs: number;
-	prewarms: number;
-	backgroundMemory: number;
-	systemOne?: number;
-	failedCompaction?: number;
-	workers?: number;
-	compactions?: number;
-	missingTokenCalls?: number;
-	cost: AcpCostAggregate;
-}
-
-export interface AcpQuotaSnapshot {
-	providerId: string;
-	displayName: string;
-	status: string;
-	windows: ReadonlyArray<{
-		label: string;
-		usedPct: number;
-		resetsAt: string | null;
-		scope?: string;
-		active?: boolean;
-	}>;
-	credits?: { display: string; usedPct: number | null } | null;
-	plan?: string | null;
-	message?: string | null;
-	retryAfterSeconds?: number | null;
-	stale?: boolean;
-	fetchedAt: string | null;
-}
-
 export interface AcpCommandFlagSpec {
 	name: string;
 	takesValue?: boolean;
@@ -1571,6 +1524,7 @@ export interface AcpCommandResult {
 }
 
 const usageMetaFields = {
+	quantities: Type.Optional(TurnQuantitiesSchema),
 	unknownCallCoverageRuns: Type.Optional(Type.Integer({ minimum: 0 })),
 	costDisplay: Type.Optional(Type.String()),
 	costSummary: Type.Optional(
@@ -2199,134 +2153,6 @@ export const AcpLibraryReloadSchema = Type.Union([
 	),
 	Type.Object({ status: Type.Literal("failed"), error: Type.String({ maxLength: 1100 }) }, closed),
 ]);
-
-const wireUsageText = Type.String({ maxLength: 260 });
-
-const wireUsageCount = Type.Integer({ minimum: 0 });
-
-const wireUsageNullableText = Type.Union([wireUsageText, Type.Null()]);
-
-const wireUsagePct = Type.Number({ minimum: 0, maximum: 100 });
-
-const wireUsageCost = Type.Object(
-	{
-		display: Type.Optional(Type.String()),
-		knownUsd: Type.Number({ minimum: 0 }),
-		calls: wireUsageCount,
-		unknownCallCoverageRuns: Type.Optional(wireUsageCount),
-		estimated: Type.Boolean(),
-		unknown: Type.Boolean(),
-		free: Type.Boolean(),
-	},
-	closed,
-);
-
-export const AcpSessionUsageSchema = Type.Object(
-	{
-		version: Type.Literal(1),
-		session: Type.Object(
-			{
-				cost: wireUsageCost,
-				tokens: wireUsageCount,
-				missingTokenCalls: Type.Optional(wireUsageCount),
-				rows: Type.Array(
-					Type.Object(
-						{
-							provider: wireUsageText,
-							model: wireUsageText,
-							runs: wireUsageCount,
-							calls: wireUsageCount,
-							missingTokenCalls: Type.Optional(wireUsageCount),
-							tokens: Type.Object(
-								{
-									input: wireUsageCount,
-									output: wireUsageCount,
-									cacheRead: wireUsageCount,
-									cacheWrite: wireUsageCount,
-									reasoning: wireUsageCount,
-									total: wireUsageCount,
-								},
-								closed,
-							),
-							beside: Type.Object(
-								{
-									sideQuestions: wireUsageCount,
-									handoffs: wireUsageCount,
-									prewarms: wireUsageCount,
-									backgroundMemory: wireUsageCount,
-									systemOne: Type.Optional(wireUsageCount),
-									failedCompaction: Type.Optional(wireUsageCount),
-									workers: Type.Optional(wireUsageCount),
-									compactions: Type.Optional(wireUsageCount),
-								},
-								closed,
-							),
-							cost: wireUsageCost,
-						},
-						closed,
-					),
-					{ maxItems: 32 },
-				),
-				truncated: Type.Boolean(),
-			},
-			closed,
-		),
-		quota: Type.Union([
-			Type.Object(
-				{
-					status: Type.Literal("read"),
-					providers: Type.Array(
-						Type.Object(
-							{
-								provider: wireUsageText,
-								name: wireUsageText,
-								status: wireUsageText,
-								plan: wireUsageNullableText,
-								message: wireUsageNullableText,
-								credits: Type.Union([
-									Type.Object({ display: wireUsageText, usedPct: Type.Union([wireUsagePct, Type.Null()]) }, closed),
-									Type.Null(),
-								]),
-								stale: Type.Boolean(),
-								fetchedAt: wireUsageNullableText,
-								retryAfterSeconds: Type.Union([wireUsageCount, Type.Null()]),
-								windows: Type.Array(
-									Type.Object(
-										{
-											label: wireUsageText,
-											usedPct: wireUsagePct,
-											resetsAt: wireUsageNullableText,
-											scope: wireUsageNullableText,
-											active: Type.Boolean(),
-										},
-										closed,
-									),
-									{ maxItems: 8 },
-								),
-							},
-							closed,
-						),
-						{ maxItems: 16 },
-					),
-				},
-				closed,
-			),
-			Type.Object({ status: Type.Literal("failed"), reason: wireUsageText }, closed),
-		]),
-		/**
-		 * The read model's whole-session `SessionTelemetryV1` and `CostReportV1` by model (#434 §11). Unlike the
-		 * counts above, an unknown here stays unknown. Typed structurally: this leaf loads in a browser bundle and the
-		 * DTO schemas do not, so `TELEMETRY_DTO_SCHEMAS` in `src/core/telemetry/dto.ts` is their contract.
-		 */
-		telemetry: Type.Optional(
-			Type.Object(
-				{ session: Type.Record(Type.String(), Type.Unknown()), cost: Type.Record(Type.String(), Type.Unknown()) },
-				closed,
-			),
-		),
-	},
-	closed,
-);
 
 const wireFleetRunText = Type.String({ maxLength: 520 });
 

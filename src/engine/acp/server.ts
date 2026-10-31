@@ -197,7 +197,6 @@ import {
 	ACP_TELEMETRY_UPDATE_NOTIFICATION,
 	subscribeTelemetryUpdates,
 	telemetryRequestHandlers,
-	telemetryViewFor,
 } from "./telemetry-methods.js";
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
 import { ACP_TRUST_CAPABILITY, ACP_TRUST_META_KEY, trustResultMeta } from "./trust-notice.js";
@@ -277,13 +276,6 @@ import {
 	ACP_WORKER_PERMISSIONS_META_KEY,
 	checkAcpAgentCapabilitiesMeta,
 } from "./types.js";
-import {
-	ACP_ACCOUNTING_META_KEY,
-	ACP_USAGE_READ_METHOD,
-	type AcpUsageSource,
-	projectQuota,
-	sessionUsageV1,
-} from "./usage.js";
 
 type AcpServerEvent = unknown;
 type AcpEventRecord = Record<string, unknown> & { type?: unknown };
@@ -512,16 +504,10 @@ export interface ClioAcpServerOptions {
 	 * `/draft`). Absent means the three methods refuse.
 	 */
 	aside?: AcpAsideControl;
-	/**
-	 * The session's spend as the read model folds it for /usage, and the quota
-	 * service, for `_clio-coder/usage/read`. Absent means the method refuses.
-	 */
-	usage?: AcpUsageSource;
-	/**
-	 * The telemetry read model, for `_clio-coder/telemetry/*`, `_clio-coder/telemetry/update` and the DTO half of
-	 * `_clio-coder/usage/read` (#434 §11.3). Absent means those methods are not announced and refuse.
-	 */
+	/** The telemetry read model for pull methods and live quantities (#434). */
 	telemetryReadModel?: TelemetryReadModel;
+	/** Bind the domain projection and its live read model to the hosted session (#434). */
+	bindTelemetrySession?: (sessionId: string) => void;
 	/**
 	 * The plugin-resource reload /library reload runs, so a library change made
 	 * elsewhere reaches this open session. Absent means the method refuses.
@@ -3357,8 +3343,6 @@ export interface AcpHandshakeFeatures {
 	libraryReload?: boolean;
 	/** Whether the side-question and draft methods answer; absent reads as false. */
 	aside?: boolean;
-	/** Whether `_clio-coder/usage/read` answers; absent reads as false. */
-	usage?: boolean;
 	/** Whether the `_clio-coder/telemetry/*` methods answer and updates are pushed; absent reads as false. */
 	telemetry?: boolean;
 	/** Whether session responses and `session_info_update` carry the workspace view; absent reads as false. */
@@ -3698,7 +3682,6 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 								}
 							: {}),
 						...(features.libraryReload ? { [ACP_LIBRARY_META_KEY]: { version: 1, reload: ACP_LIBRARY_RELOAD_METHOD } } : {}),
-						...(features.usage ? { [ACP_ACCOUNTING_META_KEY]: { version: 1, read: ACP_USAGE_READ_METHOD } } : {}),
 						...(features.telemetry
 							? {
 									[ACP_TELEMETRY_META_KEY]: {
@@ -3877,7 +3860,6 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			extensions: options.extensions !== undefined,
 			libraryReload: options.libraryReload !== undefined,
 			aside: options.aside !== undefined,
-			usage: options.usage !== undefined,
 			telemetry: options.telemetryReadModel !== undefined,
 			workspace: options.workspace !== undefined,
 			images: options.expandPrompt !== undefined,
@@ -3955,16 +3937,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		sessionId: () => boundSessionId,
 		cwd: canonicalCwd,
 		...(options.contextLedger !== undefined ? { contextLedger: options.contextLedger } : {}),
-		...(options.usage !== undefined ? { sessionTelemetry: () => liveSessionView() } : {}),
-		...(options.usage?.subscribe || options.telemetryReadModel
+		...(options.telemetryReadModel
 			? {
-					// A usage source's change, or a folded batch: a model response can land before its call is folded.
-					subscribeUsage: (listener: () => void) => {
-						const offs = [options.usage?.subscribe?.(listener), options.telemetryReadModel?.subscribe("session", listener)];
-						return () => {
-							for (const off of offs) off?.();
-						};
-					},
+					sessionTelemetry: () => liveSessionView(),
+					subscribeUsage: (listener: () => void) => options.telemetryReadModel?.subscribe("session", listener) ?? (() => {}),
 				}
 			: {}),
 		...(options.plan !== undefined ? { plan: options.plan } : {}),
@@ -4829,7 +4805,6 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				throw error;
 			}
 			const id = meta?.id ?? randomUUID();
-			options.usage?.resetSession?.(id);
 			if (safeStoredIdentifier(id, ACP_MAX_SESSION_ID_BYTES) === null) {
 				await options.mcpCapabilities?.detachClientServers();
 				throw new AcpRequestError(-32603, "session creation failed", { code: "internal_error" });
@@ -4853,6 +4828,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			sessionCreated = true;
 			sessions.set(id, session);
 			boundSessionId = id;
+			options.bindTelemetrySession?.(id);
 			const ceilingEcho = applySessionCeiling(session);
 			announceCommands(id);
 			telemetry.bind(false);
@@ -4940,6 +4916,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	const bindRestored = (session: AcpServerSession, replay: PreparedAcpReplay | undefined): void => {
 		sessions.set(session.id, session);
 		boundSessionId = session.id;
+		options.bindTelemetrySession?.(session.id);
 		announceCommands(session.id);
 		if (replay !== undefined) {
 			for (const replayParams of replay.params) options.transport.notify("session/update", replayParams);
@@ -5489,37 +5466,6 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const cancelled = pendingHandoff?.handoffId === handoffId && pendingHandoff.sessionId === bound.id;
 		if (cancelled) pendingHandoff = null;
 		return { cancelled };
-	});
-
-	// /usage: the session's own accounting and each provider's quota. A quota
-	// read that throws fails only the quota half; the session numbers still answer.
-	options.transport.onRequest(ACP_USAGE_READ_METHOD, async (params) => {
-		requireInitialized();
-		requireAuthenticated();
-		const request = assertParamKeys(params, new Set(["sessionId"]));
-		if (options.usage === undefined) throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
-		const bound = getSession(request);
-		let quota: ReturnType<typeof projectQuota> | { status: "failed"; reason: string };
-		try {
-			quota = projectQuota(await options.usage.quota());
-		} catch (err) {
-			quota = { status: "failed", reason: boundString(err instanceof Error ? err.message : String(err), 256) };
-		}
-		// The v1 counts are the read model's known parts, and its whole-session DTOs ride beside them with the unknowns
-		// the v1 numbers cannot carry (#434 §11.3).
-		let view: Awaited<ReturnType<typeof telemetryViewFor>> = null;
-		try {
-			view = options.telemetryReadModel ? await telemetryViewFor(options.telemetryReadModel, bound.id) : null;
-		} catch (error) {
-			options.diagnostics?.(`telemetry view failed: ${acpErrorMessage(error)}`);
-		}
-		const session = sessionUsageV1(view);
-		return {
-			version: 1,
-			session,
-			quota,
-			...(view ? { telemetry: { session: view.session(), cost: view.cost("model") } } : {}),
-		};
 	});
 
 	if (options.telemetryReadModel) {
@@ -7026,7 +6972,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				? ceilingMeta(applyCeilings([session.ceiling, promptCeiling], "prompt"))
 				: undefined;
 		const respond = (stopReason: string): AcpPromptResponse =>
-			promptResponse(stopReason, active, options.usage === undefined ? null : liveSessionView(), ceilingEcho);
+			promptResponse(stopReason, active, liveSessionView(), ceilingEcho);
 		telemetry.turnStarted(active.turn);
 		const unsubscribe = attachTurnObserver(session.id, active);
 		try {

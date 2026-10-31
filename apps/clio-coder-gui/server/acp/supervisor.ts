@@ -112,7 +112,6 @@ import {
 	ACP_TARGETS_PROBE_METHOD,
 	ACP_TELEMETRY_UPDATE_NOTIFICATION,
 	ACP_TRUNCATED_META_KEY,
-	ACP_USAGE_READ_METHOD,
 	type AcpJob,
 	AcpJobList,
 	AcpTargetList,
@@ -125,7 +124,6 @@ import { withLedgerDisplay } from "../services/context-display.js";
 import { turnCostDisplays, withCostDisplay } from "../services/cost-display.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
-import { withQuotaDisplay } from "../services/usage-display.js";
 import type { WorkspaceService } from "../services/workspaces.js";
 import type { AppFiles } from "../state/files.js";
 import { type ChildRow, ChildrenFile } from "./children-file.js";
@@ -1387,19 +1385,27 @@ export class Supervisor {
 		return this.projected(id, ACP_ARTIFACTS_READ_METHOD, { sessionId: id, ...body }, ArtifactPage, BRANCH_TIMEOUT_MS);
 	}
 	async usage(id: string) {
-		const entry = this.active(id);
-		if (!entry.client.capabilities.usage)
-			throw new AppProblem("conflict", "This Clio Coder build does not report its usage.");
-		const quotaMethod = entry.client.capabilities.telemetry?.methods.quota;
-		const [usage, telemetryQuota] = await Promise.all([
-			// A quota read may reach each signed-in provider once its cache has expired.
-			this.projected(id, ACP_USAGE_READ_METHOD, { sessionId: id }, SessionUsage, BRANCH_TIMEOUT_MS),
-			// The read model's quota fold; when it cannot be read, the v1 shares worded here stand (#434).
-			quotaMethod
-				? this.projected(id, quotaMethod, {}, TelemetryQuota, BRANCH_TIMEOUT_MS).catch(() => undefined)
-				: undefined,
+		const methods = this.active(id).client.capabilities.telemetry?.methods;
+		if (!methods?.session || !methods.cost || !methods.quota)
+			throw new AppProblem("conflict", "This Clio build does not report telemetry.");
+		const [session, cost, telemetryQuota] = await Promise.all([
+			this.projected(
+				id,
+				methods.session,
+				{ sessionId: id },
+				SessionUsage.properties.telemetry.properties.session,
+				BRANCH_TIMEOUT_MS,
+			),
+			this.projected(
+				id,
+				methods.cost,
+				{ sessionId: id, groupBy: "model" },
+				SessionUsage.properties.telemetry.properties.cost,
+				BRANCH_TIMEOUT_MS,
+			),
+			this.projected(id, methods.quota, {}, TelemetryQuota, BRANCH_TIMEOUT_MS),
 		]);
-		return withQuotaDisplay(usage, telemetryQuota);
+		return { telemetry: { session, cost }, telemetryQuota };
 	}
 	private asiding(id: string) {
 		const entry = this.active(id);

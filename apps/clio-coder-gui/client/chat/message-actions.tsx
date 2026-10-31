@@ -1,3 +1,5 @@
+import type { Client } from "../api/client.js";
+import { Explained } from "../telemetry/Explained.js";
 /**
  * Per-message affordances: copy the prompt, copy the response, try a failed
  * turn again, and the outcome footer that closes a settled turn.
@@ -68,52 +70,82 @@ export function MessageActions({ sessionId, row, requestText, responseText, stat
  * accounting; the clock's title carries the full date.
  */
 export function TurnOutcome({
+	client,
 	outcome,
 	formatClock,
 }: {
+	client: Client;
 	outcome: TurnOutcomeView;
 	formatClock: (at: string) => string;
 }) {
 	return (
-		<details className="turn-outcome" data-tone={outcome.tone}>
-			<summary className="turn-outcome__line">
-				<StatusMark tone={outcome.tone} label={outcome.label} />
-				{outcome.facts.slice(0, 1).map((fact) => (
-					<span className="turn-outcome__fact" key={fact}>
-						{fact}
-					</span>
-				))}
-				{outcome.usageLabel ? <span className="turn-outcome__fact">{outcome.usageLabel}</span> : null}
-				{outcome.facts.slice(1).map((fact) => (
-					<span className="turn-outcome__fact" key={fact}>
-						{fact}
-					</span>
-				))}
-				{outcome.finishedAt ? (
-					<time dateTime={outcome.finishedAt} title={formatTime(outcome.finishedAt)}>
-						{formatClock(outcome.finishedAt)}
-					</time>
+		<div className="turn-outcome" data-tone={outcome.tone}>
+			<details>
+				<summary className="turn-outcome__line">
+					<StatusMark tone={outcome.tone} label={outcome.label} />
+					{outcome.facts
+						.filter((fact) => fact !== outcome.usage?.quantities?.usd.display)
+						.slice(0, 1)
+						.map((fact) => (
+							<span className="turn-outcome__fact" key={fact}>
+								{fact}
+							</span>
+						))}
+
+					{outcome.facts
+						.filter((fact) => fact !== outcome.usage?.quantities?.usd.display)
+						.slice(1)
+						.map((fact) => (
+							<span className="turn-outcome__fact" key={fact}>
+								{fact}
+							</span>
+						))}
+					{outcome.finishedAt ? (
+						<time dateTime={outcome.finishedAt} title={formatTime(outcome.finishedAt)}>
+							{formatClock(outcome.finishedAt)}
+						</time>
+					) : null}
+				</summary>
+				{outcome.detail ? <p className="turn-outcome__detail">{outcome.detail}</p> : null}
+				{outcome.stopReason ? <code className="turn-outcome__code">{outcome.stopReason}</code> : null}
+				{outcome.breakdown.length > 0 ? (
+					<div className="turn-details">
+						{outcomeDetailGroups(outcome).map((group) => (
+							<section key={group.label} className="turn-details__group">
+								<h3>{group.label}</h3>
+								<dl>
+									{group.fields.map((field) => (
+										<div key={field.label}>
+											<dt>{field.label}</dt>
+											<dd>
+												<Explained client={client} label={field.label} value={field.value} factRef={field.factRef ?? null} />
+											</dd>
+										</div>
+									))}
+								</dl>
+							</section>
+						))}
+					</div>
 				) : null}
-			</summary>
-			{outcome.detail ? <p className="turn-outcome__detail">{outcome.detail}</p> : null}
-			{outcome.stopReason ? <code className="turn-outcome__code">{outcome.stopReason}</code> : null}
-			{outcome.breakdown.length > 0 ? (
-				<div className="turn-details">
-					{outcomeDetailGroups(outcome).map((group) => (
-						<section key={group.label} className="turn-details__group">
-							<h3>{group.label}</h3>
-							<dl>
-								{group.fields.map((field) => (
-									<div key={field.label}>
-										<dt>{field.label}</dt>
-										<dd>{field.value}</dd>
-									</div>
-								))}
-							</dl>
-						</section>
-					))}
+			</details>
+			{outcome.usage?.quantities ? (
+				<div className="turn-outcome__line">
+					{(
+						[
+							["prompt", "Input"],
+							["output", "Output"],
+							["usd", "Cost"],
+						] as const
+					).map(([key, label]) => {
+						const q = outcome.usage?.quantities?.[key];
+						return q ? (
+							<span className="turn-outcome__fact" key={key}>
+								{label}: <Explained client={client} label={label} value={q.display} factRef={q.ref} />
+							</span>
+						) : null;
+					})}
 				</div>
 			) : null}
-		</details>
+		</div>
 	);
 }

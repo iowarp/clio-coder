@@ -34,7 +34,7 @@ export const UsagePanel = memo(function UsagePanel({
 	settledTurns: number;
 	liveUsage?: LiveUsage;
 }) {
-	const supported = !!capabilities?.usage;
+	const supported = !!capabilities?.telemetry;
 	const scope = sessionReadScope(sessionId);
 	const id = useId();
 	const refreshButton = useRef<HTMLButtonElement>(null);
@@ -53,6 +53,7 @@ export const UsagePanel = memo(function UsagePanel({
 	// A closed task has no live usage read; the cold telemetry route folds its journal instead (#434).
 	const cold = useTelemetrySession(client, sessionId, !sessionOpen);
 	const summary = usageSummary(sessionOpen, usage.data, liveUsage, cold.data);
+	const overhead = (liveUsage?.session ?? usage.data?.telemetry.session ?? cold.data)?.overhead.share;
 	const quota = usage.data ? quotaCards(usage.data) : null;
 	const refresh = () => {
 		if (usage.isFetching) return;
@@ -100,9 +101,14 @@ export const UsagePanel = memo(function UsagePanel({
 					{sessionOpen ? <p className="drill__note">{summary.note}</p> : null}
 				</section>
 			) : null}
+			{overhead ? (
+				<section className="drill__section" aria-label="Harness overhead">
+					<Explained client={client} label="Harness overhead" value={overhead.display} factRef={overhead.ref} />
+				</section>
+			) : null}
 			{summary.details && usage.data ? (
 				<>
-					{usage.data.session.rows.length > 0 ? (
+					{usage.data.telemetry.cost.groups.length > 0 ? (
 						<section className="drill__section" aria-labelledby={`${id}-models`}>
 							<h3 id={`${id}-models`}>By model</h3>
 							<ul className="drill__rows usage-panel__models" aria-label="Spend by provider and model">
@@ -134,14 +140,6 @@ export const UsagePanel = memo(function UsagePanel({
 							{quota?.status === "read" ? ` · ${quota.cards.length} ${quota.cards.length === 1 ? "plan" : "plans"}` : ""}
 						</summary>
 
-						{quota?.status === "failed" ? (
-							<p role="alert" className="pane-empty">
-								{quota.reason}{" "}
-								<button type="button" disabled={usage.isFetching} onClick={refresh}>
-									Refresh reported quota
-								</button>
-							</p>
-						) : null}
 						{quota?.status === "read" && quota.cards.length === 0 ? (
 							<p className="pane-empty">No provider with a readable plan is signed in.</p>
 						) : null}

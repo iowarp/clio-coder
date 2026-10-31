@@ -2,25 +2,23 @@ import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Value } from "typebox/value";
 import { clioDataDir } from "../../../../../src/core/xdg.js";
-import { admitRunProvenance, provenanceTranscriptLines } from "../../../../../src/domains/evidence/provenance.js";
+import type { EvidenceTrustStatusView } from "../../../../../src/domains/evidence/index.js";
 import {
+	admitRunProvenance,
 	inspectEvidence,
 	listEvidenceOverviews,
 	loadEvidenceGateDecisions,
 	loadEvidenceRunProvenance,
 	loadEvidenceTrustStatus,
-} from "../../../../../src/domains/evidence/store.js";
-import {
+	provenanceTranscriptLines,
 	summarizeTrustStatus,
 	trustVerdict,
 	worstTrustVerdict,
-} from "../../../../../src/domains/evidence/trust-projection.js";
-import type { EvidenceTrustStatusView } from "../../../../../src/domains/evidence/types.js";
+} from "../../../../../src/domains/evidence/index.js";
+import { evidenceQuantities } from "../../../../../src/domains/telemetry/index.js";
 import { Id } from "../../../contracts/common.js";
 import { EvidenceOverview, type EvidenceRequest } from "../../../contracts/evidence.js";
-import { withCostDisplay } from "../../services/cost-display.js";
 import { AppProblem } from "../../services/problem.js";
-import { renderEvidenceTokens } from "../http-shims.js";
 import { artifactPage, containedFile } from "./storage.js";
 
 /** Preflight the exact files a root seam reads, including optional files. Never follow an escaping symlink. */
@@ -48,8 +46,8 @@ function verdict(trust: EvidenceTrustStatusView) {
  * marker and cost through the shared renderer, so the browser shows strings and sums nothing (#434).
  */
 function displayOverview(overview: Awaited<ReturnType<typeof listEvidenceOverviews>>[number]) {
-	const { costSummary: _summary, ...totals } = withCostDisplay({ ...overview.totals });
-	return { ...overview, totals: { ...totals, tokensDisplay: renderEvidenceTokens(overview.totals) } };
+	const { costSummary: _summary, ...totals } = overview.totals;
+	return { ...overview, totals, quantities: evidenceQuantities(overview) };
 }
 async function inventory(data: string) {
 	let entries: string[];

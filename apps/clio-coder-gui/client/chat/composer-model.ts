@@ -23,7 +23,7 @@ import {
 	STEER_TEXT_MAX_BYTES,
 	type SteerMode,
 } from "../../contracts/steering.js";
-import { compactCount, compactDuration } from "./overview-model.js";
+import { compactDuration } from "./overview-model.js";
 
 /** `routes.turn` bounds its text at this many characters, so the composer refuses past it locally. */
 export const PROMPT_TEXT_MAX_CHARACTERS = 32000;
@@ -800,27 +800,21 @@ export interface TurnOutcomeView {
 		group: "Model" | "Usage" | "Speed" | "Cache" | "Cost" | "Tools";
 		label: string;
 		value: string;
+		factRef?: string;
 	}[];
 }
 
-/** Two numbers visible. */
 export function usageSummary(usage: Usage): string {
-	return `${usage.input.toLocaleString("en-US")} in · ${usage.output.toLocaleString("en-US")} out`;
+	return usage.quantities
+		? `${usage.quantities.input.display} in · ${usage.quantities.output.display} out`
+		: "not journaled";
 }
-
-/** Five in the tooltip, because the other three are cache and reasoning accounting. */
 export function usageTitle(usage: Usage): string {
-	return [
-		`input ${usage.input.toLocaleString("en-US")}`,
-		`output ${usage.output.toLocaleString("en-US")}`,
-		`cache read ${usage.cacheRead.toLocaleString("en-US")}`,
-		`cache write ${usage.cacheWrite.toLocaleString("en-US")}`,
-		`reasoning ${usage.reasoning.toLocaleString("en-US")}`,
-	].join(" · ");
-}
-
-function turnCost(usage: Usage | null): string | null {
-	return usage ? (usage.costDisplay ?? "not measured") : null;
+	return usage.quantities
+		? Object.entries(usage.quantities)
+				.map(([key, quantity]) => `${key} ${quantity.display}`)
+				.join(" · ")
+		: "not journaled";
 }
 
 const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: string; label: string }>> = {
@@ -843,48 +837,30 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 		turn.startedAt && turn.finishedAt ? Date.parse(turn.finishedAt) - Date.parse(turn.startedAt) : Number.NaN;
 	// Under a second is not a duration worth a place in the line.
 	if (Number.isFinite(elapsed) && elapsed >= 1000) facts.push(compactDuration(elapsed));
-	const breakdown: { group: "Model" | "Usage" | "Speed" | "Cache" | "Cost" | "Tools"; label: string; value: string }[] =
-		[];
+	const breakdown: {
+		group: "Model" | "Usage" | "Speed" | "Cache" | "Cost" | "Tools";
+		label: string;
+		value: string;
+		factRef?: string;
+	}[] = [];
 	if (turn.details?.model) breakdown.push({ group: "Model", label: "Model", value: turn.details.model });
 	const usage = turn.usage;
-	const cost = turnCost(usage);
-	if (usage) {
-		for (const [key, label] of [
-			["input", "Input"],
-			["output", "Output"],
-			["reasoning", "Reasoning"],
+	const quantities = usage?.quantities;
+	const cost = quantities?.usd.display ?? null;
+	if (quantities) {
+		for (const [key, label, group] of [
+			["input", "Input", "Usage"],
+			["output", "Output", "Usage"],
+			["reasoning", "Reasoning", "Usage"],
+			["cacheRead", "Cache read", "Cache"],
+			["cacheWrite", "Cache write", "Cache"],
+			["ttft", "First token", "Speed"],
+			["usd", "Cost", "Cost"],
 		] as const)
-			if (usage[key] > 0) breakdown.push({ group: "Usage", label, value: usage[key].toLocaleString("en-US") });
-		const inputTotal = usage.input + usage.cacheRead + usage.cacheWrite;
-		if (usage.cacheRead > 0 && inputTotal > 0)
-			breakdown.push({
-				group: "Cache",
-				label: "Hit share",
-				value: `${Math.round((100 * usage.cacheRead) / inputTotal)}%`,
-			});
-		if (usage.cacheWrite > 0)
-			breakdown.push({ group: "Cache", label: "Written", value: usage.cacheWrite.toLocaleString("en-US") });
-		if (cost !== null) breakdown.push({ group: "Cost", label: "Cost", value: cost });
+			breakdown.push({ group, label, value: quantities[key].display, factRef: quantities[key].ref });
 	}
-	if (turn.details?.outputTokensPerSecond && turn.details.outputTokensPerSecond > 0)
-		breakdown.push({
-			group: "Speed",
-			label: "Output",
-			value: `${turn.details.outputTokensPerSecond.toFixed(1)} tokens/s`,
-		});
-	if (turn.details?.ttftMs && turn.details.ttftMs > 0)
-		breakdown.push({
-			group: "Speed",
-			label: "First token",
-			value:
-				turn.details.ttftMs < 1000
-					? `${Math.round(turn.details.ttftMs)} ms`
-					: `${(turn.details.ttftMs / 1000).toFixed(2)}s`,
-		});
 	if (toolCount > 0) breakdown.push({ group: "Tools", label: "Calls", value: String(toolCount) });
 	if (cost !== null) facts.push(cost);
-	if (turn.details?.outputTokensPerSecond && turn.details.outputTokensPerSecond > 0)
-		facts.push(`${turn.details.outputTokensPerSecond.toFixed(1)} tokens/s`);
 	if (toolCount > 0) facts.push(`${toolCount} tool ${toolCount === 1 ? "call" : "calls"}`);
 	return {
 		tone: shape.tone,
@@ -893,16 +869,7 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 		detail: turn.status === "succeeded" ? null : (turn.problem?.detail ?? null),
 		stopReason: turn.status === "failed" ? turn.stopReason : null,
 		facts,
-		usageLabel: usage
-			? [
-					usage.input + usage.cacheRead + usage.cacheWrite > 0
-						? `${compactCount(usage.input + usage.cacheRead + usage.cacheWrite)} in`
-						: null,
-					usage.output > 0 ? `${compactCount(usage.output)} out` : null,
-				]
-					.filter(Boolean)
-					.join(" / ") || null
-			: null,
+		usageLabel: quantities ? `${quantities.prompt.display} in / ${quantities.output.display} out` : null,
 		usage: turn.usage,
 		usageTitle: turn.usage === null ? null : usageTitle(turn.usage),
 		finishedAt: turn.finishedAt,
@@ -912,10 +879,10 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 
 /** Named groups keep the disclosure readable without printing empty categories. */
 export function outcomeDetailGroups(outcome: TurnOutcomeView) {
-	const groups = new Map<string, { label: string; value: string }[]>();
+	const groups = new Map<string, { label: string; value: string; factRef?: string }[]>();
 	for (const field of outcome.breakdown) {
 		const bucket = groups.get(field.group) ?? [];
-		bucket.push({ label: field.label, value: field.value });
+		bucket.push({ label: field.label, value: field.value, ...(field.factRef ? { factRef: field.factRef } : {}) });
 		groups.set(field.group, bucket);
 	}
 	return [...groups].map(([label, fields]) => ({ label, fields }));

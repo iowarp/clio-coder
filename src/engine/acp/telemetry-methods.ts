@@ -31,7 +31,7 @@ const invalid = (reason: string) =>
 	new AcpRequestError(-32602, "invalid method parameters", { code: "invalid_params", reason });
 
 /** The live view when it is this session's, else a cold read; null only when no directory holds the session. */
-export async function telemetryViewFor(model: TelemetryReadModel, sessionId: string): Promise<TelemetryView | null> {
+async function telemetryViewFor(model: TelemetryReadModel, sessionId: string): Promise<TelemetryView | null> {
 	const live = model.live();
 	return live?.sessionId === sessionId ? live : model.open(sessionId);
 }

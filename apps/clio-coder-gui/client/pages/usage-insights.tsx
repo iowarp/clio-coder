@@ -234,7 +234,7 @@ export function UsageInsights({ client, report }: { client: Client; report: Usag
 										strokeDashoffset={-segment.offset * 100}
 									>
 										<title>
-											{segment.model} · {segment.target}: {segment.calls} calls ({(segment.share * 100).toFixed(1)}%)
+											{segment.model} · {segment.target}: {segment.callsDisplay} calls ({segment.display})
 										</title>
 									</circle>
 								))}
@@ -261,10 +261,10 @@ export function UsageInsights({ client, report }: { client: Client; report: Usag
 										<span>
 											<strong>{segment.model}</strong>
 											<small>
-												{segment.target} · {countText(segment.calls)} calls
+												{segment.target} · {segment.callsDisplay} calls
 											</small>
 										</span>
-										<span>{(segment.share * 100).toFixed(1)}%</span>
+										<span>{segment.display}</span>
 									</button>
 								</li>
 							))}

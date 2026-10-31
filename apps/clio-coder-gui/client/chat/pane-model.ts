@@ -108,7 +108,7 @@ export function paneGate(
 ): "ready" | "checking" | "closed" | "unsupported" {
 	const required = {
 		context: "context",
-		usage: "usage",
+		usage: "telemetry",
 		board: "board",
 		artifacts: "artifacts",
 		branches: "branches",

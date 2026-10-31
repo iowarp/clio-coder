@@ -4,13 +4,15 @@ import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
 import type { SessionWorkspace } from "../../contracts/session-telemetry.js";
 import type { Client } from "../api/client.js";
+import { Explained } from "../telemetry/Explained.js";
+import { explainable } from "../telemetry/quantity-model.js";
 import { ContextControls } from "./ContextControls.js";
 import { ContextWorkCard } from "./ContextWorkCard.js";
 import { useStopContext } from "./context-command.js";
 import { contextView, contextWorkspaceFacts } from "./context-model.js";
 import { contextWorkView } from "./context-work-model.js";
 import { contextMeter } from "./overview-model.js";
-import { useContextLedger, useContextWork } from "./session-telemetry.js";
+import { useContextLedger, useContextWork, useTelemetrySession } from "./session-telemetry.js";
 import "./session-board.css";
 import "./pane-inspection.css";
 
@@ -37,6 +39,8 @@ export const ContextPanel = memo(function ContextPanel({
 	workspace?: SessionWorkspace;
 	nowMs?: number;
 }) {
+	const telemetry = useTelemetrySession(client, sessionId, true);
+	const context = telemetry.data?.context;
 	const supported = !!capabilities?.context;
 	const id = useId();
 	const refreshButton = useRef<HTMLButtonElement>(null);
@@ -134,10 +138,12 @@ export const ContextPanel = memo(function ContextPanel({
 				<>
 					<section className="drill__section context-panel__lead" aria-label="Context window in use">
 						<p className="context-panel__figure">
-							<strong>{view.figure.percent ?? view.figure.used}</strong>
+							<strong>
+								<Explained client={client} label="Context used" {...explainable(context?.used)} />
+							</strong>
 							<span className="context-panel__of">
-								{view.figure.percent === null ? "" : `${view.figure.used} `}
-								{view.figure.window === null ? "tokens in use" : `of ${view.figure.window} tokens`}
+								of <Explained client={client} label="Context window" {...explainable(context?.window)} /> tokens ·{" "}
+								<Explained client={client} label="Context share" {...explainable(context?.share)} />
 							</span>
 						</p>
 						<p className="drill__note">
@@ -169,7 +175,12 @@ export const ContextPanel = memo(function ContextPanel({
 									<ul className="pane-legend" aria-label="What fills the window">
 										{segments.map((segment, index) => (
 											<li key={segment.key} data-index={index}>
-												{segment.label} <span>{segment.share}</span>
+												{segment.label}{" "}
+												<Explained
+													client={client}
+													label={`${segment.label} share`}
+													{...explainable(context?.groups.find((group) => group.key === segment.key)?.share)}
+												/>
 											</li>
 										))}
 									</ul>
@@ -208,8 +219,20 @@ export const ContextPanel = memo(function ContextPanel({
 								{view.rows.map((row) => (
 									<tr key={row.key}>
 										<th scope="row">{row.label}</th>
-										<td>{row.tokens}</td>
-										<td>{row.share || <span className="drill__absent">not reported</span>}</td>
+										<td>
+											<Explained
+												client={client}
+												label={`${row.label} tokens`}
+												{...explainable(context?.groups.find((group) => group.key === row.key)?.tokens)}
+											/>
+										</td>
+										<td>
+											<Explained
+												client={client}
+												label={`${row.label} share`}
+												{...explainable(context?.groups.find((group) => group.key === row.key)?.share)}
+											/>
+										</td>
 									</tr>
 								))}
 							</tbody>
@@ -234,7 +257,28 @@ export const ContextPanel = memo(function ContextPanel({
 								<div key={fact.label}>
 									<dt>{fact.label}</dt>
 									<dd>
-										{fact.value !== null ? <span className="drill__num">{fact.value}</span> : null}
+										{fact.value !== null ? (
+											<Explained
+												client={client}
+												label={fact.label}
+												{...explainable(
+													fact.label === "Cache read"
+														? context?.cache?.cacheRead
+														: fact.label === "Cache write"
+															? context?.cache?.cacheWrite
+															: fact.label === "Uncached input"
+																? context?.cache?.input
+																: fact.label === "Window"
+																	? context?.window
+																	: fact.label === "Free"
+																		? context?.free
+																		: fact.label === "Reserve"
+																			? context?.reserve
+																			: null,
+													fact.value,
+												)}
+											/>
+										) : null}
 										{fact.note !== null ? <span>{fact.note}</span> : null}
 									</dd>
 								</div>
@@ -253,7 +297,28 @@ export const ContextPanel = memo(function ContextPanel({
 								<div key={fact.label}>
 									<dt>{fact.label}</dt>
 									<dd>
-										{fact.value !== null ? <span className="drill__num">{fact.value}</span> : null}
+										{fact.value !== null ? (
+											<Explained
+												client={client}
+												label={fact.label}
+												{...explainable(
+													fact.label === "Cache read"
+														? context?.cache?.cacheRead
+														: fact.label === "Cache write"
+															? context?.cache?.cacheWrite
+															: fact.label === "Uncached input"
+																? context?.cache?.input
+																: fact.label === "Window"
+																	? context?.window
+																	: fact.label === "Free"
+																		? context?.free
+																		: fact.label === "Reserve"
+																			? context?.reserve
+																			: null,
+													fact.value,
+												)}
+											/>
+										) : null}
 										{fact.note !== null ? <span>{fact.note}</span> : null}
 									</dd>
 								</div>

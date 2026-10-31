@@ -27,9 +27,7 @@ import type { SessionConfig, SetConfigOption } from "../../contracts/session-con
 import type { SessionTelemetry } from "../../contracts/session-telemetry.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
 import { TelemetryCapability } from "../../contracts/telemetry.js";
-import { UsageCapability } from "../../contracts/usage.js";
 import {
-	ACP_ACCOUNTING_META_KEY,
 	ACP_ARTIFACTS_META_KEY,
 	ACP_ASIDE_META_KEY,
 	ACP_BOARD_META_KEY,
@@ -129,7 +127,6 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("extensions", optional(ExtensionsCapability, meta[ACP_EXTENSIONS_META_KEY])),
 		...maybe("aside", optional(AsideCapability, meta[ACP_ASIDE_META_KEY])),
 		...maybe("interviews", optional(InterviewCapability, meta[ACP_INTERVIEWS_META_KEY])),
-		...maybe("usage", optional(UsageCapability, meta[ACP_ACCOUNTING_META_KEY])),
 		...maybe("telemetry", optional(TelemetryCapability, meta[ACP_TELEMETRY_META_KEY])),
 		...maybe("library", optional(LibraryCapability, meta[ACP_LIBRARY_META_KEY])),
 	};

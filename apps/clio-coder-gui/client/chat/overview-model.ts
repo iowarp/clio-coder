@@ -75,7 +75,7 @@ export function contextMeter(
 ): ContextMeter | null {
 	const meter = ledger.display.meter;
 	if (ledger.contextWindow <= 0 || meter === null) return null;
-	const raw = ledger.percent ?? (ledger.usedTokens / ledger.contextWindow) * 100;
+	const raw = ledger.percent ?? 0;
 	const percent = Math.min(100, Math.max(0, raw));
 	const tone = percent >= 85 ? "full" : percent >= 65 ? "warn" : "ok";
 	const label = `${meter.used} of ${meter.window} tokens${ledger.measured ? "" : ", estimated"}`;
