@@ -44,6 +44,7 @@ import {
 	turnsSum,
 	whyStopped,
 } from "./read-model.js";
+import type { TelemetryScopeFiles } from "./seal.js";
 
 /**
  * The live telemetry read model (#434 §11). It never reads a journal on a render path and never folds per token:
@@ -61,6 +62,9 @@ interface TelemetrySourceLoader {
 	loadProcessTelemetrySourceAsync?(stateDir: string, processId: string): Promise<JournalSource>;
 	/** The run's sealed receipt through its integrity check; absent from a loader that does not read receipts. */
 	loadRunReceiptEvidence?(stateDir: string, runId: string): ReceiptEvidenceV1;
+	/** A run scope's own files for its seal verdict and result object; absent from a loader that reads none. */
+	loadRunScopeFiles?(stateDir: string, runId: string): TelemetryScopeFiles | null;
+	loadRunScopeFilesAsync?(stateDir: string, runId: string): Promise<TelemetryScopeFiles | null>;
 	/** This host's journaled quota readings across its process journals; absent from a loader that reads none. */
 	loadHostQuotaRecordsAsync?(stateDir: string): Promise<TelemetryRecord[]>;
 }
@@ -96,6 +100,7 @@ type LocalView = TelemetryView & { references(runId: string): boolean };
 export function telemetryView(
 	source: SessionSource,
 	receipt: (runId: string) => ReceiptEvidenceV1 | null = () => null,
+	scope: (runId: string) => TelemetryScopeFiles | null = () => null,
 ): LocalView {
 	let session: SessionTelemetryV1 | undefined;
 	return {
@@ -109,7 +114,7 @@ export function telemetryView(
 		runs: () => runsReport(source),
 		run: (runId) => {
 			const run = source.runs.get(runId);
-			return run ? runTelemetry(runId, run, {}, receipt(runId)) : null;
+			return run ? runTelemetry(runId, run, {}, receipt(runId), scope(runId)) : null;
 		},
 		references: (runId) => source.runs.has(runId),
 		whyStopped: () => whyStopped(source),
@@ -293,6 +298,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	const load = async () => (loaded ??= await importLoader());
 	// Receipts are read only once the cold loader is in; a run DTO before that names no receipt rather than guessing.
 	const receipt = (runId: string) => loaded?.loadRunReceiptEvidence?.(options.stateDir(), runId) ?? null;
+	const scope = (runId: string) => loaded?.loadRunScopeFiles?.(options.stateDir(), runId) ?? null;
 	/** The session `bind` named; nothing subscribes or reads until a reader first asks (`activate`). */
 	let bound: string | null = null;
 	let current: Binding | null = null;
@@ -654,13 +660,13 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		const binding = current;
 		if (!binding) return null;
 		if (binding.view?.version === binding.version) return binding.view.view;
-		const view = telemetryView(binding.root ? snapshot(binding, binding.root) : buffered(binding), receipt);
+		const view = telemetryView(binding.root ? snapshot(binding, binding.root) : buffered(binding), receipt, scope);
 		binding.view = { version: binding.version, view };
 		return view;
 	};
 	const open = async (sessionId: string): Promise<TelemetryView | null> => {
 		const source = await (await load()).loadSessionTelemetrySourceAsync(options.stateDir(), sessionId);
-		return source ? telemetryView(source, receipt) : null;
+		return source ? telemetryView(source, receipt, scope) : null;
 	};
 
 	return {
@@ -696,6 +702,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 				await loader.loadRunTelemetrySourceAsync(options.stateDir(), runId),
 				{},
 				loader.loadRunReceiptEvidence?.(options.stateDir(), runId) ?? null,
+				(await loader.loadRunScopeFilesAsync?.(options.stateDir(), runId)) ?? null,
 			);
 		},
 		async processQuantity(metric) {

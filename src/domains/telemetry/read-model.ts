@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { Value } from "typebox/value";
 import { processIdentityAlive } from "../../core/process-identity.js";
 import { cacheBreakLoss } from "../../core/telemetry/cache-break.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
@@ -40,6 +42,7 @@ import {
 	renderUsdSum,
 } from "../../core/telemetry/render.js";
 import type { CallSettled, CallUsage, ObjectRef } from "../../core/telemetry/schemas.js";
+import { RunResultObjectSchema } from "../../core/telemetry/schemas.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { EvidenceOverview } from "../evidence/index.js";
 import type { ContextSnapshot } from "../session/context-accounting.js";
@@ -2730,12 +2733,33 @@ export function runRowTelemetry(runId: string, source: JournalSource): RunRowV1 
 	return runRow({ run }, run);
 }
 
-/** `receipt` is the run's sealed receipt read through its integrity check, which the caller's loader reads (#434 §11.1). */
+/** The run-result object a settlement names, from the scope's own files; `missing` when they do not hold it intact. */
+function runResultOf(settled: Run["settled"], scope: TelemetryScopeFiles | null): RunTelemetryV1["result"] {
+	if (settled === null || scope === null) return null;
+	const id = settled.data.result.id;
+	const file = scope.objects.find((object) => object.name === `${id}.json`);
+	if (file === undefined || createHash("sha256").update(file.bytes).digest("hex") !== id.slice("obj_".length))
+		return { state: "missing" };
+	try {
+		const value: unknown = JSON.parse(file.bytes.toString("utf8"));
+		return Value.Check(RunResultObjectSchema, value) ? { state: "resolved", value } : { state: "missing" };
+	} catch {
+		// Bytes that hash to the id but do not parse were never a stored result object.
+		return { state: "missing" };
+	}
+}
+
+/**
+ * One run's DTO: its fold, its run.settled facts, and, given the run scope's own files (`readTelemetryScopeFiles`),
+ * the seal verdict and the result object the settlement names. `receipt` is the run's sealed receipt read through its
+ * integrity check, which the caller's loader reads (#434 §11.1).
+ */
 export function runTelemetry(
 	runId: string,
 	source: JournalSource,
 	options: ReadOptions = {},
 	receipt: ReceiptEvidenceV1 | null = null,
+	scope: TelemetryScopeFiles | null = null,
 ): RunTelemetryV1 {
 	const run = analyzeRun(runId, source);
 	const view: View = { run };
@@ -2751,15 +2775,14 @@ export function runTelemetry(
 		missingTokenCalls: quantity(view, { ...base, metric: "missingTokenCalls" }),
 		settled: settled
 			? {
+					...settled.data,
 					at: settled.at,
-					terminalReason: settled.data.terminalReason,
-					processExitCode: settled.data.processExitCode,
 					boundKind: settled.data.boundKind ?? null,
 					repairRounds: quantity(view, { ...base, metric: "repairRounds" }),
-					frameType: settled.data.frameType,
-					callIds: settled.data.callIds as NonNullable<RunTelemetryV1["settled"]>["callIds"],
 				}
 			: null,
+		seal: scope === null ? null : verifyTelemetryScope(scope),
+		result: runResultOf(settled, scope),
 		receipt,
 	};
 }

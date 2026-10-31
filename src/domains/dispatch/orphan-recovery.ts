@@ -16,11 +16,12 @@
 import { existsSync, readdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import type { EventPayload } from "../../core/telemetry/events.js";
 import { clioStateDir } from "../../core/xdg.js";
-import { hostRunSettledFacts, runStatusForOutcome } from "./outcome.js";
+import { runStatusForOutcome } from "./outcome.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "./receipt-integrity.js";
 import { readReceiptTextSync, receiptTombstoneOf } from "./receipt-store.js";
+import type { RunSettlement } from "./run-settlement.js";
+import { settleFinishedRun, settleUnfinishedRun } from "./run-settlement.js";
 import type { Ledger } from "./state.js";
 import type { RunEnvelope, RunReceipt, RunStatus } from "./types.js";
 
@@ -36,7 +37,7 @@ export interface OrphanRecoverySummary {
 	 * The run.settled each abandoned or sealed run's journal may lack because its host died first; the caller journals
 	 * them (#425, #434).
 	 */
-	unsettled: Array<{ runId: string; facts: EventPayload<"run.settled"> }>;
+	unsettled: Array<{ runId: string; settlement: RunSettlement }>;
 	/**
 	 * Terminal rows of this host whose run journal is not sealed: the host persisted the terminal row and died before
 	 * the journal's seal landed. The caller seals the ones whose journal holds run.settled (#434).
@@ -256,23 +257,35 @@ function closeAbandonedRows(ledger: Ledger): Pick<OrphanRecoverySummary, "sealed
 			// The receipt sealed before the host died; its journal may still lack the settlement it names.
 			unsettled.push({
 				runId: row.id,
-				facts: hostRunSettledFacts(
-					receipt.terminalReason ? { terminalReason: receipt.terminalReason } : undefined,
-					receipt.exitCode ?? null,
-					receipt.callIds ?? null,
-				),
+				settlement: settleFinishedRun(receipt, {
+					terminal: { terminalReason: receipt.terminalReason ?? "worker_failed" },
+					processExitCode: receipt.exitCode,
+					frameType: null,
+					usage: undefined,
+				}),
 			});
 			continue;
 		}
-		ledger.update(row.id, {
+		const detail = "abandoned: orchestrator exited before the run finalized";
+		const endedAt = row.heartbeatAt ?? row.startedAt;
+		const closedRow = ledger.update(row.id, {
 			status: "dead",
 			outcome: "stalled",
-			outcomeDetail: "abandoned: orchestrator exited before the run finalized",
-			endedAt: row.heartbeatAt ?? row.startedAt,
+			outcomeDetail: detail,
+			endedAt,
 			exitCode: row.exitCode ?? 1,
 		});
 		closed += 1;
-		unsettled.push({ runId: row.id, facts: hostRunSettledFacts({ terminalReason: "stalled" }, row.exitCode ?? null) });
+		unsettled.push({
+			runId: row.id,
+			settlement: settleUnfinishedRun(closedRow ?? row, {
+				terminal: { terminalReason: "stalled" },
+				outcome: "stalled",
+				detail,
+				endedAt,
+				processExitCode: row.exitCode ?? null,
+			}),
+		});
 	}
 	return { closed, sealed, unsettled };
 }

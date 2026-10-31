@@ -19,6 +19,7 @@ import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { inspectEvidence } from "../domains/evidence/index.js";
 import {
 	loadRunReceiptEvidence,
+	loadRunScopeFiles,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
 } from "../domains/session/telemetry-source.js";
@@ -36,6 +37,7 @@ import {
 	timeline,
 	whyStopped,
 } from "../domains/telemetry/read-model.js";
+import { describeSealMismatch } from "../domains/telemetry/seal.js";
 import { explainRepoRef, isRepoRef, usageWindow } from "../domains/telemetry/usage-window.js";
 import { formatColumns, printError } from "./shared.js";
 
@@ -196,6 +198,20 @@ function printRun(dto: RunTelemetryV1): string {
 		dto.settled
 			? `settled   ${dto.settled.terminalReason} at ${dto.settled.at} · exit ${dto.settled.processExitCode ?? "unknown"} · repair rounds ${show(dto.settled.repairRounds)}${dto.settled.boundKind ? ` · bound ${dto.settled.boundKind}` : ""}`
 			: "settled   not yet, or not recorded",
+		...(dto.settled
+			? [
+					`outcome   ${dto.settled.outcome}${dto.settled.outcomeCode ? ` (${dto.settled.outcomeCode})` : ""} · ${dto.settled.agentId} on ${dto.settled.route.targetId}/${dto.settled.route.wireModelId}`,
+				]
+			: []),
+		`seal      ${
+			dto.seal === null
+				? "not read"
+				: dto.seal.status === "verified"
+					? `verified at ${dto.seal.sealedAt}`
+					: dto.seal.status === "unsealed"
+						? `unsealed (${dto.seal.reason})`
+						: `failed: ${describeSealMismatch(dto.seal.mismatch)}`
+		}`,
 	];
 	const receipt = dto.receipt;
 	if (receipt)
@@ -383,7 +399,11 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 				return 1;
 			}
 			if (args.command === "inspect")
-				return emit(runTelemetry(runId, run, {}, loadRunReceiptEvidence(stateDir, runId)), args.json, printRun);
+				return emit(
+					runTelemetry(runId, run, {}, loadRunReceiptEvidence(stateDir, runId), loadRunScopeFiles(stateDir, runId)),
+					args.json,
+					printRun,
+				);
 			if (args.command === "cost") {
 				const by = args.values.get("by") ?? "model";
 				if (by !== "role" && by !== "model" && by !== "turn") {

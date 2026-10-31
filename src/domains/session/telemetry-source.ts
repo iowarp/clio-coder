@@ -20,6 +20,8 @@ import {
 } from "../telemetry/index.js";
 import type { JournalSource, ProcessIdentity, SessionSource } from "../telemetry/read-model.js";
 import { journalSourceFromRead, sessionAccountQuotaWindow } from "../telemetry/read-model.js";
+import type { TelemetryScopeFiles } from "../telemetry/seal.js";
+import { readTelemetryScopeFiles, readTelemetryScopeFilesSync } from "../telemetry/seal.js";
 
 /**
  * Cold-path loader for the telemetry read model (#434 §11): a session's own journal, the run journals it referenced,
@@ -38,7 +40,8 @@ type Io =
 	| { op: "text"; path: string }
 	| { op: "list"; path: string }
 	| { op: "exists"; path: string }
-	| { op: "mtime"; path: string };
+	| { op: "mtime"; path: string }
+	| { op: "scope"; directory: string };
 type Load<T> = Generator<Io, T, unknown>;
 
 function* journal(directory: string): Load<CallJournalRead> {
@@ -60,8 +63,20 @@ function* mtime(path: string): Load<number | null> {
 	return (yield { op: "mtime", path }) as number | null;
 }
 
+/** A scope directory's files for its seal verdict; null when the directory cannot be read. */
+function* scopeFiles(directory: string): Load<TelemetryScopeFiles | null> {
+	return (yield { op: "scope", directory }) as TelemetryScopeFiles | null;
+}
+
 function performSync(io: Io): unknown {
 	switch (io.op) {
+		case "scope":
+			try {
+				return readTelemetryScopeFilesSync(io.directory);
+			} catch {
+				// No readable scope: the run DTO reports no seal verdict rather than a failed one.
+				return null;
+			}
 		case "journal":
 			return readCallJournalSync(io.directory);
 		case "text":
@@ -92,6 +107,8 @@ function performSync(io: Io): unknown {
 
 async function performAsync(io: Io): Promise<unknown> {
 	switch (io.op) {
+		case "scope":
+			return readTelemetryScopeFiles(io.directory).catch(() => null);
 		case "journal":
 			return readCallJournal(io.directory);
 		case "text":
@@ -309,6 +326,20 @@ export function loadRunTelemetrySource(stateDir: string, runId: string): Journal
 /** The same read off the event loop's critical path, for the live model and ACP (#434). */
 export function loadRunTelemetrySourceAsync(stateDir: string, runId: string): Promise<JournalSource> {
 	return runAsync(loadRun(stateDir, runId));
+}
+
+function* loadRunScope(stateDir: string, runId: string): Load<TelemetryScopeFiles | null> {
+	assertSafeId(runId, "run");
+	return yield* scopeFiles(telemetryRunDirectory(stateDir, runId));
+}
+
+/** A run scope's own files, which the run DTO reads its seal verdict and result object from (#434). */
+export function loadRunScopeFiles(stateDir: string, runId: string): TelemetryScopeFiles | null {
+	return runSync(loadRunScope(stateDir, runId));
+}
+
+export function loadRunScopeFilesAsync(stateDir: string, runId: string): Promise<TelemetryScopeFiles | null> {
+	return runAsync(loadRunScope(stateDir, runId));
 }
 
 /** The run's sealed receipt through its integrity check, for the run DTO (#434 §11.1). */

@@ -1,4 +1,4 @@
-import type { Static } from "typebox";
+import type { Static, TSchema } from "typebox";
 import { Type } from "typebox";
 import {
 	ConfigChangeScope,
@@ -7,6 +7,8 @@ import {
 	FailureCause,
 	RoundKind,
 	RunBoundKind,
+	RunOutcome,
+	RunOutcomeCode,
 	RunTerminalReason,
 	StopReason,
 	TransportKind,
@@ -14,6 +16,7 @@ import {
 } from "./enums.js";
 import { EstimateMethod, factSchema } from "./fact.js";
 import { AttemptIdSchema, CallIdSchema, ExistingId } from "./id-schemas.js";
+import { RUN_HASH_CANONICALIZATIONS, RUN_HASH_SUBJECTS } from "./run-vocabulary.js";
 
 const closed = { additionalProperties: false };
 const count = Type.Integer({ minimum: 0 });
@@ -37,6 +40,7 @@ export const ObjectRefSchema = Type.Object(
 			"memory-trace",
 			"observation-trace",
 			"system-one-sample",
+			"run-result",
 		]),
 		id: Type.String({ pattern: "^obj_[0-9a-f]{64}$" }),
 	},
@@ -554,8 +558,56 @@ export const TurnSettledSchema = Type.Object(
 	},
 	closed,
 );
+const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
+/** Diagnostic text a finished run states about itself, clipped and redacted where it is built (#434). */
+const diagnostic = Type.String({ maxLength: 1024 });
+const digest = Type.String({ minLength: 1, maxLength: 256 });
+/** One R7-labelled hash a finished run carries, named by the field it was computed for (`receipt-hashes.ts`, #434). */
+export const RunHashSchema = Type.Object(
+	{
+		field: Type.String({ minLength: 1, maxLength: 256 }),
+		label: vocabulary(["commitment", "resolvable"]),
+		function: Type.Literal("sha256"),
+		canonicalization: vocabulary(RUN_HASH_CANONICALIZATIONS),
+		subject: vocabulary(RUN_HASH_SUBJECTS),
+		store: Type.Optional(vocabulary(["run-receipts", "context-seeds"])),
+		hash: digest,
+	},
+	closed,
+);
+export type RunHash = Static<typeof RunHashSchema>;
+/**
+ * A finished run's one persisted record (#434). Version 1. What the run delivered (its output, failure text, worktree
+ * and check commands) is content, kept in the run scope's `run-result` object that `result` names, so the seal covers
+ * it and a share profile can drop it.
+ */
 export const RunSettledSchema = Type.Object(
 	{
+		version: Type.Literal(1),
+		agentId: ExistingId,
+		executionRole: vocabulary(["builder", "reviewer", "judge", "researcher", "verifier", "recovery"]),
+		requestOrigin: nullable(vocabulary(["user", "agent", "internal", "harness"])),
+		identity: nullable(
+			Type.Object({ host: Type.String({ maxLength: 256 }), user: Type.String({ maxLength: 256 }) }, closed),
+		),
+		route: Type.Object(
+			{
+				targetId: ExistingId,
+				wireModelId: ExistingId,
+				runtimeId: ExistingId,
+				runtimeKind: vocabulary(["http", "sdk", "subprocess", "acp-delegation"]),
+			},
+			closed,
+		),
+		node: nullable(Type.Object({ id: ExistingId, kind: vocabulary(["local", "ssh"]) }, closed)),
+		startedAt: utc,
+		endedAt: utc,
+		outcome: RunOutcome,
+		outcomeCode: nullable(RunOutcomeCode),
+		/** Null when the host settled a run whose worker never reported an exit. */
+		exitCode: nullable(Type.Integer()),
+		outcomeDetail: nullable(diagnostic),
+		failureMessage: nullable(diagnostic),
 		terminalReason: RunTerminalReason,
 		/** Null when no call telemetry reached the host: unknown, never zero calls (R1, #434). */
 		callIds: Type.Union([Type.Array(CallIdSchema), Type.Null()]),
@@ -564,9 +616,173 @@ export const RunSettledSchema = Type.Object(
 		/** Only the worker's repair loop can count its rounds; the host never infers zero (#425). */
 		repairRounds: factSchema(count),
 		frameType: Type.Union([text, Type.Null()]),
+		/** The run's own spend as one fact per quantity; the read model folds the calls for coverage (#434). */
+		usage: UsageSchema,
+		totalTokens: factSchema(count),
+		apiCalls: factSchema(count),
+		pricing: PricingSchema,
+		toolCalls: count,
+		verification: Type.Object(
+			{
+				state: vocabulary(["verified", "unverified", "not_applicable", "unknown"]),
+				basis: vocabulary([
+					"validation-tool",
+					"read-only-agent",
+					"no-validation-tool",
+					"acp-external-unobserved",
+					"receipt-unavailable",
+				]),
+			},
+			closed,
+		),
+		/** Null when the run settled before its result could be judged. */
+		quality: nullable(
+			Type.Object(
+				{
+					typedValidations: Type.Array(
+						Type.Object({ sourceId: text, validatorDigest: digest, passed: Type.Boolean() }, closed),
+						{ maxItems: 256 },
+					),
+					responseSchema: Type.Object(
+						{
+							sourceId: nullable(text),
+							schemaDigest: nullable(digest),
+							runtimeEnforceable: Type.Boolean(),
+							enforcementPassed: nullable(Type.Boolean()),
+						},
+						closed,
+					),
+					resultContract: nullable(
+						Type.Object(
+							{
+								sourceId: text,
+								validatorDigest: digest,
+								conformance: vocabulary(["pass", "fail", "not-reached"]),
+								quality: vocabulary(["pass", "fail", "unmeasured"]),
+							},
+							closed,
+						),
+					),
+				},
+				closed,
+			),
+		),
+		validationGrounding: nullable(
+			Type.Object(
+				{
+					claimed: count,
+					grounded: count,
+					ungrounded: Type.Array(text, { maxItems: 64 }),
+					basis: vocabulary(["no-command-executed", "unmatched-command"]),
+				},
+				closed,
+			),
+		),
+		findings: nullable(
+			Type.Object(
+				{
+					tags: Type.Array(ExistingId, { maxItems: 64 }),
+					firstPassSuccess: Type.Boolean(),
+					findingCount: count,
+				},
+				closed,
+			),
+		),
+		/** The isolated writer checkout's verdict; its path, branch and changed paths are in the result object. */
+		worktree: nullable(
+			Type.Object(
+				{
+					apply: vocabulary(["merge", "preserve"]),
+					applied: Type.Boolean(),
+					snapshot: nullable(vocabulary(["working-tree", "unavailable"])),
+				},
+				closed,
+			),
+		),
+		/** Orchestrator-run declared checks; their commands and output tails are in the result object. */
+		hostVerification: nullable(
+			Type.Object(
+				{
+					status: vocabulary(["verified", "rejected", "skipped", "not_implicated"]),
+					strategy: vocabulary(["single", "batch-settled"]),
+					checks: count,
+					failed: count,
+				},
+				closed,
+			),
+		),
+		hashes: Type.Array(RunHashSchema, { maxItems: 512 }),
+		result: ObjectRefSchema,
 	},
 	closed,
 );
+export type RunSettled = Static<typeof RunSettledSchema>;
+
+/** The `run-result` object a run.settled names: what the run delivered, redacted when it is stored (#434). */
+export const RunResultObjectSchema = Type.Object(
+	{
+		version: Type.Literal(1),
+		output: nullable(
+			Type.Object(
+				{
+					state: vocabulary(["final", "partial"]),
+					text: Type.String(),
+					bytes: count,
+					truncated: Type.Boolean(),
+					structured: Type.Optional(Type.Unknown()),
+				},
+				closed,
+			),
+		),
+		failureMessage: nullable(Type.String()),
+		outcomeDetail: nullable(Type.String()),
+		worktree: nullable(
+			Type.Object(
+				{
+					path: Type.String(),
+					branch: Type.String(),
+					diffHash: nullable(Type.String()),
+					changedPaths: Type.Optional(Type.Array(Type.String())),
+					commit: Type.Optional(Type.String()),
+					reason: Type.Optional(Type.String()),
+					detail: Type.Optional(Type.String()),
+				},
+				closed,
+			),
+		),
+		checkoutChanges: nullable(
+			Type.Object(
+				{ cwd: Type.String(), changedPaths: Type.Array(Type.String()), attribution: Type.Literal("observed-delta") },
+				closed,
+			),
+		),
+		hostVerification: nullable(
+			Type.Object(
+				{
+					reason: nullable(Type.String()),
+					checks: Type.Array(
+						Type.Object(
+							{
+								check: Type.String(),
+								argv: Type.Array(Type.String()),
+								cwd: Type.String(),
+								exitCode: Type.Integer(),
+								durationMs: duration,
+								memo: Type.Boolean(),
+								outputTail: Type.String(),
+								evidenceRunId: nullable(Type.String()),
+							},
+							closed,
+						),
+					),
+				},
+				closed,
+			),
+		),
+	},
+	closed,
+);
+export type RunResultObject = Static<typeof RunResultObjectSchema>;
 export const RunFeedAppendedSchema = Type.Object(
 	{ seq: Type.Integer({ minimum: 1 }), body: RunFeedBodySchema },
 	closed,

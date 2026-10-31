@@ -10,58 +10,12 @@
  * holds the preimage. No receipt hash resolves through session `objects/` yet:
  * worker prompts, briefings and steering are never persisted.
  */
+import type { ReceiptHashCanonicalization, ReceiptHashSubject } from "../../core/telemetry/run-vocabulary.js";
+import type { RunHash } from "../../core/telemetry/schemas.js";
+
 export const RECEIPT_HASH_SET = "clio-coder.receipt-hashes/1" as const;
 
-export type ReceiptHashCanonicalization =
-	/** UTF-8 bytes of the text as given (trimmed where the subject says so). */
-	| "utf8-text"
-	/** Non-empty trimmed parts joined with a blank line, then UTF-8. */
-	| "trimmed-parts-v1"
-	/** Sorted-key JSON without a domain prefix. */
-	| "json-sorted-v1"
-	/** A `clio-coder.<kind>:` domain prefix followed by sorted-key JSON. */
-	| "json-sorted-prefixed-v1"
-	/** `JSON.stringify` in insertion order. */
-	| "json-insertion-order"
-	/** Child content hashes joined with newlines. */
-	| "hash-lines-v1"
-	/** `git diff` bytes for a committed task, or the streamed working-tree snapshot form. */
-	| "task-diff-v1"
-	/** The referenced artifact's own integrity digest, copied. */
-	| "artifact-digest";
-
-export type ReceiptHashSubject =
-	| "worker-prompt"
-	| "compiled-system-prompt"
-	| "dynamic-messages"
-	| "tool-names"
-	| "tool-schemas"
-	| "briefing"
-	| "steering"
-	| "worker-context-snapshot"
-	| "worker-context-seed"
-	| "project-context"
-	| "plan-text"
-	| "execution-plan"
-	| "run-receipt"
-	| "validation-result"
-	| "response-schema"
-	| "result-contract"
-	| "safety-rule-pack"
-	| "project-safety-policy"
-	| "protected-artifacts"
-	| "worker-permit"
-	| "mcp-server"
-	| "checkout-tree"
-	| "check-payload"
-	| "task-diff"
-	| "route-decision"
-	| "agent-spec"
-	| "route-prompt-composition"
-	| "endpoint"
-	| "settings"
-	| "skill-file"
-	| "package-provenance";
+export type { ReceiptHashCanonicalization, ReceiptHashSubject };
 
 export interface ReceiptHashDeclaration {
 	label: "commitment" | "resolvable";
@@ -218,4 +172,34 @@ export function undeclaredReceiptHashes(draft: object, agentId: string): string[
 	};
 	visit(draft, "");
 	return [...undeclared].sort();
+}
+
+/**
+ * Every declared hash a finished run carries, labelled, in field order: the `hashes` a run.settled records (#434).
+ * Array indices stay in the field name so two steering hashes stay two entries.
+ */
+export function labelledRunHashes(draft: object, agentId: string): RunHash[] {
+	const hashes: RunHash[] = [];
+	const visit = (value: unknown, path: string, pattern: string) => {
+		if (OPAQUE_SUBTREES.some((subtree) => subtree.test(pattern))) return;
+		if (Array.isArray(value)) {
+			for (const [index, item] of value.entries()) visit(item, `${path}[${index}]`, `${pattern}[]`);
+			return;
+		}
+		if (value === null || typeof value !== "object") return;
+		for (const [key, child] of Object.entries(value)) {
+			const childPath = path === "" ? key : `${path}.${key}`;
+			const childPattern = pattern === "" ? key : `${pattern}.${key}`;
+			if (pattern === "" && key === "integrity") continue;
+			const declaration =
+				typeof child === "string" && child !== "" && HASH_KEY.test(key)
+					? receiptHashDeclaration(childPattern, agentId)
+					: null;
+			if (declaration !== null && typeof child === "string")
+				hashes.push({ field: childPath, ...declaration, hash: child });
+			else visit(child, childPath, childPattern);
+		}
+	};
+	visit(draft, "", "");
+	return hashes;
 }

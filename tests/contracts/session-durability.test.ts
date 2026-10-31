@@ -223,7 +223,7 @@ describe("session durability boundary", () => {
 		// The run's journal gets the settlement its dead host never wrote, so no reader waits on it.
 		const [unsettled] = recovered.unsettled;
 		strictEqual(unsettled?.runId, run.id);
-		if (unsettled) await settleOrphanedRunJournal(directory, unsettled.facts);
+		if (unsettled) await settleOrphanedRunJournal(directory, unsettled.settlement);
 		const settled = (await readCallJournal(directory)).records.filter(({ record }) => record.k === "run.settled");
 		strictEqual(settled.length, 1);
 		strictEqual((settled[0]?.record.data as { terminalReason?: string }).terminalReason, "stalled");

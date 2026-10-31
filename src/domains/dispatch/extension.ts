@@ -138,7 +138,6 @@ import type { AgentRecipe } from "../agents/recipe.js";
 import {
 	INTERNAL_HELPER_RESULT_KINDS,
 	mutationReportFailures,
-	RESULT_CONTRACT_REPAIR_LIMIT,
 	resultContractAuthorship,
 	validateRecipeResult,
 	validateStructuredHelperResult,
@@ -360,7 +359,6 @@ import {
 import { mergeGateVerdict, mergeWithheldDetail, removedTestCases, taskRequestsTestRemoval } from "./merge-gate.js";
 import { recoverOrphanReceipts } from "./orphan-recovery.js";
 import {
-	hostRunSettledFacts,
 	type ResolvedTerminalReason,
 	type RunTerminationEvidence,
 	resolveRunOutcome,
@@ -419,6 +417,7 @@ import { createRunCallUsage } from "./run-call-usage.js";
 import { defaultRunEventJournal } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
+import { settleFinishedRun, settleUnfinishedRun } from "./run-settlement.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
 import {
 	fleetRootTelemetryContext,
@@ -772,25 +771,6 @@ function runSettlementReceiptFields(
 	usage: RunCallUsage | undefined,
 ): Pick<RunReceiptDraft, "terminalReason" | "callIds"> {
 	return { terminalReason: terminal.terminalReason, ...(usage ? { callIds: [...usage.callIds] } : {}) };
-}
-
-function runSettledFacts(
-	terminal: ResolvedTerminalReason,
-	receipt: RunReceipt,
-	processExitCode: number | null,
-	frameType: string | null,
-): EventPayload<"run.settled"> {
-	return {
-		terminalReason: terminal.terminalReason,
-		callIds: receipt.callIds ?? null,
-		processExitCode,
-		...(terminal.boundKind ? { boundKind: terminal.boundKind } : {}),
-		repairRounds:
-			terminal.terminalReason === "contract_exhausted_after_repair"
-				? { kind: "measured", value: RESULT_CONTRACT_REPAIR_LIMIT, source: "local-count" }
-				: { kind: "unknown", reason: "not-observed" },
-		frameType,
-	};
 }
 
 function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1): RunReceiptDraft {
@@ -6786,7 +6766,14 @@ export function createDispatchBundle(
 					sealRouteDecision(receiptDraft, routeDecision),
 					ledgerPatch,
 				);
-				runJournal?.settle(runSettledFacts(terminal, receipt, result.exitCode, null));
+				runJournal?.settle(
+					settleFinishedRun(receipt, {
+						terminal,
+						processExitCode: result.exitCode,
+						frameType: null,
+						usage: callUsage?.snapshot()?.facts,
+					}),
+				);
 				await ledgerRef.persist();
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
 					try {
@@ -6824,10 +6811,18 @@ export function createDispatchBundle(
 				// active entry leaks until restart.
 				reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
 				// The journal still ends with how the worker loop ended, so no reader waits on this run (#425, #434).
-				runJournal?.settle(hostRunSettledFacts(resolvedTerminal));
 				const endedAt = new Date().toISOString();
 				timing.endedAt = endedAt;
 				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
+				runJournal?.settle(
+					settleUnfinishedRun(ledgerRef.get(envelope.id) ?? envelope, {
+						terminal: resolvedTerminal,
+						outcome: "failed",
+						detail,
+						endedAt,
+						processExitCode: null,
+					}),
+				);
 				try {
 					ledgerRef.update(envelope.id, {
 						status: "failed",
@@ -9148,7 +9143,14 @@ export function createDispatchBundle(
 					sealRouteDecision(receiptDraft, routeObservation.decision),
 					ledgerPatch,
 				);
-				runJournal?.settle(runSettledFacts(terminal, receipt, result.exitCode, result.channelFailure ?? null));
+				runJournal?.settle(
+					settleFinishedRun(receipt, {
+						terminal,
+						processExitCode: result.exitCode,
+						frameType: result.channelFailure ?? null,
+						usage: finalCallUsage?.facts,
+					}),
+				);
 				if (lifecycle.runtimeKind !== "http" && agentLedgerId !== null && agentLedgerAttribution !== null) {
 					void appendAgentLedgerReport(agentLedgerId, agentLedgerAttribution, receipt)
 						.then((posted) => {
@@ -9247,10 +9249,18 @@ export function createDispatchBundle(
 				// active entry leaks until restart.
 				reportDispatchDiagnostic(`finalize run ${envelope.id}`, error);
 				// The journal still ends with how the worker loop ended, so no reader waits on this run (#425, #434).
-				runJournal?.settle(hostRunSettledFacts(resolvedTerminal));
 				const endedAt = new Date().toISOString();
 				timing.endedAt = endedAt;
 				const detail = `finalization failure: ${error instanceof Error ? error.message : String(error)}`;
+				runJournal?.settle(
+					settleUnfinishedRun(ledgerRef.get(envelope.id) ?? envelope, {
+						terminal: resolvedTerminal,
+						outcome: "failed",
+						detail,
+						endedAt,
+						processExitCode: null,
+					}),
+				);
 				try {
 					ledgerRef.update(envelope.id, {
 						status: "failed",
@@ -10342,8 +10352,8 @@ export function createDispatchBundle(
 						return existsSync(telemetryJournalPath(directory)) && !existsSync(telemetryBundlePath(directory));
 					},
 				});
-				for (const { runId, facts } of recovery.unsettled)
-					void trackDurableWrite(settleOrphanedRunJournal(telemetryRunDirectory(clioStateDir(), runId), facts)).catch(
+				for (const { runId, settlement } of recovery.unsettled)
+					void trackDurableWrite(settleOrphanedRunJournal(telemetryRunDirectory(clioStateDir(), runId), settlement)).catch(
 						(error) => reportDispatchDiagnostic(`settle the journal of run ${runId}`, error),
 					);
 				// A terminal row persisted before its journal's seal landed gets that seal now (#434).

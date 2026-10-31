@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readFileSync } from "node:fs";
 import { lstat, open, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
+import type {
+	TelemetryScopeKind as ScopeKindSchema,
+	SealMismatchSchema,
+	SealVerdictSchema,
+} from "../../core/telemetry/dto.js";
 import type { SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { ScopeSealed } from "../../core/telemetry/schemas.js";
 import { ScopeSealedSchema } from "../../core/telemetry/schemas.js";
@@ -30,7 +35,7 @@ import {
  */
 
 export const SCOPE_BUNDLE_FORMAT = "clio-coder.telemetry.bundle";
-export type TelemetryScopeKind = "session" | "run" | "process";
+export type TelemetryScopeKind = Static<typeof ScopeKindSchema>;
 export const SEAL_EVENTS = {
 	session: "session.sealed",
 	run: "run.sealed",
@@ -170,25 +175,43 @@ export async function readTelemetryScopeFiles(scopeDirectory: string): Promise<T
 	return { manifest, segments, objects };
 }
 
-export type SealMismatch =
-	| { kind: "manifest"; detail: string }
-	| { kind: "segment"; name: string; detail: string }
-	| { kind: "object"; name: string; detail: string }
-	| { kind: "chain"; name: string; line: number; detail: string }
-	| { kind: "seal"; detail: string };
+function readRegularFileSync(path: string): Buffer {
+	const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+	try {
+		if (!fstatSync(fd).isFile()) throw new Error(`${path} is not a regular file`);
+		return readFileSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+}
 
-export type SealVerdict =
-	| {
-			status: "verified";
-			scope: { kind: TelemetryScopeKind; id: string };
-			sealedAt: string;
-			seal: { recordId: string; head: string };
-			records: number;
-			segments: number;
-			objects: number;
-	  }
-	| { status: "unsealed"; reason: "no-bundle" | "no-journal" }
-	| { status: "failed"; mismatch: SealMismatch };
+/** The synchronous {@link readTelemetryScopeFiles}, for the CLI and the synchronous run DTO readers (#434). */
+export function readTelemetryScopeFilesSync(scopeDirectory: string): TelemetryScopeFiles {
+	if (!lstatSync(scopeDirectory).isDirectory()) throw new Error(`${scopeDirectory} is not a directory`);
+	const names = readdirSync(scopeDirectory);
+	const manifest = names.includes(TELEMETRY_BUNDLE_FILE)
+		? readRegularFileSync(join(scopeDirectory, TELEMETRY_BUNDLE_FILE))
+		: null;
+	const segments = telemetryJournalFiles(names).map((name) => ({
+		name,
+		bytes: readRegularFileSync(join(scopeDirectory, name)),
+	}));
+	let objectNames: string[];
+	try {
+		objectNames = readdirSync(telemetryObjectsDirectory(scopeDirectory)).sort();
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		objectNames = [];
+	}
+	const objects = objectNames.map((name) => ({
+		name,
+		bytes: readRegularFileSync(join(telemetryObjectsDirectory(scopeDirectory), name)),
+	}));
+	return { manifest, segments, objects };
+}
+
+export type SealMismatch = Static<typeof SealMismatchSchema>;
+export type SealVerdict = Static<typeof SealVerdictSchema>;
 
 /** One seal the chain holds, with the chain and the segment header it was written under. */
 export interface ChainSeal {

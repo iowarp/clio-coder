@@ -2,9 +2,10 @@ import type { WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import type { FailureCause } from "../../core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { makeTelemetryRecord } from "../../core/telemetry/envelope.js";
-import type { FactSum } from "../../core/telemetry/fact.js";
+import type { EstimateMethod, Fact, FactSum } from "../../core/telemetry/fact.js";
 import { readWorkerTelemetryRecord } from "../../core/telemetry/forwarder.js";
 import { abandonedSettlement } from "../../core/telemetry/producer.js";
+import type { RunSettled } from "../../core/telemetry/schemas.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import type { CostAggregate } from "../telemetry/cost.js";
 import type { CallTotals } from "../telemetry/folds.js";
@@ -27,12 +28,126 @@ export interface RunCallUsage {
 	costSummary: CostAggregate;
 	costProvenance: CostProvenance;
 	tokenUsageMissing: boolean;
+	/** The same fold as one fact per quantity, as run.settled records it (#434). */
+	facts: RunUsageFacts;
+}
+
+/** A run's spend as run.settled states it: one Fact per quantity, collapsed from its call and usage records (#434). */
+export type RunUsageFacts = Pick<RunSettled, "usage" | "totalTokens" | "apiCalls" | "pricing">;
+
+const notObserved: Fact<number> = { kind: "unknown", reason: "not-observed" };
+
+/** A run with no call telemetry: every quantity unknown, never zero (R1, #434). */
+export function unobservedRunUsageFacts(): RunUsageFacts {
+	return {
+		usage: {
+			input: notObserved,
+			cacheRead: notObserved,
+			cacheWrite: notObserved,
+			cacheWrite1h: notObserved,
+			output: notObserved,
+			reasoning: notObserved,
+		},
+		totalTokens: notObserved,
+		apiCalls: notObserved,
+		pricing: { usd: notObserved, pricedBy: "none" },
+	};
+}
+
+type Provenance = { methods: Set<EstimateMethod>; sources: Set<MeasuredSource> };
+type MeasuredSource = Extract<Fact<number>, { kind: "measured" }>["source"];
+
+/** Where each quantity's facts came from, keyed by field name, so a collapsed fact names a real method or source. */
+function provenanceOf(records: readonly TelemetryRecord[]): Map<string, Provenance> {
+	const found = new Map<string, Provenance>();
+	const visit = (value: unknown, key: string) => {
+		if (value === null || typeof value !== "object") return;
+		const fact = value as { kind?: unknown; method?: unknown; source?: unknown };
+		if (fact.kind === "estimated" || fact.kind === "measured") {
+			const entry = found.get(key) ?? { methods: new Set(), sources: new Set() };
+			if (fact.kind === "estimated") entry.methods.add(fact.method as EstimateMethod);
+			else entry.sources.add(fact.source as MeasuredSource);
+			found.set(key, entry);
+			return;
+		}
+		// A cache bill prices re-prefill, which is not the run's spend.
+		for (const [child, item] of Object.entries(value)) if (child !== "cache") visit(item, child);
+	};
+	for (const record of records) visit(record.data, "");
+	return found;
+}
+
+/**
+ * One fact for a folded quantity: unknown when any contribution is, estimated when any was, else measured. The
+ * read model's fold over the same calls keeps the per-call coverage this collapses (#434).
+ */
+function collapse(sum: FactSum, provenance: Provenance | undefined, fallback: MeasuredSource): Fact<number> {
+	if (sum.unknownCount > 0) return notObserved;
+	if (sum.coverage.estimated > 0) {
+		const method = [...(provenance?.methods ?? [])].sort()[0];
+		return method === undefined ? notObserved : { kind: "estimated", value: sum.measured + sum.estimated, method };
+	}
+	if (sum.coverage.measured > 0)
+		return { kind: "measured", value: sum.measured, source: [...(provenance?.sources ?? [])].sort()[0] ?? fallback };
+	if (sum.absentCount > 0) return { kind: "absent", reason: "not-applicable" };
+	return { kind: "measured", value: 0, source: "local-count" };
+}
+
+const PRICED_BY_STRENGTH: readonly RunUsageFacts["pricing"]["pricedBy"][] = [
+	"none",
+	"catalog",
+	"target-rates",
+	"provider",
+];
+
+/** The weakest pricing a set of priced contributions used, so a mixed run never claims more than its least source. */
+function weakestPricedBy(used: Set<RunUsageFacts["pricing"]["pricedBy"]>): RunUsageFacts["pricing"]["pricedBy"] {
+	if (used.size === 0) return "none";
+	if (used.size === 1) return [...used][0] ?? "none";
+	used.delete("free");
+	return PRICED_BY_STRENGTH.find((strength) => used.has(strength)) ?? "none";
+}
+
+/** The pricing behind the contributions the fold counted: a whole-scope snapshot replaces calls and parts (#434). */
+function pricedByOf(
+	records: readonly TelemetryRecord[],
+	folded: ReturnType<typeof foldRunJournal>,
+): RunUsageFacts["pricing"]["pricedBy"] {
+	if (folded.source === "conflict") return "none";
+	if (folded.source === "aggregate") return folded.aggregate?.pricing.pricedBy ?? "none";
+	const used = new Set<RunUsageFacts["pricing"]["pricedBy"]>();
+	for (const attempt of folded.calls.attempts)
+		if (attempt.settled && attempt.settled.disposition !== "never_sent") used.add(attempt.settled.pricing.pricedBy);
+	if (folded.source === "parts")
+		for (const record of records)
+			if (record.k === "run.usage_reported" && record.data.partId !== undefined) used.add(record.data.pricing.pricedBy);
+	return weakestPricedBy(used);
+}
+
+function runUsageFacts(records: readonly TelemetryRecord[], folded: ReturnType<typeof foldRunJournal>): RunUsageFacts {
+	const provenance = provenanceOf(records);
+	const field = (key: string, sum: FactSum, fallback: MeasuredSource = "provider") =>
+		collapse(sum, provenance.get(key), fallback);
+	return {
+		usage: {
+			input: field("input", folded.usage.input),
+			cacheRead: field("cacheRead", folded.usage.cacheRead),
+			cacheWrite: field("cacheWrite", folded.usage.cacheWrite),
+			cacheWrite1h: field("cacheWrite1h", folded.usage.cacheWrite1h),
+			output: field("output", folded.usage.output),
+			reasoning: field("reasoning", folded.usage.reasoning),
+		},
+		totalTokens: field("totalTokens", folded.totalTokens),
+		apiCalls: field("apiCalls", folded.apiCalls, "local-count"),
+		pricing: { usd: field("usd", folded.usd, "local-count"), pricedBy: pricedByOf(records, folded) },
+	};
 }
 
 const subtotal = (sum: FactSum) => sum.measured + sum.estimated;
 
 /** Live meters and receipts project the same fold as session replay; unknown facts retain coverage (#434). */
-export function runUsageFromCallRecords(records: Iterable<TelemetryRecord>): RunCallUsage {
+export function runUsageFromCallRecords(input: Iterable<TelemetryRecord>): RunCallUsage {
+	const records = [...input];
 	const folded = foldRunJournal(records);
 	const facts = folded;
 	const apiCalls = subtotal(folded.apiCalls);
@@ -70,6 +185,7 @@ export function runUsageFromCallRecords(records: Iterable<TelemetryRecord>): Run
 						? "known"
 						: "unknown",
 		tokenUsageMissing: facts.totalTokens.unknownCount > 0 || folded.amountCoverageUnknown,
+		facts: runUsageFacts(records, folded),
 	};
 }
 

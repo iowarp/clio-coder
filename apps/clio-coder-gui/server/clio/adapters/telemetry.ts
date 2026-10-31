@@ -6,6 +6,7 @@ import type { RunListCursor } from "../../../../../src/domains/session/index.js"
 import {
 	listRunTelemetrySources,
 	loadRunReceiptEvidence,
+	loadRunScopeFiles,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
 	runTelemetryDirectoryExists,
@@ -74,7 +75,13 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 		const source = loadRunTelemetrySource(state, input.runId);
 		if (input.kind === "run-cost") return runCostReport(input.runId, source, "model");
 		return input.kind === "run"
-			? runTelemetry(input.runId, source, {}, loadRunReceiptEvidence(state, input.runId))
+			? runTelemetry(
+					input.runId,
+					source,
+					{},
+					loadRunReceiptEvidence(state, input.runId),
+					loadRunScopeFiles(state, input.runId),
+				)
 			: runTimeline(input.runId, source);
 	}
 	if (!Value.Check(Id, input.sessionId)) throw new AppProblem("validation", "Invalid session identifier.");

@@ -12,6 +12,8 @@ import type { StructuralRunFeedBody } from "../../core/telemetry/schemas.js";
 import { RUN_FEED_EVENTS, RUN_FEED_OUTCOMES } from "../../core/telemetry/schemas.js";
 import type { CallJournal } from "../telemetry/call-journal.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
+import type { RunSettlement } from "./run-settlement.js";
+import { runSettledRecord } from "./run-settlement.js";
 
 export interface RunTelemetryJournal {
 	context: WorkerTelemetryContext;
@@ -25,8 +27,11 @@ export interface RunTelemetryJournal {
 	settleCalls(records: readonly TelemetryRecord<"call.settled">[]): void;
 	linkSession(context: TelemetryContext): void;
 	gap(reason: "invalid-record" | "writer-drop", count?: number): void;
-	/** The run's one terminal accountability record, written beside its call facts (#425, #434). */
-	settle(data: EventPayload<"run.settled">): void;
+	/**
+	 * The run's one terminal accountability record, written beside its call facts once its result object is stored, so
+	 * the seal covers both (#425, #434). A close waits for it.
+	 */
+	settle(settlement: RunSettlement): void;
 	/** A channel failure the host saw, after exit included; a closed journal records nothing (#425). */
 	channel(data: EventPayload<"worker.channel_failed">): void;
 	feed(body: RunEventJournalBody, capBytes: number): void;
@@ -92,8 +97,8 @@ export function openRunTelemetry(context: WorkerTelemetryContext, directory: str
  * that exists is written, under the worker context its own run records carry, so its turn stops reading as running
  * (#425, #434). A run whose host died after run.settled but before its seal keeps that settlement and gets the seal.
  */
-export function settleOrphanedRunJournal(directory: string, facts: EventPayload<"run.settled">): Promise<void> {
-	return completeRunJournal(directory, facts);
+export function settleOrphanedRunJournal(directory: string, settlement: RunSettlement): Promise<void> {
+	return completeRunJournal(directory, settlement);
 }
 
 /**
@@ -105,14 +110,14 @@ export function sealSettledRunJournal(directory: string): Promise<void> {
 	return completeRunJournal(directory, null);
 }
 
-async function completeRunJournal(directory: string, facts: EventPayload<"run.settled"> | null): Promise<void> {
+async function completeRunJournal(directory: string, settlement: RunSettlement | null): Promise<void> {
 	const { openCallJournal, readCallJournal } = await import("../telemetry/call-journal.js");
 	const { telemetryBundlePath } = await import("../telemetry/paths.js");
 	const { existsSync } = await import("node:fs");
 	const read = await readCallJournal(directory);
 	const settled = read.records.some(({ record }) => record.k === "run.settled");
 	if (settled && read.records.at(-1)?.record.k === "run.sealed" && existsSync(telemetryBundlePath(directory))) return;
-	if (!settled && facts === null) return;
+	if (!settled && settlement === null) return;
 	const context = read.records.map(({ record }) => record.ctx).find(isWorkerTelemetryContext);
 	if (!context) return;
 	// The run's owner is gone, so this one record gets a writer of its own rather than the run's owned journal.
@@ -120,11 +125,25 @@ async function completeRunJournal(directory: string, facts: EventPayload<"run.se
 	try {
 		writer = await openCallJournal({ directory, context, writer: await clioWriterVersions() });
 	} catch (error) {
-		if (facts === null && error instanceof StateFileLockTimeoutError) return;
+		if (settlement === null && error instanceof StateFileLockTimeoutError) return;
 		throw error;
 	}
-	if (!settled && facts)
-		writer.enqueue({ kind: "run.settled", data: facts, ctx: context, wallMs: Date.now(), mono: performance.now() });
+	if (!settled && settlement) {
+		try {
+			const result = await writer.storeObject("run-result", settlement.result);
+			writer.enqueue({
+				kind: "run.settled",
+				data: runSettledRecord(settlement, result),
+				ctx: context,
+				wallMs: Date.now(),
+				mono: performance.now(),
+			});
+		} catch (error) {
+			// No result object, no settlement: the scope stays unsealed rather than citing content that is not on disk.
+			await writer.close();
+			throw error;
+		}
+	}
 	// The recovered terminal is the run's terminal, so it seals the run scope (#434).
 	await sealAndClose(writer);
 }
@@ -233,6 +252,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 	);
 	let reported = false;
 	let settled = previous.records.some(({ record }) => record.k === "run.settled");
+	let settling: Promise<void> = Promise.resolve();
 	const reportHealth = () => {
 		const health = writer.health();
 		if (!reported && (health.writeErrors > 0 || health.dropped > 0 || health.invalid > 0)) {
@@ -292,10 +312,21 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 				mono: performance.now(),
 			});
 		},
-		settle(data) {
+		settle(settlement) {
 			if (journal.closed || settled) return;
 			settled = true;
-			writer.enqueue({ kind: "run.settled", data, ctx: context, wallMs: Date.now(), mono: performance.now() });
+			const wallMs = Date.now();
+			const mono = performance.now();
+			settling = writer.storeObject("run-result", settlement.result).then(
+				(result) => {
+					writer.enqueue({ kind: "run.settled", data: runSettledRecord(settlement, result), ctx: context, wallMs, mono });
+				},
+				() => {
+					// A settlement whose result object could not be stored is not written, so the scope stays unsealed.
+					settled = false;
+					writeDiagnostic("[clio-coder:telemetry] run result object could not be stored; the run stays unsealed\n");
+				},
+			);
 		},
 		channel(data) {
 			if (journal.closed) return;
@@ -329,6 +360,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			if (body.kind === "terminal") feedClosed = true;
 		},
 		async flush() {
+			await settling;
 			await writer.flush();
 			reportHealth();
 		},
@@ -338,18 +370,20 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			// A run seals once at its terminal; a writer that closes before run.settled leaves the scope unsealed (#434).
 			const diagnose = () =>
 				writeDiagnostic("[clio-coder:telemetry] run journal close failed; recorded coverage may be incomplete\n");
-			closing = settled
-				? sealAndClose(writer).then(reportHealth, (error: unknown) => {
-						reportHealth();
-						diagnose();
-						// The terminal seal's failure reaches the run's closer instead of passing as success (#434).
-						throw error;
-					})
-				: writer.close().then(reportHealth, () => {
-						// An unsettled run has no terminal to seal; a failed close stays a diagnostic.
-						reportHealth();
-						diagnose();
-					});
+			closing = settling.then(() =>
+				settled
+					? sealAndClose(writer).then(reportHealth, (error: unknown) => {
+							reportHealth();
+							diagnose();
+							// The terminal seal's failure reaches the run's closer instead of passing as success (#434).
+							throw error;
+						})
+					: writer.close().then(reportHealth, () => {
+							// An unsettled run has no terminal to seal; a failed close stays a diagnostic.
+							reportHealth();
+							diagnose();
+						}),
+			);
 			return closing;
 		},
 	};

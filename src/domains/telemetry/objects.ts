@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import type { ObjectRef } from "../../core/telemetry/schemas.js";
-import { ObjectRefSchema } from "../../core/telemetry/schemas.js";
+import { ObjectRefSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
 import { createRedactionTally, secretRedactingReplacer } from "../evidence/redact.js";
 import { canonicalJson } from "../prompts/hash.js";
 import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
@@ -22,7 +22,8 @@ type StoredSubject =
 	| "config"
 	| "memory-trace"
 	| "observation-trace"
-	| "system-one-sample";
+	| "system-one-sample"
+	| "run-result";
 const hash = Type.String({ pattern: "^[0-9a-f]{64}$" });
 const count = Type.Integer({ minimum: 0 });
 const range = Type.Union([Type.Tuple([Type.Integer({ minimum: 1 }), Type.Integer({ minimum: 1 })]), Type.Null()]);
@@ -194,6 +195,7 @@ const contentSchemas: Partial<Record<StoredSubject, TSchema>> = {
 		{ event: Type.String(), facts: Type.Record(Type.String(), Type.Unknown()) },
 		{ additionalProperties: false },
 	),
+	"run-result": RunResultObjectSchema,
 };
 const storedSubjects: ReadonlySet<string> = new Set<StoredSubject>([
 	"prompt-structure",
@@ -204,6 +206,7 @@ const storedSubjects: ReadonlySet<string> = new Set<StoredSubject>([
 	"memory-trace",
 	"observation-trace",
 	"system-one-sample",
+	"run-result",
 ]);
 
 /**
@@ -223,6 +226,7 @@ function withheldSecretMaps(value: unknown, key?: string): unknown {
  * Cold-path storage only. A reference becomes resolvable only after its redacted preimage is durable (#434).
  * `prompt-text`, `memory-trace` and `observation-trace` are content: only a caller holding research content
  * capture for the session stores them. `config` is structure and references once its secret maps are withheld.
+ * `run-result` is content stored in every mode: a finished run's deliverable, which a share profile drops.
  */
 export async function storeTelemetryObject(
 	scopeDirectory: string,

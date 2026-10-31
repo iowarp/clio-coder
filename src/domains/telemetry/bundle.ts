@@ -27,13 +27,17 @@ export const BUNDLE_FORMAT = "clio-telemetry-bundle/1";
 const MAX_FILE_BYTES = 1024 * 1024 * 1024;
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 const OBJECT_ID = /^obj_[0-9a-f]{64}$/;
-/** Object subjects that hold content; research retention expires them before the records that cite them. */
+/**
+ * Object subjects that hold content: a share below content-bearing drops them, and research retention expires a
+ * session's before the records that cite them. A run's `run-result` is written in every mode (#434).
+ */
 export const CONTENT_SUBJECTS: ReadonlySet<string> = new Set([
 	"prompt-text",
 	"request",
 	"memory-trace",
 	"observation-trace",
 	"system-one-sample",
+	"run-result",
 ]);
 
 /**

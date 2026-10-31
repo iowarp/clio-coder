@@ -15,6 +15,8 @@ import type { ResponseModelIdObservation } from "../../core/response-model-id.js
 import type { WorkerSandboxReceipt } from "../../core/sandbox/worker-policy.js";
 import type { SkillActivation } from "../../core/skill-activation.js";
 import type { RunTerminalReason } from "../../core/telemetry/enums.js";
+import type { RunOutcome, RunOutcomeCode } from "../../core/telemetry/run-vocabulary.js";
+import { RUN_OUTCOME_CODES } from "../../core/telemetry/run-vocabulary.js";
 import type { CallUsage } from "../../core/token-split.js";
 import type { ToolProfileName } from "../../tools/profiles.js";
 import type { DeclaredCheckReport } from "../../tools/verify/scripts.js";
@@ -54,51 +56,10 @@ export function isLegacyReadOnlyReceipt(value: unknown): boolean {
  * Retry policy and audit semantics branch on the outcome, not on RunStatus,
  * which is kept for backward compatibility with pre-existing ledgers.
  */
-export type RunOutcome =
-	| "succeeded" // worker exited 0, receipt complete
-	| "failed" // worker exited nonzero or threw
-	| "timed_out" // exceeded turn/run timeout
-	| "stalled" // heartbeat dead or ACP event-inactivity exceeded
-	| "canceled" // operator abort (SIGINT, /abort, batch cancel)
-	| "denied_by_policy" // admission, budget, scope, or cooldown rejection
-	| "spawn_failed"; // process never reached a live session
-
-/** Stable machine classifications for terminal conditions that drive policy. */
-export type RunOutcomeCode =
-	| "vram_capacity_fit_failure"
-	| "worker_tool_call_cap_exhausted"
-	| "worker_context_exhausted"
-	| "worker_turn_timeout"
-	| "worker_output_cap_exhausted"
-	| "loop_guard_tools_disabled_exhausted"
-	| "result_contract_exhausted"
-	| "result_contract_invalid"
-	| "worker_final_output_missing"
-	| "host_verification_rejected"
-	| "worker_no_work"
-	| "worker_mutation_blocked"
-	| "merge_withheld"
-	| "worker_removed_tests"
-	| "information_flow_blocked";
+export type { RunOutcome, RunOutcomeCode };
 
 export function isRunOutcomeCode(value: unknown): value is RunOutcomeCode {
-	return (
-		value === "vram_capacity_fit_failure" ||
-		value === "worker_tool_call_cap_exhausted" ||
-		value === "worker_context_exhausted" ||
-		value === "worker_turn_timeout" ||
-		value === "worker_output_cap_exhausted" ||
-		value === "loop_guard_tools_disabled_exhausted" ||
-		value === "result_contract_exhausted" ||
-		value === "result_contract_invalid" ||
-		value === "worker_final_output_missing" ||
-		value === "host_verification_rejected" ||
-		value === "worker_no_work" ||
-		value === "worker_mutation_blocked" ||
-		value === "merge_withheld" ||
-		value === "worker_removed_tests" ||
-		value === "information_flow_blocked"
-	);
+	return typeof value === "string" && (RUN_OUTCOME_CODES as ReadonlyArray<string>).includes(value);
 }
 
 export const RETRYABLE_OUTCOMES: ReadonlySet<RunOutcome> = new Set(["failed", "timed_out", "stalled", "spawn_failed"]);

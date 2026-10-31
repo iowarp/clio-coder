@@ -20,6 +20,8 @@ import {
 	ObjectRefSchema,
 	PricingSchema,
 	RunFeedBodySchema,
+	RunResultObjectSchema,
+	RunSettledSchema,
 	SessionCloseReason,
 	SYSTEM_ONE_OUTCOME,
 	UtcSchema,
@@ -38,6 +40,35 @@ const nonNegative = Type.Number({ minimum: 0 });
 const text = Type.String({ maxLength: 4096 });
 
 export const TELEMETRY_DTO_VERSION = 1;
+
+export const SealMismatchSchema = Type.Union([
+	Type.Object({ kind: Type.Literal("manifest"), detail: Type.String() }, closed),
+	Type.Object({ kind: Type.Literal("segment"), name: Type.String(), detail: Type.String() }, closed),
+	Type.Object({ kind: Type.Literal("object"), name: Type.String(), detail: Type.String() }, closed),
+	Type.Object(
+		{ kind: Type.Literal("chain"), name: Type.String(), line: Type.Integer({ minimum: 0 }), detail: Type.String() },
+		closed,
+	),
+	Type.Object({ kind: Type.Literal("seal"), detail: Type.String() }, closed),
+]);
+export const TelemetryScopeKind = vocabulary(["session", "run", "process"]);
+/** A scope's seal verdict, from the scope's own files (`seal.ts`, #434). */
+export const SealVerdictSchema = Type.Union([
+	Type.Object(
+		{
+			status: Type.Literal("verified"),
+			scope: Type.Object({ kind: TelemetryScopeKind, id: ExistingId }, closed),
+			sealedAt: Type.String(),
+			seal: Type.Object({ recordId: ExistingId, head: Type.String() }, closed),
+			records: count,
+			segments: count,
+			objects: count,
+		},
+		closed,
+	),
+	Type.Object({ status: Type.Literal("unsealed"), reason: vocabulary(["no-bundle", "no-journal"]) }, closed),
+	Type.Object({ status: Type.Literal("failed"), mismatch: SealMismatchSchema }, closed),
+]);
 // The optional per-call transport facts, unwrapped for the DTOs that always carry them (null when unrecorded).
 const transportFacts = {
 	pinReason: vocabulary(["auth_rejection", "transport_failure", "post_stream_or_unknown_failure"]),
@@ -1107,19 +1138,28 @@ export const RunTelemetrySchema = Type.Object(
 		counts: callCounts,
 		tokens,
 		missingTokenCalls: QuantitySchema,
+		/** The run's terminal record as its journal holds it, with its repair rounds as a quantity (#434). */
 		settled: Type.Union([
 			Type.Object(
 				{
+					...RunSettledSchema.properties,
 					at: UtcSchema,
-					terminalReason: RunTerminalReason,
-					processExitCode: Type.Union([Type.Integer(), Type.Null()]),
 					boundKind: Type.Union([RunBoundKind, Type.Null()]),
 					repairRounds: QuantitySchema,
-					frameType: Type.Union([text, Type.Null()]),
-					callIds: Type.Union([Type.Array(CallIdSchema), Type.Null()]),
 				},
 				closed,
 			),
+			Type.Null(),
+		]),
+		/** Whether the run's sealed scope verifies from its own files; null when the reader read no scope files. */
+		seal: Type.Union([SealVerdictSchema, Type.Null()]),
+		/**
+		 * What the run delivered, from the `run-result` object its run.settled names: `missing` when the scope does not
+		 * hold it (a share that dropped content), null with no settlement or no scope files read.
+		 */
+		result: Type.Union([
+			Type.Object({ state: Type.Literal("resolved"), value: RunResultObjectSchema }, closed),
+			Type.Object({ state: Type.Literal("missing") }, closed),
 			Type.Null(),
 		]),
 		/** The run's sealed receipt through its integrity check; null when the reader was given no receipt to check. */

@@ -1,5 +1,6 @@
 import type { Static, TEnum } from "typebox";
 import { Type } from "typebox";
+import { RUN_OUTCOME_CODES, RUN_OUTCOMES } from "./run-vocabulary.js";
 
 export function vocabulary<const T extends readonly string[]>(values: T): TEnum<T[number][]> {
 	return Type.Enum<T[number][]>([...values]);
@@ -76,6 +77,11 @@ export const RunTerminalReason = vocabulary([
 ]);
 export type RunTerminalReason = Static<typeof RunTerminalReason>;
 export const RunBoundKind = vocabulary(["turns", "tokens", "cost", "time", "tools"]);
+/** The host's verdict on a finished run, beside how its loop ended (#434). */
+export const RunOutcome = vocabulary(RUN_OUTCOMES);
+export type RunOutcome = Static<typeof RunOutcome>;
+export const RunOutcomeCode = vocabulary(RUN_OUTCOME_CODES);
+export type RunOutcomeCode = Static<typeof RunOutcomeCode>;
 /**
  * Who changed the settings: the watcher's reload of a file write, or the in-process surface that made the edit. Each
  * value has a seam that writes it; a surface that writes settings names itself (#434, C3).
