@@ -172,13 +172,21 @@ export interface DatasetWriterDeps {
 	recording(session: string | null): boolean;
 	/** The session current now, for outcomes without an explicit origin. */
 	currentSession(): string | null;
-	/** Hand one sample to the session's journal; the writer stores its content and cites it. */
-	sample(session: string, data: SampleData, content: DatasetSample): void;
+	/**
+	 * Hand one sample to the session's journal; the writer stores its content and cites it. `engine` names the engine
+	 * that answered the decision the sample records or follows, or is null when this writer never saw that decision.
+	 */
+	sample(session: string, engine: string | null, data: SampleData, content: DatasetSample): void;
 }
+
+/** Decision refs whose engine an outcome can still find. */
+const DECISION_ENGINES = 1024;
 
 export function createDatasetWriter(deps: DatasetWriterDeps): DatasetWriter {
 	let held: PendingDecision[] = [];
 	let heldOutcomes: OutcomeRecord[] = [];
+	// The engine behind each recent decision ref, so its outcome acts for the same engine (#434).
+	const engines = new Map<string, string>();
 
 	const recordDecision = (item: PendingDecision, session: string): void => {
 		if (!deps.recording(session)) return;
@@ -190,8 +198,14 @@ export function createDatasetWriter(deps: DatasetWriterDeps): DatasetWriter {
 			specs[hash] ??= scrub(question, createRedactionTally(), false);
 		}
 		const decision = decisionRow({ ...item, session }, hashes);
+		if (decision.ref !== undefined) {
+			engines.delete(decision.ref);
+			engines.set(decision.ref, item.record.engine);
+			if (engines.size > DECISION_ENGINES) engines.delete(engines.keys().next().value as string);
+		}
 		deps.sample(
 			session,
+			item.record.engine,
 			{
 				sample: "decision",
 				decisionId: decision.callId,
@@ -203,7 +217,12 @@ export function createDatasetWriter(deps: DatasetWriterDeps): DatasetWriter {
 	};
 	const recordOutcome = (record: OutcomeRecord, session: string | null): void => {
 		if (session === null || !deps.recording(session)) return;
-		deps.sample(session, { sample: "outcome", ref: record.ref }, { outcome: outcomeRow(record) });
+		deps.sample(
+			session,
+			engines.get(record.ref) ?? null,
+			{ sample: "outcome", ref: record.ref },
+			{ outcome: outcomeRow(record) },
+		);
 	};
 
 	return {

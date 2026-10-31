@@ -58,7 +58,7 @@ function recorderFor(config: ClioSettings, session: () => string | null = () => 
 	const recorder = createRecorder({
 		currentSession: session,
 		recording: () => recordingFor.get(config) ?? false,
-		sample: (sessionId, data, content) => samples.push({ session: sessionId, data, content }),
+		sample: (sessionId, _engine, data, content) => samples.push({ session: sessionId, data, content }),
 		appendSessionRow: (sessionId, row) => appended.push([sessionId, row]),
 	});
 	return { recorder, appended, samples };

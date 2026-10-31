@@ -242,9 +242,13 @@ export interface TelemetryContract extends TelemetryRunProjection {
 	): Promise<TelemetrySessionLease>;
 	/** What the session's telemetry captures now, for recorders that write outside the call journal (#434). */
 	telemetryCapture?(origin: TelemetrySessionOrigin): TelemetryCapture;
-	/** Journal a background research trace into the session's own journal, its text into `objects/` (#434). */
+	/**
+	 * Journal a background research trace into the session's own journal, its text into `objects/`, as the agent whose
+	 * step it records (#434).
+	 */
 	recordResearchTrace?<K extends PreimageEventName>(
 		origin: TelemetrySessionOrigin,
+		agent: TelemetryAgent,
 		kind: K,
 		data: PreimageData<K>,
 		preimage: unknown,

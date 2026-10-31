@@ -536,7 +536,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		setExitStatus(code) {
 			exitStatus = code;
 		},
-		recordResearchTrace(origin, kind, data, preimage) {
+		recordResearchTrace(origin, agent, kind, data, preimage) {
 			// Facts can point at live runtime state; the journal keeps what the event saw (#434).
 			let owned: { data: typeof data; preimage: unknown };
 			try {
@@ -546,7 +546,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 				return;
 			}
 			void journals
-				.acquire(origin, { role: "memory", id: origin.id })
+				.acquire(origin, agent)
 				.then(async (lease) => {
 					try {
 						telemetryHub().emitContent(kind, owned.data, owned.preimage, lease.context);

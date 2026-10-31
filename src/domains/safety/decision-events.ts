@@ -1,5 +1,5 @@
 import type { TelemetryContext } from "../../core/telemetry/context.js";
-import { ownerTelemetryContext } from "../../core/telemetry/context.js";
+import { asSideAgent, ownerTelemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import { telemetryHub } from "../../core/telemetry/hub.js";
@@ -141,7 +141,15 @@ export function safetyJudgedPayload(input: SafetyJudgementInput): EventPayload<"
 	};
 }
 
-/** A judge review belongs to the session whose call it judged; a worker's ask names its run in the payload. */
+/**
+ * A judge review belongs to the session whose call it judged, acting as the safety judge whose call made it, so the
+ * verdict and the judge's own provider call name one agent; a worker's ask names its run in the payload (#434).
+ */
 export function safetyJudgementContext(input: SafetyJudgementInput): TelemetryContext | undefined {
-	return ownerTelemetryContext({ sessionId: input.sessionId, turnId: input.turnId, toolCallId: input.toolCallId });
+	const owner = ownerTelemetryContext({
+		sessionId: input.sessionId,
+		turnId: input.turnId,
+		toolCallId: input.toolCallId,
+	});
+	return owner && asSideAgent(owner, "safety-judge");
 }

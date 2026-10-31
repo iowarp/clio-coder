@@ -2373,7 +2373,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 		record(kind, data, preimage) {
 			const origin = session?.current();
-			if (origin) telemetry?.recordResearchTrace?.(origin, kind, data, preimage);
+			if (origin) telemetry?.recordResearchTrace?.(origin, { role: "memory", id: origin.id }, kind, data, preimage);
 		},
 	});
 	// One durable union of restricted sources per session. Every model send,
@@ -3697,10 +3697,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		currentSession: currentSessionId,
 		recording: systemOneRecording,
 		// A delayed outcome keeps its original session; research traces acquire that session's own writer (#434).
-		sample: (sessionId, data, content) => {
+		// A sample acts for the engine that answered its decision; an outcome whose decision this process never saw
+		// falls back to the session's System One (#434).
+		sample: (sessionId, engine, data, content) => {
 			currentSystemOneOrigin();
 			const origin = systemOneOrigins.get(sessionId);
-			if (origin) telemetry?.recordResearchTrace?.(origin, "system_one.sample_captured", data, content);
+			if (origin)
+				telemetry?.recordResearchTrace?.(
+					origin,
+					{ role: "system-one", id: engine ?? origin.id },
+					"system_one.sample_captured",
+					data,
+					content,
+				);
 		},
 		// The park flush writes a session's rows before it closes, so a call that
 		// started in a session that is no longer current is a late answer for a ledger
