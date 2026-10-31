@@ -1,5 +1,4 @@
 import type { JobPredicate, JobRecord } from "../core/job-types.js";
-import { renderCostAmount } from "../domains/observability/cost.js";
 import { jobIsComplete } from "../domains/scheduling/job-model.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ToolResult } from "../tools/registry.js";
@@ -504,8 +503,11 @@ export function loopJobLevel(job: JobRecord, now: number): NoticeLevel {
 	return jobWarnings(job, now).length > 0 ? "warn" : "info";
 }
 
-/** `/loop status <id>`: every canonical fact the record holds, and nothing it does not. */
-export function loopJobDetail(job: JobRecord, now: number): string[] {
+/**
+ * `/loop status <id>`: every canonical fact the record holds, and nothing it does not. `spend` is the job's model spend
+ * as the telemetry read model words it, absent when nothing measured one.
+ */
+export function loopJobDetail(job: JobRecord, now: number, spend: string | null = null): string[] {
 	const lines = [`${job.id} · ${stateText(job)} · ${runnerText(job)}`];
 	lines.push(
 		`every ${formatLoopDuration(job.spec.intervalMs)} · ${runsText(job)} · ${job.settled} settled · ${dueText(job, now)}`,
@@ -539,8 +541,7 @@ export function loopJobDetail(job: JobRecord, now: number): string[] {
 			`${job.delivery.kind === "main_turn" ? "follow-up turn" : "notice"} ${job.delivery.state}${job.delivery.reason ? `: ${preview(job.delivery.reason, SUMMARY_CHARS)}` : ""}`,
 		);
 	}
-	// A job cost is null unless every component was priced; the components are rate or catalog estimates (#434).
-	if (job.costUsd !== null) lines.push(`cost ${renderCostAmount(job.costUsd, "estimated")}`);
+	if (spend !== null) lines.push(`cost ${spend}`);
 	for (const warning of jobWarnings(job, now)) lines.push(`warning: ${warning}`);
 	return lines;
 }
@@ -658,7 +659,7 @@ export async function runLoopCommand(command: LoopCommand, host: LoopHost): Prom
 				host.notice("error", `No loop job ${command.id} in this session. Run /loop list to see the ids`);
 				return;
 			}
-			report(host, loopJobLevel(job, now), loopJobDetail(job, now));
+			report(host, loopJobLevel(job, now), loopJobDetail(job, now, jobs.spend?.(job.id) ?? null));
 			return;
 		}
 		let jobId = command.kind === "control" ? command.id : undefined;

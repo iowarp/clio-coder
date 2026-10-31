@@ -4,9 +4,11 @@ import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { JobOwner, JobRecord } from "../core/job-types.js";
 import { captureProjectSurface } from "../core/workspace-trust.js";
+import type { TelemetryView } from "../domains/observability/contract.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { createJobController, createJobStore } from "../domains/scheduling/index.js";
+import { createJobTurnIndex } from "../domains/scheduling/job-turns.js";
 import type { JobExecutionContext, JobStore } from "../domains/scheduling/job-types.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { ChatLoop } from "../session-control/chat-loop.js";
@@ -18,7 +20,9 @@ import { createJobRuntime, jobAuthorityRefusal } from "./job-runtime.js";
 export interface JobHostDeps {
 	registry: ToolRegistry;
 	bus: SafeEventBus;
-	session?: Pick<SessionContract, "current" | "create">;
+	session?: Pick<SessionContract, "current" | "create" | "readEntries">;
+	/** The current conversation's telemetry view, which a job's spend is read from. */
+	telemetry?(): TelemetryView | null;
 	cwd: string;
 	/** A transient `run` host cannot promise future occurrences (#411). */
 	attended: boolean;
@@ -167,6 +171,7 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 			retireCurrent("conversation branch changed");
 		}),
 	];
+	const jobTurns = createJobTurnIndex(() => deps.session?.readEntries() ?? []);
 	const operations: JobOperations = {
 		async invoke(args, options) {
 			try {
@@ -184,6 +189,12 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 		status(id) {
 			const scope = owner();
 			return scope === null ? null : controller.get(id, scope);
+		},
+		spend(id) {
+			const view = deps.telemetry?.() ?? null;
+			if (view === null || owner() === null) return null;
+			const turns = jobTurns(id);
+			return turns.length === 0 ? null : view.turns(turns, "usd").display;
 		},
 		subscribe(listener) {
 			listeners.add(listener);

@@ -3983,6 +3983,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		registry: toolRegistry,
 		bus,
 		...(session ? { session } : {}),
+		telemetry: () => observability?.telemetry?.live() ?? null,
 		cwd: process.cwd(),
 		attended: options.headless === undefined,
 		safety,
