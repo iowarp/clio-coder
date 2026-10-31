@@ -8,7 +8,14 @@ import type {
 } from "../core/telemetry/live-events.js";
 import type { Component } from "../engine/tui.js";
 import { visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
-import { CONTEXT_KIND_TITLES, outcomeTone, outcomeWord, plain, unchangedTokenLead } from "./context-operation-view.js";
+import {
+	CONTEXT_KIND_TITLES,
+	outcomeTone,
+	outcomeWord,
+	plain,
+	showsContextResult,
+	unchangedTokenLead,
+} from "./context-operation-view.js";
 import { animationStep, clioTheme, formatCompactMs, GLYPH, padAnsi, spinnerFrame } from "./theme/index.js";
 
 export interface ContextActivitySnapshot {
@@ -197,7 +204,9 @@ export function createContextActivityStore(
 		for (const [key, run] of runs) {
 			if (
 				!owned(run.operation) ||
-				(run.completedAtMs !== null && (run.kind === "compaction" || now - run.completedAtMs > TERMINAL_RETENTION_MS))
+				(run.completedAtMs !== null &&
+					((run.kind === "compaction" && run.operation !== undefined && showsContextResult(run.operation)) ||
+						now - run.completedAtMs > TERMINAL_RETENTION_MS))
 			)
 				runs.delete(key);
 		}
