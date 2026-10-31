@@ -1992,6 +1992,17 @@ function quotaEntry(record: Extract<TelemetryRecord, { k: "quota.reading" }>): Q
 	};
 }
 
+function gapEntry(record: Extract<TelemetryRecord, { k: "gap" }>): Extract<TimelineEntry, { kind: "gap" }> {
+	const { sink, reason, count } = record.data;
+	return { kind: "gap", at: record.t, sink, reason, count, countShown: shownCount(count) };
+}
+
+/** A count a record states, worded by the renderer. */
+function shownCount(value: number): { fact: Fact<number>; display: string } {
+	const fact = localCount(value);
+	return { fact, display: renderFact(fact) };
+}
+
 /** A reading that says the account cannot send, or a window measured full. */
 const quotaLimited = (entry: QuotaEntry) =>
 	entry.limitReached === true ||
@@ -2018,6 +2029,7 @@ export function timeline(
 					cause: record.data.terminal.cause,
 					stage: record.data.terminal.stage,
 					retries: record.data.terminal.retries,
+					retriesShown: shownCount(record.data.terminal.retries),
 					callIds: record.data.terminal.callIds as CallRowV1["callId"][],
 				});
 				break;
@@ -2048,7 +2060,7 @@ export function timeline(
 				entries.push({ kind: "session", at, event: "closed", detail: record.data.reason });
 				break;
 			case "gap":
-				entries.push({ kind: "gap", at, sink: record.data.sink, reason: record.data.reason, count: record.data.count });
+				entries.push(gapEntry(record));
 				break;
 			case "config.snapshot":
 				entries.push({
@@ -2136,6 +2148,7 @@ export function timeline(
 					structure: record.data.structure,
 					layoutVersion: record.data.layoutVersion,
 					sections: record.data.sections,
+					sectionsShown: shownCount(record.data.sections),
 					tokens: { fact: tokens, display: renderFact(tokens) },
 					callId: (record.ctx.callId ?? null) as CallRowV1["callId"] | null,
 				});
@@ -2154,7 +2167,10 @@ export function timeline(
 					at,
 					snapshotId: data.snapshotId,
 					source: data.source,
-					window: data.window,
+					window: {
+						...data.window,
+						display: { desired: renderCount(data.window.desired), effective: renderCount(data.window.effective) },
+					},
 					estimated: estimated ? { fact: estimated, display: renderFact(estimated) } : null,
 					reconciled: reconciled ? { fact: reconciled, display: renderFact(reconciled) } : null,
 					turnId: record.ctx.turnId ?? null,
@@ -2302,7 +2318,7 @@ export function runTimeline(runId: string, source: JournalSource, options: ReadO
 				entries.push({ kind: "process", at, event: "exited", exitCode: record.data.exitCode });
 				break;
 			case "gap":
-				entries.push({ kind: "gap", at, sink: record.data.sink, reason: record.data.reason, count: record.data.count });
+				entries.push(gapEntry(record));
 				break;
 		}
 	}

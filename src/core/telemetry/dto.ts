@@ -555,13 +555,21 @@ const runEntry = Type.Object(
 	},
 	closed,
 );
-const gapEntry = Type.Object(
-	{ kind: Type.Literal("gap"), ...at, sink: ExistingId, reason: text, count: count },
-	closed,
-);
 /** A value a record carries rather than a fold; explained through its record, so it names no reference. */
 const shown = Type.Object(
 	{ fact: Type.Union([factSchema(nonNegative), FactSumSchema]), display: Type.String() },
+	closed,
+);
+const gapEntry = Type.Object(
+	{
+		kind: Type.Literal("gap"),
+		...at,
+		sink: ExistingId,
+		reason: text,
+		count: count,
+		/** The records the gap lost, as the renderer words `count`. */
+		countShown: shown,
+	},
 	closed,
 );
 /** A configured amount such as a ceiling: a setting, not spend, so it carries no provenance. */
@@ -626,6 +634,8 @@ export const TimelineEntrySchema = Type.Union([
 			cause: Type.Union([FailureCause, Type.Null()]),
 			stage: Type.Union([text, Type.Null()]),
 			retries: count,
+			/** `retries` as the renderer words it. */
+			retriesShown: shown,
 			callIds: Type.Array(CallIdSchema),
 		},
 		closed,
@@ -726,6 +736,8 @@ export const TimelineEntrySchema = Type.Union([
 			structure: ObjectRefSchema,
 			layoutVersion: Type.Integer({ minimum: 1 }),
 			sections: count,
+			/** `sections` as the renderer words it. */
+			sectionsShown: shown,
 			/** The structure's own chars/4 estimate. */
 			tokens: shown,
 			callId: Type.Union([CallIdSchema, Type.Null()]),
@@ -739,7 +751,16 @@ export const TimelineEntrySchema = Type.Union([
 			...at,
 			snapshotId: ExistingId,
 			source: vocabulary(["estimated", "exact", "reconciled", "streaming"]),
-			window: Type.Object({ desired: count, effective: count, source: ExistingId }, closed),
+			window: Type.Object(
+				{
+					desired: count,
+					effective: count,
+					source: ExistingId,
+					/** Both sizes in tokens as the renderer words them; a setting, like a ceiling, so no provenance. */
+					display: Type.Object({ desired: Type.String(), effective: Type.String() }, closed),
+				},
+				closed,
+			),
 			estimated: Type.Union([shown, Type.Null()]),
 			reconciled: Type.Union([shown, Type.Null()]),
 			turnId: Type.Union([ExistingId, Type.Null()]),

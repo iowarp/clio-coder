@@ -544,6 +544,12 @@ test("the timeline carries tool, middleware, auth, prompt, context, System One a
 	strictEqual(tool?.kind === "tool" ? tool.duration.display : null, "1.25s");
 	const context = dto.entries.find((entry) => entry.kind === "context");
 	strictEqual(context?.kind === "context" ? context.estimated?.display : null, "~9,100 (chars/4)");
+	deepStrictEqual(context?.kind === "context" ? context.window.display : null, {
+		desired: "200,000",
+		effective: "200,000",
+	});
+	const prompt = dto.entries.find((entry) => entry.kind === "prompt");
+	strictEqual(prompt?.kind === "prompt" ? prompt.sectionsShown.display : null, "12");
 });
 
 test("the main loop's time splits into harness, network, model and tools, and bookkeeping-only rounds count their re-read (#434 §12.3, §12.4)", () => {
