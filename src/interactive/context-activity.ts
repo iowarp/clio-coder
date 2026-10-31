@@ -195,7 +195,10 @@ export function createContextActivityStore(
 		(operation.cwd === process.cwd() && (getSessionId === undefined || operation.sessionId === getSessionId()));
 	const snapshot = (now = Date.now()): ContextActivitySnapshot | null => {
 		for (const [key, run] of runs) {
-			if (!owned(run.operation) || (run.completedAtMs !== null && now - run.completedAtMs > TERMINAL_RETENTION_MS))
+			if (
+				!owned(run.operation) ||
+				(run.completedAtMs !== null && (run.kind === "compaction" || now - run.completedAtMs > TERMINAL_RETENTION_MS))
+			)
 				runs.delete(key);
 		}
 		const running = [...runs.values()].filter((run) => run.completedAtMs === null);
