@@ -50,7 +50,7 @@ Key entry points and their files:
 |---|---|---|
 | `createObservabilityBundle` | `src/domains/telemetry/extension.ts` | Composes cost tracker, projection, trace mirror, and bus listeners |
 | `createObservabilityProjection` | `src/domains/telemetry/projection.ts` | Reactive read model over bus events |
-| `createCostTracker` | `src/domains/telemetry/cost.ts` | Running USD cost and token accumulator |
+| `createCostTracker` | `src/core/telemetry/pricing.ts` | Running USD cost and token accumulator |
 | `createDispatchTraceMirror` | `trace-store.ts` | Async-enqueued SQLite writer for dispatch events |
 | `TraceStore` / `TraceReader` | `trace-store.ts` | Durable and read-only SQLite access |
 | `createWorkerProgressFold` | `src/domains/telemetry/worker-progress.ts` | Bounded, redacted live-progress projection |
@@ -131,7 +131,7 @@ a build mid-flight.
 
 ## Cost tracking
 
-`createCostTracker` (`src/domains/telemetry/cost.ts`) returns a `CostTracker` with:
+`createCostTracker` (`src/core/telemetry/pricing.ts`) returns a `CostTracker` with:
 
 - `accumulate()`: pushes a `CostEntry` to the log and updates running totals. The `label`
   parameter distinguishes non-ordinary-turn calls (`"side-question"`, `"handoff"`, `"prewarm"`,

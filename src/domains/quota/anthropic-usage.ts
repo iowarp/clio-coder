@@ -1,4 +1,4 @@
-import { renderCreditAmount } from "../telemetry/cost.js";
+import { renderCredit } from "../../core/telemetry/render.js";
 /**
  * Shared reader for Anthropic's OAuth usage endpoint.
  *
@@ -167,7 +167,7 @@ function usageCredits(raw: unknown): UsageCredits | null {
 	if (used === null) return null;
 	const currency = isRecord(raw.limit) && typeof raw.limit.currency === "string" ? raw.limit.currency : "USD";
 	const usedPct = percent ?? (limit > 0 ? (used / limit) * 100 : null);
-	return { display: `${renderCreditAmount(used, currency)} / ${renderCreditAmount(limit, currency)}`, usedPct };
+	return { display: `${renderCredit(used, currency)} / ${renderCredit(limit, currency)}`, usedPct };
 }
 
 function majorAmount(raw: unknown): number | null {

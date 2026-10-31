@@ -104,7 +104,7 @@ An `EvidenceIndexRow` has the following schema. `succeeded`, `completionEvidence
 
 ## Cost and Pricing
 
-Every cost figure Clio Coder shows is an amount plus a provenance. The amount is token counts times per-million-token rates. The provenance says where the rates came from, and it is one of `known`, `known_free`, `estimated`, or `unknown` (`CostProvenance` in [cost-provenance.ts](../../src/domains/providers/types/cost-provenance.ts)). A missing provenance reads as `unknown`, never as free.
+Every cost figure Clio Coder shows is an amount plus a provenance. The amount is token counts times per-million-token rates. The provenance says where the rates came from, and it is one of `known`, `known_free`, `estimated`, or `unknown` (`CostProvenance` in [pricing.ts](../../src/core/telemetry/pricing.ts)). A missing provenance reads as `unknown`, never as free.
 
 ### Declaring and resolving a price
 
@@ -129,7 +129,7 @@ Protocol-tier runtimes (`litellm`, `openai-compat`, `anthropic-compat`, `systemo
 | Trace mirror | `total_cost_usd` on runs and phases, `NULL` when the provenance is `unknown`. See [Trace Store](trace-store.md). |
 | Session cost tracker | The running `CostEntry` list behind the session cost ceiling, the System One spend gate, the headless `--max-cost-usd` cap and print mode's run cost counts, each entry with its provenance and an optional label for spend beside the session. Worker costs enter it when a terminal dispatch payload carries a target, model, and token count. `/usage` and the footer read the telemetry read model instead. |
 
-The cost aggregate renders by one rule (`formatCostAggregate` in [cost.ts](../../src/domains/telemetry/cost.ts)). Before any priced call there is no cost field, and fixed-width cells say `not measured`. All `known_free` calls render `$0.00 local`. Any `unknown` call renders the known amount with `+?` when it is above zero, and no field otherwise. Otherwise any `estimated` call renders `~$X est`, and `$X` when everything is `known`. A cost is never printed before the first call, because nothing has been measured.
+The cost aggregate renders by one rule (`formatCostAggregate` in [render.ts](../../src/core/telemetry/render.ts)). Before any priced call there is no cost field, and fixed-width cells say `not measured`. All `known_free` calls render `$0.00 local`. Any `unknown` call renders the known amount with `+?` when it is above zero, and no field otherwise. Otherwise any `estimated` call renders `~$X est`, and `$X` when everything is `known`. A cost is never printed before the first call, because nothing has been measured.
 
 The session cost ceiling `safety.limits.sessionCostUsd` (default 5) checks the tracker's known sum. It admits only requests priced `known` or `estimated`, so `known_free` and `unknown` routes never enter the gate, and an unpriced route is not a dollar limit ([budget.ts](../../src/domains/scheduling/budget.ts)). A value of `0` means no ceiling: the tracker still records spend and the check admits every request. The pricing contract and the ceiling's effect on routes are in [configuration-and-targets.md](../guide/configuration-and-targets.md).
 

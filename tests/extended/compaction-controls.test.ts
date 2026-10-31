@@ -615,7 +615,7 @@ describe("production compaction controls", () => {
 			runtimeId: "fixture",
 			wireModelId: "chat",
 			runtimeResolution: {
-				costProvenance: "known_free",
+				pricedBy: "free",
 				capabilityDecisions: { maxTokens: 8192 },
 				contextWindowDetails: {
 					desiredContextWindow: 32768,
@@ -781,7 +781,7 @@ describe("production compaction controls", () => {
 			runtimeId: "fixture",
 			wireModelId: "chat",
 			runtimeResolution: {
-				costProvenance: "known_free",
+				pricedBy: "free",
 				capabilityDecisions: { maxTokens: 8192 },
 				contextWindowDetails: {
 					desiredContextWindow: 32768,
@@ -862,7 +862,7 @@ describe("production compaction controls", () => {
 			runtimeId: "fixture",
 			wireModelId: "chat",
 			runtimeResolution: {
-				costProvenance: "known_free",
+				pricedBy: "free",
 				capabilityDecisions: { maxTokens: 8192 },
 				contextWindowDetails: { effectiveContextWindow: 32768 },
 			},
@@ -1333,7 +1333,7 @@ describe("production compaction controls", () => {
 				runtimeId: "fixture",
 				wireModelId: "chat",
 				runtimeResolution: {
-					costProvenance: "known_free",
+					pricedBy: "free",
 					contextWindowDetails: {
 						desiredContextWindow: 131072,
 						effectiveContextWindow: 131072,

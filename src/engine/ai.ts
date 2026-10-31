@@ -107,7 +107,7 @@ export interface EngineTextCompletionResult {
 		reasoning: number;
 		totalTokens: number;
 		costUsd: number;
-		missingTokenCalls?: number;
+		unmeteredCalls?: number;
 	};
 	/** Backend prefill and prediction facts when the serving runtime reported them. */
 	backend: BackendCompletionTimings | null;
@@ -164,7 +164,7 @@ async function completeEngineTextAttempt(input: EngineTextCompletionInput): Prom
 				reasoning: 0,
 				totalTokens: 0,
 				costUsd: 0,
-				...(failure.invoked ? { missingTokenCalls: 1 } : {}),
+				...(failure.invoked ? { unmeteredCalls: 1 } : {}),
 			},
 			backend: null,
 		});
@@ -193,7 +193,7 @@ async function completeEngineTextAttempt(input: EngineTextCompletionInput): Prom
 			totalTokens: usage.totalTokens,
 			costUsd: usage.cost.total,
 			...(!normalizeTokenUsage(usage as unknown as Record<string, unknown>).observed && failure?.invoked !== false
-				? { missingTokenCalls: 1 }
+				? { unmeteredCalls: 1 }
 				: {}),
 		},
 		backend: response.backendTimings ?? null,

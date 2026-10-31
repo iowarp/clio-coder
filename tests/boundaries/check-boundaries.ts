@@ -360,7 +360,7 @@ export function checkCostRendering(file: string, source: string): string[] {
 		if (bypass) {
 			const line = tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
 			violations.push(
-				`rule10: ${file}:${line} formats money outside core/telemetry/render.ts; use the canonical renderer (renderCostAggregate/renderCostAmount or a DTO display), or a server-rendered GUI display string`,
+				`rule10: ${file}:${line} formats money outside core/telemetry/render.ts; use the canonical renderer (renderPricing, renderUsdSum or a DTO display), or a server-rendered GUI display string`,
 			);
 		}
 		ts.forEachChild(node, visit);

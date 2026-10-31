@@ -175,7 +175,7 @@ test("a long turn streams usage_update per model response with the meter rising 
 		role: "assistant",
 		content: [{ type: "text", text }],
 		stopReason: "stop",
-		usage: { input: 100, output: 20, cacheRead: 50, totalTokens: 170, cost: { total: 0.25 }, costProvenance: "known" },
+		usage: { input: 100, output: 20, cacheRead: 50, totalTokens: 170, cost: { total: 0.25 }, pricedBy: "target-rates" },
 	});
 	const served = serveClioAcpAgent({
 		transport,

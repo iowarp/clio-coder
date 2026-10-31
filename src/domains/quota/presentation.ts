@@ -1,4 +1,5 @@
-import { renderCostAmount } from "../telemetry/cost.js";
+import { pricedUsd } from "../../core/telemetry/pricing.js";
+import { renderPricing } from "../../core/telemetry/render.js";
 /**
  * Pure presentation helpers for quota snapshots.
  *
@@ -158,7 +159,7 @@ export function localQuotaSnapshot(options: { runtimeLabel?: string; fetchedAt?:
 		displayName: options.runtimeLabel ?? "Local AI",
 		status: "ok",
 		windows: [],
-		credits: { display: renderCostAmount(0, "known_free"), usedPct: null },
+		credits: { display: renderPricing(pricedUsd("free", 0)), usedPct: null },
 		plan: "Local",
 		message: "no subscription window consumed",
 		fetchedAt: options.fetchedAt ?? null,

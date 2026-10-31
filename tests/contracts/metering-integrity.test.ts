@@ -11,7 +11,6 @@ import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/i
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/index.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
-import { callCoverageForRun } from "../../src/domains/telemetry/cost.js";
 import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js";
 import {
 	remainingContextMaxTokens,
@@ -197,24 +196,6 @@ describe("contracts/metering integrity", () => {
 			1,
 			"re-adding the estimate to assistantSessionPayload's copy list",
 		);
-	});
-
-	it("preserves declared call counts and unknown run coverage", () => {
-		for (const [counts, expected] of [
-			[{}, { apiCalls: 0, missingTokenCalls: 0, unknownCallCoverageRuns: 1 }],
-			[
-				{ apiCalls: 0, missingTokenCalls: 0 },
-				{ apiCalls: 0, missingTokenCalls: 0, unknownCallCoverageRuns: 0 },
-			],
-			[
-				{ apiCalls: 3, missingTokenCalls: 1 },
-				{ apiCalls: 3, missingTokenCalls: 1, unknownCallCoverageRuns: 0 },
-			],
-			[{ apiCalls: 2 }, { apiCalls: 2, missingTokenCalls: 0, unknownCallCoverageRuns: 1 }],
-		] as const) {
-			const coverage = callCoverageForRun(counts);
-			deepStrictEqual(coverage, expected);
-		}
 	});
 
 	it("estimates spent prompt and streamed output when cancellation prevents final usage", () => {
@@ -419,7 +400,7 @@ describe("canonical monetary presentation (#434)", () => {
 			ok(checkCostRendering("src/example.ts", source).some((line) => line.startsWith("rule10:")));
 		deepStrictEqual(
 			// biome-ignore lint/suspicious/noTemplateCurlyInString: source fixture for the monetary boundary (#434).
-			checkCostRendering("src/example.ts", "const label = `${elapsed.toFixed(2)}s ${renderCostAggregate(cost)}`;"),
+			checkCostRendering("src/example.ts", "const label = `${elapsed.toFixed(2)}s ${renderPricing(pricing)}`;"),
 			[],
 		);
 		deepStrictEqual(runBoundaryCheck(process.cwd()).violations, []);

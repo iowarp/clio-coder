@@ -1,10 +1,7 @@
 /**
- * The telemetry projection's run summary and the interactive dispatch
- * board each derived a run's terminal status and cost provenance from the
- * same DispatchCompleted/DispatchFailed bus payloads through their own,
- * independently-maintained copies of the mapping. resolveDispatchFailureStatus
- * and resolveCostProvenance are now the one shared definition each side
- * imports, so the two surfaces cannot silently disagree on the same run.
+ * The telemetry projection's run summary and the interactive dispatch board derive a run's terminal status from the
+ * same DispatchCompleted/DispatchFailed bus payloads through resolveDispatchFailureStatus, the one shared definition,
+ * and a target's pricer through resolveEffectivePricing, so no two surfaces disagree on the same run.
  */
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -12,7 +9,6 @@ import { validateSettings } from "../../src/core/config.js";
 import { resolveDispatchFailureStatus } from "../../src/core/dispatch-outcome.js";
 import { resolveEffectivePricing } from "../../src/domains/providers/catalog.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
-import { resolveCostProvenance } from "../../src/domains/providers/types/cost-provenance.js";
 
 describe("resolveDispatchFailureStatus", () => {
 	it("maps dead and stalled to dead", () => {
@@ -33,24 +29,8 @@ describe("resolveDispatchFailureStatus", () => {
 	});
 });
 
-describe("resolveCostProvenance", () => {
-	it("accepts every real provenance value", () => {
-		strictEqual(resolveCostProvenance("known", "unknown"), "known");
-		strictEqual(resolveCostProvenance("known_free", "unknown"), "known_free");
-		strictEqual(resolveCostProvenance("estimated", "unknown"), "estimated");
-		strictEqual(resolveCostProvenance("unknown", "known"), "unknown");
-	});
-
-	it('falls back rather than accepting a value outside the closed set, unlike the dispatch board\'s prior payload.costProvenance ?? "unknown"', () => {
-		strictEqual(resolveCostProvenance("not-a-real-provenance", "estimated"), "estimated");
-		strictEqual(resolveCostProvenance(undefined, "known"), "known");
-		strictEqual(resolveCostProvenance(null, "known"), "known");
-		strictEqual(resolveCostProvenance(42, "known"), "known");
-	});
-});
-
 describe("resolveEffectivePricing", () => {
-	it("prices every unpriced model on a free-declared proxy target as known_free", () => {
+	it("prices every unpriced model on a free-declared proxy target as free", () => {
 		const { settings, issues } = validateSettings({
 			version: 2,
 			targets: [{ id: "proxy", runtime: "litellm", pricing: "free" }],

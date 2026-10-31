@@ -456,7 +456,7 @@ describe("provider transport boundary", () => {
 			},
 		]);
 		deepStrictEqual(reported.responseModelIdObservation, { state: "reported", reportedModelId: "served-model" });
-		strictEqual(reported.usage.cacheReadReported, true);
+		strictEqual(reported.usage.cacheReadField, "sent");
 		deepStrictEqual(reported.backendTimings, {
 			promptTokens: 100,
 			cachedTokens: 80,
@@ -473,7 +473,7 @@ describe("provider transport boundary", () => {
 			},
 		]);
 		deepStrictEqual(silent.responseModelIdObservation, { state: "not-reported" });
-		strictEqual(silent.usage.cacheReadReported, false);
+		strictEqual(silent.usage.cacheReadField, "omitted");
 		strictEqual(silent.backendTimings, undefined);
 	});
 

@@ -177,7 +177,7 @@ test("S1-06 usage report reads journaled approvals and emits measured rate", asy
 				cacheWrite: 0,
 				totalTokens: 150,
 				cost: { total: 0.03 },
-				costProvenance: "known",
+				pricedBy: "target-rates",
 			},
 		},
 	});

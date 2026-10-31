@@ -288,7 +288,7 @@ test("the client and server sum no telemetry quantity: no accumulation over toke
 	const sums: string[] = [];
 	// The read model's quantity names; plain counters such as a tool tally or an attachment size are not these.
 	const telemetry =
-		/\b(?:tokens|totalTokens|tokenCount|input|output|cacheRead|cacheWrite|reasoning|usd|costUsd|knownUsd|missingTokenCalls|apiCalls)\b/;
+		/\b(?:tokens|totalTokens|tokenCount|input|output|cacheRead|cacheWrite|reasoning|usd|costUsd|knownUsd|unmeteredCalls|apiCalls)\b/;
 	for (const file of [...files(resolve(app, "client")), ...files(resolve(app, "server"))]) {
 		const tree = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
 		const walk = (node: ts.Node) => {

@@ -316,7 +316,7 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 		},
 		totalTokens: measured(tokens),
 		apiCalls: unknown,
-		missingTokenCalls: unknown,
+		unmeteredCalls: unknown,
 		pricing: { usd: unknown, pricedBy: "none" },
 	});
 	const report = (tokens: number, revision: number) =>
@@ -1153,7 +1153,7 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		},
 		totalTokens: measured(100),
 		apiCalls: unknown,
-		missingTokenCalls: unknown,
+		unmeteredCalls: unknown,
 		pricing: { usd: measured(1), pricedBy: "provider" },
 	};
 	const aggregateRecord = makeTelemetryRecord(
@@ -1168,7 +1168,7 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 	const partialCounts = runUsageFromCallRecords([
 		{
 			...aggregateRecord,
-			data: { ...aggregate, apiCalls: measured(3), missingTokenCalls: measured(0), callCountCoverage: "partial" },
+			data: { ...aggregate, apiCalls: measured(3), unmeteredCalls: measured(0), callCountCoverage: "partial" },
 		},
 	]);
 	strictEqual(factKnownValue(partialCounts.sums.apiCalls ?? emptySum), 3);
@@ -1211,7 +1211,7 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 			revision: 2,
 			totalTokens: measured(0),
 			apiCalls: measured(0),
-			missingTokenCalls: measured(0),
+			unmeteredCalls: measured(0),
 			pricing: { usd: measured(0), pricedBy: "provider" },
 		},
 		aggregateRecord.ctx,
@@ -1486,7 +1486,7 @@ test("usage report discovers a standalone run journal that has no session and no
 		},
 		totalTokens: measured,
 		apiCalls: unknown,
-		missingTokenCalls: unknown,
+		unmeteredCalls: unknown,
 		pricing: { usd: unknown, pricedBy: "none" },
 	};
 	try {

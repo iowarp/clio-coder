@@ -558,7 +558,7 @@ it("a changed tool choice is a cold reason for the request that sends it, a #426
 	state.runtime = null;
 	const observation = (
 		context.promptCachePayloadForAssistant(
-			{ input: 10_000, output: 5, cacheRead: 0, cacheWrite: 0, cacheReadReported: false } as never,
+			{ input: 10_000, output: 5, cacheRead: 0, cacheWrite: 0, cacheReadField: "omitted" } as never,
 			{
 				promptTokens: 10_000,
 				cachedTokens: 6_000,

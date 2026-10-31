@@ -115,7 +115,7 @@ test("a server whose usage omits cache reads is judged by its own cache_n, and i
 		{
 			role: "assistant",
 			stopReason: "stop",
-			usage: { input: 10_000, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 10_005, cacheReadReported: false },
+			usage: { input: 10_000, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 10_005, cacheReadField: "omitted" },
 		},
 		"free",
 	);

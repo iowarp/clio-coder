@@ -1,9 +1,9 @@
+import { renderUsdEstimate, renderUsdLimit } from "../core/telemetry/render.js";
 import {
 	parseWorkerContextPolicy,
 	type WorkerContextPolicy,
 	type WorkerContextProvenance,
 } from "../domains/context/worker/contract.js";
-import { renderCostAmount } from "../domains/telemetry/cost.js";
 import { parseWorkerContextProvenance } from "../worker/context-seed.js";
 /**
  * Plan-scale dispatch detection and the operator-facing plan artifact.
@@ -434,7 +434,7 @@ function renderPlanText(
 ): string {
 	const lines = [
 		`dispatch plan: topology=${topology} tasks=${tasks.length}`,
-		`advisory session cost baseline: ${costCeilingUsd === undefined ? "unavailable" : costCeilingUsd === 0 ? "no ceiling" : renderCostAmount(costCeilingUsd, "known")}`,
+		`advisory session cost baseline: ${costCeilingUsd === undefined ? "unavailable" : costCeilingUsd === 0 ? "no ceiling" : renderUsdLimit(costCeilingUsd)}`,
 		`deadline: ${deadlineMs === null ? "none (advisory planning)" : `${deadlineMs}ms whole-plan`}`,
 	];
 	if (confirmation !== undefined) {
@@ -485,7 +485,7 @@ function renderPlanText(
 			const approval = task.routeApproval;
 			const selected = approval.decision.selected;
 			lines.push(
-				`    active policy=${safeField(approval.decision.policyVersion)} decision=${approval.decision.decisionHash} runtime=${safeField(selected.runtimeId)} thinking=${safeField(selected.thinkingLevel ?? "default")} totalCostUpperBoundUsd=${renderCostAmount(approval.totalCostUpperBoundUsd, "estimated")} deadlineMs=${approval.deadlineMs ?? "none"} maxAttempts=${approval.maxAttempts}`,
+				`    active policy=${safeField(approval.decision.policyVersion)} decision=${approval.decision.decisionHash} runtime=${safeField(selected.runtimeId)} thinking=${safeField(selected.thinkingLevel ?? "default")} totalCostUpperBoundUsd=${renderUsdEstimate(approval.totalCostUpperBoundUsd)} deadlineMs=${approval.deadlineMs ?? "none"} maxAttempts=${approval.maxAttempts}`,
 			);
 		}
 		if (task.agentSelection !== null) {

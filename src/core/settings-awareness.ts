@@ -1,10 +1,10 @@
-import { renderCostAmount } from "../domains/telemetry/cost.js";
 import type { ClioSettings } from "./config.js";
 import { type RouteName, type RouteProvenance, routeFields } from "./route-provenance.js";
 import { getAtPath } from "./session-routing.js";
 import { settingsAreaForPath } from "./settings-areas.js";
 import { SETTING_CONTROLS } from "./settings-controls.js";
 import { resolveSettingsSection, settingsSectionForPath } from "./settings-navigation.js";
+import { renderUsdLimit } from "./telemetry/render.js";
 
 export const AUTONOMY_HELP = {
 	default:
@@ -27,7 +27,7 @@ function describeSettingsPosture(settings: Readonly<ClioSettings>): string {
 	const budget =
 		settings.safety.limits.sessionCostUsd === 0
 			? "Tracked spending has no session ceiling."
-			: `Tracked session spending is capped at ${renderCostAmount(settings.safety.limits.sessionCostUsd, "known")}; unknown provider prices are not a guaranteed dollar limit.`;
+			: `Tracked session spending is capped at ${renderUsdLimit(settings.safety.limits.sessionCostUsd)}; unknown provider prices are not a guaranteed dollar limit.`;
 	return `${AUTONOMY_HELP[settings.safety.autonomy]} ${worker} ${budget}`;
 }
 

@@ -22,7 +22,7 @@ function renderUsd(value: number): string {
 	return `$${value.toFixed(digits)}`;
 }
 
-/** A provider credit balance; it can be denominated outside USD. */
+/** A provider credit balance, a measured amount; it can be denominated outside USD. */
 export function renderCredit(value: number, currency: string): string {
 	return currency.toUpperCase() === "USD" ? renderUsd(value) : `${value.toFixed(2)} ${currency}`;
 }
@@ -76,37 +76,28 @@ function renderUnknown(reason: Extract<Fact<unknown>, { kind: "unknown" }>["reas
 }
 
 /**
- * The structural shape of a folded cost claim, shared with the telemetry `CostAggregate`. `calls` counts the
- * priced or unpriced contributions; zero calls is no claim, not a measured `$0.00`.
+ * The one cost wording family over a sum's parts. Partly priced says what it knows with `+?` marking the rest (L3);
+ * estimates say so (L5); a sum nobody priced has no claim and reads as not measured, never `$0.00`.
  */
-export interface CostClaim {
-	knownUsd: number;
-	hasEstimated: boolean;
-	hasUnknown: boolean;
-	allKnownFree: boolean;
-	calls: number;
-	unknownCallCoverageRuns?: number;
-}
-
-export function costClaimMeasured(cost: CostClaim): boolean {
-	return cost.calls > 0 || (cost.unknownCallCoverageRuns ?? 0) > 0;
-}
-
-/**
- * The one cost wording family. Null means there is no cost claim to make: nothing priced yet, or a target that
- * prices nothing. Partly priced says what it knows with `+?` marking the rest (L3); estimates say so (L5).
- */
-export function renderCostClaim(cost: CostClaim | null | undefined): string | null {
-	if (!cost || !costClaimMeasured(cost)) return null;
-	if (cost.allKnownFree) return "$0.00 local";
-	if (cost.hasUnknown) return cost.knownUsd > 0 ? `${cost.hasEstimated ? "~" : ""}${renderUsd(cost.knownUsd)} +?` : null;
-	if (cost.hasEstimated) return `~${renderUsd(cost.knownUsd)} est`;
-	return renderUsd(cost.knownUsd);
+function renderUsdParts(known: number, parts: { estimated: boolean; unpriced: boolean; free: boolean }): string {
+	if (parts.free && !parts.unpriced && !parts.estimated) return "$0.00 local";
+	if (parts.unpriced) return known > 0 ? `${parts.estimated ? "~" : ""}${renderUsd(known)} +?` : COST_NOT_MEASURED;
+	if (parts.estimated) return `~${renderUsd(known)} est`;
+	return renderUsd(known);
 }
 
 /** A projected amount, such as a route's admission estimate: a figure Clio derived, never spend. */
 export function renderUsdEstimate(usd: number): string {
 	return `~${renderUsd(usd)} est`;
+}
+
+/** A spend a budget stop states, marked as it was priced: estimated parts and unpriced calls stay visible (#434 §6.3). */
+export function renderUsdSpend(usd: number, priced: { estimated: boolean; unpriced: boolean } | undefined): string {
+	return renderUsdParts(usd, {
+		estimated: priced?.estimated ?? false,
+		unpriced: priced?.unpriced ?? false,
+		free: false,
+	});
 }
 
 /**
@@ -165,18 +156,15 @@ export function renderCompactCount(fact: Fact<number> | FactSum): string {
 	return fact.coverage.measured + fact.coverage.estimated === 0 ? "?" : `≥${known} +?`;
 }
 
-/** A folded USD sum, as the same claim {@link renderCostClaim} words; `free` is true when every priced call was free. */
+/** A folded USD sum; `free` is true when every priced call was a free target's measured zero. */
 export function renderUsdSum(sum: FactSum, free: boolean): string {
 	if (allAbsent(sum)) return renderAbsent("not-applicable");
-	return (
-		renderCostClaim({
-			knownUsd: sum.measured + sum.estimated,
-			hasEstimated: sum.coverage.estimated > 0,
-			hasUnknown: sum.unknownCount > 0,
-			allKnownFree: free && sum.unknownCount === 0 && sum.coverage.estimated === 0,
-			calls: contributions(sum),
-		}) ?? COST_NOT_MEASURED
-	);
+	if (contributions(sum) === 0) return COST_NOT_MEASURED;
+	return renderUsdParts(sum.measured + sum.estimated, {
+		estimated: sum.coverage.estimated > 0,
+		unpriced: sum.unknownCount > 0,
+		free,
+	});
 }
 
 /** A folded duration sum (total admission wait, total model time); partial sums are lower bounds. */

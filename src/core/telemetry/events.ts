@@ -175,7 +175,7 @@ function projectMemoryObservation(payload: {
 				cacheWrite: number;
 				reasoning: number;
 				totalTokens: number;
-				missingTokenCalls?: number;
+				unmeteredCalls?: number;
 				callId?: string;
 				attemptId?: string;
 		  }
@@ -183,7 +183,7 @@ function projectMemoryObservation(payload: {
 		| undefined;
 	if (usage) {
 		const token = (value: number) =>
-			value > 0 || usage.missingTokenCalls === 0
+			value > 0 || usage.unmeteredCalls === 0
 				? { kind: "measured", value, source: "provider" }
 				: { kind: "unknown", reason: "not-observed" };
 		facts.usage = {

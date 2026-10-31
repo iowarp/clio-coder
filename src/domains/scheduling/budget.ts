@@ -1,5 +1,10 @@
-import { renderCostRemaining, renderUsdSetting } from "../../core/telemetry/render.js";
-import { renderCostAmount } from "../telemetry/cost.js";
+import {
+	renderCostRemaining,
+	renderUsdEstimate,
+	renderUsdLimit,
+	renderUsdSetting,
+	renderUsdSpend,
+} from "../../core/telemetry/render.js";
 /**
  * Session budget state. Admission checks priced spend before the next paid
  * request; unpriced requests never enter this gate.
@@ -65,14 +70,7 @@ function readPricing(value: unknown): BudgetSpendPricing | undefined {
 
 /** A stop's spend through the canonical renderer, marked as it was priced. */
 export function budgetSpendText(usd: number, pricing: BudgetSpendPricing | undefined): string {
-	if (!pricing) return renderCostAmount(usd, "known");
-	return renderCostAmount(usd, undefined, {
-		knownUsd: usd,
-		hasEstimated: pricing.estimated,
-		hasUnknown: pricing.unpriced,
-		allKnownFree: false,
-		calls: 1,
-	});
+	return renderUsdSpend(usd, pricing);
 }
 
 /**
@@ -119,8 +117,8 @@ export function budgetBlockSpendText(
 	block: Pick<BudgetBlockView, "currentUsd" | "projectedUsd" | "ceilingUsd" | "pricing">,
 ): string {
 	const projected = block.projectedUsd ?? 0;
-	const pending = projected > 0 ? ` (${renderCostAmount(projected, "estimated")} pending)` : "";
-	return `${budgetSpendText(block.currentUsd + projected, block.pricing)} of ${renderCostAmount(block.ceilingUsd, "known")} ceiling${pending}`;
+	const pending = projected > 0 ? ` (${renderUsdEstimate(projected)} pending)` : "";
+	return `${budgetSpendText(block.currentUsd + projected, block.pricing)} of ${renderUsdLimit(block.ceilingUsd)} ceiling${pending}`;
 }
 
 /** The one-line operator notice for a ceiling stop; `error` once spend has passed the ceiling. */
@@ -158,8 +156,8 @@ export class SessionCostCeilingError extends Error {
 		const perCall = budgetStopContextClause(contextTokens);
 		super(
 			runCap !== undefined && ceilingUsd >= runCap.ceilingUsd
-				? `${SESSION_COST_CEILING_REASON}: this run's priced spend ${budgetSpendText(currentUsd - runCap.startUsd, pricing)} reached its --max-cost-usd ${renderCostAmount(runCap.maxUsd, "known")} cap${perCall}`
-				: `${SESSION_COST_CEILING_REASON}: session priced spend ${budgetSpendText(currentUsd, pricing)} reached the ${renderCostAmount(ceilingUsd, "known")} ceiling${perCall}; raise safety.limits.sessionCostUsd`,
+				? `${SESSION_COST_CEILING_REASON}: this run's priced spend ${budgetSpendText(currentUsd - runCap.startUsd, pricing)} reached its --max-cost-usd ${renderUsdLimit(runCap.maxUsd)} cap${perCall}`
+				: `${SESSION_COST_CEILING_REASON}: session priced spend ${budgetSpendText(currentUsd, pricing)} reached the ${renderUsdLimit(ceilingUsd)} ceiling${perCall}; raise safety.limits.sessionCostUsd`,
 		);
 	}
 }

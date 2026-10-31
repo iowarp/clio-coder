@@ -248,7 +248,7 @@ This document defines the core architectural concepts and terminology used throu
 
 ### 61. Cost Provenance
 - **Definition**: The label that says where a cost figure came from: `known` (declared target rates), `known_free` (declared free, all-zero rates, or a `local-native` runtime), `estimated` (a Pi catalog rate) or `unknown` (no rate source). Absent provenance reads as `unknown`, never as free. Pricing is declared per target, and the label travels with the cost on receipts and in the footer, `/usage` and run tables. See [pricing and cost provenance](configuration-and-targets.md#pricing-and-cost-provenance).
-- **Owning Type**: `CostProvenance` in [cost-provenance.ts](../../src/domains/providers/types/cost-provenance.ts); resolved by `resolveEffectivePricing` in [catalog.ts](../../src/domains/providers/catalog.ts).
+- **Owning Type**: `CostProvenance` in [pricing.ts](../../src/core/telemetry/pricing.ts); resolved by `resolveEffectivePricing` in [catalog.ts](../../src/domains/providers/catalog.ts).
 
 ### 62. Chat Route
 - **Definition**: The target, model and thinking level that answer the operator, saved as `chat.target`, `chat.model` and `chat.thinkingLevel`. A session owns its live copy. When an existing home has no chat route, startup detects one from configured targets, environment keys, stored logins and loopback servers and saves it only when no chat route exists. A saved route that cannot be used is kept: a missing credential opens the session unavailable, and a target with no model or a runtime that cannot drive the main agent exits 2. See [chat route detection](configuration-and-targets.md#chat-route-detection).

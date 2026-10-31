@@ -346,7 +346,7 @@ function foldRunScope(records: Iterable<TelemetryRecord>, options: FoldOptions) 
 				? foldFacts([observed(apiCalls), aggregate.apiCalls])
 				: chooseCount(aggregate.apiCalls)
 			: fromFact(observed(apiCalls)),
-		missingTokenCalls: aggregate ? chooseCount(aggregate.missingTokenCalls) : fromFact(observed(missingCalls)),
+		unmeteredCalls: aggregate ? chooseCount(aggregate.unmeteredCalls) : fromFact(observed(missingCalls)),
 		amountCoverageUnknown: aggregate
 			? conflict || aggregate.coverage !== "complete"
 			: calls.coverage.gapRecords > 0 || callTotals.incomplete > 0 || calls.unresolvedCallIds.length > 0,
@@ -357,8 +357,8 @@ function foldRunScope(records: Iterable<TelemetryRecord>, options: FoldOptions) 
 					aggregate.callCountCoverage !== "complete" ||
 					aggregate.apiCalls.kind === "unknown" ||
 					aggregate.apiCalls.kind === "absent" ||
-					aggregate.missingTokenCalls.kind === "unknown" ||
-					aggregate.missingTokenCalls.kind === "absent"
+					aggregate.unmeteredCalls.kind === "unknown" ||
+					aggregate.unmeteredCalls.kind === "absent"
 				: calls.coverage.gapRecords > 0 || callTotals.incomplete > 0 || calls.unresolvedCallIds.length > 0),
 	};
 }
@@ -401,7 +401,7 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>, options: Fold
 		.map(([, part]) => foldRunScope(part, options));
 	const sources = new Set(scopes.map((scope) => `${scope.aggregate?.source}/${scope.aggregate?.scope}`));
 	if (sources.size > 1) return { ...foldRunScope(rows, options), allKnownFree: false };
-	const sum = (key: "totalTokens" | "usd" | "apiCalls" | "missingTokenCalls") =>
+	const sum = (key: "totalTokens" | "usd" | "apiCalls" | "unmeteredCalls") =>
 		sumFactSums(scopes.map((scope) => scope[key]));
 	const apiCalls = sum("apiCalls");
 	// Identified constituent calls and reported part counts overlap; either can establish a lower bound (#434).
@@ -415,7 +415,7 @@ export function foldRunJournal(records: Iterable<TelemetryRecord>, options: Fold
 		totalTokens: sum("totalTokens"),
 		usd: sum("usd"),
 		apiCalls,
-		missingTokenCalls: sum("missingTokenCalls"),
+		unmeteredCalls: sum("unmeteredCalls"),
 		amountCoverageUnknown: base.amountCoverageUnknown || scopes.some((scope) => scope.amountCoverageUnknown),
 		unknownCoverage: base.unknownCoverage || scopes.some((scope) => scope.unknownCoverage),
 		allKnownFree: scopes.every(allKnownFree),

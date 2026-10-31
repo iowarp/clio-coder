@@ -254,7 +254,7 @@ function clioPeerUsageFacts(meta: AcpUsageMeta, coverage: RunUsage["coverage"]) 
 		usage: facts,
 		totalTokens: peerFact(q?.total.fact),
 		apiCalls: peerFact(callsFact, "local-count"),
-		missingTokenCalls: unreportedCalls(q?.total.fact),
+		unmeteredCalls: unreportedCalls(q?.total.fact),
 		pricing: {
 			usd,
 			pricedBy:

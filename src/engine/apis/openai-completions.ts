@@ -25,6 +25,7 @@ import {
 	liteLLMRouteFailureMessage,
 } from "../../core/gateway-routing.js";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
+import type { CacheReadField } from "../../core/token-split.js";
 import {
 	type ResolvedModelRuntimeCapabilities,
 	reasoningClassForMechanism,
@@ -67,8 +68,8 @@ import type { EngineApiProvider } from "./types.js";
 
 declare module "@earendil-works/pi-ai" {
 	interface Usage {
-		/** Whether the wire response explicitly supplied a cache-read count. */
-		cacheReadReported?: boolean;
+		/** Whether the wire response sent a cache-read count or omitted it; absent when the adapter does not check. */
+		cacheReadField?: CacheReadField;
 	}
 	interface AssistantMessage {
 		/** Direct observation of model-id presence in an OpenAI-compatible response. */
@@ -116,7 +117,7 @@ interface ResponseModelIdCapture {
 	reportedModelId: string | null;
 	observed: boolean;
 	modelIdDone: boolean;
-	cacheReadReported: boolean;
+	cacheReadField: CacheReadField;
 	backendTimings: BackendCompletionTimings | null;
 	backendTimingsSource: BackendTimingsSource | null;
 	gatewayRouting: GatewayRoutingObservation | null;
@@ -187,7 +188,7 @@ function observeProviderChunk(payload: unknown, capture: ResponseModelIdCapture)
 		nonnegativeFiniteNumber(details.cached_tokens) !== null ||
 		nonnegativeFiniteNumber(usage.cache_read_input_tokens) !== null
 	) {
-		capture.cacheReadReported = true;
+		capture.cacheReadField = "sent";
 	}
 	if (!capture.modelIdDone) {
 		const model = payload.model;
@@ -280,7 +281,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 		reportedModelId: null,
 		observed: false,
 		modelIdDone: false,
-		cacheReadReported: false,
+		cacheReadField: "omitted",
 		backendTimings: null,
 		backendTimingsSource: backendTimingsSourceForModel(model),
 		gatewayRouting: null,
@@ -312,7 +313,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 						: { state: "reported", reportedModelId: capture.reportedModelId }
 					: { state: "not-observed" };
 				if (event.type === "done") {
-					event.message.usage.cacheReadReported = capture.cacheReadReported;
+					event.message.usage.cacheReadField = capture.cacheReadField;
 					event.message.responseModelIdObservation = observation;
 					if (capture.gatewayRouting !== null) event.message.gatewayRouting = capture.gatewayRouting;
 					if (capture.backendTimings !== null) event.message.backendTimings = capture.backendTimings;
@@ -323,7 +324,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 					if (capture.contentFilter && event.error.stopReason === "error") {
 						event.error.errorMessage = providerContentFilterMessage(event.error.errorMessage ?? "");
 					}
-					event.error.usage.cacheReadReported = capture.cacheReadReported;
+					event.error.usage.cacheReadField = capture.cacheReadField;
 					event.error.responseModelIdObservation = observation;
 					if (capture.gatewayRouting !== null) event.error.gatewayRouting = capture.gatewayRouting;
 					if (capture.backendTimings !== null) event.error.backendTimings = capture.backendTimings;

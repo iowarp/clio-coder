@@ -1021,7 +1021,7 @@ const FAMILY: Record<FactMetric, Family> = {
 	total: "count",
 	usd: "usd",
 	apiCalls: "count",
-	missingTokenCalls: "count",
+	unmeteredCalls: "count",
 	ttft: "duration",
 	firstToken: "duration",
 	modelTime: "duration",
@@ -1081,7 +1081,7 @@ const RULES: Record<FactMetric, string> = {
 	total: "sum(usage.total where reported, else input + cacheRead + cacheWrite + output)",
 	usd: "sum(pricing.usd)",
 	apiCalls: "count(attempts that reached the provider)",
-	missingTokenCalls: "count(sent attempts whose token usage is unknown)",
+	unmeteredCalls: "count(sent attempts whose token usage is unknown)",
 	ttft: "stages.firstToken − stages.send.end, per attempt",
 	firstToken:
 		"ttft of the earliest attempt that measured or estimated one (for a prompt, among its main-agent responses), so a failed attempt before it never hides it",
@@ -1254,7 +1254,7 @@ function callSum(totals: () => CallTotals, metric: FactMetric, missing: () => nu
 			const all = totals();
 			return counted(all.settled + all.settledNoUsage + all.sentUnsettled);
 		}
-		case "missingTokenCalls":
+		case "unmeteredCalls":
 			return counted(missing());
 		case "runs":
 			return counted(0);
@@ -1287,8 +1287,8 @@ function runSum(run: Run, metric: FactMetric): FactSum {
 		case "calls":
 		case "apiCalls":
 			return fold.apiCalls;
-		case "missingTokenCalls":
-			return fold.missingTokenCalls;
+		case "unmeteredCalls":
+			return fold.unmeteredCalls;
 		case "attempts":
 			return counts(fold.calls.totals.attempts);
 		case "neverSent":
@@ -2907,7 +2907,7 @@ export function runTelemetry(
 		journal: journalCoverage(source, run.fold.calls),
 		counts: callCounts(view, base),
 		tokens: tokenQuantities(view, base),
-		missingTokenCalls: quantity(view, { ...base, metric: "missingTokenCalls" }),
+		unmeteredCalls: quantity(view, { ...base, metric: "unmeteredCalls" }),
 		settled: settled
 			? {
 					...settled.data,

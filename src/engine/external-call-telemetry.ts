@@ -37,7 +37,7 @@ export function externalUsageFacts(
 	| "usage"
 	| "totalTokens"
 	| "apiCalls"
-	| "missingTokenCalls"
+	| "unmeteredCalls"
 	| "pricing"
 	| "coverage"
 	| "pricingCoverage"
@@ -87,7 +87,7 @@ export function externalUsageFacts(
 		usage,
 		totalTokens: token("totalTokens"),
 		apiCalls: read(raw.apiCalls),
-		missingTokenCalls: read(raw.missingTokenCalls),
+		unmeteredCalls: read(raw.unmeteredCalls),
 		pricing: {
 			usd: estimatedUsd,
 			pricedBy:

@@ -141,12 +141,12 @@ export function callSettlementFromMessage(
 			!Number.isInteger(value)
 		)
 			return unknown;
-		if (key === "cacheRead" && usage.cacheReadReported === false) return unknown;
+		if (key === "cacheRead" && usage.cacheReadField === "omitted") return unknown;
 		if (
 			value > 0 ||
 			reported ||
 			external.tokenUsage === "provider-reported" ||
-			(key === "cacheRead" && usage.cacheReadReported === true)
+			(key === "cacheRead" && usage.cacheReadField === "sent")
 		) {
 			return { kind: "measured", value, source: "provider" };
 		}

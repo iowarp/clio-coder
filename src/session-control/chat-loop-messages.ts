@@ -2,6 +2,7 @@ import { classifyCallFailure, readCallFailure } from "../core/call-failure.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
 import { type Pricing, type PricingSum, sumPricing } from "../core/telemetry/pricing.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
+import type { CacheReadField } from "../core/token-split.js";
 import type { EffectivePricing } from "../domains/providers/catalog.js";
 import { callSettlementFromMessage, type InterruptedUsageEstimate } from "../domains/telemetry/call-facts.js";
 import { addCallTotals, type CallTotals, emptyCallTotals } from "../domains/telemetry/folds.js";
@@ -566,13 +567,13 @@ export function backendCacheVerdict(
 	input: number,
 	cacheRead: number,
 	backend?: BackendCompletionTimings | null,
-	cacheReadReported?: boolean,
+	cacheReadField?: CacheReadField,
 ): BackendCacheVerdict {
 	if (cacheRead === 0 && backend?.cachedTokens !== null && backend?.cachedTokens !== undefined) {
 		const backendInput = uncachedPrefillTokens(backend);
 		if (backendInput !== null) return classifyCacheUsage(backendInput, backend.cachedTokens);
 	}
-	if (cacheRead === 0 && cacheReadReported === false) return "unknown";
+	if (cacheRead === 0 && cacheReadField === "omitted") return "unknown";
 	return classifyCacheUsage(input, cacheRead);
 }
 

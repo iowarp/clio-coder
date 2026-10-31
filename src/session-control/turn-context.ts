@@ -3332,11 +3332,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const lifetimeSeconds = model ? cacheLifetimeSeconds(model, undefined) : undefined;
 			// A server that omits cache reads from its usage but reports cache_n in its timings is judged by those
 			// timings, as the journal judges it, so doctor and /usage count the same breaks (#434).
-			const evaluated = usage.cacheReadReported === false ? uncachedPrefillTokens(backend) : null;
+			const evaluated = usage.cacheReadField === "omitted" ? uncachedPrefillTokens(backend) : null;
 			const observation = buildCacheCallObservation(
 				evaluated !== null && backend
 					? { input: evaluated, cacheRead: backend.promptTokens - evaluated, cacheWrite: 0 }
-					: { input, cacheRead: usage.cacheReadReported === false ? null : cacheRead, cacheWrite },
+					: { input, cacheRead: usage.cacheReadField === "omitted" ? null : cacheRead, cacheWrite },
 				cacheCallBaseline,
 				nextAssistantColdReasons,
 				now,
@@ -3407,7 +3407,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				input,
 				cacheRead,
 				cacheWrite,
-				backendVerdict: backendCacheVerdict(input, cacheRead, backend, usage.cacheReadReported),
+				backendVerdict: backendCacheVerdict(input, cacheRead, backend, usage.cacheReadField),
 				observation,
 			};
 			if (backend !== undefined) promptCache.backend = { ...backend };

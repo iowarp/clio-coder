@@ -42,7 +42,7 @@ it("reads a Clio peer's quantities as the facts they state, its partial sums as 
 	});
 	deepStrictEqual(facts.usage.input, { kind: "measured", value: 140, source: "provider" });
 	strictEqual(facts.totalTokens.kind, "unknown");
-	deepStrictEqual(facts.missingTokenCalls, { kind: "measured", value: 1, source: "provider" });
+	deepStrictEqual(facts.unmeteredCalls, { kind: "measured", value: 1, source: "provider" });
 	deepStrictEqual(facts.apiCalls, { kind: "measured", value: 3, source: "local-count" });
 	strictEqual(facts.pricing.usd.kind, "unknown");
 	strictEqual(facts.pricingCoverage, "partial");

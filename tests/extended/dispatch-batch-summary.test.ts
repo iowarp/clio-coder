@@ -9,11 +9,10 @@ import { writeSettledRun } from "../harness/settled-run.js";
 function run(
 	id: string,
 	costUsd: number,
-	provenance: "known" | "estimated" | "unknown",
+	pricedBy: "target-rates" | "catalog" | "none",
 	calls: number,
 	external = false,
 ) {
-	const pricedBy = provenance === "known" ? "target-rates" : provenance === "estimated" ? "catalog" : "none";
 	const envelope = { ...fixtureEnvelope(id), spend: measuredSpend({ input: 20, output: 22 }, costUsd, pricedBy) };
 	const draft = fixtureReceiptDraft(envelope);
 	draft.toolCalls = calls;
@@ -52,15 +51,15 @@ test("the coordinator receives the landing fact for automatic and operator merge
 			frameType: null,
 			usage: undefined,
 		}).result;
-		const output = formatDispatchOutput("parallel", [{ ...run("run-merged", 0, "known", 1), receipt }], 16384);
+		const output = formatDispatchOutput("parallel", [{ ...run("run-merged", 0, "target-rates", 1), receipt }], 16384);
 		match(output, /merged abc1234 onto main/);
 	}
 });
 
 test("dispatch batch shows sealed tool calls and provenance-aware cost without inventing external tool counts", () => {
-	const first = run("run-a", 0.1, "known", 3);
-	const second = run("run-b", 0.2, "estimated", 4);
-	const opaque = run("run-c", 0, "unknown", 0, true);
+	const first = run("run-a", 0.1, "target-rates", 3);
+	const second = run("run-b", 0.2, "catalog", 4);
+	const opaque = run("run-c", 0, "none", 0, true);
 	const runs = [first, second, opaque];
 	deepStrictEqual(dispatchBatchSummary(runs), {
 		observedToolCalls: 7,

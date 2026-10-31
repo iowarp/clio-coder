@@ -112,7 +112,7 @@ export const FACT_METRICS = [
 	"total",
 	"usd",
 	"apiCalls",
-	"missingTokenCalls",
+	"unmeteredCalls",
 	"ttft",
 	"firstToken",
 	"modelTime",
@@ -1158,7 +1158,7 @@ export const RunTelemetrySchema = Type.Object(
 		journal: JournalCoverageSchema,
 		counts: callCounts,
 		tokens,
-		missingTokenCalls: QuantitySchema,
+		unmeteredCalls: QuantitySchema,
 		/** The run's terminal record as its journal holds it, with its repair rounds as a quantity (#434). */
 		settled: Type.Union([
 			Type.Object(
