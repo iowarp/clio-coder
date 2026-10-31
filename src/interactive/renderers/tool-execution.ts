@@ -574,15 +574,15 @@ function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): stri
 			break;
 		}
 		case "delegate": {
-			const receipts = numberField(details, "receiptCount");
-			if (receipts !== null) {
+			const runCount = numberField(details, "runCount");
+			if (runCount !== null) {
 				// A card under the call is the run's row: a single dispatch states no
 				// tally, a fan-out keeps its execution counts, and quality stays on
 				// each card. A dispatch with no card carries both.
-				if (finished.cardAttached === true && receipts <= 1) break;
+				if (finished.cardAttached === true && runCount <= 1) break;
 				const failed = numberField(details, "failedCount") ?? 0;
-				parts.push(failed > 0 ? `${receipts - failed} ok, ${failed} failed` : `${receipts} ok`);
-				const quality = finished.cardAttached === true ? null : receiptQuality(details, receipts);
+				parts.push(failed > 0 ? `${runCount - failed} ok, ${failed} failed` : `${runCount} ok`);
+				const quality = finished.cardAttached === true ? null : runQuality(details, runCount);
 				if (quality !== null) parts.push(`quality ${quality}`);
 				break;
 			}
@@ -610,13 +610,13 @@ function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): stri
 }
 
 /**
- * Validation quality across a dispatch's receipts, counted by state, with
- * receipts that carry no trust summary counted as unknown. Execution success
+ * Validation quality across a dispatch's runs, counted by state, with
+ * runs that carry no trust summary counted as unknown. Execution success
  * and quality stay separate facts: a run can execute cleanly and fail
  * validation.
  */
-function receiptQuality(details: Record<string, unknown> | null, receipts: number): string | null {
-	const runs = Array.isArray(details?.runs) ? details.runs.slice(0, receipts) : [];
+function runQuality(details: Record<string, unknown> | null, runCount: number): string | null {
+	const runs = Array.isArray(details?.runs) ? details.runs.slice(0, runCount) : [];
 	const counts = new Map<string, number>();
 	for (const run of runs) {
 		const trust = isPlainObject(run) && isPlainObject(run.trust) ? run.trust : null;
@@ -624,9 +624,9 @@ function receiptQuality(details: Record<string, unknown> | null, receipts: numbe
 		const word = trustStateWord("validationGrounding", stringField(axes, "validationGrounding") ?? "unknown");
 		counts.set(word, (counts.get(word) ?? 0) + 1);
 	}
-	if (runs.length < receipts) {
+	if (runs.length < runCount) {
 		const unknown = trustStateWord("validationGrounding", "unknown");
-		counts.set(unknown, (counts.get(unknown) ?? 0) + receipts - runs.length);
+		counts.set(unknown, (counts.get(unknown) ?? 0) + runCount - runs.length);
 	}
 	return counts.size === 0 ? null : [...counts].map(([word, count]) => `${count} ${word}`).join(", ");
 }

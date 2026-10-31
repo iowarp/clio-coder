@@ -767,7 +767,7 @@ function dispatchReceiptEvidence(
 /**
  * Summarizes a dispatch result as passed-receipt evidence, or null when it is
  * not a passing dispatch. Handles the toolkit v2 batch shape
- * (`{mode, runIds, receiptCount, failedCount, runs:[{runId, agentId, exitCode}]}`
+ * (`{mode, runIds, runCount, failedCount, runs:[{runId, agentId, exitCode}]}`
  * where exit codes live per-run) as well as the legacy single-run shape
  * (`{exitCode, runId, agentId}`). A batch counts only when it has at least one
  * run and every run exited cleanly. Current results must also carry verified

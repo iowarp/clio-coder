@@ -655,7 +655,7 @@ describe("dispatch quality presentation", () => {
 			toolCallId: "dispatch",
 			toolName: "dispatch",
 			isError: false,
-			result: { details: { receiptCount: 3, failedCount: 0, runs: [{ trust: trusts[0] }, { trust: trusts[1] }, {}] } },
+			result: { details: { runCount: 3, failedCount: 0, runs: [{ trust: trusts[0] }, { trust: trusts[1] }, {}] } },
 		};
 		const plain = renderToolSubline(finished, 44).map(stripTerminalSequences).join(" ").replace(/\s+/gu, " ");
 		// With no card under it, the dispatch row carries execution and quality as separate facts.
@@ -674,14 +674,14 @@ describe("dispatch quality presentation", () => {
 			{
 				...finished,
 				args: { agent: "scout", task: "map callers" },
-				result: { details: { receiptCount: 1, failedCount: 0, runs: [{ trust: trusts[0] }] } },
+				result: { details: { runCount: 1, failedCount: 0, runs: [{ trust: trusts[0] }] } },
 				cardAttached: true,
 			},
 			76,
 		).map(stripTerminalSequences);
 		doesNotMatch(single.join(" "), /\bok\b|quality/u);
 		// Wrapped action rows hang in the content column, so rows join on any run of whitespace.
-		const historical = renderToolSubline({ ...finished, result: { details: { receiptCount: 3, failedCount: 1 } } }, 76)
+		const historical = renderToolSubline({ ...finished, result: { details: { runCount: 3, failedCount: 1 } } }, 76)
 			.map(stripTerminalSequences)
 			.join(" ")
 			.replace(/\s+/gu, " ");
@@ -751,7 +751,7 @@ describe("dispatch quality presentation", () => {
 						toolCallId: "dispatch",
 						toolName: "dispatch",
 						isError: false,
-						result: { details: { receiptCount: 3, failedCount: 0, runs: [{ trust }, { trust }, { trust }] } },
+						result: { details: { runCount: 3, failedCount: 0, runs: [{ trust }, { trust }, { trust }] } },
 					},
 					76,
 				);

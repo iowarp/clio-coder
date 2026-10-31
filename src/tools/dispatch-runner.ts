@@ -742,7 +742,7 @@ function dispatchDetails(
 		),
 		terminalRunIds: runs.map((run) => run.receipt.runId),
 		...(carried !== null ? { [FLOW_RESTRICTIONS_DETAIL]: carried } : {}),
-		receiptCount: runs.length,
+		runCount: runs.length,
 		failedCount: failed.length,
 		batchSummary: batch,
 		// Same text the output carries, under a stable key, so a surface that

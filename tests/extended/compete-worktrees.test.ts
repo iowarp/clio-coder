@@ -278,7 +278,7 @@ for (const agent of ["scout", "coder"] as const) {
 				strictEqual(receipt.settled.route.wireModelId, "fixture-model");
 			}
 			strictEqual(result.details?.mode, "compete");
-			strictEqual(result.details?.receiptCount, 3);
+			strictEqual(result.details?.runCount, 3);
 			deepStrictEqual((result.details?.terminalRunIds as string[]).slice().sort(), allRuns.map((run) => run.id).sort());
 			const winner = readGateDecisionArtifacts().find(({ artifact }) => artifact.outcome === "winner")?.artifact;
 			ok(winner);
@@ -300,7 +300,7 @@ for (const agent of ["scout", "coder"] as const) {
 					mode: result.details?.mode,
 					candidateIds: receipts.map((receipt) => receipt.row.runId),
 					judgeId: judgeReceipt.row.runId,
-					receiptCount: result.details?.receiptCount,
+					runCount: result.details?.runCount,
 					winner,
 				}),
 			);
@@ -505,7 +505,7 @@ for (const phase of ["candidates", "judge"] as const) {
 						);
 					ok(result.message.includes(run.id), "stopped tool output must retain each terminal run identity");
 				}
-				strictEqual(result.details?.receiptCount, runs.length);
+				strictEqual(result.details?.runCount, runs.length);
 				deepStrictEqual((result.details?.terminalRunIds as string[]).slice().sort(), runs.map((run) => run.id).sort());
 				strictEqual((result.details?.compete as { winner: unknown }).winner, null);
 				strictEqual(readGateDecisionArtifacts().length, 0, "interruption must not invent a judge verdict");

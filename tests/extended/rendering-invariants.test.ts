@@ -2770,14 +2770,14 @@ describe("agent invocations", () => {
 	};
 	const dispatchStart = (panel: ChatPanel, id: string, args: unknown) =>
 		panel.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName: "dispatch", args } as never);
-	const dispatchEnd = (panel: ChatPanel, id: string, receiptCount: number, failedCount = 0) =>
+	const dispatchEnd = (panel: ChatPanel, id: string, runCount: number, failedCount = 0) =>
 		panel.applyEvent({
 			type: "tool_execution_end",
 			toolCallId: id,
 			toolName: "dispatch",
 			result: {
-				content: [{ type: "text", text: `${receiptCount} tasks -> done` }],
-				details: { receiptCount, failedCount, runs: [] },
+				content: [{ type: "text", text: `${runCount} tasks -> done` }],
+				details: { runCount, failedCount, runs: [] },
 			},
 			isError: false,
 			durationMs: 38_000,
