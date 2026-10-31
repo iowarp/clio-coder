@@ -359,6 +359,8 @@ export interface DecisionRecord {
 
 /** What followed a decision, joined to it by `ref` when the dataset is exported. */
 export interface OutcomeRecord {
+	/** The session that produced the outcome, including callbacks that settle after a session switch (#434). */
+	readonly session?: string | null;
 	readonly ref: string;
 	/**
 	 * `turn-tokens` amends a cancelled turn's `turn` row with the worker tokens

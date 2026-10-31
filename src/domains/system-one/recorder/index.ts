@@ -32,8 +32,8 @@ export interface RecorderDeps {
 	 * session it started in.
 	 */
 	currentSession: () => string | null;
-	/** Whether research capture keeps the dataset now; nothing else admits it (#434). */
-	recording: () => boolean;
+	/** Whether research capture keeps the dataset for its destination; null means no session yet (#434). */
+	recording: (session: string | null) => boolean;
 	/** Hand one dataset sample to its session's journal, which stores the content and cites it (#434). */
 	sample: DatasetWriterDeps["sample"];
 	/**
@@ -75,7 +75,7 @@ export function createRecorder(deps: RecorderDeps): SystemOneRecorder {
 				pending.push({ session, row: buildSessionRow(record, serialized, digest) });
 				// The newest calls are the ones a later turn can still be joined to.
 				if (pending.length > MAX_BUFFERED) pending = pending.slice(pending.length - MAX_BUFFERED);
-				if (recording()) writer.decision({ record, session, serialized, digest });
+				if (recording(session)) writer.decision({ record, session, serialized, digest });
 			} catch {
 				// Recording never costs the decision it describes.
 			}
@@ -83,7 +83,7 @@ export function createRecorder(deps: RecorderDeps): SystemOneRecorder {
 
 		outcome(record: OutcomeRecord): void {
 			try {
-				if (recording()) writer.outcome(record);
+				writer.outcome(record);
 			} catch {
 				// Recording never costs the outcome's source either.
 			}

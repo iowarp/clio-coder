@@ -16,6 +16,7 @@ export {
 	type RecordBackgroundMemoryStepInput,
 	recordBackgroundMemoryStep,
 } from "./background-memory-usage.js";
+export { workspaceTelemetryCapture } from "./consent.js";
 export type {
 	TelemetryContract,
 	TelemetryNotice,

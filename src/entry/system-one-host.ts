@@ -432,6 +432,7 @@ export interface SystemOneHost {
 	readSteer(input: SteerReadInput): void;
 	/** What followed a decision, joined to it by `ref`. */
 	recordOutcome(outcome: {
+		session?: string | null;
 		ref: string;
 		source: OutcomeRecord["source"];
 		facts: Readonly<Record<string, unknown>>;
@@ -761,6 +762,7 @@ export function createSystemOneHost(deps: SystemOneHostDeps): SystemOneHost {
 		recordOutcome(outcome) {
 			deps.usage.recorder.outcome({
 				ref: outcome.ref,
+				...(outcome.session !== undefined ? { session: outcome.session } : {}),
 				source: outcome.source,
 				at: new Date().toISOString(),
 				facts: outcome.facts,

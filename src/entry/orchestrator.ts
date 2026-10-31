@@ -60,7 +60,7 @@ import {
 import { settingsSourceFor, updateProjectLocalSettings } from "../core/settings-layers.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
-import { captureAdmits, STANDARD_CAPTURE, systemOneDatasetRecording } from "../core/telemetry/capture.js";
+import { captureAdmits, effectiveTelemetryCapture, systemOneDatasetRecording } from "../core/telemetry/capture.js";
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { EventPayload } from "../core/telemetry/events.js";
@@ -309,7 +309,7 @@ import { openCallScope } from "../domains/telemetry/call-scope.js";
 import { recordFailedCompactionCalls } from "../domains/telemetry/compaction-usage.js";
 import { TELEMETRY_FOLD_VERSION } from "../domains/telemetry/folds.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
-import { TelemetryDomainModule } from "../domains/telemetry/index.js";
+import { TelemetryDomainModule, workspaceTelemetryCapture } from "../domains/telemetry/index.js";
 import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
@@ -3737,21 +3737,45 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// System One: one recorder and one instance for the process. Every call
 	// leaves a compact row that reaches the ledger at the next turn boundary or
 	// settle, and, when the operator opted in, a redacted record for the dataset.
-	const currentSessionId = (): string | null => session?.current()?.id ?? null;
-	// Research mode keeps the dataset only with content capture for the current session's workspace (#434).
-	const systemOneRecording = (): boolean => {
+	const systemOneOrigins = new Map<string, { id: string; cwdHash: string; cwd: string }>();
+	const currentSystemOneOrigin = () => {
 		const origin = session?.current();
-		const capture = (origin && telemetry?.telemetryCapture?.(origin)) ?? STANDARD_CAPTURE;
+		if (origin) {
+			systemOneOrigins.set(origin.id, { id: origin.id, cwdHash: origin.cwdHash, cwd: origin.cwd });
+			if (systemOneOrigins.size > 256) {
+				const oldest = systemOneOrigins.keys().next().value;
+				if (oldest !== undefined) systemOneOrigins.delete(oldest);
+			}
+		}
+		return origin;
+	};
+	const currentSessionId = (): string | null => currentSystemOneOrigin()?.id ?? null;
+	// Resolve the workspace's consent even before the first turn creates a session. Adoption and late outcomes ask
+	// again for their destination's workspace; the journal also checks capture before storing any content (#434).
+	const systemOneRecording = (sessionId: string | null = currentSessionId()): boolean => {
+		const current = currentSystemOneOrigin();
+		const settings = getCurrentSettings();
+		const origin = sessionId === null ? null : systemOneOrigins.get(sessionId);
+		if (sessionId !== null && !origin) return false;
+		const requested =
+			sessionId === null || sessionId === current?.id
+				? settings.telemetry
+				: applyOverrides(
+						config?.get() ?? readSettings(),
+						new Map([...startupOverrides, ...(conversationOverrides.get(sessionId) ?? [])]),
+					).telemetry;
+		if (!systemOneDatasetRecording(effectiveTelemetryCapture(requested, true))) return false;
+		const { capture } = workspaceTelemetryCapture(requested, clioStateDir(), origin?.cwd ?? process.cwd());
 		return systemOneDatasetRecording(capture);
 	};
 	const systemOneRecorder = createRecorder({
 		currentSession: currentSessionId,
 		recording: systemOneRecording,
-		// A sample journals into its own session only while that session is current: a late answer for a session this
-		// process already closed has no journal open to receive it (#434).
+		// A delayed outcome keeps its original session; research traces acquire that session's own writer (#434).
 		sample: (sessionId, data, content) => {
-			const origin = session?.current();
-			if (origin?.id === sessionId) telemetry?.recordResearchTrace?.(origin, "system_one.sample_captured", data, content);
+			currentSystemOneOrigin();
+			const origin = systemOneOrigins.get(sessionId);
+			if (origin) telemetry?.recordResearchTrace?.(origin, "system_one.sample_captured", data, content);
 		},
 		// The park flush writes a session's rows before it closes, so a call that
 		// started in a session that is no longer current is a late answer for a ledger

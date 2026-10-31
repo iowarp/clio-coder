@@ -1067,6 +1067,7 @@ export interface CreateChatLoopDeps {
 	}) => void;
 	/** What followed a decision, joined to it by `ref` when the dataset is exported. */
 	recordOutcome?: (outcome: {
+		session?: string | null;
 		ref: string;
 		source: "turn" | "turn-tokens" | "next-operator" | "steer";
 		facts: Readonly<Record<string, unknown>>;
@@ -2165,6 +2166,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 				deps.recordOutcome?.({
 					ref: input.ref,
+					session: sessionId,
 					source: "turn-tokens",
 					facts: { turnId: input.turnId, workerTokens: { ...workers }, sealedAfterMs: afterMs },
 				});
@@ -3824,6 +3826,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Local shell completion and tree navigation also refresh the same transcript.
 			eggs.syncConversation();
 			operatorTurnsBefore = null;
+			previousOperatorTurn = null;
 			lastHistoricalImageNoticeKey = null;
 			pendingVisionSidecar?.abort();
 			pendingCompactionPaint?.abort();

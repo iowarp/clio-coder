@@ -159,7 +159,7 @@ export interface PendingDecision {
 export interface DatasetWriter {
 	/** A decision with no session is held until `adopt`; any other is recorded. */
 	decision(item: PendingDecision): void;
-	/** Recorded under the current session, unless its `ref` names a held decision, which it then follows. */
+	/** Recorded under its originating session; an outcome for a held decision follows its adoption. */
 	outcome(record: OutcomeRecord): void;
 	/** Stamp the held decisions with `session` and record them. */
 	adopt(session: string): void;
@@ -169,8 +169,8 @@ export interface DatasetWriter {
 
 export interface DatasetWriterDeps {
 	/** Read when a sample is about to be recorded, so turning capture off applies to held decisions too. */
-	recording(): boolean;
-	/** The session current now, for outcomes, which carry no session of their own. */
+	recording(session: string | null): boolean;
+	/** The session current now, for outcomes without an explicit origin. */
 	currentSession(): string | null;
 	/** Hand one sample to the session's journal; the writer stores its content and cites it. */
 	sample(session: string, data: SampleData, content: DatasetSample): void;
@@ -181,7 +181,7 @@ export function createDatasetWriter(deps: DatasetWriterDeps): DatasetWriter {
 	let heldOutcomes: OutcomeRecord[] = [];
 
 	const recordDecision = (item: PendingDecision, session: string): void => {
-		if (!deps.recording()) return;
+		if (!deps.recording(session)) return;
 		const hashes: Record<string, string> = {};
 		const specs: Record<string, Question> = {};
 		for (const [id, question] of Object.entries(item.record.questions)) {
@@ -202,7 +202,7 @@ export function createDatasetWriter(deps: DatasetWriterDeps): DatasetWriter {
 		);
 	};
 	const recordOutcome = (record: OutcomeRecord, session: string | null): void => {
-		if (session === null || !deps.recording()) return;
+		if (session === null || !deps.recording(session)) return;
 		deps.sample(session, { sample: "outcome", ref: record.ref }, { outcome: outcomeRow(record) });
 	};
 
@@ -221,7 +221,7 @@ export function createDatasetWriter(deps: DatasetWriterDeps): DatasetWriter {
 				if (heldOutcomes.length > MAX_HELD) heldOutcomes = heldOutcomes.slice(heldOutcomes.length - MAX_HELD);
 				return;
 			}
-			recordOutcome(record, deps.currentSession());
+			recordOutcome(record, record.session !== undefined ? record.session : deps.currentSession());
 		},
 		adopt(session) {
 			const waiting = held;
