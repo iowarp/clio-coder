@@ -51,6 +51,7 @@ import { isAbsolute, resolve as resolvePath } from "node:path";
 import { type BashCommandProgress, combineBashOutput } from "../../core/bash-exec.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
+import { emitApproval } from "../../core/telemetry/approvals.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import type {
 	AccountabilityEvidenceReadyPayload,
@@ -2973,7 +2974,7 @@ function installPermissionBridge(input: {
 			for (const requestId of queuedRequestIds) {
 				if (requestId === currentRequestId) continue;
 				const details = queuedRequestDetails.get(requestId);
-				input.bus?.emit("approval.resolved", {
+				emitApproval(input.bus, "approval.resolved", {
 					status: "denied",
 					requestId,
 					origin: "acp-server",
@@ -2987,7 +2988,7 @@ function installPermissionBridge(input: {
 			for (const requestId of queuedRequestIds) {
 				if (requestId === currentRequestId) continue;
 				const details = queuedRequestDetails.get(requestId);
-				input.bus?.emit("approval.resolved", {
+				emitApproval(input.bus, "approval.resolved", {
 					status: "expired",
 					requestId,
 					origin: "acp-server",

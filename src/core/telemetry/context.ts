@@ -58,6 +58,35 @@ export function withTelemetryContext<T>(context: TelemetryContext, fn: () => T):
 	return contexts.run(Object.freeze({ ...context }), fn);
 }
 
+/**
+ * The scope a record about a known owner belongs to, for a producer that may run outside that owner's async context
+ * (an operator keypress, a dispatch callback): the current context when it already names the owner, else the owner
+ * itself. Without an owner it is the current context (#434).
+ */
+export function ownerTelemetryContext(owner: {
+	sessionId?: string | null | undefined;
+	runId?: string | undefined;
+	turnId?: string | undefined;
+	toolCallId?: string | undefined;
+}): TelemetryContext | undefined {
+	const current = telemetryContext();
+	const ids = {
+		...(owner.turnId ? { turnId: owner.turnId } : {}),
+		...(owner.toolCallId ? { toolCallId: owner.toolCallId } : {}),
+	};
+	if (owner.runId) {
+		if (current?.runId === owner.runId) return current;
+		return owner.sessionId
+			? { sessionId: owner.sessionId, runId: owner.runId, label: "worker" }
+			: { sessionId: null, runId: owner.runId, label: "worker" };
+	}
+	if (owner.sessionId) {
+		if (current && current.sessionId === owner.sessionId && current.runId === undefined) return current;
+		return { sessionId: owner.sessionId, label: "main", ...ids };
+	}
+	return current;
+}
+
 /** Tool admission uses host identities, never ids supplied in model arguments (#434). */
 export function withToolTelemetryContext<T>(
 	identity: {

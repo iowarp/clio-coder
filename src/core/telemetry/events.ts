@@ -43,6 +43,7 @@ import type {
 	SessionStartPayload,
 	SessionTurnSwitchedPayload,
 	ToolBudgetExceededPayload,
+	TurnAbortedPayload,
 } from "./live-events.js";
 import type { CallSettled, ObjectRef } from "./schemas.js";
 import * as S from "./schemas.js";
@@ -98,6 +99,16 @@ function definedFields(value: object): Record<string, unknown> {
 	return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined));
 }
 
+/** The defined fields of a live payload, so a projection never writes an explicit undefined (#434). */
+function pick<T extends object, const K extends keyof T>(
+	value: T,
+	keys: readonly K[],
+): { [P in K]: Exclude<T[P], undefined> } {
+	const out: Partial<Record<K, unknown>> = {};
+	for (const key of keys) if (value[key] !== undefined) out[key] = value[key];
+	return out as { [P in K]: Exclude<T[P], undefined> };
+}
+
 const LIVE: LiveDefinition<never> = Object.freeze({ durability: "live" });
 function live<P>(): LiveDefinition<P> {
 	return LIVE as LiveDefinition<P>;
@@ -140,7 +151,7 @@ export const EVENTS = {
 	"compaction.settled": journal(S.CompactionSettledSchema, { tier: "accountability", cc: "content-free" }),
 	"journal.gap": journal(S.JournalGapSchema, { tier: "accountability", cc: "content-free" }),
 	"session.opened": journal(S.EmptySchema, { tier: "accountability", cc: "content-free" }),
-	"session.resumed": journal(S.EmptySchema, { tier: "accountability", cc: "content-free" }),
+	"session.resumed": journal(S.SessionResumedSchema, { tier: "accountability", cc: "content-free" }),
 	"session.forked": journal(S.SessionForkedSchema, { tier: "accountability", cc: "content-free" }),
 	"session.closed": journal(S.SessionClosedSchema, { tier: "accountability", cc: "content-free" }),
 	"journal.segment_closed": journal(S.JournalSegmentClosedSchema, { tier: "accountability", cc: "content-free" }),
@@ -175,6 +186,62 @@ export const EVENTS = {
 	"health.sampled": journal(S.HealthSampledSchema, { tier: "operational", cc: "content-free" }),
 	"health.samples_captured": journal(S.HealthSamplesCapturedSchema, { tier: "research", cc: "content-free" }),
 	"tool.settled": journal(S.ToolSettledSchema, { tier: "operational", cc: "content-free" }),
+	"tool.decided": journal(S.ToolDecidedSchema, { tier: "accountability", cc: "content-free" }),
+	"approval.requested": journal(S.ApprovalRequestedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		project: (p: PermissionRequestedPayload) =>
+			pick(p, [
+				"tool",
+				"actionClass",
+				"requestId",
+				"origin",
+				"requestedBy",
+				"agentId",
+				"axis",
+				"posture",
+				"ruleId",
+				"reasonCode",
+				"policySource",
+				"timeoutMs",
+				"fallback",
+				"escalation",
+				"approvalAuthority",
+				"forwardedByMain",
+			]),
+	}),
+	"approval.resolved": journal(S.ApprovalResolvedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		project: (p: PermissionResolvedPayload) => ({
+			...pick(p, ["status", "requestId", "origin", "decidedBy", "tool", "actionClass", "requestedBy", "fallback"]),
+			...(p.grant ? { grant: pick(p.grant, ["attempt", "authority", "issuer", "execution", "state"]) } : {}),
+		}),
+	}),
+	"run.aborted": journal(S.RunAbortedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		project: (p: RunAbortedPayload) => pick(p, ["source", "runId", "startedAt", "elapsedMs"]),
+	}),
+	"turn.aborted": journal(S.TurnAbortedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		project: (p: TurnAbortedPayload) => ({ source: p.source }),
+	}),
+	"agent.status_changed": journal(S.AgentStatusChangedSchema, {
+		tier: "accountability",
+		cc: "content-free",
+		project: (p: AgentStatusChangedPayload) => ({
+			...pick(p, ["phase", "prevPhase", "watchdogTier"]),
+			elapsedFromStart: Math.max(0, p.elapsedFromStart),
+			...(p.metadata?.toolName !== undefined ? { toolName: p.metadata.toolName } : {}),
+			...(p.metadata?.attempt !== undefined ? { attempt: p.metadata.attempt } : {}),
+			...(p.metadata?.agentName !== undefined ? { agentName: p.metadata.agentName } : {}),
+			...(p.metadata?.reason !== undefined ? { stopReason: p.metadata.reason } : {}),
+		}),
+	}),
+	"completion.evaluated": journal(S.CompletionEvaluatedSchema, { tier: "accountability", cc: "content-free" }),
+	"safety.judged": journal(S.SafetyJudgedSchema, { tier: "accountability", cc: "content-free" }),
 	"prompt.compiled": journal(S.PromptCompiledSchema, { tier: "operational", cc: "structural" }),
 	"context.snapshotted": journal(S.ContextSnapshottedSchema, { tier: "operational", cc: "content-free" }),
 	"call.timing_captured": journal(S.CallTimingCapturedSchema, {
@@ -236,8 +303,6 @@ export const EVENTS = {
 		project: ({ message }: ConfigReloadFailedPayload) => ({ state: message === null ? "recovered" : "rejected" }),
 	}),
 	"config.session_changed": live<ConfigSessionChangePayload>(),
-	"approval.requested": live<PermissionRequestedPayload>(),
-	"approval.resolved": live<PermissionResolvedPayload>(),
 	"safety.blocked": live<SafetyBlockedPayload>(),
 	"safety.loop_blocked": live<LoopBlockedPayload>(),
 	"safety.tool_budget_exceeded": live<ToolBudgetExceededPayload>(),
@@ -278,8 +343,6 @@ export const EVENTS = {
 	"context.recalled": journal(S.ContextRecalledSchema, { tier: "operational", cc: "structural", scope: "session" }),
 	"memory.step_completed": live<MemoryStepCompletedPayload>(),
 	"memory.guardian_changed": live<MemoryGuardianChangedPayload>(),
-	"agent.status_changed": live<AgentStatusChangedPayload>(),
-	"run.aborted": live<RunAbortedPayload>(),
 	"budget.alerted": live<BudgetAlertPayload>(),
 	"shutdown.requested": journal(S.ShutdownRequestedSchema, {
 		tier: "operational",

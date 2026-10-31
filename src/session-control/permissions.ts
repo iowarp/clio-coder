@@ -1,3 +1,4 @@
+import { emitApproval } from "../core/telemetry/approvals.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { PermissionResolvedPayload } from "../core/telemetry/live-events.js";
 import type { ActionClass } from "../domains/safety/action-classifier.js";
@@ -20,7 +21,7 @@ export function resolvePermission(
 	},
 	resolution: PermissionResolution,
 ): Promise<void> | void {
-	ports.bus?.emit("approval.resolved", resolution.payload);
+	emitApproval(ports.bus, "approval.resolved", resolution.payload);
 	resolution.beforeRelease?.();
 	const reason = resolution.reason ?? resolution.payload.reason ?? "permission denied";
 	switch (resolution.action) {

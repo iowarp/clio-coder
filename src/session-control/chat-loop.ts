@@ -3,7 +3,7 @@ import type { CallObservation } from "../core/call-failure.js";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
-import { observedToolCallOrigin, telemetryContext } from "../core/telemetry/context.js";
+import { observedToolCallOrigin, ownerTelemetryContext, telemetryContext } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
@@ -76,7 +76,7 @@ import {
 	withModelSkillActivation,
 } from "../core/skill-activation.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
-import type { RunAbortSource } from "../core/telemetry/live-events.js";
+import type { TurnAbortSource } from "../core/telemetry/live-events.js";
 import {
 	narrowTurnConstraints,
 	snapshotTurnConstraints,
@@ -615,14 +615,14 @@ function operatorFacingEngineError(message: string): string {
  * marks the cancel as an explained interrupt (the loop guard, or an operator
  * interrupt-with-message): the chat loop persists a durable, visible assistant
  * turn carrying that reason in place of the empty aborted turn, and tags the
- * audit trail with `source`.
+ * `turn.aborted` event with `source`.
  */
 export interface ChatCancelOptions {
 	/** Operator-facing explanation for a system-initiated stop. */
 	reason?: string;
-	/** Audit source for the emitted RunAborted event. Defaults to "stream_cancel". */
-	source?: RunAbortSource;
-	/** Short audit reason string. Defaults to a source-appropriate phrase. */
+	/** Source of the emitted `turn.aborted` event. Defaults to "stream_cancel". */
+	source?: TurnAbortSource;
+	/** Short reason carried by the live `turn.aborted` payload. Defaults to a source-appropriate phrase. */
 	auditReason?: string;
 }
 
@@ -988,9 +988,9 @@ export interface CreateChatLoopDeps {
 		markDegraded(reason: string): void;
 	};
 	/**
-	 * Shared event bus. When wired, `cancel()` fans a `"run.aborted"`
-	 * payload with `source: "stream_cancel"` so the safety audit subscriber
-	 * persists a kind: "abort" row for every Esc-on-stream / Ctrl+C cancel.
+	 * Shared event bus. When wired, `cancel()` emits `turn.aborted` with
+	 * `source: "stream_cancel"`, journaled in the session for every
+	 * Esc-on-stream / Ctrl+C cancel.
 	 * Optional so unit tests that drive chat-loop in isolation do not need
 	 * to construct a bus.
 	 */
@@ -3690,14 +3690,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					});
 			}
 			if (wasStreaming && deps.bus) {
-				deps.bus.emit("run.aborted", {
-					source: options?.source ?? "stream_cancel",
-					runId: null,
-					startedAt: null,
-					elapsedMs: null,
-					at: Date.now(),
-					reason: options?.auditReason ?? (requestedReason ? "loop guard stopped a runaway turn" : "user cancelled stream"),
-				});
+				// A keypress cancels outside the turn's async context, so the record names its session itself (#434).
+				deps.bus.emit(
+					"turn.aborted",
+					{
+						source: options?.source ?? "stream_cancel",
+						at: Date.now(),
+						reason: options?.auditReason ?? (requestedReason ? "loop guard stopped a runaway turn" : "user cancelled stream"),
+					},
+					ownerTelemetryContext({ sessionId: api.getSessionId(), turnId: state.activeUserTurnId ?? undefined }),
+				);
 			}
 		},
 

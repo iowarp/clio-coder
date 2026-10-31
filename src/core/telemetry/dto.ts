@@ -20,6 +20,7 @@ import {
 	ObjectRefSchema,
 	PricingSchema,
 	RunFeedBodySchema,
+	SessionCloseReason,
 	SYSTEM_ONE_OUTCOME,
 	UtcSchema,
 } from "./schemas.js";
@@ -260,10 +261,7 @@ export const SessionTelemetrySchema = Type.Object(
 				state: vocabulary(["open", "closed", "ended-abnormally", "unverifiable", "unknown"]),
 				/** Set only when `state` is `closed`; the reason is null for a close only the ledger recorded. */
 				closed: Type.Union([
-					Type.Object(
-						{ at: UtcSchema, reason: Type.Union([vocabulary(["completed", "cancelled", "error"]), Type.Null()]) },
-						closed,
-					),
+					Type.Object({ at: UtcSchema, reason: Type.Union([SessionCloseReason, Type.Null()]) }, closed),
 					Type.Null(),
 				]),
 			},

@@ -18372,6 +18372,9 @@
 				},
 				"additionalProperties": false
 			},
+			"Enum_09fa48b8": {
+				"enum": ["create_new", "resume_other", "fork", "switch_branch", "close", "shutdown"]
+			},
 			"Enum_2f17e4ad": {
 				"enum": ["verified", "failed", "absent", "unknown", "not_applicable"]
 			},
@@ -21151,7 +21154,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_at_reason_9275a5f0": {
+			"Object_at_reason_8f2b567c": {
 				"type": "object",
 				"required": ["at", "reason"],
 				"properties": {
@@ -21160,7 +21163,7 @@
 						"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
 					},
 					"reason": {
-						"$ref": "#/components/schemas/Union_e2762ed2"
+						"$ref": "#/components/schemas/Union_a2cec452"
 					}
 				},
 				"additionalProperties": false
@@ -22199,11 +22202,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_closed_firstRecordAt_lastRecordAt_d89803e7": {
+			"Object_closed_firstRecordAt_lastRecordAt_a4ab1107": {
 				"type": "object",
 				"required": ["firstRecordAt", "lastRecordAt", "state", "closed"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_33da2f86"
+					"$ref": "#/components/schemas/Shape_e76e46ca"
 				},
 				"additionalProperties": false
 			},
@@ -24227,7 +24230,7 @@
 					"transport"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_bd7b62c1"
+					"$ref": "#/components/schemas/Shape_bc69e981"
 				},
 				"additionalProperties": false
 			},
@@ -24672,20 +24675,6 @@
 				},
 				"validationGrounding": {
 					"$ref": "#/components/schemas/Union_374d0695"
-				}
-			},
-			"Shape_33da2f86": {
-				"firstRecordAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"lastRecordAt": {
-					"$ref": "#/components/schemas/Union_9d36f13d"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Enum_bd7ae760"
-				},
-				"closed": {
-					"$ref": "#/components/schemas/Union_54e98030"
 				}
 			},
 			"Shape_39fbf6ee": {
@@ -26035,7 +26024,7 @@
 					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
 				}
 			},
-			"Shape_bd7b62c1": {
+			"Shape_bc69e981": {
 				"v": {
 					"type": "number",
 					"const": 1
@@ -26067,7 +26056,7 @@
 					"$ref": "#/components/schemas/Object_conflictingAttempts_damaged_droppedRecords_fc03a4ff"
 				},
 				"lifetime": {
-					"$ref": "#/components/schemas/Object_closed_firstRecordAt_lastRecordAt_d89803e7"
+					"$ref": "#/components/schemas/Object_closed_firstRecordAt_lastRecordAt_a4ab1107"
 				},
 				"lineage": {
 					"$ref": "#/components/schemas/Object_parent_totals_unreadableAncestors_9a060df9"
@@ -26771,6 +26760,20 @@
 				},
 				"reportedModel": {
 					"$ref": "#/components/schemas/Object_display_fact_e638ba04"
+				}
+			},
+			"Shape_e76e46ca": {
+				"firstRecordAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"lastRecordAt": {
+					"$ref": "#/components/schemas/Union_9d36f13d"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Enum_bd7ae760"
+				},
+				"closed": {
+					"$ref": "#/components/schemas/Union_76a27b10"
 				}
 			},
 			"Shape_ed450adc": {
@@ -28236,16 +28239,6 @@
 					}
 				]
 			},
-			"Union_54e98030": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_at_reason_9275a5f0"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_591a0eba": {
 				"anyOf": [
 					{
@@ -28457,6 +28450,16 @@
 					{
 						"type": "string",
 						"const": "failure"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_76a27b10": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_at_reason_8f2b567c"
 					},
 					{
 						"type": "null"
@@ -28705,6 +28708,16 @@
 					{
 						"type": "string",
 						"const": "observations"
+					}
+				]
+			},
+			"Union_a2cec452": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Enum_09fa48b8"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -29145,16 +29158,6 @@
 					{
 						"type": "string",
 						"const": "failed"
-					}
-				]
-			},
-			"Union_e2762ed2": {
-				"anyOf": [
-					{
-						"enum": ["completed", "cancelled", "error"]
-					},
-					{
-						"type": "null"
 					}
 				]
 			},

@@ -67,6 +67,7 @@ import {
 	workerSandboxReceipt,
 } from "../../core/sandbox/worker-policy.js";
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
+import { emitApproval } from "../../core/telemetry/approvals.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
 import type { DispatchCompletedPayload, DispatchRunIdentity } from "../../core/telemetry/live-events.js";
@@ -418,7 +419,12 @@ import { defaultRunEventJournal } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
-import { fleetRootTelemetryContext, openRunTelemetry, settleOrphanedRunJournal } from "./run-telemetry.js";
+import {
+	fleetRootTelemetryContext,
+	openRunTelemetry,
+	runTelemetryJournal,
+	settleOrphanedRunJournal,
+} from "./run-telemetry.js";
 import { type Ledger, newRunId, openLedger } from "./state.js";
 import { createTargetBreaker, type TargetBreakerBlock } from "./target-breaker.js";
 import {
@@ -3804,7 +3810,7 @@ export function createDispatchBundle(
 		const origin = `worker:${record.runId}`;
 		const fallback = grantRunFallbacks.get(record.runId) ?? "deny";
 		const requested = (escalation: boolean): void => {
-			context.bus.emit("approval.requested", {
+			emitApproval(context.bus, "approval.requested", {
 				tool: record.tool,
 				actionClass: record.actionClass,
 				...(record.ownerSessionId !== null ? { sessionId: record.ownerSessionId } : {}),
@@ -3872,7 +3878,7 @@ export function createDispatchBundle(
 								? "safety-judge"
 								: record.issuer
 						: "worker";
-		context.bus.emit("approval.resolved", {
+		emitApproval(context.bus, "approval.resolved", {
 			status,
 			tool: record.tool,
 			requestId: record.requestId,
@@ -6168,7 +6174,7 @@ export function createDispatchBundle(
 				const actionClass = typeof event.payload.actionClass === "string" ? event.payload.actionClass : "unknown";
 				const reason =
 					typeof event.payload.reason === "string" ? event.payload.reason : `${event.payload.tool} requires approval`;
-				context.bus.emit("approval.requested", {
+				emitApproval(context.bus, "approval.requested", {
 					tool: event.payload.tool,
 					actionClass,
 					requestId,
@@ -6177,7 +6183,7 @@ export function createDispatchBundle(
 					requestedBy: runIdForPermissionAudit ?? undefined,
 					rejection: { short: reason, detail: reason, hints: [] },
 				});
-				context.bus.emit("approval.resolved", {
+				emitApproval(context.bus, "approval.resolved", {
 					status: "denied",
 					tool: event.payload.tool,
 					requestId,
@@ -7782,7 +7788,7 @@ export function createDispatchBundle(
 				const axis =
 					readStringOrNull(event.payload.axis) ??
 					(ruleId !== null ? `net:${ruleId}` : policyKind === "ask" && reasonCode !== null ? `net:${reasonCode}` : null);
-				context.bus.emit("approval.requested", {
+				emitApproval(context.bus, "approval.requested", {
 					tool: typeof event.payload.tool === "string" ? event.payload.tool : "unknown",
 					actionClass,
 					...(req.ownerSessionId ? { sessionId: req.ownerSessionId } : {}),
@@ -7941,7 +7947,7 @@ export function createDispatchBundle(
 					requestId &&
 					origin
 				) {
-					context.bus.emit("approval.requested", {
+					emitApproval(context.bus, "approval.requested", {
 						tool: event.payload.tool,
 						actionClass,
 						requestId,
@@ -7957,7 +7963,7 @@ export function createDispatchBundle(
 				} else if (source === "timeout") {
 					escalationCounts.timedOut += 1;
 				}
-				context.bus.emit("approval.resolved", {
+				emitApproval(context.bus, "approval.resolved", {
 					status: granted ? "granted" : "denied",
 					tool: event.payload.tool,
 					...(requestId !== undefined ? { requestId } : {}),
@@ -10294,9 +10300,7 @@ export function createDispatchBundle(
 					const sessions = new Set(grantBroker.list({ state: "pending" }).map((record) => record.ownerSessionId));
 					for (const sessionId of sessions) grantBroker.revokeSession(sessionId, "the owning session ended");
 				}),
-				context.bus.subscribe("run.aborted", (payload) => {
-					if (payload.runId !== null) return;
-					if (payload.source !== "stream_cancel" && payload.source !== "loop_guard") return;
+				context.bus.subscribe("turn.aborted", () => {
 					const sessionId = options?.getSessionId?.() ?? null;
 					const batches = listDetachedBatches().filter(
 						(batch) => batch.sessionId === sessionId && (sessionId !== null || batch.cwd === process.cwd()),
@@ -10406,13 +10410,19 @@ export function createDispatchBundle(
 		const startedMs = Date.parse(run.startedAt);
 		const at = Date.now();
 		const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, at - startedMs) : null;
-		context.bus.emit("run.aborted", {
-			source,
-			runId: run.runId,
-			startedAt: run.startedAt,
-			elapsedMs,
-			at,
-		});
+		context.bus.emit(
+			"run.aborted",
+			{ source, runId: run.runId, startedAt: run.startedAt, elapsedMs, at },
+			runContext(run.runId),
+		);
+	}
+
+	/**
+	 * An operator action reaches a run outside its async context, so the record names the run's journal. A run with no
+	 * open journal, such as one still queued, falls to the current scope; the payload's runId keeps the target (#434).
+	 */
+	function runContext(runId: string): TelemetryContext | undefined {
+		return runTelemetryJournal(runId)?.context;
 	}
 
 	/**
@@ -10987,13 +10997,17 @@ export function createDispatchBundle(
 			const queued = pendingCapacity.get(rootRunId);
 			if (queued !== undefined && capacityAdmission.cancel(rootRunId)) {
 				persistAssignment(cancelStoredAssignment(rootRunId), `${rootRunId}:cancel-queued`);
-				context.bus.emit("run.aborted", {
-					source: "dispatch_abort",
-					runId: rootRunId,
-					startedAt: null,
-					elapsedMs: null,
-					reason: reason?.detail ?? "operator abort while waiting for an endpoint slot",
-				});
+				context.bus.emit(
+					"run.aborted",
+					{
+						source: "dispatch_abort",
+						runId: rootRunId,
+						startedAt: null,
+						elapsedMs: null,
+						reason: reason?.detail ?? "operator abort while waiting for an endpoint slot",
+					},
+					runContext(rootRunId),
+				);
 			}
 			const assignment = assignments.get(rootRunId);
 			if (assignment?.status === "running") {
@@ -11008,13 +11022,17 @@ export function createDispatchBundle(
 				if (retry.rootRunId === rootRunId) {
 					settleAssignmentDurably(asAssignmentId(rootRunId), retry.terminalCandidate, "canceled");
 				}
-				context.bus.emit("run.aborted", {
-					source: "dispatch_abort",
-					runId: finishedRunId,
-					startedAt: null,
-					elapsedMs: null,
-					reason: `scheduled retry ${retry.attempt} canceled by operator`,
-				});
+				context.bus.emit(
+					"run.aborted",
+					{
+						source: "dispatch_abort",
+						runId: finishedRunId,
+						startedAt: null,
+						elapsedMs: null,
+						reason: `scheduled retry ${retry.attempt} canceled by operator`,
+					},
+					runContext(finishedRunId),
+				);
 				context.bus.emit("run.progressed", {
 					runId: finishedRunId,
 					agentId: retry.agentId,

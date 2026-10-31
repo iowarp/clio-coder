@@ -1,4 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
+import { ownerTelemetryContext } from "../../core/telemetry/context.js";
 import type { TelemetryHub } from "../../core/telemetry/hub.js";
 import { isRunAbortedPayload } from "../../core/telemetry/live-events.js";
 import type { ProvidersContract } from "../../domains/providers/index.js";
@@ -131,7 +132,8 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 			watchdogTier: next.watchdogTier,
 			metadata: statusMetadata(next),
 		};
-		deps.bus?.emit("agent.status_changed", payload);
+		// Phase changes follow chat events outside the turn's async context; the session names the scope (#434).
+		deps.bus?.emit("agent.status_changed", payload, ownerTelemetryContext({ sessionId: deps.chat.getSessionId() }));
 	};
 
 	const notify = (prev: AgentStatus, next: AgentStatus, force = false): void => {
@@ -239,6 +241,17 @@ export function createStatusController(deps: StatusControllerDeps): StatusContro
 					return;
 				}
 				apply({ type: "run_aborted" }, true);
+			}),
+			deps.bus.subscribe("turn.aborted", (payload) => {
+				scheduleAbortCeiling();
+				apply(
+					{
+						type: "run_aborted",
+						source: payload.source,
+						...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+					},
+					true,
+				);
 			}),
 		);
 	}

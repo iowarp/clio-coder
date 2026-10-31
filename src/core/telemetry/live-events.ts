@@ -301,37 +301,39 @@ export interface SafetyBlockedPayload {
 }
 
 /** Where a `run.aborted` event originated. */
-export type RunAbortSource = "dispatch_abort" | "dispatch_drain" | "stream_cancel" | "loop_guard";
+export type RunAbortSource = "dispatch_abort" | "dispatch_drain";
+export type TurnAbortSource = "stream_cancel" | "loop_guard";
 
 /**
- * Payload published on `run.aborted`. Dispatch emits
- * dispatch_abort/dispatch_drain with run lineage; the chat loop emits
- * stream_cancel for an operator Esc/Ctrl+C and loop_guard when the loop guard
- * stops a runaway turn. Subscribers must not collapse the sources: a drained
- * dispatch run, a user-cancelled stream, and a guard-stopped loop are different
- * operator situations.
+ * Payload published on `run.aborted` when dispatch cancels (dispatch_abort) or drains (dispatch_drain) a run.
+ * A main turn's own stream stop is `turn.aborted`; subscribers must not collapse the two (#434).
  */
 export interface RunAbortedPayload {
 	source: RunAbortSource;
-	runId: string | null;
+	runId: string;
 	startedAt: string | null;
 	elapsedMs: number | null;
 	at?: number;
 	reason?: string;
 }
 
-const RUN_ABORT_SOURCES: ReadonlySet<string> = new Set<RunAbortSource>([
-	"dispatch_abort",
-	"dispatch_drain",
-	"stream_cancel",
-	"loop_guard",
-]);
+/**
+ * Payload published on `turn.aborted`: the chat loop's stream_cancel for an operator Esc/Ctrl+C, or loop_guard
+ * when the loop guard stops a runaway turn.
+ */
+export interface TurnAbortedPayload {
+	source: TurnAbortSource;
+	at: number;
+	reason?: string;
+}
+
+const RUN_ABORT_SOURCES: ReadonlySet<string> = new Set<RunAbortSource>(["dispatch_abort", "dispatch_drain"]);
 
 export function isRunAbortedPayload(value: unknown): value is RunAbortedPayload {
 	if (!value || typeof value !== "object") return false;
 	const p = value as Record<string, unknown>;
 	if (typeof p.source !== "string" || !RUN_ABORT_SOURCES.has(p.source)) return false;
-	if (p.runId !== null && typeof p.runId !== "string") return false;
+	if (typeof p.runId !== "string") return false;
 	if (p.startedAt !== null && typeof p.startedAt !== "string") return false;
 	if (p.elapsedMs !== null && typeof p.elapsedMs !== "number") return false;
 	if (p.reason !== undefined && typeof p.reason !== "string") return false;

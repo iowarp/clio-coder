@@ -269,7 +269,7 @@ function fixture(initialMode: WireMode, readTurn?: () => void, visionSidecar?: V
 	let wire = transport(initialMode);
 	const events: ChatLoopEvent[] = [];
 	const audit: unknown[] = [];
-	context.bus.subscribe("run.aborted", (event) => {
+	context.bus.subscribe("turn.aborted", (event) => {
 		audit.push(event);
 	});
 	// The fixture runs without telemetry; a test that reads the receipt's spend supplies the read model's view.

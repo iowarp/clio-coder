@@ -386,6 +386,7 @@ import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-l
 
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 
+import { emitApproval } from "../core/telemetry/approvals.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource, PluginsReloadedPayload } from "../core/telemetry/live-events.js";
 import {
@@ -3347,7 +3348,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.subscribe("config.hot_reloaded", () => toolRegistry.forgetRefusals());
 	const mainPermissionOrigin = acpMode ? "acp-server" : "main";
 	toolRegistry.onPermissionRequired((call, decision, meta) => {
-		bus.emit("approval.requested", {
+		emitApproval(bus, "approval.requested", {
 			tool: call.tool,
 			actionClass: decision.classification.actionClass,
 			requestId: meta.requestId,

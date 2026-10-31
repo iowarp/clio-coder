@@ -437,13 +437,14 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 					liveSession = { id: sessionId, cwdHash };
 					recordLifecycle(liveSession, "session.opened", {});
 				}),
-				context.bus.subscribe("session.reattached", ({ sessionId, cwdHash }) => {
+				context.bus.subscribe("session.reattached", ({ sessionId, cwdHash, via }) => {
 					liveSession = cwdHash === undefined ? null : { id: sessionId, cwdHash };
-					if (liveSession) recordLifecycle(liveSession, "session.resumed", {});
+					if (liveSession) recordLifecycle(liveSession, "session.resumed", { via });
 				}),
-				context.bus.subscribe("session.parked", ({ sessionId, cwdHash }) => {
+				// A park is the session's close; its reason says what replaced or ended it (#434).
+				context.bus.subscribe("session.parked", ({ sessionId, cwdHash, reason }) => {
 					if (liveSession?.id === sessionId) liveSession = null;
-					if (cwdHash !== undefined) recordLifecycle({ id: sessionId, cwdHash }, "session.closed", { reason: "completed" });
+					if (cwdHash !== undefined) recordLifecycle({ id: sessionId, cwdHash }, "session.closed", { reason });
 				}),
 			);
 			unsubscribes.push(
@@ -472,7 +473,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		async stop() {
 			stopping = true;
 			healthWindows.stop();
-			if (liveSession) recordLifecycle(liveSession, "session.closed", { reason: "completed" });
+			if (liveSession) recordLifecycle(liveSession, "session.closed", { reason: "shutdown" });
 			liveSession = null;
 			await Promise.all(pendingRecords);
 			await journals.closeAll();

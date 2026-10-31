@@ -1,4 +1,4 @@
-import type { RunAbortSource } from "../../core/telemetry/live-events.js";
+import type { RunAbortSource, TurnAbortSource } from "../../core/telemetry/live-events.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPhase } from "../../session-control/chat-loop.js";
@@ -41,7 +41,7 @@ export interface OverlayPopEvent {
 
 export interface RunAbortedStatusEvent {
 	type: "run_aborted";
-	source?: RunAbortSource;
+	source?: RunAbortSource | TurnAbortSource;
 	reason?: string;
 }
 
@@ -289,7 +289,7 @@ function cancelledSummary(
 	});
 }
 
-const ABORT_SOURCE_LABELS: Record<RunAbortSource, string> = {
+const ABORT_SOURCE_LABELS: Record<RunAbortSource | TurnAbortSource, string> = {
 	dispatch_abort: "dispatch abort",
 	dispatch_drain: "dispatch drain",
 	stream_cancel: "stream cancel",

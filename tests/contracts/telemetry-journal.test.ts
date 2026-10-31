@@ -233,7 +233,7 @@ test("overlapping work retains its original session and releases ownership only 
 		await main.release();
 		const next = await journals.acquire({ ...origin, id: "next" }, "main", "turn-b");
 		telemetryHub().emit("session.opened", {}, next.context);
-		telemetryHub().emit("session.resumed", {}, side.context);
+		telemetryHub().emit("session.resumed", { via: "resume" }, side.context);
 		await next.release();
 		await side.release();
 		const original = await readCallJournal(telemetrySessionDirectory(stateDir, "original"));
@@ -610,7 +610,7 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 		deepStrictEqual(replayed[0]?.[8], projected[0]?.costSummary);
 		await journal.close();
 		const before = telemetryProducerHealth().unownedRecords;
-		strictEqual(telemetryHub().emit("session.closed", { reason: "completed" }, context), false);
+		strictEqual(telemetryHub().emit("session.closed", { reason: "shutdown" }, context), false);
 		strictEqual(telemetryProducerHealth().unownedRecords, before + 1);
 	} finally {
 		await journal.close();
@@ -693,7 +693,7 @@ test("a segment header says what its mode admits, and a mode change opens a new 
 		await journal.flush();
 		const research = { content: true, deltas: true, providerHeaders: false, systemOneDataset: true, busTrace: false };
 		capture = effectiveTelemetryCapture({ mode: "research", research }, false);
-		telemetryHub().emit("session.resumed", {}, context);
+		telemetryHub().emit("session.resumed", { via: "resume" }, context);
 		await journal.flush();
 		const rows = scanTelemetrySegment(await readFile(join(sessionDirectory, "journal.jsonl"))).rows;
 		deepStrictEqual(

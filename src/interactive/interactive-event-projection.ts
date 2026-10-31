@@ -235,6 +235,9 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 		deps.bus.subscribe("run.aborted", () => {
 			deps.stopTerminalProgress();
 		}),
+		deps.bus.subscribe("turn.aborted", () => {
+			deps.stopTerminalProgress();
+		}),
 		deps.chat.onEvent((event) => {
 			if (event.type !== "message_end" && event.type !== "agent_end") return;
 			// #423: the reuse estimate is about the next call. Once a call settles,

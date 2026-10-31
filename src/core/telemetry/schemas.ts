@@ -520,7 +520,17 @@ export const SessionForkedSchema = Type.Object(
 	},
 	closed,
 );
-export const SessionClosedSchema = Type.Object({ reason: vocabulary(["completed", "cancelled", "error"]) }, closed);
+/** Why the session stopped being current: the park reason, or `shutdown` when the process ended with it open (#434). */
+export const SessionCloseReason = vocabulary([
+	"create_new",
+	"resume_other",
+	"fork",
+	"switch_branch",
+	"close",
+	"shutdown",
+]);
+export const SessionClosedSchema = Type.Object({ reason: SessionCloseReason }, closed);
+export const SessionResumedSchema = Type.Object({ via: vocabulary(["resume", "switch_branch"]) }, closed);
 export const JournalSegmentClosedSchema = Type.Object(
 	{ reason: vocabulary(["rotation", "mode-change", "shutdown"]) },
 	closed,
@@ -706,6 +716,173 @@ export const ToolSettledSchema = Type.Object(
 		terminate: Type.Optional(Type.Literal(true)),
 		/** Which refusal blocked it: a policy, an unapproved park, or a withheld duplicate of a succeeded call. */
 		blocked: Type.Optional(vocabulary(["refused", "denied-park", "redundant-repeat"])),
+	},
+	closed,
+);
+/**
+ * One safety decision about a tool call, from classification to the final autonomy or budget disposition. A
+ * `classified` record is a net pass that a later axis still decides; the command, arguments and policy prose stay
+ * out of the journal (#434).
+ */
+export const ToolDecidedSchema = Type.Object(
+	{
+		tool: ExistingId,
+		actionClass: ExistingId,
+		decision: vocabulary(["allowed", "blocked", "permission_requested", "classified", "denied"]),
+		exposure: Type.Optional(Type.Literal("outward")),
+		posture: Type.Optional(ExistingId),
+		requestId: Type.Optional(ExistingId),
+		ruleId: Type.Optional(ExistingId),
+		reasonCode: Type.Optional(ExistingId),
+		policySource: Type.Optional(ExistingId),
+		policyHash: Type.Optional(ExistingId),
+	},
+	closed,
+);
+/** A parked call's approval ask. The card's summary, target, consequence and rejection text are live only (#434). */
+export const ApprovalRequestedSchema = Type.Object(
+	{
+		tool: ExistingId,
+		actionClass: ExistingId,
+		requestId: Type.Optional(ExistingId),
+		origin: Type.Optional(ExistingId),
+		/** The worker run that asked; absent for a main-session ask. */
+		requestedBy: Type.Optional(ExistingId),
+		agentId: Type.Optional(ExistingId),
+		axis: Type.Optional(ExistingId),
+		posture: Type.Optional(ExistingId),
+		ruleId: Type.Optional(ExistingId),
+		reasonCode: Type.Optional(ExistingId),
+		policySource: Type.Optional(ExistingId),
+		timeoutMs: Type.Optional(duration),
+		fallback: Type.Optional(vocabulary(["deny", "fail"])),
+		escalation: Type.Optional(Type.Boolean()),
+		approvalAuthority: Type.Optional(vocabulary(["main", "operator"])),
+		forwardedByMain: Type.Optional(Type.Boolean()),
+	},
+	closed,
+);
+export const ApprovalResolvedSchema = Type.Object(
+	{
+		status: vocabulary(["granted", "denied", "expired"]),
+		requestId: Type.Optional(ExistingId),
+		origin: Type.Optional(ExistingId),
+		decidedBy: Type.Optional(ExistingId),
+		tool: Type.Optional(ExistingId),
+		actionClass: Type.Optional(ExistingId),
+		requestedBy: Type.Optional(ExistingId),
+		fallback: Type.Optional(vocabulary(["deny", "fail"])),
+		grant: Type.Optional(
+			Type.Object(
+				{
+					attempt: count,
+					authority: vocabulary(["main", "operator"]),
+					issuer: Type.Optional(vocabulary(["main", "operator"])),
+					execution: vocabulary(["not_executed", "executing", "executed", "unknown"]),
+					state: ExistingId,
+				},
+				closed,
+			),
+		),
+	},
+	closed,
+);
+/** A dispatch run cancelled or drained. `runId` names the target, which a queued run's own journal may not hold. */
+export const RunAbortedSchema = Type.Object(
+	{
+		source: vocabulary(["dispatch_abort", "dispatch_drain"]),
+		runId: ExistingId,
+		startedAt: Type.Union([Type.String({ maxLength: 64 }), Type.Null()]),
+		elapsedMs: Type.Union([duration, Type.Null()]),
+	},
+	closed,
+);
+/** A main turn's stream stopped by the operator or by the loop guard; no dispatch run is involved (#434). */
+export const TurnAbortedSchema = Type.Object({ source: vocabulary(["stream_cancel", "loop_guard"]) }, closed);
+export const StatusPhase = vocabulary([
+	"idle",
+	"preparing",
+	"waiting_model",
+	"thinking",
+	"writing",
+	"tool_running",
+	"tool_blocked",
+	"retrying",
+	"compacting",
+	"dispatching",
+	"stuck",
+	"ended",
+]);
+export const AgentStatusChangedSchema = Type.Object(
+	{
+		phase: StatusPhase,
+		prevPhase: StatusPhase,
+		elapsedFromStart: duration,
+		watchdogTier: Type.Integer({ minimum: 0, maximum: 4 }),
+		toolName: Type.Optional(ExistingId),
+		attempt: Type.Optional(count),
+		agentName: Type.Optional(ExistingId),
+		stopReason: Type.Optional(ExistingId),
+	},
+	closed,
+);
+/** The finish contract's decision at turn end. Paths and finding prose are counted, never copied (#434). */
+export const CompletionEvaluatedSchema = Type.Object(
+	{
+		decision: vocabulary(["ok", "engage"]),
+		reason: vocabulary([
+			"no_mutation",
+			"no_net_mutation",
+			"deletion_only",
+			"prose_only",
+			"validation_evidence",
+			"explicit_limitation",
+			"unvalidated_mutation",
+		]),
+		rigor: vocabulary(["normal", "high"]),
+		mutatedPaths: count,
+		evidenceKinds: Type.Array(ExistingId),
+		quality: Type.Optional(
+			Type.Array(
+				Type.Object(
+					{
+						rule: ExistingId,
+						check: ExistingId,
+						state: vocabulary(["passed", "failed", "stale", "missing", "limited", "unavailable"]),
+					},
+					closed,
+				),
+			),
+		),
+		/** The checks the decision counted as passed and the operator's acceptance per check; limitations stay out. */
+		verification: Type.Optional(
+			Type.Object(
+				{
+					passedChecks: Type.Array(ExistingId),
+					acceptance: Type.Array(
+						Type.Object({ check: ExistingId, state: vocabulary(["passed", "limited", "unverified"]) }, closed),
+					),
+				},
+				closed,
+			),
+		),
+	},
+	closed,
+);
+/** The safety judge's review of a call that would have parked; its reason and detail prose stay out (#434). */
+export const SafetyJudgedSchema = Type.Object(
+	{
+		tool: ExistingId,
+		actionClass: ExistingId,
+		verdict: vocabulary(["allow", "block", "none", "escalated"]),
+		latencyMs: duration,
+		workerRunId: Type.Optional(ExistingId),
+		askRule: Type.Optional(ExistingId),
+		rule: Type.Optional(ExistingId),
+		target: Type.Optional(ExistingId),
+		model: Type.Optional(ExistingId),
+		noVerdict: Type.Optional(ExistingId),
+		operatorMessages: Type.Optional(count),
 	},
 	closed,
 );

@@ -63,8 +63,16 @@ test("two installs append to and read one state dir; neither retires the other's
 		await settle(directory, telemetryCall(SESSION, { usd: 0.5, at: "2026-10-30T10:00:00.000Z" }));
 
 		const at = { t: "2026-10-30T10:05:00.000Z", mono: 1 };
-		const unknownKind = { ...makeTelemetryRecord("session.resumed", {}, ctx, at), id: newRecordId(), k: "vnext.signal" };
-		const newerVersion = { ...makeTelemetryRecord("session.resumed", {}, ctx, at), id: newRecordId(), kv: 99 };
+		const unknownKind = {
+			...makeTelemetryRecord("session.resumed", { via: "resume" }, ctx, at),
+			id: newRecordId(),
+			k: "vnext.signal",
+		};
+		const newerVersion = {
+			...makeTelemetryRecord("session.resumed", { via: "resume" }, ctx, at),
+			id: newRecordId(),
+			kv: 99,
+		};
 		const newer = Buffer.concat([
 			encodeTelemetryLine(callJournalHeader({ clioCoderVersion: "0.7.0", piVersion: "test" })),
 			...telemetryCall(SESSION, { usd: 0.25, at: "2026-10-30T10:04:00.000Z" }).map(encodeTelemetryLine),
