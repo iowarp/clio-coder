@@ -31,7 +31,7 @@ export interface AttemptRef {
 	attempt: number;
 	outcome: RunOutcome;
 	node: RunNodeIdentity | null;
-	receiptDigest: string;
+	runDigest: string;
 	retryReason: string | null;
 }
 

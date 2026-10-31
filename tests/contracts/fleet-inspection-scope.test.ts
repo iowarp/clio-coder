@@ -53,7 +53,7 @@ test("fleet inspection defaults to this project and --all deliberately shows eve
 						stepId: "step",
 						assignmentId: "assignment",
 						terminalRunId: foreign.id,
-						receiptDigest: "a".repeat(64),
+						runDigest: "a".repeat(64),
 						output: "",
 						succeeded: true,
 						integrityValid: true,

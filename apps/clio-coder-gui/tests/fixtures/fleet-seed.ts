@@ -35,7 +35,7 @@ for (let i = 0; i < 150; i++) {
 					stepId: "review",
 					assignmentId: "fixture-assignment",
 					terminalRunId: "member-two",
-					receiptDigest: "b".repeat(64),
+					runDigest: "b".repeat(64),
 					output: "Fixture step passed.",
 					succeeded: true,
 					integrityValid: true,

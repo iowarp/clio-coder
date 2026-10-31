@@ -41,7 +41,7 @@ const interpretation: TurnInterpretation = {
 	direction: { requested: false },
 };
 const settings = DEFAULT_SETTINGS.turnControl;
-const prior = { runId: "prior-run", receiptDigest: "digest", fingerprint: { ...facts.workspace } };
+const prior = { runId: "prior-run", runDigest: "digest", fingerprint: { ...facts.workspace } };
 
 it("decides workflow cases in the required order, including each reachable none reason", () => {
 	const direction = {
@@ -145,7 +145,7 @@ it("decides workflow cases in the required order, including each reachable none 
 				kind: "orientation",
 				question: orientationQuestion(facts.operatorText, "area", 4),
 				breadth: "area",
-				reuse: { runId: "prior-run", receiptDigest: "digest" },
+				reuse: { runId: "prior-run", runDigest: "digest" },
 				budget: { maxScouts: 4, toolCallsPerScout: 36 },
 			},
 		},
@@ -239,7 +239,7 @@ it("renders complete cited findings within 4000 characters and bounds the reques
 	}));
 	const rendered = renderOrientationBlock({
 		runId: "run",
-		receiptDigest: "123456789012abcdef",
+		runDigest: "123456789012abcdef",
 		findings,
 		ungrounded: [],
 		toolCalls: 12,
@@ -253,7 +253,7 @@ it("renders complete cited findings within 4000 characters and bounds the reques
 		included,
 		findings.slice(0, 3).map((finding) => `- ${finding.claim} (${finding.path}:${finding.line})`),
 	);
-	match(rendered, /receipt 123456789012\)/);
+	match(rendered, /digest 123456789012\)/);
 	match(rendered, /Limitations: 12\/36 tool calls; split: none; validation: cited/);
 	ok(rendered.endsWith("Answer the user from these findings. Use focused reads only for specific facts still missing."));
 	const raw = `  ${"😀  ".repeat(350)}tail `;

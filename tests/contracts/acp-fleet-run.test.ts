@@ -298,7 +298,7 @@ test("a resume id compiles the replayed prefix into every surface's approval", a
 			steps: [
 				{
 					stepId: "survey",
-					result: { succeeded: true, integrityValid: true, terminalRunId: "r1", receiptDigest: "d1" } as ExecutionStepResult,
+					result: { succeeded: true, integrityValid: true, terminalRunId: "r1", runDigest: "d1" } as ExecutionStepResult,
 				},
 			],
 		});

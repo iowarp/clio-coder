@@ -4,7 +4,7 @@ import type { ExecutionPlan, ExecutionPlanCodeStep } from "./execution-plan.js";
 export interface FleetCommitPriorResult {
 	succeeded: boolean;
 	integrityValid: boolean;
-	receiptDigest: string;
+	runDigest: string;
 	/** Decision refs from the step's run; they become `Clio-Decision:` trailers. */
 	decisionRefs?: ReadonlyArray<string>;
 }
@@ -38,11 +38,11 @@ export function deriveFleetCommitAttribution(input: {
 		}
 		materiallyAuthored = true;
 		if (result.decisionRefs !== undefined && result.decisionRefs.length > 0) decisions = [...result.decisionRefs];
-		if (/^[0-9a-f]{64}$/u.test(result.receiptDigest)) {
+		if (/^[0-9a-f]{64}$/u.test(result.runDigest)) {
 			run = {
 				version: 1,
 				algorithm: "sha256",
-				digest: result.receiptDigest,
+				digest: result.runDigest,
 				integrityValid: true,
 				directlyRelevant: true,
 			};

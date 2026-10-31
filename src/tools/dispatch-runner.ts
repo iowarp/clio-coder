@@ -2559,7 +2559,7 @@ export async function runDispatchTool(
 					: {
 							kind: "scout-transition",
 							runId: resolvedPlan.source.runId,
-							receiptDigest: resolvedPlan.source.receiptDigest,
+							runDigest: resolvedPlan.source.runDigest,
 							executionPlanHash: resolvedPlan.source.executionPlanHash,
 						},
 			...(authenticatedApproval !== undefined

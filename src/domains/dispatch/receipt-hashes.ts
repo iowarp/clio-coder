@@ -77,7 +77,7 @@ const DECLARATIONS: ReadonlyArray<DeclarationRow> = [
 		declaration: commitment("plan-text", "utf8-text"),
 	},
 	{ path: /^plan\.source\.executionPlanHash$/u, declaration: commitment("execution-plan", "json-insertion-order") },
-	{ path: /^plan\.source\.receiptDigest$/u, declaration: resolvable("run-receipt", "artifact-digest", "run-receipts") },
+	{ path: /^plan\.source\.runDigest$/u, declaration: resolvable("run-receipt", "artifact-digest", "run-receipts") },
 	{ path: /^gate\.subjects\[\]\.digest$/u, declaration: resolvable("run-receipt", "artifact-digest", "run-receipts") },
 	{
 		path: /^quality\.typedValidations\[\]\.validatorDigest$/u,

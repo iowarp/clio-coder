@@ -284,7 +284,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 			Type.Object(
 				{
 					run_id: Type.String({ description: "Terminal Scout run id." }),
-					receipt_digest: Type.String({ description: "Its sha256 receipt digest." }),
+					run_digest: Type.String({ description: "Its sha256 run digest." }),
 				},
 				{
 					additionalProperties: false,

@@ -24,7 +24,7 @@ export type WorkflowDecision =
 			kind: "orientation";
 			question: string;
 			breadth: "repository" | "area";
-			reuse: { runId: string; receiptDigest: string } | null;
+			reuse: { runId: string; runDigest: string } | null;
 			budget: { maxScouts: 1 | 2 | 3 | 4; toolCallsPerScout: number };
 	  }
 	| { kind: "direction"; observations: ReadonlyArray<"git-status" | "git-log" | "tree" | "codemap"> }
@@ -70,7 +70,7 @@ export function decide(
 			breadth,
 			reuse:
 				prior && fingerprintEquals(prior.fingerprint, facts.workspace)
-					? { runId: prior.runId, receiptDigest: prior.receiptDigest }
+					? { runId: prior.runId, runDigest: prior.runDigest }
 					: null,
 			budget: { maxScouts: settings.orientation.maxSplit, toolCallsPerScout: 36 },
 		};

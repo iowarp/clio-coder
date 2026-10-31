@@ -656,7 +656,7 @@ function isValidPredecessorHandoffs(value: unknown): value is ExecutionHandoff[]
 			candidate.stepId,
 			candidate.assignmentId,
 			candidate.terminalRunId,
-			candidate.receiptDigest,
+			candidate.runDigest,
 			candidate.output,
 		];
 		return (
@@ -667,8 +667,8 @@ function isValidPredecessorHandoffs(value: unknown): value is ExecutionHandoff[]
 			candidate.assignmentId.length > 0 &&
 			typeof candidate.terminalRunId === "string" &&
 			candidate.terminalRunId.length > 0 &&
-			typeof candidate.receiptDigest === "string" &&
-			/^[a-f0-9]{64}$/.test(candidate.receiptDigest)
+			typeof candidate.runDigest === "string" &&
+			/^[a-f0-9]{64}$/.test(candidate.runDigest)
 		);
 	});
 }
@@ -802,8 +802,8 @@ function isValidPlan(value: unknown): value is RunPlanProvenance {
 			value.source.kind !== "scout-transition" ||
 			typeof value.source.runId !== "string" ||
 			value.source.runId.length === 0 ||
-			typeof value.source.receiptDigest !== "string" ||
-			!/^[0-9a-f]{64}$/u.test(value.source.receiptDigest) ||
+			typeof value.source.runDigest !== "string" ||
+			!/^[0-9a-f]{64}$/u.test(value.source.runDigest) ||
 			typeof value.source.executionPlanHash !== "string" ||
 			!/^[0-9a-f]{64}$/u.test(value.source.executionPlanHash)
 		)

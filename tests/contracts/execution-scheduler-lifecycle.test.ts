@@ -36,7 +36,7 @@ const result = (id: string, succeeded = true): ExecutionStepResult => ({
 	stepId: id,
 	assignmentId: id,
 	terminalRunId: `run-${id}`,
-	receiptDigest: `digest-${id}`,
+	runDigest: `digest-${id}`,
 	output: `output-${id}`,
 	succeeded,
 	integrityValid: true,
@@ -138,7 +138,7 @@ describe("execution scheduler lifecycle", () => {
 				const outcome = await execution;
 				strictEqual(receipt.succeeded, true, "never alter the adapter's receipt projection");
 				strictEqual(outcome.results.get("a")?.succeeded, false);
-				strictEqual(outcome.results.get("a")?.receiptDigest, receipt.receiptDigest);
+				strictEqual(outcome.results.get("a")?.runDigest, receipt.runDigest);
 			} else await execution;
 			strictEqual(f.log.includes("launch:dependent"), false);
 			if (timing === "before")
@@ -207,7 +207,7 @@ describe("execution scheduler lifecycle", () => {
 		const f = fixture();
 		const handoffs: string[] = [];
 		f.adapter.run = async (step, upstream) => {
-			handoffs.push(...upstream.map((item) => item.receiptDigest));
+			handoffs.push(...upstream.map((item) => item.runDigest));
 			return { assignmentId: step.id, result: Promise.resolve(result(step.id)) };
 		};
 		const boundaries: string[] = [];
@@ -324,7 +324,7 @@ describe("execution scheduler lifecycle", () => {
 		f.adapter.onStepSettled = (_step, result) => {
 			strictEqual(result.succeeded, false);
 			strictEqual(result.boundaryViolated, true);
-			strictEqual(result.receiptDigest, "digest-a");
+			strictEqual(result.runDigest, "digest-a");
 			log.push("saved");
 		};
 		const p = plan([

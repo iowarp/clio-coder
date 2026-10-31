@@ -259,7 +259,7 @@ describe("dispatch session ownership", () => {
 			throws(
 				() =>
 					loadVerifiedScoutSource({
-						ref: { runId, receiptDigest: receipt.digest },
+						ref: { runId, runDigest: receipt.digest },
 						dispatch: b.contract,
 						agentSpecs: [],
 					}),

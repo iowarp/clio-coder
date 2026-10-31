@@ -11,7 +11,7 @@ export interface TurnControlRecord {
 	readonly factsDigest: string;
 	readonly decision: WorkflowDecision;
 	readonly decisionHash: string;
-	readonly orientation?: { runId: string; receiptDigest: string; fingerprint: WorkspaceFingerprint; block: string };
+	readonly orientation?: { runId: string; runDigest: string; fingerprint: WorkspaceFingerprint; block: string };
 	readonly executed:
 		| { runIds: ReadonlyArray<string>; blockChars: number; durationMs: number }
 		| { refused: string; startedRunIds?: ReadonlyArray<string> }

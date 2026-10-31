@@ -19,7 +19,7 @@ import type { FinishedRun } from "./worker-evidence.js";
 
 export interface ScoutContinuationRef {
 	runId: string;
-	receiptDigest: string;
+	runDigest: string;
 }
 
 export interface VerifiedScoutSource {
@@ -52,16 +52,16 @@ export function scoutContinuationRefFromArgs(
 		};
 	}
 	const value = args.from_scout;
-	if (!record(value) || Object.keys(value).sort().join("\u0000") !== "receipt_digest\u0000run_id") {
-		return { ok: false, message: "dispatch: from_scout requires exactly run_id and receipt_digest" };
+	if (!record(value) || Object.keys(value).sort().join("\u0000") !== "run_digest\u0000run_id") {
+		return { ok: false, message: "dispatch: from_scout requires exactly run_id and run_digest" };
 	}
 	if (typeof value.run_id !== "string" || value.run_id.trim().length === 0) {
 		return { ok: false, message: "dispatch: from_scout.run_id must be non-empty" };
 	}
-	if (typeof value.receipt_digest !== "string" || !/^[0-9a-f]{64}$/u.test(value.receipt_digest)) {
-		return { ok: false, message: "dispatch: from_scout.receipt_digest must be a sha256 digest" };
+	if (typeof value.run_digest !== "string" || !/^[0-9a-f]{64}$/u.test(value.run_digest)) {
+		return { ok: false, message: "dispatch: from_scout.run_digest must be a sha256 digest" };
 	}
-	return { ok: true, ref: { runId: value.run_id.trim(), receiptDigest: value.receipt_digest } };
+	return { ok: true, ref: { runId: value.run_id.trim(), runDigest: value.run_digest } };
 }
 
 /**
@@ -106,7 +106,7 @@ export function loadVerifiedScoutSource(input: {
 	if (!dispatchOwnership(dispatchOwnerOf(input.dispatch)).ownsRun(envelope)) {
 		throw new Error(`dispatch: Scout source run '${input.ref.runId}' belongs to another session`);
 	}
-	const record = readVerifiedRun(clioStateDir(), input.ref.runId, input.ref.receiptDigest);
+	const record = readVerifiedRun(clioStateDir(), input.ref.runId, input.ref.runDigest);
 	if (record === null)
 		throw new Error(`dispatch: Scout source '${input.ref.runId}' has no sealed record under the cited digest`);
 	return validateScoutSource(
@@ -197,7 +197,7 @@ export function prepareScoutContinuation(input: {
 	];
 	const transition = compileScoutTransition({
 		scout: input.source.scout,
-		sourceReceiptDigest: input.source.run.digest,
+		sourceRunDigest: input.source.run.digest,
 		rootTask: input.source.envelope.task,
 		bindings,
 		authority: {
@@ -279,7 +279,7 @@ export function prepareScoutContinuation(input: {
 			source: {
 				kind: "scout-transition",
 				runId: input.source.run.runId,
-				receiptDigest: input.source.run.digest,
+				runDigest: input.source.run.digest,
 				executionPlanHash: plan.hash,
 			},
 			maxWorkers: plan.maxWorkers,

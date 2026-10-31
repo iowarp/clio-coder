@@ -54,7 +54,7 @@ export type DispatchPlanTopology =
 export type DispatchPlanSource = null | {
 	kind: "scout-transition";
 	runId: string;
-	receiptDigest: string;
+	runDigest: string;
 	executionPlanHash: string;
 };
 
@@ -444,7 +444,7 @@ function renderPlanText(
 	}
 	if (source !== null) {
 		lines.push(
-			`source: scout-transition run=${safeField(source.runId)} receipt=${source.receiptDigest} execution-plan=${source.executionPlanHash} max-workers=${maxWorkers ?? "?"} on-failure=${onFailure ?? "?"}`,
+			`source: scout-transition run=${safeField(source.runId)} run-digest=${source.runDigest} execution-plan=${source.executionPlanHash} max-workers=${maxWorkers ?? "?"} on-failure=${onFailure ?? "?"}`,
 		);
 	}
 	for (const [index, task] of tasks.entries()) {
@@ -926,15 +926,15 @@ function parsePlanSource(value: unknown): DispatchPlanSource | undefined {
 	if (value === null) return null;
 	if (
 		!isRecord(value) ||
-		Object.keys(value).sort().join("\u0000") !== "executionPlanHash\u0000kind\u0000receiptDigest\u0000runId"
+		Object.keys(value).sort().join("\u0000") !== "executionPlanHash\u0000kind\u0000runDigest\u0000runId"
 	)
 		return undefined;
 	if (
 		value.kind !== "scout-transition" ||
 		typeof value.runId !== "string" ||
 		value.runId.length === 0 ||
-		typeof value.receiptDigest !== "string" ||
-		!/^[0-9a-f]{64}$/u.test(value.receiptDigest) ||
+		typeof value.runDigest !== "string" ||
+		!/^[0-9a-f]{64}$/u.test(value.runDigest) ||
 		typeof value.executionPlanHash !== "string" ||
 		!/^[0-9a-f]{64}$/u.test(value.executionPlanHash)
 	)
@@ -942,7 +942,7 @@ function parsePlanSource(value: unknown): DispatchPlanSource | undefined {
 	return {
 		kind: "scout-transition",
 		runId: value.runId,
-		receiptDigest: value.receiptDigest,
+		runDigest: value.runDigest,
 		executionPlanHash: value.executionPlanHash,
 	};
 }

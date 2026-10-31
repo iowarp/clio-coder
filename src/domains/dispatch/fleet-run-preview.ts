@@ -402,7 +402,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 					? {
 							resume: {
 								fromRunId: resume.fromRunId,
-								replayed: [...resume.replayed].map(([stepId, result]) => [stepId, result.receiptDigest ?? null]),
+								replayed: [...resume.replayed].map(([stepId, result]) => [stepId, result.runDigest ?? null]),
 							},
 						}
 					: {}),

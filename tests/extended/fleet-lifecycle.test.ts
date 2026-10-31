@@ -67,7 +67,7 @@ function result(stepId: string, succeeded = true, integrityValid = true): Execut
 		stepId,
 		assignmentId: `assignment-${stepId}`,
 		terminalRunId: `run-${stepId}`,
-		receiptDigest: `digest-${stepId}`,
+		runDigest: `digest-${stepId}`,
 		output: `${stepId} outcome`,
 		succeeded,
 		integrityValid,

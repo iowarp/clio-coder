@@ -21,7 +21,7 @@ export function orientationQuestion(operatorText: string, _breadth: "repository"
 
 export interface OrientationBlockInput {
 	runId: string;
-	receiptDigest: string;
+	runDigest: string;
 	findings: ReadonlyArray<{ claim: string; path?: string; line?: number }>;
 	ungrounded: ReadonlyArray<string>;
 	toolCalls: number;
@@ -33,7 +33,7 @@ export interface OrientationBlockInput {
 export function renderOrientationBlock(input: OrientationBlockInput): string {
 	return block(
 		[
-			`[Orientation] Clio ran Scout before this turn (run ${line(input.runId)}, receipt ${line(input.receiptDigest).slice(0, 12)}) for repository orientation; do not dispatch Scout again for this orientation.`,
+			`[Orientation] Clio ran Scout before this turn (run ${line(input.runId)}, digest ${line(input.runDigest).slice(0, 12)}) for repository orientation; do not dispatch Scout again for this orientation.`,
 			"Findings (cited):",
 		],
 		input.findings.map(

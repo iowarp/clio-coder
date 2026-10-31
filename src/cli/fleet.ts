@@ -98,10 +98,10 @@ Subcommands:
   land [<run>] [--squash] [--yes]  list, preview or land task branches finished runs kept
   run <playbook> [--var k=v ...]  preflight and execute a playbook
        [--resume <runId>]        replay a completed prefix from a prior run of the same plan
-       [--json]                 emit step receipts as JSON
+       [--json]                 emit step results as JSON
   status [--json] [--all]       show running, retrying, and total dispatch state
   decisions --json [--all]      emit a bounded window of sealed review and compete gate verdicts
-  view <runId> [--follow] [--all]  read one run's ledger entry, event journal, and receipt
+  view <runId> [--follow] [--all]  read one run's ledger entry, event journal, and run record
   view <fleetRootId> [--all]    list a fleet run's steps and the run id to view for each
   code-steps <rootId> [--json]  list the deterministic code steps one fleet root ran, from the
                                 code_step.settled records in the root's run journal
@@ -503,21 +503,21 @@ async function runFleet(
 									`${JSON.stringify({
 										stepId: step.stepId,
 										status: "replayed",
-										receipt: {
+										run: {
 											runId: step.result.terminalRunId,
-											digest: step.result.receiptDigest,
+											digest: step.result.runDigest,
 										},
 									})}\n`,
 								);
 							} else {
 								reporter.stdout(
-									`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} receipt=${step.result.receiptDigest}\n`,
+									`step ${step.stepId}: replayed terminal-run=${step.result.terminalRunId} run-digest=${step.result.runDigest}\n`,
 								);
 							}
 							return;
 						}
-						if (step.receipt !== undefined) {
-							if (json) reporter.stdout(`${JSON.stringify(step.receipt)}\n`);
+						if (step.run !== undefined) {
+							if (json) reporter.stdout(`${JSON.stringify(step.run)}\n`);
 							else {
 								reporter.stdout(
 									`step ${step.stepId} ${step.agentId}: ${step.succeeded ? "succeeded" : "failed"}${step.failureReason !== undefined ? ` reason=${step.failureReason}` : ""} assignment=${step.assignmentId} terminal-run=${step.terminalRunId} cost=${renderCostAmount(step.costUsd, step.costProvenance, step.costSummary)}\n`,

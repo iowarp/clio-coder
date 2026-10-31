@@ -19,7 +19,7 @@
  *                    workspaceRoot, stepIds
  *   step_dispatched  stepId, kind, waveIndex, assignmentId, agentId | commandId
  *   step_settled     stepId, kind, succeeded, integrityValid, terminalRunId,
- *                    receiptDigest, recordPath, failureReason?, stepEntryDigest,
+ *                    runDigest, recordPath, failureReason?, stepEntryDigest,
  *                    manifestStepCount, manifestDigest
  *   fleet_sealed     outcome ("succeeded" | "failed" | "aborted"), endedAt, stepCount,
  *                    manifestDigest
@@ -74,7 +74,7 @@ export type FleetEventBody =
 			succeeded: boolean;
 			integrityValid: boolean;
 			terminalRunId: string;
-			receiptDigest: string | null;
+			runDigest: string | null;
 			/** The sealed receipt, or the code step's command record, as an absolute path. */
 			recordPath: string;
 			failureReason?: string;

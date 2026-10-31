@@ -32,7 +32,7 @@ describe("dispatch assignment lifecycle", () => {
 			attempt: 0,
 			outcome: "failed",
 			node: { id: "local", kind: "local" },
-			receiptDigest: "digest-0",
+			runDigest: "digest-0",
 			retryReason: "worker-runtime",
 		});
 		registry.recordAttempt(opened.id, {
@@ -40,7 +40,7 @@ describe("dispatch assignment lifecycle", () => {
 			attempt: 0,
 			outcome: "failed",
 			node: null,
-			receiptDigest: "duplicate",
+			runDigest: "duplicate",
 			retryReason: null,
 		});
 		registry.recordAttempt(opened.id, {
@@ -48,7 +48,7 @@ describe("dispatch assignment lifecycle", () => {
 			attempt: 1,
 			outcome: "succeeded",
 			node: { id: "mini", kind: "ssh", host: "mini.lan" },
-			receiptDigest: "digest-1",
+			runDigest: "digest-1",
 			retryReason: null,
 		});
 		const envelope = fixtureEnvelope("run-retry");

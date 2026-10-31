@@ -278,7 +278,7 @@ export interface RunPlanProvenance {
 	source: null | {
 		kind: "scout-transition";
 		runId: string;
-		receiptDigest: string;
+		runDigest: string;
 		executionPlanHash: string;
 	};
 	/** Registry-issued identity of the one-shot operator approval, when applicable. */

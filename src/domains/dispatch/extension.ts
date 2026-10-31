@@ -4690,7 +4690,7 @@ export function createDispatchBundle(
 			attempt: run.lineage.attempt,
 			outcome,
 			node: run.node,
-			receiptDigest: receipt.digest,
+			runDigest: receipt.digest,
 			retryReason,
 		});
 		persistAssignment(recordAssignmentAttempt(assignment.id, run.runId), `${assignment.id}:attempt:${run.runId}`);

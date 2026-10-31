@@ -24,18 +24,18 @@ export interface ScoutAgentBinding {
 export type ScoutTransition =
 	| {
 			kind: "settled";
-			sourceReceiptDigest: string;
+			sourceRunDigest: string;
 			findings: ScoutResult["findings"];
 	  }
 	| {
 			kind: "approval-required";
-			sourceReceiptDigest: string;
+			sourceRunDigest: string;
 			plan: ExecutionPlan;
 			requiredAuthorities: ReadonlyArray<AgentAutomationAuthority>;
 	  }
 	| {
 			kind: "ready";
-			sourceReceiptDigest: string;
+			sourceRunDigest: string;
 			plan: ExecutionPlan;
 			authority: TrustedTransitionAuthority;
 	  };
@@ -44,8 +44,8 @@ function scopeFor(authority: AgentAutomationAuthority): "readonly" | "workspace"
 	return authority === "read-only" || authority === "verification" ? "readonly" : "workspace";
 }
 
-function assertReceiptDigest(value: string): void {
-	if (!/^[0-9a-f]{64}$/u.test(value)) throw new Error("scout transition: source receipt digest is invalid");
+function assertRunDigest(value: string): void {
+	if (!/^[0-9a-f]{64}$/u.test(value)) throw new Error("scout transition: source run digest is invalid");
 }
 
 /**
@@ -54,17 +54,17 @@ function assertReceiptDigest(value: string): void {
  */
 export function compileScoutTransition(input: {
 	scout: ScoutResult;
-	sourceReceiptDigest: string;
+	sourceRunDigest: string;
 	rootTask: string;
 	bindings: ReadonlyArray<ScoutAgentBinding>;
 	authority: TrustedTransitionAuthority;
 	maxWorkers: number;
 }): ScoutTransition {
-	assertReceiptDigest(input.sourceReceiptDigest);
+	assertRunDigest(input.sourceRunDigest);
 	if (!input.scout.needsSplit) {
 		return {
 			kind: "settled",
-			sourceReceiptDigest: input.sourceReceiptDigest,
+			sourceRunDigest: input.sourceRunDigest,
 			findings: input.scout.findings.map((finding) => ({ ...finding })),
 		};
 	}
@@ -117,14 +117,14 @@ export function compileScoutTransition(input: {
 	if (missing.size > 0) {
 		return {
 			kind: "approval-required",
-			sourceReceiptDigest: input.sourceReceiptDigest,
+			sourceRunDigest: input.sourceRunDigest,
 			plan,
 			requiredAuthorities: [...missing],
 		};
 	}
 	return {
 		kind: "ready",
-		sourceReceiptDigest: input.sourceReceiptDigest,
+		sourceRunDigest: input.sourceRunDigest,
 		plan,
 		authority: {
 			basis: input.authority.basis,

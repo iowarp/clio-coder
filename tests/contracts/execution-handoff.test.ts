@@ -16,7 +16,7 @@ function handoff(stepId: string, output: string): ExecutionHandoff {
 		stepId,
 		assignmentId: `assignment-${stepId}`,
 		terminalRunId: `run-${stepId}`,
-		receiptDigest: "a".repeat(64),
+		runDigest: "a".repeat(64),
 		output,
 	};
 }

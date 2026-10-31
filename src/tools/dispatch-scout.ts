@@ -15,15 +15,15 @@ export type ScoutTransitionDetail =
 	| {
 			kind: "settled";
 			sourceRunId: string;
-			sourceReceiptDigest: string;
+			sourceRunDigest: string;
 			findings: ScoutResult["findings"];
 	  }
 	| {
 			kind: "proposed";
 			sourceRunId: string;
-			sourceReceiptDigest: string;
+			sourceRunDigest: string;
 			subtaskCount: number;
-			continueWith: { from_scout: { run_id: string; receipt_digest: string } };
+			continueWith: { from_scout: { run_id: string; run_digest: string } };
 	  };
 
 export function scoutTransitionDetail(input: {
@@ -37,16 +37,16 @@ export function scoutTransitionDetail(input: {
 			? {
 					kind: "proposed",
 					sourceRunId: source.run.runId,
-					sourceReceiptDigest: source.run.digest,
+					sourceRunDigest: source.run.digest,
 					subtaskCount: source.scout.proposedSubtasks.length,
 					continueWith: {
-						from_scout: { run_id: source.run.runId, receipt_digest: source.run.digest },
+						from_scout: { run_id: source.run.runId, run_digest: source.run.digest },
 					},
 				}
 			: {
 					kind: "settled",
 					sourceRunId: source.run.runId,
-					sourceReceiptDigest: source.run.digest,
+					sourceRunDigest: source.run.digest,
 					findings: source.scout.findings.map((finding) => ({ ...finding })),
 				};
 	} catch {
@@ -142,7 +142,7 @@ export async function runScoutContinuationPlan<T, S>(input: {
 							stepId: step.id,
 							assignmentId: handle.runId,
 							terminalRunId: receipt.runId,
-							receiptDigest: receipt.digest,
+							runDigest: receipt.digest,
 							output: receipt.output?.state === "final" ? receipt.output.text : "",
 							succeeded: receipt.exitCode === 0 && (receipt.outcome === undefined || receipt.outcome === "succeeded"),
 							integrityValid: completed.integrityValid,

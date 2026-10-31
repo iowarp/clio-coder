@@ -117,7 +117,7 @@ export interface FleetRunStepOutcome extends FleetRunStepEvent {
 	 * command, or a delegation plan the validator refused (`delegation_plan_*`).
 	 */
 	failureReason?: string;
-	/** Terminal run id, which is the receipt id for an agent step. */
+	/** Terminal run id, which names the run record for an agent step. */
 	terminalRunId: string;
 	costUsd: number;
 	/**
@@ -130,8 +130,8 @@ export interface FleetRunStepOutcome extends FleetRunStepEvent {
 	 */
 	costProvenance: CostProvenance;
 	costSummary?: CostAggregate;
-	/** The sealed agent receipt when this was an agent step. */
-	receipt?: RunResult;
+	/** The agent run's result when this was an agent step. */
+	run?: RunResult;
 	/** The durable code-step record when this was a deterministic step. */
 	codeStep?: Awaited<ReturnType<typeof runCodeStep>>["record"];
 	/** The journal holding the step's `code_step.settled` when this was a deterministic step. */
@@ -684,7 +684,7 @@ async function runFleetHoldingWorkspace(
 		recordMemberReceipts(await memberReceipts(runId, firstReceipt), stepId);
 	for (const [stepId, replayedResult] of replayed) {
 		try {
-			const run = replayedStepRun(replayedResult.terminalRunId, replayedResult.receiptDigest);
+			const run = replayedStepRun(replayedResult.terminalRunId, replayedResult.runDigest);
 			if (run !== null) receiptsByStep.set(stepId, run);
 		} catch {
 			// Deterministic results and runs whose scope cannot be read carry no run projection.
@@ -906,7 +906,7 @@ async function runFleetHoldingWorkspace(
 									cycle: step.loop.attempt,
 									subjects: handoffs.map((handoff) => ({
 										runId: handoff.terminalRunId,
-										digest: handoff.receiptDigest,
+										digest: handoff.runDigest,
 									})),
 								},
 							}
@@ -1078,7 +1078,7 @@ async function runFleetHoldingWorkspace(
 							costUsd: receipt.costUsd,
 							costProvenance: receipt.costProvenance,
 							...(receipt.costSummary ? { costSummary: receipt.costSummary } : {}),
-							receipt,
+							run: receipt,
 							...(failureReason !== undefined ? { failureReason } : {}),
 						});
 						if (input.onStepSettled === undefined) {
@@ -1090,7 +1090,7 @@ async function runFleetHoldingWorkspace(
 							stepId: step.id,
 							assignmentId: handle.runId,
 							terminalRunId: receipt.runId,
-							receiptDigest: receipt.digest,
+							runDigest: receipt.digest,
 							output: receipt.output?.state === "final" ? receipt.output.text : "",
 							succeeded: stepSucceeded,
 							integrityValid,
@@ -1227,7 +1227,7 @@ async function runFleetHoldingWorkspace(
 					stepId: step.id,
 					assignmentId: outcome.record.runId,
 					terminalRunId: outcome.record.runId,
-					receiptDigest: outcome.record.reportDigest,
+					runDigest: outcome.record.reportDigest,
 					output: step.gate === undefined ? outcome.output : gateFailureLines(outcome.report.outputExcerpt),
 					succeeded: outcome.report.passed,
 					// The runner authored this report itself, so its provenance is
@@ -1315,7 +1315,7 @@ async function runFleetHoldingWorkspace(
 					succeeded: stepResult.succeeded,
 					integrityValid: stepResult.integrityValid,
 					terminalRunId: stepResult.terminalRunId,
-					receiptDigest: stepResult.receiptDigest ?? null,
+					runDigest: stepResult.runDigest ?? null,
 					recordPath:
 						step.kind === "code"
 							? rootJournalPath

@@ -73,9 +73,7 @@ describe("fleet commit seam", () => {
 		const evidence = deriveFleetCommitAttribution({
 			plan,
 			step: commitStep,
-			priorResults: new Map([
-				["build", { succeeded: true, integrityValid: true, receiptDigest: digest, decisionRefs: REFS }],
-			]),
+			priorResults: new Map([["build", { succeeded: true, integrityValid: true, runDigest: digest, decisionRefs: REFS }]]),
 			validationFresh: true,
 			independentReviewFresh: false,
 		});
@@ -85,7 +83,7 @@ describe("fleet commit seam", () => {
 		const bare = deriveFleetCommitAttribution({
 			plan,
 			step: commitStep,
-			priorResults: new Map([["build", { succeeded: true, integrityValid: true, receiptDigest: digest }]]),
+			priorResults: new Map([["build", { succeeded: true, integrityValid: true, runDigest: digest }]]),
 			validationFresh: false,
 			independentReviewFresh: false,
 		});

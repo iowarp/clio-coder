@@ -5,7 +5,7 @@ export interface ExecutionHandoff {
 	stepId: string;
 	assignmentId: string;
 	terminalRunId: string;
-	receiptDigest: string;
+	runDigest: string;
 	output: string;
 }
 
