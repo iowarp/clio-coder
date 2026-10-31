@@ -480,6 +480,7 @@ import {
 	type AgentLedgerBody,
 	computeSettingsFingerprint,
 	endpointIdentityHash,
+	toolSignatureOf,
 	type WorkerExtensionHook,
 	type WorkerGrantRequestFrame,
 	type WorkerHookEffect,
@@ -902,10 +903,6 @@ function promptCompositionHash(parts: ReadonlyArray<string>): string | null {
 		.filter((part) => part.length > 0)
 		.join("\n\n");
 	return text.length > 0 ? sha256(text) : null;
-}
-
-function toolSignature(tools: ReadonlyArray<ToolName>): string {
-	return sha256(JSON.stringify([...tools].sort()));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -5702,7 +5699,7 @@ export function createDispatchBundle(
 		const sessionShellHash = staticCompositionHash;
 		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
 		const personaOverride = personaOverrideFor(req, staticCompositionHash);
-		const currentToolSignature = toolSignature(effectiveTools);
+		const currentToolSignature = toolSignatureOf(effectiveTools);
 		const auth = targetRequiresAuth(target.target, target.runtime)
 			? await providers.auth.resolveForTarget(target.target, target.runtime)
 			: null;
@@ -9719,7 +9716,7 @@ export function createDispatchBundle(
 			...(endpoint !== null ? { endpoint: { key: endpoint.key, label: endpoint.label, limit: endpoint.limit } } : {}),
 			node: previewNode(req).node,
 			thinkingLevel: target.thinkingLevel,
-			toolSignature: toolSignature(effectiveTools),
+			toolSignature: toolSignatureOf(effectiveTools),
 			endpointIdentityHash: endpointIdentityHash(target.target.url),
 			settingsFingerprint: computeSettingsFingerprint(settings ?? null),
 			costUpperBoundUsd: conservativeRouteAdmissionEstimateUsd(

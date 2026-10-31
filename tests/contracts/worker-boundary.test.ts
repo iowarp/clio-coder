@@ -199,7 +199,7 @@ describe("worker boundary", () => {
 		});
 		strictEqual(computeSettingsFingerprint(settings), sha256(`clio-coder.settings:${canonicalJson(settings)}`));
 		strictEqual(workerSpecDigest(spec), sha256(`clio-coder.workerSpec:${canonicalJson(spec)}`));
-		strictEqual(toolSignatureOf(["write", "read"]), sha256("clio-coder.tools:read,write"));
+		strictEqual(toolSignatureOf(["write", "read"]), sha256(JSON.stringify(["read", "write"])));
 		strictEqual(endpointIdentityHash(undefined), sha256("clio-coder.endpoint:none"));
 		strictEqual(endpointIdentityHash("https://example.test/v1/"), sha256("clio-coder.endpoint:https://example.test:/v1"));
 	});

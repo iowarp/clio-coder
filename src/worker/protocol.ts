@@ -639,9 +639,13 @@ export function workerPermitDigest(permit: {
 	return sha256Hex(`clio-coder.workerPermit:${canonicalJson(payload)}`);
 }
 
-/** Stable signature of the effective tool surface a worker will expose. */
+/**
+ * The one signature of a tool surface by name: sha256 over the JSON array of its sorted names. Receipts, route
+ * history and plan approvals store this digest, so the worker's announce carries the same one rather than a second
+ * form of it (#434). The main agent's signature commits to its tool schemas instead, a different subject.
+ */
 export function toolSignatureOf(names: ReadonlyArray<string>): string {
-	return sha256Hex(`clio-coder.tools:${[...names].sort().join(",")}`);
+	return sha256Hex(JSON.stringify([...names].sort()));
 }
 
 /**
