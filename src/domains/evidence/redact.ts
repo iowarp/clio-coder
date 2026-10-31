@@ -51,9 +51,8 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 	},
 ];
 
-/** The assignment pattern's key and value halves, for a key that arrives as a JSON property name. */
+/** The assignment pattern's key half, for a key that arrives as a JSON property name. */
 const SECRET_PROPERTY_NAME = /(?:api[_-]?key|apikey|secret|token|passwd|password|credential)[A-Za-z0-9_-]*$/i;
-const CREDENTIAL_PREFIX = /^[^\s"'`;,&|<>]{8,}/;
 
 /**
  * A known value shorter than this is too likely to be ordinary text (a word,
@@ -128,22 +127,22 @@ export function redactSecretsDeep<T>(value: T, tally: RedactionTally): T {
 }
 
 /**
- * A `JSON.stringify` replacer that redacts string leaves before they are
- * escaped. Redacting the serialized text instead let the assignment value
- * swallow the backslash of an escaped quote, which left an unescaped quote in
- * the durable trace and an undecodable payload (DF-12). Leaf by leaf the
- * assignment pattern never sees a property name, so a secret-flavored name
- * redacts its credential-shaped value the way `"api_key": "value"` text would.
+ * A `JSON.stringify` replacer or `JSON.parse` reviver that redacts string
+ * leaves one at a time. Redacting the serialized text instead let the
+ * assignment value swallow the backslash of an escaped quote, which left an
+ * unescaped quote in the durable trace and an undecodable payload (DF-12).
+ * Leaf by leaf the assignment pattern never sees a property name, so a
+ * credential-named property has its whole value redacted, whatever its shape.
+ * This is the one key-aware redaction evidence and telemetry objects share.
  */
 export function secretRedactingReplacer(tally: RedactionTally): (key: string, value: unknown) => unknown {
 	return (key, value) => {
 		if (typeof value !== "string") return value;
-		const redacted = redactSecretsText(value, tally);
-		if (!SECRET_PROPERTY_NAME.test(key) || redacted.startsWith("[redacted:")) return redacted;
-		return redacted.replace(CREDENTIAL_PREFIX, () => {
+		if (value !== "" && SECRET_PROPERTY_NAME.test(key)) {
 			tally.count += 1;
 			return "[redacted:assignment]";
-		});
+		}
+		return redactSecretsText(value, tally);
 	};
 }
 
