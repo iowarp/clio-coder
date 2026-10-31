@@ -1,7 +1,7 @@
 import type { ToolRoundRecord } from "../../engine/types.js";
 import type { WorkerContextProvenance } from "../context/worker/contract.js";
-import type { CostAggregate } from "../observability/cost.js";
 import type { FlowRestrictionSet } from "../safety/information-flow.js";
+import type { CostAggregate } from "../telemetry/cost.js";
 /**
  * Shared run + receipt types for the dispatch domain.
  *
@@ -1141,7 +1141,7 @@ export interface RunReceipt {
 		cost: "provider-reported" | "peer-estimated" | "missing" | "unverified";
 		sessionId: string | null;
 		exitReason: "stop" | "error" | "aborted" | "unknown";
-		toolObservability: "unavailable";
+		toolTelemetry: "unavailable";
 	};
 	/** Git-visible checkout delta observed during an external subprocess run; concurrent edits are not attributable. */
 	checkoutChanges?: {

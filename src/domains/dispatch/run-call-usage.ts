@@ -5,10 +5,10 @@ import { makeTelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { FactSum } from "../../core/telemetry/fact.js";
 import { readWorkerTelemetryRecord } from "../../core/telemetry/forwarder.js";
 import { abandonedSettlement } from "../../core/telemetry/producer.js";
-import type { CostAggregate } from "../observability/cost.js";
-import type { CallTotals } from "../observability/folds.js";
-import { foldRunJournal } from "../observability/folds.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
+import type { CostAggregate } from "../telemetry/cost.js";
+import type { CallTotals } from "../telemetry/folds.js";
+import { foldRunJournal } from "../telemetry/folds.js";
 
 export interface RunCallUsage {
 	callIds: string[];

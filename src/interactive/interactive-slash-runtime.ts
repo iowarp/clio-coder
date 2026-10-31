@@ -12,7 +12,6 @@ import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import type { MusicOperations } from "../domains/mux/music-operations.js";
 import type { PanesOperations } from "../domains/mux/operations.js";
-import type { TelemetryView } from "../domains/observability/contract.js";
 import {
 	type ProvidersContract,
 	type ResolvedThinkingCapability,
@@ -25,6 +24,7 @@ import { installSkill } from "../domains/resources/skills/marketplace.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { verifyReceiptFileReport } from "../domains/session/view-artifacts.js";
 import { archiveCommandHost, type ShareContract } from "../domains/share/index.js";
+import type { TelemetryView } from "../domains/telemetry/contract.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { stripTerminalSequences } from "../engine/tui.js";

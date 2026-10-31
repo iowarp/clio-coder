@@ -1,4 +1,4 @@
-import { renderCostAmount } from "../observability/cost.js";
+import { renderCostAmount } from "../telemetry/cost.js";
 /**
  * What `/fleet run <playbook>` will do, projected before anything dispatches.
  *

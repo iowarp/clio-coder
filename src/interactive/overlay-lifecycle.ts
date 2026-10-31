@@ -50,7 +50,7 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "systemOne"
 	| "recordOutcome"
 	| "interop"
-	| "observability"
+	| "telemetry"
 	| "onConfigure"
 	| "onContextClear"
 	| "onForkSession"
@@ -493,7 +493,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		terminal: deps.terminal,
 		suspendTerminal: deps.suspendTerminal,
 		announceTaskMemorySeedOffer,
-		sessionUsage: deps.app.observability,
+		sessionUsage: deps.app.telemetry,
 		...(setLastTurnSummary ? { setLastTurnSummary } : {}),
 		refreshFooter: () => footer.refresh(),
 		requestRender: () => tui.requestRender(),
@@ -510,7 +510,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		readTranscript: () => chatPanel.inspectionArtifacts(),
 		tui,
 		transitions: overlayTransitions,
-		observability: deps.app.observability,
+		telemetry: deps.app.telemetry,
 		systemOne: () => deps.app.systemOne,
 		...(deps.getQuotaSnapshots ? { getQuotaSnapshots: deps.getQuotaSnapshots } : {}),
 		...(deps.getDispatchRows ? { getDispatchRows: deps.getDispatchRows } : {}),

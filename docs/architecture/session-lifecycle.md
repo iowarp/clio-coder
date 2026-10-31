@@ -251,7 +251,7 @@ When resuming a session via `/resume` or a headless `clio-coder run --session <i
 
 - **Transcript and model replay** follow the active leaf, which is `meta.pinnedLeafTurnId` when a `/tree` switch left one and the newest turn otherwise.
 - **Route.** The recorded target, model and thinking level come from the session metadata and the last `modelChange` and `thinkingLevelChange` rows ([resumed-route.ts](../../src/domains/session/resumed-route.ts)). They apply as a session-scoped override and are not saved to settings. A recorded target that is no longer configured keeps the current route and prints a notice. An explicit CLI route flag wins over the recorded route.
-- **Usage totals** for `/usage` and the footer are rebuilt from the active ledger path together with session-owned auxiliary calls and worker receipts loaded by observability reset, so a resumed session shows its own recorded numbers ([usage-reseed.ts](../../src/domains/session/usage-reseed.ts), [extension.ts](../../src/domains/observability/extension.ts)).
+- **Usage totals** for `/usage` and the footer are rebuilt from the active ledger path together with session-owned auxiliary calls and worker receipts loaded by observability reset, so a resumed session shows its own recorded numbers ([usage-reseed.ts](../../src/domains/session/usage-reseed.ts), [extension.ts](../../src/domains/telemetry/extension.ts)).
 - **Boards and fold.** Task board, decision board and the working-set fold are refolded from the ledger.
 - **Task-memory handoff offer.** Switching to a different session announces any task-memory handoff entries available from `.clio-coder/handoffs/` and tells the operator to run `/memory seed` to import them, see [Proactive memory](../guide/proactive-memory.md).
 

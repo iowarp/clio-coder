@@ -1,4 +1,4 @@
-import { renderCostAmount } from "../../domains/observability/cost.js";
+import { renderCostAmount } from "../../domains/telemetry/cost.js";
 import type { AcpBudgetBlock, AcpBudgetCapability } from "./types.js";
 
 export type { AcpBudgetBlock } from "./types.js";

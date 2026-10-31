@@ -24,11 +24,11 @@ import {
 	TRUST_STATUS_AXES,
 } from "../evidence/trust-status.js";
 import type { EvidenceFinding, EvidenceInspectable, EvidenceOverview, EvidenceSource } from "../evidence/types.js";
-import { renderCostAggregate, renderCostAmount } from "../observability/cost.js";
-import type { AccountabilitySummary } from "../observability/index.js";
-import { readEvidenceIndex, summarizeEvidenceIndex } from "../observability/index.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { redactSecretString } from "../safety/redaction.js";
+import { renderCostAggregate, renderCostAmount } from "../telemetry/cost.js";
+import type { AccountabilitySummary } from "../telemetry/index.js";
+import { readEvidenceIndex, summarizeEvidenceIndex } from "../telemetry/index.js";
 import type { AuditJsonRow, AuditReadResult } from "./archive-readers.js";
 import { readAuditRows } from "./archive-readers.js";
 import type { SessionMeta } from "./contract.js";

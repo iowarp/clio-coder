@@ -5,10 +5,10 @@ import { afterEach, beforeEach, it } from "node:test";
 import { type BudgetAlertPayload, BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
-import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createSchedulingBundle } from "../../src/domains/scheduling/extension.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { Model } from "../../src/engine/types.js";
@@ -129,13 +129,13 @@ function fixture(mode: "cold" | "wedged", firstTokenDelayMs = 0, budget?: Budget
 	context.bus.on(BusChannels.BudgetAlert, (payload) => {
 		alerts.push(payload);
 	});
-	const spent = { sessionCost: () => budget?.spentUsd ?? 0 } as unknown as ObservabilityContract;
+	const spent = { sessionCost: () => budget?.spentUsd ?? 0 } as unknown as TelemetryContract;
 	const scheduling = budget
 		? createSchedulingBundle(
 				{
 					bus: context.bus,
 					getContract: ((name: string) =>
-						name === "observability" ? spent : context.getContract(name)) as DomainContext["getContract"],
+						name === "telemetry" ? spent : context.getContract(name)) as DomainContext["getContract"],
 				},
 				{ getSettings: () => settings },
 			).contract

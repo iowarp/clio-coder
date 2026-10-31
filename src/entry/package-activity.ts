@@ -1,8 +1,8 @@
 import { bindPackageActivitySink } from "../core/package-activity.js";
-import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { SessionContract } from "../domains/session/index.js";
+import type { TelemetryContract } from "../domains/telemetry/index.js";
 
-export function bindSessionPackageActivity(session: SessionContract, observability: ObservabilityContract): () => void {
+export function bindSessionPackageActivity(session: SessionContract, telemetry: TelemetryContract): () => void {
 	return bindPackageActivitySink((activity) => {
 		const current = session.current();
 		if (!current) return false;
@@ -15,7 +15,7 @@ export function bindSessionPackageActivity(session: SessionContract, observabili
 			data: attributed,
 			display: false,
 		});
-		observability.recordPackageActivity?.(attributed);
+		telemetry.recordPackageActivity?.(attributed);
 		return true;
 	});
 }

@@ -2,8 +2,8 @@ import type { CallObservation } from "../core/call-failure.js";
 import { trackCallFetch } from "../core/call-failure.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { rememberOAuthCallFailure, withOAuthRefresh } from "../core/oauth-retry.js";
-import type { AdmissionHold, CallJournalOptions, CallScope } from "../domains/observability/call-scope.js";
-import { openCallScope } from "../domains/observability/call-scope.js";
+import type { AdmissionHold, CallJournalOptions, CallScope } from "../domains/telemetry/call-scope.js";
+import { openCallScope } from "../domains/telemetry/call-scope.js";
 /**
  * `/btw`: one model round beside the session, never inside it.
  *

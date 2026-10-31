@@ -15,13 +15,13 @@ import { after, before, test } from "node:test";
 import { createBoardSource } from "../../src/cli/fleet-board-model.js";
 import type { Quantity } from "../../src/core/telemetry/dto.js";
 import { renderCompactCount } from "../../src/core/telemetry/render.js";
-import type { TelemetryView } from "../../src/domains/observability/contract.js";
-import type { ObservabilityContract } from "../../src/domains/observability/index.js";
-import { repoCostReport, repoOwner, repoTokenQuantities } from "../../src/domains/observability/read-model.js";
-import type { LiveTelemetryModel } from "../../src/domains/observability/telemetry-live.js";
-import { createLiveTelemetryModel } from "../../src/domains/observability/telemetry-live.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { loadRepoTelemetrySources } from "../../src/domains/session/telemetry-source.js";
+import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
+import { repoCostReport, repoOwner, repoTokenQuantities } from "../../src/domains/telemetry/read-model.js";
+import type { LiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
+import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
 import { sessionUsageTotals, turnUsageMeta } from "../../src/engine/acp/live-telemetry.js";
 import { telemetryRequestHandlers } from "../../src/engine/acp/telemetry-methods.js";
 import { ACP_TELEMETRY_METHODS } from "../../src/engine/acp/types.js";
@@ -124,7 +124,7 @@ test("/usage shows the session's tokens and cost, and /context the newest main c
 		},
 	} as unknown as TUI;
 	const telemetry = { live: () => view, subscribe: () => () => {} };
-	const usage = openUsageOverlay(tui, { subscribe: () => () => {}, telemetry } as unknown as ObservabilityContract);
+	const usage = openUsageOverlay(tui, { subscribe: () => () => {}, telemetry } as unknown as TelemetryContract);
 	try {
 		const text = stripTerminalSequences(dockTop(tui)?.frame.renderDockBody(200, 30).join("\n") ?? "");
 		ok(text.includes(cold.session.totals.usd.display), text);

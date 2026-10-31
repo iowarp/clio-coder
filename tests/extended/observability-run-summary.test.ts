@@ -1,5 +1,5 @@
 /**
- * The observability projection's run summary used to accept a NaN or
+ * The telemetry projection's run summary used to accept a NaN or
  * Infinity costUsd/tokenCount off a DispatchCompleted/DispatchFailed payload
  * with a bare `typeof === "number"` check, unlike the interactive dispatch
  * board's identical field, which already rejected non-finite values through
@@ -11,9 +11,9 @@ import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels, type DispatchFailedPayload } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
-import { dispatchHasEvidenceLedger } from "../../src/domains/observability/extension.js";
-import { createObservabilityProjection, type ProjectionReadModel } from "../../src/domains/observability/projection.js";
+import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
+import { dispatchHasEvidenceLedger } from "../../src/domains/telemetry/extension.js";
+import { createTelemetryProjection, type ProjectionReadModel } from "../../src/domains/telemetry/projection.js";
 
 function stubReadModel(): ProjectionReadModel {
 	return {
@@ -38,7 +38,7 @@ function baseFailedPayload(overrides: Partial<DispatchFailedPayload> = {}): Disp
 	};
 }
 
-describe("observability run summary: dispatch-failed terminal fields", () => {
+describe("telemetry run summary: dispatch-failed terminal fields", () => {
 	it("does not auto-build evidence for a pre-admission failure that created no ledger", () => {
 		strictEqual(dispatchHasEvidenceLedger(baseFailedPayload()), false);
 		strictEqual(
@@ -51,49 +51,49 @@ describe("observability run summary: dispatch-failed terminal fields", () => {
 
 	it("resolves reason to status through the shared resolver (stalled -> dead)", () => {
 		const bus = createSafeEventBus();
-		const projection = createObservabilityProjection(bus, stubReadModel());
+		const projection = createTelemetryProjection(bus, stubReadModel());
 		bus.emit(BusChannels.DispatchFailed, baseFailedPayload({ reason: "stalled" }));
 		strictEqual(projection.snapshot().runs[0]?.status, "dead");
 	});
 
 	it("resolves reason to status through the shared resolver (canceled -> aborted)", () => {
 		const bus = createSafeEventBus();
-		const projection = createObservabilityProjection(bus, stubReadModel());
+		const projection = createTelemetryProjection(bus, stubReadModel());
 		bus.emit(BusChannels.DispatchFailed, baseFailedPayload({ reason: "canceled" }));
 		strictEqual(projection.snapshot().runs[0]?.status, "aborted");
 	});
 
 	it("keeps the prior costUsd rather than storing NaN off a malformed payload", () => {
 		const bus = createSafeEventBus();
-		const projection = createObservabilityProjection(bus, stubReadModel());
+		const projection = createTelemetryProjection(bus, stubReadModel());
 		bus.emit(BusChannels.DispatchFailed, baseFailedPayload({ costUsd: Number.NaN }));
 		strictEqual(projection.snapshot().runs[0]?.costUsd, 0);
 	});
 
 	it("keeps the prior tokenCount rather than storing Infinity off a malformed payload", () => {
 		const bus = createSafeEventBus();
-		const projection = createObservabilityProjection(bus, stubReadModel());
+		const projection = createTelemetryProjection(bus, stubReadModel());
 		bus.emit(BusChannels.DispatchFailed, baseFailedPayload({ tokenCount: Number.POSITIVE_INFINITY }));
 		strictEqual(projection.snapshot().runs[0]?.tokens.total, 0);
 	});
 
 	it("accepts a genuine finite costUsd normally", () => {
 		const bus = createSafeEventBus();
-		const projection = createObservabilityProjection(bus, stubReadModel());
+		const projection = createTelemetryProjection(bus, stubReadModel());
 		bus.emit(BusChannels.DispatchFailed, baseFailedPayload({ costUsd: 0.42 }));
 		strictEqual(projection.snapshot().runs[0]?.costUsd, 0.42);
 	});
 
 	it("falls back to unknown rather than storing a provenance value outside the closed set", () => {
 		const bus = createSafeEventBus();
-		const projection = createObservabilityProjection(bus, stubReadModel());
+		const projection = createTelemetryProjection(bus, stubReadModel());
 		bus.emit(BusChannels.DispatchFailed, baseFailedPayload({ costProvenance: "bogus" as never }));
 		strictEqual(projection.snapshot().runs[0]?.costProvenance, "unknown");
 	});
 
 	it("accepts a genuine provenance value", () => {
 		const bus = createSafeEventBus();
-		const projection = createObservabilityProjection(bus, stubReadModel());
+		const projection = createTelemetryProjection(bus, stubReadModel());
 		bus.emit(BusChannels.DispatchFailed, baseFailedPayload({ costProvenance: "estimated" }));
 		strictEqual(projection.snapshot().runs[0]?.costProvenance, "estimated");
 	});

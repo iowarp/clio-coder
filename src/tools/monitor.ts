@@ -15,7 +15,7 @@ import {
 	type CanonicalTrustStatus,
 	inspectRunReceiptTrustStatus,
 } from "../domains/evidence/trust-status.js";
-import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
+import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/index.js";
 import type { DispatchRunEventRegistry } from "./dispatch.js";
 import { grantRequestLines, pendingRequestsFor, requestsAwaitingMain } from "./grant-request-text.js";
 import type { JobOperations } from "./job-types.js";

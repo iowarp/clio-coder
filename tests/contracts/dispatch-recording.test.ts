@@ -18,9 +18,9 @@ import type { WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import { buildEvidence } from "../../src/domains/evidence/build.js";
 import { exportEvidenceRecordings } from "../../src/domains/evidence/recordings.js";
 import { inspectEvidence } from "../../src/domains/evidence/store.js";
-import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
-import { readCallJournal } from "../../src/domains/observability/call-journal.js";
-import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
@@ -203,7 +203,7 @@ it("dispatch preserves the explicit capture option with journal history disabled
 		const context = {
 			bus: base.bus,
 			getContract: ((name: string) =>
-				name === "observability"
+				name === "telemetry"
 					? { acquireTelemetrySession: journals.acquire }
 					: base.getContract(name)) as typeof base.getContract,
 		};

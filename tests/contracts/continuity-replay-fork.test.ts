@@ -6,7 +6,6 @@ import { stripVTControlCharacters } from "node:util";
 
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { clioStatePath } from "../../src/core/xdg.js";
-import { readCallJournalSync } from "../../src/domains/observability/call-journal.js";
 import type {
 	AcceptedNote,
 	ContinuityCheckpointPayload,
@@ -24,6 +23,7 @@ import {
 import type { SessionContract, SessionEntryInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { readCallJournalSync } from "../../src/domains/telemetry/call-journal.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";

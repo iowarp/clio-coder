@@ -71,11 +71,11 @@ import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
-import { aggregateCostAmounts, renderCostAggregate } from "../domains/observability/cost.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
+import { aggregateCostAmounts, renderCostAggregate } from "../domains/telemetry/cost.js";
 import { renderCompeteJudgeTask } from "./compete-judge-task.js";
 import {
 	type CandidateWorktree,
@@ -593,7 +593,7 @@ export function dispatchBatchSummary(runs: ReadonlyArray<CompletedRun>): {
 	cost: string;
 } {
 	const trusted = runs.filter((run) => run.integrity.ok).map((run) => run.receipt);
-	const observable = trusted.filter((receipt) => receipt.externalTelemetry?.toolObservability !== "unavailable");
+	const observable = trusted.filter((receipt) => receipt.externalTelemetry?.toolTelemetry !== "unavailable");
 	return {
 		observedToolCalls: observable.reduce((total, receipt) => total + receipt.toolCalls, 0),
 		unobservableToolRuns: trusted.length - observable.length,

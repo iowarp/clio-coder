@@ -14,7 +14,6 @@ import type {
 } from "../dispatch/index.js";
 import { type ExecutionRole, isExecutionRole, readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
 import { readReceiptText } from "../dispatch/receipt-store.js";
-import { aggregateCostAmounts, callCoverageForRun } from "../observability/cost.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import { foldDecisionBoard } from "../session/decision-board.js";
 import { type DecisionLedgerEntry, decisionRef, type TaskLedgerValidationEvidence } from "../session/entries.js";
@@ -31,6 +30,7 @@ import {
 } from "../session/index.js";
 import { legacyTaskCompletionRow, TASK_BOARD_COMPLETION_CLAIM_PREFIX } from "../session/task-board.js";
 import { filterEntriesToActivePath } from "../session/tree/active-path.js";
+import { aggregateCostAmounts, callCoverageForRun } from "../telemetry/cost.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
 import { renderEvidenceFindingsMarkdown } from "./findings-markdown.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";

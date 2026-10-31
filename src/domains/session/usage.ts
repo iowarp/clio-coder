@@ -14,11 +14,11 @@ import {
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { Payload } from "../../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
-import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
-import type { CallTotals } from "../observability/folds.js";
-import { foldCallJournal, foldCalls } from "../observability/folds.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import { resolveCostProvenance } from "../providers/types/cost-provenance.js";
+import type { CostAggregate, CostEntryLabel } from "../telemetry/cost.js";
+import type { CallTotals } from "../telemetry/folds.js";
+import { foldCallJournal, foldCalls } from "../telemetry/folds.js";
 import type { SessionEntry } from "./entries.js";
 import { journalOwnsSideUsage, usageCallsFromJournal } from "./journal-usage.js";
 

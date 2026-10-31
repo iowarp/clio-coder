@@ -1,4 +1,4 @@
-import { renderCostAmount } from "../../domains/observability/cost.js";
+import { renderCostAmount } from "../../domains/telemetry/cost.js";
 import type { AcpDispatchPlanMeta } from "./types.js";
 
 export type { AcpDispatchPlanMeta } from "./types.js";

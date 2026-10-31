@@ -8,7 +8,7 @@ import { readWorkerTelemetryFrame } from "../../core/telemetry/forwarder.js";
 import { recordTelemetry } from "../../core/telemetry/producer.js";
 import type { Payload, StructuralRunFeedBody } from "../../core/telemetry/schemas.js";
 import { RUN_FEED_EVENTS, RUN_FEED_OUTCOMES } from "../../core/telemetry/schemas.js";
-import type { CallJournal } from "../observability/call-journal.js";
+import type { CallJournal } from "../telemetry/call-journal.js";
 import type { RunEventJournalBody } from "./run-event-journal.js";
 
 export interface RunTelemetryJournal {
@@ -91,7 +91,7 @@ export function openRunTelemetry(context: WorkerTelemetryContext, directory: str
  * (#425, #434).
  */
 export async function settleOrphanedRunJournal(directory: string, facts: Payload<"run.settled">): Promise<void> {
-	const { openCallJournal, readCallJournal } = await import("../observability/call-journal.js");
+	const { openCallJournal, readCallJournal } = await import("../telemetry/call-journal.js");
 	const read = await readCallJournal(directory, "events.ndjson");
 	if (read.records.some(({ record }) => record.k === "run.settled")) return;
 	const context = read.records.map(({ record }) => record.ctx).find(isWorkerTelemetryContext);
@@ -126,7 +126,7 @@ async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory:
 			throw new Error("run telemetry owner changed or closed");
 		return existing;
 	}
-	const { openCallJournal, readCallJournal } = await import("../observability/call-journal.js");
+	const { openCallJournal, readCallJournal } = await import("../telemetry/call-journal.js");
 	const versions = await clioWriterVersions();
 	const previous = await readCallJournal(directory, "events.ndjson");
 	let seq = previous.records.reduce(

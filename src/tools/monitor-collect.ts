@@ -9,8 +9,8 @@ import type { RunEnvelope, RunReceipt, RunReceiptVerification } from "../domains
 import { isTerminalRunEnvelope } from "../domains/dispatch/types.js";
 import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 import { adaptRunReceiptTrustStatus, inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
-import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/observability/index.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
+import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/index.js";
 import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
 import type { MonitorToolDeps } from "./monitor.js";
 import type { ToolResult } from "./registry.js";

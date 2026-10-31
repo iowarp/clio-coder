@@ -14,11 +14,11 @@ import type { Fact, FactSum } from "../../src/core/telemetry/fact.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import type { RouteObservation } from "../../src/domains/dispatch/route-policy.js";
 import { estimateRoute } from "../../src/domains/dispatch/route-policy.js";
-import type { BundleImport } from "../../src/domains/observability/bundle.js";
-import { importTelemetryBundle } from "../../src/domains/observability/bundle.js";
-import { readCallJournal } from "../../src/domains/observability/call-journal.js";
-import { foldCallJournal, foldCalls } from "../../src/domains/observability/folds.js";
-import type { JournalSource, SessionSource } from "../../src/domains/observability/read-model.js";
+import type { BundleImport } from "../../src/domains/telemetry/bundle.js";
+import { importTelemetryBundle } from "../../src/domains/telemetry/bundle.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { foldCallJournal, foldCalls } from "../../src/domains/telemetry/folds.js";
+import type { JournalSource, SessionSource } from "../../src/domains/telemetry/read-model.js";
 import {
 	cacheReport,
 	callsReport,
@@ -27,7 +27,7 @@ import {
 	sessionTelemetry,
 	timeline,
 	whyStopped,
-} from "../../src/domains/observability/read-model.js";
+} from "../../src/domains/telemetry/read-model.js";
 import { dtoLies } from "../harness/telemetry-lies.js";
 
 const FIXTURE = new URL("../fixtures/telemetry/golden/vccap2ywu7n8/", import.meta.url).pathname;

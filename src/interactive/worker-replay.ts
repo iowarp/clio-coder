@@ -17,8 +17,8 @@
  * Pure: the receipt reader is a parameter, so nothing here touches disk.
  */
 
-import type { WorkerAction } from "../domains/observability/worker-progress.js";
 import type { SessionEntryInput, WorkerRunEntry } from "../domains/session/index.js";
+import type { WorkerAction } from "../domains/telemetry/worker-progress.js";
 import {
 	boundSettledText,
 	type WorkerAttempt,

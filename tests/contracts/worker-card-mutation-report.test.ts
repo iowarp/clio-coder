@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
-import { WORKER_LIVE_TAIL_MAX_BYTES } from "../../src/domains/observability/worker-progress.js";
+import { WORKER_LIVE_TAIL_MAX_BYTES } from "../../src/domains/telemetry/worker-progress.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";

@@ -22,10 +22,10 @@ import type { Playbook } from "../agents/playbook.js";
 import type { PlaybookCommandRegistry } from "../agents/playbook-commands.js";
 import { mutationReportPaths, resultContractAuthorship } from "../agents/result-contract.js";
 import type { AgentSpec } from "../agents/spec.js";
-import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../observability/cost.js";
 import type { CostProvenance } from "../providers/index.js";
 import { activeDecisionRefs } from "../session/decision-board.js";
 import type { DecisionLedgerEntry } from "../session/entries.js";
+import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../telemetry/cost.js";
 import {
 	assignmentProcessOwnerAlive,
 	claimAssignmentVerdict,

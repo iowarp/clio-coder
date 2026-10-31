@@ -11,15 +11,15 @@ import { messageCallsForAccounting, messageUsageForAccounting } from "../core/me
 import type { PackageIdentity } from "../core/package-identity.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
-import type { ObservabilityContract } from "../domains/observability/contract.js";
-import { aggregateCostAmounts } from "../domains/observability/cost.js";
-import type { SessionTurnUsage } from "../domains/observability/trace-store.js";
 import { normalizeCostProvenance, resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { noteAnthropicStreamQuota, noteCodexStreamQuota } from "../domains/quota/index.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { BudgetBlockData, SessionEntry } from "../domains/session/entries.js";
 import { BUDGET_BLOCK_ENTRY } from "../domains/session/entries.js";
 import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
+import type { TelemetryContract } from "../domains/telemetry/contract.js";
+import { aggregateCostAmounts } from "../domains/telemetry/cost.js";
+import type { SessionTurnUsage } from "../domains/telemetry/trace-store.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
 import { replaceEngineMessages, setEngineCodexUserTurn } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
@@ -82,10 +82,10 @@ export interface TurnPersistenceDeps {
 	/**
 	 * Second sink for the same rows, mirroring the operator's own turns into the
 	 * trace database beside the runs this session dispatched. Optional: absent
-	 * observability leaves every append exactly as it was. The mirror is
+	 * telemetry leaves every append exactly as it was. The mirror is
 	 * best-effort by construction, so nothing here inspects or awaits it.
 	 */
-	observability?: ObservabilityContract | undefined;
+	telemetry?: TelemetryContract | undefined;
 }
 
 export interface TurnPersistence {
@@ -195,7 +195,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	// --- trace mirror ---------------------------------------------------------
 	// One open runs/phases pair per operator turn, opened by the user row that
 	// starts the turn and closed by the assistant row that ends it. Every helper
-	// is a no-op without an observability contract or without an open turn, so a
+	// is a no-op without a telemetry contract or without an open turn, so a
 	// session that resumes mid-turn contributes nothing rather than half a run.
 	let traceRunId: string | null = null;
 	let traceSessionId: string | null = null;
@@ -214,9 +214,9 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 
 	const traceNow = (): string => new Date().toISOString();
 
-	const mirror = (record: Parameters<ObservabilityContract["recordSessionTurn"]>[0] | null): void => {
+	const mirror = (record: Parameters<TelemetryContract["recordSessionTurn"]>[0] | null): void => {
 		if (record === null) return;
-		deps.observability?.recordSessionTurn(record);
+		deps.telemetry?.recordSessionTurn(record);
 	};
 
 	let traceCloseDeferred = false;
@@ -245,7 +245,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		usageSources = 0;
 		reportedUsageSources = 0;
 		measuredUsageSources = 0;
-		if (deps.observability === undefined) return;
+		if (deps.telemetry === undefined) return;
 		const runtime = submitted ?? state.runtime;
 		if (!runtime) return;
 		// A previous turn still open means it ended without a final assistant row
@@ -420,7 +420,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			recordValue(payload.usage)?.callInvoked === false ||
 			recordValue(payload.failure)?.invoked === false
 		) {
-			deps.observability?.recordNeverSentCalls(1);
+			deps.telemetry?.recordNeverSentCalls(1);
 		}
 		state.lastTurnId = turn.id;
 		traceEvent({

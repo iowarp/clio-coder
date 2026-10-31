@@ -12,8 +12,8 @@
  */
 
 import type { FleetRunPreview, FleetRunPreviewStep } from "../../domains/dispatch/index.js";
-import { renderCostAmount } from "../../domains/observability/cost.js";
 import { budgetSpendText } from "../../domains/scheduling/budget.js";
+import { renderCostAmount } from "../../domains/telemetry/cost.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";

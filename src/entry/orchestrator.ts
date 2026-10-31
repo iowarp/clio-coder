@@ -175,18 +175,6 @@ import { createTaskBoardReminderRegistration } from "../domains/middleware/task-
 import { createTaskNudgeRegistration } from "../domains/middleware/task-nudge.js";
 import { createWatchdogRegistration } from "../domains/middleware/watchdog.js";
 import type { MuxContract } from "../domains/mux/index.js";
-import type { BackgroundMemoryUsageSink } from "../domains/observability/background-memory-usage.js";
-import type { AdmissionHold, CallJournalOptions } from "../domains/observability/call-scope.js";
-import { openCallScope } from "../domains/observability/call-scope.js";
-import { recordFailedCompactionCalls } from "../domains/observability/compaction-usage.js";
-import { TELEMETRY_FOLD_VERSION } from "../domains/observability/folds.js";
-import type { ObservabilityContract } from "../domains/observability/index.js";
-import { ObservabilityDomainModule } from "../domains/observability/index.js";
-import {
-	appendResearchTraceLine,
-	RESEARCH_TRACE_FILES,
-	researchTracePath,
-} from "../domains/observability/research-files.js";
 import { committedPluginSnapshot, PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
@@ -318,6 +306,18 @@ import { createFollowUpTracker, observePermissionOutcomes } from "../domains/sys
 import { createRelevanceRanker } from "../domains/system-one/rank.js";
 import { anchorSessionRows, createRecorder, SESSION_ROW_CUSTOM_TYPE } from "../domains/system-one/recorder/index.js";
 import { TURN_SITE } from "../domains/system-one/sites/turn.js";
+import type { BackgroundMemoryUsageSink } from "../domains/telemetry/background-memory-usage.js";
+import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
+import { openCallScope } from "../domains/telemetry/call-scope.js";
+import { recordFailedCompactionCalls } from "../domains/telemetry/compaction-usage.js";
+import { TELEMETRY_FOLD_VERSION } from "../domains/telemetry/folds.js";
+import type { TelemetryContract } from "../domains/telemetry/index.js";
+import { TelemetryDomainModule } from "../domains/telemetry/index.js";
+import {
+	appendResearchTraceLine,
+	RESEARCH_TRACE_FILES,
+	researchTracePath,
+} from "../domains/telemetry/research-files.js";
 import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
@@ -1514,7 +1514,7 @@ async function runCompactionFlow(
 	providers: ProvidersContract,
 	instructions?: string,
 	trigger?: CompactionTrigger,
-	observability?: BackgroundMemoryUsageSink,
+	telemetry?: BackgroundMemoryUsageSink,
 	budget?: Pick<
 		CompactInput,
 		| "providerCompaction"
@@ -1551,7 +1551,7 @@ async function runCompactionFlow(
 	const entries = withProviderCheckpointMeasurements(filterEntriesToActivePath(session.readEntries(), activeLeafTurnId));
 	if (entries.length === 0) return null;
 	// Keep this owner alive through checkpoint publication, after individual streams close (#434).
-	const lease = await observability?.acquireTelemetrySession?.(meta, "compaction");
+	const lease = await telemetry?.acquireTelemetrySession?.(meta, "compaction");
 	const callIds = new Set<string>();
 	const settledCalls: CallSettled[] = [];
 	const closure: Payload<"compaction.closed"> = { callIds: [], outcome: "failed", checkpointTurnId: null };
@@ -1604,7 +1604,7 @@ async function runCompactionFlow(
 					model: resolved.wireModelId,
 				},
 				calls,
-				isOriginCurrent() ? observability : undefined,
+				isOriginCurrent() ? telemetry : undefined,
 			);
 
 		// A compaction summary is a full streamed request against its resolved target.
@@ -1643,11 +1643,11 @@ async function runCompactionFlow(
 		let result: CompactResult;
 		try {
 			result = await compact({
-				...(observability?.acquireTelemetrySession
+				...(telemetry?.acquireTelemetrySession
 					? {
 							telemetry: {
 								origin: meta,
-								acquire: observability.acquireTelemetrySession,
+								acquire: telemetry.acquireTelemetrySession,
 								label: "compaction",
 								targetId: resolved.targetId,
 								runtimeId: resolved.runtimeId,
@@ -1819,7 +1819,7 @@ async function runCompactionFlow(
 				providers,
 				instructions,
 				trigger,
-				observability,
+				telemetry,
 				{ ...portableBudget, providerFallbackReason: "checkpoint-publication-failed" },
 				summarize,
 				{ ...admission, summaryAdmitted: true },
@@ -1859,7 +1859,7 @@ async function runCompactionFlow(
 						model: resolved.wireModelId,
 					},
 					calls.filter((call) => call.outcome !== "success"),
-					observability,
+					telemetry,
 				);
 			} catch {
 				// The cut is already durable; a secondary accounting failure must not invalidate it (#423).
@@ -1872,12 +1872,12 @@ async function runCompactionFlow(
 	} finally {
 		if (lease && callIds.size > 0)
 			recordTelemetry("compaction.closed", { ...closure, callIds: [...callIds] }, lease.context);
-		if (observability && session.current()?.id === meta.id) {
+		if (telemetry && session.current()?.id === meta.id) {
 			try {
 				for (const facts of settledCalls) {
-					if (facts.disposition === "never_sent") observability.recordNeverSentCalls?.(1);
+					if (facts.disposition === "never_sent") telemetry.recordNeverSentCalls?.(1);
 					for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }]))
-						recordUsageCall(observability, withCompactionOutcome(call, closure.outcome));
+						recordUsageCall(telemetry, withCompactionOutcome(call, closure.outcome));
 				}
 			} catch {
 				writeDiagnostic("[clio-coder:telemetry] live compaction projection failed; journal retains the calls\n");
@@ -1921,7 +1921,7 @@ export function createProductionAutoCompact(
 	session: SessionContract,
 	getSettings: () => ClioSettings,
 	providers: ProvidersContract,
-	observability?: BackgroundMemoryUsageSink,
+	telemetry?: BackgroundMemoryUsageSink,
 	summarize?: CompactInput["summarize"],
 	admission?: {
 		scheduling?: SchedulingContract;
@@ -1950,17 +1950,7 @@ export function createProductionAutoCompact(
 	>,
 ) => Promise<CompactResult | null> {
 	return (instructions, trigger, budget) =>
-		runCompactionFlow(
-			session,
-			getSettings(),
-			providers,
-			instructions,
-			trigger,
-			observability,
-			budget,
-			summarize,
-			admission,
-		);
+		runCompactionFlow(session, getSettings(), providers, instructions, trigger, telemetry, budget, summarize, admission);
 }
 
 function estimateTokensFromSummary(result: CompactResult): number {
@@ -2287,7 +2277,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				}),
 			},
 			SessionDomainModule,
-			ObservabilityDomainModule,
+			TelemetryDomainModule,
 			// Budget alerts and the plan baseline read the ceiling through the
 			// session's effective view, where `--max-cost-usd` sets it.
 			createSchedulingDomainModule({ getSettings: () => effectiveSettingsForDispatch?.() }),
@@ -2410,21 +2400,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	const middleware = result.getContract<MiddlewareContract>("middleware");
-	const observability = result.getContract<ObservabilityContract>("observability");
+	const telemetry = result.getContract<TelemetryContract>("telemetry");
 	const safety = result.getContract<SafetyContract>("safety");
 	const session = result.getContract<SessionContract>("session");
-	observability?.resetSession(session?.current()?.id ?? null);
+	telemetry?.resetSession(session?.current()?.id ?? null);
 	// Memory and compaction traces run outside any call; they journal into the session current when they fire,
 	// the same session background memory calls are journaled under (#434).
 	registerResearchTraceSink({
 		admits(kind) {
 			const origin = session?.current();
-			const capture = origin ? observability?.telemetryCapture?.(origin) : undefined;
+			const capture = origin ? telemetry?.telemetryCapture?.(origin) : undefined;
 			return capture !== undefined && captureAdmits(capture, kind);
 		},
 		record(kind, data, preimage) {
 			const origin = session?.current();
-			if (origin) observability?.recordResearchTrace?.(origin, kind, data, preimage);
+			if (origin) telemetry?.recordResearchTrace?.(origin, kind, data, preimage);
 		},
 	});
 	// One durable union of restricted sources per session. Every model send,
@@ -2496,16 +2486,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		if (interactive) initialNotices.push(conversion);
 		else bootStderr(`${conversion}\n`);
 	}
-	if (!providers || !dispatch || !observability || !safety || !middleware) {
+	if (!providers || !dispatch || !telemetry || !safety || !middleware) {
 		bootStderr(
-			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + observability contracts; aborting.\n",
+			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + telemetry contracts; aborting.\n",
 		);
 		await termination.shutdown(1);
 		return { exitCode: 1, bootTimeMs: timer.snapshot().totalMs };
 	}
 
 	if (session) {
-		const unbindActivity = bindSessionPackageActivity(session, observability);
+		const unbindActivity = bindSessionPackageActivity(session, telemetry);
 		termination.onDrain(unbindActivity);
 		termination.onDrain(bus.on(BusChannels.SessionResumed, () => flushPackageActivities()));
 	}
@@ -2714,10 +2704,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// The spend the scheduling gate admits paid requests against, so a memory
 	// step's projected cost meets the same ceiling chat and dispatch do.
 	const backgroundSessionSpendUsd = (): number =>
-		result.getContract<SchedulingContract>("scheduling")?.preflight().currentUsd ?? observability?.sessionCost() ?? 0;
+		result.getContract<SchedulingContract>("scheduling")?.preflight().currentUsd ?? telemetry?.sessionCost() ?? 0;
 	const backgroundCallJournal = (targetId: string, modelId: string): CallJournalOptions | undefined => {
 		const origin = session?.current();
-		const acquire = observability?.acquireTelemetrySession;
+		const acquire = telemetry?.acquireTelemetrySession;
 		const target = providers.getTarget(targetId);
 		const runtime = target ? providers.getRuntime(target.runtime) : null;
 		if (!origin || !acquire || !target || !runtime) return undefined;
@@ -2726,10 +2716,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			acquire,
 			label: "memory",
 			onSettled: (facts) => {
-				if (!observability || session?.current()?.id !== origin.id) return;
-				if (facts.disposition === "never_sent") observability.recordNeverSentCalls(1);
-				for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }]))
-					recordUsageCall(observability, call);
+				if (!telemetry || session?.current()?.id !== origin.id) return;
+				if (facts.disposition === "never_sent") telemetry.recordNeverSentCalls(1);
+				for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) recordUsageCall(telemetry, call);
 			},
 			targetId,
 			runtimeId: runtime.id,
@@ -2742,7 +2731,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			stateDir: clioStateDir(),
 			sessionId: meta?.id ?? null,
 			repoIdentity: meta ? meta.cwdHash || cwdHash(meta.cwd || process.cwd()) : null,
-			...(observability === undefined ? {} : { observability }),
+			...(telemetry === undefined ? {} : { telemetry }),
 		});
 	};
 	// Lesson gate decisions reach the operator through the transcript notice
@@ -3732,7 +3721,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Research mode keeps the dataset only with content capture for the current session's workspace (#434).
 	const systemOneRecording = (): boolean => {
 		const origin = session?.current();
-		const capture = (origin && observability?.telemetryCapture?.(origin)) ?? STANDARD_CAPTURE;
+		const capture = (origin && telemetry?.telemetryCapture?.(origin)) ?? STANDARD_CAPTURE;
 		return systemOneDatasetRecording(getCurrentSettings(), capture);
 	};
 	const systemOneRecorder = createRecorder({
@@ -3750,7 +3739,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const systemOneAdmissionDeps = {
 		providers,
 		...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
-		...(observability ? { observability } : {}),
+		...(telemetry ? { telemetry } : {}),
 		getCeilingUsd: () => getCurrentSettings().safety.limits.sessionCostUsd,
 		currentSession: currentSessionId,
 		repoIdentity: () => {
@@ -3983,7 +3972,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		registry: toolRegistry,
 		bus,
 		...(session ? { session } : {}),
-		telemetry: () => observability?.telemetry?.live() ?? null,
+		telemetry: () => telemetry?.telemetry?.live() ?? null,
 		cwd: process.cwd(),
 		attended: options.headless === undefined,
 		safety,
@@ -4507,9 +4496,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	const reseedUsage = (): void => {
 		const meta = session?.current();
-		if (!meta || !observability || !session) return;
+		if (!meta || !telemetry || !session) return;
 		reseedSessionUsageFromLedger(
-			observability,
+			telemetry,
 			readCurrentSessionEntries(),
 			{
 				target: meta.target,
@@ -4529,7 +4518,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let projectedUsage: string | null = null;
 	const projectSessionUsage = (): void => {
 		const meta = session?.current();
-		const view = observability?.telemetry?.live();
+		const view = telemetry?.telemetry?.live();
 		if (!meta || !session || !view || view.sessionId !== meta.id || view.seeding) return;
 		// Two quantities over the cached analysis, not the whole session DTO, at up to 10 Hz.
 		const tokens = view.quantity(factRef({ scope: "session", owner: meta.id, metric: "total" }));
@@ -4544,7 +4533,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// The resume picker's spend is a convenience; the journal already holds every call.
 		}
 	};
-	const unsubscribeUsageProjection = observability?.telemetry?.subscribe("session", projectSessionUsage);
+	const unsubscribeUsageProjection = telemetry?.telemetry?.subscribe("session", projectSessionUsage);
 	if (unsubscribeUsageProjection) termination.onDrain(unsubscribeUsageProjection);
 
 	const turnOutcomeCollector = createTurnOutcomeCollector();
@@ -4829,7 +4818,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			markDegraded: (reason) => protectedArtifactsGuard.markDegraded(reason),
 		},
 		knownTargets: () => new Set(providers.list().map((entry) => entry.target.id)),
-		observability,
+		telemetry,
 		...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
 		bus,
 		...(prompts ? { prompts } : {}),
@@ -4935,7 +4924,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session
 			? {
 					readSessionEntries: readCurrentSessionEntries,
-					autoCompact: createProductionAutoCompact(session, getCurrentSettings, providers, observability, undefined, {
+					autoCompact: createProductionAutoCompact(session, getCurrentSettings, providers, telemetry, undefined, {
 						...(sessionScheduling ? { scheduling: sessionScheduling } : {}),
 						headless: options.headless !== undefined,
 						getCeilingUsd: () => getCurrentSettings().safety.limits.sessionCostUsd,
@@ -5050,9 +5039,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 			try {
 				const resumedEntries = readCurrentSessionEntries();
-				if (observability) {
+				if (telemetry) {
 					reseedSessionUsageFromLedger(
-						observability,
+						telemetry,
 						resumedEntries,
 						{
 							target: resumedMeta.target,
@@ -5416,7 +5405,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										...(settings.chat.model ? { model: settings.chat.model } : {}),
 									});
 									persistCurrentThinkingLevel();
-									observability?.resetSession(session.current()?.id ?? null);
+									telemetry?.resetSession(session.current()?.id ?? null);
 									taskBoard.snapshot();
 								},
 								getDecisionBoard: () => decisionBoard.snapshot(),
@@ -5749,12 +5738,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: {}),
 				// /usage: the overlay's own fold of the cost ledger, and the quota service
 				// behind its cache, so reopening the view does not spend a provider read.
-				...(observability
+				...(telemetry
 					? {
-							...(observability.telemetry ? { telemetryReadModel: observability.telemetry } : {}),
+							...(telemetry.telemetry ? { telemetryReadModel: telemetry.telemetry } : {}),
 							usage: {
-								resetSession: (sessionId: string) => observability.resetSession(sessionId),
-								subscribe: (listener: () => void) => observability.subscribe(listener),
+								resetSession: (sessionId: string) => telemetry.resetSession(sessionId),
+								subscribe: (listener: () => void) => telemetry.subscribe(listener),
 								quota: async () => {
 									if (acpQuota === null) {
 										const { createQuotaService } = await import("../domains/quota/service.js");
@@ -5907,7 +5896,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const runCostCap =
 			options.headless.maxCostUsd === undefined
 				? null
-				: createRunCostCap(observability?.sessionCost() ?? 0, options.headless.maxCostUsd);
+				: createRunCostCap(telemetry?.sessionCost() ?? 0, options.headless.maxCostUsd);
 		if (runCostCap !== null) {
 			startupOverrides.set(
 				"safety.limits.sessionCostUsd",
@@ -6033,7 +6022,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.headless.deadline !== undefined ? { deadline: options.headless.deadline } : {}),
 				...(dispatch ? { dispatch } : {}),
 				scopeNotices: (listener) => bus.on(BusChannels.DispatchScopeNotice, listener),
-				...(observability ? { costEntries: () => observability.costEntries() } : {}),
+				...(telemetry ? { costEntries: () => telemetry.costEntries() } : {}),
 				...(runCostCap !== null ? { costCap: { maxUsd: runCostCap.maxUsd, unpricedRoutes } } : {}),
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 			});
@@ -6090,7 +6079,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		})(),
 		systemOne,
 		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
-		observability,
+		telemetry,
 		chat,
 		...(options.terminalLease
 			? {
@@ -6283,7 +6272,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						if (settings.chat.model) input.model = settings.chat.model;
 						session.create(input);
 						persistCurrentThinkingLevel();
-						observability?.resetSession(session.current()?.id ?? null);
+						telemetry?.resetSession(session.current()?.id ?? null);
 						taskBoard.snapshot();
 					},
 					onForkSession: (parentTurnId) => {

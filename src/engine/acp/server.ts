@@ -8,8 +8,8 @@ import {
 import type { JobRecord } from "../../core/job-types.js";
 import { messageCallsForAccounting } from "../../core/message-accounting.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
-import type { TelemetryReadModel, TelemetryView } from "../../domains/observability/contract.js";
-import { runTokenCount } from "../../domains/observability/read-model.js";
+import type { TelemetryReadModel, TelemetryView } from "../../domains/telemetry/contract.js";
+import { runTokenCount } from "../../domains/telemetry/read-model.js";
 import {
 	ACP_DISPATCH_STEER_METHOD,
 	ACP_EGGS_META_KEY,

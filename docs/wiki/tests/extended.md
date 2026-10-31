@@ -146,7 +146,7 @@ channel (`bus.listeners(channel).length === 1`), proving the projection is the s
 
 `tests/extended/dispatch-board.test.ts` exercises `createDispatchBoardStore` and
 `createDispatchBoardView` from `src/interactive/dispatch-board.ts` against the observability
-projection in `src/domains/observability/projection.ts`.
+projection in `src/domains/telemetry/projection.ts`.
 
 The store is a thin projection of the observability snapshot: `rows()` reverses and sorts
 `current.runs` by `STATUS_ORDER` then by finish/start time, maps each run through `toRow`, and

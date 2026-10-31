@@ -15,8 +15,8 @@
  * call, and recorded on the session ledger with its economics.
  */
 
-import type { CallJournalOptions } from "../domains/observability/call-scope.js";
-import { openCallScope } from "../domains/observability/call-scope.js";
+import type { CallJournalOptions } from "../domains/telemetry/call-scope.js";
+import { openCallScope } from "../domains/telemetry/call-scope.js";
 import {
 	CACHE_KEEPALIVE_MIN_SAVINGS_USD,
 	type CacheKeepaliveEconomics,

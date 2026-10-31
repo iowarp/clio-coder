@@ -3,7 +3,7 @@ import {
 	type WorkerContextPolicy,
 	type WorkerContextProvenance,
 } from "../domains/context/worker/contract.js";
-import { renderCostAmount } from "../domains/observability/cost.js";
+import { renderCostAmount } from "../domains/telemetry/cost.js";
 import { parseWorkerContextProvenance } from "../worker/context-seed.js";
 /**
  * Plan-scale dispatch detection and the operator-facing plan artifact.

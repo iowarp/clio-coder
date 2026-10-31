@@ -5,10 +5,10 @@ import { uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
-import type { TelemetryReadModel, TelemetryView } from "../domains/observability/contract.js";
 import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import type { RecallTelemetry } from "../domains/session/recall-telemetry.js";
+import type { TelemetryReadModel, TelemetryView } from "../domains/telemetry/contract.js";
 import { type OverlayHandle, Text, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { coldReasonText } from "../session-control/cold-reasons.js";
 import {

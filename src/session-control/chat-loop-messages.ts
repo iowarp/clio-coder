@@ -1,9 +1,9 @@
 import { classifyCallFailure, readCallFailure } from "../core/call-failure.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
-import type { CostAggregate, CostAmount } from "../domains/observability/cost.js";
-import { aggregateCostAmounts } from "../domains/observability/cost.js";
 import { resolveCostProvenance } from "../domains/providers/types/cost-provenance.js";
 import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
+import type { CostAggregate, CostAmount } from "../domains/telemetry/cost.js";
+import { aggregateCostAmounts } from "../domains/telemetry/cost.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 /**
  * Pure helpers over agent messages, tool policies, and session payload

@@ -37,11 +37,11 @@ import type {
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
-import type { CostAmount, CostEntry } from "../../domains/observability/cost.js";
-import { aggregateCostAmounts } from "../../domains/observability/cost.js";
 import { resolveCostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
+import type { CostAmount, CostEntry } from "../../domains/telemetry/cost.js";
+import { aggregateCostAmounts } from "../../domains/telemetry/cost.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";

@@ -94,7 +94,6 @@ import { selectVisibleEntries } from "../domains/context/working-set/visible.js"
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
 import { memorySectionBlocks, memorySectionDelta } from "../domains/memory/prompt-section.js";
 import type { MemoryStatus } from "../domains/memory/types.js";
-import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import {
@@ -152,6 +151,7 @@ import {
 	type SessionPromptCompileRecord,
 } from "../domains/session/prompt-manifest.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import type { TelemetryContract } from "../domains/telemetry/contract.js";
 import { cacheLifetimeSeconds } from "../engine/cache-keepalive.js";
 import type {
 	AgentMessage,
@@ -206,7 +206,7 @@ export interface TurnContextDeps {
 	session?: SessionContract | undefined;
 	prompts?: PromptsContract | undefined;
 	toolRegistry?: ToolRegistry | undefined;
-	observability?: ObservabilityContract | undefined;
+	telemetry?: TelemetryContract | undefined;
 	bus?: SafeEventBus | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
 	autoCompact?:
@@ -1569,8 +1569,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const recordCompactionUsage = (agentRuntime: AgentRuntime, result: CompactResult): void => {
 		if (result.callIds?.length) return;
 		const usage = result.usage;
-		if (!usage || !deps.observability) return;
-		deps.observability.recordTokens(
+		if (!usage || !deps.telemetry) return;
+		deps.telemetry.recordTokens(
 			usage.targetId ?? agentRuntime.targetId,
 			usage.modelId ?? agentRuntime.wireModelId,
 			usage.totalTokens,

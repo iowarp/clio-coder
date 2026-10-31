@@ -11,8 +11,8 @@ import {
 	type TaskMemoryStepUsage,
 } from "../../src/domains/memory/task-memory-policy.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
-import type { OutOfTurnUsageRow } from "../../src/domains/observability/out-of-turn-usage.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import type { OutOfTurnUsageRow } from "../../src/domains/telemetry/out-of-turn-usage.js";
 import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "../../src/entry/task-memory-lifecycle.js";
 import {
 	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
@@ -219,7 +219,7 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 					stateDir: env.dir,
 					repoIdentity: required(session.current()).cwdHash,
 					appendRow: (_dir, row) => rows.push(row),
-					observability: {
+					telemetry: {
 						recordTokens: (_provider, _model, tokens) => {
 							live.push(tokens);
 						},

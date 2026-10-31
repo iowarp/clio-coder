@@ -1,5 +1,5 @@
 import type { Quantity } from "../../core/telemetry/dto.js";
-import type { CostAggregate } from "../observability/cost.js";
+import type { CostAggregate } from "../telemetry/cost.js";
 import type { SessionUsageProjection } from "./contract.js";
 
 /** A quantity's known part, measured plus estimated; an unknown contribution adds nothing. */

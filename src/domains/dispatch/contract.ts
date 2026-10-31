@@ -326,7 +326,7 @@ export interface DispatchSnapshot {
 		elapsedMs: number;
 		/**
 		 * `input` is fresh input only, as on the receipt. `cacheRead` travels
-		 * beside it so observability can fold it in the way it folds a settled
+		 * beside it so telemetry can fold it in the way it folds a settled
 		 * receipt; without it the live island undercounted input against the
 		 * worker card.
 		 */
@@ -342,7 +342,7 @@ export interface DispatchSnapshot {
 		outputTokens: number;
 		totalTokens: number;
 		costUsd: number;
-		/** Structural mirror of observability's CostAggregate; `calls` is what separates unpriced from priced-at-zero. */
+		/** Structural mirror of telemetry's CostAggregate; `calls` is what separates unpriced from priced-at-zero. */
 		cost?: { knownUsd: number; hasEstimated: boolean; hasUnknown: boolean; allKnownFree: boolean; calls: number };
 		runtimeSeconds: number;
 	};

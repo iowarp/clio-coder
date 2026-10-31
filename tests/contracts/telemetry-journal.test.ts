@@ -44,45 +44,6 @@ import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/d
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
 import { observationTracing, traceObservation } from "../../src/domains/memory/observation-trace.js";
 import { createTaskMemoryTrace } from "../../src/domains/memory/task-memory-trace.js";
-import { exportTelemetryBundle, importTelemetryBundle } from "../../src/domains/observability/bundle.js";
-import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/observability/call-facts.js";
-import {
-	callJournalHeader,
-	openCallJournal,
-	readCallJournal,
-	readCallJournalSync,
-	seedForkCallJournal,
-} from "../../src/domains/observability/call-journal.js";
-import {
-	createConsentView,
-	grantTelemetryConsent,
-	readTelemetryConsent,
-	resolveConsentWorkspace,
-	revokeTelemetryConsent,
-} from "../../src/domains/observability/consent.js";
-import { createCostTracker } from "../../src/domains/observability/cost.js";
-import {
-	foldCallJournal,
-	foldCallsBy,
-	foldFacts,
-	TELEMETRY_FOLD_VERSION,
-} from "../../src/domains/observability/folds.js";
-import { createHealthWindows } from "../../src/domains/observability/health-window.js";
-import {
-	readTelemetryObject,
-	storeTelemetryObject,
-	telemetryCommitment,
-	telemetryPromptStructure,
-} from "../../src/domains/observability/objects.js";
-import { appendOutOfTurnUsageRow } from "../../src/domains/observability/out-of-turn-usage.js";
-import type { RepoSource } from "../../src/domains/observability/read-model.js";
-import { repoOwner, repoTokenQuantities } from "../../src/domains/observability/read-model.js";
-import {
-	applyTelemetryPrune,
-	DEFAULT_PRUNE_POLICY,
-	planTelemetryPrune,
-} from "../../src/domains/observability/retention.js";
-import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { buildAuditRecord, openAuditWriter } from "../../src/domains/safety/audit.js";
 import { readAuditRows } from "../../src/domains/session/archive-readers.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
@@ -99,6 +60,40 @@ import { rebuildUsageProjections } from "../../src/domains/session/usage-project
 import type { SessionUsageSink } from "../../src/domains/session/usage-record.js";
 import { recordUsageCall } from "../../src/domains/session/usage-record.js";
 import { reseedSessionUsageFromLedger } from "../../src/domains/session/usage-reseed.js";
+import { exportTelemetryBundle, importTelemetryBundle } from "../../src/domains/telemetry/bundle.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import {
+	callJournalHeader,
+	openCallJournal,
+	readCallJournal,
+	readCallJournalSync,
+	seedForkCallJournal,
+} from "../../src/domains/telemetry/call-journal.js";
+import {
+	createConsentView,
+	grantTelemetryConsent,
+	readTelemetryConsent,
+	resolveConsentWorkspace,
+	revokeTelemetryConsent,
+} from "../../src/domains/telemetry/consent.js";
+import { createCostTracker } from "../../src/domains/telemetry/cost.js";
+import { foldCallJournal, foldCallsBy, foldFacts, TELEMETRY_FOLD_VERSION } from "../../src/domains/telemetry/folds.js";
+import { createHealthWindows } from "../../src/domains/telemetry/health-window.js";
+import {
+	readTelemetryObject,
+	storeTelemetryObject,
+	telemetryCommitment,
+	telemetryPromptStructure,
+} from "../../src/domains/telemetry/objects.js";
+import { appendOutOfTurnUsageRow } from "../../src/domains/telemetry/out-of-turn-usage.js";
+import type { RepoSource } from "../../src/domains/telemetry/read-model.js";
+import { repoOwner, repoTokenQuantities } from "../../src/domains/telemetry/read-model.js";
+import {
+	applyTelemetryPrune,
+	DEFAULT_PRUNE_POLICY,
+	planTelemetryPrune,
+} from "../../src/domains/telemetry/retention.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { isReceiptBearingFrame } from "../../src/worker/protocol.js";
 import { checkTelemetryProducer, checkTelemetryWrites } from "../boundaries/check-boundaries.js";
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
@@ -128,7 +123,7 @@ test("producer boundaries reject filesystem helpers and serialization without bl
 	deepStrictEqual(checkTelemetryProducer("producer.ts", "sink.enqueue(event);"), []);
 });
 
-test("rule11 keeps writes under telemetry paths inside the observability domain", () => {
+test("rule11 keeps writes under telemetry paths inside the telemetry domain", () => {
 	for (const source of [
 		'writeFileSync(join(directory, "calls.jsonl"), bytes);',
 		'const path = join(stateDir, "telemetry", "consent.json"); await writeFile(path, "{}");',
@@ -138,7 +133,7 @@ test("rule11 keeps writes under telemetry paths inside the observability domain"
 		'new DatabaseSync(join(stateDir, "trace.sqlite"));',
 	]) {
 		ok(checkTelemetryWrites("src/domains/session/example.ts", source)[0]?.startsWith("rule11:"), source);
-		deepStrictEqual(checkTelemetryWrites("src/domains/observability/example.ts", source), []);
+		deepStrictEqual(checkTelemetryWrites("src/domains/telemetry/example.ts", source), []);
 	}
 	for (const source of [
 		'readFileSync(join(directory, "calls.jsonl"));',

@@ -57,7 +57,7 @@ import {
  * The telemetry read model (#434 §11). Pure: callers hand it journal records (read from disk, or the live writer's
  * persisted batches) and get DTOs back. Every quantity in every DTO comes from {@link measure}, the same function
  * `explain` answers with, so a number and its explanation cannot drift apart, and every display string comes from
- * the canonical renderer. Arithmetic is the observability folds'; this module only selects what they fold.
+ * the canonical renderer. Arithmetic is the telemetry folds'; this module only selects what they fold.
  */
 
 type Mode = SegmentHeader["mode"];

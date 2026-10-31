@@ -21,9 +21,9 @@ import { clioStateDir } from "../../core/xdg.js";
 import { integrityClause, trustStateWord, validationClause } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
 import { inspectRunReceiptTrustStatus, retiredIntegrityVersionOf } from "../evidence/trust-status.js";
-import { readEvidenceIndex } from "../observability/evidence-index.js";
-import { TELEMETRY_FOLD_VERSION } from "../observability/folds.js";
 import { receiptFilePath } from "../session/view-artifacts.js";
+import { readEvidenceIndex } from "../telemetry/evidence-index.js";
+import { TELEMETRY_FOLD_VERSION } from "../telemetry/folds.js";
 import { readReceiptTextSync } from "./receipt-store.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
 

@@ -13,9 +13,9 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
-import { readCallJournalSync } from "../observability/call-journal.js";
-import type { FoldedAttempt } from "../observability/folds.js";
-import { foldCallJournal, foldCalls } from "../observability/folds.js";
+import { readCallJournalSync } from "../telemetry/call-journal.js";
+import type { FoldedAttempt } from "../telemetry/folds.js";
+import { foldCallJournal, foldCalls } from "../telemetry/folds.js";
 import type { TaskMemoryCallReference } from "./task-memory-policy.js";
 import { parseTaskMemoryTelemetryRecord, TASK_MEMORY_TELEMETRY_FILE } from "./task-memory-telemetry.js";
 

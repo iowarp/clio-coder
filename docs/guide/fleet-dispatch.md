@@ -1726,7 +1726,7 @@ hard block.
   stays compact, so a fan-out of scouts costs one card each until an operator
   opens one. Council rows have no detail.
 - The board and the transcript worker block read one projection
-  ([worker-progress.ts](../../src/domains/observability/worker-progress.ts)), so they cannot disagree about what a
+  ([worker-progress.ts](../../src/domains/telemetry/worker-progress.ts)), so they cannot disagree about what a
   worker is saying or touching. Progress settles on `agent_end`, with the live phase shown as `finishing` until the terminal run event arrives. It keeps 40 lines and 4096 bytes of tail, 8
   distinct tool names, 4 recent actions, and accepts 16 KB of delta bytes per
   250 ms; what the bounds refuse is counted and named on the card beside the

@@ -13,18 +13,6 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall } from "../../src/domains/context/working-set/recall.js";
-import { readCallJournal } from "../../src/domains/observability/call-journal.js";
-import {
-	failedCompactionUsageFromCalls,
-	summarizeFailedCompactionUsage,
-} from "../../src/domains/observability/compaction-usage.js";
-import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
-import {
-	appendOutOfTurnUsageRow,
-	outOfTurnUsagePath,
-	readOutOfTurnUsageRows,
-} from "../../src/domains/observability/out-of-turn-usage.js";
-import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
 import { canonicalEndpointKey, foregroundStreamUsage } from "../../src/domains/providers/index.js";
@@ -37,6 +25,18 @@ import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { appendEntry, appendTurn, readCurrentEntries, startSession } from "../../src/domains/session/manager.js";
 import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import {
+	failedCompactionUsageFromCalls,
+	summarizeFailedCompactionUsage,
+} from "../../src/domains/telemetry/compaction-usage.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import {
+	appendOutOfTurnUsageRow,
+	outOfTurnUsagePath,
+	readOutOfTurnUsageRows,
+} from "../../src/domains/telemetry/out-of-turn-usage.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
@@ -1528,7 +1528,7 @@ describe("production compaction controls", () => {
 					}
 					return result;
 				},
-				observability: { recordTokens: (...args: unknown[]) => recorded.push(args) } as unknown as ObservabilityContract,
+				telemetry: { recordTokens: (...args: unknown[]) => recorded.push(args) } as unknown as TelemetryContract,
 				middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
 				emitNotice: (text) => notices.push(text),
 			});

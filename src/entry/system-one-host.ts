@@ -1,10 +1,10 @@
 import type { CallObservation } from "../core/call-failure.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
 import { beginCall } from "../core/telemetry/producer.js";
-import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
-import type { CostEntryLabel } from "../domains/observability/cost.js";
 import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
 import { recordUsageCall } from "../domains/session/usage-record.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
+import type { CostEntryLabel } from "../domains/telemetry/cost.js";
 /**
  * What the composition root keeps between System One calls.
  *
@@ -25,8 +25,6 @@ import { recordUsageCall } from "../domains/session/usage-record.js";
  */
 
 import type { DecisionHintLines } from "../domains/middleware/decision-hints.js";
-import type { ObservabilityContract } from "../domains/observability/contract.js";
-import { appendOutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
 import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { SessionCostCeilingError, sessionCeilingReached } from "../domains/scheduling/budget.js";
@@ -49,6 +47,8 @@ import { TOOL_RESULT_SITE } from "../domains/system-one/sites/tool-result.js";
 import type { TurnRecipeOption, TurnValue } from "../domains/system-one/sites/turn.js";
 import { recipesInGroup, TURN_RECIPE_SITE, TURN_SITE } from "../domains/system-one/sites/turn.js";
 import { TURN_END_SITE } from "../domains/system-one/sites/turn-end.js";
+import type { TelemetryContract } from "../domains/telemetry/contract.js";
+import { appendOutOfTurnUsageRow } from "../domains/telemetry/out-of-turn-usage.js";
 import type { TokenSplit, TurnInterpretation } from "../domains/turn-control/index.js";
 import type { ToolCallGateSubject } from "../tools/registry.js";
 
@@ -61,7 +61,7 @@ const COUNTED_TURNS = 8;
 export function createSystemOneRequestAdmission(deps: {
 	providers: Pick<ProvidersContract, "getTarget"> & Partial<Pick<ProvidersContract, "getRuntime">>;
 	scheduling?: SchedulingContract;
-	observability?: ObservabilityContract;
+	telemetry?: TelemetryContract;
 	getCeilingUsd: () => number;
 	currentSession: () => string | null;
 	repoIdentity: () => string | null;
@@ -81,7 +81,7 @@ export function createSystemOneRequestAdmission(deps: {
 		);
 		const lease =
 			session && repoIdentity
-				? await deps.observability?.acquireTelemetrySession?.({ id: session, cwdHash: repoIdentity }, label)
+				? await deps.telemetry?.acquireTelemetrySession?.({ id: session, cwdHash: repoIdentity }, label)
 				: undefined;
 		// Without an open writer the decision mints no call, so its spend reaches the out-of-turn store (#434).
 		const call = lease?.journaled
@@ -111,10 +111,10 @@ export function createSystemOneRequestAdmission(deps: {
 				reportedModelFromMessage(message),
 			);
 			try {
-				if (facts && deps.observability && deps.currentSession() === session) {
-					if (facts.disposition === "never_sent") deps.observability.recordNeverSentCalls(1);
+				if (facts && deps.telemetry && deps.currentSession() === session) {
+					if (facts.disposition === "never_sent") deps.telemetry.recordNeverSentCalls(1);
 					for (const projected of usageCallsFromAttempts([{ started: facts, settled: facts }]))
-						recordUsageCall(deps.observability, projected);
+						recordUsageCall(deps.telemetry, projected);
 				}
 			} catch {
 				writeDiagnostic("[clio-coder:telemetry] live decision projection failed; journal retains the call\n");
@@ -128,7 +128,7 @@ export function createSystemOneRequestAdmission(deps: {
 				if (deps.scheduling?.admitPaidRequest) {
 					await deps.scheduling.admitPaidRequest({ waitForRaise: false, getCeilingUsd: deps.getCeilingUsd, signal });
 				} else {
-					const currentUsd = deps.observability?.sessionCost() ?? 0;
+					const currentUsd = deps.telemetry?.sessionCost() ?? 0;
 					const ceilingUsd = deps.getCeilingUsd();
 					if (sessionCeilingReached(currentUsd, ceilingUsd)) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
 				}
@@ -183,7 +183,7 @@ export function createSystemOneRequestAdmission(deps: {
 			};
 			if (usage === null) {
 				if (deps.currentSession() === session) {
-					deps.observability?.recordTokens(
+					deps.telemetry?.recordTokens(
 						targetId,
 						model,
 						0,
@@ -230,7 +230,7 @@ export function createSystemOneRequestAdmission(deps: {
 				});
 			// Late answers must not charge the session that replaced their origin.
 			if (deps.currentSession() === session) {
-				deps.observability?.recordTokens(
+				deps.telemetry?.recordTokens(
 					targetId,
 					model,
 					totalTokens,

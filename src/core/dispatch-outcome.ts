@@ -1,7 +1,7 @@
 /**
  * Shared mapping from a `DispatchFailed` payload's `reason` field to the
- * terminal status it implies. Both the observability projection's run
- * summary (src/domains/observability/projection.ts) and the interactive
+ * terminal status it implies. Both the telemetry projection's run
+ * summary (src/domains/telemetry/projection.ts) and the interactive
  * dispatch board (src/interactive/dispatch-board.ts) derive a run's status
  * from the same DispatchCompleted/DispatchFailed bus events; before this
  * module existed they each carried their own copy of this exact mapping,

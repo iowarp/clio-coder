@@ -7,7 +7,7 @@ import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
-import { readCallJournal } from "../../src/domains/observability/call-journal.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";

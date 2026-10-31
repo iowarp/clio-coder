@@ -1,9 +1,9 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { normalizeTokenUsage } from "../../core/token-split.js";
 /**
- * Reactive observability projection. Folds the dispatch and evidence bus
+ * Reactive telemetry projection. Folds the dispatch and evidence bus
  * channels plus the session cost tracker into a single bounded
- * {@link ObservabilitySnapshot} that product surfaces (footer, overlays, the
+ * {@link TelemetrySnapshot} that product surfaces (footer, overlays, the
  * dispatch board) consume through one seam.
  *
  * Design constraints for this slice:
@@ -29,12 +29,12 @@ import { summarizeTrustStatus } from "../evidence/trust-projection.js";
 import { type CostProvenance, resolveCostProvenance } from "../providers/types/cost-provenance.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import type {
-	ObservabilityNotice,
-	ObservabilityRunEvidence,
-	ObservabilityRunProjection,
-	ObservabilityRunReaders,
-	ObservabilityRunSummary,
-	ObservabilitySnapshot,
+	TelemetryNotice,
+	TelemetryRunEvidence,
+	TelemetryRunProjection,
+	TelemetryRunReaders,
+	TelemetryRunSummary,
+	TelemetrySnapshot,
 	TokenThroughputSnapshot,
 } from "./contract.js";
 import type { CostAggregate, UsageBreakdown } from "./cost.js";
@@ -53,15 +53,15 @@ export const PROJECTION_FLUSH_DEBOUNCE_MS = 16;
  * them at snapshot-build time so ordering with the extension's own bus handlers
  * never matters (both run synchronously before the debounced build).
  */
-export interface ProjectionReadModel extends ObservabilityRunReaders {
+export interface ProjectionReadModel extends TelemetryRunReaders {
 	sessionCostSummary(): CostAggregate;
 	sessionTokens(): UsageBreakdown;
 	latestThroughput(): TokenThroughputSnapshot | null;
 }
 
-export interface ObservabilityProjection extends ObservabilityRunProjection {
-	snapshot(): ObservabilitySnapshot;
-	subscribe(listener: (snapshot: ObservabilitySnapshot) => void): () => void;
+export interface TelemetryProjection extends TelemetryRunProjection {
+	snapshot(): TelemetrySnapshot;
+	subscribe(listener: (snapshot: TelemetrySnapshot) => void): () => void;
 	/** Recompute after a direct session mutation (recordTokens/resetSession/throughput). */
 	refresh(): void;
 	/** A forensic evidence build for `runId` has started. */
@@ -83,11 +83,11 @@ function asRunId(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function isTerminal(status: ObservabilityRunSummary["status"]): boolean {
+function isTerminal(status: TelemetryRunSummary["status"]): boolean {
 	return status === "completed" || status === "failed" || status === "aborted" || status === "dead";
 }
 
-function resolveHeartbeat(status: unknown): ObservabilityRunSummary["status"] | null {
+function resolveHeartbeat(status: unknown): TelemetryRunSummary["status"] | null {
 	if (status === "alive") return "running";
 	if (status === "stale") return "stale";
 	if (status === "dead") return "dead";
@@ -95,15 +95,15 @@ function resolveHeartbeat(status: unknown): ObservabilityRunSummary["status"] | 
 }
 
 /** Build a notice ref from candidate parts, dropping anything non-string/empty. */
-function makeRef(parts: Record<string, unknown>): ObservabilityNotice["ref"] | undefined {
+function makeRef(parts: Record<string, unknown>): TelemetryNotice["ref"] | undefined {
 	const ref: Record<string, string> = {};
 	for (const [key, value] of Object.entries(parts)) {
 		if (typeof value === "string" && value.length > 0) ref[key] = value;
 	}
-	return Object.keys(ref).length > 0 ? (ref as ObservabilityNotice["ref"]) : undefined;
+	return Object.keys(ref).length > 0 ? (ref as TelemetryNotice["ref"]) : undefined;
 }
 
-interface RunEntry extends ObservabilityRunSummary {
+interface RunEntry extends TelemetryRunSummary {
 	progressFold: WorkerProgressFold;
 	startedAtClockMs: number | null;
 }
@@ -155,7 +155,7 @@ function parseGateBadge(value: unknown): { role: string; cycle: number } | undef
 	return { role: record.role, cycle };
 }
 
-function parseEndpointCapacity(value: unknown): ObservabilityRunSummary["endpoint"] | undefined {
+function parseEndpointCapacity(value: unknown): TelemetryRunSummary["endpoint"] | undefined {
 	if (typeof value !== "object" || value === null) return undefined;
 	const record = value as { key?: unknown; label?: unknown; limit?: unknown };
 	const key = parseNonEmptyString(record.key);
@@ -164,7 +164,7 @@ function parseEndpointCapacity(value: unknown): ObservabilityRunSummary["endpoin
 	return key === undefined || label === undefined || limit === undefined ? undefined : { key, label, limit };
 }
 
-function parseCouncilBadge(value: unknown): ObservabilityRunSummary["council"] | undefined {
+function parseCouncilBadge(value: unknown): TelemetryRunSummary["council"] | undefined {
 	if (typeof value !== "object" || value === null) return undefined;
 	const record = value as { group?: unknown; label?: unknown; color?: unknown; round?: unknown };
 	const group = parseNonEmptyString(record.group);
@@ -190,7 +190,7 @@ function sanitizeDispatchTaskSummary(value: unknown): string | undefined {
 
 function parseRetrySnapshot(
 	value: DispatchSnapshot["retrying"][number],
-): NonNullable<ObservabilityRunSummary["retry"]> | null {
+): NonNullable<TelemetryRunSummary["retry"]> | null {
 	const attempt = parsePositiveInt(value.attempt);
 	const dueAtMs = Date.parse(value.dueAt);
 	if (attempt === undefined || !Number.isFinite(dueAtMs)) return null;
@@ -203,10 +203,10 @@ function parseRetrySnapshot(
 
 function readRetrySnapshot(
 	snapshot: DispatchSnapshot,
-): Map<string, { agentId: string; taskSummary?: string; retry: NonNullable<ObservabilityRunSummary["retry"]> }> {
+): Map<string, { agentId: string; taskSummary?: string; retry: NonNullable<TelemetryRunSummary["retry"]> }> {
 	const retrying = new Map<
 		string,
-		{ agentId: string; taskSummary?: string; retry: NonNullable<ObservabilityRunSummary["retry"]> }
+		{ agentId: string; taskSummary?: string; retry: NonNullable<TelemetryRunSummary["retry"]> }
 	>();
 	try {
 		for (const value of snapshot.retrying) {
@@ -275,20 +275,20 @@ function readRunningSnapshot(snapshot: DispatchSnapshot): Map<
 	return running;
 }
 
-export function createObservabilityProjection(bus: SafeEventBus, deps: ProjectionReadModel): ObservabilityProjection {
+export function createTelemetryProjection(bus: SafeEventBus, deps: ProjectionReadModel): TelemetryProjection {
 	const runs = new Map<string, RunEntry>();
 	// Settlement order is independent of enqueue order: an old active run
 	// becomes the newest history entry when it finally settles.
 	const terminalHistory = new Set<string>();
-	const fleetPhases = new Map<string, NonNullable<ObservabilityRunSummary["phase"]>>();
-	let runReaders: ObservabilityRunReaders = deps;
-	const notices: ObservabilityNotice[] = [];
+	const fleetPhases = new Map<string, NonNullable<TelemetryRunSummary["phase"]>>();
+	let runReaders: TelemetryRunReaders = deps;
+	const notices: TelemetryNotice[] = [];
 	const pendingEvidence = new Set<string>();
 
-	const listeners = new Set<(snapshot: ObservabilitySnapshot) => void>();
+	const listeners = new Set<(snapshot: TelemetrySnapshot) => void>();
 	let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-	function buildSnapshot(): ObservabilitySnapshot {
+	function buildSnapshot(): TelemetrySnapshot {
 		return {
 			generatedAt: Date.now(),
 			session: {
@@ -320,7 +320,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 				listener(snapshot);
 			} catch (error) {
 				const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-				writeDiagnostic(`[clio-coder:observability] projection listener crashed: ${message}`, "error");
+				writeDiagnostic(`[clio-coder:telemetry] projection listener crashed: ${message}`, "error");
 			}
 		}
 	}
@@ -406,7 +406,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 	// `typeof === "number"` check this function had instead, so the projection
 	// could corrupt a run's running total on a malformed terminal payload while
 	// the dispatch board's parseFiniteNumber (an identical check) rejected it.
-	function applyTerminalTokens(summary: ObservabilityRunSummary, payload: Record<string, unknown>): void {
+	function applyTerminalTokens(summary: TelemetryRunSummary, payload: Record<string, unknown>): void {
 		summary.tokens.total = num(payload.tokenCount, summary.tokens.total);
 		if (typeof payload.inputTokenCount === "number") {
 			summary.tokens.input = num(payload.inputTokenCount, summary.tokens.input) + num(payload.cacheReadTokenCount, 0);
@@ -418,12 +418,12 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 	}
 
 	function pushNotice(
-		kind: ObservabilityNotice["kind"],
-		level: ObservabilityNotice["level"],
+		kind: TelemetryNotice["kind"],
+		level: TelemetryNotice["level"],
 		message: string,
-		ref?: ObservabilityNotice["ref"],
+		ref?: TelemetryNotice["ref"],
 	): void {
-		const notice: ObservabilityNotice = {
+		const notice: TelemetryNotice = {
 			kind,
 			level,
 			message,
@@ -516,7 +516,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 		if (changed) markChanged();
 	}
 
-	function evidenceBuildSucceeded(runId: string, evidence: ObservabilityRunEvidence): void {
+	function evidenceBuildSucceeded(runId: string, evidence: TelemetryRunEvidence): void {
 		pendingEvidence.delete(runId);
 		const summary = runs.get(runId);
 		if (summary) summary.evidence = { evidenceId: evidence.evidenceId };

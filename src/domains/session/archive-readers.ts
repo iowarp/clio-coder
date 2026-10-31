@@ -10,9 +10,9 @@ import { isSessionEntry, isSessionHeader, type SessionEntry } from "./entries.js
  *
  * The module lives in the session domain because that is its only dependency,
  * and it is re-exported from the session index so consumers reach it through
- * the barrel. It used to live under observability, where the barrel could not
- * be used: the observability extension imports the evidence domain, so an
- * evidence-side import through the observability index would cycle.
+ * the barrel. It used to live under telemetry, where the barrel could not
+ * be used: the telemetry extension imports the evidence domain, so an
+ * evidence-side import through the telemetry index would cycle.
  */
 
 export interface AuditJsonRow {

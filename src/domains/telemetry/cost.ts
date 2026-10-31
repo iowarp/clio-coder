@@ -8,7 +8,7 @@
  * Per-entry token breakdown (input/output/cacheRead/cacheWrite/reasoning)
  * matches the shape of pi-ai's `Usage` plus provider-specific reasoning detail
  * fields. The /usage overlay aggregates it via `aggregateCostEntries`; the TUI
- * footer reads the session sum from the observability snapshot's
+ * footer reads the session sum from the telemetry snapshot's
  * `session.tokens`, which carries the full breakdown although the footer shows
  * only input, output and the total.
  */

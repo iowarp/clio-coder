@@ -20,8 +20,6 @@ import {
 	proposeTaskBankPromotion,
 	rejectMemoryRecord,
 } from "../domains/memory/index.js";
-import type { ObservabilityContract } from "../domains/observability/index.js";
-import { renderCostAggregate } from "../domains/observability/index.js";
 import type { BudgetPreflight } from "../domains/scheduling/contract.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionMeta } from "../domains/session/index.js";
@@ -35,6 +33,8 @@ import type { GitChanges } from "../domains/session/workspace/git-probe.js";
 import { probeGitChangesAsync } from "../domains/session/workspace/git-probe.js";
 import type { OutcomeRecord, SystemOne } from "../domains/system-one/index.js";
 import { draftTakenOutcome } from "../domains/system-one/outcomes.js";
+import type { TelemetryContract } from "../domains/telemetry/index.js";
+import { renderCostAggregate } from "../domains/telemetry/index.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { createWorkspaceSnapshots, type WorkspaceSnapshots } from "../domains/workspace-snapshots/index.js";
@@ -74,7 +74,7 @@ export interface OverlayGeneralOpenersDeps {
 	readTranscript?: ArtifactProviderDeps["readTranscript"];
 	tui: TUI;
 	transitions: OverlayTransitions;
-	observability: ObservabilityContract;
+	telemetry: TelemetryContract;
 	getQuotaSnapshots?: () => ReadonlyArray<import("../domains/quota/types.js").UsageSnapshot>;
 	getDispatchRows?: () => ReadonlyArray<import("./dispatch-board.js").DispatchBoardRow>;
 	getSessionId?: () => string | null;
@@ -241,7 +241,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 			changes = result;
 			deps.requestRender();
 		});
-		deps.transitions.handle = openUsageOverlayFactory(deps.tui, deps.observability, {
+		deps.transitions.handle = openUsageOverlayFactory(deps.tui, deps.telemetry, {
 			sessionId: deps.getSessionId?.() ?? null,
 			...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
 			getChanges: () => changes,
@@ -261,7 +261,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "health";
 		const systemOne = deps.systemOne?.();
-		deps.transitions.handle = openHealthOverlay(deps.tui, deps.observability.telemetry, {
+		deps.transitions.handle = openHealthOverlay(deps.tui, deps.telemetry.telemetry, {
 			getBreakers: () => deps.dispatch.routeBreakers?.() ?? [],
 			...(systemOne?.breakers ? { getSystemOneBreakers: () => systemOne.breakers?.() ?? [] } : {}),
 		});
@@ -274,7 +274,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.transitions.handle = openContextOverlayFactory(deps.tui, deps.getContextLedger, {
 			bus: deps.bus,
 			chat: deps.contextChat,
-			...(deps.observability.telemetry ? { telemetry: deps.observability.telemetry } : {}),
+			...(deps.telemetry.telemetry ? { telemetry: deps.telemetry.telemetry } : {}),
 			getWorkingSet: () => {
 				const readSessionEntries = deps.readSessionEntries;
 				if (!readSessionEntries) return null;

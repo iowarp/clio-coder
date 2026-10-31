@@ -21,7 +21,7 @@ function run(
 			cost: "missing",
 			sessionId: null,
 			exitReason: "stop",
-			toolObservability: "unavailable",
+			toolTelemetry: "unavailable",
 		};
 	}
 	const receipt = withReceiptIntegrity(draft, envelope);

@@ -4,11 +4,11 @@ import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
-import type { ObservabilityContract, ObservabilitySnapshot } from "../../src/domains/observability/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
 import { localQuotaSnapshot } from "../../src/domains/quota/presentation.js";
 import { createQuotaSummaryFeed } from "../../src/domains/quota/summary-feed.js";
 import type { UsageSnapshot } from "../../src/domains/quota/types.js";
+import type { TelemetryContract, TelemetrySnapshot } from "../../src/domains/telemetry/index.js";
 import type { Component, OverlayOptions, TUI } from "../../src/engine/tui.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { dockTop } from "../../src/interactive/dock.js";
@@ -209,13 +209,13 @@ test("usage replaces cost in parsing, dispatch, autocomplete, and Escape routing
 test("usage overlay shows account details and live session totals, scrolls, resizes, and releases ownership", () => {
 	let options: OverlayOptions | undefined;
 	let rows = 100;
-	let listener: ((snapshot: ObservabilitySnapshot) => void) | undefined;
+	let listener: ((snapshot: TelemetrySnapshot) => void) | undefined;
 	let unsubscribed = 0;
 	let hidden = 0;
 	let renders = 0;
 	const titles: string[] = [];
 	let quota = accounts();
-	const snapshot = { session: {} } as ObservabilitySnapshot;
+	const snapshot = { session: {} } as TelemetrySnapshot;
 	let calls: TelemetryRecord[] = [];
 	let view = telemetryViewOf("usage-session", calls);
 	const updates = new Set<() => void>();
@@ -224,7 +224,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		view = telemetryViewOf("usage-session", calls);
 		for (const update of updates) update();
 	};
-	const observability = {
+	const telemetry = {
 		subscribe: (callback: typeof listener) => {
 			listener = callback;
 			callback?.(snapshot);
@@ -239,7 +239,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 				return () => updates.delete(update);
 			},
 		},
-	} as unknown as ObservabilityContract;
+	} as unknown as TelemetryContract;
 	const tui = {
 		terminal: {
 			setTitle: (title: string) => titles.push(title),
@@ -253,7 +253,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 			return { hide: () => hidden++ };
 		},
 	} as unknown as TUI;
-	const handle = openUsageOverlay(tui, observability, { getQuotaSnapshots: () => quota });
+	const handle = openUsageOverlay(tui, telemetry, { getQuotaSnapshots: () => quota });
 	// The engine overlay is a zero-row focus proxy; the composer draws the
 	// docked frame, so the test renders the dock's top entry at the terminal height.
 	const frame = dockTop(tui)?.frame as unknown as Component | undefined;

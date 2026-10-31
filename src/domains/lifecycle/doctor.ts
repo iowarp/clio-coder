@@ -17,7 +17,6 @@ import {
 	validateHarness,
 } from "../agents/harness-validate.js";
 import { detectInteropAgents, interopAgentKind, resolveOnPath } from "../interop/index.js";
-import { systemOneRecordingLabel, workspaceTelemetryCapture } from "../observability/consent.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../providers/auth/index.js";
 import { credentialsPresent } from "../providers/credentials.js";
 import { fingerprintNativeRuntime } from "../providers/probe/fingerprint.js";
@@ -27,6 +26,7 @@ import { loadSkills, type SkillSource } from "../resources/skills/loader.js";
 import { isSessionEntry, type SessionEntry } from "../session/entries.js";
 import { foldPromptCacheTelemetry, hasPromptCacheTelemetry, topExpectedColdReason } from "../session/prompt-cache.js";
 import type { SiteBindingInfo } from "../system-one/types.js";
+import { systemOneRecordingLabel, workspaceTelemetryCapture } from "../telemetry/consent.js";
 import { deferredUpdateTarget, readDeferredResult } from "./deferred-update.js";
 import { type Installation, inspectInstallation } from "./install-method.js";
 import { listMigrations, readMigrationManifestResult } from "./migrations/index.js";

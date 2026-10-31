@@ -1,4 +1,4 @@
-import type { CallJournalOptions } from "../domains/observability/call-scope.js";
+import type { CallJournalOptions } from "../domains/telemetry/call-scope.js";
 /**
  * Pre-warm ownership: when the prefix is sent, what stops it, and what it
  * records. The round itself lives in `prewarm.ts`.

@@ -1,7 +1,7 @@
 import type { CallRowV1, CostReportV1, FactMetric, Quantity } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
 import { COST_NOT_MEASURED } from "../../core/telemetry/render.js";
-import type { TelemetryView } from "../../domains/observability/contract.js";
+import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import type { AcpQuotaSnapshot } from "./types.js";
 
 export type { AcpCostAggregate, AcpQuotaSnapshot, AcpUsageRow } from "./types.js";

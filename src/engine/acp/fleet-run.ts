@@ -1,5 +1,5 @@
-import { renderCostAmount } from "../../domains/observability/cost.js";
 import { budgetSpendText } from "../../domains/scheduling/index.js";
+import { renderCostAmount } from "../../domains/telemetry/cost.js";
 import type { AcpFleetPreview, AcpFleetStep } from "./types.js";
 
 export type { AcpFleetPreview, AcpFleetStep } from "./types.js";

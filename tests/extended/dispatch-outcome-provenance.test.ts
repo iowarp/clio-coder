@@ -1,5 +1,5 @@
 /**
- * The observability projection's run summary and the interactive dispatch
+ * The telemetry projection's run summary and the interactive dispatch
  * board each derived a run's terminal status and cost provenance from the
  * same DispatchCompleted/DispatchFailed bus payloads through their own,
  * independently-maintained copies of the mapping. resolveDispatchFailureStatus

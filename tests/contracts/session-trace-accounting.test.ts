@@ -6,10 +6,10 @@ import { it } from "node:test";
 import type { DispatchCompletedPayload } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
-import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
-import { TraceReader, TraceStore } from "../../src/domains/observability/trace-store.js";
 import type { CostProvenance } from "../../src/domains/providers/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { TraceReader, TraceStore } from "../../src/domains/telemetry/trace-store.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { createTurnPersistence } from "../../src/session-control/turn-persistence.js";
 import type { AgentRuntime, ChatTurnState } from "../../src/session-control/turn-state.js";
@@ -52,7 +52,7 @@ it("session traces retain known subtotals, call coverage, and pricing uncertaint
 				consumePersistedEcho: () => false,
 				removeQueuedMirrorEntry: () => {},
 				promptCachePayloadForAssistant: () => ({}),
-				observability: { recordSessionTurn: (trace) => store.recordSessionTurn(trace) } as ObservabilityContract,
+				telemetry: { recordSessionTurn: (trace) => store.recordSessionTurn(trace) } as TelemetryContract,
 			});
 			const interrupted = persistence.appendSubmittedUserTurn(runtime, "interrupted", undefined, false);
 			const userTurn = persistence.appendSubmittedUserTurn(runtime, "calibration", undefined, false);

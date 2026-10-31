@@ -2,15 +2,6 @@ import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { loadMemoryRecordsSync, type MemoryRecord } from "../domains/memory/index.js";
-import { summarizeEvidenceIndex } from "../domains/observability/accountability.js";
-import { readEvidenceIndex } from "../domains/observability/evidence-index.js";
-import { cacheReport, repoCostReport, repoTokenQuantities } from "../domains/observability/read-model.js";
-import {
-	emptyUsageDiagnostics,
-	inUsageWindow,
-	type UsageDiagnostics,
-	usageWindow,
-} from "../domains/observability/usage-window.js";
 import { loadSkills } from "../domains/resources/index.js";
 import {
 	foldRecallTelemetry,
@@ -20,6 +11,15 @@ import {
 	type RecallTelemetry,
 	readAuditRows,
 } from "../domains/session/index.js";
+import { summarizeEvidenceIndex } from "../domains/telemetry/accountability.js";
+import { readEvidenceIndex } from "../domains/telemetry/evidence-index.js";
+import { cacheReport, repoCostReport, repoTokenQuantities } from "../domains/telemetry/read-model.js";
+import {
+	emptyUsageDiagnostics,
+	inUsageWindow,
+	type UsageDiagnostics,
+	usageWindow,
+} from "../domains/telemetry/usage-window.js";
 import { cwdHash } from "../engine/session.js";
 import { displayToolCall } from "../tools/gateway-display.js";
 import { expandChainMessages } from "../tools/surface.js";

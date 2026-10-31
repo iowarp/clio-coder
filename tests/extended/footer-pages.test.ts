@@ -1,8 +1,8 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { createWorkerProgressFold } from "../../src/domains/observability/worker-progress.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
+import { createWorkerProgressFold } from "../../src/domains/telemetry/worker-progress.js";
 import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid } from "../../src/interactive/context-meter.js";
 import type { FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";

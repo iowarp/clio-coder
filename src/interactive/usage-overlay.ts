@@ -1,11 +1,11 @@
 import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
-import type { TelemetryView } from "../domains/observability/contract.js";
-import type { ObservabilityContract } from "../domains/observability/index.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
 import type { RecallTelemetry, SessionEntry } from "../domains/session/index.js";
 import { foldRecallTelemetry, formatRecallTelemetry, hasRecallTelemetry } from "../domains/session/index.js";
 import type { GitChanges } from "../domains/session/workspace/git-probe.js";
+import type { TelemetryView } from "../domains/telemetry/contract.js";
+import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { matchesKey, wrapTextWithAnsi } from "../engine/tui.js";
 import { ACTIVITY_SPAN_DAYS, bucketActivity, renderActivityHeatmap } from "./activity-view.js";
@@ -366,26 +366,26 @@ class UsageOverlayBody implements Component {
 
 /**
  * Mount the read-only usage overlay. Quota comes from the shared presentation feed. The session cost comes from the
- * observability projection's `snapshot().session.cost`, while the
- * per-provider/model rows fold `observability.costEntries()`. The overlay is
- * kept live by `observability.subscribe()`: the projection already folds the
+ * telemetry projection's `snapshot().session.cost`, while the
+ * per-provider/model rows fold `telemetry.costEntries()`. The overlay is
+ * kept live by `telemetry.subscribe()`: the projection already folds the
  * dispatch terminal channels and every `recordTokens()` into one coalesced
  * update, so a single subscription replaces the former DispatchCompleted /
  * DispatchFailed / chat-turn refresh wiring. `hide()` unsubscribes.
  */
 export function openUsageOverlay(
 	tui: TUI,
-	observability: ObservabilityContract,
+	telemetry: TelemetryContract,
 	options?: OpenUsageOverlayOptions,
 ): OverlayHandle {
 	const sessionId = options?.sessionId ?? null;
-	const telemetry = observability.telemetry;
+	const readModel = telemetry.telemetry;
 	const readRecall = () => (options?.getSessionEntries ? foldRecallTelemetry(options.getSessionEntries()) : null);
 	let recall = readRecall();
 	const now = options?.now ?? (() => Date.now());
 	const sessions = options?.listSessions?.() ?? [];
 	const body = new UsageOverlayBody(
-		() => ({ view: telemetry?.live() ?? null, recall }),
+		() => ({ view: readModel?.live() ?? null, recall }),
 		options?.getQuotaSnapshots ?? (() => []),
 		options?.getDispatchRows ?? (() => []),
 		() => tui.requestRender(),
@@ -418,14 +418,14 @@ export function openUsageOverlay(
 	});
 
 	// The Workers tab reads the dispatch board, which the projection keeps current.
-	const unsubscribe = observability.subscribe(() => tui.requestRender());
+	const unsubscribe = telemetry.subscribe(() => tui.requestRender());
 	// Spend changes arrive as persisted batches, at most 10 Hz; the ledger's recall fold is re-read then, not per frame.
 	const refresh = () => {
 		recall = readRecall();
 		tui.requestRender();
 	};
-	const offs = telemetry
-		? (["session", "calls", "cost", "cache", "runs"] as const).map((topic) => telemetry.subscribe(topic, refresh))
+	const offs = readModel
+		? (["session", "calls", "cost", "cache", "runs"] as const).map((topic) => readModel.subscribe(topic, refresh))
 		: [];
 
 	return {

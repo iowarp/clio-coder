@@ -1,7 +1,7 @@
 import type { HealthV1, QuotaStateV1, SessionTelemetryV1 } from "../core/telemetry/dto.js";
 import type { RouteBreakerView } from "../domains/dispatch/contract.js";
-import type { TelemetryReadModel } from "../domains/observability/contract.js";
 import type { SystemOneBreakerView } from "../domains/system-one/index.js";
+import type { TelemetryReadModel } from "../domains/telemetry/contract.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { matchesKey, wrapTextWithAnsi } from "../engine/tui.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";

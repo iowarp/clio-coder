@@ -12,13 +12,13 @@ import { createDispatchDomainModule, type DispatchContract } from "../../src/dom
 import { type Ledger, openLedger } from "../../src/domains/dispatch/state.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { MiddlewareDomainModule } from "../../src/domains/middleware/index.js";
-import { ObservabilityDomainModule } from "../../src/domains/observability/index.js";
 import { createPromptsDomainModule } from "../../src/domains/prompts/index.js";
 import { ProvidersDomainModule } from "../../src/domains/providers/index.js";
 import { ResourcesDomainModule } from "../../src/domains/resources/index.js";
 import { SafetyDomainModule } from "../../src/domains/safety/index.js";
 import { SchedulingDomainModule } from "../../src/domains/scheduling/index.js";
 import { SessionDomainModule } from "../../src/domains/session/index.js";
+import { TelemetryDomainModule } from "../../src/domains/telemetry/index.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 let scratch: IsolatedClioEnv;
@@ -75,7 +75,7 @@ test("an open dispatch ledger follows config updates and effective session overr
 		createPromptsDomainModule({ noContextFiles: true }),
 		MiddlewareDomainModule,
 		SessionDomainModule,
-		ObservabilityDomainModule,
+		TelemetryDomainModule,
 		SchedulingDomainModule,
 		createDispatchDomainModule({ getSettings: () => override }),
 	]);

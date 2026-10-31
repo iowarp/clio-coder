@@ -1,7 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { canonicalizePath } from "../core/path-canonical.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
-import { systemOneRecordingLabel } from "../domains/observability/consent.js";
 import {
 	countDatasetRows,
 	datasetDir,
@@ -14,6 +13,7 @@ import {
 } from "../domains/system-one/recorder/index.js";
 import type { SiteId } from "../domains/system-one/types.js";
 import { SITE_IDS } from "../domains/system-one/types.js";
+import { systemOneRecordingLabel } from "../domains/telemetry/consent.js";
 import { formatColumns, printError, printNote } from "./shared.js";
 
 const HELP = `clio-coder systemone status

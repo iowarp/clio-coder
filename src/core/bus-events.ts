@@ -1,4 +1,4 @@
-import type { CostAggregate } from "../domains/observability/cost.js";
+import type { CostAggregate } from "../domains/telemetry/cost.js";
 import type { ContextOperation } from "./context-operation.js";
 import type { JobChangedPayload } from "./job-types.js";
 /**
@@ -27,9 +27,9 @@ import type {
 	ToolActivitySummary,
 } from "../domains/dispatch/types.js";
 import type { MiddlewareHook } from "../domains/middleware/types.js";
-import type { ObservabilityRunEvidence } from "../domains/observability/contract.js";
 import type { TargetStatus } from "../domains/providers/contract.js";
 import type { CostProvenance } from "../domains/providers/index.js";
+import type { TelemetryRunEvidence } from "../domains/telemetry/contract.js";
 import type { ClioSettings } from "./config.js";
 import type { SkillActivation } from "./skill-activation.js";
 import type { TerminationPhase } from "./termination.js";
@@ -822,15 +822,15 @@ export interface DispatchFailedPayload extends DispatchRunIdentity, Partial<Disp
 
 /**
  * Published on {@link BusChannels.AccountabilityEvidenceReady} by the
- * observability extension once a finalized run's evidence bundle and its
+ * telemetry extension once a finalized run's evidence bundle and its
  * sidecar index row have landed. The evidence fields are exactly
- * {@link ObservabilityRunEvidence}, the shape the projection already attaches
+ * {@link TelemetryRunEvidence}, the shape the projection already attaches
  * to the run summary, so the bus and the snapshot cannot describe the same
  * moment two ways. A failed build publishes nothing here: the projection's
  * notice is the failure surface, and a client that never receives this event
  * has learned only that no bundle is ready, which is the truth.
  */
-export interface AccountabilityEvidenceReadyPayload extends ObservabilityRunEvidence {
+export interface AccountabilityEvidenceReadyPayload extends TelemetryRunEvidence {
 	runId: string;
 }
 

@@ -12,8 +12,8 @@ import { DELTA_GAP_BOUNDS_MS, validPayload } from "../../src/core/telemetry/sche
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { listMiddlewareRuleDefinitions } from "../../src/domains/middleware/rules.js";
-import { createHealthWindows } from "../../src/domains/observability/health-window.js";
-import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
+import { createHealthWindows } from "../../src/domains/telemetry/health-window.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { researchCaptureFor } from "../../src/engine/research-capture.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { prefixBlocksOf } from "../../src/session-control/prefix-blocks.js";

@@ -14,7 +14,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { SESSION_TRACE_ASSIGNMENT_ID, TraceReader, TraceStore } from "../../src/domains/observability/trace-store.js";
+import { SESSION_TRACE_ASSIGNMENT_ID, TraceReader, TraceStore } from "../../src/domains/telemetry/trace-store.js";
 
 // Mirrors trace-store.ts's own lazy accessor; node:sqlite is not always
 // importable as a static ESM binding on every supported Node build.

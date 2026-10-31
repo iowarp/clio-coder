@@ -105,7 +105,7 @@ function presentationProvider(userTasks?: UserTasksStore) {
 				getTaskBoard: () => ({ tasks: [{ id: "t91", title: "Agent board only", status: "pending" }] }),
 				workspaceFacts: {},
 				keybindings: { getKeys: () => [] },
-				observability: { bindRunReaders: () => noop, snapshot: () => ({}), subscribe: () => noop },
+				telemetry: { bindRunReaders: () => noop, snapshot: () => ({}), subscribe: () => noop },
 				factories: {
 					createBanner: () => ({}),
 					createChatPanel: () => ({}),

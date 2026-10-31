@@ -4,12 +4,12 @@ import {
 	emptyResponseModelIdObservationCounts,
 } from "../../core/response-model-id.js";
 import type { CallSettled } from "../../core/telemetry/schemas.js";
-import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
+import type { CostAggregate, CostEntryLabel } from "../telemetry/cost.js";
 import { usageCallsFromAttempts } from "./journal-usage.js";
 import type { LedgerUsageCall } from "./usage.js";
 
-/** The slice of ObservabilityContract a reseed needs. */
+/** The slice of TelemetryContract a reseed needs. */
 export interface SessionUsageSink {
 	recordRunTokens?(
 		runId: string,

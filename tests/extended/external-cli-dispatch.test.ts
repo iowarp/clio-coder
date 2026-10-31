@@ -114,7 +114,7 @@ test("managed Codex CLI dispatch seals success and cancellation receipts", { tim
 			cost: "missing",
 			sessionId: "fixture-thread",
 			exitReason: "stop",
-			toolObservability: "unavailable",
+			toolTelemetry: "unavailable",
 		});
 		equal(receipt.costProvenance, "unknown");
 		equal(receipt.reproducibility?.cwd, root);
@@ -213,7 +213,7 @@ for (const event of [
 			cost: "peer-estimated",
 			sessionId: "pi-session",
 			exitReason: "stop",
-			toolObservability: "unavailable",
+			toolTelemetry: "unavailable",
 		});
 		const stateDir = process.env.CLIO_CODER_STATE_DIR;
 		ok(stateDir);

@@ -28,7 +28,6 @@ import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { buildDispatchMemorySection } from "../domains/memory/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
-import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
@@ -37,6 +36,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SessionCostCeilingError } from "../domains/scheduling/budget.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { TelemetryDomainModule } from "../domains/telemetry/index.js";
 import type { ImageContent } from "../engine/types.js";
 import type { HeadlessRunDeadline } from "../entry/boot-options.js";
 import { assistantTextFromEvent } from "../tools/dispatch-event-text.js";
@@ -651,11 +651,11 @@ async function runDispatch(
 		AgentsDomainModule,
 		MiddlewareDomainModule,
 		SessionDomainModule,
-		// Observability subscribes to the dispatch terminal events so a headless
+		// Telemetry subscribes to the dispatch terminal events so a headless
 		// run auto-builds its forensic evidence bundle and sidecar index, the same
 		// as an interactive session. It depends only on providers + session, both
 		// loaded above.
-		ObservabilityDomainModule,
+		TelemetryDomainModule,
 		SchedulingDomainModule,
 		createDispatchDomainModule({
 			getSettings: () => effectiveSettings,

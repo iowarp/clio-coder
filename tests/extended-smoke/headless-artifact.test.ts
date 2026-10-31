@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { evidenceDirectory } from "../../src/domains/evidence/store.js";
-import { readEvidenceIndex } from "../../src/domains/observability/evidence-index.js";
+import { readEvidenceIndex } from "../../src/domains/telemetry/evidence-index.js";
 import {
 	closeServer,
 	hasToolExchange,

@@ -66,14 +66,6 @@ import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enf
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
-import {
-	aggregateCostAmounts,
-	type CostAggregate,
-	ObservabilityDomainModule,
-	renderCostAggregate,
-	renderCostAmount,
-} from "../domains/observability/index.js";
-import { type RunTokenField, runsTotal } from "../domains/observability/read-model.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import {
 	type CostProvenance,
@@ -87,6 +79,14 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { budgetRemainingText, budgetSpendText, SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import {
+	aggregateCostAmounts,
+	type CostAggregate,
+	renderCostAggregate,
+	renderCostAmount,
+	TelemetryDomainModule,
+} from "../domains/telemetry/index.js";
+import { type RunTokenField, runsTotal } from "../domains/telemetry/read-model.js";
 import { runFleetWithShutdown } from "./fleet-lifecycle.js";
 import { fleetInspectionScope } from "./fleet-project-scope.js";
 import { createFleetReporter } from "./fleet-reporting.js";
@@ -299,7 +299,7 @@ async function runFleet(
 		createPromptsDomainModule({ noContextFiles: true }),
 		AgentsDomainModule,
 		MiddlewareDomainModule,
-		ObservabilityDomainModule,
+		TelemetryDomainModule,
 		SchedulingDomainModule,
 		// A fleet step is dispatched by executeFleetRun, which drains the handle
 		// itself and never builds a dispatch event registry, so the domain is the

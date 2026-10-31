@@ -45,7 +45,7 @@ export interface TokenThroughputSnapshot {
 }
 
 /**
- * One bounded, product-facing observability event: an evidence build that
+ * One bounded, product-facing telemetry event: an evidence build that
  * failed for a run, read by the Dispatch Board to explain why a run has no
  * evidence bundle. This used to also carry runtime/middleware/safety/loop/
  * tool-budget/context/budget notices classified off the same bus channels the
@@ -55,7 +55,7 @@ export interface TokenThroughputSnapshot {
  * own here and were removed rather than kept as an unread second opinion.
  * `message` is a short rendered line and `ref` links back to the run.
  */
-export interface ObservabilityNotice {
+export interface TelemetryNotice {
 	kind: "evidence";
 	level: "info" | "warning" | "error";
 	message: string;
@@ -70,7 +70,7 @@ export interface ObservabilityNotice {
  * progress is a bounded, redacted presentation of the live stream. `evidence`
  * is populated asynchronously once the forensic bundle for the run finalizes.
  */
-export interface ObservabilityRunSummary {
+export interface TelemetryRunSummary {
 	runId: string;
 	agentId: string;
 	targetId?: string;
@@ -122,7 +122,7 @@ export interface ObservabilityRunSummary {
  * It is the `accountability.evidenceReady` payload ACP forwards; the run
  * summary keeps only `evidenceId`.
  */
-export interface ObservabilityRunEvidence {
+export interface TelemetryRunEvidence {
 	evidenceId: string;
 	firstPassSuccess: boolean;
 	findingCount: number;
@@ -130,24 +130,24 @@ export interface ObservabilityRunEvidence {
 }
 
 /**
- * Single product-facing projection of the observability domain. A materialized,
+ * Single product-facing projection of the telemetry domain. A materialized,
  * bounded read model folded from the event bus plus the session cost tracker.
  * `generatedAt` is the wall-clock time the snapshot object was assembled.
  */
-export interface ObservabilitySnapshot {
+export interface TelemetrySnapshot {
 	generatedAt: number;
 	session: {
 		cost: CostAggregate;
 		tokens: UsageBreakdown;
 		latestThroughput: TokenThroughputSnapshot | null;
 	};
-	runs: readonly ObservabilityRunSummary[];
-	notices: readonly ObservabilityNotice[];
+	runs: readonly TelemetryRunSummary[];
+	notices: readonly TelemetryNotice[];
 	pendingEvidenceBuildRunIds: readonly string[];
 }
 
 /** Runtime readers supplied after dispatch is composed, avoiding a domain dependency cycle. */
-export interface ObservabilityRunReaders {
+export interface TelemetryRunReaders {
 	dispatchSnapshot?: () => DispatchSnapshot;
 	readReceipt?: (
 		runId: string,
@@ -155,13 +155,13 @@ export interface ObservabilityRunReaders {
 }
 
 /** Run projection controls shared by the contract and the in-memory projection. */
-export interface ObservabilityRunProjection {
+export interface TelemetryRunProjection {
 	/** Bind live dispatch and receipt readers; disposal detaches this binding only. */
-	bindRunReaders(readers: ObservabilityRunReaders): () => void;
+	bindRunReaders(readers: TelemetryRunReaders): () => void;
 	/** Fold retry timers and live counters from the dispatch reader. */
 	reconcileRuns(): void;
 	/** Record an explicit fleet position, including before a run's first event. */
-	setFleetPhase(runId: string, phase: NonNullable<ObservabilityRunSummary["phase"]>): void;
+	setFleetPhase(runId: string, phase: NonNullable<TelemetryRunSummary["phase"]>): void;
 }
 
 /** One session's telemetry DTOs over one fixed read; every quantity carries its fact, display and ref (#434 §11). */
@@ -204,13 +204,13 @@ export interface TelemetryReadModel {
 	subscribe(topic: TelemetryTopic, listener: (update: TelemetryUpdateV1) => void): () => void;
 }
 
-export interface ObservabilityContract extends ObservabilityRunProjection {
-	/** Absent on contracts built without the observability extension, such as test doubles. */
+export interface TelemetryContract extends TelemetryRunProjection {
+	/** Absent on contracts built without the telemetry extension, such as test doubles. */
 	telemetry?: TelemetryReadModel;
 	recordRunTokens?(
 		runId: string,
 		source: "journal" | "unavailable",
-		...args: Parameters<ObservabilityContract["recordTokens"]>
+		...args: Parameters<TelemetryContract["recordTokens"]>
 	): void;
 	/** Running session USD cost. */
 	sessionCost(): number;
@@ -279,12 +279,12 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 	 * (active runs, bounded terminal history/notices, session cost/tokens and the
 	 * latest throughput) into a fresh immutable snapshot.
 	 */
-	snapshot(): ObservabilitySnapshot;
+	snapshot(): TelemetrySnapshot;
 	/**
 	 * Subscribe to projection updates. The listener is invoked immediately with
 	 * the current snapshot, then on each coalesced change. Returns an unsubscribe
 	 * function; high-frequency bus events are debounced so consumers are not
 	 * thrashed. The listener must stay cheap and non-blocking.
 	 */
-	subscribe(listener: (snapshot: ObservabilitySnapshot) => void): () => void;
+	subscribe(listener: (snapshot: TelemetrySnapshot) => void): () => void;
 }

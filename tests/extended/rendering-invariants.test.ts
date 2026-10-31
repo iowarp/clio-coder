@@ -3,14 +3,14 @@ import { describe, it } from "node:test";
 import type { OutputStyle } from "../../src/core/defaults.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
-import type { TelemetryView } from "../../src/domains/observability/contract.js";
+import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
+import type { WorkerRunEntry } from "../../src/domains/session/index.js";
+import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
 import {
 	createWorkerProgressFold,
 	WORKER_ACTION_TRAIL_LIMIT,
 	WORKER_TOOL_NAME_LIMIT,
-} from "../../src/domains/observability/worker-progress.js";
-import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
-import type { WorkerRunEntry } from "../../src/domains/session/index.js";
+} from "../../src/domains/telemetry/worker-progress.js";
 import {
 	InstrumentedTuiAltScreen,
 	ScrollView,

@@ -1,8 +1,8 @@
 import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import { COST_NOT_MEASURED, renderCompactCount } from "../core/telemetry/render.js";
-import type { TelemetryView } from "../domains/observability/contract.js";
 import { usageCoverageLabel } from "../domains/session/usage.js";
+import type { TelemetryView } from "../domains/telemetry/contract.js";
 import { type ReasoningUsageView, reasoningFromQuantity } from "./status/reasoning.js";
 
 /**

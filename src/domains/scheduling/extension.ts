@@ -16,7 +16,7 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import { recordTelemetry } from "../../core/telemetry/producer.js";
 import type { Payload } from "../../core/telemetry/schemas.js";
 import type { ConfigContract } from "../config/contract.js";
-import type { ObservabilityContract } from "../observability/contract.js";
+import type { TelemetryContract } from "../telemetry/contract.js";
 import {
 	type BudgetSpendPricing,
 	combineBudgetPricing,
@@ -51,7 +51,7 @@ export function createSchedulingBundle(
 	const maybeConfig = context.getContract<ConfigContract>("config");
 	if (!maybeConfig) throw new Error("scheduling domain requires 'config' contract");
 	const config: ConfigContract = maybeConfig;
-	const observability = context.getContract<ObservabilityContract>("observability");
+	const telemetry = context.getContract<TelemetryContract>("telemetry");
 
 	const settings = config.get();
 	let budget = createBudgetState(settings.safety.limits.sessionCostUsd);
@@ -78,14 +78,14 @@ export function createSchedulingBundle(
 
 	function evaluate(): { verdict: ReturnType<typeof budget.checkCeiling>; currentUsd: number } {
 		syncBudget();
-		const currentUsd = observability?.sessionCost() ?? 0;
+		const currentUsd = telemetry?.sessionCost() ?? 0;
 		return { verdict: budget.checkCeiling(currentUsd), currentUsd };
 	}
 
 	/** How the session's spend was priced, read where a stop names it; enforcement reads sessionCost() alone. */
 	function sessionPricing(): BudgetSpendPricing | undefined {
-		// A minimal observability stub may lack the summary; the stop then names its spend as before.
-		const summary = observability?.sessionCostSummary?.();
+		// A minimal telemetry stub may lack the summary; the stop then names its spend as before.
+		const summary = telemetry?.sessionCostSummary?.();
 		return summary ? { estimated: summary.hasEstimated, unpriced: summary.hasUnknown } : undefined;
 	}
 

@@ -1,4 +1,4 @@
-import type { WorkerProgressSnapshot } from "../domains/observability/worker-progress.js";
+import type { WorkerProgressSnapshot } from "../domains/telemetry/worker-progress.js";
 import { GLYPH } from "./theme/index.js";
 
 /**

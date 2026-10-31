@@ -36,7 +36,7 @@ This document defines the core architectural concepts and terminology used throu
 
 ### 8. Phase
 - **Definition**: A designated execution interval within a run. Every trace event and spend row is keyed to one `phaseId`, and the `phases` table is opened alongside `runs` for each operator turn.
-- **Owning Type**: `TraceEventInput.phaseId` and the `phases` table in [trace-store.ts](../../src/domains/observability/trace-store.ts).
+- **Owning Type**: `TraceEventInput.phaseId` and the `phases` table in [trace-store.ts](../../src/domains/telemetry/trace-store.ts).
 
 ### 9. Gate
 - **Definition**: A validation or review barrier (such as a read-only reviewer verdict or a compete judge decision) determining whether candidate diffs are merged or revised.

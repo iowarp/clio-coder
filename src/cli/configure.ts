@@ -22,7 +22,6 @@ import {
 import { resolveClioDirs } from "../core/xdg.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
-import { renderCostAmount } from "../domains/observability/cost.js";
 import { openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import {
 	buildProviderSupportEntry,
@@ -48,6 +47,7 @@ import {
 	observeHostCapacityFacts,
 	resolveLocalConcurrency,
 } from "../domains/scheduling/local-capacity.js";
+import { renderCostAmount } from "../domains/telemetry/cost.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { ask, askYesNo } from "./ask.js";
 import { editSettingControl, orderedSectionControls } from "./configure-controls.js";

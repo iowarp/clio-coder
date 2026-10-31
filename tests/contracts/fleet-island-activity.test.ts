@@ -1,6 +1,6 @@
 import { doesNotMatch, match } from "node:assert/strict";
 import { test } from "node:test";
-import type { WorkerProgressSnapshot } from "../../src/domains/observability/worker-progress.js";
+import type { WorkerProgressSnapshot } from "../../src/domains/telemetry/worker-progress.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { type DispatchBoardRow, formatTaskIslandLines } from "../../src/interactive/dispatch-board.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";

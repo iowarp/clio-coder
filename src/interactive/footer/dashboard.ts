@@ -3,8 +3,6 @@ import { readHarnessProfile } from "../../core/harness-profile.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
-import type { TelemetryView } from "../../domains/observability/contract.js";
-import type { TokenThroughputSnapshot } from "../../domains/observability/index.js";
 import type { CapabilityFlags, ProvidersContract } from "../../domains/providers/index.js";
 import { acceptsImageInput } from "../../domains/providers/index.js";
 import type { UsageSnapshot } from "../../domains/quota/types.js";
@@ -13,6 +11,8 @@ import type { ContextUsageSnapshot } from "../../domains/session/context-account
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
+import type { TelemetryView } from "../../domains/telemetry/contract.js";
+import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
 import { getKeybindings, Text } from "../../engine/tui.js";
 import { getCurrentBranch } from "../../utils/git.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";

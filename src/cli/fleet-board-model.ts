@@ -33,9 +33,9 @@ import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { trustStateWord, trustVerdictWord, validationClause } from "../domains/evidence/trust-projection.js";
 import { retiredIntegrityVersionOf } from "../domains/evidence/trust-status.js";
-import { costAggregateForAmount, formatCostAggregate } from "../domains/observability/cost.js";
-import { addGroup, emptyFactSum, foldFacts, foldRunJournal, sumFactSums } from "../domains/observability/folds.js";
-import { READ_MODEL_FOLD, runTokenCount } from "../domains/observability/read-model.js";
+import { costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/cost.js";
+import { addGroup, emptyFactSum, foldFacts, foldRunJournal, sumFactSums } from "../domains/telemetry/folds.js";
+import { READ_MODEL_FOLD, runTokenCount } from "../domains/telemetry/read-model.js";
 
 /** Lines the feed's writer dropped or this reader skipped: calls whose tokens the fold never saw. */
 const UNREAD: Fact<number> = { kind: "unknown", reason: "not-observed" };

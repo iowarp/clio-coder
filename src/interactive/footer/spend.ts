@@ -1,7 +1,7 @@
 import type { FactMetric, Quantity } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
 import { renderCompactCount, renderCount } from "../../core/telemetry/render.js";
-import type { TelemetryView } from "../../domains/observability/contract.js";
+import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import { type ReasoningUsageView, reasoningFromQuantity } from "../status/reasoning.js";
 
 /**

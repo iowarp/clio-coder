@@ -9,12 +9,12 @@ import { evidenceReceiptCopyPath, receiptFromEvidenceCopy, receiptTombstoneOf } 
 import type { RunEnvelope, RunReceipt } from "../dispatch/types.js";
 import type { ReceiptIntegrityOutcome } from "../evidence/trust-status.js";
 import { verifyReceiptIntegrityOutcome } from "../evidence/trust-status.js";
-import type { CallJournalRead } from "../observability/call-journal.js";
-import { readCallJournal, readCallJournalSync } from "../observability/call-journal.js";
-import type { OutOfTurnUsageRow } from "../observability/out-of-turn-usage.js";
-import { outOfTurnUsagePath, parseOutOfTurnUsageRows } from "../observability/out-of-turn-usage.js";
-import type { JournalSource, ProcessIdentity, SessionSource } from "../observability/read-model.js";
-import { journalSourceFromRead } from "../observability/read-model.js";
+import type { CallJournalRead } from "../telemetry/call-journal.js";
+import { readCallJournal, readCallJournalSync } from "../telemetry/call-journal.js";
+import type { OutOfTurnUsageRow } from "../telemetry/out-of-turn-usage.js";
+import { outOfTurnUsagePath, parseOutOfTurnUsageRows } from "../telemetry/out-of-turn-usage.js";
+import type { JournalSource, ProcessIdentity, SessionSource } from "../telemetry/read-model.js";
+import { journalSourceFromRead } from "../telemetry/read-model.js";
 import type { SessionEntry, SessionHeader } from "./entries.js";
 import { isSessionEntry, isSessionHeader } from "./entries.js";
 import type { LegacyReceiptSeal } from "./legacy-import.js";

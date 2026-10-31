@@ -14,16 +14,12 @@ import { runKindSupportsLiveSteering } from "../domains/dispatch/types.js";
 import { describeWriteBoundaryAttributionDowngrade } from "../domains/dispatch/write-boundary.js";
 import type { TrustSummaryProjection, TrustVerdict } from "../domains/evidence/trust-projection.js";
 import { trustStateWord } from "../domains/evidence/trust-projection.js";
-import type {
-	ObservabilityContract,
-	ObservabilityRunSummary,
-	TelemetryView,
-} from "../domains/observability/contract.js";
-import type { ObservabilityNotice, ObservabilitySnapshot } from "../domains/observability/index.js";
-import type { WorkerAction, WorkerProgressSnapshot } from "../domains/observability/worker-progress.js";
 import { foregroundStreamUsage } from "../domains/providers/index.js";
 import type { UsageSnapshot } from "../domains/quota/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import type { TelemetryContract, TelemetryRunSummary, TelemetryView } from "../domains/telemetry/contract.js";
+import type { TelemetryNotice, TelemetrySnapshot } from "../domains/telemetry/index.js";
+import type { WorkerAction, WorkerProgressSnapshot } from "../domains/telemetry/worker-progress.js";
 import type { Component } from "../engine/tui.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { COUNCIL_SYNTHESIS_LABEL } from "../session-control/council.js";
@@ -52,7 +48,7 @@ import {
 import { fitIdentityLabel } from "./theme/labels.js";
 import { workerActivityWords } from "./worker-activity.js";
 
-export type DispatchBoardStatus = ObservabilityRunSummary["status"];
+export type DispatchBoardStatus = TelemetryRunSummary["status"];
 
 export interface DispatchRetryPresentation {
 	attempt: number;
@@ -125,7 +121,7 @@ export interface DispatchBoardRow {
 	 * worker is doing rather than a richer spinner.
 	 */
 	progress?: WorkerProgressSnapshot;
-	resultContract?: ObservabilityRunSummary["resultContract"];
+	resultContract?: TelemetryRunSummary["resultContract"];
 	/**
 	 * Id of the receipt sealed for this run (`receipts/<runId>.json`, the id
 	 * `clio-coder trace` takes). Set only once a terminal dispatch event has
@@ -377,12 +373,12 @@ export function dispatchStatusPresentation(
 	}
 }
 
-/** Evidence-readiness state for a dispatch run, derived from the observability projection. */
+/** Evidence-readiness state for a dispatch run, derived from the telemetry projection. */
 export type EvidenceState = "pending" | "ready" | "failed" | "none";
 
 /**
  * Compact, presentation-ready evidence readiness for one run. Derived purely
- * from an ObservabilitySnapshot: no evidence files are read and no /view
+ * from a TelemetrySnapshot: no evidence files are read and no /view
  * artifact bodies are inspected. `viewFilter` is the `/view` deep-link an
  * operator would type to inspect the run or its bundle.
  */
@@ -399,7 +395,7 @@ export interface RunEvidencePresentation {
 // A run's evidence failure is signalled by its latest evidence notice carrying
 // the error level and this run's id; a trailing warning/info notice for the same
 // run is not a failure, and a notice without ref.runId is not attributed here.
-function latestEvidenceFailureReason(notices: readonly ObservabilityNotice[], runId: string): string | null {
+function latestEvidenceFailureReason(notices: readonly TelemetryNotice[], runId: string): string | null {
 	for (let index = notices.length - 1; index >= 0; index -= 1) {
 		const notice = notices[index];
 		if (!notice) continue;
@@ -412,14 +408,14 @@ function latestEvidenceFailureReason(notices: readonly ObservabilityNotice[], ru
 }
 
 /**
- * Fold an ObservabilitySnapshot into the evidence readiness for one run. Cheap
+ * Fold a TelemetrySnapshot into the evidence readiness for one run. Cheap
  * and pure: it scans the bounded run and notice rings the projection already
  * maintains and reads no evidence files. Pending outranks a stale ready bundle
  * because an in-flight rebuild is the more current signal; a matching run
  * summary with an evidence bundle is ready; the latest error-level evidence
  * notice for the run marks it failed.
  */
-function deriveRunEvidenceState(snapshot: ObservabilitySnapshot | undefined, runId: string): RunEvidencePresentation {
+function deriveRunEvidenceState(snapshot: TelemetrySnapshot | undefined, runId: string): RunEvidencePresentation {
 	if (!snapshot || runId.length === 0) return { state: "none", viewFilter: `dispatch:${runId}` };
 	if (snapshot.pendingEvidenceBuildRunIds.includes(runId)) {
 		return { state: "pending", viewFilter: `evidence:${runId}` };
@@ -583,7 +579,7 @@ function progressAnswerLines(
 	progress: WorkerProgressSnapshot,
 	runId: string,
 	contentWidth: number,
-	contract: ObservabilityRunSummary["resultContract"],
+	contract: TelemetryRunSummary["resultContract"],
 	maxRows = WORKER_PROGRESS_CARD_ROWS,
 ): string[] {
 	if (progress.tailText.length === 0) return [];
@@ -814,7 +810,7 @@ function renderDispatchCard(
 			...wrapTextWithAnsi(`${cardKvKey(theme, "record")}${theme.fg("warning", `open: ${warning}`)}`, contentWidth),
 		);
 	}
-	// The proof row is present only when the observability projection knows an
+	// The proof row is present only when the telemetry projection knows an
 	// evidence state for this run; an unknown/none state adds no line, so cards
 	// without evidence keep their existing three-line body.
 	if (evidence) {
@@ -1055,7 +1051,7 @@ function renderCouncilCard(group: CouncilGroupView, width: number): string[] {
 function formatDispatchBoardLines(
 	rows: ReadonlyArray<DispatchBoardRow>,
 	width = 76,
-	observability?: ObservabilitySnapshot,
+	telemetry?: TelemetrySnapshot,
 	selectedRunId?: string | null,
 	/** Whether the selected row renders its worker-progress detail. Off by default. */
 	detailExpanded = false,
@@ -1087,7 +1083,7 @@ function formatDispatchBoardLines(
 	const cards = dispatchBoardItems(rows, selectedRunId).map((item) =>
 		item.kind === "council"
 			? renderCouncilCard(item.group, width)
-			: renderDispatchCard(item.row, width, deriveRunEvidenceState(observability, item.row.runId), {
+			: renderDispatchCard(item.row, width, deriveRunEvidenceState(telemetry, item.row.runId), {
 					selected: item.row.runId === selectedRunId,
 					expanded: detailExpanded && item.row.runId === selectedRunId,
 					...(item.row.endpoint !== undefined
@@ -1110,7 +1106,7 @@ function formatDispatchBoardLines(
  * Live dispatch-board component. Cards render at the width the TUI actually
  * grants instead of a baked-in 76-column layout, so a narrow terminal no
  * longer clips telemetry mid-token and a wide one no longer wastes the frame.
- * Rows and the observability snapshot are read per render. The board is a pure
+ * Rows and the telemetry snapshot are read per render. The board is a pure
  * consumer: its owner reconciles the store on the shared UI polling cycle.
  * The only local state is the selected run id, kept stable across
  * lifecycle-driven reorders; ticker plus bus-driven requestRender calls drive
@@ -1128,7 +1124,7 @@ export interface DispatchBoardView extends Component {
 
 export function createDispatchBoardView(
 	rows: () => ReadonlyArray<DispatchBoardRow>,
-	observability: () => ObservabilitySnapshot | undefined,
+	telemetry: () => TelemetrySnapshot | undefined,
 ): DispatchBoardView {
 	let selectedRunId: string | null = null;
 	// Detail is a property of the operator's attention, not of a run, so it
@@ -1172,7 +1168,7 @@ export function createDispatchBoardView(
 		render(width: number): string[] {
 			const currentRows = rows();
 			normalizeSelection(currentRows);
-			return formatDispatchBoardLines(currentRows, Math.max(1, width), observability(), selectedRunId, expanded);
+			return formatDispatchBoardLines(currentRows, Math.max(1, width), telemetry(), selectedRunId, expanded);
 		},
 		selectedRow(): DispatchBoardRow | null {
 			return normalizeSelection(rows());
@@ -1281,7 +1277,7 @@ function isTerminalStatus(status: DispatchBoardStatus): boolean {
 	return status === "completed" || status === "failed" || status === "aborted" || status === "dead";
 }
 
-function toRow(entry: ObservabilityRunSummary, now: number, usage: DispatchRunUsage): DispatchBoardRow {
+function toRow(entry: TelemetryRunSummary, now: number, usage: DispatchRunUsage): DispatchBoardRow {
 	const retry = entry.retry;
 	const progress = entry.progress;
 	return {
@@ -1351,9 +1347,9 @@ export function dispatchRunUsage(view: TelemetryView | null | undefined, runId: 
 	return view ? (runUsagesOf(view).get(runId) ?? PENDING) : UNAVAILABLE;
 }
 
-/** The board keeps display order and reads every run fact from observability; tokens and cost from its read model. */
+/** The board keeps display order and reads every run fact from telemetry; tokens and cost from its read model. */
 export function createDispatchBoardStore(
-	projection: Pick<ObservabilityContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "telemetry">,
+	projection: Pick<TelemetryContract, "snapshot" | "subscribe" | "reconcileRuns" | "setFleetPhase" | "telemetry">,
 ): {
 	rows(): ReadonlyArray<DispatchBoardRow>;
 	activeRows(): ReadonlyArray<DispatchBoardRow>;

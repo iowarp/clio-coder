@@ -248,9 +248,9 @@ const PATH_WRITES = new Map<string, number[]>([
 	["safeResourceWriteAsync", [0]],
 ]);
 
-/** Only the observability domain writes under the telemetry paths; every other module goes through its writers (#434 §5.1). */
+/** Only the telemetry domain writes under the telemetry paths; every other module goes through its writers (#434 §5.1). */
 export function checkTelemetryWrites(file: string, source: string): string[] {
-	if (file.startsWith("src/domains/observability/")) return [];
+	if (file.startsWith("src/domains/telemetry/")) return [];
 	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 	// A path is usually built a step or two before the write, so a name expands to what this file assigns it.
 	const definitions = new Map<string, ts.Node[]>();
@@ -304,7 +304,7 @@ export function checkTelemetryWrites(file: string, source: string): string[] {
 			if (!match) continue;
 			const line = tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
 			violations.push(
-				`rule11: ${file}:${line} writes under a telemetry path (${match[1]}) outside the observability domain; go through the observability writers`,
+				`rule11: ${file}:${line} writes under a telemetry path (${match[1]}) outside the telemetry domain; go through the telemetry writers`,
 			);
 			break;
 		}

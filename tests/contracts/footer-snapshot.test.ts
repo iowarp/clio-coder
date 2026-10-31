@@ -1,6 +1,6 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import type { TelemetryView } from "../../src/domains/observability/contract.js";
+import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { DASHBOARD_PAGES, renderCompactDashboard, renderDashboardPage } from "../../src/interactive/footer/pages.js";

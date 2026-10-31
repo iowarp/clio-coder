@@ -17,8 +17,8 @@ import {
 	parseTaskMemoryTelemetryRecord,
 	taskMemoryTelemetryRecord,
 } from "../../src/domains/memory/task-memory-telemetry.js";
-import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
-import { openCallJournal } from "../../src/domains/observability/call-journal.js";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const ZERO = { added: 0, updated: 0, deleted: 0 };

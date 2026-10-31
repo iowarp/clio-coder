@@ -77,7 +77,7 @@ function renderUnknown(reason: Extract<Fact<unknown>, { kind: "unknown" }>["reas
 }
 
 /**
- * The structural shape of a folded cost claim, shared with the observability `CostAggregate`. `calls` counts the
+ * The structural shape of a folded cost claim, shared with the telemetry `CostAggregate`. `calls` counts the
  * priced or unpriced contributions; zero calls is no claim, not a measured `$0.00`.
  */
 export interface CostClaim {

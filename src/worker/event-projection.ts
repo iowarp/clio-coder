@@ -19,7 +19,7 @@
  *     last assistant `message_end` (src/tools/dispatch.ts,
  *     src/domains/dispatch/extension.ts), and
  *   - token accounting reads `message_end.message.usage`
- *     (src/domains/observability/projection.ts, dispatch-board.ts).
+ *     (src/domains/telemetry/projection.ts, dispatch-board.ts).
  *
  * The in-process orchestrator surfaces that DO render `assistantMessageEvent.partial`
  * live (chat-loop, ACP server, status state machine) subscribe to their own

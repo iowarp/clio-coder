@@ -18,7 +18,7 @@
 
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
-import { appendResearchTraceLine, RESEARCH_TRACE_FILES, researchTracePath } from "../observability/research-files.js";
+import { appendResearchTraceLine, RESEARCH_TRACE_FILES, researchTracePath } from "../telemetry/research-files.js";
 import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
 import {
 	createDurableQualitySourceCache,

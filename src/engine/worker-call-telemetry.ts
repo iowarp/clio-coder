@@ -8,8 +8,8 @@ import { createTelemetryForwarder } from "../core/telemetry/forwarder.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall, recordTelemetry } from "../core/telemetry/producer.js";
 import type { CallStarted } from "../core/telemetry/schemas.js";
-import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
 import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
 import { hasAssistantGenerationDelta } from "./generation-delta.js";
 
 type Request = Pick<CallStarted, "roundKind" | "toolChoice">;

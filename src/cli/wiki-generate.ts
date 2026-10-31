@@ -37,9 +37,6 @@ import { callLevelUpstreamResponses, type RunReceipt } from "../domains/dispatch
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
-import { renderCostAmount } from "../domains/observability/cost.js";
-import { createObservabilityDomainModule } from "../domains/observability/index.js";
-import { runsCost, runsTotal } from "../domains/observability/read-model.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { canonicalizeWireModelId, type ProvidersContract, ProvidersDomainModule } from "../domains/providers/index.js";
 import { ResourcesDomainModule } from "../domains/resources/index.js";
@@ -47,6 +44,9 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { renderCostAmount } from "../domains/telemetry/cost.js";
+import { createTelemetryDomainModule } from "../domains/telemetry/index.js";
+import { runsCost, runsTotal } from "../domains/telemetry/read-model.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
@@ -1056,7 +1056,7 @@ async function loadWikiDispatch(): Promise<{
 		AgentsDomainModule,
 		MiddlewareDomainModule,
 		SessionDomainModule,
-		createObservabilityDomainModule({ dispatchTrace: false }),
+		createTelemetryDomainModule({ dispatchTrace: false }),
 		SchedulingDomainModule,
 		createDispatchDomainModule({ journalRunEvents: true, workerHooks: workerHooks.workerHooks }),
 	]);

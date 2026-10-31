@@ -11,8 +11,8 @@ import type { CallMessageObserver } from "../../../core/telemetry/producer.js";
 import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
 import type { MemoryCompactionOffer, MemoryConsumptionReceipt } from "../../memory/contract.js";
 import { observationTracing, traceObservation } from "../../memory/observation-trace.js";
-import type { AdmissionHold, CallJournalOptions, CallScope } from "../../observability/call-scope.js";
-import { openCallScope } from "../../observability/call-scope.js";
+import type { AdmissionHold, CallJournalOptions, CallScope } from "../../telemetry/call-scope.js";
+import { openCallScope } from "../../telemetry/call-scope.js";
 
 export {
 	COMPACTION_SYSTEM_PROMPT,

@@ -8,8 +8,8 @@ import { gateTopology } from "../../../../../src/domains/dispatch/gate-topology.
 import { readReceiptTextSync } from "../../../../../src/domains/dispatch/receipt-store.js";
 import { type FleetRunRecord, openLedger, readFleetRun } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
-import { runRowTelemetry } from "../../../../../src/domains/observability/read-model.js";
 import { loadRunReceiptEvidence, loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
+import { runRowTelemetry } from "../../../../../src/domains/telemetry/read-model.js";
 import { Id } from "../../../contracts/common.js";
 import {
 	Councils,

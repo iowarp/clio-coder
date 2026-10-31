@@ -1,4 +1,4 @@
-import { renderCreditAmount } from "../observability/cost.js";
+import { renderCreditAmount } from "../telemetry/cost.js";
 /**
  * Shared reader for Anthropic's OAuth usage endpoint.
  *

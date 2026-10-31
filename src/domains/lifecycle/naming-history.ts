@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { TraceReader } from "../observability/trace-store.js";
+import { TraceReader } from "../telemetry/trace-store.js";
 
 const HISTORY_FILE_LIMIT = 10_000;
 const HISTORY_FILE_BYTE_LIMIT = 8 * 1024 * 1024;

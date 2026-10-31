@@ -3,6 +3,13 @@ import { join } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
+import type { RunListCursor } from "../../../../../src/domains/session/telemetry-source.js";
+import {
+	listRunTelemetrySources,
+	loadRunReceiptEvidence,
+	loadRunTelemetrySource,
+	loadSessionTelemetrySource,
+} from "../../../../../src/domains/session/telemetry-source.js";
 import {
 	cacheReport,
 	callsReport,
@@ -15,15 +22,8 @@ import {
 	sessionTelemetry,
 	timeline,
 	whyStopped,
-} from "../../../../../src/domains/observability/read-model.js";
-import { explainRepoRef, isRepoRef } from "../../../../../src/domains/observability/usage-window.js";
-import type { RunListCursor } from "../../../../../src/domains/session/telemetry-source.js";
-import {
-	listRunTelemetrySources,
-	loadRunReceiptEvidence,
-	loadRunTelemetrySource,
-	loadSessionTelemetrySource,
-} from "../../../../../src/domains/session/telemetry-source.js";
+} from "../../../../../src/domains/telemetry/read-model.js";
+import { explainRepoRef, isRepoRef } from "../../../../../src/domains/telemetry/usage-window.js";
 import { Id } from "../../../contracts/common.js";
 import type { TelemetryRequest } from "../../../contracts/telemetry.js";
 import { parseFactRef } from "../../../contracts/wire.js";

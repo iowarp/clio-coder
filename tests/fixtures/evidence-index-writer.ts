@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { writeEvidenceIndexRowQueued } from "../../src/domains/observability/evidence-index.js";
+import { writeEvidenceIndexRowQueued } from "../../src/domains/telemetry/evidence-index.js";
 
 const [stateDir, runId, startFile] = process.argv.slice(2);
 

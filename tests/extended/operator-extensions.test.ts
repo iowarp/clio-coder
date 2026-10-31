@@ -34,9 +34,9 @@ import {
 	removeExtension,
 } from "../../src/domains/extensions/state.js";
 import { isLoadableExtension } from "../../src/domains/extensions/types.js";
-import { TraceReader, TraceStore } from "../../src/domains/observability/trace-store.js";
 import { disablePlugin, enablePlugin, installPlugin, removePlugin } from "../../src/domains/plugins/state.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
+import { TraceReader, TraceStore } from "../../src/domains/telemetry/trace-store.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { ExtensionPanelView } from "../../src/interactive/overlays/extension-panel.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";

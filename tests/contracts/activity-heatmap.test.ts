@@ -1,7 +1,7 @@
 import { deepStrictEqual, doesNotMatch, match, ok } from "node:assert/strict";
 import { test } from "node:test";
-import type { TelemetryView } from "../../src/domains/observability/contract.js";
-import type { ObservabilityContract } from "../../src/domains/observability/index.js";
+import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
 import type { TUI } from "../../src/engine/tui.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { bucketActivity, renderActivityHeatmap } from "../../src/interactive/activity-view.js";
@@ -57,11 +57,11 @@ function activityOverlay(view: TelemetryView): string {
 			return { hide() {} };
 		},
 	} as unknown as TUI;
-	const observability = {
+	const telemetry = {
 		subscribe: () => () => {},
 		telemetry: { live: () => view, subscribe: () => () => {} },
-	} as unknown as ObservabilityContract;
-	const handle = openUsageOverlay(tui, observability, { now: () => new Date(2026, 8, 26, 12).getTime() });
+	} as unknown as TelemetryContract;
+	const handle = openUsageOverlay(tui, telemetry, { now: () => new Date(2026, 8, 26, 12).getTime() });
 	try {
 		const frame = dockTop(tui)?.frame;
 		ok(frame);

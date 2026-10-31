@@ -28,7 +28,6 @@ import { newRunId } from "../domains/dispatch/state.js";
 import type { RunReceipt } from "../domains/dispatch/types.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
-import { createObservabilityDomainModule } from "../domains/observability/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import { ProvidersDomainModule } from "../domains/providers/index.js";
@@ -36,6 +35,7 @@ import { ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { createTelemetryDomainModule } from "../domains/telemetry/index.js";
 import { armInternalDispatchDeadline } from "./internal-dispatch.js";
 import { createCliWorkerHooks } from "./worker-extension-hooks.js";
 
@@ -557,7 +557,7 @@ async function loadBootstrapDispatch(): Promise<{
 		// dispatch event, which costs `clio-coder context init` a module load it never
 		// reads back and prints Node's ExperimentalWarning over the command's own
 		// output. Receipts and the ledger still record the run.
-		createObservabilityDomainModule({ dispatchTrace: false }),
+		createTelemetryDomainModule({ dispatchTrace: false }),
 		SchedulingDomainModule,
 		createDispatchDomainModule({ workerHooks: workerHooks.workerHooks }),
 	]);

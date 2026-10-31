@@ -5,21 +5,21 @@ import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { readLayeredSettings } from "../core/settings-layers.js";
 import { encodeTelemetryLine } from "../core/telemetry/segment.js";
 import { clioStateDir } from "../core/xdg.js";
-import type { BundleContentClass } from "../domains/observability/bundle.js";
-import { exportTelemetryBundle, importTelemetryBundle } from "../domains/observability/bundle.js";
-import { callJournalHeader } from "../domains/observability/call-journal.js";
+import type { SessionEntry } from "../domains/session/entries.js";
+import { isSessionEntry } from "../domains/session/entries.js";
+import { importLegacySession } from "../domains/session/legacy-import.js";
+import type { BundleContentClass } from "../domains/telemetry/bundle.js";
+import { exportTelemetryBundle, importTelemetryBundle } from "../domains/telemetry/bundle.js";
+import { callJournalHeader } from "../domains/telemetry/call-journal.js";
 import {
 	grantTelemetryConsent,
 	readTelemetryConsent,
 	resolveConsentWorkspace,
 	revokeTelemetryConsent,
 	workspaceTelemetryCapture,
-} from "../domains/observability/consent.js";
-import { readOutOfTurnUsageRows } from "../domains/observability/out-of-turn-usage.js";
-import { applyTelemetryPrune, DEFAULT_PRUNE_POLICY, planTelemetryPrune } from "../domains/observability/retention.js";
-import type { SessionEntry } from "../domains/session/entries.js";
-import { isSessionEntry } from "../domains/session/entries.js";
-import { importLegacySession } from "../domains/session/legacy-import.js";
+} from "../domains/telemetry/consent.js";
+import { readOutOfTurnUsageRows } from "../domains/telemetry/out-of-turn-usage.js";
+import { applyTelemetryPrune, DEFAULT_PRUNE_POLICY, planTelemetryPrune } from "../domains/telemetry/retention.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder telemetry import-legacy <session-dir> --out <file>

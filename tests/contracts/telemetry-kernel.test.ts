@@ -22,7 +22,7 @@ import {
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { KIND_NAMES, KIND_REGISTRY, validPayload } from "../../src/core/telemetry/schemas.js";
 import { crc32, encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
-import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 
 const context = { sessionId: "existing-session-id", label: "main" as const };
 const header: SegmentHeader = {

@@ -37,8 +37,11 @@ import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { applyReceiptPrune, planReceiptPrune } from "../../src/domains/dispatch/receipt-prune.js";
 import { readReceiptTextSync } from "../../src/domains/dispatch/receipt-store.js";
-import { openCallJournal } from "../../src/domains/observability/call-journal.js";
-import type { RepoSource, SessionSource } from "../../src/domains/observability/read-model.js";
+import { isSessionEntry } from "../../src/domains/session/entries.js";
+import { importLegacySession } from "../../src/domains/session/legacy-import.js";
+import { loadRunTelemetrySource, loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
+import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import type { RepoSource, SessionSource } from "../../src/domains/telemetry/read-model.js";
 import {
 	cacheReport,
 	callsReport,
@@ -49,11 +52,8 @@ import {
 	sessionTelemetry,
 	timeline,
 	whyStopped,
-} from "../../src/domains/observability/read-model.js";
-import { createLiveTelemetryModel } from "../../src/domains/observability/telemetry-live.js";
-import { isSessionEntry } from "../../src/domains/session/entries.js";
-import { importLegacySession } from "../../src/domains/session/legacy-import.js";
-import { loadRunTelemetrySource, loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
+} from "../../src/domains/telemetry/read-model.js";
+import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import {
 	absentRenderedOtherwise,

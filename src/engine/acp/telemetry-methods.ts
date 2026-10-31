@@ -1,7 +1,7 @@
 import { Value } from "typebox/value";
 import type { CallFilter, CostReportV1, TelemetryUpdateV1 } from "../../core/telemetry/dto.js";
 import { CallFilterSchema, parseFactRef, TELEMETRY_TOPICS } from "../../core/telemetry/dto.js";
-import type { TelemetryReadModel, TelemetryView } from "../../domains/observability/contract.js";
+import type { TelemetryReadModel, TelemetryView } from "../../domains/telemetry/contract.js";
 import { AcpRequestError } from "./errors.js";
 import { ACP_TELEMETRY_METHODS } from "./types.js";
 

@@ -48,7 +48,7 @@ function observedUsage(call: CompactionCallObservation): OutOfTurnUsage & { cost
 export function recordFailedCompactionCalls(
 	origin: CompactionUsageOrigin,
 	calls: ReadonlyArray<CompactionCallObservation>,
-	observability?: BackgroundMemoryUsageSink,
+	telemetry?: BackgroundMemoryUsageSink,
 ): void {
 	for (const call of calls) {
 		if (call.callId) continue;
@@ -66,7 +66,7 @@ export function recordFailedCompactionCalls(
 		};
 		appendOutOfTurnUsageRow(origin.stateDir, row, { required: true });
 		if (call.failure?.invoked !== false)
-			observability?.recordTokens(
+			telemetry?.recordTokens(
 				origin.target,
 				origin.model,
 				usage.totalTokens ?? 0,

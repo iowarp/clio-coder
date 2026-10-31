@@ -10,9 +10,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Value } from "typebox/value";
 import { RunRowSchema } from "../../src/core/telemetry/dto.js";
-import { openCallJournal } from "../../src/domains/observability/call-journal.js";
-import { runRowTelemetry } from "../../src/domains/observability/read-model.js";
 import { listRunTelemetrySources, listRunTelemetrySourcesAsync } from "../../src/domains/session/telemetry-source.js";
+import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { runRowTelemetry } from "../../src/domains/telemetry/read-model.js";
 
 async function writeRunJournal(stateDir: string, runId: string, writtenAt: Date) {
 	const directory = join(stateDir, "runs", runId);

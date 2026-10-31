@@ -8,15 +8,15 @@ import { telemetryContext } from "../../src/core/telemetry/context.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
-import { readCallJournal } from "../../src/domains/observability/call-journal.js";
-import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
-import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { lockedSynthesisRepromptMessages } from "../../src/engine/loop-guard.js";
@@ -139,13 +139,13 @@ it("a main call journals its stages in Pi's order and its cache physics, a budge
 			agent = created.agent;
 			return created;
 		},
-		observability: {
+		telemetry: {
 			acquireTelemetrySession: journals.acquire,
 			recordSessionTurn() {},
 			recordTokens() {},
 			recordTokenThroughput() {},
 			recordNeverSentCalls() {},
-		} as unknown as ObservabilityContract,
+		} as unknown as TelemetryContract,
 		prompts: {
 			inputEpoch: () => (memory === "one" ? 0 : 1),
 			compileSessionPrompt: async () => ({
@@ -502,13 +502,13 @@ it("a main call journals the model change and the Codex transport resets the hos
 			runHook: () => ({ effects: [], ruleIds: [] }),
 		} as unknown as MiddlewareContract,
 		knownTargets: () => new Set([target.id]),
-		observability: {
+		telemetry: {
 			acquireTelemetrySession: journals.acquire,
 			recordSessionTurn() {},
 			recordTokens() {},
 			recordTokenThroughput() {},
 			recordNeverSentCalls() {},
-		} as unknown as ObservabilityContract,
+		} as unknown as TelemetryContract,
 		prompts: {
 			inputEpoch: () => 0,
 			compileSessionPrompt: async () => ({

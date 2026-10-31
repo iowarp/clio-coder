@@ -1,6 +1,6 @@
 import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.js";
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
-import { renderCostAmount } from "../domains/observability/cost.js";
+import { renderCostAmount } from "../domains/telemetry/cost.js";
 /**
  * `clio-coder fleet view <runId|fleetRootId> [--follow]`.
  *

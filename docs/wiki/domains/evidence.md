@@ -54,7 +54,7 @@ The domain has three consumers:
 - the `clio-coder evidence` CLI (`src/cli/evidence.ts`), for operators;
 - the `evidence` tool (`src/tools/evidence.ts`), which exposes ownership-scoped
   bundle reads to the model;
-- the observability domain (`src/domains/observability/extension.ts`), which
+- the observability domain (`src/domains/telemetry/extension.ts`), which
   auto-builds a bundle whenever a dispatch run terminates and folds a compact
   sidecar row into `<stateDir>/evidence-index.json`.
 
@@ -281,7 +281,7 @@ because every reader opens files by name.
 
 ## Upstream callers and downstream dependencies
 
-**Observability auto-build.** `src/domains/observability/extension.ts`
+**Observability auto-build.** `src/domains/telemetry/extension.ts`
 subscribes to `DispatchCompleted` and `DispatchFailed` on the dispatch bus. A
 terminal payload with a run id starts `buildAndIndexEvidence` without blocking the
 bus, and the extension's `stop()` flushes the in-flight promises so a headless
@@ -289,7 +289,7 @@ one-shot run still lands its bundle. `DispatchFailed` builds only when
 `dispatchHasEvidenceLedger(payload)` (the payload carries a lineage), because
 pre-admission failures never create a run ledger. After the build, a sidecar row
 goes to `<stateDir>/evidence-index.json` through
-`writeEvidenceIndexRowQueued` (`src/domains/observability/evidence-index.ts`),
+`writeEvidenceIndexRowQueued` (`src/domains/telemetry/evidence-index.ts`),
 and the extension emits `BusChannels.AccountabilityEvidenceReady`. The row's
 `firstPassSuccess` is true only when the run succeeded, had lineage attempt 0,
 and the bundle carries no `no-validation` tag.

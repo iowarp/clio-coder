@@ -7,12 +7,12 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { messageUsageForAccounting, rememberMessageCalls } from "../../src/core/message-accounting.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
-import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
-import { callCoverageForRun, createCostTracker, renderCostAggregate } from "../../src/domains/observability/cost.js";
-import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import { ledgerUsageCalls, type SessionEntry } from "../../src/domains/session/index.js";
 import { ledgerCallFailureCounts } from "../../src/domains/session/usage.js";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import { callCoverageForRun, createCostTracker, renderCostAggregate } from "../../src/domains/telemetry/cost.js";
+import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js";
 import {
 	remainingContextMaxTokens,
 	resolveReservedOutputTokens,
@@ -386,10 +386,9 @@ describe("contracts/metering integrity", () => {
 				neverInvokedCalls: 1,
 			});
 		}
-		const { contract: observability, extension } = createObservabilityBundle(
-			{ bus: createSafeEventBus() } as DomainContext,
-			{ dispatchTrace: false },
-		);
+		const { contract: telemetry, extension } = createTelemetryBundle({ bus: createSafeEventBus() } as DomainContext, {
+			dispatchTrace: false,
+		});
 		try {
 			const entries: SessionEntry[] = [];
 			const persistence = createTurnPersistence({
@@ -406,7 +405,7 @@ describe("contracts/metering integrity", () => {
 				consumePersistedEcho: () => false,
 				removeQueuedMirrorEntry: () => undefined,
 				promptCachePayloadForAssistant: () => ({}),
-				observability,
+				telemetry,
 			});
 			persistence.appendAssistantTurn(message);
 			persistence.appendAssistantTurn(message);
@@ -422,21 +421,21 @@ describe("contracts/metering integrity", () => {
 				ok("payload" in entry);
 				strictEqual((entry.payload as Record<string, unknown>).usage, null);
 			}
-			strictEqual(observability.snapshot().session.tokens.neverSentCalls, 3);
-			strictEqual(observability.snapshot().session.tokens.apiCalls ?? 0, 0);
-			strictEqual(observability.snapshot().session.cost.calls, 0);
-			deepStrictEqual(observability.costEntries(), []);
+			strictEqual(telemetry.snapshot().session.tokens.neverSentCalls, 3);
+			strictEqual(telemetry.snapshot().session.tokens.apiCalls ?? 0, 0);
+			strictEqual(telemetry.snapshot().session.cost.calls, 0);
+			deepStrictEqual(telemetry.costEntries(), []);
 			for (let resume = 0; resume < 2; resume += 1) {
-				reseedSessionUsageFromLedger(observability, [unknown, ...entries]);
-				const snapshot = observability.snapshot();
+				reseedSessionUsageFromLedger(telemetry, [unknown, ...entries]);
+				const snapshot = telemetry.snapshot();
 				strictEqual(snapshot.session.tokens.neverSentCalls, 3);
 				strictEqual(snapshot.session.tokens.missingTokenCalls, 1);
 				strictEqual(snapshot.session.tokens.apiCalls, 1);
 				strictEqual(snapshot.session.tokens.totalTokens, 0);
 				strictEqual(snapshot.session.cost.calls, 1);
 			}
-			reseedSessionUsageFromLedger(observability, []);
-			strictEqual(observability.snapshot().session.tokens.neverSentCalls ?? 0, 0);
+			reseedSessionUsageFromLedger(telemetry, []);
+			strictEqual(telemetry.snapshot().session.tokens.neverSentCalls ?? 0, 0);
 		} finally {
 			await extension.stop?.();
 		}

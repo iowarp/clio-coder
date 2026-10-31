@@ -6,10 +6,10 @@ import { messageCallsForAccounting, messageUsageForAccounting } from "../core/me
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
-import type { TelemetryView } from "../domains/observability/contract.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import type { ViewArtifact } from "../domains/session/view-artifacts.js";
+import type { TelemetryView } from "../domains/telemetry/contract.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import {
 	type Component,

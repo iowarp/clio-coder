@@ -8,9 +8,6 @@ import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { RunReceipt } from "../../src/domains/dispatch/types.js";
-import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
-import type { TelemetryView } from "../../src/domains/observability/contract.js";
-import type { CostEntry } from "../../src/domains/observability/cost.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -21,6 +18,9 @@ import type { VisionSidecar } from "../../src/domains/providers/vision-sidecar.j
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { isSessionEntry, isSessionHeader, type SessionEntry } from "../../src/domains/session/index.js";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
+import type { CostEntry } from "../../src/domains/telemetry/cost.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import { readSessionFileEntries, sessionPaths } from "../../src/engine/session.js";
@@ -273,7 +273,7 @@ function fixture(initialMode: WireMode, readTurn?: () => void, visionSidecar?: V
 	context.bus.on(BusChannels.RunAborted, (event) => {
 		audit.push(event);
 	});
-	// The fixture runs without observability; a test that reads the receipt's spend supplies the read model's view.
+	// The fixture runs without telemetry; a test that reads the receipt's spend supplies the read model's view.
 	let telemetry: TelemetryView | null = null;
 	const panel = createChatPanel({ getOutputStyle: () => "detailed", getTelemetry: () => telemetry });
 	const loop = createChatLoop({

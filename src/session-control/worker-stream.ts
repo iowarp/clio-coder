@@ -9,7 +9,7 @@
  * I/O, so every sequence below is testable as a pure fold.
  *
  * What a worker is saying and doing is not decided here. That is the canonical
- * {@link WorkerProgressSnapshot} projection in `src/domains/observability/worker-progress.ts`, which the
+ * {@link WorkerProgressSnapshot} projection in `src/domains/telemetry/worker-progress.ts`, which the
  * Fleet Runs board reads from the same events, so the two surfaces cannot drift
  * on the answer tail, the tool names, or what a call is touching. This module
  * owns the half the board has no use for: which assignment an event belongs to,
@@ -47,19 +47,19 @@ import type {
 	RunResultContract,
 } from "../domains/dispatch/receipt-facts.js";
 import type { RunKind } from "../domains/dispatch/types.js";
+import type { WorkerRunOrigin, WorkerRunRuntime, WorkerRunRuntimeKind } from "../domains/session/index.js";
 import {
 	createWorkerProgressFold,
 	type WorkerAction,
 	type WorkerProgressFold,
 	type WorkerProgressSnapshot,
-} from "../domains/observability/worker-progress.js";
-import type { WorkerRunOrigin, WorkerRunRuntime, WorkerRunRuntimeKind } from "../domains/session/index.js";
+} from "../domains/telemetry/worker-progress.js";
 
 export {
 	boundSettledText,
 	WORKER_LIVE_TAIL_LINES,
 	WORKER_TOOL_NAME_LIMIT,
-} from "../domains/observability/worker-progress.js";
+} from "../domains/telemetry/worker-progress.js";
 export type { WorkerProgressSnapshot };
 
 export interface WorkerAttempt {

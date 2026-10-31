@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
-import type { CallJournalRead } from "../observability/call-journal.js";
-import { readCallJournalSync } from "../observability/call-journal.js";
+import type { CallJournalRead } from "../telemetry/call-journal.js";
+import { readCallJournalSync } from "../telemetry/call-journal.js";
 import type { SessionEntry } from "./entries.js";
 import { journalOwnsSideUsage } from "./journal-usage.js";
 

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { openCallJournal } from "../../../../src/domains/observability/call-journal.js";
+import { openCallJournal } from "../../../../src/domains/telemetry/call-journal.js";
 
 type PendingTelemetry = Parameters<Awaited<ReturnType<typeof openCallJournal>>["enqueue"]>[0];
 type Kind = PendingTelemetry["kind"];

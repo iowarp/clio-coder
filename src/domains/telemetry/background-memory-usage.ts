@@ -1,5 +1,5 @@
 import type { CallFailureRecord } from "../../core/call-failure.js";
-import type { ObservabilityContract } from "./contract.js";
+import type { TelemetryContract } from "./contract.js";
 /**
  * Accounting for one proactive-memory step.
  *
@@ -37,10 +37,10 @@ export interface BackgroundMemoryStepUsage {
 	costProvenance: CostProvenance;
 }
 
-/** The subset of the observability contract this accounting needs. */
+/** The subset of the telemetry contract this accounting needs. */
 export interface BackgroundMemoryUsageSink {
-	recordNeverSentCalls?: ObservabilityContract["recordNeverSentCalls"];
-	acquireTelemetrySession?: ObservabilityContract["acquireTelemetrySession"];
+	recordNeverSentCalls?: TelemetryContract["recordNeverSentCalls"];
+	acquireTelemetrySession?: TelemetryContract["acquireTelemetrySession"];
 	recordTokens(
 		providerId: string,
 		attributedModelId: string,
@@ -59,7 +59,7 @@ export interface RecordBackgroundMemoryStepInput {
 	stateDir: string;
 	/** The cwd hash the session ledger is filed under, so `usage report --repo` selects it. */
 	repoIdentity: string | null;
-	observability?: BackgroundMemoryUsageSink | undefined;
+	telemetry?: BackgroundMemoryUsageSink | undefined;
 	now?: Date;
 	/** Test seam; production appends to the out-of-turn store under the state dir. */
 	appendRow?: (stateDir: string, row: OutOfTurnUsageRow) => void;
@@ -100,7 +100,7 @@ export function backgroundMemoryUsageRow(
 /** Record one memory step in the session's cost totals and in the durable store. */
 export function recordBackgroundMemoryStep(input: RecordBackgroundMemoryStepInput): OutOfTurnUsageRow {
 	if (input.usage.failure?.invoked !== false)
-		input.observability?.recordTokens(
+		input.telemetry?.recordTokens(
 			input.usage.targetId,
 			input.usage.attributedModelId,
 			input.usage.totalTokens,

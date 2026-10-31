@@ -1,11 +1,11 @@
 import { basename } from "node:path";
 import { formatFooterTokens } from "../../core/display-units.js";
 import { renderCompactCount } from "../../core/telemetry/render.js";
-import { formatCostAggregate } from "../../domains/observability/cost.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/index.js";
 import { liveSessionOwner } from "../../domains/session/live-owner.js";
 import { projectedUsageQuantities } from "../../domains/session/usage-meta.js";
+import { formatCostAggregate } from "../../domains/telemetry/cost.js";
 import type { TuiMouseEvent, TuiMouseEventResult } from "../../engine/tui.js";
 import {
 	getKeybindings,

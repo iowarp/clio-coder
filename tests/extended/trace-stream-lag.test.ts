@@ -17,12 +17,8 @@ import { fileURLToPath } from "node:url";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { spawnWorkerProcess } from "../../src/domains/dispatch/worker-spawn.js";
-import {
-	createDispatchTraceMirror,
-	TraceReader,
-	traceDatabasePath,
-} from "../../src/domains/observability/trace-store.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import { createDispatchTraceMirror, TraceReader, traceDatabasePath } from "../../src/domains/telemetry/trace-store.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
@@ -82,7 +78,7 @@ it("keeps three streaming workers to fact rows and a bounded main-thread lag", {
 			deltasOnBus.set(payload.runId, (deltasOnBus.get(payload.runId) ?? 0) + 1);
 		}),
 	];
-	// The same five channels the observability extension mirrors.
+	// The same five channels the telemetry extension mirrors.
 	for (const channel of [
 		BusChannels.DispatchEnqueued,
 		BusChannels.DispatchStarted,

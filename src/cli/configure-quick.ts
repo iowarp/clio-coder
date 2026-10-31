@@ -1,6 +1,5 @@
 import { readSettings, SettingsValidationError, updateSettings, validateSettings } from "../core/config.js";
 import { initializeClioHome } from "../core/init.js";
-import { renderCostAmount } from "../domains/observability/cost.js";
 import { openAuthStorage } from "../domains/providers/auth/index.js";
 import { isOrchestratorEligibleRuntime, resolveAuthTarget } from "../domains/providers/index.js";
 import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
@@ -14,6 +13,7 @@ import {
 	observeHostCapacityFacts,
 	resolveLocalConcurrency,
 } from "../domains/scheduling/local-capacity.js";
+import { renderCostAmount } from "../domains/telemetry/cost.js";
 import { ConfigureNavigation, type ConfigurePrompts } from "./configure-prompts.js";
 import {
 	applyTarget,

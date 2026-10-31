@@ -11,13 +11,13 @@ import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integri
 import { buildEvidence } from "../../src/domains/evidence/index.js";
 import { summarizeTrustStatus } from "../../src/domains/evidence/trust-projection.js";
 import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
-import type { ObservabilityRunReaders, ObservabilityRunSummary } from "../../src/domains/observability/contract.js";
-import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
+import type { TelemetryRunReaders, TelemetryRunSummary } from "../../src/domains/telemetry/contract.js";
+import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
 import {
-	createObservabilityProjection,
+	createTelemetryProjection,
 	MAX_PROJECTION_RUNS,
-	type ObservabilityProjection,
-} from "../../src/domains/observability/projection.js";
+	type TelemetryProjection,
+} from "../../src/domains/telemetry/projection.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { councilGroupBody, councilIslandLines } from "../../src/interactive/council-grid.js";
 import {
@@ -113,14 +113,14 @@ const COMPLETED: DispatchCompletedPayload = {
 	hostVerification: "verified",
 };
 
-const projections: ObservabilityProjection[] = [];
+const projections: TelemetryProjection[] = [];
 afterEach(() => {
 	for (const projection of projections.splice(0)) projection.stop();
 });
 
-function setup(readers: ObservabilityRunReaders = {}) {
+function setup(readers: TelemetryRunReaders = {}) {
 	const bus = createSafeEventBus();
-	const projection = createObservabilityProjection(bus, {
+	const projection = createTelemetryProjection(bus, {
 		...readers,
 		sessionCostSummary: emptyCostAggregate,
 		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),
@@ -136,7 +136,7 @@ function setup(readers: ObservabilityRunReaders = {}) {
 }
 
 /** Wait for the projection's next coalesced publication, with no board reconciliation shortcut. */
-function nextPublication(projection: ObservabilityProjection): Promise<void> {
+function nextPublication(projection: TelemetryProjection): Promise<void> {
 	return new Promise((resolve, reject) => {
 		let unsubscribe = () => {};
 		let immediate = true;
@@ -170,7 +170,7 @@ function commonRow(row: DispatchBoardRow) {
 		progress: row.progress,
 	};
 }
-function commonSummary(row: ObservabilityRunSummary) {
+function commonSummary(row: TelemetryRunSummary) {
 	return {
 		runId: row.runId,
 		agentId: row.agentId,
@@ -181,7 +181,7 @@ function commonSummary(row: ObservabilityRunSummary) {
 	};
 }
 
-describe("dispatch board uses the observability projection", () => {
+describe("dispatch board uses the telemetry projection", () => {
 	it("publishes all five dispatch events and evidenceReady through one fold", async () => {
 		const { bus, projection, board, progress, start } = setup();
 		for (const channel of [

@@ -6,15 +6,15 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
-import { readCallJournal } from "../../src/domains/observability/call-journal.js";
-import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
-import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
-import { TraceReader, TraceStore } from "../../src/domains/observability/trace-store.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
 import { recordUsageCall } from "../../src/domains/session/usage-record.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
+import { TraceReader, TraceStore } from "../../src/domains/telemetry/trace-store.js";
 import type { TurnOutcomeRecord } from "../../src/domains/turn-control/index.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import type { CreateChatLoopDeps } from "../../src/session-control/chat-loop.js";
@@ -119,15 +119,15 @@ for (const continuation of [false, true])
 							} as NonNullable<CreateChatLoopDeps["turnControl"]>,
 						}
 					: {}),
-				observability: {
+				telemetry: {
 					acquireTelemetrySession: journals.acquire,
-					recordSessionTurn: (trace: Parameters<ObservabilityContract["recordSessionTurn"]>[0]) =>
+					recordSessionTurn: (trace: Parameters<TelemetryContract["recordSessionTurn"]>[0]) =>
 						store.recordSessionTurn(trace),
 					recordTokens(...args: unknown[]) {
 						liveUsage.push(args);
 					},
 					recordTokenThroughput() {},
-				} as unknown as ObservabilityContract,
+				} as unknown as TelemetryContract,
 				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
 					// The generic dispatch stub omits the API; a journal target needs the scripted protocol (#434).
 					Object.assign(options?.initialState?.model ?? {}, { api: "openai-responses" });

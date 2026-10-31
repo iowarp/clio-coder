@@ -6,12 +6,12 @@ export { renderCompactCount, renderCount, renderFact } from "../../../../src/cor
 export { clioConfigDir, clioDataDir, clioStateDir, resolveClioDirs } from "../../../../src/core/xdg.js";
 export { renderEvidenceTokens } from "../../../../src/domains/evidence/index.js";
 export { getVersionInfo } from "../../../../src/domains/lifecycle/version.js";
-export type { CostAggregate } from "../../../../src/domains/observability/cost.js";
+export type { CostAggregate } from "../../../../src/domains/telemetry/cost.js";
 export {
 	aggregateCostAmounts,
 	renderCostAggregate,
 	renderUsdLimit,
-} from "../../../../src/domains/observability/cost.js";
+} from "../../../../src/domains/telemetry/cost.js";
 export {
 	AcpProcessError,
 	AcpProtocolError,

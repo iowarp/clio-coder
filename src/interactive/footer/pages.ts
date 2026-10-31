@@ -1,8 +1,8 @@
-import { renderCostAmount } from "../../domains/observability/cost.js";
 import type { UsageSnapshot } from "../../domains/quota/types.js";
 /** Expanded footer pages: dense inspection, separate from transcript output style. */
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
+import { renderCostAmount } from "../../domains/telemetry/cost.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";

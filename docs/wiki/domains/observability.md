@@ -2,15 +2,15 @@
 title: "Domains observability"
 summary: "The observability domain folds dispatch bus events, session cost tracking, and forensic evidence builds into a single bounded snapshot consumed by product surfaces. It owns the live projection, the SQLite trace mirror, the cost tracker, and the out-of-turn usage ledger."
 sources:
-  - "src/domains/observability/index.ts"
-  - "src/domains/observability/extension.ts"
-  - "src/domains/observability/projection.ts"
-  - "src/domains/observability/contract.ts"
-  - "src/domains/observability/cost.ts"
-  - "src/domains/observability/trace-store.ts"
-  - "src/domains/observability/worker-progress.ts"
-  - "src/domains/observability/out-of-turn-usage.ts"
-  - "src/domains/observability/evidence-index.ts"
+  - "src/domains/telemetry/index.ts"
+  - "src/domains/telemetry/extension.ts"
+  - "src/domains/telemetry/projection.ts"
+  - "src/domains/telemetry/contract.ts"
+  - "src/domains/telemetry/cost.ts"
+  - "src/domains/telemetry/trace-store.ts"
+  - "src/domains/telemetry/worker-progress.ts"
+  - "src/domains/telemetry/out-of-turn-usage.ts"
+  - "src/domains/telemetry/evidence-index.ts"
 tests:
   - "tests/contracts/observability-wiring.test.ts"
   - "tests/contracts/trace-store-legacy-tables.test.ts"
@@ -38,10 +38,10 @@ Product surfaces (the TUI footer, the dispatch board, `/usage` overlay, quota vi
 
 ## Ownership and entry points
 
-The domain module is declared in `src/domains/observability/index.ts` as
+The domain module is declared in `src/domains/telemetry/index.ts` as
 `ObservabilityDomainModule`, which the domain loader instantiates via
-`createObservabilityBundle` from `src/domains/observability/extension.ts`. The manifest
-(`src/domains/observability/manifest.ts`) declares `dependsOn: ["providers", "session"]`, keeping
+`createObservabilityBundle` from `src/domains/telemetry/extension.ts`. The manifest
+(`src/domains/telemetry/manifest.ts`) declares `dependsOn: ["providers", "session"]`, keeping
 dispatch out of `dependsOn` so scheduling can sit between observability and dispatch without a
 topological cycle.
 
@@ -49,19 +49,19 @@ Key entry points and their files:
 
 | Symbol | File | Role |
 |---|---|---|
-| `createObservabilityBundle` | `src/domains/observability/extension.ts` | Composes cost tracker, projection, trace mirror, and bus listeners |
-| `createObservabilityProjection` | `src/domains/observability/projection.ts` | Reactive read model over bus events |
-| `createCostTracker` | `src/domains/observability/cost.ts` | Running USD cost and token accumulator |
-| `createDispatchTraceMirror` | `src/domains/observability/trace-store.ts` | Async-enqueued SQLite writer for dispatch events |
-| `TraceStore` / `TraceReader` | `src/domains/observability/trace-store.ts` | Durable and read-only SQLite access |
-| `createWorkerProgressFold` | `src/domains/observability/worker-progress.ts` | Bounded, redacted live-progress projection |
-| `appendOutOfTurnUsageRow` / `readOutOfTurnUsageRows` | `src/domains/observability/out-of-turn-usage.ts` | Durable JSONL ledger for side questions, handoffs, prewarming |
-| `summarizeEvidenceIndex` | `src/domains/observability/accountability.ts` | Pure aggregation over evidence index rows |
-| `recordBackgroundMemoryStep` | `src/domains/observability/background-memory-usage.ts` | Dual-write for background memory steps |
+| `createObservabilityBundle` | `src/domains/telemetry/extension.ts` | Composes cost tracker, projection, trace mirror, and bus listeners |
+| `createObservabilityProjection` | `src/domains/telemetry/projection.ts` | Reactive read model over bus events |
+| `createCostTracker` | `src/domains/telemetry/cost.ts` | Running USD cost and token accumulator |
+| `createDispatchTraceMirror` | `src/domains/telemetry/trace-store.ts` | Async-enqueued SQLite writer for dispatch events |
+| `TraceStore` / `TraceReader` | `src/domains/telemetry/trace-store.ts` | Durable and read-only SQLite access |
+| `createWorkerProgressFold` | `src/domains/telemetry/worker-progress.ts` | Bounded, redacted live-progress projection |
+| `appendOutOfTurnUsageRow` / `readOutOfTurnUsageRows` | `src/domains/telemetry/out-of-turn-usage.ts` | Durable JSONL ledger for side questions, handoffs, prewarming |
+| `summarizeEvidenceIndex` | `src/domains/telemetry/accountability.ts` | Pure aggregation over evidence index rows |
+| `recordBackgroundMemoryStep` | `src/domains/telemetry/background-memory-usage.ts` | Dual-write for background memory steps |
 
 ## The `ObservabilityContract` and snapshot shape
 
-The contract (`src/domains/observability/contract.ts`) is the interface other domains read. It
+The contract (`src/domains/telemetry/contract.ts`) is the interface other domains read. It
 extends `ObservabilityRunProjection` (bind/dispose readers, `reconcileRuns`, `setFleetPhase`) and
 adds:
 
@@ -99,7 +99,7 @@ tokens-per-second is zero or non-finite.
 
 ### Trace mirror and session turns
 
-The `DispatchTraceMirror` interface (`src/domains/observability/trace-store.ts`) exposes
+The `DispatchTraceMirror` interface (`src/domains/telemetry/trace-store.ts`) exposes
 `enqueue(channel, payload)`, `enqueueSessionTurn(trace)`, `flush()`, and `close()`. The extension
 subscribes to the five dispatch bus channels and forwards each payload. `enqueueSessionTurn`
 accepts a `SessionTurnTrace` (start/event/finish triple) that mirrors the operator's own chat-loop
@@ -108,7 +108,7 @@ turns into the same SQLite tables as dispatched runs, using the sentinel
 
 ## Extension wire-up and lifecycle
 
-`createObservabilityBundle` (`src/domains/observability/extension.ts`) performs:
+`createObservabilityBundle` (`src/domains/telemetry/extension.ts`) performs:
 
 1. **Cost tracker creation**: `createCostTracker()` from `cost.ts`.
 2. **Trace mirror creation**: `createDispatchTraceMirror(traceDatabasePath(clioStateDir()))`
@@ -134,7 +134,7 @@ a build mid-flight.
 
 ## Cost tracking
 
-`createCostTracker` (`src/domains/observability/cost.ts`) returns a `CostTracker` with:
+`createCostTracker` (`src/domains/telemetry/cost.ts`) returns a `CostTracker` with:
 
 - `accumulate()`: pushes a `CostEntry` to the log and updates running totals. The `label`
   parameter distinguishes non-ordinary-turn calls (`"side-question"`, `"handoff"`, `"prewarm"`,
@@ -151,7 +151,7 @@ and rendered values with provenance markers (`~...est` for estimated, `+?` for u
 
 ## Worker progress fold
 
-`createWorkerProgressFold` (`src/domains/observability/worker-progress.ts`) is a pure, bounded
+`createWorkerProgressFold` (`src/domains/telemetry/worker-progress.ts`) is a pure, bounded
 projection of a worker's live stream. Three enforcement rules:
 
 1. **No tool arguments**: `tool_execution_*` events (which carry `args`) are not read; tool names
@@ -169,7 +169,7 @@ while preserving the tail and trail (which the operator is already reading).
 
 ## Trace store: SQLite mirror
 
-`TraceStore` (`src/domains/observability/trace-store.ts`) writes to a WAL-mode SQLite database at
+`TraceStore` (`src/domains/telemetry/trace-store.ts`) writes to a WAL-mode SQLite database at
 `<stateDir>/trace.sqlite`. Schema version 1 (`TRACE_SCHEMA_VERSION = 1`) defines tables:
 `meta`, `runs`, `phases`, `events`, `gate_results`, `agent_sessions`, `processes`.
 

@@ -10,7 +10,6 @@ import type { ContextState } from "../domains/context/index.js";
 import { renderPromptContext } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
-import type { ObservabilityContract, TokenThroughputSnapshot } from "../domains/observability/index.js";
 import { selectProjectPreload } from "../domains/prompts/preload.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import { resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
@@ -20,6 +19,7 @@ import type { ResourcesContract } from "../domains/resources/index.js";
 import { jobIsComplete } from "../domains/scheduling/job-model.js";
 import type { LocalCapacity } from "../domains/scheduling/local-capacity.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
+import type { TelemetryContract, TokenThroughputSnapshot } from "../domains/telemetry/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { Component, ScrollView, TUI } from "../engine/tui.js";
 import { createAssistantGenerationTiming } from "../session-control/assistant-generation-timing.js";
@@ -105,7 +105,7 @@ export interface InteractivePresentationDeps {
 	bus: SafeEventBus;
 	providers: ProvidersContract;
 	dispatch: Pick<DispatchContract, "snapshot">;
-	observability: ObservabilityContract;
+	telemetry: TelemetryContract;
 	chat: ChatLoop;
 	workspaceFacts: WorkspaceFacts;
 	sessionTranscript: Pick<SessionTranscript, "liveSessionTurns">;
@@ -354,7 +354,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	if (deps.startsResumed === true) banner.collapseToSessionHeader();
 	const renderTrace = getActiveRenderTrace();
 	const chatPanel = factories.createChatPanel({
-		...(deps.observability.telemetry ? { getTelemetry: () => deps.observability.telemetry?.live() ?? null } : {}),
+		...(deps.telemetry.telemetry ? { getTelemetry: () => deps.telemetry.telemetry?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
 		requestRender,
@@ -385,11 +385,11 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		bus: deps.bus,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
-	const unbindRunReaders = deps.observability.bindRunReaders({
+	const unbindRunReaders = deps.telemetry.bindRunReaders({
 		dispatchSnapshot: () => deps.dispatch.snapshot(),
 		readReceipt: (runId) => readWorkerReceiptFacts(runId),
 	});
-	const dispatchBoardStore = factories.createDispatchBoardStore(deps.observability);
+	const dispatchBoardStore = factories.createDispatchBoardStore(deps.telemetry);
 	const contextActivityStore = factories.createContextActivityStore(deps.bus, () => deps.chat.getSessionId());
 
 	const footerToolCounts = new Map<string, number>();
@@ -397,7 +397,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let footerToolErrors = 0;
 	let footerToolTruncatedResults = 0;
 	let lastTurnSummary: TurnSummary | null = null;
-	let observabilitySnapshot = deps.observability.snapshot();
+	let telemetrySnapshot = deps.telemetry.snapshot();
 	const generationTiming = createAssistantGenerationTiming();
 	let liveGeneration = false;
 	const recordChatEvent = (event: ChatLoopEvent): void => {
@@ -473,8 +473,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		onHeightChange: (rows) => {
 			if (setDockFooterRows(deps.tui, rows)) requestRender();
 		},
-		...(deps.observability.telemetry ? { getTelemetry: () => deps.observability.telemetry?.live() ?? null } : {}),
-		getTokenThroughput: () => (liveGeneration ? currentLiveThroughput() : observabilitySnapshot.session.latestThroughput),
+		...(deps.telemetry.telemetry ? { getTelemetry: () => deps.telemetry.telemetry?.live() ?? null } : {}),
+		getTokenThroughput: () => (liveGeneration ? currentLiveThroughput() : telemetrySnapshot.session.latestThroughput),
 		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),
@@ -521,8 +521,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 	};
 	footer = factories.buildFooter(footerDeps);
-	const unsubscribeObservability = deps.observability.subscribe((snapshot) => {
-		observabilitySnapshot = snapshot;
+	const unsubscribeProjection = deps.telemetry.subscribe((snapshot) => {
+		telemetrySnapshot = snapshot;
 		footer.refresh();
 		requestRender();
 	});
@@ -533,17 +533,17 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		requestRender();
 	};
 	const unsubscribeTelemetry = (["session", "calls", "cost", "runs"] as const).map(
-		(topic) => deps.observability.telemetry?.subscribe(topic, repaintSpend) ?? (() => {}),
+		(topic) => deps.telemetry.telemetry?.subscribe(topic, repaintSpend) ?? (() => {}),
 	);
 	// A journal that loses records raises one notice per owner a minute; a rise held by the window is checked when
 	// the window ends, so it is never left unreported (#434 §14).
 	const dropAlerts = createDropAlerts();
 	let dropCheck: NodeJS.Timeout | undefined;
 	const checkDrops = () => {
-		const telemetry = deps.observability.telemetry;
-		if (!telemetry) return;
+		const readModel = deps.telemetry.telemetry;
+		if (!readModel) return;
 		const now = Date.now();
-		const alerts = dropAlerts.observe(telemetry.health(), now);
+		const alerts = dropAlerts.observe(readModel.health(), now);
 		for (const alert of alerts) notify("warning", alert.text, alert.key);
 		if (alerts.length > 0) requestRender();
 		if (dropCheck) clearTimeout(dropCheck);
@@ -553,7 +553,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		dropCheck = setTimeout(checkDrops, Math.max(0, due - now));
 		dropCheck.unref();
 	};
-	unsubscribeTelemetry.push(deps.observability.telemetry?.subscribe("health", checkDrops) ?? (() => {}));
+	unsubscribeTelemetry.push(deps.telemetry.telemetry?.subscribe("health", checkDrops) ?? (() => {}));
 
 	const editorChrome: EditorChrome = {
 		getLoopRail: (width) => loopSegment(loopSnapshot, width, Date.now()),
@@ -709,7 +709,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 
 	const dispatchBoard = factories.createDispatchBoardView(
 		() => dispatchBoardStore.rows(),
-		() => observabilitySnapshot,
+		() => telemetrySnapshot,
 	);
 	const chatRenderer = factories.createChatRenderer({
 		chatPanel,
@@ -848,7 +848,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		quotaSummary.dispose();
 		banner.dispose();
 		footer.dispose();
-		unsubscribeObservability();
+		unsubscribeProjection();
 		for (const off of unsubscribeTelemetry) off();
 		if (dropCheck) clearTimeout(dropCheck);
 		contextActivityStore.unsubscribe();

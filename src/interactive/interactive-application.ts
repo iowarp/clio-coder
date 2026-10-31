@@ -27,8 +27,6 @@ import type { MuxContract } from "../domains/mux/index.js";
 import type { MusicOperations, MusicResult } from "../domains/mux/music-operations.js";
 import { describeMusicResult, musicResultTone } from "../domains/mux/music-operations.js";
 import type { PanesOperations, PanesWatchController } from "../domains/mux/operations.js";
-import type { ObservabilityContract } from "../domains/observability/index.js";
-import { appendOutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import { expandSubmitText, type SubmitExpansion } from "../domains/resources/submit-expansion.js";
@@ -39,6 +37,8 @@ import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domain
 import { recordSettledSideCall } from "../domains/session/usage-record.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { OutcomeRecord, SystemOne } from "../domains/system-one/index.js";
+import type { TelemetryContract } from "../domains/telemetry/index.js";
+import { appendOutOfTurnUsageRow } from "../domains/telemetry/out-of-turn-usage.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
 import { createAgentProgress } from "../engine/tui.js";
@@ -150,7 +150,7 @@ export interface InteractiveDeps {
 		source: OutcomeRecord["source"];
 		facts: Readonly<Record<string, unknown>>;
 	}) => void;
-	observability: ObservabilityContract;
+	telemetry: TelemetryContract;
 	chat: ChatLoop;
 	/** Fired once after the first real TUI render transaction issued all of its terminal writes. */
 	onFirstFrameCommit?: (frameId: number) => void;
@@ -569,7 +569,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const { readStructuredEntries, recordSubmittedTurn } = sessionTranscript;
 	const exitSummary = createExitSummaryCollector({
 		bus: deps.bus,
-		observability: deps.observability,
+		telemetry: deps.telemetry,
 		dispatch: deps.dispatch,
 		...(deps.session ? { session: deps.session } : {}),
 		getTurns: sessionTranscript.liveSessionTurns,
@@ -780,7 +780,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		onSmoothStreamingMode: (_mode, pacingActive) => shell.setStreamPacingActive(pacingActive),
 		providers: deps.providers,
 		dispatch: deps.dispatch,
-		observability: deps.observability,
+		telemetry: deps.telemetry,
 		chat: deps.chat,
 		workspaceFacts,
 		sessionTranscript,
@@ -1118,7 +1118,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	const slashRuntime = createInteractiveSlashRuntime({
 		recordFeature,
-		...(deps.observability.telemetry ? { getTelemetry: () => deps.observability.telemetry?.live() ?? null } : {}),
+		...(deps.telemetry.telemetry ? { getTelemetry: () => deps.telemetry.telemetry?.live() ?? null } : {}),
 		keyboardActions: {
 			background: () => backgroundActiveDispatch(),
 			editor: (text) => editorSubmit.openExternalEditorForInput(text),
@@ -1565,7 +1565,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		if (settlement) await settlement;
 		unsent.push(...deps.chat.clearQueuedFollowUps());
 		deps.onNewSession();
-		deps.observability.resetSession(deps.session?.current()?.id ?? null);
+		deps.telemetry.resetSession(deps.session?.current()?.id ?? null);
 		presentation.resetForNewSession();
 		exitSummary.reset();
 		resetTranscript();
@@ -2136,7 +2136,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 						signal: startupAbort.signal,
 						isBusy,
 						callJournal: (targetId, runtimeId, costProvenance) => {
-							const acquire = deps.observability.acquireTelemetrySession;
+							const acquire = deps.telemetry.acquireTelemetrySession;
 							if (!startupSession || !acquire) return undefined;
 							return {
 								origin: startupSession,
@@ -2146,8 +2146,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 								runtimeId,
 								costProvenance,
 								onSettled: (facts) => {
-									if ((deps.session?.current()?.id ?? null) === startupSession.id)
-										recordSettledSideCall(deps.observability, facts);
+									if ((deps.session?.current()?.id ?? null) === startupSession.id) recordSettledSideCall(deps.telemetry, facts);
 								},
 							};
 						},
@@ -2156,7 +2155,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 							if (result.invoked === false || result.callId) return;
 							const usage = result.usage;
 							if ((deps.session?.current()?.id ?? null) === (startupSession?.id ?? null))
-								deps.observability.recordTokens(
+								deps.telemetry.recordTokens(
 									target,
 									model,
 									usage?.totalTokens ?? 0,

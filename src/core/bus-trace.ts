@@ -9,7 +9,7 @@
  *
  * In research telemetry mode with `telemetry.research.busTrace`, the same events
  * go as records to the writer the host hands over, which appends them through
- * the observability domain, so a terminal UI is never written over;
+ * the telemetry domain, so a terminal UI is never written over;
  * `CLIO_CODER_BUS_TRACE=1` remains the deprecated stderr alias (#434). Both
  * writes are synchronous because these events are few and their order across
  * shutdown is the point.

@@ -3,9 +3,9 @@ import { test } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { DispatchSnapshot } from "../../src/domains/dispatch/contract.js";
-import type { TelemetryReadModel } from "../../src/domains/observability/contract.js";
-import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
-import { createObservabilityProjection } from "../../src/domains/observability/projection.js";
+import type { TelemetryReadModel } from "../../src/domains/telemetry/contract.js";
+import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
+import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
 import { createDispatchBoardStore, dispatchUsageText } from "../../src/interactive/dispatch-board.js";
 import { telemetryCall, telemetryViewOf } from "../harness/telemetry-view.js";
 
@@ -38,7 +38,7 @@ test("the island's input counts cache reads, so ↑ plus ↓ is the card's proce
 			node: null,
 		} as DispatchSnapshot["running"][number],
 	];
-	const projection = createObservabilityProjection(bus, {
+	const projection = createTelemetryProjection(bus, {
 		dispatchSnapshot: () =>
 			({
 				running,

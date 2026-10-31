@@ -4,12 +4,12 @@ import { beginCall } from "../../core/telemetry/producer.js";
 import type { CallSettled, CallStarted } from "../../core/telemetry/schemas.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "./call-facts.js";
-import type { ObservabilityContract } from "./contract.js";
+import type { TelemetryContract } from "./contract.js";
 import type { TelemetrySessionOrigin } from "./session-journals.js";
 
 export interface CallJournalOptions {
 	origin: TelemetrySessionOrigin;
-	acquire: NonNullable<ObservabilityContract["acquireTelemetrySession"]>;
+	acquire: NonNullable<TelemetryContract["acquireTelemetrySession"]>;
 	label: CallStarted["label"];
 	targetId: string;
 	runtimeId: string;

@@ -16,7 +16,12 @@ import type {
 import { parseFactRef } from "../core/telemetry/dto.js";
 import { CallLabel, Disposition } from "../core/telemetry/enums.js";
 import { clioStateDir } from "../core/xdg.js";
-import type { SessionSource } from "../domains/observability/read-model.js";
+import {
+	loadRunReceiptEvidence,
+	loadRunTelemetrySource,
+	loadSessionTelemetrySource,
+} from "../domains/session/telemetry-source.js";
+import type { SessionSource } from "../domains/telemetry/read-model.js";
 import {
 	cacheReport,
 	callsReport,
@@ -29,13 +34,8 @@ import {
 	sessionTelemetry,
 	timeline,
 	whyStopped,
-} from "../domains/observability/read-model.js";
-import { explainRepoRef, isRepoRef, usageWindow } from "../domains/observability/usage-window.js";
-import {
-	loadRunReceiptEvidence,
-	loadRunTelemetrySource,
-	loadSessionTelemetrySource,
-} from "../domains/session/telemetry-source.js";
+} from "../domains/telemetry/read-model.js";
+import { explainRepoRef, isRepoRef, usageWindow } from "../domains/telemetry/usage-window.js";
 import { formatColumns, printError } from "./shared.js";
 
 /**

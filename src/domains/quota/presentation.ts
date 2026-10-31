@@ -1,4 +1,4 @@
-import { renderCostAmount } from "../observability/cost.js";
+import { renderCostAmount } from "../telemetry/cost.js";
 /**
  * Pure presentation helpers for quota snapshots.
  *

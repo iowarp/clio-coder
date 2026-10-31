@@ -3,9 +3,9 @@ import { attributedModelId } from "../../core/response-model-id.js";
 import type { CallLabel } from "../../core/telemetry/enums.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { FactSum } from "../../core/telemetry/fact.js";
-import type { CostAggregate, CostEntryLabel } from "../observability/cost.js";
-import type { FoldedAttempt } from "../observability/folds.js";
-import { foldCallJournal, foldCalls } from "../observability/folds.js";
+import type { CostAggregate, CostEntryLabel } from "../telemetry/cost.js";
+import type { FoldedAttempt } from "../telemetry/folds.js";
+import { foldCallJournal, foldCalls } from "../telemetry/folds.js";
 import type { LedgerUsageCall } from "./usage.js";
 
 const labels: Record<CallLabel, CostEntryLabel | undefined> = {

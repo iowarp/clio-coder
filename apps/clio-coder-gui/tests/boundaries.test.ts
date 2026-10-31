@@ -10,7 +10,7 @@ const root = resolve(app, "../..");
 const httpModules = new Map([
 	// Cost display stays on the server; browser contracts carry only rendered strings (#434).
 	[
-		"src/domains/observability/cost.ts",
+		"src/domains/telemetry/cost.ts",
 		new Set(["aggregateCostAmounts", "renderCostAggregate", "renderUsdLimit", "CostAggregate"]),
 	],
 	// The server records its loaded build and reads activation so live status can report a pending upgrade.
@@ -85,13 +85,13 @@ const adapters = new Set([
 	"src/domains/toolchain/index.ts",
 	"src/core/xdg.ts",
 	"src/core/workspace-files.ts",
-	"src/domains/observability/evidence-index.ts",
+	"src/domains/telemetry/evidence-index.ts",
 	"src/domains/session/history.ts",
 	// The telemetry read model and its cold loader; the adapter serves their DTOs unchanged (#434).
-	"src/domains/observability/read-model.ts",
+	"src/domains/telemetry/read-model.ts",
 	"src/domains/session/telemetry-source.ts",
 	// The repository window `usage report` folds, so a repo reference explains to the CLI's number (#434 §11.4).
-	"src/domains/observability/usage-window.ts",
+	"src/domains/telemetry/usage-window.ts",
 	// Every receipt read follows a pruned receipt's tombstone to its evidence copy (#434).
 	"src/domains/dispatch/receipt-store.ts",
 ]);
@@ -116,7 +116,7 @@ const testModules = new Set([
 	"tests/harness/openai-compat-fixture.ts",
 	"tests/harness/telemetry-view.ts",
 	"tests/harness/telemetry-lies.ts",
-	"src/domains/observability/call-journal.ts",
+	"src/domains/telemetry/call-journal.ts",
 ]);
 function files(directory: string): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>

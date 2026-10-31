@@ -5,7 +5,7 @@ import type { MemoryInterventionRegistration } from "../domains/middleware/memor
 import {
 	type RecordBackgroundMemoryStepInput,
 	recordBackgroundMemoryStep,
-} from "../domains/observability/background-memory-usage.js";
+} from "../domains/telemetry/background-memory-usage.js";
 
 /** Saves the bank of a session being parked and hands it back when that session is resumed. */
 export interface TaskMemoryBankPersistence {
@@ -57,9 +57,9 @@ export function bindTaskMemoryLifecycle(
 export function captureTaskMemoryUsage(
 	input: Omit<RecordBackgroundMemoryStepInput, "usage">,
 ): (usage: TaskMemoryStepUsage, isCurrent: boolean) => void {
-	const { observability, ...origin } = input;
+	const { telemetry, ...origin } = input;
 	return (usage, isCurrent) => {
 		if (usage.callId) return;
-		recordBackgroundMemoryStep({ ...origin, usage, observability: isCurrent ? observability : undefined });
+		recordBackgroundMemoryStep({ ...origin, usage, telemetry: isCurrent ? telemetry : undefined });
 	};
 }

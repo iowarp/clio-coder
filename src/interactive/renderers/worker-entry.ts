@@ -15,7 +15,7 @@ import {
 
 import { trustStateWord, validationClause } from "../../domains/evidence/trust-projection.js";
 import { retiredIntegrityVersionOf } from "../../domains/evidence/trust-status.js";
-import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/observability/worker-progress.js";
+import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/telemetry/worker-progress.js";
 import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import {

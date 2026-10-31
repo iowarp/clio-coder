@@ -11,7 +11,7 @@
  *
  * The fold itself is `ledgerUsageCalls` in the session domain, which owns the
  * ledger and serves `clio-coder usage report` from the same function. This module is
- * only the sink wiring between that fold and the observability projection.
+ * only the sink wiring between that fold and the telemetry projection.
  */
 
 import { writeDiagnostic } from "../../core/diagnostics.js";

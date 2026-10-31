@@ -115,7 +115,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		deps.requestRender();
 	};
 	// Keep the stream current for /share, but invalidate each card at most once
-	// per frame. The observability projection already refreshes the footer and
+	// per frame. The telemetry projection already refreshes the footer and
 	// task data; repeating those reads per token also hashes the live budget (#428).
 	const pendingWorkers = new Map<string, WorkerEntryState>();
 	let workerPaintTimer: ReturnType<typeof setTimeout> | null = null;

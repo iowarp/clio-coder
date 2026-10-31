@@ -1,4 +1,4 @@
-import { costWasMeasured } from "../../domains/observability/cost.js";
+import { costWasMeasured } from "../../domains/telemetry/cost.js";
 import type { AcpWorkspaceView } from "./types.js";
 
 export type { AcpWorkspaceView } from "./types.js";
@@ -26,11 +26,11 @@ export { ACP_PLAN_META_KEY, ACP_WORKSPACE_META_KEY } from "./types.js";
 import type { FactMetric } from "../../core/telemetry/dto.js";
 import { factRef } from "../../core/telemetry/dto.js";
 import type { FactSum } from "../../core/telemetry/fact.js";
-import type { TelemetryView } from "../../domains/observability/contract.js";
 import type { CostProvenance } from "../../domains/providers/types/cost-provenance.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
+import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import { ACP_CONTEXT_META_KEY, projectContextLedger } from "./context-ledger.js";
 import type { AcpCostAggregate } from "./types.js";
 import { ACP_USAGE_META_KEY } from "./types.js";

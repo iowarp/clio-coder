@@ -5,8 +5,8 @@ import {
 	toToolDeclaration,
 } from "@earendil-works/pi-ai";
 import { trackCallFetch } from "../core/call-failure.js";
-import type { CallJournalOptions, CallScope } from "../domains/observability/call-scope.js";
-import { openCallScope } from "../domains/observability/call-scope.js";
+import type { CallJournalOptions, CallScope } from "../domains/telemetry/call-scope.js";
+import { openCallScope } from "../domains/telemetry/call-scope.js";
 import { normalizeContext } from "./context.js";
 /**
  * One bounded-output warm through the eventual caller's engine request path.

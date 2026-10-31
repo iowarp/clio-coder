@@ -29,12 +29,12 @@ it("a held paid request journals one crossing per ceiling and its hold, with the
 			return () => {};
 		},
 	} as unknown as ConfigContract;
-	const observability = { sessionCost: () => 1.25 };
+	const telemetryContract = { sessionCost: () => 1.25 };
 	const bus = createSafeEventBus();
 	const { contract, extension } = createSchedulingBundle({
 		bus,
 		getContract: (<T>(name: string) =>
-			(name === "config" ? config : name === "observability" ? observability : undefined) as T | undefined) as never,
+			(name === "config" ? config : name === "telemetry" ? telemetryContract : undefined) as T | undefined) as never,
 	});
 	const records: PendingTelemetry[] = [];
 	const release = registerTelemetrySink("budget-session", { enqueue: (record) => Boolean(records.push(record)) });
@@ -94,11 +94,11 @@ it("a ceiling stop names estimated or partly unpriced spend as it was priced, an
 	settings.safety.limits.sessionCostUsd = 1;
 	const config = { get: () => settings, onChange: () => () => {} } as unknown as ConfigContract;
 	const summary = { knownUsd: 1.25, hasEstimated: true, hasUnknown: false, allKnownFree: false, calls: 3 };
-	const observability = { sessionCost: () => summary.knownUsd, sessionCostSummary: () => ({ ...summary }) };
+	const telemetryContract = { sessionCost: () => summary.knownUsd, sessionCostSummary: () => ({ ...summary }) };
 	const { contract, extension } = createSchedulingBundle({
 		bus: createSafeEventBus(),
 		getContract: (<T>(name: string) =>
-			(name === "config" ? config : name === "observability" ? observability : undefined) as T | undefined) as never,
+			(name === "config" ? config : name === "telemetry" ? telemetryContract : undefined) as T | undefined) as never,
 	});
 	const records: PendingTelemetry[] = [];
 	const release = registerTelemetrySink("priced-session", { enqueue: (record) => Boolean(records.push(record)) });

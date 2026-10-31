@@ -7,16 +7,16 @@ import type { CallSettled } from "../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { observationTracing, traceObservation } from "../domains/memory/observation-trace.js";
-import type { CacheBaseline } from "../domains/observability/cache-physics.js";
-import { cachePhysics, serverTimedUsage } from "../domains/observability/cache-physics.js";
-import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
-import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/observability/session-journals.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { QuotaReading } from "../domains/quota/index.js";
 import { quotaReadingFingerprint, quotaReadingFromMessage } from "../domains/quota/index.js";
 import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
 import { PROMPT_MANIFEST_VERSION } from "../domains/session/prompt-manifest.js";
 import { recordUsageCall } from "../domains/session/usage-record.js";
+import type { CacheBaseline } from "../domains/telemetry/cache-physics.js";
+import { cachePhysics, serverTimedUsage } from "../domains/telemetry/cache-physics.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
+import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../domains/telemetry/session-journals.js";
 import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
@@ -38,7 +38,6 @@ import type { ClioSettings } from "../core/config.js";
 import { gatewayRoutingObservationFromRecord, gatewayRoutingObservationLabel } from "../core/gateway-routing.js";
 import { attributedModelId } from "../core/response-model-id.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
-import type { ObservabilityContract } from "../domains/observability/contract.js";
 import {
 	applyModelCapabilityPatch,
 	canonicalEndpointKey,
@@ -58,6 +57,7 @@ import {
 } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import type { RetrySettings } from "../domains/session/retry.js";
+import type { TelemetryContract } from "../domains/telemetry/contract.js";
 import type { createEngineAgent } from "../engine/agent.js";
 import { enginePinnedPrefix } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
@@ -207,7 +207,7 @@ export interface TurnRuntimeDeps {
 	getSettings: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
 	knownTargets: () => ReadonlySet<string>;
-	observability?: ObservabilityContract | undefined;
+	telemetry?: TelemetryContract | undefined;
 	scheduling?: SchedulingContract | undefined;
 	headless?: boolean | undefined;
 	createAgent: typeof createEngineAgent;
@@ -766,15 +766,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			hidden = false,
 		): void => {
 			if (facts) settledAttempts.push(facts);
-			if (!facts || !deps.observability || owner?.sessionId !== deps.sessionOrigin?.()?.id) return;
+			if (!facts || !deps.telemetry || owner?.sessionId !== deps.sessionOrigin?.()?.id) return;
 			// A call belongs to the turn its lease was taken for, never to whichever turn is active when it settles,
 			// including a stream that settles after its run ended (#434).
 			if (owner?.turnId) turnCalls.set(owner.turnId, [...(turnCalls.get(owner.turnId) ?? []), facts]);
 			if (!currentRun()) return;
 			// Final never-sent messages are counted when persisted; hidden retries have no ledger row (#430, #434).
-			if (hidden && facts.disposition === "never_sent") deps.observability.recordNeverSentCalls(1);
+			if (hidden && facts.disposition === "never_sent") deps.telemetry.recordNeverSentCalls(1);
 			for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) {
-				recordUsageCall(deps.observability, call);
+				recordUsageCall(deps.telemetry, call);
 			}
 		};
 		const settleModelCall = async (message: AgentMessage): Promise<boolean> => {
@@ -830,8 +830,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// The journal's call for the next model response of this run (#434).
 		const openModelCall = async (): Promise<void> => {
 			const origin = deps.sessionOrigin?.();
-			if (!origin || !deps.observability?.acquireTelemetrySession) return;
-			journalLease = await deps.observability.acquireTelemetrySession(origin, "main", state.activeUserTurnId ?? undefined);
+			if (!origin || !deps.telemetry?.acquireTelemetrySession) return;
+			journalLease = await deps.telemetry.acquireTelemetrySession(origin, "main", state.activeUserTurnId ?? undefined);
 			const compiled = context.compiledSessionPrompt?.();
 			const objects = await journalLease.storeRequestObjects?.({
 				...(compiled ? { prompt: compiled } : {}),
@@ -1635,21 +1635,21 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message.role === "assistant") {
 				const completed = sumRunUsage([enrichedEvent.message]);
-				if (!deps.observability && completed.hadUsage && Number.isFinite(completed.costUsd) && completed.costUsd > 0) {
+				if (!deps.telemetry && completed.hadUsage && Number.isFinite(completed.costUsd) && completed.costUsd > 0) {
 					unsettledSpendUsd += completed.costUsd;
 				}
 			}
 			if (
 				enrichedEvent.type === "message_end" &&
 				enrichedEvent.message.role === "assistant" &&
-				deps.observability &&
+				deps.telemetry &&
 				!journalAccounted
 			) {
 				const summary = sumRunUsage([enrichedEvent.message]);
 				const rawUsage = messageUsageForAccounting(enrichedEvent.message) ?? {};
 				const reported = normalizeTokenUsage(rawUsage ?? {});
 				if (summary.hadUsage && rawUsage.callInvoked === true) {
-					deps.observability.recordTokens(
+					deps.telemetry.recordTokens(
 						localRuntime.targetId,
 						attributedModelId(
 							summary.lastResponseModelIdObservation,
@@ -1679,12 +1679,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					);
 				}
 			}
-			if (enrichedEvent.type === "agent_end" && deps.observability) {
+			if (enrichedEvent.type === "agent_end" && deps.telemetry) {
 				const timing = generationTiming.snapshot(eventClock);
 				const generated = generationTiming.output();
 				if (generated.outputTokens > 0 && timing) {
 					const durationMs = Math.round(timing.durationMs);
-					deps.observability.recordTokenThroughput({
+					deps.telemetry.recordTokenThroughput({
 						tokensPerSecond: generated.outputTokens / (durationMs / 1000),
 						...generated,
 						durationMs,

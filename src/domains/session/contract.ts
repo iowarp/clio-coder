@@ -1,7 +1,7 @@
 import type { SkillActivation } from "../../core/skill-activation.js";
 import type { Quantity } from "../../core/telemetry/dto.js";
 import type { ClioSessionMeta, ClioTurnRecord } from "../../engine/session.js";
-import type { CostAggregate } from "../observability/cost.js";
+import type { CostAggregate } from "../telemetry/cost.js";
 import type { SessionEntry } from "./entries.js";
 import type { TreeSnapshot } from "./tree/navigator.js";
 import type { WorkspaceSnapshot } from "./workspace/index.js";

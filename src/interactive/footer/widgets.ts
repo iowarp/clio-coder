@@ -1,11 +1,11 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
-import type { TokenThroughputSnapshot } from "../../domains/observability/index.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { taskBoardCounts } from "../../domains/session/task-board.js";
+import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { CONTEXT_BAR_LABEL_WIDTH, finiteNonNegative } from "../context-bar.js";
 import { contextCategorySwatch, contextPercentRole, renderContextMeterBar } from "../context-meter.js";

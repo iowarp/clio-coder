@@ -3,13 +3,8 @@ import { resolve } from "node:path";
 import { clioStatePath } from "../core/xdg.js";
 import type { CodeStepRecord } from "../domains/dispatch/code-step.js";
 import { codeStepDir, readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
-import { renderTraceCost } from "../domains/observability/cost.js";
-import type {
-	TraceEventRow,
-	TracePhaseRow,
-	TraceProcessRow,
-	TraceRunRow,
-} from "../domains/observability/trace-store.js";
+import { renderTraceCost } from "../domains/telemetry/cost.js";
+import type { TraceEventRow, TracePhaseRow, TraceProcessRow, TraceRunRow } from "../domains/telemetry/trace-store.js";
 import {
 	assertTraceSelectOnly,
 	DEFAULT_TRACE_RETENTION_POLICY,
@@ -18,7 +13,7 @@ import {
 	TraceReader,
 	TraceStore,
 	traceDatabasePath,
-} from "../domains/observability/trace-store.js";
+} from "../domains/telemetry/trace-store.js";
 
 const HELP = `Usage:
   clio-coder trace runs [--db PATH] [--limit N] [--json]

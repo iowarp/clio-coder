@@ -1,5 +1,5 @@
 /**
- * Observability facts whose writer and reader disagreed: the trace mirror read
+ * Telemetry facts whose writer and reader disagreed: the trace mirror read
  * the Clio tool frames at the wrong nesting level, an evidence build failure
  * was raised at a level the dispatch board never reads, and a failed or
  * aborted prewarm was read back as a zero-cost success.
@@ -22,22 +22,22 @@ import {
 	subscribeExtensionObservations,
 } from "../../src/domains/extensions/bus-observations.js";
 import type { ExtensionObservationV2 } from "../../src/domains/extensions/public-api-v2.js";
-import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
-import type { OutOfTurnUsageRow } from "../../src/domains/observability/out-of-turn-usage.js";
-import { appendOutOfTurnUsageRow, readOutOfTurnUsageRows } from "../../src/domains/observability/out-of-turn-usage.js";
-import type { ProjectionReadModel } from "../../src/domains/observability/projection.js";
-import { createObservabilityProjection } from "../../src/domains/observability/projection.js";
+import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
+import type { OutOfTurnUsageRow } from "../../src/domains/telemetry/out-of-turn-usage.js";
+import { appendOutOfTurnUsageRow, readOutOfTurnUsageRows } from "../../src/domains/telemetry/out-of-turn-usage.js";
+import type { ProjectionReadModel } from "../../src/domains/telemetry/projection.js";
+import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
 import {
 	createDispatchTraceMirror,
 	TRACE_WRITE_QUEUE_LIMIT,
 	TraceReader,
 	TraceStore,
-} from "../../src/domains/observability/trace-store.js";
+} from "../../src/domains/telemetry/trace-store.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import type { DispatchBoardRow } from "../../src/interactive/dispatch-board.js";
 import { createDispatchBoardView } from "../../src/interactive/dispatch-board.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "clio-coder-observability-wiring-"));
+const scratch = mkdtempSync(join(tmpdir(), "clio-coder-telemetry-wiring-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 it("serializes schema creation when two cold writers wait on the same database", async () => {
@@ -46,7 +46,7 @@ it("serializes schema creation when two cold writers wait on the same database",
 	const lock = new DatabaseSync(path);
 	lock.exec("PRAGMA journal_mode=WAL; BEGIN IMMEDIATE");
 	const script = `
-import { TraceStore } from ${JSON.stringify(pathToFileURL(resolve("src/domains/observability/trace-store.ts")).href)};
+import { TraceStore } from ${JSON.stringify(pathToFileURL(resolve("src/domains/telemetry/trace-store.ts")).href)};
 process.send("ready");
 await new Promise(resolve => process.once("message", resolve));
 new TraceStore(${JSON.stringify(path)}).close();
@@ -558,7 +558,7 @@ describe("evidence build failure", () => {
 	}
 
 	it("reaches the dispatch board as a failed proof with its reason", () => {
-		const projection = createObservabilityProjection(createSafeEventBus(), readModel());
+		const projection = createTelemetryProjection(createSafeEventBus(), readModel());
 		projection.evidenceBuildFailed("run-proof", "disk full while writing the bundle");
 		const row: DispatchBoardRow = {
 			runId: "run-proof",

@@ -16,15 +16,15 @@ import type { FactSum } from "../../src/core/telemetry/fact.js";
 import { newRecordId } from "../../src/core/telemetry/ids.js";
 import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import { encodeTelemetryLine } from "../../src/core/telemetry/segment.js";
+import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
+import { rebuildUsageProjections } from "../../src/domains/session/usage-projection.js";
 import {
 	callJournalHeader,
 	journalFiles,
 	openCallJournal,
 	readCallJournal,
-} from "../../src/domains/observability/call-journal.js";
-import { callsReport, sessionTelemetry } from "../../src/domains/observability/read-model.js";
-import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
-import { rebuildUsageProjections } from "../../src/domains/session/usage-projection.js";
+} from "../../src/domains/telemetry/call-journal.js";
+import { callsReport, sessionTelemetry } from "../../src/domains/telemetry/read-model.js";
 import { telemetryCall } from "../harness/telemetry-view.js";
 
 const SESSION = "shared-session";

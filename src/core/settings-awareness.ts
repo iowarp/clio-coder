@@ -1,4 +1,4 @@
-import { renderCostAmount } from "../domains/observability/cost.js";
+import { renderCostAmount } from "../domains/telemetry/cost.js";
 import type { ClioSettings } from "./config.js";
 import { type RouteName, type RouteProvenance, routeFields } from "./route-provenance.js";
 import { getAtPath } from "./session-routing.js";

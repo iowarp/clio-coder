@@ -4,9 +4,9 @@ import { BusChannels, type DispatchCompletedPayload } from "../../src/core/bus-e
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
-import type { ObservabilityRunReaders } from "../../src/domains/observability/contract.js";
-import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
-import { createObservabilityProjection } from "../../src/domains/observability/projection.js";
+import type { TelemetryRunReaders } from "../../src/domains/telemetry/contract.js";
+import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
+import { createTelemetryProjection } from "../../src/domains/telemetry/projection.js";
 import { createDispatchBoardStore } from "../../src/interactive/dispatch-board.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
@@ -15,14 +15,14 @@ test("only integrity-admitted receipt contract facts reach the board and lifecyc
 	const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
 	const verified = inspectRunReceiptTrustStatus(receipt, envelope).status;
 	const rejected = inspectRunReceiptTrustStatus({ ...receipt, task: "tampered" }, envelope).status;
-	let facts: ReturnType<NonNullable<ObservabilityRunReaders["readReceipt"]>> = {
+	let facts: ReturnType<NonNullable<TelemetryRunReaders["readReceipt"]>> = {
 		text: '{"diagnosis":"Verified bytes","reproduction":"unknown","evidence":[]}',
 		trust: verified,
 		contract: "pass",
 		contractKind: "debugger-report",
 	};
 	const bus = createSafeEventBus();
-	const projection = createObservabilityProjection(bus, {
+	const projection = createTelemetryProjection(bus, {
 		readReceipt: () => facts,
 		sessionCostSummary: emptyCostAggregate,
 		sessionTokens: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0, totalTokens: 0 }),

@@ -4,9 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, it } from "node:test";
-import { backgroundMemoryUsageRow } from "../../src/domains/observability/background-memory-usage.js";
-import { recordFailedCompactionCalls } from "../../src/domains/observability/compaction-usage.js";
-import { outOfTurnUsagePath, readOutOfTurnUsageRows } from "../../src/domains/observability/out-of-turn-usage.js";
+import { backgroundMemoryUsageRow } from "../../src/domains/telemetry/background-memory-usage.js";
+import { recordFailedCompactionCalls } from "../../src/domains/telemetry/compaction-usage.js";
+import { outOfTurnUsagePath, readOutOfTurnUsageRows } from "../../src/domains/telemetry/out-of-turn-usage.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "clio-coder-out-of-turn-fields-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));

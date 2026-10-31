@@ -2,12 +2,12 @@ import { publishClioCompileCache } from "../core/compile-cache.js";
 import type { ClioSettings } from "../core/config.js";
 import { canonicalEndpointUrl } from "../core/endpoint-key.js";
 import { endpointCapacityUsage } from "../domains/dispatch/index.js";
-import type { CallJournalOptions } from "../domains/observability/call-scope.js";
 import { observeCacheDeployment } from "../domains/providers/cache-deployment.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../domains/providers/endpoint-capacity.js";
 import type { CostProvenance } from "../domains/providers/types/cost-provenance.js";
+import type { CallJournalOptions } from "../domains/telemetry/call-scope.js";
 import { type PrewarmRoundResult, runPrewarmRound } from "../engine/prewarm.js";
 import { recordStartupDiagnostic } from "../session-control/startup-diagnostics.js";
 

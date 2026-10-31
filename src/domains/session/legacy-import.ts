@@ -5,9 +5,9 @@ import { makeTelemetryRecord, readTelemetryRecord } from "../../core/telemetry/e
 import type { Fact } from "../../core/telemetry/fact.js";
 import { derivedTelemetryIds, newAttemptId, newCallId } from "../../core/telemetry/ids.js";
 import type { CallStarted, CallUsage, RunUsage } from "../../core/telemetry/schemas.js";
-import { callSettlementFromMessage, reportedModelFromMessage } from "../observability/call-facts.js";
-import type { OutOfTurnUsageRow } from "../observability/out-of-turn-usage.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../telemetry/call-facts.js";
+import type { OutOfTurnUsageRow } from "../telemetry/out-of-turn-usage.js";
 import type { SessionEntry } from "./entries.js";
 
 export interface LegacyImport {

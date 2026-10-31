@@ -7,13 +7,13 @@ import { observedToolCallOrigin, telemetryContext } from "../core/telemetry/cont
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { recordTelemetry } from "../core/telemetry/producer.js";
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
-import { turnSettlementFromCalls } from "../domains/observability/call-facts.js";
-import type { AdmissionHold, CallJournalOptions } from "../domains/observability/call-scope.js";
-import type { TelemetrySessionLease } from "../domains/observability/session-journals.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { journalOwnsSideUsage } from "../domains/session/journal-usage.js";
 import { recordSettledSideCall } from "../domains/session/usage-record.js";
+import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
+import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
+import type { TelemetrySessionLease } from "../domains/telemetry/session-journals.js";
 import type { TurnControlRecord, TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
@@ -93,9 +93,6 @@ import {
 	type MiddlewareContract,
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
-import type { ObservabilityContract } from "../domains/observability/contract.js";
-import type { CostEntryLabel } from "../domains/observability/cost.js";
-import { appendOutOfTurnUsageRow, type OutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
@@ -130,6 +127,9 @@ import { protectedArtifactStateFromSessionEntries } from "../domains/session/pro
 import type { RetrySettings } from "../domains/session/retry.js";
 import { classifyRecoveryFailure, isRetryableRecoveryFailure } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import type { TelemetryContract } from "../domains/telemetry/contract.js";
+import type { CostEntryLabel } from "../domains/telemetry/cost.js";
+import { appendOutOfTurnUsageRow, type OutOfTurnUsageRow } from "../domains/telemetry/out-of-turn-usage.js";
 import type { TokenSplit } from "../domains/turn-control/index.js";
 import { reduceTurnOutcome } from "../domains/turn-control/index.js";
 import { createEngineAgent } from "../engine/agent.js";
@@ -947,8 +947,8 @@ export interface CreateChatLoopDeps {
 			| "checkpointTokenFigures"
 		>,
 	) => Promise<CompactResult | null>;
-	/** Optional observability sink for orchestrator chat token usage. */
-	observability?: ObservabilityContract;
+	/** Optional telemetry sink for orchestrator chat token usage. */
+	telemetry?: TelemetryContract;
 	/**
 	 * Production tool admission path. When wired, every agent-facing tool runs
 	 * through `ToolRegistry.invoke(...)` so safety classification and
@@ -1495,7 +1495,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		session: deps.session,
 		prompts: deps.prompts,
 		toolRegistry: deps.toolRegistry,
-		observability: deps.observability,
+		telemetry: deps.telemetry,
 		bus: deps.bus,
 		readSessionEntries: deps.readSessionEntries,
 		autoCompact: deps.autoCompact,
@@ -1657,7 +1657,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		promptCachePayloadForAssistant: (usage, backend, anthropicResponse, transport) =>
 			context.promptCachePayloadForAssistant(usage, backend, anthropicResponse, transport),
 		noteNextRunColdReason: (reason) => context.noteNextRunColdReason(reason),
-		observability: deps.observability,
+		telemetry: deps.telemetry,
 	});
 	const outcomeCollector = deps.turnOutcomeCollector ?? createTurnOutcomeCollector();
 	if (deps.turnOutcomeCollector === undefined) deps.middleware?.registerHook(outcomeCollector);
@@ -1716,7 +1716,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		getSettings: deps.getSettings,
 		providers: deps.providers,
 		knownTargets: deps.knownTargets,
-		observability: deps.observability,
+		telemetry: deps.telemetry,
 		scheduling: deps.scheduling,
 		headless: deps.headless,
 		createAgent,
@@ -1976,7 +1976,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		label: CallJournalOptions["label"],
 		origin: ReturnType<SessionContract["current"]>,
 	): { telemetry?: CallJournalOptions } => {
-		const acquire = deps.observability?.acquireTelemetrySession;
+		const acquire = deps.telemetry?.acquireTelemetrySession;
 		return origin && acquire
 			? {
 					telemetry: {
@@ -1986,8 +1986,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						...(journalOwnsSideUsage(label)
 							? {
 									onSettled: (facts) => {
-										if (!deps.observability || deps.session?.current()?.id !== origin.id) return;
-										recordSettledSideCall(deps.observability, facts);
+										if (!deps.telemetry || deps.session?.current()?.id !== origin.id) return;
+										recordSettledSideCall(deps.telemetry, facts);
 									},
 								}
 							: {}),
@@ -2037,7 +2037,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (observation?.callId) return;
 		const costProvenance = usage ? runtime.costProvenance : "unknown";
 		if (observation?.failure?.invoked !== false && (deps.session?.current()?.id ?? null) === (origin?.id ?? null))
-			deps.observability?.recordTokens(
+			deps.telemetry?.recordTokens(
 				runtime.targetId,
 				runtime.wireModelId,
 				usage?.totalTokens ?? 0,
@@ -2182,7 +2182,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	): Promise<void> => {
 		const calls = turnRuntime.takeSettledCalls(userTurnId);
 		const origin = deps.session?.current();
-		const acquire = deps.observability?.acquireTelemetrySession;
+		const acquire = deps.telemetry?.acquireTelemetrySession;
 		if (!origin || !acquire) return;
 		try {
 			const lease = await acquire(origin, "main", userTurnId);
@@ -2700,9 +2700,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// The turn holds its session's writer open from submit to settle, so the records it makes outside a model
 				// call (middleware at turn start, tools, snapshots) reach the journal after an idle close (#434).
 				const turnOrigin = deps.session?.current();
-				if (turnOrigin && deps.observability?.acquireTelemetrySession) {
+				if (turnOrigin && deps.telemetry?.acquireTelemetrySession) {
 					try {
-						turnLease = await deps.observability.acquireTelemetrySession(turnOrigin, "main");
+						turnLease = await deps.telemetry.acquireTelemetrySession(turnOrigin, "main");
 					} catch {
 						// The writer reports its own failures; a turn never waits on telemetry.
 					}

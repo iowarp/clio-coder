@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
 import { readSessionFileEntries, type SessionTreeNode, sessionPaths } from "../../../engine/session.js";
-import { seedForkCallJournal } from "../../observability/call-journal.js";
+import { seedForkCallJournal } from "../../telemetry/call-journal.js";
 import { collectSessionEntries } from "../compaction/session-entries.js";
 import { HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE } from "../continuity/operator-request.js";
 import type { SessionMeta } from "../contract.js";

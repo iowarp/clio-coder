@@ -11,7 +11,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, it } from "node:test";
-import { TraceReader, TraceStore } from "../../src/domains/observability/trace-store.js";
+import { TraceReader, TraceStore } from "../../src/domains/telemetry/trace-store.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "clio-coder-trace-legacy-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));

@@ -53,9 +53,9 @@ import { normalizeClioCoderEventRecord } from "../../core/naming-events.js";
 import { normalizeCallUsage } from "../../core/token-split.js";
 import { runTailEntryFromEvent } from "../../tools/dispatch-run-events.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
-import { isThinkingEvent, workerTextDelta } from "../observability/worker-progress.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { redactSecretString } from "../safety/redaction.js";
+import { isThinkingEvent, workerTextDelta } from "../telemetry/worker-progress.js";
 import {
 	defaultRunEventJournal,
 	parseToolAuditFacts,

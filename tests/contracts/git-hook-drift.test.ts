@@ -8,12 +8,12 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createGitHooksFingerprinter, gitHookDirectories } from "../../src/core/sandbox/git-hooks-fingerprint.js";
 import { resolveWorkerSandboxSpec } from "../../src/core/sandbox/worker-policy.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import type { ObservabilityContract } from "../../src/domains/observability/index.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import type { SafetyDecision } from "../../src/domains/safety/contract.js";
 import { createGitHookDriftGuard, GIT_HOOKS_CHANGED_RULE_ID } from "../../src/domains/safety/hook-drift.js";
 import { operatorOnlyAsk, type SafetyJudgeSubject } from "../../src/domains/safety/safety-judge.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/index.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { renderExitSummary } from "../../src/interactive/exit-summary.js";
 import { createExitSummaryCollector } from "../../src/interactive/exit-summary-collector.js";
@@ -192,14 +192,14 @@ test("an approved git-control-file write refreshes the baseline, and the exit su
 	strictEqual(await runs(s, commit(cwd)), "ok", "the approved write is in the baseline");
 	strictEqual(s.parks.length, 1);
 
-	const observability = {
+	const telemetry = {
 		costEntries: () => [],
 		sessionCostSummary: () => ({ knownUsd: 0, hasEstimated: false, hasUnknown: false, allKnownFree: false, calls: 0 }),
 		subscribe: () => () => {},
-	} as unknown as ObservabilityContract;
+	} as unknown as TelemetryContract;
 	const collector = createExitSummaryCollector({
 		bus: createSafeEventBus(),
-		observability,
+		telemetry,
 		dispatch: {},
 		session: { current: () => ({ id: "session-1", hasModelTurn: true }) } as unknown as Pick<SessionContract, "current">,
 		getTurns: () => 1,

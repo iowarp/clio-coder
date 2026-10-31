@@ -3,10 +3,6 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
-import { readCallJournal } from "../../src/domains/observability/call-journal.js";
-import type { ObservabilityContract } from "../../src/domains/observability/contract.js";
-import type { UsageBreakdown } from "../../src/domains/observability/cost.js";
-import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import anthropicRuntime from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -18,13 +14,17 @@ import type { OneShotPort } from "../../src/domains/system-one/index.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
 import { createRunner } from "../../src/domains/system-one/runner.js";
 import type { DecisionEngine, DecisionRecord, SiteDefinition } from "../../src/domains/system-one/types.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import type { UsageBreakdown } from "../../src/domains/telemetry/cost.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createSystemOneRequestAdmission } from "../../src/entry/system-one-host.js";
 import { runOutOfTurnRound } from "../../src/session-control/side-question.js";
 
 /**
  * Every System One request to a priced target passes the host's admission,
  * and whatever usage it reports is charged to the session. The real admission
- * from the composition root runs over fake scheduling and observability, and
+ * from the composition root runs over fake scheduling and telemetry, and
  * `fetch` is faked, so nothing reaches a network or the operator's state.
  */
 
@@ -80,20 +80,19 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 		throw new Error("journal unavailable");
 	});
 	flushers.push(journals.closeAll);
-	const observability: Pick<ObservabilityContract, "recordTokens" | "acquireTelemetrySession" | "recordNeverSentCalls"> =
-		{
-			acquireTelemetrySession: journals.acquire,
-			recordNeverSentCalls(count) {
-				neverSent += count;
-			},
-			recordTokens(_provider, _model, tokens, costUsd, breakdown, provenance, _facts, label) {
-				charges.push({ tokens, costUsd, breakdown, provenance, label });
-			},
-		};
+	const telemetry: Pick<TelemetryContract, "recordTokens" | "acquireTelemetrySession" | "recordNeverSentCalls"> = {
+		acquireTelemetrySession: journals.acquire,
+		recordNeverSentCalls(count) {
+			neverSent += count;
+		},
+		recordTokens(_provider, _model, tokens, costUsd, breakdown, provenance, _facts, label) {
+			charges.push({ tokens, costUsd, breakdown, provenance, label });
+		},
+	};
 	const admit = createSystemOneRequestAdmission({
 		providers: { getTarget: (id) => (id === target.id ? target : null) },
 		scheduling: scheduling as SchedulingContract,
-		observability: observability as ObservabilityContract,
+		telemetry: telemetry as TelemetryContract,
 		getCeilingUsd: () => 1,
 		currentSession: () => "session-1",
 		repoIdentity: () => "repo",

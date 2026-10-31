@@ -1,5 +1,5 @@
 import { renderCostRemaining, renderUsdSetting } from "../../core/telemetry/render.js";
-import { renderCostAmount } from "../observability/cost.js";
+import { renderCostAmount } from "../telemetry/cost.js";
 /**
  * Session budget state. Admission checks priced spend before the next paid
  * request; unpriced requests never enter this gate.

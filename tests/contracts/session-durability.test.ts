@@ -8,12 +8,12 @@ import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recover
 import { readRunEventJournal, runEventJournalRoot } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry, settleOrphanedRunJournal } from "../../src/domains/dispatch/run-telemetry.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import { readCallJournal } from "../../src/domains/observability/call-journal.js";
 import { appendTurn, persistSessionMeta, resumeSessionState, startSession } from "../../src/domains/session/manager.js";
 import {
 	reconcilePendingProtectedArtifacts,
 	stagePendingProtectedArtifact,
 } from "../../src/domains/session/protected-artifact-journal.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import {
 	createSession,
 	readSessionFileEntries,

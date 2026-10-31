@@ -5,8 +5,8 @@ import { createTelemetryForwarder } from "../core/telemetry/forwarder.js";
 import { newAttemptId, newCallId } from "../core/telemetry/ids.js";
 import { recordTelemetry } from "../core/telemetry/producer.js";
 import type { CallUsage, RunUsage } from "../core/telemetry/schemas.js";
-import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/observability/call-facts.js";
 import { calculatePricingCostUsd } from "../domains/providers/catalog.js";
+import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
 import type { WorkerEventEmit, WorkerRunHandle, WorkerRunInput } from "./worker-runtime.js";
 
 const unknown = { kind: "unknown", reason: "provider-omitted" } as const;

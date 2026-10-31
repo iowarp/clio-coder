@@ -1,7 +1,7 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { summarizeEvidenceIndex } from "../../src/domains/observability/accountability.js";
-import type { EvidenceIndexRow } from "../../src/domains/observability/evidence-index.js";
+import { summarizeEvidenceIndex } from "../../src/domains/telemetry/accountability.js";
+import type { EvidenceIndexRow } from "../../src/domains/telemetry/evidence-index.js";
 
 function row(runId: string, fields: Partial<EvidenceIndexRow> = {}): EvidenceIndexRow {
 	return {

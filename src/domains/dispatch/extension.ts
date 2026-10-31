@@ -12,7 +12,6 @@ import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
 import { persistWorkerContextSeed } from "../context/worker/store.js";
 import { ensureClaudeAgentSdk } from "../lifecycle/claude-sdk-install.js";
 import type { CapabilityGate } from "../middleware/capability-gate.js";
-import { aggregateCostAmounts, type CostAmount, callCoverageForRun, renderCostAmount } from "../observability/cost.js";
 import { isBuiltinClaudeAcp, resolveClaudeLaunchCredential } from "../providers/auth/index.js";
 import type { WorkerFlowPolicyInput } from "../safety/information-flow.js";
 import {
@@ -22,6 +21,7 @@ import {
 	flowUnmediatedAgentRefusal,
 	resolveModelDestination,
 } from "../safety/information-flow.js";
+import { aggregateCostAmounts, type CostAmount, callCoverageForRun, renderCostAmount } from "../telemetry/cost.js";
 import { assertTurnConstraintCompatibility } from "./tool-constraints.js";
 import { readToolRounds } from "./types.js";
 /**
@@ -157,8 +157,6 @@ import type { ContextContract, ProjectPromptContext, ProjectStructuredContext } 
 import { compileHandbook, selectWorkerHandbook, workerHandbookAudience } from "../context/handbook-units.js";
 import { enabledHarnessExtensionToolNames } from "../extensions/command-tools.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
-import type { ObservabilityContract } from "../observability/contract.js";
-import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../observability/session-journals.js";
 import { workerPermitLine, workerSafetyOneLiner } from "../prompts/compiler.js";
 import type { PromptsContract } from "../prompts/contract.js";
 import { selectProjectPreload } from "../prompts/preload.js";
@@ -225,6 +223,8 @@ import {
 import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
 import { ceilChars } from "../session/context-accounting.js";
+import type { TelemetryContract } from "../telemetry/contract.js";
+import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../telemetry/session-journals.js";
 import {
 	approvedRouteObservation,
 	consumeActiveRouteApproval,
@@ -4096,7 +4096,7 @@ export function createDispatchBundle(
 
 	/**
 	 * Priced spend metered by workers still running. A worker's spend reaches
-	 * the session ledger only when its run ends (observability records it on
+	 * the session ledger only when its run ends (telemetry records it on
 	 * the terminal event, after `active` drops the run), so without this a
 	 * fan-out admitted every member against settled spend alone.
 	 */
@@ -5965,7 +5965,7 @@ export function createDispatchBundle(
 				runJournal = await openRunTelemetry(telemetryContext, join(runEventJournalRoot(), telemetryContext.runId));
 				if (req.ownerSessionId && req.ownerSessionCwdHash) {
 					parentJournal = await context
-						.getContract<ObservabilityContract>("observability")
+						.getContract<TelemetryContract>("telemetry")
 						?.acquireTelemetrySession?.({ id: req.ownerSessionId, cwdHash: req.ownerSessionCwdHash }, "worker");
 					if (parentJournal) runJournal.linkSession(parentJournal.context);
 				}
@@ -7408,7 +7408,7 @@ export function createDispatchBundle(
 					);
 					if (req.ownerSessionId && req.ownerSessionCwdHash) {
 						parentJournal = await context
-							.getContract<ObservabilityContract>("observability")
+							.getContract<TelemetryContract>("telemetry")
 							?.acquireTelemetrySession?.({ id: req.ownerSessionId, cwdHash: req.ownerSessionCwdHash }, "worker");
 						if (parentJournal) runJournal.linkSession(parentJournal.context);
 					}
@@ -7830,7 +7830,7 @@ export function createDispatchBundle(
 								: "unverified",
 						sessionId: readStringOrNull(evidence?.sessionId),
 						exitReason: stopReason === "stop" || stopReason === "error" || stopReason === "aborted" ? stopReason : "unknown",
-						toolObservability: "unavailable",
+						toolTelemetry: "unavailable",
 					};
 				}
 				const failure = readCallFailure(event.message.failure);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
-import type { TelemetryReadModel } from "../../src/domains/observability/contract.js";
+import type { TelemetryReadModel } from "../../src/domains/telemetry/contract.js";
 import { sessionUsageTotals } from "../../src/engine/acp/live-telemetry.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";

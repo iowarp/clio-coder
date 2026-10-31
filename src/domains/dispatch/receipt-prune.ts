@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import { verifyReceiptIntegrityOutcome } from "../evidence/trust-status.js";
-import { readEvidenceIndex } from "../observability/evidence-index.js";
+import { readEvidenceIndex } from "../telemetry/evidence-index.js";
 import { isOpenRunRow } from "./orphan-recovery.js";
 import type { ReceiptTombstone } from "./receipt-store.js";
 import {

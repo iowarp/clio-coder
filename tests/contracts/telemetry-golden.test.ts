@@ -10,11 +10,11 @@ import { test } from "node:test";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import type { RouteObservation } from "../../src/domains/dispatch/route-policy.js";
 import { estimateRoute, routeObservationFromHistory } from "../../src/domains/dispatch/route-policy.js";
-import { aggregateCostAmounts, renderCostAggregate } from "../../src/domains/observability/cost.js";
-import { foldCallJournal } from "../../src/domains/observability/folds.js";
 import { isSessionEntry } from "../../src/domains/session/entries.js";
 import { usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
 import { importLegacySession } from "../../src/domains/session/legacy-import.js";
+import { aggregateCostAmounts, renderCostAggregate } from "../../src/domains/telemetry/cost.js";
+import { foldCallJournal } from "../../src/domains/telemetry/folds.js";
 
 const ledger = readFileSync(new URL("../fixtures/telemetry/golden/p0/current.jsonl", import.meta.url), "utf8")
 	.trim()

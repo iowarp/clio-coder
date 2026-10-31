@@ -14,7 +14,7 @@ import {
 	settingsV2PathForRow,
 } from "../../core/settings-controls.js";
 import { settingsChangeKind } from "../../domains/config/classify.js";
-import { renderCostAmount } from "../../domains/observability/cost.js";
+import { renderCostAmount } from "../../domains/telemetry/cost.js";
 import { openTargetWizard } from "../target-wizard.js";
 
 export { SETTINGS_LABELS_BY_ID } from "../../core/settings-controls.js";

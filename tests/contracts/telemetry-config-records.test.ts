@@ -12,9 +12,9 @@ import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
 import { computeSettingsFingerprint } from "../../src/domains/dispatch/settings-fingerprint.js";
-import { readCallJournal } from "../../src/domains/observability/call-journal.js";
-import { createObservabilityBundle } from "../../src/domains/observability/extension.js";
-import { readTelemetryObject } from "../../src/domains/observability/objects.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js";
+import { readTelemetryObject } from "../../src/domains/telemetry/objects.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 it("a session writer opens with its settings and journals each change once, with both documents (#434)", async () => {
@@ -39,7 +39,7 @@ it("a session writer opens with its settings and journals each change once, with
 			return () => {};
 		},
 	} as unknown as ConfigContract;
-	const { contract, extension } = createObservabilityBundle(
+	const { contract, extension } = createTelemetryBundle(
 		{
 			bus: createSafeEventBus(),
 			getContract: (name: string) => (name === "config" ? config : undefined),
@@ -101,7 +101,7 @@ it("a session writer opens with its settings and journals each change once, with
 it("a session's lifecycle events become session.opened, session.resumed and session.closed records (#434)", async () => {
 	const env = await isolateClioEnv("clio-coder-lifecycle-records-");
 	const bus = createSafeEventBus();
-	const { extension } = createObservabilityBundle({ bus, getContract: () => undefined } as unknown as DomainContext, {
+	const { extension } = createTelemetryBundle({ bus, getContract: () => undefined } as unknown as DomainContext, {
 		dispatchTrace: false,
 	});
 	const origin = { id: "lifecycle-session", cwdHash: "lifecycle-repo" };

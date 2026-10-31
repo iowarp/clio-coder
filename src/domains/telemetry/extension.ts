@@ -2,7 +2,7 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 import { readReceiptTextSync } from "../dispatch/receipt-store.js";
 
 /**
- * Observability domain wire-up. Listens to the dispatch bus channels and folds
+ * Telemetry domain wire-up. Listens to the dispatch bus channels and folds
  * their payloads into the session cost tracker, the projection and the trace
  * mirror. Other domains read the snapshot through the contract; the one thing
  * it emits is `accountability.evidenceReady`, once per run whose evidence
@@ -31,13 +31,13 @@ import { computeSettingsFingerprint } from "../dispatch/settings-fingerprint.js"
 import type { RunReceipt } from "../dispatch/types.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
 import { createConsentView } from "./consent.js";
-import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
+import type { TelemetryContract, TelemetryRunEvidence, TokenThroughputSnapshot } from "./contract.js";
 import { callCoverageForRun, createCostTracker } from "./cost.js";
 import { type EvidenceIndexRow, writeEvidenceIndexRowQueued } from "./evidence-index.js";
 import { createHealthWindows } from "./health-window.js";
 import { storeTelemetryObject } from "./objects.js";
 import { readOutOfTurnUsageRows } from "./out-of-turn-usage.js";
-import { createObservabilityProjection } from "./projection.js";
+import { createTelemetryProjection } from "./projection.js";
 import type { SessionCapture, TelemetrySessionOrigin } from "./session-journals.js";
 import { createSessionJournals } from "./session-journals.js";
 import { createLiveTelemetryModel } from "./telemetry-live.js";
@@ -49,7 +49,7 @@ import { createDispatchTraceMirror, type DispatchTraceMirror, traceDatabasePath 
  * the sidecar index row lands; `onFailed` fires when the build or write throws.
  */
 interface EvidenceBuildHooks {
-	onReady(runId: string, evidence: ObservabilityRunEvidence): void;
+	onReady(runId: string, evidence: TelemetryRunEvidence): void;
 	onFailed(runId: string, message: string): void;
 }
 
@@ -170,15 +170,15 @@ function evidenceIndexRow(
 	};
 }
 
-export interface ObservabilityBundleOptions {
+export interface TelemetryBundleOptions {
 	/** Disable the SQLite dispatch mirror for short-lived internal generators. */
 	dispatchTrace?: boolean;
 }
 
-export function createObservabilityBundle(
+export function createTelemetryBundle(
 	context: DomainContext,
-	options: ObservabilityBundleOptions = {},
-): DomainBundle<ObservabilityContract> {
+	options: TelemetryBundleOptions = {},
+): DomainBundle<TelemetryContract> {
 	const cost = createCostTracker();
 	// Writers ask before every record and batch, so the capture is answered from memory: consent per session
 	// refreshes on the cold path before each lease, and the result is reused until settings or consent change (#434).
@@ -365,7 +365,7 @@ export function createObservabilityBundle(
 	// tracker into a single bounded snapshot. It reads these accessors at
 	// snapshot-build time, so it always observes the latest state regardless of
 	// bus-handler ordering.
-	const projection = createObservabilityProjection(context.bus, {
+	const projection = createTelemetryProjection(context.bus, {
 		sessionCostSummary: () => cost.sessionCost(),
 		sessionTokens: () => cost.sessionTokens(),
 		latestThroughput: () => latestThroughput,
@@ -470,7 +470,7 @@ export function createObservabilityBundle(
 		},
 	};
 
-	const contract: ObservabilityContract = {
+	const contract: TelemetryContract = {
 		recordRunTokens(runId, source, ...args) {
 			// A sealed receipt already restored the complete run; its journal may since have been evicted (#434).
 			if (source === "unavailable" && recordedRuns.has(runId)) return;

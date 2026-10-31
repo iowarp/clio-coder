@@ -572,7 +572,7 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 		bus: { on: () => noop, emit: noop },
 		providers: { list: () => [status()] },
 		dispatch: { snapshot: () => ({ running: [] }) },
-		observability: { bindRunReaders: () => noop, snapshot: () => ({ session: {} }), subscribe: () => noop },
+		telemetry: { bindRunReaders: () => noop, snapshot: () => ({ session: {} }), subscribe: () => noop },
 		chat: {
 			contextUsage: () => ({}),
 			contextLedger: () => null,

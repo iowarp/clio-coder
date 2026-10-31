@@ -1,7 +1,7 @@
 import type { GateDecisionArtifact, RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
-import type { CostAggregate } from "../observability/cost.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
 import type { DecisionRecord } from "../session/entries.js";
+import type { CostAggregate } from "../telemetry/cost.js";
 import type { CanonicalTrustStatus } from "./trust-status.js";
 
 export const EVIDENCE_VERSION = 1;

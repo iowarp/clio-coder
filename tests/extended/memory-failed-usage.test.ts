@@ -22,13 +22,13 @@ import { readTaskMemorySpendSummary } from "../../src/domains/memory/task-memory
 import { createTaskMemoryTelemetrySink } from "../../src/domains/memory/task-memory-telemetry.js";
 import { createMemoryGuardian } from "../../src/domains/middleware/memory-guardian.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
-import { readCallJournal } from "../../src/domains/observability/call-journal.js";
-import { readOutOfTurnUsageRows } from "../../src/domains/observability/out-of-turn-usage.js";
-import { createSessionJournals } from "../../src/domains/observability/session-journals.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { EMPTY_CAPABILITIES, type ProvidersContract } from "../../src/domains/providers/index.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { readOutOfTurnUsageRows } from "../../src/domains/telemetry/out-of-turn-usage.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { completeEngineText } from "../../src/engine/ai.js";
 import {
 	createEngineFauxCore,
@@ -195,7 +195,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 						stateDir: join(env.dir, "state"),
 						repoIdentity: origin.cwdHash,
 						sessionId: origin.id,
-						observability: {
+						telemetry: {
 							recordTokens: (_target, _model, tokens) => {
 								live.push(tokens);
 							},

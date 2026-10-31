@@ -1,6 +1,6 @@
 /**
- * The observability projection's notice ring used to classify eight kinds of
- * bus event into an ObservabilityNotice. Seven of them (runtime, middleware,
+ * The telemetry projection's notice ring used to classify eight kinds of
+ * bus event into a TelemetryNotice. Seven of them (runtime, middleware,
  * safety, loop, tool-budget, context, budget) had no reader anywhere in the
  * repository and duplicated richer, independent classification the
  * interactive layer already runs for the same bus channels (bus-notices.ts
@@ -13,8 +13,8 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BusChannels, type DeclaredRuntimeNotice } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
-import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
-import { createObservabilityProjection, type ProjectionReadModel } from "../../src/domains/observability/projection.js";
+import { emptyCostAggregate } from "../../src/domains/telemetry/cost.js";
+import { createTelemetryProjection, type ProjectionReadModel } from "../../src/domains/telemetry/projection.js";
 
 function stubReadModel(): ProjectionReadModel {
 	return {
@@ -24,10 +24,10 @@ function stubReadModel(): ProjectionReadModel {
 	};
 }
 
-describe("observability projection notices", () => {
+describe("telemetry projection notices", () => {
 	it("produces nothing for the seven bus channels that used to classify a now-removed notice kind", () => {
 		const bus = createSafeEventBus();
-		const projection = createObservabilityProjection(bus, stubReadModel());
+		const projection = createTelemetryProjection(bus, stubReadModel());
 
 		bus.emit(BusChannels.RuntimeNotice, {
 			kind: "swap",
@@ -82,7 +82,7 @@ describe("observability projection notices", () => {
 
 	it("still surfaces an evidence-build-failure notice, the one kind that survives", () => {
 		const bus = createSafeEventBus();
-		const projection = createObservabilityProjection(bus, stubReadModel());
+		const projection = createTelemetryProjection(bus, stubReadModel());
 
 		projection.evidenceBuildFailed("run-1", "disk full");
 		const notices = projection.snapshot().notices;
@@ -95,7 +95,7 @@ describe("observability projection notices", () => {
 
 	it("falls back to a generated message when the failure carries none", () => {
 		const bus = createSafeEventBus();
-		const projection = createObservabilityProjection(bus, stubReadModel());
+		const projection = createTelemetryProjection(bus, stubReadModel());
 
 		projection.evidenceBuildFailed("run-2", "");
 		const notices = projection.snapshot().notices;

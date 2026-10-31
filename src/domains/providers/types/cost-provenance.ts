@@ -18,7 +18,7 @@ const COST_PROVENANCE_VALUES: ReadonlySet<string> = new Set<CostProvenance>([
  * worker process boundary, never runtime-checked against this closed set
  * before) against the four real provenance values. An unrecognized value
  * keeps `fallback` rather than being accepted as-is, matching how the
- * observability projection's run summary already treated this field; the
+ * telemetry projection's run summary already treated this field; the
  * interactive dispatch board previously accepted any truthy string here.
  */
 export function resolveCostProvenance(value: unknown, fallback: CostProvenance): CostProvenance {

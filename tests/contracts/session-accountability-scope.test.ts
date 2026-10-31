@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import { writeEvidenceIndexRowQueued } from "../../src/domains/observability/evidence-index.js";
+import { writeEvidenceIndexRowQueued } from "../../src/domains/telemetry/evidence-index.js";
 import { AccountabilityArtifactProvider } from "../../src/interactive/view/artifacts.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 

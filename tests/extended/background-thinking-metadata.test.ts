@@ -11,12 +11,12 @@ import {
 	type TaskMemoryStepUsage,
 } from "../../src/domains/memory/task-memory-policy.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
-import { backgroundMemoryUsageRow } from "../../src/domains/observability/background-memory-usage.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { createProvidersBundle } from "../../src/domains/providers/extension.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import { appendEntry, appendTurn, readCurrentEntries, startSession } from "../../src/domains/session/manager.js";
+import { backgroundMemoryUsageRow } from "../../src/domains/telemetry/background-memory-usage.js";
 import {
 	createBackgroundMemoryModelClient,
 	createBackgroundMemoryRouting,

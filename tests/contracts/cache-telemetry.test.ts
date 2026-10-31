@@ -6,14 +6,10 @@ import {
 	type CacheRequestStructure,
 } from "../../src/core/cache-telemetry.js";
 import type { CallUsage } from "../../src/core/telemetry/schemas.js";
-import {
-	cachePhysics,
-	firstDivergentSection,
-	serverTimedUsage,
-} from "../../src/domains/observability/cache-physics.js";
-import { callSettlementFromMessage } from "../../src/domains/observability/call-facts.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { foldPromptCacheTelemetry } from "../../src/domains/session/prompt-cache.js";
+import { cachePhysics, firstDivergentSection, serverTimedUsage } from "../../src/domains/telemetry/cache-physics.js";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 
 // #423: a break the host cannot name is attributed to the route lifetime it outlived, or to a continuation
 // the transport rebuilt, before it is left unknown.

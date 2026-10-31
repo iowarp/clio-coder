@@ -6,11 +6,11 @@ import type { FactMetric } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
-import type { TelemetryView } from "../domains/observability/contract.js";
-import type { ObservabilityContract } from "../domains/observability/index.js";
 import { mutatingReceipts } from "../domains/safety/finish-contract.js";
 import { UNATTENDED_DECIDED_BY } from "../domains/safety/unattended.js";
 import type { SessionContract } from "../domains/session/contract.js";
+import type { TelemetryView } from "../domains/telemetry/contract.js";
+import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { ChatLoopEvent } from "../session-control/chat-loop.js";
 import type { WorkerReceiptFacts } from "../session-control/worker-stream.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
@@ -89,7 +89,7 @@ function autoResolvedQuestions(toolName: string, result: unknown): number {
 
 interface CollectorDeps {
 	bus: SafeEventBus;
-	observability: ObservabilityContract;
+	telemetry: TelemetryContract;
 	dispatch: Pick<DispatchContract, "observedRunWrites">;
 	session?: Pick<SessionContract, "current">;
 	getTurns: () => number | null;
@@ -407,7 +407,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			for (const stats of workerTools.values()) {
 				for (const { tool, count } of stats) tools.set(tool, (tools.get(tool) ?? 0) + count);
 			}
-			const spend = exitSpend(deps.observability.telemetry?.live(), visitFrom);
+			const spend = exitSpend(deps.telemetry.telemetry?.live(), visitFrom);
 			return {
 				sessionId: session.id,
 				sessionName: session.name ?? null,

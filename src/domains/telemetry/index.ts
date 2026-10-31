@@ -1,16 +1,16 @@
 import type { DomainModule } from "../../core/domain-loader.js";
-import { createObservabilityBundle, type ObservabilityBundleOptions } from "./extension.js";
-import { ObservabilityManifest } from "./manifest.js";
+import { createTelemetryBundle, type TelemetryBundleOptions } from "./extension.js";
+import { TelemetryManifest } from "./manifest.js";
 
-export const ObservabilityDomainModule: DomainModule = {
-	manifest: ObservabilityManifest,
-	createExtension: createObservabilityBundle,
+export const TelemetryDomainModule: DomainModule = {
+	manifest: TelemetryManifest,
+	createExtension: createTelemetryBundle,
 };
 
-export function createObservabilityDomainModule(options: ObservabilityBundleOptions = {}): DomainModule {
+export function createTelemetryDomainModule(options: TelemetryBundleOptions = {}): DomainModule {
 	return {
-		manifest: ObservabilityManifest,
-		createExtension: (context) => createObservabilityBundle(context, options),
+		manifest: TelemetryManifest,
+		createExtension: (context) => createTelemetryBundle(context, options),
 	};
 }
 
@@ -24,11 +24,11 @@ export {
 	recordBackgroundMemoryStep,
 } from "./background-memory-usage.js";
 export type {
-	ObservabilityContract,
-	ObservabilityNotice,
-	ObservabilityRunEvidence,
-	ObservabilityRunSummary,
-	ObservabilitySnapshot,
+	TelemetryContract,
+	TelemetryNotice,
+	TelemetryRunEvidence,
+	TelemetryRunSummary,
+	TelemetrySnapshot,
 	TokenThroughputSnapshot,
 } from "./contract.js";
 export {
@@ -48,7 +48,7 @@ export {
 } from "./cost.js";
 export type { EvidenceIndexRow } from "./evidence-index.js";
 export { EVIDENCE_INDEX_FILE, MAX_EVIDENCE_INDEX_ROWS, readEvidenceIndex } from "./evidence-index.js";
-export { ObservabilityManifest } from "./manifest.js";
+export { TelemetryManifest } from "./manifest.js";
 export type { OutOfTurnUsage, OutOfTurnUsageReadResult, OutOfTurnUsageRow } from "./out-of-turn-usage.js";
 export {
 	appendOutOfTurnUsageRow,
@@ -57,9 +57,9 @@ export {
 	outOfTurnUsagePath,
 	readOutOfTurnUsageRows,
 } from "./out-of-turn-usage.js";
-export type { ObservabilityProjection, ProjectionReadModel } from "./projection.js";
+export type { ProjectionReadModel, TelemetryProjection } from "./projection.js";
 export {
-	createObservabilityProjection,
+	createTelemetryProjection,
 	MAX_PROJECTION_NOTICES,
 	MAX_PROJECTION_RUNS,
 	PROJECTION_FLUSH_DEBOUNCE_MS,
