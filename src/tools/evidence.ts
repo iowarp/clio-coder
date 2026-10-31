@@ -3,6 +3,7 @@ import { assertSafeId } from "../core/safe-id.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioStateDir } from "../core/xdg.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
+import type { RunEvidence } from "../domains/evidence/types.js";
 import { StringEnum } from "../engine/ai.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -27,11 +28,12 @@ function boundedResult(value: unknown): ToolResult {
 }
 
 /**
- * The runs a session may read: those its own session dispatched, and those that ran in its project. The ledger row
- * decides visibility only; what the tool reports comes from the run's sealed scope (#434).
+ * The runs a session may read: those its own session dispatched, and those that ran in its project. The bounded run
+ * ledger drops old rows while their sealed scopes remain, so a run is also visible by the session its journal names
+ * and the workspace its sealed assessment records (#434). What the tool reports comes from the run's sealed scope.
  */
 async function visibleRuns(sessionId: string | undefined): Promise<{
-	sees(runId: string): boolean;
+	sees(run: RunEvidence): boolean;
 	known(runId: string): boolean;
 	cwd(runId: string): string | null;
 }> {
@@ -43,9 +45,10 @@ async function visibleRuns(sessionId: string | undefined): Promise<{
 			.map((row) => [row.id, row] as const),
 	);
 	return {
-		sees(runId) {
-			const row = rows.get(runId);
-			return row !== undefined && ownership.seesRun(row);
+		sees(run) {
+			const row = rows.get(run.runId);
+			if (row !== undefined) return ownership.seesRun(row);
+			return ownership.seesRun({ sessionId: run.sessionId, cwd: run.cwd ?? "" });
 		},
 		known: (runId) => rows.has(runId),
 		cwd: (runId) => rows.get(runId)?.cwd ?? null,
@@ -72,7 +75,7 @@ export const evidenceTool: ToolSpec = {
 		try {
 			const stateDir = clioStateDir();
 			const visible = await visibleRuns(options?.sessionId);
-			const sees = (runId: string) => visible.sees(runId);
+			const sees = (run: RunEvidence) => visible.sees(run);
 			if (mode === "list") {
 				if (args.cursor !== undefined && typeof args.cursor !== "string") {
 					return { kind: "error", message: "evidence: cursor must be a string" };
@@ -82,7 +85,7 @@ export const evidenceTool: ToolSpec = {
 					"../domains/evidence/inventory.js"
 				);
 				for (let limit = EVIDENCE_INVENTORY_MAX_ARTIFACTS; limit > 0; limit -= 1) {
-					const snapshot = await evidenceInventorySnapshot(Date.now, stateDir, (run) => sees(run.runId), {
+					const snapshot = await evidenceInventorySnapshot(Date.now, stateDir, sees, {
 						...(args.cursor === undefined ? {} : { cursor: args.cursor }),
 						limit,
 					});
@@ -109,7 +112,7 @@ export const evidenceTool: ToolSpec = {
 				const inventory = await evidenceInventorySnapshot(
 					Date.now,
 					stateDir,
-					(run) => run.sessionId === sessionId && sees(run.runId),
+					(run) => run.sessionId === sessionId && sees(run),
 				);
 				const { readSessionEntriesForId } = await import("../domains/session/index.js");
 				const { filterEntriesToActivePath } = await import("../domains/session/tree/active-path.js");
@@ -138,23 +141,24 @@ export const evidenceTool: ToolSpec = {
 				return { kind: "error", message: "evidence: inspect requires runId" };
 			}
 			assertSafeId(id, "run");
-			if (!visible.known(id)) {
+			const { inspectRunEvidence } = await import("../domains/evidence/index.js");
+			const evidence = await inspectRunEvidence(stateDir, id);
+			const retained = evidence.settled !== null || evidence.integrity.state === "failed";
+			if (!visible.known(id) && !retained) {
 				return {
 					kind: "error",
 					message: `evidence: run '${id}' not found`,
 					details: { code: "artifact_absent", artifactAbsent: true },
 				};
 			}
-			if (!sees(id)) {
+			if (!sees(evidence)) {
 				return {
 					kind: "error",
 					message: `evidence: run '${id}' is not one this session dispatched or that ran in its project`,
 					details: { code: "evidence_foreign", artifactAbsent: false },
 				};
 			}
-			const { inspectRunEvidence } = await import("../domains/evidence/index.js");
-			const evidence = await inspectRunEvidence(stateDir, id);
-			if (evidence.settled === null && evidence.integrity.state !== "failed") {
+			if (!retained) {
 				return {
 					kind: "error",
 					message: `evidence: run '${id}' has not settled; it has no evidence yet`,

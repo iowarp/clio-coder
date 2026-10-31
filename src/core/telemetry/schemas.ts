@@ -1067,6 +1067,11 @@ export const EvidenceFindingsObjectSchema = Type.Object(
 		decisions: Type.Array(
 			Type.Object({ ref: ExistingId, sessionId: ExistingId, record: Type.Record(Type.String(), Type.Unknown()) }, closed),
 		),
+		/**
+		 * The workspace dispatch ran the run from, so a project may still read its retained evidence once the bounded
+		 * run ledger drops its row; null when the run was sealed by recovery without its row (#434).
+		 */
+		cwd: nullable(Type.String()),
 	},
 	closed,
 );

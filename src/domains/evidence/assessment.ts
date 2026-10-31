@@ -24,6 +24,8 @@ import type { EvidenceSeverity, EvidenceTag } from "./types.js";
 /** What dispatch knew of the run when it settled it; recovery that seals an orphaned run has none of it. */
 export interface RunAssessmentContext {
 	sessionId: string | null;
+	/** The workspace the run was dispatched from: its project identity for readers after its ledger row is gone. */
+	cwd: string;
 	/** The dispatch lineage attempt; null for a run dispatched without a lineage. */
 	attempt: number | null;
 	decisionRefs: ReadonlyArray<string>;
@@ -124,6 +126,7 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 			version: 1,
 			findings: findings.map((entry, index) => ({ id: ids[index] ?? "", message: entry.message })),
 			decisions,
+			cwd: context?.cwd ?? null,
 		},
 	};
 }

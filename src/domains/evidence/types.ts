@@ -58,6 +58,8 @@ export interface EvidenceVerdict {
 export interface RunEvidence {
 	runId: string;
 	sessionId: string | null;
+	/** The workspace dispatch ran the run from, as its sealed assessment records it; null when it records none. */
+	cwd: string | null;
 	integrity: RunIntegrity;
 	/** The assessment's axes with the seal's own integrity verdict; the run record's alone when not assessed. */
 	trust: CanonicalTrustStatus;

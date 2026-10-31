@@ -13,7 +13,8 @@ import type { DispatchContract } from "../dispatch/contract.js";
 import type { DispatchOwnership } from "../dispatch/ownership.js";
 import { dispatchOwnership } from "../dispatch/ownership.js";
 import type { RunEnvelope } from "../dispatch/types.js";
-import { runEvidence } from "../evidence/run-evidence.js";
+import { listRunEvidence, runEvidence } from "../evidence/run-evidence.js";
+import { readRunGateIndex } from "../evidence/run-trust.js";
 import { formatTrustSummaryLine, trustStateWord } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus, TrustStatusAxis } from "../evidence/trust-status.js";
 import { inspectRunTrustStatus, TRUST_STATUS_AXES } from "../evidence/trust-status.js";
@@ -262,7 +263,7 @@ function viewOwnership(deps: ArtifactProviderDeps): DispatchOwnership {
 	return dispatchOwnership({ sessionId: deps.sessionMeta?.id ?? null, cwd: deps.sessionMeta?.cwd ?? process.cwd() });
 }
 
-function listRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {
+function allRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {
 	// The in-process dispatch ledger only sees runs created by this process.
 	// A headless `clio-coder run` in another process writes runs.json and run journals
 	// directly, so every listing re-reads the disk ledger and merges runs the
@@ -275,8 +276,33 @@ function listRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {
 	}
 	const seen = new Set(fromMemory.map((env) => env.id));
 	const fromDisk = readRunLedger(deps.stateDir).filter((env) => !seen.has(env.id));
+	return [...fromMemory, ...fromDisk];
+}
+
+function listRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {
 	const ownership = viewOwnership(deps);
-	return [...fromMemory, ...fromDisk].filter((env) => ownership.seesRun(env));
+	return allRunEnvelopes(deps).filter((env) => ownership.seesRun(env));
+}
+
+/**
+ * Finished runs whose ledger rows the bounded run ledger has dropped while their sealed scopes remain (#434). Each is
+ * visible by the session its journal names or the workspace its sealed assessment records, as a ledger row would be.
+ */
+async function retainedRunEvidence(deps: ArtifactProviderDeps): Promise<RunEvidence[]> {
+	const known = new Set(allRunEnvelopes(deps).map((env) => env.id));
+	const ownership = viewOwnership(deps);
+	let runs: RunEvidence[];
+	try {
+		runs = await listRunEvidence(deps.stateDir, (runId) => known.has(runId));
+	} catch {
+		// An unreadable run store retains nothing beyond what the ledger lists.
+		return [];
+	}
+	return runs.filter(
+		(run) =>
+			(run.settled !== null || run.integrity.state === "failed") &&
+			ownership.seesRun({ sessionId: run.sessionId, cwd: run.cwd ?? "" }),
+	);
 }
 
 function trustCheckEvidence(status: CanonicalTrustStatus, axis: string): string {
@@ -693,34 +719,29 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 
 	async list(): Promise<ViewArtifact[]> {
 		const stateDir = this.deps.stateDir;
-		const artifacts: ViewArtifact[] = [];
-		// The ledger decides which runs this session may see; everything shown comes from each run's scope.
-		for (const env of listRunEnvelopes(this.deps)) {
-			if (env.endedAt === null) continue;
-			const directory = telemetryRunDirectory(stateDir, env.id);
-			if (maybeSizeBytes(telemetryJournalPath(directory)) === undefined) continue;
-			artifacts.push({
-				id: env.id,
+		const gates = readRunGateIndex(stateDir);
+		const artifact = (
+			runId: string,
+			sessionId: string | null,
+			title: string,
+			timestamp: number,
+			searchText: string[],
+		): ViewArtifact => {
+			const directory = telemetryRunDirectory(stateDir, runId);
+			return {
+				id: runId,
 				category: this.category,
-				title: safeTitle(`${env.outcome ?? env.status} · ${env.task}`, "Run evidence"),
-				timestamp: parseTime(env.endedAt),
-				searchText: [
-					env.id,
-					...(env.sessionId ? [env.sessionId] : []),
-					env.agentId,
-					env.targetId,
-					env.runtimeId,
-					env.wireModelId,
-					env.status,
-				],
+				title,
+				timestamp,
+				searchText,
 				path: directory,
-				runId: env.id,
-				...(env.sessionId !== null ? { sessionId: env.sessionId } : {}),
+				runId,
+				...(sessionId !== null ? { sessionId } : {}),
 				load: async () => {
 					try {
-						const record = await readRunRecordAsync(stateDir, env.id);
-						const evidence = runEvidence(env.id, record);
-						const run = evidence.integrity.state === "verified" ? settledRunView(env.id, record) : null;
+						const record = await readRunRecordAsync(stateDir, runId);
+						const evidence = runEvidence(runId, record, gates(runId));
+						const run = evidence.integrity.state === "verified" ? settledRunView(runId, record) : null;
 						return {
 							format: "markdown" as const,
 							lines: renderEvidenceSummary(evidence, run),
@@ -742,7 +763,46 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 						return { format: "markdown" as const, lines: [`unable to read run evidence: ${message}`] };
 					}
 				},
-			});
+			};
+		};
+		const artifacts: ViewArtifact[] = [];
+		// A ledger row decides whether this session may see its run; everything shown comes from each run's scope.
+		for (const env of listRunEnvelopes(this.deps)) {
+			if (env.endedAt === null) continue;
+			if (maybeSizeBytes(telemetryJournalPath(telemetryRunDirectory(stateDir, env.id))) === undefined) continue;
+			artifacts.push(
+				artifact(
+					env.id,
+					env.sessionId,
+					safeTitle(`${env.outcome ?? env.status} · ${env.task}`, "Run evidence"),
+					parseTime(env.endedAt),
+					[
+						env.id,
+						...(env.sessionId ? [env.sessionId] : []),
+						env.agentId,
+						env.targetId,
+						env.runtimeId,
+						env.wireModelId,
+						env.status,
+					],
+				),
+			);
+		}
+		for (const run of await retainedRunEvidence(this.deps)) {
+			const settled = run.settled;
+			artifacts.push(
+				artifact(
+					run.runId,
+					run.sessionId,
+					safeTitle(settled ? `${settled.outcome} · ${settled.agentId}` : "seal failed", "Run evidence"),
+					settled ? parseTime(settled.endedAt) : 0,
+					[
+						run.runId,
+						...(run.sessionId ? [run.sessionId] : []),
+						...(settled ? [settled.agentId, settled.targetId, settled.runtimeId, settled.wireModelId, settled.outcome] : []),
+					],
+				),
+			);
 		}
 		return artifacts;
 	}
@@ -1408,11 +1468,14 @@ export class AccountabilityArtifactProvider implements ArtifactProvider {
 				timestamp: Date.now(),
 				load: async () => {
 					// Fold only the runs this view lists, each from its own sealed assessment (#434).
+					const gates = readRunGateIndex(stateDir);
 					const runs: RunEvidence[] = [];
 					for (const env of listRunEnvelopes(this.deps)) {
 						if (env.endedAt === null) continue;
-						runs.push(runEvidence(env.id, await readRunRecordAsync(stateDir, env.id).catch(() => null)));
+						const record = await readRunRecordAsync(stateDir, env.id).catch(() => null);
+						runs.push(runEvidence(env.id, record, gates(env.id)));
 					}
+					runs.push(...(await retainedRunEvidence(this.deps)));
 					return { format: "markdown" as const, lines: renderAccountabilitySummary(summarizeRunAccountability(runs)) };
 				},
 			},

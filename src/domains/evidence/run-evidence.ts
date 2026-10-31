@@ -67,6 +67,7 @@ export function runEvidence(
 	return {
 		runId,
 		sessionId: record?.row.sessionId ?? null,
+		cwd: assessment?.content?.state === "resolved" ? assessment.content.value.cwd : null,
 		integrity,
 		trust: read.trust,
 		assessedAt: assessment?.at ?? null,
@@ -112,8 +113,11 @@ export async function inspectRunEvidence(stateDir: string, runId: string): Promi
 	return runEvidence(runId, await readRunRecordAsync(stateDir, runId), readRunGateIndex(stateDir)(runId));
 }
 
-/** Every run scope on this host, newest settlement first; a run that never settled sorts last. */
-export async function listRunEvidence(stateDir: string): Promise<RunEvidence[]> {
+/**
+ * Every run scope on this host, newest settlement first; a run that never settled sorts last. `skip` leaves out runs a
+ * caller already holds without opening their scopes.
+ */
+export async function listRunEvidence(stateDir: string, skip?: (runId: string) => boolean): Promise<RunEvidence[]> {
 	const directory = telemetryRunsDirectory(stateDir);
 	// A run store that resolves outside the state root is not this host's evidence (#434).
 	if (!containedInStateRoot(stateDir, directory)) return [];
@@ -127,6 +131,7 @@ export async function listRunEvidence(stateDir: string): Promise<RunEvidence[]> 
 	const gates = readRunGateIndex(stateDir);
 	const out: RunEvidence[] = [];
 	for (const runId of names.sort(compareCodepoints)) {
+		if (skip?.(runId)) continue;
 		try {
 			out.push(runEvidence(runId, await readRunRecordAsync(stateDir, runId), gates(runId)));
 		} catch {

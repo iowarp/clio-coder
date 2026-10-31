@@ -39,10 +39,11 @@ export interface RunSettlement {
 
 /** The provenance a run's sealed assessment records, as dispatch admitted the run. */
 function runAssessmentContext(
-	run: Pick<RunEnvelope, "sessionId" | "lineage" | "decisionRefs" | "pipeline" | "personaOverride">,
+	run: Pick<RunEnvelope, "sessionId" | "cwd" | "lineage" | "decisionRefs" | "pipeline" | "personaOverride">,
 ): RunAssessmentContext {
 	return {
 		sessionId: run.sessionId,
+		cwd: run.cwd,
 		attempt: run.lineage?.attempt ?? null,
 		decisionRefs: [...(run.decisionRefs ?? [])],
 		pipeline: run.pipeline ? { ...run.pipeline } : null,

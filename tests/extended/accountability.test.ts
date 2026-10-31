@@ -26,6 +26,7 @@ function run(runId: string, fields: Fields = {}): RunEvidence {
 	return {
 		runId,
 		sessionId: null,
+		cwd: null,
 		integrity: { state: "verified", by: "seal" },
 		trust: composeTrustStatus(),
 		assessedAt: fields.assessed === false ? null : at,
