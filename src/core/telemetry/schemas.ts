@@ -397,6 +397,27 @@ export const ContextRecalledSchema = Type.Object(
 	closed,
 );
 export const DomainLoadedSchema = Type.Object({ name: ExistingId }, closed);
+export const DomainFailedSchema = Type.Object({ name: ExistingId }, closed);
+/** A settings reload the watcher rejected, keeping the last good settings, or the reload that ended the rejection. */
+export const ConfigReloadFailedSchema = Type.Object({ state: vocabulary(["rejected", "recovered"]) }, closed);
+/** The route's context-window warning starting or ending; its text stays on the live notice (#434). */
+export const ContextWarningRaisedSchema = Type.Object({ state: vocabulary(["raised", "cleared"]) }, closed);
+/** A middleware hook that threw, overran its budget, or lost its id to another registration (#434). */
+export const MiddlewareHookFailedSchema = Type.Object(
+	{
+		kind: vocabulary(["hook_failed", "budget_exceeded", "registration_conflict"]),
+		registrationId: ExistingId,
+		hook: vocabulary(["before_tool", "after_tool", "turn_start", "turn_end", "on_compaction"]),
+		elapsedMs: Type.Optional(duration),
+		budgetMs: Type.Optional(duration),
+		steadyStateWarn: Type.Optional(Type.Boolean()),
+		p50Ms: Type.Optional(duration),
+		p95Ms: Type.Optional(duration),
+		overCount: Type.Optional(count),
+		windowSamples: Type.Optional(count),
+	},
+	closed,
+);
 /** A plugin resource reload: the generation it committed and the snapshot's content identity (#434). */
 export const PluginReloadedSchema = Type.Object(
 	{ generation: count, previousGeneration: count, changed: Type.Boolean(), digest: ExistingId },

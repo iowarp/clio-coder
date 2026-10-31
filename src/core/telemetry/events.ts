@@ -93,6 +93,11 @@ function journal<
 	return { durability: "journal", version: 1, schema, ...options };
 }
 
+/** Optional live fields arrive as `undefined`; a closed journal schema holds only the ones present. */
+function definedFields(value: object): Record<string, unknown> {
+	return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined));
+}
+
 const LIVE: LiveDefinition<never> = Object.freeze({ durability: "live" });
 function live<P>(): LiveDefinition<P> {
 	return LIVE as LiveDefinition<P>;
@@ -198,11 +203,21 @@ export const EVENTS = {
 	"session.reattached": live<SessionResumedPayload>(),
 	"session.turn_switched": live<SessionTurnSwitchedPayload>(),
 	"domain.loaded": journal(S.DomainLoadedSchema, { tier: "operational", cc: "structural", ambient: true }),
-	"domain.failed": live<DomainFailedPayload>(),
+	"domain.failed": journal(S.DomainFailedSchema, {
+		tier: "operational",
+		cc: "structural",
+		ambient: true,
+		project: ({ name }: DomainFailedPayload) => ({ name }),
+	}),
 	"config.hot_reloaded": live<ConfigChangePayload>(),
 	"config.next_turn_scheduled": live<ConfigChangePayload>(),
 	"config.restart_required": live<ConfigChangePayload>(),
-	"config.reload_failed": live<ConfigReloadFailedPayload>(),
+	"config.reload_failed": journal(S.ConfigReloadFailedSchema, {
+		tier: "operational",
+		cc: "content-free",
+		ambient: true,
+		project: ({ message }: ConfigReloadFailedPayload) => ({ state: message === null ? "recovered" : "rejected" }),
+	}),
 	"config.session_changed": live<ConfigSessionChangePayload>(),
 	"approval.requested": live<PermissionRequestedPayload>(),
 	"approval.resolved": live<PermissionResolvedPayload>(),
@@ -221,12 +236,28 @@ export const EVENTS = {
 	"evidence.assessed": live<AccountabilityEvidenceReadyPayload>(),
 	"compaction.started": live<CompactionPayload>(),
 	"compaction.ended": live<CompactionPayload>(),
-	"middleware.hook_failed": live<MiddlewareHookFailedPayload>(),
+	"middleware.hook_failed": journal(S.MiddlewareHookFailedSchema, {
+		tier: "operational",
+		cc: "structural",
+		ambient: true,
+		project: ({ at: _at, message: _message, ...facts }: MiddlewareHookFailedPayload) =>
+			definedFields(facts) as Static<typeof S.MiddlewareHookFailedSchema>,
+	}),
 	"plugin.reloaded": journal(S.PluginReloadedSchema, { tier: "operational", cc: "structural", ambient: true }),
-	"extension.load_failed": live<ExtensionsLoadIssuePayload>(),
+	"extension.load_failed": journal(S.EmptySchema, {
+		tier: "operational",
+		cc: "content-free",
+		ambient: true,
+		project: (_issue: ExtensionsLoadIssuePayload) => ({}),
+	}),
 	"context.activity_changed": live<ContextActivityPayload>(),
 	"context.sources_changed": live<ContextSourcesChangedPayload>(),
-	"context.warning_raised": live<ContextWarningPayload>(),
+	"context.warning_raised": journal(S.ContextWarningRaisedSchema, {
+		tier: "operational",
+		cc: "content-free",
+		ambient: true,
+		project: ({ warning }: ContextWarningPayload) => ({ state: warning === null ? "cleared" : "raised" }),
+	}),
 	"context.pruned": journal(S.ContextPrunedSchema, { tier: "operational", cc: "structural", ambient: true }),
 	"context.recalled": journal(S.ContextRecalledSchema, { tier: "operational", cc: "structural", ambient: true }),
 	"memory.step_completed": live<MemoryStepCompletedPayload>(),
