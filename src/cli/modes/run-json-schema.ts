@@ -1,4 +1,5 @@
 import type { ToolRoundRecord } from "../../engine/types.js";
+
 /**
  * The `clio-coder run --json` wire schema.
  *
@@ -14,6 +15,8 @@ import type { ToolRoundRecord } from "../../engine/types.js";
  */
 
 import type { DispatchScopeNoticeView } from "../../core/dispatch-scope-notice.js";
+import type { FactSum } from "../../core/telemetry/fact.js";
+import type { PricingSum } from "../../core/telemetry/pricing.js";
 import type { RunResult } from "../../domains/dispatch/types.js";
 import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent } from "../../session-control/chat-loop.js";
@@ -142,18 +145,17 @@ export interface RunJsonThinkingDeltaFrame {
 
 export type RunJsonMessageEndFrame = Omit<LoopEvent<"message_end">, "message"> & { message: RunJsonMessage };
 
+/** One agent segment's usage over its calls, one fact sum per quantity (#434); never a zero for a call that said nothing. */
 export interface RunJsonSegmentUsage {
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	reasoning: number;
-	totalTokens: number;
-	costUsd: number;
+	input: FactSum;
+	output: FactSum;
+	cacheRead: FactSum;
+	cacheWrite: FactSum;
+	reasoning: FactSum;
+	totalTokens: FactSum;
+	cost: PricingSum;
+	/** Calls that reached a provider. */
 	apiCalls: number;
-	/** False when the provider reported no usage or the numbers are an estimate. */
-	measured: boolean;
-	estimated?: true;
 }
 
 /** One agent segment's account, in place of a second copy of its messages. */

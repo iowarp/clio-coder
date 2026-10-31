@@ -8,6 +8,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, describe, it } from "node:test";
 import { readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
+import { factKnownValue } from "../../src/core/telemetry/known.js";
 import { runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import { peerModeCapabilities } from "../../src/domains/interop/peer-modes.js";
 import { interopAgentKind } from "../../src/domains/interop/registry.js";
@@ -228,11 +229,10 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 		).promise;
 		ok(frames.every(({ record }) => readTelemetryRecord(record).kind === "record"));
 		const projected = runUsageFromCallRecords(frames.map(({ record }) => record));
-		equal(projected.totalTokens, 13);
-		equal(projected.apiCalls, 0, "a CLI turn can contain multiple provider calls");
-		equal(projected.costSummary.unknownCallCoverageRuns, 1);
-		equal(projected.costProvenance, "known", "declared target rates read as known");
-		ok(Math.abs(projected.costUsd - 27 / 1_000_000) < 1e-12);
+		equal(factKnownValue(projected.sums.totalTokens), 13);
+		equal(projected.facts.apiCalls.kind, "unknown", "a CLI turn can contain multiple provider calls");
+		equal(projected.facts.pricing.pricedBy, "target-rates", "declared target rates price it");
+		ok(Math.abs(factKnownValue(projected.sums.usd) - 27 / 1_000_000) < 1e-12);
 		equal(projected.usageFacts.reasoning.unknownCount, 1);
 		equal(result.exitCode, 0);
 		const message = assistant(result.messages);
@@ -358,12 +358,11 @@ describe("Clio external CLI connectors", { skip: process.platform === "win32" },
 			return read.kind === "record" ? [read.record] : [];
 		});
 		const folded = runUsageFromCallRecords(records);
-		equal(folded.totalTokens, 7);
-		equal(folded.apiCalls, 0);
-		equal(folded.costSummary.unknownCallCoverageRuns, 1);
-		equal(folded.costProvenance, "estimated");
+		equal(factKnownValue(folded.sums.totalTokens), 7);
+		equal(folded.facts.apiCalls.kind, "unknown");
+		equal(folded.facts.pricing.usd.kind, "estimated");
 		ok(folded.usageFacts.cacheRead.unknownCount > 0);
-		ok(Math.abs(folded.costUsd - 0.03) < 1e-12);
+		ok(Math.abs(factKnownValue(folded.sums.usd) - 0.03) < 1e-12);
 		deepStrictEqual((message.usage as unknown as { clioExternal?: unknown }).clioExternal, {
 			tokenUsage: "provider-reported",
 			cost: "peer-estimated",

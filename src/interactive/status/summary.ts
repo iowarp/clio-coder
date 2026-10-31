@@ -58,7 +58,7 @@ export function foldMessageIntoRunTally(tally: RunTally, message: AgentMessage):
 	return {
 		...tally,
 		settledMessages: tally.settledMessages + 1,
-		responseModelIdObservation: folded.costSummary
+		responseModelIdObservation: folded.hadUsage
 			? folded.lastResponseModelIdObservation
 			: responseModelIdObservationFromRecord(message as unknown as Record<string, unknown>, "not-observed"),
 	};

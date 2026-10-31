@@ -22,7 +22,8 @@ import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/
  * keeps its own answer.
  */
 
-import { pricesCalls } from "../core/telemetry/pricing.js";
+import type { Fact } from "../core/telemetry/fact.js";
+import { pricesCalls, sumFacts } from "../core/telemetry/pricing.js";
 import type { DecisionHintLines } from "../domains/middleware/decision-hints.js";
 import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
@@ -47,7 +48,8 @@ import type { TurnRecipeOption, TurnValue } from "../domains/system-one/sites/tu
 import { recipesInGroup, TURN_RECIPE_SITE, TURN_SITE } from "../domains/system-one/sites/turn.js";
 import { TURN_END_SITE } from "../domains/system-one/sites/turn-end.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
-import type { TokenSplit, TurnInterpretation } from "../domains/turn-control/index.js";
+import { addGroup, emptyFactSum } from "../domains/telemetry/folds.js";
+import type { TurnInterpretation, TurnTokens } from "../domains/turn-control/index.js";
 import type { ToolCallGateSubject } from "../tools/registry.js";
 
 /** Earlier operator requests the turn-end site reads beside the current one. */
@@ -177,11 +179,10 @@ export function createSystemOneRequestAdmission(deps: {
 	};
 }
 
+/** One counted call's tokens; a call that reported no usage is unknown, never zero (#434). */
 interface Spend {
-	calls: number;
-	reported: number;
-	input: number;
-	output: number;
+	input: Fact<number>[];
+	output: Fact<number>[];
 }
 
 export interface DecisionUsageTally {
@@ -189,8 +190,8 @@ export interface DecisionUsageTally {
 	readonly recorder: DecisionRecorder;
 	/** Start counting the calls joined to this user turn. */
 	begin(ref: string): void;
-	/** What the counted calls spent; `none` when nothing was counted or no call reported usage. */
-	read(ref: string): TokenSplit;
+	/** What the counted calls spent, one fact sum per quantity; empty when nothing was counted. */
+	read(ref: string): TurnTokens;
 }
 
 export function createDecisionUsageTally(inner: DecisionRecorder): DecisionUsageTally {
@@ -201,16 +202,17 @@ export function createDecisionUsageTally(inner: DecisionRecorder): DecisionUsage
 				inner.decision(record);
 				const spend = record.ref === undefined ? undefined : counted.get(record.ref);
 				if (spend === undefined) return;
-				spend.calls += 1;
-				if (record.usage === undefined) return;
-				spend.reported += 1;
-				spend.input += record.usage.input;
-				spend.output += record.usage.output;
+				const fact = (value: number | undefined): Fact<number> =>
+					value === undefined
+						? { kind: "unknown", reason: "provider-omitted" }
+						: { kind: "measured", value, source: "provider" };
+				spend.input.push(fact(record.usage?.input));
+				spend.output.push(fact(record.usage?.output));
 			},
 			outcome: (record) => inner.outcome(record),
 		},
 		begin(ref) {
-			counted.set(ref, { calls: 0, reported: 0, input: 0, output: 0 });
+			counted.set(ref, { input: [], output: [] });
 			// A turn nobody reads back must not keep its counter forever.
 			for (const key of counted.keys()) {
 				if (counted.size <= COUNTED_TURNS) break;
@@ -218,16 +220,16 @@ export function createDecisionUsageTally(inner: DecisionRecorder): DecisionUsage
 			}
 		},
 		read(ref) {
-			const spend = counted.get(ref);
-			if (spend === undefined) {
-				return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0, provenance: "none" };
-			}
+			const spend = counted.get(ref) ?? { input: [], output: [] };
+			// The decision model reports no cache reads; its total is its input and output, call by call.
 			return {
-				inputTokens: spend.input,
-				outputTokens: spend.output,
-				cacheReadTokens: 0,
-				totalTokens: spend.input + spend.output,
-				provenance: spend.reported === 0 ? "none" : spend.reported === spend.calls ? "reported" : "partial",
+				input: sumFacts(spend.input),
+				output: sumFacts(spend.output),
+				cacheRead: sumFacts([]),
+				total: spend.input.reduce((sum, input, index) => {
+					addGroup(sum, [input, spend.output[index] ?? input]);
+					return sum;
+				}, emptyFactSum()),
 			};
 		},
 	};

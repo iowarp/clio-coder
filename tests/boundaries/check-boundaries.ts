@@ -404,12 +404,6 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 		reason:
 			"context-window occupancy from the context ledger's estimate, not spend: pending user text joins the conversation segment",
 	},
-	{
-		file: "src/cli/modes/print.ts",
-		functions: ["addRunUsage"],
-		reason:
-			"a headless run folds its own calls into the main-agent receipt it seals and the --max-cost-usd cap it enforces",
-	},
 ];
 
 const USAGE_FIELD = /^(?:input|output|cacheRead|cacheWrite|cacheWrite1h|reasoning)$/;

@@ -6,31 +6,18 @@ import type { EstimateMethod, Fact, FactSum } from "../../core/telemetry/fact.js
 import { readWorkerTelemetryRecord } from "../../core/telemetry/forwarder.js";
 import { unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
 import { abandonedSettlement } from "../../core/telemetry/producer.js";
-import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
-import type { CostProvenance } from "../providers/types/cost-provenance.js";
-import type { CostAggregate } from "../telemetry/cost.js";
+import type { CallSettled, RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { CallTotals, FoldOptions } from "../telemetry/folds.js";
-import { foldRunJournal } from "../telemetry/folds.js";
+import { addCallTotals, emptyCallTotals, foldRunJournal } from "../telemetry/folds.js";
 
 export interface RunCallUsage {
 	callIds: string[];
 	callFacts: CallTotals;
 	usageFacts: CallTotals["usage"];
-	apiCalls: number;
-	missingTokenCalls: number;
-	totalTokens: number;
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
-	cacheWrite1hTokens: number;
-	reasoningTokens: number;
-	costUsd: number;
-	costSummary: CostAggregate;
-	costProvenance: CostProvenance;
-	tokenUsageMissing: boolean;
+	/** The journal may hold calls this fold could not count: a gap, an unclosed attempt or an unresolved reference. */
+	coverageUnknown: boolean;
 	/** The run's spend as sums over its calls, so a budget counts the priced part of a partly priced run (#434). */
-	sums: { usd: FactSum; totalTokens: FactSum };
+	sums: { usd: FactSum; totalTokens: FactSum; apiCalls: FactSum };
 	/** The same fold as one fact per quantity, as run.settled records it (#434). */
 	facts: RunUsageFacts;
 }
@@ -45,7 +32,7 @@ type Provenance = { methods: Set<EstimateMethod>; sources: Set<MeasuredSource> }
 type MeasuredSource = Extract<Fact<number>, { kind: "measured" }>["source"];
 
 /** Where each quantity's facts came from, keyed by field name, so a collapsed fact names a real method or source. */
-function provenanceOf(records: readonly TelemetryRecord[]): Map<string, Provenance> {
+function provenanceOf(payloads: readonly unknown[]): Map<string, Provenance> {
 	const found = new Map<string, Provenance>();
 	const visit = (value: unknown, key: string) => {
 		if (value === null || typeof value !== "object") return;
@@ -60,7 +47,7 @@ function provenanceOf(records: readonly TelemetryRecord[]): Map<string, Provenan
 		// A cache bill prices re-prefill, which is not the run's spend.
 		for (const [child, item] of Object.entries(value)) if (child !== "cache") visit(item, child);
 	};
-	for (const record of records) visit(record.data, "");
+	for (const payload of payloads) visit(payload, "");
 	return found;
 }
 
@@ -112,7 +99,7 @@ function pricedByOf(
 }
 
 function runUsageFacts(records: readonly TelemetryRecord[], folded: ReturnType<typeof foldRunJournal>): RunUsageFacts {
-	const provenance = provenanceOf(records);
+	const provenance = provenanceOf(records.map((record) => record.data));
 	const field = (key: string, sum: FactSum, fallback: MeasuredSource = "provider") =>
 		collapse(sum, provenance.get(key), fallback);
 	return {
@@ -130,49 +117,44 @@ function runUsageFacts(records: readonly TelemetryRecord[], folded: ReturnType<t
 	};
 }
 
-const subtotal = (sum: FactSum) => sum.measured + sum.estimated;
+export type CallSpend = Pick<CallSettled, "disposition" | "usage" | "pricing">;
 
-/** Live meters and receipts project the same fold as session replay; unknown facts retain coverage (#434). */
+/** A run's spend from settlements a host holds outside a run journal, such as a headless main agent's calls (#434). */
+export function runUsageFactsFromCalls(calls: readonly CallSpend[]): RunUsageFacts {
+	const totals = emptyCallTotals();
+	for (const call of calls) addCallTotals(totals, call);
+	const provenance = provenanceOf(calls);
+	const field = (key: string, sum: FactSum, fallback: MeasuredSource = "provider") =>
+		collapse(sum, provenance.get(key), fallback);
+	const sent = calls.filter((call) => call.disposition !== "never_sent");
+	return {
+		usage: {
+			input: field("input", totals.usage.input),
+			cacheRead: field("cacheRead", totals.usage.cacheRead),
+			cacheWrite: field("cacheWrite", totals.usage.cacheWrite),
+			cacheWrite1h: field("cacheWrite1h", totals.usage.cacheWrite1h),
+			output: field("output", totals.usage.output),
+			reasoning: field("reasoning", totals.usage.reasoning),
+		},
+		totalTokens: field("total", totals.totalTokens),
+		apiCalls: { kind: "measured", value: sent.length, source: "local-count" },
+		pricing: {
+			usd: field("usd", totals.usd, "local-count"),
+			pricedBy: weakestPricedBy(new Set(sent.map((call) => call.pricing.pricedBy))),
+		},
+	};
+}
+
+/** Live meters and run settlement project the same fold as session replay; unknown facts retain coverage (#434). */
 export function runUsageFromCallRecords(input: Iterable<TelemetryRecord>, options: FoldOptions = {}): RunCallUsage {
 	const records = [...input];
 	const folded = foldRunJournal(records, options);
-	const facts = folded;
-	const apiCalls = subtotal(folded.apiCalls);
-	const unknownCoverage = folded.unknownCoverage;
-	const costSummary: CostAggregate = {
-		knownUsd: subtotal(facts.usd),
-		hasEstimated: facts.usd.coverage.estimated > 0,
-		hasUnknown: facts.usd.unknownCount > 0 || folded.amountCoverageUnknown,
-		allKnownFree: folded.allKnownFree,
-		calls: apiCalls,
-		...(unknownCoverage ? { unknownCallCoverageRuns: 1 } : {}),
-	};
 	return {
 		callIds: [...new Set(folded.calls.attempts.map(({ started }) => started.callId))].sort(),
 		callFacts: folded.calls.totals,
 		usageFacts: folded.usage,
-		apiCalls,
-		missingTokenCalls: subtotal(folded.missingTokenCalls),
-		totalTokens: subtotal(facts.totalTokens),
-		inputTokens: subtotal(facts.usage.input),
-		outputTokens: subtotal(facts.usage.output),
-		cacheReadTokens: subtotal(facts.usage.cacheRead),
-		cacheWriteTokens: subtotal(facts.usage.cacheWrite),
-		cacheWrite1hTokens: subtotal(facts.usage.cacheWrite1h),
-		reasoningTokens: subtotal(facts.usage.reasoning),
-		costUsd: costSummary.knownUsd,
-		costSummary,
-		costProvenance: costSummary.hasUnknown
-			? "unknown"
-			: costSummary.hasEstimated
-				? "estimated"
-				: costSummary.allKnownFree
-					? "known_free"
-					: facts.usd.coverage.measured > 0
-						? "known"
-						: "unknown",
-		tokenUsageMissing: facts.totalTokens.unknownCount > 0 || folded.amountCoverageUnknown,
-		sums: { usd: folded.usd, totalTokens: folded.totalTokens },
+		coverageUnknown: folded.unknownCoverage,
+		sums: { usd: folded.usd, totalTokens: folded.totalTokens, apiCalls: folded.apiCalls },
 		facts: runUsageFacts(records, folded),
 	};
 }

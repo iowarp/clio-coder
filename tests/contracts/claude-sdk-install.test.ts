@@ -6,6 +6,7 @@ import { claudeAuthEnvironment, withClaudeCredential } from "../../src/core/clau
 import { runCommandVector } from "../../src/core/safe-exec.js";
 import { readTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
+import { factKnownValue } from "../../src/core/telemetry/known.js";
 import { runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import {
 	ClaudeAgentSdkUnavailableError,
@@ -147,16 +148,15 @@ test("SDK steering uses one open input lane, keeps Clio mediation, and closes af
 	strictEqual(frames[0]?.record.k, "process.started");
 	const usage = runUsageFromCallRecords(frames.map(({ record }) => record));
 	strictEqual(usage.callIds.length, 2);
-	strictEqual(usage.totalTokens, 12, "the SDK aggregate replaces its constituent call usage");
-	strictEqual(usage.costUsd, 0.25);
+	strictEqual(factKnownValue(usage.sums.totalTokens), 12, "the SDK aggregate replaces its constituent call usage");
+	strictEqual(usage.sums.totalTokens.unknownCount, 0);
+	strictEqual(factKnownValue(usage.sums.usd), 0.25);
 	strictEqual(
-		usage.costProvenance,
+		usage.facts.pricing.usd.kind,
 		"estimated",
 		"the SDK total is a peer estimate; unknown request counts do not invalidate it",
 	);
-	strictEqual(usage.tokenUsageMissing, false);
-	strictEqual(usage.apiCalls, 2, "identified calls give a lower bound; the aggregate request count stays unknown");
-	strictEqual(usage.costSummary.unknownCallCoverageRuns, 1);
+	strictEqual(usage.facts.apiCalls.kind, "unknown", "the aggregate request count stays unknown");
 	const calls = frames.flatMap(({ record }) => (record.k === "call.settled" ? [record.data] : []));
 	strictEqual(calls[0]?.usage?.output.kind, "measured");
 	strictEqual(calls[0]?.usage?.cacheWrite.kind, "unknown");

@@ -6,6 +6,7 @@ import { isHostPolicyMessage } from "../core/host-policy-message.js";
 import { providerCheckpointFromMessage, providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
 import { mainAgent, sessionTelemetryContext } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
+import { factKnownValue } from "../core/telemetry/known.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
@@ -3434,11 +3435,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					lastBackend = (message as { backendTimings?: BackendCompletionTimings }).backendTimings ?? null;
 					break;
 				}
+				const cacheRead = factKnownValue(cacheSummary.totals.usage.cacheRead);
+				const cacheWrite = factKnownValue(cacheSummary.totals.usage.cacheWrite);
+				const cacheReported = cacheRead > 0 || cacheWrite > 0;
 				lastPromptCache = {
 					shellReused: lastSystemPromptReused,
-					cacheReadTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheRead : null,
-					cacheWriteTokens: cacheSummary.cacheRead > 0 || cacheSummary.cacheWrite > 0 ? cacheSummary.cacheWrite : null,
-					uncachedInputTokens: cacheSummary.input,
+					cacheReadTokens: cacheReported ? cacheRead : null,
+					cacheWriteTokens: cacheReported ? cacheWrite : null,
+					uncachedInputTokens: factKnownValue(cacheSummary.totals.usage.input),
 					backend: lastBackend,
 					uncachedPrefillTokens: uncachedPrefillTokens(lastBackend),
 					backendVerdict: runFirstCallVerdict,

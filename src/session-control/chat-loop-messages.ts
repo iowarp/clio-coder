@@ -1,10 +1,10 @@
 import { classifyCallFailure, readCallFailure } from "../core/call-failure.js";
 import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
-import { costProvenanceOf } from "../domains/providers/types/cost-provenance.js";
-import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
-import type { InterruptedUsageEstimate } from "../domains/telemetry/call-facts.js";
-import type { CostAggregate, CostAmount } from "../domains/telemetry/cost.js";
-import { aggregateCostAmounts } from "../domains/telemetry/cost.js";
+import { type Pricing, type PricingSum, sumPricing } from "../core/telemetry/pricing.js";
+import type { CallSettled } from "../core/telemetry/schemas.js";
+import type { EffectivePricing } from "../domains/providers/catalog.js";
+import { callSettlementFromMessage, type InterruptedUsageEstimate } from "../domains/telemetry/call-facts.js";
+import { addCallTotals, type CallTotals, emptyCallTotals } from "../domains/telemetry/folds.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
 /**
  * Pure helpers over agent messages, tool policies, and session payload
@@ -29,13 +29,12 @@ import {
 	responseModelIdObservationFromRecord,
 } from "../core/response-model-id.js";
 import type { PendingSkillRequest, PendingSkillToolPolicy, SkillDeclaredToolPolicy } from "../core/skill-activation.js";
-import { normalizeTokenUsage } from "../core/token-split.js";
 import { ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { sha256 } from "../domains/prompts/hash.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
-import { ceilChars, extractReasoningTokens } from "../domains/session/context-accounting.js";
+import { ceilChars } from "../domains/session/context-accounting.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { AskUserToolPolicy, ToolRegistry } from "../tools/registry.js";
 import { toolSpecPlacement } from "../tools/surface.js";
@@ -423,148 +422,125 @@ export function createAskUserToolPolicy(
 	};
 }
 
+/**
+ * A run's usage over its calls as the journal fold sums it, one fact sum per quantity (#434): a call that reported
+ * nothing leaves a sum partial, never zero, and an estimate keeps its estimated coverage.
+ */
 export interface RunUsageSummary {
-	costSummary?: CostAggregate;
-	missingTokenCalls?: number;
-	tokens: number;
-	costUsd: number;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	cacheWrite1h?: number;
-	reasoning: number;
+	totals: CallTotals;
+	/** The calls' cost; `free` holds only when every call was a free target's measured zero. */
+	cost: PricingSum;
+	/** Calls that reached a provider. */
 	apiCalls: number;
 	hadReasoning: boolean;
 	hadUsage: boolean;
-	estimated?: boolean;
 	responseModelIdObservationCounts: ResponseModelIdObservationCounts;
 	lastResponseModelIdObservation: ResponseModelIdObservation;
 	lastDifferingResponseModelId: string | null;
+}
+
+type SettledUsage = Pick<CallSettled, "disposition" | "usage" | "pricing">;
+
+/**
+ * One assistant message's calls: the journal's settlements when the message carries them, else the message's own usage
+ * read the way its call.settled would read it, priced by what the reply's call accounting recorded (#434).
+ */
+function messageSettlements(
+	message: AgentMessage,
+	fallbackPricedBy: EffectivePricing["pricedBy"] = "none",
+): { settled: SettledUsage[]; journaled: readonly CallSettled[] | null } {
+	const journaled = messageCallsForAccounting(message);
+	if (journaled !== undefined) return { settled: [...journaled], journaled };
+	const usage = messageUsageForAccounting(message);
+	if (usage === null) return { settled: [], journaled: null };
+	const pricedBy =
+		typeof usage.pricedBy === "string" ? (usage.pricedBy as EffectivePricing["pricedBy"]) : fallbackPricedBy;
+	return { settled: [callSettlementFromMessage({ ...message, usage }, pricedBy)], journaled: null };
+}
+
+/**
+ * One assistant message's calls as settlements, with the journal attempt id when the journal holds them, so a host
+ * that folds its own run's spend counts each attempt once. `fallbackPricedBy` prices a reply with no call accounting.
+ */
+export function messageCallSpends(
+	message: AgentMessage,
+	fallbackPricedBy: EffectivePricing["pricedBy"] = "none",
+): Array<SettledUsage & { attemptId?: string }> {
+	if (message.role !== "assistant") return [];
+	const { settled, journaled } = messageSettlements(message, fallbackPricedBy);
+	return journaled ? journaled.map((call) => ({ ...call })) : settled;
+}
+
+function observationOf(call: CallSettled): ResponseModelIdObservation {
+	const model = call.target.reportedModel;
+	return model.kind === "measured"
+		? { state: "reported", reportedModelId: model.value }
+		: model.kind === "unknown" && model.reason === "provider-omitted"
+			? { state: "not-reported" }
+			: { state: "not-observed" };
 }
 
 /**
  * Sum per-call usage across every assistant message in a single agent run.
  * pi-ai emits one `AssistantMessage` per API call, each carrying its own
  * `Usage` object; a multi-turn tool-calling loop produces several assistant
- * messages. Earlier versions of this function walked the list from the tail
- * and returned the first match, which silently dropped every intermediate
- * API call from the cost tally. Summing instead matches what the provider
- * actually billed and keeps the `/usage` overlay and footer counters
- * aligned across tool-heavy runs.
+ * messages, and every one of them counts.
  */
 export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSummary {
-	const summary: RunUsageSummary = {
-		tokens: 0,
-		costUsd: 0,
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		reasoning: 0,
+	const totals = emptyCallTotals();
+	const pricings: Pricing[] = [];
+	const summary = {
 		apiCalls: 0,
 		hadReasoning: false,
 		hadUsage: false,
 		responseModelIdObservationCounts: emptyResponseModelIdObservationCounts(),
-		lastResponseModelIdObservation: { state: "not-observed" },
-		lastDifferingResponseModelId: null,
+		lastResponseModelIdObservation: { state: "not-observed" } as ResponseModelIdObservation,
+		lastDifferingResponseModelId: null as string | null,
 	};
 	const seenAttempts = new Set<string>();
-	const costAmounts: CostAmount[] = [];
-	let journalObserved = false;
-	for (const raw of messages) {
-		const message = raw as
-			| AgentMessage
-			| {
-					role?: unknown;
-					usage?: {
-						input?: unknown;
-						output?: unknown;
-						cacheRead?: unknown;
-						cacheWrite?: unknown;
-						cacheWrite1h?: unknown;
-						totalTokens?: unknown;
-						cost?: { total?: unknown };
-					};
-			  };
-		if (!message || typeof message !== "object") continue;
-		if (message.role !== "assistant") continue;
-		const record = message as unknown as Record<string, unknown>;
-
-		const calls = messageCallsForAccounting(message);
-		if (calls !== undefined) {
-			journalObserved = true;
-			const unique = calls.filter((call) => {
-				if (seenAttempts.has(call.attemptId)) return false;
-				seenAttempts.add(call.attemptId);
-				return true;
-			});
-			for (const call of usageCallsFromAttempts(unique.map((settled) => ({ started: settled, settled })))) {
-				summary.hadUsage = true;
-				summary.apiCalls += call.apiCalls ?? 0;
-				summary.missingTokenCalls = (summary.missingTokenCalls ?? 0) + (call.missingTokenCalls ?? 0);
-				summary.input += call.input;
-				summary.output += call.output;
-				summary.cacheRead += call.cacheRead;
-				summary.cacheWrite += call.cacheWrite;
-				if (call.cacheWrite1h !== undefined) summary.cacheWrite1h = (summary.cacheWrite1h ?? 0) + call.cacheWrite1h;
-				summary.reasoning += call.reasoningTokens;
-				summary.hadReasoning ||= (call.facts?.usage.reasoning.coverage.measured ?? 0) > 0;
-				summary.tokens += call.totalTokens;
-				summary.costUsd += call.costUsd;
-				summary.lastResponseModelIdObservation = call.responseModelIdObservation;
-				addResponseModelIdObservationCount(summary.responseModelIdObservationCounts, call.responseModelIdObservation);
+	for (const message of messages) {
+		if (!message || typeof message !== "object" || message.role !== "assistant") continue;
+		const { settled, journaled } = messageSettlements(message);
+		const unique = journaled
+			? journaled.filter((call) => {
+					if (seenAttempts.has(call.attemptId)) return false;
+					seenAttempts.add(call.attemptId);
+					return true;
+				})
+			: settled;
+		let sent = false;
+		for (const call of unique) {
+			if (call.disposition === "never_sent") continue;
+			sent = true;
+			addCallTotals(totals, call);
+			summary.hadUsage = true;
+			summary.apiCalls += 1;
+			pricings.push(call.pricing);
+			summary.hadReasoning ||= call.usage?.reasoning.kind === "measured";
+		}
+		if (!sent) continue;
+		if (journaled) {
+			for (const call of unique as unknown as readonly CallSettled[]) {
+				if (call.disposition === "never_sent") continue;
+				const observation = observationOf(call);
+				summary.lastResponseModelIdObservation = observation;
+				addResponseModelIdObservationCount(summary.responseModelIdObservationCounts, observation);
 				summary.lastDifferingResponseModelId =
-					call.responseModelIdObservation.state === "reported" &&
-					call.responseModelIdObservation.reportedModelId !== call.requestedModelId
-						? call.responseModelIdObservation.reportedModelId
+					observation.state === "reported" && observation.reportedModelId !== call.target.requestedModel
+						? observation.reportedModelId
 						: null;
-				costAmounts.push({
-					usd: call.costUsd,
-					provenance: call.costProvenance ?? "unknown",
-					...(call.costSummary ? { costSummary: call.costSummary } : {}),
-				});
 			}
 			continue;
 		}
-		const providerUsage = messageUsageForAccounting(message);
-		if (!providerUsage || typeof providerUsage !== "object" || providerUsage.callInvoked === false) continue;
-		const usage = providerUsage;
-		if ((usage as { estimated?: unknown }).estimated === true) summary.estimated = true;
+		const record = message as unknown as Record<string, unknown>;
 		summary.lastResponseModelIdObservation = responseModelIdObservationFromRecord(record, "not-observed");
 		addResponseModelIdObservationCount(summary.responseModelIdObservationCounts, summary.lastResponseModelIdObservation);
 		summary.lastDifferingResponseModelId =
 			typeof record.responseModel === "string" && record.responseModel.trim().length > 0
 				? record.responseModel.trim()
 				: null;
-		summary.hadUsage = true;
-		summary.apiCalls += 1;
-		const reported = normalizeTokenUsage(usage);
-		summary.input += reported.input;
-		summary.output += reported.output;
-		summary.cacheRead += reported.cacheRead;
-		summary.cacheWrite += reported.cacheWrite;
-		if (reported.observed && typeof usage.cacheWrite1h === "number")
-			summary.cacheWrite1h = (summary.cacheWrite1h ?? 0) + usage.cacheWrite1h;
-		summary.reasoning += reported.reasoning;
-		summary.hadReasoning ||= usage.estimated !== true && reported.observed && extractReasoningTokens(usage) !== null;
-		summary.tokens += reported.totalTokens;
-		const total = usage.cost && typeof usage.cost === "object" ? (usage.cost as { total?: unknown }).total : undefined;
-		if ((usage as { estimated?: unknown }).estimated !== true && typeof total === "number" && Number.isFinite(total))
-			summary.costUsd += total;
-		costAmounts.push({
-			usd: typeof total === "number" && Number.isFinite(total) ? total : 0,
-			provenance:
-				usage.estimated === true
-					? "unknown"
-					: costProvenanceOf(
-							typeof usage.pricedBy === "string" ? (usage.pricedBy as Parameters<typeof costProvenanceOf>[0]) : "none",
-						),
-			missingTokenCalls: reported.observed ? 0 : 1,
-		});
 	}
-	if (journalObserved) summary.costSummary = aggregateCostAmounts(costAmounts);
-	return summary;
+	return { ...summary, totals, cost: sumPricing(pricings) };
 }
 
 export type { BackendCacheVerdict } from "../core/cache-telemetry.js";

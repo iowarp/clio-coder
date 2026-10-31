@@ -2,6 +2,7 @@ import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
 import { mainAgent } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
+import { factKnownValue } from "../core/telemetry/known.js";
 import { pricesCalls } from "../core/telemetry/pricing.js";
 import type { TelemetryCall } from "../core/telemetry/producer.js";
 import { beginCall, telemetryCaptures } from "../core/telemetry/producer.js";
@@ -1610,13 +1611,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (enrichedEvent.type === "message_end" && enrichedEvent.message.role === "assistant") {
 				const completed = sumRunUsage([enrichedEvent.message]);
 				// A call no journal holds is counted against the ceiling for the rest of its run only (#434).
-				if (
-					(!deps.telemetry || !journalAccounted) &&
-					completed.hadUsage &&
-					Number.isFinite(completed.costUsd) &&
-					completed.costUsd > 0
-				) {
-					unsettledSpendUsd += completed.costUsd;
+				const priced = factKnownValue(completed.cost.usd);
+				if ((!deps.telemetry || !journalAccounted) && completed.hadUsage && Number.isFinite(priced) && priced > 0) {
+					unsettledSpendUsd += priced;
 				}
 			}
 			if (enrichedEvent.type === "agent_end") unsettledSpendUsd = 0;

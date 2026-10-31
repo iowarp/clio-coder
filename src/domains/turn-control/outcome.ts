@@ -1,10 +1,18 @@
 import type { CallFailureRecord } from "../../core/call-failure.js";
-import type { TokenSplit } from "../../core/token-split.js";
+import type { FactSum } from "../../core/telemetry/fact.js";
 import type { WorkflowDecision } from "./decide.js";
 
 /** Budget admission can fail before a provider call exists (#430). */
 export interface TurnFailureRecord extends Omit<CallFailureRecord, "stage"> {
 	stage: CallFailureRecord["stage"] | "budget";
+}
+
+/** A turn's tokens from one producer, each a fact sum over the calls or runs that contributed (#434). */
+export interface TurnTokens {
+	readonly input: FactSum;
+	readonly output: FactSum;
+	readonly cacheRead: FactSum;
+	readonly total: FactSum;
 }
 
 export interface TurnOutcomeRecord {
@@ -53,9 +61,9 @@ export interface TurnOutcomeRecord {
 		readonly interviewDismissed?: true;
 	};
 	readonly tokens: {
-		readonly coordinator: TokenSplit;
-		readonly decisionModel: TokenSplit;
-		readonly workers: TokenSplit;
+		readonly coordinator: TurnTokens;
+		readonly decisionModel: TurnTokens;
+		readonly workers: TurnTokens;
 	};
 	readonly failure?: TurnFailureRecord;
 	readonly stopReason: string;

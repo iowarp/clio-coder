@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { factKnownValue } from "../../src/core/telemetry/known.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/index.js";
@@ -187,13 +188,12 @@ for (const continuation of [false, true])
 				strictEqual(row.parentTurnId, continuation ? "turn-3" : "turn-2");
 				strictEqual(row.display, false);
 				strictEqual(outcome.coordinator.toolCalls, 0);
-				deepStrictEqual(outcome.tokens.coordinator, {
-					inputTokens: 7,
-					outputTokens: 5,
-					cacheReadTokens: 0,
-					totalTokens: 12,
-					provenance: "reported",
-				});
+				const { coordinator } = outcome.tokens;
+				deepStrictEqual(
+					[coordinator.input, coordinator.output, coordinator.cacheRead, coordinator.total].map(factKnownValue),
+					[7, 5, 0, 12],
+				);
+				strictEqual(coordinator.total.unknownCount, 0);
 				strictEqual(outcome.completion.decision, "ok");
 				strictEqual(outcome.conversation.clarificationStreak, 1);
 			} finally {
@@ -311,7 +311,14 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 	}
 }
 
-const SCOUT_TOKENS = { inputTokens: 40, outputTokens: 2, cacheReadTokens: 0, totalTokens: 42, provenance: "reported" };
+const measured = (value: number) => ({
+	measured: value,
+	estimated: 0,
+	unknownCount: 0,
+	absentCount: 0,
+	coverage: { measured: 1, estimated: 0, unknown: 0 },
+});
+const SCOUT_TOKENS = { input: measured(40), output: measured(2), cacheRead: measured(0), total: measured(42) };
 
 it("a cancel during the orientation act before admission still yields one cancelled outcome row", async () => {
 	await cancelBeforeAdmission(60, async ({ entries, recorded, reservedId }) => {
@@ -337,9 +344,10 @@ it("worker tokens that seal after the settle wait amend the cancelled outcome, i
 	await cancelBeforeAdmission(2500, async ({ entries, recorded, reservedId }) => {
 		const outcome = entries.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcome");
 		ok(outcome?.kind === "custom");
-		strictEqual((outcome.data as TurnOutcomeRecord).tokens.workers.provenance, "partial");
+		// The Scout had not sealed when the outcome was written, so its tokens are an unknown contribution.
+		strictEqual((outcome.data as TurnOutcomeRecord).tokens.workers.total.unknownCount, 1);
 		strictEqual(recorded[0]?.source, "turn");
-		strictEqual((recorded[0]?.facts.workerTokens as { provenance: string }).provenance, "partial");
+		strictEqual((recorded[0]?.facts.workerTokens as TurnOutcomeRecord["tokens"]["workers"]).total.unknownCount, 1);
 		const amended = () => entries.find((entry) => entry.kind === "custom" && entry.customType === "turnOutcomeTokens");
 		for (let waited = 0; amended() === undefined && waited < 5000; waited += 50) {
 			await new Promise<void>((resolve) => setTimeout(resolve, 50));

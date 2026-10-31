@@ -88,7 +88,10 @@ export function emptyCallTotals(): CallTotals {
  * Fold one more attempt into `totals` in place; {@link foldCalls} is this over attempts in attemptId order. Distinct
  * calls are a property of the whole set, so `logicalCalls` is the caller's.
  */
-export function addCallTotals(totals: CallTotals, settled: CallSettled | null): void {
+export function addCallTotals(
+	totals: CallTotals,
+	settled: Pick<CallSettled, "disposition" | "usage" | "pricing"> | null,
+): void {
 	totals.attempts += 1;
 	if (!settled) totals.incomplete += 1;
 	else if (settled.disposition === "never_sent") totals.neverSent += 1;

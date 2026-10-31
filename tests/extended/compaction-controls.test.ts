@@ -1322,7 +1322,6 @@ describe("production compaction controls", () => {
 					if (legacy && result?.usage) {
 						delete result.usage.targetId;
 						delete result.usage.modelId;
-						delete result.usage.costProvenance;
 					}
 					return result;
 				},

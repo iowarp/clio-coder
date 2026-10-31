@@ -28,7 +28,6 @@ import { isProviderCheckpointHandle } from "../../core/provider-checkpoint-handl
 import { isSkillActivation, type PendingSkillToolPolicy, type SkillActivation } from "../../core/skill-activation.js";
 import type { ClioTurnRecord } from "../../engine/session.js";
 import type { ProviderCheckpointHandle } from "../../engine/types.js";
-import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import { AUTONOMY_EXPOSURES, type AutonomyExposure } from "../safety/autonomy.js";
 import type {
 	ContinuityCheckpointPayload,
@@ -138,14 +137,11 @@ export interface BranchSummaryEntry extends BaseSessionEntry {
 export type CompactionTrigger = "auto" | "force" | "overflow";
 
 /**
- * Provider usage for the summarization call a compaction ran, summed over the
- * one or two streams it takes. A compaction is a model call like any other and
- * is billed like one, so it carries the same fields the assistant payload's
- * `usage` carries and the ledger usage fold reads both from one place.
+ * What the summarizer's provider reported for the one or two streams a compaction ran, kept beside the checkpoint as
+ * the raw report. Accounting never reads it: the checkpoint's `callIds` name the calls, and their journal facts are
+ * the usage and cost, so a stream that reported nothing is unknown there rather than this zero (#434).
  */
 export interface CompactionUsage {
-	missingTokenCalls?: number;
-	costProvenance?: CostProvenance;
 	/** Executing route; absent on legacy checkpoints that used the active chat model. */
 	targetId?: string;
 	/** Requested wire model ID, not a verified physical backend identity. */

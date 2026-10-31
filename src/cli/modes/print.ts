@@ -1,11 +1,6 @@
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
 import { headlessRouteFailureText } from "../../core/gateway-routing.js";
-import { messageUsageForAccounting } from "../../core/message-accounting.js";
 import { readClioVersion } from "../../core/package-root.js";
-import {
-	addResponseModelIdObservationCounts,
-	emptyResponseModelIdObservationCounts,
-} from "../../core/response-model-id.js";
 import { withRunOverrides } from "../../core/run-overrides.js";
 import {
 	type PendingSkillRequest,
@@ -14,17 +9,13 @@ import {
 } from "../../core/skill-activation.js";
 import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import { mainAgent } from "../../core/telemetry/context.js";
-import type { Fact } from "../../core/telemetry/fact.js";
-import { type PricedBy, pricedUsd, unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
-import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
-import { normalizeTokenUsage } from "../../core/token-split.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { mainAgentTerminalReason, runStatusForOutcome } from "../../domains/dispatch/outcome.js";
-import type { RunCallUsage } from "../../domains/dispatch/run-call-usage.js";
+import { type RunCallUsage, runUsageFactsFromCalls } from "../../domains/dispatch/run-call-usage.js";
 import {
 	createRunResultQuality,
 	deriveRunVerification,
@@ -47,17 +38,14 @@ import type {
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
 import { readToolRounds } from "../../domains/dispatch/types.js";
-import { costProvenanceOf } from "../../domains/providers/types/cost-provenance.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
-import type { CostAmount } from "../../domains/telemetry/cost.js";
-import { aggregateCostAmounts } from "../../domains/telemetry/cost.js";
 import { telemetryRunDirectory } from "../../domains/telemetry/paths.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent, ToolRoundRecord } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../session-control/chat-loop.js";
-import { type RunUsageSummary, sumRunUsage } from "../../session-control/chat-loop-messages.js";
+import { messageCallSpends } from "../../session-control/chat-loop-messages.js";
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
@@ -189,8 +177,10 @@ interface HeadlessMainAgentRunStats {
 	pendingVerifyCalls: Map<string, string | null>;
 	verifyCalls: VerifyCallOutcome[];
 	skillActivations: SkillActivation[];
-	usage: RunUsageSummary | null;
-	costAmounts: CostAmount[];
+	/** Every call the run made, as its settlement states it; the run's spend folds these (#434). */
+	calls: Parameters<typeof runUsageFactsFromCalls>[0][number][];
+	/** Journal attempts already counted, so a call two messages carry counts once. */
+	seenAttempts: Set<string>;
 	/** The decision axis, counted the way a worker's settled run counts it. */
 	decisions: RunResultSafetySummary["decisions"];
 	/** Every call whose outcome was blocked, in a worker's settled shape, up to `BLOCKED_ATTEMPTS_LIMIT`. */
@@ -494,59 +484,6 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	}
 }
 
-/** The headless run's spend from the usage its session accrued, one fact per quantity (#434). */
-function headlessRunSpend(usage: RunUsageSummary | null, cost: ReturnType<typeof aggregateCostAmounts>): RunUsageFacts {
-	if (usage === null || !usage.hadUsage) return unobservedRunUsageFacts();
-	const complete = (usage.missingTokenCalls ?? 0) === 0 && usage.estimated !== true;
-	const count = (value: number): Fact<number> =>
-		complete ? { kind: "measured", value, source: "provider" } : { kind: "unknown", reason: "provider-omitted" };
-	const pricedBy: PricedBy =
-		cost.calls === 0 || cost.hasUnknown
-			? "none"
-			: cost.hasEstimated
-				? "catalog"
-				: cost.allKnownFree
-					? "free"
-					: "target-rates";
-	return {
-		usage: {
-			input: count(usage.input),
-			output: count(usage.output),
-			cacheRead: count(usage.cacheRead),
-			cacheWrite: count(usage.cacheWrite),
-			cacheWrite1h: count(usage.cacheWrite1h ?? 0),
-			reasoning: count(usage.reasoning),
-		},
-		totalTokens: count(usage.tokens),
-		apiCalls: { kind: "measured", value: usage.apiCalls, source: "local-count" },
-		pricing: pricedUsd(pricedBy, cost.knownUsd),
-	};
-}
-
-function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSummary {
-	const responseModelIdObservationCounts = emptyResponseModelIdObservationCounts();
-	addResponseModelIdObservationCounts(responseModelIdObservationCounts, left.responseModelIdObservationCounts);
-	addResponseModelIdObservationCounts(responseModelIdObservationCounts, right.responseModelIdObservationCounts);
-	const last = right.hadUsage ? right : left;
-	return {
-		tokens: left.tokens + right.tokens,
-		costUsd: left.costUsd + right.costUsd,
-		input: left.input + right.input,
-		output: left.output + right.output,
-		cacheRead: left.cacheRead + right.cacheRead,
-		cacheWrite: left.cacheWrite + right.cacheWrite,
-		reasoning: left.reasoning + right.reasoning,
-		apiCalls: left.apiCalls + right.apiCalls,
-		missingTokenCalls: (left.missingTokenCalls ?? 0) + (right.missingTokenCalls ?? 0),
-		hadReasoning: left.hadReasoning || right.hadReasoning,
-		hadUsage: left.hadUsage || right.hadUsage,
-		...(left.estimated || right.estimated ? { estimated: true } : {}),
-		responseModelIdObservationCounts,
-		lastResponseModelIdObservation: last.lastResponseModelIdObservation,
-		lastDifferingResponseModelId: last.lastDifferingResponseModelId,
-	};
-}
-
 /**
  * Ticket #378: a run whose every write was denied, and whose model then wrote
  * an apology, used to read as a success. The terminal frame now says so in one bit.
@@ -676,8 +613,8 @@ async function recordHeadlessMainAgentRun(input: {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
 	if (!isMainAgentRunKind(snapshot.runtimeKind)) return;
-	// The read model's fold of the run's session calls is its spend; the message fold stands without one (#434).
-	const spend = input.calls?.facts ?? headlessRunSpend(input.stats.usage, aggregateCostAmounts(input.stats.costAmounts));
+	// The read model's fold of the run's session calls is its spend; the run's own calls stand without one (#434).
+	const spend = input.calls?.facts ?? runUsageFactsFromCalls(input.stats.calls);
 	const { exitCode, outcome, status } = input.terminal;
 	const outcomeDetail = input.terminal.outcomeDetail ?? input.terminal.failureMessage;
 	const outcomeCode = outcome === "failed" ? snapshot.outcomeCode : undefined;
@@ -845,8 +782,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		pendingVerifyCalls: new Map(),
 		verifyCalls: [],
 		skillActivations: [],
-		usage: null,
-		costAmounts: [],
+		calls: [],
+		seenAttempts: new Set(),
 		decisions: { allowed: 0, blocked: 0, permissionRequested: 0 },
 		blockedAttempts: [],
 		blockedAttemptsTruncated: 0,
@@ -1036,33 +973,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			// mid-segment, and a headless turn spans several agent segments
 			// (middleware nudges and finish-contract reprompts start new agent
 			// runs), so nothing here may key on the last segment alone.
-			const usageSummary = sumRunUsage([event.message]);
-			const rawUsage = messageUsageForAccounting(event.message) ?? {};
-			if (usageSummary.hadUsage && (usageSummary.costSummary || rawUsage.callInvoked !== false)) {
-				if (!usageSummary.costSummary) {
-					const reported = normalizeTokenUsage(rawUsage);
-					Object.assign(usageSummary, {
-						...reported,
-						tokens: reported.totalTokens,
-						missingTokenCalls: reported.observed ? 0 : 1,
-						costUsd: rawUsage.estimated === true ? 0 : usageSummary.costUsd,
-					});
+			for (const call of messageCallSpends(event.message, chat.lastRunSnapshot?.()?.pricedBy ?? "none")) {
+				if (call.attemptId !== undefined) {
+					if (runStats.seenAttempts.has(call.attemptId)) continue;
+					runStats.seenAttempts.add(call.attemptId);
 				}
-				runStats.costAmounts.push({
-					usd: usageSummary.costUsd,
-					apiCalls: usageSummary.apiCalls,
-					...(usageSummary.costSummary ? { costSummary: usageSummary.costSummary } : {}),
-					provenance:
-						rawUsage.estimated === true
-							? "unknown"
-							: costProvenanceOf(
-									((typeof rawUsage.pricedBy === "string" ? rawUsage.pricedBy : undefined) as PricedBy | undefined) ??
-										chat.lastRunSnapshot?.()?.pricedBy ??
-										"none",
-								),
-					missingTokenCalls: usageSummary.missingTokenCalls ?? 0,
-				});
-				runStats.usage = runStats.usage === null ? usageSummary : addRunUsage(runStats.usage, usageSummary);
+				if (call.disposition !== "never_sent") runStats.calls.push(call);
 			}
 		}
 		result = resultFromEvent(event, result);

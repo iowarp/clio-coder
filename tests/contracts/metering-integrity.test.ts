@@ -5,6 +5,7 @@ import { projectDispatchJsonEvent } from "../../src/cli/modes/json-stream.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { messageUsageForAccounting, rememberMessageCalls } from "../../src/core/message-accounting.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { factKnownValue } from "../../src/core/telemetry/known.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
@@ -117,12 +118,11 @@ describe("contracts/metering integrity", () => {
 					: undefined,
 			);
 			const summary = sumRunUsage([message, message]);
-			strictEqual(summary.tokens, 10);
-			strictEqual(summary.costUsd, 0.25);
+			strictEqual(factKnownValue(summary.totals.totalTokens), 10);
+			strictEqual(factKnownValue(summary.cost.usd), 0.25);
 			strictEqual(summary.apiCalls, invoked ? 2 : 1);
-			strictEqual(summary.missingTokenCalls, invoked ? 1 : 0);
-			strictEqual(summary.costSummary?.hasUnknown, invoked);
-			strictEqual(summary.costSummary?.calls, invoked ? 2 : 1);
+			strictEqual(summary.totals.totalTokens.unknownCount, invoked ? 1 : 0);
+			strictEqual(summary.cost.usd.unknownCount > 0, invoked);
 			strictEqual(summary.lastResponseModelIdObservation.state, "reported");
 			strictEqual((message as unknown as { usage: unknown }).usage, zeroUsage);
 		}
@@ -148,7 +148,7 @@ describe("contracts/metering integrity", () => {
 			// The ledger is the conversation record; the journal owns usage, so annotations stay on the live message (#434 §5.3).
 			strictEqual(payload.callAccounting, undefined);
 			strictEqual(payload.estimatedUsage, undefined);
-			strictEqual(sumRunUsage([message]).tokens, reported.totalTokens);
+			strictEqual(factKnownValue(sumRunUsage([message]).totals.totalTokens), reported.totalTokens);
 			const projected = messageUsageForAccounting(message);
 			ok(projected);
 			strictEqual(projected.targetId, "selected-target");
@@ -253,13 +253,11 @@ describe("contracts/metering integrity", () => {
 		const authoritative = { ...raw, usage: { ...zeroUsage, input: 100, output: 42, totalTokens: 142 } } as AgentMessage;
 		strictEqual(estimatedUsageForInterruptedTurn(authoritative, 100), null);
 		const summary = projectDispatchJsonEvent({ type: "agent_end", messages: [raw] }) as {
-			usage: {
-				measured: boolean;
-				estimated?: boolean;
-			};
+			usage: { totalTokens: { unknownCount: number; coverage: { measured: number } } };
 		};
-		strictEqual(summary.usage.measured, false);
-		strictEqual(summary.usage.estimated, true);
+		// An estimated reply is no measurement: its call's tokens are unknown, never the estimate (#434).
+		strictEqual(summary.usage.totalTokens.unknownCount, 1);
+		strictEqual(summary.usage.totalTokens.coverage.measured, 0);
 	});
 
 	it("never-sent aborts have no prompt estimate or spend and count separately from unknown usage", async () => {
@@ -274,8 +272,10 @@ describe("contracts/metering integrity", () => {
 		const frame = projectDispatchJsonEvent({
 			type: "agent_end",
 			messages: [{ ...message, usage: zeroUsage, callInvoked: false }],
-		}) as { usage: { missingTokenCalls?: number } };
-		strictEqual(frame.usage.missingTokenCalls ?? 0, 0);
+		}) as { usage: { totalTokens: { unknownCount: number }; apiCalls: number } };
+		// A never-sent call is no call: it neither counts nor leaves an unknown contribution.
+		strictEqual(frame.usage.totalTokens.unknownCount, 0);
+		strictEqual(frame.usage.apiCalls, 0);
 		const { contract: telemetry, extension } = createTelemetryBundle({ bus: createTelemetryHub() } as DomainContext);
 		try {
 			const entries: SessionEntry[] = [];

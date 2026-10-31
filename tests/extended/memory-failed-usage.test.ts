@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { factKnownValue } from "../../src/core/telemetry/known.js";
 import { registerProcessTelemetrySink } from "../../src/core/telemetry/producer.js";
 import {
 	acquireCapacityLease,
@@ -176,7 +177,8 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 					pricedBy: "none",
 					onSettled: (facts) => {
 						if (session.current()?.id === origin.id) {
-							for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) live.push(call.totalTokens);
+							for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }]))
+								live.push(call.facts ? factKnownValue(call.facts.totalTokens) : 0);
 						}
 					},
 				}),

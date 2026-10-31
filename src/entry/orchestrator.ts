@@ -1734,7 +1734,6 @@ async function runCompactionFlow(
 				...result.usage,
 				targetId: resolved.targetId,
 				modelId: resolved.wireModelId,
-				costProvenance: costProvenanceOf(resolved.pricedBy),
 			};
 		const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
 			kind: "compactionSummary",

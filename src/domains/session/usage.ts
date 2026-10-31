@@ -7,14 +7,13 @@
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
-import type { CostProvenance } from "../providers/types/cost-provenance.js";
-import type { CostAggregate } from "../telemetry/cost.js";
+import type { RunUsageFacts } from "../../core/telemetry/schemas.js";
 import type { CallTotals } from "../telemetry/folds.js";
 import { foldCallJournal, foldCalls } from "../telemetry/folds.js";
 import type { SessionEntry } from "./entries.js";
 import { journalOwnsSideUsage, usageCallsFromJournal } from "./journal-usage.js";
 
-/** One attempt projected from the journal (#434). */
+/** One attempt, or one run's contribution, projected from the journal; every quantity is a fact sum (#434). */
 export interface LedgerUsageCall {
 	runId?: string;
 	runJournalUnavailable?: boolean;
@@ -22,10 +21,11 @@ export interface LedgerUsageCall {
 	runCutoff?: number;
 	callId?: string;
 	attemptId?: string;
+	/** The attempt's fold; a run contribution carries its run's spend instead. */
 	facts?: CallTotals;
 	usageFacts?: CallTotals["usage"];
-	tokenUsageMissing?: boolean;
-	costSummary?: CostAggregate;
+	/** A run contribution's spend as one fact per quantity; unknown when its journal is unreadable or damaged. */
+	runSpend?: RunUsageFacts;
 	callOutcome?: "success" | "error" | "aborted";
 	compactionOutcome?: EventPayload<"compaction.settled">["outcome"] | "unknown";
 	providerId: string;
@@ -35,18 +35,6 @@ export interface LedgerUsageCall {
 	requestedModelId: string;
 	/** Direct presence observation, with the pre-#193 difference-only shape labeled separately. */
 	responseModelIdObservation: ResponseModelIdObservation;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	cacheWrite1h?: number;
-	reasoningTokens: number;
-	totalTokens: number;
-	costUsd: number;
-	/** API calls this row accounts for. Absent means one, which is every message row. */
-	apiCalls?: number;
-	missingTokenCalls?: number;
-	costProvenance?: CostProvenance;
 }
 
 /** The target and model a session ran under before any modelChange row. */

@@ -1,3 +1,5 @@
+import type { FactSum } from "../core/telemetry/fact.js";
+import type { PricingSum } from "../core/telemetry/pricing.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 
 /** Controller-owned delivery, never an entry in the operator's editable queue (#411). */
@@ -32,5 +34,6 @@ export interface MachineTurnResult {
 	turnId: string | null;
 	reason?: string;
 	text?: string;
-	usage?: { tokens: number; costUsd: number | null };
+	/** The turn's tokens and cost over its calls, each a fact sum (#434). */
+	usage?: { tokens: FactSum; cost: PricingSum };
 }

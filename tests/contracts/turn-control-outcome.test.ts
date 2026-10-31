@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { it } from "node:test";
+import { sumFacts } from "../../src/core/telemetry/pricing.js";
 import type { TurnOutcomeInput } from "../../src/domains/turn-control/index.js";
 import {
 	conversationShape,
@@ -42,7 +43,7 @@ it("advances clarification streaks only for tool-free questions or options", () 
 });
 
 it("reduces a question, a duplicate dispatch, and a canceled turn without mutating their facts", () => {
-	const unused = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0, provenance: "none" as const };
+	const unused = { input: sumFacts([]), output: sumFacts([]), cacheRead: sumFacts([]), total: sumFacts([]) };
 	const base: TurnOutcomeInput = {
 		turnId: "user-1",
 		turnIndex: 0,

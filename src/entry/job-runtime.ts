@@ -185,7 +185,11 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 			json: { turnId: result.turnId, outcome: result.status, usage: result.usage ?? null },
 			jsonComplete: true,
 			evidenceRefs: result.turnId === null ? [] : [`session:${context.job.owner.sessionId}/turn:${result.turnId}`],
-			costUsd: result.usage?.costUsd ?? null,
+			// A job's ledger keeps a plain amount; only a cost with no unpriced call is one (#434).
+			costUsd:
+				result.usage && result.usage.cost.usd.unknownCount === 0
+					? result.usage.cost.usd.measured + result.usage.cost.usd.estimated
+					: null,
 			...(result.status === "failed" ? { errorClass: "infrastructure" as const } : {}),
 		};
 	};

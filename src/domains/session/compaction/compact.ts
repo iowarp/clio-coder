@@ -825,15 +825,14 @@ function numberOrZero(value: unknown): number {
 }
 
 /**
- * Fold one summarization call's provider usage into the running total. A split
- * turn runs two calls; both are billed, so both are counted. Missing provider
- * counts stay separate from the known token subtotal.
+ * Fold one summarization call's provider report into the checkpoint's raw report. A split turn runs two calls; both
+ * are reported. The calls' journal facts are the accounting (#434).
  */
 function addCompactionUsage(total: CompactionUsage | undefined, raw: unknown): CompactionUsage {
 	const usage = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Partial<Usage> & {
 		reasoning?: number;
 	};
-	const { input, output, cacheRead, cacheWrite, reasoning, totalTokens, observed } = normalizeTokenUsage(
+	const { input, output, cacheRead, cacheWrite, reasoning, totalTokens } = normalizeTokenUsage(
 		usage as Record<string, unknown>,
 	);
 	const base = total ?? {
@@ -858,9 +857,6 @@ function addCompactionUsage(total: CompactionUsage | undefined, raw: unknown): C
 		totalTokens: base.totalTokens + totalTokens,
 		cost: { total: base.cost.total + numberOrZero(usage.cost?.total) },
 		apiCalls: base.apiCalls + 1,
-		...((base.missingTokenCalls ?? 0) + (observed ? 0 : 1) > 0
-			? { missingTokenCalls: (base.missingTokenCalls ?? 0) + (observed ? 0 : 1) }
-			: {}),
 	};
 }
 

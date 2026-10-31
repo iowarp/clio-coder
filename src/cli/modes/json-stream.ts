@@ -1,4 +1,3 @@
-import { messageUsageForAccounting } from "../../core/message-accounting.js";
 import { factKnownValue } from "../../core/telemetry/known.js";
 /**
  * Projection from chat-loop events to the headless `--json` wire stream.
@@ -42,7 +41,6 @@ import { factKnownValue } from "../../core/telemetry/known.js";
  */
 
 import type { FactMetric } from "../../core/telemetry/dto.js";
-import { normalizeTokenUsage } from "../../core/token-split.js";
 import type { TelemetryView } from "../../domains/telemetry/contract.js";
 import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent } from "../../session-control/chat-loop.js";
@@ -232,52 +230,33 @@ export function segmentUsageFromView(
 	const attemptIds = segmentAttemptIds(messages);
 	if (attemptIds.length === 0) return null;
 	const read = (metric: FactMetric) => view.attempts(attemptIds, metric).fact;
-	const known = (metric: FactMetric) => {
-		const fact = read(metric);
-		return factKnownValue(fact);
-	};
-	const total = read("total");
-	const estimated = total.estimated > 0 || total.coverage.estimated > 0;
 	return {
-		input: known("input"),
-		output: known("output"),
-		cacheRead: known("cacheRead"),
-		cacheWrite: known("cacheWrite"),
-		reasoning: known("reasoning"),
-		totalTokens: factKnownValue(total),
-		costUsd: known("usd"),
-		apiCalls: known("apiCalls"),
-		measured: total.unknownCount === 0 && !estimated && total.coverage.measured > 0,
-		...(estimated ? { estimated: true as const } : {}),
+		input: read("input"),
+		output: read("output"),
+		cacheRead: read("cacheRead"),
+		cacheWrite: read("cacheWrite"),
+		reasoning: read("reasoning"),
+		totalTokens: read("total"),
+		// The view's sum carries no pricer, so a free segment reads as a measured `$0.00`, never as free spend.
+		cost: { usd: read("usd"), free: false },
+		apiCalls: factKnownValue(read("apiCalls")),
 	};
-}
-
-/** An assistant call that reached the provider and came back without usage (#423). */
-function unmeteredCall(message: AgentMessage): boolean {
-	if (message.role !== "assistant") return false;
-	const raw = messageUsageForAccounting(message);
-	if (raw === null) return false;
-	return raw.callInvoked !== false && !normalizeTokenUsage(raw).observed;
 }
 
 function segmentSummary(messages: ReadonlyArray<AgentMessage>): RunJsonAgentEndFrame {
-	const usage = sumRunUsage(messages);
+	const { totals, cost, apiCalls } = sumRunUsage(messages);
 	return {
 		type: "agent_end",
 		messageCount: messages.length,
 		usage: {
-			input: usage.input,
-			output: usage.output,
-			cacheRead: usage.cacheRead,
-			cacheWrite: usage.cacheWrite,
-			reasoning: usage.reasoning,
-			totalTokens: usage.tokens,
-			costUsd: usage.costUsd,
-			apiCalls: usage.apiCalls,
-			// A call that failed before reporting usage leaves zeros, which are not
-			// a measurement of it.
-			measured: usage.hadUsage && usage.estimated !== true && !messages.some(unmeteredCall),
-			...(usage.estimated === true ? { estimated: true as const } : {}),
+			input: totals.usage.input,
+			output: totals.usage.output,
+			cacheRead: totals.usage.cacheRead,
+			cacheWrite: totals.usage.cacheWrite,
+			reasoning: totals.usage.reasoning,
+			totalTokens: totals.totalTokens,
+			cost,
+			apiCalls,
 		},
 	};
 }

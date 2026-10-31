@@ -40,16 +40,6 @@ export function addResponseModelIdObservationCount(
 	}
 }
 
-export function addResponseModelIdObservationCounts(
-	counts: ResponseModelIdObservationCounts,
-	additional: Readonly<ResponseModelIdObservationCounts>,
-): void {
-	counts.reportedCalls += additional.reportedCalls;
-	counts.notReportedCalls += additional.notReportedCalls;
-	counts.notObservedCalls += additional.notObservedCalls;
-	counts.legacyDifferenceOnlyCalls += additional.legacyDifferenceOnlyCalls;
-}
-
 function nonEmptyString(value: unknown): string | null {
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }

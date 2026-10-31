@@ -31,12 +31,17 @@ import type { WorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js
 import { createTelemetryForwarder, readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
+import { factKnownValue } from "../../src/core/telemetry/known.js";
+import { sumFacts } from "../../src/core/telemetry/pricing.js";
 import { beginCall, telemetryProducerHealth } from "../../src/core/telemetry/producer.js";
 import { registerResearchTraceSink } from "../../src/core/telemetry/research-trace.js";
 import type { CallStarted, RunUsage } from "../../src/core/telemetry/schemas.js";
 import { encodeTelemetryLine, scanTelemetrySegment } from "../../src/core/telemetry/segment.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
+
+const emptySum = sumFacts([]);
+
 import { defaultRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
 import { observationTracing, traceObservation } from "../../src/domains/memory/observation-events.js";
@@ -162,9 +167,9 @@ test("worker forwarding preserves identity and source clocks with bounded deferr
 		const meter = createRunCallUsage(run);
 		strictEqual(meter.snapshot(), undefined);
 		for (const frame of frames) ok(meter.observe(frame));
-		strictEqual(meter.snapshot()?.apiCalls, 0);
+		strictEqual(factKnownValue(meter.snapshot()?.sums.apiCalls ?? emptySum), 0);
 		strictEqual(meter.snapshot()?.callFacts.neverSent, 1);
-		strictEqual(meter.snapshot()?.costSummary.unknownCallCoverageRuns, 1);
+		strictEqual(meter.snapshot()?.coverageUnknown, true);
 		const clean = createRunCallUsage(run);
 		ok(
 			clean.observe({
@@ -172,9 +177,9 @@ test("worker forwarding preserves identity and source clocks with bounded deferr
 				record: { ...makeTelemetryRecord("process.started", {}, run, { t: new Date().toISOString(), mono: 0 }), origin },
 			}),
 		);
-		strictEqual(clean.snapshot()?.apiCalls, 0);
+		strictEqual(factKnownValue(clean.snapshot()?.sums.apiCalls ?? emptySum), 0);
 		clean.gap();
-		strictEqual(clean.snapshot()?.costSummary.unknownCallCoverageRuns, 1);
+		strictEqual(clean.snapshot()?.coverageUnknown, true);
 		ok(frames.every(isReceiptBearingFrame));
 		strictEqual(readWorkerTelemetryFrame(frames[0], { ...run, runId: "different-run" }), null);
 		strictEqual(readWorkerTelemetryFrame(frames[0], { ...run, sessionId: "different-session" }), null);
@@ -339,8 +344,7 @@ test("parent replay resolves aggregate-only run references and replaces a partia
 			runs: new Map([...snapshot.runs].map(([id, journal]) => [id, { ...journal, records: [] }])),
 		};
 		const unresolved = usageCallsFromRunJournals(runJournalsInWindow(missing, 0, Number.POSITIVE_INFINITY));
-		strictEqual(unresolved[0]?.apiCalls, 0);
-		strictEqual(unresolved[0]?.costSummary?.unknownCallCoverageRuns, 1);
+		strictEqual(unresolved[0]?.runSpend?.apiCalls.kind, "unknown");
 		await mkdir(sessionDirectory, { recursive: true });
 		await writeFile(join(sessionDirectory, "current.jsonl"), "");
 		const cli = new URL("../../src/cli/usage.ts", import.meta.url).href;
@@ -518,8 +522,8 @@ test("journal owns a session, flushes call attempts once, and keeps retries link
 		deepStrictEqual(live, projected);
 		strictEqual(projected.length, 1);
 		strictEqual(projected[0]?.attributedModelId, "served-model");
-		strictEqual(projected[0]?.totalTokens, 9);
-		strictEqual(projected[0]?.costProvenance, "known", "declared target rates read as known");
+		strictEqual(factKnownValue(projected[0]?.facts?.totalTokens ?? emptySum), 9);
+		strictEqual(projected[0]?.facts?.usd.coverage.measured, 1, "declared target rates price it as measured");
 		const ledger: SessionEntry[] = [
 			{
 				kind: "message",
@@ -1108,10 +1112,10 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		{ ...zero, id: makeTelemetryRecord("session.opened", {}, context, clock).id },
 	];
 	const run = runUsageFromCallRecords(rows);
-	strictEqual(run.totalTokens, 22);
-	strictEqual(run.costUsd, 0.125);
-	strictEqual(run.apiCalls, 2);
-	strictEqual(run.costSummary.unknownCallCoverageRuns, 1);
+	strictEqual(factKnownValue(run.sums.totalTokens ?? emptySum), 22);
+	strictEqual(factKnownValue(run.sums.usd ?? emptySum), 0.125);
+	strictEqual(factKnownValue(run.sums.apiCalls ?? emptySum), 2);
+	strictEqual(run.coverageUnknown, true);
 	deepStrictEqual(runUsageFromCallRecords([...rows].reverse()), run);
 	const fold = foldCallJournal(rows);
 	deepStrictEqual(foldCallJournal([...rows].reverse()).totals, fold.totals);
@@ -1159,19 +1163,19 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		clock,
 	);
 	const aggregateOnly = runUsageFromCallRecords([aggregateRecord]);
-	strictEqual(aggregateOnly.apiCalls, 0);
-	strictEqual(aggregateOnly.costProvenance, "known");
+	strictEqual(factKnownValue(aggregateOnly.sums.apiCalls ?? emptySum), 0);
+	strictEqual(aggregateOnly.facts.pricing.pricedBy, "provider");
 	const partialCounts = runUsageFromCallRecords([
 		{
 			...aggregateRecord,
 			data: { ...aggregate, apiCalls: measured(3), missingTokenCalls: measured(0), callCountCoverage: "partial" },
 		},
 	]);
-	strictEqual(partialCounts.apiCalls, 3);
-	strictEqual(partialCounts.costSummary.unknownCallCoverageRuns, 1);
-	strictEqual(partialCounts.totalTokens, 100);
-	strictEqual(partialCounts.tokenUsageMissing, false);
-	strictEqual(partialCounts.costProvenance, "known");
+	strictEqual(factKnownValue(partialCounts.sums.apiCalls ?? emptySum), 3);
+	strictEqual(partialCounts.facts.apiCalls.kind, "unknown");
+	strictEqual(factKnownValue(partialCounts.sums.totalTokens ?? emptySum), 100);
+	strictEqual(partialCounts.sums.totalTokens.unknownCount > 0, false);
+	strictEqual(partialCounts.facts.pricing.pricedBy, "provider");
 	const partA = { ...aggregateRecord, data: { ...aggregate, partId: "a" } };
 	const partB = {
 		...aggregateRecord,
@@ -1179,18 +1183,26 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		data: { ...aggregate, partId: "b", totalTokens: measured(0), pricing: { usd: unknown, pricedBy: "none" as const } },
 	};
 	const parts = runUsageFromCallRecords([partA, partB, partA]);
-	strictEqual(parts.totalTokens, 100);
-	strictEqual(parts.costUsd, 1);
-	strictEqual(parts.costSummary.hasUnknown, true);
-	strictEqual(parts.apiCalls, 0);
+	strictEqual(factKnownValue(parts.sums.totalTokens ?? emptySum), 100);
+	strictEqual(factKnownValue(parts.sums.usd ?? emptySum), 1);
+	strictEqual(parts.sums.usd.unknownCount > 0, true);
+	strictEqual(factKnownValue(parts.sums.apiCalls ?? emptySum), 0);
 	deepStrictEqual(runUsageFromCallRecords([partB, partA]), parts);
 	deepStrictEqual(runUsageFromCallRecords([partA, aggregateRecord, partB]), aggregateOnly);
 	const withAggregate = [...rows, aggregateRecord, aggregateRecord];
 	const runAggregate = runUsageFromCallRecords(withAggregate);
-	strictEqual(runAggregate.totalTokens, 100, "the snapshot includes per-call usage; never add both");
-	strictEqual(runAggregate.costUsd, 1);
-	strictEqual(runAggregate.apiCalls, 2, "only identified calls establish a count; aggregate coverage remains unknown");
-	strictEqual(runAggregate.costSummary.unknownCallCoverageRuns, 1);
+	strictEqual(
+		factKnownValue(runAggregate.sums.totalTokens ?? emptySum),
+		100,
+		"the snapshot includes per-call usage; never add both",
+	);
+	strictEqual(factKnownValue(runAggregate.sums.usd ?? emptySum), 1);
+	strictEqual(
+		factKnownValue(runAggregate.sums.apiCalls ?? emptySum),
+		2,
+		"only identified calls establish a count; aggregate coverage remains unknown",
+	);
+	strictEqual(runAggregate.facts.apiCalls.kind, "unknown");
 	deepStrictEqual(runUsageFromCallRecords([...withAggregate].reverse()), runAggregate);
 	const zeroAggregate = makeTelemetryRecord(
 		"run.usage_reported",
@@ -1206,14 +1218,14 @@ test("the call fold deduplicates forks and retries, preserves unknown coverage a
 		clock,
 	);
 	strictEqual(
-		runUsageFromCallRecords([...withAggregate, zeroAggregate]).totalTokens,
+		factKnownValue(runUsageFromCallRecords([...withAggregate, zeroAggregate]).sums.totalTokens),
 		0,
 		"latest revision replaces earlier snapshots, including measured zero",
 	);
 	const conflictingAggregate = { ...aggregateRecord, data: { ...aggregate, totalTokens: measured(200) } };
 	const damagedAggregate = runUsageFromCallRecords([...withAggregate, conflictingAggregate]);
-	strictEqual(damagedAggregate.totalTokens, 0);
-	strictEqual(damagedAggregate.tokenUsageMissing, true);
+	strictEqual(factKnownValue(damagedAggregate.sums.totalTokens ?? emptySum), 0);
+	strictEqual(damagedAggregate.sums.totalTokens.unknownCount > 0, true);
 	deepStrictEqual(runUsageFromCallRecords([conflictingAggregate, ...withAggregate].reverse()), damagedAggregate);
 	const conflicting = {
 		...priced,
@@ -1333,10 +1345,11 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 			readSessionCallJournalSync(root, "child", entries).records.map(({ record }) => record),
 		);
 		strictEqual(
-			childCalls.reduce((sum, call) => sum + call.totalTokens, 0),
+			childCalls.reduce((sum, call) => sum + factKnownValue(call.facts?.totalTokens ?? emptySum), 0),
 			23,
 		);
-		const total = (calls: typeof childCalls) => uniqueUsageCalls(calls).reduce((sum, call) => sum + call.totalTokens, 0);
+		const total = (calls: typeof childCalls) =>
+			uniqueUsageCalls(calls).reduce((sum, call) => sum + factKnownValue(call.facts?.totalTokens ?? emptySum), 0);
 		strictEqual(total([...parentCalls, ...childCalls]), 32);
 		strictEqual(total([...childCalls, ...parentCalls]), 32);
 		strictEqual(
@@ -1357,7 +1370,7 @@ test("fork lineage resolves the inherited prefix without copying facts or double
 			undefined,
 		);
 		strictEqual(
-			remaining.reduce((sum, call) => sum + call.totalTokens, 0),
+			remaining.reduce((sum, call) => sum + factKnownValue(call.facts?.totalTokens ?? emptySum), 0),
 			11,
 		);
 	} finally {

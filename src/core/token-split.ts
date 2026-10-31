@@ -5,15 +5,6 @@ export function ceilChars(chars: number): number {
 	return Math.ceil(Math.max(0, chars) / TOKEN_CHARS);
 }
 
-export interface TokenSplit {
-	readonly inputTokens: number;
-	readonly outputTokens: number;
-	readonly cacheReadTokens: number;
-	readonly totalTokens: number;
-	/** "reported" when every contributing source reported usage; otherwise "partial" or "none". */
-	readonly provenance: "reported" | "partial" | "none";
-}
-
 function tokenUsageCounts(raw: Record<string, unknown>) {
 	const first = (...values: unknown[]): number | undefined =>
 		values.find((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0);

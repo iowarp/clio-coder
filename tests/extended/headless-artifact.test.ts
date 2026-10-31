@@ -382,16 +382,28 @@ for (const scenario of [
 						event.message.role === "assistant" &&
 						event.message.stopReason === "length",
 				).length;
-				deepStrictEqual(envelope.spend.totalTokens, {
-					kind: "measured",
-					value: scenario.calls * 5 + exhaustedCalls * 55968,
-					source: "provider",
-				});
-				deepStrictEqual(envelope.spend.usage.reasoning, {
-					kind: "measured",
-					value: exhaustedCalls * 7926,
-					source: "provider",
-				});
+				// A call that ended in a provider error without an HTTP status left its zeros unknown, so the run's spend
+				// is unknown rather than a total that took them for measured (#434).
+				const errored = scenario.events.some(
+					(event) =>
+						event.type === "message_end" &&
+						"message" in event &&
+						event.message.role === "assistant" &&
+						event.message.stopReason === "error",
+				);
+				if (errored) strictEqual(envelope.spend.totalTokens.kind, "unknown");
+				else {
+					deepStrictEqual(envelope.spend.totalTokens, {
+						kind: "measured",
+						value: scenario.calls * 5 + exhaustedCalls * 55968,
+						source: "provider",
+					});
+					deepStrictEqual(envelope.spend.usage.reasoning, {
+						kind: "measured",
+						value: exhaustedCalls * 7926,
+						source: "provider",
+					});
+				}
 				if ("exhausted" in scenario) {
 					match(stderr, /output token limit.*stopReason=length/);
 					strictEqual(stderr.trim().split("\n").at(-1), envelope.outcomeDetail);
@@ -413,7 +425,8 @@ for (const scenario of [
 						strictEqual(end.error, envelope.outcomeDetail);
 					}
 				}
-				strictEqual(factKnownValue(envelope.spend.pricing.usd), scenario.calls * 0.25);
+				if (errored) strictEqual(envelope.spend.pricing.usd.kind, "unknown");
+				else strictEqual(factKnownValue(envelope.spend.pricing.usd), scenario.calls * 0.25);
 			} finally {
 				scratch.restore();
 			}

@@ -7,9 +7,10 @@
 
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
-import { messageCallsForAccounting, messageUsageForAccounting } from "../core/message-accounting.js";
+import { messageUsageForAccounting } from "../core/message-accounting.js";
 import type { PackageIdentity } from "../core/package-identity.js";
-import { normalizeTokenUsage } from "../core/token-split.js";
+import type { FactSum } from "../core/telemetry/fact.js";
+import { sumFacts } from "../core/telemetry/pricing.js";
 import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import { noteAnthropicStreamQuota, noteCodexStreamQuota } from "../domains/quota/index.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
@@ -17,7 +18,8 @@ import type { BudgetBlockData, SessionEntry } from "../domains/session/entries.j
 import { BUDGET_BLOCK_ENTRY } from "../domains/session/entries.js";
 import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
-import type { TokenSplit } from "../domains/turn-control/index.js";
+import { sumFactSums } from "../domains/telemetry/folds.js";
+import type { TurnTokens } from "../domains/turn-control/index.js";
 import { replaceEngineMessages, setEngineCodexUserTurn } from "../engine/agent.js";
 import type { ClioTurnRecord } from "../engine/session.js";
 import type {
@@ -77,7 +79,7 @@ export interface TurnPersistence {
 	 * Provider-reported usage of every call since the user row `userTurnId`
 	 * opened, or null once a later user row has opened another turn.
 	 */
-	turnUsage(userTurnId: string): TokenSplit | null;
+	turnUsage(userTurnId: string): TurnTokens | null;
 	/** True when this exact assistant message object was already persisted. */
 	wasPersisted(message: unknown): boolean;
 	appendAssistantTurn(
@@ -157,10 +159,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	// Calls after the final row of a run, such as a middleware continuation,
 	// still belong to that turn, so the total stays open until the next user row.
 	let usageTurnId: string | null = null;
-	let turnUsage: Omit<TokenSplit, "provenance"> | null = null;
-	let usageSources = 0;
-	let reportedUsageSources = 0;
-	let measuredUsageSources = 0;
+	let turnUsage: TurnTokens | null = null;
 	// The terminal row names the capability a gateway op=call ran. Its result
 	// may not name it (a refused capability), so the call's own reading is kept
 	// until the call settles.
@@ -170,35 +169,21 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	const startTurnUsage = (userTurnId: string): void => {
 		usageTurnId = userTurnId;
 		turnUsage = null;
-		usageSources = 0;
-		reportedUsageSources = 0;
-		measuredUsageSources = 0;
 		shownToolCalls.clear();
 		toolOwners.clear();
 	};
 
-	/** Fold one assistant message's provider-reported usage into the turn total. */
+	/** Fold one assistant message's calls into the turn total, each call one contribution (#434). */
 	const accumulateTurnUsage = (message: AgentMessage): void => {
 		if (usageTurnId === null) return;
-		const summary = sumRunUsage([message]);
-		const rawUsage = messageUsageForAccounting(message) ?? {};
-		if (summary.costSummary ? !summary.hadUsage : rawUsage.callInvoked === false) return;
-		const reported = normalizeTokenUsage(rawUsage);
-		const apiCalls = summary.costSummary ? summary.apiCalls : 1;
-		const missingTokenCalls = summary.costSummary ? (summary.missingTokenCalls ?? 0) : reported.observed ? 0 : 1;
-		usageSources += apiCalls;
-		reportedUsageSources += apiCalls - missingTokenCalls;
-		const calls = messageCallsForAccounting(message);
-		measuredUsageSources += calls
-			? calls.filter((call) => call.disposition === "settled").length
-			: reported.observed
-				? 1
-				: 0;
+		const { totals, hadUsage } = sumRunUsage([message]);
+		if (!hadUsage) return;
+		const add = (prior: FactSum | undefined, next: FactSum) => (prior ? sumFactSums([prior, next]) : next);
 		turnUsage = {
-			inputTokens: (turnUsage?.inputTokens ?? 0) + summary.input,
-			outputTokens: (turnUsage?.outputTokens ?? 0) + summary.output,
-			cacheReadTokens: (turnUsage?.cacheReadTokens ?? 0) + summary.cacheRead,
-			totalTokens: (turnUsage?.totalTokens ?? 0) + summary.tokens,
+			input: add(turnUsage?.input, totals.usage.input),
+			output: add(turnUsage?.output, totals.usage.output),
+			cacheRead: add(turnUsage?.cacheRead, totals.usage.cacheRead),
+			total: add(turnUsage?.total, totals.totalTokens),
 		};
 	};
 
@@ -272,14 +257,8 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 	return {
 		turnUsage(userTurnId) {
 			if (usageTurnId !== userTurnId) return null;
-			const usage = turnUsage;
-			return {
-				inputTokens: usage?.inputTokens ?? 0,
-				outputTokens: usage?.outputTokens ?? 0,
-				cacheReadTokens: usage?.cacheReadTokens ?? 0,
-				totalTokens: usage?.totalTokens ?? 0,
-				provenance: measuredUsageSources === 0 ? "none" : reportedUsageSources === usageSources ? "reported" : "partial",
-			};
+			const empty = sumFacts([]);
+			return turnUsage ?? { input: empty, output: empty, cacheRead: empty, total: empty };
 		},
 		wasPersisted(message: unknown): boolean {
 			return !!message && typeof message === "object" && persistedAssistantMessages.has(message as object);

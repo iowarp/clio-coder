@@ -10,7 +10,7 @@ import {
 } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
-import { pricesCalls } from "../core/telemetry/pricing.js";
+import { pricesCalls, sumFacts } from "../core/telemetry/pricing.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
@@ -132,7 +132,7 @@ import type { RetrySettings } from "../domains/session/retry.js";
 import { classifyRecoveryFailure, isRetryableRecoveryFailure } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
-import type { TokenSplit } from "../domains/turn-control/index.js";
+import type { TurnTokens } from "../domains/turn-control/index.js";
 import { reduceTurnOutcome } from "../domains/turn-control/index.js";
 import { createEngineAgent } from "../engine/agent.js";
 import { countImageBlocks } from "../engine/image-context.js";
@@ -368,14 +368,14 @@ function turnOutcomeFacts(
 		mutatedPaths: record.completion.mutatedPaths,
 		stopReason: record.stopReason,
 		durationMs: Math.round(record.durationMs),
-		// A cancelled turn settles before its workers seal their receipts, so `provenance` says
-		// whether this count is final. A `turn-tokens` row carries the count that arrived late.
+		// A cancelled turn settles before its workers seal their receipts, so an unsealed run counts as unknown
+		// here. A `turn-tokens` row carries the count that arrived late.
 		workerTokens: { ...record.tokens.workers },
 	};
 }
 
-function noOutcomeUsage(): TokenSplit {
-	return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0, provenance: "none" };
+function noOutcomeUsage(): TurnTokens {
+	return { input: sumFacts([]), output: sumFacts([]), cacheRead: sumFacts([]), total: sumFacts([]) };
 }
 
 /** A worker run's settled record once its journal holds run.settled; null while it has not settled (#434). */
@@ -453,41 +453,20 @@ function watchLateWorkerReceipts(input: {
 	return () => clearInterval(timer);
 }
 
+/** The workers' tokens, each run one contribution; a run that has not settled counts as unknown, never zero (#434). */
 function workerOutcomeUsage(
 	runIds: ReadonlyArray<string>,
 	dispatch: Pick<DispatchContract, "getRun"> | undefined,
-): TokenSplit {
-	let inputTokens = 0;
-	let outputTokens = 0;
-	let cacheReadTokens = 0;
-	let totalTokens = 0;
-	let reported = 0;
-	let available = 0;
-	let missing = 0;
-	const ids = [...new Set(runIds)];
-	const known = (fact: Fact<number>) => (fact.kind === "measured" || fact.kind === "estimated" ? fact.value : null);
-	for (const runId of ids) {
-		const settled = readWorkerSettlement(runId, dispatch);
-		if (settled === null) {
-			missing += 1;
-			continue;
-		}
-		const input = known(settled.usage.input);
-		const output = known(settled.usage.output);
-		const total = known(settled.totalTokens);
-		inputTokens += input ?? 0;
-		outputTokens += output ?? 0;
-		cacheReadTokens += known(settled.usage.cacheRead) ?? 0;
-		totalTokens += total ?? 0;
-		if (input !== null || output !== null) available += 1;
-		if (input !== null && output !== null && total !== null) reported += 1;
-	}
+): TurnTokens {
+	const notSettled: Fact<number> = { kind: "unknown", reason: "not-observed" };
+	const runs = [...new Set(runIds)].map((runId) => readWorkerSettlement(runId, dispatch));
+	const read = (pick: (settled: Pick<RunSettled, "usage" | "totalTokens">) => Fact<number>) =>
+		sumFacts(runs.map((settled) => (settled === null ? notSettled : pick(settled))));
 	return {
-		inputTokens,
-		outputTokens,
-		cacheReadTokens,
-		totalTokens,
-		provenance: available === 0 && missing === 0 ? "none" : reported === ids.length ? "reported" : "partial",
+		input: read((settled) => settled.usage.input),
+		output: read((settled) => settled.usage.output),
+		cacheRead: read((settled) => settled.usage.cacheRead),
+		total: read((settled) => settled.totalTokens),
 	};
 }
 
@@ -826,7 +805,7 @@ export interface CreateChatLoopDeps {
 	turnControl?: TurnControlRunner;
 	turnOutcomeCollector?: TurnOutcomeCollector;
 	/** Tokens System One spent on calls joined to this user turn, for the outcome record's `decisionModel` split. */
-	getDecisionUsage?: (userTurnId: string) => TokenSplit;
+	getDecisionUsage?: (userTurnId: string) => TurnTokens;
 	getTaskEstablished?: () => boolean;
 	outcomeDispatch?: Pick<DispatchContract, "getRun">;
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
@@ -3491,10 +3470,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							turnId: userTurnId,
 							...(failure ? { reason: failure.errorMessage } : {}),
 							...(finalMessage ? { text: extractText(finalMessage) } : {}),
-							usage: {
-								tokens: usage.tokens,
-								costUsd: usage.hadUsage && agentRuntime.runtimeResolution.pricedBy !== "none" ? usage.costUsd : null,
-							},
+							usage: { tokens: usage.totals.totalTokens, cost: usage.cost },
 						});
 					}
 					state.activeUserTurnId = null;

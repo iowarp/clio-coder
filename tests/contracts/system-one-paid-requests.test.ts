@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
+import { factKnownValue } from "../../src/core/telemetry/known.js";
 import anthropicRuntime from "../../src/domains/providers/runtimes/cloud/anthropic.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -16,7 +17,6 @@ import { createRunner } from "../../src/domains/system-one/runner.js";
 import type { DecisionEngine, DecisionRecord, SiteDefinition } from "../../src/domains/system-one/types.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
-import type { UsageBreakdown } from "../../src/domains/telemetry/cost.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { createSystemOneRequestAdmission } from "../../src/entry/system-one-host.js";
@@ -57,10 +57,8 @@ afterEach(async () => {
 });
 
 interface Charge {
-	tokens: number;
-	costUsd: number | undefined;
-	breakdown: Partial<UsageBreakdown> | undefined;
-	provenance: string | undefined;
+	facts: NonNullable<ReturnType<typeof usageCallsFromJournal>[number]["facts"]>;
+	pricedBy: string | undefined;
 }
 
 /** The host admission over a target priced at {@link PRICING}; `gate` runs inside each paid admission, numbered from 1. */
@@ -101,34 +99,30 @@ function ledger(target: TargetDescriptor, gate?: (admission: number) => Promise<
 		calls,
 		/** Each journaled call's spend, as the read model's journal fold books it (#434). */
 		async charges(): Promise<Charge[]> {
-			return usageCallsFromJournal(await calls()).map((call) => ({
-				tokens: call.totalTokens,
-				costUsd: call.costUsd,
-				breakdown: {
-					input: call.input,
-					output: call.output,
-					cacheRead: call.cacheRead,
-					apiCalls: call.apiCalls ?? 1,
-					missingTokenCalls: call.missingTokenCalls ?? 0,
-				},
-				provenance: call.costProvenance,
-			}));
+			const settled = await calls();
+			return usageCallsFromJournal(settled).flatMap((call) => {
+				const record = settled.find((row) => row.data.attemptId === call.attemptId);
+				return call.facts ? [{ facts: call.facts, pricedBy: record?.data.pricing.pricedBy }] : [];
+			});
 		},
 	};
 }
 
 function assertCharged(charge: Charge | undefined): void {
 	ok(charge);
-	strictEqual(charge.tokens, 105);
-	strictEqual(charge.breakdown?.input, 40, "fresh input excludes the cached tokens");
-	strictEqual(charge.breakdown?.cacheRead, 60);
-	strictEqual(charge.breakdown?.output, 5);
+	const { facts } = charge;
+	strictEqual(factKnownValue(facts.totalTokens), 105);
+	strictEqual(factKnownValue(facts.usage.input), 40, "fresh input excludes the cached tokens");
+	strictEqual(factKnownValue(facts.usage.cacheRead), 60);
+	strictEqual(factKnownValue(facts.usage.output), 5);
+	const usd = factKnownValue(facts.usd);
 	ok(
-		Math.abs((charge.costUsd ?? Number.NaN) - EXPECTED_COST_USD) <= COST_TOLERANCE_USD,
-		`cost ${charge.costUsd} is not ${EXPECTED_COST_USD} within ${COST_TOLERANCE_USD}`,
+		Math.abs(usd - EXPECTED_COST_USD) <= COST_TOLERANCE_USD,
+		`cost ${usd} is not ${EXPECTED_COST_USD} within ${COST_TOLERANCE_USD}`,
 	);
-	// Declared target rates read as known, as in 0.6.5 (#434).
-	strictEqual(charge.provenance, "known");
+	// Declared target rates price the call as measured (#434).
+	strictEqual(facts.usd.coverage.measured, 1);
+	strictEqual(charge.pricedBy, "target-rates");
 }
 
 /**
@@ -137,11 +131,10 @@ function assertCharged(charge: Charge | undefined): void {
  */
 function assertUnmetered(charge: Charge | undefined): void {
 	ok(charge);
-	strictEqual(charge.tokens, 0);
-	strictEqual(charge.costUsd, 0);
-	strictEqual(charge.breakdown?.apiCalls, 1);
-	strictEqual(charge.breakdown?.missingTokenCalls, 1);
-	strictEqual(charge.provenance, "unknown");
+	strictEqual(charge.facts.totalTokens.unknownCount, 1);
+	strictEqual(charge.facts.usd.unknownCount, 1);
+	strictEqual(charge.facts.settled + charge.facts.settledNoUsage + charge.facts.sentUnsettled, 1);
+	strictEqual(charge.pricedBy, "none");
 }
 
 function json(status: number, body: unknown): Response {
@@ -217,10 +210,10 @@ describe("System One paid requests: admission and accounting", () => {
 		// The rejected request reported no usage and is recorded as unmetered; every answered one is charged.
 		const charges = await journaled();
 		strictEqual(charges.length, 6);
-		const unmetered = charges.filter((charge) => charge.provenance === "unknown");
+		const unmetered = charges.filter((charge) => charge.pricedBy === "none");
 		strictEqual(unmetered.length, 1);
 		assertUnmetered(unmetered[0]);
-		for (const charge of charges.filter((charge) => charge.provenance !== "unknown")) assertCharged(charge);
+		for (const charge of charges.filter((charge) => charge.pricedBy !== "none")) assertCharged(charge);
 		const settled = await calls();
 		strictEqual(settled.length, bodies.length);
 		strictEqual(settled.filter((row) => row.data.disposition === "settled_no_usage").length, 1);

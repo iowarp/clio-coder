@@ -1,3 +1,4 @@
+import { unobservedRunUsageFacts } from "../../core/telemetry/pricing.js";
 import { runUsageFromCallRecords } from "../dispatch/run-call-usage.js";
 import type { SessionCallJournalRead } from "./fork-journal.js";
 import type { LedgerUsageCall } from "./usage.js";
@@ -60,25 +61,12 @@ export function usageCallsFromRunJournals(runs: Readonly<SessionCallJournalRead[
 				runJournalUnavailable: !source,
 				runCutoff: journal.throughMs,
 				usageFacts: usage.usageFacts,
-				tokenUsageMissing: usage.tokenUsageMissing || incomplete,
+				// A run whose journal is missing, skipped or damaged settles nothing it can vouch for (#434).
+				runSpend: incomplete ? unobservedRunUsageFacts() : usage.facts,
 				providerId: target?.targetId ?? "unknown",
 				requestedModelId: target?.requestedModel ?? "unknown",
 				attributedModelId: target?.requestedModel ?? "unknown",
 				responseModelIdObservation: { state: "not-observed" },
-				input: usage.inputTokens,
-				output: usage.outputTokens,
-				cacheRead: usage.cacheReadTokens,
-				cacheWrite: usage.cacheWriteTokens,
-				cacheWrite1h: usage.cacheWrite1hTokens,
-				reasoningTokens: usage.reasoningTokens,
-				totalTokens: usage.totalTokens,
-				apiCalls: usage.apiCalls,
-				missingTokenCalls: usage.missingTokenCalls,
-				costUsd: usage.costUsd,
-				costSummary: incomplete
-					? { ...usage.costSummary, hasUnknown: true, allKnownFree: false, unknownCallCoverageRuns: 1 }
-					: usage.costSummary,
-				costProvenance: incomplete ? "unknown" : usage.costProvenance,
 			};
 		});
 }
