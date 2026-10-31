@@ -205,7 +205,7 @@ function printRun(dto: RunTelemetryV1): string {
 		`run ${row.runId}${row.sessionId ? ` (session ${row.sessionId})` : ""} · source ${row.source}`,
 		`span      ${row.firstAt ?? "no records"} → ${row.lastAt ?? "no records"}`,
 		`journal   ${dto.journal.present ? `${dto.journal.records} records` : "none"} · ${dto.journal.skipped} skipped · ${dto.journal.damaged} damaged · ${dto.journal.gapRecords} gaps`,
-		`calls     ${show(row.apiCalls)} API calls · ${show(dto.counts.attempts)} attempts · never sent ${show(dto.counts.dispositions.neverSent)} · usage unknown on ${show(dto.missingTokenCalls)}`,
+		`calls     ${show(row.apiCalls)} API calls · ${show(dto.counts.attempts)} attempts · never sent ${show(dto.counts.dispositions.neverSent)}`,
 		`tokens    input ${show(dto.tokens.input)} · output ${show(dto.tokens.output)} · cache read ${show(dto.tokens.cacheRead)} · cache write ${show(dto.tokens.cacheWrite)} · total ${show(dto.tokens.total)}`,
 		`cost      ${show(row.usd)}`,
 		dto.settled

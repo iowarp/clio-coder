@@ -19,6 +19,7 @@ import {
 	type SettingsSectionId,
 	settingsGroupForPath,
 } from "../core/settings-navigation.js";
+import { renderUsdLimit } from "../core/telemetry/render.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
@@ -47,7 +48,6 @@ import {
 	observeHostCapacityFacts,
 	resolveLocalConcurrency,
 } from "../domains/scheduling/local-capacity.js";
-import { renderCostAmount } from "../domains/telemetry/cost.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { ask, askYesNo } from "./ask.js";
 import { editSettingControl, orderedSectionControls } from "./configure-controls.js";
@@ -1494,9 +1494,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				["Worker permissions", settings.fleet.permissions.mode],
 				[
 					"Session cost limit",
-					settings.safety.limits.sessionCostUsd === 0
-						? "none"
-						: renderCostAmount(settings.safety.limits.sessionCostUsd, "known"),
+					settings.safety.limits.sessionCostUsd === 0 ? "none" : renderUsdLimit(settings.safety.limits.sessionCostUsd),
 				],
 				["Turn tool budget", String(settings.safety.limits.chatToolCallsPerTurn)],
 				["Review watchdog", onOff(settings.safety.review.enabled)],
@@ -1547,15 +1545,13 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 					if (answer === null) return;
 					const parsed = Number(answer);
 					if (!Number.isFinite(parsed) || parsed < 0) {
-						io.warn(`Session cost limit must be 0 or greater; left at ${renderCostAmount(current, "known")}\n`);
+						io.warn(`Session cost limit must be 0 or greater; left at ${renderUsdLimit(current)}\n`);
 						return;
 					}
 					updateSettings((draft) => {
 						draft.safety.limits.sessionCostUsd = parsed;
 					});
-					io.ok(
-						parsed === 0 ? "Session cost limit removed" : `Session cost limit set to ${renderCostAmount(parsed, "known")}`,
-					);
+					io.ok(parsed === 0 ? "Session cost limit removed" : `Session cost limit set to ${renderUsdLimit(parsed)}`);
 				},
 			},
 			{
