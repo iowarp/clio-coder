@@ -1,4 +1,5 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import { withToolTelemetryContext } from "../../core/telemetry/context.js";
 import { createHookBudgetTracker, type HookBudgetStats, type HookBudgetTracker } from "./budget.js";
 import type { MiddlewareRegistrationConflictTier, MiddlewareRegistrationOwner } from "./registrations.js";
 import {
@@ -261,12 +262,16 @@ export function runMiddlewareRegistrations(
 				},
 			});
 		} catch (err) {
-			emitDiagnostic(onDiagnostic, {
-				kind: "hook_failed",
-				registrationId: registration.id,
-				hook: input.hook,
-				message: err instanceof Error ? err.message : String(err),
-			});
+			emitDiagnostic(
+				onDiagnostic,
+				{
+					kind: "hook_failed",
+					registrationId: registration.id,
+					hook: input.hook,
+					message: err instanceof Error ? err.message : String(err),
+				},
+				input,
+			);
 			continue;
 		}
 		const elapsedMs = now() - startedAt;
@@ -276,15 +281,19 @@ export function runMiddlewareRegistrations(
 		// telemetry; only steady-state slowness carries steadyStateWarn.
 		const outcome = budgetTracker.record(registration.id, input.hook, elapsedMs);
 		if (outcome.exceeded && !outcome.warmup) {
-			emitDiagnostic(onDiagnostic, {
-				kind: "budget_exceeded",
-				registrationId: registration.id,
-				hook: input.hook,
-				elapsedMs,
-				budgetMs: outcome.budgetMs,
-				steadyStateWarn: outcome.warn,
-				stats: outcome.stats,
-			});
+			emitDiagnostic(
+				onDiagnostic,
+				{
+					kind: "budget_exceeded",
+					registrationId: registration.id,
+					hook: input.hook,
+					elapsedMs,
+					budgetMs: outcome.budgetMs,
+					steadyStateWarn: outcome.warn,
+					stats: outcome.stats,
+				},
+				input,
+			);
 		}
 		if (emitted.length === 0) continue;
 		for (const effect of emitted) {
@@ -337,12 +346,16 @@ export async function runMiddlewareAsyncRegistrations(
 				},
 			});
 		} catch (err) {
-			emitDiagnostic(onDiagnostic, {
-				kind: "hook_failed",
-				registrationId: registration.id,
-				hook: input.hook,
-				message: err instanceof Error ? err.message : String(err),
-			});
+			emitDiagnostic(
+				onDiagnostic,
+				{
+					kind: "hook_failed",
+					registrationId: registration.id,
+					hook: input.hook,
+					message: err instanceof Error ? err.message : String(err),
+				},
+				input,
+			);
 			continue;
 		}
 		for (const effect of emitted) effects.push(cloneMiddlewareEffect(effect));
@@ -370,9 +383,25 @@ function isToolHook(hook: MiddlewareHook): boolean {
 	return hook === "before_tool" || hook === "after_tool";
 }
 
-function emitDiagnostic(sink: MiddlewareDiagnosticSink, diagnostic: MiddlewareDiagnostic): void {
+/**
+ * The sink runs under the hook occurrence's own session, run, turn and tool call, so a failure it records belongs to
+ * the scope the hook ran for (#434).
+ */
+function emitDiagnostic(
+	sink: MiddlewareDiagnosticSink,
+	diagnostic: MiddlewareDiagnostic,
+	input: MiddlewareHookInput,
+): void {
 	try {
-		sink(diagnostic);
+		withToolTelemetryContext(
+			{
+				...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+				...(input.runId !== undefined ? { runId: input.runId } : {}),
+				...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
+				...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
+			},
+			() => sink(diagnostic),
+		);
 	} catch {
 		// A diagnostics sink must never affect hook evaluation or the turn.
 	}

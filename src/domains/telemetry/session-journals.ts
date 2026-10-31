@@ -73,6 +73,8 @@ interface Entry {
  * probe, on the thread that runs the turn (#434).
  */
 export const JOURNAL_IDLE_CLOSE_MS = 30_000;
+/** Sessions whose origin a writer set remembers for reopening; an ACP server hosts a few at most. */
+const KNOWN_ORIGINS = 256;
 
 /** Active work, rather than the selected UI session, owns the writer's lifetime (#434). */
 export function createSessionJournals(
@@ -83,6 +85,8 @@ export function createSessionJournals(
 	opened?: (origin: TelemetrySessionOrigin, sessionDirectory: string) => Promise<void>,
 ) {
 	const entries = new Map<string, Entry>();
+	/** Sessions this process has leased, so a session fact naming one can reopen its writer (#434). */
+	const origins = new Map<string, TelemetrySessionOrigin>();
 	let versions: Promise<SegmentHeader["writer"]> | undefined;
 	const writer = () =>
 		(versions ??= readFile(join(resolvePackageRoot(), "package.json"), "utf8").then((text) => {
@@ -126,6 +130,9 @@ export function createSessionJournals(
 			return { context, journaled: false, async release() {} };
 		}
 		const directory = telemetrySessionDirectory(stateDir, origin.id);
+		origins.delete(origin.id);
+		origins.set(origin.id, origin);
+		if (origins.size > KNOWN_ORIGINS) origins.delete(origins.keys().next().value as string);
 		try {
 			await capture?.prepare?.(origin);
 		} catch {
@@ -245,6 +252,8 @@ export function createSessionJournals(
 	};
 	return {
 		acquire,
+		/** The origin of a session this process leased recently, or undefined for one it never wrote. */
+		knownOrigin: (sessionId: string): TelemetrySessionOrigin | undefined => origins.get(sessionId),
 		/** Sessions whose writer is open now; a closed writer records its settings again when it reopens (#434). */
 		openSessions(): Array<{ origin: TelemetrySessionOrigin; sessionDirectory: string; health: JournalHealth }> {
 			return [...entries.values()].flatMap(({ open, origin, writer }) =>

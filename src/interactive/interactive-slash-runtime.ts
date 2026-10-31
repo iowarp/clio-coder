@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
+import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource } from "../core/telemetry/live-events.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
@@ -870,7 +871,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 								return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
 							},
 							appendEntry: (entry) => session.appendEntry(entry),
-							onRecalled: (payload) => deps.bus.emit("context.recalled", payload),
+							onRecalled: (payload) =>
+								deps.bus.emit("context.recalled", payload, sessionTelemetryContext(session.current()?.id)),
 							...(deps.now ? { now: () => (deps.now?.() ?? new Date()).getTime() } : {}),
 						});
 						if (!outcome.ok) {

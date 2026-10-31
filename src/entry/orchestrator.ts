@@ -62,6 +62,7 @@ import { settingsSourceFor, updateProjectLocalSettings } from "../core/settings-
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { captureAdmits, STANDARD_CAPTURE, systemOneDatasetRecording } from "../core/telemetry/capture.js";
+import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { EventPayload } from "../core/telemetry/events.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
@@ -1411,7 +1412,7 @@ function createSessionRereadPort(session: SessionContract, bus: TelemetryHub): R
 		},
 		cwd: () => session.current()?.cwd ?? null,
 		appendEntry: (entry) => session.appendEntry(entry),
-		onRecalled: (payload) => bus.emit("context.recalled", payload),
+		onRecalled: (payload) => bus.emit("context.recalled", payload, sessionTelemetryContext(session.current()?.id)),
 	});
 	bus.subscribe("context.pruned", () => port.invalidate());
 	return port;
@@ -4080,7 +4081,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						const meta = session.current();
 						return meta ? session.readEntries() : [];
 					},
-					onContextRecalled: (payload) => bus.emit("context.recalled", payload),
+					onContextRecalled: (payload) =>
+						bus.emit("context.recalled", payload, sessionTelemetryContext(session.current()?.id)),
 					readRecall: createSessionRereadPort(session, bus),
 				}
 			: {}),
@@ -5588,7 +5590,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 														return meta ? (session.tree(meta.id).leafId ?? undefined) : undefined;
 													},
 													appendEntry: (entry) => session.appendEntry(entry),
-													onRecalled: (payload) => bus.emit("context.recalled", payload),
+													onRecalled: (payload) =>
+														bus.emit("context.recalled", payload, sessionTelemetryContext(session.current()?.id)),
 												});
 												// The body answers the person; like the TUI's replay block it never becomes model context.
 												return outcome.ok

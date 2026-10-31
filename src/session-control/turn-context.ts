@@ -4,6 +4,7 @@ import type { ContextOperationFact } from "../core/context-operation.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
 import { isHostPolicyMessage } from "../core/host-policy-message.js";
 import { providerCheckpointFromMessage, providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
+import { sessionTelemetryContext } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import type { CallMessageObserver } from "../core/telemetry/producer.js";
 import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
@@ -1817,19 +1818,23 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							tokensAfter: tokensAfterMask,
 							trigger,
 						};
-						deps.bus?.emit("context.pruned", {
-							stage: "mask_observations",
-							pressure: verdict.pressure,
-							tokensBefore: estimate.tokens,
-							tokensAfter: tokensAfterMask,
-							maskedObservations: masked.maskedObservations,
-							maskedThinkingBlocks: masked.maskedThinkingBlocks,
-							maskedThinkingChars: masked.maskedThinkingChars,
-							trigger,
-							snapshotIdBefore: beforeSnapshotId,
-							snapshotIdAfter: postMaskSnapshot.snapshotId,
-							at: Date.now(),
-						} satisfies ContextPrunedPayload);
+						deps.bus?.emit(
+							"context.pruned",
+							{
+								stage: "mask_observations",
+								pressure: verdict.pressure,
+								tokensBefore: estimate.tokens,
+								tokensAfter: tokensAfterMask,
+								maskedObservations: masked.maskedObservations,
+								maskedThinkingBlocks: masked.maskedThinkingBlocks,
+								maskedThinkingChars: masked.maskedThinkingChars,
+								trigger,
+								snapshotIdBefore: beforeSnapshotId,
+								snapshotIdAfter: postMaskSnapshot.snapshotId,
+								at: Date.now(),
+							} satisfies ContextPrunedPayload,
+							sessionTelemetryContext(originSession),
+						);
 						compactionFacts.push({ kind: "omitted", unit: "observations", count: masked.maskedObservations });
 						compactionTokens = { before: estimate.tokens, after: tokensAfterMask, basis: "runtime-estimate" };
 						emitCompactionActivity("completed", `${masked.maskedObservations} observations masked`);
@@ -1936,18 +1941,22 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								tokensAfter: planned.tokensAfter,
 								trigger,
 							};
-							deps.bus?.emit("context.pruned", {
-								stage: "working_set",
-								pressure: verdict.pressure,
-								tokensBefore: planned.tokensBefore,
-								tokensAfter: planned.tokensAfter,
-								trigger,
-								snapshotIdBefore: beforeSnapshotId,
-								snapshotIdAfter: postEvictionSnapshot.snapshotId,
-								policyId: planned.policyId,
-								evictedItems: planned.items.length,
-								at: Date.now(),
-							} satisfies ContextPrunedPayload);
+							deps.bus?.emit(
+								"context.pruned",
+								{
+									stage: "working_set",
+									pressure: verdict.pressure,
+									tokensBefore: planned.tokensBefore,
+									tokensAfter: planned.tokensAfter,
+									trigger,
+									snapshotIdBefore: beforeSnapshotId,
+									snapshotIdAfter: postEvictionSnapshot.snapshotId,
+									policyId: planned.policyId,
+									evictedItems: planned.items.length,
+									at: Date.now(),
+								} satisfies ContextPrunedPayload,
+								sessionTelemetryContext(originSession),
+							);
 							compactionFacts.push({ kind: "omitted", unit: "observations", count: planned.items.length });
 							const itemsWord = planned.items.length === 1 ? "item" : "items";
 							emitCompactionActivity("completed", `${planned.items.length} working-set ${itemsWord} evicted`);
@@ -2216,15 +2225,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			tokensAfter,
 			trigger,
 		};
-		deps.bus?.emit("context.pruned", {
-			stage: "llm_summary",
-			tokensBefore,
-			tokensAfter,
-			trigger,
-			snapshotIdBefore: preCompactSnapshot.snapshotId,
-			snapshotIdAfter: postCompactSnapshot.snapshotId,
-			at: Date.now(),
-		} satisfies ContextPrunedPayload);
+		deps.bus?.emit(
+			"context.pruned",
+			{
+				stage: "llm_summary",
+				tokensBefore,
+				tokensAfter,
+				trigger,
+				snapshotIdBefore: preCompactSnapshot.snapshotId,
+				snapshotIdAfter: postCompactSnapshot.snapshotId,
+				at: Date.now(),
+			} satisfies ContextPrunedPayload,
+			sessionTelemetryContext(originSession),
+		);
 		// The reducer reports selected ledger rows, not just message rows.
 		compactionFacts.push({ kind: "summarized", unit: "entries", count: result.messagesSummarized });
 		compactionTokens = { before: tokensBefore, after: tokensAfter, basis: "runtime-estimate" };
@@ -3248,7 +3261,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		emitContextWindowWarningTransition(warning: string | null): void {
 			if (warning === lastContextWindowWarning) return;
 			lastContextWindowWarning = warning;
-			deps.bus?.emit("context.warning_raised", { warning } satisfies ContextWarningPayload);
+			deps.bus?.emit(
+				"context.warning_raised",
+				{ warning } satisfies ContextWarningPayload,
+				sessionTelemetryContext(deps.session?.current()?.id),
+			);
 		},
 
 		noteColdReason,

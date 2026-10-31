@@ -24,7 +24,7 @@ import type {
 } from "../../core/telemetry/live-events.js";
 import {
 	enqueueReopenedTelemetry,
-	registerTelemetryFallback,
+	registerTelemetryReopener,
 	telemetryCaptures,
 } from "../../core/telemetry/producer.js";
 import { settingsFingerprintCommitment } from "../../core/telemetry/schemas.js";
@@ -240,6 +240,8 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	// The session the lifecycle records left open. Shutdown stops this domain before the session domain parks it,
 	// so stop() journals its close while the writers still accept records (#434).
 	let liveSession: TelemetrySessionOrigin | null = null;
+	// Once stopping, no record reopens a writer that closeAll is shutting (#434).
+	let stopping = false;
 	/**
 	 * An edit that moved only the current session's effective settings belongs to that session's journal alone. A
 	 * writer opens for it, so a session idle past its writer's close still records it (#434).
@@ -408,29 +410,27 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 					unsubscribes.push(settings.onChange(kind, recordSettingsChange));
 			}
 			unsubscribes.push(
-				// Ambient facts carry no telemetry context; the live session holds them, and a writer its idle close
-				// shut opens again for them. Shutdown waits for these writes with the lifecycle records (#434).
-				registerTelemetryFallback({
-					ambient: () => (liveSession ? sessionContext(liveSession.id) : undefined),
-					reopen(record) {
-						const origin = liveSession;
-						if (!origin || record.ctx.sessionId !== origin.id || record.ctx.runId !== undefined) return false;
-						const write = journals
-							.acquire(origin, "main")
-							.then(async (lease) => {
-								try {
-									if (lease.journaled) enqueueReopenedTelemetry(record);
-								} finally {
-									await lease.release();
-								}
-							})
-							.catch(() => {
-								// The writer reports its own failure.
-							})
-							.finally(() => pendingRecords.delete(write));
-						pendingRecords.add(write);
-						return true;
-					},
+				// A session fact whose context names a session this process has written reopens that session's writer
+				// after its idle close. Shutdown waits for these writes with the lifecycle records (#434).
+				registerTelemetryReopener((record) => {
+					const id = record.ctx.sessionId;
+					const origin = id === null || stopping ? undefined : journals.knownOrigin(id);
+					if (!origin) return false;
+					const write = journals
+						.acquire(origin, "main")
+						.then(async (lease) => {
+							try {
+								if (lease.journaled) enqueueReopenedTelemetry(record);
+							} finally {
+								await lease.release();
+							}
+						})
+						.catch(() => {
+							// The writer reports its own failure.
+						})
+						.finally(() => pendingRecords.delete(write));
+					pendingRecords.add(write);
+					return true;
 				}),
 				context.bus.subscribe("config.session_changed", recordSessionSettingsChange),
 				context.bus.subscribe("session.created", ({ sessionId, cwdHash }) => {
@@ -470,6 +470,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			);
 		},
 		async stop() {
+			stopping = true;
 			healthWindows.stop();
 			if (liveSession) recordLifecycle(liveSession, "session.closed", { reason: "completed" });
 			liveSession = null;

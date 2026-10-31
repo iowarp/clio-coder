@@ -66,11 +66,11 @@ export interface JournalDefinition<S extends TSchema = TSchema> {
 	 */
 	readonly project?: (payload: never) => unknown;
 	/**
-	 * A harness fact its emitter records without a telemetry context: emitted with none it belongs to the live
-	 * session, else to the process journal, and one whose session writer closed idle reopens it
-	 * (registerTelemetryFallback, #434).
+	 * Where the record belongs regardless of how it was emitted. `process`: a fact about the process, always in the
+	 * process journal. `session`: a fact about one session or run, which its seam names in the telemetry context; one
+	 * emitted without a context is a gap, and one whose session writer closed idle reopens it (#434).
 	 */
-	readonly ambient?: true;
+	readonly scope?: "process" | "session";
 }
 
 /** The payload exists only in the type system; live events carry no runtime schema. */
@@ -85,7 +85,7 @@ function journal<
 		tier: Tier;
 		cc: ContentClass;
 		capture?: CaptureFlag;
-		ambient?: true;
+		scope?: "process" | "session";
 		// biome-ignore lint/suspicious/noExplicitAny: the projection's own annotation names the live payload type.
 		project?: (payload: any) => Static<S>;
 	},
@@ -193,18 +193,22 @@ export const EVENTS = {
 		cc: "content-free",
 		capture: "providerHeaders",
 	}),
-	"hook.ran": journal(S.HookRanSchema, { tier: "operational", cc: "structural", ambient: true }),
-	"library.installed": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", ambient: true }),
-	"library.updated": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", ambient: true }),
-	"library.enabled": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", ambient: true }),
-	"library.disabled": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", ambient: true }),
-	"library.removed": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", ambient: true }),
-	"library.registered": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", ambient: true }),
-	"library.imported": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", ambient: true }),
+	"hook.ran": journal(S.HookRanSchema, { tier: "operational", cc: "structural", scope: "session" }),
+	"library.installed": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", scope: "process" }),
+	"library.updated": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", scope: "process" }),
+	"library.enabled": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", scope: "process" }),
+	"library.disabled": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", scope: "process" }),
+	"library.removed": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", scope: "process" }),
+	"library.registered": journal(S.LibraryLifecycleSchema, {
+		tier: "accountability",
+		cc: "structural",
+		scope: "process",
+	}),
+	"library.imported": journal(S.LibraryLifecycleSchema, { tier: "accountability", cc: "structural", scope: "process" }),
 	"library.share_imported": journal(S.LibraryLifecycleSchema, {
 		tier: "accountability",
 		cc: "structural",
-		ambient: true,
+		scope: "process",
 	}),
 	"job.changed": live<JobChangedPayload>(),
 	"session.eggs_changed": live<{ sessionId: string | null; active: readonly string[] }>(),
@@ -215,11 +219,11 @@ export const EVENTS = {
 	"session.resume_started": live<SessionResumingPayload>(),
 	"session.reattached": live<SessionResumedPayload>(),
 	"session.turn_switched": live<SessionTurnSwitchedPayload>(),
-	"domain.loaded": journal(S.DomainLoadedSchema, { tier: "operational", cc: "structural", ambient: true }),
+	"domain.loaded": journal(S.DomainLoadedSchema, { tier: "operational", cc: "structural", scope: "process" }),
 	"domain.failed": journal(S.DomainFailedSchema, {
 		tier: "operational",
 		cc: "structural",
-		ambient: true,
+		scope: "process",
 		project: ({ name }: DomainFailedPayload) => ({ name }),
 	}),
 	"config.hot_reloaded": live<ConfigChangePayload>(),
@@ -228,7 +232,7 @@ export const EVENTS = {
 	"config.reload_failed": journal(S.ConfigReloadFailedSchema, {
 		tier: "operational",
 		cc: "content-free",
-		ambient: true,
+		scope: "process",
 		project: ({ message }: ConfigReloadFailedPayload) => ({ state: message === null ? "recovered" : "rejected" }),
 	}),
 	"config.session_changed": live<ConfigSessionChangePayload>(),
@@ -252,15 +256,14 @@ export const EVENTS = {
 	"middleware.hook_failed": journal(S.MiddlewareHookFailedSchema, {
 		tier: "operational",
 		cc: "structural",
-		ambient: true,
 		project: ({ at: _at, message: _message, ...facts }: MiddlewareHookFailedPayload) =>
 			definedFields(facts) as Static<typeof S.MiddlewareHookFailedSchema>,
 	}),
-	"plugin.reloaded": journal(S.PluginReloadedSchema, { tier: "operational", cc: "structural", ambient: true }),
+	"plugin.reloaded": journal(S.PluginReloadedSchema, { tier: "operational", cc: "structural", scope: "process" }),
 	"extension.load_failed": journal(S.EmptySchema, {
 		tier: "operational",
 		cc: "content-free",
-		ambient: true,
+		scope: "process",
 		project: (_issue: ExtensionsLoadIssuePayload) => ({}),
 	}),
 	"context.activity_changed": live<ContextActivityPayload>(),
@@ -268,20 +271,24 @@ export const EVENTS = {
 	"context.warning_raised": journal(S.ContextWarningRaisedSchema, {
 		tier: "operational",
 		cc: "content-free",
-		ambient: true,
+		scope: "session",
 		project: ({ warning }: ContextWarningPayload) => ({ state: warning === null ? "cleared" : "raised" }),
 	}),
-	"context.pruned": journal(S.ContextPrunedSchema, { tier: "operational", cc: "structural", ambient: true }),
-	"context.recalled": journal(S.ContextRecalledSchema, { tier: "operational", cc: "structural", ambient: true }),
+	"context.pruned": journal(S.ContextPrunedSchema, { tier: "operational", cc: "structural", scope: "session" }),
+	"context.recalled": journal(S.ContextRecalledSchema, { tier: "operational", cc: "structural", scope: "session" }),
 	"memory.step_completed": live<MemoryStepCompletedPayload>(),
 	"memory.guardian_changed": live<MemoryGuardianChangedPayload>(),
 	"agent.status_changed": live<AgentStatusChangedPayload>(),
 	"run.aborted": live<RunAbortedPayload>(),
 	"budget.alerted": live<BudgetAlertPayload>(),
-	"shutdown.requested": journal(S.ShutdownRequestedSchema, { tier: "operational", cc: "content-free", ambient: true }),
-	"shutdown.drained": journal(S.EmptySchema, { tier: "operational", cc: "content-free", ambient: true }),
-	"shutdown.terminated": journal(S.EmptySchema, { tier: "operational", cc: "content-free", ambient: true }),
-	"shutdown.persisted": journal(S.EmptySchema, { tier: "operational", cc: "content-free", ambient: true }),
+	"shutdown.requested": journal(S.ShutdownRequestedSchema, {
+		tier: "operational",
+		cc: "content-free",
+		scope: "process",
+	}),
+	"shutdown.drained": journal(S.EmptySchema, { tier: "operational", cc: "content-free", scope: "process" }),
+	"shutdown.terminated": journal(S.EmptySchema, { tier: "operational", cc: "content-free", scope: "process" }),
+	"shutdown.persisted": journal(S.EmptySchema, { tier: "operational", cc: "content-free", scope: "process" }),
 } as const;
 
 export type EventName = keyof typeof EVENTS;

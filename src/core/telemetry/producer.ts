@@ -40,20 +40,15 @@ export interface TelemetrySink {
 }
 
 /**
- * Where an ambient record goes when its context names no open writer: the telemetry domain answers with the live
- * session and reopens that session's writer for a record its idle close left without a sink (#434).
+ * Reopens a session writer its idle close shut, for a session-scoped record whose context names that session. It
+ * never chooses an owner: a record whose context names no session has none to reopen (#434).
  */
-export interface TelemetryFallback {
-	/** The owner of an ambient record emitted with no telemetry context. */
-	ambient(): TelemetryContext | undefined;
-	/** Takes ownership of a record whose owner has no open writer; false when it cannot reopen that owner. */
-	reopen(record: PendingTelemetry): boolean;
-}
+export type TelemetryReopener = (record: PendingTelemetry) => boolean;
 
 const sinks = new Map<string, TelemetrySink>();
 /** Owns records whose context names neither a session nor a run; the writer stamps its own context on them (#434). */
 let processOwner: { context: TelemetryContext; sink: TelemetrySink } | undefined;
-let fallback: TelemetryFallback | null = null;
+let reopener: TelemetryReopener | null = null;
 const liveAttempts = new Map<string, TelemetryCall>();
 let unownedRecords = 0;
 let sinkFailures = 0;
@@ -84,10 +79,10 @@ function registerSink(owner: string, sink: TelemetrySink): () => void {
 }
 
 /** One telemetry domain runs per process; a later registration replaces an earlier one until either is released. */
-export function registerTelemetryFallback(next: TelemetryFallback): () => void {
-	fallback = next;
+export function registerTelemetryReopener(next: TelemetryReopener): () => void {
+	reopener = next;
 	return () => {
-		if (fallback === next) fallback = null;
+		if (reopener === next) reopener = null;
 	};
 }
 
@@ -134,18 +129,27 @@ function enqueueTelemetry(
 ): boolean {
 	if (!isJournalEvent(name)) return false;
 	const definition = journalDefinition(name);
-	const ambient = definition.ambient === true && fallback !== null;
-	// An ambient fact with no context belongs to the live session; with none live, to the process (#434).
-	const owned = given ?? (ambient ? fallback?.ambient() : undefined);
-	const ctx = owned ?? processOwner?.context;
-	const sink = owned ? sinks.get(telemetryOwner(owned)) : processOwner?.sink;
-	if (!ctx) {
-		// An ambient fact emitted before the telemetry domain starts, such as an early domain.loaded, has no journal
-		// to belong to yet; it is unrecorded, not a record a writer lost (#434).
-		if (definition.ambient !== true) unownedRecords += 1;
-		return false;
+	if (definition.scope === "process") {
+		given = processOwner?.context;
+		if (!given) {
+			// A process fact emitted before the telemetry domain opens the process journal, such as the domain.loaded of
+			// a domain that starts ahead of it, has no journal to belong to yet; it is unrecorded, not lost (#434).
+			return false;
+		}
 	}
-	if (!sink && !(ambient && owned && preimage === undefined)) {
+	// A session fact names its session at its seam; one emitted without a context is a gap, never the process's (#434).
+	const ctx = given ?? (definition.scope === "session" ? undefined : processOwner?.context);
+	const sink = given
+		? definition.scope === "process"
+			? processOwner?.sink
+			: sinks.get(telemetryOwner(given))
+		: processOwner?.sink;
+	const reopens =
+		definition.scope === "session" &&
+		typeof ctx?.sessionId === "string" &&
+		ctx.runId === undefined &&
+		preimage === undefined;
+	if (!ctx || (!sink && !reopens)) {
 		unownedRecords += 1;
 		return false;
 	}
@@ -164,14 +168,14 @@ function enqueueTelemetry(
 			: { kind: name, data, ctx, wallMs: Date.now(), mono: performance.now(), preimage }
 	) as PendingTelemetry;
 	if (sink) return enqueueInto(sink, record);
-	// The live session's writer closed idle; the fallback reopens it for this record (#434).
-	if (fallback?.reopen(record)) return false;
+	// The named session's writer closed idle; the telemetry domain reopens it for this record (#434).
+	if (reopener?.(record)) return false;
 	unownedRecords += 1;
 	return false;
 }
 
 /**
- * Enqueue a record the fallback reopened a writer for, stamped and projected when it was emitted. Its owner is looked
+ * Enqueue a record the reopener opened a writer for, stamped and projected when it was emitted. Its owner is looked
  * up now; a writer that failed to open leaves it unowned (#434).
  */
 export function enqueueReopenedTelemetry(record: PendingTelemetry): boolean {

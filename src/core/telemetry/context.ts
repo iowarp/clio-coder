@@ -106,6 +106,16 @@ export function withToolTelemetryContext<T>(
 	);
 }
 
+/**
+ * The context of a fact about one session, for a seam that knows which session it acted on: the async context when
+ * it already names that session (keeping its turn and tool call), else the session's own. No session, no context;
+ * the fact is then a gap rather than another scope's (#434).
+ */
+export function sessionTelemetryContext(sessionId: string | null | undefined): TelemetryContext | undefined {
+	if (!sessionId) return undefined;
+	return withToolTelemetryContext({ sessionId }, telemetryContext);
+}
+
 /** Match the actual tool block to ids Clio attached at settlement; provider ids are never inferred (#434). */
 export function observedToolCallOrigin(
 	messages: readonly unknown[],
