@@ -9,7 +9,6 @@ import type { JobRecord } from "../../core/job-types.js";
 import { messageCallsForAccounting } from "../../core/message-accounting.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { TelemetryReadModel, TelemetryView } from "../../domains/observability/contract.js";
-import { renderCostAmount } from "../../domains/observability/cost.js";
 import { runTokenCount } from "../../domains/observability/read-model.js";
 import {
 	ACP_DISPATCH_STEER_METHOD,
@@ -2020,11 +2019,13 @@ const ACP_MAX_JOB_EVIDENCE_BYTES = 256;
 /**
  * The wire projection of one canonical job record, for `_clio-coder/jobs/list` and
  * the opt-in `job.changed` stream. Every figure is the record's own: counts, the
- * next due time and the deadline are not derived here, cost stays null when the
- * record says it is unknown, and a job with no recorded run reports no last
- * outcome. A client must be able to draw the same truth the terminal prints.
+ * next due time and the deadline are not derived here, `costUsd` stays null when
+ * the record says it is unknown, and a job with no recorded run reports no last
+ * outcome. `costDisplay` is the job's spend as the telemetry read model words it,
+ * the line `/loop status` prints, and is absent when nothing measured one. A
+ * client must be able to draw the same truth the terminal prints.
  */
-function jobEventPayload(job: JobRecord, complete: boolean, turn: boolean): AcpJob | null {
+function jobEventPayload(job: JobRecord, complete: boolean, turn: boolean, spend: string | null): AcpJob | null {
 	const jobId = safeStoredIdentifier(job.id, ACP_MAX_DISPATCH_ID_BYTES);
 	if (jobId === null) return null;
 	const runner = job.spec.runner;
@@ -2062,8 +2063,7 @@ function jobEventPayload(job: JobRecord, complete: boolean, turn: boolean): AcpJ
 						truncated: last.truncated,
 					},
 		delivery: job.delivery === null ? null : { kind: job.delivery.kind, state: job.delivery.state },
-		// Null means a component had unknown pricing; a priced job is a sum of rate or catalog estimates (#434).
-		costDisplay: job.costUsd === null ? renderCostAmount(0, "unknown") : renderCostAmount(job.costUsd, "estimated"),
+		...(spend === null ? {} : { costDisplay: spend }),
 		costUsd: job.costUsd !== null && Number.isFinite(job.costUsd) && job.costUsd >= 0 ? job.costUsd : null,
 		saved: job.persistenceError === null,
 		complete,
@@ -4431,7 +4431,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		machineLease !== null && machineLease.jobId === jobId && machineLease.active.scheduled?.opened === true;
 	/** Sends one job's canonical record. */
 	const forwardJob = (job: JobRecord, complete: boolean): void => {
-		const projected = jobEventPayload(job, complete, jobTurnOpen(job.id));
+		const projected = jobEventPayload(job, complete, jobTurnOpen(job.id), options.commands?.jobSpend?.(job.id) ?? null);
 		if (projected === null) return;
 		forwardEvent("job.changed", null, complete, projected);
 	};
@@ -5159,7 +5159,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const jobs: AcpJob[] = [];
 		for (const job of ranked) {
 			if (jobs.length >= ACP_MAX_JOBS) break;
-			const projected = jobEventPayload(job, jobIsComplete(job), jobTurnOpen(job.id));
+			const projected = jobEventPayload(
+				job,
+				jobIsComplete(job),
+				jobTurnOpen(job.id),
+				options.commands?.jobSpend?.(job.id) ?? null,
+			);
 			if (projected !== null) jobs.push(projected);
 		}
 		return { jobs };

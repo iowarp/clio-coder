@@ -771,6 +771,8 @@ export interface AcpCommandControl {
 	promptNames?(): string[];
 	/** The jobs the bound session owns now. Present only when the host has a job control. */
 	jobs?(): ReadonlyArray<JobRecord>;
+	/** A job's model spend as the telemetry read model words it; null when nothing measured one. */
+	jobSpend?(id: string): string | null;
 }
 
 const MAX_PROMPT_NAMES = 256;
@@ -868,7 +870,9 @@ export function acpCommandControl(host: AcpCommandHost): AcpCommandControl {
 		},
 		capability: { ...ACP_COMMANDS_CAPABILITY, count: availableRules(host).length },
 		screenPrompt: (text) => screenAcpPromptLine(text, host),
-		...(host.jobs ? { jobs: () => host.jobs?.list() ?? [] } : {}),
+		...(host.jobs
+			? { jobs: () => host.jobs?.list() ?? [], jobSpend: (id: string) => host.jobs?.spend?.(id) ?? null }
+			: {}),
 		...(host.listPromptNames
 			? {
 					promptNames: () =>
