@@ -206,6 +206,11 @@ export interface TelemetryReadModel {
 export interface TelemetryContract extends TelemetryRunProjection {
 	/** Absent on contracts built without the telemetry extension, such as test doubles. */
 	read?: TelemetryReadModel;
+	/**
+	 * The status the process exits with, which `process.exited` records. Each host names it before stopping domains:
+	 * the coordinated shutdown's status, or the status a CLI command returns (#434).
+	 */
+	setExitStatus?(code: number): void;
 	recordRunTokens?(
 		runId: string,
 		source: "journal" | "unavailable",

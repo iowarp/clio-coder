@@ -2389,12 +2389,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// The loader caps each domain separately. The outer hook must allow the
 	// whole sequence to finish, including cleanup after a timed-out domain and
 	// the dispatch stop's own allowance for its async durable writes (#428).
-	termination.onPersist((signal) => result.stop(signal), {
-		timeoutMs: Math.min(
-			2 ** 31 - 1,
-			(result.loaded.length + 1) * resolveShutdownHookBudgetMs() + (dispatch?.drainAllowanceMs?.() ?? 0),
-		),
-	});
+	termination.onPersist(
+		(signal) => {
+			// The coordinator's status is set before any hook runs (130 on SIGINT, 143 on SIGTERM); process.exited
+			// records it (#434).
+			result.getContract<TelemetryContract>("telemetry")?.setExitStatus?.(termination.getExitCode());
+			return result.stop(signal);
+		},
+		{
+			timeoutMs: Math.min(
+				2 ** 31 - 1,
+				(result.loaded.length + 1) * resolveShutdownHookBudgetMs() + (dispatch?.drainAllowanceMs?.() ?? 0),
+			),
+		},
+	);
 
 	bus.emit("session.started", { at: Date.now() });
 	timer.mark("session_start fired");

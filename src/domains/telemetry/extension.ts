@@ -398,6 +398,10 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 		void build.finally(() => pendingBuilds.delete(build));
 	};
 
+	// The status the host named before stopping its domains; every host that exits through them names one (#434).
+	let exitStatus: number | undefined;
+	const processExitStatus = (): number => exitStatus ?? (typeof process.exitCode === "number" ? process.exitCode : 0);
+
 	const extension: DomainExtension = {
 		async start() {
 			try {
@@ -486,7 +490,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			await Promise.all(pendingRecords);
 			await journals.closeAll();
 			// A process that recorded nothing process-scoped never opened a journal, and closing it writes nothing.
-			await processJournal?.close(typeof process.exitCode === "number" ? process.exitCode : 0);
+			await processJournal?.close(processExitStatus());
 			processJournal = undefined;
 			telemetry.stop();
 			for (const off of unsubscribes) off();
@@ -524,6 +528,9 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			return sessionCapture.current(origin);
 		},
 		read: telemetry,
+		setExitStatus(code) {
+			exitStatus = code;
+		},
 		recordResearchTrace(origin, kind, data, preimage) {
 			// Facts can point at live runtime state; the journal keeps what the event saw (#434).
 			let owned: { data: typeof data; preimage: unknown };

@@ -13,7 +13,8 @@ type FleetTermination = Pick<
 
 export async function runFleetWithShutdown<T>(
 	run: (signal: AbortSignal, registerEmergencySeal: (seal: () => void) => () => void) => Promise<T>,
-	cleanup: () => Promise<void>,
+	/** Runs once the run settles, with how it settled, so the host can name its exit status before teardown. */
+	cleanup: (settled: { ok: true; value: T } | { ok: false; error: unknown }) => Promise<void>,
 	drainAllowanceMs = 0,
 	termination: FleetTermination = getTerminationCoordinator(),
 	options: { beginDrain?: () => Promise<void>; notice?: (text: string) => void; cleanupAllowanceMs?: number } = {},
@@ -54,16 +55,22 @@ export async function runFleetWithShutdown<T>(
 		{ timeoutMs },
 	);
 	termination.installSignalHandlers();
+	let outcome: { ok: true; value: T } | { ok: false; error: unknown } = { ok: false, error: undefined };
 	try {
-		return await run(controller.signal, (seal) => {
+		const value = await run(controller.signal, (seal) => {
 			emergencySeal = seal;
 			return () => {
 				if (emergencySeal === seal) emergencySeal = undefined;
 			};
 		});
+		outcome = { ok: true, value };
+		return value;
+	} catch (error) {
+		outcome = { ok: false, error };
+		throw error;
 	} finally {
 		try {
-			await cleanup();
+			await cleanup(outcome);
 		} finally {
 			unregister();
 			unregisterForce?.();

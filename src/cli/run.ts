@@ -35,6 +35,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SessionCostCeilingError } from "../domains/scheduling/budget.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import type { TelemetryContract } from "../domains/telemetry/index.js";
 import { TelemetryDomainModule } from "../domains/telemetry/index.js";
 import type { ImageContent } from "../engine/types.js";
 import type { HeadlessRunDeadline } from "../entry/boot-options.js";
@@ -666,6 +667,12 @@ async function runDispatch(
 			workerHooks: workerHooks.workerHooks,
 		}),
 	]);
+	// The process journal records the status this command returns, which no shutdown coordinator sets here (#434).
+	const stopDomains = async (code: number): Promise<number> => {
+		loaded.getContract<TelemetryContract>("telemetry")?.setExitStatus?.(code);
+		await loaded.stop();
+		return code;
+	};
 	const config = loaded.getContract<ConfigContract>("config");
 	const baseSettings = config?.get() ?? readSettings();
 	// Install `fleet.history.journal` the same way the interactive composition root
@@ -681,16 +688,14 @@ async function runDispatch(
 	const dispatch = loaded.getContract<DispatchContract>("dispatch");
 	if (!dispatch) {
 		writeRunDiagnostic("dispatch domain unavailable\n");
-		await loaded.stop();
-		return 1;
+		return await stopDomains(1);
 	}
 
 	if (options.apiKey) {
 		const providers = loaded.getContract<ProvidersContract>("providers");
 		if (!providers) {
 			writeRunDiagnostic("clio-coder run: --api-key supplied but providers domain unavailable\n");
-			await loaded.stop();
-			return 1;
+			return await stopDomains(1);
 		}
 		const settings = effectiveSettings;
 		const profileTargetId = parsed.agentProfile ? settings.fleet?.profiles?.[parsed.agentProfile]?.target : undefined;
@@ -706,8 +711,7 @@ async function runDispatch(
 		const runtime = target ? providers.getRuntime(target.runtime) : null;
 		if (!target || !runtime) {
 			writeRunDiagnostic("clio-coder run: --api-key supplied but no target resolved; pass --target <id>\n");
-			await loaded.stop();
-			return 2;
+			return await stopDomains(2);
 		}
 		providers.auth.setRuntimeOverrideForTarget(target, runtime, options.apiKey);
 	}
@@ -806,9 +810,8 @@ async function runDispatch(
 		if (hookRefusal !== null) {
 			unsubscribeScopeNotices();
 			await workerHooks.dispose();
-			await loaded.stop();
 			writeRunDiagnostic(`clio-coder run: ${hookRefusal}\n`);
-			return 1;
+			return await stopDomains(1);
 		}
 		const handle = await dispatch.dispatch(dispatchReq);
 		startRunOutput();
@@ -874,8 +877,7 @@ async function runDispatch(
 		await dispatch.drain();
 		await workerHooks.drain();
 		await workerHooks.dispose();
-		await loaded.stop();
-		return mapExitCode(receipt);
+		return await stopDomains(mapExitCode(receipt));
 	} catch (err) {
 		unsubscribeScopeNotices();
 		if (cleanupSteer) {
@@ -891,21 +893,17 @@ async function runDispatch(
 		if (failedSpec?.audience === "shadow") {
 			process.stderr.write(`clio-coder run: instead run: ${shadowStandInCommand(parsed)}\n`);
 		}
-		await loaded.stop();
-		if (err instanceof SessionCostCeilingError) return SESSION_COST_CEILING_EXIT_CODE;
-		// Asking for an agent reserved for internal orchestration is an admission
-		// refusal like any other, and no model was called. Matched against the
-		// refusal the spec's own audience produces, not against failure text at large.
-		if (failedSpec && msg === userOriginAudienceRefusal(failedSpec)) return 2;
-		if (/target '.+' not found/.test(msg)) return 2;
-		if (
+		const refused =
+			// Asking for an agent reserved for internal orchestration is an admission
+			// refusal like any other, and no model was called. Matched against the
+			// refusal the spec's own audience produces, not against failure text at large.
+			(failedSpec && msg === userOriginAudienceRefusal(failedSpec)) ||
+			/target '.+' not found/.test(msg) ||
 			msg.includes("unknown agent recipe") ||
 			msg.includes("admission") ||
 			msg.includes("capability") ||
-			msg.includes("budget")
-		)
-			return 2;
-		return 1;
+			msg.includes("budget");
+		return await stopDomains(err instanceof SessionCostCeilingError ? SESSION_COST_CEILING_EXIT_CODE : refused ? 2 : 1);
 	}
 }
 

@@ -85,6 +85,7 @@ import {
 	type CostAggregate,
 	renderCostAggregate,
 	renderCostAmount,
+	type TelemetryContract,
 	TelemetryDomainModule,
 } from "../domains/telemetry/index.js";
 import { type RunTokenField, runsTotal } from "../domains/telemetry/read-model.js";
@@ -137,6 +138,11 @@ Notes:
   When the owning process is gone it terminates the orphaned worker's process
   group and settles the ledger row itself.
 `;
+
+/** A busy or unjudgeable workspace lock refuses a run; it is not a usage error, so it exits 1 like the other refusals. */
+function fleetFailureExitCode(err: unknown): number {
+	return err instanceof FleetWorkspaceBusyError || err instanceof FleetWorkspaceLockUnavailableError ? 1 : 2;
+}
 
 function fail(message: string): number {
 	process.stderr.write(`clio-coder fleet: ${message}\n`);
@@ -547,10 +553,22 @@ async function runFleet(
 					},
 				});
 			},
-			async () => {
+			async (settled) => {
 				await beginDispatchDrain();
 				await workerHooks.drain();
 				await workerHooks.dispose();
+				// The process journal records the status this command returns (#434).
+				loaded
+					.getContract<TelemetryContract>("telemetry")
+					?.setExitStatus?.(
+						runSignal?.aborted
+							? getTerminationCoordinator().getExitCode()
+							: settled.ok
+								? settled.value.cleanRun
+									? 0
+									: 1
+								: fleetFailureExitCode(settled.error),
+					);
 				await loaded.stop();
 			},
 			dispatch.drainAllowanceMs?.(),
@@ -563,11 +581,8 @@ async function runFleet(
 		);
 	} catch (err) {
 		if (runSignal?.aborted && err === runSignal.reason) return getTerminationCoordinator().getExitCode();
-		// A busy or unjudgeable workspace lock refuses this run; it is not a usage error, so it exits 1 like the other refusals.
-		if (err instanceof FleetWorkspaceBusyError || err instanceof FleetWorkspaceLockUnavailableError) {
-			return refuse(err.message);
-		}
-		return fail(err instanceof Error ? err.message : String(err));
+		const message = err instanceof Error ? err.message : String(err);
+		return fleetFailureExitCode(err) === 1 ? refuse(message) : fail(message);
 	}
 
 	if (json) {
