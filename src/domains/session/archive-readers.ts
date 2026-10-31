@@ -3,8 +3,7 @@ import { join } from "node:path";
 import { isSessionEntry, isSessionHeader, type SessionEntry } from "./entries.js";
 
 /**
- * Shared read-only readers over the local usage archive: the per-day audit
- * JSONL files and the per-session ledger files under the state dir. Evidence
+ * Shared read-only readers over the per-session ledger files under the state dir. Evidence
  * building and the cross-session usage report both consume these; they were
  * factored out of evidence/build.ts so the parsers exist exactly once.
  *
@@ -14,20 +13,6 @@ import { isSessionEntry, isSessionHeader, type SessionEntry } from "./entries.js
  * be used: the telemetry extension imports the evidence domain, so an
  * evidence-side import through the telemetry index would cycle.
  */
-
-export interface AuditJsonRow {
-	file: string;
-	line: number;
-	row: Record<string, unknown>;
-	ts: string | null;
-	auditKind: string;
-	correlationId: string;
-}
-
-export interface AuditReadResult {
-	rows: AuditJsonRow[];
-	errors: string[];
-}
 
 export interface SessionReadResult {
 	/** Persisted /tree selection, when the session has not appended past it. */
@@ -50,70 +35,6 @@ const LEGACY_ROUTING_NOTICE_CUSTOM_TYPE = "clio.routing-notice";
 function normalizeReleasedCustomType(entry: SessionEntry): SessionEntry {
 	if (entry.kind !== "custom" || entry.customType !== LEGACY_ROUTING_NOTICE_CUSTOM_TYPE) return entry;
 	return { ...entry, customType: ROUTING_NOTICE_CUSTOM_TYPE };
-}
-
-/**
- * Read legacy `<date>.jsonl` and UTC `<date>.utc.jsonl` audit rows together (#434).
- * Filenames never establish event order. Malformed lines are skipped
- * and reported in `errors` instead of failing the read.
- */
-export async function readAuditRows(stateDir: string): Promise<AuditReadResult> {
-	const root = join(stateDir, "audit");
-	let files: string[];
-	try {
-		files = await readdir(root);
-	} catch (error) {
-		const err = error as NodeJS.ErrnoException;
-		if (err.code === "ENOENT") return { rows: [], errors: [] };
-		return { rows: [], errors: [`audit root read error: ${err.message ?? String(err)}`] };
-	}
-	const rows: AuditJsonRow[] = [];
-	const errors: string[] = [];
-	for (const file of files.filter((name) => name.endsWith(".jsonl")).sort(compareStrings)) {
-		const path = join(root, file);
-		let raw: string;
-		try {
-			raw = await readFile(path, "utf8");
-		} catch (error) {
-			const err = error as NodeJS.ErrnoException;
-			errors.push(`${path}: ${err.message ?? String(err)}`);
-			continue;
-		}
-		const lines = raw.split("\n");
-		for (let index = 0; index < lines.length; index += 1) {
-			const line = lines[index];
-			if (line === undefined || line.length === 0) continue;
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(line) as unknown;
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				errors.push(`${path}:${index + 1}: invalid JSON: ${message}`);
-				continue;
-			}
-			if (!isRecord(parsed)) {
-				errors.push(`${path}:${index + 1}: expected object`);
-				continue;
-			}
-			const auditKind = readOptionalString(parsed.kind) ?? "tool_call";
-			rows.push({
-				file,
-				line: index + 1,
-				row: parsed,
-				ts: readOptionalString(parsed.ts),
-				auditKind,
-				correlationId: readOptionalString(parsed.correlationId) ?? "",
-			});
-		}
-	}
-	rows.sort((left, right) => {
-		const instant = (row: AuditJsonRow) => {
-			const parsed = row.ts === null ? Number.NaN : Date.parse(row.ts);
-			return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
-		};
-		return instant(left) - instant(right) || compareStrings(left.file, right.file) || left.line - right.line;
-	});
-	return { rows, errors };
 }
 
 /**
@@ -218,10 +139,6 @@ export async function listSessionLedgerRefs(stateDir: string, onlyCwdHash?: stri
 		}
 	}
 	return refs;
-}
-
-function readOptionalString(value: unknown): string | null {
-	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

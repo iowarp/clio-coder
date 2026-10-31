@@ -231,8 +231,6 @@ function budgetDenial(
 		tool: mapped.clioToolName,
 		classification,
 		decision: "denied",
-		args: mapped.args,
-		reasons: [reason],
 		reasonCode: "worker-budget",
 	});
 	return {
@@ -332,8 +330,6 @@ function deniedDecision(
 		tool: mapped.clioToolName,
 		classification: decision.classification,
 		decision: "denied",
-		args: mapped.args,
-		reasons: [rejection.detail],
 		reasonCode,
 	});
 	return { kind: "deny", mapped, decision: blocked, reason: rejection.short, reasonCode, permissionRequired: false };

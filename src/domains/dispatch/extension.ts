@@ -4079,12 +4079,11 @@ export function createDispatchBundle(
 
 	/**
 	 * Budget admission preflight denial. The dispatch dies before any worker or
-	 * run row exists, so without this denied tool_call row the audit log would
-	 * carry no trace that the admission gate refused the dispatch.
+	 * run row exists, so without this denied `tool.decided` record the journal
+	 * would carry no trace that the admission gate refused the dispatch.
 	 */
 	function denyDispatchForBudget(
 		preflight: { currentUsd: number; ceilingUsd: number; pricing?: BudgetSpendPricing },
-		agentId: string,
 		routeEstimateUsd = 0,
 	): never {
 		const estimateSuffix =
@@ -4092,11 +4091,9 @@ export function createDispatchBundle(
 		const reason = `budget ceiling crossed: ${budgetSpendText(preflight.currentUsd, preflight.pricing)} / ${renderCostAmount(preflight.ceilingUsd, "known")}${estimateSuffix}`;
 		safety.audit.recordToolCall?.({
 			tool: "dispatch",
-			classification: { actionClass: "dispatch", reasons: ["budget admission preflight"] },
+			classification: { actionClass: "dispatch" },
 			decision: "denied",
-			reasons: [reason],
 			reasonCode: "budget-ceiling",
-			args: { agentId },
 		});
 		throw new Error(`dispatch: admission denied: ${reason}`);
 	}
@@ -4157,7 +4154,6 @@ export function createDispatchBundle(
 			// The amount compared is the route's conservative estimate, so it is named as one (#434 §6.3).
 			denyDispatchForBudget(
 				{ currentUsd: estimateUsd, ceilingUsd: intentCeiling, pricing: { estimated: true, unpriced: false } },
-				req.agentId,
 				estimateUsd,
 			);
 		if (pricing.rates === null || Object.values(pricing.rates).every((rate) => rate === 0)) return;
@@ -4186,11 +4182,9 @@ export function createDispatchBundle(
 			if (error instanceof SessionCostCeilingError) {
 				safety.audit.recordToolCall?.({
 					tool: "dispatch",
-					classification: { actionClass: "dispatch", reasons: ["session cost ceiling"] },
+					classification: { actionClass: "dispatch" },
 					decision: "denied",
-					reasons: [error.message],
 					reasonCode: SESSION_COST_CEILING_REASON,
-					args: { agentId: req.agentId },
 				});
 			}
 			throw error;

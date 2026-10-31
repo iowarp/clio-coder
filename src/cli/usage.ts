@@ -9,11 +9,17 @@ import {
 	listSessionLedgerRefs,
 	parseSessionEntries,
 	type RecallTelemetry,
-	readAuditRows,
 } from "../domains/session/index.js";
 import { summarizeEvidenceIndex } from "../domains/telemetry/accountability.js";
 import { readEvidenceIndex } from "../domains/telemetry/evidence-index.js";
-import { cacheReport, repoCostReport, repoTokenQuantities } from "../domains/telemetry/read-model.js";
+import {
+	type AccountabilityRecord,
+	accountabilityRecords,
+	cacheReport,
+	repoCostReport,
+	repoTokenQuantities,
+	sessionJournals,
+} from "../domains/telemetry/read-model.js";
 import {
 	emptyUsageDiagnostics,
 	inUsageWindow,
@@ -31,7 +37,7 @@ Cross-session usage analyzer (experimental, read-only). Spend comes from the
 telemetry read model: session and run call journals, plus the ledger and
 out-of-turn rows no journal holds and the sealed receipt of a run with no
 journal, whose known totals count with unknown call coverage. Receipts, session
-ledgers, audit rows, the
+ledgers, the journals' safety decisions, the
 evidence index and the memory store supply the other facts and the improvement
 opportunities, every line citing ids and counts. Nothing is written or stored;
 suggestions are printed only.
@@ -217,17 +223,15 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	const spendMeasurable = presence.sessionsPresent || repo.runs.size > 0;
 	const harnessActions = sessions.reduce((total, session) => total + session.harnessActions, 0);
 	const duplicateDispatches = sessions.reduce((total, session) => total + session.duplicateDispatches, 0);
-	const auditRows = await readAuditRows(stateDir);
-	diagnostics.malformedAuditRows = auditRows.errors.length;
-	const auditInWindow = auditRows.rows.filter((row) => row.ts !== null && inUsageWindow(row.ts, windowStart, now));
-	const auditToolCalls = auditInWindow.filter((row) => row.auditKind === "tool_call");
-	const permissions = summarizePermissionDecisions(
-		auditInWindow.filter((row) => row.auditKind === "permission").map((row) => row.row),
+	// Safety decisions are the journals' accountability records, in the same window as the spend (#434).
+	const decisions = accountabilityRecords([...repo.sessions.flatMap(sessionJournals), ...repo.runs.values()]).filter(
+		(record) => inUsageWindow(record.t, windowStart, now),
 	);
-	const auditBlocked = auditToolCalls.filter((row) => {
-		const decision = typeof row.row.decision === "string" ? row.row.decision : "";
-		return decision === "blocked" || decision === "denied";
-	});
+	const toolDecisions = decisions.filter((record) => record.k === "tool.decided");
+	const permissions = summarizePermissionDecisions(decisions);
+	const blockedDecisions = toolDecisions.filter(
+		(record) => record.data.decision === "blocked" || record.data.decision === "denied",
+	);
 	const evidenceRows = readEvidenceIndex(stateDir).filter((row) => inUsageWindow(row.generatedAt, windowStart, now));
 	const accountability = summarizeEvidenceIndex(evidenceRows);
 	let memoryRecords: MemoryRecord[] = [];
@@ -359,8 +363,6 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		diagParts.push(`${diagnostics.unreadableSessions} unreadable session ledger(s)`);
 	if (diagnostics.malformedSessionLines > 0)
 		diagParts.push(`${diagnostics.malformedSessionLines} malformed session line(s) skipped`);
-	if (diagnostics.malformedAuditRows > 0)
-		diagParts.push(`${diagnostics.malformedAuditRows} malformed audit row(s) skipped`);
 	for (const note of diagnostics.notes) diagParts.push(note);
 	if (diagParts.length > 0) process.stderr.write(`clio-coder usage: ${diagParts.join("; ")}\n`);
 
@@ -383,7 +385,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		emit({ kind: "fact", fact: "harness-actions", value: harnessActions });
 		emit({ kind: "fact", fact: "duplicate-dispatches", value: duplicateDispatches });
 		emit({ kind: "fact", fact: "ungrounded-claims", value: accountability.ungroundedClaims });
-		emit({ kind: "fact", fact: "audit-tool-calls", value: auditToolCalls.length, blocked: auditBlocked.length });
+		emit({ kind: "fact", fact: "tool-decisions", value: toolDecisions.length, blocked: blockedDecisions.length });
 		emit({ kind: "fact", fact: "permission-approval", ...permissions });
 		if (spendMeasurable) {
 			for (const report of costReports) emit({ kind: "fact", fact: "telemetry-cost", groupBy: report.groupBy, report });
@@ -452,7 +454,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 	out(
 		`  permission decisions: ${permissions.requested} requested, ${permissions.granted} granted, ${permissions.denied} denied, ${permissions.expired} expired; approval rate ${permissions.approvalRate === null ? "n/a" : `${(permissions.approvalRate * 100).toFixed(1)}%`}`,
 	);
-	out(`  audited tool calls in window: ${auditToolCalls.length} (${auditBlocked.length} blocked/denied)`);
+	out(`  tool decisions in window: ${toolDecisions.length} (${blockedDecisions.length} blocked/denied)`);
 	const [byOrigin] = costReports;
 	if (spendMeasurable && byOrigin)
 		out(
@@ -837,7 +839,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Event-window approval rate. Resolutions can belong to requests outside the window. */
-export function summarizePermissionDecisions(rows: ReadonlyArray<Record<string, unknown>>): {
+export function summarizePermissionDecisions(records: ReadonlyArray<AccountabilityRecord>): {
 	requested: number;
 	granted: number;
 	denied: number;
@@ -845,10 +847,14 @@ export function summarizePermissionDecisions(rows: ReadonlyArray<Record<string, 
 	approvalRate: number | null;
 } {
 	const counts = { requested: 0, granted: 0, denied: 0, expired: 0 };
-	for (const row of rows) {
-		const status = row.status;
-		if (status === "requested" || status === "granted" || status === "denied" || status === "expired")
-			counts[status] += 1;
+	// A forwarded ask republishes its request; one request id is one ask.
+	const asked = new Set<string>();
+	for (const record of records) {
+		if (record.k === "approval.requested") {
+			const id = record.data.requestId;
+			if (id === undefined || !asked.has(id)) counts.requested += 1;
+			if (id !== undefined) asked.add(id);
+		} else if (record.k === "approval.resolved") counts[record.data.status] += 1;
 	}
 	return { ...counts, approvalRate: counts.requested === 0 ? null : counts.granted / counts.requested };
 }

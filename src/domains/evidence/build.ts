@@ -18,19 +18,20 @@ import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import { foldDecisionBoard } from "../session/decision-board.js";
 import { type DecisionLedgerEntry, decisionRef, type TaskLedgerValidationEvidence } from "../session/entries.js";
 import {
-	type AuditJsonRow,
 	type BashExecutionEntry,
 	type MessageEntry,
 	type ProtectedArtifactEntry,
 	protectedArtifactFromSessionEntry,
 	protectedArtifactStateFromSessionEntries,
-	readAuditRows,
 	readSessionEntriesForId,
 	type SessionEntry,
 } from "../session/index.js";
 import { legacyTaskCompletionRow, TASK_BOARD_COMPLETION_CLAIM_PREFIX } from "../session/task-board.js";
+import { loadRunTelemetrySourceAsync, loadSessionTelemetrySourceAsync } from "../session/telemetry-source.js";
 import { filterEntriesToActivePath } from "../session/tree/active-path.js";
 import { aggregateCostAmounts, callCoverageForRun } from "../telemetry/cost.js";
+import type { AccountabilityRecord, JournalSource } from "../telemetry/read-model.js";
+import { accountabilityRecords } from "../telemetry/read-model.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
 import { renderEvidenceFindingsMarkdown } from "./findings-markdown.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
@@ -69,7 +70,7 @@ const MODEL_PRIVATE_MARKER = "[not sent to model]";
 export interface BuildEvidenceOptions {
 	/** Evidence bundles are written under <dataDir>/evidence/. */
 	dataDir: string;
-	/** Run ledger, receipts, sessions, and audit logs are read from here. */
+	/** Run ledger, receipts, sessions, and telemetry journals are read from here. */
 	stateDir: string;
 	runId?: string;
 	sessionId?: string;
@@ -477,18 +478,6 @@ function buildFindings(
 				"best-effort-link",
 				null,
 				`${ambiguousEntries} session entry(s) fell inside more than one concurrent run window`,
-			),
-		);
-	}
-	const bestEffortAuditRows = auditLinks.rows.filter((row) => row.confidence === "best-effort").length;
-	if (bestEffortAuditRows > 0) {
-		findings.push(
-			finding(
-				findings.length,
-				"info",
-				"best-effort-link",
-				null,
-				`${bestEffortAuditRows} audit row(s) linked with best-effort metadata`,
 			),
 		);
 	}
@@ -1044,156 +1033,111 @@ function compareSessionToolCalls(a: SessionToolCall, b: SessionToolCall): number
 	return compareStrings(a.id, b.id);
 }
 
+/**
+ * The accountability records the bundle covers, from the journals (#434): each run's own journal, then the linked
+ * sessions' journals. A record names its scope in its context, so every link is exact: a run's record, a session
+ * record naming one of the runs (a worker's ask or judge review), or a session record of a linked session.
+ */
 async function linkAuditRows(
 	stateDir: string,
 	source: EvidenceOverview["source"],
 	runSources: ReadonlyArray<EvidenceRunSource>,
 	sessionLinks: SessionLinkResult,
 ): Promise<AuditLinkResult> {
-	const auditRows = await readAuditRows(stateDir);
-	const rows: EvidenceAuditLinkedRow[] = [];
 	const runIds = new Set(runSources.map((item) => item.envelope.id));
 	const sessionIds = new Set(sessionLinks.attemptedSessionIds);
 	if (source.kind === "session") sessionIds.add(source.sessionId);
 	const runSessionIds = new Map(
 		runSources.map((item) => [item.envelope.id, item.envelope.sessionId ?? item.receipt?.sessionId ?? null] as const),
 	);
-	for (const audit of auditRows.rows) {
-		const directRunId = readOptionalString(audit.row.runId);
-		if (directRunId !== null && runIds.has(directRunId)) {
+	const readErrors: string[] = [];
+	const unreadable = (scope: string, journal: JournalSource): void => {
+		const count = journal.skipped + journal.damaged;
+		if (count > 0) readErrors.push(`${scope} journal: ${count} unreadable record(s)`);
+	};
+	const journals: JournalSource[] = [];
+	for (const runId of [...runIds].sort(compareStrings)) {
+		try {
+			const journal = await loadRunTelemetrySourceAsync(stateDir, runId);
+			unreadable(`run ${runId}`, journal);
+			journals.push(journal);
+		} catch (error) {
+			readErrors.push(`run ${runId} journal: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+	for (const sessionId of [...sessionIds].sort(compareStrings)) {
+		try {
+			const session = await loadSessionTelemetrySourceAsync(stateDir, sessionId);
+			if (session === null) continue;
+			unreadable(`session ${sessionId}`, session.journal);
+			journals.push(session.journal);
+		} catch (error) {
+			readErrors.push(`session ${sessionId} journal: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+	const rows: EvidenceAuditLinkedRow[] = [];
+	for (const record of accountabilityRecords(journals)) {
+		const namedRun = recordRunId(record);
+		if (namedRun !== null && runIds.has(namedRun)) {
 			rows.push(
-				auditLinkedRow(audit, {
-					runId: directRunId,
-					sessionId: readOptionalString(audit.row.sessionId) ?? runSessionIds.get(directRunId) ?? null,
+				auditLinkedRow(record, {
+					runId: namedRun,
+					sessionId: record.ctx.sessionId ?? runSessionIds.get(namedRun) ?? null,
 					linkKind: "run-id",
-					confidence: "exact",
-					reasons: ["audit runId matched run ledger"],
+					reasons: ["journal record named the run"],
 				}),
 			);
 			continue;
 		}
-		const directSessionId = readOptionalString(audit.row.sessionId);
-		if (directSessionId !== null && sessionIds.has(directSessionId)) {
+		if (record.ctx.sessionId !== null && sessionIds.has(record.ctx.sessionId) && record.ctx.runId === undefined) {
 			rows.push(
-				auditLinkedRow(audit, {
+				auditLinkedRow(record, {
 					runId: null,
-					sessionId: directSessionId,
+					sessionId: record.ctx.sessionId,
 					linkKind: "session-id",
-					confidence: "exact",
-					reasons: ["audit sessionId matched linked session"],
+					reasons: ["journal record belonged to the linked session"],
 				}),
 			);
-			continue;
 		}
-		const bestEffort = bestEffortAuditLink(audit, source, runSources, sessionIds);
-		if (bestEffort !== null) rows.push(auditLinkedRow(audit, bestEffort));
 	}
 	rows.sort(compareAuditLinkedRows);
-	return { rows, readErrors: auditRows.errors };
+	return { rows, readErrors };
+}
+
+/** The run a record is about: its scope's run, or the worker run a session record names. */
+function recordRunId(record: AccountabilityRecord): string | null {
+	if (record.ctx.runId !== undefined) return record.ctx.runId;
+	if (record.k === "run.aborted") return record.data.runId;
+	if (record.k === "approval.requested" || record.k === "approval.resolved") return record.data.requestedBy ?? null;
+	if (record.k === "safety.judged") return record.data.workerRunId ?? null;
+	return null;
 }
 
 interface AuditLinkFields {
 	runId: string | null;
 	sessionId: string | null;
 	linkKind: string;
-	confidence: EvidenceLinkConfidence;
 	reasons: string[];
-	candidateRunIds?: string[];
 }
 
-function auditLinkedRow(audit: AuditJsonRow, fields: AuditLinkFields): EvidenceAuditLinkedRow {
+function auditLinkedRow(record: AccountabilityRecord, fields: AuditLinkFields): EvidenceAuditLinkedRow {
 	return {
 		kind: "audit-linked",
-		auditKind: audit.auditKind,
-		ts: audit.ts,
+		auditKind: record.k,
+		ts: record.t,
 		runId: fields.runId,
 		sessionId: fields.sessionId,
 		linkKind: fields.linkKind,
-		confidence: fields.confidence,
+		confidence: "exact",
 		reasons: fields.reasons,
-		...(fields.candidateRunIds === undefined ? {} : { candidateRunIds: fields.candidateRunIds }),
-		row: audit.row,
+		row: { id: record.id, ...record.data },
 	};
-}
-
-function bestEffortAuditLink(
-	audit: AuditJsonRow,
-	source: EvidenceOverview["source"],
-	runSources: ReadonlyArray<EvidenceRunSource>,
-	sessionIds: ReadonlySet<string>,
-): AuditLinkFields | null {
-	if (audit.auditKind !== "tool_call") return null;
-	const tool = readOptionalString(audit.row.tool);
-	if (tool === null || audit.ts === null) return null;
-	const candidates = runSources.filter((item) => {
-		if (!timestampInRunWindow(audit.ts ?? "", item.envelope)) return false;
-		const tools = receiptToolNames(item);
-		return tools.size === 0 || tools.has(tool);
-	});
-	if (candidates.length === 1) {
-		const candidate = candidates[0];
-		if (candidate === undefined) return null;
-		return {
-			runId: candidate.envelope.id,
-			sessionId:
-				candidate.envelope.sessionId ??
-				candidate.receipt?.sessionId ??
-				(source.kind === "session" ? source.sessionId : null),
-			linkKind: "timestamp-tool",
-			confidence: "best-effort",
-			reasons: ["audit timestamp fell within one run window", "audit tool matched receipt metadata"],
-		};
-	}
-	if (source.kind === "session" && candidates.length > 1) {
-		return {
-			runId: null,
-			sessionId: source.sessionId,
-			linkKind: "ambiguous-timestamp-tool",
-			confidence: "best-effort",
-			reasons: ["audit timestamp and tool matched multiple runs in this session"],
-			candidateRunIds: candidates.map((item) => item.envelope.id).sort(compareStrings),
-		};
-	}
-	if (source.kind === "session" && sessionIds.has(source.sessionId)) {
-		const sessionSpan = sessionTimeSpan(runSources);
-		if (sessionSpan !== null && timestampInSpan(audit.ts, sessionSpan)) {
-			return {
-				runId: null,
-				sessionId: source.sessionId,
-				linkKind: "session-timestamp-tool",
-				confidence: "best-effort",
-				reasons: ["audit timestamp fell within the session run span", "audit tool metadata was present"],
-			};
-		}
-	}
-	return null;
-}
-
-function receiptToolNames(source: EvidenceRunSource): Set<string> {
-	return new Set((source.receipt?.toolStats ?? []).map((stat) => stat.tool));
-}
-
-function sessionTimeSpan(runSources: ReadonlyArray<EvidenceRunSource>): { start: string; end: string | null } | null {
-	const starts = runSources.map((source) => source.envelope.startedAt);
-	if (starts.length === 0) return null;
-	return {
-		start: earliest(starts) ?? starts[0] ?? "1970-01-01T00:00:00.000Z",
-		end: latest(runSources.flatMap((source) => (source.envelope.endedAt === null ? [] : [source.envelope.endedAt]))),
-	};
-}
-
-function timestampInSpan(timestamp: string, span: { start: string; end: string | null }): boolean {
-	const value = Date.parse(timestamp);
-	const start = Date.parse(span.start);
-	const end = span.end === null ? Number.POSITIVE_INFINITY : Date.parse(span.end);
-	if (!Number.isFinite(value) || !Number.isFinite(start) || !Number.isFinite(end)) return false;
-	return value >= start && value <= end;
 }
 
 function auditToolEvents(rows: ReadonlyArray<EvidenceAuditLinkedRow>): EvidenceToolEvent[] {
 	const events: EvidenceToolEvent[] = [];
 	for (const row of rows) {
-		if (row.auditKind !== "tool_call") continue;
+		if (row.auditKind !== "tool.decided") continue;
 		const tool = readOptionalString(row.row.tool);
 		if (tool === null) continue;
 		const decision = readOptionalString(row.row.decision);
@@ -1225,10 +1169,7 @@ function compareAuditLinkedRows(a: EvidenceAuditLinkedRow, b: EvidenceAuditLinke
 	if (byTs !== 0) return byTs;
 	const byKind = compareStrings(a.auditKind, b.auditKind);
 	if (byKind !== 0) return byKind;
-	const aCorrelation = readOptionalString(a.row.correlationId) ?? "";
-	const bCorrelation = readOptionalString(b.row.correlationId) ?? "";
-	if (aCorrelation !== bCorrelation) return compareStrings(aCorrelation, bCorrelation);
-	return compareStrings(JSON.stringify(a.row), JSON.stringify(b.row));
+	return compareStrings(String(a.row.id ?? ""), String(b.row.id ?? ""));
 }
 
 function receiptsFile(runSources: ReadonlyArray<EvidenceRunSource>): EvidenceReceiptFile {

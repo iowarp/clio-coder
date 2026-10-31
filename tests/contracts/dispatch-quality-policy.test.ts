@@ -7,11 +7,8 @@ import { stringify } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import {
-	buildCompletionContractAuditRecord,
-	type CompletionContractAuditRecord,
-} from "../../src/domains/safety/audit.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
 import { createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { invokeRegisteredTool } from "../../src/tools/agent-tools.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
@@ -47,7 +44,7 @@ async function project(body: (root: string) => Promise<void>): Promise<void> {
 	}
 }
 
-function auditedContext(settings: typeof DEFAULT_SETTINGS, audits: CompletionContractAuditRecord[]) {
+function auditedContext(settings: typeof DEFAULT_SETTINGS, audits: CompletionEvaluationInput[]) {
 	const base = dispatchStubContext({ settings });
 	const baseSafety = base.getContract<SafetyContract>("safety");
 	ok(baseSafety);
@@ -55,7 +52,7 @@ function auditedContext(settings: typeof DEFAULT_SETTINGS, audits: CompletionCon
 		...baseSafety,
 		audit: {
 			...baseSafety.audit,
-			recordCompletionContract: (input) => audits.push(buildCompletionContractAuditRecord(input)),
+			recordCompletionContract: (input) => audits.push(input),
 		},
 	};
 	return {
@@ -126,7 +123,7 @@ for (const mode of ["missing", "passed", "normal"] as const) {
 			ok(process.cwd() !== root, "the parent must not accidentally supply the worker's cwd");
 			const settings = structuredClone(DEFAULT_SETTINGS);
 			settings.fleet.retry.maxRetries = 0;
-			const audits: CompletionContractAuditRecord[] = [];
+			const audits: CompletionEvaluationInput[] = [];
 			let launches = 0;
 			const controls: unknown[] = [];
 			const bundle = makeDispatchBundle(auditedContext(settings, audits), {
@@ -205,7 +202,7 @@ for (const rigor of ["high", "normal"] as const) {
 			settings.integrations.externalAgents.entries = [
 				{ id: "quality-fixture", command: process.execPath, args: ["-e", ACP_PEER], toolGovernance: "clio-coder-policy" },
 			];
-			const audits: CompletionContractAuditRecord[] = [];
+			const audits: CompletionEvaluationInput[] = [];
 			const bundle = makeDispatchBundle(auditedContext(settings, audits));
 			await bundle.extension.start();
 			try {

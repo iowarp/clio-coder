@@ -5,7 +5,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { it, mock } from "node:test";
 import { stringify } from "yaml";
-import { buildCompletionContractAuditRecord } from "../../src/domains/safety/audit.js";
+import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
 import {
 	assessFinishContract,
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
@@ -261,7 +261,7 @@ it("keeps normal-rigor advisories, requests scoped high-rigor recovery and audit
 		const audits: unknown[] = [];
 		const normal = createFinishContractRegistration({
 			readSessionEntries: () => entries,
-			recordDecision: (input) => audits.push(buildCompletionContractAuditRecord(input)),
+			recordDecision: (input) => audits.push(input),
 		});
 		const effects = await normal.evaluate({ hook: "turn_end", text: "Fixed solver." });
 		strictEqual(
@@ -492,12 +492,12 @@ it("retains passing policy findings in the audit when operator acceptance is sti
 	project(async () => {
 		const entries = mutation();
 		await verify(entries);
-		const audits: ReturnType<typeof buildCompletionContractAuditRecord>[] = [];
+		const audits: CompletionEvaluationInput[] = [];
 		const hook = createFinishContractRegistration({
 			readSessionEntries: () => entries,
 			resolveRigor: () => "high",
 			readActiveAcceptance: () => ({ expectedOutputs: [], verification: [{ check: "lint", timeoutMs: 5000 }] }),
-			recordDecision: (input) => audits.push(buildCompletionContractAuditRecord(input)),
+			recordDecision: (input) => audits.push(input),
 		});
 		const effects = await hook.evaluate({ hook: "turn_end", text: "Fixed solver." });
 		ok(effects.some((effect) => effect.kind === "request_continuation"));

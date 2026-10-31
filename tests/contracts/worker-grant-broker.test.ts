@@ -12,7 +12,7 @@ import {
 	type GrantRequestInput,
 } from "../../src/domains/dispatch/grant-broker.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
-import type { SafetyJudgeAuditInput } from "../../src/domains/safety/audit.js";
+import type { SafetyJudgementInput } from "../../src/domains/safety/decision-events.js";
 import { grantEffectDescriptor, grantEffectDigest } from "../../src/domains/safety/grant-effect.js";
 import { createSafetyJudge, type SafetyJudgeConfig } from "../../src/domains/safety/safety-judge.js";
 import type { AgentEvent } from "../../src/engine/types.js";
@@ -205,7 +205,7 @@ const JUDGE_CONFIG: SafetyJudgeConfig = {
 /** The main session's judge seat with a faked completion; the operator asked only to run the marker script. */
 function fakeJudge(reply: () => string, config: SafetyJudgeConfig = JUDGE_CONFIG) {
 	const prompts: string[] = [];
-	const audits: SafetyJudgeAuditInput[] = [];
+	const audits: SafetyJudgementInput[] = [];
 	const judge = createSafetyJudge({
 		config: () => config,
 		complete: async (request) => {
@@ -215,7 +215,7 @@ function fakeJudge(reply: () => string, config: SafetyJudgeConfig = JUDGE_CONFIG
 		operatorMessages: () => ["run the marker script"],
 		session: () => "session-1",
 		consequences: () => [],
-		audit: (input) => audits.push(input),
+		record: (input) => audits.push(input),
 	});
 	return { judge, prompts, audits };
 }

@@ -1,7 +1,7 @@
 /**
  * What the composition root gives the safety judge: the operator's own words
  * from the session ledger, a one-shot completion on the judge's route, the
- * audit sink and the transcript note. The judge itself lives in the safety
+ * journal hook and the transcript note. The judge itself lives in the safety
  * domain (`src/domains/safety/safety-judge.ts`) and never sees the session,
  * the providers or the ledger directly.
  */
@@ -123,7 +123,7 @@ export function createSafetyJudgeHost(deps: {
 			}
 			return operatorMessagesForJudge(session.readEntries(), leaf, turnId);
 		},
-		audit: (input) => deps.safety?.audit.recordSafetyJudge?.(input),
+		record: (input) => deps.safety?.audit.recordSafetyJudge?.(input),
 		note: (note) => {
 			const session = deps.session();
 			if (session === undefined || !session.current()) return;

@@ -2,7 +2,7 @@
 
 `createSafetyPolicyEngine` in [policy-engine.ts](../../src/domains/safety/policy-engine.ts) decides what a tool call may do. One admission evaluator, `evaluateAdmission` in [admission.ts](../../src/domains/safety/admission.ts), applies that decision and then the autonomy mapping in [autonomy.ts](../../src/domains/safety/autonomy.ts). The native tool registry ([registry.ts](../../src/tools/registry.ts)), the Claude SDK bridge and the ACP delegation mediator all decide through it, each translating its transport into the same input. The [tool usage guide](../guide/tool-usage.md) shows the operator surface, and [Choosing an autonomy level](../guide/commands-and-modes.md#choosing-an-autonomy-level) is the operator's how-to.
 
-The registry enforces safety rules before admitted tool calls execute. The session prompt describes those rules to the model. Safety decisions, safety judge verdicts, aborts and session park or resume events are appended to a daily NDJSON audit log at `<state>/audit/YYYY-MM-DD.jsonl`, named by local date ([audit.ts](../../src/domains/safety/audit.ts)).
+The registry enforces safety rules before admitted tool calls execute. The session prompt describes those rules to the model. Safety decisions, safety judge verdicts, aborts and session park or resume events are accountability events in the session and run telemetry journals ([decision-events.ts](../../src/domains/safety/decision-events.ts)).
 
 ## Execution boundary
 
@@ -593,7 +593,7 @@ Defaults come from `DEFAULT_SETTINGS` in [defaults.ts](../../src/core/defaults.t
 | Project trust | [workspace-trust.ts](../../src/core/workspace-trust.ts), [config-trust.ts](../../src/cli/config-trust.ts) | `captureProjectSurface`, `runConfigTrustCommand` |
 | Read scope checks | [read-scope.ts](../../src/domains/safety/read-scope.ts) | `readScopeEscape`, `readScopeSpellings` |
 | Worker sandbox | [worker-process.ts](../../src/core/sandbox/worker-process.ts) | `planSandboxedSpawn` |
-| Audit records | [audit.ts](../../src/domains/safety/audit.ts) | `buildAuditRecord`, `openAuditWriter` |
+| Accountability records | [decision-events.ts](../../src/domains/safety/decision-events.ts) | `toolDecidedPayload`, `completionEvaluatedPayload`, `safetyJudgedPayload` |
 | Decision presentation | [decision-presentation.ts](../../src/domains/safety/decision-presentation.ts) | `classifyDecisionPresentation`, `DECISION_TIERS` |
 | System One sites | [factory.ts](../../src/domains/system-one/factory.ts) | see [System One Architecture](system-one.md) |
 | Finish contract and rigor | [finish-contract.ts](../../src/domains/safety/finish-contract.ts), [rigor.ts](../../src/domains/safety/rigor.ts) | `assessFinishContract`, `resolveRigor` |

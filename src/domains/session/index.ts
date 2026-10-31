@@ -8,15 +8,12 @@ export const SessionDomainModule: DomainModule = {
 };
 
 export type {
-	AuditJsonRow,
-	AuditReadResult,
 	SessionLedgerRef,
 	SessionReadResult,
 } from "./archive-readers.js";
 export {
 	listSessionLedgerRefs,
 	parseSessionEntries,
-	readAuditRows,
 	readSessionEntriesForId,
 } from "./archive-readers.js";
 // Durable continuity (CONTRACTS §§2-8). Only the consumer-facing half surfaces

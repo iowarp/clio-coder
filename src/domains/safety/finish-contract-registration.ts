@@ -22,7 +22,7 @@ import { VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts
 import { effectiveToolCall } from "../../tools/surface.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
-import type { CompletionContractAuditInput } from "./audit.js";
+import type { CompletionEvaluationInput } from "./decision-events.js";
 import {
 	assessFinishContract,
 	DEFAULT_RECENT_ENTRY_LIMIT,
@@ -70,7 +70,7 @@ export interface CreateFinishContractRegistrationOptions {
 	 * OK reason and each engagement — is written so the outcome is replayable
 	 * from the JSONL alone. Failures here never affect the returned effects.
 	 */
-	recordDecision?: (input: CompletionContractAuditInput) => void;
+	recordDecision?: (input: CompletionEvaluationInput) => void;
 }
 
 /** Files above this are compared by size and mtime; a rewrite then counts as a change. */
@@ -259,6 +259,6 @@ function recordDecision(
 			...(assessment.verificationScope ? { verificationScope: assessment.verificationScope } : {}),
 		});
 	} catch {
-		// Audit must never break the hot path; a failed ledger write is silent.
+		// Recording must never break the hot path; a failed record is silent.
 	}
 }

@@ -1,6 +1,6 @@
 import type { Classification, ClassifierCall } from "./action-classifier.js";
-import type { CompletionContractAuditInput, SafetyJudgeAuditInput, ToolCallAuditInput } from "./audit.js";
 import type { DamageControlMatch } from "./damage-control.js";
+import type { CompletionEvaluationInput, SafetyJudgementInput, ToolDecisionInput } from "./decision-events.js";
 import type { FlowRestrictionSet, InformationFlowPolicy } from "./information-flow.js";
 import type { LoopVerdict } from "./loop-detector.js";
 import type { OperatorScope, SafetyPolicyDecision, SafetyPolicyMetadata } from "./policy-engine.js";
@@ -41,12 +41,12 @@ export type SafetyDecision =
 	  };
 
 export interface SafetyContract {
-	/** Pure classification. Does not write audit or emit bus events. */
+	/** Pure classification. Records nothing and emits no events. */
 	classify(call: ClassifierCall): Classification;
 
 	/**
-	 * Full evaluation: classify + damage-control match + decision. Writes the
-	 * safety-net audit row and emits safety.blocked on a block. Registry admission writes any final autonomy disposition
+	 * Full evaluation: classify + damage-control match + decision. Records the
+	 * net's `tool.decided` and emits safety.blocked on a block. Registry admission records any final autonomy disposition
 	 * through `audit.recordToolCall`. `scope` is present only for the main
 	 * session's own calls (#419, Phase 2c) and for a worker whose permit
 	 * inherited the operator's yolo (#407). At yolo the net holds only the
@@ -90,16 +90,15 @@ export interface SafetyContract {
 	};
 
 	/**
-	 * Shared audit sink. `recordCount` is for diagnostics; `recordToolCall` is
-	 * the registry's hook for autonomy-level final dispositions;
-	 * `recordCompletionContract` is the finish-contract's hook for its turn_end
-	 * decision so every gate outcome is replayable from the ledger.
+	 * The safety domain's accountability records, journaled in the scope that decided (#434). `recordCount` is for
+	 * diagnostics; `recordToolCall` is the registry's hook for autonomy-level final dispositions (`tool.decided`);
+	 * `recordCompletionContract` is the finish contract's hook for its turn-end decision (`completion.evaluated`).
 	 */
 	readonly audit: {
 		recordCount(): number;
-		recordToolCall?(input: ToolCallAuditInput): void;
-		recordCompletionContract?(input: CompletionContractAuditInput): void;
-		/** The safety judge's hook for each review of a call that would have parked. */
-		recordSafetyJudge?(input: SafetyJudgeAuditInput): void;
+		recordToolCall?(input: ToolDecisionInput): void;
+		recordCompletionContract?(input: CompletionEvaluationInput): void;
+		/** The safety judge's hook for each review of a call that would have parked (`safety.judged`). */
+		recordSafetyJudge?(input: SafetyJudgementInput): void;
 	};
 }

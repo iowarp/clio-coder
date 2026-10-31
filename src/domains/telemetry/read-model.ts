@@ -25,7 +25,7 @@ import type {
 } from "../../core/telemetry/dto.js";
 import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
-import type { EventPayload } from "../../core/telemetry/events.js";
+import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
 import {
 	renderCount,
@@ -2349,6 +2349,50 @@ export function codeStepsReport(source: JournalSource): CodeStepRowV1[] {
 	return source.records
 		.flatMap((record) => (record.k === "code_step.settled" ? [{ ...record.data, at: record.t }] : []))
 		.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+}
+
+/** The safety and lifecycle decisions a scope journals: what the retired audit log kept (#434). */
+export const ACCOUNTABILITY_EVENTS = [
+	"tool.decided",
+	"approval.requested",
+	"approval.resolved",
+	"run.aborted",
+	"turn.aborted",
+	"agent.status_changed",
+	"completion.evaluated",
+	"safety.judged",
+	"session.resumed",
+	"session.closed",
+] as const satisfies readonly JournalEventName[];
+export type AccountabilityEventName = (typeof ACCOUNTABILITY_EVENTS)[number];
+export type AccountabilityRecord = TelemetryRecord<AccountabilityEventName>;
+
+const accountabilityKinds: ReadonlySet<string> = new Set(ACCOUNTABILITY_EVENTS);
+
+function isAccountabilityRecord(record: TelemetryRecord): record is AccountabilityRecord {
+	return accountabilityKinds.has(record.k);
+}
+
+/**
+ * The accountability records of the given journals, oldest first and each once: a run journal a session and a repo
+ * both reference is read once (#434).
+ */
+export function accountabilityRecords(journals: Iterable<JournalSource>): AccountabilityRecord[] {
+	const seen = new Set<string>();
+	const out: AccountabilityRecord[] = [];
+	for (const journal of journals) {
+		for (const record of journal.records) {
+			if (!isAccountabilityRecord(record) || seen.has(record.id)) continue;
+			seen.add(record.id);
+			out.push(record);
+		}
+	}
+	return out.sort((a, b) => a.t.localeCompare(b.t) || a.id.localeCompare(b.id));
+}
+
+/** A session's own journal and the run journals its records reference. */
+export function sessionJournals(source: SessionSource): JournalSource[] {
+	return [source.journal, ...source.runs.values()];
 }
 
 /** The runs a session's own records reference, in run id order. */

@@ -29,8 +29,9 @@ import { redactSecretString } from "../safety/redaction.js";
 import { renderCostAggregate, renderCostAmount } from "../telemetry/cost.js";
 import type { AccountabilitySummary } from "../telemetry/index.js";
 import { readEvidenceIndex, summarizeEvidenceIndex } from "../telemetry/index.js";
-import type { AuditJsonRow, AuditReadResult } from "./archive-readers.js";
-import { readAuditRows } from "./archive-readers.js";
+import { telemetryJournalPath, telemetrySessionDirectory } from "../telemetry/paths.js";
+import type { AccountabilityRecord, JournalSource, SessionSource } from "../telemetry/read-model.js";
+import { accountabilityRecords, sessionJournals } from "../telemetry/read-model.js";
 import type { SessionMeta } from "./contract.js";
 import type {
 	BashExecutionEntry,
@@ -1728,140 +1729,118 @@ export class AccountabilityArtifactProvider implements ArtifactProvider {
 
 const SAFETY_AUDIT_ARTIFACT_LIMIT = 200;
 
-function compareAuditRowsNewestFirst(left: AuditJsonRow, right: AuditJsonRow): number {
-	const time = parseTime(right.ts) - parseTime(left.ts);
-	if (time !== 0) return time;
-	const file = right.file.localeCompare(left.file);
-	if (file !== 0) return file;
-	return right.line - left.line;
-}
-
-function currentSessionAuditRows(
-	rows: ReadonlyArray<AuditJsonRow>,
-	sessionId: string | null | undefined,
-): ReadonlyArray<AuditJsonRow> {
-	if (!sessionId) return rows;
-	// No fallback to every session's rows when this one has none yet: the audit
-	// log is machine-wide, and the fallback put other projects' tool calls in
-	// a fresh session's view.
-	return rows.filter((row) => readStringField(row.row, "sessionId") === sessionId);
-}
-
-function auditRowSubject(row: AuditJsonRow): string {
-	const subjectParts: string[] = [];
-	const tool = readStringField(row.row, "tool");
-	if (tool !== null) subjectParts.push(tool);
-	const actionClass = readStringField(row.row, "actionClass");
-	if (actionClass !== null) subjectParts.push(actionClass);
-	const decision =
-		readStringField(row.row, "decision") ??
-		readStringField(row.row, "status") ??
-		readStringField(row.row, "source") ??
-		readStringField(row.row, "phase");
-	if (decision !== null) subjectParts.push(decision);
-	const runId = readStringField(row.row, "runId");
-	const sessionId = readStringField(row.row, "sessionId");
-	const correlationId = readStringField(row.row, "correlationId") ?? row.correlationId;
-	if (runId !== null) {
-		subjectParts.push(`run ${shortValue(runId)}`);
-	} else if (sessionId !== null) {
-		subjectParts.push(`session ${shortValue(sessionId)}`);
-	} else if (correlationId.length > 0) {
-		subjectParts.push(`corr ${shortValue(correlationId)}`);
+/** The fact a record states, for its title and search: a decision, status, verdict, source or phase. */
+function accountabilityOutcome(record: AccountabilityRecord): string | null {
+	switch (record.k) {
+		case "tool.decided":
+		case "completion.evaluated":
+			return record.data.decision;
+		case "approval.resolved":
+			return record.data.status;
+		case "safety.judged":
+			return record.data.verdict;
+		case "run.aborted":
+		case "turn.aborted":
+			return record.data.source;
+		case "agent.status_changed":
+			return record.data.phase;
+		case "session.closed":
+			return record.data.reason;
+		case "session.resumed":
+			return record.data.via;
+		case "approval.requested":
+			return null;
 	}
-	return subjectParts.join(" · ");
 }
 
-function auditRowTitle(row: AuditJsonRow): string {
-	const subject = auditRowSubject(row);
-	return safeTitle(`Audit · ${row.auditKind}${subject ? ` · ${subject}` : ""}`, "Audit row");
-}
-
-function auditRowPayload(row: AuditJsonRow): Record<string, unknown> {
+function accountabilityTool(record: AccountabilityRecord): { tool: string | null; actionClass: string | null } {
+	const data = record.data as { tool?: unknown; actionClass?: unknown };
 	return {
-		file: row.file,
-		line: row.line,
-		auditKind: row.auditKind,
-		correlationId: row.correlationId,
-		row: row.row,
+		tool: typeof data.tool === "string" ? data.tool : null,
+		actionClass: typeof data.actionClass === "string" ? data.actionClass : null,
 	};
 }
 
-function auditReadErrorsArtifact(stateDir: string, errors: ReadonlyArray<string>): ViewArtifact | null {
-	if (errors.length === 0) return null;
-	const path = join(stateDir, "audit");
+function accountabilityTitle(record: AccountabilityRecord): string {
+	const { tool, actionClass } = accountabilityTool(record);
+	const outcome = accountabilityOutcome(record);
+	const runId = record.ctx.runId ?? (record.k === "run.aborted" ? record.data.runId : null);
+	const parts = [tool, actionClass, outcome, runId !== null ? `run ${shortValue(runId)}` : null].filter(
+		isNonEmptyString,
+	);
+	return safeTitle(`Audit · ${record.k}${parts.length > 0 ? ` · ${parts.join(" · ")}` : ""}`, "Audit record");
+}
+
+function auditReadErrorsArtifact(path: string, journals: ReadonlyArray<JournalSource>): ViewArtifact | null {
+	const unreadable = journals.reduce((total, journal) => total + journal.skipped + journal.damaged, 0);
+	if (unreadable === 0) return null;
 	return {
 		id: "audit:read-errors",
 		category: "audit",
-		title: `Audit · ${errors.length} read error${errors.length === 1 ? "" : "s"}`,
+		title: `Audit · ${unreadable} unreadable journal record${unreadable === 1 ? "" : "s"}`,
 		timestamp: Date.now(),
 		path,
 		load: async () => ({
 			format: "markdown" as const,
-			lines: ["# Audit Read Errors", "", ...errors.map((error) => `- ${error}`)],
+			lines: [
+				"# Unreadable Journal Records",
+				"",
+				`- ${unreadable} record(s) in this session's journals could not be read; the decisions listed are partial.`,
+			],
 		}),
 	};
 }
 
+/**
+ * The current session's safety and lifecycle decisions, newest first, from its journal and the run journals it
+ * references (#434). A view with no session lists none: the journals are per scope, never machine-wide.
+ */
 export class SafetyAuditArtifactProvider implements ArtifactProvider {
 	readonly category = "audit" as const;
 
 	constructor(private readonly deps: ArtifactProviderDeps) {}
 
 	async list(): Promise<ViewArtifact[]> {
-		let read: AuditReadResult;
+		const sessionId = this.deps.sessionMeta?.id;
+		if (!sessionId) return [];
+		let source: SessionSource | null;
 		try {
-			read = await readAuditRows(this.deps.stateDir);
+			// The journal loader reaches receipts and dispatch; the /view list loads it only when opened.
+			const { loadSessionTelemetrySourceAsync } = await import("./telemetry-source.js");
+			source = await loadSessionTelemetrySourceAsync(this.deps.stateDir, sessionId);
 		} catch {
 			return [];
 		}
-		const selected = [...currentSessionAuditRows(read.rows, this.deps.sessionMeta?.id)]
-			.sort(compareAuditRowsNewestFirst)
-			.slice(0, SAFETY_AUDIT_ARTIFACT_LIMIT);
-		const artifacts: ViewArtifact[] = selected.map((row) => {
-			const path = join(this.deps.stateDir, "audit", row.file);
-			const runId = readStringField(row.row, "runId");
-			const sessionId = readStringField(row.row, "sessionId");
-			const correlationId = readStringField(row.row, "correlationId") ?? row.correlationId;
-			const tool = readStringField(row.row, "tool");
-			const actionClass = readStringField(row.row, "actionClass");
-			const decision = readStringField(row.row, "decision");
-			const status = readStringField(row.row, "status");
-			const source = readStringField(row.row, "source");
-			const phase = readStringField(row.row, "phase");
+		if (source === null) return [];
+		const journals = sessionJournals(source);
+		const path = telemetryJournalPath(telemetrySessionDirectory(this.deps.stateDir, sessionId));
+		const selected = accountabilityRecords(journals).reverse().slice(0, SAFETY_AUDIT_ARTIFACT_LIMIT);
+		const artifacts: ViewArtifact[] = selected.map((record) => {
+			const runId = record.ctx.runId ?? (record.k === "run.aborted" ? record.data.runId : undefined);
+			const { tool, actionClass } = accountabilityTool(record);
+			const outcome = accountabilityOutcome(record);
 			return {
-				id: `audit:${row.file}:${row.line}`,
+				id: `audit:${record.id}`,
 				category: this.category,
-				title: auditRowTitle(row),
-				timestamp: parseTime(row.ts),
-				sizeBytes: maybeSizeBytes(path),
+				title: accountabilityTitle(record),
+				timestamp: parseTime(record.t),
 				path,
 				...(runId ? { runId } : {}),
-				...(sessionId ? { sessionId } : {}),
-				...(correlationId ? { correlationId } : {}),
+				...(record.ctx.sessionId ? { sessionId: record.ctx.sessionId } : {}),
 				...(tool ? { toolName: tool } : {}),
-				searchText: [
-					row.file,
-					String(row.line),
-					row.auditKind,
-					row.correlationId,
-					runId ?? "",
-					sessionId ?? "",
-					correlationId,
-					tool ?? "",
-					actionClass ?? "",
-					decision ?? "",
-					status ?? "",
-					source ?? "",
-					phase ?? "",
-				].filter(isNonEmptyString),
+				searchText: [record.k, record.id, runId ?? "", tool ?? "", actionClass ?? "", outcome ?? ""].filter(
+					isNonEmptyString,
+				),
 				load: async () => ({
 					format: "json" as const,
-					lines: splitLinesCapped(JSON.stringify(auditRowPayload(row), null, 2), path),
+					lines: splitLinesCapped(
+						JSON.stringify({ kind: record.k, at: record.t, ctx: record.ctx, data: record.data }, null, 2),
+						path,
+					),
 				}),
 			};
 		});
-		const errors = auditReadErrorsArtifact(this.deps.stateDir, read.errors);
+		const errors = auditReadErrorsArtifact(path, journals);
 		return errors ? [...artifacts, errors] : artifacts;
 	}
 }

@@ -4,9 +4,9 @@ import { ToolNames } from "../../core/tool-names.js";
 import { TOOL_CALL_RUNGS } from "../system-one/sites/tool-call.js";
 import type { ClassifierCall } from "./action-classifier.js";
 import type { AdmissionAskSource, ApprovalAuthority } from "./admission.js";
-import type { SafetyJudgeAuditInput } from "./audit.js";
 import { describeMainCallConsequences } from "./call-consequence.js";
 import type { SafetyDecision } from "./contract.js";
+import type { SafetyJudgementInput } from "./decision-events.js";
 import { GIT_HOOKS_CHANGED_RULE_ID } from "./hook-drift.js";
 import { redactSecretString, redactToolArgs } from "./redaction.js";
 import { SESSION_CODE_CONSENT_RULE_ID } from "./session-code-consent.js";
@@ -248,7 +248,8 @@ export interface SafetyJudgeDeps {
 	/** The current session, so block counts never carry from one session to another. */
 	session: () => string | null;
 	consequences?: (call: ClassifierCall) => ReadonlyArray<string>;
-	audit?: (input: SafetyJudgeAuditInput) => void;
+	/** The journal hook for each review: the `safety.judged` record (#434). */
+	record?: (input: SafetyJudgementInput) => void;
 	note?: (note: SafetyJudgeNote) => void;
 	timeoutMs?: number;
 	/** Monotonic milliseconds. */
@@ -283,11 +284,11 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 		return state;
 	};
 
-	const audit = (input: SafetyJudgeAuditInput): void => {
+	const record = (input: SafetyJudgementInput): void => {
 		try {
-			deps.audit?.(input);
+			deps.record?.(input);
 		} catch {
-			// The audit sink must not decide a call; a failed row only loses the record.
+			// The journal hook must not decide a call; a failed record only loses the record.
 		}
 	};
 	const note = (input: SafetyJudgeNote): void => {
@@ -319,24 +320,17 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 			};
 			const build = judgeBuild(config);
 			if (current.escalated) {
-				audit({ ...base, verdict: "escalated", latencyMs: 0 });
+				record({ ...base, verdict: "escalated", latencyMs: 0 });
 				return { kind: "park", cause: "escalated", gateReason: escalationReason(current), build, latencyMs: 0 };
 			}
 			const startedAt = now();
 			const elapsed = (): number => Math.max(0, Math.round(now() - startedAt));
 			// How many operator messages the judge's prompt carried, once it is built, so
-			// an audit row shows whether the judge read the request the call serves.
+			// the record shows whether the judge read the request the call serves.
 			let prompted: { operatorMessages?: number } = {};
 			const noVerdict = (cause: SafetyJudgeNoVerdictCause, detail?: string): SafetyJudgeOutcome => {
 				const latencyMs = elapsed();
-				audit({
-					...base,
-					...prompted,
-					verdict: "none",
-					latencyMs,
-					noVerdict: cause,
-					...(detail !== undefined ? { detail } : {}),
-				});
+				record({ ...base, ...prompted, verdict: "none", latencyMs, noVerdict: cause });
 				return { kind: "park", cause, gateReason: noVerdictReason(cause, detail), build, latencyMs };
 			};
 			const targetId = config.target;
@@ -405,12 +399,12 @@ export function createSafetyJudge(deps: SafetyJudgeDeps): SafetyJudgeSeat {
 				const after = stateNow();
 				if (parsed.verdict === "allow") {
 					after.consecutive = 0;
-					audit({ ...base, ...prompted, verdict: "allow", rule: parsed.rule, reason: parsed.reason, latencyMs });
+					record({ ...base, ...prompted, verdict: "allow", rule: parsed.rule, latencyMs });
 					return { kind: "allow", rule: parsed.rule, reason: parsed.reason, build, latencyMs };
 				}
 				after.consecutive += 1;
 				after.total += 1;
-				audit({ ...base, ...prompted, verdict: "block", rule: parsed.rule, reason: parsed.reason, latencyMs });
+				record({ ...base, ...prompted, verdict: "block", rule: parsed.rule, latencyMs });
 				const counts = { consecutiveBlocks: after.consecutive, totalBlocks: after.total };
 				const position = {
 					...(subject.turnId !== undefined ? { turnId: subject.turnId } : {}),

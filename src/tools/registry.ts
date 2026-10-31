@@ -1112,7 +1112,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			if (flowViolation !== null) {
 				recordRegistryDisposition(call, decision, "blocked", {
 					reasonCode: FLOW_BLOCK_REASON_CODE,
-					reasons: [flowViolation],
 				});
 				return flowBlockedVerdict(decision, call.tool, flowViolation);
 			}
@@ -1163,7 +1162,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const verdict = guardBlockedVerdict(decision, call.tool, block.reason);
 				recordRegistryDisposition(call, verdict.decision, "blocked", {
 					reasonCode: GUARD_BLOCK_REASON_CODE,
-					reasons: [block.reason],
 				});
 				return block.redundantRepeat === true ? { ...verdict, redundantRepeat: true } : verdict;
 			}
@@ -1175,7 +1173,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const verdict = snapshotRequiredVerdict(decision, call.tool, reason);
 				recordRegistryDisposition(call, verdict.decision, "blocked", {
 					reasonCode: SNAPSHOT_REQUIRED_REASON_CODE,
-					reasons: [reason],
 				});
 				return verdict;
 			}
@@ -1253,7 +1250,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					const unlabeled = deps.flow?.refusal() ?? null;
 					if (unlabeled !== null) {
 						const reason = `${spec.name} result withheld: ${unlabeled}`;
-						recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE, reasons: [reason] });
+						recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE });
 						return flowBlockedVerdict(decision, call.tool, reason);
 					}
 				}
@@ -1309,7 +1306,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const unlabeled = thrownRestrictions === null ? null : (deps.flow?.refusal() ?? null);
 				if (unlabeled !== null) {
 					const reason = `${spec.name} error withheld: ${unlabeled}`;
-					recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE, reasons: [reason] });
+					recordRegistryDisposition(call, decision, "blocked", { reasonCode: FLOW_BLOCK_REASON_CODE });
 					return flowBlockedVerdict(decision, call.tool, reason);
 				}
 				const result: ToolResult = withFlowRestrictions({ kind: "error", message }, thrownRestrictions);
@@ -1798,7 +1795,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const verdict = skillSurfaceBlockedVerdict(decision, call.tool, admission.skillViolation);
 			recordRegistryDisposition(call, verdict.decision, "blocked", {
 				reasonCode: "skill_surface",
-				reasons: [verdict.reason],
 			});
 			return verdict;
 		}
@@ -1825,7 +1821,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					hints: ["Work within the operator's task scope; approval of an individual tool does not widen it."],
 				},
 			};
-			recordRegistryDisposition(call, blocked, "blocked", { reasonCode: "turn_constraint", reasons: [reason] });
+			recordRegistryDisposition(call, blocked, "blocked", { reasonCode: "turn_constraint" });
 			return withDenial(
 				{ kind: "blocked", reason, decision: blocked },
 				"clio_policy",
@@ -1838,10 +1834,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			);
 		}
 		if (admission.code === "git_destructive") {
-			recordRegistryDisposition(call, decision, "blocked", {
-				reasons: [admission.reason],
-				reasonCode: "classification:git_destructive",
-			});
+			recordRegistryDisposition(call, decision, "blocked", { reasonCode: "classification:git_destructive" });
 			return withDenial(
 				{ kind: "blocked", reason: admission.reason, decision },
 				"clio_policy",
@@ -1947,7 +1940,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			},
 			...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode } } : {}),
 		};
-		recordRegistryDisposition(call, blocked, "blocked", { reasonCode, reasons: [reason] });
+		recordRegistryDisposition(call, blocked, "blocked", { reasonCode });
 		return { kind: "terminal", verdict: { kind: "blocked", reason, decision: blocked } };
 	};
 
@@ -1955,24 +1948,21 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		call: ClassifierCall,
 		decision: SafetyDecision,
 		auditDecision: "allowed" | "blocked" | "permission_requested" | "denied",
-		overrides?: { reasons?: ReadonlyArray<string>; reasonCode?: string; requestId?: string },
+		overrides?: { reasonCode?: string; requestId?: string },
 	): void => {
-		// Row sequence for net-pass calls: safety.evaluate writes `classified`;
-		// registry admission writes the final autonomy disposition. Confirmed
-		// re-admissions keep their existing `allowed` row from safety.evaluate.
+		// Record sequence for net-pass calls: safety.evaluate records `classified`;
+		// registry admission records the final autonomy disposition. Confirmed
+		// re-admissions keep their existing `allowed` record from safety.evaluate.
 		// When the registry, not the policy engine, made the final call, the
-		// caller passes a reasonCode override so the row does not repeat the
+		// caller passes a reasonCode override so the record does not repeat the
 		// net pass's "allowed" code on a non-allowed decision.
-		const reasons = overrides?.reasons;
 		deps.safety.audit.recordToolCall?.({
 			tool: call.tool,
 			classification: decision.classification,
 			decision: auditDecision,
-			args: call.args,
 			...(overrides?.requestId !== undefined ? { requestId: overrides.requestId } : {}),
 			...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 			...(overrides?.reasonCode !== undefined ? { reasonCode: overrides.reasonCode } : {}),
-			...(reasons !== undefined ? { reasons } : decision.kind === "allow" ? {} : { reasons: [decision.rejection.detail] }),
 		});
 	};
 
@@ -2026,7 +2016,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const verdict = guardBlockedVerdict(decision, call.tool, reason);
 		recordRegistryDisposition(call, verdict.decision, "blocked", {
 			reasonCode: GUARD_BLOCK_REASON_CODE,
-			reasons: [reason],
 		});
 		return verdict;
 	};
@@ -2216,7 +2205,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const allowed = safetyJudgeAllowedDecision(outcome.decision);
 			recordRegistryDisposition(admissionCall, allowed, "allowed", {
 				reasonCode: SAFETY_JUDGE_ALLOW_REASON_CODE,
-				reasons: [judged.reason],
 			});
 			const verdict = await runSpec(judgedSpec, admissionCall, allowed, options);
 			refreshHooksAfterGitControlWrite(admissionCall, outcome.decision, verdict);
@@ -2237,7 +2225,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					? { policy: { ...outcome.decision.policy, kind: "block" as const, reasonCode } }
 					: {}),
 			};
-			recordRegistryDisposition(admissionCall, blocked, "blocked", { reasonCode, reasons: [judged.reason] });
+			recordRegistryDisposition(admissionCall, blocked, "blocked", { reasonCode });
 			const verdict = withDenial(
 				{ kind: "blocked", reason: judged.refusal, decision: blocked },
 				"clio_policy",

@@ -69,7 +69,7 @@ These names follow an upstream or operating-system convention. They are not subs
 | `SSH_CONNECTION`, `SSH_TTY`, `TMUX`, `STY` | Remote-session and terminal-multiplexer detection used by the adaptive stream-pacing policy ([stream-pacing-policy.ts](../../src/interactive/stream-pacing-policy.ts)). |
 | `COLUMNS` | Fallback text width for non-TTY CLI output ([text-layout.ts](../../src/cli/text-layout.ts)). |
 | `VIRTUAL_ENV` | Python interpreter for typed Python verify entries when the project has neither a uv lock nor a `.venv`: Clio uses `$VIRTUAL_ENV/bin/python` (`Scripts/python.exe` on Windows) before looking for `python` or `python3` on `PATH` ([toolchain.ts](../../src/tools/verify/toolchain.ts)). |
-| `TZ` | Local timestamp formatting and daily audit-log date boundaries ([format-time.ts](../../src/interactive/format-time.ts), [audit.ts](../../src/domains/safety/audit.ts)). |
+| `TZ` | Local timestamp formatting ([format-time.ts](../../src/interactive/format-time.ts)). |
 | `CI` | CI-sensitive presentation behavior. It grants no tool authority. |
 | `ZELLIJ` | Zellij detection. Like `TMUX`, `STY`, or a `tmux` or `screen` terminal type, it marks a multiplexed terminal, where Clio restores mouse tracking after a text selection without any-motion reporting ([instrumented-tui.ts](../../src/engine/instrumented-tui.ts)). |
 | `SHELL`, `ComSpec` | The shell that runs the external editor command and a stored API key written as a `!command`. Unset falls back to `/bin/sh`; on Windows the stored-key command runs under `ComSpec`, default `cmd.exe` ([external-editor.ts](../../src/core/external-editor.ts), [resolve-config-value.ts](../../src/core/resolve-config-value.ts)). |

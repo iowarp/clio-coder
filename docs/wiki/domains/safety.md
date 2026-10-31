@@ -96,7 +96,7 @@ Key symbols by file:
 | `src/domains/safety/policy-engine.ts` | `createSafetyPolicyEngine`, `SafetyPolicyDecision`, `SafetyPolicyEngine`, `SafetyPolicyEngineOptions`, `BUILTIN_ALLOWLIST`, `TEST_RUNNER_COMMANDS`, `PROJECT_SCRIPT_COMMANDS`, `WRITE_ROOT_REFUSED_TOOLS`, `evaluateBashPolicy`, `evaluateWriteRoots`, `matchesRepositoryCommand` |
 | `src/domains/safety/action-classifier.ts` | `classify`, `ActionClass`, `Classification`, `ClassifierCall`, `GIT_DESTRUCTIVE_PATTERNS`, `SYSTEM_MODIFY_PATTERNS`, `SYSTEM_WRITE_ROOT_PREFIXES`, `SYSTEM_WRITE_EXEMPT_PREFIXES`, `normalizeCallPaths` |
 | `src/domains/safety/autonomy.ts` | `mapAutonomy`, `AutonomyLevel`, `AutonomyDisposition`, `autonomyFromUserInput`, `AUTONOMY_EXPOSURES` |
-| `src/domains/safety/audit.ts` | `openAuditWriter`, `AuditRecord`, `ToolCallAuditRecord`, `buildAuditRecord`, `buildCompletionContractAuditRecord`, `AUDIT_FLUSH_INTERVAL_MS` |
+| `src/domains/safety/decision-events.ts` | `toolDecidedPayload`, `completionEvaluatedPayload`, `safetyJudgedPayload` |
 | `src/domains/safety/finish-contract.ts` | `assessFinishContract`, `FinishContractAssessment`, `FinishContractInput`, `recentEntries`, `typedValidationSummary`, `DEFAULT_RECENT_ENTRY_LIMIT` |
 | `src/domains/safety/finish-contract-registration.ts` | `createFinishContractRegistration`, `FINISH_CONTRACT_REGISTRATION_ID`, `HIGH_RIGOR_REVALIDATION_MESSAGE` |
 | `src/domains/safety/project-policy.ts` | `loadProjectSafetyPolicy`, `LoadedProjectSafetyPolicy`, `ProjectCommandPolicy` |
@@ -271,7 +271,7 @@ The loader never throws; every failure is a `{ ok: false, path, reason }` value.
 
 ## Audit recording
 
-`openAuditWriter` in `src/domains/safety/audit.ts` creates an NDJSON writer that rotates files on local-date rollover (`YYYY-MM-DD.jsonl`). Rows are written with `writeSync`; durability `fsync` happens on `flush()`, `close()`, rotation, and a 5-second background interval (`AUDIT_FLUSH_INTERVAL_MS`). Write errors are logged to stderr with `[clio-coder:audit]` prefix and never thrown.
+`src/domains/safety/decision-events.ts` builds the structural payloads of `tool.decided`, `completion.evaluated` and `safety.judged`; the safety extension emits them through the telemetry hub into the deciding scope's journal.
 
 The writer is a discriminated union over `kind`:
 - `tool_call` — emitted by `safety.evaluate()` for every classified tool call.
@@ -320,7 +320,7 @@ The `AutonomyMappingOptions` interface in `src/domains/safety/autonomy.ts` is th
 
 ### Adding a new audit record kind
 
-The `AuditRecord` discriminated union in `src/domains/safety/audit.ts` is extended by adding a new `kind` and a corresponding builder function. The `write` method serializes any `AuditRecord` to JSON.
+A new accountability record is a journal event declared in `src/core/telemetry/events.ts` with a payload builder in `src/domains/safety/decision-events.ts`.
 
 ## Focused tests
 

@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { FINISH_CONTRACT_EVIDENCE_TAGS } from "../../src/domains/evidence/finish-contract-map.js";
 import { composeTrustStatus } from "../../src/domains/evidence/trust-status.js";
-import { buildCompletionContractAuditRecord } from "../../src/domains/safety/audit.js";
+import type { CompletionEvaluationInput } from "../../src/domains/safety/decision-events.js";
 import {
 	assessFinishContract,
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
@@ -223,12 +223,12 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 				{ check: "lint", timeoutMs: 1000 },
 			],
 		};
-		const audits: ReturnType<typeof buildCompletionContractAuditRecord>[] = [];
+		const audits: CompletionEvaluationInput[] = [];
 		const normal = createFinishContractRegistration({
 			readSessionEntries: () => entries,
 			readActiveAcceptance: () => activeAcceptance,
 			getTurnConstraints: () => ({ mode: "proposal", allowedTools: ["read", "edit"] }),
-			recordDecision: (input) => audits.push(buildCompletionContractAuditRecord(input)),
+			recordDecision: (input) => audits.push(input),
 		});
 		const effects = await normal.evaluate({ hook: "turn_end", text: "Done." });
 		deepStrictEqual(effects, [
@@ -247,7 +247,7 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			readSessionEntries: () => entries,
 			readActiveAcceptance: () => activeAcceptance,
 			resolveRigor: () => "high",
-			recordDecision: (input) => audits.push(buildCompletionContractAuditRecord(input)),
+			recordDecision: (input) => audits.push(input),
 		});
 		deepStrictEqual(await high.evaluate({ hook: "turn_end", text: "Done." }), effects);
 		strictEqual(audits[1]?.reason, "explicit_limitation");

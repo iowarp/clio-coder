@@ -9,7 +9,7 @@ import { HEADLESS_PERMISSION_DENIED_REASON } from "../../src/core/headless-permi
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
-import type { SafetyJudgeAuditInput } from "../../src/domains/safety/audit.js";
+import type { SafetyJudgementInput } from "../../src/domains/safety/decision-events.js";
 import {
 	createSafetyJudge,
 	operatorOnlyAsk,
@@ -232,7 +232,7 @@ test("the judge reads the call's own turn when the session leaf lags, and never 
 		appendEntry: (input: unknown) => input,
 	} as unknown as SessionContract;
 	const prompts: string[] = [];
-	const audits: SafetyJudgeAuditInput[] = [];
+	const audits: SafetyJudgementInput[] = [];
 	const seat = createSafetyJudgeHost({
 		settings: () =>
 			({ ...DEFAULT_SETTINGS, chat: { ...DEFAULT_SETTINGS.chat, target: "local", model: "m" } }) as ClioSettings,
@@ -241,7 +241,7 @@ test("the judge reads the call's own turn when the session leaf lags, and never 
 			return { text: answer("allow", "operator-named", "Asked for.") };
 		},
 		session: () => session,
-		safety: { audit: { recordSafetyJudge: (input: SafetyJudgeAuditInput) => audits.push(input) } } as never,
+		safety: { audit: { recordSafetyJudge: (input: SafetyJudgementInput) => audits.push(input) } } as never,
 	});
 	const decision = {
 		kind: "ask",

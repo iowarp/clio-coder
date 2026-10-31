@@ -32,12 +32,11 @@ export interface UsageDiagnostics {
 	malformedReceipts: number;
 	unreadableSessions: number;
 	malformedSessionLines: number;
-	malformedAuditRows: number;
 	notes: string[];
 }
 
 export function emptyUsageDiagnostics(): UsageDiagnostics {
-	return { malformedReceipts: 0, unreadableSessions: 0, malformedSessionLines: 0, malformedAuditRows: 0, notes: [] };
+	return { malformedReceipts: 0, unreadableSessions: 0, malformedSessionLines: 0, notes: [] };
 }
 
 /** Whether a timestamp falls in a window, allowing a writer clock a few seconds ahead. */

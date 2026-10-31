@@ -117,15 +117,25 @@ test("S1-05 inspect emits compiled safety metadata", async () => {
 });
 test("S1-06 permission rate counts all outcomes and leaves an empty denominator unknown", async () => {
 	const { summarizePermissionDecisions } = await import("../../src/cli/usage.js");
+	type Decision = Parameters<typeof summarizePermissionDecisions>[0][number];
+	const requested = (requestId: string) =>
+		({ k: "approval.requested", data: { tool: "bash", actionClass: "execute", requestId } }) as Decision;
+	const resolved = (status: "granted" | "denied" | "expired") =>
+		({ k: "approval.resolved", data: { status } }) as Decision;
 	assert.deepEqual(
-		summarizePermissionDecisions(
-			["requested", "requested", "requested", "requested", "granted", "granted", "denied", "expired"].map((status) => ({
-				status,
-			})),
-		),
+		summarizePermissionDecisions([
+			requested("a"),
+			requested("b"),
+			requested("c"),
+			requested("d"),
+			resolved("granted"),
+			resolved("granted"),
+			resolved("denied"),
+			resolved("expired"),
+		]),
 		{ requested: 4, granted: 2, denied: 1, expired: 1, approvalRate: 0.5 },
 	);
-	assert.equal(summarizePermissionDecisions([{ status: "granted" }]).approvalRate, null);
+	assert.equal(summarizePermissionDecisions([resolved("granted")]).approvalRate, null);
 });
 
 test("S1-05 config inspect --json exposes effective compiled metadata", () => {
@@ -147,7 +157,7 @@ test("S1-05 config inspect --json exposes effective compiled metadata", () => {
 		...createSafetyPolicyEngine({ cwd: root }).metadata(),
 	});
 });
-test("S1-06 usage report reads permission audit rows and emits measured rate", async () => {
+test("S1-06 usage report reads journaled approvals and emits measured rate", async () => {
 	const { clioStateDir } = await import("../../src/core/xdg.js");
 	const { createTelemetryHub } = await import("../../src/core/telemetry/hub.js");
 	const { createSessionBundle } = await import("../../src/domains/session/extension.js");
@@ -171,11 +181,28 @@ test("S1-06 usage report reads permission audit rows and emits measured rate", a
 		},
 	});
 	session.flushAppends?.();
-	const audit = join(clioStateDir(), "audit");
-	mkdirSync(audit, { recursive: true });
+	// Approvals are the session journal's accountability records (#434).
+	const { callJournalHeader } = await import("../../src/domains/telemetry/call-journal.js");
+	const { makeTelemetryRecord } = await import("../../src/core/telemetry/envelope.js");
+	const { encodeTelemetryLine } = await import("../../src/core/telemetry/segment.js");
+	const { telemetryJournalPath, telemetrySessionDirectory } = await import("../../src/domains/telemetry/paths.js");
+	const journalDirectory = telemetrySessionDirectory(clioStateDir(), meta.id);
+	mkdirSync(journalDirectory, { recursive: true });
+	const ctx = { sessionId: meta.id, label: "main" } as const;
+	const clock = (mono: number) => ({ t: new Date().toISOString(), mono });
 	writeFileSync(
-		join(audit, "s1-permissions.jsonl"),
-		`${["requested", "requested", "granted", "denied"].map((status, index) => JSON.stringify({ kind: "permission", status, ts: new Date().toISOString(), correlationId: `s1-${index}` })).join("\n")}\n`,
+		telemetryJournalPath(journalDirectory),
+		Buffer.concat([
+			encodeTelemetryLine(callJournalHeader({ clioCoderVersion: "test", piVersion: "test" })),
+			...["s1-0", "s1-1"].map((requestId, index) =>
+				encodeTelemetryLine(
+					makeTelemetryRecord("approval.requested", { tool: "bash", actionClass: "execute", requestId }, ctx, clock(index)),
+				),
+			),
+			...(["granted", "denied"] as const).map((status, index) =>
+				encodeTelemetryLine(makeTelemetryRecord("approval.resolved", { status }, ctx, clock(index + 2))),
+			),
+		]),
 	);
 	const receipts = join(clioStateDir(), "receipts");
 	mkdirSync(receipts, { recursive: true });

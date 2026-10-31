@@ -3,13 +3,14 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import type { TelemetryContext } from "../../src/core/telemetry/context.js";
 import { telemetryContext, withToolTelemetryContext } from "../../src/core/telemetry/context.js";
 import { newAttemptId, newCallId } from "../../src/core/telemetry/ids.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import type { ToolCallAuditInput, ToolCallAuditRecord } from "../../src/domains/safety/audit.js";
-import { buildAuditRecord } from "../../src/domains/safety/audit.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import type { SafetyContract, SafetyDecision } from "../../src/domains/safety/contract.js";
+import type { ToolDecisionInput } from "../../src/domains/safety/decision-events.js";
+import { toolDecidedPayload } from "../../src/domains/safety/decision-events.js";
 import { foldSessionArtifacts } from "../../src/domains/session/session-artifacts.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createArtifactTool } from "../../src/tools/artifact.js";
@@ -45,8 +46,8 @@ interface ParkRecord {
 interface Harness {
 	cwd: string;
 	registry: ToolRegistry;
-	rows: ToolCallAuditInput[];
-	auditRows: ToolCallAuditRecord[];
+	rows: ToolDecisionInput[];
+	auditRows: DecisionRecord[];
 	parks: ParkRecord[];
 }
 
@@ -59,14 +60,17 @@ function neutral<T>(value: T, cwd: string): T {
 	return JSON.parse(JSON.stringify(value).split(cwd).join("<cwd>")) as T;
 }
 
-function auditing(base: SafetyContract, rows: ToolCallAuditInput[], auditRows: ToolCallAuditRecord[]): SafetyContract {
+/** A `tool.decided` record as the journal would scope it: the async context it was made in, then its payload. */
+type DecisionRecord = ReturnType<typeof toolDecidedPayload> & Partial<TelemetryContext>;
+
+function auditing(base: SafetyContract, rows: ToolDecisionInput[], auditRows: DecisionRecord[]): SafetyContract {
 	return {
 		...base,
 		audit: {
 			recordCount: () => rows.length,
 			recordToolCall: (input) => {
 				rows.push(input);
-				auditRows.push(buildAuditRecord(input));
+				auditRows.push({ ...telemetryContext(), ...toolDecidedPayload(input) });
 			},
 		},
 	};
@@ -80,8 +84,8 @@ function harness(
 	answer: "approve" | "deny",
 	readOnly = false,
 ): Harness {
-	const rows: ToolCallAuditInput[] = [];
-	const auditRows: ToolCallAuditRecord[] = [];
+	const rows: ToolDecisionInput[] = [];
+	const auditRows: DecisionRecord[] = [];
 	const parks: ParkRecord[] = [];
 	const registry = createRegistry({
 		safety: auditing(createWorkerSafety({ cwd }), rows, auditRows),
@@ -126,7 +130,7 @@ function capabilityRows(source: Harness, tool: string): Array<Record<string, unk
 	return neutral(
 		source.rows
 			.filter((row) => row.tool === tool)
-			.map(({ requestId: _requestId, now: _now, ...rest }) => ({ ...rest }) as Record<string, unknown>),
+			.map(({ requestId: _requestId, ...rest }) => ({ ...rest }) as Record<string, unknown>),
 		source.cwd,
 	);
 }
@@ -193,8 +197,8 @@ describe("direct and gateway invocation preserve the same authority", () => {
 	});
 
 	it("retains the parked caller's identity when another context approves it", async () => {
-		const rows: ToolCallAuditInput[] = [];
-		const auditRows: ToolCallAuditRecord[] = [];
+		const rows: ToolDecisionInput[] = [];
+		const auditRows: DecisionRecord[] = [];
 		const registry = createRegistry({ safety: auditing(createWorkerSafety({ cwd: scratch() }), rows, auditRows) });
 		let requestId = "";
 		registry.onPermissionRequired((_call, _decision, meta) => {

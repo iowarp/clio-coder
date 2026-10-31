@@ -6,7 +6,7 @@ import { Type } from "typebox";
 import type { JobCreateInput, JobOwner, JobRecord } from "../../src/core/job-types.js";
 import { toolLimitConstraints } from "../../src/core/tool-limit-flags.js";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
-import type { ToolCallAuditInput } from "../../src/domains/safety/audit.js";
+import type { ToolDecisionInput } from "../../src/domains/safety/decision-events.js";
 import { createJobController } from "../../src/domains/scheduling/job-controller.js";
 import { jobIsComplete } from "../../src/domains/scheduling/job-model.js";
 import type { JobController, JobRunnerPorts, JobStore } from "../../src/domains/scheduling/job-types.js";
@@ -539,7 +539,7 @@ describe("job ownership, scheduling and execution settlement", () => {
 			"mcp_zulipchat-grc__other",
 		]);
 		const safety = createWorkerSafety({ cwd: scratch.dir });
-		const audits: ToolCallAuditInput[] = [];
+		const audits: ToolDecisionInput[] = [];
 		safety.audit.recordToolCall = (row) => audits.push(row);
 		const registry = createRegistry({ safety, autonomy: () => "yolo" });
 		registerCoreTools(registry);
