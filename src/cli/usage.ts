@@ -352,7 +352,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		});
 	}
 
-	// UsageDiagnostics to stderr (both modes)
+	// Diagnostics to stderr (both modes)
 	const diagParts: string[] = [];
 	if (diagnostics.malformedReceipts > 0) diagParts.push(`${diagnostics.malformedReceipts} malformed receipt(s) skipped`);
 	if (diagnostics.unreadableSessions > 0)
