@@ -12,6 +12,8 @@ export {
 } from "./provenance.js";
 export { createRedactionTally, redactSecretSegments } from "./redact.js";
 export { inspectRunEvidence, listRunEvidence, runEvidence } from "./run-evidence.js";
+export type { RunTrustFinding, RunTrustRead } from "./run-trust.js";
+export { readRunGateIndex, readRunTrust } from "./run-trust.js";
 export type { TrustSummaryProjection, TrustVerdict } from "./trust-projection.js";
 export {
 	formatTrustAxes,

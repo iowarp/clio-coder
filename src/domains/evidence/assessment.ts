@@ -12,7 +12,7 @@ import type { RunPersonaOverride, RunPipelineProvenance } from "../dispatch/type
 import type { DecisionRecord } from "../session/entries.js";
 import { runSettledDigest } from "../telemetry/run-digest.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
-import { compareCodepoints } from "./ordering.js";
+import { compareGates, reviewFinding } from "./run-trust.js";
 import {
 	adaptGateDecisionReviewStatus,
 	adaptRunTrustStatus,
@@ -128,12 +128,6 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 	};
 }
 
-function compareGates(left: GateDecisionArtifact, right: GateDecisionArtifact): number {
-	return (
-		compareCodepoints(left.createdAt, right.createdAt) || left.cycle - right.cycle || compareCodepoints(left.id, right.id)
-	);
-}
-
 function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[] {
 	const out: Finding[] = [];
 	const add = (severity: EvidenceSeverity, tag: EvidenceTag, message: string) => out.push({ severity, tag, message });
@@ -155,13 +149,8 @@ function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[
 			"external-bypass",
 			"run used external peer permissions outside Clio policy; Clio safety blocks were not enforced",
 		);
-	const review = trust.independentReview.state;
-	if (review === "failed") add("warn", "independent-review", "independent review failed for this run");
-	else if (review === "not_independent")
-		add("warn", "independent-review", "review was not independent of the run it judged");
-	else if (review === "inconclusive") add("info", "independent-review", "independent review was inconclusive");
-	else if (succeeded && (review === "absent" || review === "unknown"))
-		add("info", "independent-review", "run was not independently reviewed; its result rests on its own record");
+	const review = reviewFinding(trust.independentReview.state, succeeded);
+	if (review !== null) out.push(review);
 	if (trust.contextProvenance.state === "invalid")
 		add("warn", "context-provenance", "context provenance record is contradictory");
 	const completion = trust.completionEvidence.state;

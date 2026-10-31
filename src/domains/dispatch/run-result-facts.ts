@@ -15,11 +15,12 @@ import type { RunEvidenceV1, RunTelemetryV1 } from "../../core/telemetry/dto.js"
 import { TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
 import type { Fact } from "../../core/telemetry/fact.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { readRunGateIndex, readRunTrust } from "../evidence/run-trust.js";
 import { integrityClause, trustStateWord, validationClause } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
-import { inspectRunTrustStatus } from "../evidence/trust-status.js";
 import { TELEMETRY_FOLD_VERSION } from "../telemetry/folds.js";
 import { readRunRecord } from "../telemetry/index.js";
+import type { GateDecisionArtifact } from "./gate-decisions.js";
 
 export type RunResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
 
@@ -133,7 +134,7 @@ function runResultFactsOf(record: RunTelemetryV1 | null): RunResultFacts | null 
 	const failureMessage = result?.failureMessage ?? settled.failureMessage;
 	const text = result?.output?.text;
 	return {
-		trust: inspectRunTrustStatus(record).status,
+		trust: readRunTrust(record).trust,
 		outcome: settled.outcome,
 		tokens: settled.totalTokens,
 		tokensDisplay: record.row.tokens.display,
@@ -330,31 +331,33 @@ function sealedChecks(run: SettledRun): Sealed {
 export function runEvidenceOf(
 	runId: string,
 	record: RunTelemetryV1 | null,
-	options: { now?: Date } = {},
+	options: { now?: Date; gates?: ReadonlyArray<GateDecisionArtifact> } = {},
 ): RunEvidenceV1 {
-	const inspection = inspectRunTrustStatus(record);
-	const status = inspection.status;
+	// The evidence domain's one derivation: the sealed assessment's trust under the seal's verdict, with later review
+	// gates composed over it, so this DTO and `runEvidence` agree on every axis (#434).
+	const read = readRunTrust(record, options.gates);
+	const status = read.trust;
+	const verified = read.integrity.state === "verified";
 	const settled = record?.settled ? (record as SettledRun) : null;
 	const integrity: RunEvidenceV1["integrity"] =
 		settled === null
 			? { state: "unavailable", display: integrityClause(status), detail: "the run has not settled" }
-			: inspection.integrity.state === "verified"
+			: read.integrity.state === "verified"
 				? { state: "verified", display: integrityClause(status), detail: null }
 				: {
-						state: inspection.integrity.state,
+						state: read.integrity.state,
 						display: integrityClause(status),
-						detail: clip(inspection.integrity.reason),
+						detail: clip(read.integrity.reason),
 					};
-	// The assessment is read only under a seal that verifies; an unauthenticated record claims none (#434).
-	const assessment = inspection.integrity.state === "verified" ? (record?.assessment ?? null) : null;
+	const assessment = read.assessment;
 	const evidence: RunEvidenceV1["evidence"] =
 		assessment === null
 			? null
 			: {
 					assessedAt: assessment.at,
 					firstPassSuccess: assessment.firstPassSuccess,
-					findingCount: assessment.findings.length,
-					tags: [...new Set(assessment.findings.map((finding) => finding.tag))].sort(),
+					findingCount: read.findings.length,
+					tags: [...new Set(read.findings.map((finding) => finding.tag))].sort(),
 				};
 	return {
 		v: TELEMETRY_DTO_VERSION,
@@ -372,12 +375,12 @@ export function runEvidenceOf(
 			completionEvidence: trustAxis(status, "completionEvidence"),
 			validation: validationClause(status),
 		},
-		sealed: settled && inspection.integrity.state === "verified" ? sealedChecks(settled) : null,
+		sealed: settled && verified ? sealedChecks(settled) : null,
 		evidence,
 	};
 }
 
-/** A run's evidence read from its run scope. */
+/** A run's evidence read from its run scope, with the review gates decided about it. */
 export function readRunEvidence(runId: string, stateDir = clioStateDir(), options: { now?: Date } = {}): RunEvidenceV1 {
 	let record: RunTelemetryV1 | null = null;
 	try {
@@ -386,5 +389,5 @@ export function readRunEvidence(runId: string, stateDir = clioStateDir(), option
 		// An unreadable run scope reads as a missing record.
 		record = null;
 	}
-	return runEvidenceOf(runId, record, options);
+	return runEvidenceOf(runId, record, { ...options, gates: readRunGateIndex(stateDir)(runId) });
 }

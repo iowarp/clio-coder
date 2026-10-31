@@ -4,6 +4,7 @@ import { assertSafeId } from "../../core/safe-id.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { FleetRunRecord } from "../dispatch/index.js";
 import { councilTopologies, gateTopology, openLedger, readFleetRun, runEvidenceOf } from "../dispatch/index.js";
+import { readRunGateIndex } from "../evidence/index.js";
 import {
 	listRunTelemetryIds,
 	loadRunTelemetrySource,
@@ -77,7 +78,7 @@ export function readRunInspection(runId: string, state = clioStateDir()) {
 	const run = readRunRecord(state, runId);
 	return {
 		telemetry: run?.row ?? runRowTelemetry(runId, loadRunTelemetrySource(state, runId)),
-		evidence: runEvidenceOf(runId, run),
+		evidence: runEvidenceOf(runId, run, { gates: readRunGateIndex(state)(runId) }),
 		record: run?.settled ? { settled: run.settled, seal: run.seal, result: run.result } : null,
 	};
 }

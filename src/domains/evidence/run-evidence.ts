@@ -6,22 +6,29 @@
 
 import { readdir } from "node:fs/promises";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
+import type { GateDecisionArtifact } from "../dispatch/gate-decisions.js";
 import { isDecisionRecord } from "../session/entries.js";
 import { telemetryRunsDirectory } from "../telemetry/paths.js";
 import { readRunRecordAsync } from "../telemetry/run-record.js";
 import { compareCodepoints } from "./ordering.js";
 import type { RunProvenanceView } from "./provenance.js";
-import { composeTrustStatus, inspectRunTrustStatus, normalizeTrustStatus } from "./trust-status.js";
+import { readRunGateIndex, readRunTrust } from "./run-trust.js";
 import type { EvidenceDecision, EvidenceFinding, EvidenceTag, RunEvidence } from "./types.js";
 
-/** The run's evidence from its DTO; null when no run scope was read. */
-export function runEvidence(runId: string, record: RunTelemetryV1 | null): RunEvidence {
-	const inspection = inspectRunTrustStatus(record);
-	const integrity = inspection.integrity;
+/**
+ * The run's evidence from its DTO and the gate decisions naming it (`readRunGateIndex`); a later review composes over
+ * the sealed assessment as `readRunTrust` admits it.
+ */
+export function runEvidence(
+	runId: string,
+	record: RunTelemetryV1 | null,
+	gates: ReadonlyArray<GateDecisionArtifact> = [],
+): RunEvidence {
+	const read = readRunTrust(record, gates);
+	const integrity = read.integrity;
 	const verified = integrity.state === "verified";
 	const settled = record?.settled ?? null;
-	const assessment = verified ? (record?.assessment ?? null) : null;
-	let trust = inspection.status;
+	const assessment = read.assessment;
 	const findings: EvidenceFinding[] = [];
 	const decisions: EvidenceDecision[] = [];
 	let provenance: RunProvenanceView | null = null;
@@ -36,20 +43,15 @@ export function runEvidence(runId: string, record: RunTelemetryV1 | null): RunEv
 		});
 	}
 	if (assessment !== null) {
-		// The seal now vouches for the record the producer assessed, so its verdict replaces the producer's.
-		trust = composeTrustStatus(normalizeTrustStatus(assessment.trust), {
-			artifactIntegrity: inspection.status.artifactIntegrity,
-		});
-		const content = assessment.content?.state === "resolved" ? assessment.content.value : null;
-		const messages = new Map((content?.findings ?? []).map((entry) => [entry.id, entry.message]));
-		for (const entry of assessment.findings)
+		for (const entry of read.findings)
 			findings.push({
 				id: entry.id,
 				severity: entry.severity,
 				tag: entry.tag,
 				runId,
-				message: messages.get(entry.id) ?? "finding text unavailable in this run scope",
+				message: entry.message ?? "finding text unavailable in this run scope",
 			});
+		const content = assessment.content?.state === "resolved" ? assessment.content.value : null;
 		for (const decision of content?.decisions ?? [])
 			if (isDecisionRecord(decision.record))
 				decisions.push({ runId, sessionId: decision.sessionId, ref: decision.ref, record: decision.record });
@@ -66,7 +68,7 @@ export function runEvidence(runId: string, record: RunTelemetryV1 | null): RunEv
 		runId,
 		sessionId: record?.row.sessionId ?? null,
 		integrity,
-		trust,
+		trust: read.trust,
 		assessedAt: assessment?.at ?? null,
 		settled:
 			settled === null
@@ -86,7 +88,7 @@ export function runEvidence(runId: string, record: RunTelemetryV1 | null): RunEv
 		failureCause: assessment?.failureCause ?? null,
 		tags: [...new Set(findings.map((entry) => entry.tag))].sort(compareCodepoints) as EvidenceTag[],
 		findings,
-		verdicts: (assessment?.verdicts ?? []).map((verdict) => ({ ...verdict })),
+		verdicts: read.verdicts,
 		provenance: provenance !== null && Object.keys(provenance).length > 0 ? provenance : null,
 		decisions,
 		ungroundedClaims: grounding ? Math.max(0, grounding.claimed - grounding.grounded) : 0,
@@ -105,24 +107,26 @@ export function runEvidence(runId: string, record: RunTelemetryV1 | null): RunEv
 	};
 }
 
-/** One run's evidence read from its run scope. */
+/** One run's evidence read from its run scope beneath the state root, with the review gates decided about it. */
 export async function inspectRunEvidence(stateDir: string, runId: string): Promise<RunEvidence> {
-	return runEvidence(runId, await readRunRecordAsync(stateDir, runId));
+	return runEvidence(runId, await readRunRecordAsync(stateDir, runId), readRunGateIndex(stateDir)(runId));
 }
 
 /** Every run scope on this host, newest settlement first; a run that never settled sorts last. */
 export async function listRunEvidence(stateDir: string): Promise<RunEvidence[]> {
+	const directory = telemetryRunsDirectory(stateDir);
 	let names: string[];
 	try {
-		names = await readdir(telemetryRunsDirectory(stateDir));
+		names = await readdir(directory);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
 		throw error;
 	}
+	const gates = readRunGateIndex(stateDir);
 	const out: RunEvidence[] = [];
 	for (const runId of names.sort(compareCodepoints)) {
 		try {
-			out.push(await inspectRunEvidence(stateDir, runId));
+			out.push(runEvidence(runId, await readRunRecordAsync(stateDir, runId), gates(runId)));
 		} catch {
 			// A directory that is not a readable run scope is not a run; the listing stays scriptable.
 		}
