@@ -113,7 +113,9 @@ it("keeps parallel receipts sealed while heartbeat ticks during contended final 
 		});
 		await waitFor(() => locked);
 		for (const worker of workers) worker.finish();
-		await waitFor(() => runIds.every((id) => readSettledRun(stateDir, id) !== null));
+		await waitFor(() =>
+			runIds.every((id) => readSettledRun(stateDir, id) !== null && bundle.contract.getRun(id)?.status === "completed"),
+		);
 		const statuses = [];
 		for (const age of [0, 15, 25]) {
 			monotonic = age;
