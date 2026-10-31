@@ -88,11 +88,9 @@ export interface ProcessIdentity {
 export interface SessionSource {
 	sessionId: string;
 	journal: JournalSource;
-	/** Calls rebuilt from ledger rows the journal never held; checkpoint aggregates naming no calls stay unknown. */
-	legacy: { records: readonly TelemetryRecord[]; aggregates: number };
 	/** Run journals this session's own records reference, keyed by run id. */
 	runs: ReadonlyMap<string, JournalSource>;
-	/** The fork parent; `source` is null when its journal and ledger could not be read. */
+	/** The fork parent; `source` is null when it could not be read. */
 	parent: { sessionId: string; turnId: string; at: string; source: SessionSource | null } | null;
 	/**
 	 * The ledger's own lifecycle: `endedAt` is set by a clean close and cleared by a reopen. Sessions that predate the
@@ -215,7 +213,7 @@ interface Analysis {
 
 /**
  * What a live analysis needs to fold only the records a later read appends (#434 §11). Records fold as `head` then
- * the fixed `tail` (legacy rows, then ancestors' records for a lineage), while a cold read folds appended records
+ * the fixed `tail` (ancestors' records for a lineage), while a cold read folds appended records
  * before the tail; a new record that names an id the tail carries could fold differently, so it rebuilds instead.
  */
 interface Growth {
@@ -230,7 +228,6 @@ interface Growth {
 	gapRecord: boolean;
 	head: readonly TelemetryRecord[];
 	tail: { records: Set<string>; attempts: Set<string>; runs: Set<string> };
-	legacy: SessionSource["legacy"];
 	/** A lineage's parent source; null for a session's own analysis. */
 	parent: SessionSource | null;
 }
@@ -391,7 +388,6 @@ function buildAnalysis(
 	tail: readonly (readonly TelemetryRecord[])[],
 	runSources: ReadonlyMap<string, JournalSource>,
 	gap: number,
-	legacy: SessionSource["legacy"],
 	parent: SessionSource | null,
 ): Analysis {
 	const growth: Growth = {
@@ -403,7 +399,6 @@ function buildAnalysis(
 		gapRecord: false,
 		head,
 		tail: { records: new Set(), attempts: new Set(), runs: new Set() },
-		legacy,
 		parent,
 	};
 	for (const record of head) grow(growth, record);
@@ -500,7 +495,7 @@ export function continueSource(next: SessionSource, previous: SessionSource): vo
 function analyze(source: SessionSource): Analysis {
 	let analysis = analyses.get(source);
 	if (analysis) return analysis;
-	const gap = readGap(source.journal) + source.legacy.aggregates;
+	const gap = readGap(source.journal);
 	const continuation = continuations.get(source);
 	const base = continuation?.own;
 	const prior = base ? analyses.get(base) : undefined;
@@ -508,21 +503,11 @@ function analyze(source: SessionSource): Analysis {
 		base &&
 		prior &&
 		prior.sessionId === source.sessionId &&
-		prior.growth.legacy === source.legacy &&
 		extendAnalysis(prior, source.journal.records, source.runs, gap)
 	) {
 		analyses.delete(base);
 		analysis = prior;
-	} else
-		analysis = buildAnalysis(
-			source.sessionId,
-			source.journal.records,
-			[source.legacy.records],
-			source.runs,
-			gap,
-			source.legacy,
-			null,
-		);
+	} else analysis = buildAnalysis(source.sessionId, source.journal.records, [], source.runs, gap, null);
 	if (continuation) continuation.own = undefined;
 	analyses.set(source, analysis);
 	return analysis;
@@ -532,12 +517,12 @@ function analyze(source: SessionSource): Analysis {
 function analyzeLineage(source: SessionSource): Analysis {
 	let analysis = lineages.get(source);
 	if (analysis) return analysis;
-	const tail: (readonly TelemetryRecord[])[] = [source.legacy.records];
+	const tail: (readonly TelemetryRecord[])[] = [];
 	const runs = new Map<string, JournalSource>();
 	let gap = 0;
 	for (let node: SessionSource | null = source, depth = 0; node && depth < 128; depth += 1) {
 		const own = analyze(node);
-		if (node !== source) tail.push(node.journal.records, node.legacy.records);
+		if (node !== source) tail.push(node.journal.records);
 		for (const [runId, run] of own.runs) if (!runs.has(runId)) runs.set(runId, run.source);
 		gap += own.gap;
 		if (node.parent && !node.parent.source) gap += 1;
@@ -551,13 +536,12 @@ function analyzeLineage(source: SessionSource): Analysis {
 		base &&
 		prior &&
 		prior.sessionId === source.sessionId &&
-		prior.growth.legacy === source.legacy &&
 		prior.growth.parent === parent &&
 		extendAnalysis(prior, source.journal.records, runs, gap)
 	) {
 		lineages.delete(base);
 		analysis = prior;
-	} else analysis = buildAnalysis(source.sessionId, source.journal.records, tail, runs, gap, source.legacy, parent);
+	} else analysis = buildAnalysis(source.sessionId, source.journal.records, tail, runs, gap, parent);
 	if (continuation) continuation.lineage = undefined;
 	lineages.set(source, analysis);
 	return analysis;
@@ -1410,7 +1394,7 @@ function pricedByCounts(parts: readonly Part[]): Record<PricedBy, number> {
 	return counts;
 }
 
-function journalCoverage(source: JournalSource, fold: Pick<JournalFold, "coverage">, aggregates = 0) {
+function journalCoverage(source: JournalSource, fold: Pick<JournalFold, "coverage">) {
 	return {
 		present: source.present,
 		seeding: source.seeding === true,
@@ -1421,7 +1405,6 @@ function journalCoverage(source: JournalSource, fold: Pick<JournalFold, "coverag
 		droppedRecords: fold.coverage.droppedRecords,
 		duplicateRecords: fold.coverage.duplicateRecords,
 		conflictingAttempts: fold.coverage.conflictingAttempts,
-		unattributedAggregates: aggregates,
 	};
 }
 
@@ -1471,7 +1454,7 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 		kind: "session",
 		sessionId: id,
 		modes: [...new Set(source.journal.modes)],
-		journal: journalCoverage(source.journal, analysis.fold, source.legacy.aggregates),
+		journal: journalCoverage(source.journal, analysis.fold),
 		lifetime: { firstRecordAt: firstAt, lastRecordAt: lastAt, ...lifecycle(source, options) },
 		lineage: source.parent
 			? {

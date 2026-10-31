@@ -50,7 +50,6 @@ before(async () => {
 	source = {
 		sessionId: SESSION,
 		journal: journalSourceFromRead(await readCallJournal(out), true),
-		legacy: { records: [], aggregates: 0 },
 		runs,
 		parent: null,
 	};

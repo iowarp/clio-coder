@@ -41,7 +41,6 @@ export function telemetryViewOf(
 	return telemetryView({
 		sessionId,
 		journal: journal(records),
-		legacy: { records: [], aggregates: 0 },
 		runs: new Map([...runs].map(([runId, owned]) => [runId, journal(owned)])),
 		parent: null,
 	});

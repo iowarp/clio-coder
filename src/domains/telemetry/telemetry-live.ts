@@ -72,7 +72,6 @@ const SEED_ATTEMPTS = 3;
 const SESSION_TOPICS: readonly TelemetryTopic[] = ["session", "calls", "cost", "cache", "timeline"];
 const RUN_TOPICS: readonly TelemetryTopic[] = ["runs", "session", "calls", "cost", "timeline"];
 const UNREADABLE: JournalSource = { present: false, records: [], modes: [], skipped: 1, damaged: 0 };
-const EMPTY_LEGACY: SessionSource["legacy"] = { records: [], aggregates: 0 };
 const sessionOwner = (sessionId: string) => `session:${sessionId}`;
 const runOwner = (runId: string) => `run:${runId}`;
 
@@ -131,7 +130,6 @@ interface Owned {
 interface Node {
 	sessionId: string;
 	journal: Owned;
-	legacy: SessionSource["legacy"];
 	ledger?: SessionSource["ledger"];
 	runIds: Set<string>;
 	parent: { sessionId: string; turnId: string; at: string; node: Node | null } | null;
@@ -409,7 +407,6 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			const node: Node = {
 				sessionId: src.sessionId,
 				journal: adopt(owner, src.journal),
-				legacy: src.legacy,
 				...(src.ledger ? { ledger: src.ledger } : {}),
 				runIds: new Set(src.runs.keys()),
 				parent: null,
@@ -455,7 +452,6 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		const absent = (journal: JournalSource): SessionSource => ({
 			sessionId: binding.sessionId,
 			journal,
-			legacy: EMPTY_LEGACY,
 			runs: new Map(),
 			parent: null,
 		});
@@ -539,7 +535,6 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		const source: SessionSource = {
 			sessionId: node.sessionId,
 			journal,
-			legacy: node.legacy,
 			runs: new Map(runIds.map((runId, index) => [runId, runs[index] as JournalSource])),
 			parent: node.parent
 				? { sessionId: node.parent.sessionId, turnId: node.parent.turnId, at: node.parent.at, source: parent }
@@ -558,7 +553,6 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		return {
 			sessionId: binding.sessionId,
 			journal: { ...journal, seeding: true },
-			legacy: EMPTY_LEGACY,
 			runs: new Map(runIds.map((runId) => [runId, { ...journalOf(binding.owners.get(runOwner(runId))), seeding: true }])),
 			parent: null,
 		};

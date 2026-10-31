@@ -22275,7 +22275,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_conflictingAttempts_damaged_droppedRecords_fc03a4ff": {
+			"Object_conflictingAttempts_damaged_droppedRecords_48ebcd87": {
 				"type": "object",
 				"required": [
 					"present",
@@ -22286,8 +22286,7 @@
 					"gapRecords",
 					"droppedRecords",
 					"duplicateRecords",
-					"conflictingAttempts",
-					"unattributedAggregates"
+					"conflictingAttempts"
 				],
 				"properties": {
 					"present": {
@@ -22321,10 +22320,6 @@
 						"minimum": 0
 					},
 					"conflictingAttempts": {
-						"type": "integer",
-						"minimum": 0
-					},
-					"unattributedAggregates": {
 						"type": "integer",
 						"minimum": 0
 					}
@@ -23874,7 +23869,7 @@
 						"$ref": "#/components/schemas/RunRowV1"
 					},
 					"journal": {
-						"$ref": "#/components/schemas/Object_conflictingAttempts_damaged_droppedRecords_fc03a4ff"
+						"$ref": "#/components/schemas/Object_conflictingAttempts_damaged_droppedRecords_48ebcd87"
 					},
 					"counts": {
 						"$ref": "#/components/schemas/Object_attempts_calls_dispositions_4b71a0d5"
@@ -24230,7 +24225,7 @@
 					"transport"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_bc69e981"
+					"$ref": "#/components/schemas/Shape_bfe2007b"
 				},
 				"additionalProperties": false
 			},
@@ -26024,62 +26019,6 @@
 					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
 				}
 			},
-			"Shape_bc69e981": {
-				"v": {
-					"type": "number",
-					"const": 1
-				},
-				"foldVersion": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"generatedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"kind": {
-					"type": "string",
-					"const": "session"
-				},
-				"sessionId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"modes": {
-					"type": "array",
-					"items": {
-						"enum": ["standard", "research"]
-					}
-				},
-				"journal": {
-					"$ref": "#/components/schemas/Object_conflictingAttempts_damaged_droppedRecords_fc03a4ff"
-				},
-				"lifetime": {
-					"$ref": "#/components/schemas/Object_closed_firstRecordAt_lastRecordAt_a4ab1107"
-				},
-				"lineage": {
-					"$ref": "#/components/schemas/Object_parent_totals_unreadableAncestors_9a060df9"
-				},
-				"own": {
-					"$ref": "#/components/schemas/Object_cost_counts_tokens_8e0d0def"
-				},
-				"byLabel": {
-					"$ref": "#/components/schemas/Array_d3b72a61"
-				},
-				"runs": {
-					"$ref": "#/components/schemas/Object_apiCalls_count_tokens_39362887"
-				},
-				"totals": {
-					"$ref": "#/components/schemas/Object_tokens_usd_9d1e841f"
-				},
-				"overhead": {
-					"$ref": "#/components/schemas/Object_bookkeepingRounds_harness_model_9b67552f"
-				},
-				"transport": {
-					"$ref": "#/components/schemas/Union_fa0f3a17"
-				}
-			},
 			"Shape_bdc005cf": {
 				"jobId": {
 					"type": "string",
@@ -26264,6 +26203,62 @@
 				},
 				"checks": {
 					"$ref": "#/components/schemas/Array_f07c1c28"
+				}
+			},
+			"Shape_bfe2007b": {
+				"v": {
+					"type": "number",
+					"const": 1
+				},
+				"foldVersion": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"generatedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"kind": {
+					"type": "string",
+					"const": "session"
+				},
+				"sessionId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"modes": {
+					"type": "array",
+					"items": {
+						"enum": ["standard", "research"]
+					}
+				},
+				"journal": {
+					"$ref": "#/components/schemas/Object_conflictingAttempts_damaged_droppedRecords_48ebcd87"
+				},
+				"lifetime": {
+					"$ref": "#/components/schemas/Object_closed_firstRecordAt_lastRecordAt_a4ab1107"
+				},
+				"lineage": {
+					"$ref": "#/components/schemas/Object_parent_totals_unreadableAncestors_9a060df9"
+				},
+				"own": {
+					"$ref": "#/components/schemas/Object_cost_counts_tokens_8e0d0def"
+				},
+				"byLabel": {
+					"$ref": "#/components/schemas/Array_d3b72a61"
+				},
+				"runs": {
+					"$ref": "#/components/schemas/Object_apiCalls_count_tokens_39362887"
+				},
+				"totals": {
+					"$ref": "#/components/schemas/Object_tokens_usd_9d1e841f"
+				},
+				"overhead": {
+					"$ref": "#/components/schemas/Object_bookkeepingRounds_harness_model_9b67552f"
+				},
+				"transport": {
+					"$ref": "#/components/schemas/Union_fa0f3a17"
 				}
 			},
 			"Shape_c0a4f62c": {

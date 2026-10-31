@@ -204,8 +204,6 @@ export const JournalCoverageSchema = Type.Object(
 		droppedRecords: count,
 		duplicateRecords: count,
 		conflictingAttempts: count,
-		/** Legacy rows whose spend names no call: checkpoint aggregates, and rows the importer could not rebuild (#434). */
-		unattributedAggregates: count,
 	},
 	closed,
 );

@@ -141,7 +141,7 @@ function printSession(dto: SessionTelemetryV1): string {
 	const journal = dto.journal;
 	const lines = [
 		`session ${dto.sessionId}${dto.modes.length > 0 ? ` (${dto.modes.join(" → ")} mode)` : ""}`,
-		`journal   ${journal.present ? `${journal.records} records` : "none"} · ${journal.skipped} skipped · ${journal.damaged} damaged · ${journal.gapRecords} gaps (${journal.droppedRecords} dropped) · ${journal.unattributedAggregates} unattributed legacy rows`,
+		`journal   ${journal.present ? `${journal.records} records` : "none"} · ${journal.skipped} skipped · ${journal.damaged} damaged · ${journal.gapRecords} gaps (${journal.droppedRecords} dropped)`,
 		`lifetime  ${dto.lifetime.firstRecordAt ?? "no records"} → ${dto.lifetime.lastRecordAt ?? "no records"} · ${lifetimeState(dto.lifetime)}`,
 	];
 	if (dto.lineage.parent)

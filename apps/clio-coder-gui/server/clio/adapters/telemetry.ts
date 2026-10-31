@@ -116,7 +116,6 @@ function unknownCoverage(sessionId: string): NonNullable<ReturnType<typeof loadS
 	return {
 		sessionId,
 		journal: { present: false, records: [], modes: [], skipped: 1, damaged: 0 },
-		legacy: { records: [], aggregates: 0 },
 		runs: new Map(),
 		parent: null,
 	};

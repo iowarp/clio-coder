@@ -79,7 +79,6 @@ const imported = importLegacySession("golden-p0", ledger, { ids: "derived" });
 const source: SessionSource = {
 	sessionId: "golden-p0",
 	journal: { present: true, records: imported.records, modes: ["standard"], skipped: 0, damaged: 0 },
-	legacy: { records: [], aggregates: 0 },
 	runs: new Map(),
 	parent: null,
 };
@@ -309,20 +308,11 @@ test("a run's receipt evidence carries sealed checks only under a seal that veri
 	strictEqual(tampered.sealed, null);
 	strictEqual(tampered.trust.artifactIntegrity.state, "failed");
 
-	// A run with no journal imports its receipt under the same seal: a current one that fails keeps only the target.
-	const imported = (value: unknown) => {
-		writeReceipt(value);
-		const usage = loadRunTelemetrySource(stateDir, "run-evidence").records.find(
-			(record) => record.k === "run.usage_reported",
-		);
-		return usage?.k === "run.usage_reported" ? usage.data : undefined;
-	};
-	strictEqual(imported(receipt)?.usage.input.kind, "measured");
-	const failed = imported({ ...receipt, outcome: "failed" });
-	strictEqual(failed?.usage.input.kind, "unknown");
-	strictEqual(failed?.pricing.usd.kind, "unknown");
-	strictEqual(failed?.target.targetId, envelope.targetId);
-	strictEqual(imported({ ...receipt, integrity: undefined })?.usage.input.kind, "measured");
+	// A run with no journal reads as not measured, whatever its receipt holds (#434).
+	writeReceipt(receipt);
+	const unjournaled = loadRunTelemetrySource(stateDir, "run-evidence");
+	strictEqual(unjournaled.present, false);
+	strictEqual(unjournaled.records.length, 0);
 
 	// Opt-in pruning tombstones a receipt only once its evidence copy verifies, and readers follow the tombstone back.
 	writeReceipt(receipt);
@@ -346,10 +336,6 @@ test("a run's receipt evidence carries sealed checks only under a seal that veri
 	writeFileSync(misplaced, readFileSync(join(stateDir, "receipts", "run-evidence.json")));
 	throws(() => readReceiptTextSync(misplaced), { code: "ENOENT" });
 	rmSync(misplaced);
-	strictEqual(
-		imported(JSON.parse(readFileSync(join(stateDir, "receipts", "run-evidence.json"), "utf8")))?.usage.input.kind,
-		"measured",
-	);
 	rmSync(join(clioDataDir(), "evidence", evidenceId), { recursive: true });
 	strictEqual(
 		read().receipt,
