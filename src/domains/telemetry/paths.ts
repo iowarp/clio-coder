@@ -9,6 +9,8 @@ import { assertSafeId } from "../../core/safe-id.js";
  *   runs/<runId>/journal.jsonl           plus objects/ when a run stores one
  *   <scope>/bundle.json                  only while the scope is sealed
  *   consent.json
+ *   install.json                         this installation's random id, minted by its first share
+ *   imported/<installId>/telemetry/      scopes `telemetry import` placed, laid out as this root is
  *
  * Every scope names its journal `journal.jsonl` and rotates it as `journal.<sequence>.jsonl`. Nothing outside the
  * telemetry domain writes under this root (rule11 in tests/boundaries/check-boundaries.ts).
@@ -97,4 +99,21 @@ export function telemetryObjectsDirectory(scopeDirectory: string): string {
 
 export function telemetryConsentPath(stateDir: string): string {
 	return join(telemetryRoot(stateDir), "consent.json");
+}
+
+export function telemetryInstallPath(stateDir: string): string {
+	return join(telemetryRoot(stateDir), "install.json");
+}
+
+/** An install id names a share's source: random, never a hostname or path (#434). */
+export const TELEMETRY_INSTALL_ID = /^inst_[0-9a-f]{32}$/u;
+
+/**
+ * The state directory imported telemetry from one installation reads as. It holds only a `telemetry/` tree laid out as
+ * the operator's own, so every reader that takes a state directory folds imported scopes when given this one and never
+ * mixes them into the operator's own totals (#434).
+ */
+export function telemetryImportedStateDir(stateDir: string, installId: string): string {
+	if (!TELEMETRY_INSTALL_ID.test(installId)) throw new Error(`invalid install id: ${installId}`);
+	return join(telemetryRoot(stateDir), "imported", installId);
 }

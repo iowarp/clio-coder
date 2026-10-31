@@ -275,6 +275,8 @@ export const EVENTS = {
 	"run.sealed": journal(S.ScopeSealedSchema, { tier: "accountability", cc: "content-free" }),
 	"session.sealed": journal(S.ScopeSealedSchema, { tier: "accountability", cc: "content-free" }),
 	"process.sealed": journal(S.ScopeSealedSchema, { tier: "accountability", cc: "content-free" }),
+	// `telemetry share` writes this as the last line of each scope it filters into an archive; nothing emits one (#434).
+	"share.sealed": journal(S.ShareSealedSchema, { tier: "accountability", cc: "content-free" }),
 	"prompt.text_captured": journal(S.PromptTextCapturedSchema, {
 		tier: "research",
 		cc: "content-bearing",

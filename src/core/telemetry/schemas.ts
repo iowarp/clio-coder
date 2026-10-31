@@ -1017,6 +1017,13 @@ export const ScopeSealedSchema = Type.Object(
 	closed,
 );
 export type ScopeSealed = Static<typeof ScopeSealedSchema>;
+/** The share profiles an operator picks from; what each admits is declared in src/domains/telemetry/share.ts (#434). */
+export const ShareProfileSchema = vocabulary(["content-free", "structural", "research"]);
+/**
+ * The seal of a shared scope (#434): a scope's seal over the filtered journal a share archive carries, naming the
+ * profile that filtered it. Its fields mean what a scope seal's do, over the shared bytes instead of the source's.
+ */
+export const ShareSealedSchema = Type.Object({ ...ScopeSealedSchema.properties, profile: ShareProfileSchema }, closed);
 /** The compiled system prompt's redacted text, linked to calls by the structure ref they carry (#434). */
 export const PromptTextCapturedSchema = Type.Object(
 	{ structure: Type.Optional(ObjectRefSchema), text: ObjectRefSchema, bytes: count },

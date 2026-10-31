@@ -13,7 +13,7 @@ import type {
 } from "../../core/telemetry/dto.js";
 import type { SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { ScopeSealed } from "../../core/telemetry/schemas.js";
-import { ScopeSealedSchema } from "../../core/telemetry/schemas.js";
+import { ScopeSealedSchema, ShareProfileSchema } from "../../core/telemetry/schemas.js";
 import type { TelemetryChain } from "../../core/telemetry/segment.js";
 import {
 	chainTelemetryLine,
@@ -41,6 +41,8 @@ export const SEAL_EVENTS = {
 	run: "run.sealed",
 	process: "process.sealed",
 } as const satisfies Record<TelemetryScopeKind, string>;
+/** The seal a share archive's filtered scope carries in place of its own (#434). */
+export const SHARE_SEAL_EVENT = "share.sealed";
 
 const sha256Hex = Type.String({ pattern: "^[0-9a-f]{64}$" });
 const closed = { additionalProperties: false };
@@ -59,6 +61,8 @@ export const ScopeBundleManifestSchema = Type.Object(
 		objects: ScopeSealedSchema.properties.objects,
 		/** `head` is the chain head after the seal line, so it commits to the seal itself. */
 		seal: Type.Object({ recordId: Type.String(), head: sha256Hex }, closed),
+		/** Present on a scope `telemetry share` filtered: its seal is `share.sealed` under this profile (#434). */
+		share: Type.Optional(Type.Object({ profile: ShareProfileSchema }, closed)),
 	},
 	closed,
 );
@@ -134,6 +138,7 @@ export function scopeBundleManifest(input: {
 	segments: ScopeFileEntry[];
 	objects: ScopeObjectEntry[];
 	seal: { recordId: string; head: string };
+	share?: ScopeBundleManifest["share"];
 }): ScopeBundleManifest {
 	return {
 		format: SCOPE_BUNDLE_FORMAT,
@@ -145,6 +150,7 @@ export function scopeBundleManifest(input: {
 		segments: input.segments,
 		objects: input.objects,
 		seal: input.seal,
+		...(input.share !== undefined ? { share: input.share } : {}),
 	};
 }
 
@@ -233,7 +239,7 @@ export interface ChainWalk {
 	segments: ScopeFileEntry[];
 }
 
-const SEAL_KINDS: ReadonlySet<string> = new Set(Object.values(SEAL_EVENTS));
+const SEAL_KINDS: ReadonlySet<string> = new Set([...Object.values(SEAL_EVENTS), SHARE_SEAL_EVENT]);
 
 function sealOwner(record: TelemetryRecord, kind: TelemetryScopeKind): string | undefined {
 	const ctx = record.ctx;
@@ -249,11 +255,16 @@ function sameEntries<T>(left: readonly T[], right: readonly T[]): boolean {
  * Replay a scope's chain over its segments, oldest first, and check every seal it holds against the prefix that seal
  * covers: its head, its line count, the segments before it and its own segment's bytes before the seal line (#434).
  * An earlier seal stays a commitment to the history before it, so a resealed scope cannot launder an edit. `scope`
- * also binds each seal to the scope; `objects` checks each seal's object list against the current objects.
+ * also binds each seal to the scope, and to `sealEvent` when given, else to the scope's own seal event; `objects` checks
+ * each seal's object list against the current objects.
  */
 export function walkTelemetryChain(
 	files: ReadonlyArray<{ name: string; bytes: Buffer }>,
-	check: { scope?: { kind: TelemetryScopeKind; id: string }; objects?: ReadonlyMap<string, ScopeObjectEntry> } = {},
+	check: {
+		scope?: { kind: TelemetryScopeKind; id: string };
+		sealEvent?: string;
+		objects?: ReadonlyMap<string, ScopeObjectEntry>;
+	} = {},
 ): ChainWalk | { mismatch: SealMismatch } {
 	let chain: TelemetryChain = EMPTY_TELEMETRY_CHAIN;
 	const seals: ChainSeal[] = [];
@@ -296,8 +307,9 @@ export function walkTelemetryChain(
 				const data = sealRow.data as ScopeSealed;
 				const label = `seal ${sealRow.id}`;
 				if (check.scope) {
-					if (sealRow.k !== SEAL_EVENTS[check.scope.kind])
-						return { mismatch: { kind: "seal", detail: `${label} is ${sealRow.k}, not ${SEAL_EVENTS[check.scope.kind]}` } };
+					const expected = check.sealEvent ?? SEAL_EVENTS[check.scope.kind];
+					if (sealRow.k !== expected)
+						return { mismatch: { kind: "seal", detail: `${label} is ${sealRow.k}, not ${expected}` } };
 					if (sealOwner(sealRow, check.scope.kind) !== check.scope.id)
 						return { mismatch: { kind: "seal", detail: `${label} names another scope` } };
 				}
@@ -403,6 +415,7 @@ export function verifyTelemetryScope(files: TelemetryScopeFiles): SealVerdict {
 		return failed({ kind: "manifest", detail: "segments are not listed oldest first" });
 	const walk = walkTelemetryChain(files.segments, {
 		scope: manifest.scope,
+		...(manifest.share !== undefined ? { sealEvent: SHARE_SEAL_EVENT } : {}),
 		objects: new Map(manifest.objects.map((object) => [object.id, object])),
 	});
 	if ("mismatch" in walk) return failed(walk.mismatch);
@@ -415,6 +428,8 @@ export function verifyTelemetryScope(files: TelemetryScopeFiles): SealVerdict {
 		return failed({ kind: "seal", detail: "seal is not in the live segment" });
 	if (!sameEntries((last.record.data as ScopeSealed).objects, manifest.objects))
 		return failed({ kind: "seal", detail: "seal object list differs from the bundle" });
+	if (manifest.share !== undefined && (last.record.data as { profile?: unknown }).profile !== manifest.share.profile)
+		return failed({ kind: "seal", detail: "share profile differs from the seal" });
 	if (last.headAfter !== manifest.seal.head)
 		return failed({ kind: "seal", detail: "bundle head differs from the chain after the seal" });
 	// The manifest's provenance is a copy of what the chain committed; a copy that disagrees is forged (#434).
