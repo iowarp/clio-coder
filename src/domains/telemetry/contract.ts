@@ -195,6 +195,11 @@ export interface TelemetryReadModel {
 	open(sessionId: string): Promise<TelemetryView | null>;
 	/** Any run journal, read cold. */
 	run(runId: string): Promise<RunTelemetryV1>;
+	/**
+	 * One quantity over this process's own calls, those no session or run owned, read after its journal flushes; null
+	 * when the process journaled none (#434).
+	 */
+	processQuantity?(metric: FactMetric): Promise<Quantity | null>;
 	/** Resolve a reference against the live session when it owns the ref, else against a cold read of its owner. */
 	explain(ref: FactRef): Promise<ExplanationV1 | null>;
 	quota(provider?: string): QuotaStateV1;

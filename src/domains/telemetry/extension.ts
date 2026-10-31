@@ -312,7 +312,7 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 			}
 		},
 	);
-	const telemetry = createLiveTelemetryModel({ stateDir: clioStateDir });
+	const telemetry = createLiveTelemetryModel({ stateDir: clioStateDir, process: () => processJournal });
 	// Every host that boots this domain (TUI, ACP, headless run, fleet) owns one process journal, opened lazily (#434).
 	let processJournal: ProcessJournal | undefined;
 	// A change touching several effect kinds reaches each listener with one payload; it is one change (#434).

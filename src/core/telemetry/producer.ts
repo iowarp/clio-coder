@@ -163,11 +163,7 @@ function enqueueTelemetry(
 	}
 	// A session fact names its session at its seam; one emitted without a context is a gap, never the process's (#434).
 	const ctx = given ?? (definition.scope === "session" ? undefined : processOwner?.context);
-	const sink = given
-		? definition.scope === "process"
-			? processOwner?.sink
-			: sinkFor(given)
-		: processOwner?.sink;
+	const sink = given ? (definition.scope === "process" ? processOwner?.sink : sinkFor(given)) : processOwner?.sink;
 	const reopens =
 		definition.scope === "session" &&
 		typeof ctx?.sessionId === "string" &&

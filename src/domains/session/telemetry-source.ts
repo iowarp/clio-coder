@@ -286,6 +286,22 @@ export function loadHostQuotaRecordsAsync(stateDir: string): Promise<TelemetryRe
 	return runAsync(hostQuotaRecords(stateDir, null));
 }
 
+/** One process journal: the calls its process made with no session or run (#434). */
+function* loadProcess(stateDir: string, processId: string): Load<JournalSource> {
+	assertSafeId(processId, "process");
+	const directory = telemetryProcessDirectory(stateDir, processId);
+	try {
+		return journalSourceFromRead(yield* journal(directory), yield* exists(telemetryJournalPath(directory)));
+	} catch {
+		// An unreadable process journal stays visible as unknown coverage (#434).
+		return { present: false, records: [], modes: [], skipped: 1, damaged: 0 };
+	}
+}
+
+export function loadProcessTelemetrySourceAsync(stateDir: string, processId: string): Promise<JournalSource> {
+	return runAsync(loadProcess(stateDir, processId));
+}
+
 export function loadRunTelemetrySource(stateDir: string, runId: string): JournalSource {
 	return runSync(loadRun(stateDir, runId));
 }
@@ -512,6 +528,18 @@ function* loadRepo(stateDir: string, window: RepoTelemetryWindow): Load<RepoTele
 			const source = yield* loadSession(stateDir, sessionId, null, new Set(), false);
 			if (!source) continue;
 			for (const runId of source.runs.keys()) referenced.add(runId);
+			sessions.push(windowSession(source, from, to));
+		}
+	}
+	// A call no session or run owned lives in its process's journal and belongs to no workspace, so only the
+	// every-workspace window counts it, as its own sessionless source (#434).
+	if (window.cwdHash === null) {
+		const processes = telemetryProcessesDirectory(stateDir);
+		for (const processId of ((yield* list(processes)) ?? []).filter((name) => PROCESS_ID.test(name)).sort()) {
+			if ((yield* newestWrite(join(processes, processId), isTelemetryJournalFile)) < from) continue;
+			const journal = yield* loadProcess(stateDir, processId);
+			if (!journal.records.some(isCall)) continue;
+			const source: SessionSource = { sessionId: processId, journal, runs: new Map(), parent: null };
 			sessions.push(windowSession(source, from, to));
 		}
 	}

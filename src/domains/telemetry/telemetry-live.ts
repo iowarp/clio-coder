@@ -33,6 +33,7 @@ import {
 	foldAccountQuota,
 	journalSourceFromRead,
 	prepareSource,
+	processQuantity,
 	quantityOf,
 	runsReport,
 	runTelemetry,
@@ -56,6 +57,7 @@ type Mode = SegmentHeader["mode"];
 interface TelemetrySourceLoader {
 	loadSessionTelemetrySourceAsync(stateDir: string, sessionId: string): Promise<SessionSource | null>;
 	loadRunTelemetrySourceAsync(stateDir: string, runId: string): Promise<JournalSource>;
+	loadProcessTelemetrySourceAsync?(stateDir: string, processId: string): Promise<JournalSource>;
 	/** The run's sealed receipt through its integrity check; absent from a loader that does not read receipts. */
 	loadRunReceiptEvidence?(stateDir: string, runId: string): ReceiptEvidenceV1;
 	/** This host's journaled quota readings across its process journals; absent from a loader that reads none. */
@@ -65,9 +67,16 @@ export interface LiveTelemetryOptions {
 	stateDir: () => string;
 	/** The session domain's cold loader, imported on first seed so it stays off startup. */
 	loader?: () => Promise<TelemetrySourceLoader>;
+	/** This process's journal, flushed before its own calls are read; absent where no process journal is owned. */
+	process?: () => { processId: string; flush(): Promise<void> } | undefined;
 }
 export interface LiveTelemetryModel extends TelemetryReadModel {
 	bind(sessionId: string | null): void;
+	/**
+	 * The bound session once its seed has merged, so the view holds every persisted record and no whole-scope sum is
+	 * partial for want of the cold read. A reseed while waiting waits for the new seed; null when nothing is bound.
+	 */
+	settled(): Promise<TelemetryView | null>;
 	stop(): void;
 }
 
@@ -150,6 +159,8 @@ interface Binding {
 	off: Array<() => void>;
 	version: number;
 	view?: { version: number; view: LocalView };
+	/** Settles when the seed installs, or when the binding is replaced before it does. */
+	seeded: { promise: Promise<void>; resolve: () => void };
 }
 
 type QuotaRow = QuotaStateV1["providers"][number];
@@ -327,6 +338,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		const binding = current;
 		current = null;
 		for (const off of binding?.off ?? []) off();
+		binding?.seeded.resolve();
 	};
 
 	const onEvent = (binding: Binding) => (owner: string, event: PersistedTelemetry) => {
@@ -442,6 +454,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 		for (const { entry, runId } of late) void readRun(binding, entry, runId);
 		binding.version += 1;
 		markDirty(TELEMETRY_TOPICS);
+		binding.seeded.resolve();
 	};
 
 	const seed = async (binding: Binding) => {
@@ -489,6 +502,10 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	};
 
 	const bindTo = (sessionId: string) => {
+		let resolve = () => {};
+		const promise = new Promise<void>((done) => {
+			resolve = done;
+		});
 		const binding: Binding = {
 			sessionId,
 			owners: new Map(),
@@ -496,12 +513,14 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			nodes: new Map(),
 			off: [],
 			version: 0,
+			seeded: { promise, resolve },
 		};
 		current = binding;
 		binding.off.push(subscribeAllPersistedTelemetry(onEvent(binding)));
 		markDirty(TELEMETRY_TOPICS);
-		// Started on a later turn of the event loop so binding never adds a read to the caller's path.
-		setImmediate(() => void seed(binding));
+		// Started on a later turn of the event loop so binding never adds a read to the caller's path. A seed that throws
+		// before it installs still releases settled(), so budget admission reads a partial view instead of hanging (#434).
+		setImmediate(() => void seed(binding).finally(() => binding.seeded.resolve()));
 	};
 	const reseed = (sessionId: string) => {
 		unbind();
@@ -660,6 +679,13 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 			listeners.clear();
 		},
 		live,
+		async settled() {
+			activate();
+			// A torn-tail repair reseeds; past a few in a row the caller takes the seeding view, every sum marked partial.
+			for (let attempt = 0; attempt < SEED_ATTEMPTS && current && current.root === null; attempt += 1)
+				await current.seeded.promise;
+			return live();
+		},
 		open,
 		async run(runId) {
 			const loader = await load();
@@ -670,10 +696,20 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 				loader.loadRunReceiptEvidence?.(options.stateDir(), runId) ?? null,
 			);
 		},
+		async processQuantity(metric) {
+			const owned = options.process?.();
+			if (!owned) return null;
+			await owned.flush();
+			const loader = await load();
+			const source = await loader.loadProcessTelemetrySourceAsync?.(options.stateDir(), owned.processId);
+			// A process that journaled nothing of its own has made no call outside a session or run.
+			return source?.present ? processQuantity(owned.processId, source, metric) : null;
+		},
 		async explain(ref) {
 			const parsed = parseFactRef(ref);
-			// A repository window is the usage report's own read; nothing live holds one (#434).
-			if (!parsed || parsed.scope === "repo") return null;
+			// A repository window is the usage report's own read; nothing live holds one. A process scope is read through
+			// processQuantity, never explained against a session (#434).
+			if (!parsed || parsed.scope === "repo" || parsed.scope === "process") return null;
 			const view = live();
 			if (view && (parsed.scope === "run" ? view.references(parsed.owner) : parsed.owner === view.sessionId))
 				return view.explain(ref);

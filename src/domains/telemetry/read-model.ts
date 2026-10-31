@@ -867,7 +867,7 @@ interface Selection {
 	describe: string;
 }
 
-type View = { session: SessionSource } | { run: Run } | { repo: RepoSource };
+type View = { session: SessionSource } | { run: Run } | { repo: RepoSource } | { process: Run };
 /** An absent run journal is already one unknown contribution; a damaged one adds its own. */
 const runGap = (run: Run) => (run.source.present ? run.gap : 0);
 
@@ -880,6 +880,20 @@ function select(view: View, ref: ParsedFactRef): Selection | null {
 			? selectRepo(view.repo, group, ref.scope)
 			: null;
 	if (ref.scope === "repo") return null;
+	// A process journal folds as a run's does: its calls are whole attempts with no session to split them by (#434).
+	if ("process" in view || ref.scope === "process") {
+		if (!("process" in view) || ref.scope !== "process" || view.process.runId !== ref.owner) return null;
+		const owned = view.process;
+		if (ref.attemptId) {
+			const attempt = owned.byAttempt.get(ref.attemptId);
+			return attempt ? { parts: [{ attempts: [attempt], gap: 0 }], attempt, describe: "one process attempt" } : null;
+		}
+		const attempts = group ? owned.attempts.filter((attempt) => attemptInGroup(attempt, group)) : owned.attempts;
+		return {
+			parts: [{ attempts, gap: owned.gap }],
+			describe: `the process journal's attempts${group ? ` where ${group.by}=${group.key}` : ""}`,
+		};
+	}
 	if (ref.scope === "run") {
 		const run =
 			"run" in view ? (view.run.runId === ref.owner ? view.run : undefined) : analyze(view.session).runs.get(ref.owner);
@@ -1848,6 +1862,14 @@ export function runTokenCount(
 }
 
 /** A repository window's token fields: the session view's token quantities over the `repo` scope (#434 §11.1). */
+/**
+ * One quantity over a process journal: the calls its process made with no session or run, such as System One outside a
+ * session or a startup warm (#434).
+ */
+export function processQuantity(processId: string, source: JournalSource, metric: FactMetric): Quantity {
+	return quantity({ process: analyzeRun(processId, source) }, { scope: "process", owner: processId, metric });
+}
+
 export function repoTokenQuantities(repo: RepoSource): SessionTelemetryV1["own"]["tokens"] {
 	return tokenQuantities({ repo }, { scope: "repo", owner: repo.owner });
 }

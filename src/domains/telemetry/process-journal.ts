@@ -23,6 +23,8 @@ export function telemetryProcessId(): string {
 const PENDING_LIMIT = 4096;
 
 export interface ProcessJournal {
+	/** The process id its journal is filed under. */
+	readonly processId: string;
 	/** Flush what reached the writer. */
 	flush(): Promise<void>;
 	/** Write `process.exited` when the journal opened, then release it; a journal that never opened stays absent. */
@@ -106,6 +108,7 @@ export function createProcessJournal(
 	};
 	const unregister = registerProcessTelemetrySink(context, sink);
 	return {
+		processId: context.processId,
 		async flush() {
 			await (await writer)?.flush();
 		},
