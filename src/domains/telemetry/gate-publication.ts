@@ -15,6 +15,8 @@ import {
 import { SEAL_EVENTS } from "./seal.js";
 
 const publications = new Map<string, Promise<void>>();
+/** Lifecycle records that make a sealed scope live again until its next lifecycle seal. */
+const REOPEN_KINDS: ReadonlySet<string> = new Set(["session.opened", "session.resumed"]);
 
 /** Publish once by stable decision id, including recovery after an artifact rename (#434). */
 export async function publishGateDecision(
@@ -52,7 +54,11 @@ export async function publishGateDecision(
 			let lastSeal = -1;
 			for (const [index, { record }] of records.entries()) if (sealKinds.has(record.k)) lastSeal = index;
 			const bundled = existsSync(telemetryBundlePath(directory));
-			const owed = lastSeal >= 0 && (lastSeal < records.length - 1 || !bundled);
+			const after = records.slice(lastSeal + 1);
+			// A lifecycle reopen after the seal made the scope live again; its next lifecycle seal is the one owed, not
+			// this publication's, so a resumed session that never closed again is left live (#434).
+			const reopened = after.some(({ record }) => REOPEN_KINDS.has(record.k));
+			const owed = lastSeal >= 0 && !reopened && (after.length > 0 || !bundled);
 			// A retry of a publication that already landed resolves by reading, unless its seal is still owed.
 			if (decided && !owed) return;
 			reseal = owed || bundled;
