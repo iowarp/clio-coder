@@ -1978,7 +1978,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		origin: ReturnType<SessionContract["current"]>,
 	): { telemetry?: CallJournalOptions } => {
 		const acquire = deps.telemetry?.acquireTelemetrySession;
-		return origin && acquire
+		return acquire
 			? {
 					telemetry: {
 						origin,
@@ -1987,7 +1987,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						...(journalOwnsSideUsage(label)
 							? {
 									onSettled: (facts) => {
-										if (!deps.telemetry || deps.session?.current()?.id !== origin.id) return;
+										if (!deps.telemetry || !origin || deps.session?.current()?.id !== origin.id) return;
 										recordSettledSideCall(deps.telemetry, facts);
 									},
 								}

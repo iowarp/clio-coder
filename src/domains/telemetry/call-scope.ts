@@ -1,6 +1,6 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { TelemetryCall } from "../../core/telemetry/producer.js";
-import { beginCall } from "../../core/telemetry/producer.js";
+import { beginCall, processTelemetryContext } from "../../core/telemetry/producer.js";
 import type { CallSettled, CallStarted } from "../../core/telemetry/schemas.js";
 import type { CostProvenance } from "../providers/types/cost-provenance.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "./call-facts.js";
@@ -8,7 +8,8 @@ import type { TelemetryContract } from "./contract.js";
 import type { TelemetrySessionOrigin } from "./session-journals.js";
 
 export interface CallJournalOptions {
-	origin: TelemetrySessionOrigin;
+	/** Null for a call no session owns, such as a startup warm: it is the process's own call (#434). */
+	origin: TelemetrySessionOrigin | null;
 	acquire: NonNullable<TelemetryContract["acquireTelemetrySession"]>;
 	label: CallStarted["label"];
 	targetId: string;
@@ -24,10 +25,11 @@ export interface AdmissionHold {
 
 /** One logical helper call retains its originating writer across schema and auth retries (#434). */
 export async function openCallScope(options: CallJournalOptions | undefined, model: { api: string; id: string }) {
-	const acquired = options ? await options.acquire(options.origin, options.label) : undefined;
-	// A writer that failed to open owns no call: its rounds settle no call id, so their writers keep the spend in the
-	// out-of-turn store rather than skip it for a journal that never received it (#434).
+	const acquired = options?.origin ? await options.acquire(options.origin, options.label) : undefined;
+	// A session writer that failed to open owns no call; its journal records the gap (#434). A call with no session is
+	// the process journal's.
 	const lease = acquired?.journaled ? acquired : undefined;
+	const owner = options?.origin === null ? processTelemetryContext() : lease?.context;
 	let call: TelemetryCall | undefined;
 	let settledIdentity: { callId: string; attemptId: string } | undefined;
 	const settled = (facts: CallSettled | undefined): CallSettled | undefined => {
@@ -46,7 +48,7 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 		startAttempt(
 			request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>,
 		): { callId: string; attemptId: string } | undefined {
-			if (!options || !lease) return;
+			if (!options || !owner) return;
 			const previousAttempt = call?.attemptId;
 			call = call
 				? (call.nextAttempt(request) ?? call)
@@ -64,7 +66,7 @@ export async function openCallScope(options: CallJournalOptions | undefined, mod
 							toolChoice: "none",
 							...request,
 						},
-						lease.context,
+						owner,
 					);
 			if (call.attemptId !== previousAttempt) settledIdentity = undefined;
 			return { callId: call.callId, attemptId: call.attemptId };

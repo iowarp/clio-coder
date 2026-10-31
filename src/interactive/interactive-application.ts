@@ -2119,16 +2119,17 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 						isBusy,
 						callJournal: (targetId, runtimeId, costProvenance) => {
 							const acquire = deps.telemetry.acquireTelemetrySession;
-							if (!startupSession || !acquire) return undefined;
+							if (!acquire) return undefined;
 							return {
-								origin: startupSession,
+								origin: startupSession ?? null,
 								acquire,
 								label: "prewarm",
 								targetId,
 								runtimeId,
 								costProvenance,
 								onSettled: (facts) => {
-									if ((deps.session?.current()?.id ?? null) === startupSession.id) recordSettledSideCall(deps.telemetry, facts);
+									if (startupSession && deps.session?.current()?.id === startupSession.id)
+										recordSettledSideCall(deps.telemetry, facts);
 								},
 							};
 						},

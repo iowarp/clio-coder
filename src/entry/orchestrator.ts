@@ -1132,7 +1132,7 @@ export function createBackgroundMemoryRouting(
 					...scope,
 					startAttempt() {
 						const identity = scope.startAttempt();
-						if (identity && options) {
+						if (identity && options?.origin) {
 							try {
 								request.onCall?.({ ...identity, sessionId: options.origin.id, repoIdentity: options.origin.cwdHash });
 							} catch {
@@ -2731,13 +2731,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const acquire = telemetry?.acquireTelemetrySession;
 		const target = providers.getTarget(targetId);
 		const runtime = target ? providers.getRuntime(target.runtime) : null;
-		if (!origin || !acquire || !target || !runtime) return undefined;
+		if (!acquire || !target || !runtime) return undefined;
 		return {
-			origin,
+			origin: origin ?? null,
 			acquire,
 			label: "memory",
 			onSettled: (facts) => {
-				if (!telemetry || session?.current()?.id !== origin.id) return;
+				if (!telemetry || !origin || session?.current()?.id !== origin.id) return;
 				if (facts.disposition === "never_sent") telemetry.recordNeverSentCalls(1);
 				for (const call of usageCallsFromAttempts([{ started: facts, settled: facts }])) recordUsageCall(telemetry, call);
 			},

@@ -1,6 +1,6 @@
 import type { CallObservation } from "../core/call-failure.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
-import { beginCall } from "../core/telemetry/producer.js";
+import { beginCall, processTelemetryContext } from "../core/telemetry/producer.js";
 import { usageCallsFromAttempts } from "../domains/session/journal-usage.js";
 import { recordUsageCall } from "../domains/session/usage-record.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../domains/telemetry/call-facts.js";
@@ -83,8 +83,10 @@ export function createSystemOneRequestAdmission(deps: {
 			session && repoIdentity
 				? await deps.telemetry?.acquireTelemetrySession?.({ id: session, cwdHash: repoIdentity }, label)
 				: undefined;
-		// Without an open writer the decision mints no call, so its spend reaches the out-of-turn store (#434).
-		const call = lease?.journaled
+		// A decision outside a session is the process's own call; a session whose writer failed to open mints none and
+		// its journal records the gap (#434).
+		const owner = session && repoIdentity ? (lease?.journaled ? lease.context : undefined) : processTelemetryContext();
+		const call = owner
 			? beginCall(
 					{
 						label,
@@ -98,7 +100,7 @@ export function createSystemOneRequestAdmission(deps: {
 						roundKind: "tools-removed",
 						toolChoice: "none",
 					},
-					lease.context,
+					owner,
 				)
 			: undefined;
 		if (call) noteSystemOneCall(call.callId);

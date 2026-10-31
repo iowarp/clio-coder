@@ -75,6 +75,20 @@ export function registerProcessTelemetrySink(context: TelemetryContext, sink: Te
 	};
 }
 
+/** The process scope's context, so a call made with no session or run is still a call of this process (#434). */
+export function processTelemetryContext(): TelemetryContext | undefined {
+	return processOwner?.context;
+}
+
+/** A process context reaches only this process's own journal; any other owner resolves through its registered sink. */
+function sinkFor(ctx: TelemetryContext): TelemetrySink | undefined {
+	if ("processId" in ctx) {
+		const owner = processOwner;
+		return owner && "processId" in owner.context && owner.context.processId === ctx.processId ? owner.sink : undefined;
+	}
+	return sinks.get(telemetryOwner(ctx));
+}
+
 function registerSink(owner: string, sink: TelemetrySink): () => void {
 	if (sinks.has(owner)) throw new Error(`telemetry already has an owner for ${owner}`);
 	sinks.set(owner, sink);
@@ -105,7 +119,7 @@ function sinkAdmits(sink: TelemetrySink, kind: JournalEventName): boolean {
  */
 export function telemetryCaptures(kind: JournalEventName, ctx = telemetryContext()): boolean {
 	// A process fact is captured under the process journal's mode whatever context asks (#434).
-	const sink = ctx && journalDefinition(kind).scope !== "process" ? sinks.get(telemetryOwner(ctx)) : processOwner?.sink;
+	const sink = ctx && journalDefinition(kind).scope !== "process" ? sinkFor(ctx) : processOwner?.sink;
 	if (!sink) return false;
 	try {
 		return sinkAdmits(sink, kind);
@@ -152,7 +166,7 @@ function enqueueTelemetry(
 	const sink = given
 		? definition.scope === "process"
 			? processOwner?.sink
-			: sinks.get(telemetryOwner(given))
+			: sinkFor(given)
 		: processOwner?.sink;
 	const reopens =
 		definition.scope === "session" &&
@@ -197,7 +211,7 @@ export function enqueueReopenedTelemetry(record: PendingTelemetry): boolean {
 
 function traceLiveEvent(name: EventName, given: TelemetryContext | undefined): void {
 	const ctx = given ?? processOwner?.context;
-	const sink = given ? sinks.get(telemetryOwner(given)) : processOwner?.sink;
+	const sink = given ? sinkFor(given) : processOwner?.sink;
 	if (!ctx || !sink) return;
 	try {
 		if (!sinkAdmits(sink, "bus.traced")) return;
@@ -309,10 +323,15 @@ export function telemetryCallInContext(): TelemetryCall | undefined {
 	return attemptId === undefined ? undefined : liveAttempts.get(attemptId);
 }
 
+/**
+ * A call made with no session or run context is the process's own call: it carries the process context with its call
+ * and attempt ids, so the process journal holds it whole instead of refusing it as an invalid record (#434).
+ */
 export function beginCall(
 	input: Omit<CallStarted, "callId" | "attemptId" | "attempt">,
-	ctx = telemetryContext(),
+	given = telemetryContext(),
 ): TelemetryCall {
+	const ctx = given ?? processOwner?.context;
 	const callId = newCallId();
 	const attempt = (number: number, request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): TelemetryCall => {
 		const attemptId = newAttemptId();
