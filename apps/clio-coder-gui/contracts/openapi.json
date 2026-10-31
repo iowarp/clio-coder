@@ -4264,7 +4264,7 @@
 											}
 										},
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_f29cad1a"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
 										},
 										"councils": {
 											"type": "object",
@@ -4827,7 +4827,7 @@
 														]
 													},
 													"evidence": {
-														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_f29cad1a"
+														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
 													},
 													"parentRunId": {
 														"anyOf": [
@@ -5022,7 +5022,7 @@
 											]
 										},
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_f29cad1a"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
 										},
 										"parentRunId": {
 											"anyOf": [
@@ -5116,7 +5116,7 @@
 									"required": ["evidence", "record"],
 									"properties": {
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_f29cad1a"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
 										},
 										"record": {
 											"anyOf": [
@@ -5125,7 +5125,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_839c990e"
+															"$ref": "#/components/schemas/Union_1d343efa"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -15864,7 +15864,7 @@
 														"$ref": "#/components/schemas/RunRowV1"
 													},
 													"evidence": {
-														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_f29cad1a"
+														"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
 													}
 												},
 												"additionalProperties": false
@@ -16065,7 +16065,7 @@
 											"$ref": "#/components/schemas/RunRowV1"
 										},
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_f29cad1a"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
 										}
 									},
 									"additionalProperties": false
@@ -16139,7 +16139,7 @@
 									"required": ["evidence", "record"],
 									"properties": {
 										"evidence": {
-											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_f29cad1a"
+											"$ref": "#/components/schemas/Object_evidence_foldVersion_generatedAt_01df877b"
 										},
 										"record": {
 											"anyOf": [
@@ -16148,7 +16148,7 @@
 													"required": ["settled", "seal", "result"],
 													"properties": {
 														"settled": {
-															"$ref": "#/components/schemas/Union_839c990e"
+															"$ref": "#/components/schemas/Union_1d343efa"
 														},
 														"seal": {
 															"$ref": "#/components/schemas/Union_4dc8870f"
@@ -17975,13 +17975,6 @@
 					"$ref": "#/components/schemas/Object_line_path_fe38559e"
 				}
 			},
-			"Array_76e95f7c": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_canonicalization_field_function_9bd1faa9"
-				},
-				"maxItems": 512
-			},
 			"Array_779968c9": {
 				"type": "array",
 				"items": {
@@ -18088,6 +18081,13 @@
 				"items": {
 					"$ref": "#/components/schemas/Object_key_label_resetsAt_0c3b4eb1"
 				}
+			},
+			"Array_b41eac3a": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_canonicalization_field_function_dbe56c61"
+				},
+				"maxItems": 512
 			},
 			"Array_bc9113de": {
 				"type": "array",
@@ -18508,41 +18508,6 @@
 					"internal"
 				]
 			},
-			"Enum_4a16c29e": {
-				"enum": [
-					"worker-prompt",
-					"compiled-system-prompt",
-					"dynamic-messages",
-					"tool-names",
-					"tool-schemas",
-					"briefing",
-					"steering",
-					"worker-context-snapshot",
-					"worker-context-seed",
-					"project-context",
-					"plan-text",
-					"execution-plan",
-					"run-receipt",
-					"validation-result",
-					"response-schema",
-					"result-contract",
-					"safety-rule-pack",
-					"project-safety-policy",
-					"protected-artifacts",
-					"worker-permit",
-					"mcp-server",
-					"checkout-tree",
-					"check-payload",
-					"task-diff",
-					"route-decision",
-					"agent-spec",
-					"route-prompt-composition",
-					"endpoint",
-					"settings",
-					"skill-file",
-					"package-provenance"
-				]
-			},
 			"Enum_5493bc27": {
 				"enum": [
 					"run_record",
@@ -18579,15 +18544,6 @@
 			},
 			"Enum_6f2ad7b7": {
 				"enum": ["passed", "failed", "inconclusive", "not_independent", "absent", "unknown", "not_applicable"]
-			},
-			"Enum_747bca52": {
-				"enum": [
-					"validation-tool",
-					"read-only-agent",
-					"no-validation-tool",
-					"acp-external-unobserved",
-					"receipt-unavailable"
-				]
 			},
 			"Enum_7c26d95b": {
 				"enum": ["succeeded", "failed", "timed_out", "stalled", "canceled", "denied_by_policy", "spawn_failed"]
@@ -18689,6 +18645,15 @@
 					"unknown"
 				]
 			},
+			"Enum_c71171af": {
+				"enum": [
+					"validation-tool",
+					"read-only-agent",
+					"no-validation-tool",
+					"acp-external-unobserved",
+					"result-unavailable"
+				]
+			},
 			"Enum_d6fd3d9d": {
 				"enum": [
 					"working_set_evict",
@@ -18703,6 +18668,41 @@
 					"transport_reset",
 					"input_changed",
 					"tool_choice_change"
+				]
+			},
+			"Enum_dc3d24e7": {
+				"enum": [
+					"worker-prompt",
+					"compiled-system-prompt",
+					"dynamic-messages",
+					"tool-names",
+					"tool-schemas",
+					"briefing",
+					"steering",
+					"worker-context-snapshot",
+					"worker-context-seed",
+					"project-context",
+					"plan-text",
+					"execution-plan",
+					"run-settlement",
+					"validation-result",
+					"response-schema",
+					"result-contract",
+					"safety-rule-pack",
+					"project-safety-policy",
+					"protected-artifacts",
+					"worker-permit",
+					"mcp-server",
+					"checkout-tree",
+					"check-payload",
+					"task-diff",
+					"route-decision",
+					"agent-spec",
+					"route-prompt-composition",
+					"endpoint",
+					"settings",
+					"skill-file",
+					"package-provenance"
 				]
 			},
 			"Enum_f3897064": {
@@ -20560,7 +20560,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_agentId_apiCalls_at_40886cc2": {
+			"Object_agentId_apiCalls_at_489ca586": {
 				"type": "object",
 				"required": [
 					"version",
@@ -20606,7 +20606,6 @@
 					"verification",
 					"quality",
 					"validationGrounding",
-					"findings",
 					"worktree",
 					"hostVerification",
 					"contextProvenance",
@@ -20616,7 +20615,7 @@
 					"digest"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_1f8627a0"
+					"$ref": "#/components/schemas/Shape_8d3167ba"
 				},
 				"additionalProperties": false
 			},
@@ -21996,7 +21995,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_basis_state_14a62309": {
+			"Object_basis_state_c37c0862": {
 				"type": "object",
 				"required": ["state", "basis"],
 				"properties": {
@@ -22004,7 +22003,7 @@
 						"enum": ["verified", "unverified", "not_applicable", "unknown"]
 					},
 					"basis": {
-						"$ref": "#/components/schemas/Enum_747bca52"
+						"$ref": "#/components/schemas/Enum_c71171af"
 					}
 				},
 				"additionalProperties": false
@@ -22528,7 +22527,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_canonicalization_field_function_9bd1faa9": {
+			"Object_canonicalization_field_function_dbe56c61": {
 				"type": "object",
 				"required": ["field", "label", "function", "canonicalization", "subject", "hash"],
 				"properties": {
@@ -22548,10 +22547,10 @@
 						"$ref": "#/components/schemas/Enum_6e0d3d09"
 					},
 					"subject": {
-						"$ref": "#/components/schemas/Enum_4a16c29e"
+						"$ref": "#/components/schemas/Enum_dc3d24e7"
 					},
 					"store": {
-						"enum": ["run-receipts", "context-seeds"]
+						"enum": ["run-journals", "context-seeds"]
 					},
 					"hash": {
 						"type": "string",
@@ -23652,7 +23651,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_evidence_foldVersion_generatedAt_f29cad1a": {
+			"Object_evidence_foldVersion_generatedAt_01df877b": {
 				"type": "object",
 				"required": [
 					"v",
@@ -23667,11 +23666,11 @@
 					"evidence"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_c58631ce"
+					"$ref": "#/components/schemas/Shape_52915b31"
 				},
 				"additionalProperties": false
 			},
-			"Object_exitCode_failureMessage_hostVerification_6a246425": {
+			"Object_exitCode_failureMessage_hostVerification_33f4dedc": {
 				"type": "object",
 				"required": [
 					"outcome",
@@ -23686,7 +23685,7 @@
 					"validationGrounding"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_31ca1c4f"
+					"$ref": "#/components/schemas/Shape_35544bbe"
 				},
 				"additionalProperties": false
 			},
@@ -23776,23 +23775,6 @@
 					},
 					"tags": {
 						"$ref": "#/components/schemas/Array_621cce5c"
-					}
-				},
-				"additionalProperties": false
-			},
-			"Object_findingCount_firstPassSuccess_tags_79566ee8": {
-				"type": "object",
-				"required": ["tags", "firstPassSuccess", "findingCount"],
-				"properties": {
-					"tags": {
-						"$ref": "#/components/schemas/Array_e2dd0398"
-					},
-					"firstPassSuccess": {
-						"type": "boolean"
-					},
-					"findingCount": {
-						"type": "integer",
-						"minimum": 0
 					}
 				},
 				"additionalProperties": false
@@ -25081,7 +25063,7 @@
 						"$ref": "#/components/schemas/Object_display_fact_ref_27b4c44e"
 					},
 					"settled": {
-						"$ref": "#/components/schemas/Union_839c990e"
+						"$ref": "#/components/schemas/Union_1d343efa"
 					},
 					"seal": {
 						"$ref": "#/components/schemas/Union_4dc8870f"
@@ -25730,7 +25712,7 @@
 													"properties": {
 														"kind": {
 															"type": "string",
-															"const": "receipt"
+															"const": "result"
 														},
 														"outcome": {
 															"$ref": "#/components/schemas/Enum_a31a8781"
@@ -26075,208 +26057,6 @@
 					"$ref": "#/components/schemas/Object_contract_contractKind_elapsedMs_e847951a"
 				}
 			},
-			"Shape_1f8627a0": {
-				"version": {
-					"type": "number",
-					"const": 1
-				},
-				"agentId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"executionRole": {
-					"$ref": "#/components/schemas/Enum_f3897064"
-				},
-				"requestOrigin": {
-					"$ref": "#/components/schemas/Union_d7ccdb8b"
-				},
-				"identity": {
-					"$ref": "#/components/schemas/Union_5cd84371"
-				},
-				"route": {
-					"$ref": "#/components/schemas/Object_runtimeId_runtimeKind_targetId_8f906072"
-				},
-				"node": {
-					"$ref": "#/components/schemas/Union_b0281a53"
-				},
-				"routeDecision": {
-					"$ref": "#/components/schemas/Union_cfddcd30"
-				},
-				"attempt": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"phaseTiming": {
-					"$ref": "#/components/schemas/Object_queueWaitMs_totalEndToEndMs_02a09d83"
-				},
-				"routingIntent": {
-					"$ref": "#/components/schemas/Object_deadlineMs_failover_locality_da525918"
-				},
-				"startedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"endedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"outcome": {
-					"$ref": "#/components/schemas/Enum_7c26d95b"
-				},
-				"outcomeCode": {
-					"$ref": "#/components/schemas/Union_d115f01c"
-				},
-				"exitCode": {
-					"anyOf": [
-						{
-							"type": "integer"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"outcomeDetail": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 1024
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"failureMessage": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 1024
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"terminalReason": {
-					"$ref": "#/components/schemas/Enum_8bfbcdd9"
-				},
-				"callIds": {
-					"$ref": "#/components/schemas/Union_90280c4e"
-				},
-				"processExitCode": {
-					"anyOf": [
-						{
-							"type": "integer"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"boundKind": {
-					"$ref": "#/components/schemas/Union_f6453495"
-				},
-				"repairRounds": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_27b4c44e"
-				},
-				"frameType": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_cacheWrite1h_f52a393c"
-				},
-				"totalTokens": {
-					"$ref": "#/components/schemas/Union_c9b7ca4a"
-				},
-				"apiCalls": {
-					"$ref": "#/components/schemas/Union_c9b7ca4a"
-				},
-				"pricing": {
-					"$ref": "#/components/schemas/Object_pricedBy_rateRef_usd_949810bb"
-				},
-				"toolCalls": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"tools": {
-					"$ref": "#/components/schemas/Array_45cb81eb"
-				},
-				"skills": {
-					"$ref": "#/components/schemas/Array_a62e240b"
-				},
-				"toolActivity": {
-					"$ref": "#/components/schemas/Union_829d336f"
-				},
-				"capabilityMismatch": {
-					"$ref": "#/components/schemas/Union_26e30db3"
-				},
-				"budget": {
-					"$ref": "#/components/schemas/Union_e315aa3b"
-				},
-				"context": {
-					"$ref": "#/components/schemas/Object_briefingBytes_project_worker_cbbba89f"
-				},
-				"upstream": {
-					"$ref": "#/components/schemas/Object_gatewayRoutes_responseModelIds_efe23277"
-				},
-				"blockedAttempts": {
-					"$ref": "#/components/schemas/Array_cbd5fc6c"
-				},
-				"escalations": {
-					"$ref": "#/components/schemas/Union_4322c019"
-				},
-				"flowRestrictions": {
-					"$ref": "#/components/schemas/Union_db2664c0"
-				},
-				"toolGovernance": {
-					"$ref": "#/components/schemas/Union_ac760949"
-				},
-				"verification": {
-					"$ref": "#/components/schemas/Object_basis_state_14a62309"
-				},
-				"quality": {
-					"$ref": "#/components/schemas/Union_409ae0f7"
-				},
-				"validationGrounding": {
-					"$ref": "#/components/schemas/Union_1a1ff3a3"
-				},
-				"findings": {
-					"$ref": "#/components/schemas/Union_465d3be4"
-				},
-				"worktree": {
-					"$ref": "#/components/schemas/Union_7acf3e39"
-				},
-				"hostVerification": {
-					"$ref": "#/components/schemas/Union_59a3759f"
-				},
-				"contextProvenance": {
-					"enum": ["recorded", "invalid", "not_applicable", "unknown"]
-				},
-				"hashes": {
-					"$ref": "#/components/schemas/Array_76e95f7c"
-				},
-				"result": {
-					"$ref": "#/components/schemas/Object_canonicalization_function_id_86e98bc9"
-				},
-				"at": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"digest": {
-					"type": "string",
-					"pattern": "^[0-9a-f]{64}$"
-				}
-			},
 			"Shape_2027a49c": {
 				"callId": {
 					"type": "string",
@@ -26521,7 +26301,27 @@
 					"$ref": "#/components/schemas/Array_de2d36b0"
 				}
 			},
-			"Shape_31ca1c4f": {
+			"Shape_338d1b04": {
+				"verdict": {
+					"enum": ["hot", "partial", "cold", "small", "unknown"]
+				},
+				"expectedColdReasons": {
+					"$ref": "#/components/schemas/Array_bc9113de"
+				},
+				"firstDivergentSection": {
+					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
+				},
+				"rePrefilled": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_27b4c44e"
+				},
+				"uncachedPrefill": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_27b4c44e"
+				},
+				"breakUsd": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_27b4c44e"
+				}
+			},
+			"Shape_35544bbe": {
 				"outcome": {
 					"type": "string",
 					"maxLength": 4096
@@ -26559,7 +26359,7 @@
 					]
 				},
 				"verification": {
-					"$ref": "#/components/schemas/Union_c61ecf2b"
+					"$ref": "#/components/schemas/Union_be8c011a"
 				},
 				"typedValidations": {
 					"$ref": "#/components/schemas/Union_e5bede14"
@@ -26575,26 +26375,6 @@
 				},
 				"validationGrounding": {
 					"$ref": "#/components/schemas/Union_374d0695"
-				}
-			},
-			"Shape_338d1b04": {
-				"verdict": {
-					"enum": ["hot", "partial", "cold", "small", "unknown"]
-				},
-				"expectedColdReasons": {
-					"$ref": "#/components/schemas/Array_bc9113de"
-				},
-				"firstDivergentSection": {
-					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
-				},
-				"rePrefilled": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_27b4c44e"
-				},
-				"uncachedPrefill": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_27b4c44e"
-				},
-				"breakUsd": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_27b4c44e"
 				}
 			},
 			"Shape_39fec1f7": {
@@ -26997,6 +26777,44 @@
 				},
 				"settings": {
 					"$ref": "#/components/schemas/Object_issues_layers_rows_bb43261c"
+				}
+			},
+			"Shape_52915b31": {
+				"v": {
+					"type": "number",
+					"const": 1
+				},
+				"foldVersion": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"generatedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"kind": {
+					"type": "string",
+					"const": "run-evidence"
+				},
+				"runId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"record": {
+					"enum": ["settled", "unsettled", "missing"]
+				},
+				"integrity": {
+					"$ref": "#/components/schemas/Object_detail_display_state_0afac497"
+				},
+				"trust": {
+					"$ref": "#/components/schemas/Object_artifactIntegrity_completionEvidence_contextProvenance_faf874aa"
+				},
+				"sealed": {
+					"$ref": "#/components/schemas/Union_fcb44cf2"
+				},
+				"evidence": {
+					"$ref": "#/components/schemas/Union_43aa76d8"
 				}
 			},
 			"Shape_55a7b810": {
@@ -27699,6 +27517,205 @@
 					"$ref": "#/components/schemas/Array_d853a408"
 				}
 			},
+			"Shape_8d3167ba": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"agentId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"executionRole": {
+					"$ref": "#/components/schemas/Enum_f3897064"
+				},
+				"requestOrigin": {
+					"$ref": "#/components/schemas/Union_d7ccdb8b"
+				},
+				"identity": {
+					"$ref": "#/components/schemas/Union_5cd84371"
+				},
+				"route": {
+					"$ref": "#/components/schemas/Object_runtimeId_runtimeKind_targetId_8f906072"
+				},
+				"node": {
+					"$ref": "#/components/schemas/Union_b0281a53"
+				},
+				"routeDecision": {
+					"$ref": "#/components/schemas/Union_cfddcd30"
+				},
+				"attempt": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"phaseTiming": {
+					"$ref": "#/components/schemas/Object_queueWaitMs_totalEndToEndMs_02a09d83"
+				},
+				"routingIntent": {
+					"$ref": "#/components/schemas/Object_deadlineMs_failover_locality_da525918"
+				},
+				"startedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"endedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"outcome": {
+					"$ref": "#/components/schemas/Enum_7c26d95b"
+				},
+				"outcomeCode": {
+					"$ref": "#/components/schemas/Union_d115f01c"
+				},
+				"exitCode": {
+					"anyOf": [
+						{
+							"type": "integer"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"outcomeDetail": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 1024
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"failureMessage": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 1024
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"terminalReason": {
+					"$ref": "#/components/schemas/Enum_8bfbcdd9"
+				},
+				"callIds": {
+					"$ref": "#/components/schemas/Union_90280c4e"
+				},
+				"processExitCode": {
+					"anyOf": [
+						{
+							"type": "integer"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"boundKind": {
+					"$ref": "#/components/schemas/Union_f6453495"
+				},
+				"repairRounds": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_27b4c44e"
+				},
+				"frameType": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_cacheWrite1h_f52a393c"
+				},
+				"totalTokens": {
+					"$ref": "#/components/schemas/Union_c9b7ca4a"
+				},
+				"apiCalls": {
+					"$ref": "#/components/schemas/Union_c9b7ca4a"
+				},
+				"pricing": {
+					"$ref": "#/components/schemas/Object_pricedBy_rateRef_usd_949810bb"
+				},
+				"toolCalls": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"tools": {
+					"$ref": "#/components/schemas/Array_45cb81eb"
+				},
+				"skills": {
+					"$ref": "#/components/schemas/Array_a62e240b"
+				},
+				"toolActivity": {
+					"$ref": "#/components/schemas/Union_829d336f"
+				},
+				"capabilityMismatch": {
+					"$ref": "#/components/schemas/Union_26e30db3"
+				},
+				"budget": {
+					"$ref": "#/components/schemas/Union_e315aa3b"
+				},
+				"context": {
+					"$ref": "#/components/schemas/Object_briefingBytes_project_worker_cbbba89f"
+				},
+				"upstream": {
+					"$ref": "#/components/schemas/Object_gatewayRoutes_responseModelIds_efe23277"
+				},
+				"blockedAttempts": {
+					"$ref": "#/components/schemas/Array_cbd5fc6c"
+				},
+				"escalations": {
+					"$ref": "#/components/schemas/Union_4322c019"
+				},
+				"flowRestrictions": {
+					"$ref": "#/components/schemas/Union_db2664c0"
+				},
+				"toolGovernance": {
+					"$ref": "#/components/schemas/Union_ac760949"
+				},
+				"verification": {
+					"$ref": "#/components/schemas/Object_basis_state_c37c0862"
+				},
+				"quality": {
+					"$ref": "#/components/schemas/Union_409ae0f7"
+				},
+				"validationGrounding": {
+					"$ref": "#/components/schemas/Union_1a1ff3a3"
+				},
+				"worktree": {
+					"$ref": "#/components/schemas/Union_7acf3e39"
+				},
+				"hostVerification": {
+					"$ref": "#/components/schemas/Union_59a3759f"
+				},
+				"contextProvenance": {
+					"enum": ["recorded", "invalid", "not_applicable", "unknown"]
+				},
+				"hashes": {
+					"$ref": "#/components/schemas/Array_b41eac3a"
+				},
+				"result": {
+					"$ref": "#/components/schemas/Object_canonicalization_function_id_86e98bc9"
+				},
+				"at": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"digest": {
+					"type": "string",
+					"pattern": "^[0-9a-f]{64}$"
+				}
+			},
 			"Shape_92bc19ac": {
 				"id": {
 					"type": "string",
@@ -28352,44 +28369,6 @@
 				},
 				"firstToken": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_27b4c44e"
-				}
-			},
-			"Shape_c58631ce": {
-				"v": {
-					"type": "number",
-					"const": 1
-				},
-				"foldVersion": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"generatedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"kind": {
-					"type": "string",
-					"const": "run-evidence"
-				},
-				"runId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"record": {
-					"enum": ["settled", "unsettled", "missing"]
-				},
-				"integrity": {
-					"$ref": "#/components/schemas/Object_detail_display_state_0afac497"
-				},
-				"trust": {
-					"$ref": "#/components/schemas/Object_artifactIntegrity_completionEvidence_contextProvenance_faf874aa"
-				},
-				"sealed": {
-					"$ref": "#/components/schemas/Union_7ef1af01"
-				},
-				"evidence": {
-					"$ref": "#/components/schemas/Union_43aa76d8"
 				}
 			},
 			"Shape_c6011c76": {
@@ -29822,6 +29801,16 @@
 					}
 				]
 			},
+			"Union_1d343efa": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_agentId_apiCalls_at_489ca586"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_1f6fc34d": {
 				"anyOf": [
 					{
@@ -30145,16 +30134,6 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Enum_44ee915d"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
-			"Union_465d3be4": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_findingCount_firstPassSuccess_tags_79566ee8"
 					},
 					{
 						"type": "null"
@@ -30619,16 +30598,6 @@
 					}
 				]
 			},
-			"Union_7ef1af01": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_exitCode_failureMessage_hostVerification_6a246425"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_8010cbdb": {
 				"anyOf": [
 					{
@@ -30708,16 +30677,6 @@
 						"type": "string",
 						"maxLength": 1024,
 						"pattern": "^[A-Za-z0-9_-]+$"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
-			"Union_839c990e": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_agentId_apiCalls_at_40886cc2"
 					},
 					{
 						"type": "null"
@@ -31257,6 +31216,16 @@
 					}
 				]
 			},
+			"Union_be8c011a": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_basis_state_c37c0862"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
 			"Union_c22e678b": {
 				"anyOf": [
 					{
@@ -31278,16 +31247,6 @@
 					{
 						"type": "string",
 						"const": "notice"
-					}
-				]
-			},
-			"Union_c61ecf2b": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_basis_state_14a62309"
-					},
-					{
-						"type": "null"
 					}
 				]
 			},
@@ -31740,6 +31699,16 @@
 						"minLength": 1,
 						"maxLength": 256,
 						"pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_fcb44cf2": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_exitCode_failureMessage_hostVerification_33f4dedc"
 					},
 					{
 						"type": "null"
