@@ -78,6 +78,7 @@ export async function runTelemetryVerify(argv: ReadonlyArray<string>): Promise<n
 			stateDir,
 			(runId ?? target) as string,
 			runId === undefined ? "session" : "run",
+			{ allowBareArchive: true },
 		);
 		path = resolved.path;
 		if (resolved.kind === "archive") return await verifyArchive(path, json);

@@ -10,6 +10,7 @@ export function resolveTelemetryTarget(
 	stateDir: string,
 	target: string,
 	scope: "session" | "run" = "session",
+	options: { allowBareArchive?: boolean } = {},
 ): TelemetryTarget {
 	if (scope === "run") {
 		const path = telemetryRunDirectory(stateDir, target);
@@ -24,7 +25,7 @@ export function resolveTelemetryTarget(
 	}
 	const path = telemetrySessionDirectory(stateDir, target);
 	const exists = statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
-	if (!exists) {
+	if (!exists && options.allowBareArchive) {
 		const archive = resolve(target);
 		if (statSync(archive, { throwIfNoEntry: false })?.isFile()) return { kind: "archive", path: archive };
 	}
