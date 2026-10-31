@@ -326,7 +326,7 @@ export const RunFeedBodySchema = Type.Union([
 	),
 	Type.Object(
 		{
-			kind: Type.Literal("receipt"),
+			kind: Type.Literal("result"),
 			outcome: runFeedOutcome,
 			exitCode: Type.Union([Type.Integer(), Type.Null()]),
 			attemptRunId: Type.Optional(ExistingId),

@@ -325,7 +325,7 @@ function applyLine(cursor: FoldCursor, line: RunEventJournalLine): void {
 			fold.eventsUnread = true;
 			pushRow(cursor, { at: line.at, kind: "note", text: "the journal reached its size cap; later events were dropped" });
 			return;
-		case "receipt":
+		case "result":
 			return;
 		case "terminal":
 			fold.terminal =

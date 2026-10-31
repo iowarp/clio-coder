@@ -49,7 +49,7 @@ function structuralFeed(body: RunEventJournalBody): StructuralRunFeedBody | null
 			return { kind: body.kind, runId: body.runId, agentId: body.agentId };
 		case "terminal":
 			return { kind: body.kind, outcome: outcome(body.outcome) };
-		case "receipt":
+		case "result":
 			return {
 				kind: body.kind,
 				outcome: outcome(body.outcome),

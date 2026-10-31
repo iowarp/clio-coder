@@ -109,9 +109,9 @@ export interface DispatchRunEventRegistryOptions {
 	journal?: RunEventJournalSink | null;
 }
 
-/** Outcome recorded for a run whose completion rejected before a receipt existed. */
+/** Outcome recorded for a run whose completion rejected before a result existed. */
 const REGISTRY_FAILURE_OUTCOME = "failed";
-/** Outcome recorded when a receipt settled without a readable outcome field. */
+/** Outcome recorded when a result settled without a readable outcome field. */
 const REGISTRY_UNKNOWN_OUTCOME = "unknown";
 
 function errorText(error: unknown): string {
@@ -127,45 +127,43 @@ export function createDispatchRunEventRegistry(
 	const journal: RunEventJournalSink | null = options.journal === undefined ? defaultRunEventJournal() : options.journal;
 
 	/**
-	 * Seal one logical run in the journal. `logicalRunId` is the id an operator
-	 * asked about; a retried run's receipt carries the terminal attempt's id
+	 * Close one logical run in the journal. `logicalRunId` is the id an operator
+	 * asked about; a retried run's result carries the terminal attempt's id
 	 * instead, and that only ever appears as a field on the line.
 	 */
-	const journalSeal = (logicalRunId: string, receipt: RunResult): void => {
-		if (journal === null || !isRecord(receipt)) return;
+	const journalResult = (logicalRunId: string, result: RunResult): void => {
+		if (journal === null || !isRecord(result)) return;
 		// Every field is read defensively. The journal sits on the completion path
-		// of every dispatch, and a receipt that is missing a block it is typed to
+		// of every dispatch, and a result that is missing a block it is typed to
 		// have (a stubbed contract, a truncated read) must degrade the transcript,
 		// never reject the completion the caller is awaiting.
-		const digest = receipt.digest;
-		const outcome = typeof receipt.outcome === "string" ? receipt.outcome : REGISTRY_UNKNOWN_OUTCOME;
-		journal.receipt(logicalRunId, {
+		const outcome = typeof result.outcome === "string" ? result.outcome : REGISTRY_UNKNOWN_OUTCOME;
+		journal.result(logicalRunId, {
 			outcome,
-			exitCode: typeof receipt.exitCode === "number" ? receipt.exitCode : null,
-			...(typeof digest === "string" ? { digest } : {}),
-			...(receipt.runId !== logicalRunId ? { attemptRunId: receipt.runId } : {}),
+			exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+			...(result.runId !== logicalRunId ? { attemptRunId: result.runId } : {}),
 		});
-		journal.terminal(logicalRunId, outcome, receipt.outcomeDetail ?? undefined);
+		journal.terminal(logicalRunId, outcome, result.outcomeDetail ?? undefined);
 	};
 
 	/**
-	 * Seal a batch's journals. `assignmentIds` are the logical work ids in
-	 * admission order and `dispatchBatch` resolves one receipt per request, so
-	 * equal lengths pair by index. Anything else pairs by the receipt's own run
+	 * Close a batch's journals. `assignmentIds` are the logical work ids in
+	 * admission order and `dispatchBatch` resolves one result per request, so
+	 * equal lengths pair by index. Anything else pairs by the result's own run
 	 * id and leaves unmatched assignments without a terminal line rather than
 	 * inventing an outcome for them.
 	 */
-	const sealBatchJournals = (assignmentIds: ReadonlyArray<string>, receipts: ReadonlyArray<RunResult>): void => {
-		if (journal === null || !Array.isArray(receipts)) return;
-		if (assignmentIds.length === receipts.length) {
+	const closeBatchJournals = (assignmentIds: ReadonlyArray<string>, results: ReadonlyArray<RunResult>): void => {
+		if (journal === null || !Array.isArray(results)) return;
+		if (assignmentIds.length === results.length) {
 			for (const [index, runId] of assignmentIds.entries()) {
-				const receipt = receipts[index];
-				if (receipt !== undefined) journalSeal(runId, receipt);
+				const result = results[index];
+				if (result !== undefined) journalResult(runId, result);
 			}
 			return;
 		}
-		for (const receipt of receipts) {
-			if (receipt != null && typeof receipt.runId === "string") journalSeal(receipt.runId, receipt);
+		for (const result of results) {
+			if (result != null && typeof result.runId === "string") journalResult(result.runId, result);
 		}
 	};
 
@@ -279,7 +277,7 @@ export function createDispatchRunEventRegistry(
 			};
 			void completion.then(
 				({ receipt }) => {
-					journalSeal(handle.runId, receipt);
+					journalResult(handle.runId, receipt);
 					releaseSingle();
 				},
 				(error: unknown) => {
@@ -323,7 +321,7 @@ export function createDispatchRunEventRegistry(
 			};
 			void completion.then(
 				({ receipts }) => {
-					sealBatchJournals(handle.assignmentIds, receipts);
+					closeBatchJournals(handle.assignmentIds, receipts);
 					releaseBatch();
 				},
 				(error: unknown) => {

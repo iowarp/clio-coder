@@ -275,8 +275,8 @@ export function createRecordingJournal(
 			capture.bytes += bytes;
 			capture.frames.push(frame);
 		},
-		receipt() {
-			/* Receipts retain their separate sealed authority. */
+		result() {
+			/* The run's settlement in its sealed scope is the authority for its result. */
 		},
 		terminal(runId, outcome) {
 			finish(runId, outcome);

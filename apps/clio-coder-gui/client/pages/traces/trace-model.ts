@@ -191,7 +191,7 @@ export function entryLabel(entry: RunTimelineEntry): { kind: string; title: stri
 				return { kind: "journal_truncated", title: "Feed truncated at the per-run size cap", tone: "warn" };
 			return {
 				kind: body.kind,
-				title: `${body.kind === "receipt" ? "Receipt" : "Terminal outcome"}: ${body.outcome.replaceAll("_", " ")}`,
+				title: `${body.kind === "result" ? "Result" : "Terminal outcome"}: ${body.outcome.replaceAll("_", " ")}`,
 				tone: body.outcome === "succeeded" ? "success" : body.outcome === "unknown" ? "neutral" : "fail",
 			};
 		}

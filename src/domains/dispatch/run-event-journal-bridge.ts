@@ -328,7 +328,7 @@ export function attachRunEventJournalBridge(
 		flushText(identity.runId);
 		feeds.delete(identity.runId);
 		const exitCode = isRecord(payload) && typeof payload.exitCode === "number" ? payload.exitCode : null;
-		journal.receipt(identity.runId, { outcome, exitCode });
+		journal.result(identity.runId, { outcome, exitCode });
 		journal.terminal(identity.runId, outcome, detail ?? undefined);
 		opened.delete(identity.runId);
 	};

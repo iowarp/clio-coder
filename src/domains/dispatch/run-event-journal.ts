@@ -4,8 +4,8 @@ import type { ToolRoundRecord } from "../../engine/types.js";
  *
  * Live dispatch events exist only in `DispatchRunEventRegistry`'s in-memory
  * tail (src/tools/dispatch-run-events.ts), so a separate process cannot see a
- * run in flight: the ledger and receipts are durable but the event stream is
- * not. This module tees that same display tail to the run's journal so a viewer process
+ * run in flight: the ledger and the run's settlement are durable but the event
+ * stream is not. This module tees that same display tail to the run's journal so a viewer process
  * (`clio-coder fleet view`) can follow a run without sharing the orchestrator's
  * heap.
  *
@@ -17,13 +17,13 @@ import type { ToolRoundRecord } from "../../engine/types.js";
  *   open               run opened, carries agentId
  *   event              one display-tail entry; the only droppable kind
  *   journal_truncated  written once, the moment dropping begins
- *   receipt            sealed receipt facts (outcome, exit code, digest)
+ *   result             the run's result facts (outcome, exit code)
  *   terminal           always the last write for a run
  *
  * Bounding follows the worker bulk lane's philosophy. Display-only `event`
  * lines are dropped once a run's journal crosses {@link
  * RUN_EVENT_JOURNAL_CAP_BYTES}, and a single `journal_truncated` marker records
- * that dropping began. Lifecycle (`open`, `terminal`) and receipt-bearing lines
+ * that dropping began. Lifecycle (`open`, `terminal`) and result lines
  * are never dropped, so a capped journal still answers what the run was and how
  * it ended.
  *
@@ -82,14 +82,7 @@ export type RunEventJournalBody =
 	| { kind: "open"; runId: string; agentId: string }
 	| ({ kind: "event"; type: string; detail?: string } & RunEventJournalFacts)
 	| { kind: "journal_truncated"; reason: string; droppedFromSeq: number }
-	| {
-			kind: "receipt";
-			outcome: string;
-			exitCode: number | null;
-			digest?: string;
-			receiptPath?: string;
-			attemptRunId?: string;
-	  }
+	| { kind: "result"; outcome: string; exitCode: number | null; attemptRunId?: string }
 	| { kind: "terminal"; outcome: string; detail?: string };
 
 export type RunEventJournalLine = JournalLineBase & RunEventJournalBody;
@@ -101,12 +94,10 @@ export interface RunEventJournalEntry extends RunEventJournalFacts {
 	detail?: string;
 }
 
-/** Sealed receipt facts worth keeping even when display lines are being dropped. */
-export interface RunEventJournalReceipt {
+/** Result facts worth keeping even when display lines are being dropped. */
+export interface RunEventJournalResult {
 	outcome: string;
 	exitCode: number | null;
-	digest?: string | undefined;
-	receiptPath?: string | undefined;
 	/** The terminal attempt's run id, recorded only when it differs from the logical run. */
 	attemptRunId?: string | undefined;
 }
@@ -119,7 +110,7 @@ export interface RunEventJournalReceipt {
 export interface RunEventJournalSink {
 	open(runId: string, agentId: string): void;
 	append(runId: string, entry: RunEventJournalEntry): void;
-	receipt(runId: string, receipt: RunEventJournalReceipt): void;
+	result(runId: string, result: RunEventJournalResult): void;
 	terminal(runId: string, outcome: string, detail?: string): void;
 }
 
@@ -222,14 +213,12 @@ function createRunEventJournal(): RunEventJournalSink {
 			const { at: _at, ...body } = entry;
 			forward(runId, { kind: "event", ...body });
 		},
-		receipt(runId, receipt): void {
+		result(runId, result): void {
 			forward(runId, {
-				kind: "receipt",
-				outcome: receipt.outcome,
-				exitCode: receipt.exitCode,
-				...(receipt.digest !== undefined ? { digest: receipt.digest } : {}),
-				...(receipt.receiptPath !== undefined ? { receiptPath: receipt.receiptPath } : {}),
-				...(receipt.attemptRunId !== undefined ? { attemptRunId: receipt.attemptRunId } : {}),
+				kind: "result",
+				outcome: result.outcome,
+				exitCode: result.exitCode,
+				...(result.attemptRunId !== undefined ? { attemptRunId: result.attemptRunId } : {}),
 			});
 		},
 		terminal(runId, outcome, detail): void {

@@ -404,7 +404,7 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 			10000,
 		);
 		journal.feed({ kind: "event", type: "message_end", detail: "PRIVATE_MESSAGE" }, 1);
-		display.receipt(run.runId, { outcome: "succeeded", exitCode: 0 });
+		display.result(run.runId, { outcome: "succeeded", exitCode: 0 });
 		display.terminal(run.runId, "succeeded", "PRIVATE_TERMINAL_DETAIL");
 		display.append(run.runId, { at: new Date().toISOString(), type: "late-display" });
 		const call = beginCall(
@@ -429,7 +429,7 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 		const feed = readRunEventJournal(run.runId, { root: directory });
 		deepStrictEqual(
 			feed.lines.map((line) => line.kind),
-			["open", "event", "journal_truncated", "receipt", "terminal"],
+			["open", "event", "journal_truncated", "result", "terminal"],
 		);
 		strictEqual(feed.terminal?.outcome, "succeeded");
 		strictEqual(feed.truncated, true);

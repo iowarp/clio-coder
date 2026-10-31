@@ -10320,8 +10320,8 @@ export function createDispatchBundle(
 						recordingJournal.append(id, entry);
 						if (options?.journalRunEvents === true) defaultRunEventJournal().append(id, entry);
 					},
-					receipt(id, receipt) {
-						if (options?.journalRunEvents === true) defaultRunEventJournal().receipt(id, receipt);
+					result(id, result) {
+						if (options?.journalRunEvents === true) defaultRunEventJournal().result(id, result);
 					},
 					terminal(id, outcome, detail) {
 						recordingJournal.terminal(id, outcome, detail);

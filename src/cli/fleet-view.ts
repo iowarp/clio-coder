@@ -7,8 +7,8 @@ import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.j
  *
  * A read-only viewer for one dispatched run, built from durable state only:
  * the run ledger envelope, the run event journal
- * (src/domains/dispatch/run-event-journal.ts), and the sealed receipt once one
- * exists. It shares no memory with the orchestrator, has zero dependency on any
+ * (src/domains/dispatch/run-event-journal.ts), and the run's sealed record once
+ * it settles. It shares no memory with the orchestrator, has zero dependency on any
  * pane host, and works over a plain SSH session.
  *
  * Everything the viewer prints comes from `renderRunView`, a pure function over
@@ -18,10 +18,9 @@ import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.j
  * `--follow` the snapshot goes to stdout and the process exits.
  *
  * Trust rules the render obeys:
- *   - The receipt is authenticated against the ledger envelope through
- *     `inspectRunResultTrustStatus` before any of its fields are shown. A
- *     receipt that fails integrity contributes its failure reason and nothing
- *     else.
+ *   - The run record is checked through `inspectRunTrustStatus` before any of
+ *     its fields are shown. A record that fails integrity contributes its
+ *     failure reason and nothing else.
  *   - Task text is operator-supplied and worker-adjacent, so it is sanitized
  *     and bounded before rendering, per the `DispatchRunIdentity` warning in
  *     src/core/telemetry/live-events.ts. Journal event details cross the same seam and
@@ -226,11 +225,11 @@ function transcriptLine(line: RunEventJournalLine): RunViewTranscriptLine | null
 			return eventTranscriptLine(line);
 		case "journal_truncated":
 			return { at: line.at, label: "journal truncated", detail: sanitizeBounded(line.reason, 64) };
-		case "receipt":
+		case "result":
 			return {
 				at: line.at,
-				label: `receipt sealed (${sanitizeBounded(line.outcome, 32)})`,
-				detail: line.digest === undefined ? undefined : `sha256:${sanitizeBounded(line.digest, 64)}`,
+				label: `result (${sanitizeBounded(line.outcome, 32)}, exit ${line.exitCode ?? "unknown"})`,
+				detail: undefined,
 			};
 		case "terminal":
 			return {
@@ -451,7 +450,7 @@ function renderWatchView(
  * dispatched step. An operator who copies the id off the end of `fleet run` was
  * being told "unknown run".
  *
- * The root is not a run and has no ledger row, no receipt, and no journal of
+ * The root is not a run and has no ledger row, no run record, and no journal of
  * its own, so it cannot be rendered as one. What it does have is a durable
  * record under `<state>/fleet-runs/<rootId>.json` listing the planned steps and,
  * for each step that settled, the run id it terminated on. That is enough for an
@@ -586,7 +585,7 @@ function renderFleetRunView(model: FleetRunViewModel, width: number = DEFAULT_WI
 		}
 	}
 	lines.push(rule);
-	lines.push("clio-coder fleet view <run id> for one step's transcript, receipt, and ledger entry");
+	lines.push("clio-coder fleet view <run id> for one step's transcript, run record, and ledger entry");
 	return lines;
 }
 
