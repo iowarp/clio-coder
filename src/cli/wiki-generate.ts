@@ -6,7 +6,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { asDirectoryPathBoundary } from "../core/path-boundary.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import type { Fact } from "../core/telemetry/fact.js";
-import type { Pricing } from "../core/telemetry/pricing.js";
+import { type Pricing, unobservedRunUsageFacts } from "../core/telemetry/pricing.js";
 import { renderFactField, renderPricing } from "../core/telemetry/render.js";
 import type { RunUsageFacts } from "../core/telemetry/schemas.js";
 import { runWithBudget, writeShutdownNotice } from "../core/termination.js";
@@ -345,9 +345,11 @@ function dispatchUsage(
 			? attemptsBreakdown(attempts, receipt)
 			: "";
 	if (!receipt) return `; run=${runId}; usage unavailable${breakdown}`;
-	const { pricing } = receipt.spend;
+	// A receipt from a peer that settled no spend reads as unknown, never as zero (#434).
+	const spend = spendOf(receipt);
+	const { pricing } = spend;
 	return (
-		`; run=${runId}; tokens: ${usageDetail(receipt.spend, cacheReadText(receipt.spend, cache))}; cost=${renderPricing(pricing)} (priced by ${pricing.pricedBy})` +
+		`; run=${runId}; tokens: ${usageDetail(spend, cacheReadText(spend, cache))}; cost=${renderPricing(pricing)} (priced by ${pricing.pricedBy})` +
 		(receipt.budget ? `; budget=${formatEffectiveBudget(receipt.budget)}` : "") +
 		breakdown
 	);
@@ -361,6 +363,7 @@ function cacheReadText(spend: RunUsageFacts, cache: CacheReadSummary): string | 
 }
 
 const notObserved: Fact<number> = { kind: "unknown", reason: "not-observed" };
+const spendOf = (usage: Partial<WikiRunUsage>): RunUsageFacts => usage.spend ?? unobservedRunUsageFacts();
 
 /**
  * One run's field as the read model folds it over runs: unknown when no receipt holds it, and an attempt ledger that
@@ -371,14 +374,15 @@ function runField(
 	read: (spend: RunUsageFacts) => Fact<number>,
 	unrecovered = false,
 ): Fact<number>[] {
-	return [usage ? read(usage.spend) : notObserved, ...(unrecovered ? [notObserved] : [])];
+	return [usage ? read(spendOf(usage)) : notObserved, ...(unrecovered ? [notObserved] : [])];
 }
 
 function attemptsBreakdown(attempts: WikiAttempts, terminal: WikiRunUsage | undefined): string {
 	const shown = attempts.earlier
 		.slice(0, ATTEMPT_LINE_LIMIT)
 		.map(
-			(a) => `${a.runId} tokens=${a.usage ? renderFactField(a.usage.spend.totalTokens) : "unknown"} outcome=${a.outcome}`,
+			(a) =>
+				`${a.runId} tokens=${a.usage ? renderFactField(spendOf(a.usage).totalTokens) : "unknown"} outcome=${a.outcome}`,
 		);
 	const hidden = attempts.earlier.length - shown.length;
 	const all = [terminal, ...attempts.earlier.map((a) => a.usage)];
@@ -406,7 +410,7 @@ function invocationUsage(receipts: WikiReceipts): string {
 	const unpriced: Pricing = { usd: notObserved, pricedBy: "none" };
 	const cost = runsCost(
 		receipts.flatMap((run) => [
-			run.receipt ? run.receipt.spend.pricing : unpriced,
+			run.receipt ? spendOf(run.receipt).pricing : unpriced,
 			// An attempt ledger that could not be read may hide earlier attempts nobody priced.
 			...(run.unrecoveredAttempts ? [unpriced] : []),
 		]),

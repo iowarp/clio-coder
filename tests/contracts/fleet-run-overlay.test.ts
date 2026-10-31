@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { sumPricing } from "../../src/core/telemetry/pricing.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { FleetRunOutcome } from "../../src/domains/dispatch/fleet-run.js";
@@ -77,7 +78,7 @@ test("a running fleet refuses a second /fleet run until it settles", async () =>
 							cleanRun: true,
 							succeededStepCount: 1,
 							requiredStepCount: 1,
-							totalCost: { knownUsd: 0, hasEstimated: false, hasUnknown: false, allKnownFree: true, calls: 0 },
+							totalCost: sumPricing([]),
 						} as unknown as FleetRunOutcome);
 				});
 			},
