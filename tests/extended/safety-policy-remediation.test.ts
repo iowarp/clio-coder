@@ -117,14 +117,14 @@ test("S1-05 inspect emits compiled safety metadata", async () => {
 	assert.equal(row.detail?.disableDefaultPathPolicy, false);
 });
 test("S1-06 permission rate counts all outcomes and leaves an empty denominator unknown", async () => {
-	const { summarizePermissionDecisions } = await import("../../src/domains/telemetry/read-model.js");
-	type Decision = Parameters<typeof summarizePermissionDecisions>[0][number];
+	const { foldDecisions } = await import("../../src/domains/telemetry/index.js");
+	type Decision = Parameters<typeof foldDecisions>[0] extends Iterable<infer R> ? R : never;
 	const requested = (requestId: string) =>
-		({ k: "approval.requested", data: { tool: "bash", actionClass: "execute", requestId } }) as Decision;
+		({ k: "approval.requested", ctx: {}, data: { tool: "bash", actionClass: "execute", requestId } }) as Decision;
 	const resolved = (status: "granted" | "denied" | "expired") =>
-		({ k: "approval.resolved", data: { status } }) as Decision;
+		({ k: "approval.resolved", ctx: {}, data: { status } }) as Decision;
 	assert.deepEqual(
-		summarizePermissionDecisions([
+		foldDecisions([
 			requested("a"),
 			requested("b"),
 			requested("c"),
@@ -133,10 +133,10 @@ test("S1-06 permission rate counts all outcomes and leaves an empty denominator 
 			resolved("granted"),
 			resolved("denied"),
 			resolved("expired"),
-		]),
+		]).approvals,
 		{ requested: 4, granted: 2, denied: 1, expired: 1, approvalRate: 0.5 },
 	);
-	assert.equal(summarizePermissionDecisions([resolved("granted")]).approvalRate, null);
+	assert.equal(foldDecisions([resolved("granted")]).approvals.approvalRate, null);
 });
 
 test("S1-05 config inspect --json exposes effective compiled metadata", () => {
@@ -221,9 +221,9 @@ test("S1-06 usage report reads journaled approvals and emits measured rate", asy
 		{ encoding: "utf8" },
 	);
 	assert.equal(child.status, 0, child.stderr);
-	const report = JSON.parse(child.stdout) as ReturnType<
-		typeof import("../../src/domains/telemetry/read-model.js").usageReport
-	>;
-	assert.equal(report.approvals.rate.fact.kind, "measured");
-	assert.equal(report.approvals.rate.display, "50.0%");
+	const rows = child.stdout
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line) as Record<string, unknown>);
+	assert.equal(rows.find((row) => row.fact === "permission-approval")?.approvalRate, 0.5);
 });

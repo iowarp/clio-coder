@@ -23,6 +23,7 @@ import { legacyTaskCompletionRow, TASK_BOARD_COMPLETION_CLAIM_PREFIX } from "../
 import { loadRunTelemetrySourceAsync, loadSessionTelemetrySourceAsync } from "../session/telemetry-source.js";
 import { filterEntriesToActivePath } from "../session/tree/active-path.js";
 import { aggregateCostAmounts, type CostAmount } from "../telemetry/cost.js";
+import { decisionRow } from "../telemetry/fact-folds.js";
 import type { SettledRunRecord } from "../telemetry/index.js";
 import { readRunRecordAsync } from "../telemetry/index.js";
 import type { AccountabilityRecord, JournalSource } from "../telemetry/read-model.js";
@@ -1083,7 +1084,7 @@ async function linkAuditRows(
 	}
 	const rows: EvidenceAuditLinkedRow[] = [];
 	for (const record of accountabilityRecords(journals)) {
-		const namedRun = recordRunId(record);
+		const namedRun = decisionRow(record).runId;
 		if (namedRun !== null && runIds.has(namedRun)) {
 			rows.push(
 				auditLinkedRow(record, {
@@ -1108,15 +1109,6 @@ async function linkAuditRows(
 	}
 	rows.sort(compareAuditLinkedRows);
 	return { rows, readErrors };
-}
-
-/** The run a record is about: its scope's run, or the worker run a session record names. */
-function recordRunId(record: AccountabilityRecord): string | null {
-	if (record.ctx.runId !== undefined) return record.ctx.runId;
-	if (record.k === "run.aborted") return record.data.runId;
-	if (record.k === "approval.requested" || record.k === "approval.resolved") return record.data.requestedBy ?? null;
-	if (record.k === "safety.judged") return record.data.workerRunId ?? null;
-	return null;
 }
 
 interface AuditLinkFields {

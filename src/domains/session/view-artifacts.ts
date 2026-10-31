@@ -22,6 +22,7 @@ import type { EvidenceFinding, EvidenceInspectable, EvidenceOverview, EvidenceSo
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { redactSecretString } from "../safety/redaction.js";
 import { renderCostAggregate, renderCostAmount } from "../telemetry/cost.js";
+import { type DecisionRow, decisionRow } from "../telemetry/fact-folds.js";
 import type { AccountabilitySummary } from "../telemetry/index.js";
 import {
 	readEvidenceIndex,
@@ -32,7 +33,7 @@ import {
 	telemetryRunDirectory,
 	telemetrySessionDirectory,
 } from "../telemetry/index.js";
-import type { AccountabilityRecord, JournalSource, SessionSource } from "../telemetry/read-model.js";
+import type { JournalSource, SessionSource } from "../telemetry/read-model.js";
 import { accountabilityRecords, sessionJournals } from "../telemetry/read-model.js";
 import type { SessionMeta } from "./contract.js";
 import type {
@@ -1500,46 +1501,14 @@ export class AccountabilityArtifactProvider implements ArtifactProvider {
 
 const SAFETY_AUDIT_ARTIFACT_LIMIT = 200;
 
-/** The fact a record states, for its title and search: a decision, status, verdict, source or phase. */
-function accountabilityOutcome(record: AccountabilityRecord): string | null {
-	switch (record.k) {
-		case "tool.decided":
-		case "completion.evaluated":
-			return record.data.decision;
-		case "approval.resolved":
-			return record.data.status;
-		case "safety.judged":
-			return record.data.verdict;
-		case "run.aborted":
-		case "turn.aborted":
-			return record.data.source;
-		case "agent.status_changed":
-			return record.data.phase;
-		case "session.closed":
-			return record.data.reason;
-		case "session.resumed":
-			return record.data.via;
-		case "approval.requested":
-			return null;
-	}
-}
-
-function accountabilityTool(record: AccountabilityRecord): { tool: string | null; actionClass: string | null } {
-	const data = record.data as { tool?: unknown; actionClass?: unknown };
-	return {
-		tool: typeof data.tool === "string" ? data.tool : null,
-		actionClass: typeof data.actionClass === "string" ? data.actionClass : null,
-	};
-}
-
-function accountabilityTitle(record: AccountabilityRecord): string {
-	const { tool, actionClass } = accountabilityTool(record);
-	const outcome = accountabilityOutcome(record);
-	const runId = record.ctx.runId ?? (record.k === "run.aborted" ? record.data.runId : null);
-	const parts = [tool, actionClass, outcome, runId !== null ? `run ${shortValue(runId)}` : null].filter(
-		isNonEmptyString,
-	);
-	return safeTitle(`Audit · ${record.k}${parts.length > 0 ? ` · ${parts.join(" · ")}` : ""}`, "Audit record");
+function accountabilityTitle(row: DecisionRow): string {
+	const parts = [
+		row.tool,
+		row.actionClass,
+		row.outcome,
+		row.runId !== null ? `run ${shortValue(row.runId)}` : null,
+	].filter(isNonEmptyString);
+	return safeTitle(`Audit · ${row.kind}${parts.length > 0 ? ` · ${parts.join(" · ")}` : ""}`, "Audit record");
 }
 
 function auditReadErrorsArtifact(path: string, journals: ReadonlyArray<JournalSource>): ViewArtifact | null {
@@ -1587,13 +1556,12 @@ export class SafetyAuditArtifactProvider implements ArtifactProvider {
 		const path = telemetryJournalPath(telemetrySessionDirectory(this.deps.stateDir, sessionId));
 		const selected = accountabilityRecords(journals).reverse().slice(0, SAFETY_AUDIT_ARTIFACT_LIMIT);
 		const artifacts: ViewArtifact[] = selected.map((record) => {
-			const runId = record.ctx.runId ?? (record.k === "run.aborted" ? record.data.runId : undefined);
-			const { tool, actionClass } = accountabilityTool(record);
-			const outcome = accountabilityOutcome(record);
+			const row = decisionRow(record);
+			const { runId, tool, actionClass, outcome } = row;
 			return {
 				id: `audit:${record.id}`,
 				category: this.category,
-				title: accountabilityTitle(record),
+				title: accountabilityTitle(row),
 				timestamp: parseTime(record.t),
 				path,
 				...(runId ? { runId } : {}),
