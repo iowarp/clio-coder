@@ -54,6 +54,17 @@ function identityOf(run: Pick<RunEnvelope, "identity">): RunSettled["identity"] 
 	return run.identity ? { host: run.identity.host, user: run.identity.user } : null;
 }
 
+function escalationsOf(safety: RunResultDraft["safety"]): RunSettled["escalations"] {
+	const decisions = safety?.decisions;
+	if (decisions?.escalationRequested === undefined) return null;
+	return {
+		requested: decisions.escalationRequested,
+		approved: decisions.escalationApproved ?? 0,
+		denied: decisions.escalationDenied ?? 0,
+		timedOut: decisions.escalationTimedOut ?? 0,
+	};
+}
+
 /** The settlement of a run whose worker finished, from what its finalization sealed (#434). */
 export function settleFinishedRun(
 	receipt: RunResultDraft,
@@ -98,6 +109,8 @@ export function settleFinishedRun(
 				blocked: stat.blocked,
 			})),
 			skills: (receipt.skillActivations ?? []).slice(0, 256).map((skill) => skill.name),
+			escalations: escalationsOf(receipt.safety),
+			toolGovernance: receipt.delegation?.toolGovernance ?? null,
 			verification: { state: receipt.verification.state, basis: receipt.verification.basis },
 			quality: {
 				typedValidations: receipt.quality.typedValidations.map((fact) => ({ ...fact })),
@@ -216,6 +229,8 @@ export function settleUnfinishedRun(
 			toolCalls: 0,
 			tools: [],
 			skills: [],
+			escalations: null,
+			toolGovernance: null,
 			verification: { state: "unknown", basis: "receipt-unavailable" },
 			quality: null,
 			validationGrounding: null,

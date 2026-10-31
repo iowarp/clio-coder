@@ -628,6 +628,10 @@ export const RunSettledSchema = Type.Object(
 		}),
 		/** Names of the skills the run activated, in activation order. */
 		skills: Type.Array(ExistingId, { maxItems: 256 }),
+		/** Permission escalations the run asked for and how they ended; null when none was asked. */
+		escalations: nullable(Type.Object({ requested: count, approved: count, denied: count, timedOut: count }, closed)),
+		/** Who governed an external peer's tools; null for a run Clio's own tool loop drove. */
+		toolGovernance: nullable(vocabulary(["clio-coder-policy", "agent-managed", "deny-all"])),
 		verification: Type.Object(
 			{
 				state: vocabulary(["verified", "unverified", "not_applicable", "unknown"]),

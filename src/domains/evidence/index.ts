@@ -75,6 +75,7 @@ export {
 	adaptRunResultValidationStatus,
 	composeTrustStatus,
 	inspectRunResultTrustStatus,
+	inspectRunTrustStatus,
 	normalizeTrustStatus,
 	retiredIntegrityVersionOf,
 	retiredReceiptIntegrity,

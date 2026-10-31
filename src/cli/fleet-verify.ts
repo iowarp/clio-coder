@@ -1,44 +1,31 @@
 /**
- * Re-authenticate one run's sealed receipt, right now.
+ * Re-authenticate one run's sealed run scope, right now (#434).
  *
- * This command reads the receipt and its ledger envelope off disk and runs the
- * integrity check again, which is the only way to learn that a receipt trusted
- * an hour ago no longer verifies.
+ * This command reads the run's journal and objects off disk and verifies its seal again, which is the only way to
+ * learn that a run trusted an hour ago no longer verifies.
  *
- * Like `evidence inspect --json` it takes an identifier, because an operator
- * names the run. The identifier is validated for shape here; a GUI host that
- * echoes operator-supplied ids owes its own served-id window on top of that,
+ * Like `evidence inspect --json` it takes an identifier, because an operator names the run. The identifier is
+ * validated for shape here; a GUI host that echoes operator-supplied ids owes its own served-id window on top of that,
  * because shape alone does not prove the id was ever served.
  */
 
-import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
-import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { openLedger } from "../domains/dispatch/state.js";
-import type { RunEnvelope, RunResult } from "../domains/dispatch/types.js";
-import { inspectRunResultTrustStatus, TRUST_STATUS_AXES, type TrustStatusAxis } from "../domains/evidence/index.js";
+import { inspectRunTrustStatus, TRUST_STATUS_AXES, type TrustStatusAxis } from "../domains/evidence/index.js";
+import { loadRunRecord } from "../domains/session/telemetry-source.js";
 
-/** A receipt's trust as of this check: still pending, verified, failed, or unreadable. */
+/** A run's trust as of this check: still pending, verified, failed, or unavailable. */
 export type FleetVerifyState = "pending" | "verified" | "failed" | "unavailable";
 
-/**
- * Why a receipt did not authenticate, as a closed set.
- *
- * The harness composes most of these from literals, but one branch interpolates
- * a thrown error's message, which can carry anything including a path. So the
- * reason is classified rather than quoted, and anything unrecognised becomes
- * `unclassified` instead of arriving as prose.
- */
+/** Why a run did not authenticate, as a closed set: the part of its sealed scope that did not verify, or why none did. */
 export const FLEET_VERIFY_REASONS = [
-	"integrity-mismatch",
-	"ledger-mismatch",
-	"integrity-invalid",
-	"execution-role-invalid",
-	"routing-intent-invalid",
-	"route-decision-invalid",
-	"receipt-unreadable",
-	"envelope-unavailable",
-	"unclassified",
+	"manifest-mismatch",
+	"segment-mismatch",
+	"object-mismatch",
+	"chain-mismatch",
+	"seal-mismatch",
+	"unsealed",
+	"run-unreadable",
 ] as const;
 export type FleetVerifyReason = (typeof FLEET_VERIFY_REASONS)[number];
 
@@ -47,7 +34,7 @@ export interface FleetVerifySnapshot {
 	readonly verifiedAt: string;
 	readonly runId: string;
 	readonly state: FleetVerifyState;
-	/** Null whenever the receipt authenticated or has not been sealed yet. */
+	/** Null whenever the run authenticated or has not settled yet. */
 	readonly reason: FleetVerifyReason | null;
 	readonly axes: Readonly<Record<TrustStatusAxis, string>>;
 }
@@ -56,62 +43,32 @@ export class FleetVerifyUnknownRunError extends Error {
 	override readonly name = "FleetVerifyUnknownRunError";
 }
 
-function classify(reason: string): FleetVerifyReason {
-	if (reason.startsWith("integrity mismatch")) return "integrity-mismatch";
-	// The harness names the diverging field after this prefix. Which field it was
-	// is a detail of the receipt, so the classification keeps the fact and drops
-	// the name rather than passing a fragment of the record through.
-	if (reason.startsWith("ledger mismatch")) return "ledger-mismatch";
-	if (reason.startsWith("integrity invalid")) return "integrity-invalid";
-	if (reason.startsWith("execution role invalid")) return "execution-role-invalid";
-	if (reason.startsWith("routing intent invalid")) return "routing-intent-invalid";
-	if (reason.startsWith("route decision invalid")) return "route-decision-invalid";
-	if (reason.startsWith("receipt unavailable")) return "receipt-unreadable";
-	if (reason.startsWith("run ledger envelope unavailable")) return "envelope-unavailable";
-	return "unclassified";
-}
-
-function loadReceipt(envelope: RunEnvelope): RunResult | null {
-	const path = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${envelope.id}.json`);
-	try {
-		return JSON.parse(readReceiptTextSync(path)) as RunResult;
-	} catch {
-		return null;
-	}
-}
-
-/** Pure payload builder, exported so the fixed contract is testable without subprocess capture. */
 function fleetVerifySnapshot(runId: string, now: () => number = Date.now): FleetVerifySnapshot {
 	const envelope = openLedger().get(runId);
 	if (envelope === null) throw new FleetVerifyUnknownRunError(`unknown run '${runId}'`);
 	const verifiedAt = new Date(now()).toISOString();
-	const receipt = loadReceipt(envelope);
-	const inspection = inspectRunResultTrustStatus(receipt, envelope);
+	const record = loadRunRecord(clioStateDir(), envelope.id);
+	const inspection = inspectRunTrustStatus(record);
 	const axes = Object.fromEntries(TRUST_STATUS_AXES.map((axis) => [axis, inspection.status[axis].state])) as Record<
 		TrustStatusAxis,
 		string
 	>;
-
-	// A run that has not finalized has nothing to authenticate yet, which is a
-	// different answer from one whose receipt failed to authenticate.
-	if (receipt === null && envelope.receiptPath === null && envelope.endedAt === null) {
-		return { version: 1, verifiedAt, runId: envelope.id, state: "pending", reason: null, axes };
-	}
-	if (inspection.integrity.ok) {
-		return { version: 1, verifiedAt, runId: envelope.id, state: "verified", reason: null, axes };
-	}
-	const reason = classify(inspection.integrity.reason);
-	return {
+	const snapshot = (state: FleetVerifyState, reason: FleetVerifyReason | null): FleetVerifySnapshot => ({
 		version: 1,
 		verifiedAt,
 		runId: envelope.id,
-		// A receipt that could not be read at all is a missing artifact; one that
-		// was read and did not authenticate is a failure, and the two must not be
-		// reported as the same thing.
-		state: reason === "receipt-unreadable" || reason === "envelope-unavailable" ? "unavailable" : "failed",
+		state,
 		reason,
 		axes,
-	};
+	});
+	// A run that has not settled has nothing to authenticate yet, which is a different answer from one that failed to.
+	if (record?.settled == null)
+		return envelope.endedAt === null ? snapshot("pending", null) : snapshot("unavailable", "run-unreadable");
+	const seal = record.seal;
+	if (seal === null) return snapshot("unavailable", "run-unreadable");
+	if (seal.status === "verified") return snapshot("verified", null);
+	if (seal.status === "unsealed") return snapshot("unavailable", "unsealed");
+	return snapshot("failed", `${seal.mismatch.kind}-mismatch`);
 }
 
 export function runFleetVerify(args: ReadonlyArray<string>): number {
