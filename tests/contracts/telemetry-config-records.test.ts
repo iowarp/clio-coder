@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import type { EventPayload } from "../../src/core/telemetry/events.js";
-import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { createTelemetryHub, telemetryHub } from "../../src/core/telemetry/hub.js";
 import type { ConfigChangePayload } from "../../src/core/telemetry/live-events.js";
 import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -14,6 +14,7 @@ import { createTelemetryBundle } from "../../src/domains/telemetry/extension.js"
 import { readTelemetryObject } from "../../src/domains/telemetry/objects.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { telemetryCall } from "../harness/telemetry-view.js";
 
 it("a session writer opens with its settings and journals each change once, with both documents (#434)", async () => {
 	const env = await isolateClioEnv("clio-coder-config-records-");
@@ -152,6 +153,38 @@ it("a session's lifecycle events journal opening, resuming, parking and closing 
 		strictEqual(sessionChange?.scope, "session");
 		deepStrictEqual(sessionChange?.paths.nextTurn, ["chat.thinkingLevel"]);
 	} finally {
+		env.restore();
+	}
+});
+
+it("a session created after boot binds the live read model, which folds its calls (#434)", async () => {
+	const env = await isolateClioEnv("clio-coder-late-session-");
+	const bus = createTelemetryHub();
+	const { contract, extension } = createTelemetryBundle({
+		bus,
+		getContract: () => undefined,
+	} as unknown as DomainContext);
+	const origin = { id: "late-session", cwdHash: "late-repo" };
+	try {
+		await extension.start();
+		// A fresh TUI boots with no current session and creates one on the first submit.
+		contract.resetSession(null);
+		strictEqual(contract.read?.live(), null);
+		bus.emit("session.created", { sessionId: origin.id, cwdHash: origin.cwdHash, at: Date.now() });
+		const lease = await contract.acquireTelemetrySession?.(origin, { role: "main", id: origin.id });
+		ok(lease);
+		for (const record of telemetryCall(origin.id, { usd: 0.25 }))
+			telemetryHub().emit(record.k, record.data as never, record.ctx);
+		await lease.release();
+		strictEqual((await contract.settledSessionSpend()).usd, 0.25);
+		// Binding the session it is already bound to keeps what the live model folded.
+		contract.resetSession(origin.id);
+		const live = contract.read?.live();
+		ok(live);
+		strictEqual(live.sessionId, origin.id);
+		strictEqual(contract.sessionSpend().usd, 0.25);
+	} finally {
+		await extension.stop?.();
 		env.restore();
 	}
 });
