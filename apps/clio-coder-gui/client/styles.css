@@ -1041,7 +1041,8 @@ nav a:hover {
 	margin-top: var(--space-3);
 }
 /* The run's four totals, and how many events and processes there were of each kind. */
-.trace-totals {
+.trace-totals,
+.trace-spend {
 	list-style: none;
 	margin: var(--space-4) 0 0;
 	padding: 0;
@@ -1049,13 +1050,15 @@ nav a:hover {
 	flex-wrap: wrap;
 	gap: var(--space-6);
 }
-.trace-totals li {
+.trace-totals li,
+.trace-spend li {
 	display: grid;
 	gap: 2px;
 	font-size: var(--text-meta);
 	color: var(--ink-muted);
 }
-.trace-totals strong {
+.trace-totals strong,
+.trace-spend strong {
 	font-family: var(--font-mono);
 	font-size: var(--text-body);
 	color: var(--ink);

@@ -65,6 +65,7 @@ export type TelemetryRequest =
 	| { kind: "runs"; limit: number; cursor?: string }
 	| { kind: "run"; runId: string }
 	| { kind: "run-timeline"; runId: string }
+	| { kind: "run-cost"; runId: string }
 	| { kind: "explain"; ref: string };
 
 export const TelemetryRun = TELEMETRY_DTO_SCHEMAS.run;

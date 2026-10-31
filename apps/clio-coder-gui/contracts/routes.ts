@@ -1040,6 +1040,13 @@ export const routes = {
 		response: TelemetryRunTimeline,
 		summary: "One run journal in time order: calls with stages, the run feed, the worker process and the settlement",
 	}),
+	telemetryRunCost: defineRoute({
+		...get,
+		path: "/api/telemetry/runs/:runId/cost",
+		params: Type.Object({ runId: Id }, { additionalProperties: false }),
+		response: TelemetryCost,
+		summary: "One run journal's calls, tokens and cost by the model each call settled on, each with its reference",
+	}),
 	telemetryExplain: defineRoute({
 		...get,
 		path: "/api/telemetry/explain",

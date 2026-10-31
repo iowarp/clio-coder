@@ -350,6 +350,15 @@ try {
 		await page.getByText("worker call · settled", { exact: true }).first().waitFor({ state: "attached" });
 		await page.getByRole("tab", { name: /^Execution · 1 call$/ }).click();
 		await page.locator("main .trace-lane .trace-stage").first().waitFor({ state: "attached" });
+		// The run's spend by token kind, then by the model each call settled on, every figure explained (#434 §11.3).
+		const spend = page.locator("main section", {
+			has: page.getByRole("heading", { name: "Tokens and spend", exact: true }),
+		});
+		const modelCost = spend.locator(".trace-model-spend > li").first().locator("details.explain").last();
+		await modelCost.locator("summary").click();
+		await modelCost.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
+		await check("trace-run-spend");
+		await modelCost.locator("summary").click();
 		await page.getByRole("tab", { name: /^Replay/ }).click();
 		// The cost cell is the server's render; a legacy row may read partial or unmeasured, so only
 		// its presence is checked here.

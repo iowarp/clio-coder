@@ -8,6 +8,7 @@ import {
 	callsReport,
 	costReport,
 	explain,
+	runCostReport,
 	runRowTelemetry,
 	runTelemetry,
 	runTimeline,
@@ -58,11 +59,12 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 			nextCursor: page.nextBefore ? Buffer.from(JSON.stringify(page.nextBefore)).toString("base64url") : null,
 		};
 	}
-	if (input.kind === "run" || input.kind === "run-timeline") {
+	if (input.kind === "run" || input.kind === "run-timeline" || input.kind === "run-cost") {
 		if (!Value.Check(Id, input.runId)) throw new AppProblem("validation", "Invalid run identifier.");
 		// A run that never had a directory is not found; one whose journal is missing or torn is unknown coverage.
 		if (!existsSync(join(state, "runs", input.runId))) throw new AppProblem("not_found", "No run journal holds that id.");
 		const source = loadRunTelemetrySource(state, input.runId);
+		if (input.kind === "run-cost") return runCostReport(input.runId, source, "model");
 		return input.kind === "run"
 			? runTelemetry(input.runId, source, {}, loadRunReceiptEvidence(state, input.runId))
 			: runTimeline(input.runId, source);

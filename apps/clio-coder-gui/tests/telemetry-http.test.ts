@@ -152,7 +152,12 @@ test("run routes list run journals newest first as read-model rows and serve one
 	const run = await json(await h.request("/api/telemetry/runs/run-alpha"), routes.telemetryRun.response);
 	assert.equal(run.kind, "run");
 	assert.equal(run.row.runId, "run-alpha");
-	const quantities = [page, rest, run].flatMap((dto) => quantitiesOf(dto));
+	// The run page's split by model is the read model's run cost report: model groups, each quantity explained.
+	const cost = await json(await h.request("/api/telemetry/runs/run-alpha/cost"), routes.telemetryRunCost.response);
+	assert.deepEqual([cost.kind, cost.scope, cost.groupBy], ["cost", { runId: "run-alpha" }, "model"]);
+	assert.ok(cost.groups.every((group) => group.audience === null && group.usd.ref.startsWith("run:run-alpha")));
+	assert.equal((await h.request("/api/telemetry/runs/run-absent/cost")).status, 404);
+	const quantities = [page, rest, run, cost].flatMap((dto) => quantitiesOf(dto));
 	assert.deepEqual(telemetryLies(quantities), []);
 	const explained = await json(
 		await h.request(`/api/telemetry/explain?ref=${encodeURIComponent(run.row.usd.ref)}`),

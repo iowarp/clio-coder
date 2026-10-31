@@ -295,3 +295,25 @@
 	margin: var(--space-2) 0 0;
 	font-size: var(--text-exact);
 }
+/* A run's spend by model: each model and its target, then its calls, tokens and cost. */
+.trace-model-spend {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: var(--space-4);
+}
+.trace-model-spend > li + li {
+	border-top: 1px solid var(--line);
+	padding-top: var(--space-3);
+}
+.trace-model-spend__name {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.trace-model-spend__name small {
+	color: var(--ink-muted);
+}
+.trace-model-spend .trace-spend {
+	margin-top: var(--space-2);
+}

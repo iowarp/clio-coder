@@ -11,7 +11,7 @@ import { StatusMark } from "../../design/status.js";
 import { Explained } from "../../telemetry/Explained.js";
 import { listDestination } from "../run-inspection-model.js";
 import "./trace-live.css";
-import { CallWaterfall, Facts, ReceiptPanel } from "./panels.js";
+import { CallWaterfall, Facts, ReceiptPanel, SpendPanel } from "./panels.js";
 import "../run-inspection.css";
 import { liveLabel, liveRefetchMs } from "./trace-live-model.js";
 import { entryLabel, histogram, journalNote, runIsLive, runTone, runTotals } from "./trace-model.js";
@@ -61,6 +61,13 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		enabled: journaled,
 		refetchInterval: liveRefetchMs(status),
 	});
+	const cost = useQuery({
+		meta: { errorSurface: "inline" },
+		queryKey: ["telemetry", "run-cost", runId],
+		queryFn: () => client.call(routes.telemetryRunCost, input),
+		enabled: journaled,
+		refetchInterval: liveRefetchMs(status),
+	});
 	const receipt = useQuery({
 		meta: { errorSurface: "inline" },
 		placeholderData: (previous) => previous,
@@ -77,9 +84,10 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 		void run.refetch();
 		void detail.refetch();
 		void timeline.refetch();
+		void cost.refetch();
 		void receipt.refetch();
 	};
-	const failure = run.error ?? detail.error ?? timeline.error ?? receipt.error;
+	const failure = run.error ?? detail.error ?? timeline.error ?? cost.error ?? receipt.error;
 	if (!run.data)
 		return (
 			<section className="run-inspection">
@@ -147,7 +155,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				<InspectionError
 					title="Refresh failed; showing the last loaded record"
 					error={failure as Error}
-					busy={run.isFetching || detail.isFetching || timeline.isFetching || receipt.isFetching}
+					busy={run.isFetching || detail.isFetching || timeline.isFetching || cost.isFetching || receipt.isFetching}
 					retry={retry}
 				/>
 			)}
@@ -171,6 +179,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 					))}
 				{view === "execution" && (
 					<>
+						{journaled ? <SpendPanel client={client} detail={detail.data} cost={cost.data} /> : null}
 						<CallWaterfall client={client} run={trace} entries={entries} />
 						<section className="trace-panel">
 							<h2>Recorded activity</h2>

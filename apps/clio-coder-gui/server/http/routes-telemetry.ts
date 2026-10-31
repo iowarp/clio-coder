@@ -59,6 +59,9 @@ export function telemetryRoutes(app: Hono, hub: EventHub, telemetry: TelemetrySe
 	register(app, hub, routes.telemetryRunTimeline, ({ params }) =>
 		telemetry.read({ kind: "run-timeline", runId: params.runId }, routes.telemetryRunTimeline.response),
 	);
+	register(app, hub, routes.telemetryRunCost, ({ params }) =>
+		telemetry.read({ kind: "run-cost", runId: params.runId }, routes.telemetryRunCost.response),
+	);
 	register(app, hub, routes.telemetryExplain, ({ query }) =>
 		telemetry.read({ kind: "explain", ref: query.ref }, routes.telemetryExplain.response),
 	);

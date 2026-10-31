@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { Link } from "react-router";
 import type { Static } from "typebox";
 import type { TraceReceipt, TraceRun } from "../../../contracts/traces.js";
-import type { RunTimelineEntry } from "../../../contracts/wire.js";
+import type { CostReportV1, RunTelemetryV1, RunTimelineEntry } from "../../../contracts/wire.js";
 import type { Client } from "../../api/client.js";
 import { clock, formatDuration } from "../../api/clock.js";
 import { tokensText } from "../../chat/session-usage-model.js";
@@ -11,7 +11,15 @@ import { humanizeKey } from "../../design/facts-model.js";
 import { StatusMark } from "../../design/status.js";
 import { Explained } from "../../telemetry/Explained.js";
 import { ReceiptChecks } from "./receipt-checks.js";
-import { callPosition, entryLabel, provenanceFacts, runSpan, stageBars } from "./trace-model.js";
+import {
+	callPosition,
+	entryLabel,
+	provenanceFacts,
+	runModelSpend,
+	runSpan,
+	runSpend,
+	stageBars,
+} from "./trace-model.js";
 export function object(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -106,6 +114,71 @@ export function CallWaterfall({
 				})}
 			</div>
 			{calls.length === 0 ? <p>No model call was journaled for this run.</p> : null}
+		</section>
+	);
+}
+/**
+ * The run's spend from its journal (#434 §11.3): tokens by kind, cost and model calls, then the same spend by the
+ * model each call settled on, since a run's fallback targets are the one grouping it has. Every figure opens its
+ * explanation; nothing here adds one to another.
+ */
+export function SpendPanel({
+	client,
+	detail,
+	cost,
+}: {
+	client: Client;
+	detail: RunTelemetryV1 | undefined;
+	cost: CostReportV1 | undefined;
+}) {
+	const models = cost ? runModelSpend(cost) : [];
+	return (
+		<section className="trace-panel" aria-labelledby="trace-spend-heading">
+			<h2 id="trace-spend-heading">Tokens and spend</h2>
+			{detail ? (
+				<ul className="trace-spend">
+					{runSpend(detail).map((figure) => (
+						<li key={figure.label}>
+							<span>{figure.label}</span>
+							<strong>
+								<Explained client={client} {...figure} />
+							</strong>
+						</li>
+					))}
+				</ul>
+			) : (
+				<p role="status">Reading the run journal…</p>
+			)}
+			<h3>By model</h3>
+			{cost && models.length === 0 ? <p>No model call was journaled for this run.</p> : null}
+			<ul className="trace-model-spend">
+				{models.map((row) => (
+					<li key={row.key}>
+						<p className="trace-model-spend__name">
+							<strong>{row.model}</strong> <small>{row.target}</small>
+						</p>
+						<ul className="trace-spend">
+							{(
+								[
+									["Model calls", row.calls],
+									["Tokens", row.tokens],
+									["Cost", row.cost],
+								] as const
+							).map(([label, figure]) => (
+								<li key={label}>
+									<span>{label}</span>
+									<strong>
+										<Explained client={client} label={`${label}, ${row.model}`} {...figure} />
+									</strong>
+								</li>
+							))}
+						</ul>
+					</li>
+				))}
+			</ul>
+			{models.length > 1 ? (
+				<p className="panel-note">A call that failed over to another model counts under each model it reached.</p>
+			) : null}
 		</section>
 	);
 }

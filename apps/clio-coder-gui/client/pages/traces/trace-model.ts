@@ -3,7 +3,7 @@
 // without a browser. Every number shown is a server display; geometry is the only arithmetic here (#434).
 
 import type { TraceRun, TraceRunStatus } from "../../../contracts/traces.js";
-import type { RunTelemetryV1, RunTimelineEntry } from "../../../contracts/wire.js";
+import type { CostReportV1, RunTelemetryV1, RunTimelineEntry } from "../../../contracts/wire.js";
 import { formatDuration } from "../../api/clock.js";
 import { omittedSentence } from "../../design/facts-model.js";
 import type { StatusTone } from "../../design/status.js";
@@ -60,6 +60,49 @@ export function runTotals(run: TraceRun, detail: RunTelemetryV1 | undefined, now
 		{ label: "Wall time", value: span ? formatDuration(span.end - span.start) : "not recorded", ref: null },
 		{ label: "Runtime", value: run.identity?.runtimeId || "not recorded", ref: null },
 	];
+}
+
+/** The run's tokens by kind, then its cost and model calls: each the read model's quantity, explained (#434 §11.3). */
+export function runSpend(detail: RunTelemetryV1): RunTotal[] {
+	const tokens = detail.tokens;
+	return [
+		{ label: "Input", ...explainable(tokens.input) },
+		{ label: "Output", ...explainable(tokens.output) },
+		{ label: "Cache read", ...explainable(tokens.cacheRead) },
+		{ label: "Cache write", ...explainable(tokens.cacheWrite) },
+		{ label: "Cache write (1h)", ...explainable(tokens.cacheWrite1h) },
+		{ label: "Reasoning", ...explainable(tokens.reasoning) },
+		{ label: "Total tokens", ...explainable(tokens.total) },
+		{ label: "Cost", ...explainable(detail.row.usd) },
+		{ label: "Model calls", ...explainable(detail.counts.calls) },
+	];
+}
+
+export interface ModelSpend {
+	key: string;
+	target: string;
+	model: string;
+	calls: Explainable;
+	tokens: Explainable;
+	cost: Explainable;
+}
+
+/**
+ * The run's spend by the model each call settled on, from the read model's model groups: a fallback target is its
+ * own row. A group's key is `<target>/<model>`; a target id holds no slash, while a model id may.
+ */
+export function runModelSpend(report: CostReportV1): ModelSpend[] {
+	return report.groups.map((group) => {
+		const slash = group.key.indexOf("/");
+		return {
+			key: group.key,
+			target: (slash < 0 ? "" : group.key.slice(0, slash)) || "Unknown target",
+			model: (slash < 0 ? group.key : group.key.slice(slash + 1)) || "Unknown model",
+			calls: explainable(group.calls),
+			tokens: explainable(group.tokens),
+			cost: explainable(group.usd),
+		};
+	});
 }
 
 /** What the journal can and cannot vouch for, in one sentence; null when it read whole. */

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { evidenceDestination, listDestination, matchesText } from "../client/pages/run-inspection-model.js";
-import { callPosition, runTotals, stageBars } from "../client/pages/traces/trace-model.js";
+import { callPosition, runModelSpend, runTotals, stageBars } from "../client/pages/traces/trace-model.js";
 import type { TraceRun } from "../contracts/traces.js";
 import type { RunTimelineEntry } from "../contracts/wire.js";
 
@@ -116,4 +116,30 @@ test("loaded artifact discovery is case-insensitive and requires every search te
 	assert.equal(matchesText(" WORKER model ", ["worker-42", "Model-A", null]), true);
 	assert.equal(matchesText("worker unknown", ["worker-42", "model-a"]), false);
 	assert.equal(matchesText("", [undefined]), true);
+});
+
+test("a run's spend by model keeps each group's server words and reference, and a model id may hold a slash (#434 §11.3)", () => {
+	const figure = (display: string, metric: string) => ({
+		fact: { kind: "unknown", reason: "not-observed" } as const,
+		display,
+		ref: `run:run-0#${metric}` as never,
+	});
+	const group = (key: string) => ({
+		key,
+		calls: figure("1", "calls"),
+		tokens: figure("240", "total"),
+		usd: figure("$0.0024", "usd"),
+		pricedBy: { provider: 0, "target-rates": 1, catalog: 0, free: 0, none: 0 },
+		audience: null,
+	});
+	const report = { groups: [group("local/qwen/coder"), group("fallback-only")] } as unknown as Parameters<
+		typeof runModelSpend
+	>[0];
+	assert.deepEqual(
+		runModelSpend(report).map((row) => [row.target, row.model, row.tokens.value, row.cost.ref]),
+		[
+			["local", "qwen/coder", "240", "run:run-0#usd"],
+			["Unknown target", "fallback-only", "240", "run:run-0#usd"],
+		],
+	);
 });
