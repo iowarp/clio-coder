@@ -14,7 +14,6 @@ import { join } from "node:path";
 import type { RunEvidenceV1, RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import { TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
 import type { Fact } from "../../core/telemetry/fact.js";
-import { renderFact } from "../../core/telemetry/render.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { integrityClause, trustStateWord, validationClause } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
@@ -72,6 +71,11 @@ export interface RunResultSummary {
 /** A run's projection: the summary plus the answer it delivered. */
 export interface RunResultFacts extends RunResultSummary {
 	text?: string;
+	/**
+	 * The run's folded token quantity as the read model words it. Unlike `tokens`, it keeps the measured subtotal
+	 * beside unknown call coverage, so a partly counted run reads as a lower bound rather than unknown (#434).
+	 */
+	tokensDisplay?: string;
 }
 
 function factValue(fact: Fact<number>): number | undefined {
@@ -132,6 +136,7 @@ function runResultFactsOf(record: RunTelemetryV1 | null): RunResultFacts | null 
 		trust: inspectRunTrustStatus(record).status,
 		outcome: settled.outcome,
 		tokens: settled.totalTokens,
+		tokensDisplay: record.row.tokens.display,
 		toolCounts: settled.tools.map((entry) => ({ tool: entry.tool, count: entry.calls })),
 		...(changedPaths !== undefined ? { changedPaths } : {}),
 		...(settled.outcomeCode !== null ? { outcomeCode: settled.outcomeCode } : {}),
@@ -244,7 +249,7 @@ export function runResultWireFacts(runId: string, facts: RunResultFacts | null):
 		trust: facts.trust ? trustStateWord("artifactIntegrity", facts.trust.artifactIntegrity.state) : null,
 		validation: facts.trust ? validationClause(facts.trust) : null,
 		tokens: facts.tokenCount ?? null,
-		tokensDisplay: facts.tokens ? renderFact(facts.tokens) : null,
+		tokensDisplay: facts.tokensDisplay ?? null,
 		elapsedMs: facts.durationMs ?? null,
 		placement:
 			placement === undefined
