@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { attributeCommitMessage } from "../../core/commit-attribution.js";
+import { telemetryContext } from "../../core/telemetry/context.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { clioStateDir } from "../../core/xdg.js";
 import type { Playbook } from "../agents/playbook.js";
@@ -26,6 +27,7 @@ import type { CostProvenance } from "../providers/index.js";
 import { activeDecisionRefs } from "../session/decision-board.js";
 import type { DecisionLedgerEntry } from "../session/entries.js";
 import { aggregateCostAmounts, type CostAggregate, renderCostAmount } from "../telemetry/cost.js";
+import { telemetryRunDirectory } from "../telemetry/paths.js";
 import {
 	assignmentProcessOwnerAlive,
 	claimAssignmentVerdict,
@@ -69,6 +71,7 @@ import {
 import { type DispatchIntent, declaredScopeIntent } from "./intent.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
 import { readReceiptTextSync } from "./receipt-store.js";
+import { type FleetRootTelemetry, openFleetRootTelemetry } from "./run-telemetry.js";
 import { type FleetRunRecord, writeFleetRun, writeFleetRunSync } from "./state.js";
 import type { RunReceipt } from "./types.js";
 import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "./workspace-checkpoint.js";
@@ -355,12 +358,29 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			/* A dead owner can be reclaimed on the next run. */
 		}
 	});
+	let rootTelemetry: FleetRootTelemetry | undefined;
 	try {
+		try {
+			rootTelemetry = await openFleetRootTelemetry(
+				input.fleetRootId,
+				telemetryContext()?.sessionId ?? null,
+				telemetryRunDirectory(clioStateDir(), input.fleetRootId),
+			);
+		} catch (error) {
+			// The fleet runs without its journal rather than not at all; its gate files and root record still hold.
+			const message = error instanceof Error ? error.message : String(error);
+			input.onNotice?.(`fleet root telemetry journal unavailable: ${message}`);
+		}
 		input.onStarted?.();
-		return await runFleetHoldingWorkspace(input, (seal) => {
-			emergencySeal = seal;
-		});
+		return await runFleetHoldingWorkspace(
+			input,
+			(seal) => {
+				emergencySeal = seal;
+			},
+			rootTelemetry,
+		);
 	} finally {
+		await rootTelemetry?.close();
 		await lease.release().catch((error: unknown) => {
 			// The record names this live process, so other processes are refused
 			// here until it exits or its next acquisition retries the release; say
@@ -375,6 +395,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 async function runFleetHoldingWorkspace(
 	input: ExecuteFleetRunInput,
 	setEmergencySeal: (seal: () => void) => void,
+	rootTelemetry: FleetRootTelemetry | undefined,
 ): Promise<FleetRunOutcome> {
 	const { dispatch, agents, fleetRootId, workspaceRoot } = input;
 	const decisionRefs = activeDecisionRefs(input.getDecisionBoard?.() ?? []);
@@ -1152,7 +1173,7 @@ async function runFleetHoldingWorkspace(
 				independentReviewFresh = decided.verdict === "pass" && correlation.independent;
 				if (!replayed.has(step.id)) {
 					const staged = stagePendingGateDecision(decided.draft);
-					const { path: decisionPath } = materializePendingGateDecision(staged);
+					const { path: decisionPath } = materializePendingGateDecision(staged, rootTelemetry?.context);
 					notice(
 						`loop ${loop.id} cycle ${attempt}: ${decided.draft.outcome}${decided.draft.detail === undefined ? "" : ` (${decided.draft.detail})`} decision=${decisionPath}`,
 						"gate",

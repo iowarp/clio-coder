@@ -118,6 +118,47 @@ function clioWriterVersions(): Promise<{ clioCoderVersion: string; piVersion: st
 	return writerVersions;
 }
 
+export interface FleetRootTelemetry {
+	readonly context: TelemetryContext;
+	close(): Promise<void>;
+}
+
+const fleetRoots = new Map<string, TelemetryContext>();
+
+/**
+ * The fleet root's own run journal, open while its loop runs. Gate decisions, code steps and the routing of every
+ * step land here, since the root is the run that asked for them (#434).
+ */
+export async function openFleetRootTelemetry(
+	rootId: string,
+	sessionId: string | null,
+	directory: string,
+): Promise<FleetRootTelemetry> {
+	if (fleetRoots.has(rootId)) throw new Error(`fleet root ${rootId} already owns its journal`);
+	const { openCallJournal } = await import("../telemetry/call-journal.js");
+	const context: TelemetryContext =
+		sessionId === null ? { sessionId: null, runId: rootId, label: "main" } : { sessionId, runId: rootId, label: "main" };
+	const writer = await openCallJournal({ directory, context, writer: await clioWriterVersions() });
+	fleetRoots.set(rootId, context);
+	let closing: Promise<void> | undefined;
+	return {
+		context,
+		close() {
+			if (closing) return closing;
+			fleetRoots.delete(rootId);
+			closing = writer.close().catch(() => {
+				writeDiagnostic("[clio-coder:telemetry] fleet root journal close failed; recorded coverage may be incomplete\n");
+			});
+			return closing;
+		},
+	};
+}
+
+/** The open fleet root that owns an assignment, so a step's routing lands in the root that asked for it (#434). */
+export function fleetRootTelemetryContext(rootId: string | undefined): TelemetryContext | undefined {
+	return rootId === undefined ? undefined : fleetRoots.get(rootId);
+}
+
 /** Only dispatch opens owners. Viewers and the display registry never acquire a second writer (#434). */
 async function openOwnedRunTelemetry(context: WorkerTelemetryContext, directory: string): Promise<RunTelemetryJournal> {
 	const existing = journals.get(context.runId);

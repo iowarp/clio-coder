@@ -13,6 +13,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
+import type { TelemetryContext } from "../../core/telemetry/context.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
 import { parseVerifierResult, type VerifierCheck, type VerifierResult } from "../agents/result-contract.js";
@@ -590,6 +593,7 @@ function persistGateDecisionArtifact(
 	artifact: GateDecisionArtifact,
 	stateDir: string,
 	allowIdenticalExisting: boolean,
+	telemetry: TelemetryContext | undefined,
 ): { artifact: GateDecisionArtifact; path: string } {
 	const verification = verifyGateDecisionArtifact(artifact);
 	if (!verification.ok) throw new Error(verification.reason);
@@ -608,7 +612,28 @@ function persistGateDecisionArtifact(
 		throw new Error(`gate decision artifact collision: ${artifact.id}`);
 	}
 	atomicWrite(path, JSON.stringify(artifact, null, 2));
+	telemetryHub().emit("gate.decided", gateDecidedFacts(artifact), telemetry);
 	return { artifact, path };
+}
+
+/** The decision as `gate.decided` carries it: identities, verdict and digest; findings stay in the artifact (#434). */
+function gateDecidedFacts(artifact: GateDecisionArtifact): EventPayload<"gate.decided"> {
+	return {
+		decisionId: artifact.id,
+		group: artifact.group,
+		topology: artifact.topology,
+		cycle: artifact.cycle,
+		outcome: artifact.outcome,
+		subjects: artifact.subjects.map((subject) => ({ runId: subject.runId, digest: subject.digest })),
+		...(artifact.decider !== undefined
+			? { decider: { runId: artifact.decider.runId, digest: artifact.decider.digest } }
+			: {}),
+		...(artifact.winner !== undefined
+			? { winner: { index: artifact.winner.index, runId: artifact.winner.subject.runId } }
+			: {}),
+		...(artifact.confirmation !== undefined ? { confirms: artifact.confirmation.id } : {}),
+		digest: artifact.integrity.digest,
+	};
 }
 
 type PendingGateRecordWithoutIntegrity =
@@ -949,8 +974,14 @@ export function resolvePendingGateDecision(
 	return persistPendingGateDecision(resolvedRecord, loaded.stateDir, true);
 }
 
-/** Write/reuse the reserved final artifact, then durably remove its WAL record. */
-export function materializePendingGateDecision(handle: PendingGateDecisionHandle): {
+/**
+ * Write/reuse the reserved final artifact, then durably remove its WAL record. A newly written artifact is journaled
+ * as `gate.decided` under `telemetry`, else under the async context (#434).
+ */
+export function materializePendingGateDecision(
+	handle: PendingGateDecisionHandle,
+	telemetry?: TelemetryContext,
+): {
 	artifact: GateDecisionArtifact;
 	path: string;
 } {
@@ -970,7 +1001,7 @@ export function materializePendingGateDecision(handle: PendingGateDecisionHandle
 	if (loaded.record.kind !== "decision") {
 		throw new Error(`pending gate output requires receipt resolution: ${loaded.record.id}`);
 	}
-	const written = persistGateDecisionArtifact(loaded.record.decision, loaded.stateDir, true);
+	const written = persistGateDecisionArtifact(loaded.record.decision, loaded.stateDir, true, telemetry);
 	const persisted = readVerifiedArtifact(written.path);
 	if (persisted.integrity.digest !== loaded.record.decision.integrity.digest) {
 		throw new Error(`materialized gate decision does not match pending record: ${loaded.record.id}`);

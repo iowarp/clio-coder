@@ -796,3 +796,31 @@ export const ProviderHeadersCapturedSchema = Type.Object(
 	closed,
 );
 export { utc as UtcSchema };
+
+const sha256OrNull = Type.Union([sha256Hex, Type.Null()]);
+const gateSubject = Type.Object({ runId: ExistingId, digest: sha256OrNull }, closed);
+/** A decided review or compete gate, in the journal of the run the gate's group belongs to (#434). */
+export const GateDecidedSchema = Type.Object(
+	{
+		decisionId: ExistingId,
+		group: ExistingId,
+		topology: vocabulary(["review", "compete"]),
+		cycle: count,
+		outcome: vocabulary([
+			"pass",
+			"fail",
+			"revise",
+			"exhausted",
+			"winner",
+			"no-winner",
+			"operator-confirmed",
+			"yolo-applied",
+		]),
+		subjects: Type.Array(gateSubject),
+		decider: Type.Optional(gateSubject),
+		winner: Type.Optional(Type.Object({ index: count, runId: ExistingId }, closed)),
+		confirms: Type.Optional(ExistingId),
+		digest: sha256Hex,
+	},
+	closed,
+);
