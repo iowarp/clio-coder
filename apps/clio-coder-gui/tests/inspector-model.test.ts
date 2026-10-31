@@ -108,11 +108,11 @@ const run = (over: Partial<TraceRun> = {}): TraceRun => ({
 
 test("a run's totals are its journal's tokens, cost and model calls, then wall time and the runtime", () => {
 	assert.deepEqual(runTotals(run(), undefined, Date.parse("2026-09-20T10:05:00.000Z")), [
-		{ label: "Tokens", value: "4,200" },
-		{ label: "Cost", value: "$0.00 local" },
-		{ label: "Model calls", value: "1" },
-		{ label: "Wall time", value: "30s" },
-		{ label: "Runtime", value: "openai" },
+		{ label: "Tokens", value: "4,200", ref: "run:run-0#total" },
+		{ label: "Cost", value: "$0.00 local", ref: "run:run-0#usd" },
+		{ label: "Model calls", value: "1", ref: "run:run-0#apiCalls" },
+		{ label: "Wall time", value: "30s", ref: null },
+		{ label: "Runtime", value: "openai", ref: null },
 	]);
 	// A live run measures against now; a run the ledger does not hold spans its journal and names no runtime.
 	const base = run();
@@ -121,10 +121,10 @@ test("a run's totals are its journal's tokens, cost and model calls, then wall t
 		undefined,
 		Date.parse("2026-09-20T10:01:00.000Z"),
 	);
-	assert.deepEqual(live[3], { label: "Wall time", value: "1m 0s" });
+	assert.deepEqual(live[3], { label: "Wall time", value: "1m 0s", ref: null });
 	assert.deepEqual(runTotals(run({ identity: null }), undefined, 0).slice(3), [
-		{ label: "Wall time", value: "30s" },
-		{ label: "Runtime", value: "not recorded" },
+		{ label: "Wall time", value: "30s", ref: null },
+		{ label: "Runtime", value: "not recorded", ref: null },
 	]);
 });
 

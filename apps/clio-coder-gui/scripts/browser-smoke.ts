@@ -357,6 +357,26 @@ try {
 			.locator("strong");
 		await costCell.waitFor();
 		assert.notEqual((await costCell.innerText()).trim(), "", "the run's cost cell is empty");
+		// A displayed quantity explains itself: its value, coverage and fold rule in the read model's words (#434 §11.4).
+		const tokensExplain = page
+			.locator("main .trace-totals li", { has: page.locator("span", { hasText: /^Tokens$/ }) })
+			.locator("details.explain");
+		await tokensExplain.locator("summary").click();
+		const explanation = tokensExplain.locator(".explain__panel");
+		await explanation.locator("dt", { hasText: /^Coverage$/ }).waitFor();
+		assert.notEqual(
+			(await explanation.locator(".explain__rule").innerText()).trim(),
+			"",
+			"the explanation names no rule",
+		);
+		await check("trace-run-explain");
+		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `trace-run-explain-${width}.png`) });
+		await page.keyboard.press("Escape");
+		assert.equal(await tokensExplain.evaluate((element) => (element as HTMLDetailsElement).open), false);
+		assert.ok(
+			await tokensExplain.locator("summary").evaluate((element) => element === document.activeElement),
+			"Escape hands focus back to the explained number",
+		);
 		// A run opens on its replay; the sealed receipt's checks have their own view.
 		await page.getByRole("tab", { name: /^Checks & receipt/ }).click();
 		// Format conformance and contract quality are separate facts; an unmeasured quality never reads as a pass.

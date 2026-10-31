@@ -7,11 +7,10 @@ import type { RunTelemetryV1, RunTimelineEntry } from "../../../contracts/wire.j
 import { formatDuration } from "../../api/clock.js";
 import { omittedSentence } from "../../design/facts-model.js";
 import type { StatusTone } from "../../design/status.js";
-import { quantityText } from "../../telemetry/quantity-model.js";
+import { type Explainable, explainable } from "../../telemetry/quantity-model.js";
 
-export interface RunTotal {
+export interface RunTotal extends Explainable {
 	label: string;
-	value: string;
 }
 
 export interface HistogramRow {
@@ -55,11 +54,11 @@ export function runSpan(run: TraceRun, now: number): { start: number; end: numbe
 export function runTotals(run: TraceRun, detail: RunTelemetryV1 | undefined, now: number): RunTotal[] {
 	const span = runSpan(run, now);
 	return [
-		{ label: "Tokens", value: quantityText(detail?.tokens.total ?? run.telemetry.tokens) },
-		{ label: "Cost", value: quantityText(run.telemetry.usd) },
-		{ label: "Model calls", value: quantityText(detail?.counts.calls ?? run.telemetry.apiCalls) },
-		{ label: "Wall time", value: span ? formatDuration(span.end - span.start) : "not recorded" },
-		{ label: "Runtime", value: run.identity?.runtimeId || "not recorded" },
+		{ label: "Tokens", ...explainable(detail?.tokens.total ?? run.telemetry.tokens) },
+		{ label: "Cost", ...explainable(run.telemetry.usd) },
+		{ label: "Model calls", ...explainable(detail?.counts.calls ?? run.telemetry.apiCalls) },
+		{ label: "Wall time", value: span ? formatDuration(span.end - span.start) : "not recorded", ref: null },
+		{ label: "Runtime", value: run.identity?.runtimeId || "not recorded", ref: null },
 	];
 }
 

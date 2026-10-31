@@ -3,11 +3,13 @@ import { Link } from "react-router";
 import type { Static } from "typebox";
 import type { TraceReceipt, TraceRun } from "../../../contracts/traces.js";
 import type { RunTimelineEntry } from "../../../contracts/wire.js";
+import type { Client } from "../../api/client.js";
 import { clock, formatDuration } from "../../api/clock.js";
 import { tokensText } from "../../chat/session-usage-model.js";
 import { Facts as RecordFacts } from "../../design/facts.js";
 import { humanizeKey } from "../../design/facts-model.js";
 import { StatusMark } from "../../design/status.js";
+import { Explained } from "../../telemetry/Explained.js";
 import { ReceiptChecks } from "./receipt-checks.js";
 import { callPosition, entryLabel, provenanceFacts, runSpan, stageBars } from "./trace-model.js";
 export function object(value: unknown): Record<string, unknown> {
@@ -43,7 +45,15 @@ type CallEntry = Extract<RunTimelineEntry, { kind: "call" }>;
  * Each call attempt as a lane on the run's span, its recorded stages as segments of its bar. Bars use recorded
  * times and offsets and imply no causality; every label is the server's display (#434).
  */
-export function CallWaterfall({ run, entries }: { run: TraceRun; entries: readonly RunTimelineEntry[] }) {
+export function CallWaterfall({
+	client,
+	run,
+	entries,
+}: {
+	client: Client;
+	run: TraceRun;
+	entries: readonly RunTimelineEntry[];
+}) {
 	const calls = entries.filter((entry): entry is CallEntry => entry.kind === "call");
 	const now = clock.now();
 	const span = runSpan(run, now);
@@ -66,7 +76,7 @@ export function CallWaterfall({ run, entries }: { run: TraceRun; entries: readon
 							<div className="trace-lane__label">
 								<StatusMark tone={label.tone} label={label.title} />
 								<small>
-									{tokensText(call.tokens.display)} · {call.usd.display} · first token {call.timing.ttft.display} · model{" "}
+									<CallSpend client={client} call={call} /> · first token {call.timing.ttft.display} · model{" "}
 									{call.timing.modelTime.display}
 								</small>
 							</div>
@@ -99,17 +109,28 @@ export function CallWaterfall({ run, entries }: { run: TraceRun; entries: readon
 		</section>
 	);
 }
+/** A call's tokens and cost, each opening its explanation. */
+function CallSpend({ client, call }: { client: Client; call: CallEntry }) {
+	return (
+		<>
+			<Explained client={client} label="Call tokens" value={tokensText(call.tokens.display)} ref={call.tokens.ref} /> ·{" "}
+			<Explained client={client} label="Call cost" value={call.usd.display} ref={call.usd.ref} />
+		</>
+	);
+}
 /** One timeline entry: what it is, when it fell in the run, and the displays it carries. */
-export function EntryRow({ entry, start }: { entry: RunTimelineEntry; start: number | null }) {
+export function EntryRow({ client, entry, start }: { client: Client; entry: RunTimelineEntry; start: number | null }) {
 	const label = entryLabel(entry);
 	const at = Date.parse(entry.at);
 	const elapsed = start !== null && Number.isFinite(at) && at >= start ? `+${formatDuration(at - start)}` : null;
 	const details =
-		entry.kind === "call"
-			? `${tokensText(entry.tokens.display)} · ${entry.usd.display} · settle ${entry.timing.settle.display}`
-			: entry.kind === "feed" && entry.duration
-				? entry.duration.display
-				: null;
+		entry.kind === "call" ? (
+			<>
+				<CallSpend client={client} call={entry} /> · settle {entry.timing.settle.display}
+			</>
+		) : entry.kind === "feed" && entry.duration ? (
+			entry.duration.display
+		) : null;
 	return (
 		<article className="trace-event">
 			<div className="trace-event-head">
@@ -117,7 +138,7 @@ export function EntryRow({ entry, start }: { entry: RunTimelineEntry; start: num
 				<strong>{label.title}</strong>
 				<small>
 					{elapsed ?? "Elapsed time unavailable"}
-					{details ? ` · ${details}` : ""}
+					{details ? <> · {details}</> : null}
 				</small>
 			</div>
 		</article>

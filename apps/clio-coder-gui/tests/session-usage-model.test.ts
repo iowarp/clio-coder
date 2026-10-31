@@ -49,7 +49,13 @@ test("the turn overview counts turns and wall time and sums no tokens or cost (#
 		running: true,
 	});
 	// With neither a usage read nor telemetry, a session shows no spend: nothing outside the read model folds one.
-	assert.deepEqual(sessionSpend({}), { tokens: null, cost: null, calls: null, source: "none" });
+	assert.deepEqual(sessionSpend({}), {
+		tokens: null,
+		cost: null,
+		calls: null,
+		source: "none",
+		refs: { tokens: null, cost: null, calls: null },
+	});
 	assert.deepEqual(usageSummary(false, undefined, undefined).totals, []);
 });
 
@@ -114,10 +120,10 @@ const usage: SessionUsage = {
 
 test("legacy v1 totals and rows read the agent's counts without a sum or a suffix the client invents", () => {
 	assert.deepEqual(usageTotals(usage), [
-		{ label: "Cost", value: "$0.42" },
-		{ label: "Tokens", value: "5,200" },
-		{ label: "Model calls", value: "7" },
-		{ label: "Calls missing usage", value: "1" },
+		{ label: "Cost", value: "$0.42", ref: null },
+		{ label: "Tokens", value: "5,200", ref: null },
+		{ label: "Model calls", value: "7", ref: null },
+		{ label: "Calls missing usage", value: "1", ref: null },
 	]);
 	assert.deepEqual(usageRows(usage), [
 		{
@@ -128,6 +134,7 @@ test("legacy v1 totals and rows read the agent's counts without a sum or a suffi
 			calls: "7",
 			beside:
 				"1 side question, 2 pre-warms, 1 System One call, 1 failed compaction call, 1 worker call, 1 call missing token usage",
+			refs: { tokens: null, cost: null },
 		},
 	]);
 });
@@ -136,8 +143,8 @@ test("legacy v1 totals and rows read the agent's counts without a sum or a suffi
 const telemetry = {
 	session: {
 		totals: {
-			tokens: { display: "≥5,120 (1 call unknown)" },
-			usd: { display: "$0.42 +?" },
+			tokens: { display: "≥5,120 (1 call unknown)", ref: "session:s1#total" },
+			usd: { display: "$0.42 +?", ref: "session:s1#usd" },
 		},
 		own: {
 			counts: {
@@ -173,11 +180,12 @@ test("the read model's displays win over the v1 counts wherever the usage read c
 		cost: "$0.42 +?",
 		calls: "7",
 		source: "telemetry",
+		refs: { tokens: "session:s1#total", cost: "session:s1#usd", calls: null },
 	});
 	assert.deepEqual(usageTotals(withTelemetry), [
-		{ label: "Cost", value: "$0.42 +?" },
-		{ label: "Tokens", value: "≥5,120 (1 call unknown)" },
-		{ label: "Model calls", value: "7" },
+		{ label: "Cost", value: "$0.42 +?", ref: "session:s1#usd" },
+		{ label: "Tokens", value: "≥5,120 (1 call unknown)", ref: "session:s1#total" },
+		{ label: "Model calls", value: "7", ref: null },
 	]);
 	assert.deepEqual(usageRows(withTelemetry), [
 		{
@@ -187,6 +195,7 @@ test("the read model's displays win over the v1 counts wherever the usage read c
 			cost: "$0.42 +?",
 			calls: "7",
 			beside: null,
+			refs: { tokens: null, cost: null },
 		},
 	]);
 	// A closed task has no usage read; its cold session fold takes the same place.
@@ -215,7 +224,13 @@ test("the read model's displays win over the v1 counts wherever the usage read c
 		sessionSpend({ usage: { ...usage, telemetry: { ...telemetry, session: unjournaled } } }).source,
 		"legacy",
 	);
-	assert.deepEqual(sessionSpend({ cold: unjournaled }), { tokens: null, cost: null, calls: null, source: "none" });
+	assert.deepEqual(sessionSpend({ cold: unjournaled }), {
+		tokens: null,
+		cost: null,
+		calls: null,
+		source: "none",
+		refs: { tokens: null, cost: null, calls: null },
+	});
 	const summary = usageSummary(true, withTelemetry, undefined);
 	assert.equal(summary.source, "telemetry");
 	assert.match(summary.note, /read model/);
@@ -258,8 +273,8 @@ test("parked usage shows recorded totals without exposing live model details or 
 	};
 	const parked = usageSummary(false, usage, recorded);
 	assert.deepEqual(parked.totals, [
-		{ label: "Cost", value: "~$0.03 est" },
-		{ label: "Tokens", value: "1,284,413" },
+		{ label: "Cost", value: "~$0.03 est", ref: null },
+		{ label: "Tokens", value: "1,284,413", ref: null },
 	]);
 	assert.match(parked.note, /^Last recorded totals\./);
 	assert.equal(parked.details, false);

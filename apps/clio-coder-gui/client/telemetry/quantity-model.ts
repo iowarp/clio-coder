@@ -1,7 +1,7 @@
 // A read-model quantity reaches the browser as { fact, display, ref } (#434 §11.2). The display is the canonical
 // renderer's wording and the only text a surface shows for it; nothing here formats, rounds or sums a number.
 
-import type { Quantity } from "../../contracts/wire.js";
+import type { ExplanationV1, Quantity } from "../../contracts/wire.js";
 
 export interface QuantityLike {
 	readonly display: string;
@@ -12,6 +12,47 @@ export const NOT_JOURNALED = "not journaled";
 
 export function quantityText(quantity: QuantityLike | null | undefined): string {
 	return quantity?.display ?? NOT_JOURNALED;
+}
+
+/** A figure as a surface carries it: the server's words, and the reference explain() resolves when it has one. */
+export interface Explainable {
+	readonly value: string;
+	readonly ref: string | null;
+}
+
+/** A read-model quantity for a surface; an absent one reads `absent` and has nothing to explain. */
+export function explainable(
+	quantity: { readonly display: string; readonly ref?: string } | null | undefined,
+	absent = NOT_JOURNALED,
+): Explainable {
+	return quantity ? { value: quantity.display, ref: quantity.ref ?? null } : { value: absent, ref: null };
+}
+
+export interface ExplanationView {
+	readonly value: string;
+	readonly coverage: string;
+	readonly rule: string;
+	/** Each kind of contributor the read model listed, with the ids it named. */
+	readonly sources: readonly { readonly label: string; readonly ids: readonly string[] }[];
+	/** Contributors beyond the server's cap, counted there and never listed. */
+	readonly omitted: string | null;
+}
+
+/** What one quantity's explanation says (#434 §11.4): its value, coverage and fold rule in the server's words. */
+export function explanationView(explanation: ExplanationV1): ExplanationView {
+	const { from } = explanation;
+	return {
+		value: explanation.value.display,
+		coverage: explanation.coverage,
+		rule: explanation.rule,
+		sources: [
+			{ label: "Calls", ids: from.callIds },
+			{ label: "Attempts", ids: from.attemptIds },
+			{ label: "Runs", ids: from.runIds },
+			{ label: "Records", ids: from.recordIds },
+		].filter((source) => source.ids.length > 0),
+		omitted: from.omitted > 0 ? `${from.omitted} more contributors are not listed.` : null,
+	};
 }
 
 /**

@@ -8,6 +8,7 @@ import { PanelEmpty } from "../../design/panel.js";
 import { emptyState } from "../../design/panel-model.js";
 import { InspectionError, InspectionTabs } from "../../design/run-inspection.js";
 import { StatusMark } from "../../design/status.js";
+import { Explained } from "../../telemetry/Explained.js";
 import { listDestination } from "../run-inspection-model.js";
 import "./trace-live.css";
 import { CallWaterfall, Facts, ReceiptPanel } from "./panels.js";
@@ -120,7 +121,9 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				{runTotals(trace, detail.data, now).map((total) => (
 					<li key={total.label}>
 						<span>{total.label}</span>
-						<strong>{total.value}</strong>
+						<strong>
+							<Explained client={client} {...total} />
+						</strong>
 					</li>
 				))}
 			</ul>
@@ -160,7 +163,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 			>
 				{view === "replay" &&
 					(timeline.data ? (
-						<TraceReplay run={trace} timeline={entries} live={runIsLive(status)} />
+						<TraceReplay client={client} run={trace} timeline={entries} live={runIsLive(status)} />
 					) : journaled ? (
 						<p role="status">Reading the run timeline…</p>
 					) : (
@@ -168,7 +171,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 					))}
 				{view === "execution" && (
 					<>
-						<CallWaterfall run={trace} entries={entries} />
+						<CallWaterfall client={client} run={trace} entries={entries} />
 						<section className="trace-panel">
 							<h2>Recorded activity</h2>
 							{!kinds.rows.length && <PanelEmpty>{emptyState.emptyStore("journal entry", "for this run")}</PanelEmpty>}

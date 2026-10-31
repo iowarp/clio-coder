@@ -3,6 +3,7 @@ import type { KeyboardEvent } from "react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { TraceRun } from "../../../contracts/traces.js";
 import type { RunTimelineEntry } from "../../../contracts/wire.js";
+import type { Client } from "../../api/client.js";
 import { clock, formatDuration, formatTime } from "../../api/clock.js";
 import { Icon } from "../../design/icons.js";
 import { EntryRow, Json } from "./panels.js";
@@ -19,13 +20,14 @@ import {
 import "./trace-replay.css";
 
 interface TraceReplayProps {
+	client: Client;
 	run: TraceRun;
 	timeline: RunTimelineEntry[];
 	/** The run is still live, so the timeline grows as its journal is re-read. */
 	live: boolean;
 }
 
-export function TraceReplay({ run, timeline, live }: TraceReplayProps) {
+export function TraceReplay({ client, run, timeline, live }: TraceReplayProps) {
 	const id = useId();
 	const root = useRef<HTMLElement>(null);
 	const [query, setQuery] = useState("");
@@ -305,7 +307,7 @@ export function TraceReplay({ run, timeline, live }: TraceReplayProps) {
 					</div>
 					<div className="trace-replay__detail" key={currentId}>
 						<p className="eyebrow">Selected entry · {formatTime(current.entry.at)}</p>
-						<EntryRow entry={current.entry} start={runStart} />
+						<EntryRow client={client} entry={current.entry} start={runStart} />
 						<h3>Exact journal entry</h3>
 						<Json value={current.entry} />
 					</div>

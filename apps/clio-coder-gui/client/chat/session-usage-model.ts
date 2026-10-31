@@ -6,7 +6,7 @@ import type { LiveUsage } from "../../contracts/session-telemetry.js";
 import type { SessionUsage } from "../../contracts/usage.js";
 import type { SessionTelemetryV1 } from "../../contracts/wire.js";
 import type { StatusTone } from "../design/status.js";
-import { countText } from "../telemetry/quantity-model.js";
+import { countText, type Explainable } from "../telemetry/quantity-model.js";
 
 type Cost = SessionUsage["session"]["cost"];
 
@@ -47,7 +47,16 @@ export interface Spend {
 	readonly source: "telemetry" | "legacy" | "none";
 	/** Legacy only: calls the v1 counts could not cover, named beside them and never folded into them. */
 	readonly missingTokenCalls?: number;
+	/** The read model's reference behind each figure, which explain() resolves; the v1 counts carry none. */
+	readonly refs: SpendRefs;
 }
+
+export interface SpendRefs {
+	readonly tokens: string | null;
+	readonly cost: string | null;
+	readonly calls: string | null;
+}
+const NO_REFS: SpendRefs = { tokens: null, cost: null, calls: null };
 
 /**
  * One spend figure for every surface. The read model wins wherever it is present: on the usage read for an open
@@ -67,6 +76,11 @@ export function sessionSpend(input: {
 			cost: session.totals.usd.display,
 			calls: session.own.counts.calls.display,
 			source: "telemetry",
+			refs: {
+				tokens: session.totals.tokens.ref ?? null,
+				cost: session.totals.usd.ref ?? null,
+				calls: session.own.counts.calls.ref ?? null,
+			},
 		};
 	const live = input.live?.session;
 	if (live)
@@ -75,6 +89,7 @@ export function sessionSpend(input: {
 			cost: live.costDisplay ?? "not measured",
 			calls: live.calls === undefined ? null : countText(live.calls),
 			source: "legacy",
+			refs: NO_REFS,
 			...(live.missingTokenCalls ? { missingTokenCalls: live.missingTokenCalls } : {}),
 		};
 	if (input.usage) {
@@ -84,21 +99,28 @@ export function sessionSpend(input: {
 			cost: costText(legacy.cost),
 			calls: countText(legacy.cost.calls),
 			source: "legacy",
+			refs: NO_REFS,
 			...(legacy.missingTokenCalls ? { missingTokenCalls: legacy.missingTokenCalls } : {}),
 		};
 	}
-	return { tokens: null, cost: null, calls: null, source: "none" };
+	return { tokens: null, cost: null, calls: null, source: "none", refs: NO_REFS };
 }
 
-function spendTotals(spend: Spend, unknownCallCoverageRuns = 0): Array<{ label: string; value: string }> {
-	if (spend.source === "none") return spend.cost ? [{ label: "Cost", value: spend.cost }] : [];
+export interface SpendTotal extends Explainable {
+	label: string;
+}
+
+function spendTotals(spend: Spend, unknownCallCoverageRuns = 0): SpendTotal[] {
+	if (spend.source === "none") return spend.cost ? [{ label: "Cost", value: spend.cost, ref: null }] : [];
 	return [
-		{ label: "Cost", value: spend.cost ?? "not measured" },
-		{ label: "Tokens", value: spend.tokens ?? "not recorded" },
-		...(spend.calls === null ? [] : [{ label: "Model calls", value: spend.calls }]),
-		...(spend.missingTokenCalls ? [{ label: "Calls missing usage", value: countText(spend.missingTokenCalls) }] : []),
+		{ label: "Cost", value: spend.cost ?? "not measured", ref: spend.refs.cost },
+		{ label: "Tokens", value: spend.tokens ?? "not recorded", ref: spend.refs.tokens },
+		...(spend.calls === null ? [] : [{ label: "Model calls", value: spend.calls, ref: spend.refs.calls }]),
+		...(spend.missingTokenCalls
+			? [{ label: "Calls missing usage", value: countText(spend.missingTokenCalls), ref: null }]
+			: []),
 		...(unknownCallCoverageRuns > 0
-			? [{ label: "Runs with unknown call coverage", value: countText(unknownCallCoverageRuns) }]
+			? [{ label: "Runs with unknown call coverage", value: countText(unknownCallCoverageRuns), ref: null }]
 			: []),
 	];
 }
@@ -119,6 +141,8 @@ export interface UsageRow {
 	cost: string;
 	calls: string | null;
 	beside: string | null;
+	/** The read model's references behind the row's figures; the v1 rows carry none. */
+	refs: { tokens: string | null; cost: string | null };
 }
 
 /** Per-model rows: the read model's cost report by model when the usage read carries it, else the v1 rows. */
@@ -131,6 +155,7 @@ export function usageRows(usage: SessionUsage, detail: "summary" | "fields" = "s
 			cost: group.usd.display,
 			calls: group.calls.display,
 			beside: null,
+			refs: { tokens: group.tokens.ref ?? null, cost: group.usd.ref ?? null },
 		}));
 	return usage.session.rows.map((row) => {
 		const beside = [
@@ -173,6 +198,7 @@ export function usageRows(usage: SessionUsage, detail: "summary" | "fields" = "s
 			cost: costText(row.cost),
 			calls: countText(row.calls),
 			beside: beside.length > 0 ? beside.join(", ") : null,
+			refs: { tokens: null, cost: null },
 		};
 	});
 }

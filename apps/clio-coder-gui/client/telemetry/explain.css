@@ -1,0 +1,78 @@
+/* A quantity's explanation: the number stays inline, and its panel floats beneath it. */
+.explain {
+	position: relative;
+	display: inline-block;
+}
+.explain > summary {
+	display: inline;
+	cursor: pointer;
+	list-style: none;
+	text-decoration: underline dotted var(--ink-subtle);
+	text-underline-offset: 3px;
+	border-radius: var(--radius-sm);
+}
+.explain > summary::-webkit-details-marker {
+	display: none;
+}
+.explain > summary:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+.explain__panel {
+	position: absolute;
+	z-index: 20;
+	top: calc(100% + var(--space-2));
+	left: 0;
+	width: min(26rem, calc(100vw - 2 * var(--space-4)));
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--line-float);
+	border-radius: var(--radius-md);
+	background: var(--raised);
+	box-shadow: var(--shadow-panel);
+	color: var(--ink);
+	font-family: var(--font-ui);
+	font-size: var(--text-meta);
+	font-weight: normal;
+	line-height: var(--leading-body);
+	text-align: left;
+	white-space: normal;
+}
+.explain__title {
+	margin: 0 0 var(--space-2);
+	color: var(--ink-strong);
+	font-weight: 600;
+}
+.explain__note {
+	margin: var(--space-2) 0 0;
+	color: var(--ink-muted);
+}
+.explain__facts {
+	display: grid;
+	gap: var(--space-2);
+	margin: 0;
+}
+.explain__facts > div {
+	display: grid;
+	grid-template-columns: 6.5rem minmax(0, 1fr);
+	gap: var(--space-3);
+}
+.explain__facts dt {
+	color: var(--ink-muted);
+}
+.explain__facts dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.explain__rule,
+.explain__source ul {
+	font-family: var(--font-mono);
+	font-size: var(--text-instrument);
+	line-height: var(--leading-tight);
+}
+.explain__source ul {
+	max-height: 7.5rem;
+	margin: 0;
+	padding: 0;
+	overflow-y: auto;
+	list-style: none;
+}

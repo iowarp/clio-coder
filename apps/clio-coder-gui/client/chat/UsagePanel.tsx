@@ -7,6 +7,7 @@ import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { sessionReadScope } from "../api/sessions.js";
 import { StatusMark } from "../design/status.js";
+import { Explained } from "../telemetry/Explained.js";
 import { useTelemetrySession } from "./session-telemetry.js";
 import { quotaCards, quotaTone, usageCoverageNotes, usageRows, usageSummary } from "./session-usage-model.js";
 import "./session-board.css";
@@ -90,7 +91,9 @@ export const UsagePanel = memo(function UsagePanel({
 						{summary.totals.map((figure) => (
 							<div key={figure.label}>
 								<dt>{figure.label}</dt>
-								<dd>{figure.value}</dd>
+								<dd>
+									<Explained client={client} {...figure} />
+								</dd>
 							</div>
 						))}
 					</dl>
@@ -107,10 +110,14 @@ export const UsagePanel = memo(function UsagePanel({
 									<li key={row.key}>
 										<span className="drill__main">
 											<span className="usage-panel__route">{row.route}</span>
-											<small className="drill__num">{row.tokens}</small>
+											<small className="drill__num">
+												<Explained client={client} label={`Tokens, ${row.route}`} value={row.tokens} ref={row.refs.tokens} />
+											</small>
 											{row.beside ? <small>Call details: {row.beside}</small> : null}
 										</span>
-										<span className="drill__num usage-panel__cost">{row.cost}</span>
+										<span className="drill__num usage-panel__cost">
+											<Explained client={client} label={`Cost, ${row.route}`} value={row.cost} ref={row.refs.cost} />
+										</span>
 									</li>
 								))}
 							</ul>

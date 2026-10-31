@@ -11,6 +11,7 @@ import { StatusMark } from "../design/status.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { isHeld, STATE_LABELS, taskState, taskTitle } from "../shell/shell-model.js";
+import { Explained } from "../telemetry/Explained.js";
 import { boardView, type PlanRow } from "./board-model.js";
 import { branchView } from "./branch-model.js";
 import { changeCounts, summarizeChanges } from "./changes-model.js";
@@ -565,13 +566,15 @@ export function SessionOverview({
 									<div>
 										<dt>Tokens</dt>
 										<dd>
-											{spend.tokens ?? "not recorded"}
+											<Explained client={client} label="Tokens" value={spend.tokens ?? "not recorded"} ref={spend.refs.tokens} />
 											{spend.missingTokenCalls ? ` (${spend.missingTokenCalls} missing usage)` : ""}
 										</dd>
 									</div>
 									<div>
 										<dt>Cost</dt>
-										<dd>{spend.cost ?? "Unpriced"}</dd>
+										<dd>
+											<Explained client={client} label="Cost" value={spend.cost ?? "Unpriced"} ref={spend.refs.cost} />
+										</dd>
 									</div>
 								</dl>
 							) : (
