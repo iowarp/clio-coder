@@ -51,16 +51,20 @@ export function outcomeTone(outcome: ContextOperationOutcome): OutcomeTone {
 }
 
 /**
- * Whether an outcome earns a transcript card. A compaction that failed,
- * cancelled or found nothing to cut already leaves an error or explanatory
- * notice from the chat loop, and a second block would repeat it. Routine
- * automatic maintenance stays quiet unless it fails.
+ * Failed and cancelled compactions already leave a chat-loop notice. An
+ * unchanged compaction can settle without one, so its card must retain the
+ * terminal explanation when the live rail disappears (D6f).
  */
 export function showsContextResult(operation: ContextOperation): boolean {
 	if (operation.outcome === undefined) return false;
-	if (operation.kind === "compaction") return operation.outcome === "completed";
+	if (operation.kind === "compaction") return operation.outcome === "completed" || operation.outcome === "unchanged";
 	if (operation.origin === "automatic") return operation.outcome === "failed";
 	return true;
+}
+
+export interface ContextOperationResult extends ContextOperation {
+	/** The terminal activity explains an unchanged result beyond its persisted facts (D6f). */
+	conclusion?: string;
 }
 
 /**
