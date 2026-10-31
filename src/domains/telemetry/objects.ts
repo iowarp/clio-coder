@@ -66,7 +66,8 @@ const projectPreloadSchema = Type.Union([
 		{ additionalProperties: false },
 	),
 ]);
-const promptStructureSchema = Type.Object(
+/** A `prompt-structure` object; exported so the share soundness check can walk it against its projection (#434). */
+export const PromptStructureObjectSchema = Type.Object(
 	{
 		sections: Type.Array(
 			Type.Object(
@@ -213,7 +214,7 @@ async function readObjectBytes(path: string): Promise<string | null> {
 const promptTextSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
 const nullableText = Type.Union([Type.String(), Type.Null()]);
 const contentSchemas: Partial<Record<StoredSubject, TSchema>> = {
-	"prompt-structure": promptStructureSchema,
+	"prompt-structure": PromptStructureObjectSchema,
 	"prompt-text": promptTextSchema,
 	// A body past the research capture cap keeps only its head, as text (#434).
 	request: Type.Union([

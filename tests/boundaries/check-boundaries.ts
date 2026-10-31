@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { shareProjectionErrors } from "../../src/domains/telemetry/share-soundness.js";
 
 export interface BoundaryCheckResult {
 	violations: string[];
@@ -1204,5 +1205,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 	for (const file of valueImportClosure(path.join(projectRoot, "src/core/telemetry/producer.ts"))) {
 		violations.push(...checkTelemetryProducer(path.relative(projectRoot, file), readFileSync(file, "utf8")));
 	}
+	// A share keeps a field verbatim only where its schema already bounds it (#434).
+	violations.push(...shareProjectionErrors().map((error) => `share-projection: ${error}`));
 	return { violations };
 }
