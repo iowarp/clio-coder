@@ -42,6 +42,7 @@ export {
 export type { EvidenceIndexRow } from "./evidence-index.js";
 export { EVIDENCE_INDEX_FILE, MAX_EVIDENCE_INDEX_ROWS, readEvidenceIndex } from "./evidence-index.js";
 export { TelemetryManifest } from "./manifest.js";
+export { readTaskMemorySpendSummary } from "./memory-spend.js";
 export type { OutOfTurnUsage, OutOfTurnUsageReadResult, OutOfTurnUsageRow } from "./out-of-turn-usage.js";
 export {
 	appendOutOfTurnUsageRow,
@@ -73,4 +74,5 @@ export {
 	MAX_PROJECTION_RUNS,
 	PROJECTION_FLUSH_DEBOUNCE_MS,
 } from "./projection.js";
+export { emptyTaskMemorySpendSummary, foldTaskMemorySpend, type TaskMemorySpendSummary } from "./read-model.js";
 export { readSessionContextSnapshots, readSessionPromptCompiles } from "./session-artifacts.js";

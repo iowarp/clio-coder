@@ -6,7 +6,7 @@ import { beginCall, telemetryCaptures } from "../core/telemetry/producer.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
-import { observationTracing, traceObservation } from "../domains/memory/observation-trace.js";
+import { observationTracing, traceObservation } from "../domains/memory/observation-events.js";
 import { resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { QuotaReading } from "../domains/quota/index.js";
 import { quotaReadingFingerprint, quotaReadingFromMessage } from "../domains/quota/index.js";

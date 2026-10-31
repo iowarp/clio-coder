@@ -45,14 +45,14 @@ import type { HistoryReviewSlice, HistoryReviewSource } from "./history-review.j
 import type { MemoryInterventionRegistration, MemoryStepLaunchOutcome } from "./intervention.js";
 import { lessonEvidence } from "./lesson-evidence.js";
 import type { HistoryFiling } from "./lesson-feedback.js";
+import type { TaskMemoryTelemetrySink } from "./memory-events.js";
+import { taskMemoryBankDelta } from "./memory-events.js";
 import { provenRecipes, recipeAlreadyClaimed } from "./recipes.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 import { TaskMemoryBank } from "./task-bank.js";
 import type { TaskMemoryModelClient, TaskMemoryPolicyResult, TaskMemoryStepUsage } from "./task-memory-policy.js";
 import { runTaskMemoryPolicy } from "./task-memory-policy.js";
 import type { TaskMemoryGuardianState } from "./task-memory-status.js";
-import type { TaskMemoryTelemetrySink } from "./task-memory-telemetry.js";
-import { taskMemoryBankDelta } from "./task-memory-telemetry.js";
 
 /** What operator surfaces show for the guardian. `off` covers a disabled or rules-only tier. */
 export type MemoryGuardianState = TaskMemoryGuardianState;

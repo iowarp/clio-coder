@@ -27,7 +27,6 @@ import type {
 	InternalGitDriftPayload,
 	LoopBlockedPayload,
 	MemoryGuardianChangedPayload,
-	MemoryStepCompletedPayload,
 	MiddlewareHookFailedPayload,
 	PermissionRequestedPayload,
 	PermissionResolvedPayload,
@@ -112,6 +111,98 @@ function pick<T extends object, const K extends keyof T>(
 const LIVE: LiveDefinition<never> = Object.freeze({ durability: "live" });
 function live<P>(): LiveDefinition<P> {
 	return LIVE as LiveDefinition<P>;
+}
+
+/** The journal keeps counts and identities from observation decisions, never envelopes or rendered copy (#434). */
+function projectMemoryObservation(payload: {
+	event: string;
+	facts: Record<string, unknown>;
+}): S.MemoryObservationRecorded {
+	const input = payload.facts;
+	const facts: Record<string, unknown> = {};
+	for (const key of [
+		"count",
+		"grounded",
+		"ungrounded",
+		"rejected",
+		"offered",
+		"offerable",
+		"units",
+		"incompleteUnits",
+		"attempts",
+		"timeoutMs",
+		"operations",
+		"dropped",
+		"extracted",
+		"candidates",
+		"accepted",
+		"entries",
+		"splitEntries",
+		"revision",
+		"priorObservationRevision",
+		"batchId",
+		"digest",
+		"sourceDigest",
+		"sourceSessionId",
+		"commitId",
+		"reason",
+		"phase",
+		"id",
+		"by",
+		"filing",
+		"final",
+		"answered",
+		"unavailable",
+		"split",
+		"ids",
+		"retainedIds",
+		"route",
+		"outcomes",
+		"decision",
+		"proven",
+		"window",
+	])
+		if (input[key] !== undefined) facts[key] = input[key];
+	for (const key of ["sourceTokens", "noteTokens", "originalInputTokens", "substitutedInputTokens", "proposed", "raw"])
+		if (typeof input[key] === "number") facts[key] = { kind: "estimated", value: input[key], method: "chars/4" };
+	if (typeof input.durationMs === "number")
+		facts.durationMs = { kind: "measured", value: input.durationMs, source: "local-clock" };
+	const usage = input.usage as
+		| {
+				input: number;
+				output: number;
+				cacheRead: number;
+				cacheWrite: number;
+				reasoning: number;
+				totalTokens: number;
+				missingTokenCalls?: number;
+				callId?: string;
+				attemptId?: string;
+		  }
+		| null
+		| undefined;
+	if (usage) {
+		const token = (value: number) =>
+			value > 0 || usage.missingTokenCalls === 0
+				? { kind: "measured", value, source: "provider" }
+				: { kind: "unknown", reason: "not-observed" };
+		facts.usage = {
+			input: token(usage.input),
+			output: token(usage.output),
+			cacheRead: token(usage.cacheRead),
+			cacheWrite: token(usage.cacheWrite),
+			cacheWrite1h: { kind: "absent", reason: "not-applicable" },
+			reasoning: token(usage.reasoning),
+			total: token(usage.totalTokens),
+		};
+		if (usage.callId && usage.attemptId) facts.call = { callId: usage.callId, attemptId: usage.attemptId };
+	}
+	const receipt = input.receipt as { offerId?: string; batches?: { id: string }[] } | undefined;
+	if (receipt?.offerId) facts.offerId = receipt.offerId;
+	if (receipt?.batches) facts.batchIds = receipt.batches.map(({ id }) => id);
+	if (Array.isArray(input.inputs)) facts.inputIds = input.inputs.map((entry: { id: string }) => entry.id);
+	if (Array.isArray(input.offers)) facts.offerIds = input.offers.map((entry: { id: string }) => entry.id);
+	return { event: payload.event, facts } as S.MemoryObservationRecorded;
 }
 
 /** Admission facts only: the task text, budget and board copy stay on the live payload (#434). */
@@ -341,8 +432,18 @@ export const EVENTS = {
 	}),
 	"context.pruned": journal(S.ContextPrunedSchema, { tier: "operational", cc: "structural", scope: "session" }),
 	"context.recalled": journal(S.ContextRecalledSchema, { tier: "operational", cc: "structural", scope: "session" }),
-	"memory.step_completed": live<MemoryStepCompletedPayload>(),
-	"memory.guardian_changed": live<MemoryGuardianChangedPayload>(),
+	"memory.step_completed": journal(S.MemoryStepCompletedSchema, { tier: "operational", cc: "structural" }),
+	"memory.step_decided": journal(S.MemoryStepDecidedSchema, { tier: "accountability", cc: "structural" }),
+	"memory.observation_recorded": journal(S.MemoryObservationRecordedSchema, {
+		tier: "accountability",
+		cc: "structural",
+		project: projectMemoryObservation,
+	}),
+	"memory.guardian_changed": journal(S.MemoryGuardianChangedSchema, {
+		tier: "operational",
+		cc: "content-free",
+		project: (payload: MemoryGuardianChangedPayload) => ({ state: payload.state }),
+	}),
 	"budget.alerted": live<BudgetAlertPayload>(),
 	"shutdown.requested": journal(S.ShutdownRequestedSchema, {
 		tier: "operational",

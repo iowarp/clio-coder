@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -9,25 +8,26 @@ import {
 } from "@earendil-works/pi-ai";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { registerProcessTelemetrySink } from "../../src/core/telemetry/producer.js";
 import {
 	acquireCapacityLease,
 	endpointCapacityUsage,
 	releaseCapacityLease,
 } from "../../src/domains/dispatch/capacity-lease.js";
 import { createDispatchReservation, releaseDispatchReservation } from "../../src/domains/dispatch/reservation-store.js";
+import { createTaskMemoryTelemetrySink } from "../../src/domains/memory/memory-events.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryStepUsage } from "../../src/domains/memory/task-memory-policy.js";
 import { readTaskMemorySpendSummary } from "../../src/domains/memory/task-memory-spend.js";
-import { createTaskMemoryTelemetrySink } from "../../src/domains/memory/task-memory-telemetry.js";
 import { createMemoryGuardian } from "../../src/domains/middleware/memory-guardian.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
 import { canonicalEndpointKey, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
 import { EMPTY_CAPABILITIES, type ProvidersContract } from "../../src/domains/providers/index.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { usageCallsFromAttempts } from "../../src/domains/session/journal-usage.js";
-import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import { openCallJournal, readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { readOutOfTurnUsageRows } from "../../src/domains/telemetry/out-of-turn-usage.js";
-import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { telemetryProcessDirectory, telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
 import { completeEngineText } from "../../src/engine/ai.js";
 import {
@@ -188,7 +188,7 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 			const proposals: unknown[] = [];
 			const registration = createMemoryInterventionRegistration({
 				bank,
-				telemetry: createTaskMemoryTelemetrySink({ logDir: join(env.dir, "state", "memory") }),
+				telemetry: createTaskMemoryTelemetrySink(),
 				getModelClient: routing.getModelClient,
 				captureStepUsage: () =>
 					captureTaskMemoryUsage({
@@ -226,16 +226,13 @@ for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 				const rows = readOutOfTurnUsageRows(join(env.dir, "state")).rows;
 				assert.equal(rows.length, 0, "journaled memory calls do not duplicate legacy rows");
 				if (!switched) {
-					const steps = readFileSync(join(env.dir, "state", "memory", "steps.jsonl"), "utf8")
-						.trim()
-						.split("\n")
-						.map((line) => JSON.parse(line));
+					const steps = (await readCallJournal(telemetrySessionDirectory(join(env.dir, "state"), origin.id))).records
+						.map(({ record }) => record)
+						.filter((record) => record.k === "memory.step_decided");
 					assert.ok(
-						steps.some((step) =>
-							step.calls?.some(
-								(call: { callId: string; sessionId: string; repoIdentity: string }) =>
-									call.callId === calls[0]?.data.callId && call.sessionId === origin.id && call.repoIdentity === origin.cwdHash,
-							),
+						steps.some(
+							(step) =>
+								step.ctx.sessionId === origin.id && step.data.calls?.some((call) => call.callId === calls[0]?.data.callId),
 						),
 					);
 					const spend = readTaskMemorySpendSummary(join(env.dir, "state"));
@@ -676,7 +673,18 @@ test("the history guardian retains an explicit missing-usage observation in its 
 	const hold = holdEventLoop();
 	t.after(() => hold.release());
 	const stateDir = join(env.dir, "state");
-	const sink = createTaskMemoryTelemetrySink({ logDir: join(stateDir, "memory") });
+	const sink = createTaskMemoryTelemetrySink();
+	const context = { sessionId: null, processId: "history-process", label: "memory" } as const;
+	const journal = await openCallJournal({
+		directory: telemetryProcessDirectory(stateDir, "history-process"),
+		context,
+		writer: { clioCoderVersion: "fixture", piVersion: "fixture" },
+	});
+	const unregister = registerProcessTelemetrySink(context, journal);
+	t.after(async () => {
+		unregister();
+		await journal.close();
+	});
 	let recorded!: () => void;
 	const completed = new Promise<void>((resolve) => {
 		recorded = resolve;
@@ -742,6 +750,7 @@ test("the history guardian retains an explicit missing-usage observation in its 
 	guardian.wake("ready");
 	await completed;
 	guardian.dispose();
+	await journal.flush();
 	const spend = readTaskMemorySpendSummary(stateDir);
 	assert.equal(spend.llmSteps, 1);
 	assert.equal(spend.missingTokenCalls, 1);

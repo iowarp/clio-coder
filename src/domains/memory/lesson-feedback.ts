@@ -19,6 +19,7 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { type MemoryGateOutcome, recordMemoryObservations } from "./guardian-gate.js";
 import type { MemoryDeliveryOutcome, MemoryKnowledgeReview } from "./intervention.js";
+import type { MemoryObservationEvent } from "./observation-events.js";
 import { observationDigest } from "./observations.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 import { TASK_MEMORY_CONTENT_MAX_CHARS } from "./task-bank.js";
@@ -34,7 +35,7 @@ export interface LessonFeedbackPorts {
 	notice(line: string): void;
 	/** A store failure; never steers a session. */
 	diagnostic(line: string): void;
-	event?(name: string, facts: Record<string, unknown>): void;
+	event?(name: MemoryObservationEvent, facts: Record<string, unknown>): void;
 }
 
 export interface HistoryLessons {

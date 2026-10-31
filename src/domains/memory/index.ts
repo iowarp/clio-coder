@@ -47,7 +47,18 @@ export { completedLessonSource } from "./history-review.js";
 export { type LessonSubject, lessonSubject } from "./lesson-evidence.js";
 export type { MemoryLessonJudge } from "./lesson-judge.js";
 export { createMemoryLessonJudge } from "./lesson-judge.js";
-export { traceObservation } from "./observation-trace.js";
+export {
+	createTaskMemoryTelemetrySink,
+	type TaskMemoryBankDelta,
+	type TaskMemoryClassDelta,
+	type TaskMemoryTelemetryDecision,
+	type TaskMemoryTelemetrySink,
+	type TaskMemoryTelemetryStep,
+	type TaskMemoryTelemetryTier,
+	type TaskMemoryTelemetryTrigger,
+	taskMemoryBankDelta,
+} from "./memory-events.js";
+export { traceObservation } from "./observation-events.js";
 export { isMemoryConsumptionReceipt, OBSERVATION_PROMPT } from "./observations.js";
 export {
 	approveMemoryRecord,
@@ -173,11 +184,9 @@ export {
 } from "./task-memory-policy.js";
 export {
 	emptyTaskMemorySpendSummary,
-	foldTaskMemorySpend,
 	formatTaskMemorySpend,
 	readTaskMemorySpendSummary,
 	type TaskMemorySpendSummary,
-	taskMemoryStepsPath,
 } from "./task-memory-spend.js";
 export {
 	describeTaskMemoryActivity,
@@ -188,25 +197,6 @@ export {
 	type TaskMemoryTier,
 	taskMemoryBankSize,
 } from "./task-memory-status.js";
-export {
-	type CreateTaskMemoryTelemetrySinkOptions,
-	createTaskMemoryTelemetrySink,
-	parseTaskMemoryTelemetryRecord,
-	TASK_MEMORY_TELEMETRY_FILE,
-	TASK_MEMORY_TELEMETRY_MAX_BYTES,
-	TASK_MEMORY_TELEMETRY_VERSION,
-	type TaskMemoryBankDelta,
-	type TaskMemoryClassDelta,
-	type TaskMemoryTelemetryDecision,
-	type TaskMemoryTelemetryRecord,
-	type TaskMemoryTelemetrySink,
-	type TaskMemoryTelemetryStep,
-	type TaskMemoryTelemetryTier,
-	type TaskMemoryTelemetryTrigger,
-	type TaskMemoryTokenCost,
-	taskMemoryBankDelta,
-	taskMemoryTelemetryRecord,
-} from "./task-memory-telemetry.js";
 export {
 	createTaskMemoryTrace,
 	type TaskMemoryTrace,

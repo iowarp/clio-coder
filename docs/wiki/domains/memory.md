@@ -14,7 +14,7 @@ sources:
   - "src/domains/memory/types.ts"
   - "src/domains/memory/prompt-section.ts"
   - "src/domains/memory/relevance.ts"
-  - "src/domains/memory/task-memory-telemetry.ts"
+  - "src/domains/memory/memory-events.ts"
   - "src/domains/memory/task-bank-promotion.ts"
   - "src/domains/memory/task-memory-spend.ts"
   - "src/domains/memory/task-memory-status.ts"
@@ -66,7 +66,7 @@ The **promotion bridge** (`src/domains/memory/promotion.ts`, `src/domains/memory
 | `src/domains/memory/types.ts` | `MemoryRecord`, `MemoryScope`, `MemoryRetrievalOptions` | Core types |
 | `src/domains/memory/prompt-section.ts` | `selectMemoryForPrompt`, `renderMemoryPromptSection`, `buildMemoryPromptSection` | Prompt injection selection |
 | `src/domains/memory/relevance.ts` | `rankMemoryByRelevance`, `rankMemoryByPrecomputedScore` | Relevance ranking |
-| `src/domains/memory/task-memory-telemetry.ts` | `createTaskMemoryTelemetrySink`, `taskMemoryBankDelta` | Step telemetry |
+| `src/domains/memory/memory-events.ts` | `createTaskMemoryTelemetrySink`, `taskMemoryBankDelta` | Step telemetry |
 | `src/domains/memory/task-bank-promotion.ts` | `proposeInjectedTaskMemory` | Auto-promotion on injection |
 | `src/domains/memory/task-memory-spend.ts` | `foldTaskMemorySpend`, `readTaskMemorySpendSummary` | Lifetime cost aggregation |
 | `src/domains/memory/task-memory-status.ts` | `TaskMemoryOperatorStatus`, `describeTaskMemoryActivity` | Operator-facing projections |
@@ -119,7 +119,7 @@ When the context domain builds a prompt, it calls `buildMemoryPromptSection` or 
 
 **New relevance signals**: `rankMemoryByRelevance` in `src/domains/memory/relevance.ts` scores by term, path, and symbol overlap. New signals require adding a weight to `MEMORY_RELEVANCE_WEIGHTS` and a matching feature extraction in the candidate mapping.
 
-**New trigger types**: `TaskMemoryTelemetryTrigger` in `src/domains/memory/task-memory-telemetry.ts` lists the valid trigger reasons. Adding one requires updating the `TRIGGERS` set and the telemetry record parser.
+**New trigger types**: `TaskMemoryTelemetryTrigger` in `src/domains/memory/memory-events.ts` lists the valid trigger reasons. Adding one requires updating the `TRIGGERS` set and the telemetry record parser.
 
 ## Focused tests
 

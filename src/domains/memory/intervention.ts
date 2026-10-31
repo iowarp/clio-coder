@@ -31,6 +31,14 @@ import {
 import type { MemoryObservationCommands } from "./contract.js";
 import { lessonEvidence, readInsideRoot, recordObservedRead, repositoryRelativePath } from "./lesson-evidence.js";
 import { asKeptLesson, type KeptLesson, renderKeptLesson } from "./lesson-projection.js";
+import {
+	type TaskMemoryBankDelta,
+	type TaskMemoryTelemetryDecision,
+	type TaskMemoryTelemetrySink,
+	type TaskMemoryTelemetryTier,
+	type TaskMemoryTelemetryTrigger,
+	taskMemoryBankDelta,
+} from "./memory-events.js";
 import { sharesInvocationTarget } from "./recipes.js";
 import type { MemoryRestorationInput } from "./restoration.js";
 import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank, type TaskMemoryEntry } from "./task-bank.js";
@@ -46,14 +54,6 @@ import {
 	type TaskMemoryTrajectoryStep,
 } from "./task-memory-policy.js";
 import type { TaskMemoryActivityEvent } from "./task-memory-status.js";
-import {
-	type TaskMemoryBankDelta,
-	type TaskMemoryTelemetryDecision,
-	type TaskMemoryTelemetrySink,
-	type TaskMemoryTelemetryTier,
-	type TaskMemoryTelemetryTrigger,
-	taskMemoryBankDelta,
-} from "./task-memory-telemetry.js";
 
 export const MEMORY_INTERVENTION_REGISTRATION_ID = "observer.memory-intervention";
 export const MEMORY_INTERVENTION_DEFAULT_WINDOW_STEPS = 8;

@@ -2789,7 +2789,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const state = currentGuardianState();
 		if (state === publishedGuardianState) return;
 		publishedGuardianState = state;
-		bus.emit("memory.guardian_changed", { sessionId: session?.current()?.id ?? null, state });
+		const sessionId = session?.current()?.id ?? null;
+		bus.emit("memory.guardian_changed", { sessionId, state }, sessionId ? { sessionId, label: "memory" } : undefined);
 	};
 	const memoryIntervention = memoryOwner.createIntervention({
 		telemetry: memoryTelemetry,
@@ -6155,7 +6156,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				observations: memoryOwner.contract.observationStatus(),
 				retention: memoryOwner.contract.retentionStatus(),
 				promptSelection: memoryOwner.contract.promptSelection?.() ?? null,
-				// Fold available retained telemetry across sessions; rotation bounds this history.
+				// Fold retained memory decisions and call facts across the telemetry journals (#434).
 				spend: readTaskMemorySpendSummary(clioStateDir()),
 			};
 		},

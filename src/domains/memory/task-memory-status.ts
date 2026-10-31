@@ -3,16 +3,16 @@ import type { BackgroundSkipReason } from "./background-budget.js";
 import { BACKGROUND_SKIP_REASONS } from "./background-budget.js";
 import type { RetentionStatus } from "./completion-retention.js";
 import type { MemoryPromptSelection, ObservationStatus } from "./contract.js";
-import type { TaskMemorySnapshot } from "./task-bank.js";
-import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason } from "./task-memory-policy.js";
-import type { TaskMemorySpendSummary } from "./task-memory-spend.js";
 import type {
 	TaskMemoryTelemetryDecision,
 	TaskMemoryTelemetrySink,
 	TaskMemoryTelemetryStep,
 	TaskMemoryTelemetryTier,
 	TaskMemoryTelemetryTrigger,
-} from "./task-memory-telemetry.js";
+} from "./memory-events.js";
+import type { TaskMemorySnapshot } from "./task-bank.js";
+import type { TaskMemoryPolicyDecision, TaskMemoryPolicyReason } from "./task-memory-policy.js";
+import type { TaskMemorySpendSummary } from "./task-memory-spend.js";
 
 export type TaskMemoryTier = "rules" | "llm";
 

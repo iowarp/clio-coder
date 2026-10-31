@@ -521,26 +521,8 @@ function checkEnvironmentVariableInventory(): void {
 		);
 	}
 
-	// Both were read as on/off toggles because they sit beside seven that are.
-	// Setting either to `1` writes a file called `1` in the working directory.
-	if (!doc.includes("These two take a path, not `1`")) {
-		fail("environment-variable-inventory", "the path-not-toggle exception must be stated");
-	}
-	if (!doc.includes("CLIO_CODER_RENDER_TRACE") || !doc.includes("CLIO_CODER_MEMORY_TRACE")) {
-		fail(
-			"environment-variable-inventory",
-			"the path-not-toggle exception must name CLIO_CODER_RENDER_TRACE and CLIO_CODER_MEMORY_TRACE",
-		);
-	}
-
-	const memoryTraceRow = doc.split("\n").find((line) => line.includes("`CLIO_CODER_MEMORY_TRACE`"));
-	if (memoryTraceRow === undefined) {
-		fail("environment-variable-inventory", "CLIO_CODER_MEMORY_TRACE has no row");
-	} else if (!memoryTraceRow.includes("content-bearing")) {
-		fail(
-			"environment-variable-inventory",
-			`the CLIO_CODER_MEMORY_TRACE row must state it carries conversation text: ${memoryTraceRow}`,
-		);
+	if (!doc.includes("The render trace takes a path, not `1`")) {
+		fail("environment-variable-inventory", "the render trace path-not-toggle exception must be stated");
 	}
 }
 

@@ -10,7 +10,7 @@ import type { CallMessageObserver } from "../../../core/telemetry/producer.js";
 // interactive Stage 0 graph, and the barrel would pull in the whole runtime.
 import { buildTurnPrefixUserText, buildUserText, COMPACTION_SYSTEM_PROMPT } from "../../memory/compaction-prompts.js";
 import type { MemoryCompactionOffer, MemoryConsumptionReceipt } from "../../memory/contract.js";
-import { observationTracing, traceObservation } from "../../memory/observation-trace.js";
+import { observationEvent, observationTracing, traceObservation } from "../../memory/observation-events.js";
 import type { AdmissionHold, CallJournalOptions, CallScope } from "../../telemetry/call-scope.js";
 import { openCallScope } from "../../telemetry/call-scope.js";
 
@@ -1334,6 +1334,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		if (memoryOffer !== null || input.offerMemory === undefined) return raw;
 		const offer = input.offerMemory(rawSlice, ordinary, slice);
 		const declined = (reason: string, facts: Record<string, unknown> = {}) => {
+			observationEvent("offer-declined", { reason, split, entries: slice.length, ...facts });
 			if (observationTracing()) traceObservation("offer-declined", { reason, split, entries: slice.length, ...facts });
 			return raw;
 		};

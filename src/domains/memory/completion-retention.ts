@@ -9,7 +9,8 @@ import type { MemoryCommitScope } from "./commit-state.js";
 import type { CompletedLessonSource } from "./history-review.js";
 import { lessonEvidence } from "./lesson-evidence.js";
 import type { MemoryLessonJudge } from "./lesson-judge.js";
-import { observationEvent, observationTracing, traceObservation } from "./observation-trace.js";
+import type { MemoryObservationEvent } from "./observation-events.js";
+import { observationEvent, observationTracing, traceObservation } from "./observation-events.js";
 import { observationDigest } from "./observations.js";
 import { provenRecipes, recipeAlreadyClaimed } from "./recipes.js";
 import type { TaskMemoryBank, TaskMemoryEntry } from "./task-bank.js";
@@ -211,12 +212,15 @@ async function retainWithinDeadline(
 			{ timeoutMs: 100, ...(release ? {} : { signal: input.signal }) },
 		);
 	};
-	const event = (name: string, facts: Record<string, unknown>) =>
-		observationEvent(input.stateDir, name, {
-			sessionId: input.scope.sessionId,
-			revision: input.source.revision,
-			...facts,
-		});
+	const event = (name: MemoryObservationEvent, facts: Record<string, unknown>) =>
+		observationEvent(
+			name,
+			{
+				revision: input.source.revision,
+				...facts,
+			},
+			input.scope.sessionId,
+		);
 	const restoringCandidates = savedCandidates.length > 0;
 	event(restoringCandidates ? "lesson-candidates-restored" : "lesson-extraction-started", {
 		attempts,

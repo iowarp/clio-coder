@@ -1,6 +1,7 @@
 import { processIdentityAlive } from "../../core/process-identity.js";
 import { cacheBreakLoss } from "../../core/telemetry/cache-break.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
+import { telemetryOwner } from "../../core/telemetry/context.js";
 import type {
 	CacheReportV1,
 	CallFilter,
@@ -49,6 +50,7 @@ import {
 	callJournalFolder,
 	emptyCallTotals,
 	emptyFactSum,
+	foldCallJournal,
 	foldCalls,
 	foldFacts,
 	foldRunJournal,
@@ -2707,4 +2709,113 @@ export function promptCompiles(
 			},
 		];
 	});
+}
+
+export interface TaskMemorySpendSummary {
+	/** Referenced attempts whose journal facts are missing or still incomplete (#434). */
+	unresolvedCalls?: number;
+	/** Retained llm-tier boundaries, including skipped attempts. Rules-tier rows are excluded. */
+	llmSteps: number;
+	/** Llm-tier steps whose reminder reached the visible channel. */
+	injections: number;
+	/** Injections over llm steps, 0 when no llm step has run. */
+	hitRate: number;
+	inputTokens: number;
+	outputTokens: number;
+	totalTokens: number;
+	/** Cumulative llm-tier step latency. */
+	modelMs: number;
+	/** Slowest single llm-tier step, which is what a deadline has to answer for. */
+	slowestStepMs: number;
+	/** Llm-tier steps that spent their whole budget and answered nothing. */
+	timeouts: number;
+	/** Boundaries skipped because the chat endpoint was serving a turn. */
+	endpointBusySkips: number;
+	/** Oldest and newest row in the ledger, so a rate is read against a window. */
+	firstAt: string | null;
+	lastAt: string | null;
+	readableFiles: number;
+	unreadableFiles: number;
+	/** Nonblank rows that could not be parsed as supported telemetry. */
+	invalidRows: number;
+	/** Calls explicitly recorded as missing provider usage; historical zeros alone cannot establish this. */
+	missingTokenCalls: number;
+	/** Llm-tier steps with no observation of provider usage coverage. */
+	unreportedUsageSteps: number;
+}
+
+export function emptyTaskMemorySpendSummary(): TaskMemorySpendSummary {
+	return {
+		llmSteps: 0,
+		injections: 0,
+		hitRate: 0,
+		inputTokens: 0,
+		outputTokens: 0,
+		totalTokens: 0,
+		modelMs: 0,
+		slowestStepMs: 0,
+		timeouts: 0,
+		endpointBusySkips: 0,
+		firstAt: null,
+		lastAt: null,
+		readableFiles: 0,
+		unreadableFiles: 0,
+		invalidRows: 0,
+		missingTokenCalls: 0,
+		unreportedUsageSteps: 0,
+	};
+}
+
+/** Fold memory decisions and their call facts from the same journal records (#434). */
+export function foldTaskMemorySpend(records: readonly TelemetryRecord[]): TaskMemorySpendSummary {
+	const summary = emptyTaskMemorySpendSummary();
+	const attempts = new Map<string, FoldedAttempt>();
+	for (const attempt of foldCallJournal(records).attempts) attempts.set(attempt.started.attemptId, attempt);
+	const seen = new Set<string>();
+	const value = (fact: Fact<number>) => (fact.kind === "measured" || fact.kind === "estimated" ? fact.value : 0);
+	for (const row of records) {
+		if (row.k !== "memory.step_decided") continue;
+		const record = row.data;
+		const at = row.t;
+		if (summary.firstAt === null || at < summary.firstAt) summary.firstAt = at;
+		if (summary.lastAt === null || at > summary.lastAt) summary.lastAt = at;
+		if (record.reason === "endpoint_busy") summary.endpointBusySkips += 1;
+		if (record.tier !== "llm") continue;
+		summary.llmSteps += 1;
+		if (record.decision === "injected") summary.injections += 1;
+		if (record.decision === "timeout") summary.timeouts += 1;
+		if (record.calls?.length) {
+			const linked: FoldedAttempt[] = [];
+			for (const ref of record.calls) {
+				const key = `${telemetryOwner(row.ctx)}/${ref.attemptId}`;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				const attempt = attempts.get(ref.attemptId);
+				if (attempt?.started.callId === ref.callId) linked.push(attempt);
+				if (!attempt || attempt.started.callId !== ref.callId || attempt.settled === null)
+					summary.unresolvedCalls = (summary.unresolvedCalls ?? 0) + 1;
+			}
+			const totals = foldCalls(linked);
+			summary.inputTokens += totals.usage.input.measured + totals.usage.input.estimated;
+			summary.outputTokens += totals.usage.output.measured + totals.usage.output.estimated;
+			summary.totalTokens += totals.totalTokens.measured + totals.totalTokens.estimated;
+			summary.missingTokenCalls += foldCalls(
+				linked.filter((attempt) => attempt.settled !== null),
+			).totalTokens.unknownCount;
+		} else {
+			summary.inputTokens += value(record.inputTokens);
+			summary.outputTokens += value(record.outputTokens);
+			summary.totalTokens += value(record.inputTokens) + value(record.outputTokens);
+			summary.missingTokenCalls += record.missingTokenCalls ?? 0;
+			if (
+				record.missingTokenCalls === undefined &&
+				(record.inputTokens.kind === "unknown" || record.outputTokens.kind === "unknown")
+			)
+				summary.unreportedUsageSteps += 1;
+		}
+		summary.modelMs += value(record.latencyMs);
+		summary.slowestStepMs = Math.max(summary.slowestStepMs, value(record.latencyMs));
+	}
+	summary.hitRate = summary.llmSteps === 0 ? 0 : summary.injections / summary.llmSteps;
+	return summary;
 }

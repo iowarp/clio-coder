@@ -39,7 +39,7 @@ import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core
 import { createRunCallUsage, runUsageFromCallRecords } from "../../src/domains/dispatch/run-call-usage.js";
 import { defaultRunEventJournal, readRunEventJournal } from "../../src/domains/dispatch/run-event-journal.js";
 import { openRunTelemetry } from "../../src/domains/dispatch/run-telemetry.js";
-import { observationTracing, traceObservation } from "../../src/domains/memory/observation-trace.js";
+import { observationTracing, traceObservation } from "../../src/domains/memory/observation-events.js";
 import { createTaskMemoryTrace } from "../../src/domains/memory/task-memory-trace.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { readSessionCallJournalSync } from "../../src/domains/session/fork-journal.js";

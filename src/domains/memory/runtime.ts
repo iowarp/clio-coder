@@ -28,13 +28,14 @@ import { createMemoryInterventionRegistration } from "./intervention.js";
 import { type HistoryFiling, type HistoryLessons, MemoryLessonFeedback } from "./lesson-feedback.js";
 import type { MemoryLessonJudge } from "./lesson-judge.js";
 import { createKeptLessonSource, type KeptLesson } from "./lesson-projection.js";
+import type { MemoryObservationEvent } from "./observation-events.js";
+import { observationEvent, observationTracing, traceObservation } from "./observation-events.js";
 import {
 	loadObservations,
 	persistObservation,
 	pruneConsumedObservations,
 	retireObservations,
 } from "./observation-store.js";
-import { observationEvent, observationTracing, traceObservation } from "./observation-trace.js";
 import {
 	buildObservationOffer,
 	compatibleObservation,
@@ -1187,7 +1188,7 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		}
 		this.#recordConsumption(commitId, receipt, "checkpoint-committed");
 	}
-	#recordConsumption(commitId: string, receipt: MemoryConsumptionReceipt, event: string): void {
+	#recordConsumption(commitId: string, receipt: MemoryConsumptionReceipt, event: MemoryObservationEvent): void {
 		this.#commits.set(commitId, observationDigest(receipt));
 		for (const batch of receipt.batches) this.#consumed.set(batch.id, batch.digest);
 		const infra = this.#infrastructure;
@@ -1271,13 +1272,13 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			durationMs: this.#durationMs,
 		};
 	}
-	#event(event: string, facts: Record<string, unknown>): void {
-		const infra = this.#infrastructure;
-		if (infra)
-			observationEvent(infra.stateDir(), event, {
-				sessionId: this.#registration?.captureMemoryAuthority()?.scope.sessionId ?? null,
-				...facts,
-			});
+	#event(event: MemoryObservationEvent, facts: Record<string, unknown>): void {
+		const { sessionId, ...structural } = facts;
+		observationEvent(
+			event,
+			structural,
+			typeof sessionId === "string" ? sessionId : this.#registration?.captureMemoryAuthority()?.scope.sessionId,
+		);
 	}
 }
 

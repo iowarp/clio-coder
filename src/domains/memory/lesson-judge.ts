@@ -2,7 +2,7 @@ import type { Question, SystemOne } from "../system-one/index.js";
 import { yesNo } from "../system-one/index.js";
 import { consultSite } from "../system-one/sites/consult.js";
 import type { CompletedLessonSource } from "./history-review.js";
-import { observationTracing, traceObservation } from "./observation-trace.js";
+import { observationTracing, traceObservation } from "./observation-events.js";
 import type { TaskMemoryEntry } from "./task-bank.js";
 
 export type MemoryLessonJudge = (

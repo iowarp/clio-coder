@@ -1,8 +1,8 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import type { TaskMemoryTelemetryStep } from "../../src/domains/memory/memory-events.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryModelResponse } from "../../src/domains/memory/task-memory-policy.js";
-import type { TaskMemoryTelemetryStep } from "../../src/domains/memory/task-memory-telemetry.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/middleware/memory-intervention.js";
