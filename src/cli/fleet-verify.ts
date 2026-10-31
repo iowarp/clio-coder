@@ -61,14 +61,16 @@ function fleetVerifySnapshot(runId: string, now: () => number = Date.now): Fleet
 		reason,
 		axes,
 	});
+	// The seal is checked before the settlement: a changed journal can hide its run.settled, and that run failed its
+	// seal rather than being unreadable.
+	const seal = record?.seal ?? null;
+	if (seal?.status === "failed") return snapshot("failed", `${seal.mismatch.kind}-mismatch`);
 	// A run that has not settled has nothing to authenticate yet, which is a different answer from one that failed to.
 	if (record?.settled == null)
 		return envelope.endedAt === null ? snapshot("pending", null) : snapshot("unavailable", "run-unreadable");
-	const seal = record.seal;
 	if (seal === null) return snapshot("unavailable", "run-unreadable");
 	if (seal.status === "verified") return snapshot("verified", null);
-	if (seal.status === "unsealed") return snapshot("unavailable", "unsealed");
-	return snapshot("failed", `${seal.mismatch.kind}-mismatch`);
+	return snapshot("unavailable", "unsealed");
 }
 
 export function runFleetVerify(args: ReadonlyArray<string>): number {
