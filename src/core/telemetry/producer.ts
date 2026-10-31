@@ -194,7 +194,8 @@ export function abandonedSettlement(sent: boolean, cause: FailureCause): Settlem
 /**
  * A message alone cannot show a request left Clio. An attempt whose own stages show it never reached the send, and
  * whose settlement carries no provider evidence, was never sent, whatever an aborted message suggests (#434). It
- * keeps no interrupted-call estimate either: never-sent is not spent (R2, L2).
+ * keeps no interrupted-call estimate either: never-sent is not spent (R2, L2). Nor does it keep expected cold
+ * reasons, which describe the next request the provider sees; the caller carries them to it.
  */
 function unsentByStages(data: Settlement): Settlement {
 	const notApplicable = { kind: "absent", reason: "not-applicable" } as const;
@@ -207,6 +208,7 @@ function unsentByStages(data: Settlement): Settlement {
 		cache: {
 			...data.cache,
 			firstDivergentSection: notApplicable,
+			expectedColdReasons: [],
 			rePrefilledTokens: notApplicable,
 			...(data.cache.bill ? { bill: { usd: notApplicable, pricedBy: "none" } } : {}),
 		},

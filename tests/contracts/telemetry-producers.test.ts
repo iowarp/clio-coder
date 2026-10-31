@@ -275,7 +275,7 @@ test("research capture keeps a request body and only allowlisted headers, and st
 	}
 });
 
-test("an attempt whose stages never reached its send keeps no interrupted-call estimate (R2, L2)", () => {
+test("an attempt whose stages never reached its send keeps no interrupted-call estimate or cold reasons (R2, L2)", () => {
 	const call = beginCall(
 		{
 			label: "main",
@@ -292,8 +292,10 @@ test("an attempt whose stages never reached its send keeps no interrupted-call e
 		{ sessionId: "unsent-estimate", label: "main" },
 	);
 	call.stage("admission", "start");
+	const abandoned = abandonedSettlement(true, "operator_cancel");
 	const settled = call.settle({
-		...abandonedSettlement(true, "operator_cancel"),
+		...abandoned,
+		cache: { ...abandoned.cache, expectedColdReasons: ["compaction"] },
 		interruptedEstimate: {
 			input: { kind: "estimated", value: 300_000, method: "prompt-side-only" },
 			output: { kind: "estimated", value: 0, method: "chars/4" },
@@ -301,4 +303,6 @@ test("an attempt whose stages never reached its send keeps no interrupted-call e
 	});
 	strictEqual(settled?.disposition, "never_sent");
 	strictEqual(settled?.interruptedEstimate, undefined, "never-sent is not spent");
+	// The reasons describe the next request the provider sees; the turn runtime carries them to it.
+	deepStrictEqual(settled?.cache.expectedColdReasons, []);
 });

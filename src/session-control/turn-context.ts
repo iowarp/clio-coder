@@ -71,6 +71,7 @@ import { hostFramedTexts } from "../core/reminder-framing.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { RouteName, RouteSource } from "../core/route-provenance.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
+import type { CallSettled } from "../core/telemetry/schemas.js";
 import { isBuiltinToolName, ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
@@ -285,25 +286,12 @@ export interface LiveContextEstimate {
 	breakdown: ReturnType<typeof estimateAgentContextBreakdown>;
 }
 
-/** Known causes that make the next provider prefix cache miss expected. */
-export type ExpectedColdReason =
-	| "dispatch"
-	| "compaction"
-	| "working_set_evict"
-	| "residency"
-	| "thinking_change"
-	| "input_changed"
-	| "model_changed"
-	| "tool_choice_change"
-	| "tool_surface_change"
-	| "prompt_recompiled"
-	/**
-	 * A proactive-memory step ran between turns on the endpoint this session
-	 * streams against. Its prompt is a trajectory rather than the chat prefix, so
-	 * on a local server that keeps one prefix cache the next turn re-prefills
-	 * (#229).
-	 */
-	| "background_memory";
+/**
+ * Known causes that make the next provider prefix cache miss expected: the journal's closed vocabulary, so the host
+ * records no reason a call record cannot carry. `background_memory` is a proactive-memory step on the endpoint this
+ * session streams against, whose trajectory prompt displaces a local server's single prefix cache (#229).
+ */
+export type ExpectedColdReason = CallSettled["cache"]["expectedColdReasons"][number];
 
 export type LiveContextUsage = ContextUsageSnapshot &
 	Pick<LiveBudgetView, "revision" | "inputSource" | "historical" | "breakdownSource">;

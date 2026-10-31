@@ -732,6 +732,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				cache: { ...settlement.cache, ...physics.cache, expectedColdReasons: sent ? reasons : [], verdict },
 			};
 		};
+		// A call the producer relabels never sent, because its stages never reached the send, leaves its expected cold
+		// reasons to the next call the provider sees, as one the runtime already knew was unsent does (#434).
+		const carryRelabelledReasons = (
+			settlement: ReturnType<typeof callSettlementFromMessage>,
+			facts: CallSettled | undefined,
+		): void => {
+			if (facts?.disposition === "never_sent" && settlement.disposition !== "never_sent")
+				unsentColdReasons = [...new Set([...unsentColdReasons, ...settlement.cache.expectedColdReasons])];
+		};
 		const recordSettledCall = (
 			facts: CallSettled | undefined,
 			owner: TelemetrySessionLease["context"] | undefined,
@@ -757,22 +766,24 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (call) {
 				Object.assign(message, { callId: call.callId, attemptId: call.attemptId });
 				const quota = quotaReadingFromMessage(message, localRuntime.runtimeId, localRuntime.targetId);
+				const settlement = withCachePhysics(
+					callSettlementFromMessage(
+						message,
+						localRuntime.runtimeResolution.costProvenance,
+						message.role === "assistant" && message.stopReason === "aborted" && state.activeInterruptByOperator
+							? "operator_cancel"
+							: undefined,
+					),
+					message,
+				);
 				const facts = call.settle(
 					{
-						...withCachePhysics(
-							callSettlementFromMessage(
-								message,
-								localRuntime.runtimeResolution.costProvenance,
-								message.role === "assistant" && message.stopReason === "aborted" && state.activeInterruptByOperator
-									? "operator_cancel"
-									: undefined,
-							),
-							message,
-						),
+						...settlement,
 						...(quota ? { quota: { provider: quota.provider, windows: quota.windows, source: quota.source } } : {}),
 					},
 					reportedModelFromMessage(message),
 				);
+				carryRelabelledReasons(settlement, facts);
 				recordSettledCall(facts, lease?.context);
 				if (quota && facts) recordQuotaReading(quota, lease?.context, facts);
 				rememberMessageCalls(message, settledAttempts);
@@ -970,16 +981,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const failure = terminal
 							? tracking.failure(terminal.errorMessage, terminal.stopReason === "aborted", reported)
 							: undefined;
-						const facts = modelCall.settle(
-							withCachePhysics(
-								callSettlementFromMessage(
-									{ ...message, ...(failure ? { failure } : {}) },
-									localRuntime.runtimeResolution.costProvenance,
-								),
-								message,
+						const settlement = withCachePhysics(
+							callSettlementFromMessage(
+								{ ...message, ...(failure ? { failure } : {}) },
+								localRuntime.runtimeResolution.costProvenance,
 							),
-							reportedModelFromMessage(message),
+							message,
 						);
+						const facts = modelCall.settle(settlement, reportedModelFromMessage(message));
+						carryRelabelledReasons(settlement, facts);
 						recordSettledCall(facts, journalLease?.context, true);
 					},
 				);
