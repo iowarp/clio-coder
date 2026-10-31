@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { routes } from "../contracts/routes.js";
@@ -45,36 +45,12 @@ test("trace history lists run journals joined to the ledger, with read-model row
 		await h.request("/api/traces/runs/run-0000/receipt?include=full"),
 		routes.traceReceipt.response,
 	);
-	// The receipt is its evidence through the seal check; the saved document leaves only when asked for (#434 §11.3).
-	assert.equal(brief.receipt, null);
+	// A run's evidence comes through its seal check; the settled record leaves only when asked for (#434 §11.3).
+	assert.equal(brief.record, null);
 	assert.equal(brief.evidence.integrity.state, "verified");
 	assert.equal(brief.evidence.sealed?.validationGrounding?.claimed, 2);
-	assert.equal(full.receipt?.runId, "run-0000");
+	assert.equal((full.record?.settled as { agentId?: string } | undefined)?.agentId, "coder");
 	assert.equal(brief.evidence.evidence?.evidenceId, "evidence-1");
-	// A pruned receipt reads back from its verified evidence copy, never as the tombstone it left (#434).
-	const sealed = readFileSync(join(state, "receipts/run-0000.json"), "utf8");
-	mkdirSync(join(h.home.path, "data/evidence/evidence-1"), { recursive: true });
-	writeFileSync(
-		join(h.home.path, "data/evidence/evidence-1/receipt.json"),
-		JSON.stringify({ version: 1, receipts: [JSON.parse(sealed)] }),
-	);
-	writeFileSync(
-		join(state, "receipts/run-0000.json"),
-		JSON.stringify({
-			format: "clio-receipt-tombstone/1",
-			runId: "run-0000",
-			evidenceId: "evidence-1",
-			digest: (JSON.parse(sealed) as { integrity: { digest: string } }).integrity.digest,
-			prunedAt: "2026-10-30T00:00:00.000Z",
-		}),
-	);
-	const pruned = await json(
-		await h.request("/api/traces/runs/run-0000/receipt?include=full"),
-		routes.traceReceipt.response,
-	);
-	assert.deepEqual(pruned.receipt, full.receipt);
-	assert.equal(pruned.evidence.integrity.state, "verified");
-	writeFileSync(join(state, "receipts/run-0000.json"), sealed);
 	assert.equal((await h.request("/api/traces/runs/missing")).status, 404);
 	assert.equal((await h.post("/api/traces/runs")).status, 405);
 	const head = await h.request("/api/traces/runs/run-0000", { method: "HEAD" });
@@ -85,24 +61,14 @@ test("trace history lists run journals joined to the ledger, with read-model row
 		assert.ok([404, 422].includes(response.status), `${id}: ${response.status}`);
 	}
 	const empty = await json(await h.request("/api/traces/runs/absent/receipt"), routes.traceReceipt.response);
-	assert.equal(empty.receipt, null);
-	assert.equal(empty.evidence.receipt, "missing");
+	assert.equal(empty.record, null);
+	assert.equal(empty.evidence.record, "missing");
 	for (const malformed of ["{bad", "[]", "null"]) {
-		writeFileSync(join(state, "receipts/run-0000.json"), malformed);
 		writeFileSync(join(state, "evidence-index.json"), malformed);
-		const unreadable = await json(
-			await h.request("/api/traces/runs/run-0000/receipt?include=full"),
-			routes.traceReceipt.response,
-		);
-		assert.equal(unreadable.receipt, null);
-		assert.equal(unreadable.evidence.receipt, "unreadable");
-		assert.equal(unreadable.evidence.sealed, null);
+		const unindexed = await json(await h.request("/api/traces/runs/run-0000/receipt"), routes.traceReceipt.response);
+		assert.equal(unindexed.evidence.evidence, null);
+		assert.equal(unindexed.evidence.integrity.state, "verified");
 	}
-	rmSync(join(state, "receipts/run-0000.json"));
-	const outside = join(h.home.path, "outside.json");
-	writeFileSync(outside, '{"secret":"must-not-leak"}');
-	symlinkSync(outside, join(state, "receipts/run-0000.json"));
-	assert.equal((await h.request("/api/traces/runs/run-0000/receipt?include=full")).status, 422);
 });
 
 test("trace history refuses a bad cursor and an unreadable ledger, and re-reads a replaced one", async (t) => {

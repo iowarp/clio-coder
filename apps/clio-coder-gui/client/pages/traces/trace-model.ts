@@ -131,32 +131,6 @@ export function histogram(kinds: readonly string[], limit = HISTOGRAM_KINDS): Hi
 	};
 }
 
-const PROVENANCE_KEYS = [
-	"platform",
-	"nodeVersion",
-	"runtimeKind",
-	"skillActivations",
-	"integrity",
-	"lineage",
-	"node",
-	"gate",
-	"plan",
-	"pipeline",
-	"reroutes",
-] as const;
-
-/**
- * The provenance rows a receipt carries, in display order. Receipts record the harness version as
- * `clioCoderVersion`; the panel used to read `clioVersion`, so the row silently vanished. Receipts
- * sealed before the rename keep `clioVersion`, which stays readable as immutable history.
- */
-export function provenanceFacts(receipt: Record<string, unknown>): Array<[string, unknown]> {
-	return [
-		["clioCoderVersion", receipt.clioCoderVersion ?? receipt.clioVersion],
-		...PROVENANCE_KEYS.map((key): [string, unknown] => [key, receipt[key]]),
-	];
-}
-
 type CallEntry = Extract<RunTimelineEntry, { kind: "call" }>;
 /** A stable key per timeline entry: an attempt, a feed sequence, or the record's kind and time. */
 export function entryKey(entry: RunTimelineEntry): string {

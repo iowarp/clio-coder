@@ -3,9 +3,9 @@ import { access, readdir, readFile, stat } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { assertSafeId } from "../../core/safe-id.js";
-import type { ReceiptEvidenceV1 } from "../../core/telemetry/dto.js";
+import type { RunEvidenceV1, RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
-import { readReceiptEvidence } from "../dispatch/receipt-facts.js";
+import { readRunEvidence } from "../dispatch/run-result-facts.js";
 import type { CallJournalRead } from "../telemetry/call-journal.js";
 import { readCallJournal, readCallJournalSync } from "../telemetry/call-journal.js";
 import {
@@ -20,6 +20,7 @@ import {
 } from "../telemetry/index.js";
 import type { JournalSource, ProcessIdentity, SessionSource } from "../telemetry/read-model.js";
 import { journalSourceFromRead, sessionAccountQuotaWindow } from "../telemetry/read-model.js";
+import { readRunRecord } from "../telemetry/run-record.js";
 import type { TelemetryScopeFiles } from "../telemetry/seal.js";
 import { readTelemetryScopeFiles, readTelemetryScopeFilesSync } from "../telemetry/seal.js";
 
@@ -342,10 +343,15 @@ export function loadRunScopeFilesAsync(stateDir: string, runId: string): Promise
 	return runAsync(loadRunScope(stateDir, runId));
 }
 
-/** The run's sealed receipt through its integrity check, for the run DTO (#434 §11.1). */
-export function loadRunResultEvidence(stateDir: string, runId: string): ReceiptEvidenceV1 {
+/** A run's DTO with its seal verdict and result object, from its run scope; null with no run directory (#434). */
+export function loadRunRecord(stateDir: string, runId: string): RunTelemetryV1 | null {
+	return readRunRecord(stateDir, runId);
+}
+
+/** A run's evidence from its sealed run scope: seal verdict, trust and the checks it vouches for (#434 §11.3). */
+export function loadRunEvidence(stateDir: string, runId: string): RunEvidenceV1 {
 	assertSafeId(runId, "run");
-	return readReceiptEvidence(runId, stateDir);
+	return readRunEvidence(runId, stateDir);
 }
 
 export function loadSessionTelemetrySource(

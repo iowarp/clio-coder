@@ -14,7 +14,6 @@ import { ReceiptChecks } from "./receipt-checks.js";
 import {
 	callPosition,
 	entryLabel,
-	provenanceFacts,
 	runModelSpend,
 	runSpan,
 	runSpend,
@@ -235,14 +234,16 @@ export function ReceiptPanel({
 }) {
 	const { evidence } = data;
 	const sealed = evidence.sealed;
-	const r = data.receipt;
+	const record = data.record;
+	const settled = object(record?.settled);
+	const tools = Array.isArray(settled.tools) ? settled.tools.map(object) : [];
 	return (
 		<section className="trace-panel">
 			<div className="page-heading">
-				<h2>Receipt</h2>
-				{evidence.receipt !== "missing" && !full ? (
+				<h2>Run record</h2>
+				{evidence.record === "settled" && !full ? (
 					<button type="button" disabled={loading} onClick={loadFull}>
-						{loading ? "Reading receipt…" : "Load full receipt"}
+						{loading ? "Reading run record…" : "Load full run record"}
 					</button>
 				) : null}
 			</div>
@@ -266,66 +267,40 @@ export function ReceiptPanel({
 			) : (
 				<p>No evidence bundle names this run.</p>
 			)}
-			{r ? (
+			{record ? (
 				<>
-					<h3>The saved document</h3>
+					<h3>The settled record</h3>
 					<p className="trace-receipt__source">
-						As written to disk. Only the checks above are vouched for by its seal; <Link to="/evidence">Evidence</Link>{" "}
-						collects and rechecks bundles.
+						The run's run.settled and result object. Only the checks above are vouched for by its seal;{" "}
+						<Link to="/evidence">Evidence</Link> collects and rechecks bundles.
 					</p>
-					<div className="trace-receipt-grid">
-						<div>
-							<h3>Tools</h3>
-							{Array.isArray(r.toolStats) ? (
-								// biome-ignore lint/a11y/noNoninteractiveTabindex: A table wider than its column scrolls, and a scrolling region must take focus so the keyboard can move it.
-								<section className="table-scroll" tabIndex={0} aria-label="Tool statistics table">
-									<table className="trace-table">
-										<thead>
-											<tr>
-												{["Tool", "Calls", "OK", "Errors", "Blocked", "Time"].map((label) => (
-													<th key={label}>{label}</th>
-												))}
-											</tr>
-										</thead>
-										<tbody>
-											{r.toolStats.map((value, index) => {
-												const stat = object(value);
-												return (
-													<tr key={String(stat.tool ?? index)}>
-														{["tool", "count", "ok", "errors", "blocked"].map((key) => (
-															<td key={key}>{String(stat[key] ?? "not recorded")}</td>
-														))}
-														<td>
-															{typeof stat.totalDurationMs === "number" ? formatDuration(stat.totalDurationMs) : "not recorded"}
-														</td>
-													</tr>
-												);
-											})}
-										</tbody>
-									</table>
-								</section>
-							) : null}
-							<Facts entries={Object.entries(object(r.toolActivity))} />
-						</div>
-						<div>
-							<h3>Safety</h3>
-							{Object.keys(object(r.safety)).length ? (
-								<Facts entries={Object.entries(object(r.safety))} />
-							) : (
-								<p>No safety facts were recorded in this receipt.</p>
-							)}
-						</div>
-						<div>
-							<details>
-								<summary>Execution provenance & runtime facts</summary>
-								<Facts entries={provenanceFacts(r)} />
-							</details>
-						</div>
-					</div>
-					{r.findingsSummary ? <Facts entries={Object.entries(object(r.findingsSummary))} /> : null}
+					<h3>Tools</h3>
+					{tools.length > 0 ? (
+						// biome-ignore lint/a11y/noNoninteractiveTabindex: A table wider than its column scrolls, and a scrolling region must take focus so the keyboard can move it.
+						<section className="table-scroll" tabIndex={0} aria-label="Tool calls table">
+							<table className="trace-table">
+								<thead>
+									<tr>
+										<th>Tool</th>
+										<th>Calls</th>
+									</tr>
+								</thead>
+								<tbody>
+									{tools.map((stat, index) => (
+										<tr key={String(stat.tool ?? index)}>
+											<td>{String(stat.tool ?? "not recorded")}</td>
+											<td>{String(stat.calls ?? "not recorded")}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</section>
+					) : (
+						<p>The run settled no tool calls.</p>
+					)}
 					<details>
-						<summary>Full receipt payload</summary>
-						<Json value={r} />
+						<summary>Full run record</summary>
+						<Json value={record} />
 					</details>
 				</>
 			) : null}

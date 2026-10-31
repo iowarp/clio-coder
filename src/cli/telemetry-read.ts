@@ -18,7 +18,6 @@ import { AgentRole, Disposition } from "../core/telemetry/enums.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { inspectEvidence } from "../domains/evidence/index.js";
 import {
-	loadRunResultEvidence,
 	loadRunScopeFiles,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
@@ -213,11 +212,6 @@ function printRun(dto: RunTelemetryV1): string {
 						: `failed: ${describeSealMismatch(dto.seal.mismatch)}`
 		}`,
 	];
-	const receipt = dto.receipt;
-	if (receipt)
-		lines.push(
-			`receipt   ${receipt.receipt} · ${receipt.integrity.display}${receipt.integrity.detail ? ` (${receipt.integrity.detail})` : ""} · ${receipt.trust.validation}${receipt.sealed ? ` · outcome ${receipt.sealed.outcome}` : ""}`,
-		);
 	return `${lines.join("\n")}\n`;
 }
 
@@ -399,11 +393,7 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 				return 1;
 			}
 			if (args.command === "inspect")
-				return emit(
-					runTelemetry(runId, run, {}, loadRunResultEvidence(stateDir, runId), loadRunScopeFiles(stateDir, runId)),
-					args.json,
-					printRun,
-				);
+				return emit(runTelemetry(runId, run, {}, loadRunScopeFiles(stateDir, runId)), args.json, printRun);
 			if (args.command === "cost") {
 				const by = args.values.get("by") ?? "model";
 				if (by !== "role" && by !== "model" && by !== "turn") {

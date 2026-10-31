@@ -16,7 +16,6 @@ import type {
 	FactRef,
 	ParsedFactRef,
 	Quantity,
-	ReceiptEvidenceV1,
 	RunRowV1,
 	RunTelemetryV1,
 	RunTimelineEntry,
@@ -2752,14 +2751,12 @@ function runResultOf(settled: Run["settled"], scope: TelemetryScopeFiles | null)
 
 /**
  * One run's DTO: its fold, its run.settled facts, and, given the run scope's own files (`readTelemetryScopeFiles`),
- * the seal verdict and the result object the settlement names. `receipt` is the run's sealed receipt read through its
- * integrity check, which the caller's loader reads (#434 §11.1).
+ * the seal verdict and the result object the settlement names (#434 §11.1).
  */
 export function runTelemetry(
 	runId: string,
 	source: JournalSource,
 	options: ReadOptions = {},
-	receipt: ReceiptEvidenceV1 | null = null,
 	scope: TelemetryScopeFiles | null = null,
 ): RunTelemetryV1 {
 	const run = analyzeRun(runId, source);
@@ -2785,7 +2782,6 @@ export function runTelemetry(
 			: null,
 		seal: scope === null ? null : verifyTelemetryScope(scope),
 		result: runResultOf(settled, scope),
-		receipt,
 	};
 }
 

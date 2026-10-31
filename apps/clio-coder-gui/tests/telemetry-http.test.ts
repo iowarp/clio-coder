@@ -11,6 +11,9 @@ import {
 	seedGoldenSession,
 	seedParitySession,
 	seedRunJournal,
+	fixtureEnvelope,
+	fixtureReceiptDraft,
+	writeSettledRun,
 	telemetryLies,
 } from "./harness/telemetry-fixture.js";
 
@@ -185,18 +188,16 @@ test("a run's timeline orders its process, feed and settlement, with a feed dura
 			at: "2026-10-30T10:00:01.000Z",
 		},
 		{ kind: "process.exited", data: { exitCode: 0 }, at: "2026-10-30T10:00:02.000Z" },
-		{
-			kind: "run.settled",
-			data: {
-				terminalReason: "completed",
-				callIds: null,
-				processExitCode: 0,
-				repairRounds: { kind: "unknown", reason: "not-observed" },
-				frameType: null,
-			},
-			at: "2026-10-30T10:00:03.000Z",
-		},
 	]);
+	await writeSettledRun(
+		state,
+		fixtureReceiptDraft({
+			...fixtureEnvelope("run-gamma"),
+			sessionId: null,
+			startedAt: "2026-10-30T10:00:00.000Z",
+			endedAt: "2026-10-30T10:00:03.000Z",
+		}),
+	);
 	const timeline = await json(
 		await h.request("/api/telemetry/runs/run-gamma/timeline"),
 		routes.telemetryRunTimeline.response,

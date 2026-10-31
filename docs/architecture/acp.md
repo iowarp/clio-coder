@@ -427,7 +427,7 @@ An opted-in client (see [Client opt-ins](#client-opt-ins)) receives `_clio-coder
 
 #### Receipt facts on terminal dispatch frames
 
-A `dispatch.completed` or `dispatch.failed` frame carries `_meta["clio-coder/receipt"]`, the facts of the sealed receipt at `<state>/receipts/<runId>.json`, projected by the same readers the TUI worker footer uses (`src/domains/dispatch/receipt-facts.ts`). The dispatch domain seals the receipt before it publishes the terminal event, so a live read finds it. The shape is:
+A `dispatch.completed` or `dispatch.failed` frame carries `_meta["clio-coder/receipt"]`, the facts of the sealed receipt at `<state>/receipts/<runId>.json`, projected by the same readers the TUI worker footer uses (`src/domains/dispatch/run-result-facts.ts`). The dispatch domain seals the receipt before it publishes the terminal event, so a live read finds it. The shape is:
 
 | Field | Value |
 | --- | --- |

@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { withReceiptIntegrity } from "../../../../src/domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunResultDraft } from "../../../../src/domains/dispatch/types.js";
 import { fixtureReceiptDraft } from "../../../../tests/harness/receipt.js";
+import { writeSettledRun } from "../../../../tests/harness/settled-run.js";
 import { telemetryCall } from "../../../../tests/harness/telemetry-view.js";
 import { seedRunJournal } from "./telemetry-fixture.js";
 
@@ -43,46 +43,46 @@ function fullJournal(runId: string) {
 			ctx: { callId: String(record.ctx.callId), attemptId: String(record.ctx.attemptId) },
 		})),
 		{ kind: "process.exited" as const, data: { exitCode: 0 }, at: at(5) },
-		{ kind: "run.settled" as const, data: settled("completed", 0), at: endedAt },
 	];
-}
-function settled(terminalReason: string, processExitCode: number | null) {
-	return {
-		terminalReason,
-		callIds: null,
-		processExitCode,
-		repairRounds: { kind: "unknown", reason: "not-observed" },
-		frameType: null,
-	};
 }
 
 /**
  * Trace history as path A reads it (#434): `count` run journals with dispatch ledger rows beside any the ledger
- * already holds, run-0000 a whole settled run with a sealed receipt and evidence row, every third other run still
- * running. `writtenMs` sets each journal's write time, the history's order, so ties and pages are deterministic.
+ * already holds, run-0000 a whole settled run with checks under its seal and an evidence row, every third other run
+ * still running. `writtenMs` sets each journal's write time, the history's order, so ties and pages are deterministic.
  */
+/** run-0000's result: verified, with a typed check, a contract and grounding the run's seal vouches for. */
+function checkedDraft(envelope: RunEnvelope): RunResultDraft {
+	return {
+		...fixtureReceiptDraft({ ...envelope, endedAt }),
+		executionRole: envelope.executionRole,
+		verification: { state: "verified", basis: "validation-tool" },
+		quality: {
+			version: 1,
+			typedValidations: [{ sourceId: "tool:verify", validatorDigest: "1".repeat(64), passed: true }],
+			responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
+			resultContract: {
+				sourceId: "agent-result-contract:mutation-report:fixture-contract",
+				validatorDigest: "2".repeat(64),
+				conformance: "pass",
+				quality: "unmeasured",
+			},
+		},
+		validationGrounding: { claimed: 2, grounded: 1, ungrounded: ["lint"], basis: "unmatched-command" },
+		toolStats: [{ tool: "read", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 15 }],
+	};
+}
+
 export async function traceFixture(
 	state: string,
 	count = 12,
 	writtenMs: (index: number) => number = (index) => Date.parse(endedAt) - index * 1000,
 ) {
-	const rows = [];
+	const rows: RunEnvelope[] = [];
 	for (let i = 0; i < count; i++) {
 		const runId = `run-${String(i).padStart(4, "0")}`;
 		const running = i > 0 && i % 3 === 0;
-		await seedRunJournal(
-			state,
-			runId,
-			i === 0
-				? fullJournal(runId)
-				: [
-						{ kind: "process.started", data: {}, at: at(0) },
-						...(running ? [] : [{ kind: "run.settled" as const, data: settled("completed", 0), at: endedAt }]),
-					],
-		);
-		const stamp = new Date(writtenMs(i));
-		utimesSync(join(state, "telemetry", "runs", runId, "journal.jsonl"), stamp, stamp);
-		rows.push({
+		const row: RunEnvelope = {
 			version: 1,
 			id: runId,
 			agentId: "coder",
@@ -91,7 +91,7 @@ export async function traceFixture(
 			targetId: "local",
 			wireModelId: "fixture-model",
 			runtimeId: "native",
-			runtimeKind: "native",
+			runtimeKind: "http",
 			startedAt,
 			endedAt: running ? null : endedAt,
 			status: running ? "running" : "completed",
@@ -103,37 +103,17 @@ export async function traceFixture(
 			sessionId: null,
 			cwd: state,
 			tokenCount: 0,
-		});
+			costUsd: 0,
+		};
+		rows.push(row);
+		await seedRunJournal(state, runId, i === 0 ? fullJournal(runId) : [{ kind: "process.started", data: {}, at: at(0) }]);
+		if (!running) await writeSettledRun(state, i === 0 ? checkedDraft(row) : fixtureReceiptDraft({ ...row, endedAt }));
+		const stamp = new Date(writtenMs(i));
+		utimesSync(join(state, "telemetry", "runs", runId, "journal.jsonl"), stamp, stamp);
 	}
 	const ledger = join(state, "runs.json");
 	const held: unknown[] = existsSync(ledger) ? (JSON.parse(readFileSync(ledger, "utf8")) as unknown[]) : [];
 	writeFileSync(ledger, JSON.stringify([...held, ...rows]));
-	mkdirSync(join(state, "receipts"), { recursive: true });
-	// Sealed against run-0000's own ledger row, so the read model's receipt evidence verifies it (#434 §11.3).
-	const envelope = rows[0] as RunEnvelope;
-	const receipt = withReceiptIntegrity(
-		{
-			...fixtureReceiptDraft(envelope),
-			executionRole: envelope.executionRole,
-			verification: { state: "verified", basis: "validation-tool" },
-			quality: {
-				version: 1,
-				typedValidations: [{ sourceId: "tool:verify", validatorDigest: "1".repeat(64), passed: true }],
-				responseSchema: { sourceId: null, schemaDigest: null, runtimeEnforceable: false, enforcementPassed: null },
-				resultContract: {
-					sourceId: "agent-result-contract:mutation-report:fixture-contract",
-					validatorDigest: "2".repeat(64),
-					conformance: "pass",
-					quality: "unmeasured",
-				},
-			},
-			validationGrounding: { claimed: 2, grounded: 1, ungrounded: ["lint"], basis: "unmatched-command" },
-			toolStats: [{ tool: "read", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 15 }],
-			clioCoderVersion: "0.4.7",
-		} satisfies RunResultDraft,
-		envelope,
-	);
-	writeFileSync(join(state, "receipts/run-0000.json"), JSON.stringify(receipt));
 	writeFileSync(
 		join(state, "evidence-index.json"),
 		JSON.stringify([

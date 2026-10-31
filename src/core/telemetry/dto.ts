@@ -978,28 +978,21 @@ const nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null
 const digestText = Type.String({ maxLength: 256 });
 
 /**
- * A dispatched run's sealed receipt read through its integrity check (#434 §5.3, §11.3). Trust comes from the canonical
- * projection, and the checks the receipt sealed appear only under a seal that verified, so a claim the seal does not
- * vouch for never reads as a check that ran (L1, L6). The receipt file itself stays a document; nothing here is a raw
- * seal field.
+ * A finished run's evidence as its sealed run scope states it (#434 §5.3, §11.3): its seal's verdict, the trust it
+ * supports, and, only under a seal that verifies, the checks its run.settled and result object record, so a claim the
+ * seal does not vouch for never reads as a check that ran (L1, L6).
  */
-export const ReceiptEvidenceSchema = Type.Object(
+export const RunEvidenceSchema = Type.Object(
 	{
 		...header,
-		kind: Type.Literal("receipt-evidence"),
+		kind: Type.Literal("run-evidence"),
 		runId: ExistingId,
-		/**
-		 * `unsealed` is this run's receipt with no integrity block, `unreadable` is a file that is not JSON or not a receipt,
-		 * and `missing` is no file at all.
-		 */
-		receipt: vocabulary(["sealed", "unsealed", "missing", "unreadable"]),
+		/** `settled` is a run journal holding run.settled, `unsettled` one that does not yet, `missing` no journal. */
+		record: vocabulary(["settled", "unsettled", "missing"]),
 		integrity: Type.Object(
 			{
-				/**
-				 * `verified-ledger-evicted` checked the seal alone because the ledger row it was sealed from is gone;
-				 * `retired-format` is a seal version this build no longer verifies.
-				 */
-				state: vocabulary(["verified", "verified-ledger-evicted", "failed", "retired-format", "unavailable"]),
+				/** `unsealed` is a scope whose writer has not sealed it; `unavailable` is a run that has not settled. */
+				state: vocabulary(["verified", "unsealed", "failed", "unavailable"]),
 				display: Type.String(),
 				/** The verifier's own reason when the seal did not verify. */
 				detail: nullable(text),
@@ -1026,7 +1019,7 @@ export const ReceiptEvidenceSchema = Type.Object(
 			},
 			closed,
 		),
-		/** What the verified seal states; null unless `integrity.state` is `verified` or `verified-ledger-evicted`. */
+		/** What the verified seal vouches for; null unless `integrity.state` is `verified`. */
 		sealed: nullable(
 			Type.Object(
 				{
@@ -1049,7 +1042,7 @@ export const ReceiptEvidenceSchema = Type.Object(
 							closed,
 						),
 					),
-					/** Null when the receipt sealed no quality block; empty when it sealed one with no typed check. */
+					/** Null when the run settled no quality block; empty when it settled one with no typed check. */
 					typedValidations: nullable(
 						Type.Array(Type.Object({ sourceId: text, validatorDigest: digestText, passed: Type.Boolean() }, closed)),
 					),
@@ -1076,7 +1069,7 @@ export const ReceiptEvidenceSchema = Type.Object(
 							closed,
 						),
 					),
-					/** `unmeasured` when the run had no typed result contract; null when the receipt sealed no quality block. */
+					/** `unmeasured` when the run had no typed result contract; null when the run settled no quality block. */
 					resultContract: Type.Union([
 						Type.Object(
 							{
@@ -1127,7 +1120,7 @@ export const ReceiptEvidenceSchema = Type.Object(
 	},
 	closed,
 );
-export type ReceiptEvidenceV1 = Static<typeof ReceiptEvidenceSchema>;
+export type RunEvidenceV1 = Static<typeof RunEvidenceSchema>;
 
 export const RunTelemetrySchema = Type.Object(
 	{
@@ -1164,8 +1157,6 @@ export const RunTelemetrySchema = Type.Object(
 			Type.Object({ state: Type.Literal("missing") }, closed),
 			Type.Null(),
 		]),
-		/** The run's sealed receipt through its integrity check; null when the reader was given no receipt to check. */
-		receipt: Type.Union([ReceiptEvidenceSchema, Type.Null()]),
 	},
 	closed,
 );
@@ -1336,7 +1327,7 @@ export const TELEMETRY_DTO_SCHEMAS = {
 	run: RunTelemetrySchema,
 	runTimeline: RunTimelineSchema,
 	runs: Type.Array(RunRowSchema),
-	receiptEvidence: ReceiptEvidenceSchema,
+	runEvidence: RunEvidenceSchema,
 	whyStopped: WhyStoppedSchema,
 	explanation: ExplanationSchema,
 	quota: QuotaStateSchema,

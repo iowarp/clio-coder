@@ -22,17 +22,16 @@ import { StringDecoder } from "node:string_decoder";
 import type { TelemetryRecord } from "../core/telemetry/envelope.js";
 import type { Fact, FactSum } from "../core/telemetry/fact.js";
 import { clioStateDir } from "../core/xdg.js";
-import { readRunResultFacts } from "../domains/dispatch/receipt-facts.js";
 import {
 	RUN_EVENT_JOURNAL_READ_TAIL_BYTES,
 	type RunEventJournalLine,
 	readRunEventJournalLine,
 	runEventJournalPath,
 } from "../domains/dispatch/run-event-journal.js";
+import { readRunResultFacts } from "../domains/dispatch/run-result-facts.js";
 import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { trustStateWord, trustVerdictWord, validationClause } from "../domains/evidence/trust-projection.js";
-import { retiredIntegrityVersionOf } from "../domains/evidence/trust-status.js";
 import { costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/cost.js";
 import { foldFacts, foldRunJournal, sumFactSums } from "../domains/telemetry/folds.js";
 import { READ_MODEL_FOLD, runTokenCount } from "../domains/telemetry/read-model.js";
@@ -478,27 +477,13 @@ function receiptView(runId: string, stateDir: string): ReceiptView | null {
 		outcome: facts.outcome,
 		...(facts.outcomeCode !== undefined ? { outcomeCode: facts.outcomeCode } : {}),
 		...(facts.contract !== undefined ? { contract: facts.contract } : {}),
-		...(integrity !== undefined
-			? {
-					seal:
-						retiredIntegrityVersionOf(integrity) !== null
-							? "seal retired"
-							: trustStateWord("artifactIntegrity", integrity.state),
-				}
-			: {}),
+		...(integrity !== undefined ? { seal: trustStateWord("artifactIntegrity", integrity.state) } : {}),
 		...(facts.trust !== undefined
 			? { verdict: trustVerdictWord(facts.trust), validation: validationClause(facts.trust) }
 			: {}),
 		...(facts.failureMessage !== undefined ? { failure: facts.failureMessage } : {}),
 		...(facts.toolCalls !== undefined ? { toolCalls: facts.toolCalls } : {}),
-		...(facts.tokenCount !== undefined
-			? {
-					tokens: runTokenCount(facts.tokenCount, {
-						apiCalls: facts.apiCalls,
-						missingTokenCalls: facts.missingTokenCalls,
-					}).fact,
-				}
-			: {}),
+		...(facts.tokens !== undefined ? { tokens: foldFacts([facts.tokens]) } : {}),
 		...(facts.durationMs !== undefined ? { durationMs: facts.durationMs } : {}),
 		...(facts.text !== undefined && facts.text.trim().length > 0 ? { answer: facts.text } : {}),
 		...(facts.changedPaths !== undefined && facts.changedPaths.length > 0 ? { changedPaths: facts.changedPaths } : {}),

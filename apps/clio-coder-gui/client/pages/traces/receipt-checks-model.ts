@@ -4,10 +4,10 @@
 // host checks, result-contract conformance, contract quality and claim grounding are sealed by different
 // authorities and a quiet pass on one says nothing about the rest.
 
-import type { ReceiptEvidenceV1 } from "../../../contracts/wire.js";
+import type { RunEvidenceV1 } from "../../../contracts/wire.js";
 import type { StatusTone } from "../../design/status.js";
 
-type Sealed = NonNullable<ReceiptEvidenceV1["sealed"]>;
+type Sealed = NonNullable<RunEvidenceV1["sealed"]>;
 
 export interface CheckItem {
 	/** Position and name; two checks may share a name. */
@@ -382,7 +382,7 @@ function grounding(value: Sealed["validationGrounding"]): CheckRow {
  * Every row, in the order a reader asks: did it verify, what ran, was the result the right shape, was it good, what
  * was claimed. None when the seal did not verify, since nothing the receipt states can then be vouched for.
  */
-export function receiptChecks(evidence: ReceiptEvidenceV1): CheckRow[] {
+export function receiptChecks(evidence: RunEvidenceV1): CheckRow[] {
 	const sealed = evidence.sealed;
 	if (!sealed) return [];
 	return [
@@ -403,40 +403,32 @@ export interface ReceiptIntegrity {
 	meaning: string;
 }
 
-/** Whether the receipt's seal vouches for its checks, worded by the read model and explained here. */
-export function receiptIntegrity(evidence: ReceiptEvidenceV1): ReceiptIntegrity {
+/** Whether the run's seal vouches for its checks, worded by the read model and explained here. */
+export function receiptIntegrity(evidence: RunEvidenceV1): ReceiptIntegrity {
 	const { integrity } = evidence;
 	const detail = integrity.detail ? ` ${integrity.detail}` : "";
-	if (evidence.receipt === "missing")
-		return { tone: "neutral", word: integrity.display, meaning: "No saved receipt was found for this run." };
-	if (evidence.receipt === "unreadable")
-		return { tone: "fail", word: integrity.display, meaning: `The saved receipt cannot be read.${detail}` };
-	if (evidence.receipt === "unsealed")
-		return {
-			tone: "unverified",
-			word: integrity.display,
-			meaning: "The receipt carries no seal, so none of its checks can be vouched for.",
-		};
+	if (evidence.record === "missing")
+		return { tone: "neutral", word: integrity.display, meaning: "No run journal was found for this run." };
 	switch (integrity.state) {
 		case "verified":
-			return { tone: "success", word: integrity.display, meaning: "The seal verifies against the run's ledger row." };
-		case "verified-ledger-evicted":
-			return {
-				tone: "success",
-				word: integrity.display,
-				meaning: "The seal verifies on its own; the ledger row it was sealed from is no longer kept.",
-			};
+			return { tone: "success", word: integrity.display, meaning: "The run seal verifies from the run's own files." };
 		case "failed":
 			return {
 				tone: "fail",
 				word: integrity.display,
-				meaning: `The seal does not verify, so none of the receipt's checks are shown.${detail}`,
+				meaning: `The run seal does not verify, so none of the run's checks are shown.${detail}`,
+			};
+		case "unsealed":
+			return {
+				tone: "unverified",
+				word: integrity.display,
+				meaning: `The run scope is not sealed yet, so none of its checks can be vouched for.${detail}`,
 			};
 		default:
 			return {
 				tone: "unverified",
 				word: integrity.display,
-				meaning: `This build cannot verify the seal, so none of the receipt's checks are shown.${detail}`,
+				meaning: "The run has not settled, so it has no checks to show.",
 			};
 	}
 }

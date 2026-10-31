@@ -45,7 +45,7 @@ import type {
 	RunPresentedResultContract,
 	RunResultContract,
 	RunResultSummary,
-} from "../domains/dispatch/receipt-facts.js";
+} from "../domains/dispatch/run-result-facts.js";
 import type { RunKind } from "../domains/dispatch/types.js";
 import type { WorkerRunOrigin, WorkerRunRuntime, WorkerRunRuntimeKind } from "../domains/session/index.js";
 import {

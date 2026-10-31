@@ -15,7 +15,7 @@ import { readTelemetryScopeFiles, readTelemetryScopeFilesSync } from "./seal.js"
 export type SettledRunRecord = RunTelemetryV1 & { settled: NonNullable<RunTelemetryV1["settled"]> };
 
 function record(runId: string, read: Parameters<typeof journalSourceFromRead>[0], scope: TelemetryScopeFiles) {
-	return runTelemetry(runId, journalSourceFromRead(read, scope.segments.length > 0, runId), {}, null, scope);
+	return runTelemetry(runId, journalSourceFromRead(read, scope.segments.length > 0, runId), {}, scope);
 }
 
 /** The run's DTO with its seal verdict and result object; null when the run has no readable scope directory. */

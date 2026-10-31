@@ -268,7 +268,7 @@ This document defines the core architectural concepts and terminology used throu
 
 ### 66. Receipt Facts
 - **Definition**: The compact terminal facts of a finished run, read back from its sealed receipt: outcome and outcome code, exit code, token and tool counts, duration, changed paths, placement, result contract and the verified trust status. One module produces them for the TUI worker block (live and replayed) and for ACP terminal fleet frames, so every surface draws the same numbers from the same bytes. A missing or corrupt receipt reads as `receipt unavailable` and never fails a render.
-- **Owning Type**: `RunReceiptSummary` and `RunReceiptFacts` in [receipt-facts.ts](../../src/domains/dispatch/receipt-facts.ts).
+- **Owning Type**: `RunReceiptSummary` and `RunReceiptFacts` in [receipt-facts.ts](../../src/domains/dispatch/run-result-facts.ts).
 
 ### 67. Clio Coder
 - **Definition**: Clio Coder is named for Kleio, the Greek muse of history, a female figure in myth; the software is referred to by name and has no gender.

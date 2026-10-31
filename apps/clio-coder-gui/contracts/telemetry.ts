@@ -26,7 +26,7 @@ export const TelemetryExplanation = TELEMETRY_DTO_SCHEMAS.explanation;
 export const TelemetryQuota = TELEMETRY_DTO_SCHEMAS.quota;
 export const TelemetryUpdate = TELEMETRY_DTO_SCHEMAS.update;
 /** A run's sealed receipt through its integrity check: the facts the seal vouches for, never the raw document. */
-export const TelemetryReceiptEvidence = TELEMETRY_DTO_SCHEMAS.receiptEvidence;
+export const TelemetryRunEvidence = TELEMETRY_DTO_SCHEMAS.runEvidence;
 
 /** Query strings are flat, so list filters arrive comma-separated; the service rebuilds and checks the CallFilter. */
 export const TelemetryCallsQuery = Type.Object(

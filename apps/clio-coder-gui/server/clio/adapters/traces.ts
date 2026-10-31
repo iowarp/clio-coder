@@ -1,15 +1,15 @@
-import { realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { statSync } from "node:fs";
+import { join } from "node:path";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
-import { readReceiptTextSync } from "../../../../../src/domains/dispatch/receipt-store.js";
 import { openLedger } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
 import {
 	listRunTelemetryIds,
-	loadRunResultEvidence,
+	loadRunEvidence,
+	loadRunRecord,
 	loadRunTelemetrySource,
 	runTelemetryDirectoryExists,
 	runTelemetryWrittenMs,
@@ -17,7 +17,6 @@ import {
 import { runRowTelemetry } from "../../../../../src/domains/telemetry/read-model.js";
 import { Id } from "../../../contracts/common.js";
 import type { TraceIdentity, TraceRequest, TraceRun, TraceRunStatus } from "../../../contracts/traces.js";
-import { withCostDisplay } from "../../services/cost-display.js";
 import { AppProblem } from "../../services/problem.js";
 import { containedFile } from "./storage.js";
 
@@ -108,19 +107,6 @@ function matches(query: string, runId: string, identity: TraceIdentity | null): 
 		: [runId];
 	return fields.some((field) => field.toLowerCase().includes(needle));
 }
-function inside(root: string, path: string) {
-	const part = relative(root, path);
-	return part !== ".." && !part.startsWith("../") && !isAbsolute(part);
-}
-// Both the subtree and file must stay within the configured state root after resolving links.
-function contained(state: string, directory: string, filename: string) {
-	const root = realpathSync(state),
-		base = realpathSync(join(state, directory)),
-		path = realpathSync(join(base, filename));
-	if (!inside(root, base) || !inside(base, path))
-		throw new AppProblem("validation", "Trace path escapes its state directory.");
-	return path;
-}
 
 export class TraceAdapter {
 	/** The parsed ledger, kept while runs.json's identity and size stay the same. */
@@ -200,27 +186,17 @@ export class TraceAdapter {
 		return { runs, nextCursor: more && last ? Buffer.from(JSON.stringify(last)).toString("base64url") : null };
 	}
 	/**
-	 * The receipt's evidence through the read model, which checks the seal and states only what a verified seal
-	 * vouches for (#434 §11.3); the saved document itself only when the full receipt is asked for.
+	 * A run's evidence through the read model, which checks the run seal and states only what a verified seal vouches
+	 * for (#434 §11.3); the settled record and result object only when the full record is asked for.
 	 */
 	private receipt(state: string, runId: string, full: boolean) {
-		let path: string | null = null;
-		try {
-			path = contained(state, "receipts", `${runId}.json`);
-		} catch (error) {
-			// A receipt that resolves outside the state directory is refused; one that is not there is missing evidence.
-			if (error instanceof AppProblem) throw error;
-		}
-		const evidence = loadRunResultEvidence(state, runId);
-		if (!full || !path) return { evidence, receipt: null };
-		let receipt: Record<string, unknown> | null = null;
-		try {
-			// A pruned receipt's tombstone reads back as its verified evidence copy (#434).
-			const data: unknown = JSON.parse(readReceiptTextSync(path));
-			if (data && typeof data === "object" && !Array.isArray(data)) receipt = data as Record<string, unknown>;
-		} catch {
-			receipt = null;
-		}
-		return { evidence, receipt: receipt ? withCostDisplay(receipt) : null };
+		const evidence = loadRunEvidence(state, runId);
+		if (!full) return { evidence, record: null };
+		const record = loadRunRecord(state, runId);
+		return {
+			evidence,
+			record: record?.settled ? { settled: record.settled, seal: record.seal, result: record.result } : null,
+		};
 	}
+
 }

@@ -121,7 +121,7 @@ problem.
 | `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v3/`, `startup/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hook, startup diagnostics, and the request and tap files shared with the workers dashboard |
 
 The clean-exit session summary is built from an in-memory snapshot and is not
-persisted. Sealed receipt facts (`src/domains/dispatch/receipt-facts.ts`) are read
+persisted. Sealed receipt facts (`src/domains/dispatch/run-result-facts.ts`) are read
 back from `receipts/` and `runs.json` and have no file of their own.
 
 ### Cache root: disposable derived files

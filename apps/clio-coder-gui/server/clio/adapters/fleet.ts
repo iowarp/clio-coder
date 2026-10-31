@@ -1,14 +1,14 @@
-import { lstatSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
 import { councilTopologies } from "../../../../../src/domains/dispatch/council-topology.js";
 import { gateTopology } from "../../../../../src/domains/dispatch/gate-topology.js";
-import { readReceiptTextSync } from "../../../../../src/domains/dispatch/receipt-store.js";
 import { type FleetRunRecord, openLedger, readFleetRun } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
-import { loadRunResultEvidence, loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
+import { loadRunEvidence,
+	loadRunRecord, loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
 import { runRowTelemetry } from "../../../../../src/domains/telemetry/read-model.js";
 import { Id } from "../../../contracts/common.js";
 import {
@@ -19,7 +19,6 @@ import {
 	FleetRoot,
 	FleetRootDetail,
 } from "../../../contracts/fleet.js";
-import { reportCostDisplays, withCostDisplay } from "../../services/cost-display.js";
 import { AppProblem } from "../../services/problem.js";
 import { artifactPage, containedFile } from "./storage.js";
 
@@ -43,38 +42,17 @@ function dispatchSummary(row: RunEnvelope): DispatchRun {
 	});
 }
 /**
- * The receipt's evidence through the read model, which checks the seal and states only what a verified seal vouches
- * for (#434 §11.3). A file that resolves outside the state directory or past the size cap is refused, never read.
+ * A run's evidence through the read model, which checks the run seal and states only what a verified seal vouches for
+ * (#434 §11.3).
  */
-function receiptEvidence(id: string) {
-	const state = clioStateDir();
-	if (!containedFile(state, "receipts", `${id}.json`) && entryExists(join(state, "receipts", `${id}.json`)))
-		throw new AppProblem("unavailable", "The receipt is outside its storage boundary or exceeds 8 MiB.");
-	return loadRunResultEvidence(state, id);
+function runEvidence(id: string) {
+	return loadRunEvidence(clioStateDir(), id);
 }
-/** Anything at the path, a dangling link included. */
-function entryExists(path: string): boolean {
-	try {
-		lstatSync(path);
-		return true;
-	} catch {
-		return false;
-	}
-}
-/** The saved document as written, sent only when the full receipt is asked for. */
-function savedReceipt(id: string) {
-	const path = containedFile(clioStateDir(), "receipts", `${id}.json`);
-	let raw: unknown = null;
-	try {
-		// A pruned receipt's tombstone reads back as its verified evidence copy; a copy that is gone is no receipt (#434).
-		raw = path ? JSON.parse(readReceiptTextSync(path)) : null;
-	} catch {
-		raw = null;
-	}
-	// Nested route bounds and caps need their own displays beside the receipt's cost (#434).
-	return raw && typeof raw === "object" && !Array.isArray(raw)
-		? withCostDisplay(reportCostDisplays(raw) as Record<string, unknown>)
-		: null;
+/** The run's settled record and result object, sent only when the full record is asked for; null before it settles. */
+function settledRecord(id: string) {
+	const record = loadRunRecord(clioStateDir(), id);
+	if (!record?.settled) return null;
+	return { settled: record.settled, seal: record.seal, result: record.result };
 }
 function rootRecord(id: string) {
 	if (!containedFile(clioStateDir(), "fleet-runs", `${id}.json`)) return null;
@@ -132,7 +110,7 @@ export function readFleet(input: FleetRequest): unknown {
 		return { ...artifactPage(rows, input.limit, input.cursor), present: true };
 	}
 	if (input.kind === "receipt")
-		return { evidence: receiptEvidence(input.id), receipt: input.full ? savedReceipt(input.id) : null };
+		return { evidence: runEvidence(input.id), record: input.full ? settledRecord(input.id) : null };
 	if (input.kind === "gates") return checked(FleetGates, gateTopology());
 	const ledger = dispatchRows();
 	const rows = ledger.rows.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || b.id.localeCompare(a.id));
@@ -159,7 +137,7 @@ export function readFleet(input: FleetRequest): unknown {
 	const gates = gateTopology();
 	return checked(FleetRootDetail, {
 		run,
-		evidence: receiptEvidence(record.id),
+		evidence: runEvidence(record.id),
 		councils,
 		gates: {
 			...gates,

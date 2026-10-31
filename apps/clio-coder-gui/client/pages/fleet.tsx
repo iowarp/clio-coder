@@ -405,7 +405,7 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 		placeholderData: (previous) => previous,
 	});
 	const evidence = dispatch ? receipt.data?.evidence : root.data?.evidence;
-	const saved = full && !receipt.isPlaceholderData ? receipt.data?.receipt : null;
+	const saved = full && !receipt.isPlaceholderData ? receipt.data?.record : null;
 	return (
 		<section className="run-inspection">
 			<Link to={back}>← Fleet history</Link>
@@ -524,19 +524,19 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 					<Topologies councils={root.data.councils} gates={root.data.gates} />
 				</>
 			)}
-			<h2>Saved receipt</h2>
-			{dispatch && receipt.isPending && <p>Reading receipt…</p>}
+			<h2>Run record</h2>
+			{dispatch && receipt.isPending && <p>Reading run record…</p>}
 			{evidence ? (
 				<>
 					<ReceiptChecks evidence={evidence} />
 					{saved ? (
 						<details>
-							<summary>Every receipt field, as saved</summary>
+							<summary>The settled record, in full</summary>
 							<Facts value={saved} hide={["version"]} />
 						</details>
-					) : evidence.receipt !== "missing" ? (
+					) : evidence.record === "settled" ? (
 						<button type="button" disabled={full && receipt.isFetching} onClick={() => setFull(true)}>
-							{full && receipt.isFetching ? "Reading receipt…" : "Load full receipt"}
+							{full && receipt.isFetching ? "Reading run record…" : "Load full run record"}
 						</button>
 					) : null}
 				</>

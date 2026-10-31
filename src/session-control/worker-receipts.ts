@@ -7,4 +7,4 @@
 export {
 	readRunResultFacts as readWorkerReceiptFacts,
 	readRunResultFactsForReplay as readWorkerReceiptFactsForReplay,
-} from "../domains/dispatch/receipt-facts.js";
+} from "../domains/dispatch/run-result-facts.js";

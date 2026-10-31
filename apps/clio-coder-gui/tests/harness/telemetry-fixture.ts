@@ -55,3 +55,6 @@ export async function seedRunJournal(
 	await journal.close();
 	return runId;
 }
+
+export { fixtureEnvelope, fixtureReceiptDraft } from "../../../../tests/harness/receipt.js";
+export { writeSettledRun } from "../../../../tests/harness/settled-run.js";

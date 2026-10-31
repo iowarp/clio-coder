@@ -7,8 +7,8 @@
  * its closed vocabulary). The detectors live in tests/harness/telemetry-lies.ts so the GUI route tests run the same
  * ones over the DTOs they serve.
  */
-import { deepStrictEqual, match, notStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -20,7 +20,6 @@ import {
 	CostReportSchema,
 	type CostReportV1,
 	parseFactRef,
-	ReceiptEvidenceSchema,
 	SessionTelemetrySchema,
 	TimelineSchema,
 	WhyStoppedSchema,
@@ -32,12 +31,7 @@ import type { PendingTelemetry } from "../../src/core/telemetry/producer.js";
 import type { CallSettled } from "../../src/core/telemetry/schemas.js";
 import { settingsFingerprintCommitment } from "../../src/core/telemetry/schemas.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { clioDataDir } from "../../src/core/xdg.js";
-import { readReceiptEvidence } from "../../src/domains/dispatch/receipt-facts.js";
-import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { applyReceiptPrune, planReceiptPrune } from "../../src/domains/dispatch/receipt-prune.js";
-import { readReceiptTextSync } from "../../src/domains/dispatch/receipt-store.js";
-import { loadRunTelemetrySource, loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
+import { loadSessionTelemetrySource } from "../../src/domains/session/telemetry-source.js";
 import { openCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import type { RepoSource, SessionSource } from "../../src/domains/telemetry/read-model.js";
@@ -53,7 +47,6 @@ import {
 	whyStopped,
 } from "../../src/domains/telemetry/read-model.js";
 import { createLiveTelemetryModel } from "../../src/domains/telemetry/telemetry-live.js";
-import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import {
 	absentRenderedOtherwise,
 	costsOffPolicy,
@@ -261,74 +254,6 @@ test("a session's lifetime tells a clean close, an open owner, an abnormal end a
 	const crashed = why({ endedAt: null, owner }, false);
 	notStrictEqual(crashed.state, "closed");
 	ok(crashed.findings.includes("The session's process ended without closing it."));
-});
-
-test("a run's receipt evidence carries sealed checks only under a seal that verifies (#434 §11.3)", () => {
-	const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-receipt-evidence-"));
-	mkdirSync(join(stateDir, "receipts"));
-	const envelope = fixtureEnvelope("run-evidence");
-	const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
-	const writeReceipt = (value: unknown) =>
-		writeFileSync(join(stateDir, "receipts", "run-evidence.json"), JSON.stringify(value));
-	const read = () => readReceiptEvidence("run-evidence", stateDir, now);
-
-	const missing = read();
-	strictEqual(missing.receipt, "missing");
-	strictEqual(missing.integrity.state, "unavailable");
-	strictEqual(missing.sealed, null);
-
-	writeReceipt(receipt);
-	writeFileSync(join(stateDir, "runs.json"), JSON.stringify([envelope]));
-	const verified = read();
-	ok(Value.Check(ReceiptEvidenceSchema, verified), [...Value.Errors(ReceiptEvidenceSchema, verified)][0]?.message);
-	strictEqual(verified.integrity.state, "verified");
-	strictEqual(verified.sealed?.outcome, "succeeded");
-
-	rmSync(join(stateDir, "runs.json"));
-	strictEqual(read().integrity.state, "verified-ledger-evicted");
-
-	writeReceipt({ ...receipt, outcome: "failed" });
-	const tampered = read();
-	strictEqual(tampered.integrity.state, "failed");
-	ok(tampered.integrity.detail);
-	strictEqual(tampered.sealed, null);
-	strictEqual(tampered.trust.artifactIntegrity.state, "failed");
-
-	// A run with no journal reads as not measured, whatever its receipt holds (#434).
-	writeReceipt(receipt);
-	const unjournaled = loadRunTelemetrySource(stateDir, "run-evidence");
-	strictEqual(unjournaled.present, false);
-	strictEqual(unjournaled.records.length, 0);
-
-	// Opt-in pruning tombstones a receipt only once its evidence copy verifies, and readers follow the tombstone back.
-	writeReceipt(receipt);
-	writeFileSync(join(stateDir, "runs.json"), JSON.stringify([envelope]));
-	strictEqual(planReceiptPrune(stateDir).held[0]?.reason, "no-evidence-copy");
-	const evidenceId = `evidence-${Date.now()}`;
-	mkdirSync(join(clioDataDir(), "evidence", evidenceId), { recursive: true });
-	writeFileSync(
-		join(clioDataDir(), "evidence", evidenceId, "receipt.json"),
-		JSON.stringify({ version: 1, receipts: [receipt] }),
-	);
-	const row = { runId: "run-evidence", evidenceId, tags: [], firstPassSuccess: true, findingCount: 0 };
-	writeFileSync(join(stateDir, "evidence-index.json"), JSON.stringify([{ ...row, generatedAt: now.now.toISOString() }]));
-	const plan = planReceiptPrune(stateDir);
-	strictEqual(plan.prune[0]?.evidenceId, evidenceId);
-	strictEqual(applyReceiptPrune(plan).pruned.length, 1);
-	ok(readFileSync(join(stateDir, "receipts", "run-evidence.json"), "utf8").includes("clio-receipt-tombstone/1"));
-	strictEqual(read().integrity.state, "verified");
-	// A tombstone answers only for the run its file is named after, never as another run's receipt.
-	const misplaced = join(stateDir, "receipts", "run-misplaced.json");
-	writeFileSync(misplaced, readFileSync(join(stateDir, "receipts", "run-evidence.json")));
-	throws(() => readReceiptTextSync(misplaced), { code: "ENOENT" });
-	rmSync(misplaced);
-	rmSync(join(clioDataDir(), "evidence", evidenceId), { recursive: true });
-	strictEqual(
-		read().receipt,
-		"unreadable",
-		"a tombstone whose copy is gone reads as a saved receipt that cannot be read",
-	);
-	match(read().integrity.detail ?? "", /was pruned and evidence .* no longer holds it/);
 });
 
 test("the timeline and why-stopped carry config, budget and quota records, spend marked as its calls were priced (#434 §8, §12.6)", () => {

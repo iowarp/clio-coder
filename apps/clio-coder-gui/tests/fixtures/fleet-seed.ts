@@ -9,11 +9,12 @@ import { writeFleetRun } from "../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../src/domains/dispatch/types.js";
 import { openCallJournal } from "../../../../src/domains/telemetry/call-journal.js";
 import { telemetryRunDirectory } from "../../../../src/domains/telemetry/paths.js";
+import { fixtureReceiptDraft } from "../../../../tests/harness/receipt.js";
+import { writeSettledRun } from "../../../../tests/harness/settled-run.js";
 
 const state = process.env.CLIO_CODER_STATE_DIR;
 assert.ok(state);
 mkdirSync(join(state, "fleet-runs"), { recursive: true });
-mkdirSync(join(state, "receipts"), { recursive: true });
 const stamp = (i: number) => new Date(Date.UTC(2026, 8, 10, 12, Math.floor(i / 2))).toISOString();
 for (let i = 0; i < 150; i++) {
 	await writeFleetRun({
@@ -89,11 +90,13 @@ const rows: RunEnvelope[] = [
 	},
 ];
 writeFileSync(join(state, "runs.json"), JSON.stringify(rows));
-for (const id of ["fleet-149", "member-two"])
-	writeFileSync(
-		join(state, "receipts", `${id}.json`),
-		JSON.stringify({ version: 1, runId: id, outcome: "succeeded", output: { text: "Fixture receipt output" } }),
-	);
+const member = rows[1] as RunEnvelope;
+await writeSettledRun(state, {
+	...fixtureReceiptDraft(member),
+	agentId: member.agentId,
+	executionRole: member.executionRole,
+	output: { state: "final", text: "Fixture run output", bytes: 18, truncated: false },
+});
 const context = { sessionId: null, runId: "fixture-gate", agent: { role: "coordinator", id: "fixture-gate" } } as const;
 const journal = await openCallJournal({
 	directory: telemetryRunDirectory(state, context.runId),

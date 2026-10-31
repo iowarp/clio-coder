@@ -1,6 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id, PageCursor } from "./common.js";
-import { TelemetryReceiptEvidence, TelemetryRunRow } from "./telemetry.js";
+import { TelemetryRunEvidence, TelemetryRunRow } from "./telemetry.js";
 
 const closed = { additionalProperties: false };
 const text = Type.String();
@@ -54,9 +54,9 @@ export const DispatchRuns = Type.Object(
 	{ items: Type.Array(DispatchRun), nextCursor: Type.Union([PageCursor, Type.Null()]), present: Type.Boolean() },
 	closed,
 );
-/** The receipt as the read model checks it; the saved document itself only when the full receipt is asked for. */
+/** A finished run as the read model checks it; its settled record and result object only when the full record is asked for. */
 export const FleetReceipt = Type.Object(
-	{ evidence: TelemetryReceiptEvidence, receipt: Type.Union([Type.Record(text, Type.Unknown()), Type.Null()]) },
+	{ evidence: TelemetryRunEvidence, record: Type.Union([Type.Record(text, Type.Unknown()), Type.Null()]) },
 	closed,
 );
 const memberTurn = Type.Object(
@@ -147,7 +147,7 @@ export const FleetRootDetail = Type.Object(
 				closed,
 			),
 		),
-		evidence: TelemetryReceiptEvidence,
+		evidence: TelemetryRunEvidence,
 		councils: Councils,
 		gates: FleetGates,
 	},

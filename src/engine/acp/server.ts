@@ -72,12 +72,12 @@ import type {
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { narrowTurnConstraints, snapshotTurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
-import type { RunResultFacts } from "../../domains/dispatch/receipt-facts.js";
+import type { RunResultFacts } from "../../domains/dispatch/run-result-facts.js";
 import {
 	readRunResultFacts,
 	readRunResultFactsForReplay,
-	receiptWireFacts,
-} from "../../domains/dispatch/receipt-facts.js";
+	runResultWireFacts,
+} from "../../domains/dispatch/run-result-facts.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import { modelIdsForStatus } from "../../domains/providers/model-discovery.js";
@@ -4123,7 +4123,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		};
 	};
 	const receiptMeta = (runId: string, facts: RunResultFacts | null): Record<string, unknown> => ({
-		[ACP_RECEIPT_META_KEY]: receiptWireFacts(runId, facts),
+		[ACP_RECEIPT_META_KEY]: runResultWireFacts(runId, facts),
 	});
 
 	const unsubscribeEvents: Array<() => void> = [];

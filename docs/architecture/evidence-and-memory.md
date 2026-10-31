@@ -111,7 +111,7 @@ Session evidence retains the two operator-facing bookkeeping ledgers instead of 
 
 ### Sealed receipt facts
 
-`src/domains/dispatch/receipt-facts.ts` reads a sealed receipt back, verifies it against its ledger row, and projects the compact terminal facts that the TUI worker block, the exit summary and ACP terminal fleet frames report; the receipt contract is in [observability.md](observability.md).
+`src/domains/dispatch/run-result-facts.ts` reads a sealed receipt back, verifies it against its ledger row, and projects the compact terminal facts that the TUI worker block, the exit summary and ACP terminal fleet frames report; the receipt contract is in [observability.md](observability.md).
 
 ---
 

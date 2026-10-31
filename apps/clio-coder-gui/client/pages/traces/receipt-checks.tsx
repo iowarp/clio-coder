@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { ReceiptEvidenceV1 } from "../../../contracts/wire.js";
+import type { RunEvidenceV1 } from "../../../contracts/wire.js";
 import { StatusMark } from "../../design/status.js";
 import { receiptChecks, receiptIntegrity } from "./receipt-checks-model.js";
 import "./receipt-checks.css";
@@ -9,7 +9,7 @@ import "./receipt-checks.css";
  * a verified run with an unmeasured quality label reads as exactly that, and a check that never ran never borrows a
  * pass. A seal that does not verify shows no check at all, only why.
  */
-export const ReceiptChecks = memo(function ReceiptChecks({ evidence }: { evidence: ReceiptEvidenceV1 }) {
+export const ReceiptChecks = memo(function ReceiptChecks({ evidence }: { evidence: RunEvidenceV1 }) {
 	const integrity = receiptIntegrity(evidence);
 	const rows = receiptChecks(evidence);
 	return (

@@ -12,7 +12,7 @@ import type { ResolvedTerminalReason } from "./outcome.js";
 import { labelledRunHashes } from "./receipt-hashes.js";
 import type { RunUsageFacts } from "./run-call-usage.js";
 import { unobservedRunUsageFacts } from "./run-call-usage.js";
-import type { RunEnvelope, RunOutcome, RunResult } from "./types.js";
+import type { RunEnvelope, RunOutcome, RunResultDraft } from "./types.js";
 
 /** The facts and the object a run settles with; the journal adds the object's reference as `result`. */
 export interface RunSettlement {
@@ -56,7 +56,7 @@ function identityOf(run: Pick<RunEnvelope, "identity">): RunSettled["identity"] 
 
 /** The settlement of a run whose worker finished, from what its finalization sealed (#434). */
 export function settleFinishedRun(
-	receipt: RunResult,
+	receipt: RunResultDraft,
 	input: {
 		terminal: ResolvedTerminalReason;
 		processExitCode: number | null;
@@ -90,6 +90,7 @@ export function settleFinishedRun(
 			frameType: input.frameType,
 			...usage,
 			toolCalls: receipt.toolCalls,
+			tools: receipt.toolStats.slice(0, 256).map((stat) => ({ tool: stat.tool, calls: stat.count })),
 			verification: { state: receipt.verification.state, basis: receipt.verification.basis },
 			quality: {
 				typedValidations: receipt.quality.typedValidations.map((fact) => ({ ...fact })),
@@ -206,6 +207,7 @@ export function settleUnfinishedRun(
 			frameType: null,
 			...unobservedRunUsageFacts(),
 			toolCalls: 0,
+			tools: [],
 			verification: { state: "unknown", basis: "receipt-unavailable" },
 			quality: null,
 			validationGrounding: null,

@@ -983,7 +983,7 @@ export type RunIntegrity =
 	| { state: "failed"; reason: string };
 
 /** The integrity a run's seal verdict states (`telemetry/seal.ts`). */
-export function runIntegrityOfSeal(seal: SealVerdict | null): RunIntegrity {
+function runIntegrityOfSeal(seal: SealVerdict | null): RunIntegrity {
 	if (seal === null) return { state: "unsealed", reason: "run scope unreadable" };
 	if (seal.status === "verified") return { state: "verified", by: "seal" };
 	if (seal.status === "unsealed") return { state: "unsealed", reason: `run scope unsealed (${seal.reason})` };
@@ -1096,7 +1096,7 @@ function runContextStatus(facts: RunTrustFacts): ContextProvenanceStatus {
  * A finished run's trust status from its settled facts. Only an authenticated record's claims are read: a run whose
  * seal is open or failed keeps the integrity verdict and reads nothing else (#434).
  */
-export function adaptRunTrustStatus(facts: RunTrustFacts | null, integrity: RunIntegrity): CanonicalTrustStatus {
+function adaptRunTrustStatus(facts: RunTrustFacts | null, integrity: RunIntegrity): CanonicalTrustStatus {
 	if (facts === null)
 		return composeTrustStatus({
 			artifactIntegrity: absentTrustStatus("artifact_missing"),
