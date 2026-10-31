@@ -39,7 +39,7 @@ import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import type { CallUsage } from "../../core/token-split.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
-import type { ToolAuditFacts } from "../../tools/agent-tools.js";
+import type { ToolCallFacts } from "../../tools/agent-tools.js";
 import { TELEMETRY_JOURNAL_FILE, telemetryJournalFiles, telemetryRunsDirectory } from "../telemetry/index.js";
 import { runTelemetryJournal } from "./run-telemetry.js";
 
@@ -59,7 +59,7 @@ interface JournalLineBase {
  * and reasoning never appear here.
  */
 export interface RunEventJournalFacts {
-	audit?: ToolAuditFacts;
+	callFacts?: ToolCallFacts;
 	callIndex?: number;
 	usage?: CallUsage;
 	toolRounds?: ToolRoundRecord[];
@@ -264,11 +264,11 @@ export interface RunEventJournalRead {
 	agentId: string | null;
 }
 
-export function parseToolAuditFacts(value: unknown): ToolAuditFacts | undefined {
+export function parseToolCallFacts(value: unknown): ToolCallFacts | undefined {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
 	const record = value as Record<string, unknown>;
 	if (typeof record.target !== "string" || record.target.length === 0) return undefined;
-	const audit: ToolAuditFacts = { target: record.target };
+	const callFacts: ToolCallFacts = { target: record.target };
 	for (const key of [
 		"offset",
 		"limit",
@@ -279,18 +279,20 @@ export function parseToolAuditFacts(value: unknown): ToolAuditFacts | undefined 
 		"poolUsedBeforeBytes",
 	] as const) {
 		const count = record[key];
-		if (typeof count === "number" && Number.isFinite(count) && count >= 0) audit[key] = count;
+		if (typeof count === "number" && Number.isFinite(count) && count >= 0) callFacts[key] = count;
 	}
 	for (const key of ["startLine", "endLine"] as const) {
 		const count = record[key];
-		if (count === null || (typeof count === "number" && Number.isSafeInteger(count) && count >= 1)) audit[key] = count;
+		if (count === null || (typeof count === "number" && Number.isSafeInteger(count) && count >= 1))
+			callFacts[key] = count;
 	}
 	for (const key of ["partialLine", "truncated", "poolExhausted"] as const) {
-		if (typeof record[key] === "boolean") audit[key] = record[key];
+		if (typeof record[key] === "boolean") callFacts[key] = record[key];
 	}
-	if (record.targetTruncated === true) audit.targetTruncated = true;
-	if (record.rangeUnit === "physical-lines" || record.rangeUnit === "rendered-lines") audit.rangeUnit = record.rangeUnit;
-	return audit;
+	if (record.targetTruncated === true) callFacts.targetTruncated = true;
+	if (record.rangeUnit === "physical-lines" || record.rangeUnit === "rendered-lines")
+		callFacts.rangeUnit = record.rangeUnit;
+	return callFacts;
 }
 
 const UNREADABLE = { line: null, record: null } as const;

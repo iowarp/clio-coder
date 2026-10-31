@@ -24,7 +24,7 @@ import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { mainGrantsUnavailable } from "../../domains/safety/worker-permit.js";
 import { findExecutableOnPath } from "../../domains/toolchain/resolve.js";
-import { toolAuditFacts } from "../../tools/agent-tools.js";
+import { toolCallFacts } from "../../tools/agent-tools.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED, type WorkerBudget } from "../../worker/spec-contract.js";
 import { bindExternalUsage } from "../external-call-telemetry.js";
 import { isReserveAdmittedTool, resolveDeliveryTools } from "../loop-guard.js";
@@ -508,7 +508,7 @@ function decideToolUse(
 			allowedTools: input.allowedTools,
 			...(input.budgetGate ? { budgetGate: input.budgetGate } : {}),
 		});
-	// SDK callbacks run outside the native worker's async scope; bind the actual tool use before auditing (#434).
+	// SDK callbacks run outside the native worker's async scope; bind the actual tool use before recording it (#434).
 	return input.telemetryContext
 		? withTelemetryContext({ ...input.telemetryContext, ...(toolCallId !== undefined ? { toolCallId } : {}) }, decide)
 		: decide();
@@ -519,19 +519,19 @@ function buildPostToolUseHook(emit: WorkerEventEmit, cwd: string): HookCallback 
 		if (hookInput.hook_event_name !== "PostToolUse" && hookInput.hook_event_name !== "PostToolUseFailure")
 			return { continue: true };
 		const mapped = mapClaudeToolCall(hookInput.tool_name, coerceToolInput(hookInput.tool_input), cwd);
-		const audit = toolAuditFacts(mapped.clioToolName, mapped.args);
+		const callFacts = toolCallFacts(mapped.clioToolName, mapped.args);
 		const failed = hookInput.hook_event_name === "PostToolUseFailure";
-		if (!failed && audit) {
+		if (!failed && callFacts) {
 			const response = coerceToolInput(hookInput.tool_response);
 			const file = coerceToolInput(response.file);
-			if (typeof file.content === "string") audit.returnedBytes = Buffer.byteLength(file.content);
+			if (typeof file.content === "string") callFacts.returnedBytes = Buffer.byteLength(file.content);
 			if (typeof file.startLine === "number" && typeof file.numLines === "number" && file.numLines > 0) {
-				audit.startLine = file.startLine;
-				audit.endLine = file.startLine + file.numLines - 1;
-				audit.rangeUnit = "physical-lines";
+				callFacts.startLine = file.startLine;
+				callFacts.endLine = file.startLine + file.numLines - 1;
+				callFacts.rangeUnit = "physical-lines";
 				// Native reads flag truncation only when content remains after the returned range, so a read that
 				// starts mid-file and reaches the end is not truncated.
-				if (typeof file.totalLines === "number") audit.truncated = audit.endLine < file.totalLines;
+				if (typeof file.totalLines === "number") callFacts.truncated = callFacts.endLine < file.totalLines;
 			}
 		}
 		emit({
@@ -542,7 +542,7 @@ function buildPostToolUseHook(emit: WorkerEventEmit, cwd: string): HookCallback 
 				posture: "operating",
 				durationMs: hookInput.duration_ms ?? 0,
 				outcome: failed ? "error" : "ok",
-				...(audit ? { audit } : {}),
+				...(callFacts ? { callFacts } : {}),
 				...(failed ? { reason: sanitizeCallTargetText(redactSecretString(hookInput.error)).slice(0, 350) } : {}),
 			},
 		});

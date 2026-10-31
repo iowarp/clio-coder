@@ -63,7 +63,7 @@ export interface ToolTelemetry {
 
 export type ToolOutcome = "ok" | "error" | "blocked";
 
-export interface ToolAuditFacts {
+export interface ToolCallFacts {
 	target: string;
 	targetTruncated?: true;
 	offset?: number;
@@ -81,57 +81,54 @@ export interface ToolAuditFacts {
 	poolExhausted?: boolean;
 }
 
-export function toolAuditFacts(
-	tool: string,
-	args: Record<string, unknown>,
-	result?: ToolResult,
-): ToolAuditFacts | null {
+export function toolCallFacts(tool: string, args: Record<string, unknown>, result?: ToolResult): ToolCallFacts | null {
 	if (![ToolNames.Read, ToolNames.Edit, ToolNames.Write].some((name) => name === tool) || typeof args.path !== "string")
 		return null;
 	const target = sanitizeCallTargetText(redactSecretString(args.path));
-	const audit: ToolAuditFacts = {
+	const callFacts: ToolCallFacts = {
 		target: truncateUtf8(target, 4096, "…"),
 		...(Buffer.byteLength(target) > 4096 ? { targetTruncated: true } : {}),
 	};
 	for (const key of ["offset", "limit", "tail"] as const) {
 		const value = args[key];
-		if (tool === ToolNames.Read && typeof value === "number" && Number.isFinite(value) && value >= 0) audit[key] = value;
+		if (tool === ToolNames.Read && typeof value === "number" && Number.isFinite(value) && value >= 0)
+			callFacts[key] = value;
 	}
-	if (!result) return audit;
-	audit.returnedBytes =
+	if (!result) return callFacts;
+	callFacts.returnedBytes =
 		Buffer.byteLength(toolResultContextText(result)) +
 		(result.kind === "ok" ? (result.images ?? []).reduce((bytes, image) => bytes + Buffer.byteLength(image.data), 0) : 0);
 	const details = result.details;
 	const observation = details?.observation;
 	if (isRecord(observation)) {
-		if (typeof observation.shownBytes === "number") audit.observationBytes = observation.shownBytes;
-		if (typeof observation.truncated === "boolean") audit.truncated = observation.truncated;
+		if (typeof observation.shownBytes === "number") callFacts.observationBytes = observation.shownBytes;
+		if (typeof observation.truncated === "boolean") callFacts.truncated = observation.truncated;
 		const pool = observation.budget;
 		if (isRecord(pool)) {
-			if (typeof pool.limitBytes === "number") audit.poolLimitBytes = pool.limitBytes;
-			if (typeof pool.usedBeforeBytes === "number") audit.poolUsedBeforeBytes = pool.usedBeforeBytes;
-			if (typeof pool.exhausted === "boolean") audit.poolExhausted = pool.exhausted;
+			if (typeof pool.limitBytes === "number") callFacts.poolLimitBytes = pool.limitBytes;
+			if (typeof pool.usedBeforeBytes === "number") callFacts.poolUsedBeforeBytes = pool.usedBeforeBytes;
+			if (typeof pool.exhausted === "boolean") callFacts.poolExhausted = pool.exhausted;
 		}
 	}
 	const range = details?.readRange;
 	if (isRecord(range)) {
-		if (typeof range.startLine === "number" || range.startLine === null) audit.startLine = range.startLine;
-		if (typeof range.endLine === "number" || range.endLine === null) audit.endLine = range.endLine;
-		if (range.unit === "physical-lines" || range.unit === "rendered-lines") audit.rangeUnit = range.unit;
-		if (typeof range.partialLine === "boolean") audit.partialLine = range.partialLine;
+		if (typeof range.startLine === "number" || range.startLine === null) callFacts.startLine = range.startLine;
+		if (typeof range.endLine === "number" || range.endLine === null) callFacts.endLine = range.endLine;
+		if (range.unit === "physical-lines" || range.unit === "rendered-lines") callFacts.rangeUnit = range.unit;
+		if (typeof range.partialLine === "boolean") callFacts.partialLine = range.partialLine;
 	}
 	const shaped = details?.resultSize;
 	if (isRecord(shaped) && shaped.truncated === true) {
-		audit.truncated = true;
-		audit.startLine = null;
-		audit.endLine = null;
+		callFacts.truncated = true;
+		callFacts.startLine = null;
+		callFacts.endLine = null;
 	}
-	return audit;
+	return callFacts;
 }
 
 export interface ToolStartEvent {
 	tool: string;
-	audit?: ToolAuditFacts;
+	callFacts?: ToolCallFacts;
 	/**
 	 * The engine's id for this call, when the producer has one. New producers
 	 * put the same id on start and finish so concurrent calls of one tool remain
@@ -148,7 +145,7 @@ export interface ToolStartEvent {
 	startedAt: number;
 	/**
 	 * What this call is doing, as a bounded redacted descriptor composed here
-	 * where the arguments are trusted. Structured path audit facts travel separately; raw arguments never cross
+	 * where the arguments are trusted. Structured path call facts travel separately; raw arguments never cross
 	 * this telemetry seam.
 	 */
 	action?: CallActionDescriptor;
@@ -156,7 +153,7 @@ export interface ToolStartEvent {
 
 export interface ToolFinishEvent {
 	tool: string;
-	audit?: ToolAuditFacts;
+	callFacts?: ToolCallFacts;
 	/**
 	 * The engine's id for this call, when the caller supplied one through
 	 * `invokeOptions`. Consumers that correlate this authoritative outcome back
@@ -246,8 +243,8 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	// Stamped onto both lifecycle events so a concurrent finish resolves only
 	// the start for its own engine call. Direct callers may legitimately omit it.
 	const callId = input.invokeOptions?.toolCallId;
-	const audit = toolAuditFacts(spec.name, args);
-	const withCallId = { ...(callId === undefined ? {} : { toolCallId: callId }), ...(audit ? { audit } : {}) };
+	const callFacts = toolCallFacts(spec.name, args);
+	const withCallId = { ...(callId === undefined ? {} : { toolCallId: callId }), ...(callFacts ? { callFacts } : {}) };
 	// The one seam that holds validated arguments and publishes telemetry, so it
 	// is where the redacted descriptor is composed. Everything downstream of here
 	// sees the descriptor and never the arguments.
@@ -317,13 +314,13 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			formatModelRejection(verdict.reason, rejection, denial !== undefined ? denialLines(denial) : undefined),
 		);
 	}
-	const resultAudit = toolAuditFacts(spec.name, args, verdict.result);
-	const withResultAudit = { ...withCallId, ...(resultAudit ? { audit: resultAudit } : {}) };
+	const resultFacts = toolCallFacts(spec.name, args, verdict.result);
+	const withResultFacts = { ...withCallId, ...(resultFacts ? { callFacts: resultFacts } : {}) };
 	if (verdict.result.kind === "error") {
 		finish(
 			"error",
 			{
-				...withResultAudit,
+				...withResultFacts,
 				reason: verdict.result.message,
 				decision: verdict.decision,
 			},
@@ -357,7 +354,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		finish(
 			"ok",
 			{
-				...withResultAudit,
+				...withResultFacts,
 				terminate: true,
 				decision: verdict.decision,
 				...(skillActivation ? { skillActivation } : {}),
@@ -368,7 +365,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 		finish(
 			"ok",
 			{
-				...withResultAudit,
+				...withResultFacts,
 				decision: verdict.decision,
 				...(skillActivation ? { skillActivation } : {}),
 			},
@@ -378,7 +375,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 	return result;
 }
 
-/** One tool.settled per settled call; the safety audit keeps the decision itself (#434). */
+/** One tool.settled per settled call; tool.decided keeps the safety decision itself (#434). */
 function recordToolSettled(
 	ctx: TelemetryContext | undefined,
 	tool: string,
@@ -421,7 +418,7 @@ function emitFinish(
 	outcome: ToolOutcome,
 	extra?: {
 		reason?: string;
-		audit?: ToolAuditFacts;
+		callFacts?: ToolCallFacts;
 		terminate?: boolean;
 		decision?: SafetyDecision;
 		deniedPark?: true;
@@ -440,7 +437,7 @@ function emitFinish(
 	};
 	if (extra?.toolCallId !== undefined) event.toolCallId = extra.toolCallId;
 	if (extra?.reason !== undefined) event.reason = sanitizeCallTargetText(redactSecretString(extra.reason)).slice(0, 350);
-	if (extra?.audit !== undefined) event.audit = extra.audit;
+	if (extra?.callFacts !== undefined) event.callFacts = extra.callFacts;
 	if (extra?.terminate === true) event.terminate = true;
 	if (extra?.deniedPark === true) event.deniedPark = true;
 	if (extra?.redundantRepeat === true) event.redundantRepeat = true;

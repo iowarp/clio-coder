@@ -4643,7 +4643,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						record.mutatedPaths.length,
 						record.evidenceKinds,
 					);
-					safety.audit.recordCompletionContract?.(record);
+					safety.decisions.recordCompletionContract?.(record);
 				},
 			}),
 		);

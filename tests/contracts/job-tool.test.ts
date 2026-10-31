@@ -540,7 +540,7 @@ describe("job ownership, scheduling and execution settlement", () => {
 		]);
 		const safety = createWorkerSafety({ cwd: scratch.dir });
 		const audits: ToolDecisionInput[] = [];
-		safety.audit.recordToolCall = (row) => audits.push(row);
+		safety.decisions.recordToolCall = (row) => audits.push(row);
 		const registry = createRegistry({ safety, autonomy: () => "yolo" });
 		registerCoreTools(registry);
 		let effects = 0;

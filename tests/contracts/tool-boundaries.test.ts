@@ -32,7 +32,7 @@ function allowAllSafety() {
 		observeLoop: () => ({ looping: false, key: "contract", count: 0 }),
 		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 		isSubset: () => true,
-		audit: { recordCount: () => 0 },
+		decisions: {},
 	};
 }
 

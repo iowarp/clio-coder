@@ -444,7 +444,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		return 1;
 	}
 
-	// The state root's own children (audit, sessions) are inside the State row
+	// The state root's own children (telemetry, sessions) are inside the State row
 	// and go with it; listing them again as separate removals double-counted the
 	// bytes and promised per-child results that one recursive delete never
 	// produces.

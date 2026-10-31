@@ -50,8 +50,8 @@ function auditedContext(settings: typeof DEFAULT_SETTINGS, audits: CompletionEva
 	ok(baseSafety);
 	const safety: SafetyContract = {
 		...baseSafety,
-		audit: {
-			...baseSafety.audit,
+		decisions: {
+			...baseSafety.decisions,
 			recordCompletionContract: (input) => audits.push(input),
 		},
 	};

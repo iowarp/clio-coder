@@ -671,7 +671,7 @@ export class AcpToolMediator {
 		const reasonCode = finalRuleId ?? (decision === "denied" ? "acp:non-stall-denial" : undefined);
 		// An unmapped tool's name is whatever the peer sent, possibly a path; the journal keeps a fixed id (#434).
 		const recordedTool = mapped.known ? mapped.tool : "unknown";
-		this.input.safety.audit.recordToolCall?.({
+		this.input.safety.decisions.recordToolCall?.({
 			tool: recordedTool,
 			classification:
 				safetyDecision?.classification ?? this.input.safety.classify({ tool: mapped.tool, args: mapped.args }),

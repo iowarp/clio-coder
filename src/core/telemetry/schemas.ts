@@ -1318,7 +1318,7 @@ export const HealthSamplesCapturedSchema = Type.Object(
 );
 /**
  * One tool call as the model's tool wrapper settled it; ctx names the session or run, turn, tool call and the model
- * call that asked for it. The safety audit keeps the decision itself (#434).
+ * call that asked for it. tool.decided keeps the safety decision itself (#434).
  */
 export const ToolSettledSchema = Type.Object(
 	{

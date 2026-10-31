@@ -399,7 +399,7 @@ test("a standalone run shares one envelope writer for calls and bounded display 
 				durationMs: 12,
 				detail: "PRIVATE_TOOL_DETAIL",
 				reason: "PRIVATE_TOOL_REASON",
-				audit: { target: "PRIVATE_TARGET" },
+				callFacts: { target: "PRIVATE_TARGET" },
 			},
 			10000,
 		);

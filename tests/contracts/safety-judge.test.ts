@@ -241,7 +241,7 @@ test("the judge reads the call's own turn when the session leaf lags, and never 
 			return { text: answer("allow", "operator-named", "Asked for.") };
 		},
 		session: () => session,
-		safety: { audit: { recordSafetyJudge: (input: SafetyJudgementInput) => audits.push(input) } } as never,
+		safety: { decisions: { recordSafetyJudge: (input: SafetyJudgementInput) => audits.push(input) } } as never,
 	});
 	const decision = {
 		kind: "ask",

@@ -2166,7 +2166,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const unsubscribePermission = registry.onPermissionRequired((call, decision, meta) => {
 		const actionClass = decision.classification.actionClass;
 		const recordPermissionDecision = (disposition: "denied" | "permission_requested", rule?: string): void => {
-			safety.audit.recordToolCall?.({
+			safety.decisions.recordToolCall?.({
 				tool: call.tool,
 				classification: decision.classification,
 				decision: disposition,

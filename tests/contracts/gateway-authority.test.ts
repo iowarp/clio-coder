@@ -66,8 +66,7 @@ type DecisionRecord = ReturnType<typeof toolDecidedPayload> & Partial<TelemetryC
 function auditing(base: SafetyContract, rows: ToolDecisionInput[], auditRows: DecisionRecord[]): SafetyContract {
 	return {
 		...base,
-		audit: {
-			recordCount: () => rows.length,
+		decisions: {
 			recordToolCall: (input) => {
 				rows.push(input);
 				auditRows.push({ ...telemetryContext(), ...toolDecidedPayload(input) });

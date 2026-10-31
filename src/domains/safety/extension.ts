@@ -20,7 +20,6 @@ import { CONFIRMED_SCOPE, isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "./sc
 export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyContract> {
 	let policyEngine: SafetyPolicyEngine | null = null;
 	let loopState: LoopDetectorState = createLoopState();
-	let recordCount = 0;
 	let unsubscribeSessionParked: (() => void) | null = null;
 
 	function activePolicyEngine(): SafetyPolicyEngine {
@@ -30,16 +29,15 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 
 	// Tool decisions run inside the call's async context, so the scope comes from there (#434).
 	function recordToolDecision(input: ToolDecisionInput): void {
-		if (emitToolDecision(input, context.bus)) recordCount += 1;
+		emitToolDecision(input, context.bus);
 	}
 
 	function recordCompletionEvaluation(input: CompletionEvaluationInput): void {
-		if (context.bus.emit("completion.evaluated", completionEvaluatedPayload(input), completionContext(input)))
-			recordCount += 1;
+		context.bus.emit("completion.evaluated", completionEvaluatedPayload(input), completionContext(input));
 	}
 
 	function recordSafetyJudgement(input: SafetyJudgementInput): void {
-		if (context.bus.emit("safety.judged", safetyJudgedPayload(input), safetyJudgementContext(input))) recordCount += 1;
+		context.bus.emit("safety.judged", safetyJudgedPayload(input), safetyJudgementContext(input));
 	}
 
 	const extension: DomainExtension = {
@@ -116,8 +114,7 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 					),
 				),
 		},
-		audit: {
-			recordCount: () => recordCount,
+		decisions: {
 			recordToolCall: recordToolDecision,
 			recordCompletionContract: recordCompletionEvaluation,
 			recordSafetyJudge: recordSafetyJudgement,

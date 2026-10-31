@@ -57,7 +57,7 @@ import { redactSecretString } from "../safety/redaction.js";
 import { isThinkingEvent, workerTextDelta } from "../telemetry/worker-progress.js";
 import {
 	defaultRunEventJournal,
-	parseToolAuditFacts,
+	parseToolCallFacts,
 	type RunEventJournalEntry,
 	type RunEventJournalSink,
 } from "./run-event-journal.js";
@@ -148,17 +148,17 @@ function toolEntry(type: string, payload: Record<string, unknown>, at: string): 
 	const reason = boundedText(payload.reason);
 	const callId = boundedText(payload.toolCallId);
 	const finished = type === "clio_coder_tool_finish" || type === "clio_coder_tool_observation";
-	const audit = parseToolAuditFacts(payload.audit);
-	if (audit) {
-		const target = sanitizeCallTargetText(redactSecretString(audit.target));
-		audit.target = truncateUtf8(target, 4096, "…");
-		if (Buffer.byteLength(target) > 4096) audit.targetTruncated = true;
+	const callFacts = parseToolCallFacts(payload.callFacts);
+	if (callFacts) {
+		const target = sanitizeCallTargetText(redactSecretString(callFacts.target));
+		callFacts.target = truncateUtf8(target, 4096, "…");
+		if (Buffer.byteLength(target) > 4096) callFacts.targetTruncated = true;
 	}
 	return {
 		at,
 		type,
 		tool,
-		...(audit ? { audit } : {}),
+		...(callFacts ? { callFacts } : {}),
 		...(callId !== undefined ? { callId } : {}),
 		...(verb !== undefined ? { verb } : {}),
 		...(object !== undefined ? { detail: action?.truncated === true ? `${object}…` : object } : {}),

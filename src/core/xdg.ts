@@ -282,10 +282,10 @@ export function clioStatePath(): string {
  * True when the state root this process resolved is no longer on disk.
  *
  * `clio-coder uninstall` removes the whole root while processes holding session
- * writers, ledgers and audit files are still running, and every writer under
+ * writers, ledgers and telemetry journals are still running, and every writer under
  * the root mkdirs its parent back: `safeResourceWrite` does it before the temp
- * file, the state file lock does it before the critical section, the audit
- * writer does it before opening the day's file. A write landing after the
+ * file, the state file lock does it before the critical section, a telemetry
+ * journal writer does it before opening its segment. A write landing after the
  * removal therefore recreated the state home, so an uninstall that reported
  * success left one behind and the next `clio-coder` start read state from a home that
  * was supposed to be gone. The live case was the shutdown checkpoint, roughly
@@ -294,9 +294,10 @@ export function clioStatePath(): string {
  *
  * "Removed" and "never created" are not the same thing, and only the first is a
  * reason to refuse a write. With no cached root this process has not resolved
- * one yet, so a writer creating it is an ordinary first run; the audit writer
- * reaches its first row before anything else has called `clioStateDir()`, and
- * treating that as an uninstall silently disabled audit on a fresh install.
+ * one yet, so a writer creating it is an ordinary first run; the process
+ * journal can reach its first record before anything else has called
+ * `clioStateDir()`, and treating that as an uninstall would silently disable
+ * it on a fresh install.
  * Reads the cache directly rather than `clioStateDir()` because the latter
  * creates the directory it is being asked about.
  *

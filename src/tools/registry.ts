@@ -1951,7 +1951,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		overrides?: { reasonCode?: string; requestId?: string },
 	): void => {
 		// Evaluation records nothing: admission keeps the final disposition and the classification together (#434).
-		deps.safety.audit.recordToolCall?.({
+		deps.safety.decisions.recordToolCall?.({
 			tool: call.tool,
 			classification: decision.classification,
 			decision: auditDecision,

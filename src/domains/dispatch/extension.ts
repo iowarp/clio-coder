@@ -4089,7 +4089,7 @@ export function createDispatchBundle(
 		const estimateSuffix =
 			routeEstimateUsd > 0 ? ` (includes ${renderCostAmount(routeEstimateUsd, "estimated")} route estimate)` : "";
 		const reason = `budget ceiling crossed: ${budgetSpendText(preflight.currentUsd, preflight.pricing)} / ${renderCostAmount(preflight.ceilingUsd, "known")}${estimateSuffix}`;
-		safety.audit.recordToolCall?.({
+		safety.decisions.recordToolCall?.({
 			tool: "dispatch",
 			classification: { actionClass: "dispatch" },
 			decision: "denied",
@@ -4181,7 +4181,7 @@ export function createDispatchBundle(
 			}
 		} catch (error) {
 			if (error instanceof SessionCostCeilingError) {
-				safety.audit.recordToolCall?.({
+				safety.decisions.recordToolCall?.({
 					tool: "dispatch",
 					classification: { actionClass: "dispatch" },
 					decision: "denied",
@@ -6613,7 +6613,7 @@ export function createDispatchBundle(
 				rigor,
 			});
 			try {
-				safety.audit.recordCompletionContract?.({
+				safety.decisions.recordCompletionContract?.({
 					...(req.ownerSessionId ? { sessionId: req.ownerSessionId } : {}),
 					runId: envelope.id,
 					turnId: finishContractAssistantTurnId,
@@ -8532,7 +8532,7 @@ export function createDispatchBundle(
 				rigor,
 			});
 			try {
-				safety.audit.recordCompletionContract?.({
+				safety.decisions.recordCompletionContract?.({
 					...(req.ownerSessionId ? { sessionId: req.ownerSessionId } : {}),
 					runId: envelope.id,
 					turnId: finishContractAssistantTurnId,

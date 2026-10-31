@@ -33,9 +33,8 @@ import { probeWorkspace, WORKSPACE_PROBE_REUSE_MS } from "./workspace/index.js";
  * session writer. The CLI drives lifecycle; the extension only enforces the
  * shutdown contract (final checkpoint + close) on domain stop.
  *
- * Lifecycle transitions fan onto the shared bus so the safety audit
- * subscriber can persist `session_park` and `session_resume` rows without
- * pulling in the session contract directly. Park fires whenever the current
+ * Lifecycle transitions fan onto the shared bus so telemetry can journal
+ * session park and resume without pulling in the session contract directly. Park fires whenever the current
  * session is replaced or closed; resume fires when an existing session is
  * reopened via resume() or switchBranch().
  */

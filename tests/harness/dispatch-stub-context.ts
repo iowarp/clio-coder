@@ -106,7 +106,7 @@ export function dispatchStubContext(options: DispatchStubOptions = {}): DomainCo
 		observeLoop: () => ({ looping: false, key: "test", count: 0 }),
 		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 		isSubset,
-		audit: { recordCount: () => 0 },
+		decisions: {},
 	};
 	const builtinRecipes = loadRecipesFromDir({
 		dir: join(resolvePackageRoot(), "src", "domains", "agents", "builtins"),

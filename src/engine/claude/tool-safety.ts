@@ -9,7 +9,7 @@ import type { SafetyContract, SafetyDecision } from "../../domains/safety/contra
 import type { RejectionMessage } from "../../domains/safety/rejection-feedback.js";
 import { MAIN_GRANTS_UNAVAILABLE_REASON } from "../../domains/safety/worker-permit.js";
 import type { ToolFinishEvent, ToolStartEvent } from "../../tools/agent-tools.js";
-import { toolAuditFacts } from "../../tools/agent-tools.js";
+import { toolCallFacts } from "../../tools/agent-tools.js";
 import type { ClioWorkerEvent } from "../worker-events.js";
 
 export interface MappedClaudeToolCall {
@@ -37,7 +37,7 @@ export type ClaudeToolPermissionDecision =
 			 * engine denied the call. The carried policy's own reasonCode describes
 			 * the net pass ("allowed") and would misstate an autonomy denial, so
 			 * autonomy-axis denials set this to `autonomy:<level>` to match the
-			 * native registry audit convention (sd-01 §2.5).
+			 * native registry decision convention (sd-01 §2.5).
 			 */
 			reasonCode?: string;
 			permissionRequired: boolean;
@@ -338,9 +338,9 @@ function emitToolFinish(
 	reasonCode?: string,
 	toolCallId?: string,
 ): void {
-	const audit = toolAuditFacts(mapped.clioToolName, mapped.args);
+	const callFacts = toolCallFacts(mapped.clioToolName, mapped.args);
 	const event: ToolFinishEvent = {
-		...(audit ? { audit } : {}),
+		...(callFacts ? { callFacts } : {}),
 		tool: mapped.clioToolName,
 		...(toolCallId !== undefined ? { toolCallId } : {}),
 		posture: "operating",
@@ -353,7 +353,7 @@ function emitToolFinish(
 	if (decision.policy?.ruleId !== undefined) event.ruleId = decision.policy.ruleId;
 	// Prefer an explicit final reasonCode (later-axis denial) over the policy's
 	// own reasonCode, which describes the net pass ("allowed") and would
-	// misstate an autonomy denial. Mirrors audit.ts `reasonCode ?? policy`.
+	// misstate an autonomy denial. Mirrors tool.decided's `reasonCode ?? policy`.
 	const finalReasonCode = reasonCode ?? decision.policy?.reasonCode;
 	if (finalReasonCode !== undefined) event.reasonCode = finalReasonCode;
 	if (decision.policy?.policySource !== undefined) event.policySource = decision.policy.policySource;
@@ -366,7 +366,7 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	const startedAt = Date.now();
 	const startedAtClock = performance.now();
 	const decision = evaluateClaudeToolPermission(input);
-	input.safety.audit.recordToolCall?.({
+	input.safety.decisions.recordToolCall?.({
 		tool: decision.mapped.clioToolName,
 		classification: decision.decision.classification,
 		decision: decision.kind === "allow" ? "allowed" : decision.decision.kind === "block" ? "blocked" : "denied",
@@ -385,9 +385,9 @@ export function emitClaudeToolPermissionDecision(input: EmitClaudeToolPermission
 	// Mapped args are this side's own translation of the subprocess call, so the
 	// descriptor is composed from them here rather than downstream of the seam.
 	const action = describeCallAction(decision.mapped.clioToolName, decision.mapped.args);
-	const audit = toolAuditFacts(decision.mapped.clioToolName, decision.mapped.args);
+	const callFacts = toolCallFacts(decision.mapped.clioToolName, decision.mapped.args);
 	const start: ToolStartEvent = {
-		...(audit ? { audit } : {}),
+		...(callFacts ? { callFacts } : {}),
 		tool: decision.mapped.clioToolName,
 		...(toolCallId !== undefined ? { toolCallId } : {}),
 		posture: "operating",

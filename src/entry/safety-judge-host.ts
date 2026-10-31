@@ -103,7 +103,7 @@ export function createSafetyJudgeHost(deps: {
 	settings: () => Readonly<ClioSettings>;
 	complete: SafetyJudgeCompletion;
 	session: () => SessionContract | undefined;
-	safety: Pick<SafetyContract, "audit"> | undefined;
+	safety: Pick<SafetyContract, "decisions"> | undefined;
 }): SafetyJudgeSeat {
 	return createSafetyJudge({
 		config: () => resolveSafetyJudgeConfig(deps.settings()),
@@ -123,7 +123,7 @@ export function createSafetyJudgeHost(deps: {
 			}
 			return operatorMessagesForJudge(session.readEntries(), leaf, turnId);
 		},
-		record: (input) => deps.safety?.audit.recordSafetyJudge?.(input),
+		record: (input) => deps.safety?.decisions.recordSafetyJudge?.(input),
 		note: (note) => {
 			const session = deps.session();
 			if (session === undefined || !session.current()) return;

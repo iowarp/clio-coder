@@ -67,9 +67,8 @@ export interface WorkerSafetyOptions {
 
 export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyContract {
 	let loopState: LoopDetectorState = createLoopState();
-	let recordCount = 0;
 	const recordToolDecision = (input: ToolDecisionInput): void => {
-		if (emitToolDecision(input)) recordCount += 1;
+		emitToolDecision(input);
 	};
 	const policyEngine = createSafetyPolicyEngine({
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
@@ -156,7 +155,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 			allowsObservationPath: (path) =>
 				policyEngine.evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths",
 		},
-		audit: { recordCount: () => recordCount, recordToolCall: recordToolDecision },
+		decisions: { recordToolCall: recordToolDecision },
 	};
 }
 
@@ -276,8 +275,8 @@ export function attestedToolSignature(input: AttestedToolIdentityInput): string 
 			// biome-ignore lint/style/noNonNullAssertion: createWorkerSafety always sets policy; the optional member is the contract shape, not this value.
 			return resolveSafety().policy!;
 		},
-		get audit() {
-			return resolveSafety().audit;
+		get decisions() {
+			return resolveSafety().decisions;
 		},
 	});
 	return toolSignatureOf([

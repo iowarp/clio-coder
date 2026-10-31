@@ -116,7 +116,7 @@ test("agent adapter emits visual content blocks and nonvision shaping explains o
 			observeLoop: () => ({ looping: false, key: "image", count: 0 }),
 			scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 			isSubset: () => true,
-			audit: { recordCount: () => 0 },
+			decisions: {},
 		},
 	});
 	registry.register({

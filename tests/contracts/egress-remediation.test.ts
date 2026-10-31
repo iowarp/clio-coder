@@ -163,7 +163,7 @@ test("registry parks outward HTTP requests and executes GET at every autonomy le
 					observeLoop: () => ({ looping: false, key: "test", count: 0 }),
 					scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
 					isSubset: () => true,
-					audit: { recordCount: () => 0 },
+					decisions: {},
 				},
 			});
 			// A park needs a listener; without one the registry refuses the call.

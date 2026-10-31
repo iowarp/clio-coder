@@ -25,7 +25,7 @@ function yoloAcceptanceQuestion(): AskUserQuestion {
 			"- No approval stops. Edits, commands, scripts, git history changes and outward actions run as called, and questions take their recommended option.",
 			"- No sandbox by default. Commands and scripts run as you unless safety.sandbox is required.",
 			"- The floor still blocks deleting or overwriting /, your home directory or a system tree, mkfs, wipefs, writes to a block device, fork bombs, and writes into Clio's own config, state and trust records. Rules in an approved .clio-coder/safety.yaml hold.",
-			"- Workspace snapshots, the audit log and receipts stay on, so /rewind can restore files. Yolo is refused as root outside a container.",
+			"- Workspace snapshots and the telemetry journals stay on, so /rewind can restore files. Yolo is refused as root outside a container.",
 			"You accept once; safety.yoloAccepted in your user settings records it.",
 		].join("\n"),
 		options: [

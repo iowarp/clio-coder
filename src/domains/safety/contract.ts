@@ -46,7 +46,7 @@ export interface SafetyContract {
 
 	/**
 	 * Full evaluation: classify + damage-control match + decision. Emits safety.blocked on a block; the admitting
-	 * runtime records the final disposition through `audit.recordToolCall` (#434). `scope` is present only for the main
+	 * runtime records the final disposition through `decisions.recordToolCall` (#434). `scope` is present only for the main
 	 * session's own calls (#419, Phase 2c) and for a worker whose permit
 	 * inherited the operator's yolo (#407). At yolo the net holds only the
 	 * yolo floor, operator-authored rules and the run's ceilings; at default it
@@ -69,7 +69,7 @@ export interface SafetyContract {
 	/** Subset check used by dispatch admission. */
 	isSubset(worker: ScopeSpec, orchestrator: ScopeSpec): boolean;
 
-	/** Immutable safety policy metadata for receipts, audit, and replay. */
+	/** Immutable safety policy metadata for run records and replay. */
 	readonly policy?: {
 		metadata(posture?: string): SafetyPolicyMetadata;
 		/** Pure search-result filter using the same compiled policy as admission. */
@@ -89,12 +89,11 @@ export interface SafetyContract {
 	};
 
 	/**
-	 * The safety domain's accountability records, journaled in the scope that decided (#434). `recordCount` is for
-	 * diagnostics; `recordToolCall` is the registry's hook for autonomy-level final dispositions (`tool.decided`);
+	 * The safety domain's decisions, journaled as accountability records in the scope that decided (#434).
+	 * `recordToolCall` is the registry's hook for autonomy-level final dispositions (`tool.decided`);
 	 * `recordCompletionContract` is the finish contract's hook for its turn-end decision (`completion.evaluated`).
 	 */
-	readonly audit: {
-		recordCount(): number;
+	readonly decisions: {
 		recordToolCall?(input: ToolDecisionInput): void;
 		recordCompletionContract?(input: CompletionEvaluationInput): void;
 		/** The safety judge's hook for each review of a call that would have parked (`safety.judged`). */
