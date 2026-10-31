@@ -4162,7 +4162,7 @@ export function createDispatchBundle(
 			if (scheduling.admitPaidRequest) {
 				await scheduling.admitPaidRequest({
 					waitForRaise: options?.budgetWaitForRaise === true,
-					additionalUsd: inFlightSpendUsd(),
+					additionalUsd: inFlightSpendUsd,
 					additionalPricing: inFlightPricing(),
 					getCeilingUsd: () => getEffectiveSettings()?.safety.limits.sessionCostUsd ?? scheduling.ceilingUsd(),
 					...(signal ? { signal } : {}),

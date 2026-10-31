@@ -1066,7 +1066,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							try {
 								await deps.scheduling.admitPaidRequest({
 									waitForRaise: deps.headless !== true,
-									additionalUsd: unsettledSpendUsd,
+									additionalUsd: () => unsettledSpendUsd,
 									getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
 									contextTokens: input,
 									onBlocked: recordBlock,

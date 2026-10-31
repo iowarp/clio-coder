@@ -146,7 +146,7 @@ export function createSchedulingBundle(
 		},
 		admitPaidRequest: async ({
 			waitForRaise,
-			additionalUsd = 0,
+			additionalUsd: additional = 0,
 			additionalPricing,
 			getCeilingUsd,
 			contextTokens,
@@ -182,6 +182,9 @@ export function createSchedulingBundle(
 				const ceilingUsd = getCeilingUsd?.() ?? budget.ceilingUsd;
 				// No ceiling compares nothing, so an uncapped session's calls pay for no flush and no seed.
 				const spent = ceilingUsd > 0 ? await settledSpend() : null;
+				// Read after the settled spend and against the same fold, on every retry, so a call that settled while
+				// admission flushed is counted once: in the spend, not again in the projection (#434).
+				const additionalUsd = typeof additional === "function" ? additional() : additional;
 				const spend = (spent?.usd ?? 0) + additionalUsd;
 				if (!sessionCeilingReached(spend, ceilingUsd)) {
 					if (held)

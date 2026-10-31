@@ -8,7 +8,7 @@ export interface BudgetPreflight {
 	verdict: BudgetVerdict;
 	currentUsd: number;
 	ceilingUsd: number;
-	/** How `currentUsd` was priced; absent when no cost tracker feeds it. */
+	/** How `currentUsd` was priced, from the read model's spend fold; absent only on a caller that cannot say. */
 	pricing?: BudgetSpendPricing;
 }
 
@@ -26,7 +26,11 @@ export interface SchedulingContract {
 	/** Park an interactive paid request until the operator raises the ceiling, or reject a headless one. */
 	admitPaidRequest?(options: {
 		waitForRaise: boolean;
-		additionalUsd?: number;
+		/**
+		 * Cost counted ahead of its settlement. A function is read after admission's settled spend on every retry, so it
+		 * can subtract what that same fold already holds (#434).
+		 */
+		additionalUsd?: number | (() => number);
 		/** How `additionalUsd` was priced, so a stop that counts it marks it (#434 §6.3). */
 		additionalPricing?: BudgetSpendPricing;
 		getCeilingUsd?: () => number;
