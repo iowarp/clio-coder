@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import type { TelemetryCapture } from "../../core/telemetry/capture.js";
 import { captureAdmits, STANDARD_CAPTURE } from "../../core/telemetry/capture.js";
 import type { TelemetryContext } from "../../core/telemetry/context.js";
 import { newProcessId } from "../../core/telemetry/ids.js";
@@ -31,9 +32,14 @@ export interface ProcessJournal {
 /**
  * The process scope's journal (#434). It owns every record whose context names neither a session nor a run, and
  * opens only on the first such record, so a process that never produces one, such as a read-only CLI command,
- * creates nothing. Its first record is `process.started`; a clean stop closes it with `process.exited`.
+ * creates nothing. Its first record is `process.started`; a clean stop closes it with `process.exited`. `capture`
+ * answers the mode its segments admit; no workspace consent reaches the process scope, so it never captures content.
  */
-export function createProcessJournal(stateDir: string, unavailable: () => void): ProcessJournal {
+export function createProcessJournal(
+	stateDir: string,
+	unavailable: () => void,
+	capture: () => TelemetryCapture = () => STANDARD_CAPTURE,
+): ProcessJournal {
 	const context: TelemetryContext = { sessionId: null, processId: telemetryProcessId(), label: "main" };
 	const pending: PendingTelemetry[] = [];
 	let dropped = 0;
@@ -50,6 +56,7 @@ export function createProcessJournal(stateDir: string, unavailable: () => void):
 				return openCallJournal({
 					directory: telemetryProcessDirectory(stateDir, context.processId),
 					context,
+					capture,
 					writer: {
 						clioCoderVersion: pkg.version ?? "unknown",
 						piVersion: pkg.dependencies?.["@earendil-works/pi-ai"] ?? "unknown",
@@ -87,7 +94,7 @@ export function createProcessJournal(stateDir: string, unavailable: () => void):
 			return true;
 		},
 		admits(kind) {
-			return ready ? ready.admits(kind) : captureAdmits(STANDARD_CAPTURE, kind);
+			return ready ? ready.admits(kind) : captureAdmits(capture(), kind);
 		},
 	};
 	const unregister = registerProcessTelemetrySink(context, sink);

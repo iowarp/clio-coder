@@ -5,7 +5,8 @@ import type { FailureCause } from "./enums.js";
 import type { ClockOrigin } from "./envelope.js";
 import type { EventName, JournalEventName, JournalPayload } from "./events.js";
 import { isJournalEvent, journalDefinition } from "./events.js";
-import { attachJournalRoute, telemetryHub } from "./hub.js";
+import type { TelemetryScope } from "./hub.js";
+import { attachJournalRoute, PROCESS_SCOPE, telemetryHub } from "./hub.js";
 import { newAttemptId, newCallId } from "./ids.js";
 import type { CallSettled, CallStarted } from "./schemas.js";
 import { DELTA_GAP_BOUNDS_MS } from "./schemas.js";
@@ -103,8 +104,12 @@ function sinkAdmits(sink: TelemetrySink, kind: JournalEventName): boolean {
  * Whether a record of this kind would be captured under ctx now, so a producer can skip assembling research data
  * the mode drops (#434). It answers for this moment only: the record itself is still filtered when it is enqueued.
  */
-export function telemetryCaptures(kind: JournalEventName, ctx = telemetryContext()): boolean {
-	const sink = ctx ? sinks.get(telemetryOwner(ctx)) : processOwner?.sink;
+export function telemetryCaptures(
+	kind: JournalEventName,
+	ctx: TelemetryScope | undefined = telemetryContext(),
+): boolean {
+	const processFact = ctx === PROCESS_SCOPE || journalDefinition(kind).scope === "process";
+	const sink = ctx && !processFact ? sinks.get(telemetryOwner(ctx as TelemetryContext)) : processOwner?.sink;
 	if (!sink) return false;
 	try {
 		return sinkAdmits(sink, kind);
@@ -130,11 +135,11 @@ function enqueueTelemetry(
 	name: EventName,
 	data: unknown,
 	preimage: unknown,
-	given: TelemetryContext | undefined,
+	given: TelemetryScope | undefined,
 ): boolean {
 	if (!isJournalEvent(name)) return false;
 	const definition = journalDefinition(name);
-	if (definition.scope === "process") {
+	if (definition.scope === "process" || given === PROCESS_SCOPE) {
 		given = processOwner?.context;
 		if (!given) {
 			// A process fact emitted before the telemetry domain opens the process journal, such as the domain.loaded of

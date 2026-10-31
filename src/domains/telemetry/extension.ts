@@ -398,8 +398,13 @@ export function createTelemetryBundle(context: DomainContext): DomainBundle<Tele
 	const extension: DomainExtension = {
 		async start() {
 			try {
-				processJournal ??= createProcessJournal(clioStateDir(), () =>
-					writeDiagnostic("[clio-coder:telemetry] process journal unavailable; coverage is incomplete\n"),
+				processJournal ??= createProcessJournal(
+					clioStateDir(),
+					() => writeDiagnostic("[clio-coder:telemetry] process journal unavailable; coverage is incomplete\n"),
+					() => {
+						const telemetry = config()?.get().telemetry;
+						return telemetry ? effectiveTelemetryCapture(telemetry, false) : STANDARD_CAPTURE;
+					},
 				);
 			} catch {
 				// Another bundle in this process already owns the process journal; one per process (#434).

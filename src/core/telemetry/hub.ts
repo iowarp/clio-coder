@@ -15,6 +15,13 @@ import type { EventName, EventPayload, PreimageData, PreimageEventName } from ".
  *
  * Violate the invariant and shutdown.* ordering or banner timing will drift.
  */
+/**
+ * The process scope as an emit target: the record goes to this process's journal whatever session or run the async
+ * context names, because it describes the process or the account rather than one session (#434).
+ */
+export const PROCESS_SCOPE = "process";
+export type TelemetryScope = TelemetryContext | typeof PROCESS_SCOPE;
+
 export type TelemetryListener<N extends EventName = EventName> = (payload: EventPayload<N>) => void | Promise<void>;
 
 /**
@@ -26,7 +33,7 @@ export type TelemetryListener<N extends EventName = EventName> = (payload: Event
  * subscribers read it and never mutate it.
  */
 export interface TelemetryHub {
-	emit<N extends EventName>(name: N, payload: EventPayload<N>, ctx?: TelemetryContext): boolean;
+	emit<N extends EventName>(name: N, payload: EventPayload<N>, ctx?: TelemetryScope): boolean;
 	/**
 	 * Enqueue a content-bearing research record whose preimage the writer stores, reserves against the research cap
 	 * and cites before the record is written. The caller hands over ownership of `preimage` (#434).
@@ -35,7 +42,7 @@ export interface TelemetryHub {
 		name: N,
 		payload: PreimageData<N>,
 		preimage: unknown,
-		ctx?: TelemetryContext,
+		ctx?: TelemetryScope,
 	): boolean;
 	subscribe<N extends EventName>(name: N, listener: TelemetryListener<N>): () => void;
 	listeners(name: EventName): TelemetryListener[];
@@ -48,7 +55,7 @@ export interface TelemetryHub {
  * sink can be registered, so nothing a journal would have kept is lost.
  */
 export interface JournalRoute {
-	journal(name: EventName, payload: unknown, preimage: unknown, ctx: TelemetryContext | undefined): boolean;
+	journal(name: EventName, payload: unknown, preimage: unknown, ctx: TelemetryScope | undefined): boolean;
 }
 
 let journalRoute: JournalRoute | null = null;
