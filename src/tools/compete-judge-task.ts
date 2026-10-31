@@ -1,12 +1,12 @@
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
-import type { RunReceipt } from "../domains/dispatch/types.js";
+import type { RunResult } from "../domains/dispatch/types.js";
 import type { CandidateWorktree } from "./compete-worktrees.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 const OUTPUT_PREVIEW_BYTES = 8192;
 
 interface CandidateRunEvidence {
-	receipt: Pick<RunReceipt, "runId" | "integrity" | "output" | "exitCode" | "outcome">;
+	receipt: Pick<RunResult, "runId" | "integrity" | "output" | "exitCode" | "outcome">;
 	receiptPath: string | null;
 	integrity: ReceiptIntegrityResult;
 }

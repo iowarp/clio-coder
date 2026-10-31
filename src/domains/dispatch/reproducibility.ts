@@ -1,5 +1,5 @@
 import type { SafetyPolicyMetadata } from "../safety/policy-engine.js";
-import type { RunReceiptReproducibility } from "./types.js";
+import type { RunResultReproducibility } from "./types.js";
 
 /**
  * The run's working directory and the safety policy it ran under. Builds
@@ -9,7 +9,7 @@ import type { RunReceiptReproducibility } from "./types.js";
 export function collectReproducibilityMetadata(
 	cwd: string,
 	safety: SafetyPolicyMetadata | null,
-): RunReceiptReproducibility {
+): RunResultReproducibility {
 	return {
 		cwd,
 		safetyPolicy: {

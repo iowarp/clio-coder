@@ -1,4 +1,4 @@
-import type { GateDecisionArtifact, RunEnvelope, RunReceipt, ToolCallStat } from "../dispatch/index.js";
+import type { GateDecisionArtifact, RunEnvelope, RunResult, ToolCallStat } from "../dispatch/index.js";
 import type { ProtectedArtifact } from "../safety/protected-artifacts.js";
 import type { DecisionRecord } from "../session/entries.js";
 import type { CostAggregate } from "../telemetry/cost.js";
@@ -186,7 +186,7 @@ export type EvidenceTrustStatusView = EvidenceTrustStatusFile | HistoricalEviden
 
 export interface EvidenceRunSource {
 	envelope: RunEnvelope;
-	receipt: RunReceipt | null;
+	receipt: RunResult | null;
 	receiptError: string | null;
 	/** True when the receipt was readable but failed cryptographic/ledger integrity verification. */
 	receiptIntegrityFailed: boolean;
@@ -247,7 +247,7 @@ export interface EvidenceAuditLinkedRow {
 
 export interface EvidenceReceiptFile {
 	version: 1;
-	receipts: RunReceipt[];
+	receipts: RunResult[];
 }
 
 export interface EvidenceProtectedArtifactEvent {

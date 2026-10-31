@@ -8,7 +8,7 @@ import { selectWorkerContext } from "../../src/domains/context/worker/select.js"
 import { captureWorkerContext, completeHistoryLength, contextHash } from "../../src/domains/context/worker/snapshot.js";
 import { persistWorkerContextSeed } from "../../src/domains/context/worker/store.js";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { adaptRunReceiptContextStatus } from "../../src/domains/evidence/trust-status.js";
+import { adaptRunResultContextStatus } from "../../src/domains/evidence/trust-status.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
@@ -327,9 +327,9 @@ test("receipt integrity binds inherited context and reports it as context proven
 	);
 	const { workerContext: _context, ...withoutContext } = envelope;
 	equal(verifyReceiptIntegrity(receipt, withoutContext).ok, false);
-	equal(adaptRunReceiptContextStatus(receipt).state, "recorded");
+	equal(adaptRunResultContextStatus(receipt).state, "recorded");
 	equal(
-		adaptRunReceiptContextStatus({ ...receipt, workerContext: { ...provenance, contentHash: "bad" } }).state,
+		adaptRunResultContextStatus({ ...receipt, workerContext: { ...provenance, contentHash: "bad" } }).state,
 		"invalid",
 	);
 });

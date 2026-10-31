@@ -343,7 +343,7 @@ export function loadRunScopeFilesAsync(stateDir: string, runId: string): Promise
 }
 
 /** The run's sealed receipt through its integrity check, for the run DTO (#434 §11.1). */
-export function loadRunReceiptEvidence(stateDir: string, runId: string): ReceiptEvidenceV1 {
+export function loadRunResultEvidence(stateDir: string, runId: string): ReceiptEvidenceV1 {
 	assertSafeId(runId, "run");
 	return readReceiptEvidence(runId, stateDir);
 }

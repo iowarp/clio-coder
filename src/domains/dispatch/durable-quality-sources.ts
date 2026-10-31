@@ -20,10 +20,10 @@ import { existsSync, readdirSync, readFileSync, type Stats, statSync } from "nod
 import { join } from "node:path";
 import { type GateDecisionArtifact, gateDecisionsDirectory, verifyGateDecisionArtifact } from "./gate-decisions.js";
 import { readReceiptTextSync } from "./receipt-store.js";
-import type { RunEnvelope, RunReceipt } from "./types.js";
+import type { RunEnvelope, RunResult } from "./types.js";
 
 export interface DurableReceiptSource {
-	receipt: RunReceipt;
+	receipt: RunResult;
 	envelope: RunEnvelope;
 }
 
@@ -140,7 +140,7 @@ export function createDurableQualitySourceCache(
 			let source: DurableReceiptSource | null = null;
 			try {
 				const receipt = JSON.parse(readReceiptTextSync(path)) as unknown;
-				if (isObject(receipt)) source = { receipt: receipt as unknown as RunReceipt, envelope };
+				if (isObject(receipt)) source = { receipt: receipt as unknown as RunResult, envelope };
 			} catch {
 				source = null;
 			}

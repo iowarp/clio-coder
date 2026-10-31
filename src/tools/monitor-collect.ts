@@ -5,10 +5,10 @@ import type { DispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
-import type { RunEnvelope, RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
+import type { RunEnvelope, RunResult, RunResultVerification } from "../domains/dispatch/types.js";
 import { isTerminalRunEnvelope } from "../domains/dispatch/types.js";
 import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
-import { adaptRunReceiptTrustStatus, inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
+import { adaptRunResultTrustStatus, inspectRunResultTrustStatus } from "../domains/evidence/trust-status.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/index.js";
 import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
@@ -37,9 +37,9 @@ export async function collectDetachedBatch(
 }
 
 export interface DurableRunEvidence {
-	receipt: RunReceipt | null;
-	output: RunReceipt["output"] | null;
-	verification: RunReceiptVerification;
+	receipt: RunResult | null;
+	output: RunResult["output"] | null;
+	verification: RunResultVerification;
 	integrity: ReceiptIntegrityResult;
 	trustStatus: CanonicalTrustStatus;
 	integrityNote: string | null;
@@ -52,7 +52,7 @@ function unavailableRunEvidence(reason: string, note: string, integrityFailure =
 		output: null,
 		verification: UNVERIFIABLE_RECEIPT_VERIFICATION,
 		integrity: { ok: false, reason },
-		trustStatus: adaptRunReceiptTrustStatus(null, { integrity: { ok: false, reason } }),
+		trustStatus: adaptRunResultTrustStatus(null, { integrity: { ok: false, reason } }),
 		integrityNote: note,
 		integrityFailure,
 	};
@@ -77,9 +77,9 @@ export function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence 
 			"receipt integrity unavailable: no stored receipt; worker text is unavailable and validation is unknown.",
 		);
 	}
-	let receipt: RunReceipt;
+	let receipt: RunResult;
 	try {
-		receipt = JSON.parse(readReceiptTextSync(run.receiptPath)) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(run.receiptPath)) as RunResult;
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		return unavailableRunEvidence(
@@ -87,7 +87,7 @@ export function durableRunEvidence(run: RunEnvelope | null): DurableRunEvidence 
 			`receipt integrity unavailable: cannot read or parse ${run.receiptPath} (${detail}); worker text is unavailable and validation is unknown.`,
 		);
 	}
-	const inspection = inspectRunReceiptTrustStatus(receipt, run);
+	const inspection = inspectRunResultTrustStatus(receipt, run);
 	const integrity = inspection.integrity;
 	if (!integrity.ok) {
 		// A retired seal is set aside unread, as a missing receipt is. It is

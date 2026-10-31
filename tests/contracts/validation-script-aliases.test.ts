@@ -1,7 +1,7 @@
 import { strictEqual } from "node:assert/strict";
 import { it } from "node:test";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
-import { adaptRunReceiptValidationStatus } from "../../src/domains/evidence/trust-status.js";
+import { adaptRunResultValidationStatus } from "../../src/domains/evidence/trust-status.js";
 import { typedValidationSummary } from "../../src/domains/safety/finish-contract.js";
 import { detectValidationCommand } from "../../src/domains/safety/protected-artifacts.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
@@ -99,7 +99,7 @@ it("grounds a verify claim in its successful tool execution and preserves unmatc
 	strictEqual(result?.grounded, 1);
 	strictEqual(result?.ungrounded.length, 0);
 	strictEqual(
-		adaptRunReceiptValidationStatus({
+		adaptRunResultValidationStatus({
 			runId: "verify-run",
 			quality: {
 				version: 1,

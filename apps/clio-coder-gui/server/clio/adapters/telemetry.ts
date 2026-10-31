@@ -5,7 +5,7 @@ import { inspectEvidence } from "../../../../../src/domains/evidence/index.js";
 import type { RunListCursor } from "../../../../../src/domains/session/index.js";
 import {
 	listRunTelemetrySources,
-	loadRunReceiptEvidence,
+	loadRunResultEvidence,
 	loadRunScopeFiles,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
@@ -79,7 +79,7 @@ export async function readTelemetry(input: TelemetryRequest): Promise<unknown> {
 					input.runId,
 					source,
 					{},
-					loadRunReceiptEvidence(state, input.runId),
+					loadRunResultEvidence(state, input.runId),
 					loadRunScopeFiles(state, input.runId),
 				)
 			: runTimeline(input.runId, source);

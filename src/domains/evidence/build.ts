@@ -7,8 +7,8 @@ import { effectiveToolCall, expandChainMessages } from "../../tools/surface.js";
 import type {
 	RunEnvelope,
 	RunKind,
-	RunReceipt,
-	RunReceiptIntegrity,
+	RunResult,
+	RunResultIntegrity,
 	RunStatus,
 	ToolCallStat,
 } from "../dispatch/index.js";
@@ -41,7 +41,7 @@ import { createRedactionTally, redactSecretsDeep, redactSecretsText } from "./re
 import { buildEvidenceTrustStatusFile } from "./run-trust.js";
 import { EVIDENCE_FILES, evidenceDirectory, findingsFile } from "./store.js";
 import type { CanonicalTrustStatus, TrustArtifactReference } from "./trust-status.js";
-import { inspectRunReceiptTrustStatus, retiredIntegrityVersionOf } from "./trust-status.js";
+import { inspectRunResultTrustStatus, retiredIntegrityVersionOf } from "./trust-status.js";
 import {
 	EVIDENCE_VERSION,
 	type EvidenceAuditLinkedRow,
@@ -563,7 +563,7 @@ function isSuccessfulRun(source: EvidenceRunSource): boolean {
 	return source.envelope.status === "completed" && exitCode === 0;
 }
 
-function authenticatedReceipt(source: EvidenceRunSource): RunReceipt | null {
+function authenticatedReceipt(source: EvidenceRunSource): RunResult | null {
 	return source.receipt !== null && source.receiptError === null && !source.receiptIntegrityFailed
 		? source.receipt
 		: null;
@@ -1591,7 +1591,7 @@ async function readReceipt(
 	stateDir: string,
 	envelope: RunEnvelope,
 ): Promise<{
-	receipt: RunReceipt | null;
+	receipt: RunResult | null;
 	error: string | null;
 	integrityFailed: boolean;
 }> {
@@ -1606,10 +1606,10 @@ async function readReceipt(
 		}
 		return { receipt: null, error: `receipt read error: ${err.message ?? String(err)}`, integrityFailed: false };
 	}
-	let receipt: RunReceipt;
+	let receipt: RunResult;
 	try {
 		const parsed = parseJson(raw, receiptPath);
-		receipt = parseRunReceipt(parsed, receiptPath);
+		receipt = parseRunResult(parsed, receiptPath);
 	} catch (error) {
 		return {
 			receipt: null,
@@ -1617,7 +1617,7 @@ async function readReceipt(
 			integrityFailed: true,
 		};
 	}
-	const integrity = inspectRunReceiptTrustStatus(receipt, envelope).integrity;
+	const integrity = inspectRunResultTrustStatus(receipt, envelope).integrity;
 	if (!integrity.ok) {
 		// A retired seal is set aside unread, the way a missing receipt is; it
 		// is not a failed one, and its reason already names both versions.
@@ -1666,7 +1666,7 @@ function parseRunEnvelope(value: unknown, source: string): RunEnvelope {
 	};
 }
 
-function parseRunReceipt(value: unknown, source: string): RunReceipt {
+function parseRunResult(value: unknown, source: string): RunResult {
 	if (!isRecord(value)) throw new Error(`${source}: expected object`);
 	const integrity = value.integrity;
 	if (!isRecord(integrity)) throw new Error(`${source}.integrity: expected object`);
@@ -1677,7 +1677,7 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 	// write-time digest covered those fields and a lossy re-parse would make
 	// every clean receipt recompute to a different digest.
 	return {
-		...(value as unknown as RunReceipt),
+		...(value as unknown as RunResult),
 		runId: readString(value, source, "runId"),
 		agentId: readString(value, source, "agentId"),
 		task: readString(value, source, "task"),
@@ -1703,8 +1703,8 @@ function parseRunReceipt(value: unknown, source: string): RunReceipt {
 		sessionId: readNullableString(value, source, "sessionId"),
 		integrity: {
 			// The ledger commitment stays as written; the verifier checks its shape (#434).
-			...(integrity as unknown as RunReceiptIntegrity),
-			version: readNumber(integrity, `${source}.integrity`, "version") as RunReceiptIntegrity["version"],
+			...(integrity as unknown as RunResultIntegrity),
+			version: readNumber(integrity, `${source}.integrity`, "version") as RunResultIntegrity["version"],
 			algorithm: readString(integrity, `${source}.integrity`, "algorithm") as "sha256",
 			digest: readString(integrity, `${source}.integrity`, "digest"),
 		},

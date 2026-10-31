@@ -9,7 +9,7 @@ import {
 	competeStanceFor,
 	JUDGE_GATE_PROMPT,
 } from "../../src/domains/dispatch/gate-role-prompts.js";
-import type { RunReceiptOutput } from "../../src/domains/dispatch/types.js";
+import type { RunResultOutput } from "../../src/domains/dispatch/types.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
@@ -37,7 +37,7 @@ function run(index: number, text: string) {
 					digest: `fixture-ledger-${index}`,
 				},
 			},
-			output: { state: "final", text, bytes: Buffer.byteLength(text), truncated: false } as RunReceiptOutput,
+			output: { state: "final", text, bytes: Buffer.byteLength(text), truncated: false } as RunResultOutput,
 		},
 		receiptPath: `/receipts/run-${index}.json`,
 		integrity: { ok: true as const },
@@ -127,7 +127,7 @@ it("withholds integrity-failed and malformed data without substituting a live su
 		{ state: "final", text: "bad", bytes: -1, truncated: false },
 	]) {
 		const bad = run(2, "unused");
-		bad.receipt.output = malformed as unknown as RunReceiptOutput;
+		bad.receipt.output = malformed as unknown as RunResultOutput;
 		const task = renderCompeteJudgeTask("Compare answers", candidates, [], [untrusted, bad]);
 		const data = records(task);
 		strictEqual(data[0].output.status, "withheld: receipt integrity failed");

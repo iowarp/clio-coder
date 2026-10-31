@@ -22,7 +22,7 @@ import {
 	resultContractOutputBytes,
 	type StructuredHelperResult,
 } from "../agents/result-contract.js";
-import type { RunReceiptOutput } from "./types.js";
+import type { RunResultOutput } from "./types.js";
 
 /** Bounded replay capacity for the external consumer tee. */
 export const EVENT_TEE_LIMIT = 1024;
@@ -171,7 +171,7 @@ export function workerOutputCaptureBytes(contract: ResultContract | null | undef
 
 export interface WorkerOutputCapture {
 	observe(event: unknown): void;
-	snapshot(): RunReceiptOutput | undefined;
+	snapshot(): RunResultOutput | undefined;
 }
 
 export interface WorkerOutputCaptureOptions {
@@ -222,7 +222,7 @@ export function durableAssistantTextFromEvent(event: unknown): string {
 	return assistantTextFromContent(event.message.content);
 }
 
-function boundedOutput(state: RunReceiptOutput["state"], text: string, maxBytes: number): RunReceiptOutput {
+function boundedOutput(state: RunResultOutput["state"], text: string, maxBytes: number): RunResultOutput {
 	const bytes = Buffer.byteLength(text, "utf8");
 	const bounded = truncateUtf8(text, maxBytes, WORKER_OUTPUT_TRUNCATION_MARKER);
 	return { state, text: bounded, bytes, truncated: bounded !== text };
@@ -249,7 +249,7 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 	let partialText = "";
 	let partialBytes = 0;
 	let partialStored = 0;
-	let structuredOutput: RunReceiptOutput | undefined;
+	let structuredOutput: RunResultOutput | undefined;
 
 	return {
 		observe(event: unknown): void {
@@ -310,7 +310,7 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 				partialStored += Buffer.byteLength(delta, "utf8");
 			}
 		},
-		snapshot(): RunReceiptOutput | undefined {
+		snapshot(): RunResultOutput | undefined {
 			if (structuredOutput !== undefined) return structuredClone(structuredOutput);
 			if (partialBytes > 0 && partialText.trim().length > 0) {
 				const bounded = truncateUtf8(partialText.trim(), maxBytes, WORKER_OUTPUT_TRUNCATION_MARKER);

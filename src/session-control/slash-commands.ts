@@ -17,7 +17,7 @@ import { AdmissionCanceledError } from "../domains/dispatch/admission-error.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import type { AgentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { requestExecutionRole } from "../domains/dispatch/execution-role.js";
-import type { RunReceipt } from "../domains/dispatch/types.js";
+import type { RunResult } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { ReceiptIntegrityOutcome } from "../domains/evidence/trust-status.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
@@ -345,7 +345,7 @@ export interface HandleRunDeps {
  * terminal truth here rather than the transcript block: the block is a view of
  * this same text, and the caller already holds the receipt.
  */
-function shareReceipt(agentId: string, receipt: RunReceipt, deps: HandleRunDeps): void {
+function shareReceipt(agentId: string, receipt: RunResult, deps: HandleRunDeps): void {
 	if (!deps.submitOperatorNote) {
 		deps.notice("error", "--share is not wired in this session; the result stayed local");
 		return;

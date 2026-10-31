@@ -11,13 +11,13 @@ import type { DispatchOwnership } from "../dispatch/ownership.js";
 import { dispatchOwnership } from "../dispatch/ownership.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "../dispatch/receipt-integrity.js";
 import { readReceiptText, readReceiptTextSync } from "../dispatch/receipt-store.js";
-import type { RunEnvelope, RunReceipt } from "../dispatch/types.js";
+import type { RunEnvelope, RunResult } from "../dispatch/types.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../evidence/store.js";
 import { renderEvidenceTokens } from "../evidence/totals-display.js";
 import { formatTrustSummaryLine, trustStateWord } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus, ReceiptIntegrityOutcome, TrustStatusAxis } from "../evidence/trust-status.js";
 import {
-	inspectRunReceiptTrustStatus,
+	inspectRunResultTrustStatus,
 	retiredIntegrityVersionOf,
 	retiredReceiptIntegrity,
 	retiredReceiptIntegrityReason,
@@ -487,7 +487,7 @@ function verifyReceiptFile(stateDir: string, runId: string): ReceiptVerifyResult
 	}
 	// A row the ring evicted leaves the seal verifiable on its own (#434).
 	const ledger = readRunEnvelope(stateDir, runId);
-	return verifyReceiptIntegrity(r as unknown as RunReceipt, ledger.ok ? ledger.envelope : null);
+	return verifyReceiptIntegrity(r as unknown as RunResult, ledger.ok ? ledger.envelope : null);
 }
 
 const RECEIPT_FILE_FAILURE = /^(?:receipt file not found|read error:)/u;
@@ -500,7 +500,7 @@ function receiptIntegrityDigest(value: unknown): string | null {
 	return `sha256:${value.digest}`;
 }
 
-function trustCheckEvidence(status: ReturnType<typeof inspectRunReceiptTrustStatus>["status"], axis: string): string {
+function trustCheckEvidence(status: ReturnType<typeof inspectRunResultTrustStatus>["status"], axis: string): string {
 	const entry = status[axis as keyof typeof status];
 	if (typeof entry !== "object" || entry === null || !("state" in entry)) return "canonical trust projection";
 	if (entry.state === "absent") return `reason=${entry.reason}`;
@@ -508,7 +508,7 @@ function trustCheckEvidence(status: ReturnType<typeof inspectRunReceiptTrustStat
 	return refs.length > 0 ? refs.join(", ") : `${entry.authority.kind}:${entry.authority.id}`;
 }
 
-function compromisedTrustAxes(status: ReturnType<typeof inspectRunReceiptTrustStatus>["status"]): TrustStatusAxis[] {
+function compromisedTrustAxes(status: ReturnType<typeof inspectRunResultTrustStatus>["status"]): TrustStatusAxis[] {
 	return TRUST_STATUS_AXES.filter((axis) => {
 		const state = status[axis].state;
 		if (axis === "artifactIntegrity") return state === "failed";
@@ -523,15 +523,15 @@ function compromisedTrustAxes(status: ReturnType<typeof inspectRunReceiptTrustSt
 export function verifyReceiptFileReport(stateDir: string, runId: string): ReceiptVerificationReport {
 	const receiptPath = receiptFilePath(stateDir, runId);
 	const result = verifyReceiptFile(stateDir, runId);
-	let receipt: RunReceipt | null = null;
+	let receipt: RunResult | null = null;
 	try {
-		receipt = JSON.parse(readReceiptTextSync(receiptPath)) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(receiptPath)) as RunResult;
 	} catch {
 		// The verifier's named file or JSON check below retains the actionable error.
 	}
 	const sealedDigest = receiptIntegrityDigest(receipt?.integrity);
 	const ledger = readRunEnvelope(stateDir, runId);
-	const inspection = receipt === null ? null : inspectRunReceiptTrustStatus(receipt, ledger.ok ? ledger.envelope : null);
+	const inspection = receipt === null ? null : inspectRunResultTrustStatus(receipt, ledger.ok ? ledger.envelope : null);
 	const trustSummary = inspection === null ? null : formatTrustSummaryLine(inspection.status);
 	const compromiseAxes = inspection === null ? [] : compromisedTrustAxes(inspection.status);
 	const checks: ReceiptVerificationCheck[] = [];
@@ -793,7 +793,7 @@ function readableVerification(status: CanonicalTrustStatus): string {
 
 function renderEvidenceSummary(
 	inspected: EvidenceInspectable,
-	receipts: ReadonlyArray<RunReceipt>,
+	receipts: ReadonlyArray<RunResult>,
 	receiptError?: string,
 ): string[] {
 	const { overview, findings, trustStatus } = inspected;
@@ -840,7 +840,7 @@ function receiptVerificationLine(report: ReceiptVerificationReport): string {
 	return `Verification: ${report.verificationSummary ?? "receipt seal verified; result validation unknown"}`;
 }
 
-function renderReceiptChanges(receipt: RunReceipt): string[] {
+function renderReceiptChanges(receipt: RunResult): string[] {
 	const observed = receipt.worktree?.changedPaths ?? receipt.checkoutChanges?.changedPaths;
 	const output = receipt.output;
 	const contract = receipt.quality?.resultContract;
@@ -884,7 +884,7 @@ function renderReceiptChanges(receipt: RunReceipt): string[] {
 	];
 }
 
-function renderReceiptChecks(receipt: RunReceipt): string[] {
+function renderReceiptChecks(receipt: RunResult): string[] {
 	const checks = receipt.hostVerification?.checks ?? [];
 	return [
 		...(checks.length > 0
@@ -900,7 +900,7 @@ function renderReceiptChecks(receipt: RunReceipt): string[] {
 	];
 }
 
-function renderReceiptSummary(receipt: RunReceipt, report: ReceiptVerificationReport): string[] {
+function renderReceiptSummary(receipt: RunResult, report: ReceiptVerificationReport): string[] {
 	return [
 		`Agent: ${receipt.agentId} · Run: ${receipt.runId}`,
 		`Model: ${receipt.wireModelId} (${receipt.targetId})`,
@@ -935,7 +935,7 @@ async function loadReceiptSummary(path: string, stateDir: string, runId: string)
 	try {
 		if ((await stat(path)).size > JSON_PRETTY_MAX_BYTES)
 			return { format: "text", lines: ["Receipt is too large to summarize. Press i for the stored content."], details };
-		const receipt = JSON.parse(await readReceiptText(path)) as RunReceipt;
+		const receipt = JSON.parse(await readReceiptText(path)) as RunResult;
 		const report = verifyReceiptFileReport(stateDir, runId);
 		return {
 			format: "markdown",
@@ -1009,13 +1009,13 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 				load: async () => {
 					try {
 						const inspected = await inspectEvidence(dataDir, overview.evidenceId);
-						let receipts: RunReceipt[] = [];
+						let receipts: RunResult[] = [];
 						let receiptError: string | undefined;
 						try {
 							const receiptPath = join(evidenceDirectory(dataDir, overview.evidenceId), "receipt.json");
 							if ((await stat(receiptPath)).size > JSON_PRETTY_MAX_BYTES)
 								throw new Error("receipt file is too large to summarize");
-							const stored = JSON.parse(await readFile(receiptPath, "utf8")) as { receipts?: RunReceipt[] };
+							const stored = JSON.parse(await readFile(receiptPath, "utf8")) as { receipts?: RunResult[] };
 							receipts = (stored.receipts ?? []).filter((receipt) => inspected.overview.runIds.includes(receipt.runId));
 						} catch (err) {
 							receiptError = `Recorded changes and checks unavailable: ${err instanceof Error ? err.message : String(err)}`;
@@ -1186,12 +1186,12 @@ export class DispatchArtifactProvider implements ArtifactProvider {
 				...(env.sessionId ? { sessionId: env.sessionId } : {}),
 				searchText: [env.id, env.agentId, env.task, env.targetId, env.runtimeId, env.runtimeKind, env.cwd],
 				load: async () => {
-					let receipt: RunReceipt | undefined;
+					let receipt: RunResult | undefined;
 					let receiptTooLarge = false;
 					try {
 						receiptTooLarge = (await stat(receiptPath)).size > JSON_PRETTY_MAX_BYTES;
 						if (!receiptTooLarge) {
-							receipt = JSON.parse(await readReceiptText(receiptPath)) as RunReceipt;
+							receipt = JSON.parse(await readReceiptText(receiptPath)) as RunResult;
 						}
 					} catch {
 						// A missing or unreadable receipt can still have session tool output to show.

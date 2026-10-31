@@ -14,7 +14,7 @@ import { clioStateDir } from "../../src/core/xdg.js";
 import { recoverOrphanReceipts } from "../../src/domains/dispatch/orphan-recovery.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResultDraft } from "../../src/domains/dispatch/types.js";
 import {
 	createBoundedEventQueue,
 	WORKER_BULK_FRAME_MAX_BYTES,
@@ -112,7 +112,7 @@ describe("orphan adoption", () => {
 	it("restores the council and cost provenance the receipt carries", () => {
 		const council = { group: "council-7", label: "Design review", color: "cyan", round: 2 };
 		const envelope: RunEnvelope = { ...fixtureEnvelope("orphan-council"), council, costProvenance: "known" };
-		const draft: RunReceiptDraft = {
+		const draft: RunResultDraft = {
 			...fixtureReceiptDraft(envelope),
 			council,
 			costProvenance: "known",

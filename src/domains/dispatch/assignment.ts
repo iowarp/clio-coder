@@ -14,7 +14,7 @@ import type { DispatchRequest } from "./contract.js";
 import { withAttemptRole } from "./execution-role.js";
 import { type RouteDecisionV1, routeCandidateKey } from "./route-decision.js";
 import type { RoutingPosture } from "./route-policy.js";
-import type { RunNodeIdentity, RunOutcome, RunReceipt } from "./types.js";
+import type { RunNodeIdentity, RunOutcome, RunResult } from "./types.js";
 import type { DispatchFailoverCandidate, DispatchFailoverMode } from "./validation.js";
 
 declare const assignmentIdBrand: unique symbol;
@@ -131,14 +131,14 @@ export interface DispatchAssignment {
 	policy: AssignmentPolicy;
 	attempts: ReadonlyArray<AttemptRef>;
 	status: AssignmentStatus;
-	terminalReceipt: RunReceipt | null;
+	terminalReceipt: RunResult | null;
 	/**
 	 * Why the assignment ended here when the terminal receipt does not say so
 	 * itself: a retry denied at admission leaves the previous attempt's sealed
 	 * receipt as terminal evidence, and that receipt cannot record the denial.
 	 */
 	outcomeDetail: string | null;
-	terminal: Promise<RunReceipt>;
+	terminal: Promise<RunResult>;
 	/**
 	 * Every attempt's frames in order, separated by `attempt_start`. Shared
 	 * single-consumer iterator: the snapshot hands out the same stream the
@@ -152,11 +152,11 @@ interface MutableAssignment {
 	policy: AssignmentPolicy;
 	attempts: AttemptRef[];
 	status: AssignmentStatus;
-	terminalReceipt: RunReceipt | null;
+	terminalReceipt: RunResult | null;
 	outcomeDetail: string | null;
-	terminal: Promise<RunReceipt>;
+	terminal: Promise<RunResult>;
 	stream: AssignmentEventStream;
-	resolve: (receipt: RunReceipt) => void;
+	resolve: (receipt: RunResult) => void;
 	reject: (reason: unknown) => void;
 }
 
@@ -174,9 +174,9 @@ export class AssignmentRegistry {
 		const existing = this.#assignments.get(id);
 		if (existing) return this.#snapshot(existing);
 
-		let resolve!: (receipt: RunReceipt) => void;
+		let resolve!: (receipt: RunResult) => void;
 		let reject!: (reason: unknown) => void;
-		const terminal = new Promise<RunReceipt>((resolvePromise, rejectPromise) => {
+		const terminal = new Promise<RunResult>((resolvePromise, rejectPromise) => {
 			resolve = resolvePromise;
 			reject = rejectPromise;
 		});
@@ -223,7 +223,7 @@ export class AssignmentRegistry {
 		assignment.stream.abort();
 	}
 
-	settle(id: AssignmentId, terminalReceipt: RunReceipt, status: AssignmentStatus, outcomeDetail?: string): void {
+	settle(id: AssignmentId, terminalReceipt: RunResult, status: AssignmentStatus, outcomeDetail?: string): void {
 		const assignment = this.#require(id);
 		// A canceled assignment still needs its current attempt's immutable receipt
 		// to resolve the terminal promise.

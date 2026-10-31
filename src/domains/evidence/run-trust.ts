@@ -1,12 +1,12 @@
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "../dispatch/gate-decisions.js";
-import type { RunEnvelope, RunReceipt } from "../dispatch/types.js";
+import type { RunEnvelope, RunResult } from "../dispatch/types.js";
 import { compareCodepoints as compareStrings } from "./ordering.js";
 import {
 	adaptGateDecisionReviewStatus,
 	adaptGroundedEvidenceValidationStatus,
 	type CanonicalTrustStatus,
 	composeTrustStatus,
-	inspectRunReceiptTrustStatus,
+	inspectRunResultTrustStatus,
 	isTrustStatusIdentifier,
 	type TrustArtifactReference,
 } from "./trust-status.js";
@@ -14,7 +14,7 @@ import { EVIDENCE_VERSION, type EvidenceTrustStatusFile } from "./types.js";
 
 export interface EvidenceRunTrustSource {
 	envelope: RunEnvelope;
-	receipt: RunReceipt | null;
+	receipt: RunResult | null;
 }
 
 export interface BuildEvidenceTrustStatusInput {
@@ -56,7 +56,7 @@ interface ComposeEvidenceRunTrustInput {
 }
 
 function composeEvidenceRunTrustStatus(input: ComposeEvidenceRunTrustInput): CanonicalTrustStatus {
-	const inspection = inspectRunReceiptTrustStatus(input.source.receipt, input.source.envelope);
+	const inspection = inspectRunResultTrustStatus(input.source.receipt, input.source.envelope);
 	let status = inspection.status;
 	// Only independently observed executions ground validation. A completion
 	// contract audit row is the run's own self-report and cannot override the

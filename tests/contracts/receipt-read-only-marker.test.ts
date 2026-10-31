@@ -15,12 +15,12 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
-async function sealedReceipt(request: Partial<DispatchRequest>): Promise<RunReceipt> {
+async function sealedReceipt(request: Partial<DispatchRequest>): Promise<RunResult> {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
 	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {

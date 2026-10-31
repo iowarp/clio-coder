@@ -8,12 +8,12 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { type DispatchOwnership, dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
-import { isTerminalRunEnvelope, type RunEnvelope, type RunReceipt } from "../domains/dispatch/types.js";
+import { isTerminalRunEnvelope, type RunEnvelope, type RunResult } from "../domains/dispatch/types.js";
 import { summarizeTrustStatus, trustStateWord } from "../domains/evidence/trust-projection.js";
 import {
-	adaptRunReceiptTrustStatus,
+	adaptRunResultTrustStatus,
 	type CanonicalTrustStatus,
-	inspectRunReceiptTrustStatus,
+	inspectRunResultTrustStatus,
 } from "../domains/evidence/trust-status.js";
 import { COST_NOT_MEASURED, costAggregateForAmount, formatCostAggregate } from "../domains/telemetry/index.js";
 import type { DispatchRunEventRegistry } from "./dispatch.js";
@@ -329,7 +329,7 @@ function toolCallLines(entries: ReadonlyArray<{ at: string; type: string; detail
 	return lines;
 }
 
-function receiptToolLines(receipt: RunReceipt): string[] {
+function receiptToolLines(receipt: RunResult): string[] {
 	const lines: string[] = [];
 	const activity = receipt.toolActivity;
 	if (activity) {
@@ -461,12 +461,12 @@ function runReceipt(deps: MonitorToolDeps, runId: string, ownership: DispatchOwn
 		};
 	}
 	const body = truncateUtf8(raw, RECEIPT_MAX_BYTES, `\n[receipt truncated; read ${run.receiptPath} for the rest]`);
-	let receipt: RunReceipt | null = null;
+	let receipt: RunResult | null = null;
 	let receiptIntegrity: ReceiptIntegrityResult;
 	let trustStatus: CanonicalTrustStatus;
 	try {
-		receipt = JSON.parse(raw) as RunReceipt;
-		const inspection = inspectRunReceiptTrustStatus(receipt, run);
+		receipt = JSON.parse(raw) as RunResult;
+		const inspection = inspectRunResultTrustStatus(receipt, run);
 		receiptIntegrity = inspection.integrity;
 		trustStatus = inspection.status;
 	} catch (err) {
@@ -474,7 +474,7 @@ function runReceipt(deps: MonitorToolDeps, runId: string, ownership: DispatchOwn
 			ok: false,
 			reason: `receipt invalid: ${err instanceof Error ? err.message : String(err)}`,
 		};
-		trustStatus = adaptRunReceiptTrustStatus(null, { integrity: receiptIntegrity });
+		trustStatus = adaptRunResultTrustStatus(null, { integrity: receiptIntegrity });
 	}
 	return {
 		kind: "ok",

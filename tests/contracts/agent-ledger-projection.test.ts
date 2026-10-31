@@ -15,7 +15,7 @@ import {
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { parseAgentLedgerEntry } from "../../src/worker/protocol.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -62,7 +62,7 @@ function projection() {
 	};
 	const receipt = withReceiptIntegrity(draft, sealed);
 	const runs = [sealed, running];
-	const readReceipt = (run: { id: string }): RunReceipt | null => (run.id === sealed.id ? receipt : null);
+	const readReceipt = (run: { id: string }): RunResult | null => (run.id === sealed.id ? receipt : null);
 	return {
 		sealed,
 		running,

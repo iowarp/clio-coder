@@ -33,7 +33,7 @@ import { formatEffectiveBudget } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { declaredScopeIntent } from "../domains/dispatch/intent.js";
-import { callLevelUpstreamResponses, type RunReceipt } from "../domains/dispatch/types.js";
+import { callLevelUpstreamResponses, type RunResult } from "../domains/dispatch/types.js";
 import type { JobSpec, JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
@@ -197,7 +197,7 @@ function summaryDetail(summary: DispatchSummary, startedAtClock: number, attempt
 
 /** Usage and cost facts of one attempt, from its receipt or its finalized ledger envelope. */
 type WikiRunUsage = Pick<
-	RunReceipt,
+	RunResult,
 	| "tokenCount"
 	| "inputTokenCount"
 	| "outputTokenCount"
@@ -207,7 +207,7 @@ type WikiRunUsage = Pick<
 	| "costUsd"
 	| "costProvenance"
 > &
-	Partial<Pick<RunReceipt, "costSummary" | "budget" | "upstreamResponses">>;
+	Partial<Pick<RunResult, "costSummary" | "budget" | "upstreamResponses">>;
 
 interface WikiEarlierAttempt {
 	runId: string;
@@ -233,7 +233,7 @@ type WikiDispatchOutcome =
 			phase: "writer";
 			detail: string;
 			runId: string;
-			receipt?: RunReceipt;
+			receipt?: RunResult;
 			attempts?: WikiAttempts;
 	  };
 
@@ -246,7 +246,7 @@ type WikiDispatchOutcome =
 function collectWikiAttempts(
 	dispatch: DispatchContract,
 	rootRunId: string,
-	terminal: RunReceipt | undefined,
+	terminal: RunResult | undefined,
 ): WikiAttempts | undefined {
 	try {
 		if (typeof dispatch.getRun !== "function") return undefined;
@@ -321,7 +321,7 @@ function summarizeCacheRead(usage: WikiRunUsage | undefined): CacheReadSummary {
 	return { ...base, reporting: (usage?.cacheReadTokenCount ?? 0) === 0 ? "unreported" : "reported" };
 }
 
-type WikiUsage = Pick<RunReceipt, (typeof USAGE_FIELDS)[number][0]>;
+type WikiUsage = Pick<RunResult, (typeof USAGE_FIELDS)[number][0]>;
 type WikiReceipts = Array<{
 	receipt: WikiRunUsage | undefined;
 	kind: "writer" | "repair";
@@ -561,7 +561,7 @@ async function runWikiDispatch(input: {
 		HEARTBEAT_MS,
 	);
 	heartbeat.unref();
-	let receipt: RunReceipt | undefined;
+	let receipt: RunResult | undefined;
 	try {
 		const summary = await drainDispatchEvents(handle.events, (tools) => {
 			completedTools = tools;
@@ -623,7 +623,7 @@ async function runWikiDispatch(input: {
 	}
 }
 
-function receiptFailure(receipt: RunReceipt): string {
+function receiptFailure(receipt: RunResult): string {
 	const code = receipt.outcomeCode ? ` (${receipt.outcomeCode})` : "";
 	const detail = receipt.outcomeDetail?.replace(/\s+/gu, " ").slice(0, 350);
 	return `exit ${receipt.exitCode}${code}${detail ? `: ${detail}` : ""}`;

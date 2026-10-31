@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { materializePendingGateDecision, stagePendingGateDecision } from "../../src/domains/dispatch/gate-decisions.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunReceiptDraft } from "../../src/domains/dispatch/types.js";
+import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
 import { evidenceDetailSnapshot } from "../../src/domains/evidence/detail.js";
 import { buildEvidence, inspectEvidence, TRUST_STATUS_AXES } from "../../src/domains/evidence/index.js";
 import { EVIDENCE_INVENTORY_MAX_ARTIFACTS } from "../../src/domains/evidence/inventory.js";
@@ -163,7 +163,7 @@ describe("evidence tool", () => {
 		const receipt = withReceiptIntegrity(
 			{
 				...fixtureReceiptDraft(envelope),
-				delegation: { toolGovernance: "agent-managed" } as NonNullable<RunReceiptDraft["delegation"]>,
+				delegation: { toolGovernance: "agent-managed" } as NonNullable<RunResultDraft["delegation"]>,
 			},
 			envelope,
 		);

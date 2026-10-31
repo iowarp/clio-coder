@@ -7,7 +7,7 @@ import { clioStateDir } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResult } from "../../src/domains/dispatch/types.js";
 import { activeDecisionRefs } from "../../src/domains/session/decision-board.js";
 import type { DecisionLedgerEntry } from "../../src/domains/session/entries.js";
 import {
@@ -84,7 +84,7 @@ describe("active decisions on actual operator dispatch paths", () => {
 				});
 				await bundle.extension.start();
 				const requests: DispatchRequest[] = [];
-				const receipts: RunReceipt[] = [];
+				const receipts: RunResult[] = [];
 				let resolveSettled!: () => void;
 				let rejectSettled!: (reason: unknown) => void;
 				const settled = new Promise<void>((resolve, reject) => {
@@ -218,7 +218,7 @@ describe("active decisions on actual operator dispatch paths", () => {
 						deepStrictEqual(receipt.decisionRefs, expected);
 						const persisted = JSON.parse(
 							readFileSync(join(clioStateDir(), "receipts", `${receipt.runId}.json`), "utf8"),
-						) as RunReceipt;
+						) as RunResult;
 						const ledger = JSON.parse(readFileSync(join(clioStateDir(), "runs.json"), "utf8")) as RunEnvelope[];
 						const persistedEnvelope = ledger.find((run) => run.id === receipt.runId);
 						ok(persistedEnvelope);

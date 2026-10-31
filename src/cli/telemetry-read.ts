@@ -18,7 +18,7 @@ import { AgentRole, Disposition } from "../core/telemetry/enums.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { inspectEvidence } from "../domains/evidence/index.js";
 import {
-	loadRunReceiptEvidence,
+	loadRunResultEvidence,
 	loadRunScopeFiles,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
@@ -400,7 +400,7 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 			}
 			if (args.command === "inspect")
 				return emit(
-					runTelemetry(runId, run, {}, loadRunReceiptEvidence(stateDir, runId), loadRunScopeFiles(stateDir, runId)),
+					runTelemetry(runId, run, {}, loadRunResultEvidence(stateDir, runId), loadRunScopeFiles(stateDir, runId)),
 					args.json,
 					printRun,
 				);

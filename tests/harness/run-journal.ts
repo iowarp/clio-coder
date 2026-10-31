@@ -8,7 +8,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResult } from "../../src/domains/dispatch/types.js";
 import { listSessionLedgerRefs, parseSessionEntries } from "../../src/domains/session/archive-readers.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 
@@ -16,7 +16,7 @@ export interface RunJournal {
 	/** Ledger envelopes by run id, the authority a receipt is authenticated against. */
 	envelopes: Map<string, RunEnvelope>;
 	/** Receipts that parsed into receipt shape. */
-	receipts: RunReceipt[];
+	receipts: RunResult[];
 }
 
 /** The run ledger and receipts under `stateDir`, or null when the directory does not exist. */
@@ -45,9 +45,9 @@ function readEnvelopes(runsPath: string): Map<string, RunEnvelope> {
 	return envelopes;
 }
 
-function readReceipts(receiptsDir: string): RunReceipt[] {
+function readReceipts(receiptsDir: string): RunResult[] {
 	if (!existsSync(receiptsDir)) return [];
-	const receipts: RunReceipt[] = [];
+	const receipts: RunResult[] = [];
 	for (const name of readdirSync(receiptsDir).filter((entry) => entry.endsWith(".json"))) {
 		const parsed: unknown = JSON.parse(readFileSync(join(receiptsDir, name), "utf8"));
 		if (isReceiptShaped(parsed)) receipts.push(parsed);
@@ -55,7 +55,7 @@ function readReceipts(receiptsDir: string): RunReceipt[] {
 	return receipts;
 }
 
-function isReceiptShaped(value: unknown): value is RunReceipt {
+function isReceiptShaped(value: unknown): value is RunResult {
 	return (
 		isRecord(value) &&
 		typeof value.runId === "string" &&

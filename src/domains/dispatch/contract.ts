@@ -28,7 +28,7 @@ import type { DispatchOwner } from "./ownership.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { ApprovedAssignmentRoute } from "./route-approval.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
-import type { RunEnvelope, RunLineage, RunNodeIdentity, RunReceipt, RunStatus } from "./types.js";
+import type { RunEnvelope, RunLineage, RunNodeIdentity, RunResult, RunStatus } from "./types.js";
 import type { DispatchFailoverCandidate, JobSpec } from "./validation.js";
 import type { WriteBoundaryAttribution } from "./write-boundary.js";
 
@@ -453,7 +453,7 @@ export interface DispatchContract {
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
-		finalPromise: Promise<RunReceipt>;
+		finalPromise: Promise<RunResult>;
 	}>;
 
 	/** Spawn a group of dispatches and expose one merged batch event stream. */
@@ -465,7 +465,7 @@ export interface DispatchContract {
 		/** Logical work ids, one per request in admission order. */
 		assignmentIds: ReadonlyArray<string>;
 		events: AsyncIterableIterator<unknown>;
-		finalPromise: Promise<ReadonlyArray<RunReceipt>>;
+		finalPromise: Promise<ReadonlyArray<RunResult>>;
 	}>;
 
 	/** Seal a coordinator-only council synthesis receipt without invoking a model. */
@@ -475,8 +475,8 @@ export interface DispatchContract {
 		kind: "none" | "vote" | "judge";
 		text: string;
 		subjects: ReadonlyArray<{ runId: string; digest: string | null }>;
-		template: RunReceipt;
-	}): Promise<RunReceipt>;
+		template: RunResult;
+	}): Promise<RunResult>;
 
 	/**
 	 * The session and workspace this process dispatches for. Every row the
@@ -555,7 +555,7 @@ export interface DispatchContract {
 	 * attempt of this member in execution order, including the terminal receipt.
 	 * Only nested lineage attempts retain receipts, and collection releases them.
 	 */
-	waitForMember?(runId: string): Promise<{ receipt: RunReceipt; receipts: ReadonlyArray<RunReceipt> }>;
+	waitForMember?(runId: string): Promise<{ receipt: RunResult; receipts: ReadonlyArray<RunResult> }>;
 
 	/**
 	 * Queue operator guidance on a running HTTP or SDK worker. A logical

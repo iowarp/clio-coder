@@ -7,7 +7,7 @@ import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { CallRowV1 } from "../../src/core/telemetry/dto.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -980,7 +980,7 @@ it("a headless receipt counts the compaction calls its run made, once", { timeou
 		},
 	} as unknown as CallRowV1;
 	// One run without a compaction is the baseline the same turn with one is measured against.
-	const sealedRun = async (row: CallRowV1 | null): Promise<RunReceipt> => {
+	const sealedRun = async (row: CallRowV1 | null): Promise<RunResult> => {
 		const before = new Set(readRunJournal(join(env.dir, "state"))?.receipts.map((receipt) => receipt.runId) ?? []);
 		const f = fixture("success");
 		// Compaction journals its own call in the session's journal, outside the turn's events.

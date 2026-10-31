@@ -3,7 +3,7 @@
  *
  * On-disk layout under `clioStateDir()`:
  *   runs.json                    JSON array of RunEnvelope, newest first
- *   receipts/<runId>.json        per-run RunReceipt
+ *   receipts/<runId>.json        per-run RunResult
  *
  * The ledger holds an in-memory mirror of runs.json. `create()` and `update()`
  * mutate memory only; `persist()` writes the settings-bounded ring (default
@@ -31,7 +31,7 @@ import { removeRunTelemetry } from "../telemetry/retention.js";
 import type { ExecutionStepResult } from "./execution-scheduler.js";
 import { computeReceiptFindingsSummary } from "./receipt-findings.js";
 import { withReceiptIntegrity } from "./receipt-integrity.js";
-import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunStatus } from "./types.js";
+import type { RunEnvelope, RunResult, RunResultDraft, RunStatus } from "./types.js";
 
 /**
  * One fleet root's durable record. Records written by earlier builds may also
@@ -80,13 +80,13 @@ export interface Ledger {
 	update(id: string, patch: Partial<RunEnvelope>): RunEnvelope | null;
 	get(id: string): RunEnvelope | null;
 	list(opts?: { status?: RunStatus; limit?: number }): ReadonlyArray<RunEnvelope>;
-	recordReceipt(id: string, receipt: RunReceiptDraft): RunReceipt;
+	recordReceipt(id: string, receipt: RunResultDraft): RunResult;
 	/**
 	 * `terminalPatch` lands on the row in the same step as `receiptPath`, never
 	 * before the receipt file exists: a persist during the awaited write would
 	 * otherwise store a terminal row with no receipt (#428).
 	 */
-	recordReceiptAsync(id: string, receipt: RunReceiptDraft, terminalPatch?: Partial<RunEnvelope>): Promise<RunReceipt>;
+	recordReceiptAsync(id: string, receipt: RunResultDraft, terminalPatch?: Partial<RunEnvelope>): Promise<RunResult>;
 	/** Insert a fully-formed envelope recovered from a durable artifact. Returns false when the id already exists. */
 	adopt(envelope: RunEnvelope): boolean;
 	persist(): Promise<void>;
@@ -294,7 +294,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 		return runs.findIndex((r) => r.id === id);
 	}
 
-	function prepareReceipt(id: string, receipt: RunReceiptDraft, terminalPatch?: Partial<RunEnvelope>): RunReceipt {
+	function prepareReceipt(id: string, receipt: RunResultDraft, terminalPatch?: Partial<RunEnvelope>): RunResult {
 		const row = runs[findIndex(id)];
 		if (!row) throw new Error(`dispatch ledger missing run for receipt '${id}'`);
 		// Sealed against the row as it will be committed, terminal patch included.
@@ -303,7 +303,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 		// the ACP and worker finalizers get it for free and receipt integrity
 		// digest covers it. Computed cheaply from in-memory fields; never reads
 		// disk or calls buildEvidence.
-		const draft: RunReceiptDraft =
+		const draft: RunResultDraft =
 			receipt.findingsSummary === undefined
 				? { ...receipt, findingsSummary: computeReceiptFindingsSummary(receipt, current) }
 				: receipt;
@@ -394,7 +394,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 			return Object.freeze(filtered.map((envelope) => cloneEnvelope(envelope)));
 		},
 
-		recordReceipt(id: string, receipt: RunReceiptDraft): RunReceipt {
+		recordReceipt(id: string, receipt: RunResultDraft): RunResult {
 			const sealed = prepareReceipt(id, receipt);
 			// The sealed receipt is still returned to the finalizer that asked for
 			// it; what it must not do is write the state root back into existence
@@ -408,9 +408,9 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 
 		async recordReceiptAsync(
 			id: string,
-			receipt: RunReceiptDraft,
+			receipt: RunResultDraft,
 			terminalPatch?: Partial<RunEnvelope>,
-		): Promise<RunReceipt> {
+		): Promise<RunResult> {
 			const sealed = prepareReceipt(id, receipt, terminalPatch);
 			// Same uninstall contract as recordReceipt: return the sealed receipt,
 			// write nothing, and leave receiptPath null.

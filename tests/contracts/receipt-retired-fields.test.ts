@@ -16,7 +16,7 @@ import { resolveRunTerminalReason } from "../../src/domains/dispatch/outcome.js"
 import { RECEIPT_HASH_SET } from "../../src/domains/dispatch/receipt-hashes.js";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
-import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResultDraft } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { verifyReceiptFileReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -74,7 +74,7 @@ describe("receipts sealed with the retired fields", () => {
 					projectPolicyValid: null,
 				},
 			},
-		} as unknown as RunReceiptDraft;
+		} as unknown as RunResultDraft;
 		const receipt = withReceiptIntegrity(draft, envelope);
 		deepStrictEqual(verifyReceiptIntegrity(receipt, envelope), { ok: true });
 
@@ -155,7 +155,7 @@ describe("receipt v21 seal (#434)", () => {
 
 	it("refuses to seal a hash the declaration set does not name", () => {
 		const envelope = fixtureEnvelope("v21-undeclared");
-		const draft = { ...fixtureReceiptDraft(envelope), novelDigest: "a".repeat(64) } as unknown as RunReceiptDraft;
+		const draft = { ...fixtureReceiptDraft(envelope), novelDigest: "a".repeat(64) } as unknown as RunResultDraft;
 		throws(() => withReceiptIntegrity(draft, envelope), /undeclared hashes novelDigest/);
 		// Peer JSON sealed verbatim (ACP capabilities, tool-call inputs) carries the peer's keys, not Clio's hashes.
 		const peer = {
@@ -184,7 +184,7 @@ describe("receipt v21 seal (#434)", () => {
 					},
 				],
 			},
-		} as unknown as RunReceiptDraft;
+		} as unknown as RunResultDraft;
 		equal(withReceiptIntegrity(peer, envelope).hashSet, RECEIPT_HASH_SET);
 		// A worker's structured result carries the model's keys too.
 		const structured = {
@@ -196,7 +196,7 @@ describe("receipt v21 seal (#434)", () => {
 				truncated: false,
 				structured: { version: 1, kind: "scout-report", data: { commitHash: "c".repeat(40) } },
 			},
-		} as unknown as RunReceiptDraft;
+		} as unknown as RunResultDraft;
 		equal(withReceiptIntegrity(structured, envelope).hashSet, RECEIPT_HASH_SET);
 	});
 

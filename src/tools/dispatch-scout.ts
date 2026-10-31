@@ -6,7 +6,7 @@ import type { DispatchContract, DispatchRequest } from "../domains/dispatch/cont
 import type { ExecutionPlan } from "../domains/dispatch/execution-plan.js";
 import { executePlan } from "../domains/dispatch/execution-scheduler.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
-import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
+import type { RunEnvelope, RunResult } from "../domains/dispatch/types.js";
 import { normalizeYoloAuthorityBasis } from "../domains/dispatch/yolo-ids.js";
 import type { ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
 
@@ -27,13 +27,13 @@ export type ScoutTransitionDetail =
 
 interface VerifiedScoutSource {
 	envelope: RunEnvelope;
-	receipt: RunReceipt;
+	receipt: RunResult;
 	scout: ScoutResult;
 	spec: AgentSpec;
 }
 
 function validateScoutSource(
-	receipt: RunReceipt,
+	receipt: RunResult,
 	envelope: RunEnvelope,
 	agentSpecs: ReadonlyArray<AgentSpec>,
 ): VerifiedScoutSource {
@@ -57,7 +57,7 @@ function validateScoutSource(
 }
 
 export function scoutTransitionDetail(input: {
-	receipt: RunReceipt;
+	receipt: RunResult;
 	envelope: RunEnvelope;
 	agentSpecs: ReadonlyArray<AgentSpec>;
 }): ScoutTransitionDetail | null {
@@ -108,8 +108,8 @@ export async function runScoutContinuationPlan<T, S>(input: {
 	register(
 		handle: Awaited<ReturnType<DispatchContract["dispatch"]>>,
 		agentId: string,
-	): Promise<{ receipt: RunReceipt; summary: S }>;
-	complete(receipt: RunReceipt, summary: S): { value: T; integrityValid: boolean };
+	): Promise<{ receipt: RunResult; summary: S }>;
+	complete(receipt: RunResult, summary: S): { value: T; integrityValid: boolean };
 }): Promise<{ runs: T[]; skipped: ReadonlyArray<string> }> {
 	const assignmentDeadlineAt = input.artifact.deadlineMs === null ? undefined : Date.now() + input.artifact.deadlineMs;
 	const completedByStep = new Map<string, T>();

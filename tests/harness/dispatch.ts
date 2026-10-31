@@ -18,7 +18,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
-import type { RunReceiptReproducibility } from "../../src/domains/dispatch/types.js";
+import type { RunResultReproducibility } from "../../src/domains/dispatch/types.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import type { SafetyPolicyMetadata } from "../../src/domains/safety/policy-engine.js";
@@ -29,7 +29,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "./scratch-env.js";
  * signature and preserves both arguments, so a regression that passes the
  * wrong cwd or safety metadata to the collector still surfaces.
  */
-export function fastReproducibility(cwd: string, safety: SafetyPolicyMetadata | null): RunReceiptReproducibility {
+export function fastReproducibility(cwd: string, safety: SafetyPolicyMetadata | null): RunResultReproducibility {
 	return {
 		cwd,
 		safetyPolicy: {

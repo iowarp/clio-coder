@@ -23,7 +23,7 @@ import { readReceiptTextSync, receiptTombstoneOf } from "./receipt-store.js";
 import type { RunSettlement } from "./run-settlement.js";
 import { settleFinishedRun, settleUnfinishedRun } from "./run-settlement.js";
 import type { Ledger } from "./state.js";
-import type { RunEnvelope, RunReceipt, RunStatus } from "./types.js";
+import type { RunEnvelope, RunResult, RunStatus } from "./types.js";
 
 export interface OrphanRecoverySummary {
 	recovered: number;
@@ -71,7 +71,7 @@ function receiptsDir(): string {
  * integrity digest covers is either present on the receipt verbatim or fixed
  * by construction at finalization time (status is the only free variable).
  */
-function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath: string): RunEnvelope {
+function envelopeFromReceipt(receipt: RunResult, status: RunStatus, receiptPath: string): RunEnvelope {
 	const envelope: RunEnvelope = {
 		version: 1,
 		id: receipt.runId,
@@ -133,7 +133,7 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 	return envelope;
 }
 
-function verifyOrphan(receipt: RunReceipt, receiptPath: string): RunEnvelope | null {
+function verifyOrphan(receipt: RunResult, receiptPath: string): RunEnvelope | null {
 	const candidates: ReadonlyArray<RunStatus> =
 		receipt.outcome !== undefined ? [runStatusForOutcome(receipt.outcome)] : STATUS_CANDIDATES;
 	for (const status of candidates) {
@@ -171,12 +171,12 @@ const NON_TERMINAL_STATUSES: ReadonlySet<string> = new Set(["queued", "running",
  * ledger, so this window is exactly where a crash or a clobbered persist leaves
  * the truth on disk in the receipt and a lie in the row.
  */
-function sealedEnvelopeFor(runId: string): { envelope: RunEnvelope; receipt: RunReceipt } | null {
+function sealedEnvelopeFor(runId: string): { envelope: RunEnvelope; receipt: RunResult } | null {
 	const path = join(receiptsDir(), `${runId}.json`);
 	if (!existsSync(path)) return null;
-	let receipt: RunReceipt;
+	let receipt: RunResult;
 	try {
-		receipt = JSON.parse(readReceiptTextSync(path)) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(path)) as RunResult;
 	} catch {
 		return null;
 	}
@@ -196,7 +196,7 @@ export function sealRowFromVerifiedReceipt(ledger: Ledger, runId: string): boole
 }
 
 /** The verified receipt a row was sealed from, or null when there was none to seal it with. */
-function sealRowFromReceipt(ledger: Ledger, runId: string): RunReceipt | null {
+function sealRowFromReceipt(ledger: Ledger, runId: string): RunResult | null {
 	const sealed = sealedEnvelopeFor(runId);
 	if (sealed === null) return null;
 	// Patch rather than replace: the row carries phase timings and lineage
@@ -346,7 +346,7 @@ export function recoverOrphanReceipts(ledger: Ledger, options: OrphanRecoveryOpt
 				// Unstattable here means unreadable below, which quarantines or skips it.
 			}
 		}
-		let receipt: RunReceipt;
+		let receipt: RunResult;
 		try {
 			const text = readFileSync(path, "utf8");
 			// A pruned receipt's tombstone is no orphan: its run was sealed and its evidence copy holds the receipt.
@@ -354,7 +354,7 @@ export function recoverOrphanReceipts(ledger: Ledger, options: OrphanRecoveryOpt
 				summary.skipped += 1;
 				continue;
 			}
-			receipt = JSON.parse(text) as RunReceipt;
+			receipt = JSON.parse(text) as RunResult;
 		} catch {
 			summary.corrupt += quarantine(path) ? 1 : 0;
 			continue;

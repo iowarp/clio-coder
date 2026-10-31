@@ -5,6 +5,6 @@
  */
 
 export {
-	readRunReceiptFacts as readWorkerReceiptFacts,
-	readRunReceiptFactsForReplay as readWorkerReceiptFactsForReplay,
+	readRunResultFacts as readWorkerReceiptFacts,
+	readRunResultFactsForReplay as readWorkerReceiptFactsForReplay,
 } from "../domains/dispatch/receipt-facts.js";

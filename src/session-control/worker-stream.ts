@@ -43,8 +43,8 @@ import type {
 } from "../core/telemetry/live-events.js";
 import type {
 	RunPresentedResultContract,
-	RunReceiptSummary,
 	RunResultContract,
+	RunResultSummary,
 } from "../domains/dispatch/receipt-facts.js";
 import type { RunKind } from "../domains/dispatch/types.js";
 import type { WorkerRunOrigin, WorkerRunRuntime, WorkerRunRuntimeKind } from "../domains/session/index.js";
@@ -76,7 +76,7 @@ export type WorkerPresentedResultContract = RunPresentedResultContract;
  * read, carried by the terminal event otherwise. The receipt-derived fields
  * come from the dispatch domain; the two below are this transcript's own.
  */
-export interface WorkerReceiptSummary extends RunReceiptSummary {
+export interface WorkerReceiptSummary extends RunResultSummary {
 	/** From an abort marker rather than a sealed terminal event; a later DispatchCompleted/DispatchFailed replaces it. */
 	provisional?: boolean;
 	/** The run is over, but no receipt could be read for it, and the ledger row could not explain why either. */

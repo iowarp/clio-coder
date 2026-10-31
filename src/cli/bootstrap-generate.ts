@@ -25,7 +25,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { declaredScopeIntent } from "../domains/dispatch/intent.js";
 import { newRunId } from "../domains/dispatch/state.js";
-import type { RunReceipt } from "../domains/dispatch/types.js";
+import type { RunResult } from "../domains/dispatch/types.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { MiddlewareDomainModule } from "../domains/middleware/index.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
@@ -182,7 +182,7 @@ class BootstrapOutputLimitError extends Error {
 	}
 }
 
-function durationFromReceipt(receipt: RunReceipt): number | undefined {
+function durationFromReceipt(receipt: RunResult): number | undefined {
 	const startedAt = Date.parse(receipt.startedAt);
 	const endedAt = Date.parse(receipt.endedAt);
 	if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return undefined;
@@ -195,7 +195,7 @@ function bootstrapTelemetry(
 	startedAtClock: number,
 	structuredOutputMode: BootstrapRunTelemetry["structuredOutputMode"],
 	runId?: string,
-	receipt?: RunReceipt,
+	receipt?: RunResult,
 	observedOutputBytes?: number,
 ): BootstrapRunTelemetry {
 	const telemetry: BootstrapRunTelemetry = {
@@ -295,7 +295,7 @@ async function collectDispatchAssistantText(
 	return (lastAssistantText || streamedText).trim();
 }
 
-function receiptFailure(receipt: RunReceipt): string {
+function receiptFailure(receipt: RunResult): string {
 	const detail = receipt.failureMessage ? `: ${receipt.failureMessage}` : "";
 	return `bootstrap agent failed with exit ${receipt.exitCode}${detail}`;
 }
@@ -355,7 +355,7 @@ async function attemptBootstrapDispatch(
 	const heartbeat = setInterval(reportWorking, 10_000);
 	heartbeat.unref();
 	let text = "";
-	let receipt: RunReceipt | undefined;
+	let receipt: RunResult | undefined;
 	let parserAttempted = false;
 	try {
 		text = await collectDispatchAssistantText(handle.events, input);

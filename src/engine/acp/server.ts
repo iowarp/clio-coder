@@ -72,10 +72,10 @@ import type {
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { narrowTurnConstraints, snapshotTurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
-import type { RunReceiptFacts } from "../../domains/dispatch/receipt-facts.js";
+import type { RunResultFacts } from "../../domains/dispatch/receipt-facts.js";
 import {
-	readRunReceiptFacts,
-	readRunReceiptFactsForReplay,
+	readRunResultFacts,
+	readRunResultFactsForReplay,
 	receiptWireFacts,
 } from "../../domains/dispatch/receipt-facts.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
@@ -4089,9 +4089,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	 * publishes the terminal event, so a live read finds it; a missing or
 	 * unreadable one reports `unavailable: true` rather than failing the frame.
 	 */
-	const readReceipt = (runId: string, replay: boolean): RunReceiptFacts | null => {
+	const readReceipt = (runId: string, replay: boolean): RunResultFacts | null => {
 		try {
-			return replay ? readRunReceiptFactsForReplay(runId) : readRunReceiptFacts(runId);
+			return replay ? readRunResultFactsForReplay(runId) : readRunResultFacts(runId);
 		} catch {
 			// The readers already swallow I/O and parse errors; anything else still
 			// must not take down the frame, and null reads as unavailable.
@@ -4122,7 +4122,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						}).display,
 		};
 	};
-	const receiptMeta = (runId: string, facts: RunReceiptFacts | null): Record<string, unknown> => ({
+	const receiptMeta = (runId: string, facts: RunResultFacts | null): Record<string, unknown> => ({
 		[ACP_RECEIPT_META_KEY]: receiptWireFacts(runId, facts),
 	});
 

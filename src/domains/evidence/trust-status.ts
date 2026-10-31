@@ -5,9 +5,9 @@ import type {
 	RunBriefingProvenance,
 	RunEnvelope,
 	RunProjectContextProvenance,
-	RunReceipt,
-	RunReceiptQuality,
-	RunReceiptVerification,
+	RunResult,
+	RunResultQuality,
+	RunResultVerification,
 } from "../dispatch/types.js";
 import { normalizeYoloGateAuthority, normalizeYoloGateOutcome } from "../dispatch/yolo-ids.js";
 
@@ -391,10 +391,10 @@ export function composeTrustStatus(...projections: ReadonlyArray<TrustStatusProj
 	return normalizeTrustStatus({ version: TRUST_STATUS_VERSION, ...axes });
 }
 
-export type PersistedRunReceiptTrustFacts = Pick<RunReceipt, "runId"> &
+export type PersistedRunResultTrustFacts = Pick<RunResult, "runId"> &
 	Partial<
 		Pick<
-			RunReceipt,
+			RunResult,
 			| "integrity"
 			| "verification"
 			| "hostVerification"
@@ -414,7 +414,7 @@ function sha256Reference(kind: TrustArtifactKind, id: string, digest: string | u
 	return reference;
 }
 
-function receiptReference(receipt: PersistedRunReceiptTrustFacts): TrustArtifactReference {
+function receiptReference(receipt: PersistedRunResultTrustFacts): TrustArtifactReference {
 	return sha256Reference("run_receipt", receipt.runId, receipt.integrity?.digest);
 }
 
@@ -427,11 +427,11 @@ function attributed<State extends string>(
 	return { state, source, authority, artifacts: [...artifacts].sort(compareArtifactReferences) };
 }
 
-function receiptSource(receipt: PersistedRunReceiptTrustFacts): TrustStatusSource {
+function receiptSource(receipt: PersistedRunResultTrustFacts): TrustStatusSource {
 	return { kind: "run_receipt", id: receipt.runId };
 }
 
-function compatibilitySource(receipt: PersistedRunReceiptTrustFacts, field: string): TrustStatusSource {
+function compatibilitySource(receipt: PersistedRunResultTrustFacts, field: string): TrustStatusSource {
 	return { kind: "compatibility", id: `run_receipt:${receipt.runId}:${field}` };
 }
 
@@ -490,7 +490,7 @@ export function retiredReceiptIntegrityReason(retired: RetiredReceiptIntegrity):
  * view agree on what a retired receipt is.
  */
 export function verifyReceiptIntegrityOutcome(
-	receipt: RunReceipt,
+	receipt: RunResult,
 	envelope: RunEnvelope | null,
 ): ReceiptIntegrityOutcome {
 	const retired = retiredReceiptIntegrity(receipt.integrity);
@@ -518,7 +518,7 @@ export function retiredIntegrityVersionOf(status: ArtifactIntegrityStatus): numb
 
 /** Adapt receipt integrity verification without reading any receipt claim as self-authenticating. */
 export function adaptReceiptIntegrityStatus(
-	receipt: PersistedRunReceiptTrustFacts | null | undefined,
+	receipt: PersistedRunResultTrustFacts | null | undefined,
 	verification?: ReceiptIntegrityOutcome,
 ): ArtifactIntegrityStatus {
 	if (receipt === null || receipt === undefined) return absentTrustStatus("artifact_missing");
@@ -556,7 +556,7 @@ export function adaptReceiptIntegrityStatus(
 	);
 }
 
-function validationArtifacts(receipt: PersistedRunReceiptTrustFacts): TrustArtifactReference[] {
+function validationArtifacts(receipt: PersistedRunResultTrustFacts): TrustArtifactReference[] {
 	const artifacts = [receiptReference(receipt)];
 	for (const fact of receipt.quality?.typedValidations ?? []) {
 		artifacts.push(sha256Reference("validation_result", fact.sourceId, fact.validatorDigest));
@@ -568,21 +568,21 @@ function validationArtifacts(receipt: PersistedRunReceiptTrustFacts): TrustArtif
 	return uniqueBoundedReferences(artifacts);
 }
 
-function qualityHasFailure(quality: RunReceiptQuality | undefined): boolean {
+function qualityHasFailure(quality: RunResultQuality | undefined): boolean {
 	if (quality === undefined) return false;
 	if (quality.typedValidations.some((fact) => !fact.passed)) return true;
 	return quality.resultContract?.conformance === "fail" || quality.resultContract?.quality === "fail";
 }
 
-function qualityHasValidation(quality: RunReceiptQuality | undefined): boolean {
+function qualityHasValidation(quality: RunResultQuality | undefined): boolean {
 	if (quality === undefined) return false;
 	if (quality.typedValidations.some((fact) => fact.passed)) return true;
 	return quality.resultContract?.quality === "pass";
 }
 
 function verificationStatus(
-	verification: RunReceiptVerification,
-	receipt: PersistedRunReceiptTrustFacts,
+	verification: RunResultVerification,
+	receipt: PersistedRunResultTrustFacts,
 	artifacts: TrustArtifactReference[],
 ): ValidationGroundingStatus {
 	if (verification.state === "verified") {
@@ -603,8 +603,8 @@ function verificationStatus(
 }
 
 /** Adapt correctness-bearing receipt facts before the older descriptive marker. */
-export function adaptRunReceiptValidationStatus(
-	receipt: PersistedRunReceiptTrustFacts | null | undefined,
+export function adaptRunResultValidationStatus(
+	receipt: PersistedRunResultTrustFacts | null | undefined,
 ): ValidationGroundingStatus {
 	if (receipt === null || receipt === undefined) return absentTrustStatus("artifact_missing");
 	const artifacts = validationArtifacts(receipt);
@@ -708,7 +708,7 @@ function validWorkerContext(value: unknown): boolean {
 	}
 }
 
-function contextArtifacts(receipt: PersistedRunReceiptTrustFacts): TrustArtifactReference[] {
+function contextArtifacts(receipt: PersistedRunResultTrustFacts): TrustArtifactReference[] {
 	const artifacts = [receiptReference(receipt)];
 	if (receipt.workerContext !== undefined && validWorkerContext(receipt.workerContext))
 		artifacts.push(
@@ -725,8 +725,8 @@ function contextArtifacts(receipt: PersistedRunReceiptTrustFacts): TrustArtifact
 }
 
 /** Adapt briefing and project-context provenance without treating either hash as correctness evidence. */
-export function adaptRunReceiptContextStatus(
-	receipt: PersistedRunReceiptTrustFacts | null | undefined,
+export function adaptRunResultContextStatus(
+	receipt: PersistedRunResultTrustFacts | null | undefined,
 ): ContextProvenanceStatus {
 	if (receipt === null || receipt === undefined) return absentTrustStatus("artifact_missing");
 	const artifacts = contextArtifacts(receipt);
@@ -762,19 +762,19 @@ export function adaptRunReceiptContextStatus(
 	return attributed(validBoundedProjectContext(context) ? "recorded" : "invalid", source, DISPATCH_AUTHORITY, artifacts);
 }
 
-export interface AdaptRunReceiptTrustOptions {
+export interface AdaptRunResultTrustOptions {
 	integrity?: ReceiptIntegrityOutcome;
 }
 
 function receiptClaimsAreAuthenticated(
-	receipt: PersistedRunReceiptTrustFacts | null | undefined,
+	receipt: PersistedRunResultTrustFacts | null | undefined,
 	integrity: ReceiptIntegrityOutcome | undefined,
 ): boolean {
 	return receipt?.integrity !== undefined && integrity?.ok === true;
 }
 
 function unauthenticatedReceiptProjection(
-	receipt: PersistedRunReceiptTrustFacts | null | undefined,
+	receipt: PersistedRunResultTrustFacts | null | undefined,
 	integrity: ReceiptIntegrityOutcome | undefined,
 ): TrustStatusProjection {
 	if (receipt === null || receipt === undefined) {
@@ -817,15 +817,15 @@ function unauthenticatedReceiptProjection(
 }
 
 /** Build the receipt-owned projection. Gate and finish facts remain absent until explicitly composed. */
-export function adaptRunReceiptTrustStatus(
-	receipt: PersistedRunReceiptTrustFacts | null | undefined,
-	options: AdaptRunReceiptTrustOptions = {},
+export function adaptRunResultTrustStatus(
+	receipt: PersistedRunResultTrustFacts | null | undefined,
+	options: AdaptRunResultTrustOptions = {},
 ): CanonicalTrustStatus {
 	const authenticated = receiptClaimsAreAuthenticated(receipt, options.integrity);
 	const receiptProjection = authenticated
 		? {
-				validationGrounding: adaptRunReceiptValidationStatus(receipt),
-				contextProvenance: adaptRunReceiptContextStatus(receipt),
+				validationGrounding: adaptRunResultValidationStatus(receipt),
+				contextProvenance: adaptRunResultContextStatus(receipt),
 			}
 		: unauthenticatedReceiptProjection(receipt, options.integrity);
 	return composeTrustStatus({
@@ -838,7 +838,7 @@ export function adaptRunReceiptTrustStatus(
 	});
 }
 
-export interface RunReceiptTrustInspection {
+export interface RunResultTrustInspection {
 	integrity: ReceiptIntegrityOutcome;
 	status: CanonicalTrustStatus;
 }
@@ -848,10 +848,10 @@ export interface RunReceiptTrustInspection {
  * projection boundary. Callers retain the integrity result as the diagnostic
  * and consume `status` for every trust-bearing presentation.
  */
-export function inspectRunReceiptTrustStatus(
-	receipt: RunReceipt | null | undefined,
+export function inspectRunResultTrustStatus(
+	receipt: RunResult | null | undefined,
 	envelope: RunEnvelope | null | undefined,
-): RunReceiptTrustInspection {
+): RunResultTrustInspection {
 	let integrity: ReceiptIntegrityOutcome;
 	if (receipt === null || receipt === undefined) {
 		integrity = { ok: false, reason: "receipt unavailable" };
@@ -868,7 +868,7 @@ export function inspectRunReceiptTrustStatus(
 	}
 	return {
 		integrity,
-		status: adaptRunReceiptTrustStatus(receipt, { integrity }),
+		status: adaptRunResultTrustStatus(receipt, { integrity }),
 	};
 }
 

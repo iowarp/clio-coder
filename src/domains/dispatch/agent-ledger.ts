@@ -14,7 +14,7 @@
 
 import { isAbsolute, relative } from "node:path";
 import type { AgentLedgerBody, AgentLedgerEntry } from "../../worker/protocol.js";
-import type { RunEnvelope, RunLedgerProjection, RunOutcome, RunReceipt, RunStatus } from "./types.js";
+import type { RunEnvelope, RunLedgerProjection, RunOutcome, RunResult, RunStatus } from "./types.js";
 
 /**
  * Ceiling on a rendered board wherever one is handed to a model: a worker's
@@ -51,7 +51,7 @@ function oneLine(value: string): string {
 
 export function projectLedgerAssignments(
 	runs: ReadonlyArray<RunEnvelope>,
-	readReceipt: (run: RunEnvelope) => RunReceipt | null,
+	readReceipt: (run: RunEnvelope) => RunResult | null,
 ): ReadonlyArray<LedgerAssignment> {
 	return runs.map((run) => {
 		const receipt = readReceipt(run);
@@ -79,7 +79,7 @@ export function projectLedgerAssignments(
 /** The reader supplies authenticated receipts; only final passing helper handoffs are projected. */
 export function projectReceiptFindings(
 	runs: ReadonlyArray<RunEnvelope>,
-	readReceipt: (run: RunEnvelope) => RunReceipt | null,
+	readReceipt: (run: RunEnvelope) => RunResult | null,
 ): ReadonlyArray<LedgerReceiptFindings> {
 	return runs.flatMap((run) => {
 		const receipt = readReceipt(run);

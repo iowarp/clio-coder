@@ -10,7 +10,7 @@ import type { DispatchContract, DispatchSnapshot } from "../../src/domains/dispa
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import { buildEvidence } from "../../src/domains/evidence/index.js";
 import { summarizeTrustStatus } from "../../src/domains/evidence/trust-projection.js";
-import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import { inspectRunResultTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import type { TelemetryRunReaders, TelemetryRunSummary } from "../../src/domains/telemetry/contract.js";
 import {
 	createTelemetryProjection,
@@ -251,7 +251,7 @@ describe("dispatch board uses the telemetry projection", () => {
 	it("preserves every board field through the projection and keeps snapshots immutable", () => {
 		const envelope = fixtureEnvelope(IDENTITY.runId);
 		const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
-		const trust = inspectRunReceiptTrustStatus(receipt, envelope).status;
+		const trust = inspectRunResultTrustStatus(receipt, envelope).status;
 		let receiptAvailable = true;
 		const { bus, projection, board, progress, start } = setup({
 			readReceipt: () => (receiptAvailable ? { text: "sealed answer", trust } : null),
@@ -438,7 +438,7 @@ describe("dispatch board uses the telemetry projection", () => {
 		const envelope = fixtureEnvelope(IDENTITY.runId);
 		const receipt = withReceiptIntegrity(fixtureReceiptDraft(envelope), envelope);
 		receipt.task = "tampered";
-		const trust = inspectRunReceiptTrustStatus(receipt, envelope).status;
+		const trust = inspectRunResultTrustStatus(receipt, envelope).status;
 		const { bus, board, progress, start } = setup({ readReceipt: () => ({ text: "untrusted receipt answer", trust }) });
 		start();
 		progress({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "observed live tail" } });
@@ -616,7 +616,7 @@ describe("dispatch quality presentation", () => {
 				conformance: "pass",
 				quality,
 			};
-			return summarizeTrustStatus(inspectRunReceiptTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status);
+			return summarizeTrustStatus(inspectRunResultTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status);
 		});
 		const finished = {
 			toolCallId: "dispatch",
@@ -695,7 +695,7 @@ describe("dispatch quality presentation", () => {
 				await mkdir(join(clioStateDir(), "receipts"), { recursive: true });
 				await writeFile(envelope.receiptPath, bytes);
 				await writeFile(join(clioStateDir(), "runs.json"), JSON.stringify([envelope]));
-				const inspection = inspectRunReceiptTrustStatus(receipt, envelope);
+				const inspection = inspectRunResultTrustStatus(receipt, envelope);
 				strictEqual(inspection.integrity.ok, true);
 				strictEqual(inspection.status.validationGrounding.state, state);
 				const trust = summarizeTrustStatus(inspection.status);
@@ -768,7 +768,7 @@ describe("dispatch quality presentation", () => {
 				const findings = await readFile(join(built.directory, "findings.md"), "utf8");
 				ok(findings.includes(wording), findings);
 				strictEqual(await readFile(envelope.receiptPath, "utf8"), bytes);
-				strictEqual(inspectRunReceiptTrustStatus(receipt, envelope).integrity.ok, true);
+				strictEqual(inspectRunResultTrustStatus(receipt, envelope).integrity.ok, true);
 				if (quality === "unknown") doesNotMatch(plain(collapsed), /validation failed/u);
 			} finally {
 				env.restore();

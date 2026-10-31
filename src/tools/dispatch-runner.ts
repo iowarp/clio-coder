@@ -65,13 +65,13 @@ import type {
 	RunGateProvenance,
 	RunGateSubjectRef,
 	RunPlanProvenance,
-	RunReceipt,
+	RunResult,
 } from "../domains/dispatch/types.js";
 import { isLegacyReadOnlyReceipt } from "../domains/dispatch/types.js";
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
-import { adaptRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
+import { adaptRunResultTrustStatus } from "../domains/evidence/trust-status.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
@@ -473,7 +473,7 @@ async function backgroundedDispatchResult(
  * detail is only set for runs that finished without a successful tool call;
  * the dispatch summary must not flatter such a run as plainly "completed".
  */
-function successNote(receipt: RunReceipt): string | null {
+function successNote(receipt: RunResult): string | null {
 	if (receipt.outcome !== undefined && receipt.outcome !== "succeeded") return null;
 	if (receipt.exitCode !== 0) return null;
 	return (
@@ -484,7 +484,7 @@ function successNote(receipt: RunReceipt): string | null {
 interface CompletedRun {
 	recording?: import("../domains/dispatch/index.js").RecordingReference;
 	readOnly?: boolean;
-	receipt: RunReceipt;
+	receipt: RunResult;
 	receiptPath: string | null;
 	summary: EventSummary;
 	/**
@@ -503,7 +503,7 @@ interface CompletedRun {
  */
 function completeRun(
 	deps: DispatchToolDeps,
-	receipt: RunReceipt,
+	receipt: RunResult,
 	summary: EventSummary,
 	pendingGate?: PendingGateDecisionHandle,
 	request?: DispatchRequest,
@@ -548,7 +548,7 @@ function integrityFailureBanner(run: CompletedRun): string | null {
 }
 
 /** Name the next host step from sealed facts when a worker claimed checks it never ran. */
-export function nextHostValidationAction(receipt: RunReceipt, integrity: ReceiptIntegrityResult): string | null {
+export function nextHostValidationAction(receipt: RunResult, integrity: ReceiptIntegrityResult): string | null {
 	if (!integrity.ok || receipt.hostVerification?.status === "verified" || receipt.hostVerification?.checks.length)
 		return null;
 	const grounding = receipt.validationGrounding;
@@ -566,7 +566,7 @@ export function nextHostValidationAction(receipt: RunReceipt, integrity: Receipt
  * own prose can say it did not commit, so the host states where the work is
  * (flywheel p7/A2).
  */
-function withheldMergeNotice(receipt: RunReceipt, integrity: ReceiptIntegrityResult): string | null {
+function withheldMergeNotice(receipt: RunResult, integrity: ReceiptIntegrityResult): string | null {
 	const worktree = receipt.worktree;
 	if (!integrity.ok || receipt.outcomeCode !== "merge_withheld" || worktree === undefined) return null;
 	if (worktree.applied || worktree.reason === "operator_discarded") return null;
@@ -575,7 +575,7 @@ function withheldMergeNotice(receipt: RunReceipt, integrity: ReceiptIntegrityRes
 }
 
 /** The admission notice for MCP servers the run's sandbox left without network, read back from the sealed receipt. */
-function mcpSandboxNoNetworkNotice(receipt: RunReceipt, integrity: ReceiptIntegrityResult): string | null {
+function mcpSandboxNoNetworkNotice(receipt: RunResult, integrity: ReceiptIntegrityResult): string | null {
 	const sandbox = receipt.safety?.sandbox;
 	const ceiling = receipt.safety?.permit?.ceiling;
 	if (!integrity.ok || sandbox === undefined || ceiling?.mcp === undefined) return null;
@@ -645,7 +645,7 @@ export function formatDispatchOutput(
 
 	const needsSpotCheck = runs.some((run) => {
 		if (receiptHelperResult(run.receipt, run.integrity) !== null) return false;
-		const state = adaptRunReceiptTrustStatus(run.receipt, { integrity: run.integrity }).validationGrounding.state;
+		const state = adaptRunResultTrustStatus(run.receipt, { integrity: run.integrity }).validationGrounding.state;
 		return state === "absent" || state === "unknown" || state === "ungrounded";
 	});
 	const lines = [
@@ -677,7 +677,7 @@ export function formatDispatchOutput(
 			// Evidence confidence comes from the sealed receipt. A receipt that fails
 			// integrity cannot be read as evidence at all.
 			const verification = run.integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION;
-			const trustStatus = adaptRunReceiptTrustStatus(
+			const trustStatus = adaptRunResultTrustStatus(
 				{ ...receipt, verification: verification },
 				{ integrity: run.integrity },
 			);
@@ -726,7 +726,7 @@ export function formatDispatchOutput(
 }
 
 /** The union of what the collected runs' contexts carried, for the parent ledger to absorb. */
-export function flowRestrictionsOfRuns(receipts: ReadonlyArray<RunReceipt | null>): FlowRestrictionSet | null {
+export function flowRestrictionsOfRuns(receipts: ReadonlyArray<RunResult | null>): FlowRestrictionSet | null {
 	return mergeFlowRestrictions(...receipts.map((receipt) => receipt?.safety?.flowRestrictions ?? null));
 }
 
@@ -782,7 +782,7 @@ function dispatchDetails(
 			// Additive provenance keys only; folded in when the receipt carries the
 			// field so a run entry without them keeps its exact shape.
 			const provenance = extractRunProvenance(receipt);
-			const trustStatus = adaptRunReceiptTrustStatus(receipt, { integrity });
+			const trustStatus = adaptRunResultTrustStatus(receipt, { integrity });
 			const helperResult = receiptHelperResult(receipt, integrity);
 			return {
 				...(helperResult !== null ? { helperResult } : {}),
@@ -839,7 +839,7 @@ function newGateGroupId(prefix: string): string {
 	return `${prefix}-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
 }
 
-function subjectRef(receipt: RunReceipt): RunGateSubjectRef {
+function subjectRef(receipt: RunResult): RunGateSubjectRef {
 	return { runId: receipt.runId, digest: receipt.integrity?.digest ?? null };
 }
 
@@ -847,8 +847,8 @@ function subjectRef(receipt: RunReceipt): RunGateSubjectRef {
  * Sealed correlation between a decider route and the subject route it graded.
  * Reported on every decision, including when no independent route exists.
  */
-function gateCorrelationOf(subject: RunReceipt, decider: RunReceipt): GateDecisionCorrelation {
-	const facts = (receipt: RunReceipt): RouteCorrelationFacts => ({
+function gateCorrelationOf(subject: RunResult, decider: RunResult): GateDecisionCorrelation {
+	const facts = (receipt: RunResult): RouteCorrelationFacts => ({
 		agentId: receipt.agentId,
 		targetId: receipt.targetId,
 		wireModelId: receipt.wireModelId,
@@ -864,8 +864,8 @@ function gateCorrelationOf(subject: RunReceipt, decider: RunReceipt): GateDecisi
 
 /** Compete candidates share the base request's agent and model, so the first is representative. */
 function competeCorrelation(
-	candidates: ReadonlyArray<{ receipt: RunReceipt }>,
-	decider: RunReceipt,
+	candidates: ReadonlyArray<{ receipt: RunResult }>,
+	decider: RunResult,
 ): GateDecisionCorrelation {
 	const subject = candidates[0]?.receipt;
 	if (subject === undefined) throw new Error("compete decision requires at least one candidate receipt");
@@ -968,7 +968,7 @@ async function runReviewGated(
 				throw error;
 			}
 		}
-		let receipt: RunReceipt;
+		let receipt: RunResult;
 		try {
 			receipt = await handle.finalPromise;
 		} finally {
@@ -1101,14 +1101,14 @@ async function runReviewGated(
 	}
 }
 
-function readVerifiedGateReceipt(deps: DispatchToolDeps, runId: string): RunReceipt | null {
+function readVerifiedGateReceipt(deps: DispatchToolDeps, runId: string): RunResult | null {
 	const envelope = deps.dispatch.getRun(runId);
 	if (envelope === null) return null;
 	const path = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${runId}.json`);
 	if (!existsSync(path)) return null;
-	let receipt: RunReceipt;
+	let receipt: RunResult;
 	try {
-		receipt = JSON.parse(readReceiptTextSync(path)) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(path)) as RunResult;
 	} catch (error) {
 		throw new Error(`pending gate receipt ${runId} is unreadable: ${competeErrorMessage(error)}`);
 	}
@@ -1121,8 +1121,8 @@ function readVerifiedGateReceipt(deps: DispatchToolDeps, runId: string): RunRece
 
 function ledgerProjectionFor(deps: DispatchToolDeps, ledgerId: string) {
 	const runs = deps.dispatch.listRuns().filter((run) => run.projection?.ledgerId === ledgerId);
-	const receipts = new Map<string, RunReceipt | null>();
-	const readReceipt = (run: RunEnvelope): RunReceipt | null => {
+	const receipts = new Map<string, RunResult | null>();
+	const readReceipt = (run: RunEnvelope): RunResult | null => {
 		if (!receipts.has(run.id)) {
 			try {
 				receipts.set(run.id, readVerifiedGateReceipt(deps, run.id));
@@ -1142,7 +1142,7 @@ function ledgerProjectionFor(deps: DispatchToolDeps, ledgerId: string) {
 function recoveredCorrelation(
 	deps: DispatchToolDeps,
 	subjects: ReadonlyArray<RunGateSubjectRef>,
-	decider: RunReceipt,
+	decider: RunResult,
 ): GateDecisionCorrelation {
 	const first = subjects[0];
 	const subject = first === undefined ? null : readVerifiedGateReceipt(deps, first.runId);
@@ -2939,12 +2939,12 @@ async function runSequential(
 }
 
 /** A pipeline step failed when its worker exited nonzero or its outcome is not success. */
-function isPipelineStepFailure(receipt: RunReceipt): boolean {
+function isPipelineStepFailure(receipt: RunResult): boolean {
 	if (receipt.exitCode !== 0) return true;
 	return receipt.outcome !== undefined && receipt.outcome !== "succeeded";
 }
 
-function pipelineFailureReason(receipt: RunReceipt): string {
+function pipelineFailureReason(receipt: RunResult): string {
 	if (receipt.outcome !== undefined && receipt.outcome !== "succeeded") return `outcome=${receipt.outcome}`;
 	return `exit=${receipt.exitCode}`;
 }

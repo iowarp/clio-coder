@@ -5,9 +5,10 @@ import type { CostAggregate } from "../telemetry/cost.js";
 /**
  * Shared run + receipt types for the dispatch domain.
  *
- * RunEnvelope is the live record kept in the ledger (runs.json). RunReceipt is
- * the per-run artifact written under receipts/<runId>.json on completion. Both
- * are pure data: no class methods, no engine refs.
+ * RunEnvelope is the live record kept in the ledger (runs.json). RunResult is
+ * the in-memory value dispatch hands its caller when a run finishes; the run's
+ * persisted record is its run.settled and run.sealed (#434). Both are pure data:
+ * no class methods, no engine refs.
  */
 
 import type { GatewayRoutingObservation } from "../../core/gateway-routing.js";
@@ -191,7 +192,7 @@ export interface RunNodeIdentity {
  * are null rather than zero: the receipt records that the node could not
  * observe the value, not that the value was absent.
  */
-export interface RunReceiptAttestation {
+export interface RunResultAttestation {
 	protocolVersion: number;
 	/** Host identity as the executing node reported it, not as the orchestrator assumed. */
 	host: string;
@@ -355,7 +356,7 @@ export interface RunPhaseDurations {
  * receipt. `receipt-integrity.ts` annotates its constant against this type, so
  * bumping one without the other is a compile error.
  */
-export interface RunReceiptIntegrity {
+export interface RunResultIntegrity {
 	version: 21;
 	algorithm: "sha256";
 	digest: string;
@@ -364,11 +365,11 @@ export interface RunReceiptIntegrity {
 	 * the commitment, so the receipt still verifies after the ring evicts its row,
 	 * reported as verified with the ledger evicted (#434).
 	 */
-	ledger: RunReceiptLedgerCommitment;
+	ledger: RunResultLedgerCommitment;
 }
 
 /** An R7-labelled commitment: the preimage lives in `runs.json` only while the ring keeps the row (#434). */
-export interface RunReceiptLedgerCommitment {
+export interface RunResultLedgerCommitment {
 	label: "commitment";
 	function: "sha256";
 	canonicalization: "json-sorted-v1";
@@ -377,14 +378,14 @@ export interface RunReceiptLedgerCommitment {
 }
 
 /** One correctness-bearing validation result sealed at receipt finalization. */
-export interface RunReceiptTypedValidationFact {
+export interface RunResultTypedValidationFact {
 	sourceId: string;
 	validatorDigest: string;
 	passed: boolean;
 }
 
 /** The exact response-schema enforcement fact, distinct from answer correctness. */
-export interface RunReceiptResponseSchemaFact {
+export interface RunResultResponseSchemaFact {
 	sourceId: string | null;
 	schemaDigest: string | null;
 	runtimeEnforceable: boolean;
@@ -392,7 +393,7 @@ export interface RunReceiptResponseSchemaFact {
 }
 
 /** Typed result-contract conformance and its separately eligible quality label. */
-export interface RunReceiptResultContractFact {
+export interface RunResultContractFact {
 	sourceId: string;
 	validatorDigest: string;
 	/** `not-reached` means the run never produced a terminal result to judge. */
@@ -449,11 +450,11 @@ export interface RunCapabilityMismatch {
  * Required run-local quality facts. Later gate and evaluation artifacts link to
  * the sealed receipt digest rather than mutating this block after finalization.
  */
-export interface RunReceiptQuality {
+export interface RunResultQuality {
 	version: 1;
-	typedValidations: RunReceiptTypedValidationFact[];
-	responseSchema: RunReceiptResponseSchemaFact;
-	resultContract: RunReceiptResultContractFact | null;
+	typedValidations: RunResultTypedValidationFact[];
+	responseSchema: RunResultResponseSchemaFact;
+	resultContract: RunResultContractFact | null;
 }
 
 /**
@@ -466,7 +467,7 @@ export interface RunReceiptQuality {
  * payload must stay JSON-clean: tags is a stably ordered array, firstPassSuccess
  * a boolean, findingCount a finite number. No undefined inside.
  */
-export interface RunReceiptFindingsSummary {
+export interface RunResultFindingsSummary {
 	tags: EvidenceTag[];
 	firstPassSuccess: boolean;
 	findingCount: number;
@@ -640,7 +641,7 @@ export interface DelegationToolCallLogEntry {
 	timestamp: string;
 }
 
-export interface RunReceiptDelegation {
+export interface RunResultDelegation {
 	agentConfigId: string;
 	/** Peer-advertised model selected for the ACP session, when available. */
 	selectedModelId?: string;
@@ -660,7 +661,7 @@ export interface RunReceiptDelegation {
 	toolCallLog: DelegationToolCallLogEntry[];
 }
 
-export interface RunReceiptSafetySummary {
+export interface RunResultSafetySummary {
 	/**
 	 * The decision axis: how the safety classifier admitted each tool call. It is
 	 * distinct from the outcome axis (`blockedAttempts`, plus `toolStats`/
@@ -807,7 +808,7 @@ export interface RunReceiptSafetySummary {
 	sandbox?: WorkerSandboxReceipt;
 }
 
-export interface RunReceiptReproducibility {
+export interface RunResultReproducibility {
 	cwd: string;
 	/**
 	 * Checkout state at finalization. Builds before 0.5.6 spent three `git`
@@ -831,7 +832,7 @@ export interface RunReceiptReproducibility {
 	};
 }
 
-export interface RunReceiptUpstreamResponse {
+export interface RunResultUpstreamResponse {
 	/** One-based assistant-call index within this run; absent in older receipts. */
 	callIndex?: number;
 	/** Normalized counts; observed=false explicitly records unavailable provider usage. */
@@ -860,8 +861,8 @@ export interface RunReceiptUpstreamResponse {
  * so it is kept only when no per-call row exists.
  */
 export function callLevelUpstreamResponses(
-	responses: ReadonlyArray<RunReceiptUpstreamResponse>,
-): ReadonlyArray<RunReceiptUpstreamResponse> {
+	responses: ReadonlyArray<RunResultUpstreamResponse>,
+): ReadonlyArray<RunResultUpstreamResponse> {
 	const calls = responses.filter((response) => response.usageScope !== "run-aggregate");
 	return calls.length > 0 ? calls : responses;
 }
@@ -878,7 +879,7 @@ export function callLevelUpstreamResponses(
  * clipped `text`, so truncation is always explicit. Absent when no assistant text was
  * captured. Covered by the receipt integrity digest like every other field.
  */
-export interface RunReceiptOutput {
+export interface RunResultOutput {
 	state: "final" | "partial";
 	text: string;
 	bytes: number;
@@ -893,7 +894,7 @@ export interface RunReceiptOutput {
  */
 export type ReceiptVerificationState = "verified" | "unverified" | "not_applicable" | "unknown";
 
-export interface RunReceiptVerification {
+export interface RunResultVerification {
 	state: ReceiptVerificationState;
 	basis:
 		| "validation-tool"
@@ -987,14 +988,14 @@ export interface RunHostVerification {
 	attribution?: RunHostVerificationAttribution[];
 }
 
-export interface RunReceiptCostCap {
+export interface RunResultCostCap {
 	/** Priced spend the run could add, in US dollars. */
 	maxUsd: number;
 	/** Routes in use at the start whose cost is unknown, as `target/model`; the cap does not bound them. */
 	unpricedRoutes: string[];
 }
 
-export interface RunReceipt {
+export interface RunResult {
 	cwd?: string;
 	runId: string;
 	agentId: string;
@@ -1040,7 +1041,7 @@ export interface RunReceipt {
 	 * sealed this projection into the receipt, where nothing read it; the
 	 * integrity digest still covers it so those receipts verify.
 	 */
-	attestation?: RunReceiptAttestation;
+	attestation?: RunResultAttestation;
 	/** Dead-node failover hops, oldest first; absent when the run was never rerouted. */
 	reroutes?: RunNodeReroute[];
 	/** Pipeline threading provenance; present only on pipeline steps after the first. */
@@ -1090,9 +1091,9 @@ export interface RunReceipt {
 	cacheWriteTokenCount?: number;
 	cacheWrite1hTokenCount?: number;
 	reasoningTokenCount?: number;
-	upstreamResponses?: RunReceiptUpstreamResponse[];
+	upstreamResponses?: RunResultUpstreamResponse[];
 	/** Bounded final/partial assistant output; absent when none was captured. */
-	output?: RunReceiptOutput;
+	output?: RunResultOutput;
 	costUsd: number;
 	/** Pricing-source truth. Sealed on every receipt; unknown pricing says so. */
 	costProvenance: CostProvenance;
@@ -1129,7 +1130,7 @@ export interface RunReceipt {
 	toolStats: ToolCallStat[];
 	toolActivity?: ToolActivitySummary;
 	/** Integrity-sealed evidence confidence. Sealed on every receipt. */
-	verification: RunReceiptVerification;
+	verification: RunResultVerification;
 	/** Orchestrator-executed declared checks. Worker self-report never populates this field. */
 	hostVerification?: RunHostVerification;
 	/** Isolated writer checkout and its collect-time application result. */
@@ -1157,11 +1158,11 @@ export interface RunReceipt {
 	 */
 	effectiveFailover?: DispatchFailoverMode;
 	/** Required routing-quality facts known at receipt finalization. */
-	quality: RunReceiptQuality;
+	quality: RunResultQuality;
 	skillActivations?: SkillActivation[];
 	/** Level the run used. Older sealed receipts may omit this field. */
 	autonomy?: AutonomyLevel;
-	safety?: RunReceiptSafetySummary;
+	safety?: RunResultSafetySummary;
 	/**
 	 * Whether the run changed nothing it was allowed to change: a tool call was
 	 * blocked and no mutating call succeeded, or tools ran and none succeeded.
@@ -1177,13 +1178,13 @@ export interface RunReceipt {
 	 * The `clio-coder run --max-cost-usd` cap a headless main-agent run ran
 	 * under. Absent on runs without the flag and on worker receipts.
 	 */
-	costCap?: RunReceiptCostCap;
-	reproducibility?: RunReceiptReproducibility;
+	costCap?: RunResultCostCap;
+	reproducibility?: RunResultReproducibility;
 	/** Effective target/runtime/model/thinking/capability decision for this run. */
 	runtimeResolution?: RuntimeTargetSnapshot;
-	delegation?: RunReceiptDelegation;
+	delegation?: RunResultDelegation;
 	/** Compact findings summary; absent on receipts written before v3 integrity. */
-	findingsSummary?: RunReceiptFindingsSummary;
+	findingsSummary?: RunResultFindingsSummary;
 	/** Passing validation claims measured against executed commands; absent when none were claimed. */
 	validationGrounding?: RunValidationGrounding;
 	/** Read-only recipe admitted against a mutating task; absent when the pairing was sound. */
@@ -1212,11 +1213,10 @@ export interface RunReceipt {
 	/** The R7 declaration set naming every hash this receipt carries (`receipt-hashes.ts`, #434). */
 	hashSet?: typeof RECEIPT_HASH_SET;
 	sessionId: string | null;
-	integrity: RunReceiptIntegrity;
+	integrity: RunResultIntegrity;
 }
 
-export type RunReceiptDraft = Omit<RunReceipt, "integrity" | "routingIntent"> &
-	Partial<Pick<RunReceipt, "routingIntent">>;
+export type RunResultDraft = Omit<RunResult, "integrity" | "routingIntent"> & Partial<Pick<RunResult, "routingIntent">>;
 
 /** Keep routing evidence bounded when it crosses the worker IPC boundary (#426). */
 export function readToolRounds(record: unknown): ToolRoundRecord[] {

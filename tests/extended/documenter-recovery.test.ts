@@ -11,7 +11,7 @@ import {
 } from "../../src/domains/agents/result-contract.js";
 import { capacityLeaseUsage } from "../../src/domains/dispatch/capacity-lease.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { receiptEvidenceLabels } from "../../src/tools/worker-evidence.js";
@@ -82,7 +82,7 @@ it("gives the parent a bounded exit for an unchanged terminal Documenter report 
 		if (result.kind !== "ok") return;
 		const run = bundle.contract.listRuns()[0];
 		ok(run?.receiptPath);
-		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
 		strictEqual(receipt.outcome, "succeeded");
 		strictEqual(receipt.output?.text, report());
 		strictEqual(receipt.quality.resultContract?.conformance, "pass");
@@ -147,7 +147,7 @@ it("does not advance a dependent step after a conforming Documenter report with 
 		if (result.kind === "error") match(result.message, /result quality=fail.*skipped 1/u);
 		const run = bundle.contract.listRuns()[0];
 		ok(run?.receiptPath);
-		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
 		strictEqual(receipt.outcome, "succeeded", "execution and quality remain distinct");
 		strictEqual(receipt.quality.resultContract?.conformance, "pass");
 		strictEqual(receipt.quality.resultContract?.quality, "fail");
@@ -181,7 +181,7 @@ it("continues passing Scout quality into the intended Documenter and delivers it
 		);
 		const receipts = bundle.contract.listRuns().map((run) => {
 			ok(run.receiptPath);
-			const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+			const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
 			ok(verifyReceiptIntegrity(receipt, run).ok);
 			return receipt;
 		});
@@ -235,7 +235,7 @@ it("preserves explicit Coder and delivers its bounded explanation through the co
 		match(prompt, /`commitMessage` 1000/u);
 		for (const run of bundle.contract.listRuns()) {
 			ok(run.receiptPath);
-			const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+			const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
 			ok(verifyReceiptIntegrity(receipt, run).ok);
 			strictEqual(receipt.agentId, "coder");
 			strictEqual(receipt.quality.resultContract?.conformance, "pass");
@@ -259,7 +259,7 @@ it("keeps failed Coder JSON sealed failed independently of terminal dispatch lif
 		const run = bundle.contract.listRuns()[0];
 		ok(run?.receiptPath);
 		const original = readFileSync(run.receiptPath, "utf8");
-		const receipt = JSON.parse(original) as RunReceipt;
+		const receipt = JSON.parse(original) as RunResult;
 		strictEqual(receipt.outcome, "failed");
 		strictEqual(receipt.outcomeCode, "result_contract_invalid");
 		strictEqual(receipt.quality.resultContract?.conformance, "fail");

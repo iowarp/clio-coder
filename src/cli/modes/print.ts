@@ -20,7 +20,7 @@ import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
 import { runStatusForOutcome, terminalReasonForOutcome } from "../../domains/dispatch/outcome.js";
 import {
-	createRunReceiptQuality,
+	createRunResultQuality,
 	deriveReceiptVerification,
 	typedValidationFactsFromVerifyCalls,
 	type VerifyCallOutcome,
@@ -30,9 +30,9 @@ import { newRunId, openLedger } from "../../domains/dispatch/state.js";
 import type {
 	RunKind,
 	RunOutcome,
-	RunReceiptCostCap,
-	RunReceiptDraft,
-	RunReceiptSafetySummary,
+	RunResultCostCap,
+	RunResultDraft,
+	RunResultSafetySummary,
 	RunStatus,
 	SafetyBlockedAttempt,
 	ToolCallStat,
@@ -130,7 +130,7 @@ export interface HeadlessMainAgentOptions {
 	 */
 	segmentUsage?: (messages: ReadonlyArray<AgentMessage>) => Promise<RunJsonSegmentUsage | null>;
 	/** `clio-coder run --max-cost-usd`: the cap the receipt records. */
-	costCap?: RunReceiptCostCap;
+	costCap?: RunResultCostCap;
 }
 
 /** A quantity's known amount: measured plus estimated parts, nothing for an unknown one. */
@@ -228,7 +228,7 @@ interface HeadlessMainAgentReceiptStats {
 	usage: RunUsageSummary | null;
 	costAmounts: CostAmount[];
 	/** The decision axis, counted the way a worker receipt counts it. */
-	decisions: RunReceiptSafetySummary["decisions"];
+	decisions: RunResultSafetySummary["decisions"];
 	/** Every call whose outcome was blocked, in the worker receipt's shape, up to `BLOCKED_ATTEMPTS_LIMIT`. */
 	blockedAttempts: SafetyBlockedAttempt[];
 	/** Blocked attempts past `BLOCKED_ATTEMPTS_LIMIT`, counted but not listed. */
@@ -671,7 +671,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 	endedAt: string;
 	terminal: HeadlessTerminalOutcome;
 	stats: HeadlessMainAgentReceiptStats;
-	costCap?: RunReceiptCostCap;
+	costCap?: RunResultCostCap;
 }): Promise<void> {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
@@ -742,7 +742,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 	if (!updated) return;
 	const toolStats = sortedToolStats(input.stats.toolStats);
 	const typedValidations = typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls);
-	const receipt: RunReceiptDraft = {
+	const receipt: RunResultDraft = {
 		runId: envelope.id,
 		cwd: snapshot.cwd,
 		agentId: "main-agent",
@@ -768,7 +768,7 @@ async function recordHeadlessMainAgentReceipt(input: {
 			locality: "any",
 			failover: "none",
 		},
-		quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, typedValidations }),
+		quality: createRunResultQuality({ runtimeEnforceable: false, enforcementPassed: null, typedValidations }),
 		costProvenance,
 		startedAt: input.startedAt,
 		endedAt: input.endedAt,

@@ -16,7 +16,7 @@ import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import type { RoutingIntent } from "../domains/dispatch/routing-intent.js";
 import { compileScoutTransition, type ScoutAgentBinding } from "../domains/dispatch/scout-transition.js";
-import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
+import type { RunEnvelope, RunResult } from "../domains/dispatch/types.js";
 import type { ResolvedDispatchPlanArtifact } from "./dispatch-plan.js";
 
 export interface ScoutContinuationRef {
@@ -26,7 +26,7 @@ export interface ScoutContinuationRef {
 
 export interface VerifiedScoutSource {
 	envelope: RunEnvelope;
-	receipt: RunReceipt;
+	receipt: RunResult;
 	scout: ScoutResult;
 	spec: AgentSpec;
 }
@@ -66,7 +66,7 @@ export function scoutContinuationRefFromArgs(
 }
 
 function validateScoutSource(
-	receipt: RunReceipt,
+	receipt: RunResult,
 	envelope: RunEnvelope,
 	agentSpecs: ReadonlyArray<AgentSpec>,
 ): VerifiedScoutSource {
@@ -104,9 +104,9 @@ export function loadVerifiedScoutSource(input: {
 	}
 	const receiptPath = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${input.ref.runId}.json`);
 	if (!existsSync(receiptPath)) throw new Error(`dispatch: Scout source receipt '${input.ref.runId}' is unavailable`);
-	let receipt: RunReceipt;
+	let receipt: RunResult;
 	try {
-		receipt = JSON.parse(readReceiptTextSync(receiptPath)) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(receiptPath)) as RunResult;
 	} catch (error) {
 		throw new Error(
 			`dispatch: Scout source receipt is unreadable: ${error instanceof Error ? error.message : String(error)}`,

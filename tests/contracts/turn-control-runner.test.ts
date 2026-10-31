@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DetachedBatchRecord } from "../../src/domains/dispatch/batch-store.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
-import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
 import type { TurnInterpretation } from "../../src/domains/turn-control/index.js";
 import type { TurnControlRunnerDeps } from "../../src/session-control/turn-control-runner.js";
 import { createTurnControlRunner } from "../../src/session-control/turn-control-runner.js";
@@ -25,7 +25,7 @@ const report = {
 async function* events() {
 	/* S6: no synthetic worker events are needed for these contract facts. */
 }
-function receipt(data: unknown = report): RunReceipt {
+function receipt(data: unknown = report): RunResult {
 	return {
 		runId: "scout-1",
 		agentId: "scout",
@@ -34,7 +34,7 @@ function receipt(data: unknown = report): RunReceipt {
 		toolCalls: 3,
 		output: { state: "final", text: JSON.stringify(data) },
 		integrity: { digest: "a".repeat(64) },
-	} as RunReceipt;
+	} as RunResult;
 }
 function harness(overrides: Partial<TurnControlRunnerDeps> = {}, receiptData: unknown = report) {
 	const cwd = mkdtempSync(join(tmpdir(), "clio-orientation-"));
@@ -183,7 +183,7 @@ test("canceling in-flight orientation aborts its run and leaves no block", async
 	h.deps.dispatch.dispatch = async () => ({
 		runId: "scout-1",
 		events: events(),
-		finalPromise: new Promise<RunReceipt>(() => {}),
+		finalPromise: new Promise<RunResult>(() => {}),
 	});
 	h.deps.emitNotice = () => started();
 	const controller = new AbortController();

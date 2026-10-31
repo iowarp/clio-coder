@@ -3,7 +3,7 @@ import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { durableAssistantTextFromEvent } from "../domains/dispatch/event-pump.js";
 import { defaultRunEventJournal, type RunEventJournalSink } from "../domains/dispatch/run-event-journal.js";
-import type { RunReceipt } from "../domains/dispatch/types.js";
+import type { RunResult } from "../domains/dispatch/types.js";
 import { assistantTextFromEvent } from "./dispatch-event-text.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
@@ -28,13 +28,13 @@ interface RunTailState {
 
 interface RegisteredSingleDispatch {
 	runId: string;
-	completion: Promise<{ receipt: RunReceipt; summary: DispatchEventSummary }>;
+	completion: Promise<{ receipt: RunResult; summary: DispatchEventSummary }>;
 }
 
 interface RegisteredBatchDispatch {
 	batchId: string;
 	assignmentIds: ReadonlyArray<string>;
-	completion: Promise<{ receipts: ReadonlyArray<RunReceipt>; summaries: Map<string, DispatchEventSummary> }>;
+	completion: Promise<{ receipts: ReadonlyArray<RunResult>; summaries: Map<string, DispatchEventSummary> }>;
 }
 
 export interface DispatchRunEventRegistry {
@@ -131,7 +131,7 @@ export function createDispatchRunEventRegistry(
 	 * asked about; a retried run's receipt carries the terminal attempt's id
 	 * instead, and that only ever appears as a field on the line.
 	 */
-	const journalSeal = (logicalRunId: string, receipt: RunReceipt): void => {
+	const journalSeal = (logicalRunId: string, receipt: RunResult): void => {
 		if (journal === null || !isRecord(receipt)) return;
 		// Every field is read defensively. The journal sits on the completion path
 		// of every dispatch, and a receipt that is missing a block it is typed to
@@ -155,7 +155,7 @@ export function createDispatchRunEventRegistry(
 	 * id and leaves unmatched assignments without a terminal line rather than
 	 * inventing an outcome for them.
 	 */
-	const sealBatchJournals = (assignmentIds: ReadonlyArray<string>, receipts: ReadonlyArray<RunReceipt>): void => {
+	const sealBatchJournals = (assignmentIds: ReadonlyArray<string>, receipts: ReadonlyArray<RunResult>): void => {
 		if (journal === null || !Array.isArray(receipts)) return;
 		if (assignmentIds.length === receipts.length) {
 			for (const [index, runId] of assignmentIds.entries()) {

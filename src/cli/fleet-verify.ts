@@ -15,8 +15,8 @@ import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { openLedger } from "../domains/dispatch/state.js";
-import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
-import { inspectRunReceiptTrustStatus, TRUST_STATUS_AXES, type TrustStatusAxis } from "../domains/evidence/index.js";
+import type { RunEnvelope, RunResult } from "../domains/dispatch/types.js";
+import { inspectRunResultTrustStatus, TRUST_STATUS_AXES, type TrustStatusAxis } from "../domains/evidence/index.js";
 
 /** A receipt's trust as of this check: still pending, verified, failed, or unreadable. */
 export type FleetVerifyState = "pending" | "verified" | "failed" | "unavailable";
@@ -71,10 +71,10 @@ function classify(reason: string): FleetVerifyReason {
 	return "unclassified";
 }
 
-function loadReceipt(envelope: RunEnvelope): RunReceipt | null {
+function loadReceipt(envelope: RunEnvelope): RunResult | null {
 	const path = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${envelope.id}.json`);
 	try {
-		return JSON.parse(readReceiptTextSync(path)) as RunReceipt;
+		return JSON.parse(readReceiptTextSync(path)) as RunResult;
 	} catch {
 		return null;
 	}
@@ -86,7 +86,7 @@ function fleetVerifySnapshot(runId: string, now: () => number = Date.now): Fleet
 	if (envelope === null) throw new FleetVerifyUnknownRunError(`unknown run '${runId}'`);
 	const verifiedAt = new Date(now()).toISOString();
 	const receipt = loadReceipt(envelope);
-	const inspection = inspectRunReceiptTrustStatus(receipt, envelope);
+	const inspection = inspectRunResultTrustStatus(receipt, envelope);
 	const axes = Object.fromEntries(TRUST_STATUS_AXES.map((axis) => [axis, inspection.status[axis].state])) as Record<
 		TrustStatusAxis,
 		string

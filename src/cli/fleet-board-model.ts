@@ -22,7 +22,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { TelemetryRecord } from "../core/telemetry/envelope.js";
 import type { Fact, FactSum } from "../core/telemetry/fact.js";
 import { clioStateDir } from "../core/xdg.js";
-import { readRunReceiptFacts } from "../domains/dispatch/receipt-facts.js";
+import { readRunResultFacts } from "../domains/dispatch/receipt-facts.js";
 import {
 	RUN_EVENT_JOURNAL_READ_TAIL_BYTES,
 	type RunEventJournalLine,
@@ -471,7 +471,7 @@ export interface ReceiptView {
 }
 
 function receiptView(runId: string, stateDir: string): ReceiptView | null {
-	const facts = readRunReceiptFacts(runId, stateDir);
+	const facts = readRunResultFacts(runId, stateDir);
 	if (facts === null) return null;
 	const integrity = facts.trust?.artifactIntegrity;
 	return {

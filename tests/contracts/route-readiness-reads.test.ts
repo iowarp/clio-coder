@@ -14,7 +14,7 @@ import {
 	routeSettledLabel,
 } from "../../src/domains/dispatch/route-history.js";
 import { createRouteObserver } from "../../src/domains/dispatch/route-observer.js";
-import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResult } from "../../src/domains/dispatch/types.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 function hash(seed: string): string {
@@ -42,14 +42,14 @@ function writeRenamed(path: string, body: string): void {
 	renameSync(`${path}.tmp`, path);
 }
 
-function sealed(runId: string, passed: boolean): { envelope: RunEnvelope; receipt: RunReceipt } {
+function sealed(runId: string, passed: boolean): { envelope: RunEnvelope; receipt: RunResult } {
 	const envelope = fixtureEnvelope(runId);
 	const draft = fixtureReceiptDraft(envelope);
 	draft.quality.typedValidations = [{ sourceId: "typed", validatorDigest: hash("validator"), passed }];
 	return { envelope, receipt: withReceiptIntegrity(draft, envelope) };
 }
 
-function ledger(stateDir: string, runs: ReadonlyArray<{ envelope: RunEnvelope; receipt: RunReceipt }>): void {
+function ledger(stateDir: string, runs: ReadonlyArray<{ envelope: RunEnvelope; receipt: RunResult }>): void {
 	mkdirSync(join(stateDir, "receipts"), { recursive: true });
 	for (const run of runs)
 		writeRenamed(join(stateDir, "receipts", `${run.envelope.id}.json`), JSON.stringify(run.receipt));

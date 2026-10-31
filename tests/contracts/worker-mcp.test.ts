@@ -18,7 +18,7 @@ import type { AgentRecipe } from "../../src/domains/agents/recipe.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunReceiptSafetySummary } from "../../src/domains/dispatch/types.js";
+import type { RunResultSafetySummary } from "../../src/domains/dispatch/types.js";
 import {
 	resolveWorkerMcpAdmission,
 	withholdWritableMcpNetwork,
@@ -329,7 +329,7 @@ describe("native worker MCP capabilities", () => {
 			tools: [{ serverId: "fake", digest: "d", tool: "echo", actionClass: "read" }],
 		};
 		const ceiling = { tools: TOOLS, readOnly: true, writeRoots: [], enforcement, mcp };
-		const permit: NonNullable<RunReceiptSafetySummary["permit"]> = {
+		const permit: NonNullable<RunResultSafetySummary["permit"]> = {
 			version: 1,
 			digest: "fixture",
 			capabilityClass: "read-only",
@@ -346,7 +346,7 @@ describe("native worker MCP capabilities", () => {
 			gitWritablePaths: [],
 			network: false,
 		} as const;
-		const safety: RunReceiptSafetySummary = {
+		const safety: RunResultSafetySummary = {
 			decisions: { allowed: 0, blocked: 0, permissionRequested: 0 },
 			blockedAttempts: [],
 			permit,

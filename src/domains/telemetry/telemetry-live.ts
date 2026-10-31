@@ -61,7 +61,7 @@ interface TelemetrySourceLoader {
 	loadRunTelemetrySourceAsync(stateDir: string, runId: string): Promise<JournalSource>;
 	loadProcessTelemetrySourceAsync?(stateDir: string, processId: string): Promise<JournalSource>;
 	/** The run's sealed receipt through its integrity check; absent from a loader that does not read receipts. */
-	loadRunReceiptEvidence?(stateDir: string, runId: string): ReceiptEvidenceV1;
+	loadRunResultEvidence?(stateDir: string, runId: string): ReceiptEvidenceV1;
 	/** A run scope's own files for its seal verdict and result object; absent from a loader that reads none. */
 	loadRunScopeFiles?(stateDir: string, runId: string): TelemetryScopeFiles | null;
 	loadRunScopeFilesAsync?(stateDir: string, runId: string): Promise<TelemetryScopeFiles | null>;
@@ -297,7 +297,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	let loaded: TelemetrySourceLoader | null = null;
 	const load = async () => (loaded ??= await importLoader());
 	// Receipts are read only once the cold loader is in; a run DTO before that names no receipt rather than guessing.
-	const receipt = (runId: string) => loaded?.loadRunReceiptEvidence?.(options.stateDir(), runId) ?? null;
+	const receipt = (runId: string) => loaded?.loadRunResultEvidence?.(options.stateDir(), runId) ?? null;
 	const scope = (runId: string) => loaded?.loadRunScopeFiles?.(options.stateDir(), runId) ?? null;
 	/** The session `bind` named; nothing subscribes or reads until a reader first asks (`activate`). */
 	let bound: string | null = null;
@@ -701,7 +701,7 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 				runId,
 				await loader.loadRunTelemetrySourceAsync(options.stateDir(), runId),
 				{},
-				loader.loadRunReceiptEvidence?.(options.stateDir(), runId) ?? null,
+				loader.loadRunResultEvidence?.(options.stateDir(), runId) ?? null,
 				(await loader.loadRunScopeFilesAsync?.(options.stateDir(), runId)) ?? null,
 			);
 		},

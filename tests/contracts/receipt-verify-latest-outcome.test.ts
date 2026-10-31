@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { verifyCheckIdentity } from "../../src/domains/dispatch/receipt-findings.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -83,7 +83,7 @@ function verifyCallEvents(call: VerifyCall): unknown[] {
 	];
 }
 
-async function sealedReceipt(calls: VerifyCall[]): Promise<RunReceipt> {
+async function sealedReceipt(calls: VerifyCall[]): Promise<RunResult> {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
 	const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
@@ -124,7 +124,7 @@ async function sealedReceipt(calls: VerifyCall[]): Promise<RunReceipt> {
 	}
 }
 
-function verdicts(receipt: RunReceipt): boolean[] {
+function verdicts(receipt: RunResult): boolean[] {
 	return receipt.quality.typedValidations.map((fact) => fact.passed).sort();
 }
 

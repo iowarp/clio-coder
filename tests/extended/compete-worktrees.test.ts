@@ -9,7 +9,7 @@ import { withTelemetryContext } from "../../src/core/telemetry/context.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { readGateDecisionArtifacts } from "../../src/domains/dispatch/gate-decisions.js";
-import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import {
@@ -238,7 +238,7 @@ for (const agent of ["scout", "coder"] as const) {
 				.filter((run) => run.agentId === agent)
 				.map((run) => {
 					ok(run.receiptPath);
-					return JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+					return JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
 				});
 			strictEqual(receipts.length, 2);
 			const candidateEvidence = judgeTask
@@ -264,7 +264,7 @@ for (const agent of ["scout", "coder"] as const) {
 			strictEqual(allRuns.length, 3, "exactly two candidate executions plus one judge; no council substitution");
 			const judgeRun = allRuns.find((run) => run.gate?.role === "judge");
 			ok(judgeRun?.receiptPath);
-			const judgeReceipt = JSON.parse(readFileSync(judgeRun.receiptPath, "utf8")) as RunReceipt;
+			const judgeReceipt = JSON.parse(readFileSync(judgeRun.receiptPath, "utf8")) as RunResult;
 			strictEqual(judgeReceipt.outcome, "succeeded");
 			strictEqual(judgeReceipt.autonomy, "default");
 			deepStrictEqual(
@@ -490,7 +490,7 @@ for (const phase of ["candidates", "judge"] as const) {
 				strictEqual(runs.length, phase === "judge" ? 3 : 2);
 				for (const run of runs) {
 					ok(run.receiptPath);
-					const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+					const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
 					const interrupted = phase === "candidates" || receipt.gate?.role === "judge";
 					strictEqual(receipt.outcome, interrupted ? "canceled" : "succeeded");
 					if (interrupted)

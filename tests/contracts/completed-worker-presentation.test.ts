@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import { inspectRunResultTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
@@ -28,7 +28,7 @@ function worker(
 		conformance: "pass",
 		quality: "unmeasured",
 	};
-	const trust = inspectRunReceiptTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status;
+	const trust = inspectRunResultTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status;
 	return {
 		assignmentId: "a",
 		runId: "aa-run",

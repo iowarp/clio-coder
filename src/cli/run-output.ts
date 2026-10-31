@@ -1,5 +1,5 @@
 import { parseJsonObjectPayload } from "../core/json-payload.js";
-import type { RunReceipt } from "../domains/dispatch/types.js";
+import type { RunResult } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { receiptGatewayRoutingLabel, receiptResponseModelIdObservationLabel } from "../tools/dispatch-event-text.js";
 
@@ -26,7 +26,7 @@ function failedChecks(value: unknown): string[] {
 }
 
 /** DF-6: project only contract fields from the sealed result, never infer limits from narration. */
-function sealedResultLimitations(receipt: RunReceipt): string[] {
+function sealedResultLimitations(receipt: RunResult): string[] {
 	const output = receipt.output;
 	if (output?.state !== "final" || output.truncated) return [];
 	const fact = receipt.quality.resultContract;
@@ -93,7 +93,7 @@ function limitationLine(item: string): string {
  * only through the result contract and wrote no assistant text (DF-6: a read-only
  * coder's explanation reached stdout as a bare receipt line).
  */
-function sealedResultAnswer(receipt: RunReceipt): string {
+function sealedResultAnswer(receipt: RunResult): string {
 	const output = receipt.output;
 	if (output?.state !== "final") return "";
 	const structured = output.structured;
@@ -136,7 +136,7 @@ function sealedResultAnswer(receipt: RunReceipt): string {
 }
 
 /** The human answer, sealed evidence limits, and execution receipt in that order. */
-export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunReceipt): string {
+export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunResult): string {
 	const answer = streamedAnswer.length > 0 ? streamedAnswer : sealedResultAnswer(receipt);
 	const limitations = sealedResultLimitations(receipt);
 	const block =
@@ -146,7 +146,7 @@ export function formatDispatchHumanOutput(streamedAnswer: string, receipt: RunRe
 	return `${answer.length > 0 ? `${answer}\n` : ""}${block}${formatReceipt(receipt, limitations.length)}\n`;
 }
 
-function formatReceipt(r: RunReceipt, notVerified: number): string {
+function formatReceipt(r: RunResult, notVerified: number): string {
 	const reasoning =
 		typeof r.reasoningTokenCount === "number" && r.reasoningTokenCount > 0 ? ` reasoning=${r.reasoningTokenCount}` : "";
 	const failure = r.failureMessage ? ` error=${r.failureMessage}` : "";

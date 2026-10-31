@@ -1,4 +1,4 @@
-import type { RunPersonaOverride, RunPipelineProvenance, RunReceipt } from "../dispatch/types.js";
+import type { RunPersonaOverride, RunPipelineProvenance, RunResult } from "../dispatch/types.js";
 import type { CanonicalTrustStatus } from "./trust-status.js";
 
 /**
@@ -25,8 +25,8 @@ export interface RunProvenanceView {
 	escalation?: RunEscalationCounts;
 }
 
-/** The receipt fields the provenance view reads; a narrow slice of RunReceipt. */
-type ProvenanceReceipt = Pick<RunReceipt, "pipeline" | "personaOverride" | "safety">;
+/** The receipt fields the provenance view reads; a narrow slice of RunResult. */
+type ProvenanceReceipt = Pick<RunResult, "pipeline" | "personaOverride" | "safety">;
 
 /** Number of leading hash characters shown as a persona-override prompt-hash prefix. */
 export const PERSONA_HASH_PREFIX_CHARS = 12;
@@ -118,7 +118,7 @@ function escalationFromUnknown(safety: unknown): RunEscalationCounts | null {
 	};
 }
 
-function escalationCountsFrom(safety: RunReceipt["safety"]): RunEscalationCounts | null {
+function escalationCountsFrom(safety: RunResult["safety"]): RunEscalationCounts | null {
 	const decisions = safety?.decisions;
 	if (decisions === undefined || decisions.escalationRequested === undefined) return null;
 	return {

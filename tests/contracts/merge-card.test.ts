@@ -2,7 +2,7 @@ import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { askMergeCard } from "../../src/domains/dispatch/merge-card.js";
 import { validationClause } from "../../src/domains/evidence/trust-projection.js";
-import { adaptRunReceiptValidationStatus } from "../../src/domains/evidence/trust-status.js";
+import { adaptRunResultValidationStatus } from "../../src/domains/evidence/trust-status.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../src/tools/ask-user.js";
 
 const INPUT = { branch: "clio/task-1", changedPaths: ["src/a.ts"], reason: "the report claims no check" };
@@ -106,7 +106,7 @@ test("a host failure also observed on the base leaves quality unknown, not faile
 		outputTail: "failure",
 	};
 	const status = (baseComparison: { status: "passed" | "failed"; base: string; exitCode: number }) =>
-		adaptRunReceiptValidationStatus({
+		adaptRunResultValidationStatus({
 			runId: "run-1",
 			hostVerification: { status: "rejected", checks: [{ ...check, baseComparison }] },
 		}).state;
@@ -115,7 +115,7 @@ test("a host failure also observed on the base leaves quality unknown, not faile
 });
 
 test("a confirmed baseline failure is explained by the shared validation projection", () => {
-	const validationGrounding = adaptRunReceiptValidationStatus({
+	const validationGrounding = adaptRunResultValidationStatus({
 		runId: "baseline-run",
 		hostVerification: {
 			status: "rejected",

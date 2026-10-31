@@ -14,7 +14,7 @@ import type { ToolRoundRecord } from "../../engine/types.js";
  */
 
 import type { DispatchScopeNoticeView } from "../../core/dispatch-scope-notice.js";
-import type { RunReceipt } from "../../domains/dispatch/types.js";
+import type { RunResult } from "../../domains/dispatch/types.js";
 import type { AgentMessage } from "../../engine/types.js";
 import type { ChatLoopEvent } from "../../session-control/chat-loop.js";
 import type { VIA_GATEWAY } from "../../tools/gateway-display.js";
@@ -227,11 +227,11 @@ export interface RunJsonTerminalTurnEndFrame {
 	text: string;
 	error?: string;
 	/** The sealed receipt's outcome: `succeeded`, `failed`, `canceled` or `timed_out`. */
-	outcome?: RunReceipt["outcome"];
+	outcome?: RunResult["outcome"];
 	/** Machine-readable failure detail such as `noop` or `limitation`. */
 	outcomeDetail?: string;
 	/** The receipt's safety summary; a `permissionRequired` attempt needed an approval the run could not give. */
-	safety?: Pick<NonNullable<RunReceipt["safety"]>, "decisions" | "blockedAttempts" | "blockedAttemptsTruncated">;
+	safety?: Pick<NonNullable<RunResult["safety"]>, "decisions" | "blockedAttempts" | "blockedAttemptsTruncated">;
 }
 
 export interface RunJsonDispatchScopeNoticeFrame extends DispatchScopeNoticeView {
@@ -283,7 +283,7 @@ export interface RunJsonReceiptFrame {
 	/** Display-only reference relative to the Clio state root; outside receipt authority. */
 	recording?: import("../../domains/dispatch/index.js").RecordingReference;
 	type: "receipt";
-	receipt: RunReceipt;
+	receipt: RunResult;
 }
 
 // ---------------------------------------------------------------------------

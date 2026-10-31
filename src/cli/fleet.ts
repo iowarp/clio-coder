@@ -61,7 +61,7 @@ import {
 import { readReceiptTextSync } from "../domains/dispatch/receipt-store.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { openLedger } from "../domains/dispatch/state.js";
-import type { RunEnvelope, RunReceipt } from "../domains/dispatch/types.js";
+import type { RunEnvelope, RunResult } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { preflightWriteBoundaries } from "../domains/dispatch/write-boundary-enforcer.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
@@ -801,7 +801,7 @@ function rowTokenFields(row: RunEnvelope): Record<"input" | "output" | "total", 
 function receiptTokenFields(row: RunEnvelope): { input: number | null; output: number | null } {
 	const path = row.receiptPath ?? join(clioStateDir(), "receipts", `${row.id}.json`);
 	try {
-		const parsed = JSON.parse(readReceiptTextSync(path)) as Partial<RunReceipt>;
+		const parsed = JSON.parse(readReceiptTextSync(path)) as Partial<RunResult>;
 		return { input: countOrNull(parsed.inputTokenCount), output: countOrNull(parsed.outputTokenCount) };
 	} catch {
 		return { input: null, output: null };

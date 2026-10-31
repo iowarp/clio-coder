@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withReceiptIntegrity } from "../../../../src/domains/dispatch/receipt-integrity.js";
-import type { RunEnvelope, RunReceiptDraft } from "../../../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResultDraft } from "../../../../src/domains/dispatch/types.js";
 import { fixtureReceiptDraft } from "../../../../tests/harness/receipt.js";
 import { telemetryCall } from "../../../../tests/harness/telemetry-view.js";
 import { seedRunJournal } from "./telemetry-fixture.js";
@@ -130,7 +130,7 @@ export async function traceFixture(
 			validationGrounding: { claimed: 2, grounded: 1, ungrounded: ["lint"], basis: "unmatched-command" },
 			toolStats: [{ tool: "read", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 15 }],
 			clioCoderVersion: "0.4.7",
-		} satisfies RunReceiptDraft,
+		} satisfies RunResultDraft,
 		envelope,
 	);
 	writeFileSync(join(state, "receipts/run-0000.json"), JSON.stringify(receipt));

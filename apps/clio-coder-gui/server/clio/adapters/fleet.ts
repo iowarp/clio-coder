@@ -8,7 +8,7 @@ import { gateTopology } from "../../../../../src/domains/dispatch/gate-topology.
 import { readReceiptTextSync } from "../../../../../src/domains/dispatch/receipt-store.js";
 import { type FleetRunRecord, openLedger, readFleetRun } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
-import { loadRunReceiptEvidence, loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
+import { loadRunResultEvidence, loadRunTelemetrySource } from "../../../../../src/domains/session/telemetry-source.js";
 import { runRowTelemetry } from "../../../../../src/domains/telemetry/read-model.js";
 import { Id } from "../../../contracts/common.js";
 import {
@@ -50,7 +50,7 @@ function receiptEvidence(id: string) {
 	const state = clioStateDir();
 	if (!containedFile(state, "receipts", `${id}.json`) && entryExists(join(state, "receipts", `${id}.json`)))
 		throw new AppProblem("unavailable", "The receipt is outside its storage boundary or exceeds 8 MiB.");
-	return loadRunReceiptEvidence(state, id);
+	return loadRunResultEvidence(state, id);
 }
 /** Anything at the path, a dangling link included. */
 function entryExists(path: string): boolean {

@@ -9,7 +9,7 @@ import { clioStateDir } from "../../src/core/xdg.js";
 import type { WikiPlan } from "../../src/domains/context/wiki/plan.js";
 import { readWikiPlanFile } from "../../src/domains/context/wiki/plan-store.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
-import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 it("reports incomplete publications and fails wiki generation with pending pages, including no-op updates", () => {
@@ -79,7 +79,7 @@ it("separates known, estimated and unknown run costs and reports missing usage",
 		};
 		const receipts: Array<
 			| Pick<
-					RunReceipt,
+					RunResult,
 					| "exitCode"
 					| "tokenCount"
 					| "inputTokenCount"

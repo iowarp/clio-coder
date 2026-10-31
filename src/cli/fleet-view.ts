@@ -21,7 +21,7 @@ import { renderCostAmount } from "../domains/telemetry/cost.js";
  *
  * Trust rules the render obeys:
  *   - The receipt is authenticated against the ledger envelope through
- *     `inspectRunReceiptTrustStatus` before any of its fields are shown. A
+ *     `inspectRunResultTrustStatus` before any of its fields are shown. A
  *     receipt that fails integrity contributes its failure reason and nothing
  *     else.
  *   - Task text is operator-supplied and worker-adjacent, so it is sanitized
@@ -48,10 +48,10 @@ import {
 	runEventJournalPath,
 } from "../domains/dispatch/run-event-journal.js";
 import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
-import { callLevelUpstreamResponses, type RunEnvelope, type RunReceipt } from "../domains/dispatch/types.js";
+import { callLevelUpstreamResponses, type RunEnvelope, type RunResult } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
 import { formatTrustSummaryLine } from "../domains/evidence/trust-projection.js";
-import { inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
+import { inspectRunResultTrustStatus } from "../domains/evidence/trust-status.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui-primitives.js";
 import { fleetInspectionScope, resolveFleetRootId } from "./fleet-project-scope.js";
@@ -133,7 +133,7 @@ export interface RunViewModel {
 	evidence: string;
 	receiptPath: string | null;
 	/** Present only when the receipt authenticated against its ledger row. */
-	receipt?: RunReceipt;
+	receipt?: RunResult;
 	outcome: string | null;
 	outcomeDetail: string | null;
 	/** True once the journal carries its terminal line or the ledger row ended. */
@@ -162,21 +162,21 @@ function receiptPathFor(run: RunEnvelope): string {
  * trust vocabulary. Nothing from an unauthenticated receipt reaches the line
  * beyond the reason it could not be trusted.
  */
-function evidenceLine(run: RunEnvelope): { text: string; receiptPath: string | null; receipt?: RunReceipt } {
+function evidenceLine(run: RunEnvelope): { text: string; receiptPath: string | null; receipt?: RunResult } {
 	if (run.receiptPath === null && run.endedAt === null) {
 		return { text: "receipt pending; the run has not finalized", receiptPath: null };
 	}
 	const path = receiptPathFor(run);
-	let receipt: RunReceipt;
+	let receipt: RunResult;
 	try {
-		receipt = JSON.parse(readReceiptTextSync(path)) as RunReceipt;
+		receipt = JSON.parse(readReceiptTextSync(path)) as RunResult;
 	} catch (error) {
 		return {
 			text: `receipt unavailable: cannot read ${path} (${error instanceof Error ? error.message : String(error)})`,
 			receiptPath: null,
 		};
 	}
-	const inspection = inspectRunReceiptTrustStatus(receipt, run);
+	const inspection = inspectRunResultTrustStatus(receipt, run);
 	if (!inspection.integrity.ok) {
 		return {
 			text: `RECEIPT INTEGRITY FAILED: ${inspection.integrity.reason}; stored receipt fields are untrusted`,
@@ -192,7 +192,7 @@ function evidenceLine(run: RunEnvelope): { text: string; receiptPath: string | n
  * records what a provider said about its own response, and a call whose
  * report Clio did not capture reads "not observed", never the requested id.
  */
-function modelObservationText(receipt: RunReceipt): string {
+function modelObservationText(receipt: RunResult): string {
 	const requested = `requested ${sanitizeBounded(receipt.wireModelId ?? "not recorded", 128)}`;
 	const responses = callLevelUpstreamResponses(receipt.upstreamResponses ?? []);
 	if (responses.length === 0) return `${requested} · no provider response recorded`;
@@ -216,7 +216,7 @@ function modelObservationText(receipt: RunReceipt): string {
 	return `${requested} · provider ${observed.join(", ")}`;
 }
 
-function costText(receipt: RunReceipt): string {
+function costText(receipt: RunResult): string {
 	const cost = typeof receipt.costUsd === "number" && Number.isFinite(receipt.costUsd) ? receipt.costUsd : null;
 	return renderCostAmount(cost ?? 0, receipt.costProvenance, receipt.costSummary);
 }

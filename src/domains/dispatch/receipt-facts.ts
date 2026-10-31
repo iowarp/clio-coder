@@ -20,12 +20,12 @@ import { TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { integrityClause, trustStateWord, validationClause } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
-import { inspectRunReceiptTrustStatus, retiredIntegrityVersionOf } from "../evidence/trust-status.js";
+import { inspectRunResultTrustStatus, retiredIntegrityVersionOf } from "../evidence/trust-status.js";
 import { receiptFilePath } from "../session/view-artifacts.js";
 import { readEvidenceIndex } from "../telemetry/evidence-index.js";
 import { TELEMETRY_FOLD_VERSION } from "../telemetry/folds.js";
 import { readReceiptTextSync } from "./receipt-store.js";
-import type { RunEnvelope, RunReceipt } from "./types.js";
+import type { RunEnvelope, RunResult } from "./types.js";
 
 export type RunResultContract = "pass" | "fail" | "not-reached" | "unmeasured";
 
@@ -42,7 +42,7 @@ export type RunPresentedResultContract =
  * only when known: an ACP peer reports no tokens of its own, and a surface
  * that says it spent zero would be claiming something no receipt sealed.
  */
-export interface RunReceiptSummary {
+export interface RunResultSummary {
 	/**
 	 * The canonical trust status of the persisted receipt, authenticated
 	 * against the persisted ledger row it was sealed from. Present only when
@@ -79,7 +79,7 @@ export interface RunReceiptSummary {
 }
 
 /** A receipt's projection: the summary plus the answer it sealed. */
-export interface RunReceiptFacts extends RunReceiptSummary {
+export interface RunResultFacts extends RunResultSummary {
 	text?: string;
 }
 
@@ -136,11 +136,11 @@ function contractKindFrom(receipt: Record<string, unknown>): RunPresentedResultC
 
 /**
  * Project a parsed receipt onto the facts a worker block renders. The input is
- * whatever JSON the file held, not a typed {@link RunReceipt}: receipts written
+ * whatever JSON the file held, not a typed {@link RunResult}: receipts written
  * by older versions of Clio are still valid history, so every field is read
  * structurally and a missing one degrades the footer rather than the render.
  */
-function workerReceiptFacts(receipt: Record<string, unknown>): RunReceiptFacts | null {
+function workerReceiptFacts(receipt: Record<string, unknown>): RunResultFacts | null {
 	const outcome = optionalString(receipt.outcome);
 	if (outcome === undefined) return null;
 	const output = isRecord(receipt.output) ? receipt.output : null;
@@ -214,7 +214,7 @@ function workerReceiptFacts(receipt: Record<string, unknown>): RunReceiptFacts |
 }
 
 /** Read and project `<state>/receipts/<runId>.json` alone; null when it is absent or unreadable. */
-function readReceiptFileFacts(runId: string, stateDir: string): RunReceiptFacts | null {
+function readReceiptFileFacts(runId: string, stateDir: string): RunResultFacts | null {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(readReceiptTextSync(receiptFilePath(stateDir, runId)));
@@ -229,12 +229,12 @@ function readReceiptFileFacts(runId: string, stateDir: string): RunReceiptFacts 
 	// authentication, and no verdict is better than a guessed one.
 	const row = findRunRow(runId, stateDir);
 	if (row === null) return facts;
-	const trust = inspectRunReceiptTrustStatus(parsed as unknown as RunReceipt, row as unknown as RunEnvelope).status;
+	const trust = inspectRunResultTrustStatus(parsed as unknown as RunResult, row as unknown as RunEnvelope).status;
 	return { ...facts, trust };
 }
 
 /** Read and project `<state>/receipts/<runId>.json`; null when it is absent or unreadable. */
-export function readRunReceiptFacts(runId: string, stateDir = clioStateDir()): RunReceiptFacts | null {
+export function readRunResultFacts(runId: string, stateDir = clioStateDir()): RunResultFacts | null {
 	return readReceiptFileFacts(runId, stateDir);
 }
 
@@ -267,7 +267,7 @@ function findRunRow(runId: string, stateDir: string): Record<string, unknown> | 
  * missing receipt at settle time is a flush race the terminal event's own
  * payload already covers (`worker-stream.ts`'s `settle`), not an open run.
  */
-export function readRunReceiptFactsForReplay(runId: string, stateDir = clioStateDir()): RunReceiptFacts | null {
+export function readRunResultFactsForReplay(runId: string, stateDir = clioStateDir()): RunResultFacts | null {
 	const sealed = readReceiptFileFacts(runId, stateDir);
 	if (sealed !== null) return sealed;
 	const row = findRunRow(runId, stateDir);
@@ -287,7 +287,7 @@ export function readRunReceiptFactsForReplay(runId: string, stateDir = clioState
  * `validation` its quality clause, so a client shows the same words without
  * re-implementing the trust projection.
  */
-export interface RunReceiptWireFacts {
+export interface RunResultWireFacts {
 	receiptId: string;
 	outcome: string | null;
 	contract: RunResultContract | null;
@@ -301,7 +301,7 @@ export interface RunReceiptWireFacts {
 }
 
 /** Project receipt facts onto the wire; null facts become `unavailable: true`, never an error. */
-export function receiptWireFacts(runId: string, facts: RunReceiptFacts | null): RunReceiptWireFacts {
+export function receiptWireFacts(runId: string, facts: RunResultFacts | null): RunResultWireFacts {
 	if (facts === null) {
 		return {
 			receiptId: runId,
@@ -502,8 +502,8 @@ export function readReceiptEvidence(
 		}
 	}
 	const row = receipt ? findRunRow(runId, stateDir) : null;
-	const inspection = inspectRunReceiptTrustStatus(
-		receipt as unknown as RunReceipt | null,
+	const inspection = inspectRunResultTrustStatus(
+		receipt as unknown as RunResult | null,
 		row as unknown as RunEnvelope | null,
 	);
 	const outcome = inspection.integrity;

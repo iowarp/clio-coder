@@ -7,7 +7,7 @@ import { clioStateDir } from "../../core/xdg.js";
 import { type ExecutionRole, isExecutionRole } from "./execution-role.js";
 import { type RouteCandidate, routeCapabilityKey, routeDriftGuard, routeDriftInvalidates } from "./route-decision.js";
 import type { RouteQualityLabel } from "./route-quality.js";
-import type { RunReceipt } from "./types.js";
+import type { RunResult } from "./types.js";
 
 export type RouteReliabilityOutcome = "success" | "failure" | "neutral";
 
@@ -18,7 +18,7 @@ export type RouteReliabilityOutcome = "success" | "failure" | "neutral";
  * outcome such as `timed_out`), else `failure`. Quality labels stay reserved
  * for independent evidence; this label is what every settled route carries.
  */
-export function routeSettledLabel(receipt: Pick<RunReceipt, "outcome" | "outcomeCode" | "outcomeDetail">): string {
+export function routeSettledLabel(receipt: Pick<RunResult, "outcome" | "outcomeCode" | "outcomeDetail">): string {
 	if (receipt.outcome === "succeeded") return "success";
 	if (receipt.outcomeCode !== undefined && receipt.outcomeCode !== null) return receipt.outcomeCode;
 	if (/^permission_required(?:;|$)/u.test(receipt.outcomeDetail ?? "")) return "permission_required";

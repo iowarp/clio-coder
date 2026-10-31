@@ -1,5 +1,5 @@
 /**
- * Pure aggregation helpers for the per-tool stats folded into a RunReceipt.
+ * Pure aggregation helpers for the per-tool stats folded into a RunResult.
  *
  * Sourced from the worker's ToolTelemetry stream (`clio_coder_tool_finish` IPC
  * events). Kept as a small standalone module so receipts have a single source

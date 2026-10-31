@@ -7,7 +7,7 @@
  * rather than letting one drift into asserting against a stale shape.
  */
 
-import type { RunEnvelope, RunReceiptDraft } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResultDraft } from "../../src/domains/dispatch/types.js";
 
 export function fixtureEnvelope(runId = "run-1"): RunEnvelope {
 	return {
@@ -43,7 +43,7 @@ export function fixtureEnvelope(runId = "run-1"): RunEnvelope {
 	};
 }
 
-export function fixtureReceiptDraft(envelope: RunEnvelope): RunReceiptDraft {
+export function fixtureReceiptDraft(envelope: RunEnvelope): RunResultDraft {
 	return {
 		verification: { state: "unverified", basis: "no-validation-tool" },
 		routingIntent: {

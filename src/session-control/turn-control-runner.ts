@@ -14,7 +14,7 @@ import { normalizeDispatchIntent } from "../domains/dispatch/intent.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { defaultRoutingIntent } from "../domains/dispatch/routing-intent.js";
-import type { RunReceipt } from "../domains/dispatch/types.js";
+import type { RunResult } from "../domains/dispatch/types.js";
 import type {
 	OrientationBlockInput,
 	TurnControlRecord,
@@ -82,7 +82,7 @@ export interface TurnControlRunnerDeps {
 }
 
 function receiptFindings(
-	receipt: RunReceipt,
+	receipt: RunResult,
 	dispatch: DispatchContract,
 ): Pick<OrientationBlockInput, "findings" | "ungrounded"> {
 	const strict = parseScoutResult(receipt.output?.text ?? "");

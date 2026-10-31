@@ -15,12 +15,12 @@ import { createHash } from "node:crypto";
 import { type EvidenceTag, FAILURE_CAUSE_TAG_ORDER, FAILURE_CAUSE_TAGS } from "../evidence/index.js";
 import type {
 	RunEnvelope,
-	RunReceiptDraft,
-	RunReceiptFindingsSummary,
-	RunReceiptQuality,
-	RunReceiptResultContractFact,
-	RunReceiptTypedValidationFact,
-	RunReceiptVerification,
+	RunResultContractFact,
+	RunResultDraft,
+	RunResultFindingsSummary,
+	RunResultQuality,
+	RunResultTypedValidationFact,
+	RunResultVerification,
 } from "./types.js";
 
 function lower(value: string | null | undefined): string {
@@ -52,12 +52,12 @@ function canonicalResponseSchemaDigest(schema: Record<string, unknown>): string 
 	return createHash("sha256").update(canonicalJson(schema), "utf8").digest("hex");
 }
 
-export interface CreateRunReceiptQualityInput {
+export interface CreateRunResultQualityInput {
 	responseSchema?: Record<string, unknown>;
 	runtimeEnforceable: boolean;
 	enforcementPassed: boolean | null;
-	typedValidations?: ReadonlyArray<RunReceiptTypedValidationFact>;
-	resultContract?: RunReceiptResultContractFact | null;
+	typedValidations?: ReadonlyArray<RunResultTypedValidationFact>;
+	resultContract?: RunResultContractFact | null;
 }
 
 /**
@@ -66,8 +66,8 @@ export interface CreateRunReceiptQualityInput {
  * never enter this channel.
  */
 function typedValidationFactsFromToolStats(
-	toolStats: ReadonlyArray<Pick<RunReceiptDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
-): RunReceiptTypedValidationFact[] {
+	toolStats: ReadonlyArray<Pick<RunResultDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
+): RunResultTypedValidationFact[] {
 	return toolStats
 		.filter((stat) => stat.tool === "verify" && stat.count > stat.blocked)
 		.map((stat) => ({
@@ -140,7 +140,7 @@ function typedVerifyFact(
 	check: string | null,
 	outcomes: ReadonlyArray<string | null>,
 	passed: boolean,
-): RunReceiptTypedValidationFact {
+): RunResultTypedValidationFact {
 	const evidence = { tool: "verify", check, outcomes };
 	return {
 		sourceId: "tool:verify",
@@ -161,9 +161,9 @@ function typedVerifyFact(
  * the per-tool aggregate, excluding checks whose calls were all blocked.
  */
 export function typedValidationFactsFromVerifyCalls(
-	toolStats: ReadonlyArray<Pick<RunReceiptDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
+	toolStats: ReadonlyArray<Pick<RunResultDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
 	calls: ReadonlyArray<VerifyCallOutcome>,
-): RunReceiptTypedValidationFact[] {
+): RunResultTypedValidationFact[] {
 	if (!calls.some((call) => call.check !== null && call.outcome !== null)) {
 		return typedValidationFactsFromToolStats(toolStats);
 	}
@@ -179,7 +179,7 @@ export function typedValidationFactsFromVerifyCalls(
 		outcomes.push(call.outcome);
 		byCheck.set(call.check, outcomes);
 	}
-	const facts: RunReceiptTypedValidationFact[] = [];
+	const facts: RunResultTypedValidationFact[] = [];
 	for (const [check, outcomes] of byCheck) {
 		facts.push(typedVerifyFact(check, outcomes, outcomes.at(-1) === "ok"));
 	}
@@ -196,7 +196,7 @@ export function typedValidationFactsFromVerifyCalls(
 }
 
 /** Create the required, JSON-clean quality block for one receipt finalization. */
-export function createRunReceiptQuality(input: CreateRunReceiptQualityInput): RunReceiptQuality {
+export function createRunResultQuality(input: CreateRunResultQualityInput): RunResultQuality {
 	const schemaDigest = input.responseSchema === undefined ? null : canonicalResponseSchemaDigest(input.responseSchema);
 	return {
 		version: 1,
@@ -216,7 +216,7 @@ export function createRunReceiptQuality(input: CreateRunReceiptQualityInput): Ru
 	};
 }
 
-function toolNamesLower(draft: RunReceiptDraft): string[] {
+function toolNamesLower(draft: RunResultDraft): string[] {
 	return draft.toolStats.map((stat) => stat.tool.toLowerCase());
 }
 
@@ -224,7 +224,7 @@ function anyToolMatches(toolNames: string[], needles: readonly string[]): boolea
 	return toolNames.some((name) => needles.some((needle) => name.includes(needle)));
 }
 
-function blockedCount(draft: RunReceiptDraft): number {
+function blockedCount(draft: RunResultDraft): number {
 	const fromStats = draft.toolStats.reduce((total, stat) => total + stat.blocked, 0);
 	const fromActivity = draft.toolActivity?.blocked ?? 0;
 	return Math.max(fromStats, fromActivity);
@@ -250,7 +250,7 @@ const VALIDATION_TOOL_NEEDLES = [
  * Emit the conservative failure-cause tags justified by the draft + envelope.
  * Only signals that are unambiguous in the available data produce a tag.
  */
-function classifyTags(draft: RunReceiptDraft, envelope: RunEnvelope): Set<EvidenceTag> {
+function classifyTags(draft: RunResultDraft, envelope: RunEnvelope): Set<EvidenceTag> {
 	const tags = new Set<EvidenceTag>();
 	const outcome = draft.outcome ?? envelope.outcome ?? null;
 	const detail = lower(draft.outcomeDetail ?? envelope.outcomeDetail);
@@ -311,11 +311,11 @@ function isValidationTool(tool: string): boolean {
 }
 
 /** A validation tool the run was observed to call, whatever it answered. */
-function ranValidationTool(draft: Pick<RunReceiptDraft, "toolStats">): boolean {
+function ranValidationTool(draft: Pick<RunResultDraft, "toolStats">): boolean {
 	return draft.toolStats.some((stat) => stat.count > 0 && isValidationTool(stat.tool));
 }
 
-function hasValidationEvidence(draft: Pick<RunReceiptDraft, "toolStats">): boolean {
+function hasValidationEvidence(draft: Pick<RunResultDraft, "toolStats">): boolean {
 	return draft.toolStats.some((stat) => {
 		if (stat.ok <= 0 || stat.errors > 0) return false;
 		return isValidationTool(stat.tool);
@@ -329,8 +329,8 @@ function hasValidationEvidence(draft: Pick<RunReceiptDraft, "toolStats">): boole
  * validation tools carry no check identity, so their aggregate still decides.
  */
 function hasPassingValidation(
-	toolStats: RunReceiptDraft["toolStats"],
-	typedValidations: ReadonlyArray<RunReceiptTypedValidationFact> | undefined,
+	toolStats: RunResultDraft["toolStats"],
+	typedValidations: ReadonlyArray<RunResultTypedValidationFact> | undefined,
 ): boolean {
 	const verifyFacts = (typedValidations ?? []).filter((fact) => fact.sourceId === "tool:verify");
 	return toolStats.some((stat) => {
@@ -347,9 +347,9 @@ function hasPassingValidation(
  * Pass the receipt's typed validations so the marker agrees with them.
  */
 export function deriveReceiptVerification(
-	draft: Pick<RunReceiptDraft, "toolStats"> & { typedValidations?: ReadonlyArray<RunReceiptTypedValidationFact> },
+	draft: Pick<RunResultDraft, "toolStats"> & { typedValidations?: ReadonlyArray<RunResultTypedValidationFact> },
 	context: { capabilityClass?: string | null; acpDelegation?: boolean } = {},
-): RunReceiptVerification {
+): RunResultVerification {
 	if (context.capabilityClass === "read-only") {
 		return { state: "not_applicable", basis: "read-only-agent" };
 	}
@@ -375,7 +375,7 @@ export function deriveReceiptVerification(
  * Evidence confidence when no sealed receipt can be read: the run has none, or
  * its integrity check failed, so nothing it claims may be reported as verified.
  */
-export const UNVERIFIABLE_RECEIPT_VERIFICATION: RunReceiptVerification = {
+export const UNVERIFIABLE_RECEIPT_VERIFICATION: RunResultVerification = {
 	state: "unknown",
 	basis: "receipt-unavailable",
 };
@@ -389,10 +389,7 @@ export const UNVERIFIABLE_RECEIPT_VERIFICATION: RunReceiptVerification = {
  * in the receipt stats, and no failure-cause tag. Absent draft lineage falls
  * back to the envelope before treating the run as attempt 0.
  */
-export function computeReceiptFindingsSummary(
-	draft: RunReceiptDraft,
-	envelope: RunEnvelope,
-): RunReceiptFindingsSummary {
+export function computeReceiptFindingsSummary(draft: RunResultDraft, envelope: RunEnvelope): RunResultFindingsSummary {
 	const detected = classifyTags(draft, envelope);
 	const tags = FAILURE_CAUSE_TAG_ORDER.filter((tag) => detected.has(tag));
 

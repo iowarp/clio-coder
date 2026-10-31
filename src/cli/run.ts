@@ -22,7 +22,7 @@ import type { DispatchContract, DispatchRequest } from "../domains/dispatch/cont
 import { agentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
-import type { RunReceipt } from "../domains/dispatch/types.js";
+import type { RunResult } from "../domains/dispatch/types.js";
 import { ExtensionsDomainModule } from "../domains/extensions/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import { buildDispatchMemorySection } from "../domains/memory/index.js";
@@ -927,6 +927,6 @@ const PASS_THROUGH_EXIT_CODES: ReadonlySet<number> = new Set([
 	SESSION_COST_CEILING_EXIT_CODE,
 ]);
 
-function mapExitCode(r: RunReceipt): number {
+function mapExitCode(r: RunResult): number {
 	return PASS_THROUGH_EXIT_CODES.has(r.exitCode) ? r.exitCode : 1;
 }

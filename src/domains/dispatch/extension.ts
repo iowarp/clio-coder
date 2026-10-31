@@ -378,7 +378,7 @@ import { deriveEnvelopePhaseDurations, recordRunTimingBestEffort } from "./phase
 import { createFleetPlacementPreviewResolver, createFleetPlacementResolver } from "./placement.js";
 import type { VerifyCallOutcome } from "./receipt-findings.js";
 import {
-	createRunReceiptQuality,
+	createRunResultQuality,
 	deriveReceiptVerification,
 	typedValidationFactsFromVerifyCalls,
 	verifyCheckIdentity,
@@ -458,11 +458,11 @@ import {
 	type RunPhaseMarks,
 	type RunPipelineProvenance,
 	type RunProjectContextProvenance,
-	type RunReceipt,
-	type RunReceiptDraft,
-	type RunReceiptOutput,
-	type RunReceiptResultContractFact,
-	type RunReceiptUpstreamResponse,
+	type RunResult,
+	type RunResultContractFact,
+	type RunResultDraft,
+	type RunResultOutput,
+	type RunResultUpstreamResponse,
 	type RunStatus,
 	type RunSteeringProvenance,
 	type RunValidationGrounding,
@@ -610,7 +610,7 @@ interface ActiveRun {
 	awaitingOperator?: boolean;
 	meter: RunTokenMeter;
 	costProvenance: import("../providers/index.js").CostProvenance;
-	finalPromise: Promise<RunReceipt>;
+	finalPromise: Promise<RunResult>;
 }
 
 interface PendingCapacityAdmission {
@@ -769,11 +769,11 @@ const LOCAL_RUN_NODE: RunNodeIdentity = { id: "local", kind: "local" };
 function runSettlementReceiptFields(
 	terminal: ResolvedTerminalReason,
 	usage: RunCallUsage | undefined,
-): Pick<RunReceiptDraft, "terminalReason" | "callIds"> {
+): Pick<RunResultDraft, "terminalReason" | "callIds"> {
 	return { terminalReason: terminal.terminalReason, ...(usage ? { callIds: [...usage.callIds] } : {}) };
 }
 
-function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1): RunReceiptDraft {
+function sealRouteDecision(draft: RunResultDraft, decision: RouteDecisionV1): RunResultDraft {
 	return { ...draft, routeDecision: decision };
 }
 export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
@@ -914,7 +914,7 @@ function usagelessUpstreamResponse(
 	message: Record<string, unknown>,
 	callIndex: number,
 	fallbackModelId: string | null,
-): RunReceiptUpstreamResponse | null {
+): RunResultUpstreamResponse | null {
 	if (message.clioSyntheticFault === true) return null;
 	const { usage: _usage, usageScope: _usageScope, ...row } = upstreamResponse(message, callIndex, "call");
 	return row.requestedModelId === null && fallbackModelId !== null ? { ...row, requestedModelId: fallbackModelId } : row;
@@ -924,7 +924,7 @@ function upstreamResponse(
 	message: Record<string, unknown>,
 	callIndex: number,
 	usageScope: "call" | "run-aggregate",
-): RunReceiptUpstreamResponse {
+): RunResultUpstreamResponse {
 	const usage = isRecord(message.usage) ? message.usage : {};
 	const reported = workerUsageReported(usage);
 	const normalized = normalizeCallUsage({ ...usage, estimated: !reported });
@@ -954,14 +954,12 @@ const CALL_ERROR_MESSAGE_MAX_CHARS = 512;
  * aborted before its first chunk has no response id or response model, and
  * without this the receipt row could not say why.
  */
-function callOutcome(
-	message: Record<string, unknown>,
-): Pick<RunReceiptUpstreamResponse, "stopReason" | "errorMessage"> {
+function callOutcome(message: Record<string, unknown>): Pick<RunResultUpstreamResponse, "stopReason" | "errorMessage"> {
 	const stopReason = typeof message.stopReason === "string" ? message.stopReason : null;
 	if (stopReason === null || !CALL_STOP_REASONS.has(stopReason)) return {};
 	const errorMessage = readStringOrNull(message.errorMessage);
 	return {
-		stopReason: stopReason as NonNullable<RunReceiptUpstreamResponse["stopReason"]>,
+		stopReason: stopReason as NonNullable<RunResultUpstreamResponse["stopReason"]>,
 		...((stopReason === "error" || stopReason === "aborted") && errorMessage !== null
 			? { errorMessage: errorMessage.slice(0, CALL_ERROR_MESSAGE_MAX_CHARS) }
 			: {}),
@@ -1170,7 +1168,7 @@ const OUTCOME_CODE_SPECIFICITY: ReadonlyArray<RunOutcomeCode> = [
 
 const WORKER_FINAL_OUTPUT_MISSING_DETAIL = "worker loop ended without a receipt-sealed final assistant output";
 
-function hasDurableFinalOutput(output: RunReceiptOutput | undefined): boolean {
+function hasDurableFinalOutput(output: RunResultOutput | undefined): boolean {
 	return output?.state === "final" && output.text.trim().length > 0;
 }
 
@@ -2317,7 +2315,7 @@ function resolveDispatchPermitOnce(
 function receiptPermitSummary(
 	permit: WorkerPermit | RecordOnlyWorkerPermit,
 	mcpNetworkWithheld: ReadonlyArray<WorkerMcpNetworkWithheld> = [],
-): NonNullable<NonNullable<RunReceiptDraft["safety"]>["permit"]> {
+): NonNullable<NonNullable<RunResultDraft["safety"]>["permit"]> {
 	return {
 		version: permit.version,
 		digest: permit.digest,
@@ -2351,7 +2349,7 @@ function receiptPermitSummary(
 function receiptGrantAudit(
 	records: ReadonlyArray<GrantRecord>,
 	runId: string,
-): { grants?: NonNullable<NonNullable<RunReceiptDraft["safety"]>["grants"]> } {
+): { grants?: NonNullable<NonNullable<RunResultDraft["safety"]>["grants"]> } {
 	const rows = records
 		.filter((record) => record.runId === runId)
 		.map((record) => ({
@@ -2722,7 +2720,7 @@ function assertProtectedArtifactsEnforceable(
 
 function protectedArtifactReceiptSummary(
 	state: WorkerSpec["protectedArtifactState"],
-): NonNullable<RunReceiptDraft["safety"]>["protectedArtifacts"] | undefined {
+): NonNullable<RunResultDraft["safety"]>["protectedArtifacts"] | undefined {
 	if (state === undefined || state.artifacts.length === 0) return undefined;
 	const artifacts = [...state.artifacts]
 		.map((artifact) => ({ ...artifact }))
@@ -4300,7 +4298,7 @@ export function createDispatchBundle(
 		reason: string;
 		excludedRouteParts: RetryDecision["excludedRouteParts"];
 		rootRunId: string;
-		terminalCandidate: RunReceipt;
+		terminalCandidate: RunResult;
 		timer: ReturnType<typeof setTimeout>;
 		settleCanceled: () => void;
 	}
@@ -4318,7 +4316,7 @@ export function createDispatchBundle(
 	const controlRootsByAttempt = new Map<string, string>();
 	const controlAttempts = new Map<
 		string,
-		{ lineage: RunLineage; reservation: DispatchRequest["reservation"]; maxRetries: number; receipt?: RunReceipt }
+		{ lineage: RunLineage; reservation: DispatchRequest["reservation"]; maxRetries: number; receipt?: RunResult }
 	>();
 	const canceledControlRoots = new Set<string>();
 	const memberWork = new Map<string, Set<Promise<unknown>>>();
@@ -4399,7 +4397,7 @@ export function createDispatchBundle(
 		};
 	}
 
-	function accumulateFinalizedTotals(receipt: RunReceipt): void {
+	function accumulateFinalizedTotals(receipt: RunResult): void {
 		finalizedTotals.inputTokens += receipt.inputTokenCount ?? 0;
 		finalizedTotals.outputTokens += receipt.outputTokenCount ?? 0;
 		finalizedTotals.totalTokens += receipt.tokenCount;
@@ -4441,7 +4439,7 @@ export function createDispatchBundle(
 
 	function settleAssignmentDurably(
 		assignmentId: import("./assignment.js").AssignmentId,
-		receipt: RunReceipt,
+		receipt: RunResult,
 		status: "succeeded" | "failed" | "canceled",
 		outcomeDetail?: string,
 	): void {
@@ -4510,7 +4508,7 @@ export function createDispatchBundle(
 		run: ActiveRun,
 		outcome: RunOutcome,
 		detail: string | null,
-		receipt: RunReceipt,
+		receipt: RunResult,
 		failureClass: FailureClass,
 		contextOverflow = false,
 		currentRetryReason: string | null = null,
@@ -4654,7 +4652,7 @@ export function createDispatchBundle(
 
 	function completeAssignmentAttempt(
 		run: ActiveRun,
-		receipt: RunReceipt,
+		receipt: RunResult,
 		outcome: RunOutcome,
 		detail: string | null,
 		failureClass: FailureClass,
@@ -4741,7 +4739,7 @@ export function createDispatchBundle(
 		// the worktree it created). A retry shares the assignment lineage but
 		// must receive its own ledger/run identity.
 		delete retryReq.runIdHint;
-		let terminal: Promise<RunReceipt> | undefined;
+		let terminal: Promise<RunResult> | undefined;
 		const reasonKey = retryReasonKey(controlRootFor(run.runId), attempt);
 		retryReasons.set(reasonKey, reason);
 		try {
@@ -5861,7 +5859,7 @@ export function createDispatchBundle(
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
-		finalPromise: Promise<RunReceipt>;
+		finalPromise: Promise<RunResult>;
 	}> {
 		const lifecycle = resolveAcpDelegationLifecycle(req, settings);
 		const estimate = workerToolCallHardCap(settings);
@@ -6020,7 +6018,7 @@ export function createDispatchBundle(
 		const toolStats = new Map<string, ToolCallStat>();
 		const inFlightTools = new Map<string, number>();
 		let toolTelemetryIngestionErrors = 0;
-		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
+		const upstreamResponses: RunResultUpstreamResponse[] = [];
 		const finishContractEntries: unknown[] = [];
 		let finishContractAssistantText = "";
 		let finishContractAssistantTurnId: string | null = null;
@@ -6334,9 +6332,9 @@ export function createDispatchBundle(
 		});
 
 		const startedAt = envelope.startedAt;
-		let resolveFinal!: (receipt: RunReceipt) => void;
+		let resolveFinal!: (receipt: RunResult) => void;
 		let rejectFinal!: (error: unknown) => void;
-		const finalPromise = new Promise<RunReceipt>((res, rej) => {
+		const finalPromise = new Promise<RunResult>((res, rej) => {
 			resolveFinal = res;
 			rejectFinal = rej;
 		});
@@ -6382,8 +6380,8 @@ export function createDispatchBundle(
 			status: RunStatus,
 			outcome: RunOutcome,
 			outcomeDetail: string | null,
-			capturedOutput: RunReceiptOutput | undefined,
-		): RunReceiptDraft => {
+			capturedOutput: RunResultOutput | undefined,
+		): RunResultDraft => {
 			// The adapter's aggregate usage is authoritative; event metering saw
 			// the same messages, so adding both would double-count. Event-metered
 			// values survive only when the adapter reported nothing.
@@ -6486,7 +6484,7 @@ export function createDispatchBundle(
 				verification: deriveReceiptVerification({ toolStats: finalToolStats }, { acpDelegation: true }),
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
 				effectiveFailover: failoverModeFor(req),
-				quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
+				quality: createRunResultQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
 				autonomy: "default",
 				safety: {
 					decisions: safetyDecisionCounts,
@@ -6539,7 +6537,7 @@ export function createDispatchBundle(
 			};
 		};
 
-		const emitTerminalDispatchEvent = (receipt: RunReceipt, outcome: RunOutcome): void => {
+		const emitTerminalDispatchEvent = (receipt: RunResult, outcome: RunOutcome): void => {
 			const startMs = Date.parse(receipt.startedAt);
 			const endMs = Date.parse(receipt.endedAt);
 			const durationMs =
@@ -6614,7 +6612,7 @@ export function createDispatchBundle(
 			return { assessment, rigor };
 		};
 
-		(async (): Promise<RunReceipt> => {
+		(async (): Promise<RunResult> => {
 			try {
 				const result = await acp.promise;
 				// The receipt reads meters the domain pump fills. Finalization
@@ -6686,7 +6684,7 @@ export function createDispatchBundle(
 					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
 					failureMessage = finalDetail;
 				}
-				let worktreeReceipt: RunReceiptDraft["worktree"];
+				let worktreeReceipt: RunResultDraft["worktree"];
 				if (req.taskWorktree !== undefined && finalOutcome === "succeeded") {
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
@@ -6906,7 +6904,7 @@ export function createDispatchBundle(
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
-		finalPromise: Promise<RunReceipt>;
+		finalPromise: Promise<RunResult>;
 		effectiveRequest: DispatchRequest;
 	}> {
 		const hostRun = preparation?.hostRun;
@@ -6966,7 +6964,7 @@ export function createDispatchBundle(
 		const protectedArtifactState = protectedArtifactStateForRequest(getProtectedArtifactState(), req);
 
 		let routeObservation: RouteObservationHandle;
-		const attachRouteObservation = <T extends { finalPromise: Promise<RunReceipt> }>(handle: T): T => {
+		const attachRouteObservation = <T extends { finalPromise: Promise<RunResult> }>(handle: T): T => {
 			const observation = routeObservation;
 			handle.finalPromise
 				.then((receipt) => {
@@ -7524,7 +7522,7 @@ export function createDispatchBundle(
 		const toolStats = new Map<string, ToolCallStat>();
 		const inFlightTools = new Map<string, number>();
 		let toolTelemetryIngestionErrors = 0;
-		const upstreamResponses: RunReceiptUpstreamResponse[] = [];
+		const upstreamResponses: RunResultUpstreamResponse[] = [];
 		const skillActivations: SkillActivation[] = [];
 		const finishContractEntries: unknown[] = [];
 		const verifyCalls: VerifyCallLog = { pending: new Map(), calls: [] };
@@ -7549,7 +7547,7 @@ export function createDispatchBundle(
 		let failureMessage: string | undefined;
 		let permissionDenialDetail: string | null = null;
 		let providerErrorMessage: string | null = null;
-		let externalTelemetry: RunReceiptDraft["externalTelemetry"];
+		let externalTelemetry: RunResultDraft["externalTelemetry"];
 		let outcomeCode: RunOutcomeCode | null = null;
 		const trustedOutcomeCodes = new Set<RunOutcomeCode>();
 		const trustedOutcomeDetails = new Map<RunOutcomeCode, string>();
@@ -8216,9 +8214,9 @@ export function createDispatchBundle(
 
 		const startedAt = envelope.startedAt;
 
-		let resolveFinal!: (receipt: RunReceipt) => void;
+		let resolveFinal!: (receipt: RunResult) => void;
 		let rejectFinal!: (error: unknown) => void;
-		const finalPromise = new Promise<RunReceipt>((res, rej) => {
+		const finalPromise = new Promise<RunResult>((res, rej) => {
 			resolveFinal = res;
 			rejectFinal = rej;
 		});
@@ -8270,11 +8268,11 @@ export function createDispatchBundle(
 			status: RunStatus,
 			outcome: RunOutcome,
 			outcomeDetail: string | null,
-			capturedOutput: RunReceiptOutput | undefined,
+			capturedOutput: RunResultOutput | undefined,
 			steering: ReadonlyArray<RunSteeringProvenance>,
-			resultContract: RunReceiptResultContractFact | null,
+			resultContract: RunResultContractFact | null,
 			validationGrounding: RunValidationGrounding | null,
-		): RunReceiptDraft => {
+		): RunResultDraft => {
 			// A canceled run seals status "interrupted" and must not report exit 0:
 			// the terminal state disagrees with a success code. This mirrors the ACP
 			// receipt builder, which already coerces "interrupted" to nonzero.
@@ -8407,7 +8405,7 @@ export function createDispatchBundle(
 				),
 				routingIntent: req.routingIntent ?? defaultRoutingIntent(req),
 				effectiveFailover: failoverModeFor(req),
-				quality: createRunReceiptQuality({
+				quality: createRunResultQuality({
 					...(req.responseSchema === undefined ? {} : { responseSchema: req.responseSchema }),
 					runtimeEnforceable:
 						runtimeSpeaksResponseSchemaDialect(lifecycle.target.runtime) &&
@@ -8465,7 +8463,7 @@ export function createDispatchBundle(
 			};
 		};
 
-		const emitTerminalDispatchEvent = (receipt: RunReceipt, outcome: RunOutcome): void => {
+		const emitTerminalDispatchEvent = (receipt: RunResult, outcome: RunOutcome): void => {
 			const startMs = Date.parse(receipt.startedAt);
 			const endMs = Date.parse(receipt.endedAt);
 			const durationMs =
@@ -8549,7 +8547,7 @@ export function createDispatchBundle(
 		// finalPromise settles.
 		settlement?.live(envelope.id);
 
-		(async (): Promise<RunReceipt> => {
+		(async (): Promise<RunResult> => {
 			try {
 				const result = await workerDone;
 				// #425: stop board traffic as soon as the process settles, before receipt work awaits.
@@ -8766,7 +8764,7 @@ export function createDispatchBundle(
 					executedCheckingCalls: countCheckingCalls(toolStats),
 					readOnly: lifecycle.readOnly,
 				});
-				const sealedResultContractFact: RunReceiptResultContractFact | null =
+				const sealedResultContractFact: RunResultContractFact | null =
 					resultContract === null
 						? null
 						: validationGrounding !== null &&
@@ -8856,7 +8854,7 @@ export function createDispatchBundle(
 				// for the operator's one merge command instead of left as loose edits.
 				const hostRejectedMerge =
 					req.taskWorktree !== undefined && (req.apply ?? "merge") === "merge" && hostRejection !== null && workerSucceeded;
-				let worktreeReceipt: RunReceiptDraft["worktree"];
+				let worktreeReceipt: RunResultDraft["worktree"];
 				// Set when the operator discarded the branch and worktree from the merge card.
 				let worktreeDiscarded = false;
 				// Set once the task claim is gone, so the closing settle below does not
@@ -9361,7 +9359,7 @@ export function createDispatchBundle(
 	): Promise<{
 		runId: string;
 		events: AsyncIterableIterator<unknown>;
-		finalPromise: Promise<RunReceipt>;
+		finalPromise: Promise<RunResult>;
 	}> {
 		// A retry re-enters here with the request it was first admitted under, so
 		// only a request that has never been stamped takes the current session.
@@ -10020,7 +10018,7 @@ export function createDispatchBundle(
 			runId: string;
 			agentId: string;
 			events: AsyncIterableIterator<unknown>;
-			finalPromise: Promise<RunReceipt>;
+			finalPromise: Promise<RunResult>;
 		}>,
 		batchRef: { current: BatchState },
 	): AsyncIterableIterator<unknown> {
@@ -10068,7 +10066,7 @@ export function createDispatchBundle(
 		batchId: string;
 		assignmentIds: ReadonlyArray<string>;
 		events: AsyncIterableIterator<unknown>;
-		finalPromise: Promise<ReadonlyArray<RunReceipt>>;
+		finalPromise: Promise<ReadonlyArray<RunResult>>;
 	}> {
 		if (reqs.length === 0) throw new Error("dispatch: batch requires at least one request");
 		// Two or more concurrent workers share one checkout, so a declared check
@@ -10103,7 +10101,7 @@ export function createDispatchBundle(
 				batchRef.current = onRunComplete(batchRef.current, handle.runId, receipt.exitCode !== 0);
 				return receipt;
 			}),
-		).then((receipts) => receipts as ReadonlyArray<RunReceipt>);
+		).then((receipts) => receipts as ReadonlyArray<RunResult>);
 		return {
 			batchId: batchRef.current.id,
 			assignmentIds: batchRef.current.assignmentIds,
@@ -10118,8 +10116,8 @@ export function createDispatchBundle(
 		kind: "none" | "vote" | "judge";
 		text: string;
 		subjects: ReadonlyArray<{ runId: string; digest: string | null }>;
-		template: RunReceipt;
-	}): Promise<RunReceipt> {
+		template: RunResult;
+	}): Promise<RunResult> {
 		const l = requireLedger();
 		const runId = newRunId();
 		const task = `Council ${input.kind} synthesis`;
@@ -10204,7 +10202,7 @@ export function createDispatchBundle(
 					toolStats: [],
 					verification: { state: "unverified", basis: "no-validation-tool" },
 					routingIntent: defaultRoutingIntent({}),
-					quality: createRunReceiptQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
+					quality: createRunResultQuality({ runtimeEnforceable: false, enforcementPassed: null, resultContract: null }),
 					reproducibility: collectReproducibility(input.template.reproducibility?.cwd ?? process.cwd(), null),
 					sessionId: input.template.sessionId,
 					gate,
@@ -11007,7 +11005,7 @@ export function createDispatchBundle(
 		async waitForMember(runId) {
 			const root = controlRootFor(runId);
 			await contract.drainMember?.(runId);
-			const receipts: RunReceipt[] = [];
+			const receipts: RunResult[] = [];
 			for (const [attemptId, attempt] of controlAttempts) {
 				if (controlRootsByAttempt.get(attemptId) === root && attempt.receipt !== undefined) {
 					receipts.push(attempt.receipt);

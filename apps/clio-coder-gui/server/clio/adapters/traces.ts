@@ -9,7 +9,7 @@ import { openLedger } from "../../../../../src/domains/dispatch/state.js";
 import type { RunEnvelope } from "../../../../../src/domains/dispatch/types.js";
 import {
 	listRunTelemetryIds,
-	loadRunReceiptEvidence,
+	loadRunResultEvidence,
 	loadRunTelemetrySource,
 	runTelemetryDirectoryExists,
 	runTelemetryWrittenMs,
@@ -211,7 +211,7 @@ export class TraceAdapter {
 			// A receipt that resolves outside the state directory is refused; one that is not there is missing evidence.
 			if (error instanceof AppProblem) throw error;
 		}
-		const evidence = loadRunReceiptEvidence(state, runId);
+		const evidence = loadRunResultEvidence(state, runId);
 		if (!full || !path) return { evidence, receipt: null };
 		let receipt: Record<string, unknown> | null = null;
 		try {

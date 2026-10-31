@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import { inspectRunResultTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { WORKER_LIVE_TAIL_MAX_BYTES } from "../../src/domains/telemetry/worker-progress.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
@@ -30,7 +30,7 @@ function verifiedFacts(runId: string): WorkerReceiptFacts {
 	const envelope = fixtureEnvelope(runId);
 	const draft = fixtureReceiptDraft(envelope);
 	draft.output = { text, truncated: false, state: "final", bytes: Buffer.byteLength(text) };
-	const trust = inspectRunReceiptTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status;
+	const trust = inspectRunResultTrustStatus(withReceiptIntegrity(draft, envelope), envelope).status;
 	return { trust, outcome: "succeeded", exitCode: 0, text, mergeDetail: "merged abc1234 onto main" };
 }
 

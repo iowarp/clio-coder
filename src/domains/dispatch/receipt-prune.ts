@@ -22,7 +22,7 @@ import {
 	receiptFromEvidenceCopy,
 	receiptTombstoneOf,
 } from "./receipt-store.js";
-import type { RunEnvelope, RunReceipt } from "./types.js";
+import type { RunEnvelope, RunResult } from "./types.js";
 
 export interface ReceiptPruneAction {
 	runId: string;
@@ -63,7 +63,7 @@ function readRows(stateDir: string): Map<string, RunEnvelope> {
 
 /** The evidence bundle whose copy of this receipt verifies under its seal, newest first, or why none does. */
 function verifiedCopy(
-	receipt: RunReceipt,
+	receipt: RunResult,
 	row: RunEnvelope | null,
 	evidenceIds: readonly string[],
 	dataDir: string,
@@ -88,7 +88,7 @@ function verifiedCopy(
 		if (copy === null) continue;
 		found = true;
 		try {
-			if (verifyReceiptIntegrityOutcome(copy as unknown as RunReceipt, row).ok) return evidenceId;
+			if (verifyReceiptIntegrityOutcome(copy as unknown as RunResult, row).ok) return evidenceId;
 		} catch {
 			// A copy the verifier cannot read is no copy to prune against.
 		}
@@ -116,11 +116,11 @@ export function planReceiptPrune(stateDir = clioStateDir(), dataDir = clioDataDi
 		const runId = name.slice(0, -".json".length);
 		const path = join(stateDir, "receipts", name);
 		let text: string;
-		let receipt: RunReceipt;
+		let receipt: RunResult;
 		try {
 			text = readFileSync(path, "utf8");
 			if (receiptTombstoneOf(text) !== null) continue;
-			receipt = JSON.parse(text) as RunReceipt;
+			receipt = JSON.parse(text) as RunResult;
 		} catch {
 			plan.held.push({ runId, path, reason: "unreadable" });
 			continue;

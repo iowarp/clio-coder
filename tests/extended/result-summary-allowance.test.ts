@@ -24,7 +24,7 @@ import {
 } from "../../src/domains/dispatch/event-pump.js";
 import { dispatchResultContract } from "../../src/domains/dispatch/execution-role.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { receiptEvidenceLabels } from "../../src/tools/worker-evidence.js";
@@ -315,10 +315,10 @@ function setup(outputs: readonly string[]) {
 const intent = { read_roots: ["."], write_roots: [] };
 
 /** The integrity-verified receipt whose sealed output is exactly `text`. */
-function sealedReceipt(bundle: ReturnType<typeof setup>["bundle"], text: string): RunReceipt {
+function sealedReceipt(bundle: ReturnType<typeof setup>["bundle"], text: string): RunResult {
 	for (const run of bundle.contract.listRuns()) {
 		if (!run.receiptPath) continue;
-		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunReceipt;
+		const receipt = JSON.parse(readFileSync(run.receiptPath, "utf8")) as RunResult;
 		if (receipt.output?.text !== text) continue;
 		ok(verifyReceiptIntegrity(receipt, run).ok);
 		return receipt;

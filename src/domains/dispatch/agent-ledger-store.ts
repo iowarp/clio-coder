@@ -30,7 +30,7 @@ import { parseAgentLedgerBody, parseAgentLedgerEntry } from "../../worker/protoc
 import { mergeFlowRestrictions } from "../safety/information-flow.js";
 import type { RenderAgentLedgerOptions } from "./agent-ledger.js";
 import { AGENT_LEDGER_PROMPT_MAX_CHARS, claimConflicts, renderAgentLedger } from "./agent-ledger.js";
-import type { RunReceipt } from "./types.js";
+import type { RunResult } from "./types.js";
 
 /** Bounded ring: newest first, oldest dropped past this count. */
 const MAX_AGENT_LEDGER_RECORDS = 50;
@@ -312,7 +312,7 @@ export async function appendAgentLedgerEntry(
 export function appendAgentLedgerReport(
 	id: string,
 	attribution: AgentLedgerAttribution,
-	receipt: Pick<RunReceipt, "outcome" | "outcomeDetail" | "output" | "safety">,
+	receipt: Pick<RunResult, "outcome" | "outcomeDetail" | "output" | "safety">,
 ): Promise<AgentLedgerAppendResult> {
 	const output = receipt.output;
 	const text =

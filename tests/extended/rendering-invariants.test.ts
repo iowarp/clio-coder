@@ -2,7 +2,7 @@ import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:asse
 import { describe, it } from "node:test";
 import type { OutputStyle } from "../../src/core/defaults.js";
 import { withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { inspectRunReceiptTrustStatus } from "../../src/domains/evidence/trust-status.js";
+import { inspectRunResultTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import type { WorkerRunEntry } from "../../src/domains/session/index.js";
 import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
@@ -593,7 +593,7 @@ describe("worker rendering invariants", () => {
 			tools: [],
 			attempts: [],
 			pending: false,
-			receipt: { outcome: "succeeded", durationMs: 21000, trust: inspectRunReceiptTrustStatus(receipt, envelope).status },
+			receipt: { outcome: "succeeded", durationMs: 21000, trust: inspectRunResultTrustStatus(receipt, envelope).status },
 		};
 		for (const width of [24, 44, 76]) {
 			const lines = renderWorkerEntryLines(entry, width, {});

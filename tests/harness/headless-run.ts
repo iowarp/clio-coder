@@ -10,7 +10,7 @@ import { copyFileSync, cpSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
+import type { RunEnvelope, RunResult } from "../../src/domains/dispatch/types.js";
 import { readRunJournal } from "./run-journal.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -123,7 +123,7 @@ export function runCli(
 }
 
 /** The run's single receipt and ledger row, after checking the integrity seal binds them. */
-export function sealedReceipt(stateDir: string): { receipt: RunReceipt; envelope: RunEnvelope } {
+export function sealedReceipt(stateDir: string): { receipt: RunResult; envelope: RunEnvelope } {
 	const journal = readRunJournal(stateDir);
 	ok(journal, `no run journal under ${stateDir}`);
 	strictEqual(journal.receipts.length, 1, `expected one receipt, found ${journal.receipts.length}`);

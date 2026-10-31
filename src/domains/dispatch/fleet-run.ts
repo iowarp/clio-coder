@@ -76,7 +76,7 @@ import { verifyReceiptIntegrity } from "./receipt-integrity.js";
 import { readReceiptTextSync } from "./receipt-store.js";
 import { type FleetRootTelemetry, openFleetRootTelemetry } from "./run-telemetry.js";
 import { type FleetRunRecord, writeFleetRun, writeFleetRunSync } from "./state.js";
-import type { RunReceipt } from "./types.js";
+import type { RunResult } from "./types.js";
 import { captureWorkspaceCheckpoint, workspaceCheckpointRef } from "./workspace-checkpoint.js";
 import type { WriteBoundaryAttribution } from "./write-boundary.js";
 import { createWriteBoundaryEnforcer } from "./write-boundary-enforcer.js";
@@ -126,7 +126,7 @@ export interface FleetRunStepOutcome extends FleetRunStepEvent {
 	costProvenance: CostProvenance;
 	costSummary?: CostAggregate;
 	/** The sealed agent receipt when this was an agent step. */
-	receipt?: RunReceipt;
+	receipt?: RunResult;
 	/** The durable code-step record when this was a deterministic step. */
 	codeStep?: Awaited<ReturnType<typeof runCodeStep>>["record"];
 	/** The journal holding the step's `code_step.settled` when this was a deterministic step. */
@@ -283,7 +283,7 @@ export interface FleetRunOutcome {
 	rootId: string;
 	planHash: string;
 	result: ExecutionPlanResult;
-	receipts: ReadonlyArray<RunReceipt>;
+	receipts: ReadonlyArray<RunResult>;
 	/**
 	 * The fold that keeps unpriced calls distinguishable from priced ones, so a
 	 * run whose every receipt came back `unknown` renders as not measured rather
@@ -299,8 +299,8 @@ export interface FleetRunOutcome {
 }
 
 /** Sealed independence facts between the work under review and its reviewer. */
-function fleetGateCorrelation(subject: RunReceipt, decider: RunReceipt): GateDecisionCorrelation {
-	const facts = (receipt: RunReceipt) => ({
+function fleetGateCorrelation(subject: RunResult, decider: RunResult): GateDecisionCorrelation {
+	const facts = (receipt: RunResult) => ({
 		agentId: receipt.agentId,
 		targetId: receipt.targetId,
 		wireModelId: receipt.wireModelId,
@@ -583,19 +583,19 @@ async function runFleetHoldingWorkspace(
 			notice(`write boundary ${verdict.window}: ${verdict.detail} record=${path}`, "write-boundary");
 		},
 	});
-	const receipts: RunReceipt[] = [];
-	const receiptsByStep = new Map<string, RunReceipt>();
+	const receipts: RunResult[] = [];
+	const receiptsByStep = new Map<string, RunResult>();
 	// Paths a workspace code step created or edited, so a later loop check runs
 	// a test it generated exactly as it runs an agent ancestor's changed tests.
 	// Null marks a step whose changes could not be measured (no git status).
 	const codeChangedPathsByStep = new Map<string, ReadonlyArray<string> | null>();
 	const attemptRunIdsByStep = new Map<string, ReadonlyArray<string>>();
-	const memberReceipts = async (runId: string, firstReceipt: RunReceipt) =>
+	const memberReceipts = async (runId: string, firstReceipt: RunResult) =>
 		dispatch.waitForMember ? dispatch.waitForMember(runId) : { receipt: firstReceipt, receipts: [firstReceipt] };
 	const recordMemberReceipts = async (
-		member: { receipt: RunReceipt; receipts: ReadonlyArray<RunReceipt> },
+		member: { receipt: RunResult; receipts: ReadonlyArray<RunResult> },
 		stepId?: string,
-	): Promise<RunReceipt> => {
+	): Promise<RunResult> => {
 		if (stepId !== undefined) {
 			const runIds = member.receipts.map((receipt) => receipt.runId);
 			attemptRunIdsByStep.set(stepId, runIds);
@@ -608,13 +608,13 @@ async function runFleetHoldingWorkspace(
 		}
 		return member.receipt;
 	};
-	const collectMemberReceipts = async (runId: string, firstReceipt: RunReceipt, stepId?: string) =>
+	const collectMemberReceipts = async (runId: string, firstReceipt: RunResult, stepId?: string) =>
 		recordMemberReceipts(await memberReceipts(runId, firstReceipt), stepId);
 	for (const [stepId, replayedResult] of replayed) {
 		try {
 			const receipt = JSON.parse(
 				readReceiptTextSync(join(clioStateDir(), "receipts", `${replayedResult.terminalRunId}.json`)),
-			) as RunReceipt;
+			) as RunResult;
 			receiptsByStep.set(stepId, receipt);
 		} catch {
 			// Deterministic results and unavailable historical receipts need no receipt projection.
@@ -1180,7 +1180,7 @@ async function runFleetHoldingWorkspace(
 				// because a loop's declared dependency is another loop's deterministic
 				// check, which produced no receipt at all.
 				const ancestors = executionPlanAncestors(livePlan, step.id);
-				let subject: RunReceipt | undefined;
+				let subject: RunResult | undefined;
 				for (const [stepId, receipt] of receiptsByStep) {
 					if (ancestors.has(stepId)) subject = receipt;
 				}

@@ -6,20 +6,20 @@ import { ROUTE_POLICY_VERSION } from "./route-policy.js";
 import { isRoutingIntent } from "./routing-intent.js";
 import type {
 	RunEnvelope,
-	RunReceipt,
-	RunReceiptDraft,
-	RunReceiptIntegrity,
-	RunReceiptLedgerCommitment,
-	RunReceiptQuality,
+	RunResult,
+	RunResultDraft,
+	RunResultIntegrity,
+	RunResultLedgerCommitment,
+	RunResultQuality,
 } from "./types.js";
 
 /**
  * The single receipt integrity contract. Historical receipts sealed under
  * this version retain their digest coverage when optional fields change.
  */
-export const RUN_RECEIPT_INTEGRITY_VERSION: RunReceiptIntegrity["version"] = 21;
-export type ReceiptIntegrityVersion = RunReceiptIntegrity["version"];
-export type ReceiptIntegrityField = keyof RunReceiptDraft;
+export const RUN_RECEIPT_INTEGRITY_VERSION: RunResultIntegrity["version"] = 21;
+export type ReceiptIntegrityVersion = RunResultIntegrity["version"];
+export type ReceiptIntegrityField = keyof RunResultDraft;
 export const RUN_RECEIPT_INTEGRITY_ALGORITHM = "sha256";
 
 /** `ledgerEvicted` means the receipt's own seal verified while its ledger row was no longer available (#434). */
@@ -195,7 +195,7 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 const RECEIPT_FIELDS = Object.keys(RECEIPT_INTEGRITY_FIELD_COVERAGE) as ReceiptIntegrityField[];
 
 function selectedReceiptFields(
-	receipt: RunReceipt | RunReceiptDraft,
+	receipt: RunResult | RunResultDraft,
 	fields: ReadonlyArray<string>,
 ): Record<string, unknown> {
 	const source = receipt as unknown as Record<string, unknown>;
@@ -207,7 +207,7 @@ function selectedReceiptFields(
 	return result;
 }
 
-function receiptDigestFields(receipt: RunReceipt | RunReceiptDraft): Record<string, unknown> {
+function receiptDigestFields(receipt: RunResult | RunResultDraft): Record<string, unknown> {
 	const result = selectedReceiptFields(receipt, RECEIPT_FIELDS);
 	result.briefing = receipt.briefing ?? null;
 	result.outcomeCode = receipt.outcomeCode ?? null;
@@ -268,7 +268,7 @@ function ledgerDigestFields(envelope: RunEnvelope): Record<string, unknown> {
 	};
 }
 
-function ledgerCommitment(envelope: RunEnvelope): RunReceiptLedgerCommitment {
+function ledgerCommitment(envelope: RunEnvelope): RunResultLedgerCommitment {
 	return {
 		label: "commitment",
 		function: "sha256",
@@ -285,7 +285,7 @@ function ledgerCommitment(envelope: RunEnvelope): RunReceiptLedgerCommitment {
 }
 
 /** The seal covers the receipt and a commitment to its ledger row, never the row itself (#434). */
-function receiptDigest(receipt: RunReceipt | RunReceiptDraft, ledger: RunReceiptLedgerCommitment): string {
+function receiptDigest(receipt: RunResult | RunResultDraft, ledger: RunResultLedgerCommitment): string {
 	return sha256(
 		canonicalJson({
 			contract: "clio-coder.runReceipt.integrity",
@@ -297,7 +297,7 @@ function receiptDigest(receipt: RunReceipt | RunReceiptDraft, ledger: RunReceipt
 	);
 }
 
-function computeReceiptIntegrity(receipt: RunReceipt | RunReceiptDraft, envelope: RunEnvelope): RunReceiptIntegrity {
+function computeReceiptIntegrity(receipt: RunResult | RunResultDraft, envelope: RunEnvelope): RunResultIntegrity {
 	const ledger = ledgerCommitment(envelope);
 	return {
 		version: RUN_RECEIPT_INTEGRITY_VERSION,
@@ -307,7 +307,7 @@ function computeReceiptIntegrity(receipt: RunReceipt | RunReceiptDraft, envelope
 	};
 }
 
-function isReceiptQuality(value: unknown): value is RunReceiptQuality {
+function isReceiptQuality(value: unknown): value is RunResultQuality {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 	const quality = value as Record<string, unknown>;
 	if (quality.version !== 1 || !Array.isArray(quality.typedValidations)) return false;
@@ -363,7 +363,7 @@ function isCurrentRouteDecision(value: unknown): boolean {
 	);
 }
 
-export function withReceiptIntegrity(receipt: RunReceiptDraft, envelope: RunEnvelope): RunReceipt {
+export function withReceiptIntegrity(receipt: RunResultDraft, envelope: RunEnvelope): RunResult {
 	if (!isReceiptQuality(receipt.quality)) throw new Error("receipt integrity: required quality block invalid");
 	if (!isExecutionRole(receipt.executionRole)) throw new Error("receipt integrity: required execution role invalid");
 	if (!isRoutingIntent(receipt.routingIntent)) {
@@ -375,7 +375,7 @@ export function withReceiptIntegrity(receipt: RunReceiptDraft, envelope: RunEnve
 	// R7: a hash without a declared function, canonicalization, subject and label is never sealed (#434).
 	const undeclared = undeclaredReceiptHashes(receipt, receipt.agentId);
 	if (undeclared.length > 0) throw new Error(`receipt integrity: undeclared hashes ${undeclared.join(", ")}`);
-	const declared: RunReceiptDraft = { ...receipt, hashSet: RECEIPT_HASH_SET };
+	const declared: RunResultDraft = { ...receipt, hashSet: RECEIPT_HASH_SET };
 	return {
 		...declared,
 		routingIntent: receipt.routingIntent,
@@ -383,7 +383,7 @@ export function withReceiptIntegrity(receipt: RunReceiptDraft, envelope: RunEnve
 	};
 }
 
-export function isReceiptIntegrity(value: unknown): value is RunReceiptIntegrity {
+export function isReceiptIntegrity(value: unknown): value is RunResultIntegrity {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 	const candidate = value as Record<string, unknown>;
 	const ledger = candidate.ledger as Record<string, unknown> | null | undefined;
@@ -403,7 +403,7 @@ export function isReceiptIntegrity(value: unknown): value is RunReceiptIntegrity
 	);
 }
 
-function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string | null {
+function firstLedgerMismatch(receipt: RunResult, envelope: RunEnvelope): string | null {
 	const sharedFields: Array<[string, unknown, unknown]> = [
 		["runId", receipt.runId, envelope.id],
 		["agentId", receipt.agentId, envelope.agentId],
@@ -453,7 +453,7 @@ function firstLedgerMismatch(receipt: RunReceipt, envelope: RunEnvelope): string
  * it. A null envelope is an evicted row: the seal alone verifies, and the
  * result says the ledger could not be compared (#434).
  */
-export function verifyReceiptIntegrity(receipt: RunReceipt, envelope: RunEnvelope | null): ReceiptIntegrityResult {
+export function verifyReceiptIntegrity(receipt: RunResult, envelope: RunEnvelope | null): ReceiptIntegrityResult {
 	if (!isReceiptQuality(receipt.quality) || !isReceiptIntegrity(receipt.integrity)) {
 		return { ok: false, reason: "integrity invalid" };
 	}

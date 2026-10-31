@@ -42,15 +42,15 @@ import {
 import { createRouteHistoryStore, type RouteHistoryStore, routeSettledLabel } from "./route-history.js";
 import { type RouteObservation, routeObservationFromHistory } from "./route-policy.js";
 import { type RouteQualityReduction, receiptSourceAuthenticated, reduceRouteQuality } from "./route-quality.js";
-import type { RunEnvelope, RunReceipt } from "./types.js";
+import type { RunEnvelope, RunResult } from "./types.js";
 
-function receiptHasUnknownCost(receipt: RunReceipt): boolean {
+function receiptHasUnknownCost(receipt: RunResult): boolean {
 	return (
 		receipt.costSummary?.hasUnknown ?? (receipt.costProvenance === undefined || receipt.costProvenance === "unknown")
 	);
 }
 
-function receiptPricedCoverage(receipt: RunReceipt): "complete" | "partial" | "unknown" {
+function receiptPricedCoverage(receipt: RunResult): "complete" | "partial" | "unknown" {
 	if (!receiptHasUnknownCost(receipt)) return "complete";
 	return (receipt.costSummary?.knownUsd ?? 0) > 0 ? "partial" : "unknown";
 }
@@ -184,7 +184,7 @@ export interface RouteObservationHandle {
 export interface RouteObservedOutcome extends RouteRealizedOutcome {
 	/** Host lifecycle assignment identity, separate from the published ancestry root. */
 	assignmentId?: string;
-	receipt: RunReceipt;
+	receipt: RunResult;
 	envelope: RunEnvelope;
 	quality: RouteQualityReduction;
 	phaseTiming: { totalEndToEndMs: number | null; queueWaitMs: number | null } | undefined;

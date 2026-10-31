@@ -1,7 +1,7 @@
 import { gateRouteCorrelation } from "./execution-role.js";
 import { type GateDecisionArtifact, verifyGateDecisionArtifact } from "./gate-decisions.js";
 import { verifyReceiptIntegrity } from "./receipt-integrity.js";
-import type { RunEnvelope, RunReceipt } from "./types.js";
+import type { RunEnvelope, RunResult } from "./types.js";
 
 /** A routing label is deliberately separate from the descriptive receipt verification state. */
 export type RouteQualityLabel = "pass" | "fail" | "unmeasured";
@@ -31,7 +31,7 @@ export interface RouteQualityReduction {
 }
 
 export interface RouteQualityReceiptSource {
-	receipt: RunReceipt;
+	receipt: RunResult;
 	envelope: RunEnvelope;
 }
 
@@ -115,7 +115,7 @@ function gateOutcome(artifact: GateDecisionArtifact): "pass" | "fail" | null {
 	return null;
 }
 
-function correlationFacts(receipt: RunReceipt): Parameters<typeof gateRouteCorrelation>[0] {
+function correlationFacts(receipt: RunResult): Parameters<typeof gateRouteCorrelation>[0] {
 	return {
 		agentId: receipt.agentId,
 		targetId: receipt.targetId,
@@ -126,8 +126,8 @@ function correlationFacts(receipt: RunReceipt): Parameters<typeof gateRouteCorre
 }
 
 function gateCorrelation(
-	subject: RunReceipt,
-	decider: RunReceipt,
+	subject: RunResult,
+	decider: RunResult,
 ): Pick<CorrelatedGateEvidence, "reason" | "dimensions"> | null {
 	const correlation = gateRouteCorrelation(correlationFacts(subject), correlationFacts(decider));
 	if (correlation.independent) return null;

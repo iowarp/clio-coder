@@ -12,15 +12,15 @@ import {
 } from "../domains/dispatch/budget-envelope.js";
 import { hostCheckBaseNote } from "../domains/dispatch/host-verification-note.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
-import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/types.js";
+import type { RunResult, RunResultVerification } from "../domains/dispatch/types.js";
 import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
-import { adaptRunReceiptTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
+import { adaptRunResultTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 import { receiptGatewayRoutingLabel, receiptResponseModelIdObservationLabel } from "./dispatch-event-text.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 /** Expose only a completed, sealed handoff. Conformance does not imply evidence quality. */
 export function receiptHelperResult(
-	receipt: RunReceipt,
+	receipt: RunResult,
 	integrity: ReceiptIntegrityResult,
 ): StructuredHelperResult | null {
 	const output = receipt.output;
@@ -37,7 +37,7 @@ export function receiptHelperResult(
 }
 
 export function compactHelperResultLines(
-	receipt: RunReceipt,
+	receipt: RunResult,
 	integrity: ReceiptIntegrityResult,
 	maxBytes: number,
 ): string[] | null {
@@ -91,7 +91,7 @@ export { FLEET_EVIDENCE_GUIDANCE as SPOT_CHECK_GUIDANCE } from "../domains/agent
  * keeps its own role, so this is deliberately narrow; the activity and
  * first-pass labels below carry the honest signal for every other class.
  */
-function isMutationClassRun(receipt: RunReceipt, status: CanonicalTrustStatus): boolean {
+function isMutationClassRun(receipt: RunResult, status: CanonicalTrustStatus): boolean {
 	// A read-only agent seals `not_applicable`; recon that changes nothing is
 	// the expected outcome there, not a missing effect.
 	if (status.validationGrounding.state === "not_applicable") return false;
@@ -107,7 +107,7 @@ function isMutationClassRun(receipt: RunReceipt, status: CanonicalTrustStatus): 
  * fabricated `npm run typecheck` for a script that does not exist, and neither
  * honest signal reached the line the orchestrator reads.
  */
-function receiptAdmissionLabels(receipt: RunReceipt): string[] {
+function receiptAdmissionLabels(receipt: RunResult): string[] {
 	const labels: string[] = [];
 	const mismatch = receipt.capabilityMismatch;
 	if (mismatch !== undefined) {
@@ -139,7 +139,7 @@ function receiptAdmissionLabels(receipt: RunReceipt): string[] {
  * fixed the file. These labels are the receipt's own counters, so the parent
  * sees the shape of the run before it reads the worker's account of it.
  */
-function receiptActivityLabels(receipt: RunReceipt, status: CanonicalTrustStatus): string[] {
+function receiptActivityLabels(receipt: RunResult, status: CanonicalTrustStatus): string[] {
 	const labels: string[] = [];
 	const activity = receipt.toolActivity;
 	if (activity !== undefined) {
@@ -161,7 +161,7 @@ function receiptActivityLabels(receipt: RunReceipt, status: CanonicalTrustStatus
 }
 
 /** Receipt-sealed load provenance, bounded by count and name without exposing skill paths or bodies. */
-function receiptSkillLoadLabels(receipt: RunReceipt): string[] {
+function receiptSkillLoadLabels(receipt: RunResult): string[] {
 	const activations = receipt.skillActivations ?? [];
 	if (activations.length === 0) return [];
 	const shown = activations.slice(0, 6).map((activation) => {
@@ -187,11 +187,11 @@ function receiptSkillLoadLabels(receipt: RunReceipt): string[] {
  * project context stay separate, and neither line includes prompt prose.
  */
 export function receiptEvidenceLabels(
-	receipt: RunReceipt,
-	verification: RunReceiptVerification,
+	receipt: RunResult,
+	verification: RunResultVerification,
 	integrity: ReceiptIntegrityResult,
 ): string[] {
-	const status = adaptRunReceiptTrustStatus({ ...receipt, verification: verification }, { integrity });
+	const status = adaptRunResultTrustStatus({ ...receipt, verification: verification }, { integrity });
 	const canonical = canonicalTrustLabels(status);
 	if (!integrity.ok) {
 		return [...canonical, `receipt_integrity=FAILED reason=${JSON.stringify(integrity.reason)}`];
@@ -255,7 +255,7 @@ export function receiptEvidenceLabels(
 }
 
 /** Delivery guidance uses only an authenticated, terminal mutation report. */
-function documenterDeliveryLabels(receipt: RunReceipt): string[] {
+function documenterDeliveryLabels(receipt: RunResult): string[] {
 	if (
 		receipt.agentId !== "documenter" ||
 		!receipt.quality.resultContract?.sourceId.startsWith("agent-result-contract:mutation-report:")
@@ -320,7 +320,7 @@ export function workerTextLabel(status: CanonicalTrustStatus): string {
  * never the worker's claims.
  */
 export function workerTextNonEvidenceNotices(
-	receipt: RunReceipt,
+	receipt: RunResult,
 	status: CanonicalTrustStatus,
 	answerText: string,
 ): string[] {
