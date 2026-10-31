@@ -373,13 +373,13 @@ for (const trackedState of [false, true]) {
 			}
 			git(candidate.path, "add", "-A");
 			const staged = snapshot(candidate.path);
-			strictEqual(commitCandidateWork(candidate, "generated only", []), false);
+			strictEqual(commitCandidateWork(candidate, "generated only", []).committed, false);
 			strictEqual(candidateDiffStat(root, candidate.branch), "no changes");
 			strictEqual(git(candidate.path, "diff", "--cached", "--name-only"), "");
 			strictEqual(git(candidate.path, "rev-parse", "HEAD"), before.head);
 			writeFileSync(join(candidate.path, "tracked.txt"), "candidate work\n");
 			git(candidate.path, "add", "-A");
-			strictEqual(commitCandidateWork(candidate, "authored change", []), true);
+			strictEqual(commitCandidateWork(candidate, "authored change", []).committed, true);
 			const changed = git(root, "diff", "--name-only", `HEAD...${candidate.branch}`);
 			strictEqual(changed, "tracked.txt");
 			const merge = mergeWinnerBranch(root, candidate.branch);

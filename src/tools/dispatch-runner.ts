@@ -113,6 +113,7 @@ import type {
 import { grantRequestLines } from "./grant-request-text.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "./registry.js";
 import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
+import { leftUncommittedReport } from "./task-worktree.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
 	compactHelperResultLines,
@@ -485,6 +486,11 @@ interface CompletedRun {
 	recording?: import("../domains/dispatch/index.js").RecordingReference;
 	readOnly?: boolean;
 	receipt: RunResult;
+	/**
+	 * New files a compete candidate's commit left out. The candidate's worktree
+	 * is the runner's, not the run's, so its sealed receipt carries no worktree.
+	 */
+	leftUncommitted?: NonNullable<RunResult["worktree"]>["leftUncommitted"];
 	summary: EventSummary;
 	/** Reviewer/judge output staged before its receipt settlement boundary. */
 	pendingGate?: PendingGateDecisionHandle;
@@ -665,7 +671,7 @@ export function formatDispatchOutput(
 					? ` changed=${JSON.stringify(changedPaths.slice(0, 20))}${changedPaths.length > 20 ? `(+${changedPaths.length - 20} more)` : ""}`
 					: "";
 			// Byproducts the host commit kept out of the branch; the main agent decides whether any should ship.
-			const leftUncommitted = receipt.worktree?.leftUncommitted;
+			const leftUncommitted = run.leftUncommitted ?? receipt.worktree?.leftUncommitted;
 			const uncommittedSuffix =
 				leftUncommitted === undefined
 					? ""
@@ -1595,7 +1601,11 @@ async function runCompete(
 						(attribution.downgrades ?? []).some((entry) => entry.reason === "incomplete_tool_telemetry")
 							? null
 							: attribution.recorded;
-					commitCandidateWork(worktree, `clio-coder compete ${group} candidate ${worktree.index}`, recorded);
+					const left = leftUncommittedReport(
+						commitCandidateWork(worktree, `clio-coder compete ${group} candidate ${worktree.index}`, recorded)
+							.leftUncommitted,
+					);
+					if (left !== undefined) candidate.leftUncommitted = left;
 				}
 				return candidateDiffStat(root, worktree.branch);
 			});

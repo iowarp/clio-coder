@@ -285,11 +285,14 @@ export function commitWorktreePath(
 	return { committed: true, leftUncommitted };
 }
 
-/** The receipt's bounded account of new files a host commit left out, or nothing when it left none. */
+/** The bounded account of new files a host commit left out, or undefined when it left none. */
+export function leftUncommittedReport(paths: ReadonlyArray<string>): TaskWorktreeReceipt["leftUncommitted"] {
+	return paths.length === 0 ? undefined : { count: paths.length, paths: paths.slice(0, LEFT_UNCOMMITTED_LIST_LIMIT) };
+}
+
 function leftUncommittedField(paths: ReadonlyArray<string>): Pick<TaskWorktreeReceipt, "leftUncommitted"> {
-	return paths.length === 0
-		? {}
-		: { leftUncommitted: { count: paths.length, paths: paths.slice(0, LEFT_UNCOMMITTED_LIST_LIMIT) } };
+	const report = leftUncommittedReport(paths);
+	return report === undefined ? {} : { leftUncommitted: report };
 }
 
 export function worktreeBranchDiffStat(root: string, branch: string): string {
