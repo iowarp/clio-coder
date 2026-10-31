@@ -40,6 +40,7 @@ export { readTaskMemorySpendSummary } from "./memory-spend.js";
 export {
 	isTelemetryJournalFile,
 	TELEMETRY_JOURNAL_FILE,
+	telemetryBundlePath,
 	telemetryConsentPath,
 	telemetryJournalFiles,
 	telemetryJournalPath,

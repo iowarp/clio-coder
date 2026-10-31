@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { StateFileLockTimeoutError } from "../../core/state-file-lock.js";
 import type { TelemetryContext, WorkerTelemetryContext } from "../../core/telemetry/context.js";
 import { isWorkerTelemetryContext } from "../../core/telemetry/context.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
@@ -91,22 +92,38 @@ export function openRunTelemetry(context: WorkerTelemetryContext, directory: str
  * that exists is written, under the worker context its own run records carry, so its turn stops reading as running
  * (#425, #434). A run whose host died after run.settled but before its seal keeps that settlement and gets the seal.
  */
-export async function settleOrphanedRunJournal(directory: string, facts: EventPayload<"run.settled">): Promise<void> {
+export function settleOrphanedRunJournal(directory: string, facts: EventPayload<"run.settled">): Promise<void> {
+	return completeRunJournal(directory, facts);
+}
+
+/**
+ * Seal a terminal run whose journal holds run.settled but no seal after it: its host died between the settlement and
+ * the seal. A journal without run.settled is left alone, and so is one whose writer another live process holds,
+ * since that owner seals it itself (#434).
+ */
+export function sealSettledRunJournal(directory: string): Promise<void> {
+	return completeRunJournal(directory, null);
+}
+
+async function completeRunJournal(directory: string, facts: EventPayload<"run.settled"> | null): Promise<void> {
 	const { openCallJournal, readCallJournal } = await import("../telemetry/call-journal.js");
 	const { telemetryBundlePath } = await import("../telemetry/paths.js");
 	const { existsSync } = await import("node:fs");
 	const read = await readCallJournal(directory);
 	const settled = read.records.some(({ record }) => record.k === "run.settled");
 	if (settled && read.records.at(-1)?.record.k === "run.sealed" && existsSync(telemetryBundlePath(directory))) return;
+	if (!settled && facts === null) return;
 	const context = read.records.map(({ record }) => record.ctx).find(isWorkerTelemetryContext);
 	if (!context) return;
 	// The run's owner is gone, so this one record gets a writer of its own rather than the run's owned journal.
-	const writer = await openCallJournal({
-		directory,
-		context,
-		writer: await clioWriterVersions(),
-	});
-	if (!settled)
+	let writer: CallJournal;
+	try {
+		writer = await openCallJournal({ directory, context, writer: await clioWriterVersions() });
+	} catch (error) {
+		if (facts === null && error instanceof StateFileLockTimeoutError) return;
+		throw error;
+	}
+	if (!settled && facts)
 		writer.enqueue({ kind: "run.settled", data: facts, ctx: context, wallMs: Date.now(), mono: performance.now() });
 	// The recovered terminal is the run's terminal, so it seals the run scope (#434).
 	await sealAndClose(writer);
@@ -114,9 +131,7 @@ export async function settleOrphanedRunJournal(directory: string, facts: EventPa
 
 /** Seal a run scope at its terminal and close its writer; a seal that did not land rejects after the close (#434). */
 async function sealAndClose(writer: CallJournal): Promise<void> {
-	const sealed = await writer.seal();
-	await writer.close();
-	if (!sealed) throw new Error("run telemetry seal did not land");
+	if (!(await writer.sealAndClose())) throw new Error("run telemetry seal did not land");
 }
 
 function clioWriterVersions(): Promise<{ clioCoderVersion: string; piVersion: string }> {

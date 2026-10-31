@@ -36,7 +36,7 @@ import { readToolRounds } from "./types.js";
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { type Dirent, readdirSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { bashShellPath } from "../../core/bash-shell.js";
@@ -227,7 +227,7 @@ import type { SchedulingContract } from "../scheduling/contract.js";
 import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { TelemetryContract } from "../telemetry/contract.js";
-import { telemetryRunDirectory } from "../telemetry/index.js";
+import { telemetryBundlePath, telemetryJournalPath, telemetryRunDirectory } from "../telemetry/index.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../telemetry/session-journals.js";
 import {
 	approvedRouteObservation,
@@ -423,6 +423,7 @@ import {
 	fleetRootTelemetryContext,
 	openRunTelemetry,
 	runTelemetryJournal,
+	sealSettledRunJournal,
 	settleOrphanedRunJournal,
 } from "./run-telemetry.js";
 import { type Ledger, newRunId, openLedger } from "./state.js";
@@ -10331,10 +10332,20 @@ export function createDispatchBundle(
 			// receipts whose ledger rows were lost to a crash between
 			// recordReceipt() and persist(); quarantine tampered ones.
 			try {
-				const recovery = recoverOrphanReceipts(ledger);
+				const recovery = recoverOrphanReceipts(ledger, {
+					journalUnsealed: (runId) => {
+						const directory = telemetryRunDirectory(clioStateDir(), runId);
+						return existsSync(telemetryJournalPath(directory)) && !existsSync(telemetryBundlePath(directory));
+					},
+				});
 				for (const { runId, facts } of recovery.unsettled)
 					void trackDurableWrite(settleOrphanedRunJournal(telemetryRunDirectory(clioStateDir(), runId), facts)).catch(
 						(error) => reportDispatchDiagnostic(`settle the journal of run ${runId}`, error),
+					);
+				// A terminal row persisted before its journal's seal landed gets that seal now (#434).
+				for (const runId of recovery.unsealed)
+					void trackDurableWrite(sealSettledRunJournal(telemetryRunDirectory(clioStateDir(), runId))).catch((error) =>
+						reportDispatchDiagnostic(`seal the journal of run ${runId}`, error),
 					);
 				if (recovery.recovered > 0 || recovery.corrupt > 0 || recovery.abandoned > 0 || recovery.sealed > 0) {
 					await ledger.persist();

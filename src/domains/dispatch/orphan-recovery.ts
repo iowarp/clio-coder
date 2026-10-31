@@ -37,6 +37,16 @@ export interface OrphanRecoverySummary {
 	 * them (#425, #434).
 	 */
 	unsettled: Array<{ runId: string; facts: EventPayload<"run.settled"> }>;
+	/**
+	 * Terminal rows of this host whose run journal is not sealed: the host persisted the terminal row and died before
+	 * the journal's seal landed. The caller seals the ones whose journal holds run.settled (#434).
+	 */
+	unsealed: string[];
+}
+
+export interface OrphanRecoveryOptions {
+	/** Whether a run's journal exists without its sealed bundle; without it no terminal row is offered. */
+	journalUnsealed?: (runId: string) => boolean;
 }
 
 /**
@@ -267,8 +277,10 @@ function closeAbandonedRows(ledger: Ledger): Pick<OrphanRecoverySummary, "sealed
 	return { closed, sealed, unsettled };
 }
 
-export function recoverOrphanReceipts(ledger: Ledger): OrphanRecoverySummary {
+export function recoverOrphanReceipts(ledger: Ledger, options: OrphanRecoveryOptions = {}): OrphanRecoverySummary {
 	const abandoned = closeAbandonedRows(ledger);
+	const settling = new Set(abandoned.unsettled.map(({ runId }) => runId));
+	const localHost = hostname();
 	const summary: OrphanRecoverySummary = {
 		recovered: 0,
 		corrupt: 0,
@@ -276,6 +288,18 @@ export function recoverOrphanReceipts(ledger: Ledger): OrphanRecoverySummary {
 		abandoned: abandoned.closed,
 		sealed: abandoned.sealed,
 		unsettled: abandoned.unsettled,
+		unsealed: options.journalUnsealed
+			? ledger
+					.list()
+					.filter(
+						(row) =>
+							!isOpenRunRow(row) &&
+							!settling.has(row.id) &&
+							(row.identity === undefined || row.identity.host === localHost) &&
+							options.journalUnsealed?.(row.id) === true,
+					)
+					.map((row) => row.id)
+			: [],
 	};
 	const dir = receiptsDir();
 	if (!existsSync(dir)) return summary;
