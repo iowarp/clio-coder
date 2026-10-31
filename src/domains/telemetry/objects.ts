@@ -10,6 +10,7 @@ import type { ObjectRef } from "../../core/telemetry/schemas.js";
 import { ObjectRefSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
 import { createRedactionTally, secretRedactingReplacer } from "../evidence/redact.js";
 import { canonicalJson } from "../prompts/hash.js";
+import { redactSecretString } from "../safety/redaction.js";
 import type { SessionPromptCompileRecord } from "../session/prompt-manifest.js";
 import { telemetryObjectsDirectory } from "./paths.js";
 
@@ -230,7 +231,12 @@ function storedPreimage(subject: StoredSubject, value: unknown): { ref: ObjectRe
 		throw new Error(`telemetry ${subject} object contains unsupported fields`);
 	// Validate before JSON's replacer could silently convert non-finite numbers to null (#434).
 	const canonical = canonicalJson(subject === "config" ? withheldSecretMaps(value) : value);
-	const redacted = JSON.parse(canonical, secretRedactingReplacer(createRedactionTally()));
+	// Value patterns miss URL userinfo, query credentials and secret flags; a run's deliverable is stored in every
+	// capture mode, so both passes run before the bytes are hashed (#434).
+	const secretValues = secretRedactingReplacer(createRedactionTally());
+	const redacted = JSON.parse(canonical, (key, value: unknown) =>
+		secretValues(key, typeof value === "string" ? redactSecretString(value) : value),
+	);
 	const bytes = canonicalJson(redacted);
 	if (Buffer.byteLength(bytes) > maximumBytes) throw new Error("telemetry object exceeds size limit");
 	return { ref: reference(subject, bytes, "resolvable"), bytes };
