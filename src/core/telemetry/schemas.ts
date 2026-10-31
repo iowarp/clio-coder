@@ -797,6 +797,102 @@ export const ProviderHeadersCapturedSchema = Type.Object(
 );
 export { utc as UtcSchema };
 
+/**
+ * Closed routing vocabularies (#434). The dispatch domain maps its decision onto them, and a code or filter it does
+ * not know reads as `unknown`, so a renamed reason surfaces instead of passing as free text.
+ */
+export const ROUTE_HARD_FILTERS = [
+	"manual-pins",
+	"approved-envelope",
+	"audience",
+	"authority",
+	"required-tools",
+	"required-skills",
+	"result-contract",
+	"response-schema-support",
+	"locality",
+	"authentication",
+	"network-policy",
+	"endpoint-reachability",
+	"model-context",
+	"resource-fit",
+	"capacity-lease-availability",
+	"budget",
+	"deadline",
+	"cooldown",
+	"routing-intent",
+	"fixed-executed-route",
+	"unknown",
+] as const;
+export const ROUTE_REASONS = [
+	"hard-filter-rejected",
+	"active-readiness-excluded",
+	"posture-floor-excluded",
+	"posture-floors-unsatisfiable",
+	"manual-posture-exact-route",
+	"no-admissible-candidate",
+	"executed-route-not-admissible",
+	"shadow-advisory-only",
+	"shadow-differs-from-executed",
+	"observer-failure-fixed-route",
+	"unknown",
+] as const;
+export const EXECUTION_ROLE_VOCABULARY = [
+	"builder",
+	"reviewer",
+	"judge",
+	"researcher",
+	"verifier",
+	"recovery",
+] as const;
+const routeTuple = Type.Object(
+	{
+		agentId: ExistingId,
+		executionRole: vocabulary(EXECUTION_ROLE_VOCABULARY),
+		targetId: ExistingId,
+		modelId: ExistingId,
+		runtimeId: ExistingId,
+		nodeId: ExistingId,
+	},
+	closed,
+);
+const finiteOrNull = Type.Union([Type.Number(), Type.Null()]);
+/**
+ * One routing decision, in the journal of the session or run that asked (#434). Candidates, verdicts and reasons
+ * are the decision's own; prompts, specs and settings appear only through the decision hash.
+ */
+export const RouteDecidedSchema = Type.Object(
+	{
+		policyVersion: ExistingId,
+		mode: vocabulary(["fixed", "shadow", "active"]),
+		posture: vocabulary(["manual", "quality", "balanced", "latency", "economy"]),
+		decisionHash: ExistingId,
+		decisionDurationMs: duration,
+		confidence: finiteOrNull,
+		selected: routeTuple,
+		executed: routeTuple,
+		fallbacks: Type.Array(routeTuple),
+		recommendedAgentId: ExistingId,
+		candidates: Type.Array(
+			Type.Object(
+				{
+					route: routeTuple,
+					rejection: Type.Union([vocabulary(ROUTE_HARD_FILTERS), Type.Null()]),
+					/** Null for a rejected candidate, which is never scored. */
+					score: finiteOrNull,
+					dominated: Type.Boolean(),
+					samples: count,
+					ready: Type.Boolean(),
+				},
+				closed,
+			),
+		),
+		reasons: Type.Array(Type.Object({ code: vocabulary(ROUTE_REASONS), count: Type.Optional(count) }, closed)),
+		/** Whether the policy would have run another route, and whether the route that ran passed every hard filter. */
+		verdict: Type.Object({ differs: Type.Boolean(), executedAdmissible: Type.Boolean() }, closed),
+	},
+	closed,
+);
 const sha256OrNull = Type.Union([sha256Hex, Type.Null()]);
 const gateSubject = Type.Object({ runId: ExistingId, digest: sha256OrNull }, closed);
 /** A decided review or compete gate, in the journal of the run the gate's group belongs to (#434). */

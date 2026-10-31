@@ -89,7 +89,7 @@ describe("contracts/route readiness reads", () => {
 		ledger(stateDir, runs);
 		const { reads, restore } = countLedgerReads(stateDir);
 		after(restore);
-		const observer = createRouteObserver({ stateDir, logDir: join(stateDir, "route-decisions") });
+		const observer = createRouteObserver({ stateDir });
 
 		// Each check takes the reads since the previous one.
 		const drain = (): string[] => reads.splice(0).sort();
@@ -143,7 +143,7 @@ describe("contracts/route readiness reads", () => {
 			settledAt: "2026-06-25T12:00:05.000Z",
 		});
 		const historyPath = join(stateDir, "route-history.json");
-		const observer = createRouteObserver({ stateDir, logDir: join(stateDir, "route-decisions") });
+		const observer = createRouteObserver({ stateDir });
 
 		observer.readinessWindow();
 		const reconciled = statSync(historyPath);
@@ -185,7 +185,7 @@ describe("contracts/route readiness reads", () => {
 				settledAt: "2026-06-25T12:00:05.000Z",
 			});
 		}
-		createRouteObserver({ stateDir, logDir: join(stateDir, "route-decisions") }).readinessWindow();
+		createRouteObserver({ stateDir }).readinessWindow();
 		deepStrictEqual(
 			createRouteHistoryStore({ stateDir })
 				.all()
@@ -221,7 +221,7 @@ describe("contracts/route readiness reads", () => {
 			sourceDigests: [run.receipt.integrity.digest],
 			settledAt: "2026-06-25T12:00:05.000Z",
 		});
-		const observer = createRouteObserver({ stateDir, logDir: join(stateDir, "route-decisions") });
+		const observer = createRouteObserver({ stateDir });
 		observer.readinessWindow();
 		strictEqual(createRouteHistoryStore({ stateDir }).all()[0]?.qualityLabel, "pass");
 

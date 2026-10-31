@@ -8,7 +8,6 @@ import { telemetryResearchDirectory } from "./paths.js";
  */
 export const RESEARCH_TRACE_FILES = {
 	"bus-trace": 8 * 1024 * 1024,
-	"route-observations": 1024 * 1024,
 } as const;
 
 export type ResearchTraceFile = keyof typeof RESEARCH_TRACE_FILES;

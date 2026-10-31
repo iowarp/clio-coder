@@ -1,10 +1,11 @@
 /**
  * Route observer (shadow mode).
  *
- * The observer watches every dispatch, receives the shared RouteDecisionV1,
- * the policy would have produced, and records decision-versus-outcome into a
- * bounded JSONL under the local state dir. Selection belongs to the resolver;
- * this module only records the route that shadow or active admission sealed.
+ * The observer watches every dispatch, receives the shared RouteDecisionV1
+ * the policy would have produced, journals it as `route.decided` in the
+ * journal of the session or run that asked (#434), and folds the realized
+ * outcome into route history. Selection belongs to the resolver; this module
+ * only records the route that shadow or active admission sealed.
  *
  * What it measures is deliberately not "did Clio dispatch to the agent it was
  * asked for". That comparison was true by construction, because the actual
@@ -16,9 +17,11 @@
  * prior. It never contributes a hard constraint or durable raw task text.
  */
 
-import { join } from "node:path";
+import type { TelemetryContext } from "../../core/telemetry/context.js";
+import type { EventPayload } from "../../core/telemetry/events.js";
+import { telemetryHub } from "../../core/telemetry/hub.js";
+import { ROUTE_HARD_FILTERS, ROUTE_REASONS } from "../../core/telemetry/schemas.js";
 import { clioStateDir } from "../../core/xdg.js";
-import { appendResearchTraceLine, RESEARCH_TRACE_FILES, researchTracePath } from "../telemetry/research-files.js";
 import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
 import {
 	createDurableQualitySourceCache,
@@ -27,7 +30,6 @@ import {
 	type DurableReceiptSource,
 } from "./durable-quality-sources.js";
 import {
-	type CandidateEvaluation,
 	evaluateRouteDecision,
 	fixedRouteDecision,
 	type RouteCandidate,
@@ -169,6 +171,8 @@ export interface RouteObserveInput {
 	task: string;
 	/** Decision already produced by the shared joint resolver. */
 	decision: RouteDecisionV1;
+	/** The scope that asked for the route; the async context when absent (#434). */
+	ctx?: TelemetryContext;
 }
 
 export interface RouteObservationHandle {
@@ -219,14 +223,6 @@ export interface CreateRouteObserverOptions {
 	history?: RouteHistoryStore;
 	/** Test-only estimator input seam. Production does not use this store. */
 	samples?: RouteSampleStore;
-	/** Log directory override, written always; tests use it. */
-	logDir?: string;
-	/**
-	 * Without `logDir`, observations are a research record: written to
-	 * `<state>/telemetry/research/route-observations.jsonl` only while this says research mode, where
-	 * research retention prunes them. Nothing reads them back (#434, P5).
-	 */
-	research?: () => boolean;
 	/** Durable source directory override, primarily for restart/replay tests. */
 	stateDir?: string;
 }
@@ -251,19 +247,67 @@ function gateEvidenceKey(sources: DurableQualitySources, serialOf: (value: objec
 	return parts.join(",");
 }
 
-function appendObservationLine(path: string | null, record: Record<string, unknown>): void {
-	if (path === null) return;
-	appendResearchTraceLine(path, record, RESEARCH_TRACE_FILES["route-observations"]);
+type RouteTuple = EventPayload<"route.decided">["selected"];
+function routeTuple(candidate: RouteCandidate): RouteTuple {
+	return {
+		agentId: candidate.agentId,
+		executionRole: candidate.executionRole,
+		targetId: candidate.targetId,
+		modelId: candidate.modelId,
+		runtimeId: candidate.runtimeId,
+		nodeId: candidate.nodeId,
+	};
 }
 
-/** The compact log projection; the sealed receipt keeps the full evaluation. */
-function loggableEvaluation(evaluation: CandidateEvaluation): Record<string, unknown> {
+function vocabularyValue<const T extends readonly string[]>(values: T, value: string): T[number] {
+	return (values as readonly string[]).includes(value) ? (value as T[number]) : "unknown";
+}
+
+function finiteOrNull(value: number | null): number | null {
+	return value !== null && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The decision as `route.decided` carries it (#434). A rejection keeps its filter name and drops the filter's prose,
+ * and a counted reason such as `hard-filter-rejected-3` keeps its count as a number.
+ */
+function routeDecidedFacts(decision: RouteDecisionV1): EventPayload<"route.decided"> {
+	const executedKey = routeCandidateKey(decision.executedRoute);
+	const executed = decision.candidateEvaluations.find(
+		(evaluation) => routeCandidateKey(evaluation.candidate) === executedKey,
+	);
 	return {
-		key: routeCandidateKey(evaluation.candidate),
-		rejection: evaluation.rejection,
-		score: evaluation.score,
-		dominated: evaluation.dominated,
-		sampleCount: evaluation.estimate.sampleCount,
+		policyVersion: decision.policyVersion,
+		mode: decision.mode,
+		posture: decision.posture,
+		decisionHash: decision.decisionHash,
+		decisionDurationMs: Math.max(0, decision.decisionDurationMs),
+		confidence: finiteOrNull(decision.confidence),
+		selected: routeTuple(decision.selected),
+		executed: routeTuple(decision.executedRoute),
+		fallbacks: decision.approvedFallbacks.map(routeTuple),
+		recommendedAgentId: decision.agentSelection.recommendedAgentId,
+		candidates: decision.candidateEvaluations.map((evaluation) => ({
+			route: routeTuple(evaluation.candidate),
+			rejection:
+				evaluation.rejection === null
+					? null
+					: vocabularyValue(ROUTE_HARD_FILTERS, evaluation.rejection.split(":", 1)[0]?.trim() ?? ""),
+			score: finiteOrNull(evaluation.score),
+			dominated: evaluation.dominated,
+			samples: evaluation.estimate.sampleCount,
+			ready: evaluation.activeReadiness.ready,
+		})),
+		reasons: decision.reasonCodes.map((code) => {
+			const counted = /^(.*)-(\d+)$/.exec(code);
+			return counted?.[1] !== undefined && counted[2] !== undefined
+				? { code: vocabularyValue(ROUTE_REASONS, counted[1]), count: Number(counted[2]) }
+				: { code: vocabularyValue(ROUTE_REASONS, code) };
+		}),
+		verdict: {
+			differs: routeCandidateKey(decision.selected) !== executedKey,
+			executedAdmissible: executed !== undefined && executed.rejection === null,
+		},
 	};
 }
 
@@ -282,12 +326,6 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 	const PENDING_LIMIT = 512;
 	let totalObservations = 0;
 	let sequence = 0;
-	const logDir = (): string | null => {
-		if (options.logDir !== undefined) return join(options.logDir, "observations.jsonl");
-		return options.research?.() === true
-			? researchTracePath(options.stateDir ?? clioStateDir(), "route-observations")
-			: null;
-	};
 	let qualitySources: DurableQualitySourceCache | undefined;
 	const readSources = (): DurableQualitySources => {
 		qualitySources ??= createDurableQualitySourceCache({ stateDir: options.stateDir ?? clioStateDir() });
@@ -404,31 +442,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 					const oldest = pending.keys().next().value;
 					if (oldest !== undefined) pending.delete(oldest);
 				}
-				appendObservationLine(logDir(), {
-					kind: "decision",
-					id: observationId,
-					at: new Date().toISOString(),
-					intent,
-					agentRecommendation: {
-						agentId: decision.agentSelection.recommendedAgentId,
-						executionRole:
-							decision.agentSelection.evaluations.find(
-								(evaluation) => evaluation.agentId === decision.agentSelection.recommendedAgentId,
-							)?.executionRole ?? decision.selected.executionRole,
-					},
-					policyVersion: decision.policyVersion,
-					mode: decision.mode,
-					posture: decision.posture,
-					decisionHash: decision.decisionHash,
-					decisionDurationMs: decision.decisionDurationMs,
-					confidence: decision.confidence,
-					selected: routeCandidateKey(decision.selected),
-					executed: routeCandidateKey(decision.executedRoute),
-					approvedFallbacks: decision.approvedFallbacks.map(routeCandidateKey),
-					hardConstraints: decision.hardConstraints,
-					reasonCodes: decision.reasonCodes,
-					candidateEvaluations: decision.candidateEvaluations.map(loggableEvaluation),
-				});
+				telemetryHub().emit("route.decided", routeDecidedFacts(decision), input.ctx);
 				return { id: observationId, decision };
 			} catch {
 				// Active authority already changed execution and must remain sealed. A
@@ -441,6 +455,11 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				const observationId = `route-fixed-${decision.decisionHash.slice(0, 12)}-${sequence.toString(36)}`;
 				totalObservations += 1;
 				pending.set(observationId, { decision, taskType: classifyAgentTask(input.task).taskType });
+				try {
+					telemetryHub().emit("route.decided", routeDecidedFacts(decision), input.ctx);
+				} catch {
+					// The sealed fallback must reach its receipt even when its journal record cannot be built.
+				}
 				return { id: observationId, decision };
 			}
 		},
@@ -501,19 +520,6 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 					pricedCoverage: receiptPricedCoverage(outcome.receipt),
 					sourceDigests: outcome.quality.sourceDigests,
 					settledAt: outcome.receipt.endedAt,
-				});
-				appendObservationLine(logDir(), {
-					kind: "outcome",
-					id: observationId,
-					at: new Date().toISOString(),
-					decisionHash: entry.decision.decisionHash,
-					executed: routeCandidateKey(realized.route),
-					quality: outcome.quality,
-					regret: evaluation.regret,
-					validity: evaluation.validity,
-					calibration: evaluation.calibration,
-					outcome: evaluation.outcome,
-					settled,
 				});
 			} catch {
 				// Observation must never disturb dispatch.

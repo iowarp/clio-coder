@@ -417,7 +417,7 @@ import { defaultRunEventJournal } from "./run-event-journal.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
 import type { RunTelemetryJournal } from "./run-telemetry.js";
-import { openRunTelemetry, settleOrphanedRunJournal } from "./run-telemetry.js";
+import { fleetRootTelemetryContext, openRunTelemetry, settleOrphanedRunJournal } from "./run-telemetry.js";
 import { type Ledger, newRunId, openLedger } from "./state.js";
 import { createTargetBreaker, type TargetBreakerBlock } from "./target-breaker.js";
 import {
@@ -3699,9 +3699,7 @@ export function createDispatchBundle(
 		threshold: () => getEffectiveSettings()?.fleet?.retry.breakerThreshold ?? 1,
 	});
 	// Durable evidence owner used by shadow observation and active readiness.
-	const routeObserver: RouteObserver =
-		options?.routeObserver ??
-		createRouteObserver({ research: () => getEffectiveSettings()?.telemetry?.mode === "research" });
+	const routeObserver: RouteObserver = options?.routeObserver ?? createRouteObserver({});
 	const heldWorkers: HeldWorkerPool | null =
 		options?.spawnHeldWorker !== undefined || options?.spawnWorker === undefined
 			? createHeldWorkerPool({
@@ -6946,7 +6944,7 @@ export function createDispatchBundle(
 				capabilityClass: recipe === null ? null : normalizeAgentSpec(recipe).capabilityClass,
 				failover: failoverModeFor(req),
 				requestedAt,
-				observe: (request, decision) => routeObserver.observe({ task: request.task, decision }),
+				observe: (request, decision) => routeObserver.observe(routeObservationInput(request, decision)),
 			});
 			if (activation !== null) {
 				req = activation.request;
@@ -9954,10 +9952,15 @@ export function createDispatchBundle(
 		} catch {
 			decision = fixedRouteDecision(input.executedRoute);
 		}
-		return routeObserver.observe({
-			task: req.task,
-			decision,
-		});
+		return routeObserver.observe(routeObservationInput(req, decision));
+	}
+
+	/** A fleet step's route belongs to its fleet root; any other dispatch's to the async context that asked (#434). */
+	function routeObservationInput(req: DispatchRequest, decision: RouteDecisionV1) {
+		const ctx =
+			fleetRootTelemetryContext(req.lineage?.rootRunId) ??
+			fleetRootTelemetryContext(req.lineage?.parentRunId ?? undefined);
+		return { task: req.task, decision, ...(ctx !== undefined ? { ctx } : {}) };
 	}
 
 	function mergeBatchEvents(
