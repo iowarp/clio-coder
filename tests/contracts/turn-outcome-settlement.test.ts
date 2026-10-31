@@ -281,34 +281,33 @@ async function cancelBeforeAdmission(sealAfterMs: number, check: (run: Cancelled
 			},
 		})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
 	});
+	let settlement = Promise.resolve();
 	try {
 		const submitted = loop.submit("Give me a tour of this codebase.");
 		await runStarted;
 		loop.cancel();
 		const measured = (value: number) => ({ kind: "measured" as const, value, source: "provider" as const });
-		setTimeout(
-			() =>
-				void writeSettledRun(clioStateDir(), fixtureReceiptDraft(fixtureEnvelope("scout-1")), {
-					usage: {
-						input: measured(40),
-						output: measured(2),
-						cacheRead: measured(0),
-						cacheWrite: measured(0),
-						cacheWrite1h: measured(0),
-						reasoning: measured(0),
-					},
-					totalTokens: measured(42),
-					apiCalls: measured(1),
-					pricing: { usd: measured(0), pricedBy: "none" },
-				}),
-			sealAfterMs,
+		settlement = new Promise<void>((resolve) => setTimeout(resolve, sealAfterMs)).then(() =>
+			writeSettledRun(clioStateDir(), fixtureReceiptDraft(fixtureEnvelope("scout-1")), {
+				usage: {
+					input: measured(40),
+					output: measured(2),
+					cacheRead: measured(0),
+					cacheWrite: measured(0),
+					cacheWrite1h: measured(0),
+					reasoning: measured(0),
+				},
+				totalTokens: measured(42),
+				apiCalls: measured(1),
+				pricing: { usd: measured(0), pricedBy: "none" },
+			}),
 		);
-		await submitted;
-		await check({ entries, recorded, reservedId });
+		await Promise.all([settlement, submitted.then(() => check({ entries, recorded, reservedId }))]);
 	} finally {
 		loop.dispose();
 		await loop.whenSettled();
-		scratch.restore();
+		// The settled record is readable before its seal finishes; keep the fixture home until the writer closes (#434).
+		await settlement.finally(() => scratch.restore());
 	}
 }
 
