@@ -162,13 +162,78 @@ Prompt sections have different update boundaries:
 
 Section order and fragments are specified in [Prompt compilation](prompt-compilation.md).
 
-### Reading cache telemetry
-
-`/context` and turn receipts display provider-reported cache reads and available backend timing. The host records these cold-prefix causes: `dispatch`, `residency`, `background_memory`, `compaction`, `working_set_evict`, `prompt_recompiled`, `tool_surface_change` and `thinking_change`. The overlay prints them as `last cache-affecting events: …`. The per-call cache observation described below names a wider set, which also covers `model_changed`, `input_changed`, `tool_choice_changed`, `idle_expiry` and `transport_reset`. These observations distinguish prompt changes from server cache behavior.
-
-Each model call also carries its own cache observation. A call counts as a break when it reads more than 1,024 tokens fewer than the previous call's input and under 90% of it, so the provider's 128-token alignment never reads as one. A break names a cause: `model_changed`, `reasoning_changed`, `input_changed`, `tool_choice_changed`, `tools_changed`, `prompt_recompiled`, `compaction`, `working_set_evict`, `idle_expiry`, `transport_reset`, or `unknown` when nothing explains it. A change the host knows about wins. `idle_expiry` is an inference: the gap since the previous call reached the route's declared cache lifetime, the same lifetime the [prompt-cache keepalive](../guide/configuration-reference.md) refreshes against. OpenAI and Codex routes assume the documented 5-minute floor. `transport_reset` marks a full request frame that followed a delta frame or a transport recovery on a continuation transport. The observation records the lifetime it judged against as `ttl`, `declared` or `unknown`. On Codex the fingerprint uses the effort the request carried on the wire, which stays at the conversation's initial value while a `/thinking` change travels as a later item, so a thinking change is not a break cause there.
-
 The Codex backend reuses its cache at input-item granularity, so a changed leading item is paid in full from its first byte. That is why the compiled prompt stays frozen between turns, and why posture, memory and effort changes arrive as later items instead of rewriting the prompt. While a turn waits on its own tools, `chat.cacheKeepalive` replays the turn's last request shortly before the hosted cache entry expires; see [Configuration reference](../guide/configuration-reference.md).
+
+## Cache-divergence honesty
+
+**A stable prefix is an opportunity for reuse, not a promise of a cache hit.** Actual reuse depends on the provider, model, serving configuration, routing and cache lifetime, so Clio Coder cannot guarantee a hit or a discount. It records what each call actually reused, names the events that may have changed reuse, and never treats an event by itself as proof that the cache went cold.
+
+### What each call records
+
+Every main-loop call's `call.settled` record carries a cache block, computed at settle from the request as sent and the usage the provider reported ([cache-physics.ts](../../src/domains/observability/cache-physics.ts), [turn-runtime.ts](../../src/session-control/turn-runtime.ts)). Side calls, worker calls and System One calls record an unknown verdict and no re-prefill.
+
+| Fact | Meaning |
+| --- | --- |
+| `verdict` | With a cache read above zero, an uncached input of 2,000 tokens or more is `partial` and less is `hot`. With no cache read, 2,000 or more is `cold` and less is `small`. A provider that reported no cache read leaves it `unknown`. When the provider reported a zero read but a llama.cpp server reported its own reuse, the server's figures decide. |
+| `uncachedPrefillTokens` | The input the provider reported as not served from cache. |
+| `rePrefilledTokens` | The tokens this call prefilled again that the previous request on the same target, API and wire model had already sent: the smaller of the call's uncached input and the previous request's prompt size less this call's cache read, never below zero. |
+| `firstDivergentSection` | Where this request first departs from that previous one, compared by digests of the request as sent: the compiled prompt section that changed first, `system-prompt` when no section can be named, `tools` when the tool set changed, `messages` when an earlier message changed or the transcript shrank, and none when the request only extends its predecessor. |
+| `bill` | The re-prefilled tokens priced at the input rate less the cache-read rate from the target's effective pricing, fixed at settle. It is measured under declared target rates, estimated under the catalog, zero on a free or local-native route, and unknown without rates or counts. The read model shows it as `breakUsd`. |
+| `expectedColdReasons` | The events recorded since the previous call that may have changed reuse; see below. |
+
+The baseline for re-prefill lives in memory, keyed by target, API and wire model. A completed compaction, a working-set eviction or a session switch clears it, and so does a restart. A call with no baseline re-prefills nothing when its request holds no earlier reply, and an unknown amount when it does. A dropped stream, or a provider that omitted the input or the cache read, also leaves re-prefill unknown, never zero.
+
+### Expected cold reasons
+
+The host records an event that may disturb the cache once, on the next call that is sent ([turn-context.ts](../../src/session-control/turn-context.ts)). Prefix changes are recorded on every tier. Events that disturb a local server's single prefix-cache slot are recorded only when the runtime's tier is `local-native`, because only there does an interleaved request displace the cache.
+
+| Reason | Recorded when | Tier |
+| --- | --- | --- |
+| `working_set_evict` | A pressure eviction was applied to the replayed history. | every tier |
+| `prompt_recompiled` | The compiled prompt's hash moved from the last one the session recorded, a resumed process's first compile included, or an in-process switch (`/resume`, `/new`, a fork) replaced a prompt this process had applied. A new session's first compile has nothing to diverge from. | every tier |
+| `thinking_change` | The thinking level changed on a route that can change effort mid-conversation neither natively nor through a configuration update. | every tier |
+| `tool_surface_change` | The tool signature changed on a route that does not accept both tool and system-message changes mid-conversation. | every tier |
+| `compaction` | A compaction began or ended. | `local-native` |
+| `dispatch` | A dispatch started, completed or failed. | `local-native` |
+| `residency` | A residency load or eviction succeeded on this session's own endpoint. | `local-native` |
+| `background_memory` | A memory step completed against the endpoint this session streams to. | `local-native` |
+
+`residency` and `background_memory` also compare endpoint identity, so work on a second server never explains a cold prefix on the first. The record's vocabulary also names `model_changed`, `input_changed`, `tool_choice_change` and `transport_reset`; no producer records them.
+
+### Breaks and the cache report
+
+A call is a cache break when its re-prefill is measured above zero, or is unknown on a call whose verdict is `cold` or `partial`. A partial call whose re-prefill is a known zero, the ordinary append of a tool result to a warm prefix, is not a break (#423). The read model's cache report sums verdict counts, cache read and write, uncached prefill, re-prefill and its bill over every call in the session, lists each break with its section and reasons, and groups the breaks by expected reason, with `unattributed` for a break no reason explains; a break with two reasons counts under each ([read-model.ts](../../src/domains/observability/read-model.ts)). `/usage` shows it, and `clio-coder telemetry cache <session>` prints it, `--json` for the DTO.
+
+The ledger keeps a separate per-call observation on each assistant entry's `promptCache.observation` ([cache-telemetry.ts](../../src/core/cache-telemetry.ts)), which `clio-coder doctor` folds for the latest session. It counts a break only when it reads more than 1,024 tokens fewer than the previous call's input and under 90% of it, so the provider's 128-token alignment never reads as one. A break names a cause: `model_changed`, `reasoning_changed`, `input_changed`, `tool_choice_changed`, `tools_changed`, `prompt_recompiled`, `compaction`, `working_set_evict`, `idle_expiry`, `transport_reset`, or `unknown` when nothing explains it. A change the host knows about wins. `idle_expiry` is an inference: the gap since the previous call reached the route's declared cache lifetime, the same lifetime the [prompt-cache keepalive](../guide/configuration-reference.md) refreshes against. OpenAI and Codex routes assume the documented 5-minute floor. `transport_reset` marks a full request frame that followed a delta frame or a transport recovery on a continuation transport. The observation records the lifetime it judged against as `ttl`, `declared` or `unknown`. On Codex the fingerprint uses the effort the request carried on the wire, which stays at the conversation's initial value while a `/thinking` change travels as a later item, so a thinking change is not a break cause there. Because the observation tolerates the small shortfall a provider's alignment leaves, doctor can report fewer breaks than `/usage` for the same session.
+
+### What /context shows
+
+`/context` reads the newest main-loop call's cache facts from the journal ([context-overlay.ts](../../src/interactive/context-overlay.ts)). The `prompt cache:` line names whether the compiled prompt shell was reused or recompiled, then what the backend did: `backend reused` for a hot call, `backend partly reused` or `backend cold` with the call's re-prefill, or `backend small`, followed by the cache read and the uncached input. When the verdict or the cache read is unknown, or the serving backend reported no cache figure, it says `server does not report cache reads` instead of calling the backend cold.
+
+A cold call after a recorded reason adds `last cache-affecting events: …` with each reason in prose, and the cache line stays an annotation. A reused shell with a cold backend and no recorded reason is a warning: Clio kept the bytes stable and the provider re-prefilled anyway, which is a disagreement worth surfacing.
+
+### What the serving backend reports
+
+On a llama.cpp target, Clio Coder also keeps the server's own prefill accounting, read from the last timing object of the response the turn already makes; it opens no second connection and sets no extra payload flag. It lands on the ledger entry as `promptCache.backend`:
+
+| Field | Meaning |
+| --- | --- |
+| `promptTokens` | The whole prompt the server accounted for, `prompt_n + cache_n`. |
+| `cachedTokens` | `cache_n`, the prompt work the slot reused; null when the server reports no cache figure. |
+| `predictedTokens` | `predicted_n`, tokens generated. |
+| `promptMs` | `prompt_ms`, milliseconds spent in prefill. |
+| `predictedMs` | `predicted_ms`, milliseconds spent generating. |
+| `source` | `llamacpp-timings` or `lmstudio-timings`. |
+
+The server's uncached prefill is `promptTokens - cachedTokens`, taken only when both are present and consistent. It decides the verdict when the provider reported a zero cache read, and `/context` prints it as `prefill: N uncached · M cached · X ms`, or `prefill: N prompt · X ms` without a cache figure. LM Studio's OpenAI-compatible port returns no timing object, so `lmstudio-timings` is a shape Clio Coder accepts and has not observed.
+
+### Self-hosted prefix-cache contract
+
+Clio Coder controls the request it sends. The inference server controls cache allocation, retention, eviction, and whether requests reach the same cache. Stable prompt bytes alone do not guarantee reuse.
+
+- **llama.cpp:** reuse can depend on slot selection, KV-pool configuration and model architecture. Server flags and defaults change between builds; check the documentation for the deployed version.
+- **Gateway routes:** the gateway may filter request fields or route successive requests to different backends. A saved target does not prove backend affinity.
+- **Other local runtimes:** use the usage or timing fields the server actually reports. Missing cache telemetry is not evidence of a cold cache.
 
 ---
 
