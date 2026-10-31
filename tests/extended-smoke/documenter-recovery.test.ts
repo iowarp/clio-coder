@@ -54,7 +54,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 }
 
 // Scripted loopback models exercise the real parent, worker repair loop, and
-// sealed receipts. They prove transport/settlement, not live model reliability.
+// sealed run scopes. They prove transport/settlement, not live model reliability.
 for (const scenario of ["dependent-repair", "exhausted"] as const) {
 	test(`built Documenter recovery: ${scenario}`, { timeout: 60_000 }, async (t) => {
 		const scratch = makeScratchHome("clio-coder-documenter-recovery-");
@@ -216,13 +216,13 @@ for (const scenario of ["dependent-repair", "exhausted"] as const) {
 			deepStrictEqual(fixtureErrors, [], result.stderr);
 			// A Documenter that exhausts its repairs is a dispatched worker that did not deliver.
 			strictEqual(result.code, scenario === "exhausted" ? 1 : 0, result.stderr);
-			doesNotMatch(result.stderr, /receipt write failed/u);
+			doesNotMatch(result.stderr, /run record write failed/u);
 			strictEqual(readFileSync(join(workspace, "grid.py"), "utf8"), SOURCE);
 			strictEqual(parentRounds, 2);
 			strictEqual(documenterRounds, scenario === "exhausted" ? 3 : 2);
 			const journal = readRunJournal(join(scratch.dir, "state"));
 			ok(journal);
-			strictEqual(journal.runs.length, 2);
+			strictEqual(journal.runs.length, 3);
 			strictEqual(journal.envelopes.size, 3);
 			for (const receipt of journal.runs) {
 				const envelope = journal.envelopes.get(receipt.row.runId);
@@ -233,8 +233,10 @@ for (const scenario of ["dependent-repair", "exhausted"] as const) {
 			}
 			const doc = journal.runs.find((r) => r.settled.agentId === "documenter");
 			const parent = [...journal.envelopes.values()].find((r) => r.agentId === "main-agent");
+			const parentResult = journal.runs.find((r) => r.settled.agentId === "main-agent");
 			const scout = journal.runs.find((r) => r.settled.agentId === "scout");
-			ok(doc && parent && scout);
+			ok(doc && parent && parentResult && scout);
+			strictEqual(parentResult.row.runId, parent.id);
 			strictEqual(scout.settled.outcome, "succeeded");
 			strictEqual(doc.settled.outcome, scenario === "exhausted" ? "failed" : "succeeded");
 			strictEqual(doc.settled.quality?.resultContract?.conformance, scenario === "exhausted" ? "fail" : "pass");

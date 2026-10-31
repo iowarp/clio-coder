@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
+import { readVerifiedRun, telemetryRunsDirectory } from "../../src/domains/telemetry/index.js";
 import { formatUserTaskHandoff } from "../../src/domains/user-tasks/handoff.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -387,7 +388,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 		}
 	});
 
-	it("runs one JSON headless turn through a local provider and seals its receipt", async () => {
+	it("runs one JSON headless turn through a local provider and seals its run scope", async () => {
 		const scratch = home();
 		try {
 			const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
@@ -439,18 +440,19 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 				"prompt must reach provider",
 			);
 
-			const receiptDir = join(scratch.root, "state", "receipts");
-			const files = readdirSync(receiptDir).filter((name) => name.endsWith(".json"));
-			strictEqual(files.length, 1);
-			const receipt = JSON.parse(readFileSync(join(receiptDir, files[0] ?? ""), "utf8")) as Record<string, unknown>;
-			strictEqual(receipt.exitCode, 0);
-			strictEqual(receipt.outcome, "succeeded");
-			strictEqual(receipt.agentId, "main-agent");
-			strictEqual(receipt.targetId, "local-smoke");
-			strictEqual(receipt.wireModelId, "mock-model");
-			ok(typeof receipt.runId === "string" && receipt.runId.length > 0);
-			ok(typeof receipt.sessionId === "string" && receipt.sessionId.length > 0);
-			ok(typeof receipt.integrity === "object" && receipt.integrity !== null);
+			const stateDir = join(scratch.root, "state");
+			const runIds = readdirSync(telemetryRunsDirectory(stateDir));
+			strictEqual(runIds.length, 1);
+			const run = readVerifiedRun(stateDir, runIds[0] ?? "");
+			ok(run, "the run scope seal must verify");
+			strictEqual(run.settled.exitCode, 0);
+			strictEqual(run.settled.outcome, "succeeded");
+			strictEqual(run.settled.agentId, "main-agent");
+			strictEqual(run.settled.route.targetId, "local-smoke");
+			strictEqual(run.settled.route.wireModelId, "mock-model");
+			strictEqual(run.row.runId, runIds[0]);
+			ok(typeof run.row.sessionId === "string" && run.row.sessionId.length > 0);
+			ok(run.result?.state === "resolved");
 		} finally {
 			scratch.cleanup();
 		}

@@ -60,7 +60,12 @@ function fakeWorker(): SpawnedWorker {
 
 /** The spec with its run id normalized: each dispatch carries its own run's id to the worker (#434). */
 function runNormalized(spec: WorkerSpec | undefined): WorkerSpec | undefined {
-	return spec?.telemetryContext ? { ...spec, telemetryContext: { ...spec.telemetryContext, runId: "run" } } : spec;
+	return spec?.telemetryContext
+		? {
+				...spec,
+				telemetryContext: { ...spec.telemetryContext, runId: "run", agent: { role: "worker", id: "run" } },
+			}
+		: spec;
 }
 
 interface Harness {
@@ -148,6 +153,8 @@ describe("contracts/speculative dispatch", () => {
 			strictEqual(coldRun?.timing?.heldWorkerAdoptedAt, undefined);
 			strictEqual(h.adopted[0]?.telemetryContext?.runId, adoptedRun?.id, "the adopted spec names its own run");
 			strictEqual(h.cold[0]?.telemetryContext?.runId, coldRun?.id, "the cold spec names its own run");
+			strictEqual(h.adopted[0]?.telemetryContext?.agent.id, adoptedRun?.id);
+			strictEqual(h.cold[0]?.telemetryContext?.agent.id, coldRun?.id);
 			deepStrictEqual(runNormalized(h.adopted[0]), runNormalized(h.cold[0]), "adoption changed the spec");
 			deepStrictEqual(h.bundle.contract.speculativeStats?.(), { held: 1, adopted: 1, discarded: 0, live: 0 });
 		} finally {

@@ -357,6 +357,7 @@ function scanSockets(
 		...new Set(entries.map(physical).filter((entry): entry is string => entry !== null)),
 	];
 	const workspaceRoots = unique(roots.workspaceRoots);
+	const scratchRoots = unique(roots.scratchRoots ?? []);
 	// A private /tmp hides the host's; /var/tmp is visible either way.
 	const tempRoots = unique([...(roots.privateTmp ? [] : ["/tmp"]), "/var/tmp", ...(roots.scratchRoots ?? [])]);
 	const home = unique([roots.home ?? homedir()]);
@@ -366,9 +367,11 @@ function scanSockets(
 		found: new Set(),
 		skip: existing.filter((mask) => mask.kind === "directory").map((mask) => mask.path),
 	};
+	// Scan the command's explicit roots before shared trees can exhaust the bounded walk (#434).
+	for (const root of unique([...workspaceRoots, ...scratchRoots])) walkSockets(root, TREE_SCAN_DEPTH, uid, state);
 	for (const root of home) walkSockets(root, HOME_SCAN_DEPTH, uid, state);
-	for (const root of [...tempRoots, ...workspaceRoots]) walkSockets(root, TREE_SCAN_DEPTH, uid, state);
-	const keep = [...workspaceRoots, ...unique(roots.scratchRoots ?? [])];
+	for (const root of tempRoots) walkSockets(root, TREE_SCAN_DEPTH, uid, state);
+	const keep = [...workspaceRoots, ...scratchRoots];
 	const taken = new Set(existing.map((mask) => mask.path));
 	const masks: SandboxMaskedPath[] = [];
 	let capped = state.capped;

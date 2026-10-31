@@ -237,12 +237,13 @@ describe("read scope admission", () => {
 		}
 	});
 
-	it("keeps the interop skill roots and dispatch receipts readable unless CLIO_CODER_INTEROP_HOME is none", () => {
+	it("keeps telemetry run scopes readable and honors CLIO_CODER_INTEROP_HOME for interop skills", () => {
 		delete process.env.CLIO_CODER_INTEROP_HOME;
 		// A CLIO_CODER_HOME install still exempts the operator's own interop skill roots.
 		const operatorSkill = { path: join(homedir(), ".claude", "skills", "demo", "SKILL.md") };
 		const engine = createSafetyPolicyEngine({ cwd: root });
-		for (const path of [operatorSkill.path, join(env.dir, "state", "receipts", "run-1.json")]) {
+		const runScope = join(env.dir, "state", "telemetry", "runs", "run-1");
+		for (const path of [operatorSkill.path, join(runScope, "journal.jsonl"), join(runScope, "bundle.json")]) {
 			strictEqual(engine.evaluate({ tool: ToolNames.Read, args: { path } }).readScope, undefined, path);
 		}
 		const sibling = join(homedir(), ".claude", "skillsX", "demo.md");
@@ -251,6 +252,7 @@ describe("read scope admission", () => {
 		try {
 			const isolated = createSafetyPolicyEngine({ cwd: root });
 			strictEqual(isolated.evaluate({ tool: ToolNames.Read, args: operatorSkill }).readScope, "outside-workspace");
+			strictEqual(isolated.evaluate({ tool: ToolNames.Read, args: { path: runScope } }).readScope, undefined);
 		} finally {
 			delete process.env.CLIO_CODER_INTEROP_HOME;
 		}

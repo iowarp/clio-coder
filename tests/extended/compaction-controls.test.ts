@@ -1193,13 +1193,10 @@ describe("production compaction controls", () => {
 			{ encoding: "utf8", env: process.env, timeout: 15000 },
 		);
 		strictEqual(result.status, 0, result.stderr);
-		const facts = result.stdout
-			.trim()
-			.split("\n")
-			.map((line) => JSON.parse(line));
+		const report = JSON.parse(result.stdout);
 		// The failed stream's placeholder zeros measured nothing: its call counts, its tokens and cost stay unknown (#434).
-		const cost = (groupBy: string) => facts.find((fact) => fact.fact === "telemetry-cost" && fact.groupBy === groupBy);
-		const byRole = cost("role")?.report;
+		const cost = (groupBy: string) => report.cost.find((entry: { groupBy: string }) => entry.groupBy === groupBy);
+		const byRole = cost("role");
 		ok(byRole);
 		strictEqual(byRole.total.calls.display, "1");
 		strictEqual(byRole.total.tokens.display, "unknown (1 call unknown)");
@@ -1208,7 +1205,7 @@ describe("production compaction controls", () => {
 			byRole.groups.map((group: { key: string; tokens: { display: string } }) => [group.key, group.tokens.display]),
 			[["compaction", "unknown (1 call unknown)"]],
 		);
-		strictEqual(cost("model")?.report.groups[0]?.usd.display, "not measured");
+		strictEqual(cost("model")?.groups[0]?.usd.display, "not measured");
 	});
 	for (const text of [
 		"## Goal\nRepair MPI exchange\n## Constraints & Preferences\nKeep rank order.",

@@ -766,7 +766,20 @@ test("an operator /run resumes with its command above its card, the spend its li
 	]);
 	const command = "/run documenter --target blade --model dynamo/qwopus document the retry options";
 	let style: "standard" | "detailed" = "standard";
-	const live = createChatPanel({ getOutputStyle: () => style });
+	const view = telemetryViewOf(
+		"run-replay",
+		[],
+		new Map([
+			[
+				"run-d",
+				[
+					...telemetryCall("run-replay", { role: "worker", usage: { input: 10_000, output: 2_000 } }),
+					...telemetryCall("run-replay", { role: "worker", usage: { input: 5_000, output: 1_000, cacheWrite: 200 } }),
+				],
+			],
+		]),
+	);
+	const live = createChatPanel({ getOutputStyle: () => style, getTelemetry: () => view });
 	appendOperatorCommand(command, { appendReplayBlock: (block) => live.appendReplayBlock(block), requestRender: noop });
 	assert.ok(liveState);
 	live.applyWorkerState(liveState);
@@ -792,11 +805,12 @@ test("an operator /run resumes with its command above its card, the spend its li
 			data: settled[0],
 		},
 	] as SessionEntry[];
-	const replayed = createChatPanel({ getOutputStyle: () => style });
+	const replayed = createChatPanel({ getOutputStyle: () => style, getTelemetry: () => view });
 	rehydrateChatPanelFromTurns(replayed, entries, { readWorkerReceipt: () => receipt });
 	const plain = (panel: ReturnType<typeof createChatPanel>) => panel.render(100).map(stripTerminalSequences).join("\n");
 	assert.match(plain(replayed), /^▌ \/run documenter --target blade/u);
-	assert.match(plain(replayed), /context 6\.2k/u);
+	assert.match(plain(replayed), /context 6,200/u);
+	assert.match(plain(replayed), /18,200 tokens processed/u);
 	assert.equal(plain(replayed), plain(live));
 	// Detailed lists the calls the run made, oldest first, on /resume as it did live.
 	style = "detailed";
