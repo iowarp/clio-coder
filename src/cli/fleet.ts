@@ -5,6 +5,7 @@
  *   clio-coder fleet status [--json] [--all]   runtime snapshot from the durable ledger
  *   clio-coder fleet decisions --json [--all]  bounded sealed review and compete gate verdicts
  *   clio-coder fleet view <runId|fleetRootId>  one run's transcript, or a root's step index
+ *   clio-coder fleet code-steps <rootId> [--json]  deterministic code steps of one fleet root
  *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
  *   clio-coder fleet cancel <runId>             cancel one run from any terminal
  *
@@ -109,6 +110,8 @@ Subcommands:
   decisions --json [--all]      emit a bounded window of sealed review and compete gate verdicts
   view <runId> [--follow] [--all]  read one run's ledger entry, event journal, and receipt
   view <fleetRootId> [--all]    list a fleet run's steps and the run id to view for each
+  code-steps <rootId> [--json]  list the deterministic code steps one fleet root ran, from the
+                                per-root records under the state directory's code-steps/ tree
   events <fleetRootId> [--follow] [--json] [--all]
                                 print a fleet run's live event journal of hash-chained, unsigned
                                 lines; each settled step names the manifest bytes written at that
@@ -904,6 +907,8 @@ export async function runFleetCommand(args: ReadonlyArray<string>): Promise<numb
 			return (await import("./fleet-view.js")).runFleetView(args.slice(1));
 		case "events":
 			return (await import("./fleet-events.js")).runFleetEvents(args.slice(1));
+		case "code-steps":
+			return (await import("./fleet-code-steps.js")).runFleetCodeSteps(args.slice(1));
 		case "drain":
 			return runAdmissionControl("drain", args.slice(1));
 		case "resume":

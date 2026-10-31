@@ -30,7 +30,7 @@ test("closed stdout quietly ends fleet journals, followers, and trace JSON with 
 		for (const args of [
 			["fleet", "events", rootId, "--json"],
 			["fleet", "events", rootId, "--json", "--follow"],
-			["trace", "code-steps", rootId, "--json"],
+			["fleet", "code-steps", rootId, "--json"],
 		]) {
 			const child = spawn(process.execPath, ["--import", "tsx", resolve("src/cli/index.ts"), ...args], {
 				cwd: process.cwd(),
@@ -81,7 +81,7 @@ test("main reports an EPIPE rejection that was not emitted by stdout", async () 
 	try {
 		const script = `
 			process.stdout.write = () => { throw Object.assign(new Error("upstream pipe failed"), {code: "EPIPE"}); };
-			process.argv = [process.execPath, "clio-coder", "trace", "code-steps", "missing", "--json"];
+			process.argv = [process.execPath, "clio-coder", "fleet", "code-steps", "missing", "--json"];
 			await import(${JSON.stringify(resolve("src/cli/index.ts"))});
 		`;
 		const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {

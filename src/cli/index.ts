@@ -7,8 +7,7 @@ process.title = "clio-coder";
 
 function installHumanStdoutHandler(command: string, args: readonly string[]): void {
 	const streamsToReader =
-		(command === "fleet" && ["events", "status", "view"].includes(args[0] ?? "")) ||
-		command === "trace" ||
+		(command === "fleet" && ["code-steps", "events", "status", "view"].includes(args[0] ?? "")) ||
 		command === "export" ||
 		(command === "systemone" && args[0] === "export");
 	if (!streamsToReader) return;
@@ -81,7 +80,7 @@ Usage:
   clio-coder agents               list discovered agent recipes
   clio-coder agents validate      report every unresolved reference in the repo's recipes, skills and fleet bindings
   clio-coder playbook list|new|validate|graph|commands  list, author, validate, and graph playbooks
-  clio-coder fleet nodes|run|status|view|verify|drain|resume  run playbooks on the fleet, status, verification, and admission control
+  clio-coder fleet nodes|run|status|view|code-steps|verify|drain|resume  run playbooks on the fleet, status, code steps, verification, and admission control
   clio-coder evidence             build, list, or inspect evidence artifacts
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
@@ -90,7 +89,6 @@ Usage:
   clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain  read session and run telemetry (--json for the DTO)
   clio-coder telemetry import-legacy|consent|export|import-bundle|prune  rebuild pre-journal call facts; manage research content consent; export or verify a telemetry bundle; apply retention
   clio-coder systemone status|export  System One decision dataset: what it holds, and export it as JSONL (experimental)
-  clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder library              register, install, update, import, inspect, and manage packages of every kind
   clio-coder mcp list|test|trust|untrust  list, test and trust declared MCP servers
@@ -325,7 +323,6 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["telemetry", async (subArgs) => (await import("./telemetry.js")).runTelemetryCommand(subArgs)],
 	["session", async (subArgs) => (await import("./session.js")).runSessionCommand(subArgs)],
 	["systemone", async (subArgs) => (await import("./system-one.js")).runSystemOneCommand(subArgs)],
-	["trace", async (subArgs) => (await import("./trace.js")).runTraceCommand(subArgs)],
 	["evolve", async (subArgs) => (await import("./evolve.js")).runEvolveCommand(subArgs)],
 	[
 		"dev",

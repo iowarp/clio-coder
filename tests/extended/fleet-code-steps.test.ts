@@ -3,11 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { runTraceCommand } from "../../src/cli/trace.js";
+import { runFleetCodeSteps } from "../../src/cli/fleet-code-steps.js";
 import type { CodeStepRecord } from "../../src/domains/dispatch/code-step.js";
 import { readCodeStepRecords, writeCodeStepRecord } from "../../src/domains/dispatch/code-step-store.js";
 
-/** Runs one trace invocation with stdout and stderr captured. */
+/** Runs one fleet code-steps invocation with stdout and stderr captured. */
 async function capture(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
 	const outWrite = process.stdout.write;
 	const errWrite = process.stderr.write;
@@ -23,7 +23,7 @@ async function capture(args: string[]): Promise<{ code: number; stdout: string; 
 		return true;
 	}) as typeof process.stderr.write;
 	try {
-		const code = await runTraceCommand(args);
+		const code = runFleetCodeSteps(args);
 		return { code, stdout, stderr };
 	} finally {
 		process.stdout.write = outWrite;
@@ -56,11 +56,11 @@ function record(overrides: Partial<CodeStepRecord>): CodeStepRecord {
 	};
 }
 
-describe("contracts/trace code-steps reads the deterministic code-step records back", () => {
+describe("contracts/fleet code-steps reads the deterministic code-step records back", () => {
 	let home = "";
 	let previousHome: string | undefined;
 	before(() => {
-		home = mkdtempSync(join(tmpdir(), "clio-coder-trace-code-steps-"));
+		home = mkdtempSync(join(tmpdir(), "clio-coder-fleet-code-steps-"));
 		previousHome = process.env.CLIO_CODER_HOME;
 		process.env.CLIO_CODER_HOME = home;
 	});
@@ -71,33 +71,16 @@ describe("contracts/trace code-steps reads the deterministic code-step records b
 	});
 
 	it("requires a fleet root id and exits 2 without one, like the run-scoped subcommands", async () => {
-		const result = await capture(["code-steps"]);
+		const result = await capture([]);
 		strictEqual(result.code, 2);
-		match(result.stderr, /trace code-steps requires a fleet root id/);
-	});
-
-	it("retires the viewer command and port flag before opening storage", async () => {
-		const removed = await capture(["ui"]);
-		strictEqual(removed.code, 2);
-		match(removed.stderr, /unknown trace command: ui/);
-		const help = await capture(["--help"]);
-		strictEqual(help.code, 0);
-		strictEqual(help.stdout.includes("trace ui"), false);
-		for (const args of [
-			["runs", "--port", "4600"],
-			["runs", "--port=4600"],
-		]) {
-			const result = await capture(args);
-			strictEqual(result.code, 2);
-			match(result.stderr, /unknown trace flag: --port/);
-		}
+		match(result.stderr, /fleet code-steps requires a fleet root id/);
 	});
 
 	it("treats a root that never ran a code step as the empty state, not a failure", async () => {
-		const result = await capture(["code-steps", "root-empty"]);
+		const result = await capture(["root-empty"]);
 		strictEqual(result.code, 0);
 		match(result.stdout, /no code-step records for fleet root root-empty/);
-		const json = await capture(["code-steps", "root-empty", "--json"]);
+		const json = await capture(["root-empty", "--json"]);
 		strictEqual(json.code, 0);
 		deepStrictEqual(JSON.parse(json.stdout), []);
 	});
@@ -109,22 +92,16 @@ describe("contracts/trace code-steps reads the deterministic code-step records b
 		await writeCodeStepRecord("root-a", earlier);
 		deepStrictEqual(readCodeStepRecords("root-a"), [earlier, later]);
 
-		const json = await capture(["code-steps", "root-a", "--json"]);
+		const json = await capture(["root-a", "--json"]);
 		strictEqual(json.code, 0);
 		deepStrictEqual(JSON.parse(json.stdout), [earlier, later]);
 
-		const table = await capture(["code-steps", "root-a"]);
+		const table = await capture(["root-a"]);
 		strictEqual(table.code, 0);
 		const lines = table.stdout.trimEnd().split("\n");
 		strictEqual(lines.length, 3);
 		match(lines[0] ?? "", /^EXIT\s+DURATION\s+STARTED\s+STEP\s+COMMAND\s+ARGV$/);
 		match(lines[1] ?? "", /^0\s+1000ms .*lint .*npm run lint$/);
 		match(lines[2] ?? "", /^1\s+1000ms .*test .*npm run lint$/);
-	});
-
-	it("ignores --db, because the records are files beside the ledger and not rows in the mirror", async () => {
-		const result = await capture(["code-steps", "root-a", "--db", join(home, "does-not-exist.sqlite"), "--json"]);
-		strictEqual(result.code, 0);
-		strictEqual((JSON.parse(result.stdout) as unknown[]).length, 2);
 	});
 });

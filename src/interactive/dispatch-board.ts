@@ -124,7 +124,7 @@ export interface DispatchBoardRow {
 	resultContract?: TelemetryRunSummary["resultContract"];
 	/**
 	 * Id of the receipt sealed for this run (`receipts/<runId>.json`, the id
-	 * `clio-coder trace` takes). Set only once a terminal dispatch event has
+	 * `clio-coder fleet view` takes). Set only once a terminal dispatch event has
 	 * been published, which the dispatch domain does after recordReceipt, so a
 	 * running row carries no receipt id and never implies evidence that does
 	 * not exist yet.
