@@ -9,6 +9,7 @@ import { fixtureEnvelope } from "./receipt.js";
  */
 
 import type { WorkerTelemetryContext } from "../../src/core/telemetry/context.js";
+import { workerAgent } from "../../src/core/telemetry/context.js";
 import type { RunUsageFacts } from "../../src/domains/dispatch/run-call-usage.js";
 import { finishRunResult, runSettledRecord, settleFinishedRun } from "../../src/domains/dispatch/run-settlement.js";
 import type { RunResultDraft } from "../../src/domains/dispatch/types.js";
@@ -18,8 +19,8 @@ import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 export async function writeSettledRun(stateDir: string, draft: RunResultDraft, usage?: RunUsageFacts): Promise<void> {
 	const context: WorkerTelemetryContext =
 		draft.sessionId === null
-			? { sessionId: null, runId: draft.runId, label: "worker" }
-			: { sessionId: draft.sessionId, runId: draft.runId, label: "worker" };
+			? { sessionId: null, runId: draft.runId, agent: workerAgent(draft.runId) }
+			: { sessionId: draft.sessionId, runId: draft.runId, agent: workerAgent(draft.runId) };
 	const writer = await openCallJournal({
 		directory: telemetryRunDirectory(stateDir, draft.runId),
 		context,

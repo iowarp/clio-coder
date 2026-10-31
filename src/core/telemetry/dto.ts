@@ -137,7 +137,7 @@ export const FACT_METRICS = [
 	"contextReserve",
 	"contextShare",
 	"contextTokens",
-	"receipts",
+	"runRecords",
 	"toolCalls",
 	"toolErrors",
 ] as const;

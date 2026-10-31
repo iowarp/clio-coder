@@ -128,7 +128,8 @@ export { createTaskBoardStore, foldTaskBoard, taskBoardCounts, toTaskLedgerEntry
 export type { RunListCursor } from "./telemetry-source.js";
 export {
 	listRunTelemetrySources,
-	loadRunReceiptEvidence,
+	loadRunEvidence,
+	loadRunScopeFiles,
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
 	runTelemetryDirectoryExists,

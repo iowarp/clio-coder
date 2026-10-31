@@ -1030,7 +1030,7 @@ const FAMILY: Record<FactMetric, Family> = {
 	contextReserve: "count",
 	contextShare: "percent",
 	contextTokens: "count",
-	receipts: "count",
+	runRecords: "count",
 	toolCalls: "count",
 	toolErrors: "count",
 	harnessShare: "percent",
@@ -1048,7 +1048,7 @@ const RULES: Record<FactMetric, string> = {
 	contextReserve: "latest context snapshot reserve tokens",
 	contextShare: "100 × context tokens / effective window",
 	contextTokens: "latest context snapshot category tokens",
-	receipts: "sealed evidence receipts",
+	runRecords: "sealed evidence run records",
 	toolCalls: "sealed evidence tool calls",
 	toolErrors: "sealed evidence tool errors",
 	harnessShare: "100 × harnessTime / (harnessTime + networkTime + modelTime + toolTime), main-loop calls only",
@@ -3219,7 +3219,7 @@ export function evidenceQuantities(overview: EvidenceOverview) {
 		: unknownSum(1);
 	return {
 		runs: q("runs", counted(totals.runs)),
-		receipts: q("receipts", counted(totals.receipts)),
+		runRecords: q("runRecords", counted(totals.runRecords)),
 		toolCalls: q("toolCalls", counted(totals.toolCalls)),
 		toolErrors: q("toolErrors", counted(totals.toolErrors)),
 		total: q("total", tokenFact),

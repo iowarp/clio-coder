@@ -10179,8 +10179,8 @@ export function createDispatchBundle(
 			// The synthesis never ran as a worker, so its run journal is opened here to settle it (#434).
 			const synthesisContext: WorkerTelemetryContext =
 				input.template.sessionId === null
-					? { sessionId: null, runId, label: "worker" }
-					: { sessionId: input.template.sessionId, runId, label: "worker" };
+					? { sessionId: null, runId, agent: workerAgent(runId) }
+					: { sessionId: input.template.sessionId, runId, agent: workerAgent(runId) };
 			const synthesisJournal = await openRunTelemetry(synthesisContext, telemetryRunDirectory(clioStateDir(), runId));
 			let receipt: RunResult;
 			try {

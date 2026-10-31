@@ -289,8 +289,9 @@ for (const mode of ["single", "parallel", "review", "compete", "council"] as con
 				lineage: { parentRunId: "forged", rootRunId: "forged", depth: 99, attempt: 99 },
 			};
 			// Tool options are supplied by the host, independently of model args.
-			const result = await withTelemetryContext({ sessionId: "lineage-test", label: "main" }, () =>
-				f.tool.run(args, { hostRun, toolCallId: "call-trusted" } as ToolInvokeOptions),
+			const result = await withTelemetryContext(
+				{ sessionId: "lineage-test", agent: { role: "main", id: "lineage-test" } },
+				() => f.tool.run(args, { hostRun, toolCallId: "call-trusted" } as ToolInvokeOptions),
 			);
 			strictEqual(result.kind, "ok", JSON.stringify(result).slice(0, 1200));
 			strictEqual(f.captured.length, mode === "single" ? 1 : mode === "parallel" || mode === "review" ? 2 : 3);

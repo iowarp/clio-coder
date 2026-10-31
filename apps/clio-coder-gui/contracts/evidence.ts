@@ -60,7 +60,7 @@ export const EvidenceOverview = Type.Object(
 		quantities: Type.Object(
 			{
 				runs: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
-				receipts: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
+				runRecords: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
 				toolCalls: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
 				toolErrors: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.calls,
 				total: TELEMETRY_DTO_SCHEMAS.cost.properties.total.properties.tokens,
