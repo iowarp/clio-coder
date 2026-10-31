@@ -70,7 +70,7 @@ clio-coder library install extension:materio --user
 
 An extension that serves a plugin shows that plugin in its Library detail, and the plugin shows its extension, each with the partner's installed state and whether a takeover applies. Installing a plugin never installs its extension, so the two are separate installs, each with its own review.
 
-Every committed install, update, enable, disable, remove, register and import also writes a bounded lifecycle receipt. A receipt records the operation, the package kind and id, the content digest and, for an extension, the envelope digest, the scope, the source, and the actor (`operator`, `model-confirmed`, or `upgrade`). Clio keeps the most recent 512 receipts in `library-receipts.json` under its state directory. The Library detail pane and the `/extensions` reference show a package's last lifecycle line, and `clio-coder trace tail` and evidence bundles carry the package owner of extension, skill and prompt activity.
+Every committed install, update, enable, disable, remove, register and import also writes a bounded lifecycle receipt. A receipt records the operation, the package kind and id, the content digest and, for an extension, the envelope digest, the scope, the source, and the actor (`operator`, `model-confirmed`, or `upgrade`). Clio keeps the most recent 512 receipts in `library-receipts.json` under its state directory, and the operation itself is journaled as a `library.*` record, such as `library.installed`, in the process journal. The Library detail pane and the `/extensions` reference show a package's last lifecycle line, and the session ledger carries the package owner of extension, skill and prompt activity.
 
 ## Scope and workspace state
 

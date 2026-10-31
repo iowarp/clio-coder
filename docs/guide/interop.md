@@ -16,8 +16,8 @@ capabilities.
 Depending on the peer, Clio Coder can run a named task through an Agent Client
 Protocol (ACP) connection or a managed headless CLI target, or open an
 interactive Herdr pane. Clio Coder remains the main conversation and records a run
-and receipt for ACP and headless dispatch. A pane is an interactive handoff
-and has no managed result or receipt. External peers
+that settles and seals in its telemetry run scope for ACP and headless dispatch.
+A pane is an interactive handoff and has no managed result or run record. External peers
 are selected explicitly; Clio does not silently switch agents or modes.
 
 | Peer | ACP connection | Headless target runtime | Pane ID |
@@ -78,7 +78,7 @@ user `opencode.json` or `opencode.jsonc`, the headless connector passes that
 named variable to OpenCode when it is set. For ACP, add
 `env: { LAB_GATEWAY_KEY: "{env:LAB_GATEWAY_KEY}" }` to that peer entry. Clio Coder
 resolves the reference at launch; the key value does not enter settings or the
-receipt. Unrelated environment secrets stay out of headless CLI children by
+run record. Unrelated environment secrets stay out of headless CLI children by
 default.
 
 ```text
@@ -88,11 +88,11 @@ default.
 ```
 
 `/run --worktree` preserves the peer's Git task branch for review and records
-its path, branch, and changed files in the receipt. Without it, a headless peer
+its path, branch, and changed files in the run record. Without it, a headless peer
 works in the current checkout and edits may appear immediately. A task worktree
 separates Git changes but does not confine the peer's own filesystem, shell, or
 network tools. Clio can mediate ACP permission requests a peer reports, but a
-peer may write without requesting permission; receipts mark this enforcement
+peer may write without requesting permission; run records mark this enforcement
 limit. OpenCode's headless path supports writable runs and refuses read-only
 dispatched runs. Use the existing Git workflow to inspect and merge a
 preserved branch, and use `/share` when the main agent should read a managed
@@ -124,7 +124,7 @@ managed runtime, and the `pane` row for a peer that has both a binary name and a
 managed runtime. Statuses are `ready`, `experimental`, and `unavailable`. A
 configured ACP or headless mode is never better than `experimental`, because
 authentication, permission behavior, and the selected model are only proven by a
-live task and its receipt. `ready` belongs to a pane, and only when `/interop`
+live task and its run record. `ready` belongs to a pane, and only when `/interop`
 sees a live Herdr pane host. `interop inspect` cannot observe a pane host, so it
 reports a pane with an installed binary as `experimental`. A mode is
 `unavailable` when the CLI is missing, no target uses the runtime, no ACP entry is

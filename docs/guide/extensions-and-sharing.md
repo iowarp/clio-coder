@@ -161,7 +161,7 @@ Use in the TUI:
 
 Bare `/skill` returns a usage error that points to `/skills`, which opens the Library on its Skills tab. `/skill <name> [args]` submits `args` with a pending skill request; the model must call `context` (scope="skills") for that skill before following the workflow. `/skill off` clears the session's skill tool surface (see [skills-marketplace.md](skills-marketplace.md)). The same pending-request path runs in headless mode, so `clio-coder run "/skill hdf5-review inspect the writer"` matches the interactive behavior.
 
-Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata, prompt diagnostics, and run receipts. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
+Every activation records a session ledger entry with the skill name, file path, hash, source, trigger (`slash-command` or `tool`), and turn id when one is available. The same ledger is mirrored into session metadata and prompt diagnostics, and a dispatched run's `run.settled` record lists the skills it loaded and who asked for each. Compaction keeps the newest active skill turn in the retained suffix so a loaded skill is not silently summarized away.
 
 ### Naming and validation
 

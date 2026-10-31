@@ -3,7 +3,7 @@
 Clio Coder dispatches bounded worker agents locally or on verified SSH nodes.
 Registering a remote node keeps unpinned work local. An explicit pin, session
 choice or standing preference selects remote execution through the same
-admission, worker authority, verification and receipt paths.
+admission, worker authority, verification and run record paths.
 
 Source of truth: `src/domains/dispatch/`, [cluster.ts](../../src/domains/scheduling/cluster.ts),
 [dispatch.ts](../../src/tools/dispatch.ts), [dispatch-schema.ts](../../src/tools/dispatch-schema.ts),
@@ -21,13 +21,13 @@ Source of truth: `src/domains/dispatch/`, [cluster.ts](../../src/domains/schedul
 | Write or run a repo-owned playbook | [Shipped playbooks and playbook versions](#shipped-playbooks-and-playbook-versions), [Playbook authoring](#playbook-authoring) |
 | Know what happens when a route fails | [Failure semantics](#failure-semantics), [Assignments, attempts, and failover](#assignments-attempts-and-failover) |
 | Watch, cancel, or inspect running work | [Operator visibility](#operator-visibility), [Workers dock and dashboard](#workers-dock-and-dashboard), [Inspect fleet runs from the CLI](#inspect-fleet-runs-from-the-cli) |
-| Read what a run proved | [Receipts](#receipts) |
+| Read what a run proved | [Run records](#run-records) |
 
 ## Architecture
 
 The orchestrator writes one WorkerSpec JSON line to a worker's stdin and reads
 NDJSON events from its stdout. A remote worker is the same protocol tunneled
-through `ssh -T`, so prompts, safety, receipts and telemetry do not change with
+through `ssh -T`, so prompts, safety, run records and telemetry do not change with
 distance. The `local` and `ssh` transports implement one `WorkerTransport`
 interface ([transport.ts](../../src/domains/dispatch/transport.ts)). The frames, the announce and
 attestation handshake, drift handling and worker exit codes are specified in
@@ -77,7 +77,7 @@ churn stable prompt hashes.
 One run has a first-class singular shape: `task` is the worker assignment and
 `briefing` is separate bounded context, at most 12,000 UTF-8 bytes. A briefing
 is untrusted task data. It carries no conversation or session history, never
-replaces `task`, never gets copied into the receipt task, and arrives as a
+replaces `task`, never gets copied into the run's task, and arrives as a
 separately delimited dynamic prompt message. `tasks` is the batch form. A shared
 top-level briefing applies to string tasks and to task objects without their own;
 an object-level briefing wins. Supplying both `task` and `tasks` fails instead of
@@ -96,8 +96,8 @@ result-contract revision or review revision may use; neither field may be smalle
 than the requested phase. Admission never refuses a
 request for exceeding the recipe maximum or the operator cap. It resolves one
 immutable envelope from the recipe policy, the request, the effective worker
-budget and every clamp or escalation reason, then seals the envelope in the run
-ledger and receipt. `monitor`, `fleet status` and the live fleet card print the
+budget and every clamp or escalation reason, then records the envelope on the
+run ledger row and in the run's `run.settled`. `monitor`, `fleet status` and the live fleet card print the
 recipe policy, the requested envelope, the effective envelope and the clamp or
 escalation reason ([budget-envelope.ts](../../src/domains/dispatch/budget-envelope.ts)).
 
@@ -130,7 +130,7 @@ lists. Native dispatch resolves each declaration and action class before launch,
 refuses an untrusted or stale server by name, and seals the server digest and
 tool names in the worker permit. The worker launches only the matching declared
 server, under its sandbox and at the task worktree root for a project server.
-Its receipt records the attested MCP tools. CLI runtimes and ACP peers do not
+Its `RunResult` permit records the attested MCP tools. CLI runtimes and ACP peers do not
 gain Clio Coder's MCP gateway through this mechanism.
 
 Grant worker-server networking with `network: true` in an operator-owned user
@@ -502,8 +502,8 @@ implicit local path and optional fleet-node provenance may remain absent.
   session choice or standing preference when that names another node, otherwise
   local. When no eligible node remains the retry fails closed.
 - Every failover hop is recorded as a reroute (`fromNode`, `toNode`, reason)
-  on the ledger row and the receipt, so the placement lineage of a run is
-  reconstructable from evidence alone.
+  on the ledger row and the run's `RunResult`, so the placement lineage of a
+  run is reconstructable from evidence alone.
 - An idle node is never auto-offlined by staleness; only consecutive channel
   failures change the registry health to `offline`. Doctor preflight is a separate
   durable eligibility gate: a failed or stale record blocks placement without
@@ -649,7 +649,7 @@ detected by the merge guard yields `worktree_destination_busy` and leaves that
 operation, the index, and working-tree edits untouched. The guard recognizes
 merges, cherry-picks, reverts, rebases, and cherry-pick/revert sequences.
 A detached task applies when its
-run finalizes, so `monitor(mode="collect")` returns the sealed application receipt.
+run finalizes, so `monitor(mode="collect")` returns the settled application result.
 
 Four cases withhold the merge: a worker whose own report lists a failing validation,
 a worker whose task requested validation but which executed no check, a worker that
@@ -667,7 +667,7 @@ branch, and the detail names the `clio-coder fleet land` command that applies it
 
 A merge-mode run whose host verification rejected the tree fails with
 `host_verification_rejected` and keeps its branch with the work committed. The detail
-names the `clio-coder fleet land` command that applies it. That detail, the receipt's evidence line for the
+names the `clio-coder fleet land` command that applies it. That detail, the run's evidence line for the
 check, and the merge card all say whether Clio Coder ran the failing check on the task base. Only
 a quick command check is replayed, once, inside a bubblewrap sandbox over a throwaway
 archive of the base: one that took under two seconds, with a timeout capped at five seconds.
@@ -701,7 +701,7 @@ worker is unknown.
   the preserved branch, and the detail names the `clio-coder fleet land` command that applies it.
 - `Discard` asks `Delete branch <b> and its worktree? This cannot be undone.` (opening on
   `Back`) and, on `Delete`, removes the worktree and branch; `Back` or Esc returns to the
-  card. If the worktree is removed but the branch cannot be deleted, the receipt says so and
+  card. If the worktree is removed but the branch cannot be deleted, the run's worktree detail says so and
   the branch remains.
 - Esc on the card, an answer that is not one of its options, and a canceled run all keep
   the branch. An attended card has no timeout. `fleet.permissions.escalation.timeoutMs`
@@ -711,7 +711,7 @@ A card behind another overlay posts a notice, and an idle model interview yields
 to it and resumes afterwards. While it waits, the run shows as running, `fleet cancel`
 settles it as Keep, and a lone dispatch keeps its capacity slot free for other work. Cards
 for a batch appear one at a time, and members that pass the gate merge without waiting. The
-receipt's `worktree.detail` records the decision: a landed merge reads `merged <sha> onto
+`worktree.detail` in the run's `run-result` object records the decision: a landed merge reads `merged <sha> onto
 <branch>; operator merge accepted after the gate held it because ...`, a refused one begins
 `operator merge refused:`, a conflict or other failure begins `operator merge:`, and a keep or
 discard begins `operator keep:` or `operator discard:` (with `worktree.reason`
@@ -824,7 +824,7 @@ flow then run locally. The operator checkout changes only through that flow.
 `apply: "preserve"` keeps the result instead of applying it.
 
 Transfer, path, validation and application failures preserve the node branch
-and worktree. The receipt's worktree detail names the node, branch, path and
+and worktree. The run result's worktree detail names the node, branch, path and
 imported commit when available. Inspect the preserved branch and any uncommitted
 files on the node before retrying, merging or deleting them. A local imported
 branch is also recoverable through the existing task-worktree guidance. Remote
@@ -930,7 +930,7 @@ them when they settle.
 The orchestrator is the sole writer. A post travels up the control lane as a
 body and nothing else, and every attribution field is stamped from the
 orchestrator's own admission record, so no worker-supplied value can reach a
-field a peer or a receipt reads as identity. Admitted entries are pushed back
+field a peer or a run record reads as identity. Admitted entries are pushed back
 down to each worker's local mirror, so a read answers with a watermark instead of
 blocking on a round trip, and a worker that spawns late receives the whole board.
 Entries that carry information-flow restrictions are withheld from a worker whose
@@ -961,11 +961,11 @@ batch each carry one `agent ledger (<n> entries, sequence <w>)` section after th
 per-run lines. It holds the same bounded render a worker sees, with the same
 attribution and the same corroboration and dispute marks, and no count, score, or
 consensus line. The section also lists the batch's assignments and, for Scout
-reports, the findings taken from receipts. The same text is on the result's
+reports, the findings taken from their run records. The same text is on the result's
 `details.agentLedgerBoard`. A batch nobody posted to still shows
 `agent ledger (0 entries, sequence 0)`.
 
-Receipts do not record ledger contributions.
+Run records do not record ledger contributions.
 
 ### Detached fan-out, backgrounding, and collect
 
@@ -1046,7 +1046,7 @@ to distinguish the leased process from PID reuse, terminates an abandoned
 worker or ACP process group, and then removes the group's registered
 worktrees and branches. If a judge output is waiting in the decision journal,
 the workers are quiesced but the candidates remain until that output is bound
-to an integrity-verified judge receipt; a recovered winner is preserved for
+to a judge run whose seal verifies; a recovered winner is preserved for
 operator inspection rather than silently auto-applied after restart.
 
 ### Council
@@ -1080,8 +1080,9 @@ Three synthesis modes are available:
 | `vote` | Deterministic majority tally over structured `verdict` fields. | No |
 | `judge` | Runs one additional read-only judge against all final answers. The judge defaults to `oracle`, or to `researcher` when the call's own agent is `oracle`, so by default the judge is never the call's own recipe. Set `judge.agent` to choose another. | Yes, one |
 
-Every member run seals a receipt, a judge receipt points backward to every final
-member receipt through gate provenance, and the approval artifact names each
+Every member run settles and seals its own run record, a judge run points
+backward to every final member run's digest through gate provenance, and the
+approval artifact names each
 member's label, target, model, node, color, round count, and
 synthesis mode, so the plan hash binds the whole council contract.
 
@@ -1111,7 +1112,7 @@ which no answering member carried a verdict reports `no_verdict_field`.
 Every orchestration shape compiles to one strict ExecutionPlan v4 DAG with
 stable task ids, explicit dependencies, requested and approved authority,
 capacity-bounded waves, stop/continue semantics, and structured
-handoffs bound to receipt digests. The scheduler performs whole-plan preflight and reservation before
+handoffs bound to run digests. The scheduler performs whole-plan preflight and reservation before
 the first worker spawns. A missing authority grant is an admission failure.
 
 A plan-scale dispatch call maps to an approval ask at the `default` autonomy
@@ -1141,8 +1142,8 @@ Execution consumes the same pins, including each expanded builder/reviewer/candi
 the SSH node's transport kind and host. A placement, host, or capability
 change fails before launch rather than silently choosing an
 unapproved alternative. Yolo skips the stop and seals the
-same plan hash into every run's receipt instead
-(`plan.approval: "yolo"` is the stable receipt value).
+same plan hash into every run's plan provenance instead
+(`plan.approval: "yolo"` is the stable value).
 
 The registry boundary is resolved dispatch plan v3. `deadlineMs` is required:
 a fleet plan carries a positive integer or `null` and a non-fleet plan carries
@@ -1190,12 +1191,12 @@ When `proposals: true`, every roster member first runs with a read-only dispatch
 
 - `clio-coder playbook list` lists every playbook with its source, a state of `valid`, `setup` or `invalid`, and the rendered steps. It takes no flags. `setup` means the playbook needs registry commands this repository has not declared, and the line carries the remedy.
 - `clio-coder playbook new <name> --from <builtin>` copies one of `build-review`, `build-test`, or `sdlc` into `.clio-coder/playbooks/<name>.md`. The command requires a safe file stem (lowercase letters, digits, `.`, `_` and `-`, starting and ending with a letter or digit) and refuses to replace an existing playbook.
-- `clio-coder playbook validate <name> [--json]` parses the playbook, validates its graph and command bindings, resolves every agent, target and profile, compiles the execution plan, and checks the declared write boundaries against `.gitignore`. It prints one line per check (`parse`, `graph`, `commands`, `agents`, `plan`), exits 1 with the diagnostics when the playbook is invalid, and creates no state directory, ledger row, reservation, worker, or receipt. `--json` emits `{valid, playbook, checks, planHash}` or `{valid: false, playbook, diagnostics}`.
+- `clio-coder playbook validate <name> [--json]` parses the playbook, validates its graph and command bindings, resolves every agent, target and profile, compiles the execution plan, and checks the declared write boundaries against `.gitignore`. It prints one line per check (`parse`, `graph`, `commands`, `agents`, `plan`), exits 1 with the diagnostics when the playbook is invalid, and creates no state directory, ledger row, reservation, worker, or run record. `--json` emits `{valid, playbook, checks, planHash}` or `{valid: false, playbook, diagnostics}`.
 - `clio-coder playbook graph <name> [--json]` renders the compiled waves with each step kind, agent or command, target or profile, scope, and write boundary. Gate and plan steps show their path, command, roster and task limit. Bounded loops also show their check and repair nodes beneath the loop identifier. `--json` emits `{playbook, planHash, waves, loops}`.
 - `clio-coder playbook commands init` discovers declared package scripts, just recipes, Makefile targets, and supported `pyproject.toml` script and tool entries. It writes a fully commented `.clio-coder/playbooks/commands.yaml` draft. Uncommenting an entry confirms its exact argument vector, and an existing registry is never replaced.
-- `clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--json]` runs a playbook ([fleet.ts](../../src/cli/fleet.ts)). Preflight resolves every agent, target and profile, requires each step scope to fit inside the orchestrator scope, checks that the session budget is open and can hold `budgetUsd` (a session ceiling of `0` is always open and holds any `budgetUsd`), binds routes, and checks the write boundaries; a preflight failure exits 2 before anything dispatches. The run prints `fleet <name>: root=fleet-<hex> plan=<hash> steps=<n> loops=<m>` on stderr, one line per settled step on stdout (`--json` prints receipts and code reports as JSON lines without human step notices), and a summary on stdout with each loop's terminal reason, staleness re-runs, steps that need an operator decision, and write-boundary violations. Exit code 0 means every required step succeeded, no step was skipped, and every loop resolved; any other finished run exits 1, and an error thrown by the scheduler exits 2 like a preflight failure. `fleet view <fleetRootId>` lists the steps and the run id of each.
+- `clio-coder fleet run <name> [--var key=value ...] [--resume <runId>] [--json]` runs a playbook ([fleet.ts](../../src/cli/fleet.ts)). Preflight resolves every agent, target and profile, requires each step scope to fit inside the orchestrator scope, checks that the session budget is open and can hold `budgetUsd` (a session ceiling of `0` is always open and holds any `budgetUsd`), binds routes, and checks the write boundaries; a preflight failure exits 2 before anything dispatches. The run prints `fleet <name>: root=fleet-<hex> plan=<hash> steps=<n> loops=<m>` on stderr, one line per settled step on stdout (`--json` prints each agent step's `RunResult` and each code step's report as JSON lines without human step notices), and a summary on stdout with each loop's terminal reason, staleness re-runs, steps that need an operator decision, and write-boundary violations. Exit code 0 means every required step succeeded, no step was skipped, and every loop resolved; any other finished run exits 1, and an error thrown by the scheduler exits 2 like a preflight failure. `fleet view <fleetRootId>` lists the steps and the run id of each.
 
-Run resumption is separate from `clio-coder fleet resume`, which reopens dispatch admission after an operator drain. A resumable fleet run records its playbook name, rendered plan hash, ordered step identifiers, variables, and receipt references in the durable fleet ledger under the state directory. Runs started from the TUI through `/fleet run` use the same durable record and can be resumed with `fleet run --resume`. `--resume` starts a new fleet run after replaying the longest successful, integrity-valid prefix of the named prior run, in declared step order. The new run records the prior fleet run as its resume parent. Replayed steps are reported as `replayed`, retain their original receipt or code-report references, and do not create new receipts.
+Run resumption is separate from `clio-coder fleet resume`, which reopens dispatch admission after an operator drain. A resumable fleet run records its playbook name, rendered plan hash, ordered step identifiers, variables, and terminal run references (run id and run digest) in the durable fleet ledger under the state directory. Runs started from the TUI through `/fleet run` use the same durable record and can be resumed with `fleet run --resume`. `--resume` starts a new fleet run after replaying the longest successful, integrity-valid prefix of the named prior run, in declared step order. The new run records the prior fleet run as its resume parent. Replayed steps are reported as `replayed`, retain their original run or code-report references, and do not create new runs.
 
 The current playbook must compile to the same plan hash. A mismatch refuses before execution and prints the changed positions in the ordered step list. The prior run must belong to the same playbook name, and the variables must exactly match the original run. A different value, an added value, or an omitted value is refused even when the resulting task text would otherwise be similar. An unknown run id is refused as not found in the durable fleet ledger.
 
@@ -1260,7 +1261,7 @@ Write boundary enforcement is detect-and-rollback, never OS or filesystem sandbo
 Playbook versions 3 through 5 support declared check/repair loops (`kind: loop`). A loop declares `id`, `maxAttempts` (an integer between 1 and `PLAYBOOK_LOOP_MAX_ATTEMPTS = 5`), `check` (a code command or agent reviewer), and `repair` (an agent coder).
 
 At plan compilation, the orchestrator unrolls each loop statically into a deterministic hashed DAG containing `maxAttempts` verification check steps (`<loopId>.check.<n>`) and `maxAttempts - 1` repair steps (`<loopId>.repair.<n>`).
-- Receipt per attempt: Every attempt in an unrolled loop executes as an independent plan node and produces its own receipt.
+- Run record per attempt: Every attempt in an unrolled loop executes as an independent plan node and produces its own run record.
 - Recovery role: Repair attempts following the first check are assigned the `recovery` execution role.
 - Spent bounds: Reaching `maxAttempts` without a passing check settles the loop with the terminal reason `loop_bound_exhausted`.
 - Five terminal reasons: A loop concludes with one of five reasons: `resolved` (verification passed), `loop_bound_exhausted` (attempt ceiling spent), `loop_step_failed` (underlying step errored or was denied), `loop_not_reached` (prior plan dependencies failed), or `loop_canceled` (a running check or repair was interrupted). A check that finished and passed before a sibling was interrupted still resolves its loop.
@@ -1289,7 +1290,7 @@ Deterministic code steps (`kind: code`) execute known commands directly as subpr
 - Execution environment: Code steps run unattended with arguments bound from the command registry, fixed working directory, closed environment allowlist (`PLAYBOOK_COMMAND_BASE_ENV` plus declared command env), bounded timeout (`timeoutMs`), byte-capped output capture (`CODE_STEP_CAPTURE_MAX_BYTES` = 1 MiB log artifact, `CODE_STEP_EXCERPT_MAX_BYTES` = 8,000-byte excerpt), no stdin pipe and no shell interpreter. Host checks still pass through the session test-runner consent gate when an attended session has not approved test runners.
 - Missing registry diagnostic: If a playbook declares code steps but `.clio-coder/playbooks/commands.yaml` is missing in the repository, `clio-coder playbook list` reports the playbook state as `setup` and provides the remedy: ``needs .clio-coder/playbooks/commands.yaml declaring <id>; declare each id there under `commands:` with an `argv` list; see bundled `docs/guide/fleet-dispatch.md` for the schema``.
 - Commit message sources: A code step with `commitFrom` populates its `commitMessage` placeholder from the output of preceding agent steps.
-- Cost and route: Code steps run no model. Their cost is recorded as `known_free`, an observed zero, and they produce a code-step record rather than a receipt, route decision, or quality label.
+- Cost and route: Code steps run no model, so they record no tokens, cost or route. Each step settles as a `code_step.settled` record in the fleet root's run journal, which `clio-coder fleet code-steps <rootId>` lists, rather than a run record, route decision, or quality label. Captured output stays in the step's log under `<stateDir>/code-steps/<rootId>/`.
 
 #### Command Registry Schema (`.clio-coder/playbooks/commands.yaml`)
 
@@ -1405,28 +1406,28 @@ plan approval or existing yolo authority.
 
 ### Route history and settled labels
 
-Each settled dispatch writes one record to `route-history.json` in the state directory ([route-history.ts](../../src/domains/telemetry/route-history.ts)). The file is version 4, keyed by terminal receipt digest, and keeps the newest 4,096 records. A version 3 file is read conservatively and rewritten as version 4. An older file is renamed aside as `route-history.json.v<N>.<timestamp>.retired`, never read, and the store starts empty, and a newer file is left as it is and not written. A record holds the route identity, the execution role, `qualityLabel` (`pass`, `fail` or `unmeasured`, from independent evidence only), `reliability` (`success`, `failure`, or `neutral` for operator cancels, policy denials and permission refusals), `firstPass`, completed cost and phase timing, cache use, source digests and `settledAt`. The route observer refines `qualityLabel` when later gate evidence verifies.
+Route history is a fold over this host's settled runs, not a file ([route-history.ts](../../src/domains/telemetry/route-history.ts)). Every run whose `run.settled` names a route decision contributes one entry, read from its sealed scope under `<stateDir>/telemetry/runs/` and re-read only when that scope's files change. An entry holds the run digest, whether the run's seal verifies, the executed route identity and execution role, the decision hash and mode, `reliability` (`success`, `failure`, or `neutral` for operator cancels, policy denials and permission refusals), `firstPass`, the priced cost as a fact, cache use, phase timing and `settledAt`. Only a run whose seal verifies contributes quality, cost or timing. The route observer projects each entry to a `qualityLabel` (`pass`, `fail` or `unmeasured`, from independent evidence only) and refines it when later gate evidence verifies.
 
-Independent quality evidence arrives late or never, so every record also carries `settled`, the receipt's own verdict from `routeSettledLabel`:
+Independent quality evidence arrives late or never, so every entry also carries `settled`, the run's own verdict from `routeSettledLabel`:
 
 | `settled` | Meaning for the operator |
 | --- | --- |
-| `success` | The receipt outcome is `succeeded`. |
-| An outcome code | The receipt's `outcomeCode`, the most specific failure class: `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `result_contract_invalid`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked` or `vram_capacity_fit_failure`. |
+| `success` | The run's outcome is `succeeded`. |
+| An outcome code | The run's `outcomeCode`, the most specific failure class: `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`, `loop_guard_tools_disabled_exhausted`, `result_contract_exhausted`, `result_contract_invalid`, `worker_final_output_missing`, `host_verification_rejected`, `worker_no_work`, `worker_mutation_blocked`, `merge_withheld`, `worker_removed_tests`, `information_flow_blocked` or `vram_capacity_fit_failure`. |
 | `permission_required` | No outcome code, and the outcome detail opens with `permission_required`: the worker ended on its refusal limit or the `fail` posture. |
 | `failure` | The outcome is `failed` with neither of the above. |
-| An outcome | Any other receipt outcome, unchanged: `timed_out`, `stalled`, `canceled`, `denied_by_policy` or `spawn_failed`. |
+| An outcome | Any other run outcome, unchanged: `timed_out`, `stalled`, `canceled`, `denied_by_policy` or `spawn_failed`. |
 
-A record written without the label receives one from its receipt when the observer next reconciles it. The label is a lowercase token. `clio-coder fleet view <runId>` prints it on a `settled` line once the receipt verifies ([Model, cost and settled label in `fleet view`](#model-cost-and-settled-label-in-fleet-view)). It is also readable in `route-history.json` and in the `outcome` lines of the route observer log, and the receipt's `outcome` and `outcomeDetail` (shown by `fleet view`) and `outcomeCode` (in the receipt file) are the per-run source it is derived from. No `evidence` or `trace` command prints it. Adaptive routing does not read `settled`: route estimates and readiness use `qualityLabel` and `reliability`, so the label cannot change a route choice. Routing on it needs a recorded decision first.
+The label is computed from `run.settled` on every read, so every entry has one. The label is a lowercase token. `clio-coder fleet view <runId>` prints it on a `settled` line once the run's seal verifies ([Model, cost and settled label in `fleet view`](#model-cost-and-settled-label-in-fleet-view)). The run's `outcome`, `outcomeDetail` and `outcomeCode` in `run.settled` are the per-run source it is derived from. No `evidence` command prints it. Adaptive routing does not read `settled`: route estimates and readiness use `qualityLabel` and `reliability`, so the label cannot change a route choice. Routing on it needs a recorded decision first.
 
 ## Assignments, attempts, and failover
 
 A dispatch is a logical assignment containing one or more immutable run
 attempts. The assignment id and terminal run ids are distinct identities.
 Public `finalPromise` handles resolve only when the assignment succeeds,
-is canceled, or exhausts its retry policy; the returned receipt is the
-terminal attempt's unchanged receipt. Earlier attempts stay independently
-addressable and integrity-verifiable. The assignment also owns the event stream,
+is canceled, or exhausts its retry policy; the returned `RunResult` is the
+terminal attempt's own. Earlier attempts stay independently addressable, and
+each keeps its own sealed run record. The assignment also owns the event stream,
 which carries every attempt's frames in order, separated by a synthetic
 `attempt_start` frame; [worker-dispatch-mechanics.md](../architecture/worker-dispatch-mechanics.md) specifies it.
 
@@ -1440,12 +1441,12 @@ part. For example, an SSH channel failure can move the node while retaining the
 agent, target, and model. Cancellation, policy rejection, and permission
 refusal neither retry nor penalize infrastructure. A worker information-flow refusal ends the run with deterministic `outcomeCode: "information_flow_blocked"`; it is never retried or failed over.
 
-A worker receipt records the mode that governed its retries as
+A worker's `RunResult` records the mode that governed its retries as
 `effectiveFailover`. That is a different fact from `routingIntent.failover`,
 which carries the two-valued policy the request asked for and reads `none`
 whenever nothing was requested, so only `effectiveFailover` tells a sealed tuple
-apart from an unpinned run that was free to move. A receipt omits it when no
-dispatch failover governed the run, as for a main-agent or print-mode receipt.
+apart from an unpinned run that was free to move. A `RunResult` omits it when
+no dispatch failover governed the run, as for a main-agent or print-mode run.
 
 When a lower-level request omits the failover field, retry policy defaults to
 `none` for a target or node pin and `automatic` otherwise. Normal tool
@@ -1521,7 +1522,7 @@ assignment then settles failed with an `outcomeDetail` that names the reason.
 </details>
 
 Assignment status, attempt ids, and terminal run id are stored separately in
-`assignments.json` while each attempt keeps its own strict v21 receipt.
+`assignments.json` while each attempt keeps its own sealed run record.
 Pipelines and batches await assignment terminals, so downstream stages consume
 the successful fallback output rather than an earlier failed attempt.
 
@@ -1529,8 +1530,9 @@ A fleet run is the exception to "the attempts settle the record". Every step of
 a fleet dispatches under the fleet root id as its lineage root, so all of them
 share one row, and no single step is the run's verdict. The run claims the row
 by writing `verdictOwner: "fleet"` when it opens, files every settled step's
-attempt run ids in `attempts` (an agent step's receipt id, a code step's
-`code-*` run id, whose report sits under `code-steps/<fleetRootId>/`), and
+attempt run ids in `attempts` (an agent step's run id, or a code step's
+`code-*` run id, whose `code_step.settled` record is in the fleet root's run
+journal), and
 writes `status` once at the end from the whole-run outcome. Until then the row
 stays `running`, and a step settling under it records its attempt without
 touching the status. The row is `succeeded` only when every required step
@@ -1539,37 +1541,23 @@ unhandled error, is `failed`. A run abandoned by a crashed process is
 reconciled to `failed` at the next startup rather than inheriting a green
 step's success.
 
-## Receipts
+## Run records
 
-### Inspect worker receipts
+### Inspect worker runs
 
-Inspect worker receipts with `clio-coder fleet view <runId> --json`, or open the dispatch runs and receipts in `/view`. A receipt records the worker's outcome, route, costs and evidence; `/view verify <runId>` checks its integrity. The [fleet CLI viewer](#inspect-fleet-runs-from-the-cli) also shows the run's ledger and available transcript.
+Inspect a worker run with `clio-coder fleet view <runId> --json`, or open the dispatch runs in `/view` ([/view](../architecture/observability.md)). A run's record states the worker's outcome, route, usage, cost and evidence; `/view verify <runId>` and `clio-coder fleet verify <runId> --json` check its seal. The [fleet CLI viewer](#inspect-fleet-runs-from-the-cli) also shows the run's ledger row and available transcript.
 
-### Receipt integrity and fields
+### Run record integrity and fields
 
-Receipts carry exactly one current integrity version (`RUN_RECEIPT_INTEGRITY_VERSION = 21`), whose unkeyed digest covers the complete receipt and a commitment to its reconstructible ledger provenance surface; a receipt whose ledger row the ring evicted verifies on its seal alone and reports verified (ledger evicted). There is no historical evidence reader: a lower version is reported as retired, is not migrated, and is never read as evidence; a malformed or future version is invalid. The fleet provenance fields covered by the digest
-include:
+A finished run's record is its own telemetry scope at `<stateDir>/telemetry/runs/<runId>/`. Settlement appends `run.settled` (version 1), which names the redacted `run-result` object holding the run's output, failure text, worktree and host check commands. The evidence assessment follows as `evidence.assessed`, and `run.sealed` closes the scope over the journal's hash chain head, so the seal covers the settled facts, the assessment and every object. A sealed run directory verifies with only its own files ([seals and bundles](../architecture/telemetry.md#seals-and-bundles)). The run's identity is the SHA-256 of its `run.settled` payload, and gate subjects, Scout sources and plan sources cite that digest. In memory, dispatch hands its caller the run's `RunResult`; readers use the read model's run DTO ([read model](../architecture/telemetry.md#read-model)). The fleet provenance facts `run.settled` carries include:
 
-- `node`: the fleet node the worker ran on (`id`, `kind`, `host`). The `node.id` explicitly identifies the worker process host executing the task, not the model host (which is represented by the `target` id).
-- `reroutes`: dead-node failover hops, oldest first.
-- `gate`: review/compete provenance (role, group, cycle, subject run ids with
-  their receipt digests, and the verdict that caused a revise builder).
-- `plan`: plan-approval provenance (hash, topology, task count, cost ceiling
-  (`0` when there is no session ceiling), approval kind, and the registry approval identity when supervised).
-- `budget`: the sealed budget envelope (recipe policy, request, effective phase and clamp reasons).
-- `briefing`: byte count and SHA-256 of the exact canonical parent briefing;
-  the prose is not retained and is distinct from bounded project context.
-- `intent`: the normalized typed path, expected-output, and verification
-  declaration that admission sealed for the run.
-- `verification`: the existing evidence state and basis observed from worker
+- `node`: the fleet node the worker ran on (`id`, `kind`). The `node.id` explicitly identifies the worker process host executing the task, not the model host (which is represented by the `route.targetId`).
+- `budget`: the admitted budget envelope (recipe policy, request, effective phase and clamp reasons).
+- `context`: the briefing byte count and the worker and project context sizes. Their SHA-256 hashes are in `hashes`; briefing prose is not retained and is distinct from bounded project context.
+- `verification`: the evidence state and basis observed from worker
   tool execution.
-- `hostVerification`: host-run status and the resolved check evidence, including
-  argv, cwd, exit code, duration, memo provenance, bounded output tail, and
-  optional artifact path.
-- `worktree`: task worktree path, branch, diff hash, requested application,
-  applied status, and an optional closed failure reason.
-- `steering`: ordered byte/hash/timestamp and acknowledgement provenance for
-  successfully written steers; steering prose is never stored.
+- `hostVerification`: host-run status, strategy and check counts. The resolved check evidence (argv, cwd, exit code, duration, memo provenance, bounded output tail and base comparison) is in the `run-result` object.
+- `worktree`: the requested application and the applied status. The task worktree path, branch, diff hash and any failure reason are in the `run-result` object.
 - `outcomeCode`: the stable terminal classifier. The codes are
   `vram_capacity_fit_failure`, `worker_tool_call_cap_exhausted`,
   `worker_context_exhausted`, `worker_turn_timeout`, `worker_output_cap_exhausted`,
@@ -1577,7 +1565,7 @@ include:
   `result_contract_invalid` (the host's validator found an otherwise successful
   worker's final result nonconforming, which a worker cannot assert itself),
   `worker_final_output_missing` (an otherwise
-  successful worker exited without a nonempty receipt-sealed final answer),
+  successful worker exited without a nonempty final answer),
   `host_verification_rejected` (a declared host check rejected the settled tree),
   `worker_no_work` (an edit worker finished without doing its assignment),
   `worker_mutation_blocked`, `merge_withheld` (a task worktree was preserved instead
@@ -1585,32 +1573,36 @@ include:
   run in the current checkout removed existing test cases that the task did not ask to
   remove) and `information_flow_blocked`. Every code except `result_contract_invalid` and `worker_final_output_missing` suppresses automatic retry. `result_contract_invalid` is retried on another agent or model. `worker_final_output_missing` has no retry class of its own, so the run's other evidence classifies it, usually as a worker runtime failure that is retried on another runtime.
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
-  complete current-policy decision, exact execution role, route estimate and
-  readiness evidence, and digest-covered quality sources.
-- `effectiveFailover`: the retry mode that actually governed a worker run;
-  a run without dispatch failover omits it.
+  the executed route decision with its whole route identity, and the
+  quality sources with their validator digests.
 - `resultContract`: inside `quality`, the admitted contract identity and its `pass`, `fail`, or
   `not-reached` conformance state. Only a due correctness-bearing contract can
   label route quality.
 - `validationGrounding`: claimed versus grounded validations checked against canonical executed commands.
-- `capabilityMismatch`: the recipe's capability class against the task shape (`agentId`, `capabilityClass`, `taskType`, `suggestedAgentId`). A confident mismatch is refused at admission and never becomes a run, so a receipt carries only a flagged one.
-The worker's attestation is verified at spawn and a drifting peer never runs,
-but the attested identity is not copied into the receipt, and the receipt records
-no ledger contributions. A receipt that carries an `attestation` or
-`ledgerContribution` field verifies as stored.
+- `capabilityMismatch`: the recipe's capability class against the task shape (`agentId`, `capabilityClass`, `taskType`, `suggestedAgentId`). A confident mismatch is refused at admission and never becomes a run, so a run record carries only a flagged one.
+- `usage`, `totalTokens`, `apiCalls` and `pricing`: each value is a fact that is measured, estimated, unknown or absent, never a bare number ([honest values](../architecture/telemetry.md#honest-values)).
+
+Reroutes, gate provenance (role, group, cycle, subject run ids with their run
+digests, and the verdict that caused a revise builder), plan-approval
+provenance, steering provenance and the briefing provenance live on the run's
+ledger row and its `RunResult`. The admitted typed `intent` and the
+`effectiveFailover` mode are `RunResult` facts. The worker's attestation is
+verified at spawn and a drifting peer never runs, but the attested identity is
+not copied into the run record, and the run record holds no ledger
+contributions.
 
 Process exit zero is not a delegated deliverable. Native and ACP runs succeed
-only when the drained event stream yields a nonempty receipt output with
+only when the drained event stream yields a nonempty run output with
 `state: "final"`. A missing final answer fails with
 `outcomeCode: "worker_final_output_missing"`; any captured unfinished text is
 retained only as `state: "partial"` diagnostics and automatic retry is
-suppressed. Dispatch, monitor, ledger, receipt, terminal bus event, and retry
+suppressed. Dispatch, monitor, ledger, run record, terminal bus event, and retry
 policy all consume that same final classification.
 
-Receipt integrity, host verification, and evidence verification are separate axes. Integrity says
-that the sealed receipt matches its ledger envelope; evidence verification
+Run integrity, host verification, and evidence verification are separate axes. Integrity says
+that the run's sealed scope verifies; evidence verification
 reports whether Clio Coder observed an applicable validation tool (or marks the
-basis unknown/not applicable). A read-only Scout can therefore report `receipt_integrity=verified/v21/sha256` alongside
+basis unknown/not applicable). A read-only Scout can therefore report `run_integrity=verified/seal` alongside
 `evidence_verification=not_applicable/read-only-agent`. Host verification is
 rendered independently as `host_verification=verified|rejected|skipped|not_implicated|not_requested`.
 A host-executed successful check projects onto canonical validation grounding as
@@ -1621,24 +1613,24 @@ hash substitutes for the other.
 A worker that runs `verify` more than once is judged by the latest run of each
 check. A check is the call's `check`, `path`, `cwd`, `browser` and `args` taken
 together. Re-running `verify(check="test")` after a fix clears the earlier
-failure, and a later failure of a check that passed seals as failed. A narrower
+failure, and a later failure of a check that passed settles as failed. A narrower
 `verify(check="test", args=[...])` is a different check, so its pass clears
 nothing, and a blocked call never ran its check, so it changes nothing. The
-receipt's `quality.typedValidations` carries one `tool:verify` fact per check,
+run's `quality.typedValidations` carries one `tool:verify` fact per check,
 and evidence verification agrees with those facts. A check whose only calls
-were blocked seals no typed validation fact because it never ran. Workers leave
+were blocked settles no typed validation fact because it never ran. Workers leave
 denied checks out of mutation-report validations and place source reads and
 citations in summary. When no files changed and no check ran, validations may be empty and quality
-remains unmeasured. Editing reports may use empty validations when every attempted check was blocked; otherwise they require a concrete executed check. For receipts carrying `safety.readOnly: true`, mutation-report read claims
+remains unmeasured. Editing reports may use empty validations when every attempted check was blocked; otherwise they require a concrete executed check. For read-only runs (`safety.readOnly: true` on the `RunResult`), mutation-report read claims
 do not require command evidence; verifier verdicts and executable path claims
 retain command grounding; executable validation claims still do.
 
 The canonical terminology for these facts is the five-axis trust status in
 [`evidence-and-memory.md`](../architecture/evidence-and-memory.md).
-Receipt integrity projects onto artifact integrity; receipt verification,
+Run integrity projects onto artifact integrity; evidence verification,
 typed quality, and validation grounding project onto validation grounding;
 gate decisions project onto independent review; briefing and project context
-project onto context provenance. A receipt does not contain independent-review or
+project onto context provenance. A run record does not contain independent-review or
 completion-evidence outcomes merely because it is sealed. Those axes remain
 `absent` until a verified gate artifact or finish assessment is composed.
 Integrity checks the recorded artifact against its digest; provenance identifies its
@@ -1649,16 +1641,17 @@ Gate references point backward: a reviewer references the builder it reviewed, a
 revise builder references the reviewer whose findings it received, and a judge
 references every candidate.
 
-Because a worker receipt seals before the coordinator parses its final verdict,
+Because a worker run settles before the coordinator parses its final verdict,
 terminal pass/fail, exhaustion, winner, and confirmation outcomes are append-only
-integrity-covered gate-decision artifacts under the state directory. Evidence
-builds discover them from linked receipt ids and export `gate-decisions.json`.
+integrity-covered gate-decision artifacts under `<stateDir>/gate-decisions/`.
+The run's `evidence.assessed` record carries the gate verdicts linked to it
+([evidence](../architecture/telemetry.md#evidence)).
 
 Reviewer and judge terminal output first crosses an integrity-covered
 write-ahead boundary under `state/gate-decisions/pending/`, before the caller
-waits for the final receipt. Restart recovery verifies the receipt, applies the
+waits for the final run result. Restart recovery verifies the run's seal, applies the
 same verdict/winner parser, materializes the final artifact idempotently, and
-only then clears the pending record. Missing receipts, tampering, or a
+only then clears the pending record. Missing run records, tampering, or a
 conflicting artifact fail closed and leave the journal and any compete worktrees
 available for inspection.
 
@@ -1703,10 +1696,10 @@ hard block.
   (never a model-asked `◆` run); `/share <runId>` may name a model-asked run
   explicitly. `/new`, `/resume`, `/tree`, `/fork` and `/handoff` reset the pool bare `/share`
   draws from, so a run from another session cannot be shared into the current one.
-- Replay: `/resume` replays worker blocks from receipts; the session file's
+- Replay: `/resume` replays worker blocks from their sealed run records; the session file's
   `workerRun` entries carry ids, origin, runtime and task without worker prose; the
-  replayed answer is bounded from the receipt exactly like the live one. A
-  missing receipt renders `receipt unavailable`.
+  replayed answer is bounded from the run record exactly like the live one. A
+  run with no readable record renders `receipt unavailable`.
 - Internal `context-bootstrap` and `wiki-writer` runs report through the context rail
   and never open a transcript block. Other shadow and internal helper runs open a
   compact `↳` row.
@@ -1739,8 +1732,8 @@ hard block.
   argument objects never cross at all.
 - Reasoning content is never displayed. The detail may name a `thinking`
   phase and the usage facts the card already carries, never the text.
-- Settlement replaces the provisional tail with the sealed receipt's answer;
-  a run whose receipt cannot be read keeps its own last durable message.
+- Settlement replaces the provisional tail with the settled run's answer;
+  a run whose record cannot be read keeps its own last durable message.
 - The context meter renders the worker's last-message context occupancy
   against the model's context window: healthy below 80 percent, warn from 80,
   critical from 95.
@@ -1759,7 +1752,7 @@ hard block.
   its scope, and its declared write boundary, followed by the budget ceiling
   the run would be admitted under (`budget: admitted under no session ceiling`
   when `safety.limits.sessionCostUsd` is `0`). Enter dispatches the plan through the same
-  path `clio-coder fleet run` uses, so admission, autonomy, receipts, and the
+  path `clio-coder fleet run` uses, so admission, autonomy, run records, and the
   durable ledger are identical. Esc cancels with nothing dispatched and nothing
   written. A playbook that fails preflight opens the same overlay with its
   diagnostics and no accept key. A turn in flight refuses the command with a
@@ -1814,7 +1807,7 @@ The dock splits to the right of Clio Coder's pane and takes `interface.panes.wor
 
 #### Process and request files
 
-The pane runs this install's own CLI: `clio-coder fleet view --watch <state>/watch-selection --dock-taps <state>/watch-dock-taps`, with the config, data, state and cache directories pinned on argv. The dashboard reads durable state only: the run ledger (`runs.json`), each run's [event journal](../architecture/worker-dispatch-mechanics.md#run-event-journal), the sealed receipt and, for a fleet step, the fleet run record. It shares nothing with the orchestrator's memory, runs over SSH, and works from a second terminal. It polls every 250 ms.
+The pane runs this install's own CLI: `clio-coder fleet view --watch <state>/watch-selection --dock-taps <state>/watch-dock-taps`, with the config, data, state and cache directories pinned on argv. The dashboard reads durable state only: the run ledger (`runs.json`), each run's [event journal](../architecture/worker-dispatch-mechanics.md#run-event-journal), the run's sealed record through the read model and, for a fleet step, the fleet run record. It shares nothing with the orchestrator's memory, runs over SSH, and works from a second terminal. It polls every 250 ms.
 
 Two small files carry everything between Clio Coder and the dashboard, one pair per state root:
 
@@ -1833,7 +1826,7 @@ A card has three rows:
 
 1. The state glyph (`●` running, `◌` queued, `!` stale, `✓` done, `⊘` canceled, `✗` failed, `◌` for a run that succeeded without calling a tool), the agent id, the elapsed clock and the task.
 2. The route (`target/model`), the tool-budget meter (`▰▰▱ tools 12/40`, or `tools 12` with no cap), tokens, and for a finished run its cost when something priced it.
-3. For a live run, the call in flight as a redacted verb and object, the prose being written, `last: <call>` while it waits on the model, or its phase (`starting`, `thinking`, `writing`, `calling a tool`, `waiting for the model`, `sealing the receipt`). A queued run reads `queued, waiting for a slot`. For a finished run, the receipt's verdict: `✓ succeeded`, `◌ ran no tools`, `⊘ canceled` or `✗ <outcome code>`, then `contract pass|fail|not-reached|unmeasured` when the receipt records a result-contract fact, then the trust verdict (`trust reviewed|grounded|unverified|unknown`, or the failed axis in words). A seal that is not intact (such as `seal broken`, `seal retired` or `seal unchecked`) replaces the trust verdict. A run with no readable receipt shows the ledger's own outcome detail or `receipt unavailable`.
+3. For a live run, the tool call in flight, `last: <call>` while it waits on the model, or its phase (`starting`, `thinking`, `writing`, `calling a tool`, `waiting for the model`, `sealing the receipt`). A queued run reads `queued, waiting for a slot`. For a finished run, the run record's verdict: `✓ succeeded`, `◌ ran no tools`, `⊘ canceled` or `✗ <outcome code>`, then `contract pass|fail|not-reached|unmeasured` when the run settled a result-contract fact, then the trust verdict (`trust reviewed|grounded|unverified|unknown`, or the failed axis in words). A seal that is not intact (such as `seal broken` or `seal unchecked`) replaces the trust verdict. A run with no readable run record shows the ledger's own outcome detail or `receipt unavailable`.
 
 A narrow dock sheds the task first, then the model, then cost and route. The state glyph and the clock always stay. Every worker-adjacent string is redacted and stripped of control bytes where it is drawn.
 
@@ -1850,14 +1843,14 @@ A narrow dock sheds the task first, then the model, then cost and route. The sta
 
 A takeover pins a header over the worker's live stream. The header holds the back hint, state glyph, agent id, state and elapsed clock with `run <runId>` at the right, the task (up to two lines), the route, tool-budget meter, tokens and cost, and for a step of a fleet run a line `⇲ fleet <name> · <settled>/<planned> steps settled · following`. Below it the stream shows, each row with its offset from the run's start:
 
-- Tool calls as a verb and object, `…` while pending, then `✓` with the duration, `✗ failed` or `⊘ blocked`. A failed or blocked call adds up to two rows of its reason.
-- The worker's prose as it streams, and a `thinking` marker where a reasoning block opened. Reasoning content is never shown.
-- Approvals asked, and each decision with its reason.
-- The run outcome code and reason, steering received, and a note when the journal reached its size cap.
+- Tool calls by tool name, `…` while pending, then `✓` with the duration, `✗ failed` or `⊘ blocked`.
+- A `thinking` marker where a reasoning block opened. The run feed is structural, so worker prose and reasoning content are never shown.
+- Approvals asked, and each decision's outcome.
+- The run outcome, steering received, and a note when the journal reached its size cap.
 
 When the journal is missing, the stream says no event journal exists (`fleet.history.journal` may be off). When the head was dropped it says earlier events are not shown. A requested run that is not in the ledger yet shows `waiting for this run to reach the ledger`.
 
-A finished worker adds a receipt section under the stream: the verdict row, a spend row (tool calls, tokens, cost, duration), the seal, trust and validation clause, the first line of a failure message, the changed paths, and the first 12 lines of the sealed answer. A longer answer ends with the count of the rest and `clio-coder fleet view <runId>`.
+A finished worker adds a run record section under the stream: the verdict row, a spend row (tool calls, tokens, cost, duration), the seal, trust and validation clause, the first line of a failure message, the changed paths, and the first 12 lines of the sealed answer. A longer answer ends with the count of the rest and `clio-coder fleet view <runId>`.
 
 | Takeover key | Action |
 | --- | --- |
@@ -1880,42 +1873,42 @@ Every inspection command reads durable state only, so it works from a second ter
 
 | Command | What it reports |
 | --- | --- |
-| `clio-coder fleet status [--json] [--all]` | The admission state (`open`, or `draining` with the deadline, requesting PID and request time), each running or stale row with its node, heartbeat (`alive`, `stale` or `dead`, from the recorded worker PID), attempt, depth, elapsed time and cost, the budget envelope lines, and totals for tokens, cost and runtime. A run that recorded only part of its token usage, or predates the counts that say so, makes the token totals a lower bound, such as `≥200 (1 run unknown)`. The owning process writes live token counts and cost to the ledger on each reconciler tick, about once a second. The retry queue lives in the owning process, so `retrying` is always empty here. |
+| `clio-coder fleet status [--json] [--all]` | The admission state (`open`, or `draining` with the deadline, requesting PID and request time), each running or stale row with its node, heartbeat (`alive`, `stale` or `dead`, from the recorded worker PID), attempt, depth, elapsed time and cost, the budget envelope lines, and totals for tokens, cost and runtime. Tokens, cost and runtime come from the read model's fold over each run's telemetry journal, so a run whose usage is only partly measured makes the token totals a lower bound, marked `≥` with the count of unknown values. The retry queue lives in the owning process, so `retrying` is always empty here. |
 | `clio-coder fleet decisions --json [--all]` | The newest 8 sealed review and compete gate decisions, each with at most 6 subject runs, the decider run and a closed-set reason. It reports `available: false` when no gate has ever run, plus `truncated` and an `unverifiable` count. `--json` is required. |
-| `clio-coder fleet view <runId> [--follow] [--json] [--all]` | One run's ledger entry, event journal transcript and sealed receipt, with the receipt verified against its ledger envelope before any field is shown. A unique id prefix resolves. Once the receipt verifies, the snapshot adds `model`, `cost` and `settled` lines ([below](#model-cost-and-settled-label-in-fleet-view)). `--follow` (or `-f`) tails the journal in an alternate screen until the terminal line and stays open until `q`; without a TTY it prints a snapshot. `--json` prints the snapshot as JSON, including the verified receipt. |
+| `clio-coder fleet view <runId> [--follow] [--json] [--all]` | One run's ledger entry, event journal transcript and sealed run record, with the run's seal verified before any settled field is shown. A unique id prefix resolves. Once the seal verifies, the snapshot adds `model`, `cost` and `settled` lines ([below](#model-cost-and-settled-label-in-fleet-view)). `--follow` (or `-f`) tails the journal in an alternate screen until the terminal line and stays open until `q`; without a TTY it prints a snapshot. `--json` prints the snapshot as JSON, including the verified run record. |
 | `clio-coder fleet view --watch <selection-file> [--dock-taps <file>] [--all]` | The workers dashboard that the workers dock runs ([Workers dock and dashboard](#workers-dock-and-dashboard)). `--watch` does not take a run id or `--follow`, and `--dock-taps` is valid only with `--watch`. |
 | `clio-coder fleet view <fleetRootId> [--all]` | The step index of a fleet run: one line per step with its run id and outcome. Pass one of those run ids back to see that step. |
-| `clio-coder fleet verify <runId> --json` | Re-verifies one run's sealed receipt right now and reports `state` (`pending`, `verified`, `failed` or `unavailable`), a closed-set `reason` when it did not verify, and the five trust axes. Exit 1 for an unknown run. |
+| `clio-coder fleet verify <runId> --json` | Re-verifies one run's sealed scope right now and reports `state` (`pending`, `verified`, `failed` or `unavailable`), a closed-set `reason` when it did not verify, and the five trust axes. Exit 1 for an unknown run. |
 | `clio-coder fleet cancel <runId> [--json] [--reason <text>]` | Cancels one running run from any terminal. |
 | `clio-coder fleet drain [--json]`, `clio-coder fleet resume [--json]` | Close or reopen durable dispatch admission (see [Placement and process-safe admission](#placement-and-process-safe-admission)). |
 
-The `view` transcript comes from `<state>/runs/<runId>/events.ndjson`, which the orchestrator writes while `fleet.history.journal` is on (the default). The line format and write path are in [Run event journal](../architecture/worker-dispatch-mechanics.md#run-event-journal). A run dispatched with the journal off shows its ledger and receipt but no transcript, and the viewer says whether the journal is disabled or missing. The transcript renders each feed line in words: prose as `assistant`, a tool call as `<tool> started` and `<tool> ok|error|blocked in <n>ms` with its verb and object, a model call as `model call (<n> tokens)`, and the lifecycle lines as `run opened (<agent>)`, `receipt sealed (<outcome>)` and `terminal (<outcome>)`. `fleet view` exits 0 after it prints a snapshot or index, or after `--follow` ends. An unknown or ambiguous id, an unknown flag, and an invalid combination (`--json` with `--follow`, `--watch` or a fleet root id) exit 2.
+The `view` transcript comes from the `run.feed_appended` records in `<state>/telemetry/runs/<runId>/journal.jsonl`, which the orchestrator writes while `fleet.history.journal` is on (the default). The record format is in [Run event journal](../architecture/worker-dispatch-mechanics.md#run-event-journal). A run dispatched with the journal off shows its ledger and run record but no transcript, and the viewer says whether the journal is disabled or missing. The transcript renders each feed record in words: a tool call as `<tool> started` and `<tool> ok|error|blocked in <n>ms`, other events by their type, and the lifecycle records as `run opened (<agent>)`, `receipt sealed (<outcome>)` and `terminal (<outcome>)`. `fleet view` exits 0 after it prints a snapshot or index, or after `--follow` ends. An unknown or ambiguous id, an unknown flag, and an invalid combination (`--json` with `--follow`, `--watch` or a fleet root id) exit 2.
 
-`fleet cancel` acts according to who owns the run. When the owning process is alive, the command leaves a cancel request that the owner's reconciler tick turns into its own abort, so the run seals `canceled` with a full receipt. The command waits up to 15 seconds for the seal and exits 0 when it lands. It exits 1 while the request is still pending; the request stays queued and is applied on the owner's next tick. When no live owner is recorded, the command leaves the request, waits the same 15 seconds and reports a note in the `--json` output, because only a process still holding the run can apply it; it never kills a process it cannot confirm. When the owning process is gone, the command terminates the orphaned worker's process group (SIGTERM, then SIGKILL after 3 seconds) once it has confirmed the PID is the run's worker, and refuses to guess when it cannot. It then seals the ledger row from a verified receipt if the owner wrote one, and otherwise settles the row `canceled` without minting a receipt. It refuses a run that is already terminal, a run recorded on another host, and an invalid run id.
+`fleet cancel` acts according to who owns the run. When the owning process is alive, the command leaves a cancel request that the owner's reconciler tick turns into its own abort, so the run settles and seals `canceled` with a full run record. The command waits up to 15 seconds for the seal and exits 0 when it lands. It exits 1 while the request is still pending; the request stays queued and is applied on the owner's next tick. When no live owner is recorded, the command leaves the request, waits the same 15 seconds and reports a note in the `--json` output, because only a process still holding the run can apply it; it never kills a process it cannot confirm. When the owning process is gone, the command terminates the orphaned worker's process group (SIGTERM, then SIGKILL after 3 seconds) once it has confirmed the PID is the run's worker, and refuses to guess when it cannot. It then settles the ledger row from the run's `run.settled` if the owner wrote one, and otherwise settles the row `canceled` without minting a run record. It refuses a run that is already terminal, a run recorded on another host, and an invalid run id.
 
 ### Model, cost and settled label in `fleet view`
 
-When the receipt verifies, the snapshot adds three lines after `evidence`:
+When the run's seal verifies, the snapshot adds three lines after `evidence`:
 
 | Line | Content |
 | --- | --- |
-| `model` | `requested <wireModelId>` from the receipt, then the provider's report for each call in `upstreamResponses`, grouped with counts: `reported <id> (n/m)`, `no model id in the response (n/m)`, `not observed (n/m)`, or `legacy record, differing id <id> (n/m)`. A receipt with no response rows prints `no provider response recorded`. |
-| `cost` | `$<usd to four decimals>` and the receipt's `costProvenance`, or `not recorded` and `provenance not recorded`. |
-| `settled` | The receipt's label from `routeSettledLabel`, the value route history stores ([Route history and settled labels](#route-history-and-settled-labels)). |
+| `model` | `requested <wireModelId>` from `run.settled`, then `provider` and the run's `upstream.responseModelIds`, which names each distinct model the providers reported on the run's calls once. A run with no provider report prints `no provider response recorded`. |
+| `cost` | The run's priced cost as the read model words it from its `Pricing` fact ([honest values](../architecture/telemetry.md#honest-values)), or `not available`. |
+| `settled` | The run's label from `routeSettledLabel`, the value route history folds ([Route history and settled labels](#route-history-and-settled-labels)). |
 
-A receipt that fails verification prints `RECEIPT INTEGRITY FAILED` and its reason on the `evidence` line, and none of these three lines. The route a run was dispatched on is configuration. Only the provider's report says which model answered, so `not observed` means Clio Coder captured no report for that call. It never means the requested model served it.
+A run whose seal fails prints `RUN SEAL FAILED` and its reason on the `evidence` line, and an unsealed run prints `run record unsealed`; neither prints these three lines. The route a run was dispatched on is configuration. Only the provider's report says which model answered, so `not observed` means Clio Coder captured no report for that call. It never means the requested model served it.
 
-Calls over the `openai-codex-responses` and `openai-responses` APIs read `response.model` from the provider's lifecycle events ([responses-model-id.ts](../../src/engine/apis/responses-model-id.ts)). A response that names a model records `responseModelIdObservation: reported` with that id, a response object without one records `not-reported`, and a call that produced no response object records `not-observed`. The observation is stored per call in session usage and in the receipt's `upstreamResponses`.
+Calls over the `openai-codex-responses` and `openai-responses` APIs read `response.model` from the provider's lifecycle events ([responses-model-id.ts](../../src/engine/apis/responses-model-id.ts)). A response that names a model records `responseModelIdObservation: reported` with that id, a response object without one records `not-reported`, and a call that produced no response object records `not-observed`. The observation is journaled as `target.reportedModel` on each call's `call.settled`, and the run's `run.settled` lists the distinct reports in `upstream.responseModelIds`.
 
-`fleet view <runId> --json` prints one JSON object: `runId`, `agentId`, `model`, `target`, `node`, `phase`, `startedAt`, `elapsedMs`, `task`, the bounded `transcript` and `transcriptTruncated`, `journalPresent` and `journalPath`, `evidence`, `receiptPath`, `outcome`, `outcomeDetail`, `terminal`, `journalUnavailableReason` and `agentLedgerBoard` when they apply, and the full `receipt` only when it verified against its ledger row. The snapshot has no `settled` field. The label derives from the receipt's outcome fields.
+`fleet view <runId> --json` prints one JSON object: `runId`, `agentId`, `model`, `target`, `node`, `phase`, `startedAt`, `task`, the read model's `telemetry` for the run, the bounded `transcript` and `transcriptTruncated`, `journalPresent` and `journalPath`, `evidence`, `outcome`, `outcomeDetail`, `terminal`, `journalUnavailableReason` and `agentLedgerBoard` when they apply, and the settled `record` only when its seal verified. The snapshot has no `settled` field. The label derives from the record's outcome fields.
 
-### Provider call counts and stop reasons in receipts
+### Provider call counts and stop reasons
 
-A dispatch receipt's `apiCalls` counts provider calls, excluding synthetic assistant steering entries. Its `upstreamResponses` records per-call observations. When the runtime reports them, `stopReason` is `stop`, `length`, `toolUse`, `error` or `aborted`, and `errorMessage` preserves the engine error for `error` or `aborted`, clipped to 512 characters. Older receipts and runtimes without those observations omit the fields. A Claude SDK aggregate usage row is not an extra provider call when per-call rows exist. See [types.ts](../../src/domains/dispatch/types.ts).
+A dispatched run's `apiCalls` in `run.settled` counts provider calls as a fact, excluding synthetic assistant steering entries. The run's `RunResult` carries `upstreamResponses`, its per-call observations. When the runtime reports them, `stopReason` is `stop`, `length`, `toolUse`, `error` or `aborted`, and `errorMessage` preserves the engine error for `error` or `aborted`, clipped to 512 characters. Runtimes without those observations omit the fields. A Claude SDK aggregate usage row is not an extra provider call when per-call rows exist. See [types.ts](../../src/domains/dispatch/types.ts).
 
 ## Route observer
 
-The route observer records what the joint route resolver decided against what happened for every dispatch. It never selects a route, because selection belongs to the resolver. In research telemetry mode (`telemetry.mode: research`) it appends one JSON line per decision (`kind: "decision"`) or outcome (`kind: "outcome"`) to `<state>/telemetry/research/route-observations.jsonl`, rotates the file to `.1` at 1 MiB, and `clio-coder telemetry prune` applies research retention to it. In standard mode it writes no observation file; nothing reads one back, and an older `<state>/route-decisions/observations.jsonl` is left as it was. The records measure route regret, constraint validity, prediction calibration, and outcome. An outcome line also carries the receipt's `settled` label (see [Route history and settled labels](#route-history-and-settled-labels)). The records do not measure whether Clio Coder dispatched the agent the caller asked for, because that is true by construction.
+The route observer records what the joint route resolver decided against what happened for every dispatch. It never selects a route, because selection belongs to the resolver. It journals each decision as `route.decided` in the journal of the session or run that asked, with the selected and executed routes, the scored candidates, the reasons and whether the policy would have run another route. The outcome's durable record is the run's own `run.settled`, which route history folds ([Route history and settled labels](#route-history-and-settled-labels)). There is no separate observation file. The records measure route regret, constraint validity, prediction calibration, and outcome. They do not measure whether Clio Coder dispatched the agent the caller asked for, because that is true by construction.
 
 ## Speculative worker prewarm
 
@@ -1923,7 +1916,7 @@ The route observer records what the joint route resolver decided against what ha
 
 A dispatch adopts a held process only when its agent, target, wire model, runtime, and working directory all match the prediction. Anything else runs on an ordinary cold spawn, and the held process is killed when the turn settles. At most two held processes exist at once. They take no capacity lease, so they never take a slot from a real dispatch.
 
-Nothing is held for a remote node, a non-native runtime, a draining fleet, or an endpoint or fleet already at its limit. The call, admission, spec, and receipt of the adopting dispatch are identical to a cold spawn.
+Nothing is held for a remote node, a non-native runtime, a draining fleet, or an endpoint or fleet already at its limit. The call, admission, spec, and run record of the adopting dispatch are identical to a cold spawn.
 
 ## Residency
 
@@ -1944,7 +1937,7 @@ declines with a `will-not-fit` notice instead of stranding the configured model.
 Use `clio-coder playbook validate <name>` and `clio-coder playbook graph <name>` for
 model-free playbook checks. An operator with configured targets can then run
 the playbook explicitly with `clio-coder fleet run <name>` and retain its
-receipts; `clio-coder fleet verify <runId> --json` re-verifies a sealed receipt
+run records; `clio-coder fleet verify <runId> --json` re-verifies a run's seal
 afterwards. [Topologies](#topologies) explains reviewer gates and verification
 commands. Live fleet execution requires an operator.
 
@@ -1957,7 +1950,7 @@ the requested explanation and citations, with `mutatedPaths` empty.
 | Field | Bound |
 | --- | --- |
 | Inline `summary` | 16,384 UTF-8 bytes by default, set between 1 and 32,768 by recipe `maxSummaryBytes` or dispatch `result_summary_max_bytes`. |
-| Internal helper results | 32,768 bytes (`STRUCTURED_HELPER_RESULT_MAX_BYTES`), the same acceptance and receipt-capture ceiling. |
+| Internal helper results | 32,768 bytes (`STRUCTURED_HELPER_RESULT_MAX_BYTES`), the same acceptance and `run-result` capture ceiling. |
 | Authored `commitMessage` and `architect-plan` authorship | 1,000 UTF-8 bytes. |
 
 In batch
@@ -1978,7 +1971,7 @@ Documenter exposes no arbitrary shell commands; it relies on declared verifier c
 
 Eligible native HTTP workers with tool support finish through the worker-local `clio_submit_result` tool. This covers internal helper results and coder `mutation-report` results. Its arguments are the existing contract payload, not a second model-authored envelope. The host validates the payload and grounding, seals `output.structured = {version: 1, kind, data}`, and retains canonical JSON in `output.text` for consumers that read text. A valid handoff ends generation without another narration round. During synthesis or repair only the terminal handoff remains available; mixed work/handoff batches are rejected and repairs remain bounded. A mutation report's schema reaches the model only at the synthesis lock or a terminal-format repair, so working requests carry no extra bytes, and a valid plain JSON answer still seals without the tool. A submission is not work activity and gains no authority: the mutation validator checks the report against the run's observed effects in the worker and again at parent capture. Strict JSON text fallback is validated through the same contract. Other transports retain their existing output path, and Wiki Writer retains its scoped artifact workflow.
 
-Dispatch and `monitor(mode="collect")` expose successful sealed payloads in `details.runs[].helperResult`, with compact text and a receipt lookup. Failed integrity, failed runs, partial/truncated output, or failed contract conformance do not become consumable typed results. `quality=unmeasured` remains unmeasured. Typed data never grants write authority or authorizes Scout split continuation by itself.
+Dispatch and `monitor(mode="collect")` expose successful sealed payloads in `details.runs[].helperResult`, with compact text and a run lookup. Failed integrity, failed runs, partial/truncated output, or failed contract conformance do not become consumable typed results. `quality=unmeasured` remains unmeasured. Typed data never grants write authority or authorizes Scout split continuation by itself.
 
 For an independent helper task, use `detach:true` and continue useful work; collect the batch when its result is needed. This uses the existing durable detached-run mechanism. The TUI announces helper start and settlement in its notice area even for internal invocations without a transcript island.
 
@@ -1986,7 +1979,7 @@ The Scout recipe instructs the model to return structured findings with source p
 
 Planning time estimates and the dispatch `budget` are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, capacity rules, and, for native workers, the hard tool-call ceiling described in [Worker prompt and budget admission](#worker-prompt-and-budget-admission). Claude SDK runs in advisory mode have no tool-call ceiling, and subprocess runtimes and ACP peers do not enforce per-tool counts. In advisory dispatch `fleet.limits.toolCallsPerRun` lowers that ceiling for recipes with a larger maximum but never below the admitted estimate. Repetition guards still apply. The `fleet.limits.internalRunTimeoutMs` setting (default 900000 ms) bounds internal CLI dispatch such as the wiki documenter and the bootstrap scout; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
 
-A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own receipt and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.
+A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own run record and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.
 
 An editing mutation report may omit all validations when every checking call it attempted has an observed blocked outcome. It conforms with unmeasured quality. No attempts, unknown outcomes, or any executed check retain the concrete validation requirement.
 
@@ -1994,4 +1987,4 @@ Validation grounding treats `npm test`, `pnpm test`, and `yarn test` as aliases 
 
 A terminal colon in a validation claim, such as `npm test:`, is punctuation and grounds against `npm run test`. Script suffixes such as `test:unit` remain distinct.
 
-A typed-scope replacement produces one stderr diagnostic per root run, on the first attempt of an internal or harness dispatch, and none for `context-bootstrap` or `wiki-writer`. Retries are quiet, and receipts keep the scope provenance. The notice changes no working-context path, rule selection, or worker authority.
+A typed-scope replacement produces one stderr diagnostic per root run, on the first attempt of an internal or harness dispatch, and none for `context-bootstrap` or `wiki-writer`. Retries are quiet, and each run's `RunResult` keeps the admitted intent. The notice changes no working-context path, rule selection, or worker authority.

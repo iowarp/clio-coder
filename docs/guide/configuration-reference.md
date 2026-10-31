@@ -122,11 +122,8 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `systemOne.engines` | `{}` | Map of engine name to `{ kind, target, model?, mode?, profile? }`. | next turn |
 | `systemOne.sites` | `{}` | Map of site id to an engine name or `{ engine, timeoutMs?, tasks? }`. A site with no entry is off. | next turn; `systemOne.sites.consult` needs a restart |
 | `systemOne.cuts` | `{}` | Per-build overrides keyed by answering build, then `<site>.<key>`, with values from 0.01 to 0.99. | next turn |
-| `systemOne.record` | `false` | Boolean. Deprecated alias that keeps every decision and its outcome as a local dataset without research capture; user settings only. | next turn |
-| `systemOne.retentionDays` | `30` | Integer at least 1. Days of dataset day files kept. | next turn |
-| `systemOne.maxMiB` | `64` | Integer at least 1. Size cap of the dataset directory. | next turn |
 | `safety.autonomy` | `"default"` | `default` or `yolo`. User layer or operator session control. A project layer can only tighten the user level (`default` over `yolo`); a looser value is ignored with a layer issue. | hot reload |
-| `safety.limits.sessionCostUsd` | `5` | Finite number at least 0, in USD; a negative value fails validation. Session cost ceiling. It gates requests on routes priced `known` or `estimated`; see [pricing](configuration-and-targets.md#pricing-and-cost-provenance). `0` means no session ceiling: paid requests are admitted, dispatch plans and Scout continuations carry a ceiling of 0, and fleet previews skip the remaining-budget check. A parked request re-reads the ceiling every 250 ms and dispatch admission reads it per call, so raising it releases a waiting request. | hot reload |
+| `safety.limits.sessionCostUsd` | `5` | Finite number at least 0, in USD; a negative value fails validation. Session cost ceiling. It gates requests on routes priced by target rates or the catalog; see [pricing](configuration-and-targets.md#pricing-and-cost-provenance). `0` means no session ceiling: paid requests are admitted, dispatch plans and Scout continuations carry a ceiling of 0, and fleet previews skip the remaining-budget check. A parked request re-reads the ceiling every 250 ms and dispatch admission reads it per call, so raising it releases a waiting request. | hot reload |
 | `safety.limits.chatToolCallsPerTurn` | `60` | Integer at least 1. At the limit Clio stops using tools and summarizes the turn. | next turn |
 | `safety.limits.readBytesPerCall` | `51200` | Integer at least 1. Most text one file read returns; a read gets at least 1 KB. | next turn |
 | `safety.limits.observationBytesPerTurn` | `196608` | Integer at least 1. Combined tool output the model may receive in one turn. While the value stays at this default the pool scales to 1.5 bytes per context-window token, between 192 KiB and 1 MiB; any other value applies exactly. | next turn |
@@ -180,6 +177,12 @@ Default chat settings control interactive conversation routing, reasoning effort
 | `integrations.music.enabled` | `false` | Boolean. Allows `/music` to open cliamp in a Herdr dock. Needs Herdr panes and cliamp. | hot reload |
 | `integrations.music.station` | `"http://radio.cliamp.stream/lofi/stream"` | Non-empty string, a stream URL or a station name. What `/music on` plays. | hot reload |
 | `integrations.music.agentControl` | `false` | Boolean. Registers the `music` tool at startup so the model can drive the pane; off, the tool does not exist and costs no prompt bytes. | restart required |
+| `telemetry.mode` | `"standard"` | `standard` or `research`. What each scope's telemetry journal admits; a project or local layer can only lower it. | next turn |
+| `telemetry.research.content` | `false` | Boolean. In research mode with workspace consent, keep prompts, request bodies and background memory and compaction text as telemetry objects. | next turn |
+| `telemetry.research.deltas` | `true` | Boolean. In research mode, keep each call's inter-delta gaps as one `call.timing_captured` histogram. | next turn |
+| `telemetry.research.providerHeaders` | `true` | Boolean. In research mode, keep allow-listed provider response headers as `provider.headers_captured`. | next turn |
+| `telemetry.research.systemOneDataset` | `true` | Boolean. In research mode with `content` and consent, keep the System One dataset as `system_one.sample_captured` records. | next turn |
+| `telemetry.research.busTrace` | `false` | Boolean. In research mode, journal a `bus.traced` record naming each live event the telemetry hub delivers. | next turn |
 
 `systemOne.*` and `fleet.speculativeDispatch` are experimental and off by default. The [System One guide](system-one.md) describes them, including the engine `profile` field (`generic`, `jev`, `laya`, `laya-multilingual`, `julia-1`, `gliner2.5-small`, `gliner2.5-decide` or `strands-decider`) and the per-site `tasks` routes, which have no default. A decision engine's window is the `capabilities.contextWindow` of its `systemone` target (480 when unset), bounded by the profile's ceiling. There is no placement setting: which processor an engine runs on is decided by the server behind its target, as the placing-engines section of the [System One guide](system-one.md) describes.
 
@@ -372,6 +375,8 @@ Inside `fleet.nodes`, the key `clioEntry` is renamed `clioCoderEntry`. A file th
 | `delegation.agents[].labels` and `integrations.externalAgents.entries[].labels` | Nothing read or displayed external agent labels. |
 | `fleet.decisionProfiles` | System One replaced decision profiles. Bind an engine under `systemOne.engines` and `systemOne.sites`. An empty `{}` is accepted silently. |
 | `turnControl.interpretation` | The `systemOne.sites.turn` site reads the request, and nothing falls back to the main model. |
+| `systemOne.record` | Research capture keeps the System One dataset: `telemetry.research.systemOneDataset` with `content`. |
+| `systemOne.retentionDays` and `systemOne.maxMiB` | System One samples are research content in session journals, which telemetry retention bounds. |
 
 Three enum spellings are retired and stay validation errors until `clio-coder doctor --fix` rewrites them, so loading never changes policy silently.
 

@@ -242,9 +242,6 @@ System One is experimental and off by default; its keys and sites may change bet
 | `systemOne.engines` | `{}` | next turn |
 | `systemOne.sites` | `{}` | next turn; `systemOne.sites.consult` on restart |
 | `systemOne.cuts` | `{}` | next turn |
-| `systemOne.record` | `false` | next turn; deprecated alias of research capture, user settings only |
-| `systemOne.retentionDays` | `30` | next turn |
-| `systemOne.maxMiB` | `64` | next turn |
 
 ### Safety
 
@@ -324,7 +321,7 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 
 ### Telemetry
 
-`telemetry.mode` sets what each session's call journal admits. `standard`, the default, keeps accountability and operational records, all of them content-free or structural. `research` also admits the research-tier records that the `telemetry.research` flags turn on, and `content` additionally needs the operator's consent for the workspace. In this build `content` keeps the text of each distinct compiled system prompt, each main-loop and side call's request body, and the prompts, replies and facts of background memory and compaction steps as `memory.trace` and `memory.observation` records, in the session's `objects/` directory; `systemOneDataset` keeps the [System One dataset](system-one.md#the-training-dataset), which also needs `content` and consent because it holds redacted prompts; `busTrace` appends shutdown and domain lifecycle bus events to `<stateDir>/telemetry/research/bus-trace.jsonl`; `deltas` keeps each main-loop and side call's inter-delta gaps as one histogram record; `providerHeaders` keeps a call's rate-limit, quota, request-id and server-timing response headers and no others. Content capture runs only in a workspace the operator consented for with `clio-coder telemetry consent`, which records the consent in Clio's state directory and never in the workspace; `--revoke` ends it from the session's next call. A session's research capture stops at 256 MiB, and a `gap` record marks what was refused. Every journal segment header records the mode and the effective flags, and a change starts a new segment at the journal's next write. A project or local layer can lower capture but never raise it above user settings.
+`telemetry.mode` sets what each scope's telemetry journal admits. `standard`, the default, keeps accountability and operational records, all of them content-free or structural. `research` also admits the research-tier records that the `telemetry.research` flags turn on, and `content` additionally needs the operator's consent for the workspace. In this build `content` keeps the text of each distinct compiled system prompt, each main-loop and side call's request body, and the prompts, replies and facts of background memory and compaction steps as `memory.traced` and `memory.observed` records, with the text in the session's telemetry `objects/` directory; `systemOneDataset` keeps the [System One dataset](system-one.md#the-training-dataset), which also needs `content` and consent because it holds redacted prompts; `busTrace` journals a `bus.traced` record naming each live event the telemetry hub delivers; `deltas` keeps each main-loop and side call's inter-delta gaps as one histogram record; `providerHeaders` keeps a call's rate-limit, quota, request-id and server-timing response headers and no others. Content capture runs only in a workspace the operator consented for with `clio-coder telemetry consent`, which records the consent in Clio's state directory and never in the workspace; `--revoke` ends it from the session's next call. A session's research capture stops at 256 MiB, and a `journal.gap` record marks what was refused. Every journal segment header records the mode and the effective flags, and a change starts a new segment at the journal's next write. A project or local layer can lower capture but never raise it above user settings.
 
 | Key | Default | When it applies |
 | --- | --- | --- |
@@ -475,7 +472,7 @@ Clio reads both files at startup and rereads them whenever the `/model` overlay 
 
 A `targets[]` entry accepts `id` and `runtime` (both required), `url`, `auth`, `defaultModel`, `wireModels`, `capabilities`, `lifecycle`, `gateway`, `pricing`, `cache`, `lmstudio`, `litellm`, `ollama`, `maxConcurrentRequests` and `trustedUnmediated`. Any other key is rejected. Target ids are unique. When `defaultModel` is omitted, the first `wireModels` entry is used.
 
-`auth` takes `apiKeyEnvVar` (environment variable read per request), `apiKeyRef`, `oauthProfile` and `headers`. `capabilities` takes the booleans `chat`, `tools`, `reasoning`, `vision`, `audio`, `embeddings`, `rerank` and `fim`, the enums `toolCallFormat`, `thinkingFormat` and `structuredOutputs`, and the integers `contextWindow` and `maxTokens`. `gateway: true` marks the endpoint as a gateway. `pricing` is `free` or a rate map; see [pricing and cost provenance](#pricing-and-cost-provenance). `cache.retention` is `none`, `short` or `long`; `cache.deployment` binds the read-only control URL of a `llamacpp`, `vllm` or `lmstudio` deployment (`backend`, `controlUrl`, `model`, `build`, and an optional `gatewayDeploymentId`) so Clio Coder can observe its cache state; `cache.warm` bounds startup prewarm with `startup`, `maxInputTokens`, `maxDurationMs` and `cooldownMs`, and startup prewarm does nothing while `cache.retention` is `none`. `maxConcurrentRequests` is an explicit request-slot limit for the endpoint and overrides live discovery. `lifecycle` is `user-managed` or `clio-coder-managed`; `user-managed` keeps Clio Coder from loading or unloading models on that server. `trustedUnmediated: true` lets a runtime that runs its own tool loop (`claude-code`, `codex-cli`, `pi-cli`, `opencode-cli`, `antigravity-code`) take write-capable dispatch work under its own authority; without it such work is refused, and the opt-in is recorded on the run receipt. Only user settings may set it; a project layer's value is ignored.
+`auth` takes `apiKeyEnvVar` (environment variable read per request), `apiKeyRef`, `oauthProfile` and `headers`. `capabilities` takes the booleans `chat`, `tools`, `reasoning`, `vision`, `audio`, `embeddings`, `rerank` and `fim`, the enums `toolCallFormat`, `thinkingFormat` and `structuredOutputs`, and the integers `contextWindow` and `maxTokens`. `gateway: true` marks the endpoint as a gateway. `pricing` is `free` or a rate map; see [pricing and cost provenance](#pricing-and-cost-provenance). `cache.retention` is `none`, `short` or `long`; `cache.deployment` binds the read-only control URL of a `llamacpp`, `vllm` or `lmstudio` deployment (`backend`, `controlUrl`, `model`, `build`, and an optional `gatewayDeploymentId`) so Clio Coder can observe its cache state; `cache.warm` bounds startup prewarm with `startup`, `maxInputTokens`, `maxDurationMs` and `cooldownMs`, and startup prewarm does nothing while `cache.retention` is `none`. `maxConcurrentRequests` is an explicit request-slot limit for the endpoint and overrides live discovery. `lifecycle` is `user-managed` or `clio-coder-managed`; `user-managed` keeps Clio Coder from loading or unloading models on that server. `trustedUnmediated: true` lets a runtime that runs its own tool loop (`claude-code`, `codex-cli`, `pi-cli`, `opencode-cli`, `antigravity-code`) take write-capable dispatch work under its own authority; without it such work is refused, and the opt-in is recorded in the worker permit the run's result carries. Only user settings may set it; a project layer's value is ignored.
 
 ## Pricing and cost provenance
 
@@ -497,34 +494,34 @@ Pricing is declared per target in `targets[].pricing` ([`src/core/config.ts`](..
 
 `input` and `output` are required nonnegative numbers. `cacheRead` and `cacheWrite` are optional and read as 0 when omitted. Any other key is rejected. `configure` has no pricing flag, so set it in `settings.yaml` directly or through `clio-coder configure --edit`.
 
-[`resolveEffectivePricing`](../../src/domains/providers/catalog.ts) turns a target, its runtime and the wire model id into rates plus a provenance label. It takes the first rule that matches:
+[`resolveEffectivePricing`](../../src/domains/providers/catalog.ts) turns a target, its runtime and the wire model id into rates. It takes the first rule that matches, and the rule decides the `pricing` each `call.settled` record carries: a `usd` fact and a `pricedBy` source ([`call-facts.ts`](../../src/domains/telemetry/call-facts.ts)).
 
-| Order | Rule | Rates | Provenance |
+| Order | Rule | Rates | `pricedBy` and `usd` |
 | --- | --- | --- | --- |
-| 1 | The target declares a rate map | The declared rates | `known`, or `known_free` when every declared rate is 0 |
-| 2 | The target declares `pricing: free` | 0 | `known_free` |
-| 3 | The runtime tier is `local-native` (`lmstudio`, `ollama`, `llamacpp` and its variants, `vllm`, `sglang`, `lemonade`) | 0 | `known_free` |
-| 4 | The Pi catalog has a row for the runtime and wire model | The catalog rates | `estimated` |
-| 5 | None of the above | None | `unknown` |
+| 1 | The target declares a rate map | The declared rates | `target-rates`, measured; `free`, measured 0, when every declared rate is 0 |
+| 2 | The target declares `pricing: free` | 0 | `free`, measured 0 |
+| 3 | The runtime tier is `local-native` (`lmstudio`, `ollama`, `llamacpp` and its variants, `vllm`, `sglang`, `lemonade`) | 0 | `free`, measured 0 |
+| 4 | The Pi catalog has a row for the runtime and wire model | The catalog rates | `catalog`, estimated with method `catalog` |
+| 5 | None of the above | None | `none`, unknown |
 
-Only runtimes that map to a Pi catalog provider can reach rule 4: `anthropic`, `anthropic-max`, `claude-code`, `claude-sdk`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openai-codex` and `openrouter`. The catalog is static data in the pinned Pi dependency and not a live price feed. Runtimes outside that map and outside rule 3, such as `alcf`, `inception` and the subprocess delegation runtimes, stay `unknown` until a target prices them. Protocol-tier runtimes (`litellm`, `openai-compat`, `anthropic-compat`, `systemone`) are never assumed free, because a proxy can front a paid cloud model. A LiteLLM target therefore reports `unknown` cost until it declares `pricing`, even when the model behind it is local. Workers price from the same target rates; a cost the provider call itself reports is kept as reported.
+Only runtimes that map to a Pi catalog provider can reach rule 4: `anthropic`, `anthropic-max`, `claude-code`, `claude-sdk`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openai-codex` and `openrouter`. The catalog is static data in the pinned Pi dependency and not a live price feed. Runtimes outside that map and outside rule 3, such as `alcf`, `inception` and the subprocess delegation runtimes, stay unpriced until a target prices them. Protocol-tier runtimes (`litellm`, `openai-compat`, `anthropic-compat`, `systemone`) are never assumed free, because a proxy can front a paid cloud model. A LiteLLM target therefore reports an unknown cost until it declares `pricing`, even when the model behind it is local. Workers price from the same target rates; a cost the provider call itself reports is kept as reported, as a measured `usd` with `pricedBy: provider`.
 
-Cost appears in these places, and every one reads the provenance. How each surface records it and how a receipt seals it is described in [observability](../architecture/observability.md).
+Cost appears in these places, and every one renders the journaled facts through one renderer ([`render.ts`](../../src/core/telemetry/render.ts)). How a value keeps its kind from journal to display is described in [honest values](../architecture/telemetry.md#honest-values).
 
-- Sealed run receipts carry `costUsd` and `costProvenance`.
+- Each run's `run.settled` record carries its `usage` and `pricing` facts.
 - The footer shows the session total, and the footer dashboard page labels it `Tracked cost` and lists the session ceiling beside it as `Clio ceiling`, which reads `none` when `safety.limits.sessionCostUsd` is `0`.
 - `/usage` shows a `cost` row for the session and for each model.
 - The dispatch board, `clio-coder fleet` output and the `monitor` tool show a cost per run.
-- The exit summary prints a `Cost` row, and under `report` a cost per model in its `Models` section. It words the label itself: `(known)`, `(free)`, `est`, `(partly unknown)`, `unknown pricing` or `unknown (not measured)`.
+- The exit summary prints a `Cost` row, and under `report` a cost per model in its `Models` section, in the same wording as the table below.
 
-| Provenance | What the footer, `/usage` and run tables show |
+| `usd` fact | What the footer, `/usage` and run tables show |
 | --- | --- |
-| `known` | A dollar amount such as `$1.23`. |
-| `known_free` | `$0.00 local` when every priced call was free. |
-| `estimated` | `~$1.23 est`. |
-| `unknown` | Tokens are still counted, but the call adds nothing to the dollar total. A session with some priced calls shows `$1.23 +?`. A session with none shows no cost field in the footer and `/usage`, and `not measured` in the fixed-width tables. |
+| measured | A dollar amount such as `$1.23`. |
+| measured 0 with `pricedBy: free` | `$0.00 local` when every priced call was free. |
+| estimated | `~$1.23 est`. |
+| unknown | Tokens are still counted, but the call adds nothing to the dollar total. A session with some priced calls shows `$1.23 +?`. A session with none shows no cost field in the footer and `/usage`, and `not measured` in the fixed-width tables. |
 
-Provenance also decides what the cost ceiling sees. `safety.limits.sessionCostUsd` gates chat requests only on routes whose provenance is `known` or `estimated`, and gates dispatched routes that have a nonzero rate. `known_free` and `unknown` routes are not counted, so work on an unpriced LiteLLM target spends outside the ceiling until the target declares `pricing`. A dispatch routing intent that sets `maxCostUsd` prices a route with no rates at a fixed admission estimate of 1 USD.
+The pricing rule also decides what the cost ceiling sees. `safety.limits.sessionCostUsd` gates chat requests only on routes priced by target rates or the catalog, and gates dispatched routes that have a nonzero rate. Free and unpriced routes are not counted, so work on an unpriced LiteLLM target spends outside the ceiling until the target declares `pricing`. A dispatch routing intent that sets `maxCostUsd` prices a route with no rates at a fixed admission estimate of 1 USD.
 
 `safety.limits.sessionCostUsd` accepts any finite number of at least 0, fractions included. `0` means no session ceiling. The session gate admits every paid request, and an interactive session never waits on a raise. A dispatch plan and a Scout continuation carry a ceiling of 0 that enforces nothing, and a fleet preview skips its remaining-budget check. A negative value fails settings validation with `safety.limits.sessionCostUsd: expected a number >= 0, got <value>`. `clio-coder configure` shows a ceiling of 0 as `none` and a positive one as `$<amount> USD` on its `Session cost limit` row, and its prompt accepts 0 to remove the ceiling. A positive ceiling still refuses a paid request once priced spend reaches it, and `clio-coder run` then exits 4 with `budget_ceiling` ([exit codes](exit-codes-and-output.md)).
 
@@ -637,6 +634,6 @@ If your provider gives a 401 authentication error, check the target's credential
     clio-coder models --target <id>
     clio-coder auth status <target-or-runtime>
 
-For a report, include the Clio Coder and Node versions, target id/runtime, model id, probe result, and a redacted receipt or transcript. Do not include API keys or credential files.
+For a report, include the Clio Coder and Node versions, target id/runtime, model id, probe result, and a `clio-coder telemetry share` archive or a redacted transcript. Do not include API keys or credential files.
 
 How a dispatched worker's provider error is classified, and whether it retries on another target, is described in [worker dispatch mechanics](../architecture/worker-dispatch-mechanics.md).

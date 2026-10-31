@@ -254,10 +254,10 @@ serialized from the same working-set projection the ordinary summary uses. The
 compactor uses the offer only when the whole substituted summarizer request
 fits the model's window and is smaller than the ordinary request; otherwise it
 summarizes the ordinary history (`src/domains/session/compaction/compact.ts`).
-Lifecycle rows such as `batch-ready`, `notes-rejected`, `offer-declined` and
+Lifecycle events such as `batch-ready`, `notes-rejected`, `offer-declined` and
 `offer-used`, which records `originalInputTokens` and `substitutedInputTokens`,
-are appended to `<stateDir>/memory/observation-events.jsonl` without note or
-message text.
+are journaled as `memory.observation_recorded` records in the session's
+telemetry journal without note or message text.
 
 Each session keeps at most 64 artifacts under
 `<stateDir>/memory/observations/<sessionId>/`. When the directory is full,
@@ -477,11 +477,11 @@ step uses whatever `chat.target` and `chat.model` are at that moment, so memory
 tokens are billed to the chat model by default. The rules tier answers alone when
 no chat route is configured. Its default timeout is `context.memory.timeoutMs: 60000`.
 
-Each model step contributes a cost entry under `background-memory`, shown as
-`memory steps` in `/usage`, and a durable token-usage and cost row in
-`<stateDir>/usage/out-of-turn.jsonl`. `clio-coder usage report` includes those rows
-after the process exits. `/memory` summarizes `steps.jsonl`: steps, tokens, model
-time, and the proportion of steps that produced reminders.
+Each model step's calls are journaled under the `memory` agent role and shown
+as `memory steps` in `/usage`. `clio-coder usage report` reads the same journal
+records after the process exits. `/memory` folds the `memory.step_decided`
+records in the session, run and process journals: steps, tokens, model time,
+and the proportion of steps that produced reminders.
 
 A step shares the resolved endpoint's request capacity. When known occupancy
 exhausts that capacity, the step is skipped with reason `endpoint_busy`. A shared
@@ -575,7 +575,7 @@ kind from its resolved pricing and runtime; there is no setting for it.
   `quota_retry` while the usage endpoint's 429 retry interval runs. Clio never
   fetches usage for this. A missing, stale or unusable reading defers the step
   with `quota_unknown` until a trustworthy reading arrives.
-- **Local** (`known_free`) and **unpriced** routes, such as a LiteLLM proxy
+- **Free** and **unpriced** routes, such as a LiteLLM proxy
   without declared `pricing`, have no dollar limit. The endpoint is the budget:
   a step takes a free slot or is skipped with `endpoint_busy`, and a foreground
   request competing for the same slot still preempts it. Once the endpoint has reported prefill and
@@ -584,7 +584,7 @@ kind from its resolved pricing and runtime; there is no setting for it.
   the step is skipped with `time_budget`. With no measurement yet the deadline
   is `context.memory.timeoutMs`.
 
-A skipped step is recorded in `steps.jsonl` as `dropped` with its reason, plus
+A skipped step is journaled as a `memory.step_decided` record with decision `dropped` and its reason, plus
 `resumeAt` when Clio knows when room returns (a window reset or a retry instant).
 `/memory` shows the newest skip and that time. A skipped step is not retried;
 the next cadence tick or turn end decides again.
@@ -798,73 +798,68 @@ prior bank before the new session can observe it. `clio-coder memory promote
 
 ## Telemetry
 
-Each completed memory-policy attempt appends one content-free record to:
-
-```text
-<stateDir>/memory/steps.jsonl
-```
-
-Use `clio-coder paths --json` to resolve the state directory (the `"state"` property). The log rotates after 1 MiB and
-keeps one previous generation as `steps.jsonl.1`.
+Each completed memory-policy attempt journals one structural `memory.step_decided`
+record in the owning scope's telemetry journal, and each model step that
+finished on an endpoint journals a `memory.step_completed` record naming the
+endpoint and target. There is no separate memory step log; see
+[Journals](../architecture/telemetry.md#journals) for where the journal lives.
 
 <details>
-<summary>Every field in a steps.jsonl record and what each outcome means</summary>
+<summary>Every field in a memory.step_decided record and what each outcome means</summary>
 
-Every exact-schema record (`version: 2`) has:
+Every record has:
 
-- `at` timestamp and `version`;
-- `triggerReasons`: one to three of `interval`, `tool_error_streak`, `loop_signal`, `repeated_failure`, `turn_end`, `post_compaction`, `manual`;
+- `triggerReasons`: one or more of `interval`, `tool_error_streak`, `loop_signal`, `repeated_failure`, `durable_lesson`, `durable_lesson_variant`, `durable_lesson_verify`, `durable_lesson_subject`, `turn_end`, `post_compaction`, `idle_review`, `manual`;
 - `tier`: `rules` or `llm`;
 - `bankDelta`: per-class (`status`, `knowledge`, `procedural`) added, updated, and deleted entry counts;
 - `decision`: `silent`, `injected`, `gated`, `timeout`, `malformed`, or `dropped`;
-- `reason`, which explains the decision, and an optional `refusalReason` on `information_flow_blocked`;
+- `reason`, which explains the decision;
 - `bankOperations` accepted, `droppedOperations` refused, and `citedEntries`;
-- `tokenCost` with input, output and total memory-model tokens, and `latencyMs`;
-- `targetId` and `modelId` for the route that served the step, absent on rules-tier rows.
+- `inputTokens`, `outputTokens` and `latencyMs` as facts that say whether each value was measured, estimated or unknown;
+- `calls`, the call and attempt ids of the model calls the step made;
+- `route` with the `targetId` and `modelId` that served the step, absent on rules-tier records;
+- `resumeAt` when a budget skip knows when room returns.
 
 The reasons are `intervened`, `model_silent`, `duplicate_reminder`, `suppressed`,
-`uncited`, `invalid_path`, `resolved_failure`, `over_budget`, `invalid_reminder`,
-`unparseable`, `all_operations_invalid`, `deadline`, `timed_out`, `endpoint_busy`,
-`client_error`, `information_flow_blocked`, `no_client`, `no_consumer`,
-`step_in_flight`, `llm_timeout_backoff`, `no_repeated_failure`, `bank_empty` and
-`scope_changed`. The parser rejects rows from schema version 1 and rows with any
-other key set.
+`uncited`, `invalid_path`, `resolved_failure`, `no_lost_context`, `over_budget`,
+`invalid_reminder`, `unparseable`, `all_operations_invalid`, `deadline`,
+`timed_out`, `endpoint_busy`, `endpoint_preempted`, `cost_ceiling`,
+`quota_unknown`, `quota_window`, `quota_retry`, `time_budget`, `client_error`,
+`information_flow_blocked`, `no_client`, `no_consumer`, `step_in_flight`,
+`llm_timeout_backoff`, `no_repeated_failure`, `bank_empty` and `scope_changed`.
 
 The same steps are also billed. See "Cost and defaults" for the
-`/usage` row, the durable out-of-turn usage row, and the lifetime figures `/memory`
-folds out of this file.
+`/usage` row and the lifetime figures `/memory` folds out of these records.
 
-`dropped` is the one outcome that ran no step. It has two causes, separated by
-the row's reason: `step_in_flight` means the boundary triggered while an earlier
-step still held the single in-flight slot, and `endpoint_busy` means the step
-found the known endpoint request capacity exhausted. Both cost
-no tokens and no latency, both leave their triggers pending for the next free
-boundary, and neither replaces the operator-visible last decision. Counting
-`dropped` rows against `llm` rows over a session is how a starved cadence becomes
-visible.
+`dropped` is the outcome that ran no step. Its reason says why: `step_in_flight`
+means the boundary triggered while an earlier step still held the single
+in-flight slot, `endpoint_busy` means the step found the known endpoint request
+capacity exhausted, and the budget reasons above mean admission refused it.
+None of them costs tokens or latency, each leaves its triggers pending for the
+next free boundary, and none replaces the operator-visible last decision.
+Counting `dropped` records against `llm` records over a session is how a
+starved cadence becomes visible.
 
 A step that exceeds the deadline records `timeout`, never `silent`: reason
 `deadline` when the policy's own race fired first, and `timed_out` when the
 transport aborted at its deadline. Both are distinct from `client_error`, which
 is a route that refused rather than a route that was slow.
 
-The log contains no task, trajectory, bank, error, or reminder text. File creation,
-rotation, serialization, and injected sinks are all best effort; a read-only
-state directory or full disk cannot alter intervention behavior.
+The record contains no task, trajectory, bank, error, or reminder text. Journaling
+is best effort; a read-only state directory or full disk cannot alter
+intervention behavior.
 
-Note that routine no-tool continuation checks do not emit telemetry rows, as they
+Note that routine no-tool continuation checks do not journal a step, as they
 are not considered new memory boundaries. Only actual tool-bearing or explicitly
-triggered memory steps produce rows.
+triggered memory steps produce records.
 
 </details>
 
-When debugging a model route, set `CLIO_CODER_MEMORY_TRACE` to a file path. Each
-step then appends one content-bearing JSON row there (the reminder, plus the
-prompt and the raw response each clipped to 8,000 characters), and the file is
-truncated when the session opens it. The trace is never written unless the variable is set; see
-[Environment variables](environment-variables.md). The variable is a deprecated alias: research mode
-with `telemetry.research.content` and workspace consent records the same step as a `memory.trace`
-record in the session's call journal.
+When debugging a model route, use research mode with `telemetry.research.content`
+and workspace consent. Each step is then also journaled as a `memory.traced`
+record whose object holds the reminder, the prompt and the raw response, and each
+observation event as a `memory.observed` record with its facts; see
+[Telemetry settings](configuration-and-targets.md#telemetry).
 
 ## Session scope
 

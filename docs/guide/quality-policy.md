@@ -86,8 +86,8 @@ supersedes an earlier pass. Source edits, additions, deletions, policy edits,
 and changes to the check declaration invalidate an old result, including
 changes made outside Clio Coder's tools.
 
-The assessment and completion audit record contain one structured finding
-per applicable rule/check:
+The assessment and the `completion.evaluated` journal event contain one
+structured finding per applicable rule/check:
 
 | State | Meaning |
 | --- | --- |

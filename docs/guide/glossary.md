@@ -11,11 +11,11 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `DurableAssignmentRecord` in [assignment-store.ts](../../src/domains/dispatch/assignment-store.ts).
 
 ### 2. Run
-- **Definition**: A concrete execution attempt of an assignment. Dispatch creates a 12-character random base36 run identifier with `newRunId()`. Session ids use the same 12-character base36 generator, while appended session turn and entry ids use UUIDv7. Every run has an isolated event stream, a designated execution node, and a final receipt sealed with an unkeyed SHA-256 digest.
+- **Definition**: A concrete execution attempt of an assignment. Dispatch creates a 12-character random base36 run identifier with `newRunId()`. Session ids use the same 12-character base36 generator, while appended session turn and entry ids use UUIDv7. Every run has an isolated event stream, a designated execution node, and its own telemetry scope that ends with `run.settled` and `run.sealed`. Its identity is the SHA-256 of its `run.settled` payload as canonical JSON.
 - **Owning Type**: `RunEnvelope` in [types.ts](../../src/domains/dispatch/types.ts).
 
 ### 3. Attempt
-- **Definition**: A 0-based sequential retry index of a logical assignment. The first run of an assignment is attempt 0; a retry after a retriable infrastructure error increments it while preserving the earlier attempt's own run and receipt.
+- **Definition**: A 0-based sequential retry index of a logical assignment. The first run of an assignment is attempt 0; a retry after a retriable infrastructure error increments it while preserving the earlier attempt's own run and run record.
 - **Owning Type**: `RunLineage.attempt` in [types.ts](../../src/domains/dispatch/types.ts).
 
 ### 4. Batch
@@ -26,17 +26,17 @@ This document defines the core architectural concepts and terminology used throu
 - **Definition**: A multi-step directed acyclic graph (DAG) defining steps, dependencies, code validations, and budget ceilings approved by the operator before dispatch.
 - **Owning Type**: `ExecutionPlan` in [execution-plan.ts](../../src/domains/dispatch/execution-plan.ts).
 
-### 6. Receipt
-- **Definition**: A record of a completed run, sealed with an unkeyed SHA-256 digest that verification checks against the run ledger, containing full execution facts, tool telemetry, token accounting, validation grounding, and outcome codes.
-- **Owning Type**: `RunReceipt` in [types.ts](../../src/domains/dispatch/types.ts) (`RUN_RECEIPT_INTEGRITY_VERSION = 21` in [seal.ts](../../src/domains/telemetry/seal.ts)).
+### 6. Run Record
+- **Definition**: The persisted record of a finished run: `run.settled` in the run's journal, carrying outcome and outcome code, route, usage and pricing as facts, tool counts, validation grounding and the hashes the run committed to, plus the `run-result` object it names, followed by `run.sealed` over the journal's chain head. The sealed run directory under `<stateDir>/telemetry/runs/<runId>/` verifies with only its own files. In memory, dispatch hands its caller a `RunResult`; readers use the read model's run DTO. See [seals and bundles](../architecture/telemetry.md#seals-and-bundles).
+- **Owning Type**: `RunSettledSchema` in [schemas.ts](../../src/core/telemetry/schemas.ts); `RunResult` in [types.ts](../../src/domains/dispatch/types.ts); read through [run-record.ts](../../src/domains/telemetry/run-record.ts).
 
 ### 7. Envelope
 - **Definition**: A bounded container enforcing byte-length limits and truncation indicators on a dynamic payload. Tool output carries shown and total byte counts plus a continuation fragment; a parent briefing carries byte count and SHA-256 content hash instead.
 - **Owning Type**: `Observation` in [observation.ts](../../src/tools/observation.ts) for tool output; `RunBriefingProvenance` in [types.ts](../../src/domains/dispatch/types.ts) for briefings.
 
 ### 8. Phase
-- **Definition**: A designated execution interval within a run. Every trace event and spend row is keyed to one `phaseId`, and the `phases` table is opened alongside `runs` for each operator turn.
-- **Owning Type**: `TraceEventInput.phaseId` and the `phases` table in `trace-store.ts`.
+- **Definition**: A designated execution interval within a run, bounded by the run's phase marks (requested, queued, admitted, worker spawned, ended). Dispatch derives the queue wait and the user-observed end-to-end time from them, and `run.settled` carries both as `phaseTiming`.
+- **Owning Type**: `RunPhaseMarks` and `RunPhaseDurations` in [types.ts](../../src/domains/dispatch/types.ts); derived in [phase-timing.ts](../../src/domains/dispatch/phase-timing.ts).
 
 ### 9. Gate
 - **Definition**: A validation or review barrier (such as a read-only reviewer verdict or a compete judge decision) determining whether candidate diffs are merged or revised.
@@ -123,7 +123,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Types**: `FleetNodeSnapshot` in [cluster.ts](../../src/domains/scheduling/cluster.ts) for capacity; `Playbook` for the declared multi-step workflow (see Playbook below).
 
 ### 30. Dispatch
-- **Definition**: Sending one unit of work to a worker: the domain that resolves recipe, target, model, and node, admits the request against authority, spawns the worker, and seals the receipt. It is the `dispatch` tool, the `/run` slash command, and `src/domains/dispatch/`.
+- **Definition**: Sending one unit of work to a worker: the domain that resolves recipe, target, model, and node, admits the request against authority, spawns the worker, and settles and seals the run. It is the `dispatch` tool, the `/run` slash command, and `src/domains/dispatch/`.
 - **Owning Type**: `DispatchRequest` in [contract.ts](../../src/domains/dispatch/contract.ts).
 
 ### 31. Run Ledger
@@ -191,19 +191,19 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `CanonicalTrustStatus` in [trust-status.ts](../../src/domains/evidence/trust-status.ts).
 
 ### 47. Trust Projection
-- **Definition**: The one rendering of the canonical trust status every operator surface prints. The compact human line answers who claims the result, what was observed, what was independently checked, and what is still unknown, in five fixed clauses (`sealed; grounded by host-verification; not independently reviewed; context recorded; completion evidenced`). The machine projection is the same answer as a bounded, versioned record with references to the detailed artifacts. Dispatch and monitor output, `evidence inspect`, `findings.md`, the Fleet Runs board, the receipt view, and the ACP wire all print from it.
+- **Definition**: The one rendering of the canonical trust status every operator surface prints. The compact human line answers who claims the result, what was observed, what was independently checked, and what is still unknown, in five fixed clauses (`sealed; grounded by host-verification; not independently reviewed; context recorded; completion evidenced`). The machine projection is the same answer as a bounded, versioned record with references to the detailed artifacts. Dispatch and monitor output, `clio-coder evidence`, the Fleet Runs board and its finished-card view, and the ACP wire all print from it.
 - **Owning Type**: `formatTrustSummary` and `TrustSummaryProjection` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 48. Trust Verdict
-- **Definition**: The presentation tier read off the axes in a fixed order, used for styling and sorting and never as a score. `reviewed` requires a verified independent pass and is the only tier styled as independently verified. `grounded` is observed validation without independent review. `unverified` is a sealed receipt with nothing observed. `compromised` is a broken seal, a failed or inferred validation, a failed or correlated review, or a contradictory context record. `unknown` is an unchecked or missing seal.
+- **Definition**: The presentation tier read off the axes in a fixed order, used for styling and sorting and never as a score. `reviewed` requires a verified independent pass and is the only tier styled as independently verified. `grounded` is observed validation without independent review. `unverified` is a sealed run with nothing observed. `compromised` is a broken seal, a failed or inferred validation, a failed or correlated review, or a contradictory context record. `unknown` is an unchecked or missing seal.
 - **Owning Type**: `TrustVerdict` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 49. Trust Vocabulary
-- **Definition**: The standardized word for each canonical state, so the same fact is never spelled two ways. `sealed` means the receipt verified against the ledger row. `grounded` means validation was observed to run and pass, named by its claimant (`host-verification`, `validation-tool`, `receipt-quality`, `evidence-grounding`). `independently reviewed` means a verified reviewer that was not the run itself recorded a verdict. `inferred` means the worker claimed validation and nothing was observed to have run. `unknown` means a named source could not answer; `not applicable` means a named authority decided the axis does not apply.
+- **Definition**: The standardized word for each canonical state, so the same fact is never spelled two ways. `sealed` means the run's telemetry seal verified. `grounded` means validation was observed to run and pass, named by its claimant (`host-verification`, `validation-tool`, `receipt-quality`, `evidence-grounding`). `independently reviewed` means a verified reviewer that was not the run itself recorded a verdict. `inferred` means the worker claimed validation and nothing was observed to have run. `unknown` means a named source could not answer; `not applicable` means a named authority decided the axis does not apply.
 - **Owning Type**: `TRUST_STATE_WORDS` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 50. Commonly Confused Trust States
-- **Definition**: `sealed` is not `grounded`: a receipt can verify perfectly and describe a run that validated nothing. `grounded` is not `independently reviewed`: a host check is Clio Coder observing the run's own declared command, not a second agent judging the result. A `host checks verified` unit on the board is folded into validation grounding and is never independent review. `mediated` and `enforced` are one state under two names, the receipt grade and the canonical id. `not_requested` is not a trust state at all; a run with no host check reads `no validation observed`. `completion unevidenced` (a mutation finished with no validation at the completion boundary) is distinct from `no validation observed` (no validation was linked anywhere in the run): the first is the finish contract's observation, the second the evidence linker's.
+- **Definition**: `sealed` is not `grounded`: a run's seal can verify perfectly over a run that validated nothing. `grounded` is not `independently reviewed`: a host check is Clio Coder observing the run's own declared command, not a second agent judging the result. A `host checks verified` unit on the board is folded into validation grounding and is never independent review. `not_requested` is not a trust state at all; a run with no host check reads `no validation observed`. `completion unevidenced` (a mutation finished with no validation at the completion boundary) is distinct from `no validation observed` (no validation was linked anywhere in the run): the first is the finish contract's observation, the second the evidence linker's.
 - **Owning Type**: `TRUST_STATE_WORDS` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts); the axis states in `TRUST_STATUS_STATES` in [trust-status.ts](../../src/domains/evidence/trust-status.ts).
 
 ### 51. System One
@@ -223,7 +223,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `SiteCuts` in [types.ts](../../src/domains/system-one/types.ts); `FITTED_CUTS` and `cutsFor` in [calibration.ts](../../src/domains/system-one/calibration.ts).
 
 ### 55. Shadow Mode
-- **Definition**: What a site does under an unfitted build. The engine is still asked and the call is recorded in the session ledger, and in the dataset while it is recorded (research capture or the deprecated `systemOne.record` alias), but the site produces no hint, no gate, no act and no ranking. With recording off, a site whose build is known to be unfitted makes no call at all. No automatic site waits on a call, shadowed or not.
+- **Definition**: What a site does under an unfitted build. The engine is still asked and the call is recorded in the session ledger, and in the System One dataset while research capture keeps it (`telemetry.research.systemOneDataset` with content capture on), but the site produces no hint, no gate, no act and no ranking. With recording off, a site whose build is known to be unfitted makes no call at all. No automatic site waits on a call, shadowed or not.
 - **Owning Type**: `SystemOne.shadowed` and `SiteCuts.fitted` in [types.ts](../../src/domains/system-one/types.ts).
 
 ### 56. Laya
@@ -246,9 +246,9 @@ This document defines the core architectural concepts and terminology used throu
 - **Definition**: A per-model record of what a model is: capability flags, a declared context and output maximum, the thinking mechanism and level mapping, and a recommended output budget. Packaged profiles live in `models/profiles.yaml` and the operator's `<configDir>/model-profiles.yaml` layers over them. A profile describes the model and never a deployment, so a live server report outranks it for the serving window, output cap, tools, vision and reasoning. See [Configuration and targets](configuration-and-targets.md) and the [model catalog](../architecture/model-catalog.md).
 - **Owning Type**: `ModelProfile` in [model-profiles.ts](../../src/domains/providers/model-profiles.ts).
 
-### 61. Cost Provenance
-- **Definition**: The label that says where a cost figure came from: `known` (declared target rates), `known_free` (declared free, all-zero rates, or a `local-native` runtime), `estimated` (a Pi catalog rate) or `unknown` (no rate source). Absent provenance reads as `unknown`, never as free. Pricing is declared per target, and the label travels with the cost on receipts and in the footer, `/usage` and run tables. See [pricing and cost provenance](configuration-and-targets.md#pricing-and-cost-provenance).
-- **Owning Type**: `CostProvenance` in [pricing.ts](../../src/core/telemetry/pricing.ts); resolved by `resolveEffectivePricing` in [catalog.ts](../../src/domains/providers/catalog.ts).
+### 61. Pricing
+- **Definition**: The priced cost of a call or run: `usd` is a `Fact<number>` (measured, estimated, unknown or absent, each naming its source or reason) and `pricedBy` says what priced it: `provider`, `target-rates`, `catalog`, `free` or `none`. An unknown cost never reads as free; `free` is a measured local zero. Sums over many calls are a `FactSum` that keeps measured, estimated and unknown coverage apart. Every surface words these values through one renderer. Pricing is declared per target. See [pricing and cost provenance](configuration-and-targets.md#pricing-and-cost-provenance) and [honest values](../architecture/telemetry.md#honest-values).
+- **Owning Type**: `PricingSchema` in [schemas.ts](../../src/core/telemetry/schemas.ts); `Fact` and `FactSum` in [fact.ts](../../src/core/telemetry/fact.ts); rendered by [render.ts](../../src/core/telemetry/render.ts).
 
 ### 62. Chat Route
 - **Definition**: The target, model and thinking level that answer the operator, saved as `chat.target`, `chat.model` and `chat.thinkingLevel`. A session owns its live copy. When an existing home has no chat route, startup detects one from configured targets, environment keys, stored logins and loopback servers and saves it only when no chat route exists. A saved route that cannot be used is kept: a missing credential opens the session unavailable, and a target with no model or a runtime that cannot drive the main agent exits 2. See [chat route detection](configuration-and-targets.md#chat-route-detection).
@@ -259,16 +259,16 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `RouteProvenance` in [route-provenance.ts](../../src/core/route-provenance.ts).
 
 ### 64. Settled
-- **Definition**: The outcome label every route history record carries, from `routeSettledLabel`: `success`, else the receipt's most specific outcome code, else `permission_required`, else `failure` or the receipt outcome. The route observer backfills older records. Adaptive routing reads quality labels and reliability and does not read `settled`.
-- **Owning Type**: `routeSettledLabel` in [route-history.ts](../../src/domains/telemetry/route-history.ts); backfilled by [route-observer.ts](../../src/domains/dispatch/route-observer.ts).
+- **Definition**: The outcome label every route history entry carries, from `routeSettledLabel` over the run's `run.settled`: `success`, else the run's most specific outcome code, else `permission_required`, else `failure` or the run's outcome. Route history is a fold over settled runs, so the label is computed on read and never stored. Adaptive routing reads quality labels and reliability and does not read `settled`.
+- **Owning Type**: `routeSettledLabel` in [route-history.ts](../../src/domains/telemetry/route-history.ts).
 
 ### 65. Operator Notes
 - **Definition**: The `<operator-notes>` block of a compaction summary, a bounded list of things the operator asked Clio to keep. Each compaction collects the notes already in earlier summaries, sentences in the operator's own messages that open with `remember`, `keep in mind` or `don't forget`, and the instructions given to `/compact`. Instructions to `/compact` also bind the summarizer through an `<operator-instructions>` block and are kept verbatim in the notes. A note is clipped to 400 characters, the block keeps the latest 30, and notes are XML-escaped inside it.
 - **Owning Type**: `extractOperatorNotes` and `formatOperatorNotes` in [compact.ts](../../src/domains/session/compaction/compact.ts).
 
-### 66. Receipt Facts
-- **Definition**: The compact terminal facts of a finished run, read back from its sealed receipt: outcome and outcome code, exit code, token and tool counts, duration, changed paths, placement, result contract and the verified trust status. One module produces them for the TUI worker block (live and replayed) and for ACP terminal fleet frames, so every surface draws the same numbers from the same bytes. A missing or corrupt receipt reads as `receipt unavailable` and never fails a render.
-- **Owning Type**: `RunReceiptSummary` and `RunReceiptFacts` in [receipt-facts.ts](../../src/domains/dispatch/run-result-facts.ts).
+### 66. Run Result Facts
+- **Definition**: The compact terminal facts of a finished run, read from the read model's run DTO over its sealed run scope: outcome and outcome code, exit code, token and tool counts, duration, changed paths, placement, result contract and the trust status authenticated by the run seal. One module produces them for the TUI worker block (live and replayed) and for ACP terminal fleet frames, so every surface draws the same numbers from the same record. A run that has not settled reads as `result unavailable` and never fails a render.
+- **Owning Type**: `RunResultSummary` and `RunResultFacts` in [run-result-facts.ts](../../src/domains/dispatch/run-result-facts.ts).
 
 ### 67. Clio Coder
 - **Definition**: Clio Coder is named for Kleio, the Greek muse of history, a female figure in myth; the software is referred to by name and has no gender.

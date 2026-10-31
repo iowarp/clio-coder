@@ -108,7 +108,7 @@ record is truncated. Entries are filtered to the active branch before the fold, 
 switch never briefs the advisor on decisions the operator walked away from.
 
 The run is an ordinary singular dispatch with `requestOrigin: "internal"` and
-`readOnly: true`, so admission, receipts, and the Fleet Runs island apply
+`readOnly: true`, so admission, the run record, and the Fleet Runs island apply
 to it exactly as they apply to `/run`. Its `oracle-report` contract carries the
 answer shape: a verdict line, the strongest challenge the advisor can mount, the
 evidence that would change its verdict, and the decisions it cited. The rendered
@@ -179,7 +179,7 @@ A recipe must also pass the capability policy before it enters any catalog. A `w
 *   **Advisory estimate (default).** `toolCalls` and `readReserve` plan the run and are not a cutoff. When the call count reaches `toolCalls`, the next tool result carries a one-time notice to reassess and finish, and tools stay available. The hard ceiling is the recipe's `maximum.toolCalls`, or `toolCalls` when the recipe declares no `maximum`. Dispatch clamps the ceiling to `fleet.limits.toolCallsPerRun` (default `150`), and it never falls below an estimate or result-contract revision the request was admitted with. A dispatch can supply its own `budget` estimate (`toolCalls`, `readReserve`, optional `retryRevision`) for one run. What happens at the ceiling depends on the worker; see [Reporting workers and the finishing rule](../architecture/worker-dispatch-mechanics.md#reporting-workers-and-the-finishing-rule).
 *   **Enforced research phases.** Native runs of `scout`, `provenance`, and `context-bootstrap` are read-only research, so their budget is enforced. After at most 36 observed tool calls (`READ_ONLY_RESEARCH_SYNTHESIS_TOOL_CALLS`; fewer when `fleet.limits.toolCallsPerRun` is smaller, and for `context-bootstrap` when its recipe or request budget is smaller) the runtime removes the tools and runs one text-only synthesis round. The last `readReserve` calls of the phase admit only `read` and the recipe's delivery tools: `write` and `edit`, plus `code_nav` for `product: orientation`.
 
-`readReserve` is clamped to zero when canonical `read` is absent after tool admission, and to at most one less than `toolCalls`. The operator cap cannot be widened by a recipe. The admitted envelope (recipe policy, request, effective budget, and each clamp reason) is sealed in the run ledger and receipt. The Claude SDK runtime enforces a budget only in the enforced mode.
+`readReserve` is clamped to zero when canonical `read` is absent after tool admission, and to at most one less than `toolCalls`. The operator cap cannot be widened by a recipe. The admitted envelope (recipe policy, request, effective budget, and each clamp reason) is kept on the run ledger row and in the `budget` field of the run's `run.settled`, under the run seal. The Claude SDK runtime enforces a budget only in the enforced mode.
 
 ### Skills
 Skills are knowledge attachments declared under `skills: [...]` in the YAML frontmatter.
@@ -223,7 +223,7 @@ In addition to standard HTTP targets and [Agent Client Protocol (ACP)](https://a
 - **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker with `--permission-mode acceptEdits`, or with `plan` and a read-only `--tools` list for a read-only dispatch. It is a black box: tool calls run inside the `claude` process and are not routed through Clio Coder's per-tool mediation, so Clio cannot enforce a per-tool profile on it. Dispatching a narrowing `tool_profile` (`minimal-local` or `science-local`) to this runtime is refused; use `full-agent` (or a native / `claude-sdk` worker) instead.
 - **`antigravity-code` (Antigravity CLI, experimental local delegation):** Runs the operator-installed and authenticated official `agy` command as a local external delegation worker. It is useful for a `world-knowledge` pass, a second opinion, or another bounded one-shot subtask; it is never an orchestrator or Gemini chat backend. Clio Coder consumes agy's structured stream and live model catalog but cannot mediate individual tools, so a narrowing `tool_profile` is refused rather than silently ignored. The `world-knowledge` binding is permanently read-only.
 
-Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` mediate every tool call, so the budget policy in [Budget semantics](#budget-semantics) applies to them. An opaque external loop instead receives an `external-one-shot` enforcement classification: Clio enforces one subprocess launch, its deadline, output cap, cancellation, and result-contract validation, while recording recipe per-tool numbers as `unobserved-not-enforced`. Receipts and status never label those internal per-tool limits enforced, and Clio never automatically retries a generating external-agent run. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
+Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` mediate every tool call, so the budget policy in [Budget semantics](#budget-semantics) applies to them. An opaque external loop instead receives an `external-one-shot` enforcement classification: Clio enforces one subprocess launch, its deadline, output cap, cancellation, and result-contract validation, while recording recipe per-tool numbers as `unobserved-not-enforced`. The run record and status never label those internal per-tool limits enforced, and Clio never automatically retries a generating external-agent run. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
 
 Interactive TUI:
 
@@ -258,8 +258,9 @@ validated profiles as recipe dispatch (`minimal-local`, `science-local`, or
 
 Personas are capped at 8000 characters and are rejected for shadow agents and
 ACP delegation agents. A composed run legitimately gets its own
-`staticCompositionHash`, and its receipt and run ledger carry
-`personaOverride.promptHash` so the override is explicit and queryable.
+`staticCompositionHash`, and its run ledger row and the `hashes` of its
+`run.settled` carry `personaOverride.promptHash` so the override is explicit
+and queryable.
 Recipe-based runs omit `personaOverride`.
 
 ### Worker context injection
@@ -293,11 +294,9 @@ messages, in the order a worker reads them, each present only when it applies:
   step's final assistant output, threaded as data inside a fixed
   `<<<PIPELINE-INPUT ... PIPELINE-INPUT>>>` delimiter and labeled as input,
   not instructions. It is ordered last, adjacent to the task,
-  and capped at 12000 characters; the receiving run's receipt records
+  and capped at 12000 characters; the receiving run's ledger row records
   `pipeline` provenance (source run, step position, input bytes, whether the
-  cap truncated it). Step 1 and every non-pipeline run get none. The `pipeline`
-  and `personaOverride` field shapes and their stability labels are documented
-  in the [receipt provenance schema](../architecture/observability.md).
+  cap truncated it). Step 1 and every non-pipeline run get none.
 
 ---
 
@@ -307,10 +306,10 @@ Clio Coder manages running subagent tasks, tracks token costs, and handles task 
 
 ### 1. In-Memory Retry Queue
 Subagent runs that terminate with retryable outcomes are placed in an in-memory retry queue. The queue does not survive process restarts. The retryable outcomes are:
-- `failed`: The subagent process exited non-zero or returned an error receipt.
+- `failed`: The subagent process exited non-zero or settled with an error result.
 - `timed_out`: The run or delegation turn exceeded its timeout limit.
 - `stalled`: The run exceeded the event-inactivity window without progress or stopped responding to heartbeats.
-- `spawn_failed`: The runtime failed to spawn the subprocess or establish connection. The spawn error's own text, such as `spawn <path> ENOENT`, is sealed in the receipt's `outcomeDetail` and `failureMessage`.
+- `spawn_failed`: The runtime failed to spawn the subprocess or establish connection. The spawn error's own text, such as `spawn <path> ENOENT`, is settled in the run's `outcomeDetail` and `failureMessage`.
 
 ### 2. Retry limits
 `fleet.retry.maxRetries` (default `2`) bounds the retries per assignment. Deterministic failures are never retried, for example `information_flow_blocked`, `result_contract_exhausted`, `worker_tool_call_cap_exhausted`, `worker_context_exhausted`, `host_verification_rejected`, `worker_no_work`, `merge_withheld`, and `worker_removed_tests`. A provider 4xx answer other than 401, 403, 408, and 429 is deterministic as well. A retry is also suppressed when the failed attempt may have changed the workspace: a successful mutating tool call, or incomplete tool telemetry that cannot prove the workspace is unchanged. An `information_flow_blocked` refusal ends the worker run without retry or failover. One-shot external agent loops are never retried automatically.
@@ -333,7 +332,7 @@ A dispatched worker has no operator by default, so a tool call that requires int
 - `escalate`: the parked call is handed up to the interactive operator. The worker emits a `clio_coder_permission_escalated` event over its stdout; the dispatch domain republishes it on the bus as a permission request tagged with the run id; the operator resolves it in the TUI permission overlay; and the decision travels back down the worker's stdin as a `permission_decision` line (the same pipe steers use). Under `escalate` only the operator can approve.
 - `main`: the parked call goes to the main agent, which decides it with `steer`. The main agent can grant an ordinary autonomy ask only when it runs at `yolo`, the call is inside the worker's permit and the operator's delegation ceiling for the turn, and the same call would be admitted as the main agent's own at `yolo`; the worker still re-admits the call under its unchanged permit before it runs. Below `yolo` with an operator attached, the main agent's approval becomes an ask to the operator; headless below `yolo`, the ask is denied at once. Operator-authority asks, hard blocks, gateway-wrapped calls and calls too large to evaluate are never main-grantable. Only native local workers can take main-agent grants. A main-agent denial of an execute ask counts toward the worker's refusal limit.
 
-Escalate is only meaningful with an interactive operator attached. Headless sessions have no subscriber, so the escalation resolves by the timeout fallback. The bounds are `fleet.permissions.escalation` (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`): a parked ask that no operator answers within `timeoutMs` applies the fallback deny/fail, so an escalate-posture run can never hang forever. The heartbeat timer runs independently of the parked call, so an escalated worker keeps reporting alive while it waits. Each escalation and its resolution (operator or timeout) is tallied on the receipt's `safety.decisions` escalation counters, documented with their stability labels in the [receipt provenance schema](../architecture/observability.md#receipt-fields-for-dispatch-provenance); a timed-out or denied escalation also raises an `escalation` finding in the evidence bundle. ACP delegations are out of scope: they resolve permissions through their own mediator and have no worker stdin channel.
+Escalate is only meaningful with an interactive operator attached. Headless sessions have no subscriber, so the escalation resolves by the timeout fallback. The bounds are `fleet.permissions.escalation` (`{ timeoutMs, fallback }`, defaults 120000 ms and `deny`): a parked ask that no operator answers within `timeoutMs` applies the fallback deny/fail, so an escalate-posture run can never hang forever. The heartbeat timer runs independently of the parked call, so an escalated worker keeps reporting alive while it waits. Each escalation and its resolution (operator or timeout) is tallied in the `escalations` counters (`requested`, `approved`, `denied`, `timedOut`) of the run's `run.settled`; a timed-out or denied escalation also raises an `escalation` finding in the run's `evidence.assessed` record. ACP delegations are out of scope: they resolve permissions through their own mediator and have no worker stdin channel.
 
 ---
 

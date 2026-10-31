@@ -25,8 +25,8 @@ Clio closes its docks and leaves utility panes open:
   mention and returns the keyboard to the prompt. The engine behind it is
   yazi, a vendored file manager installed on request with
   `clio-coder tools install yazi`.
-- **The logs pane.** `/panes open logs` follows the newest dispatched run's
-  event journal with `tail -n 200 -F`.
+- **The logs pane.** `/panes open logs` follows the telemetry journal of the
+  dispatched run written to most recently with `tail -n 200 -F`.
 - **The shell pane.** `/panes open shell` opens a login `bash` in the
   workspace.
 - **Coding peer handoff.** `/peer [--cwd <workspace>] <peer> [brief]` opens
@@ -154,7 +154,7 @@ WARN panes protocol         unknown; Clio's optional methods need protocol 17 or
 OK   panes binary           PATH /home/you/.local/bin/herdr (0.9.3, pin 0.9.3)
 OK   panes layout           off
 OK   naming panes           no legacy Clio Coder pane ownership tokens or watch titles found
-OK   panes journal dir      /home/you/.local/state/clio-coder/runs is writable
+OK   panes journal dir      /home/you/.local/state/clio-coder/telemetry/runs is writable
 ```
 
 The plain report folds quiet `naming` rows into one summary row; `--verbose` and `--json` keep every row.
@@ -163,7 +163,7 @@ A missing herdr or yazi is a WARN only while panes (and, for yazi, the files pan
 the row reads `experimental integration disabled by settings`, and `files pane profile` reads `disabled by settings`.
 A missing croc or cliamp is always INFO. With `interface.panes.enabled: off`, doctor prints only `panes mode: off by choice` and the `panes layout`
 row, and does not advertise setup work. With `embedded` in a plain terminal, `panes mode` reads `workspace (panes.enabled=embedded); this command is not running inside one` and does not probe a socket. When a host answers, `panes protocol` reads `server <version>, protocol <n>; Clio's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
-The `panes journal dir` row warns when `<state>/runs` is absent or not writable, because `fleet view` then has no transcript to follow. The `naming panes` row warns about panes that carry only the legacy
+The `panes journal dir` row reads `has no run journal yet` when `<state>/telemetry/runs` does not exist and warns when it is not writable, because `fleet view` then has no transcript to follow. The `naming panes` row warns about panes that carry only the legacy
 `clio_owner=clio:mux` token or the stale `clio watch` title; quit and cleanup recognize both token schemes.
 
 The `files pane profile` row is `missing` (INFO) until the first open generates it, then
@@ -294,7 +294,7 @@ A divider you drag in herdr becomes the dock's new target share, and a dock you 
 | `interface.panes.layout` | `off` | `workers` opens the workers dock at boot; `cockpit` opens the workers dock and, when `interface.panes.files.enabled` is `true`, the files pane, visible. Both close on `/quit`. Takes effect at the next start. Independent of the hidden-at-boot preparation of the files and music docks. |
 | `interface.panes.notifications` | `failures` | Which finished runs raise a herdr toast: `failures` (failed and timed-out runs), `all` or `off`. A failure also leaves a transcript notice unless this is `off`. |
 | `interface.panes.workers.ratio` | `0.34` | Share of the terminal width the workers dock takes, `0.05` through `0.5`, floored at 40 columns. Read when the pane opens. |
-| `fleet.history.journal` | `true` | Whether dispatched runs write `events.ndjson`, the journal the logs and watch panes follow. `/panes` prints it as `journal`. |
+| `fleet.history.journal` | `true` | Whether dispatched runs write their display events into the run's telemetry journal, which the logs and watch panes follow. `/panes` prints it as `journal`. |
 | `integrations.music.enabled` | `false` | Allows `/music`. See [Music](music.md). |
 | `interface.keybindings."clio-coder.files.toggle"` | `alt+e` | Rebind the files key. The leader entry `Ctrl+G` then `e` is fixed. |
 | `interface.keybindings."clio-coder.music.toggle"` | `alt+a` | Rebind the music key. The leader entry `Ctrl+G` then `a` is fixed. |
@@ -381,7 +381,7 @@ what" above.
 | `<data>/tools/<id>/<version>/` | Vendored programs with their license files and an install marker. |
 | `<cache>/yazi/profile/` | Clio Coder's generated engine profile: `yazi.toml`, `keymap.toml`, `theme.toml`, `init.lua`, a git-status plugin, and a stamp of the inputs. |
 | `<cache>/yazi/sessions/` | Per-pane transport files, removed when the pane closes; anything older than a day is swept on the next open. |
-| `<state>/runs/<runId>/events.ndjson` | The journal the logs pane follows. |
+| `<state>/telemetry/runs/<runId>/journal.jsonl` | The run's telemetry journal, which the logs pane follows. |
 | `<state>/watch-selection`, `<state>/watch-dock-taps` | The request and tap files shared with the workers dashboard. See [Fleet Dispatch](fleet-dispatch.md). |
 | `<state>/cliamp/dock-taps` | Lines the music pane's `clio-dock` plugin appends when Alt+A is pressed inside cliamp. See [Music](music.md). |
 

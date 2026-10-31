@@ -70,10 +70,14 @@ systemOne:
     toolCall: decider
     toolResult: decider
     turnEnd: decider
-  record: true
+
+telemetry:
+  mode: research
+  research:
+    content: true
 ```
 
-The `systemone` runtime assumes a 480-token window, so raise `capabilities.contextWindow` to what the served checkpoint actually reads: 4096 for the Strands Decider, 1024 for Julia-1 at the window its published accuracy used. A call whose state and longest question do not fit is not sent. With `record: true`, each answer and what followed it is kept in the local dataset, from which cuts can be fitted.
+The `systemone` runtime assumes a 480-token window, so raise `capabilities.contextWindow` to what the served checkpoint actually reads: 4096 for the Strands Decider, 1024 for Julia-1 at the window its published accuracy used. A call whose state and longest question do not fit is not sent. With research mode, content capture and `clio-coder telemetry consent` for the workspace, each answer and what followed it is kept in the local dataset, from which cuts can be fitted.
 
 **Tier 3, the hosted engine.** The `typesafe-jev` runtime reads `TYPESAFE_API_KEY`:
 
@@ -180,9 +184,6 @@ and provisioning belong to that server.
 | `systemOne.engines` | `{}` | next turn |
 | `systemOne.sites` | `{}` | next turn; `systemOne.sites.consult` on restart |
 | `systemOne.cuts` | `{}` | next turn |
-| `systemOne.record` | `false` | next turn; deprecated alias of research capture, user settings only |
-| `systemOne.retentionDays` | `30` | next turn |
-| `systemOne.maxMiB` | `64` | next turn |
 
 `systemOne.engines` is a map from an engine name you choose to an engine definition:
 
@@ -198,9 +199,9 @@ and provisioning belong to that server.
 
 `systemOne.cuts` maps an answering build to fitted overrides. See [Calibration and shadow mode](#calibration-and-shadow-mode).
 
-The local training dataset is kept in research telemetry mode with `telemetry.research.systemOneDataset` and content capture for the session's workspace (`telemetry.research.content` plus `clio-coder telemetry consent`), because it holds redacted prompts and decision state. `systemOne.record: true` is a deprecated alias that keeps it without either, and only user settings can turn it on. `systemOne.retentionDays` and `systemOne.maxMiB` bound it and must be integers of at least 1. See [The training dataset](#the-training-dataset).
+The local training dataset is kept in research telemetry mode with `telemetry.research.systemOneDataset` and content capture for the session's workspace (`telemetry.research.content` plus `clio-coder telemetry consent`), because it holds redacted prompts and decision state. Telemetry [retention](../architecture/telemetry.md#retention) bounds it like any other research content. See [The training dataset](#the-training-dataset).
 
-The terminal `/settings` overlay lists site bindings and dataset keys under Advanced → Experimental. A site row binds the site to an engine already declared in the settings file and keeps the binding's `timeoutMs` and `tasks`; engines and cuts are edited in the file. `clio-coder configure --settings` and the GUI group System One controls under Fleet → Decision engines (experimental). The GUI shows only the dataset controls, with a line saying where the rest is set. A running session re-reads the block on every call, so an edited engine or binding applies to the next question without a restart. The defaults are in `src/core/defaults.ts`, validation is in `src/core/config.ts`, and effect timing is classified in `src/domains/config/classify.ts`.
+The terminal `/settings` overlay lists site bindings under Advanced → Experimental. A site row binds the site to an engine already declared in the settings file and keeps the binding's `timeoutMs` and `tasks`; engines and cuts are edited in the file. `clio-coder configure --settings` and the GUI group System One controls under Fleet → Decision engines (experimental). The GUI shows only the dataset controls, with a line saying where the rest is set. A running session re-reads the block on every call, so an edited engine or binding applies to the next question without a restart. The defaults are in `src/core/defaults.ts`, validation is in `src/core/config.ts`, and effect timing is classified in `src/domains/config/classify.ts`.
 
 ## Engines
 
@@ -310,9 +311,9 @@ The training dataset applies a second pass on its own copy: a key-name pass for 
 
 ## The training dataset
 
-The session ledger always keeps a compact `systemOne` row per call (site, engine, build, outcome, latency, the answers and policy outcome, a hash of the state, but never the state itself). This is the cheap record that makes a silent site diagnosable.
+The session ledger always keeps a compact `systemOne` row per call (site, engine, build, outcome, latency, the answers and policy outcome, a hash of the state, but never the state itself), and the journal keeps a content-free `system_one.decided` record with the site, outcome, latency, deadline and the route each engine took. This is the cheap record that makes a silent site diagnosable.
 
-Research capture, or the deprecated `systemOne.record: true` alias, additionally keeps a local, opt-in dataset intended for fitting cuts and comparing engine builds. It lives at `<state dir>/systemone/YYYY-MM-DD.jsonl`, one append-only file per UTC day, with the directory mode `0700` and files `0600`. Nothing leaves the machine unless you export it and send the file yourself. Day files older than `systemOne.retentionDays` are deleted, and when the directory exceeds `systemOne.maxMiB` the oldest day files are deleted first. The newest file is never deleted for size. The row kinds (`decision`, `spec`, `outcome`), the outcome sources and the write rules are specified in [Records](../architecture/system-one.md#records).
+Research capture additionally keeps a local, opt-in dataset intended for fitting cuts and comparing engine builds. Each decision, with its redacted state and the question specs it asked, and each outcome that followed it, is a research `system_one.sample_captured` record in the session's telemetry journal, and its content is an object in the session's `objects/` directory. There is no separate System One store. Nothing leaves the machine unless you export it and send the file yourself, and telemetry [retention](../architecture/telemetry.md#retention) expires it. The sample kinds (`decision`, `outcome`), the outcome sources and the write rules are specified in [Records](../architecture/system-one.md#records).
 
 Inspect and export it:
 
@@ -321,9 +322,9 @@ clio-coder systemone status
 clio-coder systemone export --out dataset.jsonl [--since 2026-09-01] [--site toolCall]
 ```
 
-`status` prints whether recording is on, the directory, the file count and date range, the size against the cap with the retention days, row counts by kind, and where each site is bound (the engine, its kind, the target and model, any deadline, or the reason the binding cannot answer). `export` writes one JSON line per decision joined to the full text of its questions and every outcome recorded for it. `--out` is required, is replaced atomically and may not point into the dataset directory. `--since` takes a UTC day and `--site` one site id. An export that matches nothing, or that finds question specs missing from the selected days or unreadable rows, says so. `clio-coder systemone --help` prints the usage and exits 0.
+`status` prints whether recording is on, the decision and outcome sample counts with the number of sessions and the date range, and where each site is bound (the engine, its kind, the target and model, any deadline, or the reason the binding cannot answer). `export` writes one JSON line per decision joined to the full text of its questions and every outcome recorded for it. `--out` is required, is replaced atomically and may not point into the telemetry directory. `--since` takes a UTC day and `--site` one site id. An export that matches nothing, or that finds question specs missing from the selected days or unreadable rows, says so. `clio-coder systemone --help` prints the usage and exits 0.
 
-`systemone` exits 0 on success, 2 for a usage error (an unknown command or flag, a missing `--out`, a `--since` that is not a day, a `--site` that is not a site id, or an `--out` inside the dataset directory) and 1 when reading or writing fails. Read an export before sharing it, because it holds the operator's own requests.
+`systemone` exits 0 on success, 2 for a usage error (an unknown command or flag, a missing `--out`, a `--since` that is not a day, a `--site` that is not a site id, or an `--out` inside the telemetry directory) and 1 when reading or writing fails. Read an export before sharing it, because it holds the operator's own requests.
 
 ## Doctor rows
 

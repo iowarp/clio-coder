@@ -498,9 +498,9 @@ Runs one task or a batch on configured fleet agents. Source: [`src/tools/dispatc
 | `gate` | Shorthand for `intent.verification=[{check: gate}]`; refused when both forms are supplied. |
 | `budget`, `max_output_bytes`, `result_summary_max_bytes` | Budget is `{toolCalls>=1,readReserve>=0,retryRevision?}`; `retryRevision` uses the same two fields. They are estimates, but a native worker stops at a hard tool-call ceiling, which in the default advisory mode is never below `toolCalls` or `retryRevision.toolCalls`. `readReserve` applies only to native scout, provenance and context-bootstrap runs. Requests are not range-checked, so a larger `toolCalls` raises the advisory ceiling ([budget admission](fleet-dispatch.md#worker-prompt-and-budget-admission)). Returned preview defaults to 20000 bytes. Inline summary defaults to 16384 bytes; mutation-report workers accept 1–32768, with per-task override. Explicit mutation summary limits on other steps are refused. |
 
-`tasks` accepts a JSON-string array, single object, or bare string. The result is batch-shaped even for one task: `details` carries `assignmentIds`, counts, and `runs[]`; each run distinguishes `assignmentId` from terminal `runId`, and includes verification and receipt-integrity status. There is no `runIds` alias. Any nonzero terminal attempt makes the call fail with the same summary.
+`tasks` accepts a JSON-string array, single object, or bare string. The result is batch-shaped even for one task: `details` carries `assignmentIds`, counts, and `runs[]`; each run distinguishes `assignmentId` from terminal `runId`, and includes verification and run-integrity status. There is no `runIds` alias. Any nonzero terminal attempt makes the call fail with the same summary.
 
-Receipt integrity, worker evidence, orchestrator verification, parent briefing, and rendered project context are separate facts. A zero exit alone is not a deliverable: native and ACP workers need nonempty final output. Treat worker prose as advisory until you inspect its receipt or verify the stated result. For detached batches, `wait` observes; `collect` closes the batch and resolves each assignment to its terminal attempt. See [Fleet dispatch](fleet-dispatch.md) for receipt and verification workflows.
+Run integrity, worker evidence, orchestrator verification, parent briefing, and rendered project context are separate facts. A zero exit alone is not a deliverable: native and ACP workers need nonempty final output. Treat worker prose as advisory until you inspect its settled run record or verify the stated result. For detached batches, `wait` observes; `collect` closes the batch and resolves each assignment to its terminal attempt. See [Fleet dispatch](fleet-dispatch.md) for run record and verification workflows.
 
 ### Compact schema in the main session
 
@@ -869,19 +869,19 @@ Read-only view of known synchronous and detached runs from the dispatch ledger, 
 | Argument | Contract |
 | --- | --- |
 | `run_id` | Optional dispatch run ID. |
-| `mode` | `list`, `status`, `peek`, `receipt`, `wait`, `collect`, or `tools`; defaults to status with run_id, list otherwise. |
+| `mode` | `list`, `status`, `peek`, `record`, `wait`, `collect`, or `tools`; defaults to status with run_id, list otherwise. |
 | `batch_id`, `run_ids` | `collect`: provide a detached batch ID or nonempty run list; one `run_ids` entry also serves as `run_id` for single-run modes. |
 | `timeout_ms` | `wait` default 60000 ms, `collect` default 30000 ms, maximum 600000 ms for both. Ignored by other modes. |
 
 | Mode | Result |
 | --- | --- |
-| `list` | Up to 20 newest runs this session dispatched. Includes state, agent, timing, tokens, receipt path. |
-| `status` | State/outcome, target/model/runtime, timing, exit, tokens, cost, receipt; live runs include phase/heartbeat/elapsed/tokens. |
+| `list` | Up to 20 newest runs this session dispatched, with state, agent, timing and tokens. |
+| `status` | State/outcome, target/model/runtime, timing, exit, tokens, cost, and the trust status of a finished run; live runs include phase/heartbeat/elapsed/tokens. |
 | `peek` | Recent process-local event tail (100 events/run, 64 runs, 8 KiB; oldest trimmed). Other-process/prior-process runs have no tail. |
-| `receipt` | Receipt JSON, capped at 14 KiB with path to full receipt. |
+| `record` | The settled run record as JSON: its seal, its settled facts, and its result only when the seal verifies. Capped at 14 KiB. A run that has not settled is an error. |
 | `wait` | Bounded wait for one run; timeout observes only and never cancels. |
 | `collect` | Barrier over a detached `batch_id` or explicit `run_ids` this session dispatched. It polls once a second while any run is in flight and returns full results once every run is terminal. At the timeout it returns a pending snapshot with `timedOut: true` and leaves the runs running. |
-| `tools` | Executed tool names/outcomes from event buffer plus integrity-verified receipt totals; command arguments are not recorded. |
+| `tools` | Executed tool names/outcomes from event buffer plus the settled run's tool totals when its seal verifies; command arguments are not recorded. |
 
 `wait` and `collect` stop early, with `permissionPending: true` and the pending requests listed, when a worker in scope is waiting for the main agent's permission decision; answer with [steer](#steer-guide-cancel-or-approve-a-running-worker) `approve` or `deny`. The ledger and batch store are machine-wide, so single-run modes refuse runs another project dispatched, and `collect` and steer refuse runs another session dispatched.
 
@@ -890,7 +890,7 @@ Use monitor to observe detached workers; pair with steer when a native worker ne
 ```text
 monitor(mode="list")
 monitor(run_id="run-01H...", mode="peek")
-monitor(run_id="run-01H...", mode="receipt")
+monitor(run_id="run-01H...", mode="record")
 ```
 
 ## steer: guide, cancel, or approve a running worker
@@ -906,7 +906,7 @@ Arguments:
 
 `action="guide"` injects the message through the dispatch contract's stdin steer channel; an HTTP or SDK worker sees it as a user message at its next turn boundary. The worker acknowledges only after its runtime accepts the guidance. Single-shot subprocess runtimes (Claude CLI and Antigravity) and ACP delegation do not expose live input and return the contract's structured unsupported-steering error.
 
-`action="cancel"` aborts a non-terminal run; the run finalizes with `outcome=canceled` and its receipt records the cancellation. A run that already finished (completed, failed, interrupted, stale, or dead) errors with its state, since there is nothing to cancel. `run_id` may also be a detached assignment id: cancelling a running assignment aborts its current attempt and starts no further attempt. A run or assignment that another Clio Coder process is running is refused with that process's pid, so steer or cancel it from that session.
+`action="cancel"` aborts a non-terminal run; the run settles with `outcome=canceled` and its run record carries the cancellation. A run that already finished (completed, failed, interrupted, stale, or dead) errors with its state, since there is nothing to cancel. `run_id` may also be a detached assignment id: cancelling a running assignment aborts its current attempt and starts no further attempt. A run or assignment that another Clio Coder process is running is refused with that process's pid, so steer or cancel it from that session.
 
 `action="approve"` and `action="deny"` answer one worker permission request that was raised to the main agent. The request id is looked up in the dispatch domain's grant broker, never trusted from the arguments, and the request must belong to this session and the named run. A deny always settles the request, and the worker continues without that call. An approve is admitted as the main agent's own call. At `yolo`, it is granted when the worker's effect is inside the worker's permit, inside the operator's delegation ceiling for the turn, and admitted at `yolo`; the worker still re-admits the call under its unchanged permit. Below `yolo`, an attended session forwards the approval to the operator, who decides with the main agent's request as provenance, and a headless run denies it at once. A request marked operator authority is never main-grantable. A request the main session's safety judge is deciding under `fleet.permissions.mode: judge` is refused here, because it settles on the judge's verdict. One approval runs that one call once; an identical later call asks again.
 
@@ -952,7 +952,7 @@ Workers read only their assigned board. Native workers and the main
 agent participate live. Workers on non-HTTP runtimes (Claude SDK, CLI peers and
 ACP) have no live ledger tool. When such a run settles, the host posts one
 bounded final-report preview of at most 1000 bytes with its outcome and a
-`fleet view <runId>` reference to the full receipt. It uses the same board
+`fleet view <runId>` reference to the full run. It uses the same board
 capacity, and a repeated settlement does not duplicate it.
 
 Arguments:
@@ -1019,17 +1019,17 @@ panes(action="close", target="all")
 
 ## evidence: inspect canonical evidence and trust status
 
-Reads evidence bundles as JSON. Source: [evidence.ts](../../src/tools/evidence.ts). Read class; sequential, because `run` mode may materialize a bundle under Clio Coder's data directory. It shares the trust projection behind `clio-coder evidence inspect`, so the model and the operator read the same record.
+Reads evidence as JSON. A run's evidence is its sealed telemetry run scope, read through the read model's run record; see [Evidence](../architecture/telemetry.md#evidence). Source: [evidence.ts](../../src/tools/evidence.ts). Read class; sequential. It shares the trust projection behind `clio-coder evidence inspect`, so the model and the operator read the same record.
 
 Arguments:
 
 - `mode` (required). `list`, `inspect`, `run`, or `session`.
-- `id` (required for `inspect`). An evidence bundle id.
-- `runId` (required for `run`). A dispatch run id; the bundle is built first when none exists.
+- `id` (required for `inspect`). An evidence id.
+- `runId` (required for `run`). A dispatch run id.
 - `sessionId` (required for `session`). This session's id; returns a bounded session summary.
 - `cursor` and `sourceKind` (`list`). `cursor` is the next cursor from a prior page, and `sourceKind` limits the page to `run` or `session` bundles.
 
-`list` returns the bounded newest-first inventory: provenance, tags, totals, and a worst-run trust verdict per bundle. `inspect` returns the bundle overview, the per-run trust axes and verdict, the gate decisions, and the findings. `run` resolves `run-<runId>` and builds the bundle when it is absent; a run with no ledger row is reported absent with `artifactAbsent: true` in the details. Results are capped at 16KB, and a truncated result stays valid JSON with a `preview`. Provenance requires this tool and Verifier may use it.
+`list` returns the bounded newest-first inventory: provenance, tags, totals, and a worst-run trust verdict per bundle. `inspect` returns the bundle overview, the per-run trust axes and verdict, the gate decisions, and the findings. `run` resolves `run-<runId>`; a run with no ledger row is reported absent with `artifactAbsent: true` in the details. Results are capped at 16KB, and a truncated result stays valid JSON with a `preview`. Provenance requires this tool and Verifier may use it.
 
 ```text
 gateway(op="call", capability="evidence", args={mode: "list"})
