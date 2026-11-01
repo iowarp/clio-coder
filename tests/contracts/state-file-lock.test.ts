@@ -90,6 +90,23 @@ describe("contracts/state-file-lock", () => {
 		strictEqual(existsSync(lockPath), false);
 	});
 
+	it("reclaims a dead owner's lock only under the reclaim guard", () => {
+		const guardPath = `${lockPath}.reclaim.lock`;
+		const deadPid = 999_999_999;
+		holdLock(deadPid);
+		writeFileSync(guardPath, `${JSON.stringify({ pid: process.pid })}\n`, "utf8");
+		const before = readFileSync(lockPath, "utf8");
+		throws(() => withStateFileLockSync(target, () => "entered", { timeoutMs: 0 }), /timed out/);
+		strictEqual(readFileSync(lockPath, "utf8"), before, "a live guard defers the reclaim and leaves the lock alone");
+		writeFileSync(guardPath, `${JSON.stringify({ pid: deadPid })}\n`, "utf8");
+		strictEqual(
+			withStateFileLockSync(target, () => "entered", { timeoutMs: 0 }),
+			"entered",
+		);
+		ok(!existsSync(guardPath), "a guard left by a dead reclaimer is recovered and released");
+		ok(!existsSync(lockPath));
+	});
+
 	it("falls back to age for a record whose owner cannot be read", () => {
 		writeFileSync(lockPath, "not-a-lock-record\n", "utf8");
 		throws(() => withStateFileLockSync(target, () => "unreachable", { timeoutMs: 50 }), /timed out .* waiting for/);

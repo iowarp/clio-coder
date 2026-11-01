@@ -118,18 +118,48 @@ function createLock(lockPath: string): boolean {
 	}
 }
 
-/** True once the lock is ours. Steals only from an owner that is provably gone. */
-function tryAcquire(lockPath: string): boolean {
-	if (createLock(lockPath)) return true;
+function lockIsAbandoned(lockPath: string): boolean {
 	const owner = readLockOwner(lockPath);
+	if (owner !== null) return !ownerIsAlive(owner);
 	const ageMs = lockfileAgeMs(lockPath);
-	const abandoned = owner !== null ? !ownerIsAlive(owner) : ageMs !== null && ageMs > STALE_LOCK_MS;
-	if (!abandoned) return false;
+	return ageMs !== null && ageMs > STALE_LOCK_MS;
+}
+
+function removeLockFile(lockPath: string): void {
 	try {
 		unlinkSync(lockPath);
 	} catch {
-		// Another waiter reclaimed it first; the attempt below races normally.
+		// Already gone, which is the state the caller wanted.
 	}
+}
+
+/**
+ * Remove an abandoned lock under an exclusive reclaim guard. POSIX has no conditional unlink, so a waiter acting on an
+ * earlier read of the dead owner would delete the fresh lock another waiter just took. Inside the guard the only other
+ * deleter of this file is its owner, and the re-read proves that owner gone, so the file cannot change before the
+ * unlink. The guard is held for a few synchronous syscalls. A guard left by a holder that died in that window is itself
+ * reclaimed by owner, and two waiters racing that recovery in the same instant is an accepted double fault.
+ */
+function reclaimAbandonedLock(lockPath: string): boolean {
+	// Ends in .lock so a forced release of a dead owner's locks also clears a guard it left (#439).
+	const guardPath = `${lockPath}.reclaim.lock`;
+	if (!createLock(guardPath)) {
+		if (!lockIsAbandoned(guardPath)) return false;
+		removeLockFile(guardPath);
+		if (!createLock(guardPath)) return false;
+	}
+	try {
+		if (lockIsAbandoned(lockPath)) removeLockFile(lockPath);
+	} finally {
+		removeLockFile(guardPath);
+	}
+	return true;
+}
+
+/** True once the lock is ours. Steals only from an owner that is provably gone. */
+function tryAcquire(lockPath: string): boolean {
+	if (createLock(lockPath)) return true;
+	if (!lockIsAbandoned(lockPath) || !reclaimAbandonedLock(lockPath)) return false;
 	// Acquire in the same attempt as the reclaim: a caller with no wait budget, such as a recovery writer, would
 	// otherwise reclaim a dead owner's lock and still give up (#434).
 	return createLock(lockPath);
