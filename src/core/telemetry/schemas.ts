@@ -903,6 +903,8 @@ export const RunSettledSchema = Type.Object(
 export type RunSettled = Static<typeof RunSettledSchema>;
 
 /** The `run-result` object a run.settled names: what the run delivered, redacted when it is stored (#434). */
+/** A count with the first paths it covers, the bound a worktree receipt keeps its file lists to. */
+const boundedPathList = Type.Object({ count: Type.Integer({ minimum: 0 }), paths: Type.Array(Type.String()) }, closed);
 export const RunResultObjectSchema = Type.Object(
 	{
 		version: Type.Literal(1),
@@ -936,6 +938,8 @@ export const RunResultObjectSchema = Type.Object(
 					commit: Type.Optional(Type.String()),
 					reason: Type.Optional(Type.String()),
 					detail: Type.Optional(Type.String()),
+					leftUncommitted: Type.Optional(boundedPathList),
+					changedAfterCommit: Type.Optional(boundedPathList),
 				},
 				closed,
 			),

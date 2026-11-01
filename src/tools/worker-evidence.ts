@@ -60,6 +60,7 @@ export interface FinishedRun {
 		| "toolCalls"
 		| "tools"
 		| "blockedAttempts"
+		| "worktree"
 	>;
 	delivered: RunResultObject | null;
 	/** The run's journaled assessment; null when the run has none or the producer has not read it back. */
@@ -84,6 +85,39 @@ export function runHelperResult(run: FinishedRun, integrity: RunIntegrity): Stru
 	return (output.structured as StructuredHelperResult | undefined) ?? null;
 }
 
+function boundedPathField(name: string, listed: { count: number; paths: string[] } | undefined): string[] {
+	if (listed === undefined) return [];
+	const shown = listed.paths.slice(0, 8);
+	const more = listed.count - shown.length;
+	return [`${name}=${listed.count}${JSON.stringify(shown)}${more > 0 ? `(+${more} more)` : ""}`];
+}
+
+/**
+ * Where a task worktree's work ended up. Only the host knows: a worker reports
+ * from inside the tree, often says it did not commit, and may name paths in a
+ * worktree that a merge has since removed.
+ */
+function taskWorktreeLines(run: FinishedRun): string[] {
+	const worktree = run.delivered?.worktree;
+	if (worktree === undefined || worktree === null) return [];
+	const commit = worktree.commit !== undefined ? ` at ${worktree.commit.slice(0, 7)}` : "";
+	const held = `branch ${worktree.branch}${commit}, worktree ${worktree.path}`;
+	const landing =
+		run.facts.worktree?.applied === true
+			? (worktree.detail ?? "merged")
+			: worktree.reason !== undefined
+				? `not merged, ${worktree.reason}${worktree.detail !== undefined ? ` (${worktree.detail})` : ""}; the work is on ${held}`
+				: `preserved, not merged; the work is on ${held}`;
+	return [
+		`  ${[
+			`task worktree: ${landing}`,
+			...(worktree.changedPaths !== undefined ? [`changed=${JSON.stringify(worktree.changedPaths.slice(0, 20))}`] : []),
+			...boundedPathField("left_uncommitted", worktree.leftUncommitted),
+			...boundedPathField("changed_after_commit", worktree.changedAfterCommit),
+		].join("; ")}`,
+	];
+}
+
 export function compactHelperResultLines(run: FinishedRun, integrity: RunIntegrity, maxBytes: number): string[] | null {
 	const result = runHelperResult(run, integrity);
 	if (result === null) return null;
@@ -98,6 +132,7 @@ export function compactHelperResultLines(run: FinishedRun, integrity: RunIntegri
 				]
 			: []),
 		`  ${truncateUtf8(JSON.stringify(result.data), maxBytes, "\n[helper result preview truncated; inspect the run record for the full result]")}`,
+		...taskWorktreeLines(run),
 		`  Run record available on demand: monitor(mode="record", run_id=${JSON.stringify(run.runId)}).`,
 		...skillLoadLabels(run).map((label) => `  ${label}`),
 	];

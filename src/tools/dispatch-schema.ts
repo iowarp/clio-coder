@@ -96,6 +96,9 @@ export function coordinatorDispatchParameters() {
 			}),
 		),
 		worktree: Type.Optional(Type.Literal(true)),
+		apply: Type.Optional(
+			StringEnum(["merge", "preserve"], { description: "With worktree: merge (default) or keep the branch." }),
+		),
 		detach: Type.Optional(Type.Boolean({ description: "Return ids; collect with monitor before synthesis." })),
 	});
 }

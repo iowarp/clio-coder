@@ -290,6 +290,19 @@ export function settleFinishedRun(
 						...(receipt.worktree.commit !== undefined ? { commit: receipt.worktree.commit } : {}),
 						...(receipt.worktree.reason !== undefined ? { reason: receipt.worktree.reason } : {}),
 						...(receipt.worktree.detail !== undefined ? { detail: receipt.worktree.detail } : {}),
+						...(receipt.worktree.leftUncommitted !== undefined
+							? {
+									leftUncommitted: { ...receipt.worktree.leftUncommitted, paths: [...receipt.worktree.leftUncommitted.paths] },
+								}
+							: {}),
+						...(receipt.worktree.changedAfterCommit !== undefined
+							? {
+									changedAfterCommit: {
+										...receipt.worktree.changedAfterCommit,
+										paths: [...receipt.worktree.changedAfterCommit.paths],
+									},
+								}
+							: {}),
 					}
 				: null,
 			checkoutChanges: receipt.checkoutChanges
