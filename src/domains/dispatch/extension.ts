@@ -132,6 +132,7 @@ import {
 	taskWorktreeBaseDiff,
 	taskWorktreeHoldsWork,
 	WORKTREE_CHANGED_SINCE_PREVIEW,
+	withStrayWrites,
 } from "../../tools/task-worktree.js";
 import { diskWorktreeParent, prepareWorktreeParent, resolveWorktreeRoot } from "../../tools/worktree-root.js";
 import {
@@ -8741,6 +8742,7 @@ export function createDispatchBundle(
 						authoredPaths,
 						onAccounted,
 					});
+					worktreeReceipt = withStrayWrites(worktreeReceipt, req.taskWorktree, observedRunEffects.mutatedPaths);
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
 						finalDetail = hostRejectedMerge

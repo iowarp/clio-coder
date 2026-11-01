@@ -24,6 +24,7 @@ import {
 	cleanupTaskWorktree,
 	createTaskWorktree,
 	recoverTaskWorktrees,
+	withStrayWrites,
 } from "../../src/tools/task-worktree.js";
 import {
 	allowedWorktreeParents,
@@ -318,5 +319,16 @@ describe("task worktree root", () => {
 		});
 		strictEqual(short?.level, "warn");
 		match(short?.detail ?? "", /\.clio-coder\/worktrees \(ext4, .*\); .* using the project root$/u);
+	});
+
+	it("names a worker's writes outside its worktree on the receipt, because they reach no branch", () => {
+		const worktree = { path: "/work/repo/.clio-coder/worktrees/run1" };
+		const merged = { applied: true, detail: "nothing merged: the task branch holds no change beyond its base" };
+		deepStrictEqual(withStrayWrites(merged, worktree, ["/work/repo/.clio-coder/worktrees/run1/src/a.py"]), merged);
+		match(
+			withStrayWrites(merged, worktree, ["/work/repo/.clio-coder/worktrees/run1/src/a.py", "/work/repo/src/a.py"])
+				.detail ?? "",
+			/nothing merged.*outside its task worktree.*on no branch: \/work\/repo\/src\/a\.py$/u,
+		);
 	});
 });

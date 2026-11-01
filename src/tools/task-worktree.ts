@@ -1173,6 +1173,26 @@ export function applyTaskWorktree(input: {
 	return { ...receipt, applied: true, detail: `merged ${landedCommit.slice(0, 7)} onto ${destinationBranch}` };
 }
 
+/**
+ * Only yolo admits a task worker's write outside its worktree, which a local model does when it takes the checkout for
+ * its root. That work reaches no branch, so a plain "nothing merged" beside a worker's success would hide edits sitting
+ * in the operator's tree.
+ */
+export function withStrayWrites<Receipt extends { detail?: string }>(
+	receipt: Receipt,
+	worktree: Pick<TaskWorktree, "path">,
+	mutatedPaths: Iterable<string>,
+): Receipt {
+	const stray = [...mutatedPaths].filter((target) => {
+		const inside = relative(worktree.path, target);
+		return inside.startsWith("..") || isAbsolute(inside);
+	});
+	if (stray.length === 0) return receipt;
+	const named = `${stray.slice(0, 5).join(", ")}${stray.length > 5 ? ", ..." : ""}`;
+	const note = `the worker also wrote outside its task worktree, so these changes are on no branch: ${named}`;
+	return { ...receipt, detail: receipt.detail === undefined ? note : `${receipt.detail}; ${note}` };
+}
+
 function removeWorktreeDirectory(worktree: TaskWorktree): void {
 	try {
 		git(worktree.root, ["worktree", "remove", "--force", worktree.path]);
