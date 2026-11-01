@@ -1407,6 +1407,8 @@ export interface WorkspaceRootFacts {
 	entries: ReadonlyArray<string>;
 	/** True when the listing was cut at the entry limit. */
 	truncated: boolean;
+	/** The checkout this task worktree was made from; absent outside a task worktree. */
+	checkout?: string;
 }
 
 /**
@@ -1418,6 +1420,7 @@ export interface WorkspaceRootFacts {
  */
 function readWorkspaceRootFacts(
 	cwd: string,
+	checkout?: string,
 	readEntries: (dir: string) => Dirent[] = readDirentsSafely,
 ): WorkspaceRootFacts {
 	const names = readEntries(cwd)
@@ -1428,6 +1431,7 @@ function readWorkspaceRootFacts(
 		root: cwd,
 		entries: names.slice(0, WORKER_WORKSPACE_ENTRY_LIMIT),
 		truncated: names.length > WORKER_WORKSPACE_ENTRY_LIMIT,
+		...(checkout !== undefined ? { checkout } : {}),
 	};
 }
 
@@ -1448,6 +1452,13 @@ function readDirentsSafely(dir: string): Dirent[] {
  */
 function renderWorkerWorkspaceContext(workspace: WorkspaceRootFacts): string {
 	const lines = ["# Workspace", `Root: ${workspace.root}`, "Your process starts here; relative paths resolve from it."];
+	// Memory and handbooks name the checkout by its absolute path. Workers that took
+	// it for their root edited the operator's tree, and the merge then landed nothing.
+	if (workspace.checkout !== undefined) {
+		lines.push(
+			`This is a task worktree of ${workspace.checkout}. Read and write only under Root; ${workspace.checkout} itself is outside this run, even where memory or the task names it.`,
+		);
+	}
 	if (workspace.entries.length > 0) {
 		lines.push(`Top level: ${workspace.entries.join(", ")}${workspace.truncated ? ", …" : ""}`);
 	}
@@ -5596,7 +5607,7 @@ export function createDispatchBundle(
 			shellToolsAdmitted: effectiveTools.includes(ToolNames.Bash) || effectiveTools.includes(ToolNames.Verify),
 			ledgerToolAvailable:
 				target.runtime.kind === "http" && targetToolCapability(target) && effectiveTools.includes(ToolNames.Ledger),
-			workspace: readWorkspaceRootFacts(cwd),
+			workspace: readWorkspaceRootFacts(cwd, req.taskWorktree?.root),
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
@@ -5735,7 +5746,7 @@ export function createDispatchBundle(
 			projectPrompt,
 			projectReadTools: null,
 			projectExternalReadTools: true,
-			workspace: readWorkspaceRootFacts(cwd),
+			workspace: readWorkspaceRootFacts(cwd, req.taskWorktree?.root),
 		});
 		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages);
 		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");

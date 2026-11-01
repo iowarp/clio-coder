@@ -1166,6 +1166,10 @@ export function applyTaskWorktree(input: {
 		};
 	}
 	const landedCommit = git(worktree.root, ["rev-parse", "HEAD"]);
+	if ((receipt.changedPaths?.length ?? 0) === 0) {
+		// Merging a branch at its base moves nothing, so the destination's own head is not this run's landing.
+		return { ...receipt, applied: true, detail: "nothing merged: the task branch holds no change beyond its base" };
+	}
 	return { ...receipt, applied: true, detail: `merged ${landedCommit.slice(0, 7)} onto ${destinationBranch}` };
 }
 
