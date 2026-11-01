@@ -7,7 +7,10 @@ import { afterEach, it } from "node:test";
 import {
 	CODE_STEP_CAPTURE_MAX_BYTES,
 	CODE_STEP_EXCERPT_MAX_BYTES,
+	readCommitBaseline,
 	runCodeStep,
+	workspaceChangeSnapshot,
+	writeCommitBaseline,
 } from "../../src/domains/dispatch/code-step.js";
 
 const roots: string[] = [];
@@ -97,7 +100,7 @@ it("fails the check when a newly reported test fails outside the declared suite"
 	match(fallback.report.outputExcerpt, /no recognizable project runner.*declared check only/u);
 });
 
-it("stages only a commit's source outputs, including an ignored required artifact", async () => {
+it("stages everything since the last commit point, including an ignored required artifact", async () => {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-commit-stage-"));
 	roots.push(root);
 	const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
@@ -105,16 +108,21 @@ it("stages only a commit's source outputs, including an ignored required artifac
 	git("config", "user.name", "Contract");
 	git("config", "user.email", "contract@example.invalid");
 	writeFileSync(join(root, ".gitignore"), ".clio-coder/\n");
-	writeFileSync(join(root, "calc.c"), "base\n");
-	writeFileSync(join(root, "gone.c"), "base\n");
+	for (const name of ["calc.c", "gone.c", "repaired.c"]) writeFileSync(join(root, name), "base\n");
 	git("add", ".");
 	git("commit", "-qm", "base");
+	writeFileSync(join(root, "operator-scratch.txt"), "not this run's\n");
+	const artifactDir = join(root, ".git", "code-step");
+	const before = workspaceChangeSnapshot(root);
+	if (before === null) throw new Error("the fixture is a git workspace");
+	writeCommitBaseline(artifactDir, before);
 	mkdirSync(join(root, ".clio-coder", "artifacts"), { recursive: true });
 	writeFileSync(join(root, ".clio-coder", "artifacts", "PLAN.md"), "plan\n");
 	writeFileSync(join(root, "calc.c"), "edited\n");
+	writeFileSync(join(root, "repaired.c"), "edited by a repair in an earlier process\n");
 	writeFileSync(join(root, "new file.c"), "new\n");
-	rmSync(join(root, "gone.c"));
-	writeFileSync(join(root, "operator-scratch.txt"), "not this run's\n");
+	// Staged, as a crash between staging and committing leaves it.
+	git("rm", "-q", "gone.c");
 	const outcome = await runCodeStep({
 		command: {
 			id: "commit",
@@ -126,18 +134,15 @@ it("stages only a commit's source outputs, including an ignored required artifac
 		},
 		stepId: "commit-code",
 		workspaceRoot: root,
-		artifactDir: join(root, ".git", "code-step"),
+		artifactDir,
 		substitutions: { commitMessage: "record the work" },
 		requireWorkspaceChanges: true,
-		stage: {
-			paths: ["calc.c", "./new file.c", "gone.c", "declared-but-unchanged.c"],
-			artifacts: [".clio-coder/artifacts/PLAN.md"],
-		},
+		stage: { baseline: readCommitBaseline(artifactDir), artifacts: [".clio-coder/artifacts/PLAN.md"] },
 	});
-	strictEqual(outcome.report.passed, true);
+	strictEqual(outcome.report.passed, true, outcome.report.checks[0]?.evidence);
 	strictEqual(
 		git("show", "--name-status", "--format=", "HEAD"),
-		"A\t.clio-coder/artifacts/PLAN.md\nM\tcalc.c\nD\tgone.c\nA\tnew file.c\n",
+		"A\t.clio-coder/artifacts/PLAN.md\nM\tcalc.c\nD\tgone.c\nA\tnew file.c\nM\trepaired.c\n",
 	);
 	strictEqual(git("status", "--porcelain"), "?? operator-scratch.txt\n");
 	match(outcome.report.checks[0]?.evidence ?? "", /1 other change\(s\) left out of this commit: operator-scratch\.txt/);

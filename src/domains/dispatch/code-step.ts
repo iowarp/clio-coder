@@ -15,7 +15,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AI_AGENT_NAME } from "../../core/agent-environment.js";
 import type { CommitAttributionEvidence } from "../../core/commit-attribution.js";
@@ -25,6 +25,7 @@ import {
 	withManagedGitCommitAttributionEnvironment,
 } from "../../core/git-commit-attribution.js";
 import { internalGitArgv } from "../../core/internal-git.js";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { type CheckoutSnapshot, changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
 import {
@@ -51,11 +52,13 @@ export const CODE_STEP_EMPTY_DIFF_MESSAGE = "nothing to commit: the workspace ha
 
 /**
  * The registered commit command is a bare `git commit` and the workers who made the work never run git, so code stages
- * it. Only the fleet knows which paths belong to which author, so a repository wrapper around `git add -A` could not.
+ * it. The tree a commit records is the tree the run verified, so it takes every change since the last commit point.
+ * Attributing paths to steps would commit a partial tree after a resume, when a repair ran in the earlier process or a
+ * rerun source found its work already done.
  */
 export interface CommitStage {
-	/** Workspace-relative paths the commit's source steps produced. Only a git-visible change among them is staged. */
-	paths: ReadonlyArray<string>;
+	/** Workspace state at the last commit point; null when the resumed run left none, which stages no changes. */
+	baseline: WorkspaceChangeSnapshot | null;
 	/** A required artifact of a source step, staged even when the repository ignores it. */
 	artifacts: ReadonlyArray<string>;
 }
@@ -270,25 +273,59 @@ export function workspaceChangedPaths(before: WorkspaceChangeSnapshot, after: Wo
 		.map((path) => path.slice(before.prefix.length));
 }
 
+const COMMIT_BASELINE_FILE = "commit-baseline.json";
+
+/** Durable so a resumed run in a new process commits against the same point. */
+export function writeCommitBaseline(dir: string, snapshot: WorkspaceChangeSnapshot): void {
+	const { checkout, prefix } = snapshot;
+	safeResourceWrite(
+		join(dir, COMMIT_BASELINE_FILE),
+		JSON.stringify({ root: checkout.root, prefix, paths: [...checkout.paths] }),
+	);
+}
+
+export function readCommitBaseline(dir: string): WorkspaceChangeSnapshot | null {
+	try {
+		const record = JSON.parse(readFileSync(join(dir, COMMIT_BASELINE_FILE), "utf8")) as {
+			root: string;
+			prefix: string;
+			paths: Array<[string, string]>;
+		};
+		return { checkout: { root: record.root, paths: new Map(record.paths) }, prefix: record.prefix };
+	} catch {
+		// Absent for a run that predates baselines or died before writing one; the caller stages no changes.
+		return null;
+	}
+}
+
 /** Stage a commit's outputs and return the other changes that stay out of it. */
 function stageCommitOutputs(root: string, stage: CommitStage): string[] {
-	const snapshot = workspaceChangeSnapshot(root);
-	if (snapshot === null) throw new Error("git could not report the workspace status");
-	const produced = new Set(stage.paths.map((path) => relative(root, resolve(root, path)).split(sep).join("/")));
-	const changed = [...snapshot.checkout.paths.keys()]
-		.filter((path) => path.startsWith(snapshot.prefix))
-		.map((path) => path.slice(snapshot.prefix.length));
-	const staged = changed.filter((path) => produced.has(path));
-	const git = (args: ReadonlyArray<string>, input?: string) =>
-		execFileSync("git", internalGitArgv(["-C", root, "--literal-pathspecs", "add", ...args]), {
-			...(input !== undefined ? { input } : {}),
+	const now = workspaceChangeSnapshot(root);
+	if (now === null) throw new Error("git could not report the workspace status");
+	// An untracked embedded repository lists as `dir/`, which only `git add` can record; it stays out and is named.
+	const produced = stage.baseline === null ? [] : workspaceChangedPaths(stage.baseline, now);
+	const staged = produced.filter((path) => !path.endsWith("/"));
+	// update-index takes a path that is new, edited, deleted or already staged alike, where `git add -A` refuses a
+	// staged deletion as an unmatched pathspec. It also never consults ignore rules, which a required artifact needs.
+	const paths = [...staged, ...stage.artifacts];
+	if (paths.length > 0) {
+		execFileSync("git", internalGitArgv(["-C", root, "update-index", "--add", "--remove", "-z", "--stdin"]), {
+			input: `${paths.join("\0")}\0`,
 			timeout: 30_000,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
-	// Fed through stdin so a large change set cannot outrun the platform's argv limit.
-	if (staged.length > 0) git(["-A", "--pathspec-from-file=-", "--pathspec-file-nul"], staged.join("\0"));
-	if (stage.artifacts.length > 0) git(["-f", "--", ...stage.artifacts]);
-	return changed.filter((path) => !produced.has(path) && !stage.artifacts.includes(path));
+	}
+	const inIndex = new Set(
+		execFileSync("git", internalGitArgv(["-C", root, "diff", "--cached", "--name-only", "--relative", "-z"]), {
+			encoding: "utf8",
+			timeout: 30_000,
+			stdio: ["ignore", "pipe", "pipe"],
+		}).split("\0"),
+	);
+	return [...now.checkout.paths.keys()]
+		.filter((path) => path.startsWith(now.prefix))
+		.map((path) => path.slice(now.prefix.length))
+		.filter((path) => !inIndex.has(path));
 }
 
 function unstagedNote(paths: ReadonlyArray<string>): string[] {

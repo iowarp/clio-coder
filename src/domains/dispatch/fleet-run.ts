@@ -41,13 +41,14 @@ import {
 import {
 	type CodeStepRecord,
 	type CodeStepRunInput,
-	type CommitStage,
 	codeStepDir,
 	newCodeRunId,
 	preflightCodeStep,
+	readCommitBaseline,
 	runCodeStep,
 	workspaceChangedPaths,
 	workspaceChangeSnapshot,
+	writeCommitBaseline,
 } from "./code-step.js";
 import type { DispatchContract, DispatchPlanTaskResolution, DispatchRequest } from "./contract.js";
 import { buildDelegationProposalBriefing, validateDelegationPlan } from "./delegation-plan.js";
@@ -631,8 +632,6 @@ async function runFleetHoldingWorkspace(
 	// a test it generated exactly as it runs an agent ancestor's changed tests.
 	// Null marks a step whose changes could not be measured (no git status).
 	const codeChangedPathsByStep = new Map<string, ReadonlyArray<string> | null>();
-	// What each commit source changed, measured around its run. A step replayed on resume has no entry.
-	const agentChangedPathsByStep = new Map<string, ReadonlyArray<string>>();
 	const attemptRunIdsByStep = new Map<string, ReadonlyArray<string>>();
 	const memberReceipts = async (runId: string, firstReceipt: RunResult) =>
 		dispatch.waitForMember ? dispatch.waitForMember(runId) : { receipt: firstReceipt, receipts: [firstReceipt] };
@@ -717,31 +716,28 @@ async function runFleetHoldingWorkspace(
 		return `clio(${fleetRootId}): ${input.playbookName} ${step.id}`;
 	};
 
-	/**
-	 * Every source that ran counts, whatever its own outcome: a repair that failed its attempt still left edits in the
-	 * tree the later check passed. A replayed step falls back to the paths it declared, which staging only honors for a
-	 * file git reports as changed.
-	 */
-	const commitStageFor = (
+	// A required architect artifact goes in even when ignored: the playbook commits the plan before any code exists.
+	const commitArtifactsFor = (
 		step: ExecutionPlanCodeStep,
-		priorResults: ReadonlyMap<string, { output: string; integrityValid: boolean }>,
-	): CommitStage => {
-		const paths = new Set<string>();
+		priorResults: ReadonlyMap<string, { integrityValid: boolean }>,
+	): string[] => {
 		const artifacts = new Set<string>();
 		for (const candidate of step.commitFrom ?? []) {
 			const source = planStep(candidate);
 			const result = priorResults.get(candidate);
-			if (source === undefined || source.kind !== "agent" || result === undefined) continue;
+			if (source === undefined || source.kind !== "agent" || result?.integrityValid !== true) continue;
 			const contract = agents.getSpec(source.agentId)?.resultContract ?? null;
-			if (contract?.kind === "architect-plan" && result.integrityValid) artifacts.add(contract.path);
-			const measured = agentChangedPathsByStep.get(candidate);
-			const declared = contract === null ? [] : mutationReportPaths(contract, result.output);
-			for (const path of [...(measured ?? declared), ...(receiptsByStep.get(candidate)?.changedPaths ?? [])]) {
-				paths.add(path);
-			}
+			if (contract?.kind === "architect-plan") artifacts.add(contract.path);
 		}
-		return { paths: [...paths], artifacts: [...artifacts] };
+		return [...artifacts];
 	};
+	const commitsWork = livePlan.steps.some((step) => step.kind === "code" && step.commitFrom !== undefined);
+	let commitBaseline = !commitsWork
+		? null
+		: input.resume !== undefined
+			? readCommitBaseline(codeStepDir(input.resume.record.id))
+			: workspaceChangeSnapshot(workspaceRoot);
+	if (commitBaseline !== null) writeCommitBaseline(codeStepDir(fleetRootId), commitBaseline);
 
 	// The journal opens only here, after the last await outside the scheduler's
 	// try, so every path that writes fleet_started also reaches a seal.
@@ -979,11 +975,6 @@ async function runFleetHoldingWorkspace(
 					request.briefing = buildDelegationProposalBriefing(proposals);
 				}
 				signal?.throwIfAborted();
-				const changesBefore = livePlan.steps.some(
-					(later) => later.kind === "code" && later.commitFrom?.includes(step.id) === true,
-				)
-					? workspaceChangeSnapshot(workspaceRoot)
-					: null;
 				const handle = await dispatch.dispatch(request, undefined, signal ? { signal } : undefined);
 				const waveIndex = fleetPlanWaveIndex(livePlan, step.id);
 				stepDispatched({
@@ -1002,10 +993,6 @@ async function runFleetHoldingWorkspace(
 					assignmentId: handle.runId,
 					result: handle.finalPromise.then(async (firstReceipt) => {
 						const receipt = await collectMemberReceipts(handle.runId, firstReceipt, step.id);
-						const changesAfter = changesBefore === null ? null : workspaceChangeSnapshot(workspaceRoot);
-						if (changesBefore !== null && changesAfter !== null) {
-							agentChangedPathsByStep.set(step.id, workspaceChangedPaths(changesBefore, changesAfter));
-						}
 						if (step.scope === "workspace") {
 							validationFresh = false;
 							independentReviewFresh = false;
@@ -1168,7 +1155,7 @@ async function runFleetHoldingWorkspace(
 									commitMessage: attributeCommitMessage(originalMessage, evidence, input.attributionEnabled),
 								},
 								requireWorkspaceChanges: true,
-								stage: commitStageFor(step, priorResults),
+								stage: { baseline: commitBaseline, artifacts: commitArtifactsFor(step, priorResults) },
 								commitAttribution: { enabled: input.attributionEnabled, evidence },
 							}
 						: {}),
@@ -1206,6 +1193,10 @@ async function runFleetHoldingWorkspace(
 						step.id,
 						before === null || after === null ? null : workspaceChangedPaths(before, after),
 					);
+				}
+				if (isCommit && outcome.report.passed) {
+					commitBaseline = workspaceChangeSnapshot(workspaceRoot);
+					if (commitBaseline !== null) writeCommitBaseline(codeStepDir(fleetRootId), commitBaseline);
 				}
 				if (step.verification === true) validationFresh = outcome.report.passed;
 				if (!telemetryHub().emit("code_step.settled", codeStepSettledFacts(outcome.record), rootTelemetry.context))
