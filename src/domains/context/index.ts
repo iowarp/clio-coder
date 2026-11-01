@@ -50,7 +50,13 @@ export {
 	updateCodewikiPaths,
 } from "./codewiki/indexer.js";
 export { CODEWIKI_VERSION } from "./codewiki/schema.js";
-export type { ContextContract, ContextState, ProjectPromptContext, ProjectStructuredContext } from "./contract.js";
+export type {
+	ContextContract,
+	ContextState,
+	ProjectPromptContext,
+	ProjectStructuredContext,
+	StartupHint,
+} from "./contract.js";
 export {
 	computeFingerprint,
 	isStale,
@@ -74,7 +80,12 @@ export {
 	type RunContextRefreshResult,
 	runContextRefresh,
 } from "./refresh.js";
-export { type ContextBundleOptions, ContextDomainModule, createContextDomainModule } from "./runtime.js";
+export {
+	type ContextBundleOptions,
+	ContextDomainModule,
+	createContextDomainModule,
+	type StartupHintHost,
+} from "./runtime.js";
 export {
 	type BootstrapGenerationMode,
 	type BootstrapGenerationState,

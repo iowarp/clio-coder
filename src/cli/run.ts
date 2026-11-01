@@ -643,7 +643,11 @@ async function runDispatch(
 		ResourcesDomainModule,
 		createContextDomainModule({
 			noContextFiles: options.noContextFiles === true,
-			headless: parsed.json ? "json" : "text",
+			startupHintHost: {
+				initCommand: "clio-coder context init",
+				suggest: !parsed.json && process.stderr.isTTY === true,
+				sink: (hint) => process.stderr.write(`${hint.text}\n`),
+			},
 		}),
 		ProvidersDomainModule,
 		SafetyDomainModule,

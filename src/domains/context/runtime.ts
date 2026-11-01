@@ -14,4 +14,4 @@ export function createContextDomainModule(options: ContextBundleOptions = {}): D
 	};
 }
 
-export type { ContextBundleOptions } from "./extension.js";
+export type { ContextBundleOptions, StartupHintHost } from "./extension.js";

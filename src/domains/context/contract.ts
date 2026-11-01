@@ -42,6 +42,12 @@ export interface ContextState {
 	memoryCount: number;
 }
 
+/** A session-start note about this project's context, worded for the host that shows it. */
+export interface StartupHint {
+	level: "info" | "warning";
+	text: string;
+}
+
 export interface ContextContract extends DomainContract {
 	/** Cancel only the active operation owned by this session and workspace. */
 	cancelOperation?(sessionId: string, cwd: string, operationId?: string): boolean;
@@ -55,7 +61,7 @@ export interface ContextContract extends DomainContract {
 	runContextRefresh(input?: RunContextRefreshInput): Promise<RunContextRefreshResult>;
 	renderPromptContext(cwd: string): ProjectPromptContext;
 	contextState(cwd?: string): ContextState;
-	startupHints(): string[];
+	startupHints(): StartupHint[];
 	/**
 	 * Incrementally refresh the codemap for files changed during the session
 	 * (e.g. after an edit or write). No-op when the project was never indexed;

@@ -73,6 +73,7 @@ import type {
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { narrowTurnConstraints, snapshotTurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
+import type { StartupHint } from "../../domains/context/contract.js";
 import type { RunResultFacts } from "../../domains/dispatch/index.js";
 import { readRunResultFacts, readRunResultFactsForReplay, runResultWireFacts } from "../../domains/dispatch/index.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
@@ -473,6 +474,8 @@ export interface ClioAcpServerOptions {
 	 * announced and refuses.
 	 */
 	board?: () => AcpBoardSource;
+	/** Project context notes for the operator, shown once on the first prompt this process serves. */
+	startupHints?: () => ReadonlyArray<StartupHint>;
 	/**
 	 * The shared /handoff lifecycle, bound by the composition root. Absent means
 	 * the three handoff methods are not announced and refuse.
@@ -3918,6 +3921,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	let handoffPreparing = false;
 	/** Counts prompts, so a draft drawn while a request started is known to be stale. */
 	let promptSerial = 0;
+	let startupHintsShown = false;
 	let promptSettled: Promise<void> | null = null;
 	/** The one operator shell line this process runs at a time, as the terminal runs one. */
 	let activeShell: { sessionId: string; abort: AbortController; settled: Promise<void> } | null = null;
@@ -6964,6 +6968,22 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		telemetry.turnStarted(active.turn);
 		const unsubscribe = attachTurnObserver(session.id, active);
 		try {
+			// The GUI requires message chunks to belong to a prompt, so startup
+			// notices wait for the first one. They do not count toward admission:
+			// a refused prompt must still fail as prompt_not_admitted.
+			if (!startupHintsShown) {
+				startupHintsShown = true;
+				for (const hint of options.startupHints?.() ?? []) {
+					options.transport.notify("session/update", {
+						sessionId: session.id,
+						update: {
+							sessionUpdate: "agent_message_chunk",
+							content: textContent(`${safeStoredString(hint.text, ACP_MAX_CHUNK_BYTES - 2)}\n`),
+						},
+						_meta: { ...ORCHESTRATOR_UPDATE_META, [ACP_NOTICE_META_KEY]: { level: hint.level } },
+					});
+				}
+			}
 			const trimmed = text.trim();
 			const commandMatch = /^\/([a-z][a-z0-9_-]*)(?:\s+([\s\S]*))?$/u.exec(trimmed);
 			const command = commandMatch?.[1];

@@ -20,7 +20,7 @@ import { runContextClear } from "./clear.js";
 import { loadProjectClioMd } from "./clio-md.js";
 import { codewikiPath } from "./codewiki/artifact.js";
 import { coordinateCodewikiExclusive, coordinateCodewikiWrite, drainCodewikiWrites } from "./codewiki/coordinator.js";
-import type { ContextContract, ContextState } from "./contract.js";
+import type { ContextContract, ContextState, StartupHint } from "./contract.js";
 import {
 	bootstrapOperationFacts,
 	ContextOperationAbortError,
@@ -145,22 +145,24 @@ function createContextStateReader(): { read(cwd?: string): ContextState; invalid
 	};
 }
 
-export interface ContextBundleOptions {
-	noContextFiles?: boolean;
-	/**
-	 * Headless runs have no slash commands, so the bootstrap hint names the CLI
-	 * subcommand. `json` keeps stderr free of suggestions a machine consumer
-	 * cannot act on; malformed-file and contract warnings still print.
-	 */
-	headless?: "text" | "json";
+/** How one host words and shows startup hints; the hint text itself lives only here. */
+export interface StartupHintHost {
+	/** The context init command as an operator of this host would send it. */
+	initCommand: string;
+	/** False where nobody can act on a suggestion to run a command. Warnings still flow. */
+	suggest: boolean;
+	/** Takes the hints as the session starts. A host without one reads `startupHints()` for its own surface. */
+	sink?: (hint: StartupHint) => void;
 }
 
-function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): string[] {
-	const initCommand = options.headless === undefined ? "/context init" : "clio-coder context init";
-	// A scripted or piped headless run has no operator reading stderr, so the
-	// bootstrap suggestion is only for an interactive session or a stderr TTY.
-	const suggest = options.headless === undefined || (options.headless === "text" && process.stderr.isTTY === true);
-	const hints: string[] = [];
+export interface ContextBundleOptions {
+	noContextFiles?: boolean;
+	startupHintHost?: StartupHintHost;
+}
+
+function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): StartupHint[] {
+	const { initCommand, suggest } = options.startupHintHost ?? { initCommand: "/context init", suggest: true };
+	const hints: StartupHint[] = [];
 	// Runs at session start with the TUI mounting. Use a root-only hint; an
 	// indexed project answers from the type its state
 	// already records; only a never-indexed directory pays for detection.
@@ -179,20 +181,29 @@ function collectStartupHints(cwd: string, options: ContextBundleOptions = {}): s
 		options.noContextFiles !== true &&
 		suggest
 	) {
-		hints.push(`clio-coder: No CLIO-CODER.md detected. Run ${initCommand} to explore the repo and bootstrap context.`);
+		hints.push({
+			level: "info",
+			text: `clio-coder: No CLIO-CODER.md detected. Run ${initCommand} to explore the repo and bootstrap context.`,
+		});
 	}
 	for (const issue of clio.errors) {
-		hints.push(`clio-coder: malformed ${issue.path} ignored: ${issue.error}`);
+		hints.push({ level: "warning", text: `clio-coder: malformed ${issue.path} ignored: ${issue.error}` });
 	}
 	// An invalid validation contract leaves rigor at normal; say so once here
 	// rather than letting the finish gate quietly behave as if no contract existed.
 	const contract = loadValidationContract(cwd);
 	if (!contract.ok) {
-		hints.push(`clio-coder: validation contract ignored, rigor stays normal: ${describeValidationContract(contract)}`);
+		hints.push({
+			level: "warning",
+			text: `clio-coder: validation contract ignored, rigor stays normal: ${describeValidationContract(contract)}`,
+		});
 	}
 	if (!state) return hints;
 	if (suggest && state.contextSources !== undefined && adoptionSourcesChanged(state.contextSources, { cwd })) {
-		hints.push(`clio-coder: Imported agent context changed. Run ${initCommand} --adopt to refresh.`);
+		hints.push({
+			level: "warning",
+			text: `clio-coder: Imported agent context changed. Run ${initCommand} --adopt to refresh.`,
+		});
 	}
 	return hints;
 }
@@ -203,7 +214,7 @@ export function createContextBundle(
 ): DomainBundle<ContextContract> {
 	let lastCwd = process.cwd();
 	let stopping = false;
-	let startupHints: string[] = [];
+	let startupHints: StartupHint[] = [];
 	const contextState = createContextStateReader();
 	const semanticBackground = createSemanticBackgroundRefresh(() =>
 		_context.getContract<ConfigContract>("config")?.get(),
@@ -218,8 +229,8 @@ export function createContextBundle(
 				// Indexing is best-effort; a failed refresh must not block session start.
 			});
 		startupHints = collectStartupHints(lastCwd, options);
-		if (process.env.CLIO_CODER_INTERACTIVE === "1") return;
-		for (const hint of startupHints) process.stderr.write(`${hint}\n`);
+		const sink = options.startupHintHost?.sink;
+		if (sink) for (const hint of startupHints) sink(hint);
 	};
 
 	// Incremental updates are read-modify-write on the artifact; overlapping runs
