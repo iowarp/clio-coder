@@ -204,6 +204,18 @@ describe("test runner vocabulary (#377)", () => {
 		strictEqual(disposition(policy, 'pnpm run test:file -- "$X"', "default"), "ask");
 	});
 
+	it("lets make clean lead a recognized chain without counting as validation", () => {
+		for (const command of ["make clean", "make clean && make test"]) {
+			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+			strictEqual(disposition(policy, command, "default"), "allow", command);
+			strictEqual(decision.runsWorkspaceCode, true, command);
+		}
+		strictEqual(detectValidationCommand("make clean").kind, "none");
+		for (const command of ["make clean all", "make clean && curl https://example.com"]) {
+			strictEqual(disposition(policy, command, "default"), "ask", command);
+		}
+	});
+
 	it("does not mistake a Node script argument or evaluation for the test runner", () => {
 		for (const command of ["node sum.mjs --test", "node -e process.exit(0) -- --test", "node --test-only sum.mjs"]) {
 			strictEqual(detectValidationCommand(command).kind, "none", command);

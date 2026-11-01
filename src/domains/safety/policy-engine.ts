@@ -461,6 +461,15 @@ export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:gradle-test", re: /^(?:gradle|(?:\.\/)?gradlew)\s+test(?:\s+[\w=./:-]+)*$/ },
 ];
 
+/**
+ * The clean step of `make clean && make test`, which ended sdlc coders at
+ * WORKER_REFUSAL_LIMIT. It runs the same Makefile `make test` already runs
+ * unattended, so it carries the same workspace-code gate. It stays out of
+ * TEST_RUNNER_COMMANDS because a clean validates nothing and must not count as
+ * evidence, and it takes no arguments, so `make clean all` stays unrecognized.
+ */
+const MAKE_CLEAN_COMMAND = { id: "builtin:make-clean", re: /^make\s+clean$/ };
+
 /** Test runners that resolve imports through PYTHONPATH. */
 const PYTHON_TEST_RUNNER_IDS: ReadonlySet<string> = new Set([
 	"builtin:uv-pytest",
@@ -2048,6 +2057,20 @@ function evaluateBashPolicy(
 			ruleId: testRunner.id,
 			reasonCode: testRunner.id,
 			reasons: [`matched built-in test runner '${testRunner.id}'`, projectScriptPreview(recognitionCommand, callCwd)],
+			policySource: "builtin-command-allowlist",
+			execRecognition: "recognized",
+			runsWorkspaceCode: true,
+		};
+	}
+	if (MAKE_CLEAN_COMMAND.re.test(recognitionCommand)) {
+		return {
+			kind: "allow",
+			ruleId: MAKE_CLEAN_COMMAND.id,
+			reasonCode: MAKE_CLEAN_COMMAND.id,
+			reasons: [
+				`matched built-in clean step '${MAKE_CLEAN_COMMAND.id}'`,
+				projectScriptPreview(recognitionCommand, callCwd),
+			],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "recognized",
 			runsWorkspaceCode: true,
@@ -3707,6 +3730,11 @@ function recognizeCommandChain(
 		const testRunner = TEST_RUNNER_COMMANDS.find((entry) => entry.re.test(rendered));
 		if (testRunner !== undefined) {
 			ruleIds.push(testRunner.id);
+			runsTestRunner = true;
+			continue;
+		}
+		if (MAKE_CLEAN_COMMAND.re.test(rendered)) {
+			ruleIds.push(MAKE_CLEAN_COMMAND.id);
 			runsTestRunner = true;
 			continue;
 		}
