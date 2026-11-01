@@ -53,9 +53,14 @@ export const COORDINATOR_DISPATCH_ARGUMENTS = {
 		Object.hasOwn(args, "task") ? args : { ...args, task: "" },
 	restore(args: Record<string, unknown>): Record<string, unknown> {
 		const { task, tasks, ...rest } = args;
+		// A grammar requires task first, so a model reaching for the batch field repeats its assignment there. A one-item
+		// batch is the form the tool normalizes every call into, so the copy loses nothing and the call means one run.
+		const only = Array.isArray(tasks) && tasks.length === 1 ? (tasks[0] as unknown) : undefined;
+		const repeatsTask =
+			only === task || (typeof only === "object" && only !== null && (only as { task?: unknown }).task === task);
 		return {
 			...rest,
-			...(task !== "" ? { task } : {}),
+			...(task !== "" && !repeatsTask ? { task } : {}),
 			// A grammar offers the trailing batch field after any assignment, and models fill it with an empty list.
 			...(tasks !== undefined && !(Array.isArray(tasks) && tasks.length === 0) ? { tasks } : {}),
 		};

@@ -76,6 +76,15 @@ describe("compact coordinator dispatch contract", () => {
 		strictEqual(received.length, 3, "invalid canonical arguments never execute");
 	});
 
+	it("reads a one-item batch repeating the assignment as that run, and keeps a real conflict refusable", () => {
+		const { restore } = COORDINATOR_DISPATCH_ARGUMENTS;
+		const entry = { task: "Add sub", agent: "coder", intent: { write_roots: ["src/"] } };
+		deepStrictEqual(restore({ task: "Add sub", mode: "compete", tasks: [entry] }), { mode: "compete", tasks: [entry] });
+		deepStrictEqual(restore({ task: "Add sub", tasks: ["Add sub"] }), { tasks: ["Add sub"] });
+		deepStrictEqual(restore({ task: "Add sub", tasks: ["Other"] }), { task: "Add sub", tasks: ["Other"] });
+		deepStrictEqual(restore({ task: "Add sub" }), { task: "Add sub" });
+	});
+
 	it("admits every shared ordinary field with its canonical type", () => {
 		const canonical = buildDispatchParameters();
 		const compact = coordinatorDispatchParameters();
