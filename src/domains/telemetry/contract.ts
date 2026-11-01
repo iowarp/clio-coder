@@ -28,7 +28,7 @@ import type { DispatchSnapshot } from "../dispatch/contract.js";
 import type { DispatchRequestOrigin, RunKind } from "../dispatch/types.js";
 import type { TrustSummaryProjection } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus } from "../evidence/trust-status.js";
-import type { TurnsSum } from "./read-model.js";
+import type { EnqueuedRun, TurnsSum } from "./read-model.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "./session-journals.js";
 import type { WorkerProgressSnapshot } from "./worker-progress.js";
 
@@ -132,6 +132,8 @@ export interface TelemetryView {
 	runs(): RunRowV1[];
 	/** A run this session references; null for any other run. */
 	run(runId: string): RunTelemetryV1 | null;
+	/** How a referenced run was enqueued, the only record of its agent and route when it never settled; null if unseen. */
+	runEnqueued(runId: string): EnqueuedRun | null;
 	whyStopped(): WhyStoppedV1;
 	explain(ref: FactRef): ExplanationV1 | null;
 	/** Any one number by reference, e.g. a turn's input tokens, without building a whole report for it. */

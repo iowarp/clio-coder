@@ -57,6 +57,7 @@ export {
 	callsReport,
 	costReport,
 	emptyTaskMemorySpendSummary,
+	type EnqueuedRun,
 	explain,
 	foldTaskMemorySpend,
 	READ_MODEL_FOLD,

@@ -39,6 +39,7 @@ import {
 	quantityOf,
 	quotaAccountDetails,
 	reconcileQuotaAccounts,
+	runEnqueued,
 	runsReport,
 	runTelemetry,
 	sessionAccountQuotaWindow,
@@ -117,6 +118,7 @@ export function telemetryView(
 			const run = source.runs.get(runId);
 			return run ? runTelemetry(runId, run, {}, scope(runId)) : null;
 		},
+		runEnqueued: (runId) => runEnqueued(source, runId),
 		references: (runId) => source.runs.has(runId),
 		whyStopped: () => whyStopped(source),
 		explain: (ref) => explain(ref, { session: source }),

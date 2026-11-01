@@ -2802,6 +2802,28 @@ export function runsReport(source: SessionSource): RunRowV1[] {
 	return [...analyze(source).runs.values()].map((run) => runRow(view, run));
 }
 
+/** The agent and route a run was enqueued under. */
+export interface EnqueuedRun {
+	agentId: string;
+	targetId: string;
+	wireModelId: string;
+	node: string | null;
+}
+
+/** A run's newest enqueue record; a retry's can land in an ancestor run's journal, so every journal is read. */
+export function runEnqueued(source: SessionSource, runId: string): EnqueuedRun | null {
+	let at = "";
+	let enqueued: EnqueuedRun | null = null;
+	for (const journal of sessionJournals(source))
+		for (const record of journal.records)
+			if (record.k === "run.enqueued" && record.data.runId === runId && record.t >= at) {
+				at = record.t;
+				const { agentId, targetId, wireModelId, node } = record.data;
+				enqueued = { agentId, targetId, wireModelId, node: node ?? null };
+			}
+	return enqueued;
+}
+
 /** One run as a list row: the row `runTelemetry` reports, without the per-run detail (#434 §11.3). */
 export function runRowTelemetry(runId: string, source: JournalSource): RunRowV1 {
 	const run = analyzeRun(runId, source);
