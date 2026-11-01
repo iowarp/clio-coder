@@ -1,7 +1,11 @@
 import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { it } from "node:test";
-import { resultContractShape, validateResultContract } from "../../src/domains/agents/result-contract.js";
+import {
+	parseVerifierResult,
+	resultContractShape,
+	validateResultContract,
+} from "../../src/domains/agents/result-contract.js";
 import { mergeWithheldDetail, removedTestCases } from "../../src/domains/dispatch/merge-gate.js";
 import { typedValidationFactsFromVerifyCalls } from "../../src/domains/dispatch/run-findings.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
@@ -371,4 +375,11 @@ it("requires observed final outcomes to settle mutation-report failures", () => 
 			strictEqual(result.quality, expected);
 		}
 	}
+});
+
+it("the review gate reads a verifier report that closes a prose answer, and nothing weaker", () => {
+	const report = '{"verdict":"pass","checks":[{"name":"make test","passed":true,"evidence":"exit 0"}]}';
+	strictEqual(parseVerifierResult(`I inspected the tree.\n\n${report}`)?.verdict, "pass");
+	strictEqual(parseVerifierResult("The verdict is **pass**."), null);
+	strictEqual(parseVerifierResult(`${report}\n\nThat is my report.`), null);
 });

@@ -1212,7 +1212,11 @@ function validateVerifier(contract: ResultContract, output: string | null): Resu
  */
 export function parseVerifierResult(output: string | null): VerifierResult | null {
 	const validation = validateVerifier({ kind: "verifier-report" }, output);
-	return validation.verifier ?? null;
+	if (validation.verifier !== undefined || output === null) return validation.verifier ?? null;
+	// A local model often reasons in prose before its report. The gate still needs the verdict, so a report that closes
+	// the answer counts, under the same schema. Sending the whole tree back for repair over that preamble changes nothing.
+	const report = output.lastIndexOf('{"verdict"');
+	return report < 0 ? null : (validateVerifier({ kind: "verifier-report" }, output.slice(report)).verifier ?? null);
 }
 
 /**
