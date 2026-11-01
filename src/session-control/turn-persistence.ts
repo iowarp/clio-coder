@@ -15,7 +15,7 @@ import type { MiddlewareToolChoiceControl } from "../domains/middleware/index.js
 import { noteAnthropicStreamQuota, noteCodexStreamQuota } from "../domains/quota/index.js";
 import type { SessionContract, TurnInput } from "../domains/session/contract.js";
 import type { BudgetBlockData, SessionEntry } from "../domains/session/entries.js";
-import { BUDGET_BLOCK_ENTRY } from "../domains/session/entries.js";
+import { BUDGET_BLOCK_ENTRY, IN_RUN_CONTINUATION_ENTRY } from "../domains/session/entries.js";
 import { appendSessionThinkingLevel } from "../domains/session/thinking-route.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
 import type { TurnTokens } from "../domains/turn-control/index.js";
@@ -121,6 +121,7 @@ export interface TurnPersistence {
 		origin?: string,
 	): string | null;
 	appendBudgetBlock(block: BudgetBlockData): void;
+	appendInRunContinuation(): void;
 	appendRetryStatus(status: RetryStatusPayload): void;
 	appendModelChangeEntry(target: ChatLoopTarget): void;
 	appendThinkingLevelChangeEntry(thinkingLevel: string, effectiveEffort?: string): void;
@@ -451,6 +452,17 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 				customType: BUDGET_BLOCK_ENTRY,
 				display: true,
 				data: block,
+			});
+		},
+
+		appendInRunContinuation(): void {
+			if (!deps.session?.current()) return;
+			deps.session.appendEntry({
+				kind: "custom",
+				parentTurnId: state.lastTurnId,
+				customType: IN_RUN_CONTINUATION_ENTRY,
+				display: false,
+				data: { version: 1 },
 			});
 		},
 

@@ -1385,6 +1385,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				.join("\n\n");
 			if (content.length === 0) return false;
 			localRuntime.agent.state.messages.push({ role: "user", content, timestamp: Date.now() });
+			persistence.appendInRunContinuation();
 			return true;
 		};
 

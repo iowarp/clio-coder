@@ -86,6 +86,12 @@ export interface CustomEntry<T = unknown> extends BaseSessionEntry {
 
 /** Durable admission stop, including the setting needed to resume paid calls (#424). */
 export const BUDGET_BLOCK_ENTRY = "budgetBlock";
+/**
+ * A middleware continuation reopened the run after a terminal assistant row. The
+ * reminder itself is model-only and never persisted, so without this mark a crash
+ * in the follow-up call leaves that row as the turn's last word and replay reads Done.
+ */
+export const IN_RUN_CONTINUATION_ENTRY = "inRunContinuation";
 
 export interface BudgetBlockData {
 	level: "at" | "over";

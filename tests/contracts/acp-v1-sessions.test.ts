@@ -7,6 +7,7 @@ import { clioStateDir } from "../../src/core/xdg.js";
 import { suggestedSessionCostCeilingUsd } from "../../src/domains/scheduling/budget.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { IN_RUN_CONTINUATION_ENTRY } from "../../src/domains/session/entries.js";
 import { acpUsageSums } from "../../src/engine/acp/adapter.js";
 import type { AcpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
@@ -467,6 +468,46 @@ test("ACP replay keeps a crashed middleware continuation from reading as Done", 
 	} finally {
 		await crashed.stop();
 		await canceled.stop();
+	}
+});
+
+test("ACP replay keeps a crash after an in-run continuation from reading as Done", async () => {
+	const peer = fixture([
+		{
+			kind: "message" as const,
+			role: "user" as const,
+			turnId: "ask",
+			parentTurnId: null,
+			timestamp: "2026-09-25T12:00:00.000Z",
+			payload: "Finish the work",
+		},
+		{
+			kind: "message" as const,
+			role: "assistant" as const,
+			turnId: "answer",
+			parentTurnId: "ask",
+			timestamp: "2026-09-25T12:00:01.000Z",
+			payload: { stopReason: "stop", content: [{ type: "text", text: "Done so far" }] },
+		},
+		{
+			kind: "custom" as const,
+			customType: IN_RUN_CONTINUATION_ENTRY,
+			turnId: "reopened",
+			parentTurnId: "answer",
+			timestamp: "2026-09-25T12:00:02.000Z",
+			display: false,
+			data: { version: 1 },
+		},
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		strictEqual(peer.updates.length, 2);
+		for (const update of peer.updates) {
+			deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1, stopReason: "error" });
+		}
+	} finally {
+		await peer.stop();
 	}
 });
 
