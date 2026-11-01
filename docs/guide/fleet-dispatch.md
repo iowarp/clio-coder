@@ -446,7 +446,7 @@ placement does not read it; use `fleet.defaultNode` or a profile pin.
 
 ### Worker limits and `fleet.concurrency: auto`
 
-Each native worker response has a host deadline of `safety.limits.workerResponseSeconds` (default 600 seconds), starting after local residency waits and model loading complete. After tools lock or during synthesis, the deadline is at most 120 seconds and the request allows at most 4096 output tokens, preserving tighter limits; those rounds also request thinking off wherever the model and runtime support it. Reaching any response deadline or exhausting a locked round’s output cap fails the run with `worker_turn_timeout` or `worker_output_cap_exhausted` and keeps unfinished output partial. Both codes are sealed in the run record and suppress automatic dispatch retry and failover without penalizing the target breaker; the fleet step settles as failed and follows its `onFailure` policy. Unlocked output truncation retains the normal provider and tool-call recovery behavior. Usage is retained only when the provider reported it; otherwise the interrupted call records usage as unknown (`observed: false`), since compatible providers may send usage only in their final chunk.
+Each native worker response has a host deadline of `safety.limits.workerResponseSeconds` (default 600 seconds), starting after local residency waits and model loading complete. After tools lock or during synthesis, a round keeps that deadline and the same output budget as any other round: the model's own output limit, bounded by the remaining context window and any tighter budget the request sets. Those rounds also request thinking off wherever the model and runtime support it. Reaching a response deadline, or a locked round stopping on its output limit, fails the run with `worker_turn_timeout` or `worker_output_cap_exhausted` and keeps unfinished output partial. The `worker_output_cap_exhausted` detail names the limit and where it came from. Both codes are sealed in the run record and suppress automatic dispatch retry and failover without penalizing the target breaker; the fleet step settles as failed and follows its `onFailure` policy. Unlocked output truncation retains the normal provider and tool-call recovery behavior. Usage is retained only when the provider reported it; otherwise the interrupted call records usage as unknown (`observed: false`), since compatible providers may send usage only in their final chunk.
 
 `fleet.concurrency` sets the global worker pool and the implicit local node's
 limit. SSH nodes always use their own `maxWorkers`. A number means exactly that
@@ -634,7 +634,19 @@ there. The approved execution snapshot renders both fields and freezes the
 parent checkout as the merge destination. The host commits the task worktree
 when the worker finishes. A worker in an attested task worktree can also use
 typed `git add` and `git commit` on its task branch when its permit admits those
-operations. `expected_outputs` must be
+operations.
+
+The host commit takes changes to tracked files, whatever the worker staged, and the
+new files the run's own edit and write calls made. Any other new file, such as bytecode
+or a file a shell command generated, stays out, and the dispatch result reports it as
+`left_uncommitted` with a count and the first paths. When the host holds no complete
+write record for a run, the commit takes every new file. The dispatch result also states
+where the work landed: the merge, or the branch and worktree that hold it. A merged run's
+worktree is removed along with its left-out files. A file that arrives or changes after
+the commit keeps the worktree and its branch, and the result names it as
+`changed_after_commit`.
+
+`expected_outputs` must be
 repository-relative file paths, so `.` is refused at admission, as is an action such as `commit` that lies outside the declared `write_roots`.
 Admission also refuses a non-git checkout, a repository with no commits
 (`worktree_unborn_head`), a read-only agent, compete mode, and an explicit cwd
@@ -740,7 +752,12 @@ message and author, or lists several. `--message` replaces the message. The only
 that touches the checkout is `git merge --ff-only`, which Git refuses when it would
 overwrite a local change; unrelated local edits are carried. Uncommitted work in a kept
 worktree, common after a crash, is counted in the preview and committed onto the task
-branch only when landing. `--plan` refuses a landing whose branch tip, worktree,
+branch only when landing. Files the run's own commit left out stay out if they have not
+changed since: the preview counts them, `--json` lists them as `leftOut`, and they go with
+the worktree when it is removed. A file that arrived or changed after that commit lands. A
+run that never reached its commit, such as one that crashed or failed, recorded nothing to
+leave out, so every untracked file lands. With `--json`, stdout holds only the plan and
+the landing's notes go to stderr. `--plan` refuses a landing whose branch tip, worktree,
 destination or mode changed since that preview. After landing, the branch, its worktree
 and its claim are removed; `--keep` keeps them. A branch already on the destination is
 only cleaned up. Each task branch also records its base and source branch in Git config
