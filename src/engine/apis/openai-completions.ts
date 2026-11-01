@@ -131,6 +131,7 @@ interface ResponseModelIdCapture {
 	 * its message, so this is the one place the code is still visible.
 	 */
 	contentFilter: boolean;
+	finishReasonObserved: boolean;
 	buffer: string;
 	decoder: TextDecoder | null;
 }
@@ -181,6 +182,10 @@ function backendTimingsSourceForModel(model: Model<Api>): BackendTimingsSource |
  */
 function observeProviderChunk(payload: unknown, capture: ResponseModelIdCapture): void {
 	if (!isPlainRecord(payload)) return;
+	const choice = Array.isArray(payload.choices) ? payload.choices[0] : undefined;
+	if (isPlainRecord(choice) && typeof choice.finish_reason === "string" && choice.finish_reason.length > 0) {
+		capture.finishReasonObserved = true;
+	}
 	if (capture.diffusionFrames !== null) observeDiffusionFrameChunk(payload, capture.diffusionFrames);
 	const usage = isPlainRecord(payload.usage) ? payload.usage : {};
 	const details = isPlainRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
@@ -288,6 +293,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 		errorBody: null,
 		diffusionFrames: diffusionFramesActive(model) ? [] : null,
 		contentFilter: false,
+		finishReasonObserved: false,
 		buffer: "",
 		decoder: new TextDecoder(),
 	};
@@ -317,6 +323,15 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 					event.message.responseModelIdObservation = observation;
 					if (capture.gatewayRouting !== null) event.message.gatewayRouting = capture.gatewayRouting;
 					if (capture.backendTimings !== null) event.message.backendTimings = capture.backendTimings;
+					// Pi defaults an EOF without a provider finish reason to a successful stop.
+					// Keep the partial response, but never certify an interrupted stream as complete.
+					if (capture.observed && !capture.finishReasonObserved) {
+						event.message.stopReason = "error";
+						event.message.errorMessage =
+							"Provider stream ended before a finish reason was received; the response is incomplete.";
+						annotated.push({ type: "error", reason: "error", error: event.message });
+						continue;
+					}
 				} else if (event.type === "error") {
 					if (event.error.errorMessage !== undefined && capture.errorBody !== null) {
 						event.error.errorMessage = restoreTruncatedErrorBody(event.error.errorMessage, await capture.errorBody);

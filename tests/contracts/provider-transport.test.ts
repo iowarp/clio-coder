@@ -421,6 +421,29 @@ describe("provider transport boundary", () => {
 		deepStrictEqual(done.message.content, [{ type: "text", text: "wire-ok" }]);
 	});
 
+	it("fails a partial-text stream that reaches EOF without a finish reason", async () => {
+		const model = litellmRuntime.synthesizeModel(
+			{ id: "gateway", runtime: "litellm", url: "http://gateway.invalid:4000" },
+			"wire-model",
+			null,
+		) as Model<"openai-completions">;
+		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+		const chunk = { model: "wire-model", choices: [{ index: 0, delta: { content: "partial answer" } }] };
+		const result = await openAICompletionsApiProvider
+			.streamSimple(model, context, {
+				apiKey: "test-key",
+				fetch: async () =>
+					new Response(`data: ${JSON.stringify(chunk)}\n\n`, {
+						status: 200,
+						headers: { "content-type": "text/event-stream" },
+					}),
+			})
+			.result();
+		strictEqual(result.stopReason, "error");
+		ok(result.errorMessage?.includes("response is incomplete"), result.errorMessage);
+		deepStrictEqual(result.content, [{ type: "text", text: "partial answer" }]);
+	});
+
 	it("reports the response model id, cache-read count and llama.cpp timings only when the stream carried them", async () => {
 		const done = async (chunks: ReadonlyArray<Record<string, unknown>>) => {
 			const model = synthesizeOpenAICompatModel({
