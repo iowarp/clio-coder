@@ -491,7 +491,10 @@ function filterScope(
 			// A secret that reached a journal never leaves in an archive, whether a value pattern or only its property
 			// name gives it away (#434, A3). Redaction runs first so the projection's output is what the archive holds,
 			// and a verifier can recheck it as a fixed point.
-			const redacted = redactTelemetryValue(row.record, tally, true);
+			// A birth token is a local process identity named like a credential. It means nothing off this machine, and
+			// redacting it would count a secret that was never there on every worker record.
+			const local = row.record.origin ? { ...row.record, origin: { ...row.record.origin, birthToken: null } } : row.record;
+			const redacted = redactTelemetryValue(local, tally, true);
 			const record = projectRecord(redacted, profile, shareSource);
 			if (record === null) {
 				dropped.unlisted += 1;
