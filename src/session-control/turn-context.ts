@@ -216,6 +216,7 @@ export interface TurnContextDeps {
 					CompactInput,
 					| "providerCompaction"
 					| "providerFallbackReason"
+					| "providerReplayFallback"
 					| "keepRecentTokens"
 					| "preserveUserTurnId"
 					| "pendingOperatorTurn"
@@ -2076,7 +2077,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					(await deps.autoCompact?.(instructions, trigger, {
 						...budget,
 						...handoff,
-						...(providerFallbackReason ? { providerFallbackReason } : {}),
+						...(providerFallbackReason ? { providerFallbackReason, providerReplayFallback: true } : {}),
 						...(settings.context.compaction.provider === "native" &&
 						agentRuntime.runtimeId === "openai-codex" &&
 						providerFallbackReason === undefined

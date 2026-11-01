@@ -900,6 +900,7 @@ export interface CreateChatLoopDeps {
 			CompactInput,
 			| "providerCompaction"
 			| "providerFallbackReason"
+			| "providerReplayFallback"
 			| "keepRecentTokens"
 			| "preserveUserTurnId"
 			| "skillContextState"

@@ -430,6 +430,53 @@ describe("production compaction controls", () => {
 		});
 	}
 
+	for (const fallback of [false, true]) {
+		it(`${fallback ? "restores unusable native history for" : "excludes inclusive native replay measurements from"} the replacement gain comparison (#422)`, async () => {
+			const f = fixture(true, true, true);
+			f.settings.context.compaction.provider = "native";
+			f.settings.context.compaction.model = "summary-target/summary";
+			const parent = f.entries().at(-1);
+			ok(parent);
+			const native = appendEntry(f.state, {
+				kind: "compactionSummary",
+				parentTurnId: parent.turnId,
+				firstKeptTurnId: "",
+				summary: "Native checkpoint",
+				tokensBefore: 60000,
+				providerCheckpoint: {
+					version: 1,
+					digest: "a".repeat(64),
+					outputTokens: fallback ? 1000 : 2000,
+					...(fallback ? {} : { replayInputTokens: 30000 }),
+				},
+			});
+			const user = appendEntry(f.state, {
+				kind: "message",
+				role: "user",
+				parentTurnId: parent.turnId,
+				payload: { text: "Continue with a portable replacement." },
+			});
+			f.pinLeaf(user.turnId);
+			const before = f.entries();
+			f.response.text = syntheticCompactionSummary("replacement checkpoint ".repeat(1600));
+			const result = await f.run(undefined, "force", {
+				keepRecentTokens: 100,
+				...(fallback ? { providerFallbackReason: "native-replay-non-codex-route", providerReplayFallback: true } : {}),
+			});
+			strictEqual(result?.noGain === true, !fallback);
+			deepStrictEqual(
+				f.entries().find((entry) => entry.turnId === native.turnId),
+				native,
+			);
+			if (!fallback) deepStrictEqual(f.entries(), before);
+			else strictEqual(f.entries().at(-1)?.kind, "compactionSummary");
+			const calls = ledgerUsageCalls(f.entries(), await f.journal());
+			strictEqual(f.calls.length, 1);
+			strictEqual(calls.length, 1);
+			strictEqual(calls[0]?.compactionOutcome, fallback ? "committed" : "discarded");
+		});
+	}
+
 	it("manual compaction explains a short conversation with its context usage", async () => {
 		const f = fixture(false, false);
 		f.settings.chat.prewarm = false;

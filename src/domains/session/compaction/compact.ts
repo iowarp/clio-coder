@@ -120,6 +120,8 @@ export interface CompactInput extends SideCallAuth {
 	) => Promise<ProviderCompactionResult>;
 	providerCheckpointSource?: { sessionId: string; archive: string };
 	providerFallbackReason?: string;
+	/** The destination must restore original history instead of replaying the existing native handle (#422). */
+	providerReplayFallback?: boolean;
 	/**
 	 * Memory's substitute for one history slice. `slice` holds the raw ledger
 	 * entries the slice covers, which is what observation batches were prepared

@@ -24,6 +24,7 @@ import { installInternalGitPolicy } from "../core/internal-git.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
 import { pruneProviderCheckpoints } from "../core/provider-checkpoint.js";
+import { providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import { armRestartHandoff } from "../core/restart-handoff.js";
@@ -1553,6 +1554,7 @@ async function runCompactionFlow(
 		CompactInput,
 		| "providerCompaction"
 		| "providerFallbackReason"
+		| "providerReplayFallback"
 		| "keepRecentTokens"
 		| "preserveUserTurnId"
 		| "pendingOperatorTurn"
@@ -1795,12 +1797,23 @@ async function runCompactionFlow(
 				messages: buildModelReplayAgentMessagesFromTurns(history, {
 					...(activeLeafTurnId === undefined ? {} : { activeLeafTurnId }),
 					continuity: continuityContextFromSession(session),
+				}).map((message) => {
+					const checkpoint = providerCheckpointFromMessage(message);
+					if (!checkpoint || checkpoint.replayInputTokens === undefined) return message;
+					// Replay input includes the static prefix and tail. Only native output
+					// prices the opaque contribution on this message-only basis (#422).
+					const { replayInputTokens: _inclusive, ...contribution } = checkpoint;
+					return { ...message, clioProviderCheckpoint: contribution };
 				}),
 			}).messageTokens;
 		// Raw rows include already summarized or evicted bodies. Price both live
 		// projections without stale provider usage anchors before publishing (#422).
-		const replayBefore = replayTokens(entries);
-		const replayAfter = replayTokens([...entries, { ...entry, timestamp: new Date().toISOString() }]);
+		// An unusable native handle is removed by destination replay before the cut (#422).
+		const comparisonEntries = budget?.providerReplayFallback
+			? entries.filter((entry) => entry.kind !== "compactionSummary" || !entry.providerCheckpoint)
+			: entries;
+		const replayBefore = replayTokens(comparisonEntries);
+		const replayAfter = replayTokens([...comparisonEntries, { ...entry, timestamp: new Date().toISOString() }]);
 		if (replayAfter >= replayBefore) {
 			closure.outcome = "discarded";
 			return { ...result, noGain: true };
@@ -1923,6 +1936,7 @@ export function createProductionAutoCompact(
 		CompactInput,
 		| "providerCompaction"
 		| "providerFallbackReason"
+		| "providerReplayFallback"
 		| "keepRecentTokens"
 		| "preserveUserTurnId"
 		| "pendingOperatorTurn"
