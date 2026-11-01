@@ -2114,6 +2114,8 @@ interface AcpReplayFrame {
 
 interface AcpReplayTurn {
 	frames: AcpReplayFrame[];
+	userTurnId?: string;
+	stopReason?: string;
 }
 
 interface PreparedAcpReplay {
@@ -2254,8 +2256,15 @@ function prepareAcpReplay(
 			continue;
 		}
 		if (entry.kind === "custom") {
-			// A ceiling stop is the only custom entry a client needs back: it says why
-			// the turn after it waited or ended, and it sits inside that turn (#424).
+			if (entry.customType === "turnOutcome" && current !== null) {
+				const outcome = payloadRecord(entry.data);
+				if (outcome?.version === 1 && outcome.turnId === current.userTurnId) {
+					if (typeof outcome.stopReason === "string") current.stopReason = mapAcpStopReason(outcome.stopReason);
+					if (payloadRecord(outcome.operator)?.canceled === true) current.stopReason = "cancelled";
+				}
+				continue;
+			}
+			// A ceiling stop says why the turn after it waited or ended (#424).
 			const frame = budgetBlockReplayFrame(entry);
 			if (frame === null || current === null) continue;
 			current.frames.push({ update: frame.update, meta: frame.meta });
@@ -2267,7 +2276,7 @@ function prepareAcpReplay(
 			// Middleware continuations are provider context, not operator authorship.
 			if (payload?.synthetic === true) continue;
 			if (current !== null) closeUnrecordedReplayCalls(ids, current.frames);
-			current = { frames: [] };
+			current = { frames: [], userTurnId: entry.turnId };
 			turns.push(current);
 			const operatorText =
 				typeof payload?.operatorText === "string" ? [payload.operatorText] : replayTextBlocks(entry).text;
@@ -2276,6 +2285,7 @@ function prepareAcpReplay(
 		}
 		if (current === null) continue;
 		if (entry.role === "assistant") {
+			current.stopReason = mapAcpStopReason(payload?.stopReason);
 			const blocks = replayTextBlocks(entry);
 			replayMessageChunks(current.frames, "agent_thought_chunk", blocks.thinking);
 			replayMessageChunks(current.frames, "agent_message_chunk", blocks.text);
@@ -2327,7 +2337,13 @@ function prepareAcpReplay(
 		turn.frames.map((frame) => ({
 			sessionId,
 			update: frame.update,
-			_meta: { [ACP_REPLAY_META_KEY]: { turn: index + 1 }, ...frame.meta },
+			_meta: {
+				[ACP_REPLAY_META_KEY]: {
+					turn: index + 1,
+					...(turn.stopReason !== undefined ? { stopReason: turn.stopReason } : {}),
+				},
+				...frame.meta,
+			},
 		})),
 	);
 	return { params, runs, turns: turns.length, truncated: false };

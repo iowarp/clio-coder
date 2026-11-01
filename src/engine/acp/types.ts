@@ -961,6 +961,7 @@ export interface AcpTurnMeta {
 export interface AcpReplayMeta {
 	turn?: number;
 	run?: boolean;
+	stopReason?: string;
 }
 /** Params of the `_clio-coder/permission/withdraw` notification. */
 export interface AcpPermissionWithdrawParams {

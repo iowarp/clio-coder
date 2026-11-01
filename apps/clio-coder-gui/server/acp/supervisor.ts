@@ -159,6 +159,7 @@ type Entry = {
 	row: ChildRow;
 	turnId: string | null;
 	replay: number | null;
+	replayStopReason?: string;
 	closing: boolean;
 	bound: boolean;
 	permissions?: Permissions;
@@ -609,7 +610,7 @@ export class Supervisor {
 			await entry.client.initialize();
 			const boundId = await entry.client.open(workspace.path, existingId, !resume);
 			delete entry.resuming;
-			if (entry.replay !== null && entry.turnId) this.finish(entry, "end_turn", null, null, null);
+			if (entry.replay !== null && entry.turnId) this.finishReplay(entry);
 			if (resume) await this.restoreChoices(entry, boundId);
 			if (boundId !== id) {
 				if (this.entries.has(boundId))
@@ -847,6 +848,13 @@ export class Supervisor {
 				) === true
 		);
 	}
+	private finishReplay(entry: Entry) {
+		const reason = entry.replayStopReason ?? "end_turn";
+		const problem =
+			reason === "error" ? new AppProblem("upstream_acp", "The recorded turn ended with an error.").problem : null;
+		this.finish(entry, reason, null, problem, null);
+		delete entry.replayStopReason;
+	}
 	private failTurn(entry: Entry, problem: AppProblem) {
 		this.finish(entry, "failed", null, problem.problem, new Date().toISOString());
 	}
@@ -897,10 +905,16 @@ export class Supervisor {
 			});
 		}
 		if (metadataUpdate || entry.resuming) return;
-		const replay = record(meta[ACP_REPLAY_META_KEY]).turn;
+		const replayMeta = record(meta[ACP_REPLAY_META_KEY]);
+		const replay = replayMeta.turn;
 		if (typeof replay === "number" && Number.isInteger(replay) && replay > 0 && replay !== entry.replay) {
-			if (entry.turnId) this.finish(entry, "end_turn", null, null, null);
+			if (entry.turnId) this.finishReplay(entry);
 			entry.replay = replay;
+			entry.replayStopReason =
+				typeof replayMeta.stopReason === "string" &&
+				["end_turn", "cancelled", "error", "refusal", "max_tokens", "max_turn_requests"].includes(replayMeta.stopReason)
+					? replayMeta.stopReason
+					: "end_turn";
 			this.begin(entry, "", "replay", `replay-${replay}`);
 		}
 		if (!entry.turnId) throw new AppProblem("upstream_acp", "ACP update arrived without a turn.");
@@ -1323,7 +1337,7 @@ export class Supervisor {
 			);
 			if (result.leafId !== turnId) throw new AppProblem("upstream_acp", "Clio Coder moved to a different turn.");
 			if (entry.rebase?.mode === "switch" && !entry.rebase.reset) this.resetTimeline(entry);
-			if (entry.replay !== null && entry.turnId) this.finish(entry, "end_turn", null, null, null);
+			if (entry.replay !== null && entry.turnId) this.finishReplay(entry);
 			return { leafId: turnId, replayedTurns: this.snapshot(id).turns.length };
 		} finally {
 			delete entry.rebase;
@@ -1344,7 +1358,7 @@ export class Supervisor {
 			type: "session.telemetry",
 			payload: { resource: nextId, revision: this.revision(nextId), telemetry: entry.client.telemetry },
 		});
-		if (entry.replay !== null && entry.turnId) this.finish(entry, "end_turn", null, null, null);
+		if (entry.replay !== null && entry.turnId) this.finishReplay(entry);
 		await this.children.bind(entry.row, nextId);
 		const options = projectConfigOptions(result.configOptions);
 		if (options !== undefined) {
