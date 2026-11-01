@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { hostname } from "node:os";
 import { test } from "node:test";
 import type { TelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
@@ -468,6 +469,23 @@ test("ACP replay keeps a crashed middleware continuation from reading as Done", 
 	} finally {
 		await crashed.stop();
 		await canceled.stop();
+	}
+});
+
+test("ACP load reopens a crashed session and refuses one whose owner is alive", async () => {
+	const peer = fixture();
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const row = peer.history.find((meta) => meta.id === "session-1");
+		ok(row);
+		const load = { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] };
+		Object.assign(row, { endedAt: null, owner: { pid: process.pid, host: hostname(), birth: null } });
+		await rejects(peer.call("session/load", load), /session may already be open/u);
+		// No process has this pid: the kernel caps pids well below it.
+		Object.assign(row, { owner: { pid: 2 ** 31 - 1, host: hostname(), birth: null } });
+		await peer.call("session/load", load);
+	} finally {
+		await peer.stop();
 	}
 });
 

@@ -96,6 +96,7 @@ import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import type { BashExecutionEntry, MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import { IN_RUN_CONTINUATION_ENTRY } from "../../domains/session/entries.js";
+import { liveSessionOwner } from "../../domains/session/live-owner.js";
 import { OPERATOR_SHELL_TIMEOUT_MS, runOperatorShellLine } from "../../domains/session/operator-shell.js";
 import { resumedSessionRoute } from "../../domains/session/resumed-route.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
@@ -4958,7 +4959,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			canonicalSessionCwd(request.cwd);
 			const clientMcpServers = parseClientMcpServers(request.mcpServers, replayToClient);
 			const stored = workspaceMeta(id);
-			if (stored.endedAt === null) {
+			// A record whose owner is gone crashed, and resuming claims it atomically, as the terminal's /resume does.
+			if (stored.endedAt === null && liveSessionOwner(stored) !== null) {
 				throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
 			}
 			if (
