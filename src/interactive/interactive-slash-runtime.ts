@@ -228,6 +228,7 @@ export interface InteractiveSlashRuntimeDeps {
 	openTree: () => void;
 	openRewind?: () => void;
 	openMessagePicker: () => void;
+	startBranch?: (name?: string) => void;
 	openHelp: (query?: string) => void;
 	openExtensions: () => void;
 	openInterop?: () => void;
@@ -736,6 +737,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openTree: deps.openTree,
 		...(deps.openRewind ? { openRewind: deps.openRewind } : {}),
 		openMessagePicker: deps.openMessagePicker,
+		...(deps.startBranch ? { startBranch: deps.startBranch } : {}),
 		openHelp: deps.openHelp,
 		openExtensions: deps.openExtensions,
 		...(deps.reloadExtensions ? { reloadExtensions: deps.reloadExtensions } : {}),

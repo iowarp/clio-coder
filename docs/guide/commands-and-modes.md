@@ -440,7 +440,8 @@ The registry table below lists every interactive slash command. On a bare `/`, c
 | `/handoff` | `/handoff <goal>` | Hand this session's working state to a fresh session for a stated goal |
 | `/tree` | `/tree` | Open session tree navigator. Press `p` to filter by current cwd, `s` to cycle tree order or most recent first, `e` to label the selected entry, and `Shift+T` to toggle timestamps. |
 | `/rewind` | `/rewind` | Restore workspace files from a snapshot Clio took before its changes; `/tree` rewinds the conversation. See [Undoing file changes with /rewind](#undoing-file-changes-with-rewind). |
-| `/fork` | `/fork` | Fork from an assistant turn |
+| `/branch` | `/branch [name]` | Create and switch to a separate session at the newest assistant turn on the active conversation path, without a picker; optionally name it. Workspace files stay unchanged. |
+| `/fork` | `/fork` | Pick an assistant turn to fork into a separate session. Workspace files stay unchanged. |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
 
 The `/model` selector marks image-capable rows with `V` and spells out `image input yes` or `image input no` in the selected row's details. A completed `/model <pattern>` switch includes the same image-input state in its notice. The expanded dashboard's session capabilities always say `images yes` or `images no` for the active route. These states use the resolved deployment capability.

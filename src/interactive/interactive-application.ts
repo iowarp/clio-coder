@@ -1308,6 +1308,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		openTree: () => openTreeOverlayState(),
 		openRewind: () => openRewindOverlayState(),
 		openMessagePicker: () => openMessagePickerOverlayState(),
+		startBranch: (name) => overlayLifecycle.startBranchState(name),
 		openHelp: (query) => openHelpOverlayState(query),
 		openExtensions: () => openExtensionsOverlayState(),
 		openInterop: () => openInteropOverlayState(),

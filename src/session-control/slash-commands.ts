@@ -242,6 +242,7 @@ type SlashCommandVariant =
 	/** `/rewind`: restore workspace files from a snapshot; `/tree` rewinds the conversation. */
 	| { kind: "rewind" }
 	| { kind: "fork" }
+	| { kind: "branch"; name?: string }
 	| { kind: "compact"; instructions: string | undefined }
 	| { kind: "export"; path: string | undefined }
 	| { kind: "unknown"; text: string }
@@ -950,6 +951,7 @@ export interface SessionCommandContext {
 	/** Open `/rewind`, the workspace snapshot list. Absent on a host with no overlay layer. */
 	openRewind?: () => void;
 	openMessagePicker?: () => void;
+	startBranch?: (name?: string) => void;
 	openHelp?: (query?: string) => void;
 	openExtensions?: () => void;
 	openInterop?: () => void;
@@ -3078,6 +3080,22 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
+		name: "branch",
+		acp: false,
+		description: "Branch at the current conversation point without a picker; optionally name the new session",
+		group: "Session",
+		kinds: ["branch"],
+		args: { positionals: [{ name: "name", required: false, rest: true }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "branch", reason: parsed.error };
+			const name = parsed.rest?.trim();
+			return name ? { kind: "branch", name } : { kind: "branch" };
+		},
+		handle(command, ctx) {
+			if (command.kind === "branch") ctx.startBranch?.(command.name);
+		},
+	},
+	{
 		name: "fork",
 		acp: false,
 		description: "Fork from an assistant turn",
@@ -3427,6 +3445,7 @@ const COMMAND_ORDER = [
 	"resume",
 	"rename",
 	"handoff",
+	"branch",
 	"fork",
 	"tree",
 	"rewind",

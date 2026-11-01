@@ -189,6 +189,7 @@ export interface OverlayLifecycleController {
 	openResumeOverlayState(target?: string): void;
 	openTreeOverlayState(): void;
 	openMessagePickerOverlayState(): void;
+	startBranchState(name?: string): void;
 	openHelpOverlayState(query?: string): void;
 	openSkillsHubState(request?: LibraryOpenRequest | LibraryEntryKind): void;
 	openExtensionsOverlayState(): void;
@@ -641,6 +642,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openResumeOverlayState,
 		openTreeOverlayState,
 		openMessagePickerOverlayState,
+		startBranchState: overlaySessions.startBranch,
 		openHelpOverlayState: overlayResourceOpeners.openHelpOverlayState,
 		openSkillsHubState: overlayResourceOpeners.openSkillsHubState,
 		openExtensionsOverlayState: overlayResourceOpeners.openExtensionsOverlayState,
