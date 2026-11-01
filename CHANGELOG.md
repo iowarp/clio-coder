@@ -4,6 +4,74 @@ Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+## 0.6.7 - 2026-11-01
+
+Clio Coder 0.6.7 makes fleet work finish and sessions recover. The builtin `sdlc` playbook now runs to its three commits: commit steps stage everything git reports as changed since the last commit point against a persisted baseline, each node's task names its step, and one reader serves a verifier's closing report to the contract, the gate and claim grounding. A task worktree commit takes the worker's authored files instead of every untracked byproduct, and an SSH worker on an independent checkout returns its edits again. Sessions can be renamed, resumed by name and branched at the current point (#443, #444). An oversized prompt no longer wedges a session, two resumes can no longer both open a writable ledger, a crashed turn replays as failed instead of Done, and telemetry retention stays inside the state directory. Compaction compares its replay before publishing a result (#422).
+
+### Upgrade notes
+
+- A commit step stages everything git reports as changed since the last commit point and records that point in `commit-baseline.json` beside the run's code-step artifacts, so a resumed run commits against the same point. A run resumed from a release without a baseline stages no changes. A file git ignored at the last commit point stays out even when a worker drops the rule, a required artifact still goes in, and other changes are named in the step's evidence.
+- A task worktree commit no longer runs `git add -A`. It takes changes to tracked files, what the worker staged through the git capability, and the untracked files the run's own successful mutation calls wrote. A run with no complete tool trail still takes every untracked file. Files left out are named as `left_uncommitted` on the dispatch line and in the run result's worktree.
+- `clio-coder fleet land` lands every untracked file of a kept worktree when no write record survives, and keeps the byproducts a settled run already reported as left out. Its JSON plan lists the left-out paths and its stdout holds only the plan.
+- `make clean` is now a recognized command, alone or leading a chain such as `make clean && make test`, so a worker runs it unattended. It takes no arguments, an attended main session at `default` asks once before it as for a test runner, and it never counts as validation.
+- An OpenAI-compatible completion stream that ends without a finish reason is now an error that keeps the partial response, instead of a successful stop.
+
+### Sessions
+
+- `/rename [name]` saves a name for the session without changing its id, conversation or route. Bare `/rename` proposes one locally from the conversation and saves only after confirmation. `/resume` accepts an exact name after exact ids and id prefixes, and names survive forks and editor input (#443).
+- `/branch [name]` creates and switches to a separate session at the newest assistant turn on the active path, without a picker. Quoted branch names resolve in `/resume` (#444).
+- A prompt the server refused for size replays under the 20,000 character cap, live and after reopening, so one oversized request no longer ends the session. Only a prompt no answer has shown to fit is bounded, so a prompt the server took keeps its exact bytes and its cached prefix, and an abort does not count as an answer.
+- Waiters on a stale session lock reclaim it under an exclusive guard, and a resume claims its writer atomically, so two resumes cannot both open a writable ledger.
+- A side question that reaches for a tool retries with a no-tools instruction.
+- The fork picker gives its width to the turn preview, and settled compaction progress is hidden only when a card replaces it.
+
+### Context
+
+- Compaction prices both live projections and compares the replay before publishing its result, and native checkpoint gain estimates count only native output (#422).
+- `clio-coder context map` saves the fingerprint of the index it reconciled, so `clio-coder context` no longer reads stale right after it.
+
+### Dispatch and fleet
+
+- A run seals before its terminal event, so a worker card and an ACP frame show the sealed record. Before this, every live card read `seal unchecked` and `no validation observed` even when the run was sealed and its validation grounded.
+- At `yolo`, a task worker's writes outside its worktree are named on the run's worktree detail, because they reach no branch.
+- Each playbook node's task names its step. Left to the persona, a documenter read the documentation step as someone else's job and committed nothing, and a verifier and a coder took up the plan, which is why `sdlc` so rarely finished.
+- A verifier that reasons before a closing report passes the review gate, fenced or pretty-printed, and a second report leaves the answer unreadable, so a quoted earlier pass cannot outrank a closing fail. Claim grounding and the run summary read that same report, so a claimed check with no command behind it no longer seals as measured.
+- A worker dropping a `.gitignore` rule no longer commits the untouched `.env` behind it, and `git rm --cached` of a now ignored file commits the deletion instead of re-adding the new content.
+- An SSH worker on an independent checkout returns its edits again: `GIT_SSH_COMMAND` no longer passes the host twice. The node's commit follows the same authored-file rule, and its leftovers join the run's left-uncommitted report.
+- A compete candidate's left-out files are reported the same way. Destructive cleanup refuses untracked directories, and a forced removal after a merge card refuses once an untracked file appeared, vanished or changed since the preview. Worktrees holding unaccounted changes are preserved.
+- A refused landing or one that kept its worktree no longer leaves its claim on the old commit, so a retry keeps its exclusions.
+- The compact dispatch schema requires the assignment first, because a local server's grammar fixes property order and a model that opened with an option could never reach an optional task. A one-item batch repeating the assignment reads as that run, and the refusal for a real conflict says how to repair the call. The coder's report shape shows `commitMessage`, and a requested `apply` is no longer dropped.
+- Task workers are told the boundary of their worktree, so approved memory naming the checkout no longer sends them to the operator's tree, and a write spelling the workspace without its leading slash or aimed outside it is refused with the root named. A merge of a branch at its base says nothing merged.
+- A required architect artifact can be written inside a worker sandbox. A locked synthesis round follows the worker's response limit instead of stopping at 120 seconds.
+- `clio-coder playbook commands init` drafts the registry with this host's Python and says which ids the builtin playbooks run.
+
+### Tools and safety
+
+- A named load of an installed plugin's skill says it needs trust when the plugin is not approved, including a member the plugin did not declare, instead of calling it unknown.
+- A task-worktree worker is told which of its files the host commits, and the secret-flag redactor no longer eats the word after `operator-authority`.
+
+### Telemetry
+
+- A share archive and telemetry objects redact an opaque `Authorization` credential, which matched no value pattern before.
+- Retention and prune deletes prove containment inside the state directory after their last await, including automatic run retention.
+- A fresh TUI binds the live read model when its session is created, so `/usage` and `/health` read the session from its first submit. `/usage` lists a session's recorded worker runs after resume, and the read model exposes the agent and route a referenced run was enqueued under.
+- A failed run keeps its observed validation. Seal mismatches detail skipped records and name a seal record that does not decode, process birth tokens no longer count as redacted secrets, and bare archive resolution applies only to `verify`.
+
+### ACP
+
+- `session/load` and `session/resume` reopen a crashed session, one whose recorded owner has exited, through the same atomic claim as the terminal's `/resume`. A live or remote owner still fails `session_open`, and `session/delete` still refuses any unended record.
+- A terminal fleet frame's `clio-coder/run-result` reports the run's sealed trust and validation.
+- A replayed turn with no terminal outcome reads as failed. A middleware continuation reopens the replayed turn whether it was resubmitted or delivered in the same run, so a crash in the follow-up no longer replays as Done.
+- `initialize` advertises telemetry, jobs and the ceiling from the deferred front, and context startup hints arrive as operator notices.
+
+### Desktop app
+
+- A replayed session keeps its stopped turns, and the launcher preserves a command's exit status.
+
+### Doctor
+
+- Doctor leads with the causes of its sandbox warnings and groups worktrees.
+
 ## 0.6.6 - 2026-10-31
 
 Clio Coder 0.6.6 rebuilds telemetry as one system: one `telemetry` namespace, one event registry and hub, and journals per process, session and run under `<stateDir>/telemetry/` (#434). Every record names the acting agent, every journal is hash-chained, and a sealed scope directory is a self-contained bundle that `clio-coder telemetry verify` can check on another machine. `clio-coder telemetry share` prepares a redacted archive with a content-free, structural or research profile, and `telemetry import` verifies it into a separate namespace. Every TUI, CLI, ACP and desktop app usage figure comes from the same read model, with measured, estimated and unknown values kept distinct. Sealed run records replace receipt files, and journaled assessments replace the evidence directory. A hosted prompt cache stays warm while a turn waits on its tools (#423), a session cost ceiling stop reaches ACP clients and the desktop app with the raise that clears it (#424), and `clio-coder fleet land` lands the task branches a run kept. `@path` references inline only text Clio can bound (#438), workers refresh a rejected OAuth token (#427), gateway memory targets no longer derive a relevance engine (#429), and the ACP registry's auth check passes (#418). The desktop app opens on a desk of every project's sessions, explains usage from the number itself and shows session timelines and run replay. The Pi SDK moves to 1.4.0, and Clio names itself to providers and on its own sign-in pages.
