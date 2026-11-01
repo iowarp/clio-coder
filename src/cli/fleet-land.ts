@@ -69,8 +69,10 @@ export async function runFleetLand(args: ReadonlyArray<string>): Promise<number>
 		const root = cwd;
 		const plan = planTaskLand({ root, ref, mode, ...withParents(parentsFor(root)) });
 		if (flags.has("--json")) {
-			const { worktree, ...rest } = plan;
-			process.stdout.write(`${JSON.stringify({ ...rest, worktree: worktree?.path ?? null }, null, 2)}\n`);
+			const { worktree, leftOut, ...rest } = plan;
+			process.stdout.write(
+				`${JSON.stringify({ ...rest, worktree: worktree?.path ?? null, leftOut: [...leftOut.keys()] }, null, 2)}\n`,
+			);
 		} else {
 			const how = plan.alreadyLanded
 				? "already landed"
@@ -98,8 +100,10 @@ export async function runFleetLand(args: ReadonlyArray<string>): Promise<number>
 			);
 			return 1;
 		}
+		// With --json, stdout holds only the plan so a caller can parse it.
+		const notes = flags.has("--json") ? process.stderr : process.stdout;
 		if (!flags.has("--yes")) {
-			process.stdout.write(
+			notes.write(
 				`Land it: clio-coder fleet land ${plan.runId} --yes --plan ${plan.planId}${mode === "squash" ? " --squash" : ""}\n`,
 			);
 			return 0;
@@ -109,7 +113,7 @@ export async function runFleetLand(args: ReadonlyArray<string>): Promise<number>
 			...(message !== undefined ? { message } : {}),
 			keep: flags.has("--keep"),
 		});
-		process.stdout.write(
+		notes.write(
 			`${result.landed !== null ? `Landed ${result.landed.slice(0, 9)} on ${plan.destination}` : `Nothing new to land on ${plan.destination}`}; ${result.detail}.\n`,
 		);
 		return 0;

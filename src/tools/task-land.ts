@@ -28,6 +28,7 @@ import {
 	listPreservedTaskWorktrees,
 	loadKeptTaskWorktree,
 	mergeDestination,
+	recordTaskWorktreeAccounted,
 	type TaskWorktree,
 	type TaskWorktreeState,
 } from "./task-worktree.js";
@@ -312,6 +313,7 @@ export function executeTaskLand(
 			authoredPaths: landedUntrackedPaths(plan.worktree.path, plan.leftOut),
 		});
 		source = git(plan.root, ["rev-parse", "--verify", "--end-of-options", `refs/heads/${plan.branch}^{commit}`]);
+		recordTaskWorktreeAccounted(plan.worktree, { commit: source, untracked: plan.leftOut });
 		if (git(plan.root, ["rev-parse", `${source}^{tree}`]) !== plan.sourceTree)
 			throw new Error(
 				`the worktree changed since it was planned; its work is now committed on ${plan.branch} and nothing landed`,

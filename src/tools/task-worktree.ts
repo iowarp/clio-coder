@@ -1202,7 +1202,7 @@ export function cleanupAccountedTaskWorktree(
 	assertOwnership(worktree);
 	const drift = taskWorktreePreviewDrift(worktree, accounted);
 	if (drift === null) cleanupTaskWorktree(worktree, true);
-	else settleTaskWorktree(worktree);
+	else settleTaskWorktree(worktree, accounted);
 	return drift;
 }
 
@@ -1325,10 +1325,25 @@ export function settleTaskWorktree(worktree: TaskWorktree, accounted?: TaskWorkt
 	replaceMarker(ownerPath, {
 		...marker,
 		state: "settled" satisfies TaskWorktreeState,
-		...(accounted !== undefined
-			? { accounted: { commit: accounted.commit, untracked: Object.fromEntries(accounted.untracked) } }
-			: {}),
+		...(accounted !== undefined ? accountedField(accounted) : {}),
 	});
+}
+
+function accountedField(accounted: TaskWorktreePreview): { accounted: { commit: string; untracked: object } } {
+	return { accounted: { commit: accounted.commit, untracked: Object.fromEntries(accounted.untracked) } };
+}
+
+/**
+ * Move a kept worktree's record onto a commit a landing just made. The landing
+ * can still be refused or keep the worktree, and a retry against the old commit
+ * would read the left-out files as never accounted for and land them.
+ */
+export function recordTaskWorktreeAccounted(worktree: TaskWorktree, accounted: TaskWorktreePreview): void {
+	assertOwnership(worktree);
+	const ownerPath = claimPathFor(worktree.root, worktree.runId);
+	const marker = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown>;
+	if (marker.version !== 2) return;
+	replaceMarker(ownerPath, { ...marker, ...accountedField(accounted) });
 }
 
 /** The snapshot a settled claim recorded; anything malformed reads as no record, which lands every untracked file. */
