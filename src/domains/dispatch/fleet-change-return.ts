@@ -167,7 +167,8 @@ export async function importFleetChanges(
 	const { node, worktree: w } = input;
 	const imported = await remoteCommit(input, authoredPaths);
 	const { commit } = imported;
-	const sshOptions = buildSshArgs(node, "").slice(0, -2);
+	// Drops the host, `--` and the empty command: git supplies its own host and remote command to GIT_SSH_COMMAND.
+	const sshOptions = buildSshArgs(node, "").slice(0, -3);
 	const endpoint = `${node.user ? `${node.user}@` : ""}${node.host.includes(":") ? `[${node.host}]` : node.host}:${w.root}`;
 	const fetchedRef = `refs/clio-coder/remote/${w.runId}`;
 	await git(

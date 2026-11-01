@@ -48,7 +48,12 @@ describe("SSH task change return", () => {
 			`#!/usr/bin/env node
 const fs=require('node:fs'),cp=require('node:child_process');
 const client=${JSON.stringify(client)},server=${JSON.stringify(server)};
-const command=process.argv.at(-1).split(client).join(server);
+// Parsed as real ssh does: options, one host, then everything left is the remote command.
+const words=process.argv.slice(2);
+for(;;){if(['-o','-p','-i','-l'].includes(words[0]))words.splice(0,2);else if(words[0]==='-T')words.shift();else break;}
+words.shift();
+if(words[0]==='--')words.shift();
+const command=words.join(' ').split(client).join(server);
 const operation=command.startsWith('node -e ');
 const options={stdio:operation?['pipe','inherit','inherit']:'inherit'};
 if(operation)options.input=fs.readFileSync(0,'utf8').split(client).join(server);
