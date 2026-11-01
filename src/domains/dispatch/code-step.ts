@@ -236,6 +236,7 @@ export function workspaceHasChanges(root: string): boolean {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 30_000,
+		maxBuffer: 64 * 1024 * 1024,
 	});
 	return status.trim().length > 0;
 }
@@ -244,6 +245,8 @@ export interface WorkspaceChangeSnapshot {
 	checkout: CheckoutSnapshot;
 	/** The workspace's path below the checkout top level, "" or ending in "/". */
 	prefix: string;
+	/** What git ignored under the workspace at a commit point, relative to it, a wholly ignored directory as `dir/`. */
+	ignored?: ReadonlyArray<string>;
 }
 
 /**
@@ -265,6 +268,26 @@ export function workspaceChangeSnapshot(root: string): WorkspaceChangeSnapshot |
 	return { checkout, prefix: prefix === "" ? "" : `${prefix.split(sep).join("/")}/` };
 }
 
+/**
+ * A commit point's snapshot. It also records what git ignored then, because a file that only stops being ignored did not
+ * change: a worker dropping a .gitignore rule must not commit the pre-existing .env behind it. Null like the snapshot.
+ */
+export function commitPointSnapshot(root: string): WorkspaceChangeSnapshot | null {
+	const snapshot = workspaceChangeSnapshot(root);
+	if (snapshot === null) return null;
+	try {
+		const ignored = execFileSync(
+			"git",
+			internalGitArgv(["-C", root, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"]),
+			{ encoding: "utf8", timeout: 30_000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] },
+		);
+		return { ...snapshot, ignored: ignored.split("\0").filter((path) => path.length > 0) };
+	} catch {
+		// Null stages no changes, the same answer as a status git could not report.
+		return null;
+	}
+}
+
 /** Changed paths inside the workspace, relative to it, as later checks resolve them. */
 export function workspaceChangedPaths(before: WorkspaceChangeSnapshot, after: WorkspaceChangeSnapshot): string[] {
 	if (before.prefix !== after.prefix) return [];
@@ -282,10 +305,10 @@ const COMMIT_BASELINE_FILE = "commit-baseline.json";
 
 /** Durable so a resumed run in a new process commits against the same point. */
 export function writeCommitBaseline(dir: string, snapshot: WorkspaceChangeSnapshot): void {
-	const { checkout, prefix } = snapshot;
+	const { checkout, prefix, ignored } = snapshot;
 	safeResourceWrite(
 		join(dir, COMMIT_BASELINE_FILE),
-		JSON.stringify({ root: checkout.root, prefix, paths: [...checkout.paths] }),
+		JSON.stringify({ root: checkout.root, prefix, paths: [...checkout.paths], ignored: ignored ?? [] }),
 	);
 }
 
@@ -295,11 +318,42 @@ export function readCommitBaseline(dir: string): WorkspaceChangeSnapshot | null 
 			root: string;
 			prefix: string;
 			paths: Array<[string, string]>;
+			ignored?: string[];
 		};
-		return { checkout: { root: record.root, paths: new Map(record.paths) }, prefix: record.prefix };
+		return {
+			checkout: { root: record.root, paths: new Map(record.paths) },
+			prefix: record.prefix,
+			...(record.ignored !== undefined ? { ignored: record.ignored } : {}),
+		};
 	} catch {
 		// Absent for a run that predates baselines or died before writing one; the caller stages no changes.
 		return null;
+	}
+}
+
+function ignoredAt(baseline: WorkspaceChangeSnapshot | null): (path: string) => boolean {
+	const entries = baseline?.ignored ?? [];
+	const files = new Set(entries.filter((entry) => !entry.endsWith("/")));
+	const directories = entries.filter((entry) => entry.endsWith("/"));
+	return (path) => files.has(path) || directories.some((directory) => path.startsWith(directory));
+}
+
+/** The paths git ignores now. It consults the index, so a tracked file never reads as ignored. */
+function ignoredNow(root: string, paths: ReadonlyArray<string>): ReadonlySet<string> {
+	if (paths.length === 0) return new Set();
+	try {
+		const out = execFileSync("git", internalGitArgv(["-C", root, "check-ignore", "-z", "--stdin"]), {
+			input: `${paths.join("\0")}\0`,
+			encoding: "utf8",
+			timeout: 30_000,
+			maxBuffer: 64 * 1024 * 1024,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		return new Set(out.split("\0").filter((path) => path.length > 0));
+	} catch (err) {
+		// Exit 1 is git's answer for "none of them"; anything else is a real failure.
+		if ((err as { status?: number }).status === 1) return new Set();
+		throw err;
 	}
 }
 
@@ -315,7 +369,12 @@ function stageCommitOutputs(root: string, stage: CommitStage): CommitStageResult
 	const visibleNow = new Set(visible);
 	const produced = stage.baseline === null ? [] : workspaceChangedPaths(stage.baseline, now);
 	// An untracked embedded repository lists as `dir/`, which only `git add` can record; it stays out and is named.
-	const staged = produced.filter((path) => visibleNow.has(path) && !path.endsWith("/"));
+	const wasIgnored = ignoredAt(stage.baseline);
+	const candidates = produced.filter((path) => visibleNow.has(path) && !path.endsWith("/") && !wasIgnored(path));
+	// `git rm --cached` of a file now ignored shows as a staged deletion with the file still on disk. Taking it through
+	// update-index would re-add that content, so the deletion stays as staged and the commit records it.
+	const ignored = ignoredNow(root, candidates);
+	const staged = candidates.filter((path) => !ignored.has(path));
 	// update-index takes a path that is new, edited, deleted or already staged alike, where `git add -A` refuses a
 	// staged deletion as an unmatched pathspec. --replace lets a file take the place of a directory, and the reverse.
 	const paths = [...staged, ...stage.artifacts];
@@ -330,23 +389,26 @@ function stageCommitOutputs(root: string, stage: CommitStage): CommitStageResult
 			},
 		);
 	}
-	const inIndex = new Set(
-		execFileSync(
-			"git",
-			internalGitArgv(["-C", root, "diff", "--cached", "--no-renames", "--name-only", "--relative", "-z"]),
-			{
-				encoding: "utf8",
-				timeout: 30_000,
-				maxBuffer: 16 * 1024 * 1024,
-				stdio: ["ignore", "pipe", "pipe"],
-			},
-		).split("\0"),
-	);
-	inIndex.delete("");
+	// Not --relative: a bare `git commit` records staged paths outside a subdirectory workspace too.
+	const index = execFileSync(
+		"git",
+		internalGitArgv(["-C", root, "diff", "--cached", "--no-renames", "--name-only", "-z"]),
+		{
+			encoding: "utf8",
+			timeout: 30_000,
+			maxBuffer: 16 * 1024 * 1024,
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	)
+		.split("\0")
+		.filter((path) => path.length > 0);
+	const inside = index.filter((path) => path.startsWith(now.prefix)).map((path) => path.slice(now.prefix.length));
+	const outside = index.filter((path) => !path.startsWith(now.prefix));
+	const inIndex = new Set(inside);
 	const ours = new Set(paths);
 	return {
 		leftOut: visible.filter((path) => !inIndex.has(path)),
-		alreadyStaged: [...inIndex].filter((path) => !ours.has(path)),
+		alreadyStaged: [...inside.filter((path) => !ours.has(path)), ...outside],
 	};
 }
 
@@ -356,7 +418,9 @@ function stagingNotes({ leftOut, alreadyStaged }: CommitStageResult): string[] {
 		...(leftOut.length > 0 ? [`${leftOut.length} other change(s) left out of this commit: ${named(leftOut)}`] : []),
 		// A bare `git commit` records the whole index, so what was staged before this step goes with it.
 		...(alreadyStaged.length > 0
-			? [`${alreadyStaged.length} change(s) already staged went into this commit: ${named(alreadyStaged)}`]
+			? [
+					`${alreadyStaged.length} change(s) were staged before this step, and a commit records them too: ${named(alreadyStaged)}`,
+				]
 			: []),
 	];
 }
@@ -509,7 +573,14 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 			stageFailure = `could not stage the commit: ${err instanceof Error ? err.message : String(err)}`;
 		}
 	}
-	const emptyWorkspace = stageFailure === null && input.requireWorkspaceChanges === true && !workspaceHasChanges(cwd);
+	let emptyWorkspace = false;
+	if (stageFailure === null && input.requireWorkspaceChanges === true) {
+		try {
+			emptyWorkspace = !workspaceHasChanges(cwd);
+		} catch (err) {
+			stageFailure = `could not read the workspace status: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	}
 	const refusal = stageFailure ?? (emptyWorkspace ? CODE_STEP_EMPTY_DIFF_MESSAGE : null);
 	let spawned =
 		refusal !== null

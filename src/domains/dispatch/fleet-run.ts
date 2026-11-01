@@ -42,6 +42,7 @@ import {
 	type CodeStepRecord,
 	type CodeStepRunInput,
 	codeStepDir,
+	commitPointSnapshot,
 	newCodeRunId,
 	preflightCodeStep,
 	readCommitBaseline,
@@ -736,7 +737,7 @@ async function runFleetHoldingWorkspace(
 		? null
 		: input.resume !== undefined
 			? readCommitBaseline(codeStepDir(input.resume.record.id))
-			: workspaceChangeSnapshot(workspaceRoot);
+			: commitPointSnapshot(workspaceRoot);
 	if (commitBaseline !== null) writeCommitBaseline(codeStepDir(fleetRootId), commitBaseline);
 
 	// The journal opens only here, after the last await outside the scheduler's
@@ -1195,7 +1196,7 @@ async function runFleetHoldingWorkspace(
 					);
 				}
 				if (isCommit && outcome.report.passed) {
-					commitBaseline = workspaceChangeSnapshot(workspaceRoot);
+					commitBaseline = commitPointSnapshot(workspaceRoot);
 					if (commitBaseline !== null) writeCommitBaseline(codeStepDir(fleetRootId), commitBaseline);
 				}
 				if (step.verification === true) validationFresh = outcome.report.passed;

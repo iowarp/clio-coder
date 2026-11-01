@@ -7,6 +7,7 @@ import { afterEach, it } from "node:test";
 import {
 	CODE_STEP_CAPTURE_MAX_BYTES,
 	CODE_STEP_EXCERPT_MAX_BYTES,
+	commitPointSnapshot,
 	readCommitBaseline,
 	runCodeStep,
 	workspaceChangeSnapshot,
@@ -98,6 +99,48 @@ it("fails the check when a newly reported test fails outside the declared suite"
 	const fallback = await runCodeStep({ ...input, mutatedPaths: ["repro.test.unknown"] });
 	strictEqual(fallback.report.passed, true);
 	match(fallback.report.outputExcerpt, /no recognizable project runner.*declared check only/u);
+});
+
+it("commits neither a file that only stopped being ignored nor a rewrite behind a staged deletion", async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-commit-ignored-"));
+	roots.push(root);
+	const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
+	git("init", "-q");
+	git("config", "user.name", "Contract");
+	git("config", "user.email", "contract@example.invalid");
+	writeFileSync(join(root, ".gitignore"), ".env\n");
+	writeFileSync(join(root, "tracked.env"), "OLD=canary\n");
+	git("add", ".");
+	git("commit", "-qm", "base");
+	writeFileSync(join(root, ".env"), "PRE_EXISTING_SECRET=canary\n");
+	const artifactDir = join(root, ".git", "code-step");
+	const before = commitPointSnapshot(root);
+	if (before === null) throw new Error("the fixture is a git workspace");
+	writeCommitBaseline(artifactDir, before);
+	writeFileSync(join(root, ".gitignore"), "tracked.env\n");
+	git("rm", "-q", "--cached", "tracked.env");
+	writeFileSync(join(root, "tracked.env"), "NEW_SECRET=canary\n");
+	writeFileSync(join(root, "work.c"), "edited\n");
+	const outcome = await runCodeStep({
+		command: {
+			id: "commit",
+			argv: ["git", "commit", "-m", "{{commitMessage}}"],
+			cwd: "",
+			timeoutMs: 10_000,
+			env: [],
+			description: "Local commit fixture",
+		},
+		stepId: "commit-code",
+		workspaceRoot: root,
+		artifactDir,
+		substitutions: { commitMessage: "record the work" },
+		requireWorkspaceChanges: true,
+		stage: { baseline: readCommitBaseline(artifactDir), artifacts: [] },
+	});
+	strictEqual(outcome.report.passed, true, outcome.report.checks[0]?.evidence);
+	strictEqual(git("show", "--name-status", "--format=", "HEAD"), "M\t.gitignore\nD\ttracked.env\nA\twork.c\n");
+	strictEqual(git("status", "--porcelain"), "?? .env\n");
+	match(outcome.report.checks[0]?.evidence ?? "", /1 other change\(s\) left out of this commit: \.env/);
 });
 
 it("stages everything since the last commit point, including an ignored required artifact", async () => {
