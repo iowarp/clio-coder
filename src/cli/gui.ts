@@ -67,7 +67,7 @@ export async function runGuiCommand(args: string[]): Promise<number> {
 		// would change import.meta.url and the worker/client paths beside it.
 		const server = await import(pathToFileURL(entry).href);
 		await server.main(args);
-		return 0;
+		return Number(process.exitCode ?? 0);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : "Could not start the graphical application.");
 		return 1;
