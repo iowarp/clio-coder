@@ -1,5 +1,6 @@
 import { match, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
@@ -94,4 +95,50 @@ it("fails the check when a newly reported test fails outside the declared suite"
 	const fallback = await runCodeStep({ ...input, mutatedPaths: ["repro.test.unknown"] });
 	strictEqual(fallback.report.passed, true);
 	match(fallback.report.outputExcerpt, /no recognizable project runner.*declared check only/u);
+});
+
+it("stages only a commit's source outputs, including an ignored required artifact", async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-commit-stage-"));
+	roots.push(root);
+	const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
+	git("init", "-q");
+	git("config", "user.name", "Contract");
+	git("config", "user.email", "contract@example.invalid");
+	writeFileSync(join(root, ".gitignore"), ".clio-coder/\n");
+	writeFileSync(join(root, "calc.c"), "base\n");
+	writeFileSync(join(root, "gone.c"), "base\n");
+	git("add", ".");
+	git("commit", "-qm", "base");
+	mkdirSync(join(root, ".clio-coder", "artifacts"), { recursive: true });
+	writeFileSync(join(root, ".clio-coder", "artifacts", "PLAN.md"), "plan\n");
+	writeFileSync(join(root, "calc.c"), "edited\n");
+	writeFileSync(join(root, "new file.c"), "new\n");
+	rmSync(join(root, "gone.c"));
+	writeFileSync(join(root, "operator-scratch.txt"), "not this run's\n");
+	const outcome = await runCodeStep({
+		command: {
+			id: "commit",
+			argv: ["git", "commit", "-m", "{{commitMessage}}"],
+			cwd: "",
+			timeoutMs: 10_000,
+			env: [],
+			description: "Local commit fixture",
+		},
+		stepId: "commit-code",
+		workspaceRoot: root,
+		artifactDir: join(root, ".git", "code-step"),
+		substitutions: { commitMessage: "record the work" },
+		requireWorkspaceChanges: true,
+		stage: {
+			paths: ["calc.c", "./new file.c", "gone.c", "declared-but-unchanged.c"],
+			artifacts: [".clio-coder/artifacts/PLAN.md"],
+		},
+	});
+	strictEqual(outcome.report.passed, true);
+	strictEqual(
+		git("show", "--name-status", "--format=", "HEAD"),
+		"A\t.clio-coder/artifacts/PLAN.md\nM\tcalc.c\nD\tgone.c\nA\tnew file.c\n",
+	);
+	strictEqual(git("status", "--porcelain"), "?? operator-scratch.txt\n");
+	match(outcome.report.checks[0]?.evidence ?? "", /1 other change\(s\) left out of this commit: operator-scratch\.txt/);
 });

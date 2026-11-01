@@ -49,6 +49,17 @@ export const CODE_STEP_SPAWN_FAILURE_EXIT_CODE = 127;
 export const CODE_STEP_EMPTY_DIFF_EXIT_CODE = 125;
 export const CODE_STEP_EMPTY_DIFF_MESSAGE = "nothing to commit: the workspace has no changes to record";
 
+/**
+ * The registered commit command is a bare `git commit` and the workers who made the work never run git, so code stages
+ * it. Only the fleet knows which paths belong to which author, so a repository wrapper around `git add -A` could not.
+ */
+export interface CommitStage {
+	/** Workspace-relative paths the commit's source steps produced. Only a git-visible change among them is staged. */
+	paths: ReadonlyArray<string>;
+	/** A required artifact of a source step, staged even when the repository ignores it. */
+	artifacts: ReadonlyArray<string>;
+}
+
 export const CODE_STEP_TRUNCATION_MARKER = "\n[... output truncated, see artifact ...]\n";
 
 export interface CodeStepRunInput {
@@ -83,6 +94,8 @@ export interface CodeStepRunInput {
 	 * a failure, not a no-op: it means the step it describes produced nothing.
 	 */
 	requireWorkspaceChanges?: boolean;
+	/** What a commit step records, staged before the empty-tree check and the registered command. */
+	stage?: CommitStage;
 	/** Trusted attribution facts for a commit command; omitted uses Clio-authored child-process defaults. */
 	commitAttribution?: {
 		enabled: boolean;
@@ -257,6 +270,33 @@ export function workspaceChangedPaths(before: WorkspaceChangeSnapshot, after: Wo
 		.map((path) => path.slice(before.prefix.length));
 }
 
+/** Stage a commit's outputs and return the other changes that stay out of it. */
+function stageCommitOutputs(root: string, stage: CommitStage): string[] {
+	const snapshot = workspaceChangeSnapshot(root);
+	if (snapshot === null) throw new Error("git could not report the workspace status");
+	const produced = new Set(stage.paths.map((path) => relative(root, resolve(root, path)).split(sep).join("/")));
+	const changed = [...snapshot.checkout.paths.keys()]
+		.filter((path) => path.startsWith(snapshot.prefix))
+		.map((path) => path.slice(snapshot.prefix.length));
+	const staged = changed.filter((path) => produced.has(path));
+	const git = (args: ReadonlyArray<string>, input?: string) =>
+		execFileSync("git", internalGitArgv(["-C", root, "--literal-pathspecs", "add", ...args]), {
+			...(input !== undefined ? { input } : {}),
+			timeout: 30_000,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+	// Fed through stdin so a large change set cannot outrun the platform's argv limit.
+	if (staged.length > 0) git(["-A", "--pathspec-from-file=-", "--pathspec-file-nul"], staged.join("\0"));
+	if (stage.artifacts.length > 0) git(["-f", "--", ...stage.artifacts]);
+	return changed.filter((path) => !produced.has(path) && !stage.artifacts.includes(path));
+}
+
+function unstagedNote(paths: ReadonlyArray<string>): string[] {
+	if (paths.length === 0) return [];
+	const named = paths.slice(0, 5).join(", ");
+	return [`${paths.length} other change(s) left out of this commit: ${named}${paths.length > 5 ? ", ..." : ""}`];
+}
+
 export function newCodeRunId(): string {
 	return `code-${createHash("sha256")
 		.update(`${process.pid}:${Date.now()}:${Math.random()}`)
@@ -396,26 +436,35 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	const startedAtMs = Date.now();
 	const clock = process.hrtime.bigint();
 	const startedAt = new Date(startedAtMs).toISOString();
-	const emptyWorkspace = input.requireWorkspaceChanges === true && !workspaceHasChanges(cwd);
-	let spawned = emptyWorkspace
-		? {
-				exitCode: CODE_STEP_EMPTY_DIFF_EXIT_CODE,
-				signal: null,
-				timedOut: false,
-				captured: Buffer.from(`${CODE_STEP_EMPTY_DIFF_MESSAGE}\n`, "utf8"),
-				stdout: Buffer.alloc(0),
-				outputBytes: 0,
-				spawnError: null,
-			}
-		: await spawnCommand(input, cwd, argv);
+	let stageFailure: string | null = null;
+	let notes = input.notes ?? [];
+	if (input.stage !== undefined) {
+		try {
+			notes = [...notes, ...unstagedNote(stageCommitOutputs(input.workspaceRoot, input.stage))];
+		} catch (err) {
+			stageFailure = `could not stage the commit: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	}
+	const emptyWorkspace = stageFailure === null && input.requireWorkspaceChanges === true && !workspaceHasChanges(cwd);
+	const refusal = stageFailure ?? (emptyWorkspace ? CODE_STEP_EMPTY_DIFF_MESSAGE : null);
+	let spawned =
+		refusal !== null
+			? {
+					exitCode: stageFailure !== null ? 1 : CODE_STEP_EMPTY_DIFF_EXIT_CODE,
+					signal: null,
+					timedOut: false,
+					captured: Buffer.from(`${refusal}\n`, "utf8"),
+					stdout: Buffer.alloc(0),
+					outputBytes: 0,
+					spawnError: null,
+				}
+			: await spawnCommand(input, cwd, argv);
 	const primaryDurationMs = Number((process.hrtime.bigint() - clock) / 1_000_000n);
 	const primaryEvidence =
-		(emptyWorkspace
-			? CODE_STEP_EMPTY_DIFF_MESSAGE
-			: spawned.timedOut
+		(refusal ??
+			(spawned.timedOut
 				? `timed out after ${command.timeoutMs}ms (exit ${spawned.exitCode})`
-				: `exit ${spawned.exitCode} in ${primaryDurationMs}ms`) +
-		(input.notes?.length ? `; ${input.notes.join("; ")}` : "");
+				: `exit ${spawned.exitCode} in ${primaryDurationMs}ms`)) + (notes.length > 0 ? `; ${notes.join("; ")}` : "");
 	const checks = [
 		{
 			name: command.id,
