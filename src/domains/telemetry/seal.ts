@@ -227,7 +227,7 @@ export interface ChainWalk {
 	/** Each walked segment's name, sha256 and size. */
 	segments: ScopeFileEntry[];
 	/** Lines the reader skipped, by record id when the line names one, so a verdict can say a record is present. */
-	skipped: Map<string, { k: string; reason: string }>;
+	skipped: Map<string, { k?: string; reason: string; position: number }>;
 }
 
 const SEAL_KINDS: ReadonlySet<string> = new Set([...Object.values(SEAL_EVENTS), SHARE_SEAL_EVENT]);
@@ -265,7 +265,7 @@ export function walkTelemetryChain(
 		bytes: bytes.length,
 	}));
 	let tipIsSeal = false;
-	const skipped = new Map<string, { k: string; reason: string }>();
+	const skipped: ChainWalk["skipped"] = new Map();
 	for (const [index, segment] of files.entries()) {
 		const scan = scanTelemetrySegment(segment.bytes);
 		if (scan.corruptOffset !== null || scan.tornTailBytes > 0 || scan.validBytes !== segment.bytes.length)
@@ -297,7 +297,7 @@ export function walkTelemetryChain(
 			if (row.kind === "skipped") {
 				// Only the id and kind are read back; the record stays skipped (#434).
 				const named = skippedLineIdentity(segment.bytes.subarray(offset, end - 10));
-				if (named) skipped.set(named.id, { k: named.k, reason: row.reason });
+				if (named) skipped.set(named.id, { ...named, reason: row.reason, position: chain.lines });
 			}
 			const sealRow = row.kind === "record" && SEAL_KINDS.has(row.record.k) ? row.record : null;
 			if (sealRow) {
@@ -339,10 +339,10 @@ export function walkTelemetryChain(
 	return { chain, seals, tipIsSeal, segments, skipped };
 }
 
-function skippedLineIdentity(json: Buffer): { id: string; k: string } | null {
+function skippedLineIdentity(json: Buffer): { id: string; k?: string } | null {
 	try {
 		const value = JSON.parse(json.toString("utf8")) as { id?: unknown; k?: unknown };
-		return typeof value.id === "string" && typeof value.k === "string" ? { id: value.id, k: value.k } : null;
+		return typeof value.id === "string" ? { id: value.id, ...(typeof value.k === "string" ? { k: value.k } : {}) } : null;
 	} catch {
 		// A line that is not JSON names no record; the walk already counted it as skipped.
 		return null;
@@ -428,17 +428,25 @@ export function verifyTelemetryScope(files: TelemetryScopeFiles): SealVerdict {
 	if ("mismatch" in walk) return failed(walk.mismatch);
 	const last = walk.seals.at(-1);
 	// A seal this build cannot decode is present, not missing; say which build wrote it (#434).
-	const undecoded = walk.skipped.get(manifest.seal.recordId);
-	const unreadable = undecoded
-		? `seal record ${manifest.seal.recordId} (${undecoded.k}) is present but does not decode: ${undecoded.reason}${manifest.clioCoderVersion !== readClioVersion() ? `; written by Clio ${manifest.clioCoderVersion}, read by Clio ${readClioVersion()}` : ""}`
-		: null;
+	const unreadableRecord = (id: string, label: string): string | null => {
+		const undecoded = walk.skipped.get(id);
+		if (!undecoded) return null;
+		const version = readClioVersion();
+		return `${label} ${id}${undecoded.k !== undefined ? ` (${undecoded.k})` : ""} is present but does not decode: ${undecoded.reason}${manifest.clioCoderVersion !== version ? `; written by Clio ${manifest.clioCoderVersion}, read by Clio ${version}` : ""}`;
+	};
+	const unreadable = unreadableRecord(manifest.seal.recordId, "seal record");
 	if (!last) return failed({ kind: "seal", detail: unreadable ?? `seal record ${manifest.seal.recordId} not found` });
 	if (last.record.id !== manifest.seal.recordId)
 		return failed({
 			kind: "seal",
 			detail: unreadable ?? `bundle names ${manifest.seal.recordId}, the last seal is ${last.record.id}`,
 		});
-	if (!walk.tipIsSeal) return failed({ kind: "seal", detail: "lines follow the seal" });
+	if (!walk.tipIsSeal) {
+		for (const [id, rejected] of walk.skipped)
+			if (rejected.position > (last.record.data as ScopeSealed).records)
+				return failed({ kind: "seal", detail: `lines follow the seal; ${unreadableRecord(id, "record")}` });
+		return failed({ kind: "seal", detail: "lines follow the seal" });
+	}
 	if (last.segment !== files.segments.length - 1 || files.segments.at(-1)?.name !== TELEMETRY_JOURNAL_FILE)
 		return failed({ kind: "seal", detail: "seal is not in the live segment" });
 	if (!sameEntries((last.record.data as ScopeSealed).objects, manifest.objects))
