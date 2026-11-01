@@ -23,7 +23,7 @@ import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtim
 import { COMPACTION_SYSTEM_PROMPT } from "../../src/domains/session/compaction/compact.js";
 import { findCutPoint } from "../../src/domains/session/compaction/cut-point.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
-import { snapshotInputTokens } from "../../src/domains/session/context-accounting.js";
+import { estimateAgentContextBreakdown, snapshotInputTokens } from "../../src/domains/session/context-accounting.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { appendEntry, appendTurn, readCurrentEntries, startSession } from "../../src/domains/session/manager.js";
@@ -371,6 +371,62 @@ describe("production compaction controls", () => {
 				);
 				ok(incomplete.every((call) => call.compactionOutcome === "unknown"));
 			}
+		});
+	}
+
+	for (const expanding of [true, false]) {
+		it(`${expanding ? "rejects an expanding" : "accepts a shrinking"} replacement checkpoint on the current replay basis (#422)`, async () => {
+			const f = fixture(true, true, true);
+			await f.run(undefined, "force", { keepRecentTokens: 1000 });
+			const previous = f.entries().find((entry) => entry.kind === "compactionSummary");
+			ok(previous);
+			let leaf = previous.turnId;
+			for (let index = 0; index < 3; index++)
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "user",
+					parentTurnId: leaf,
+					payload: { text: `new-${index} ${"y".repeat(1000)}` },
+				}).turnId;
+			const replayTokens = (entries: SessionEntry[]) =>
+				estimateAgentContextBreakdown({
+					messages: buildModelReplayAgentMessagesFromTurns(entries, { activeLeafTurnId: leaf }),
+				}).messageTokens;
+			if (expanding) {
+				const input = 30000 + replayTokens(f.entries());
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "assistant",
+					parentTurnId: leaf,
+					payload: { text: "ack", usage: { input, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: input + 1 } },
+				}).turnId;
+			}
+			f.pinLeaf(leaf);
+			const before = f.entries();
+			const tokensBefore = replayTokens(before);
+			f.response.text = syntheticCompactionSummary("expanded checkpoint ".repeat(expanding ? 1600 : 1000));
+			const result = await f.run(undefined, "force", {
+				keepRecentTokens: 100,
+				checkpointTokenFigures: (entry) => ({
+					tokensBefore: 30000 + tokensBefore,
+					tokensAfter: 30000 + replayTokens([...before, { ...entry, timestamp: new Date().toISOString() }]),
+				}),
+			});
+			strictEqual(result?.noGain === true, expanding);
+			deepStrictEqual(
+				f.entries().find((entry) => entry.turnId === previous.turnId),
+				previous,
+			);
+			if (expanding) deepStrictEqual(f.entries(), before);
+			else ok(replayTokens(f.entries()) < tokensBefore);
+			const journal = await f.journal();
+			const calls = ledgerUsageCalls(f.entries(), journal);
+			strictEqual(f.calls.length, 2);
+			strictEqual(calls.length, 2, "each spent summary is accounted once across journal and checkpoints");
+			deepStrictEqual(
+				calls.map((call) => call.compactionOutcome),
+				["committed", expanding ? "discarded" : "committed"],
+			);
 		});
 	}
 

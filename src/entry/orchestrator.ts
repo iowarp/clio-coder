@@ -267,8 +267,11 @@ import { serializeConversation } from "../domains/session/compaction/branch-summ
 import type { CompactionCallObservation } from "../domains/session/compaction/compact.js";
 import { type CompactInput, type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
-import { estimateTokens } from "../domains/session/compaction/tokens.js";
-import { ceilChars, estimateAgentContextTokens } from "../domains/session/context-accounting.js";
+import {
+	ceilChars,
+	estimateAgentContextBreakdown,
+	estimateAgentContextTokens,
+} from "../domains/session/context-accounting.js";
 import { continuityPayloadFromFold } from "../domains/session/continuity/carry.js";
 import { continuityProjectionTokens, resolveContinuityProjection } from "../domains/session/continuity/projection.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
@@ -1729,10 +1732,6 @@ async function runCompactionFlow(
 			// operation's conclusion names (#422).
 			return result;
 		}
-		if (estimateTokensAfterCompaction(entries, result, continuityNote.tokens) >= result.tokensBefore) {
-			closure.outcome = "discarded";
-			return { ...result, noGain: true };
-		}
 		if (result.usage) {
 			result.usage = { ...result.usage, targetId: resolved.targetId, modelId: resolved.wireModelId };
 		}
@@ -1778,7 +1777,6 @@ async function runCompactionFlow(
 			firstKeptTurnId: result.firstKeptTurnId ?? "",
 			messagesSummarized: result.messagesSummarized,
 			isSplitTurn: result.isSplitTurn,
-			tokensAfter: estimateTokensAfterCompaction(entries, result, continuityNote.tokens),
 			// The latest validated fold, carried so the transaction survives the cut
 			// that is about to remove its earlier records from replay. It preserves
 			// the immutable identity, accepted note, original policy and commit; it
@@ -1792,6 +1790,25 @@ async function runCompactionFlow(
 			// report`, which folded the ledger and so counted every call but this one.
 			...(result.usage !== undefined ? { usage: result.usage } : {}),
 		};
+		const replayTokens = (history: ReadonlyArray<SessionEntry>): number =>
+			estimateAgentContextBreakdown({
+				messages: buildModelReplayAgentMessagesFromTurns(history, {
+					...(activeLeafTurnId === undefined ? {} : { activeLeafTurnId }),
+					continuity: continuityContextFromSession(session),
+				}),
+			}).messageTokens;
+		// Raw rows include already summarized or evicted bodies. Price both live
+		// projections without stale provider usage anchors before publishing (#422).
+		const replayBefore = replayTokens(entries);
+		const replayAfter = replayTokens([...entries, { ...entry, timestamp: new Date().toISOString() }]);
+		if (replayAfter >= replayBefore) {
+			closure.outcome = "discarded";
+			return { ...result, noGain: true };
+		}
+		// Preserve an inclusive provider anchor's unchanged prefix when no runtime
+		// figures are available, applying only the current replay's reduction (#422).
+		entry.tokensBefore = Math.max(result.tokensBefore, replayBefore);
+		entry.tokensAfter = entry.tokensBefore + replayAfter - replayBefore;
 		if (budget?.checkpointTokenFigures) {
 			const figures = budget.checkpointTokenFigures(entry);
 			entry.tokensBefore = figures.tokensBefore;
@@ -1919,59 +1936,6 @@ export function createProductionAutoCompact(
 ) => Promise<CompactResult | null> {
 	return (instructions, trigger, budget) =>
 		runCompactionFlow(session, getSettings(), providers, instructions, trigger, telemetry, budget, summarize, admission);
-}
-
-function estimateTokensFromSummary(result: CompactResult): number {
-	return estimateTokens({
-		kind: "compactionSummary",
-		turnId: "estimate",
-		parentTurnId: null,
-		timestamp: "",
-		summary: result.summary,
-		...(result.providerCheckpoint ? { providerCheckpoint: result.providerCheckpoint } : {}),
-		...(result.providerFallbackReason ? { providerFallbackReason: result.providerFallbackReason } : {}),
-		firstKeptTurnId: result.firstKeptTurnId ?? "",
-		tokensBefore: result.tokensBefore,
-		...(result.skillContext ? { skillContext: result.skillContext } : {}),
-		...(result.userContext ? { userContext: result.userContext } : {}),
-	});
-}
-
-/**
- * The post-compaction size, on the same scale as `tokensBefore`.
- *
- * `tokensBefore` is a whole-prompt figure: `calculateContextTokens` anchors it
- * on the last assistant call's measured usage, so it carries the system prompt
- * and tool schemas that compaction never touches. The after figure has to stay
- * on that scale to be comparable, and the persistence layer has no model handle
- * to re-measure with, so it is arithmetic on that same scale: drop what stops
- * being replayed and add the summary that replaces it.
- *
- * Estimating it from the rebuilt message list instead reported `tokensBefore`
- * back unchanged, which is what made /tree render "~16276 -> ~16276 tokens"
- * beside a footer that said 16276 -> 11008 for the same compaction. That
- * estimator anchors on the newest assistant usage, and the retained suffix
- * still holds the assistant message whose usage describes the pre-compaction
- * prompt. Anchoring on it reports precisely the number compaction removed.
- */
-function estimateTokensAfterCompaction(
-	entries: ReadonlyArray<SessionEntry>,
-	result: CompactResult,
-	/**
-	 * The projected continuity note, which survives the reduction and is
-	 * therefore on both sides. It is already inside `tokensBefore` and the
-	 * subtraction below never removes it, because continuity records estimate at
-	 * zero; it only has to be restored on the floor branch, which discards
-	 * `tokensBefore` entirely.
-	 */
-	continuityNoteTokens = 0,
-): number {
-	let droppedTokens = 0;
-	for (const entry of entries.slice(0, result.firstKeptEntryIndex)) droppedTokens += estimateTokens(entry);
-	const summaryTokens = estimateTokensFromSummary(result);
-	// The summary alone is the floor: a session whose dropped estimate exceeds
-	// the measured anchor must not report a negative or sub-summary context.
-	return Math.max(summaryTokens + continuityNoteTokens, result.tokensBefore - droppedTokens + summaryTokens);
 }
 
 /**
