@@ -1,11 +1,19 @@
-import type { QuotaStateV1 } from "../core/telemetry/dto.js";
+import type { QuotaStateV1, RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import type { QuotaSeverity } from "../domains/quota/presentation.js";
 import { severityForPct } from "../domains/quota/presentation.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
+import type { EnqueuedRun } from "../domains/telemetry/index.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
-import { type DispatchBoardRow, dispatchStatusPresentation, dispatchUsageText } from "./dispatch-board.js";
+import {
+	type DispatchBoardRow,
+	type DispatchBoardStatus,
+	type DispatchRunUsage,
+	type DispatchStatusPresentation,
+	dispatchStatusPresentation,
+	dispatchUsageText,
+} from "./dispatch-board.js";
 import type { ClioToken } from "./theme/index.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 
@@ -154,35 +162,101 @@ export function workerQuotaLabel(row: Pick<DispatchBoardRow, "runtimeId" | "node
 	return `Shared ${account.provider}${account.stale ? " · STALE" : ""} · ${account.windows.map((window) => `${window.label ?? window.key} ${window.usedPct.display} used`).join(" · ") || "no windows reported"}`;
 }
 
+/** A run the session's telemetry references, as the read model holds it; `enqueued` names an unsettled run's route. */
+export interface RecordedWorkerRun {
+	run: RunTelemetryV1;
+	enqueued: EnqueuedRun | null;
+}
+
+type RunOutcome = NonNullable<RunTelemetryV1["settled"]>["outcome"];
+
+/** A recorded outcome wears the board's matching glyph; a board status has no word for the rarer outcomes. */
+const RECORDED_OUTCOME: Record<RunOutcome, { status: DispatchBoardStatus; label?: string }> = {
+	succeeded: { status: "completed" },
+	failed: { status: "failed" },
+	timed_out: { status: "failed", label: "timed out" },
+	stalled: { status: "stale", label: "stalled" },
+	canceled: { status: "aborted", label: "canceled" },
+	denied_by_policy: { status: "failed", label: "denied by policy" },
+	spawn_failed: { status: "failed", label: "spawn failed" },
+};
+
+function recordedStatus(run: RunTelemetryV1): DispatchStatusPresentation {
+	// No settlement means the host never saw the run end; its elapsed clock would still be counting, so none is shown.
+	if (!run.settled) return { ...dispatchStatusPresentation("stale"), label: "not settled" };
+	const { status, label } = RECORDED_OUTCOME[run.settled.outcome];
+	const presentation = dispatchStatusPresentation(status);
+	return label ? { ...presentation, label } : presentation;
+}
+
+function recordedRoute({ run, enqueued }: RecordedWorkerRun): string {
+	const route = run.settled?.route ?? enqueued;
+	if (!route) return "Route not recorded";
+	const node = run.settled ? run.settled.node?.id : enqueued?.node;
+	return `${route.targetId} / ${route.wireModelId}${node && node !== "local" ? ` · ${node}` : ""}`;
+}
+
+function workerUsageLine(usage: DispatchRunUsage): string {
+	const text = dispatchUsageText(usage);
+	return usage.kind === "ready"
+		? `${text.total} recorded tokens · input ${text.prompt} · output ${text.output} · ${text.cost}`
+		: usage.kind === "pending"
+			? "Token usage awaiting the run's first journaled call"
+			: "Token usage not available";
+}
+
+/** Board rows first, in the board's order; recorded runs the board does not hold follow in the order given. */
 export function renderWorkerUsage(
 	rows: ReadonlyArray<DispatchBoardRow>,
+	recorded: ReadonlyArray<RecordedWorkerRun>,
 	snapshots: QuotaProviders,
 	width: number,
 ): string[] {
 	const theme = clioTheme();
+	const onBoard = new Set(rows.map((row) => row.runId));
+	const history = recorded.filter(({ run }) => !onBoard.has(run.row.runId));
 	const out = [
 		theme.fg("annotation", "Active and recent workers · recorded tokens and cost · account limits are shared."),
 	];
-	if (!rows.length) out.push("", "No worker invocations recorded.");
+	const divider = theme.fg("divider", "·");
+	if (!rows.length && !history.length) out.push("", "No worker invocations recorded.");
 	for (const row of rows) {
-		const usage = dispatchUsageText(row.usage);
 		const status = dispatchStatusPresentation(row.status);
 		out.push(
 			"",
-			`${theme.fg("footerIdentity", clean(row.agentId))} ${theme.fg("divider", "·")} ${theme.fg(status.glyphToken ?? status.token, status.glyph)} ${theme.fg(status.token, status.label)} ${theme.fg("divider", "·")} ${theme.fg("toolMetadata", row.telemetry?.activity.elapsed.display ?? "not available")}`,
+			`${theme.fg("footerIdentity", clean(row.agentId))} ${divider} ${theme.fg(status.glyphToken ?? status.token, status.glyph)} ${theme.fg(status.token, status.label)} ${divider} ${theme.fg("toolMetadata", row.telemetry?.activity.elapsed.display ?? "not available")}`,
 		);
 		out.push(clean(`${row.targetId} / ${row.wireModelId}${row.node ? ` · ${row.node}` : ""}`));
-		out.push(
-			row.usage.kind === "ready"
-				? `${usage.total} recorded tokens · input ${usage.prompt} · output ${usage.output} · ${usage.cost}`
-				: row.usage.kind === "pending"
-					? "Token usage awaiting the run's first journaled call"
-					: "Token usage not available",
-		);
+		out.push(workerUsageLine(row.usage));
 		const context = row.telemetry?.activity.contextTokens;
 		if (context) out.push(`Context ${context.display}`);
 		out.push(theme.fg("body", clean(workerQuotaLabel(row, snapshots))));
 		out.push(theme.fg("annotation", clean(`/view dispatch:${row.runId}`)));
+	}
+	for (const entry of history) {
+		const { run, enqueued } = entry;
+		const status = recordedStatus(run);
+		const agent = run.settled?.agentId ?? enqueued?.agentId ?? "agent not recorded";
+		const elapsed = run.settled ? ` ${divider} ${theme.fg("toolMetadata", run.activity.elapsed.display)}` : "";
+		out.push(
+			"",
+			`${theme.fg("footerIdentity", clean(agent))} ${divider} ${theme.fg(status.glyphToken ?? status.token, status.glyph)} ${theme.fg(status.token, status.label)}${elapsed}`,
+		);
+		out.push(clean(recordedRoute(entry)));
+		out.push(
+			workerUsageLine(
+				run.row.source === "unavailable"
+					? { kind: "unavailable" }
+					: {
+							kind: "ready",
+							prompt: run.tokens.prompt,
+							output: run.tokens.output,
+							total: run.row.tokens,
+							usd: run.row.usd,
+						},
+			),
+		);
+		out.push(theme.fg("annotation", clean(`/view dispatch:${run.row.runId}`)));
 	}
 	return out.flatMap((line) => wrapTextWithAnsi(theme.base("fieldValue", line), Math.max(1, width)));
 }

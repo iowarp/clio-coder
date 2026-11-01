@@ -1,4 +1,4 @@
-import type { FactMetric, Quantity } from "../core/telemetry/dto.js";
+import type { FactMetric, Quantity, RunTelemetryV1 } from "../core/telemetry/dto.js";
 import { factRef } from "../core/telemetry/dto.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
 import { factKnownValue } from "../core/telemetry/known.js";
@@ -15,6 +15,7 @@ import { ACTIVITY_SPAN_DAYS, bucketActivity, renderActivityHeatmap } from "./act
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { QuotaProviders } from "./quota-view.js";
+import type { RecordedWorkerRun } from "./quota-view.js";
 import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
 import { clioTheme, formatCompactMs, padAnsi, rule } from "./theme/index.js";
 
@@ -271,6 +272,28 @@ function renderActivity(
 	return lines;
 }
 
+/**
+ * The runs a session's telemetry references, newest first, read once per view. `view.run` reads and verifies the run's
+ * scope files synchronously, so a settled run, whose rendered facts no later record changes, is read only once.
+ */
+function recordedRunReader(): (view: TelemetryView | null) => ReadonlyArray<RecordedWorkerRun> {
+	const settled = new Map<string, RunTelemetryV1>();
+	let latest: { view: TelemetryView; runs: RecordedWorkerRun[] } | null = null;
+	return (view) => {
+		if (!view) return [];
+		if (latest?.view === view) return latest.runs;
+		const rows = [...view.runs()].sort((a, b) => (b.lastAt ?? "").localeCompare(a.lastAt ?? ""));
+		const runs = rows.flatMap((row) => {
+			const run = settled.get(row.runId) ?? view.run(row.runId);
+			if (!run) return [];
+			if (run.settled) settled.set(row.runId, run);
+			return [{ run, enqueued: run.settled ? null : view.runEnqueued(row.runId) }];
+		});
+		latest = { view, runs };
+		return runs;
+	};
+}
+
 const USAGE_TABS = ["Activity", "Accounts", "Session", "Models", "Workers"] as const;
 
 class UsageOverlayBody implements Component {
@@ -279,6 +302,7 @@ class UsageOverlayBody implements Component {
 	private height = 20;
 	private pageHeight = 16;
 	private lineCount = 0;
+	private readonly recordedRuns = recordedRunReader();
 
 	constructor(
 		private readonly getData: () => UsageData,
@@ -368,7 +392,7 @@ class UsageOverlayBody implements Component {
 				"",
 				...(data.view ? modelLines(data.view, contentWidth) : [theme.fg("annotation", NOT_AVAILABLE)]),
 			];
-		} else body = renderWorkerUsage(this.getDispatchRows(), quota, contentWidth);
+		} else body = renderWorkerUsage(this.getDispatchRows(), this.recordedRuns(data.view), quota, contentWidth);
 		const lines = body.flatMap((line) => wrapTextWithAnsi(line, contentWidth));
 		this.lineCount = lines.length;
 		// One row stays free for the `n–m / N` indicator a scrolled page carries.
