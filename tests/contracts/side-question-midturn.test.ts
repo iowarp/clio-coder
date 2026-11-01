@@ -87,7 +87,9 @@ test("a side answer that is only tool-call markup is replaced by a note (#415)",
 	const provider = registerEngineFauxProvider({ api: "side-tool-call-contract", models: [{ id: "fixture" }] });
 	try {
 		const { agent } = createEngineAgent({ initialState: { model: provider.getModel(), messages: [] } });
+		// The first answer reaches for a tool; the no-tools retry does too.
 		provider.setResponses([
+			fauxAssistantMessage('<tool_call>{"name":"read","arguments":{"path":"src/index.ts"}}</tool_call>'),
 			fauxAssistantMessage('<tool_call>{"name":"read","arguments":{"path":"src/index.ts"}}</tool_call>'),
 		]);
 		const answer = await runSideQuestion({

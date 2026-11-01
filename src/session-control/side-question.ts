@@ -194,17 +194,47 @@ function textFromMessage(message: unknown): string {
  */
 export async function runSideQuestion(input: SideQuestionInput): Promise<SideQuestionResult> {
 	const { question, ...rest } = input;
-	const result = await runOutOfTurnRound({ ...rest, systemPrompt: SIDE_QUESTION_SYSTEM_PROMPT, userText: question });
+	const ask = (userText: string) => runOutOfTurnRound({ ...rest, systemPrompt: SIDE_QUESTION_SYSTEM_PROMPT, userText });
 	// History that used tools, sent with none declared, can make a model imitate
 	// a call as text; the operator gets the reason, not the markup (#415). An
 	// aborted partial was never a finished call, so it keeps only its prose.
-	if (result.aborted) return { ...result, text: stripDeadToolCallMarkup(result.text) };
-	if (result.text.length > 0 && stripDeadToolCallMarkup(result.text).length === 0)
-		return { ...result, text: SIDE_QUESTION_TOOL_CALL_NOTE };
-	return result;
+	const first = await ask(question);
+	if (first.aborted) return { ...first, text: stripDeadToolCallMarkup(first.text) };
+	if (!onlyToolCallMarkup(first.text)) return first;
+	// A question the conversation cannot answer makes the model reach for a tool.
+	// One retry that says no tool exists turns that into an answer or a named gap.
+	const retry = await ask(`${question}\n\n${SIDE_QUESTION_NO_TOOLS_RETRY}`);
+	const usage = sumSideQuestionUsage(first.usage, retry.usage);
+	const text = stripDeadToolCallMarkup(retry.text);
+	if (retry.aborted) return { ...retry, usage, text };
+	return { ...retry, usage, text: onlyToolCallMarkup(retry.text) ? SIDE_QUESTION_TOOL_CALL_NOTE : retry.text };
 }
 
-export const SIDE_QUESTION_TOOL_CALL_NOTE = "The model answered with a tool call, which a side question cannot run.";
+function onlyToolCallMarkup(text: string): boolean {
+	return text.length > 0 && stripDeadToolCallMarkup(text).length === 0;
+}
+
+function sumSideQuestionUsage(a: SideQuestionUsage | null, b: SideQuestionUsage | null): SideQuestionUsage | null {
+	if (a === null || b === null) return a ?? b;
+	return {
+		input: a.input + b.input,
+		output: a.output + b.output,
+		cacheRead: a.cacheRead + b.cacheRead,
+		cacheWrite: a.cacheWrite + b.cacheWrite,
+		...(a.cacheWrite1h !== undefined || b.cacheWrite1h !== undefined
+			? { cacheWrite1h: (a.cacheWrite1h ?? 0) + (b.cacheWrite1h ?? 0) }
+			: {}),
+		reasoning: a.reasoning + b.reasoning,
+		totalTokens: a.totalTokens + b.totalTokens,
+		costUsd: a.costUsd + b.costUsd,
+	};
+}
+
+export const SIDE_QUESTION_NO_TOOLS_RETRY =
+	"No tools exist in this side question, so a tool call cannot run. Answer from the conversation above. If it does not contain the answer, say so in one sentence and name the file or command that would answer it.";
+
+export const SIDE_QUESTION_TOOL_CALL_NOTE =
+	"The model answered with a tool call, which a side question cannot run. Ask this in the main conversation, where tools are available.";
 
 const PENDING_TOOL_RESULT_TEXT = "No result yet: this tool call was still running when the operator asked this.";
 
