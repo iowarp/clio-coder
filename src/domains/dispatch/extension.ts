@@ -6669,6 +6669,13 @@ export function createDispatchBundle(
 				active.delete(envelope.id);
 				recordTargetOutcome(envelope.id, targetId, runtimeId, wireModelId, status, receipt.exitCode, failureClass);
 				accumulateFinalizedTotals(receipt);
+				// A terminal event's readers show the sealed record, so the seal lands first with the feed's last rows in it.
+				journalBridge?.closeFeed(finalOutcome, receipt.outcomeDetail, {
+					runId: envelope.id,
+					agentId: req.agentId,
+					exitCode: receipt.exitCode,
+				});
+				await closeRunJournal();
 				emitTerminalDispatchEvent(receipt, finalOutcome);
 				completeAssignmentAttempt(
 					activeRun,
@@ -9105,6 +9112,13 @@ export function createDispatchBundle(
 				);
 				recordNodeChannelOutcome(activeRun, finalOutcome, failureClass, finalDetail);
 				accumulateFinalizedTotals(receipt);
+				// A terminal event's readers show the sealed record, so the seal lands first with the feed's last rows in it.
+				journalBridge?.closeFeed(finalOutcome, receipt.outcomeDetail, {
+					runId: envelope.id,
+					agentId: req.agentId,
+					exitCode: receipt.exitCode,
+				});
+				await closeRunJournal();
 				emitTerminalDispatchEvent(receipt, finalOutcome);
 				completeAssignmentAttempt(
 					activeRun,

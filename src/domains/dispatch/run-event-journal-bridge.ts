@@ -95,6 +95,8 @@ const UNJOURNALED_TYPES = new Set([
 const OPENED_RUN_LIMIT = 512;
 
 export interface RunEventJournalBridge {
+	/** Write the run's closing feed rows now, so they land inside the seal that precedes its terminal event. */
+	closeFeed(outcome: string, detail: string | null | undefined, payload: unknown): void;
 	/** Unsubscribe from the bus. Idempotent. */
 	stop(): void;
 }
@@ -320,6 +322,8 @@ export function attachRunEventJournalBridge(
 	const seal = (outcome: string, detail: string | null | undefined, payload: unknown): void => {
 		const identity = runIdentity(payload);
 		if (identity === null || options.acceptRun?.(identity.runId) === false) return;
+		// The finalizer closes the feed itself before it seals the run, so the event that follows writes nothing.
+		if (closedAhead.delete(identity.runId)) return;
 		ensureOpen(identity.runId, identity.agentId);
 		flushText(identity.runId);
 		feeds.delete(identity.runId);
@@ -328,6 +332,8 @@ export function attachRunEventJournalBridge(
 		journal.terminal(identity.runId, outcome, detail ?? undefined);
 		opened.delete(identity.runId);
 	};
+
+	const closedAhead = new Set<string>();
 
 	const unsubscribes = [
 		bus.subscribe("run.progressed", (payload: DispatchProgressPayload) => {
@@ -391,6 +397,11 @@ export function attachRunEventJournalBridge(
 
 	let stopped = false;
 	return {
+		closeFeed(outcome, detail, payload): void {
+			seal(outcome, detail, payload);
+			const identity = runIdentity(payload);
+			if (identity !== null && options.acceptRun?.(identity.runId) !== false) closedAhead.add(identity.runId);
+		},
 		stop(): void {
 			if (stopped) return;
 			stopped = true;

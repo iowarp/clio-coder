@@ -1,19 +1,21 @@
 import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { type HeadlessShutdownHooks, runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { withTelemetryContext } from "../../src/core/telemetry/context.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { DispatchPreparationOptions, DispatchRequest } from "../../src/domains/dispatch/contract.js";
-
+import { readRunResultFacts } from "../../src/domains/dispatch/run-result-facts.js";
 import type { RunLineage } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import { telemetryRunDirectory } from "../../src/domains/telemetry/paths.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
@@ -43,7 +45,11 @@ afterEach(() => {
 // Both the main provider and worker process are deterministic seams. All chat
 // submission, agent-tool adaptation, registry admission, dispatch planning,
 // worker lifecycle and durable receipt code remain production implementations.
-async function fixture(transientFailure = false, spawn?: (spec: WorkerSpec) => SpawnedWorker) {
+async function fixture(
+	transientFailure = false,
+	spawn?: (spec: WorkerSpec) => SpawnedWorker,
+	journalRunEvents = false,
+) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = "fixture";
@@ -83,6 +89,7 @@ async function fixture(transientFailure = false, spawn?: (spec: WorkerSpec) => S
 	});
 	let starts = 0;
 	const bundle = makeDispatchBundle(context, {
+		journalRunEvents,
 		spawnWorker: (spec): SpawnedWorker => {
 			if (spawn !== undefined) return spawn(spec);
 			const fail = transientFailure && starts++ === 0;
@@ -316,6 +323,30 @@ for (const mode of ["single", "parallel", "review", "compete", "council"] as con
 		}
 	});
 }
+
+it("a terminal event's readers find the run sealed, with its closing feed rows inside the seal", {
+	timeout: 30_000,
+}, async () => {
+	const f = await fixture(false, undefined, true);
+	try {
+		const seen: Array<{ runId: string; integrity: string | undefined }> = [];
+		f.context.bus.subscribe("run.completed", (event) => {
+			seen.push({ runId: event.runId, integrity: readRunResultFacts(event.runId)?.trust?.artifactIntegrity.state });
+		});
+		const result = await f.tool.run({ agent: "scout", task: "Inspect input.txt", cwd: process.cwd() });
+		strictEqual(result.kind, "ok");
+		strictEqual(seen.length, 1);
+		strictEqual(seen[0]?.integrity, "verified");
+		const journal = readFileSync(
+			join(telemetryRunDirectory(clioStateDir(), seen[0]?.runId ?? ""), "journal.jsonl"),
+			"utf8",
+		);
+		const terminalRow = journal.search(/"k":"run\.feed_appended"[^\n]*"kind":"terminal"/u);
+		ok(terminalRow >= 0 && terminalRow < journal.indexOf('"k":"run.sealed"'));
+	} finally {
+		await f.bundle.extension.stop?.();
+	}
+});
 
 it("model tool JSON cannot author lineage, while a trusted retry keeps its existing parent, root, depth and attempt", async () => {
 	const f = await fixture();
