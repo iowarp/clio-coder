@@ -47,6 +47,21 @@ export function dispatchSchemaCompositionFor(fleet: FleetShape): DispatchSchemaC
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
+/** The compact schema's required `task` stands for nothing on a list or batch call, or when a model leaves it out. */
+export const COORDINATOR_DISPATCH_ARGUMENTS = {
+	prepare: (args: Record<string, unknown>): Record<string, unknown> =>
+		Object.hasOwn(args, "task") ? args : { ...args, task: "" },
+	restore(args: Record<string, unknown>): Record<string, unknown> {
+		const { task, tasks, ...rest } = args;
+		return {
+			...rest,
+			...(task !== "" ? { task } : {}),
+			// A grammar offers the trailing batch field after any assignment, and models fill it with an empty list.
+			...(tasks !== undefined && !(Array.isArray(tasks) && tasks.length === 0) ? { tasks } : {}),
+		};
+	},
+};
+
 /** Ordinary delegation on the permanent surface. Advanced composition is described on demand. */
 export function coordinatorDispatchParameters() {
 	const intent = Type.Object({
@@ -64,26 +79,13 @@ export function coordinatorDispatchParameters() {
 		model: Type.Optional(Type.String()),
 		list: Type.Optional(Type.Boolean({ description: "List worker recipes and their tools." })),
 		agent: Type.Optional(Type.String({ description: "Recipe id from list." })),
-		task: Type.Optional(
-			Type.String({
-				description:
-					"One self-contained assignment with outcome and constraints, never the operator's words; never combine with tasks.",
-			}),
-		),
-		tasks: Type.Optional(
-			Type.Array(
-				Type.Union([
-					Type.String(),
-					Type.Object({
-						node: Type.Optional(Type.String()),
-						agent: Type.Optional(Type.String()),
-						task: Type.String(),
-						briefing: Type.Optional(Type.String()),
-						intent: Type.Optional(intent),
-					}),
-				]),
-			),
-		),
+		// Required so it comes first. A local server's grammar fixes the property order, so
+		// a model that opened with an option could never reach an optional task after it:
+		// dynamo sent 5 of 12 dispatches with none, and none recovered from the refusal.
+		task: Type.String({
+			description:
+				"One self-contained assignment with outcome and constraints, never the operator's words; empty only with list or tasks.",
+		}),
 		intent: Type.Optional(intent),
 		briefing: Type.Optional(Type.String()),
 		// A plain string: this schema is checked before the canonical one, so an
@@ -100,6 +102,21 @@ export function coordinatorDispatchParameters() {
 			StringEnum(["merge", "preserve"], { description: "With worktree: merge (default) or keep the branch." }),
 		),
 		detach: Type.Optional(Type.Boolean({ description: "Return ids; collect with monitor before synthesis." })),
+		// Last for the same reason: a batch stays reachable after any option a model opens with.
+		tasks: Type.Optional(
+			Type.Array(
+				Type.Union([
+					Type.String(),
+					Type.Object({
+						node: Type.Optional(Type.String()),
+						agent: Type.Optional(Type.String()),
+						task: Type.String(),
+						briefing: Type.Optional(Type.String()),
+						intent: Type.Optional(intent),
+					}),
+				]),
+			),
+		),
 	});
 }
 

@@ -204,6 +204,15 @@ export interface ToolSpec {
 	parameters: TSchema;
 	/** Smaller attached schema; canonical validation and gateway describe retain parameters. */
 	modelParameters?: TSchema;
+	/**
+	 * What `modelParameters` requires beyond `parameters`: `prepare` fills it before
+	 * the wire schema validates a call, `restore` removes it before the canonical
+	 * schema and the tool body see the call.
+	 */
+	modelArguments?: {
+		prepare(args: Record<string, unknown>): Record<string, unknown>;
+		restore(args: Record<string, unknown>): Record<string, unknown>;
+	};
 	/** Base action class for this tool when arguments are trivial. */
 	baseActionClass: ActionClass;
 	/**

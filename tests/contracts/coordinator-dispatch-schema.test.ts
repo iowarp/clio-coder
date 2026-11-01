@@ -8,7 +8,11 @@ import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { validateEngineToolArguments } from "../../src/engine/ai.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
-import { buildDispatchParameters, coordinatorDispatchParameters } from "../../src/tools/dispatch-schema.js";
+import {
+	buildDispatchParameters,
+	COORDINATOR_DISPATCH_ARGUMENTS,
+	coordinatorDispatchParameters,
+} from "../../src/tools/dispatch-schema.js";
 import { createGatewayTool } from "../../src/tools/gateway/index.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import type { IsolatedClioEnv } from "../harness/scratch-env.js";
@@ -35,6 +39,7 @@ describe("compact coordinator dispatch contract", () => {
 			description: "Dispatch contract fixture.",
 			parameters: buildDispatchParameters(),
 			modelParameters: coordinatorDispatchParameters(),
+			modelArguments: COORDINATOR_DISPATCH_ARGUMENTS,
 			baseActionClass: "read",
 			run: async (args) => {
 				received.push(args);
@@ -55,7 +60,7 @@ describe("compact coordinator dispatch contract", () => {
 				},
 			],
 		]) {
-			const args = { agent: "coder", mode: "parallel", tasks };
+			const args = { agent: "coder", mode: "parallel", task: "", tasks };
 			const validated = validateEngineToolArguments(tool, {
 				type: "toolCall",
 				id: "batch",
@@ -63,9 +68,9 @@ describe("compact coordinator dispatch contract", () => {
 				arguments: args,
 			});
 			await tool.execute("batch", validated);
-			deepStrictEqual(received.at(-1), args);
+			deepStrictEqual(received.at(-1), { agent: "coder", mode: "parallel", tasks });
 		}
-		const invalid = { tasks: ["valid"], candidates: "many" };
+		const invalid = { task: "", tasks: ["valid"], candidates: "many" };
 		ok(Value.Check(tool.parameters, invalid), "hidden fields reach canonical validation");
 		await rejects(tool.execute("invalid", invalid), /candidates/u);
 		strictEqual(received.length, 3, "invalid canonical arguments never execute");
@@ -92,7 +97,7 @@ describe("compact coordinator dispatch contract", () => {
 		};
 		for (const [field, value] of Object.entries(ordinary)) {
 			ok(Value.Check(canonical, { [field]: value }), `canonical ${field}`);
-			ok(Value.Check(compact, { [field]: value }), `compact ${field}`);
+			ok(Value.Check(compact, { task: "", [field]: value }), `compact ${field}`);
 		}
 		for (const intent of [ordinary.intent, { relevant_paths: ["src/x.ts"], verification: [{ check: "test" }] }]) {
 			for (const args of [
@@ -100,7 +105,7 @@ describe("compact coordinator dispatch contract", () => {
 				{ tasks: [{ task: "assignment", agent: "scout", node: "mini", briefing: "evidence", intent }] },
 			]) {
 				ok(Value.Check(canonical, args));
-				ok(Value.Check(compact, args));
+				ok(Value.Check(compact, { task: "", ...args }));
 			}
 		}
 	});

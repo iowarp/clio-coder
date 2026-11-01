@@ -18,7 +18,7 @@ import { assertRegisteredBuiltinTools, type CoreToolBootstrapDeps, registerCoreT
 import { createDispatchRunEventRegistry, createDispatchTool } from "./dispatch.js";
 import type { DispatchBackgroundRegistry } from "./dispatch-background.js";
 import type { DispatchSchemaComposition } from "./dispatch-schema.js";
-import { coordinatorDispatchParameters } from "./dispatch-schema.js";
+import { COORDINATOR_DISPATCH_ARGUMENTS, coordinatorDispatchParameters } from "./dispatch-schema.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "./gateway/index.js";
 import { registerHarnessExtensionTools } from "./harness-extensions.js";
 import type { JobOperations } from "./job-types.js";
@@ -247,7 +247,9 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		registry.register({
 			...spec,
 			placement: coordinatorToolPlacement(spec.name),
-			...(spec.name === ToolNames.Dispatch ? { modelParameters: coordinatorDispatchParameters() } : {}),
+			...(spec.name === ToolNames.Dispatch
+				? { modelParameters: coordinatorDispatchParameters(), modelArguments: COORDINATOR_DISPATCH_ARGUMENTS }
+				: {}),
 		});
 	}
 	// Every MCP client the gateway launched closes with the session: a

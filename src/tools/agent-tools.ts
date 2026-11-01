@@ -531,7 +531,14 @@ function toAgentTool(
 				args: spec.modelParameters
 					? (validateEngineToolArguments(
 							{ name: spec.name, description: spec.description, parameters: spec.parameters },
-							{ type: "toolCall", id: toolCallId, name: spec.name, arguments: params as Record<string, unknown> },
+							{
+								type: "toolCall",
+								id: toolCallId,
+								name: spec.name,
+								arguments: spec.modelArguments
+									? spec.modelArguments.restore(params as Record<string, unknown>)
+									: (params as Record<string, unknown>),
+							},
 						) as Record<string, unknown>)
 					: (params as Record<string, unknown>),
 				registry,
@@ -549,6 +556,13 @@ function toAgentTool(
 	// legacy fields) never ran on a direct call: the call failed validation
 	// first. Dispatch's normalizer reserves capacity keyed by argument
 	// identity, which Pi's clone would orphan, so it stays on the registry path.
+	const { modelArguments } = spec;
+	if (modelArguments) {
+		tool.prepareArguments = (args: unknown) =>
+			(args !== null && typeof args === "object" && !Array.isArray(args)
+				? modelArguments.prepare(args as Record<string, unknown>)
+				: args) as Record<string, unknown>;
+	}
 	if (spec.prepareArguments && !spec.prepareAdmissionArguments) {
 		tool.prepareArguments = (args: unknown) =>
 			(args !== null && typeof args === "object" && !Array.isArray(args)
