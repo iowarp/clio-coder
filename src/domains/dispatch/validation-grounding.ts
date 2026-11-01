@@ -36,7 +36,7 @@
  * report against its own interest and needs no corroboration.
  */
 
-import { parseJsonObjectPayload } from "../../core/json-payload.js";
+import { parseVerifierPayload } from "../../core/json-payload.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 
@@ -93,9 +93,9 @@ function claimIdentity(name: string): string {
 
 function claimedValidationNames(output: string | null): string[] {
 	if (output === null) return [];
-	// Read through the shared payload reader so a fenced report that its
-	// contract accepted does not silently yield no claims here.
-	const parsed = parseJsonObjectPayload(output);
+	// Read as the verifier contract reads it, so a report it accepted cannot yield
+	// no claims here and seal a fabricated pass as measured.
+	const parsed = parseVerifierPayload(output);
 	if (!parsed.ok) return [];
 	const record = parsed.value;
 	const entries = record.checks ?? record.validations;

@@ -1,4 +1,4 @@
-import { parseJsonObjectPayload } from "../core/json-payload.js";
+import { parseJsonObjectPayload, parseVerifierPayload } from "../core/json-payload.js";
 import { renderFactField } from "../core/telemetry/render.js";
 import type { RunResult } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -36,7 +36,9 @@ function sealedResultLimitations(receipt: RunResult): string[] {
 	if (kind === undefined) return [];
 	const parsed = output.structured
 		? { ok: true as const, value: output.structured.data }
-		: parseJsonObjectPayload(output.text);
+		: kind === "verifier-report"
+			? parseVerifierPayload(output.text)
+			: parseJsonObjectPayload(output.text);
 	if (!parsed.ok) return [];
 	const data = parsed.value;
 	switch (kind) {

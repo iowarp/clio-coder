@@ -56,3 +56,39 @@ export function parseJsonObjectPayload(text: string): JsonObjectPayload {
 	}
 	return { ok: false, reason: parsedSomething ? "not-object" : "not-json" };
 }
+
+function jsonObject(text: string): Record<string, unknown> | null {
+	try {
+		const value = JSON.parse(text) as unknown;
+		return value !== null && typeof value === "object" && !Array.isArray(value)
+			? (value as Record<string, unknown>)
+			: null;
+	} catch {
+		// Not JSON, as for text after a report; the caller keeps the reason it already has.
+		return null;
+	}
+}
+
+/**
+ * A verifier report as every reader of one must see it, so a contract, its gate and claim grounding cannot disagree. A
+ * local model often reasons in prose before its report, and a brace in that prose, such as a quoted function body,
+ * defeats the brace span, so one report that closes the answer still counts, fenced or not. A second report leaves the
+ * answer unreadable rather than letting the quoted one decide, because the fence and brace spans would read the first.
+ */
+export function parseVerifierPayload(text: string): JsonObjectPayload {
+	const reports = [...text.matchAll(/\{\s*"verdict"/gu)];
+	if (reports.length > 1) {
+		const whole = jsonObject(text.trim());
+		return whole === null ? { ok: false, reason: "not-json" } : { ok: true, value: whole };
+	}
+	const parsed = parseJsonObjectPayload(text);
+	const report = reports[0];
+	if (parsed.ok || report === undefined) return parsed;
+	const closing = jsonObject(
+		text
+			.slice(report.index)
+			.trim()
+			.replace(/\s*```$/u, ""),
+	);
+	return closing === null ? parsed : { ok: true, value: closing };
+}

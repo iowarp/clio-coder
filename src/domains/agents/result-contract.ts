@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { stripAuthoredTrailers } from "../../core/commit-message.js";
-import { parseJsonObjectPayload } from "../../core/json-payload.js";
+import { parseJsonObjectPayload, parseVerifierPayload } from "../../core/json-payload.js";
 import { INTERNAL_HELPER_RESULT_KINDS } from "../../worker/protocol.js";
 import type { AgentAutomationAuthority } from "./spec.js";
 import { AGENT_AUTOMATION_AUTHORITIES } from "./spec.js";
@@ -1146,24 +1146,12 @@ function groundDegradedScout(
 	return success(contract, "unmeasured", { scout: degraded, evidence }, { scout: degraded, reason: degradedReason });
 }
 
-/**
- * A local model often reasons in prose before its report, and a brace in that prose, such as a quoted function body,
- * defeats the payload reader's brace span. One report that closes the answer still counts. Contract and gate share this,
- * so a final cycle's pass cannot be read as a pass by one and a failed step by the other. More than one report, or text
- * after it, leaves the answer unreadable rather than letting a quoted or retracted verdict decide.
- */
 function verifierPayload(output: string | null): ReturnType<typeof parseJson> {
 	const parsed = parseJson(output);
-	if (parsed.ok || output === null) return parsed;
-	const at = output.indexOf('{"verdict"');
-	if (at < 0 || at !== output.lastIndexOf('{"verdict"')) return parsed;
-	try {
-		const value = JSON.parse(output.slice(at)) as Record<string, unknown>;
-		return { ok: true, value };
-	} catch {
-		// Text after the report: the original reason stands.
-		return parsed;
-	}
+	if (output === null) return parsed;
+	const report = parseVerifierPayload(output);
+	if (report.ok) return report;
+	return parsed.ok ? { ok: false, reason: "result carries more than one report" } : parsed;
 }
 
 function validateVerifier(contract: ResultContract, output: string | null): ResultContractValidation {

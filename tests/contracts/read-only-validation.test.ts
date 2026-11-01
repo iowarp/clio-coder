@@ -11,6 +11,32 @@ import { typedValidationFactsFromVerifyCalls } from "../../src/domains/dispatch/
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 
+it("every reader of a verifier report agrees on a closing report, and a second report decides nothing", () => {
+	const report = '{"verdict":"pass","checks":[{"name":"make test","passed":true,"evidence":"exit 0"}]}';
+	const prose = "calc.c has int sub(int a) { return a; } as planned.";
+	const fenced = (text: string) => `\`\`\`json\n${text}\n\`\`\``;
+	const closingAnswers = [
+		`${prose}\n\n${report}`,
+		`\`\`\`c\nint sub(int a) { return a; }\n\`\`\`\n${fenced(report)}`,
+		`${prose}\n\n${JSON.stringify(JSON.parse(report), null, 2)}`,
+	];
+	for (const answer of closingAnswers) {
+		strictEqual(parseVerifierResult(answer)?.verdict, "pass", answer);
+		// Claim grounding reads the same report, so a claim with no command behind it is not measured.
+		strictEqual(
+			groundClaimedValidations({
+				contractKind: "verifier-report",
+				output: answer,
+				executedCommands: new Set<string>(),
+				executedCheckingCalls: 0,
+				readOnly: true,
+			})?.grounded,
+			0,
+			answer,
+		);
+	}
+	strictEqual(parseVerifierResult(`Example:\n${fenced(report)}\n${report.replace("pass", "fail")}`), null);
+});
 it("blocked-only verify checks seal no typed validation, including unattributed finishes", () => {
 	const stats = [{ tool: "verify", count: 1, ok: 0, errors: 0, blocked: 1 }];
 	for (const check of ["test", null])
