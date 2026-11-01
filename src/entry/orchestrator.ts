@@ -2253,8 +2253,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					// ACP advertises `context`, so clients can send the same slash form as the TUI.
 					initCommand: options.headless ? "clio-coder context init" : "/context init",
 					// Scripted runs keep suggestions off stderr; malformed-file warnings still flow.
-					suggest:
-						options.headless === undefined || (options.headless.mode !== "json" && process.stderr.isTTY === true),
+					suggest: options.headless === undefined || (options.headless.mode !== "json" && process.stderr.isTTY === true),
 					// TUI and ACP consume the stored hints on their own notice surfaces.
 					...(options.acp === undefined && !muxInteractive ? { sink: (hint) => bootStderr(`${hint.text}\n`) } : {}),
 				},
