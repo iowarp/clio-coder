@@ -1,7 +1,7 @@
 import type { Stats } from "node:fs";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, relative, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 /**
  * The one read boundary for durable state a reader trusts: telemetry scopes and gate decision artifacts (#434). A
@@ -34,6 +34,27 @@ export async function withinStateRootAsync(stateDir: string, path: string): Prom
 		return beneath(await realpath(stateDir), await realpath(path));
 	} catch {
 		// A path that does not resolve holds nothing to read.
+		return false;
+	}
+}
+
+/** Destructive cleanup accepts no directory links below the chosen state root. */
+export function unlinkedStateDirectory(stateDir: string, directory: string): boolean {
+	try {
+		const root = resolve(stateDir);
+		const suffix = relative(root, resolve(directory));
+		if (isAbsolute(suffix) || suffix.split(sep)[0] === "..") return false;
+		const rootStat = lstatSync(root);
+		const stat = lstatSync(directory);
+		return (
+			rootStat.isDirectory() &&
+			!rootStat.isSymbolicLink() &&
+			stat.isDirectory() &&
+			!stat.isSymbolicLink() &&
+			realpathSync(directory) === resolve(realpathSync(root), suffix)
+		);
+	} catch {
+		// Missing or replaced directories hold nothing cleanup may remove.
 		return false;
 	}
 }

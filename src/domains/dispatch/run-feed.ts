@@ -29,7 +29,8 @@ import {
 	statSync,
 	writeSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { unlinkedStateDirectory } from "../../core/state-boundary.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { ToolCallFacts } from "../../tools/agent-tools.js";
 import { createRedactionTally, redactSecretsDeep } from "../evidence/redact.js";
@@ -93,7 +94,8 @@ export function removeRunFeeds(stateDir: string, runIds: Iterable<string>): void
 	for (const runId of runIds) {
 		if (!isSafeRunId(runId)) continue;
 		try {
-			rmSync(runFeedPath(runId, stateDir), { force: true });
+			const path = runFeedPath(runId, stateDir);
+			if (unlinkedStateDirectory(stateDir, dirname(path))) rmSync(path, { force: true });
 		} catch {
 			// A feed we could not remove is retained display state, not an error.
 		}

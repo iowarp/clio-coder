@@ -1,6 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { lstat, readdir, readFile, rm, rmdir } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { unlinkedStateDirectory } from "../../core/state-boundary.js";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { liveSessionOwner } from "../session/live-owner.js";
 import { CONTENT_SUBJECTS, collectRefs } from "./objects.js";
@@ -119,18 +120,6 @@ async function realDirectory(path: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
-}
-
-/** Retention must recheck every directory below its chosen state root, including ancestors of an unchanged file. */
-async function containedDirectory(stateDir: string, directory: string): Promise<boolean> {
-	let current = resolve(stateDir);
-	const suffix = relative(current, resolve(directory));
-	if (isAbsolute(suffix) || suffix.split(sep)[0] === ".." || !(await realDirectory(current))) return false;
-	for (const component of suffix === "" ? [] : suffix.split(sep)) {
-		current = join(current, component);
-		if (!(await realDirectory(current))) return false;
-	}
-	return true;
 }
 
 /** A writer holds `<journal>.lock` for its whole life; a lock, live or stale, keeps every file of that journal. */
@@ -275,7 +264,7 @@ export async function planTelemetryPrune(
 	const sessions: SessionTelemetry[] = [];
 	const sessionsRoot = telemetrySessionsDirectory(stateDir);
 	const metas = await sessionMetas(stateDir);
-	for (const sessionId of (await containedDirectory(stateDir, sessionsRoot)) ? await names(sessionsRoot) : []) {
+	for (const sessionId of unlinkedStateDirectory(stateDir, sessionsRoot) ? await names(sessionsRoot) : []) {
 		if (!SAFE_ID.test(sessionId)) continue;
 		const directory = join(sessionsRoot, sessionId);
 		if (!(await realDirectory(directory))) {
@@ -287,7 +276,7 @@ export async function planTelemetryPrune(
 	}
 	const scopes = async (root: string): Promise<ScopeTelemetry[]> => {
 		const found: ScopeTelemetry[] = [];
-		if (!(await containedDirectory(stateDir, root))) {
+		if (!unlinkedStateDirectory(stateDir, root)) {
 			if (existsSync(root)) plan.held.push({ path: root, reason: "symlink" });
 			return found;
 		}
@@ -424,7 +413,7 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 			continue;
 		}
 		for (const action of batch) {
-			if (!(await containedDirectory(plan.stateDir, dirname(action.path)))) {
+			if (!unlinkedStateDirectory(plan.stateDir, dirname(action.path))) {
 				result.skipped.push({ path: action.path, reason: "directory is no longer contained" });
 				continue;
 			}
@@ -448,7 +437,7 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 	}
 	for (const directory of new Set(result.removed.map((action) => telemetryObjectsDirectory(action.owner.directory)))) {
 		// Only an emptied objects directory goes; rmdir refuses one that still holds a file.
-		if (await containedDirectory(plan.stateDir, directory)) await rmdir(directory).catch(() => {});
+		if (unlinkedStateDirectory(plan.stateDir, directory)) await rmdir(directory).catch(() => {});
 	}
 	return result;
 }
@@ -460,7 +449,8 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 export function removeRunTelemetry(stateDir: string, runIds: Iterable<string>): void {
 	for (const runId of runIds) {
 		try {
-			rmSync(telemetryRunDirectory(stateDir, runId), { recursive: true, force: true });
+			const directory = telemetryRunDirectory(stateDir, runId);
+			if (unlinkedStateDirectory(stateDir, directory)) rmSync(directory, { recursive: true, force: true });
 		} catch {
 			// An unsafe id resolves to no directory, and one we could not remove is retained, not an error.
 		}
