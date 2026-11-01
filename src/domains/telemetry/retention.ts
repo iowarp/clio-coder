@@ -1,5 +1,5 @@
-import { existsSync, rmSync } from "node:fs";
-import { lstat, readdir, readFile, rm, rmdir } from "node:fs/promises";
+import { existsSync, rmSync, unlinkSync } from "node:fs";
+import { lstat, readdir, readFile, rmdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { unlinkedStateDirectory } from "../../core/state-boundary.js";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
@@ -413,11 +413,13 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 			continue;
 		}
 		for (const action of batch) {
+			const current = await info(action.path);
+			// Containment is proven after the last await, and nothing yields before the unlink: a directory swapped for a
+			// link during that read must not redirect the delete. Node has no unlinkat to pin the directory itself.
 			if (!unlinkedStateDirectory(plan.stateDir, dirname(action.path))) {
 				result.skipped.push({ path: action.path, reason: "directory is no longer contained" });
 				continue;
 			}
-			const current = await info(action.path);
 			if (!current || current.bytes !== action.bytes || current.mtimeMs !== action.mtimeMs) {
 				result.skipped.push({ path: action.path, reason: current ? "changed since planning" : "already gone" });
 				continue;
@@ -428,7 +430,7 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 				continue;
 			}
 			try {
-				await rm(action.path);
+				unlinkSync(action.path);
 				result.removed.push(action);
 			} catch (error) {
 				result.skipped.push({ path: action.path, reason: error instanceof Error ? error.message : String(error) });
