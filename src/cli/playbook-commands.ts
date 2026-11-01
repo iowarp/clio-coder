@@ -20,6 +20,7 @@ export function runPlaybookCommands(args: ReadonlyArray<string>): number {
 	const lines = [
 		"# Draft playbook command registry.",
 		"# Every entry was discovered from a project declaration. Uncommenting an entry confirms its exact invocation.",
+		"# The builtin build-test and sdlc playbooks run the ids test and commit, so rename an entry to the id a playbook needs.",
 		"# version: 1",
 		"# commands:",
 	];

@@ -220,13 +220,13 @@ export function cmakeProposals(workspaceRoot: string, diagnostics: string[]): Ra
  * dependencies first, so #377 admits uv-launched pytest only with that flag,
  * and without it every non-interactive worker was denied its own test check.
  */
-function pythonLauncher(workspaceRoot: string): string[] {
+export function pythonLauncher(workspaceRoot: string): string[] {
 	if (!existsSync(path.join(workspaceRoot, "uv.lock"))) return [];
 	return existsSync(path.join(workspaceRoot, ".venv")) ? ["uv", "run", "--no-sync"] : ["uv", "run"];
 }
 
 /** DF-11: safe-exec preserves this PATH inside the worker sandbox; resolve once, without executing a probe. */
-function pythonInterpreter(workspaceRoot: string, launcher: string[]): string | null {
+export function pythonInterpreter(workspaceRoot: string, launcher: string[]): string | null {
 	if (launcher.length > 0) return "python";
 	if (existsSync(path.join(workspaceRoot, ".venv"))) {
 		return process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python";

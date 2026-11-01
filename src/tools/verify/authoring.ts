@@ -22,6 +22,8 @@ import {
 	cargoProposals,
 	cmakeProposals,
 	goProposals,
+	pythonInterpreter,
+	pythonLauncher,
 	pythonProposals,
 	type RawProposal,
 	regularFileText,
@@ -306,13 +308,15 @@ export function discoverDeclaredProjectCommands(workspaceRoot = process.cwd()): 
 					if (typeof target === "string") add(name, [name], "pyproject.toml", `[${label}] entry '${name}'`, "python-runner");
 				}
 			}
+			const launcher = pythonLauncher(workspaceRoot);
+			const interpreter = pythonInterpreter(workspaceRoot, launcher) ?? "python";
 			for (const [tablePath, module, id, label] of [
 				[["tool", "pytest", "ini_options"], "pytest", "pytest", "tool.pytest.ini_options"],
 				[["tool", "tox"], "tox", "tox", "tool.tox"],
 				[["tool", "nox"], "nox", "nox", "tool.nox"],
 			] as const) {
 				if (tomlTableAt(document, tablePath) !== null)
-					add(id, ["python", "-m", module], "pyproject.toml", `[${label}]`, "python-runner");
+					add(id, [...launcher, interpreter, "-m", module], "pyproject.toml", `[${label}]`, "python-runner");
 			}
 		}
 	}
