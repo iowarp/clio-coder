@@ -170,7 +170,7 @@ describe("compact prompt contracts", () => {
 		match(compiled.systemPrompt, /Documentation and source ship with the package/u);
 		match(compiled.systemPrompt, /Autonomy: default\./u);
 		match(compiled.systemPrompt, /Hard blocks\s+\(destructive git,/u);
-		match(compiled.systemPrompt, /Use receipts for synthesis/u);
+		match(compiled.systemPrompt, /Use run records for synthesis/u);
 		match(compiled.systemPrompt, /spot-check consequential evidence/u);
 		strictEqual(compiled.systemPrompt.includes("Collect detached runs"), false);
 		match(compiled.systemPrompt, /clio_library/u);
