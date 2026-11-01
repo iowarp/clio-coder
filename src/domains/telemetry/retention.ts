@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
 import { lstat, readdir, readFile, rm, rmdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
 import { liveSessionOwner } from "../session/live-owner.js";
 import { CONTENT_SUBJECTS, collectRefs } from "./objects.js";
@@ -54,6 +54,7 @@ export interface PruneHold {
 }
 
 export interface PrunePlan {
+	stateDir: string;
 	remove: PruneAction[];
 	held: PruneHold[];
 	standardBytes: number;
@@ -118,6 +119,18 @@ async function realDirectory(path: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
+}
+
+/** Retention must recheck every directory below its chosen state root, including ancestors of an unchanged file. */
+async function containedDirectory(stateDir: string, directory: string): Promise<boolean> {
+	let current = resolve(stateDir);
+	const suffix = relative(current, resolve(directory));
+	if (isAbsolute(suffix) || suffix.split(sep)[0] === ".." || !(await realDirectory(current))) return false;
+	for (const component of suffix === "" ? [] : suffix.split(sep)) {
+		current = join(current, component);
+		if (!(await realDirectory(current))) return false;
+	}
+	return true;
 }
 
 /** A writer holds `<journal>.lock` for its whole life; a lock, live or stale, keeps every file of that journal. */
@@ -258,11 +271,11 @@ export async function planTelemetryPrune(
 	policy: PrunePolicy,
 	nowMs = Date.now(),
 ): Promise<PrunePlan> {
-	const plan: PrunePlan = { remove: [], held: [], standardBytes: 0, researchBytes: 0 };
+	const plan: PrunePlan = { stateDir: resolve(stateDir), remove: [], held: [], standardBytes: 0, researchBytes: 0 };
 	const sessions: SessionTelemetry[] = [];
 	const sessionsRoot = telemetrySessionsDirectory(stateDir);
 	const metas = await sessionMetas(stateDir);
-	for (const sessionId of await names(sessionsRoot)) {
+	for (const sessionId of (await containedDirectory(stateDir, sessionsRoot)) ? await names(sessionsRoot) : []) {
 		if (!SAFE_ID.test(sessionId)) continue;
 		const directory = join(sessionsRoot, sessionId);
 		if (!(await realDirectory(directory))) {
@@ -274,6 +287,10 @@ export async function planTelemetryPrune(
 	}
 	const scopes = async (root: string): Promise<ScopeTelemetry[]> => {
 		const found: ScopeTelemetry[] = [];
+		if (!(await containedDirectory(stateDir, root))) {
+			if (existsSync(root)) plan.held.push({ path: root, reason: "symlink" });
+			return found;
+		}
 		for (const id of await names(root)) {
 			if (!SAFE_ID.test(id)) continue;
 			if (!(await realDirectory(join(root, id)))) {
@@ -407,6 +424,10 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 			continue;
 		}
 		for (const action of batch) {
+			if (!(await containedDirectory(plan.stateDir, dirname(action.path)))) {
+				result.skipped.push({ path: action.path, reason: "directory is no longer contained" });
+				continue;
+			}
 			const current = await info(action.path);
 			if (!current || current.bytes !== action.bytes || current.mtimeMs !== action.mtimeMs) {
 				result.skipped.push({ path: action.path, reason: current ? "changed since planning" : "already gone" });
@@ -427,7 +448,7 @@ export async function applyTelemetryPrune(plan: PrunePlan): Promise<PruneResult>
 	}
 	for (const directory of new Set(result.removed.map((action) => telemetryObjectsDirectory(action.owner.directory)))) {
 		// Only an emptied objects directory goes; rmdir refuses one that still holds a file.
-		await rmdir(directory).catch(() => {});
+		if (await containedDirectory(plan.stateDir, directory)) await rmdir(directory).catch(() => {});
 	}
 	return result;
 }

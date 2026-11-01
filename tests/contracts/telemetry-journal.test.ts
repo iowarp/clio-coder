@@ -7,6 +7,7 @@ import {
 	readdir,
 	readFile,
 	realpath,
+	rename,
 	rm,
 	stat,
 	symlink,
@@ -957,6 +958,46 @@ test("prune removes only idle, unreferenced telemetry past retention and says ex
 		deepStrictEqual(await readdir(join(keptDirectory, "objects")), [`${structure.id}.json`]);
 	} finally {
 		await rm(stateDir, { recursive: true, force: true });
+	}
+});
+
+test("prune leaves files behind linked ancestors untouched, including links introduced after planning", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-prune-containment-"));
+	const old = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
+	try {
+		for (const stage of ["plan", "apply"] as const) {
+			for (const ancestor of [
+				"telemetry",
+				"telemetry/process",
+				"telemetry/process/victim",
+				"telemetry/process/victim/objects",
+			]) {
+				const fixture = join(root, `${stage}-${ancestor.replaceAll("/", "-")}`);
+				const stateDir = join(fixture, "state");
+				const directory = telemetryProcessDirectory(stateDir, "victim");
+				const object = join(directory, "objects", `obj_${"a".repeat(64)}.json`);
+				await mkdir(join(directory, "objects"), { recursive: true });
+				for (const file of [join(directory, "journal.jsonl"), object]) {
+					await writeFile(file, "retained canary\n");
+					await utimes(file, old, old);
+				}
+				const before = await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY);
+				strictEqual(before.remove.length, 2, "ordinary expired telemetry is eligible");
+				const source = join(stateDir, ancestor);
+				const outside = join(fixture, "outside");
+				await rename(source, outside);
+				await symlink(outside, source, "dir");
+				const plan = stage === "plan" ? await planTelemetryPrune(stateDir, DEFAULT_PRUNE_POLICY) : before;
+				const result = await applyTelemetryPrune(plan);
+				strictEqual(await readFile(object, "utf8"), "retained canary\n");
+				if (!ancestor.endsWith("objects")) {
+					strictEqual(await readFile(join(directory, "journal.jsonl"), "utf8"), "retained canary\n");
+					strictEqual(result.removed.length, 0);
+				}
+			}
+		}
+	} finally {
+		await rm(root, { recursive: true, force: true });
 	}
 });
 
