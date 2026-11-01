@@ -84,8 +84,9 @@ describe("/branch session isolation", () => {
 			const workspaceFile = join(scratch.dir, "work.txt");
 			writeFileSync(workspaceFile, "existing edits");
 			const h = harness();
-			const parsed = parseSlashCommand(name ? `/branch ${name}` : "/branch");
+			const parsed = parseSlashCommand(name ? `/branch "${name}"` : "/branch");
 			deepStrictEqual(parsed, name ? { kind: "branch", name } : { kind: "branch" });
+			if (name) deepStrictEqual(parseSlashCommand(`/branch ${name}`), parsed);
 			dispatchSlashCommand(parsed, { startBranch: h.lifecycle.startBranch } as SlashCommandContext);
 			const child = session.current();
 			ok(child);

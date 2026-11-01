@@ -3088,7 +3088,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		args: { positionals: [{ name: "name", required: false, rest: true }] },
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "branch", reason: parsed.error };
-			const name = parsed.rest?.trim();
+			const name = sessionNameArgument(parsed.rest ?? "");
 			return name ? { kind: "branch", name } : { kind: "branch" };
 		},
 		handle(command, ctx) {
