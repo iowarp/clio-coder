@@ -341,7 +341,7 @@ export function dispatchRequestsFromArgs(
 	| { ok: true; requests: DispatchRequest[]; positions: number[]; rejectedTasks: DispatchRejectedTask[] }
 	| { ok: false; message: string } {
 	if (Object.hasOwn(args, "task") && Object.hasOwn(args, "tasks")) {
-		return { ok: false, message: "dispatch: pass either task for one run or tasks for a batch, not both" };
+		return { ok: false, message: 'dispatch: pass either task for one run or tasks for a batch, not both. For a batch set task to ""; for one run drop tasks.' };
 	}
 	if (args.record !== undefined && typeof args.record !== "boolean")
 		return { ok: false, message: "dispatch: record must be a boolean" };
