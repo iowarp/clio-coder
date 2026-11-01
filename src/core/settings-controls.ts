@@ -517,7 +517,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.limits.workerResponseSeconds": [
 		"Worker response time",
-		"Seconds one native worker model response may run; locked synthesis rounds stop at 120.",
+		"Seconds one native worker model response may run, including locked synthesis rounds.",
 	],
 	"context.semantic.enabled": [
 		"Semantic search",

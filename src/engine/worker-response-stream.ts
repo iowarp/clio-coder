@@ -31,11 +31,18 @@ export function boundWorkerResponse<T extends StreamOptions>(
 	const output = createAssistantMessageEventStream();
 	const controller = new AbortController();
 	const signal = options?.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-	const seconds = Math.min(limits.responseSeconds, limits.locked ? 120 : Number.POSITIVE_INFINITY);
-	const maxTokens = remainingContextMaxTokens(model, context, {
-		...options,
-		...(limits.locked ? { maxTokens: Math.min(options?.maxTokens ?? model.maxTokens, 4096) } : {}),
-	});
+	const seconds = limits.responseSeconds;
+	const maxTokens = remainingContextMaxTokens(model, context, options);
+	const outputLimitDetail = (): string => {
+		const contextLimit = remainingContextMaxTokens(model, context, { maxTokens: Number.POSITIVE_INFINITY });
+		const source =
+			maxTokens === model.maxTokens
+				? "model output limit"
+				: maxTokens === contextLimit
+					? "remaining context"
+					: "requested output budget";
+		return `worker_output_cap_exhausted: round ${limits.round} exhausted the ${maxTokens} token output limit (${source})`;
+	};
 	let settled = false;
 	let partial: AssistantMessage | undefined;
 	let reportedUsage: CallUsage | undefined;
@@ -147,10 +154,7 @@ export function boundWorkerResponse<T extends StreamOptions>(
 				if (event.type === "done" || event.type === "error") {
 					partial = event.type === "done" ? event.message : event.error;
 					if (limits.locked && partial.stopReason === "length") {
-						stop(
-							`worker_output_cap_exhausted: round ${limits.round} exhausted the ${maxTokens} token output limit`,
-							"worker_output_cap_exhausted",
-						);
+						stop(outputLimitDetail(), "worker_output_cap_exhausted");
 						return;
 					}
 					if (event.type === "error") settleUsage(event.error);
@@ -170,10 +174,7 @@ export function boundWorkerResponse<T extends StreamOptions>(
 				return;
 			}
 			if (limits.locked && message.stopReason === "length") {
-				stop(
-					`worker_output_cap_exhausted: round ${limits.round} exhausted the ${maxTokens} token output limit`,
-					"worker_output_cap_exhausted",
-				);
+				stop(outputLimitDetail(), "worker_output_cap_exhausted");
 				return;
 			}
 			settled = true;

@@ -57,7 +57,7 @@ const message = (text: string): Message => ({
 
 for (const limit of [
 	{ locked: false, configured: 600, seconds: 600 },
-	{ locked: true, configured: 600, seconds: 120 },
+	{ locked: true, configured: 600, seconds: 600 },
 	{ locked: true, configured: 1, seconds: 1 },
 ]) {
 	test(`native response deadline (${limit.seconds}s, locked=${limit.locked}) settles before a late tool batch`, async (t) => {
@@ -127,8 +127,14 @@ for (const limit of [
 			settled = true;
 		});
 		await observed;
+		if (limit.locked && limit.seconds > 120) {
+			now = 120_000;
+			t.mock.timers.tick(120_000);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			strictEqual(settled, false, "locked rounds retain the configured response deadline");
+		}
 		now = limit.seconds * 1000;
-		t.mock.timers.tick(limit.seconds * 1000);
+		t.mock.timers.tick(limit.seconds * 1000 - (limit.locked && limit.seconds > 120 ? 120_000 : 0));
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		strictEqual(settled, true, "the local agent must finish before the provider answers");
 		await run;
@@ -152,7 +158,7 @@ for (const limit of [
 	});
 }
 
-test("locked native worker rounds disable thinking, send the 4096 cap and fail on provider output exhaustion", async () => {
+test("locked native worker rounds disable thinking, send the model output limit and fail on exhaustion", async () => {
 	const env = await isolateClioEnv("worker-response-cap-");
 	writeFileSync(join(env.dir, "input.txt"), "known evidence");
 	const requests: Array<{
@@ -180,7 +186,7 @@ test("locked native worker rounds disable thinking, send the 4096 cap and fail o
 			: { role: "assistant", content: "unfinished report" };
 		res.setHeader("content-type", "text/event-stream");
 		res.end(
-			`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: working ? "tool_calls" : "length" }], usage: { prompt_tokens: 17, completion_tokens: 4096, total_tokens: 4113 } })}\n\ndata: [DONE]\n\n`,
+			`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: working ? "tool_calls" : "length" }], usage: { prompt_tokens: 17, completion_tokens: 8192, total_tokens: 8209 } })}\n\ndata: [DONE]\n\n`,
 		);
 	});
 	try {
@@ -218,13 +224,13 @@ test("locked native worker rounds disable thinking, send the 4096 cap and fail o
 		strictEqual(requests.length, 2);
 		strictEqual(requests[0]?.chat_template_kwargs?.enable_thinking, true);
 		strictEqual(requests[1]?.chat_template_kwargs?.enable_thinking, false);
-		strictEqual(requests[1]?.max_tokens, 4096);
+		strictEqual(requests[1]?.max_tokens, 8192);
 		strictEqual(requests[1]?.tools?.length ?? 0, 0);
 		strictEqual(result.exitCode, 1);
 		const outcome = outcomes.find((event) => event.type === "clio_coder_run_outcome");
 		ok(outcome?.type === "clio_coder_run_outcome");
 		strictEqual(outcome.payload.outcomeCode, "worker_output_cap_exhausted");
-		match(outcome.payload.detail ?? "", /round 2.*4096 token/);
+		match(outcome.payload.detail ?? "", /round 2.*8192 token output limit \(model output limit\)/);
 		strictEqual(capture.snapshot()?.state, "partial");
 		strictEqual(capture.snapshot()?.text, "unfinished report");
 	} finally {
@@ -312,31 +318,64 @@ for (const code of ["worker_turn_timeout", "worker_output_cap_exhausted"] as con
 	});
 }
 
-for (const terminalEvent of [true, false]) {
-	test(`unlocked length stops preserve Pi truncation recovery (terminal event=${terminalEvent})`, async () => {
-		const truncated = { ...message("truncated"), stopReason: "length" as const };
-		const source = {
-			async *[Symbol.asyncIterator]() {
-				if (terminalEvent) yield { type: "done", reason: "length", message: truncated };
-			},
-			result: async () => truncated,
-		} as unknown as Stream;
-		const codes: string[] = [];
-		const stream = boundWorkerResponse(
-			model,
-			{ messages: [] },
-			undefined,
-			{
-				locked: false,
-				responseSeconds: 600,
-				round: 1,
-				onLimit: (code) => codes.push(code),
-			},
-			() => source,
-		);
-		strictEqual((await stream.result()).stopReason, "length");
-		deepStrictEqual(codes, []);
-	});
+for (const limit of [
+	{ name: "unlocked", locked: false, currentModel: model, options: undefined, source: undefined },
+	{ name: "model", locked: true, currentModel: model, options: undefined, source: "model output limit" },
+	{
+		name: "context",
+		locked: true,
+		currentModel: { ...model, contextWindow: 4096 },
+		options: undefined,
+		source: "remaining context",
+	},
+	{ name: "request", locked: true, currentModel: model, options: { maxTokens: 512 }, source: "requested output budget" },
+]) {
+	for (const terminalEvent of [true, false]) {
+		test(`${limit.name} length stop reports its limit (terminal event=${terminalEvent})`, async () => {
+			const truncated = { ...message("truncated"), stopReason: "length" as const };
+			const source = {
+				async *[Symbol.asyncIterator]() {
+					if (terminalEvent) yield { type: "done", reason: "length", message: truncated };
+				},
+				result: async () => truncated,
+			} as unknown as Stream;
+			const outcomes: Array<{ code: string; detail: string }> = [];
+			let maxTokens = 0;
+			const stream = boundWorkerResponse(
+				limit.currentModel,
+				{ messages: [] },
+				limit.options,
+				{
+					locked: limit.locked,
+					responseSeconds: 600,
+					round: 1,
+					onLimit: (code, detail) => outcomes.push({ code, detail }),
+				},
+				(options) => {
+					maxTokens = options.maxTokens ?? 0;
+					return source;
+				},
+			);
+			const result = await stream.result();
+			if (limit.locked) {
+				strictEqual(result.stopReason, "aborted");
+				deepStrictEqual(outcomes, [
+					{
+						code: "worker_output_cap_exhausted",
+						detail: `worker_output_cap_exhausted: round 1 exhausted the ${maxTokens} token output limit (${limit.source})`,
+					},
+				]);
+			} else {
+				strictEqual(result.stopReason, "length", "preserve Pi truncation recovery");
+				deepStrictEqual(outcomes, []);
+			}
+			if (limit.name === "context") {
+				ok(maxTokens > 0 && maxTokens < limit.currentModel.contextWindow);
+			} else {
+				strictEqual(maxTokens, limit.options?.maxTokens ?? model.maxTokens);
+			}
+		});
+	}
 }
 
 for (const reported of [false, true]) {
@@ -450,8 +489,8 @@ test("response deadline starts after local residency finishes", async (t) => {
 		deepStrictEqual(codes, [], "loading must not consume the response deadline");
 		finishLoad();
 		await started;
-		now += 119_999;
-		t.mock.timers.tick(119_999);
+		now += 599_999;
+		t.mock.timers.tick(599_999);
 		deepStrictEqual(codes, []);
 		now++;
 		t.mock.timers.tick(1);
