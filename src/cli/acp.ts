@@ -161,6 +161,9 @@ export async function runAcpCommand(
 				workerPermissions: true,
 				shell: true,
 				queueEdit: true,
+				telemetry: true,
+				jobs: true,
+				ceiling: true,
 			});
 			const serving = serveDeferredAcp({
 				transport,
