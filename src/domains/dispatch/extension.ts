@@ -8754,9 +8754,7 @@ export function createDispatchBundle(
 								// The apply pass's own post-commit snapshot is what the receipt reports; a fresh
 								// one taken now would silently cover a file that arrived in between (D12).
 								preview =
-									accounted?.commit === previewedCommit
-										? accounted
-										: previewTaskWorktree(req.taskWorktree, previewedCommit);
+									accounted?.commit === previewedCommit ? accounted : previewTaskWorktree(req.taskWorktree, previewedCommit);
 							} catch (previewError) {
 								// Without the record no card is built, so nothing can remove the worktree unguarded.
 								reportDispatchDiagnostic(`preview task worktree ${req.taskWorktree.runId}`, previewError);
