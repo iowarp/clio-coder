@@ -655,6 +655,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// before_tool registration (engine/loop-guard.ts), so admission and
 	// repetition detection share one seam; there is no agent-loop hook anymore.
 	const safety = createWorkerSafety({
+		...(input.readOnly !== true &&
+		input.resultContract?.kind === "architect-plan" &&
+		input.allowedTools.includes(ToolNames.Artifact)
+			? { requiredArtifactPath: input.resultContract.path }
+			: {}),
 		...(input.flowPolicy !== undefined ? { flowPolicy: input.flowPolicy } : {}),
 		...(input.taskGit?.taskWorktree !== undefined ? { taskWorktreeRoot: input.taskGit.taskWorktree.path } : {}),
 		cwd: process.cwd(),

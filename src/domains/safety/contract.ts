@@ -76,6 +76,8 @@ export interface SafetyContract {
 		allowsObservationPath?(path: string): boolean;
 		/** Block reason when a typed write would land outside the run's write roots, or null (F3). */
 		writeTargetViolation?(target: string): string | null;
+		/** Publication-only check for a required artifact; other tools keep the ordinary write boundary. */
+		artifactTargetViolation?(target: string): string | null;
 		/** Trust-gated information-flow rules, for evaluating a transfer against carried restrictions. */
 		informationFlow?(): InformationFlowPolicy;
 		/**

@@ -1200,7 +1200,10 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...callerOptions
 				} = options ?? {};
 				const allowsObservationPath = deps.safety.policy?.allowsObservationPath;
-				const writeTargetViolation = deps.safety.policy?.writeTargetViolation;
+				const writeTargetViolation =
+					spec.name === ToolNames.Artifact
+						? (deps.safety.policy?.artifactTargetViolation ?? deps.safety.policy?.writeTargetViolation)
+						: deps.safety.policy?.writeTargetViolation;
 				// What this result will carry, decided from the path or tool name
 				// before the body runs, so a link swapped in afterwards cannot
 				// unlabel it and so the label exists before any screening.

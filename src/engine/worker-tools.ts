@@ -55,6 +55,8 @@ export const INTERNAL_HELPER_RESULT_TOOL = "clio_submit_result";
  */
 export interface WorkerSafetyOptions {
 	cwd?: string;
+	/** Exact artifact required by the admitted architect contract; never a general write grant. */
+	requiredArtifactPath?: string;
 	writeRoots?: ReadonlyArray<string>;
 	/** The worker's OS sandbox confines its commands to `writeRoots`. */
 	writeRootsOsConfined?: boolean;
@@ -83,6 +85,10 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 	const protectedArtifactState: ProtectedArtifactState = {
 		artifacts: structuredClone(options.protectedArtifactState?.artifacts ?? []),
 	};
+	const requiredArtifact =
+		options.requiredArtifactPath === undefined
+			? undefined
+			: { cwd: options.cwd ?? process.cwd(), path: options.requiredArtifactPath };
 	return {
 		classify: (call) => classifyAction(call),
 		evaluate(call, posture, scope) {
@@ -152,6 +158,12 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 					: flowRestrictionsForCall(informationFlow, flowSourceCallFor(rawCall, options.cwd ?? process.cwd())),
 			metadata: (posture) => policyEngine.metadata(posture),
 			writeTargetViolation: (target) => workerReadOnlyTargetViolation(target) ?? policyEngine.writeTargetViolation(target),
+			...(requiredArtifact !== undefined
+				? {
+						artifactTargetViolation: (target: string) =>
+							workerReadOnlyTargetViolation(target, requiredArtifact) ?? policyEngine.writeTargetViolation(target),
+					}
+				: {}),
 			allowsObservationPath: (path) =>
 				policyEngine.evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths",
 		},

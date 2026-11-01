@@ -1,6 +1,7 @@
 import { closeSync, constants, mkdirSync, openSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { workerSecretPaths } from "../../domains/safety/secret-paths.js";
+import { CLIO_ARTIFACT_DIR, CLIO_PROJECT_DIR } from "../artifact-paths.js";
 import { canonicalizePath } from "../path-canonical.js";
 import { sandboxAvailability } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
@@ -35,12 +36,33 @@ export function configureWorkerProcessSandbox(spec: WorkerSandboxSpec | undefine
 }
 
 /** Native edit/write tools run outside the child sandbox, so publication must honor its read-only paths. */
-export function workerReadOnlyTargetViolation(target: string): string | null {
+export function workerReadOnlyTargetViolation(
+	target: string,
+	requiredArtifact?: { cwd: string; path: string },
+): string | null {
 	if (active === null) return null;
 	const candidate = canonicalizePath(target);
 	if (candidate === null) return "sandbox: write target could not be resolved";
+	// A required artifact is a host-admitted publication, not a writable policy tree.
+	// Keep its exact physical destination pinned so a link cannot borrow the exception.
+	let artifactPolicyRoot: string | null = null;
+	const workspace = requiredArtifact === undefined ? null : canonicalizePath(requiredArtifact.cwd);
+	if (workspace !== null && requiredArtifact !== undefined) {
+		const artifact = path.resolve(workspace, requiredArtifact.path);
+		const relative = path.relative(path.join(workspace, CLIO_ARTIFACT_DIR), artifact);
+		if (
+			relative !== "" &&
+			relative !== ".." &&
+			!relative.startsWith(`..${path.sep}`) &&
+			!path.isAbsolute(relative) &&
+			candidate === artifact &&
+			canonicalizePath(artifact) === artifact
+		)
+			artifactPolicyRoot = path.join(workspace, CLIO_PROJECT_DIR);
+	}
 	for (const entry of active.readOnlyPaths) {
 		const root = physicalSandboxPath(entry);
+		if (root === artifactPolicyRoot) continue;
 		const relative = path.relative(root, candidate);
 		if (relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))) {
 			return `sandbox: ${target} is read-only`;
