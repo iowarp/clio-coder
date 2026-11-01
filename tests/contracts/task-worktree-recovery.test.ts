@@ -5,16 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { taskWorktreeFindings } from "../../src/cli/doctor-task-worktrees.js";
+import type { TaskWorktree, TaskWorktreePreview } from "../../src/tools/task-worktree.js";
 import {
 	applyTaskWorktree,
+	cleanupAccountedTaskWorktree,
 	createTaskWorktree,
 	discardIdleTaskWorktree,
 	discardTaskWorktree,
 	listPreservedTaskWorktrees,
 	previewTaskWorktree,
+	receiptWithDrift,
 	recoverTaskWorktrees,
 	settleTaskWorktree,
-	type TaskWorktree,
 	taskWorktreePreviewDrift,
 } from "../../src/tools/task-worktree.js";
 
@@ -163,10 +165,10 @@ describe("task worktree restart recovery", () => {
 		mkdirSync(join(vendor, "src"));
 		writeFileSync(join(vendor, "src", "worker.txt"), "before preview\n");
 		const directoryPreview = previewTaskWorktree(clean.task, clean.commit);
-		match(taskWorktreePreviewDrift(clean.task, directoryPreview) ?? "", /untracked directory vendor\//u);
+		match(taskWorktreePreviewDrift(clean.task, directoryPreview)?.detail ?? "", /untracked directory vendor\//u);
 		writeFileSync(join(vendor, "src", "worker.txt"), "after preview\n");
-		strictEqual(previewTaskWorktree(clean.task, clean.commit).untracked, directoryPreview.untracked);
-		match(taskWorktreePreviewDrift(clean.task, directoryPreview) ?? "", /untracked directory vendor\//u);
+		deepStrictEqual(previewTaskWorktree(clean.task, clean.commit).untracked, directoryPreview.untracked);
+		match(taskWorktreePreviewDrift(clean.task, directoryPreview)?.detail ?? "", /untracked directory vendor\//u);
 		const directoryDiscard = discardTaskWorktree(clean.task, directoryPreview);
 		strictEqual(directoryDiscard.outcome, "changed");
 		match(directoryDiscard.outcome === "changed" ? directoryDiscard.detail : "", /untracked directory vendor\//u);
@@ -243,6 +245,42 @@ if (process.cwd() === ${JSON.stringify(task.path)}) require('node:fs').writeFile
 		strictEqual(existsSync(join(root, "late.txt")), false);
 		strictEqual(git(root, "ls-files", "__pycache__"), "");
 		strictEqual(readFileSync(join(root, "a.txt"), "utf8"), "fixed\n");
+	});
+
+	it("keeps a merged worktree holding a file created after the commit and names it, and removes one holding only what it reported", () => {
+		const merge = (runId: string) => {
+			const task = createTaskWorktree(root, runId, undefined, "merge");
+			writeFileSync(join(task.path, "byproduct.txt"), "reported\n");
+			let accounted: TaskWorktreePreview | undefined;
+			const receipt = applyTaskWorktree({
+				worktree: task,
+				apply: "merge",
+				authoredPaths: [],
+				onAccounted: (entry) => {
+					accounted = entry;
+				},
+			});
+			deepStrictEqual(receipt.leftUncommitted, { count: 1, paths: ["byproduct.txt"] });
+			return { task, receipt, accounted };
+		};
+
+		const reported = merge("run-cleanup-reported");
+		strictEqual(taskWorktreePreviewDrift(reported.task, reported.accounted), null);
+		strictEqual(cleanupAccountedTaskWorktree(reported.task, reported.accounted), null);
+		ok(!existsSync(reported.task.path) && !branches().includes(reported.task.branch));
+
+		const raced = merge("run-cleanup-raced");
+		writeFileSync(join(raced.task.path, "late.txt"), "from a background process\n");
+		writeFileSync(join(raced.task.path, "byproduct.txt"), "changed after reporting\n");
+		const drift = cleanupAccountedTaskWorktree(raced.task, raced.accounted);
+		ok(drift !== null);
+		const sealed = receiptWithDrift(raced.receipt, raced.task, drift);
+		deepStrictEqual(sealed.changedAfterCommit, { count: 2, paths: ["byproduct.txt", "late.txt"] });
+		match(sealed.detail ?? "", /late\.txt/u);
+		strictEqual(readFileSync(join(raced.task.path, "late.txt"), "utf8"), "from a background process\n");
+		strictEqual(readFileSync(join(raced.task.path, "byproduct.txt"), "utf8"), "changed after reporting\n");
+		ok(branches().includes(raced.task.branch));
+		strictEqual((JSON.parse(readFileSync(markerPath(raced.task), "utf8")) as { state: string }).state, "settled");
 	});
 
 	it("withholds a merge when the checkout left its dispatch branch or no longer holds the task's base", () => {

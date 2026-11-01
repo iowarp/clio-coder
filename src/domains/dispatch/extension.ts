@@ -115,21 +115,22 @@ import { effectiveToolCall, gatewayChainReceipts, withGatewayForCapabilities } f
 import type { TaskWorktreePreview } from "../../tools/task-worktree.js";
 import {
 	applyTaskWorktree,
-	cleanupTaskWorktree,
+	cleanupAccountedTaskWorktree,
 	createTaskWorktree,
 	discardIdleTaskWorktree,
 	discardTaskWorktree,
 	gitCheckoutRoot,
+	keptTaskWorktreeDetail,
 	LEFT_UNCOMMITTED_LIST_LIMIT,
 	mergeDestination,
 	previewTaskWorktree,
 	protectedPathsChangedByWorktreeBranch,
+	receiptWithDrift,
 	settleTaskWorktree,
 	shareTaskWorktreeDependencies,
 	snapshotTaskWorktree,
 	taskWorktreeBaseDiff,
 	taskWorktreeHoldsWork,
-	taskWorktreePreviewDrift,
 	WORKTREE_CHANGED_SINCE_PREVIEW,
 } from "../../tools/task-worktree.js";
 import { diskWorktreeParent, prepareWorktreeParent, resolveWorktreeRoot } from "../../tools/worktree-root.js";
@@ -6556,6 +6557,7 @@ export function createDispatchBundle(
 					failureMessage = finalDetail;
 				}
 				let worktreeReceipt: RunResultDraft["worktree"];
+				let accounted: TaskWorktreePreview | undefined;
 				if (req.taskWorktree !== undefined && finalOutcome === "succeeded") {
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
@@ -6564,6 +6566,9 @@ export function createDispatchBundle(
 						// ACP delegation keeps no write record, so the host cannot tell the
 						// agent's new files from byproducts and commits every untracked file.
 						authoredPaths: null,
+						onAccounted: (entry) => {
+							accounted = entry;
+						},
 					});
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
@@ -6604,6 +6609,15 @@ export function createDispatchBundle(
 				const terminal = resolveRunTerminalReason(evidence, outcomeCode);
 				resolvedTerminal = terminal;
 				Object.assign(receiptDraft, runSettlementReceiptFields(terminal, callUsage?.snapshot()));
+				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
+					try {
+						// The merge is durable; finish cleanup before sealing its preservation paths.
+						const kept = cleanupAccountedTaskWorktree(req.taskWorktree, accounted);
+						if (kept !== null) worktreeReceipt = receiptWithDrift(worktreeReceipt, req.taskWorktree, kept);
+					} catch (cleanupError) {
+						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
+					}
+				}
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
@@ -6630,13 +6644,7 @@ export function createDispatchBundle(
 					{ terminal, processExitCode: result.exitCode, frameType: null, usage: callUsage?.snapshot()?.facts },
 				);
 				await ledgerRef.persist();
-				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
-					try {
-						cleanupTaskWorktree(req.taskWorktree, true);
-					} catch (cleanupError) {
-						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
-					}
-				} else if (req.taskWorktree !== undefined) {
+				if (worktreeReceipt?.applied !== true && req.taskWorktree !== undefined) {
 					try {
 						// A canceled run that never produced work leaves nothing to keep.
 						if (!(finalOutcome === "canceled" && discardIdleTaskWorktree(req.taskWorktree))) {
@@ -8684,8 +8692,11 @@ export function createDispatchBundle(
 				let worktreeReceipt: RunResultDraft["worktree"];
 				// Set when the operator discarded the branch and worktree from the merge card.
 				let worktreeDiscarded = false;
-				// Set when an operator's Merge landed a previewed commit; its cleanup keeps the same guard.
-				let mergedPreview: TaskWorktreePreview | undefined;
+				// What the last apply pass accounted for; automatic cleanup removes nothing beyond it.
+				let accounted: TaskWorktreePreview | undefined;
+				const onAccounted = (entry: TaskWorktreePreview): void => {
+					accounted = entry;
+				};
 				// Set once the task claim is gone, so the closing settle below does not
 				// look for it. A discard that removed the worktree but not the branch
 				// releases the claim too: nothing of Clio's is left to guard.
@@ -8706,6 +8717,7 @@ export function createDispatchBundle(
 						protectedPaths,
 						commitMessage: taskCommitMessage,
 						authoredPaths,
+						onAccounted,
 					});
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
@@ -8801,6 +8813,7 @@ export function createDispatchBundle(
 								commitMessage: taskCommitMessage,
 								authoredPaths,
 								...(preview !== undefined ? { preview } : {}),
+								onAccounted,
 							});
 							if (landed.reason === WORKTREE_CHANGED_SINCE_PREVIEW) {
 								// The branch is still withheld, so it keeps the withheld outcome
@@ -8821,7 +8834,6 @@ export function createDispatchBundle(
 								finalDetail = landed.detail ?? landed.reason;
 								failureMessage = finalDetail;
 							} else {
-								mergedPreview = preview;
 								worktreeReceipt = {
 									...landed,
 									detail: `${landed.detail}; operator merge accepted after the gate held it because ${withheldVerdict?.reason ?? "of its report"}`,
@@ -8956,6 +8968,15 @@ export function createDispatchBundle(
 							.join("; "),
 					};
 				}
+				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
+					try {
+						// The merge is durable; finish cleanup before sealing its preservation paths.
+						const kept = cleanupAccountedTaskWorktree(req.taskWorktree, accounted);
+						if (kept !== null) worktreeReceipt = receiptWithDrift(worktreeReceipt, req.taskWorktree, kept);
+					} catch (cleanupError) {
+						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
+					}
+				}
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
@@ -9036,19 +9057,6 @@ export function createDispatchBundle(
 				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
 					try {
 						if (remoteReturn && remoteImport) await cleanupFleetChangeReturn(remoteReturn, remoteImport);
-						// The forced removal would delete whatever arrived after the operator's
-						// preview, which the merge itself refused to land.
-						const drift = mergedPreview !== undefined ? taskWorktreePreviewDrift(req.taskWorktree, mergedPreview) : null;
-						if (drift === null) cleanupTaskWorktree(req.taskWorktree, true);
-						else {
-							settleTaskWorktree(req.taskWorktree);
-							reportDispatchDiagnostic(
-								`keep merged task worktree ${req.taskWorktree.runId}`,
-								new Error(
-									`task worktree ${req.taskWorktree.path} ${drift} since commit ${mergedPreview?.commit} was offered for merge, so it and branch ${req.taskWorktree.branch} stay`,
-								),
-							);
-						}
 					} catch (cleanupError) {
 						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
 					}
@@ -9352,7 +9360,14 @@ export function createDispatchBundle(
 			writerLease?.release();
 			if (createdWorktree !== undefined) {
 				try {
-					cleanupTaskWorktree(createdWorktree, true);
+					// No commit accounted for anything: a fresh worktree holds its base and no untracked file.
+					const kept = cleanupAccountedTaskWorktree(createdWorktree, { commit: createdWorktree.base, untracked: new Map() });
+					if (kept !== null) {
+						reportDispatchDiagnostic(
+							`keep task worktree ${createdWorktree.runId} after admission failure`,
+							new Error(keptTaskWorktreeDetail(createdWorktree, createdWorktree.base, kept)),
+						);
+					}
 				} catch (cleanupError) {
 					reportDispatchDiagnostic(`clean task worktree ${createdWorktree.runId} after admission failure`, cleanupError);
 				}

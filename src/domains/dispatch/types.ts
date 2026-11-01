@@ -1067,6 +1067,8 @@ export interface RunResult {
 		detail?: string;
 		/** New files the host commit left out: no mutation call wrote them and the worker did not stage them. */
 		leftUncommitted?: { count: number; paths: string[] };
+		/** What kept a merged worktree from automatic cleanup: files new or changed since the commit accounted for it. */
+		changedAfterCommit?: { count: number; paths: string[] };
 	};
 	/** Required normalized routing request, sealed without task or prompt data. */
 	routingIntent: RoutingIntent;

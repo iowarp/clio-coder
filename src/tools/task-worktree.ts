@@ -109,6 +109,12 @@ export interface TaskWorktreeReceipt {
 	 * `LEFT_UNCOMMITTED_LIST_LIMIT` of the `count`.
 	 */
 	leftUncommitted?: { count: number; paths: string[] };
+	/**
+	 * What kept a merged worktree from automatic cleanup: files changed or new
+	 * since the commit and `leftUncommitted` accounted for its contents. Bounded
+	 * like `leftUncommitted`.
+	 */
+	changedAfterCommit?: { count: number; paths: string[] };
 }
 
 /** Receipt reason for a task worktree whose HEAD no longer names its own task branch (F5). */
@@ -215,6 +221,8 @@ export interface WorktreeCommit {
 	committed: boolean;
 	/** Files still untracked after the host commit, top-relative and sorted, excluding runtime state. */
 	leftUncommitted: string[];
+	/** The commit and stamps from that same post-commit listing, for guarded cleanup. */
+	accounted: TaskWorktreePreview;
 }
 
 /** How many left-out paths a receipt names; the count still covers all of them. */
@@ -281,7 +289,13 @@ export function commitWorktreePath(
 	}
 	const committed = git(path, ["diff", "--cached", "--name-only", "-z"]).length > 0;
 	if (committed) git(path, [...hostCommitIdentity(path, identity), "commit", "-m", message, "--no-verify"]);
-	return { committed, leftUncommitted: untrackedPaths(path).filter((entry) => !excluded.has(entry)) };
+	const leftUncommitted = untrackedPaths(path).filter((entry) => !excluded.has(entry));
+	const { stamps } = untrackedState(path, leftUncommitted);
+	return {
+		committed,
+		leftUncommitted,
+		accounted: { commit: git(path, ["rev-parse", "HEAD"]), untracked: stamps },
+	};
 }
 
 /** The bounded account of new files a host commit left out, or undefined when it left none. */
@@ -866,70 +880,143 @@ function committedReceipt(worktree: TaskWorktree, commit: string, apply: TaskWor
 }
 
 /**
- * What an operator was shown: the pinned commit and the untracked files the
- * settle commit left beside it. Merge lands only the commit, but Discard and
- * the cleanup after Merge remove the worktree with `--force`, so each one
- * refuses once those files are no longer the ones the preview saw.
+ * What the host accounted for in a worktree: the pinned commit and the stamp of
+ * each untracked file beside it. An operator's preview records it before the
+ * card, and an ordinary merge from the post-commit listing behind
+ * `leftUncommitted`. Merge lands only the commit, but Discard and the cleanup
+ * after Merge remove the worktree with `--force`, so each one refuses once those
+ * files are no longer the ones accounted for.
  */
 export interface TaskWorktreePreview {
 	commit: string;
-	untracked: string;
+	untracked: ReadonlyMap<string, string>;
 }
 
+/** What a worktree holds beyond what was accounted for: `detail` finishes "the worktree ...". */
+export interface TaskWorktreeDrift {
+	detail: string;
+	paths: string[];
+}
+
+const GONE_STAMP = "gone";
+
 /**
- * A digest of each untracked file's path and inode stamp. ctime moves on every
- * write, rename and chmod and cannot be set back, so an equal digest means no
- * untracked file appeared, vanished or changed. Directory stamps cannot detect
- * edits to descendants, so directories prevent destructive cleanup. Ignored
- * files stay out, as they do from every host commit.
+ * Each untracked file's inode stamp. ctime moves on every write, rename and
+ * chmod and cannot be set back, so an equal stamp means the file did not change.
+ * Directory stamps cannot detect edits to descendants, so directories prevent
+ * destructive cleanup. Ignored files stay out, as they do from every host commit.
  */
-function untrackedState(path: string, paths = untrackedPaths(path)): { digest: string; directory: string | null } {
-	const hash = createHash("sha256");
-	let directory: string | null = null;
+function untrackedState(
+	path: string,
+	paths = untrackedPaths(path),
+): { stamps: Map<string, string>; directories: string[] } {
+	const stamps = new Map<string, string>();
+	const directories: string[] = [];
 	for (const entry of paths) {
-		let stamp = "gone";
+		let stamp = GONE_STAMP;
 		try {
 			const stat = lstatSync(join(path, entry), { bigint: true });
-			if (stat.isDirectory()) directory ??= entry;
+			if (stat.isDirectory()) directories.push(entry);
 			stamp = `${stat.mode}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
-		} catch {
-			// A file removed between the listing and the stat still names its path.
+		} catch (error) {
+			// Only a vanished file is safe to omit from destructive cleanup.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		}
-		hash.update(entry).update("\0").update(stamp).update("\0");
+		stamps.set(entry, stamp);
 	}
-	return { digest: hash.digest("hex"), directory };
+	return { stamps, directories };
 }
 
 /** Record what an operator is about to be shown for `commit`, before the card that shows it. */
 export function previewTaskWorktree(worktree: TaskWorktree, commit: string): TaskWorktreePreview {
-	return { commit, untracked: untrackedState(worktree.path).digest };
+	return { commit, untracked: untrackedState(worktree.path).stamps };
 }
 
-/** How a worktree no longer holds exactly what was previewed, or null when it does. */
+/**
+ * What the worktree holds that `accounted` does not cover. An accounted file
+ * that vanished is not drift here: nothing of it is left for a removal to lose.
+ */
+function heldDrift(
+	worktree: TaskWorktree,
+	accounted: TaskWorktreePreview,
+	head: string,
+	listed: string[],
+): TaskWorktreeDrift | null {
+	if (head !== accounted.commit) return { detail: `is now at ${head}`, paths: [] };
+	const tracked = [
+		...nullDelimitedPaths(gitBytes(worktree.path, ["diff", "--name-only", "-z", "HEAD"])),
+		...nullDelimitedPaths(gitBytes(worktree.path, ["diff", "--cached", "--name-only", "-z", "HEAD"])),
+	];
+	const { stamps, directories } = untrackedState(worktree.path, listed);
+	const changed = [...stamps]
+		.filter(([entry, stamp]) => stamp !== GONE_STAMP && accounted.untracked.get(entry) !== stamp)
+		.map(([entry]) => entry);
+	const paths = [...new Set([...tracked, ...directories, ...changed])].sort();
+	if (tracked.length > 0) return { detail: "has uncommitted changes", paths };
+	const directory = directories[0];
+	if (directory !== undefined)
+		return { detail: `has untracked directory ${directory}; destructive cleanup refused`, paths };
+	return changed.length > 0 ? { detail: "has new or changed untracked files", paths } : null;
+}
+
+/**
+ * How a worktree no longer holds exactly what was previewed, or null when it
+ * does. An operator chose on that exact listing, so a vanished file counts.
+ */
 function previewDrift(
 	worktree: TaskWorktree,
 	preview: TaskWorktreePreview,
 	head: string,
-	paths?: string[],
+	paths = untrackedPaths(worktree.path),
 ): string | null {
-	if (head !== preview.commit) return `is now at ${head}`;
-	if (gitBytes(worktree.path, ["status", "--porcelain", "-z", "--untracked-files=no"]).length > 0)
-		return "has uncommitted changes";
-	const untracked = untrackedState(worktree.path, paths);
-	if (untracked.directory !== null) return `has untracked directory ${untracked.directory}; destructive cleanup refused`;
-	if (untracked.digest !== preview.untracked) return "has new or changed untracked files";
-	return null;
+	const drift = heldDrift(worktree, preview, head, paths);
+	if (drift !== null) return drift.detail;
+	const listed = new Set(paths);
+	return [...preview.untracked.keys()].every((entry) => listed.has(entry)) ? null : "has new or changed untracked files";
 }
 
 /**
- * How the worktree drifted from `preview`, or null when it did not. A merge
- * of the pinned commit leaves the worktree on it, so the cleanup that follows
- * reads the same answer the merge did unless something arrived in between.
+ * What a forced removal would delete beyond `accounted`, or null when it would
+ * delete nothing else. A merge leaves the worktree on the commit it pinned, so
+ * this reads clean unless something arrived since. A worktree that cannot be
+ * read, or a run with no record, reads as drift: only a positive answer removes.
  */
-export function taskWorktreePreviewDrift(worktree: TaskWorktree, preview: TaskWorktreePreview): string | null {
-	const head = checkTaskWorktreeHead(worktree);
-	if (!head.ok) return head.detail;
-	return previewDrift(worktree, preview, head.commit);
+export function taskWorktreePreviewDrift(
+	worktree: TaskWorktree,
+	accounted: TaskWorktreePreview | undefined,
+): TaskWorktreeDrift | null {
+	if (accounted === undefined) return { detail: "has contents no commit accounted for", paths: [] };
+	try {
+		if (!existsSync(worktree.path)) return null;
+		const head = checkTaskWorktreeHead(worktree);
+		if (!head.ok) return { detail: head.detail, paths: [] };
+		return heldDrift(worktree, accounted, head.commit, untrackedPaths(worktree.path));
+	} catch (error) {
+		return { detail: `could not be read: ${error instanceof Error ? error.message : String(error)}`, paths: [] };
+	}
+}
+
+/** Why a worktree outlived its automatic cleanup, naming the bounded paths and how to recover them. */
+export function keptTaskWorktreeDetail(worktree: TaskWorktree, commit: string, drift: TaskWorktreeDrift): string {
+	const named = drift.paths.slice(0, LEFT_UNCOMMITTED_LIST_LIMIT);
+	const more = drift.paths.length - named.length;
+	const listing = named.length > 0 ? ` (${named.join(", ")}${more > 0 ? ` and ${more} more` : ""})` : "";
+	return `kept worktree ${worktree.path} and branch ${worktree.branch}: it ${drift.detail}${listing} beyond commit ${commit.slice(0, 7)}; inspect them, and \`clio-coder fleet land ${worktree.branch}\` lands what the worktree holds`;
+}
+
+/** A merged run's receipt once `drift` kept its worktree. */
+export function receiptWithDrift(
+	receipt: TaskWorktreeReceipt,
+	worktree: TaskWorktree,
+	drift: TaskWorktreeDrift,
+): TaskWorktreeReceipt {
+	const report = leftUncommittedReport(drift.paths);
+	const kept = keptTaskWorktreeDetail(worktree, receipt.commit ?? worktree.base, drift);
+	return {
+		...receipt,
+		...(report !== undefined ? { changedAfterCommit: report } : {}),
+		detail: receipt.detail !== undefined ? `${receipt.detail}; ${kept}` : kept,
+	};
 }
 
 /** The branch a merge from this task would land on right now: the source checkout's branch, or `detached HEAD`. */
@@ -990,12 +1077,19 @@ export function applyTaskWorktree(input: {
 	 * preview and the merge cannot land work nobody saw.
 	 */
 	preview?: TaskWorktreePreview;
+	/**
+	 * Receives what this pass accounted for: the preview it merged, or the commit
+	 * it pinned with the post-commit listing behind `leftUncommitted`. Automatic
+	 * cleanup compares the worktree with it. Kept off the receipt, which is sealed.
+	 */
+	onAccounted?: (accounted: TaskWorktreePreview) => void;
 }): TaskWorktreeReceipt {
 	const { worktree } = input;
 	const before = checkTaskWorktreeHead(worktree);
 	if (!before.ok) return headMovedReceipt(worktree, input.apply, before.detail);
 	let commit: string;
 	let leftUncommitted: string[];
+	let accounted: TaskWorktreePreview;
 	if (input.preview !== undefined) {
 		commit = input.preview.commit;
 		// Nothing is committed now, so every untracked file stays out of this merge.
@@ -1010,6 +1104,7 @@ export function applyTaskWorktree(input: {
 				detail: drift,
 			};
 		}
+		accounted = input.preview;
 	} else {
 		const taskLine = `Clio Coder task ${worktree.runId}`;
 		// The validated message is already stripped; this is the sink, and only
@@ -1018,18 +1113,23 @@ export function applyTaskWorktree(input: {
 			input.commitMessage === undefined || input.commitMessage === null
 				? undefined
 				: stripAuthoredTrailers(input.commitMessage);
-		leftUncommitted = commitWorktreePath(
+		const committed = commitWorktreePath(
 			worktree.path,
 			COMMIT_IDENTITY,
 			authored !== undefined && authored.length > 0 ? `${authored}\n\n${taskLine}` : taskLine,
 			{ authoredPaths: input.authoredPaths },
-		).leftUncommitted;
+		);
+		leftUncommitted = committed.leftUncommitted;
 		// Pin the commit the snapshot produced. Everything after this reads and
 		// merges that immutable id, so a branch moved later cannot swap it (F5).
 		const pinned = checkTaskWorktreeHead(worktree);
 		if (!pinned.ok) return headMovedReceipt(worktree, input.apply, pinned.detail);
-		commit = pinned.commit;
+		if (pinned.commit !== committed.accounted.commit)
+			return headMovedReceipt(worktree, input.apply, "HEAD changed after the host commit");
+		commit = committed.accounted.commit;
+		accounted = committed.accounted;
 	}
+	input.onAccounted?.(accounted);
 	const receipt = { ...committedReceipt(worktree, commit, input.apply), ...leftUncommittedField(leftUncommitted) };
 	if (input.apply === "preserve") return receipt;
 	const protectedChanges = protectedPathsChangedByWorktreeBranch(worktree.root, commit, input.protectedPaths ?? []);
@@ -1074,6 +1174,23 @@ export function cleanupTaskWorktree(worktree: TaskWorktree, deleteBranch: boolea
 	removeWorktreeDirectory(worktree);
 	if (deleteBranch) git(worktree.root, ["branch", "-D", worktree.branch]);
 	rmSync(claimPathFor(worktree.root, worktree.runId), { force: true });
+}
+
+/**
+ * The forced removal of a finished worktree, unless it holds more than
+ * `accounted`. A kept worktree settles as preserved so restart recovery does not
+ * read it as a crash, and the drift that kept it comes back for the receipt.
+ * Call before sealing that receipt so the cleanup and its report agree.
+ */
+export function cleanupAccountedTaskWorktree(
+	worktree: TaskWorktree,
+	accounted: TaskWorktreePreview | undefined,
+): TaskWorktreeDrift | null {
+	assertOwnership(worktree);
+	const drift = taskWorktreePreviewDrift(worktree, accounted);
+	if (drift === null) cleanupTaskWorktree(worktree, true);
+	else settleTaskWorktree(worktree);
+	return drift;
 }
 
 function branchExists(worktree: TaskWorktree): boolean {

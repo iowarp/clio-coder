@@ -17,11 +17,12 @@ import { internalGitArgv } from "../core/internal-git.js";
 import { SAFE_TASK_RUN_ID } from "../core/task-worktree-claim.js";
 import {
 	COMMIT_IDENTITY,
-	cleanupTaskWorktree,
+	cleanupAccountedTaskWorktree,
 	commitWorktreePath,
 	destinationRefusal,
 	gitOperationInProgress,
 	hostCommitIdentity,
+	keptTaskWorktreeDetail,
 	listPreservedTaskWorktrees,
 	loadKeptTaskWorktree,
 	mergeDestination,
@@ -334,8 +335,11 @@ export function executeTaskLand(
 	if (options.keep) {
 		return { landed, cleaned: false, detail: `kept ${plan.branch}${plan.worktree !== null ? " and its worktree" : ""}` };
 	}
-	if (plan.worktree !== null) cleanupTaskWorktree(plan.worktree, true);
-	else git(plan.root, ["branch", "-D", plan.branch]);
+	if (plan.worktree !== null) {
+		// Land reports no left-out files, so only the landed commit permits removal.
+		const drift = cleanupAccountedTaskWorktree(plan.worktree, { commit: source, untracked: new Map() });
+		if (drift !== null) return { landed, cleaned: false, detail: keptTaskWorktreeDetail(plan.worktree, source, drift) };
+	} else git(plan.root, ["branch", "-D", plan.branch]);
 	return {
 		landed,
 		cleaned: true,
