@@ -14,7 +14,6 @@ import {
 } from "../../engine/tui.js";
 import { clockLocal, dateLocal } from "../format-time.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { GLYPH } from "../theme/index.js";
 
 export const MESSAGE_PICKER_OVERLAY_WIDTH = 88;
 const VISIBLE_ROWS = 12;
@@ -35,13 +34,8 @@ export interface OpenMessagePickerOverlayDeps {
 	onClose: () => void;
 }
 
-function shortTurnId(id: string): string {
-	return id.length > 8 ? id.slice(0, 8) : id;
-}
-
 export interface MessagePickerRow {
 	turnId: string;
-	shortId: string;
 	at: string;
 	preview: string;
 }
@@ -59,7 +53,6 @@ function buildMessagePickerRows(turns: ReadonlyArray<MessageEntry>): MessagePick
 		if (!turn) continue;
 		rows.push({
 			turnId: turn.turnId,
-			shortId: shortTurnId(turn.turnId),
 			at: turn.timestamp,
 			preview: buildTurnPreview({ kind: "assistant", payload: turn.payload }, PREVIEW_WIDTH),
 		});
@@ -73,11 +66,15 @@ function formatTimestampForRow(timestamp: string): string {
 	return `${dateLocal(millis)} ${clockLocal(millis)}`;
 }
 
+/**
+ * One column: turn ids in a session share their time-ordered prefix and a
+ * description column caps the label at 32 cells, which left about 18 of the
+ * preview to tell turns apart.
+ */
 function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): SelectItem[] {
 	return rows.map((row) => ({
 		value: row.turnId,
-		label: `${GLYPH.running} ${row.shortId}  ${row.preview}`,
-		description: formatTimestampForRow(row.at),
+		label: `${formatTimestampForRow(row.at)}  ${row.preview.replaceAll("**", "")}`,
 	}));
 }
 
