@@ -57,6 +57,7 @@ import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
 import { renderDoctorReport } from "./renderers/doctor-report.js";
+import { renameCurrentSession } from "./session-rename.js";
 
 const EXPORT_RENDER_WIDTH = 100;
 
@@ -180,7 +181,7 @@ export interface InteractiveSlashRuntimeDeps {
 	 * `/context recall` uses the same leaf for its fold, plus `appendEntry` for
 	 * the `contextRecall` record.
 	 */
-	session?: Pick<SessionContract, "tree" | "current" | "appendEntry">;
+	session?: Pick<SessionContract, "tree" | "current" | "appendEntry" | "setName">;
 	expandSubmit: (text: string) => Promise<InteractiveSlashSubmitExpansion>;
 	openAskUser: AskUserHandler;
 	openSkillsHub: (request?: LibraryBrowseRequest) => void;
@@ -706,6 +707,30 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		},
 		...(deps.openConfigure ? { openConfigure: deps.openConfigure } : {}),
 		openSettings: deps.openSettings,
+		renameSession: (name) => {
+			const session = deps.session;
+			if (!session) {
+				appendCommandNotice("error", "[/rename] session contract unavailable");
+				return;
+			}
+			void renameCurrentSession(
+				{
+					session,
+					entries: () => {
+						const id = session.current()?.id;
+						return id ? deps.readStructuredEntries(id) : [];
+					},
+					leaf: () => session.current()?.pinnedLeafTurnId ?? undefined,
+					...(deps.openTransientAskUser ? { confirm: deps.openTransientAskUser } : {}),
+					notice: appendCommandNotice,
+					refresh: () => {
+						deps.refreshFooter();
+						deps.requestRender();
+					},
+				},
+				name,
+			);
+		},
 		openResume: deps.openResume,
 		startNewSession: deps.startNewSession,
 		openTree: deps.openTree,

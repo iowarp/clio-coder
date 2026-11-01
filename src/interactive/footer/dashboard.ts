@@ -272,6 +272,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 
 			workspace: workspaceFacts(deps, branchSlot),
 			session: {
+				name: deps.getSessionInfo?.().name ?? null,
 				target,
 				autonomy: settings?.safety.autonomy ?? "default",
 				targetId: settings?.chat?.target ?? null,

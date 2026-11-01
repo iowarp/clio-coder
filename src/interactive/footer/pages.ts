@@ -378,6 +378,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 					? theme.fg("unknownValue", "mem unavailable")
 					: "";
 	const facts = [
+		state.session.name ? theme.fg("footerIdentity", clean(state.session.name)) : "",
 		state.session.duckBadge ? theme.fg("counter", "🦆") : "",
 		workers ? theme.fg("activity", `${workers} ${workers === 1 ? "worker" : "workers"}`) : "",
 		memoryFact,
@@ -490,6 +491,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	const names = (items: string[] | undefined) =>
 		items === undefined ? "unreported" : items.length ? `${items.length} · ${items.join(", ")}` : "none";
 	const left: [string, string][] = [
+		...(state.session.name ? [["Session", clean(state.session.name)] as [string, string]] : []),
 		["Target", state.session.target ?? "No model selected"],
 		["Tracked cost", trackedCost(state.telemetry)],
 		[

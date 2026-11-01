@@ -128,6 +128,19 @@ it("keeps useful name and session ID fallbacks when previews are blank or absent
 	assert.match(text, /id-empty-beta/);
 });
 
+it("leads with a saved name even when an opening prompt exists and filters by that name", (t) => {
+	const f = picker(t, [
+		session("named-id", { name: "my-experiment", firstMessagePreview: "An older opening prompt" }),
+		session("other-id", { name: "other-experiment", firstMessagePreview: "Another prompt" }),
+	]);
+	assert.match(f.selected(), /my-experiment/);
+	f.input("my-experiment");
+	assert.match(f.selected(), /my-experiment/);
+	assert.ok(!f.lines().join("\n").includes("other-experiment"));
+	f.input("\r");
+	assert.deepEqual(f.resumed, ["named-id"]);
+});
+
 it("sanitizes external task, name, route and label text before styling", (t) => {
 	const poison = "\x1b]0;injected-title\x07\x1b[31m";
 	const f = picker(t, [

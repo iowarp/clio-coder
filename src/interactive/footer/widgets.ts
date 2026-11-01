@@ -52,6 +52,7 @@ export interface WorkspaceFacts {
 }
 
 export interface SessionFacts {
+	name?: string | null;
 	target: string | null;
 	/** Raw route fields for boundary-aware fitting in the compact footer. */
 	targetId?: string | null;

@@ -85,10 +85,10 @@ function shortTarget(meta: SessionMeta): string {
 
 function previewLine(meta: SessionMeta): string {
 	const fork = meta.parentSessionId ? `Fork ${sanitizeCallTargetText(meta.id).slice(0, 6)} · ` : "";
+	const name = sanitizeCallTargetText(meta.name ?? "");
+	if (name) return `${fork}${name}`;
 	const explicit = sanitizeCallTargetText(meta.firstMessagePreview ?? "");
 	if (explicit) return `${fork}${explicit}`;
-	const name = sanitizeCallTargetText(meta.name ?? "");
-	if (name) return `${fork}(${name})`;
 	const cwdLeaf = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "");
 	const id = sanitizeCallTargetText(meta.id) || "Unnamed session";
 	return `${id} · ${cwdLeaf || "no preview"}`;
@@ -107,7 +107,7 @@ function metaStrip(meta: SessionMeta, now: number): string {
 }
 
 /**
- * The first message or fallback identity stays visible as metadata yields.
+ * The saved name, first message or fallback identity stays visible as metadata yields.
  * Keep the canonical ID as the selection value, independent of display text.
  */
 function buildSessionItems(sessions: ReadonlyArray<SessionMeta>, now: number = Date.now()): SelectItem[] {

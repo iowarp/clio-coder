@@ -12,6 +12,7 @@ import {
 } from "../domains/session/handoff-service.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
 import { liveSessionOwner } from "../domains/session/live-owner.js";
+import { resolveSessionTarget } from "../domains/session/names.js";
 import type { TelemetryContract } from "../domains/telemetry/index.js";
 import type { TUI } from "../engine/tui.js";
 import type { ChatLoop } from "../session-control/chat-loop.js";
@@ -84,7 +85,7 @@ export interface OverlaySessionLifecycleDeps {
 }
 
 export interface OverlaySessionLifecycle {
-	/** Resume `target` (an id or unique id prefix) directly, or open the picker. */
+	/** Resume `target` (an id, unique id prefix or exact name) directly, or open the picker. */
 	openResume(target?: string): void;
 	openTree(): void;
 	openMessagePicker(): void;
@@ -214,17 +215,6 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		});
 	}
 
-	/** An exact id wins; otherwise the prefix has to name exactly one session. */
-	function matchSessionId(session: SessionContract, target: string): { id: string } | { miss: string } {
-		const ids = session.history().map((meta) => meta.id);
-		if (ids.includes(target)) return { id: target };
-		const matches = ids.filter((id) => id.startsWith(target));
-		if (matches.length === 1 && matches[0] !== undefined) return { id: matches[0] };
-		return {
-			miss: matches.length === 0 ? `no session matches ${target}` : `${target} matches ${matches.length} sessions`,
-		};
-	}
-
 	function openResume(target?: string): void {
 		if (deps.transitions.state !== "closed") return;
 		if (!deps.session) {
@@ -234,7 +224,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		const session = deps.session;
 		const preResumeSessionId = session.current()?.id ?? null;
 		if (target !== undefined) {
-			const match = matchSessionId(session, target);
+			const match = resolveSessionTarget(session.history(), target);
 			if ("id" in match) {
 				void resumeSession(session, match.id, preResumeSessionId).then(() => probeResumedCwd(session, preResumeSessionId));
 				return;

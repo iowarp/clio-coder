@@ -398,6 +398,10 @@ export function createSessionBundle(context: DomainContext): DomainBundle<Sessio
 					parentTurnId: null,
 					name,
 				} as SessionEntryInput);
+				// Live presentation and reopen must agree with the name ledger (#443).
+				if (name.trim()) state.meta.name = name.trim();
+				else delete state.meta.name;
+				persistSessionMeta(state);
 				return;
 			}
 			const entry: SessionInfoEntry = {

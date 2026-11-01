@@ -234,8 +234,9 @@ type SlashCommandVariant =
 	| { kind: "model" }
 	| { kind: "model-set"; pattern: string }
 	| { kind: "settings"; area?: SettingsAreaId; group?: string }
-	/** `target` is a session id or a unique id prefix; absent opens the picker. */
+	/** `target` is an id, unique id prefix, or exact name; absent opens the picker. */
 	| { kind: "resume"; target?: string }
+	| { kind: "rename"; name?: string }
 	| { kind: "new" }
 	| { kind: "tree" }
 	/** `/rewind`: restore workspace files from a snapshot; `/tree` rewinds the conversation. */
@@ -941,8 +942,9 @@ export interface SessionCommandContext {
 	openConfigure?: () => void;
 	openSettings?: (area?: SettingsAreaId, group?: string) => void;
 	openFleetRuns?: () => void;
-	/** Resume `target` (an id or unique id prefix) directly, or open the picker. */
+	/** Resume `target` (an id, unique id prefix or exact name) directly, or open the picker. */
 	openResume?: (target?: string) => void;
+	renameSession?: (name?: string) => void;
 	startNewSession?: () => void;
 	openTree?: () => void;
 	/** Open `/rewind`, the workspace snapshot list. Absent on a host with no overlay layer. */
@@ -2981,17 +2983,38 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "resume",
 		acp: false,
-		description: "Resume a past session; an id or unique id prefix skips the picker",
+		description: "Resume by id, unique id prefix, or exact unique name",
 		group: "Session",
 		kinds: ["resume"],
-		args: { positionals: [{ name: "id", required: false }] },
+		args: { positionals: [{ name: "id|prefix|name", required: false, rest: true }] },
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "resume", reason: parsed.error };
-			const target = parsed.positionals[0];
+			const target = sessionNameArgument(parsed.rest ?? "");
 			return target ? { kind: "resume", target } : { kind: "resume" };
 		},
 		handle(command, ctx) {
 			if (command.kind === "resume") ctx.openResume?.(command.target);
+		},
+	},
+	{
+		name: "rename",
+		acp: false,
+		description: "Name this session, or confirm a local suggestion from the conversation",
+		group: "Session",
+		kinds: ["rename"],
+		args: { positionals: [{ name: "name", required: false, rest: true }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "rename", reason: parsed.error };
+			if (parsed.rest === undefined) return { kind: "rename" };
+			const name = sessionNameArgument(parsed.rest);
+			return name
+				? { kind: "rename", name }
+				: { kind: "usage-error", command: "rename", reason: "Session name must not be empty or whitespace-only" };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "rename") return;
+			if (ctx.renameSession) ctx.renameSession(command.name);
+			else ctx.notice("error", "/rename needs an interactive session");
 		},
 	},
 	{
@@ -3204,7 +3227,17 @@ function reloadExtensionsCommand(ctx: SlashCommandContext): void {
 	if (outcome.status === "committed") ctx.openExtensions?.();
 }
 
+function sessionNameArgument(raw: string): string {
+	const text = raw.trim();
+	return (text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))
+		? text.slice(1, -1).trim()
+		: text;
+}
+
 export function parseSlashCommand(input: string): SlashCommand {
+	if (/^\s*\/rename\s+$/u.test(input)) {
+		return { kind: "usage-error", command: "rename", reason: "Session name must not be empty or whitespace-only" };
+	}
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return { kind: "empty" };
 	const retiredLibrary = /^\/(resources|plugins)(?:\s|$)/u.exec(trimmed);
@@ -3392,6 +3425,7 @@ const COMMAND_ORDER = [
 	"config",
 	"new",
 	"resume",
+	"rename",
 	"handoff",
 	"fork",
 	"tree",
