@@ -152,12 +152,15 @@ export function truncateReplayText(text: string, limit = MAX_REPLAY_TEXT_CHARS):
 
 /**
  * A prompt the server refused for size was never cached, so the byte-exact replay #423 needs does not apply to it.
- * Resent whole it fails every later turn, and compaction cannot help while the summarizer must read it too.
+ * Resent whole it fails every later turn, and compaction cannot help while the summarizer must read it too. Walks back
+ * only to the last answer the server took, which leaves a prompt it accepted, and an overflow its tool results caused
+ * later, alone. A host reminder in that span stays under the cap anyway, so replay's bytes still match.
  */
 export function boundRefusedPrompt(agent: AgentStateView): void {
-	const messages = agent.state.messages;
+	const messages = [...agent.state.messages];
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
 		const message = messages[index];
+		if (message?.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted") break;
 		if (message?.role !== "user") continue;
 		const content =
 			typeof message.content === "string"
@@ -165,22 +168,29 @@ export function boundRefusedPrompt(agent: AgentStateView): void {
 				: message.content.map((block) =>
 						block.type === "text" ? { ...block, text: truncateReplayText(block.text) } : block,
 					);
-		agent.state.messages = messages.map((entry, at) => (at === index ? { ...message, content } : entry));
-		return;
+		messages[index] = { ...message, content };
 	}
+	agent.state.messages = messages;
 }
 
-/** Prompts whose last provider answer was a size refusal; a later success means compaction made them fit after all. */
+/** Prompts the server never accepted: refused for size, with no later answer showing that the request fit. */
 function refusedPromptTurns(entries: ReadonlyArray<SessionEntry>): ReadonlySet<string> {
 	const refused = new Set<string>();
+	const accepted = new Set<string>();
 	let prompt: string | null = null;
 	for (const entry of entries) {
 		if (entry.kind !== "message") continue;
 		if (entry.role === "user") prompt = entry.turnId;
 		if (entry.role !== "assistant" || prompt === null) continue;
+		// An abort says nothing about size, whether it hit the first request or the retry after compaction.
+		if (payloadObject(entry.payload)?.stopReason === "aborted") continue;
 		const failure = messageFailure(entry);
-		if (failure === null) refused.delete(prompt);
-		else if (toContextOverflowError(failure.errorMessage) !== null) refused.add(prompt);
+		if (failure !== null && toContextOverflowError(failure.errorMessage) !== null) {
+			if (!accepted.has(prompt)) refused.add(prompt);
+			continue;
+		}
+		refused.delete(prompt);
+		accepted.add(prompt);
 	}
 	return refused;
 }

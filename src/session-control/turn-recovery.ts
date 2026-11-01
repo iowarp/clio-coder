@@ -6,7 +6,7 @@
  * terminal failure.
  */
 
-import type { toContextOverflowError } from "../domains/providers/errors.js";
+import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import type { RecoveryFailure, RetryCountdownHandle, RetrySettings } from "../domains/session/retry.js";
 import {
@@ -231,49 +231,56 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		const signal = deps.turnSignal?.();
 		const identity = deps.turnIdentity?.();
 		const cancelled = (): boolean => signal?.aborted === true || identity !== deps.turnIdentity?.();
-		if (cancelled()) return;
-		const windowUnknown = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow <= 0;
-		deps.emitNotice(
-			windowUnknown
-				? "[Clio Coder] Server rejected this request for exceeding its context window. The serving limit is unknown; compacting and retrying once. Probe the target or configure its deployment limit to enable proactive compaction."
-				: "[Clio Coder] Server rejected this request for exceeding its context window; compacting and retrying once.",
-		);
-		let compacted = false;
+		// Set only once the server has taken the request's size. Every other way out, cancel included, must not leave the
+		// refused prompt to be resent whole on the next turn.
+		let sizeAccepted = false;
 		try {
-			pruneFailedAssistantFromContext(agentRuntime.agent);
-			const mutableState = agentRuntime.agent.state as MutableAgentState;
-			mutableState.errorMessage = undefined;
-			compacted = await context.runAutoCompact(agentRuntime, true, undefined, "overflow");
-		} catch (compactErr) {
 			if (cancelled()) return;
+			const windowUnknown = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow <= 0;
 			deps.emitNotice(
-				`[Clio Coder] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
+				windowUnknown
+					? "[Clio Coder] Server rejected this request for exceeding its context window. The serving limit is unknown; compacting and retrying once."
+					: "[Clio Coder] Server rejected this request for exceeding its context window; compacting and retrying once.",
 			);
-		}
-		if (cancelled()) return;
-		if (!compacted) {
-			boundRefusedPrompt(agentRuntime.agent);
-			deps.emitNotice(
-				`[Clio Coder] context overflow could not be compacted: ${overflow.message}. Use /context compact or reduce the request.`,
-			);
-			return;
-		}
-		try {
-			await deps.markPersistedUserEcho(text, () =>
-				cancelled() ? Promise.resolve() : agentRuntime.agent.prompt(text, images ? [...images] : undefined),
-			);
-			if (cancelled()) return;
-			const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
-			if (stillOverflowed) {
-				boundRefusedPrompt(agentRuntime.agent);
-				deps.emitNotice(`[Clio Coder] context overflow persisted after compaction: ${stillOverflowed.message}`);
+			let compacted = false;
+			try {
+				pruneFailedAssistantFromContext(agentRuntime.agent);
+				const mutableState = agentRuntime.agent.state as MutableAgentState;
+				mutableState.errorMessage = undefined;
+				compacted = await context.runAutoCompact(agentRuntime, true, undefined, "overflow");
+			} catch (compactErr) {
+				if (cancelled()) return;
+				deps.emitNotice(
+					`[Clio Coder] compact-on-overflow failed: ${compactErr instanceof Error ? compactErr.message : String(compactErr)}`,
+				);
 			}
-		} catch (retryErr) {
 			if (cancelled()) return;
-			boundRefusedPrompt(agentRuntime.agent);
-			deps.emitNotice(
-				`[Clio Coder] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
-			);
+			if (!compacted) {
+				deps.emitNotice(
+					`[Clio Coder] context overflow could not be compacted: ${overflow.message}. Use /context compact or reduce the request.`,
+				);
+				return;
+			}
+			try {
+				await deps.markPersistedUserEcho(text, () =>
+					cancelled() ? Promise.resolve() : agentRuntime.agent.prompt(text, images ? [...images] : undefined),
+				);
+				if (cancelled()) return;
+				const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
+				if (stillOverflowed) {
+					deps.emitNotice(`[Clio Coder] context overflow persisted after compaction: ${stillOverflowed.message}`);
+				} else {
+					sizeAccepted = true;
+				}
+			} catch (retryErr) {
+				if (cancelled()) return;
+				sizeAccepted = toContextOverflowError(retryErr) === null;
+				deps.emitNotice(
+					`[Clio Coder] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
+				);
+			}
+		} finally {
+			if (!sizeAccepted) boundRefusedPrompt(agentRuntime.agent);
 		}
 	};
 

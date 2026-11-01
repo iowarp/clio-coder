@@ -246,29 +246,44 @@ test("the reasoning behind a final answer replays where it streamed, in every st
 	}
 });
 
-test("a prompt the server refused for size replays bounded, unless compaction later made it fit", () => {
+test("only a prompt the server never accepted replays bounded", () => {
 	const at = "2026-11-01T00:00:00.000Z";
-	const message = (role: "user" | "assistant", turnId: string, parentTurnId: string | null, payload: unknown) =>
-		({ kind: "message", role, turnId, parentTurnId, timestamp: at, payload }) as SessionEntry;
-	const oversized = "x".repeat(100_000);
+	const answer = (index: number, payload: unknown) =>
+		({
+			kind: "message",
+			role: "assistant",
+			turnId: `a${index}`,
+			parentTurnId: index === 0 ? "big" : `a${index - 1}`,
+			timestamp: at,
+			payload,
+		}) as SessionEntry;
 	const refusal = {
 		stopReason: "error",
 		errorMessage: "400: request (262118 tokens) exceeds the available context size (180224 tokens), try increasing it",
 		content: [],
 	};
-	const prompt = message("user", "big", null, { role: "user", content: [{ type: "text", text: oversized }] });
-	const textLength = (entries: SessionEntry[]) => {
+	const success = { stopReason: "stop", content: [{ type: "text", text: "fits now" }] };
+	const toolRound = { stopReason: "toolUse", content: [] };
+	const aborted = { stopReason: "aborted", errorMessage: "Request was aborted", content: [{ type: "text", text: "" }] };
+	const serverError = { stopReason: "error", errorMessage: "500: upstream exploded", content: [] };
+	const prompt = {
+		kind: "message",
+		role: "user",
+		turnId: "big",
+		parentTurnId: null,
+		timestamp: at,
+		payload: { role: "user", content: [{ type: "text", text: "x".repeat(100_000) }] },
+	} as SessionEntry;
+	const promptLength = (answers: unknown[]) => {
+		const entries = [prompt, ...answers.map((payload, index) => answer(index, payload))];
 		const first = buildReplayAgentMessagesFromTurns(entries).find((entry) => entry.role === "user");
 		return JSON.stringify(first).length;
 	};
-	assert.ok(textLength([prompt, message("assistant", "no", "big", refusal)]) < 21_000);
-	assert.ok(
-		textLength([
-			prompt,
-			message("assistant", "no", "big", refusal),
-			message("assistant", "ok", "no", { stopReason: "stop", content: [{ type: "text", text: "fits now" }] }),
-		]) > 100_000,
-	);
+	assert.ok(promptLength([refusal]) < 21_000, "refused and never accepted");
+	assert.ok(promptLength([refusal, aborted]) < 21_000, "an abort during recovery says nothing about size");
+	assert.ok(promptLength([refusal, success]) > 100_000, "compaction made it fit");
+	assert.ok(promptLength([refusal, serverError]) > 100_000, "a later non-size failure shows it fit");
+	assert.ok(promptLength([toolRound, refusal]) > 100_000, "accepted before a tool result overflowed");
 });
 
 test("a replay ending at an intermediate tool-use message does not invent completion", () => {
