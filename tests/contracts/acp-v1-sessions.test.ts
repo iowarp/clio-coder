@@ -422,6 +422,54 @@ test("ACP replay marks a persisted request without a terminal outcome as an erro
 	}
 });
 
+test("ACP replay keeps a crashed middleware continuation from reading as Done", async () => {
+	const turn = (role: "user" | "assistant", turnId: string, parentTurnId: string | null, payload: unknown) => ({
+		kind: "message" as const,
+		role,
+		turnId,
+		parentTurnId,
+		timestamp: "2026-09-25T12:00:00.000Z",
+		payload,
+	});
+	const request = turn("user", "ask", null, "Finish the work");
+	const answer = turn("assistant", "answer", "ask", {
+		stopReason: "stop",
+		content: [{ type: "text", text: "Done so far" }],
+	});
+	const nudge = turn("user", "nudge", "answer", { synthetic: true, role: "user", content: [] });
+	const crashed = fixture([request, answer, nudge]);
+	const canceled = fixture([
+		request,
+		answer,
+		nudge,
+		{
+			kind: "custom" as const,
+			customType: "turnOutcome",
+			turnId: "outcome",
+			parentTurnId: "nudge",
+			timestamp: "2026-09-25T12:00:01.000Z",
+			display: false,
+			data: { version: 1, turnId: "nudge", stopReason: "stop", operator: { canceled: true } },
+		},
+	]);
+	try {
+		for (const [peer, stopReason] of [
+			[crashed, "error"],
+			[canceled, "cancelled"],
+		] as const) {
+			await peer.call("initialize", { protocolVersion: 1 });
+			await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+			strictEqual(peer.updates.length, 2);
+			for (const update of peer.updates) {
+				deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1, stopReason });
+			}
+		}
+	} finally {
+		await crashed.stop();
+		await canceled.stop();
+	}
+});
+
 test("ACP load streams history beyond the former four MiB byte limit", async () => {
 	const largeText = "x".repeat(5 * 1024 * 1024);
 	const peer = fixture([

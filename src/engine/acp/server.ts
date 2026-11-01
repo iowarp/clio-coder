@@ -2273,8 +2273,15 @@ function prepareAcpReplay(
 		if (entry.kind !== "message") continue;
 		const payload = payloadRecord(entry.payload);
 		if (entry.role === "user") {
-			// Middleware continuations are provider context, not operator authorship.
-			if (payload?.synthetic === true) continue;
+			// Middleware continuations are provider context, not operator authorship, but they do reopen the turn: the
+			// earlier end_turn no longer settles it, and an outcome names the continuation's own id.
+			if (payload?.synthetic === true) {
+				if (current !== null) {
+					current.userTurnId = entry.turnId;
+					current.stopReason = "error";
+				}
+				continue;
+			}
 			if (current !== null) closeUnrecordedReplayCalls(ids, current.frames);
 			// A crash can leave the request without a terminal assistant or turnOutcome.
 			current = { frames: [], userTurnId: entry.turnId, stopReason: "error" };
