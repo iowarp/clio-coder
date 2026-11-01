@@ -1,4 +1,5 @@
 import { v7 as uuidv7 } from "uuid";
+import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { stateRootRemoved } from "../../core/xdg.js";
 import {
 	atomicWrite,
@@ -90,26 +91,30 @@ export function resumeSessionState(sessionId: string): {
 	state: SessionManagerState;
 	nodes: ReadonlyArray<SessionTreeNode>;
 } {
-	const persistedMeta = readSessionMeta(sessionId) as SessionMeta;
-	// Refuse before migration or reopening can write another process's ledger (#420).
-	const owner = liveSessionOwner(persistedMeta);
-	if (owner && owner.pid !== process.pid) throw new Error(liveSessionRefusal(sessionId, owner));
-	const paths = sessionPaths(persistedMeta);
-	const migration = runMigrations(persistedMeta, paths.meta);
-	const candidate = openSession(sessionId);
-	// Use the replay schema before engineResumeSession clears endedAt or
-	// the domain caller parks its current writer. The engine reader retains
-	// its established tolerance for interrupted JSONL fragments.
-	collectSessionEntries(candidate.turns(), paths.current);
-	// The ledger needed no transformation; only the stamp moves, so the next
-	// reader does not re-run the same no-op. It lands in the same metadata
-	// publication that reopens the session.
-	const { meta, writer, tree } = engineResumeSession(
-		sessionId,
-		migration.migrated ? { sessionFormatVersion: migration.to } : {},
-	);
-	const state: SessionManagerState = { meta: meta as SessionMeta, writer: withHeartbeat(meta, writer) };
-	return { state, nodes: tree };
+	const metaPath = sessionPaths(readSessionMeta(sessionId)).meta;
+	// Checking ownership and publishing the new owner must be one cross-process claim.
+	return withStateFileLockSync(metaPath, () => {
+		const persistedMeta = readSessionMeta(sessionId) as SessionMeta;
+		// Refuse before migration or reopening can write another process's ledger (#420).
+		const owner = liveSessionOwner(persistedMeta);
+		if (owner && owner.pid !== process.pid) throw new Error(liveSessionRefusal(sessionId, owner));
+		const paths = sessionPaths(persistedMeta);
+		const migration = runMigrations(persistedMeta, paths.meta);
+		const candidate = openSession(sessionId);
+		// Use the replay schema before engineResumeSession clears endedAt or
+		// the domain caller parks its current writer. The engine reader retains
+		// its established tolerance for interrupted JSONL fragments.
+		collectSessionEntries(candidate.turns(), paths.current);
+		// The ledger needed no transformation; only the stamp moves, so the next
+		// reader does not re-run the same no-op. It lands in the same metadata
+		// publication that reopens the session.
+		const { meta, writer, tree } = engineResumeSession(
+			sessionId,
+			migration.migrated ? { sessionFormatVersion: migration.to } : {},
+		);
+		const state: SessionManagerState = { meta: meta as SessionMeta, writer: withHeartbeat(meta, writer) };
+		return { state, nodes: tree };
+	});
 }
 
 export function appendTurn(state: SessionManagerState, input: TurnInput): ClioTurnRecord {
