@@ -68,6 +68,8 @@ test("saved names survive reopen and a child rename preserves the parent's trans
 	assert.equal(listSessionsForCwd(env.dir).find((meta) => meta.id === original.id)?.name, "my-experiment");
 	assert.equal(session.resume(original.id).name, "my-experiment");
 	const child = session.fork(assistant.id);
+	assert.equal(child.name, "my-experiment");
+	assert.equal(JSON.parse(readFileSync(sessionPaths(child).meta, "utf8")).name, "my-experiment");
 	const parentPath = sessionPaths(original).current;
 	const parentBytes = readFileSync(parentPath, "utf8");
 	session.setName("child-experiment");

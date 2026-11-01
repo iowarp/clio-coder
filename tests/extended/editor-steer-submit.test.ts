@@ -5,6 +5,7 @@ import { createDispatchSteering } from "../../src/interactive/dispatch-steering.
 import { parseEditorSteerMention, type RunningDispatchRef } from "../../src/interactive/editor-steer.js";
 import { createEditorSubmitController, type EditorSubmitDeps } from "../../src/interactive/editor-submit.js";
 import { createFileReferenceCompletionSource } from "../../src/interactive/file-reference-completion.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 
 const noop = () => {};
 const worker = { runId: "run-123456", agentId: "worker" };
@@ -66,6 +67,25 @@ function fixture(runs: RunningDispatchRef[] = []) {
 	const controller = createEditorSubmitController(deps);
 	return { editor, deps, controller, history, chat, steers, notices };
 }
+
+it("editor submission refuses an explicit whitespace-only rename and retains the draft", async () => {
+	const f = fixture();
+	const text = "/rename   ";
+	let dispatched = "";
+	f.deps.dispatchCommand = (input) => {
+		dispatched = input;
+		assert.equal(parseSlashCommand(input).kind, "usage-error");
+		return "rejected";
+	};
+	f.controller.submitEditorText(text);
+	assert.equal(dispatched, text);
+	assert.equal(f.editor.getText(), text);
+	assert.deepEqual(f.history, []);
+	assert.deepEqual(f.chat, []);
+	await assert.rejects(f.controller.admitCapturedText(text), /needs correction/);
+	assert.equal(dispatched, text);
+	assert.deepEqual(f.history, []);
+});
 
 it("Fleet Runs steering remains addressed when the selected worker finishes before Enter", () => {
 	const runs = [worker];

@@ -438,18 +438,19 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.ui.requestRender();
 			return;
 		}
-		const command = parseSlashCommand(trimmed);
+		// Explicit blank arguments must reach the parser before trimming (#443).
+		const command = parseSlashCommand(literalText);
 		if (command.kind === "editor" || command.kind === "interrupt") {
 			// Keep the correctable command until its owner accepts the snapshot.
 			deps.editor.setText(literalText);
-			const result = deps.dispatchCommand(trimmed);
+			const result = deps.dispatchCommand(literalText);
 			if (result === "accepted") deps.editor.addToHistory(literalText);
 		} else if (isRejectedCommand(command)) {
 			deps.editor.setText(literalText);
-			deps.dispatchCommand(trimmed);
+			deps.dispatchCommand(literalText);
 		} else if (command.kind === "unknown-command") {
 			const draft = chatDraft(literalText);
-			const result = deps.dispatchCommand(trimmed, draft);
+			const result = deps.dispatchCommand(literalText, draft);
 			if (result === "rejected") {
 				deps.editor.setText(literalText);
 			} else {
@@ -459,7 +460,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		} else {
 			const draft = chatDraft(literalText);
 			deps.editor.setText("");
-			deps.dispatchCommand(trimmed, draft);
+			deps.dispatchCommand(literalText, draft);
 			if (!draft.claimed) deps.editor.addToHistory(literalText);
 		}
 		deps.ui.requestRender();
@@ -509,18 +510,18 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.ui.requestRender();
 			return;
 		}
-		const command = parseSlashCommand(trimmed);
+		const command = parseSlashCommand(literalText);
 		if (isRejectedCommand(command)) {
 			signal?.throwIfAborted();
-			if (deps.dispatchCommandAsync) await deps.dispatchCommandAsync(trimmed, signal);
-			else deps.dispatchCommand(trimmed);
+			if (deps.dispatchCommandAsync) await deps.dispatchCommandAsync(literalText, signal);
+			else deps.dispatchCommand(literalText);
 			deps.ui.requestRender();
 			throw new Error("queued boot command needs correction; preserving it for recovery");
 		}
 		deps.editor.addToHistory(literalText);
 		signal?.throwIfAborted();
-		if (deps.dispatchCommandAsync) await deps.dispatchCommandAsync(trimmed, signal);
-		else deps.dispatchCommand(trimmed);
+		if (deps.dispatchCommandAsync) await deps.dispatchCommandAsync(literalText, signal);
+		else deps.dispatchCommand(literalText);
 		deps.ui.requestRender();
 	};
 

@@ -187,6 +187,12 @@ export function forkFromState(input: ForkInput): ForkResult {
 		parentSession: branch.parentCurrentPath,
 		parentTurnId: input.parentTurnId,
 	});
+	// The copied name ledger and the child's live metadata must agree (#443).
+	const inheritedName = branch.entries.reduce<string | undefined>(
+		(name, entry) => (entry.kind === "sessionInfo" && entry.name !== undefined ? entry.name.trim() : name),
+		undefined,
+	);
+	if (inheritedName) next.meta.name = inheritedName;
 	enrichForkMeta(next.meta, parentMeta.id, input.parentTurnId);
 	const parentTurnAt = branch.entries.find((entry) => entry.turnId === input.parentTurnId)?.timestamp;
 	if (!parentTurnAt) throw new Error("fork boundary timestamp unavailable");
