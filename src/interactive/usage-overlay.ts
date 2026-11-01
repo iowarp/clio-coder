@@ -14,8 +14,7 @@ import { matchesKey, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { ACTIVITY_SPAN_DAYS, bucketActivity, renderActivityHeatmap } from "./activity-view.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
-import type { QuotaProviders } from "./quota-view.js";
-import type { RecordedWorkerRun } from "./quota-view.js";
+import type { QuotaProviders, RecordedWorkerRun } from "./quota-view.js";
 import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
 import { clioTheme, formatCompactMs, padAnsi, rule } from "./theme/index.js";
 
