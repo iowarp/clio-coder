@@ -372,6 +372,56 @@ test("ACP load streams the complete active history beyond the former 64 turn lim
 	}
 });
 
+test("ACP replay marks a persisted request without a terminal outcome as an error", async () => {
+	const peer = fixture([
+		{
+			kind: "message",
+			role: "user",
+			turnId: "interrupted-user",
+			parentTurnId: null,
+			timestamp: "2026-09-25T12:00:00.000Z",
+			payload: "The process died while answering this request",
+		},
+		{
+			kind: "message",
+			role: "assistant",
+			turnId: "interrupted-assistant",
+			parentTurnId: "interrupted-user",
+			timestamp: "2026-09-25T12:00:01.000Z",
+			payload: { stopReason: "toolUse", content: [] },
+		},
+		{
+			kind: "message",
+			role: "tool_call",
+			turnId: "interrupted-call",
+			parentTurnId: "interrupted-assistant",
+			timestamp: "2026-09-25T12:00:01.000Z",
+			payload: { name: "read", toolCallId: "read-1", args: { path: "notes.txt" } },
+		},
+		{
+			kind: "message",
+			role: "tool_result",
+			turnId: "interrupted-result",
+			parentTurnId: "interrupted-call",
+			timestamp: "2026-09-25T12:00:02.000Z",
+			payload: { toolCallId: "read-1", toolName: "read", result: "notes", isError: false },
+		},
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		strictEqual(peer.updates.length, 3);
+		for (const update of peer.updates) {
+			deepStrictEqual((update._meta as Record<string, unknown>)["clio-coder/replay"], {
+				turn: 1,
+				stopReason: "error",
+			});
+		}
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP load streams history beyond the former four MiB byte limit", async () => {
 	const largeText = "x".repeat(5 * 1024 * 1024);
 	const peer = fixture([
@@ -952,7 +1002,7 @@ test("ACP carries a session cost ceiling stop as a notice chunk with its figures
 		if (frame === undefined) throw new Error("unreachable");
 		strictEqual(loaded.updates.filter((candidate) => text(candidate) === "").length, 0);
 		strictEqual(text(frame), `${budgetAlertNotice(block)?.text}\n`);
-		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1 });
+		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/replay"], { turn: 1, stopReason: "error" });
 		deepStrictEqual((frame._meta as Record<string, unknown>)["clio-coder/notice"], { level: "error" });
 		deepStrictEqual(budgetMeta(frame), {
 			version: 1,

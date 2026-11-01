@@ -2276,7 +2276,8 @@ function prepareAcpReplay(
 			// Middleware continuations are provider context, not operator authorship.
 			if (payload?.synthetic === true) continue;
 			if (current !== null) closeUnrecordedReplayCalls(ids, current.frames);
-			current = { frames: [], userTurnId: entry.turnId };
+			// A crash can leave the request without a terminal assistant or turnOutcome.
+			current = { frames: [], userTurnId: entry.turnId, stopReason: "error" };
 			turns.push(current);
 			const operatorText =
 				typeof payload?.operatorText === "string" ? [payload.operatorText] : replayTextBlocks(entry).text;
@@ -2285,7 +2286,7 @@ function prepareAcpReplay(
 		}
 		if (current === null) continue;
 		if (entry.role === "assistant") {
-			current.stopReason = mapAcpStopReason(payload?.stopReason);
+			current.stopReason = payload?.stopReason === "toolUse" ? "error" : mapAcpStopReason(payload?.stopReason);
 			const blocks = replayTextBlocks(entry);
 			replayMessageChunks(current.frames, "agent_thought_chunk", blocks.thinking);
 			replayMessageChunks(current.frames, "agent_message_chunk", blocks.text);
