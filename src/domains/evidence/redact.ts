@@ -40,6 +40,12 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 	{ kind: "google-api-key", re: /\bAIza[0-9A-Za-z_-]{30,}\b/g },
 	{ kind: "jwt", re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\b/g },
 	{
+		kind: "authorization",
+		// An opaque credential has no shape of its own, so the header or scheme naming it is the signal. A bare
+		// `bearer <word>` needs a digit to stay out of prose, and `$TOKEN` falls outside the value charset.
+		re: /\b((?:authorization\s*["']?\s*[:=]\s*["']?(?:bearer|basic|token)\s+)|(?:bearer\s+)(?=[A-Za-z0-9._~+/-]*\d))([A-Za-z0-9._~+/-]{8,}=*)/gi,
+	},
+	{
 		kind: "assignment",
 		// KEY=value / key: value / "api_key": "value" shapes where the key name
 		// is secret-flavored and the value is long enough to be a credential.
@@ -99,7 +105,7 @@ export function redactSecretsText(text: string, tally: RedactionTally): string {
 	for (const pattern of SECRET_PATTERNS) {
 		out = out.replace(pattern.re, (...match: unknown[]) => {
 			tally.count += 1;
-			if (pattern.kind === "assignment") {
+			if (pattern.kind === "assignment" || pattern.kind === "authorization") {
 				// Keep the key and separator; replace only the value.
 				return `${String(match[1])}[redacted:${pattern.kind}]`;
 			}

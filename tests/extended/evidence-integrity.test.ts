@@ -102,6 +102,24 @@ describe("evidence integrity boundary", () => {
 		deepStrictEqual(admitRunProvenance(view, unsealed), {});
 	});
 
+	it("redacts an opaque authorization credential but not a variable or prose", () => {
+		const tally = createRedactionTally();
+		const redacted = redactSecretsDeep(
+			{
+				header: "Authorization: Bearer CANARY-opaque-abcdef123456",
+				scheme: "sent bearer abcdef123456 upstream",
+				reference: 'curl -H "Authorization: Bearer $TOKEN"',
+				prose: "a bearer credential is required",
+			},
+			tally,
+		);
+		strictEqual(redacted.header, "Authorization: Bearer [redacted:authorization]");
+		strictEqual(redacted.scheme, "sent bearer [redacted:authorization] upstream");
+		strictEqual(redacted.reference, 'curl -H "Authorization: Bearer $TOKEN"');
+		strictEqual(redacted.prose, "a bearer credential is required");
+		strictEqual(tally.count, 2);
+	});
+
 	it("redacts secrets deeply and accounts for every replacement", () => {
 		const tally = createRedactionTally();
 		const source = {
