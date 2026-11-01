@@ -32,7 +32,9 @@ const ENV_REFERENCE_RE = /^["']?\$(?:[A-Z_][A-Z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\}
 function redactUnlessEnvReference(match: string, prefix: string, secret: string, suffix = ""): string {
 	return ENV_REFERENCE_RE.test(secret) ? match : `${prefix}[redacted]${suffix}`;
 }
-const SECRET_FLAG_NAME_RE = /(?=(api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token))/giu;
+// `auth` stops short of `author` and `authority`, so prose such as "operator-authority ask" keeps its next word.
+const SECRET_FLAG_NAME_RE =
+	/(?=(api[-_]?key|access[-_]?token|auth(?:orization)?(?!or)|credential|password|secret|token))/giu;
 
 function secretFlagStart(word: string): number | null {
 	// Plain prose words cannot name a shell flag; streaming cards revisit them often (#428).

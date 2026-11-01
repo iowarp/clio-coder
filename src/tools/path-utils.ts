@@ -76,6 +76,19 @@ export function resolveToCwd(filePath: string, cwd: string = process.cwd()): str
 }
 
 /**
+ * The absolute path a relative `filePath` was meant to be, when it is exactly a
+ * path inside `cwd` with its leading separator lost. Written as given it would
+ * plant a copy of the workspace's own ancestry inside the workspace, and a host
+ * commit would then take that as authored.
+ */
+export function absolutePathMissingRoot(filePath: string, cwd: string = process.cwd()): string | null {
+	const expanded = expandPath(filePath);
+	if (isAbsolute(expanded)) return null;
+	const candidate = `${sep}${expanded}`;
+	return candidate.startsWith(`${cwd}${sep}`) ? candidate : null;
+}
+
+/**
  * resolveToCwd, plus the physical target when the walk finished. A mutation
  * passes physical to withFileMutationQueue in the same synchronous step, so
  * the queue keys the path this walk found instead of walking it again.

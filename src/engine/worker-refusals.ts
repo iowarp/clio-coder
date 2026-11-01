@@ -1,3 +1,4 @@
+import { isAbsolute, sep } from "node:path";
 import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
@@ -19,6 +20,19 @@ export interface WorkerRefusal {
 	command: string;
 	/** The rule that refused the call, as the audit record names it. */
 	rule: string;
+}
+
+/**
+ * A worker's write aimed outside its workspace is nearly always a mistyped root,
+ * most often its checkout's instead of its task worktree's. Nobody can approve
+ * that here, so the refusal says where the work belongs instead of inviting a
+ * retry through another tool.
+ */
+export function outsideWorkspaceHint(args: unknown, cwd: string): string {
+	const path = typeof args === "object" && args !== null ? (args as { path?: unknown }).path : undefined;
+	if (typeof path !== "string" || !isAbsolute(path)) return "";
+	if (path === cwd || path.startsWith(`${cwd}${sep}`)) return "";
+	return `. ${path} is outside your workspace root ${cwd}; write inside that root instead`;
 }
 
 /**

@@ -173,6 +173,7 @@ import type { WorkerRefusal } from "./worker-refusals.js";
 import {
 	describeWorkerRefusal,
 	formatWorkerRefusal,
+	outsideWorkspaceHint,
 	WORKER_REFUSAL_LIMIT,
 	workerRefusalLimitReason,
 } from "./worker-refusals.js";
@@ -2235,7 +2236,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			if (grantBinding !== undefined && authority === "operator" && operatorUnattended) {
 				recordPermissionDecision("denied", "approval:operator-unavailable");
 				// Only a person clears an operator rail, and nobody can answer here.
-				const reason = `permission denied by policy: ${call.tool} raised an operator-authority ask and no operator can answer worker asks for this dispatch; ${call.tool} requires ${actionClass} confirmation`;
+				const reason = `permission denied by policy: ${call.tool} raised an operator-authority ask and no operator can answer worker asks for this dispatch; ${call.tool} requires ${actionClass} confirmation${outsideWorkspaceHint(call.args, contractCwd)}`;
 				emit({
 					type: "clio_coder_permission_resolved",
 					payload: { tool: call.tool, actionClass, mode: "deny", source: "policy", requestId, reason, authority },

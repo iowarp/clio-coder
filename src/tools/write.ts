@@ -4,7 +4,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { type EditDiffResult, generateDiffString } from "./edit-diff.js";
 import { publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
 import { harnessRecipeWriteNote } from "./harness-note.js";
-import { resolveMutationTarget } from "./path-utils.js";
+import { absolutePathMissingRoot, resolveMutationTarget } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { hookLandingRefusal, publishTargetAdmission } from "./tool-landing.js";
 
@@ -42,6 +42,13 @@ export const writeTool: ToolSpec = {
 		const content =
 			typeof args.content === "string" ? args.content : args.content === undefined ? null : String(args.content);
 		if (content === null) return { kind: "error", message: "write: missing content argument" };
+		const intended = absolutePathMissingRoot(pathArg);
+		if (intended !== null) {
+			return {
+				kind: "error",
+				message: `write: ${pathArg} is relative and repeats this workspace's own path; use ${intended}`,
+			};
+		}
 		const { path: filePath, physical } = resolveMutationTarget(pathArg);
 		const moved = hookLandingRefusal("write", options?.hookLanding, filePath);
 		if (moved !== null) return { kind: "error", message: moved };
