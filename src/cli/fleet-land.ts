@@ -83,6 +83,10 @@ export async function runFleetLand(args: ReadonlyArray<string>): Promise<number>
 			for (const line of plan.commits) process.stdout.write(`  ${line}\n`);
 			if (plan.uncommitted > 0)
 				process.stdout.write(`  plus ${plan.uncommitted} uncommitted path(s) in ${plan.worktree?.path}\n`);
+			if (plan.leftOut.size > 0)
+				process.stdout.write(
+					`  ${plan.leftOut.size} file(s) the run's commit left out do not land and go with the worktree\n`,
+				);
 			process.stdout.write(`  changes: ${plan.changed}\n`);
 			if (plan.refusal !== null) process.stdout.write(`  cannot land: ${plan.refusal}\n`);
 		}

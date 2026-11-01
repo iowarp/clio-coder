@@ -157,11 +157,14 @@ function gitErrorOutput(error: unknown, stream: "stdout" | "stderr"): string {
 }
 
 function gitFailureReason(error: unknown, fallback: string): string {
-	const stderr = gitErrorOutput(error, "stderr")
-		.split(/\r?\n/)
-		.find((line) => line.trim().length > 0)
-		?.trim();
-	if (stderr !== undefined) return stderr;
+	const lines = gitErrorOutput(error, "stderr").split(/\r?\n/);
+	const stderr = lines.find((line) => line.trim().length > 0)?.trim();
+	if (stderr !== undefined) {
+		// Git names the paths it refuses over on tab-indented lines after the message.
+		const paths = lines.filter((line) => line.startsWith("\t")).map((line) => line.trim());
+		if (paths.length === 0) return stderr;
+		return `${stderr} ${paths.slice(0, 10).join(", ")}${paths.length > 10 ? ` and ${paths.length - 10} more` : ""}`;
+	}
 	const code = error !== null && typeof error === "object" && "code" in error ? error.code : undefined;
 	if (typeof code !== "string") return fallback;
 	const cause =
@@ -1155,7 +1158,13 @@ export function applyTaskWorktree(input: {
 	const stranded = destinationRefusal(worktree, destinationBranch);
 	if (stranded !== null) return { ...receipt, reason: WORKTREE_DESTINATION_MOVED, detail: stranded };
 	const merged = mergeWorktreeBranch(worktree.root, commit, COMMIT_IDENTITY, `Merge branch '${worktree.branch}'`);
-	if (!merged.ok) return { ...receipt, reason: merged.code ?? "worktree_merge_conflict", detail: merged.reason };
+	if (!merged.ok) {
+		return {
+			...receipt,
+			reason: merged.code ?? "worktree_merge_conflict",
+			detail: `${merged.reason}; its work is committed on the preserved branch ${worktree.branch}, and \`clio-coder fleet land ${worktree.branch}\` lands it once that is resolved`,
+		};
+	}
 	const landedCommit = git(worktree.root, ["rev-parse", "HEAD"]);
 	return { ...receipt, applied: true, detail: `merged ${landedCommit.slice(0, 7)} onto ${destinationBranch}` };
 }
@@ -1304,12 +1313,55 @@ function replaceMarker(ownerPath: string, marker: Record<string, unknown>): void
  * recovery does not read the claim as a crash. A claim written before recovery
  * existed carries no state and is left as it is.
  */
-export function settleTaskWorktree(worktree: TaskWorktree): void {
+export function settleTaskWorktree(worktree: TaskWorktree, accounted?: TaskWorktreePreview): void {
 	assertOwnership(worktree);
 	const ownerPath = claimPathFor(worktree.root, worktree.runId);
 	const marker = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown>;
 	if (marker.version !== 2) return;
-	replaceMarker(ownerPath, { ...marker, state: "settled" satisfies TaskWorktreeState });
+	replaceMarker(ownerPath, {
+		...marker,
+		state: "settled" satisfies TaskWorktreeState,
+		...(accounted !== undefined
+			? { accounted: { commit: accounted.commit, untracked: Object.fromEntries(accounted.untracked) } }
+			: {}),
+	});
+}
+
+/** The snapshot a settled claim recorded; anything malformed reads as no record, which lands every untracked file. */
+function claimAccounted(marker: Record<string, unknown>): TaskWorktreePreview | undefined {
+	const accounted = marker.accounted;
+	if (typeof accounted !== "object" || accounted === null) return undefined;
+	const { commit, untracked } = accounted as { commit?: unknown; untracked?: unknown };
+	if (typeof commit !== "string" || typeof untracked !== "object" || untracked === null) return undefined;
+	const entries = Object.entries(untracked);
+	if (!entries.every((entry): entry is [string, string] => typeof entry[1] === "string")) return undefined;
+	return { commit, untracked: new Map(entries) };
+}
+
+/**
+ * The untracked files a landing leaves behind: those the run's own commit left
+ * out and that have not changed since. Its stamps let the landing's cleanup
+ * remove them with the worktree, and a file that arrived or changed later is
+ * not here, so it lands.
+ */
+export function leftOutOfLanding(
+	path: string,
+	head: string,
+	accounted: TaskWorktreePreview | undefined,
+): Map<string, string> {
+	const leftOut = new Map<string, string>();
+	if (accounted === undefined || accounted.commit !== head) return leftOut;
+	for (const [entry, stamp] of untrackedState(path).stamps) {
+		if (stamp !== GONE_STAMP && accounted.untracked.get(entry) === stamp) leftOut.set(entry, stamp);
+	}
+	return leftOut;
+}
+
+/** The untracked files of the worktree at `path` outside `leftOut`, as the absolute paths `commitWorktreePath` takes. */
+export function landedUntrackedPaths(path: string, leftOut: ReadonlyMap<string, string>): string[] {
+	return untrackedPaths(path)
+		.filter((entry) => !leftOut.has(entry))
+		.map((entry) => join(path, entry));
 }
 
 interface TaskClaim {
@@ -1521,7 +1573,7 @@ export function loadKeptTaskWorktree(
 	root: string,
 	runId: string,
 	allowedParents?: ReadonlyArray<string>,
-): { kind: "kept"; worktree: TaskWorktree } | { kind: "running" } | null {
+): { kind: "kept"; worktree: TaskWorktree; accounted?: TaskWorktreePreview } | { kind: "running" } | null {
 	if (!SAFE_RUN_ID.test(runId)) return null;
 	let canonical: string;
 	try {
@@ -1535,6 +1587,7 @@ export function loadKeptTaskWorktree(
 	if (claim === undefined || typeof claim.marker.ownerToken !== "string") return null;
 	if (claim.state === "active" && claim.owner !== null && ownerIsAlive(claim.owner)) return { kind: "running" };
 	const sourceBranch = typeof claim.marker.sourceBranch === "string" ? claim.marker.sourceBranch : undefined;
+	const accounted = claimAccounted(claim.marker);
 	return {
 		kind: "kept",
 		worktree: {
@@ -1547,6 +1600,7 @@ export function loadKeptTaskWorktree(
 			...(sourceBranch !== undefined && sourceBranch.length > 0 ? { sourceBranch } : {}),
 			ownerToken: claim.marker.ownerToken,
 		},
+		...(accounted !== undefined ? { accounted } : {}),
 	};
 }
 

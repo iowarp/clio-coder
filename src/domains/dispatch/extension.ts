@@ -6649,7 +6649,7 @@ export function createDispatchBundle(
 					try {
 						// A canceled run that never produced work leaves nothing to keep.
 						if (!(finalOutcome === "canceled" && discardIdleTaskWorktree(req.taskWorktree))) {
-							settleTaskWorktree(req.taskWorktree);
+							settleTaskWorktree(req.taskWorktree, accounted);
 						}
 					} catch (settleError) {
 						reportDispatchDiagnostic(`settle task worktree ${req.taskWorktree.runId}`, settleError);
@@ -9076,7 +9076,7 @@ export function createDispatchBundle(
 						if (
 							!((finalOutcome === "canceled" || outcomeCode === "worker_no_work") && discardIdleTaskWorktree(req.taskWorktree))
 						) {
-							settleTaskWorktree(req.taskWorktree);
+							settleTaskWorktree(req.taskWorktree, accounted);
 						}
 					} catch (settleError) {
 						reportDispatchDiagnostic(`settle task worktree ${req.taskWorktree.runId}`, settleError);
