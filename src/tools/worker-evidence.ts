@@ -11,9 +11,16 @@ import { hostCheckBaseNote } from "../domains/dispatch/host-verification-note.js
 import { settleFinishedRun } from "../domains/dispatch/run-settlement.js";
 import type { RunResult, RunResultDraft } from "../domains/dispatch/types.js";
 import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
-import { adaptRunTrustStatus, type CanonicalTrustStatus, type RunIntegrity } from "../domains/evidence/trust-status.js";
+import {
+	adaptRunTrustStatus,
+	type CanonicalTrustStatus,
+	composeTrustStatus,
+	normalizeTrustStatus,
+	type RunIntegrity,
+} from "../domains/evidence/trust-status.js";
 import { telemetryObjectRef } from "../domains/telemetry/objects.js";
 import { telemetryObjectsDirectory, telemetryRunDirectory } from "../domains/telemetry/paths.js";
+import { readRunRecord } from "../domains/telemetry/run-record.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 
 /**
@@ -56,7 +63,7 @@ export interface FinishedRun {
 	>;
 	delivered: RunResultObject | null;
 	/** The run's journaled assessment; null when the run has none or the producer has not read it back. */
-	assessment: Pick<EvidenceAssessed, "firstPassSuccess" | "findings"> | null;
+	assessment: Pick<EvidenceAssessed, "firstPassSuccess" | "findings" | "trust"> | null;
 }
 
 const authenticated = (integrity: RunIntegrity) => integrity.state === "verified";
@@ -229,7 +236,7 @@ function settledHash(run: FinishedRun, field: string): string | undefined {
  * separate, and neither line includes prompt prose.
  */
 export function runEvidenceLabels(run: FinishedRun, integrity: RunIntegrity): string[] {
-	const status = adaptRunTrustStatus({ ...run.facts, runId: run.runId, digest: null }, integrity);
+	const status = finishedRunTrustStatus(run, integrity);
 	const canonical = canonicalTrustLabels(status);
 	if (integrity.state !== "verified")
 		return [...canonical, `run_integrity=${integrity.state.toUpperCase()} reason=${JSON.stringify(integrity.reason)}`];
@@ -425,13 +432,25 @@ export function finishedRun(result: RunResultDraft | RunResult): FinishedRun {
 		frameType: null,
 		usage: undefined,
 	});
+	const record = "digest" in result ? readRunRecord(clioStateDir(), result.runId) : null;
 	return {
 		runId: result.runId,
 		digest: "digest" in result ? result.digest : null,
 		facts: settlement.facts,
 		delivered: settlement.result,
-		assessment: null,
+		assessment:
+			record?.seal?.status === "verified" && record.settled?.digest === ("digest" in result ? result.digest : null)
+				? record.assessment
+				: null,
 	};
+}
+
+/** The sealed assessment owns completion evidence; the caller still owns the integrity verdict for this view. */
+export function finishedRunTrustStatus(run: FinishedRun, integrity: RunIntegrity): CanonicalTrustStatus {
+	const status = adaptRunTrustStatus({ ...run.facts, runId: run.runId, digest: run.digest }, integrity);
+	return authenticated(integrity) && run.assessment !== null
+		? composeTrustStatus(normalizeTrustStatus(run.assessment.trust), { artifactIntegrity: status.artifactIntegrity })
+		: status;
 }
 
 /** A run its producer holds in memory is authentic by construction; nothing about it was read back. */

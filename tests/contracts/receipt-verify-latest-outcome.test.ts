@@ -125,7 +125,10 @@ async function sealedReceipt(calls: VerifyCall[]): Promise<RunResult> {
 }
 
 function verdicts(receipt: RunResult): boolean[] {
-	return receipt.quality.typedValidations.map((fact) => fact.passed).sort();
+	return receipt.quality.typedValidations
+		.filter((fact) => fact.sourceId === "tool:verify")
+		.map((fact) => fact.passed)
+		.sort();
 }
 
 describe("typed validation follows each check's latest run (BT-017)", () => {
@@ -151,7 +154,10 @@ describe("typed validation follows each check's latest run (BT-017)", () => {
 		]);
 		equal(receipt.toolStats.find((stat) => stat.tool === "verify")?.errors, 1);
 		deepStrictEqual(verdicts(receipt), [true]);
-		ok(receipt.quality.typedValidations.every((fact) => fact.sourceId === "tool:verify"));
+		deepStrictEqual(receipt.quality.typedValidations.map((fact) => fact.sourceId).sort(), [
+			"command:npm run test",
+			"tool:verify",
+		]);
 		deepStrictEqual(receipt.verification, { state: "verified", basis: "validation-tool" });
 	});
 

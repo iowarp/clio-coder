@@ -13,6 +13,7 @@ import { runSettledDigest } from "../telemetry/run-digest.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
 import { compareGates, type GateReview, readGateReviews, reviewFinding } from "./run-trust.js";
 import {
+	adaptCompletionEvidence,
 	adaptGateDecisionReviewStatus,
 	adaptRunTrustStatus,
 	type CanonicalTrustStatus,
@@ -66,6 +67,12 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 	const digest = runSettledDigest(settled);
 	// The producer holds the record it is about to seal; a reader replaces this integrity with the seal's verdict.
 	let trust = adaptRunTrustStatus({ ...settled, runId, digest }, { state: "verified", by: "producer" });
+	const completion = input.records
+		.filter((record) => record.k === "completion.evaluated" && record.ctx.runId === runId && record.t <= settledAt)
+		.sort((left, right) => left.t.localeCompare(right.t))
+		.at(-1);
+	if (completion?.k === "completion.evaluated")
+		trust = composeTrustStatus(trust, { completionEvidence: adaptCompletionEvidence(completion) });
 	const verdicts: EvidenceAssessed["verdicts"] = [];
 	for (const gate of [...input.gateDecisions].sort(compareGates)) {
 		const subject = gate.subjects.find((entry) => entry.runId === runId);

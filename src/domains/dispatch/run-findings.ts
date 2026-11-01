@@ -4,6 +4,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type { RunEffects } from "../safety/run-effects.js";
 import type {
 	RunResultContractFact,
 	RunResultDraft,
@@ -47,8 +48,8 @@ export interface CreateRunResultQualityInput {
 
 /**
  * `verify` is Clio's typed verifier tool. Its sealed aggregate records the
- * tool identity and pass/fail result; generic process exit and shell commands
- * never enter this channel.
+ * tool identity and pass/fail result; observed shell checks enter separately
+ * through the run-effects recorder.
  */
 function typedValidationFactsFromToolStats(
 	toolStats: ReadonlyArray<Pick<RunResultDraft["toolStats"][number], "tool" | "count" | "ok" | "errors" | "blocked">>,
@@ -215,6 +216,24 @@ const VALIDATION_TOOL_NEEDLES = [
 	"verify",
 ] as const;
 
+export const OBSERVED_COMMAND_PREFIX = "command:";
+
+/** Observed checks remain evidence of execution even when a later tool call invalidates their freshness. */
+export function typedValidationFactsFromObservedEffects(
+	effects: Pick<RunEffects, "validationCommands" | "validationOutcomes">,
+): RunResultTypedValidationFact[] {
+	const observations: Array<[string, boolean]> = [
+		...[...effects.validationCommands].map((command): [string, boolean] => [command, true]),
+		...[...effects.validationOutcomes].filter(([, passed]) => !passed),
+	];
+	return observations.map(([command, passed]) => ({
+		// Trust references are bounded identifiers; the digest still commits to the entire command and outcome.
+		sourceId: `${OBSERVED_COMMAND_PREFIX}${JSON.stringify(command).slice(1, -1)}`.slice(0, 512),
+		validatorDigest: createHash("sha256").update(canonicalJson({ command, passed }), "utf8").digest("hex"),
+		passed,
+	}));
+}
+
 function isValidationTool(tool: string): boolean {
 	const name = tool.toLowerCase();
 	return VALIDATION_TOOL_NEEDLES.some((needle) => name.includes(needle));
@@ -255,6 +274,12 @@ export function deriveRunVerification(
 ): RunResultVerification {
 	if (context.capabilityClass === "read-only") {
 		return { state: "not_applicable", basis: "read-only-agent" };
+	}
+	if (draft.typedValidations?.some((fact) => !fact.passed)) {
+		return { state: "unverified", basis: "validation-tool" };
+	}
+	if (draft.typedValidations?.some((fact) => fact.passed)) {
+		return { state: "verified", basis: "validation-tool" };
 	}
 	if (hasPassingValidation(draft.toolStats, draft.typedValidations)) {
 		return { state: "verified", basis: "validation-tool" };

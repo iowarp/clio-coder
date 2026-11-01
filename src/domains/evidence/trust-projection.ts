@@ -1,3 +1,4 @@
+import { OBSERVED_COMMAND_PREFIX } from "../dispatch/run-findings.js";
 import {
 	type CanonicalTrustStatus,
 	TRUST_STATUS_AXES,
@@ -126,6 +127,12 @@ export function validationClause(status: Pick<CanonicalTrustStatus, "validationG
 	if (entry.state === "unknown" && entry.authority.id === "host-verification-baseline-failed")
 		return "check also failed on task base; change validation unknown";
 	if (entry.state === "absent") return word;
+	if ((entry.state === "validated" || entry.state === "failed") && entry.authority.id === "host-observed-command") {
+		const commands = entry.artifacts
+			.filter((artifact) => artifact.kind === "validation_result" && artifact.id.startsWith(OBSERVED_COMMAND_PREFIX))
+			.map((artifact) => artifact.id.slice(OBSERVED_COMMAND_PREFIX.length));
+		return `validation observed ${entry.state === "validated" ? "passing" : "failing"}: ${commands.join(", ")}`;
+	}
 	if (entry.state === "failed" && entry.authority.id === "result-quality") return "recorded validation failed";
 	if (entry.state === "validated" || entry.state === "failed") return `${word} by ${entry.authority.id}`;
 	// A named external system that could not observe the run is worth naming;

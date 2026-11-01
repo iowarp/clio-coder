@@ -67,7 +67,6 @@ import type {
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
-import { adaptRunTrustStatus } from "../domains/evidence/trust-status.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
@@ -118,6 +117,7 @@ import { truncateUtf8 } from "./truncate-utf8.js";
 import {
 	compactHelperResultLines,
 	finishedRun,
+	finishedRunTrustStatus,
 	PRODUCER_INTEGRITY,
 	runEvidenceLabels,
 	runHelperResult,
@@ -627,8 +627,7 @@ export function formatDispatchOutput(
 	const needsSpotCheck = runs.some((run) => {
 		const view = finishedRun(run.receipt);
 		if (runHelperResult(view, PRODUCER_INTEGRITY) !== null) return false;
-		const state = adaptRunTrustStatus({ ...view.facts, runId: view.runId, digest: null }, PRODUCER_INTEGRITY)
-			.validationGrounding.state;
+		const state = finishedRunTrustStatus(view, PRODUCER_INTEGRITY).validationGrounding.state;
 		return state === "absent" || state === "unknown" || state === "ungrounded";
 	});
 	const lines = [
@@ -658,7 +657,7 @@ export function formatDispatchOutput(
 			// pipeline/persona/escalation fields, so the line format is unchanged.
 			const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
 			// Evidence confidence comes from the run's settled facts, the same ones its run.settled records.
-			const trustStatus = adaptRunTrustStatus({ ...view.facts, runId: view.runId, digest: null }, PRODUCER_INTEGRITY);
+			const trustStatus = finishedRunTrustStatus(view, PRODUCER_INTEGRITY);
 			const evidenceSuffix = ` ${runEvidenceLabels(view, PRODUCER_INTEGRITY).join(" ")}`;
 			const routingSuffix =
 				receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
@@ -765,7 +764,7 @@ function dispatchDetails(
 			// field so a run entry without them keeps its exact shape.
 			const provenance = extractRunProvenance(receipt);
 			const view = finishedRun(receipt);
-			const trustStatus = adaptRunTrustStatus({ ...view.facts, runId: view.runId, digest: null }, PRODUCER_INTEGRITY);
+			const trustStatus = finishedRunTrustStatus(view, PRODUCER_INTEGRITY);
 			const helperResult = runHelperResult(view, PRODUCER_INTEGRITY);
 			return {
 				...(helperResult !== null ? { helperResult } : {}),

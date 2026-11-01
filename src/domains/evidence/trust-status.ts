@@ -12,6 +12,7 @@ import {
 } from "../../core/telemetry/trust-vocabulary.js";
 import { parseWorkerContextProvenance } from "../../worker/context-seed.js";
 import type { GateDecisionVerification } from "../dispatch/gate-decisions.js";
+import { OBSERVED_COMMAND_PREFIX } from "../dispatch/run-findings.js";
 import type { RunBriefingProvenance, RunProjectContextProvenance, RunResult } from "../dispatch/types.js";
 import { normalizeYoloGateAuthority, normalizeYoloGateOutcome } from "../dispatch/yolo-ids.js";
 import type { SealVerdict } from "../telemetry/seal.js";
@@ -526,6 +527,22 @@ function runValidationStatus(facts: RunTrustFacts): ValidationGroundingStatus {
 	if (host?.status === "verified") return attributed("validated", source, hostAuthority, artifacts);
 	// A batch member the failure was charged away from has no validator verdict of its own.
 	if (host?.status === "not_implicated") return attributed("unknown", source, hostAuthority, artifacts);
+	const commands =
+		facts.quality?.typedValidations.filter((fact) => fact.sourceId.startsWith(OBSERVED_COMMAND_PREFIX)) ?? [];
+	if (commands.length > 0 && (commands.some((fact) => !fact.passed) || !settledQualityFails(facts.quality))) {
+		const failed = commands.some((fact) => !fact.passed);
+		return attributed(
+			failed ? "failed" : "validated",
+			source,
+			{ kind: "validator", id: "host-observed-command" },
+			uniqueBoundedReferences([
+				runRecordReference(facts),
+				...commands
+					.filter((fact) => fact.passed === !failed)
+					.map((fact) => sha256Reference("validation_result", fact.sourceId, fact.validatorDigest)),
+			]),
+		);
+	}
 	if (settledQualityFails(facts.quality))
 		return attributed("failed", source, { kind: "validator", id: "result-quality" }, artifacts);
 	const grounding = facts.validationGrounding;
@@ -550,6 +567,25 @@ function runValidationStatus(facts: RunTrustFacts): ValidationGroundingStatus {
 			: { kind: "unknown", id: verification.basis },
 		artifacts,
 	);
+}
+
+/** The finish contract's recorded decision remains evidence even when execution fails later. */
+export function adaptCompletionEvidence(record: {
+	id: string;
+	data: EventPayload<"completion.evaluated">;
+}): CompletionEvidenceStatus {
+	const { decision, reason } = record.data;
+	const state =
+		decision === "engage"
+			? "incomplete"
+			: reason === "explicit_limitation"
+				? "limited"
+				: reason === "validation_evidence"
+					? "evidenced"
+					: "not_applicable";
+	return attributed(state, { kind: "finish_contract", id: record.id }, { kind: "clio", id: "finish-contract" }, [
+		{ kind: "finish_contract_evidence", id: record.id },
+	]);
 }
 
 const CONTEXT_HASH_KINDS: Partial<Record<RunTrustFacts["hashes"][number]["subject"], TrustArtifactKind>> = {

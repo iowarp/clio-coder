@@ -427,6 +427,7 @@ import type { VerifyCallOutcome } from "./run-findings.js";
 import {
 	createRunResultQuality,
 	deriveRunVerification,
+	typedValidationFactsFromObservedEffects,
 	typedValidationFactsFromVerifyCalls,
 	verifyCheckIdentity,
 } from "./run-findings.js";
@@ -8157,7 +8158,10 @@ export function createDispatchBundle(
 			const safetyMetadata = safety.policy?.metadata() ?? null;
 			const protectedArtifacts = protectedArtifactReceiptSummary(spec.protectedArtifactState);
 			const finalToolStats = snapshotToolStats(toolStats);
-			const typedValidations = typedValidationFactsFromVerifyCalls(finalToolStats, verifyCalls.calls);
+			const typedValidations = [
+				...typedValidationFactsFromVerifyCalls(finalToolStats, verifyCalls.calls),
+				...typedValidationFactsFromObservedEffects(runEffects.snapshot()),
+			];
 			const unfinished = snapshotUnfinishedTools(inFlightTools);
 			const telemetryIngestionErrors = telemetryIngestionErrorsOf(result);
 			const workspaceMutationPossible =
