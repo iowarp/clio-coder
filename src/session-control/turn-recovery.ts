@@ -23,6 +23,7 @@ import {
 	isEmptyAbortedAssistantMessage,
 	pruneFailedAssistantFromContext,
 } from "./chat-loop-messages.js";
+import { boundRefusedPrompt } from "./session-replay-messages.js";
 import type { TurnContext } from "./turn-context.js";
 import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
@@ -251,6 +252,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		}
 		if (cancelled()) return;
 		if (!compacted) {
+			boundRefusedPrompt(agentRuntime.agent);
 			deps.emitNotice(
 				`[Clio Coder] context overflow could not be compacted: ${overflow.message}. Use /context compact or reduce the request.`,
 			);
@@ -263,10 +265,12 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			if (cancelled()) return;
 			const stillOverflowed = detectOverflowFromState(agentRuntime.agent);
 			if (stillOverflowed) {
+				boundRefusedPrompt(agentRuntime.agent);
 				deps.emitNotice(`[Clio Coder] context overflow persisted after compaction: ${stillOverflowed.message}`);
 			}
 		} catch (retryErr) {
 			if (cancelled()) return;
+			boundRefusedPrompt(agentRuntime.agent);
 			deps.emitNotice(
 				`[Clio Coder] context overflow persisted after compaction: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
 			);

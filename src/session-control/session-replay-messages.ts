@@ -9,6 +9,7 @@
 
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
+import { toContextOverflowError } from "../domains/providers/errors.js";
 import { captureSkillContext } from "../domains/session/compaction/compact.js";
 import type {
 	BashExecutionEntry,
@@ -31,7 +32,7 @@ import {
 	COMPACTION_SUMMARY_SUFFIX,
 } from "../engine/messages.js";
 import type { AgentMessage } from "../engine/types.js";
-import { isSelfExplainingAbort } from "./chat-loop-messages.js";
+import { type AgentStateView, isSelfExplainingAbort } from "./chat-loop-messages.js";
 import { readPostureGeneration, readPostureUpdate } from "./posture-policy.js";
 import type { WorkerRunResultReader } from "./worker-stream.js";
 
@@ -147,6 +148,41 @@ export function truncateReplayText(text: string, limit = MAX_REPLAY_TEXT_CHARS):
 	if (text.length <= limit) return text;
 	const omitted = text.length - limit;
 	return `${text.slice(0, limit)}\n\n[... ${omitted} more characters truncated from replay context]`;
+}
+
+/**
+ * A prompt the server refused for size was never cached, so the byte-exact replay #423 needs does not apply to it.
+ * Resent whole it fails every later turn, and compaction cannot help while the summarizer must read it too.
+ */
+export function boundRefusedPrompt(agent: AgentStateView): void {
+	const messages = agent.state.messages;
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index];
+		if (message?.role !== "user") continue;
+		const content =
+			typeof message.content === "string"
+				? truncateReplayText(message.content)
+				: message.content.map((block) =>
+						block.type === "text" ? { ...block, text: truncateReplayText(block.text) } : block,
+					);
+		agent.state.messages = messages.map((entry, at) => (at === index ? { ...message, content } : entry));
+		return;
+	}
+}
+
+/** Prompts whose last provider answer was a size refusal; a later success means compaction made them fit after all. */
+function refusedPromptTurns(entries: ReadonlyArray<SessionEntry>): ReadonlySet<string> {
+	const refused = new Set<string>();
+	let prompt: string | null = null;
+	for (const entry of entries) {
+		if (entry.kind !== "message") continue;
+		if (entry.role === "user") prompt = entry.turnId;
+		if (entry.role !== "assistant" || prompt === null) continue;
+		const failure = messageFailure(entry);
+		if (failure === null) refused.delete(prompt);
+		else if (toContextOverflowError(failure.errorMessage) !== null) refused.add(prompt);
+	}
+	return refused;
 }
 
 export function timestampMillis(timestamp: string): number {
@@ -761,6 +797,7 @@ export function buildReplayAgentMessagesFromTurns(
 		for (const block of options.continuityBlocks ?? []) out.push(makeTextMessage("user", block, timestamp));
 	};
 	const replayEntries = selectReplayEntries(turns, options);
+	const refusedPrompts = refusedPromptTurns(replayEntries);
 	const latestOperator = [...replayEntries]
 		.reverse()
 		.find(
@@ -782,7 +819,9 @@ export function buildReplayAgentMessagesFromTurns(
 						if (message) recordToolCallsFromMessage(message, failedToolCalls);
 						break;
 					}
-					const message = replayMessageFromEntry(entry);
+					const message = refusedPrompts.has(entry.turnId)
+						? richMessageFromEntry(entry, MAX_REPLAY_TEXT_CHARS)
+						: replayMessageFromEntry(entry);
 					if (message) {
 						out.push(message);
 						recordToolCallsFromMessage(message, seenToolCalls);

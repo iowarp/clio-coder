@@ -246,6 +246,31 @@ test("the reasoning behind a final answer replays where it streamed, in every st
 	}
 });
 
+test("a prompt the server refused for size replays bounded, unless compaction later made it fit", () => {
+	const at = "2026-11-01T00:00:00.000Z";
+	const message = (role: "user" | "assistant", turnId: string, parentTurnId: string | null, payload: unknown) =>
+		({ kind: "message", role, turnId, parentTurnId, timestamp: at, payload }) as SessionEntry;
+	const oversized = "x".repeat(100_000);
+	const refusal = {
+		stopReason: "error",
+		errorMessage: "400: request (262118 tokens) exceeds the available context size (180224 tokens), try increasing it",
+		content: [],
+	};
+	const prompt = message("user", "big", null, { role: "user", content: [{ type: "text", text: oversized }] });
+	const textLength = (entries: SessionEntry[]) => {
+		const first = buildReplayAgentMessagesFromTurns(entries).find((entry) => entry.role === "user");
+		return JSON.stringify(first).length;
+	};
+	assert.ok(textLength([prompt, message("assistant", "no", "big", refusal)]) < 21_000);
+	assert.ok(
+		textLength([
+			prompt,
+			message("assistant", "no", "big", refusal),
+			message("assistant", "ok", "no", { stopReason: "stop", content: [{ type: "text", text: "fits now" }] }),
+		]) > 100_000,
+	);
+});
+
 test("a replay ending at an intermediate tool-use message does not invent completion", () => {
 	const output = replay([{ role: "user", payload: { text: "Incomplete request" } }, toolCall]);
 	assert.doesNotMatch(output, /\bDone\b/);
