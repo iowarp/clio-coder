@@ -176,7 +176,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 			agentId: context.agentId,
 			scope: context.scope,
 			dependencies: [...dependencies],
-			task: renderFleetNodeTask(task, resolved.expectedResultContract),
+			task: renderFleetNodeTask(task, resolved.expectedResultContract, context.stepId),
 			expectedResultContract: resolved.expectedResultContract,
 			requestedAuthority: resolved.requestedAuthority,
 			approvedAuthority: resolved.approvedAuthority,

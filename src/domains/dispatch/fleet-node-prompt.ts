@@ -55,8 +55,13 @@ function fleetNodeAnswerDirective(kind: ResultContract["kind"]): string | null {
 	].join("\n");
 }
 
-/** The shared body plus the node's own answer directive. */
-export function renderFleetNodeTask(task: string, kind: ResultContract["kind"]): string {
+/**
+ * The shared body, the node's own step and its answer directive. The body tells every node to do only the step it was
+ * given, so it has to name that step: left to the persona, a documenter read "the documentation step" as someone else's
+ * job, and a verifier and a coder took up the plan.
+ */
+export function renderFleetNodeTask(task: string, kind: ResultContract["kind"], stepId: string): string {
+	const step = `Your step in this chain is \`${stepId}\`. Do that step now. Earlier steps are finished and later ones belong to other workers.`;
 	const directive = fleetNodeAnswerDirective(kind);
-	return directive === null ? task : `${task}\n\n${directive}`;
+	return [task, step, ...(directive === null ? [] : [directive])].join("\n\n");
 }
