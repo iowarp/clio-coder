@@ -7,6 +7,7 @@ import { internalGitArgv } from "../core/internal-git.js";
 import { codemapPath, legacyCodewikiPath } from "../domains/context/codewiki/artifact.js";
 import { type CodewikiCoordinatedResult, coordinateCodewikiWrite } from "../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../domains/context/codewiki/schema.js";
+import { readClioState, writeClioState } from "../domains/context/state.js";
 import { buildRepoMap, renderRepoMap } from "../domains/context/wiki/repo-map.js";
 import { publishFileAtomically, withFileMutationQueue } from "../tools/file-mutation-queue.js";
 
@@ -153,14 +154,42 @@ export async function runContextMapCommand(args: string[]): Promise<number> {
 		return 2;
 	}
 	let reconciled: CodewikiCoordinatedResult | null;
+	const indexedAt = new Date().toISOString();
 	try {
-		reconciled = await coordinateCodewikiWrite(cwd, (current, workspace) => ({
-			kind: "ensure",
-			cwd: workspace,
-			current,
-			...(current ? { language: current.language } : {}),
-			previous: null,
-		}));
+		reconciled = await coordinateCodewikiWrite(
+			cwd,
+			(current, workspace) => ({
+				kind: "ensure",
+				cwd: workspace,
+				current,
+				...(current ? { language: current.language } : {}),
+				previous: null,
+			}),
+			{
+				// The index this command just reconciled is what status compares the saved
+				// fingerprint against, so leaving the old one reads as stale at once.
+				afterCommit: ({ codewiki, fingerprint }, workspace) => {
+					const prev = readClioState(workspace);
+					writeClioState(
+						workspace,
+						{
+							version: 1,
+							projectType: prev?.projectType ?? codewiki.language,
+							fingerprint,
+							codewikiVersion: codewiki.version,
+							...(prev?.contextSources ? { contextSources: prev.contextSources } : {}),
+							...(prev?.contextSourceHash ? { contextSourceHash: prev.contextSourceHash } : {}),
+							...(prev?.lastBootstrap ? { lastBootstrap: prev.lastBootstrap } : {}),
+							...(prev?.bootstrapFingerprint ? { bootstrapFingerprint: prev.bootstrapFingerprint } : {}),
+							...(prev?.lastInitAt ? { lastInitAt: prev.lastInitAt } : {}),
+							lastSessionAt: prev?.lastSessionAt ?? indexedAt,
+							lastIndexedAt: indexedAt,
+						},
+						codewiki,
+					);
+				},
+			},
+		);
 	} catch (error) {
 		process.stderr.write(
 			`clio-coder context map: index refresh failed: ${error instanceof Error ? error.message : String(error)}\n`,

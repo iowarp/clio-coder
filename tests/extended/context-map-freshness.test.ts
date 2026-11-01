@@ -8,6 +8,8 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { readCodewiki, writeCodewiki } from "../../src/domains/context/codewiki/artifact.js";
 import { buildCodewiki } from "../../src/domains/context/codewiki/indexer.js";
+import { computeFingerprint, isStale } from "../../src/domains/context/fingerprint.js";
+import { readClioState } from "../../src/domains/context/state.js";
 
 import { makeScratchHome } from "../harness/scratch-env.js";
 
@@ -169,6 +171,16 @@ it("builds a missing index and honors the requested HTML destination", async () 
 		match(html, /app\/main.ts:2/);
 		ok(readCodewiki(cwd));
 	}, false);
+});
+
+it("saves the fingerprint of the index it reconciled, so status reads fresh", async () => {
+	await fixture(async (cwd, env) => {
+		writeFileSync(join(cwd, "store/added.ts"), "export const added = 2;\n");
+		mapRepository(cwd, env);
+		const saved = readClioState(cwd)?.fingerprint;
+		ok(saved);
+		strictEqual(isStale(saved, computeFingerprint(cwd, readCodewiki(cwd))), false);
+	});
 });
 
 it("rejects a non-HTML output without overwriting it", async () => {
