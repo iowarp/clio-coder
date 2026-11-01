@@ -155,6 +155,48 @@ for (const scope of ["user", "project"] as const) {
 	});
 }
 
+it("says an undeclared member of an unapproved project plugin needs trust, not that it is unknown", async () => {
+	const env = await isolateClioEnv("clio-coder-untrusted-plugin-member-");
+	try {
+		process.env.HOME = env.dir;
+		const installedAt = path.join(env.dir, "installed");
+		const source = path.join(env.dir, "plug-one");
+		mkdirSync(path.join(source, "skills/member-folder"), { recursive: true });
+		mkdirSync(installedAt, { recursive: true });
+		writeFileSync(
+			path.join(source, "plugin.json"),
+			JSON.stringify({
+				$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+				name: "plug-one",
+				version: "1.0.0",
+				description: "A plugin that does not declare its skills",
+			}),
+		);
+		writeFileSync(
+			path.join(source, "skills/member-folder/SKILL.md"),
+			"---\nname: member-one\ndescription: A member skill\n---\nPRIVATE MEMBER BODY\n",
+		);
+		const applied = applyLibraryLifecycle(
+			planLibraryLifecycle({ operation: "install", ref: source, scope: "project", cwd: installedAt }),
+		);
+		strictEqual(applied.committed, 1, JSON.stringify(applied));
+		// Installing approves the copy where it ran. The same state arriving with a clone is not approved.
+		const cwd = path.join(env.dir, "cloned");
+		cpSync(installedAt, cwd, { recursive: true });
+		clearPluginSnapshots();
+		const context = createContextTool({ getCwd: () => cwd });
+		const result = await context.run({ scope: "skills", name: "member-one" }, { pendingSkillPolicy: automaticPolicy() });
+		ok(result.kind === "error");
+		match(result.message, /requires trust/);
+		match(result.message, /config trust plugins/);
+		strictEqual((result.details?.refusal as { kind?: string } | undefined)?.kind, "not-ready");
+		ok(!result.message.includes("unknown skill") && !result.message.includes("PRIVATE MEMBER BODY"));
+	} finally {
+		clearPluginSnapshots();
+		env.restore();
+	}
+});
+
 it("explains a discovered but untrusted skill without claiming it is unknown or granting access", async () => {
 	const env = await isolateClioEnv("clio-coder-library-skill-denial-");
 	try {
