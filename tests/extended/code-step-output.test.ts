@@ -112,10 +112,13 @@ it("stages everything since the last commit point, including an ignored required
 	git("add", ".");
 	git("commit", "-qm", "base");
 	writeFileSync(join(root, "operator-scratch.txt"), "not this run's\n");
+	writeFileSync(join(root, ".env"), "PRE_EXISTING_SECRET=canary\n");
 	const artifactDir = join(root, ".git", "code-step");
 	const before = workspaceChangeSnapshot(root);
 	if (before === null) throw new Error("the fixture is a git workspace");
 	writeCommitBaseline(artifactDir, before);
+	// A worker ignoring a file that was already untracked must not read as producing it.
+	writeFileSync(join(root, ".gitignore"), ".clio-coder/\n.env\n");
 	mkdirSync(join(root, ".clio-coder", "artifacts"), { recursive: true });
 	writeFileSync(join(root, ".clio-coder", "artifacts", "PLAN.md"), "plan\n");
 	writeFileSync(join(root, "calc.c"), "edited\n");
@@ -142,7 +145,7 @@ it("stages everything since the last commit point, including an ignored required
 	strictEqual(outcome.report.passed, true, outcome.report.checks[0]?.evidence);
 	strictEqual(
 		git("show", "--name-status", "--format=", "HEAD"),
-		"A\t.clio-coder/artifacts/PLAN.md\nM\tcalc.c\nD\tgone.c\nA\tnew file.c\nM\trepaired.c\n",
+		"A\t.clio-coder/artifacts/PLAN.md\nM\t.gitignore\nM\tcalc.c\nD\tgone.c\nA\tnew file.c\nM\trepaired.c\n",
 	);
 	strictEqual(git("status", "--porcelain"), "?? operator-scratch.txt\n");
 	match(outcome.report.checks[0]?.evidence ?? "", /1 other change\(s\) left out of this commit: operator-scratch\.txt/);

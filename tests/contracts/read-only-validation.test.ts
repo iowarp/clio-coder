@@ -379,7 +379,20 @@ it("requires observed final outcomes to settle mutation-report failures", () => 
 
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {
 	const report = '{"verdict":"pass","checks":[{"name":"make test","passed":true,"evidence":"exit 0"}]}';
-	strictEqual(parseVerifierResult(`calc.c has int sub(int a) { return a; } as planned.\n\n${report}`)?.verdict, "pass");
-	strictEqual(parseVerifierResult("calc.c has int sub(int a) { return a; }, so the verdict is **pass**."), null);
+	const prose = "calc.c has int sub(int a) { return a; } as planned.";
+	strictEqual(parseVerifierResult(`${prose}\n\n${report}`)?.verdict, "pass");
+	strictEqual(
+		validateResultContract({
+			contract: { kind: "verifier-report" },
+			output: `${prose}\n\n${report}`,
+			cwd: process.cwd(),
+			networkAllowed: false,
+			filesystem: { readFile: () => null },
+		}).conformance,
+		"pass",
+	);
+	strictEqual(parseVerifierResult(`${prose}, so the verdict is **pass**.`), null);
 	strictEqual(parseVerifierResult('{"verdict":"pass","checks":[]}'), null);
+	strictEqual(parseVerifierResult(`${prose} ${report} That was wrong.`), null);
+	strictEqual(parseVerifierResult(`${prose} ${report.replace("pass", "fail")} Quoting: ${report}`), null);
 });

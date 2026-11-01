@@ -150,24 +150,30 @@ export function truncateReplayText(text: string, limit = MAX_REPLAY_TEXT_CHARS):
 	return `${text.slice(0, limit)}\n\n[... ${omitted} more characters truncated from replay context]`;
 }
 
+const REPLAY_TRUNCATION_MARKER = /\n\n\[\.\.\. \d+ more characters truncated from replay context\]$/u;
+
 /**
  * A prompt the server refused for size was never cached, so the byte-exact replay #423 needs does not apply to it.
- * Resent whole it fails every later turn, and compaction cannot help while the summarizer must read it too. Walks back
- * only to the last answer the server took, which leaves a prompt it accepted, and an overflow its tool results caused
- * later, alone. A host reminder in that span stays under the cap anyway, so replay's bytes still match.
+ * Resent whole it fails every later turn, and compaction cannot help while the summarizer must read it too. Bounds only
+ * the current request: any answer before it ends the walk, so an earlier prompt and an overflow caused later by tool
+ * results keep their bytes. A second refusal leaves the bounded text alone, so replay still sees the same bytes.
  */
 export function boundRefusedPrompt(agent: AgentStateView): void {
+	const bound = (text: string): string => (REPLAY_TRUNCATION_MARKER.test(text) ? text : truncateReplayText(text));
 	const messages = [...agent.state.messages];
+	let reachedRequest = false;
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
 		const message = messages[index];
-		if (message?.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted") break;
+		if (message?.role === "assistant") {
+			if (reachedRequest || (message.stopReason !== "error" && message.stopReason !== "aborted")) break;
+			continue;
+		}
 		if (message?.role !== "user") continue;
+		reachedRequest = true;
 		const content =
 			typeof message.content === "string"
-				? truncateReplayText(message.content)
-				: message.content.map((block) =>
-						block.type === "text" ? { ...block, text: truncateReplayText(block.text) } : block,
-					);
+				? bound(message.content)
+				: message.content.map((block) => (block.type === "text" ? { ...block, text: bound(block.text) } : block));
 		messages[index] = { ...message, content };
 	}
 	agent.state.messages = messages;

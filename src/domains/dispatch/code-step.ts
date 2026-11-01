@@ -273,6 +273,11 @@ export function workspaceChangedPaths(before: WorkspaceChangeSnapshot, after: Wo
 		.map((path) => path.slice(before.prefix.length));
 }
 
+interface CommitStageResult {
+	leftOut: ReadonlyArray<string>;
+	alreadyStaged: ReadonlyArray<string>;
+}
+
 const COMMIT_BASELINE_FILE = "commit-baseline.json";
 
 /** Durable so a resumed run in a new process commits against the same point. */
@@ -298,40 +303,62 @@ export function readCommitBaseline(dir: string): WorkspaceChangeSnapshot | null 
 	}
 }
 
-/** Stage a commit's outputs and return the other changes that stay out of it. */
-function stageCommitOutputs(root: string, stage: CommitStage): string[] {
+/** Stage a commit's outputs and name what git will do beyond them. */
+function stageCommitOutputs(root: string, stage: CommitStage): CommitStageResult {
 	const now = workspaceChangeSnapshot(root);
 	if (now === null) throw new Error("git could not report the workspace status");
-	// An untracked embedded repository lists as `dir/`, which only `git add` can record; it stays out and is named.
+	const visible = [...now.checkout.paths.keys()]
+		.filter((path) => path.startsWith(now.prefix))
+		.map((path) => path.slice(now.prefix.length));
+	// Only a path git reports now goes in. One that merely left the status since the baseline may have become ignored,
+	// such as a pre-existing untracked .env behind a new .gitignore rule, and update-index does not consult ignore rules.
+	const visibleNow = new Set(visible);
 	const produced = stage.baseline === null ? [] : workspaceChangedPaths(stage.baseline, now);
-	const staged = produced.filter((path) => !path.endsWith("/"));
+	// An untracked embedded repository lists as `dir/`, which only `git add` can record; it stays out and is named.
+	const staged = produced.filter((path) => visibleNow.has(path) && !path.endsWith("/"));
 	// update-index takes a path that is new, edited, deleted or already staged alike, where `git add -A` refuses a
-	// staged deletion as an unmatched pathspec. It also never consults ignore rules, which a required artifact needs.
+	// staged deletion as an unmatched pathspec. --replace lets a file take the place of a directory, and the reverse.
 	const paths = [...staged, ...stage.artifacts];
 	if (paths.length > 0) {
-		execFileSync("git", internalGitArgv(["-C", root, "update-index", "--add", "--remove", "-z", "--stdin"]), {
-			input: `${paths.join("\0")}\0`,
-			timeout: 30_000,
-			stdio: ["pipe", "pipe", "pipe"],
-		});
+		execFileSync(
+			"git",
+			internalGitArgv(["-C", root, "update-index", "--add", "--remove", "--replace", "-z", "--stdin"]),
+			{
+				input: `${paths.join("\0")}\0`,
+				timeout: 30_000,
+				stdio: ["pipe", "pipe", "pipe"],
+			},
+		);
 	}
 	const inIndex = new Set(
-		execFileSync("git", internalGitArgv(["-C", root, "diff", "--cached", "--name-only", "--relative", "-z"]), {
-			encoding: "utf8",
-			timeout: 30_000,
-			stdio: ["ignore", "pipe", "pipe"],
-		}).split("\0"),
+		execFileSync(
+			"git",
+			internalGitArgv(["-C", root, "diff", "--cached", "--no-renames", "--name-only", "--relative", "-z"]),
+			{
+				encoding: "utf8",
+				timeout: 30_000,
+				maxBuffer: 16 * 1024 * 1024,
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		).split("\0"),
 	);
-	return [...now.checkout.paths.keys()]
-		.filter((path) => path.startsWith(now.prefix))
-		.map((path) => path.slice(now.prefix.length))
-		.filter((path) => !inIndex.has(path));
+	inIndex.delete("");
+	const ours = new Set(paths);
+	return {
+		leftOut: visible.filter((path) => !inIndex.has(path)),
+		alreadyStaged: [...inIndex].filter((path) => !ours.has(path)),
+	};
 }
 
-function unstagedNote(paths: ReadonlyArray<string>): string[] {
-	if (paths.length === 0) return [];
-	const named = paths.slice(0, 5).join(", ");
-	return [`${paths.length} other change(s) left out of this commit: ${named}${paths.length > 5 ? ", ..." : ""}`];
+function stagingNotes({ leftOut, alreadyStaged }: CommitStageResult): string[] {
+	const named = (paths: ReadonlyArray<string>) => `${paths.slice(0, 5).join(", ")}${paths.length > 5 ? ", ..." : ""}`;
+	return [
+		...(leftOut.length > 0 ? [`${leftOut.length} other change(s) left out of this commit: ${named(leftOut)}`] : []),
+		// A bare `git commit` records the whole index, so what was staged before this step goes with it.
+		...(alreadyStaged.length > 0
+			? [`${alreadyStaged.length} change(s) already staged went into this commit: ${named(alreadyStaged)}`]
+			: []),
+	];
 }
 
 export function newCodeRunId(): string {
@@ -477,7 +504,7 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	let notes = input.notes ?? [];
 	if (input.stage !== undefined) {
 		try {
-			notes = [...notes, ...unstagedNote(stageCommitOutputs(input.workspaceRoot, input.stage))];
+			notes = [...notes, ...stagingNotes(stageCommitOutputs(input.workspaceRoot, input.stage))];
 		} catch (err) {
 			stageFailure = `could not stage the commit: ${err instanceof Error ? err.message : String(err)}`;
 		}

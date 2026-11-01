@@ -1146,8 +1146,28 @@ function groundDegradedScout(
 	return success(contract, "unmeasured", { scout: degraded, evidence }, { scout: degraded, reason: degradedReason });
 }
 
-function validateVerifier(contract: ResultContract, output: string | null): ResultContractValidation {
+/**
+ * A local model often reasons in prose before its report, and a brace in that prose, such as a quoted function body,
+ * defeats the payload reader's brace span. One report that closes the answer still counts. Contract and gate share this,
+ * so a final cycle's pass cannot be read as a pass by one and a failed step by the other. More than one report, or text
+ * after it, leaves the answer unreadable rather than letting a quoted or retracted verdict decide.
+ */
+function verifierPayload(output: string | null): ReturnType<typeof parseJson> {
 	const parsed = parseJson(output);
+	if (parsed.ok || output === null) return parsed;
+	const at = output.indexOf('{"verdict"');
+	if (at < 0 || at !== output.lastIndexOf('{"verdict"')) return parsed;
+	try {
+		const value = JSON.parse(output.slice(at)) as Record<string, unknown>;
+		return { ok: true, value };
+	} catch {
+		// Text after the report: the original reason stands.
+		return parsed;
+	}
+}
+
+function validateVerifier(contract: ResultContract, output: string | null): ResultContractValidation {
+	const parsed = verifierPayload(output);
 	if (!parsed.ok) return failure(contract, "fail", `Verifier result payload failed: ${parsed.reason}`);
 	const value = parsed.value;
 	const unknown = Object.keys(value).filter((key) => key !== "verdict" && key !== "checks");
@@ -1212,11 +1232,7 @@ function validateVerifier(contract: ResultContract, output: string | null): Resu
  */
 export function parseVerifierResult(output: string | null): VerifierResult | null {
 	const validation = validateVerifier({ kind: "verifier-report" }, output);
-	if (validation.verifier !== undefined || output === null) return validation.verifier ?? null;
-	// A local model often reasons in prose before its report, and a brace in that prose, such as a quoted function body,
-	// defeats the payload reader's brace span. The report that closes the answer still counts, under the same schema.
-	const report = output.lastIndexOf('{"verdict"');
-	return report < 0 ? null : (validateVerifier({ kind: "verifier-report" }, output.slice(report)).verifier ?? null);
+	return validation.verifier ?? null;
 }
 
 /**

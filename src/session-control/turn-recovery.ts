@@ -239,7 +239,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			const windowUnknown = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow <= 0;
 			deps.emitNotice(
 				windowUnknown
-					? "[Clio Coder] Server rejected this request for exceeding its context window. The serving limit is unknown; compacting and retrying once."
+					? "[Clio Coder] Server rejected this request for exceeding its context window. The serving limit is unknown; compacting and retrying once. Probe the target or configure its deployment limit to enable proactive compaction."
 					: "[Clio Coder] Server rejected this request for exceeding its context window; compacting and retrying once.",
 			);
 			let compacted = false;
@@ -280,7 +280,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				);
 			}
 		} finally {
-			if (!sizeAccepted) boundRefusedPrompt(agentRuntime.agent);
+			// A reset swaps in another session's messages, and those are not this refusal's to bound.
+			if (!sizeAccepted && identity === deps.turnIdentity?.()) boundRefusedPrompt(agentRuntime.agent);
 		}
 	};
 
