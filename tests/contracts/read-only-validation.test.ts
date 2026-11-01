@@ -377,9 +377,9 @@ it("requires observed final outcomes to settle mutation-report failures", () => 
 	}
 });
 
-it("the review gate reads a verifier report that closes a prose answer, and nothing weaker", () => {
+it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {
 	const report = '{"verdict":"pass","checks":[{"name":"make test","passed":true,"evidence":"exit 0"}]}';
-	strictEqual(parseVerifierResult(`I inspected the tree.\n\n${report}`)?.verdict, "pass");
-	strictEqual(parseVerifierResult("The verdict is **pass**."), null);
-	strictEqual(parseVerifierResult(`${report}\n\nThat is my report.`), null);
+	strictEqual(parseVerifierResult(`calc.c has int sub(int a) { return a; } as planned.\n\n${report}`)?.verdict, "pass");
+	strictEqual(parseVerifierResult("calc.c has int sub(int a) { return a; }, so the verdict is **pass**."), null);
+	strictEqual(parseVerifierResult('{"verdict":"pass","checks":[]}'), null);
 });
