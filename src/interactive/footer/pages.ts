@@ -14,9 +14,11 @@ import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { contextCategorySwatch, contextPercentRole, renderContextMeterBar } from "../context-meter.js";
-import { dispatchBoardItems, runTableRows } from "../dispatch-board.js";
+import type { DispatchBoardRow } from "../dispatch-board.js";
+import { dispatchBoardItems, renderDispatchActivity, runTableRows } from "../dispatch-board.js";
 import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
+import type { QuotaProviders } from "../quota-view.js";
 import { quotaAccountRows, routeWeeklyQuota } from "../quota-view.js";
 import {
 	brandMark,
@@ -77,8 +79,34 @@ function columns(left: string[], right: string[], width: number): string[] {
  * Activity: what is running. The harness phase and the live figures on the
  * first row, the session's totals and the task board on the second, then one
  * table row per worker, live runs first, so the question is answered before
- * the page scrolls.
+ * the page scrolls. Finished runs stop at {@link ACTIVITY_HISTORY_ROWS} and
+ * each live run keeps its detail below the table.
  */
+/** Finished runs the page lists; the Fleet Runs board has the rest. */
+const ACTIVITY_HISTORY_ROWS = 4;
+
+/**
+ * What the table row has no column for: the route the run is on, whose account
+ * it draws from, the task once progress has taken the row's activity cell, and
+ * what the worker just did, which a fast tool call would otherwise take off
+ * the page before anyone reads it.
+ */
+function liveWorkerDetail(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
+	const theme = clioTheme();
+	const field = (label: string, value: string): string[] =>
+		wrapTextWithAnsi(`${theme.fg("annotation", `${label}  `)}${clean(value)}`, width);
+	const internal = row.agentAudience === "shadow" || row.agentAudience === "internal";
+	const weekly = routeWeeklyQuota(row, quota);
+	return [
+		sectionRule(theme, width, clean(row.agentId), { meta: internal ? "internal agent" : "fleet agent" }),
+		...field("Route", `${row.targetId}/${row.wireModelId}`),
+		...(weekly ? field("Account", `Shared ${weekly.account} · ${weekly.label}`) : []),
+		...(row.progress && row.taskSummary ? field("Task", row.taskSummary) : []),
+		...renderDispatchActivity(row, width),
+		...field("Inspect", `/view dispatch:${row.runId}`),
+	];
+}
+
 function activityPage(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const streaming = state.status.phase !== "idle" && state.status.phase !== "ended";
@@ -146,14 +174,38 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		return lines;
 	}
 	const history = rows.filter((row) => !ACTIVE_DISPATCH_STATUSES.has(row.status));
+	const listed = history.slice(0, ACTIVITY_HISTORY_ROWS);
 	lines.push(
-		...runTableRows(dispatchBoardItems([...active, ...history]), width, {
+		...runTableRows(dispatchBoardItems([...active, ...listed]), width, {
 			compact: true,
+			inspectFinished: true,
 			tick: state.tick,
 			now: state.now,
 			quota: state.quota ?? [],
 		}),
 	);
+	// How a run ended can be longer than the activity column, and it is the row's whole point.
+	for (const row of listed) {
+		if (row.status !== "completed" && row.outcomeDetail) {
+			lines.push(
+				...wrapTextWithAnsi(
+					theme.fg("annotation", `${clean(row.agentId)}: ${clean(row.outcomeDetail)} · /view dispatch:${row.runId}`),
+					width,
+				),
+			);
+		}
+	}
+	if (listed.length < history.length) {
+		const boardKey =
+			getKeybindings()
+				.getKeys("clio-coder.dispatchBoard.toggle")
+				.map((key) => formatKeyLabel(key))
+				.join("/") || "Workers shortcut";
+		lines.push(
+			theme.fg("annotation", `${history.length - listed.length} more finished runs · ${boardKey} for full history`),
+		);
+	}
+	for (const row of active) lines.push(...liveWorkerDetail(row, width, state.quota ?? []));
 	return lines;
 }
 
@@ -184,19 +236,21 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	const theme = clioTheme();
 	const ledger = state.context.ledger;
 	const facts = state.context;
-	if (!ledger || facts.budget) {
+	// The budget's own figure, which a live session has beside its ledger.
+	const budgetBar = (): string => {
 		const used = facts.used;
 		const window = facts.contextWindow;
 		const percent = used !== null && window ? (used / window) * 100 : null;
 		const figure = `${contextUsageText(facts)} ${theme.fg("metricUnit", "tokens")}${
 			percent === null ? "" : ` · ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`
 		}`;
-		const bar =
-			window && used !== null
-				? pageMeter("context", used, window, width, figure)
-				: `${theme.fg("fieldName", "context")} ${theme.fg("unknownValue", "window unknown")}`;
+		return window && used !== null
+			? pageMeter("context", used, window, width, figure)
+			: `${theme.fg("fieldName", "context")} ${theme.fg("unknownValue", "window unknown")}`;
+	};
+	if (!ledger) {
 		return [
-			bar,
+			budgetBar(),
 			chipRow(
 				theme,
 				[
@@ -224,7 +278,8 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			: ` · ${theme.fg(contextPercentRole(ledger.percent), formatContextPercent(ledger.percent))}`
 	}`;
 	const barCells = Math.max(4, width - visibleWidth(figure) - 2);
-	const bar = `${renderContextMeterBar(ledger, barCells, theme)}  ${figure}`;
+	// The ledger estimates its categories, so with a budget it can only say what they are made of.
+	const bar = facts.budget ? budgetBar() : `${renderContextMeterBar(ledger, barCells, theme)}  ${figure}`;
 	const compaction =
 		ledger.contextWindow <= 0
 			? "on server overflow"
@@ -239,6 +294,7 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			labelled("compaction", theme.fg("counter", compaction)),
 			labelled("tools", theme.fg("counter", String(ledger.toolCount))),
 			theme.fg("annotation", ledger.measured ? "provider-anchored" : "estimated"),
+			facts.budget ? theme.fg("annotation", `${facts.budget.inputSource} accounting`) : null,
 			ledger.contextWindowSource ? theme.fg("annotation", `${ledger.contextWindowSource} window`) : null,
 		],
 		width,
@@ -267,7 +323,9 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	const out = [
 		bar,
 		headroom,
-		sectionRule(theme, width, "Composition", { meta: "/context-view for detail" }),
+		sectionRule(theme, width, facts.budget ? "Capture diagnostics" : "Composition", {
+			meta: "/context-view for detail",
+		}),
 		...composition,
 	];
 	const journaled = state.telemetry.kind === "ready" ? state.telemetry.promptCache : null;
@@ -415,7 +473,13 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		: pageMeter("RAM", null, 100, width);
 	const gpu = resource?.gpu
 		? resource.gpu.busyPercent === null
-			? `${theme.fg("fieldName", "GPU")} ${value(`${resource.gpu.name} · load unavailable`)}`
+			? `${theme.fg("fieldName", "GPU")} ${value(
+					`${resource.gpu.name} · load unavailable${
+						resource.gpu.usedBytes != null && resource.gpu.totalBytes != null
+							? ` · ${gib(resource.gpu.usedBytes)} / ${gib(resource.gpu.totalBytes)}`
+							: ""
+					}`,
+				)}`
 			: pageMeter(
 					`GPU ${clean(resource.gpu.name)}`,
 					resource.gpu.busyPercent,

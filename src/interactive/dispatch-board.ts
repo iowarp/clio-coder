@@ -1005,6 +1005,8 @@ export interface RunTableOptions {
 	now?: number;
 	/** Shared account limits, so a run on a metered account names its weekly figure. */
 	quota?: QuotaProviders;
+	/** A finished run says where its record is, in place of its task. */
+	inspectFinished?: boolean;
 }
 
 const USAGE_SHORT: Readonly<Record<string, string>> = { "not available": "n/a" };
@@ -1146,7 +1148,11 @@ export function runTableRows(
 							tone: weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "muted" : "warning",
 						},
 			);
-		cells.push(runActivityCell(theme, row, now));
+		cells.push(
+			options.inspectFinished && isTerminalStatus(row.status)
+				? { text: `/view dispatch:${row.runId}`, tone: "muted" }
+				: runActivityCell(theme, row, now),
+		);
 		return cells;
 	});
 	// The activity column takes whatever the fixed columns leave, so a long
