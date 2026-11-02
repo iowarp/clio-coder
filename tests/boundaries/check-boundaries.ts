@@ -398,12 +398,6 @@ const SURFACE_TOTAL_EXEMPTIONS: ReadonlyArray<{ file: string; functions: readonl
 		reason:
 			"context-window occupancy from the context ledger's estimate, not spend: pending user text joins the conversation segment",
 	},
-	{
-		file: "src/interactive/footer/widgets.ts",
-		functions: ["contextComposition"],
-		reason:
-			"context-window occupancy from the context ledger's estimate, not spend: pending user text joins the conversation segment",
-	},
 ];
 
 const USAGE_FIELD = /^(?:input|output|cacheRead|cacheWrite|cacheWrite1h|reasoning)$/;
