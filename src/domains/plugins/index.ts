@@ -26,6 +26,7 @@ export {
 	committedPluginResourceRoots,
 	committedPluginSnapshot,
 	enabledPluginResourceRoots,
+	enabledPluginResourceRootsFor,
 	pluginSnapshotFor,
 	reloadPluginResources,
 } from "./resources.js";

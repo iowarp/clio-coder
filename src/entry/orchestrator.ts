@@ -3088,10 +3088,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Skill loading reads and hashes the filesystem. Reuse the count across
 		// warm/real requests and reminders until the same source epoch that
 		// invalidates prompt composition changes (/library reload, config, etc.).
-		// The count and ranking only advise and name skills on the turn's input
-		// path, so they skip the plugin tree digest; loading a body still verifies.
+		// Descriptions from here reach models through the [Skills] reminder and the
+		// relevance ranker, so this reads verified trees, never the display listing.
 		if (!prompts) {
-			const skills = modelVisibleSkills(resources.skillsForDisplay(cwd).items);
+			const skills = modelVisibleSkills(resources.skills(cwd).items);
 			readySkillSnapshot = { key: cwd, count: skills.length, skills };
 			return skills.length;
 		}
@@ -3103,7 +3103,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			options.skillPaths ?? options.headless?.skillPaths ?? [],
 		]);
 		if (readySkillSnapshot?.key === key) return readySkillSnapshot.count;
-		const skills = modelVisibleSkills(resources.skillsForDisplay(cwd).items);
+		const skills = modelVisibleSkills(resources.skills(cwd).items);
 		const count = skills.length;
 		readySkillSnapshot = { key, count, skills };
 		return count;
@@ -3149,6 +3149,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								: [],
 						})),
 					});
+				},
+				// The snapshot is verified per epoch and a revocation takes effect on the
+				// next read, so what is about to print is checked again. Only the shown
+				// skills' trees are walked. An unverifiable match is simply not offered.
+				verifyRankedSkills: (matches) => {
+					try {
+						const skills = readySkillSnapshot?.skills ?? [];
+						const shown = skills.filter((skill) => matches.some((match) => match.id === skill.name));
+						const verified = new Set(resources.skillsStillVerified(shown, process.cwd()).map((skill) => skill.name));
+						return matches.filter((match) => verified.has(match.id));
+					} catch {
+						return [];
+					}
 				},
 				// Same lookup context(scope="skills") lists under its Marketplace
 				// heading, minus what is already installed, so the count the

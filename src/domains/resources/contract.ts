@@ -26,10 +26,18 @@ export interface ResourcesContract extends DomainContract {
 	promptsForDisplay(cwd?: string): ResourceList<PromptTemplate>;
 	/**
 	 * Skills read from the committed plugin snapshot without re-verifying each
-	 * tree. For naming only: a skill revoked or drifted since the last reload may
-	 * be listed, and loading its body still verifies.
+	 * tree. For an operator's listing or a name comparison only: a skill revoked
+	 * or drifted since the last reload may be listed with text re-read from its
+	 * current files, so nothing bound for a model may read from here.
 	 */
 	skillsForDisplay(cwd?: string): ResourceList<Skill>;
+	/**
+	 * The given skills whose owning plugin tree still matches its recorded digest
+	 * and the digest the skill was read under, verifying only those trees. Skills
+	 * no plugin owns pass through. For advice about to reach a model from a list
+	 * that {@link skills} produced earlier.
+	 */
+	skillsStillVerified(skills: ReadonlyArray<Skill>, cwd?: string): Skill[];
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
 	reload(): Promise<void>;
 }

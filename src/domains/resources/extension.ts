@@ -27,6 +27,9 @@ export function createResourcesBundle(
 		skillsForDisplay(cwd) {
 			return loader.skillsForDisplay(cwd);
 		},
+		skillsStillVerified(skills, cwd) {
+			return loader.skillsStillVerified(skills, cwd);
+		},
 		parsePendingSkillRequests(text, cwd, options) {
 			return loader.parsePendingSkillRequests(text, cwd, options);
 		},
