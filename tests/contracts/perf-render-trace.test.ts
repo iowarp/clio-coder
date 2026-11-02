@@ -1,12 +1,50 @@
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { visibleWidth } from "../../src/engine/tui.js";
+import type { Component } from "../../src/engine/tui.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { buildLayout } from "../../src/interactive/layout.js";
 import { createRenderTrace, traceComponentRenders } from "../../src/interactive/render-trace.js";
+
+test("fullscreen reuses its document on composer frames and refreshes headers, tails, widths and resets", () => {
+	const header = ["header"];
+	const panel = createChatPanel({ now: () => 1_000 });
+	panel.appendUser("A prompt long enough to wrap at a narrow width");
+	let document: Component | undefined;
+	const fixed = { render: () => [], invalidate() {} };
+	buildLayout(
+		{ banner: { render: () => header, invalidate() {} }, chat: panel, editor: fixed, footer: fixed },
+		{
+			mode: "fullscreen",
+			onTranscript: (view) => {
+				document = view.children[0];
+			},
+		},
+	);
+	ok(document);
+	const initial = document.render(80);
+	for (let frame = 0; frame < 100; frame++) strictEqual(document.render(80), initial);
+	// The banner is allowed to reuse and mutate its array.
+	header[0] = "updated";
+	const updated = document.render(80);
+	notStrictEqual(updated, initial);
+	strictEqual(updated[0], "updated");
+	strictEqual(initial[0], "header", "previous frame snapshots remain intact");
+	panel.applyEvent({ type: "text_delta", delta: "New live answer " } as never);
+	const live = document.render(80);
+	notStrictEqual(live, updated);
+	ok(stripTerminalSequences(live.join("\n")).includes("New live answer"));
+	const narrow = document.render(20);
+	notStrictEqual(narrow, live);
+	ok(narrow.every((line) => visibleWidth(line) <= 20));
+	document.invalidate();
+	notStrictEqual(document.render(20), narrow);
+	panel.reset();
+	deepStrictEqual(document.render(80), ["updated"]);
+});
 
 const WIDTHS = [60, 80, 120, 200] as const;
 
