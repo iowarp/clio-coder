@@ -46,7 +46,9 @@ function styleSpan(span: Span, theme: ClioTheme): string {
  * The token-to-code-span strategy follows pi-coding-agent 0.84 so Markdown
  * preserves every box-drawing row and its significant whitespace.
  */
-export function createMermaidMarkdownTransform(theme: ClioTheme): (markdown: string, availableWidth: number) => string {
+export function createMermaidMarkdownTransform(
+	theme: ClioTheme,
+): (markdown: string, availableWidth: number, lexed?: readonly Tokens.Generic[]) => string {
 	// A finished diagram is still in the Markdown source on every later text
 	// delta. Reuse its layout while continuing to apply the current theme below.
 	// Bound both the entry count and retained source/art size: partial diagrams
@@ -83,9 +85,9 @@ export function createMermaidMarkdownTransform(theme: ClioTheme): (markdown: str
 		}
 		return art;
 	};
-	return (markdown, availableWidth) =>
-		markdownParser
-			.lexer(markdown)
+	// `lexed` lets a caller that already lexed exactly this text spare a second pass over a long reply.
+	return (markdown, availableWidth, lexed) =>
+		(lexed ?? markdownParser.lexer(markdown))
 			.map((token) => {
 				if (!isMermaid(token)) return token.raw;
 				const art = layout(token.text, availableWidth);
