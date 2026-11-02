@@ -2,35 +2,28 @@ import { ToolNames } from "../../core/tool-names.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
-import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
+import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { taskBoardCounts } from "../../domains/session/task-board.js";
 import type { TokenThroughputSnapshot } from "../../domains/telemetry/index.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { CONTEXT_BAR_LABEL_WIDTH, finiteNonNegative } from "../context-bar.js";
-import { contextCategorySwatch, contextPercentRole, renderContextMeterBar } from "../context-meter.js";
+import { finiteNonNegative } from "../context-bar.js";
+import { contextPercentRole } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { fitFooterText, formatFooterTokens } from "../footer-panel.js";
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { formatReasoningChip, type ReasoningUsageView, spinnerFrame } from "../status/index.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
 import {
-	clioTheme,
 	FUNCTION_ROLES,
 	formatCompactMs,
 	formatContextPercent,
 	GLYPH,
 	joinChips,
 	padAnsi,
-	sectionTag,
 	toolFunction,
 } from "../theme/index.js";
-import {
-	type ContextOccupancyFacts,
-	contextBreakdownForBar,
-	contextOccupancyBar,
-	contextUsagePercent,
-} from "./context-rail.js";
+import { type ContextOccupancyFacts, contextUsagePercent } from "./context-rail.js";
 import type { FooterTelemetry } from "./spend.js";
 
 export interface ToolTallySnapshot {
@@ -177,24 +170,6 @@ export function formatToolTally(snapshot: ToolTallySnapshot | null | undefined, 
 	return `${prefix}${active}${truncated} · ${formatFooterTokens(snapshot.errors)}${GLYPH.error}`;
 }
 
-function contextComposition(context: ContextEngineFacts): {
-	system: number;
-	tools: number;
-	chat: number;
-	free: number | null;
-} {
-	const used = finiteNonNegative(context.used);
-	const window = finiteNonNegative(context.contextWindow);
-	const breakdown = contextBreakdownForBar(context);
-	return {
-		system: finiteNonNegative(breakdown?.systemPromptTokens),
-		tools: finiteNonNegative(breakdown?.toolSchemaTokens),
-		chat: finiteNonNegative(breakdown?.messageTokens) + finiteNonNegative(breakdown?.pendingUserTokens),
-		free:
-			window > 0 && typeof context.used === "number" && Number.isFinite(context.used) ? Math.max(0, window - used) : null,
-	};
-}
-
 /** Short truthful occupancy label shared by compact and expanded surfaces. */
 export function contextUsageText(context: ContextEngineFacts): string {
 	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
@@ -229,222 +204,6 @@ export function compactContextUsage(
 		: `${theme.fg("counter", "ctx")} ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`;
 }
 
-type DashboardRow =
-	| { kind: "kv"; key: string; value: string | null | undefined; valueToken?: ClioToken; styled?: boolean }
-	| { kind: "status"; value: string | null | undefined }
-	| { kind: "legend"; value: string | null | undefined };
-
-interface ExpandedQuadrantOptions {
-	width?: number;
-}
-
-function renderDashboardRow(theme: ClioTheme, row: DashboardRow, keyWidth: number): string | null {
-	if (!row.value) return null;
-	if (row.kind !== "kv") return row.value;
-	const key = theme.fg("fieldName", `${row.key.padEnd(keyWidth)} `);
-	const value = row.styled ? row.value : theme.fg(row.valueToken ?? "fieldValue", row.value);
-	return `${key}${value}`;
-}
-
-function dashboardBlock(
-	theme: ClioTheme,
-	label: string,
-	rows: ReadonlyArray<DashboardRow>,
-	width = Number.POSITIVE_INFINITY,
-): string[] {
-	const keyWidth = rows.reduce((max, row) => (row.kind === "kv" ? Math.max(max, row.key.length) : max), 0);
-	const body = rows.flatMap((row) => {
-		const rendered = renderDashboardRow(theme, row, keyWidth);
-		if (!rendered) return [];
-		if (!Number.isFinite(width)) return [rendered];
-		if (row.kind !== "kv") return wrapTextWithAnsi(rendered, Math.max(1, width));
-		const prefixWidth = Math.min(keyWidth + 1, Math.max(0, width - 1));
-		const value = row.styled ? (row.value ?? "") : theme.fg(row.valueToken ?? "fieldValue", row.value ?? "");
-		return wrapTextWithAnsi(value, Math.max(1, width - prefixWidth)).map(
-			(line, index) =>
-				`${index === 0 ? theme.fg("fieldName", `${row.key.padEnd(keyWidth)} `.slice(0, prefixWidth)) : " ".repeat(prefixWidth)}${line}`,
-		);
-	});
-	return [sectionTag(theme, "harnessHeading", label.toUpperCase(), 0), ...body];
-}
-
-function kv(key: string, value: string | null | undefined, valueToken: ClioToken = "fieldValue"): DashboardRow {
-	return { kind: "kv", key, value, valueToken };
-}
-
-function styledKv(key: string, value: string | null | undefined): DashboardRow {
-	return { kind: "kv", key, value, styled: true };
-}
-
-function statusRow(value: string | null | undefined): DashboardRow {
-	return { kind: "status", value };
-}
-
-function legendRow(value: string | null | undefined): DashboardRow {
-	return { kind: "legend", value };
-}
-
-function expandedContextBarCells(width: number | undefined): number {
-	if (typeof width !== "number" || !Number.isFinite(width) || width <= 0) return 12;
-	const budget = Math.max(6, Math.floor(width) - CONTEXT_BAR_LABEL_WIDTH - 1);
-	// A wider quadrant earns a finer meter: every extra cell is real resolution,
-	// up to 24 cells so the bar never dwarfs the facts beneath it.
-	const desired = width >= 48 ? 24 : width >= 36 ? 16 : width >= 32 ? 14 : 12;
-	return Math.max(8, Math.min(24, desired, budget));
-}
-
-function formatUsedWindow(used: number | null, contextWindow: number | null): string | null {
-	if (used === null || !contextWindow) return null;
-	return `${formatFooterTokens(used)} / ${formatFooterTokens(contextWindow)}`;
-}
-
-function formatCompaction(facts: ContextEngineFacts): string | null {
-	if (!facts.contextWindow) return "on server overflow";
-	if (facts.compactionThreshold === null) return null;
-	const mode = facts.compactionAuto ? "auto" : "manual";
-	const threshold = Math.round(facts.compactionThreshold * 100);
-	return `${facts.compactionActive ? "active " : ""}${mode} @${threshold}%`;
-}
-
-function sourceState(theme: ClioTheme, facts: ContextEngineFacts): string | null {
-	const value = joinChips(theme, [
-		facts.clioMd ? theme.fg("counter", facts.clioMd) : null,
-		facts.memory ? theme.fg("counter", facts.memory) : null,
-	]);
-	return value.length > 0 ? value : null;
-}
-
-/** Short labels for the dense footer; the overlay carries the full names. */
-const CONTEXT_SHORT_LABEL: Readonly<Record<ContextLedgerCategory, string>> = {
-	system: "sys",
-	tools: "tools",
-	toolResults: "results",
-	agents: "agt",
-	skills: "skl",
-	memory: "mem",
-	project: "proj",
-	messages: "chat",
-	pending: "input",
-	reserve: "rsv",
-	free: "free",
-	streaming: "stream",
-};
-
-/** Static-side cost chips (system prompt, tools, agents, skills, memory, project), heaviest first. */
-function ledgerSystemChips(theme: ClioTheme, ledger: ContextLedger): string {
-	const statics = new Set<ContextLedgerCategory>(["system", "tools", "agents", "skills", "memory", "project"]);
-	const chips = ledger.groups
-		.filter((group) => statics.has(group.category))
-		.sort((a, b) => b.tokens - a.tokens)
-		.slice(0, 4)
-		.map((group) => theme.fg("counter", `${CONTEXT_SHORT_LABEL[group.category]} ${formatFooterTokens(group.tokens)}`));
-	return joinChips(theme, chips);
-}
-
-/** Conversation, autocompact reserve, and free-space chips. */
-function ledgerChatChips(theme: ClioTheme, ledger: ContextLedger): string {
-	const chat = ledger.groups.find((group) => group.category === "messages")?.tokens ?? 0;
-	return joinChips(theme, [
-		theme.fg("counter", `chat ${formatFooterTokens(chat)}`),
-		ledger.groups.some((group) => group.category === "toolResults")
-			? theme.fg(
-					"counter",
-					`results ${formatFooterTokens(ledger.groups.find((group) => group.category === "toolResults")?.tokens ?? 0)}`,
-				)
-			: null,
-		ledger.reserveTokens > 0 ? theme.fg("annotation", `rsv ${formatFooterTokens(ledger.reserveTokens)}`) : null,
-		ledger.contextWindow > 0 ? theme.fg("annotation", `free ${formatFooterTokens(ledger.freeTokens)}`) : null,
-	]);
-}
-
-/**
- * Swatch legend covering exactly the categories present in the meter, packed
- * into as many rows as the quadrant needs. A ledger can carry ten categories,
- * more than one quadrant row holds, and dropping tail entries would hide
- * whole categories, so the legend wraps by whole chips instead of clipping.
- */
-function ledgerLegendRows(theme: ClioTheme, ledger: ContextLedger, width: number | undefined): string[] {
-	const chips = ledger.meter.map((group) => {
-		return `${contextCategorySwatch(group.category, theme)} ${theme.fg("legend", CONTEXT_SHORT_LABEL[group.category])}`;
-	});
-	const budget =
-		typeof width === "number" && Number.isFinite(width) && width > 0 ? Math.floor(width) : Number.POSITIVE_INFINITY;
-	const rows: string[] = [];
-	let current = "";
-	for (const chip of chips) {
-		const candidate = current.length > 0 ? `${current} ${chip}` : chip;
-		if (current.length > 0 && visibleWidth(candidate) > budget) {
-			rows.push(current);
-			current = chip;
-		} else {
-			current = candidate;
-		}
-	}
-	if (current.length > 0) rows.push(current);
-	return rows;
-}
-
-function ledgerBar(theme: ClioTheme, ledger: ContextLedger, cells: number): string {
-	const bar = renderContextMeterBar(ledger, cells, theme);
-	return ledger.percent === null
-		? bar
-		: `${bar}  ${theme.fg(contextPercentRole(ledger.percent), formatContextPercent(ledger.percent))}`;
-}
-
-export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuadrantOptions = {}): string[] {
-	const theme = clioTheme();
-	const ledger = facts.ledger ?? null;
-	const hasLedger = !facts.budget && ledger !== null && ledger.contextWindow > 0;
-	const barCells = expandedContextBarCells(options.width);
-
-	let bar: string;
-	let fill: string;
-	let chatFree: string;
-	let legendRows: string[];
-	if (hasLedger && ledger) {
-		bar = ledgerBar(theme, ledger, barCells);
-		fill = ledgerSystemChips(theme, ledger);
-		chatFree = ledgerChatChips(theme, ledger);
-		legendRows = ledgerLegendRows(theme, ledger, options.width);
-	} else {
-		const composition = contextComposition(facts);
-		fill = joinChips(theme, [
-			composition.system > 0 ? theme.fg("counter", `sys ${formatFooterTokens(composition.system)}`) : null,
-			composition.tools > 0 ? theme.fg("counter", `tools ${formatFooterTokens(composition.tools)}`) : null,
-		]);
-		chatFree = joinChips(theme, [
-			composition.chat > 0 ? theme.fg("counter", formatFooterTokens(composition.chat)) : null,
-			composition.free !== null ? theme.fg("annotation", `free ${formatFooterTokens(composition.free)}`) : null,
-		]);
-		bar = facts.contextWindow ? contextOccupancyBar(facts, barCells, theme) : theme.fg("unknownValue", "window unknown");
-		const filledChar = visibleWidth(GLYPH.contextFull) === 1 ? GLYPH.contextFull : GLYPH.barFull;
-		const freeChar = visibleWidth(GLYPH.contextFree) === 1 ? GLYPH.contextFree : GLYPH.barEmpty;
-		legendRows = [
-			`${theme.fg("meterSystem", filledChar)} ${theme.fg("legend", "sys")} ${theme.fg("meterTools", filledChar)} ${theme.fg("legend", "tools")} ${theme.fg("meterConversation", filledChar)} ${theme.fg("legend", "chat")} ${theme.fg("meterFree", freeChar)} ${theme.fg("legend", "free")}`,
-		];
-	}
-
-	const usedTokens = hasLedger && ledger ? ledger.usedTokens : facts.used;
-	const windowTokens = hasLedger && ledger ? ledger.contextWindow : facts.contextWindow;
-	return dashboardBlock(
-		theme,
-		"Context",
-		[
-			statusRow(bar),
-			kv("used", facts.budget ? contextUsageText(facts) : formatUsedWindow(usedTokens, windowTokens)),
-			fill ? styledKv("fill", fill) : statusRow(null),
-			chatFree ? styledKv("budget", chatFree) : statusRow(null),
-			kv("compact", formatCompaction(facts)),
-			styledKv("source", sourceState(theme, facts)),
-			facts.extensions && facts.extensions.installed > 0
-				? kv("ext", `${facts.extensions.active}/${facts.extensions.installed}`)
-				: statusRow(null),
-			...legendRows.map((row) => legendRow(row)),
-		],
-		options.width,
-	);
-}
-
 function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; token: ClioToken } {
 	if (reason === "error") return { glyph: GLYPH.error, token: "error" };
 	if (reason === "aborted" || reason === "cancelled") return { glyph: GLYPH.cancelled, token: "annotation" };
@@ -452,29 +211,8 @@ function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; to
 	return { glyph: GLYPH.ok, token: "success" };
 }
 
-interface ActivityQuadrantOptions extends ExpandedQuadrantOptions {
-	status?: AgentStatus;
-	toolCounts?: ToolTallySnapshot;
-	throughput?: TokenThroughputSnapshot | null;
-	telemetry?: FooterTelemetry;
-	contextUsed?: number | null;
-	tick?: number;
-	now?: number;
-}
-
-function defaultIdleStatus(): AgentStatus {
-	return {
-		phase: "idle",
-		since: 0,
-		lastMeaningfulAt: 0,
-		watchdogTier: 0,
-		watchdogPeak: 0,
-		localRuntime: false,
-	};
-}
-
 /** The streaming turn's live rate, or else the newest settled main call's rate and TTFT from the read model (#434). */
-function formattedThroughput(
+export function formattedThroughput(
 	theme: ClioTheme,
 	throughput: TokenThroughputSnapshot | null | undefined,
 	telemetry: FooterTelemetry | undefined,
@@ -497,7 +235,7 @@ function formattedThroughput(
  * The streaming run's live chip: output as it streams, and the prompt it sent, from the context meter or else the
  * read model's newest turn, never a tally of the run's own messages (#434 §11.3).
  */
-function liveTokenValue(
+export function liveTokenValue(
 	theme: ClioTheme,
 	throughput: TokenThroughputSnapshot | null | undefined,
 	telemetry: FooterTelemetry | undefined,
@@ -528,13 +266,17 @@ function reasoningChip(theme: ClioTheme, reasoning: ReasoningUsageView): string 
 	return chip === null ? null : theme.fg("counter", chip);
 }
 
-function lastTurnOutcome(theme: ClioTheme, lastTurn: TurnSummary): string {
+export function lastTurnOutcome(theme: ClioTheme, lastTurn: TurnSummary): string {
 	const stop = stopReasonStyle(lastTurn.stopReason);
 	return `${theme.fg(stop.token, stop.glyph)} ${theme.fg("counter", formatCompactMs(lastTurn.elapsedMs))}`;
 }
 
 /** Tokens are the journal's for the whole turn, workers included; timing and tools are the turn's own status. */
-function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary, telemetry: FooterTelemetry | undefined): string {
+export function lastTurnDetails(
+	theme: ClioTheme,
+	lastTurn: TurnSummary,
+	telemetry: FooterTelemetry | undefined,
+): string {
 	const turn = telemetry?.kind === "ready" ? telemetry.turn : null;
 	const parts: Array<string | null> = [
 		turn ? theme.fg("counter", `${GLYPH.up} ${turn.input} ${GLYPH.down} ${turn.output}`) : null,
@@ -554,20 +296,20 @@ function lastTurnDetails(theme: ClioTheme, lastTurn: TurnSummary, telemetry: Foo
 }
 
 /** The Σ row: the whole session across every branch, as the read model folds it (#434 §11.3). */
-function totalsValue(telemetry: FooterTelemetry | undefined): string | null {
+export function totalsValue(telemetry: FooterTelemetry | undefined): string | null {
 	if (!telemetry || telemetry.kind === "unavailable") return "not available";
 	if (telemetry.kind === "reading") return "reading the call journal";
 	if (telemetry.tokens === null && telemetry.neverSent === null) return null;
 	return [`Σ${telemetry.tokens ?? "0"}`, telemetry.neverSent].filter(Boolean).join(" · ");
 }
 
-function meaningfulToolTally(value: string): string | null {
+export function meaningfulToolTally(value: string): string | null {
 	const text = value.trim();
 	return text === "none" || text === `none · 0${GLYPH.error}` || text === `0${GLYPH.error}` ? null : value;
 }
 
 /** Task-board progress chips: `2/5 done`, with a warning chip when tasks are blocked. */
-function taskBoardValue(theme: ClioTheme, board: TaskBoardSnapshot): string {
+export function taskBoardValue(theme: ClioTheme, board: TaskBoardSnapshot): string {
 	const counts = taskBoardCounts(board);
 	const progress = theme.fg(counts.open > 0 ? "counter" : "success", `${counts.completed}/${counts.total} done`);
 	const blocked = counts.blocked > 0 ? theme.fg("warning", `${counts.blocked} blocked`) : null;
@@ -575,57 +317,10 @@ function taskBoardValue(theme: ClioTheme, board: TaskBoardSnapshot): string {
 }
 
 /** The board's current focus: the single active task, glyph-led like a worker row. */
-function activeTaskLine(theme: ClioTheme, board: TaskBoardSnapshot): string | null {
+export function activeTaskLine(theme: ClioTheme, board: TaskBoardSnapshot): string | null {
 	const active = board.tasks.find((task) => task.status === "active");
 	if (!active) return null;
 	return `${theme.fg("activity", GLYPH.running)} ${theme.fg("annotation", active.id)} ${theme.fg("counter", active.title)}`;
-}
-
-export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadrantOptions = {}): string[] {
-	const theme = clioTheme();
-	const status = options.status ?? defaultIdleStatus();
-	const toolCounts = options.toolCounts ?? { tools: {}, errors: 0 };
-	const statusWidth = Math.max(options.width ?? 120, 40);
-	const isStreaming = status.phase !== "idle" && status.phase !== "ended";
-	const fleetSummaryIsAction = facts.dispatchSummary !== null && status.phase !== "dispatching";
-	const rows: DashboardRow[] = [
-		statusRow(
-			buildHarnessStatePill(theme, status, toolCounts, options.tick ?? 0, options.now ?? Date.now(), statusWidth),
-		),
-	];
-	if (facts.contextActivity) {
-		const token =
-			facts.contextActivity.status === "failed"
-				? "error"
-				: facts.contextActivity.status === "completed"
-					? "success"
-					: "activity";
-		rows.push(kv("context", facts.contextActivity.message, token));
-		if (facts.contextActivity.detail) rows.push(kv("ctx detail", facts.contextActivity.detail, "secondaryDescription"));
-	}
-	if (isStreaming && facts.statusText) rows.push(kv("state", facts.statusText, "activity"));
-	if (isStreaming) {
-		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput, undefined)));
-		rows.push(styledKv("live", liveTokenValue(theme, options.throughput, options.telemetry, options.contextUsed)));
-	} else if (facts.lastTurn) {
-		rows.push(styledKv("last", lastTurnOutcome(theme, facts.lastTurn)));
-		rows.push(styledKv("turn", lastTurnDetails(theme, facts.lastTurn, options.telemetry)));
-		rows.push(styledKv("speed", formattedThroughput(theme, options.throughput, options.telemetry)));
-	}
-	const totals = totalsValue(options.telemetry);
-	rows.push(totals === null ? statusRow(null) : styledKv("totals", theme.fg("counter", totals)));
-	// Absent until the session made a call that could be charged; an absent row is the honest rendering of that.
-	const cost = options.telemetry?.kind === "ready" ? options.telemetry.cost : null;
-	rows.push(cost === null ? statusRow(null) : styledKv("cost", theme.fg("counter", cost)));
-	rows.push(
-		kv("fleet", facts.dispatchSummary?.replace(/^dispatch\s+/, ""), fleetSummaryIsAction ? "activity" : "annotation"),
-	);
-	if (facts.taskBoard && facts.taskBoard.tasks.length > 0) {
-		rows.push(styledKv("tasks", taskBoardValue(theme, facts.taskBoard)));
-		rows.push(statusRow(activeTaskLine(theme, facts.taskBoard)));
-	}
-	rows.push(kv("tools", meaningfulToolTally(facts.toolTally)));
-	return dashboardBlock(theme, "Activity", rows, options.width);
 }
 
 /**
@@ -809,7 +504,7 @@ export function composerPhasePresentation(status: AgentStatus, width: number, no
 	return { ...phase, label };
 }
 
-function buildHarnessStatePill(
+export function buildHarnessStatePill(
 	theme: ClioTheme,
 	status: AgentStatus,
 	toolCounts: ToolTallySnapshot,
@@ -823,7 +518,10 @@ function buildHarnessStatePill(
 	// Idleness is absence of work, not a phase worth narrating. If a tool
 	// remains live while the harness settles, keep that activity without
 	// prefixing it with an idle glyph.
-	if (status.phase === "idle") return badge;
+	if (status.phase === "idle") {
+		const idle = theme.fg("counter", `${GLYPH.queued} Ready`);
+		return badge ? `${idle} ${theme.fg("annotation", "·")} ${badge}` : idle;
+	}
 	const phase = footerPhasePresentation(status, safeWidth, now);
 	// A live phase leads with the animated spinner; the spinner stands in for the
 	// static phase glyph rather than sitting beside it. Static glyphs render only

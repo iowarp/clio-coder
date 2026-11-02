@@ -5,17 +5,28 @@ import { severityForPct } from "../domains/quota/presentation.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import type { EnqueuedRun } from "../domains/telemetry/index.js";
-import { wrapTextWithAnsi } from "../engine/tui.js";
+import { visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import {
 	type DispatchBoardRow,
 	type DispatchBoardStatus,
-	type DispatchRunUsage,
 	type DispatchStatusPresentation,
+	dispatchBoardItems,
 	dispatchStatusPresentation,
 	dispatchUsageText,
+	runTableRows,
 } from "./dispatch-board.js";
-import type { ClioToken } from "./theme/index.js";
-import { clioTheme, GLYPH } from "./theme/index.js";
+import type { ClioToken, TableCell, Tone } from "./theme/index.js";
+import {
+	chipRow,
+	clioTheme,
+	emptyState,
+	GLYPH,
+	meter,
+	padAnsi,
+	sectionRule,
+	statusChip,
+	tableRows,
+} from "./theme/index.js";
 
 export type QuotaProviders = Readonly<QuotaStateV1["providers"]>;
 const clean = (text: string) => sanitizeCallTargetText(redactSecretString(text));
@@ -33,6 +44,19 @@ export function quotaMeter(usedPct: number, cells: number, severity: QuotaSeveri
 		theme.fg("meterFree", GLYPH.meterEmpty.repeat(count - filled))
 	);
 }
+/** `2d 0h`, `2h 0m` or `7m` until `reset`; null when the time is unknown or has passed. */
+export function quotaResetDuration(reset: string | null, now = Date.now()): string | null {
+	const timestamp = reset === null ? NaN : Date.parse(reset);
+	if (!Number.isFinite(timestamp)) return null;
+	const minutes = Math.max(0, Math.ceil((timestamp - now) / 60_000));
+	if (minutes === 0) return null;
+	return minutes >= 1440
+		? `${Math.floor(minutes / 1440)}d ${Math.floor((minutes % 1440) / 60)}h`
+		: minutes >= 60
+			? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+			: `${minutes}m`;
+}
+
 export function quotaResetLabel(
 	reset: string | null,
 	now = Date.now(),
@@ -47,32 +71,64 @@ export function quotaResetLabel(
 		minute: "2-digit",
 		timeZone,
 	}).format(timestamp);
-	const minutes = Math.max(0, Math.ceil((timestamp - now) / 60_000));
-	const duration =
-		minutes >= 1440
-			? `${Math.floor(minutes / 1440)}d ${Math.floor((minutes % 1440) / 60)}h`
-			: minutes >= 60
-				? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
-				: `${minutes}m`;
-	return minutes === 0
+	const duration = quotaResetDuration(reset, now);
+	return duration === null
 		? `Reset time passed · awaiting provider update (${absolute} · ${timeZone})`
 		: `Resets in ${duration} · ${absolute} (${timeZone})`;
 }
 
-/** The latest journaled account readings; missing readings remain unavailable (#434). */
-export function renderQuotaAccounts(
+/** The meter tone for an account window: the shared fill until the limit is near, then the warning tones. */
+function quotaTone(severity: QuotaSeverity): Tone | "meter" {
+	return severity === "critical" ? "error" : severity === "normal" ? "meter" : "warning";
+}
+
+export interface QuotaAccountRowsOptions {
+	/** One row per window with the account in its label, for a page that lists every account at once. */
+	compact?: boolean;
+	now?: number;
+	timeZone?: string;
+}
+
+/** The widest a meter row's label may grow, as a share of the row. */
+const QUOTA_LABEL_SHARE = 0.38;
+/** The longest bar an account meter draws. */
+const QUOTA_METER_CELLS = 48;
+
+/**
+ * Every account's windows as meter rows, `label ━━━━━━──── 91%`, with the
+ * labels in one column so the meters start together and the percentages end
+ * together. The full form heads each account with its name and plan and puts
+ * the reset time under each meter; the compact form folds the account name
+ * into the label and the countdown into the amount. A stale reading, a failed
+ * credential and a credit balance are rows too, so no account is silent (#434).
+ */
+export function quotaAccountRows(
 	providers: QuotaProviders,
 	width: number,
-	options: { compact?: boolean; now?: number; timeZone?: string } = {},
+	options: QuotaAccountRowsOptions = {},
 ): string[] {
 	const theme = clioTheme();
+	const safe = Math.max(1, Math.floor(width));
 	if (!providers.length) return [theme.fg("annotation", "Subscriptions · no journaled quota readings")];
-	const out: string[] = [];
+	const compact = options.compact === true;
+	const now = options.now ?? Date.now();
+	type Entry =
+		| { kind: "head"; text: string; meta: string }
+		| { kind: "meter"; label: string; pct: number; display: string; severity: QuotaSeverity; reset: string | null }
+		| { kind: "note"; text: string; tone: Tone };
+	const entries: Entry[] = [];
 	for (const account of providers) {
-		const title = clean(
-			`${account.stale ? "STALE · " : ""}${account.displayName}${account.plan ? ` · ${account.plan}` : ""}`,
-		);
-		if (!options.compact) out.push(theme.style("sectionHeading", title, { bold: true }));
+		const name = clean(account.displayName);
+		const title = compact ? name : clean(`${name}${account.plan ? ` · ${account.plan}` : ""}`);
+		const stale = account.stale ? `${theme.fg("warning", "STALE")} ${theme.fg("divider", "·")} ` : "";
+		if (!compact) {
+			const seen = account.observedAt ? `observed ${account.observedAt.slice(11, 16)}` : "";
+			entries.push({
+				kind: "head",
+				text: `${stale}${theme.style("sectionHeading", title, { bold: true })}`,
+				meta: [account.source.replaceAll("-", " "), seen].filter((part) => part.length > 0).join(" · "),
+			});
+		}
 		if (account.status !== "ok" || account.message) {
 			const status = {
 				expired: "Credentials expired · refresh credentials",
@@ -81,36 +137,87 @@ export function renderQuotaAccounts(
 				loading: "Loading quota",
 				ok: "Provider notice",
 			}[account.status];
-			out.push(
-				theme.fg(
-					"warning",
-					clean(
-						`${options.compact ? `${title} · ` : ""}${status}${account.message ? ` · ${account.message}` : ""}${account.retryAfter ? ` · retry after ${account.retryAfter.display}` : ""}`,
-					),
-				),
-			);
+			entries.push({
+				kind: "note",
+				text: `${compact ? `${title} · ` : ""}${status}${account.message ? ` · ${account.message}` : ""}${account.retryAfter ? ` · retry after ${account.retryAfter.display}` : ""}`,
+				tone: "warning",
+			});
 		}
 		if (account.credits) {
 			const pct = account.credits.usedPct;
-			out.push(
-				clean(
-					`${options.compact ? `${title} · ` : ""}Credits ${account.credits.display}${pct.fact.kind === "measured" || pct.fact.kind === "estimated" ? ` · ${pct.display} used` : ""}`,
-				),
-			);
+			entries.push({
+				kind: "note",
+				text: `${compact ? `${title} · ` : ""}Credits ${account.credits.display}${pct.fact.kind === "measured" || pct.fact.kind === "estimated" ? ` · ${pct.display} used` : ""}`,
+				tone: "neutral",
+			});
 		}
-		for (const window of [...account.windows].sort(
-			(a, b) => factKnownValue(b.usedPct.fact) - factKnownValue(a.usedPct.fact),
-		)) {
-			const label = clean(`${window.label ?? window.key} ${window.usedPct.display} used`);
-			const meter = quotaMeter(factKnownValue(window.usedPct.fact), options.compact ? 8 : Math.min(48, width));
-			out.push(...wrapTextWithAnsi(`${meter} ${options.compact ? `${title} · ` : ""}${label}`, Math.max(1, width)));
-			if (!options.compact)
-				out.push(theme.fg("annotation", quotaResetLabel(window.resetsAt, options.now, options.timeZone)));
+		const windows = [...account.windows].sort((a, b) => factKnownValue(b.usedPct.fact) - factKnownValue(a.usedPct.fact));
+		for (const window of windows) {
+			const pct = factKnownValue(window.usedPct.fact);
+			const label = clean(window.label ?? window.key);
+			entries.push({
+				kind: "meter",
+				label: compact ? `${account.stale ? "STALE · " : ""}${title} · ${label}` : label,
+				pct,
+				display: window.usedPct.display,
+				severity: severityForPct(pct),
+				reset: window.resetsAt,
+			});
 		}
-		if (!account.windows.length && !account.credits && account.status === "ok")
-			out.push(theme.fg("annotation", `${title} · no windows reported`));
+		if (!windows.length && !account.credits && account.status === "ok")
+			entries.push({ kind: "note", text: `${title} · no windows reported`, tone: "muted" });
 	}
-	return out.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
+	const indent = compact ? 0 : 2;
+	const room = Math.max(8, safe - indent);
+	const labelWidth = Math.min(
+		Math.max(0, ...entries.map((entry) => (entry.kind === "meter" ? visibleWidth(entry.label) : 0))),
+		Math.max(6, Math.floor(room * QUOTA_LABEL_SHARE)),
+	);
+	const pad = " ".repeat(indent);
+	const out: string[] = [];
+	for (const entry of entries) {
+		if (entry.kind === "head") {
+			const meta = theme.fg("annotation", entry.meta);
+			const gap = safe - visibleWidth(entry.text) - visibleWidth(meta);
+			out.push(gap >= 2 ? `${entry.text}${" ".repeat(gap)}${meta}` : padAnsi(entry.text, safe));
+			continue;
+		}
+		if (entry.kind === "note") {
+			const chip =
+				entry.tone === "warning"
+					? statusChip(theme, "warning", clean(entry.text))
+					: theme.fg(entry.tone === "muted" ? "annotation" : "body", clean(entry.text));
+			out.push(...wrapTextWithAnsi(`${pad}${chip}`, safe));
+			continue;
+		}
+		const countdown = quotaResetDuration(entry.reset, now);
+		const amount = compact && countdown !== null && room >= 48 ? `${entry.display} · ${countdown}` : entry.display;
+		const label = padAnsi(theme.fg("fieldName", entry.label), labelWidth, GLYPH.ellipsis);
+		// The bar stops at 48 cells however wide the row: past that a meter gains
+		// room, not resolution, and the percentages drift away from their labels.
+		const barWidth = Math.min(Math.max(4, room - labelWidth - 1), QUOTA_METER_CELLS + 1 + visibleWidth(amount));
+		out.push(
+			`${pad}${label} ${meter(theme, { value: entry.pct, max: 100, width: barWidth, tone: quotaTone(entry.severity), amount })}`,
+		);
+		if (!compact)
+			out.push(
+				`${pad}${" ".repeat(labelWidth + 1)}${theme.fg("annotation", quotaResetLabel(entry.reset, now, options.timeZone))}`,
+			);
+	}
+	return out.flatMap((line) => wrapTextWithAnsi(line, safe));
+}
+
+/** The latest journaled account readings; missing readings remain unavailable (#434). */
+export function renderQuotaAccounts(
+	providers: QuotaProviders,
+	width: number,
+	options: { compact?: boolean; now?: number; timeZone?: string } = {},
+): string[] {
+	return quotaAccountRows(providers, width, {
+		...(options.compact === undefined ? {} : { compact: options.compact }),
+		...(options.now === undefined ? {} : { now: options.now }),
+		...(options.timeZone === undefined ? {} : { timeZone: options.timeZone }),
+	});
 }
 
 /** Only a known local credential owner can be associated with a reading (#434). */
@@ -196,15 +303,6 @@ function recordedRoute({ run, enqueued }: RecordedWorkerRun): string {
 	return `${route.targetId} / ${route.wireModelId}${node && node !== "local" ? ` · ${node}` : ""}`;
 }
 
-function workerUsageLine(usage: DispatchRunUsage): string {
-	const text = dispatchUsageText(usage);
-	return usage.kind === "ready"
-		? `${text.total} recorded tokens · input ${text.prompt} · output ${text.output} · ${text.cost}`
-		: usage.kind === "pending"
-			? "Token usage awaiting the run's first journaled call"
-			: "Token usage not available";
-}
-
 /** Board rows first, in the board's order; recorded runs the board does not hold follow in the order given. */
 export function renderWorkerUsage(
 	rows: ReadonlyArray<DispatchBoardRow>,
@@ -213,50 +311,74 @@ export function renderWorkerUsage(
 	width: number,
 ): string[] {
 	const theme = clioTheme();
+	const safe = Math.max(1, Math.floor(width));
 	const onBoard = new Set(rows.map((row) => row.runId));
 	const history = recorded.filter(({ run }) => !onBoard.has(run.row.runId));
 	const out = [
 		theme.fg("annotation", "Active and recent workers · recorded tokens and cost · account limits are shared."),
 	];
-	const divider = theme.fg("divider", "·");
-	if (!rows.length && !history.length) out.push("", "No worker invocations recorded.");
-	for (const row of rows) {
-		const status = dispatchStatusPresentation(row.status);
-		out.push(
-			"",
-			`${theme.fg("footerIdentity", clean(row.agentId))} ${divider} ${theme.fg(status.glyphToken ?? status.token, status.glyph)} ${theme.fg(status.token, status.label)} ${divider} ${theme.fg("toolMetadata", row.telemetry?.activity.elapsed.display ?? "not available")}`,
-		);
-		out.push(clean(`${row.targetId} / ${row.wireModelId}${row.node ? ` · ${row.node}` : ""}`));
-		out.push(workerUsageLine(row.usage));
-		const context = row.telemetry?.activity.contextTokens;
-		if (context) out.push(`Context ${context.display}`);
-		out.push(theme.fg("body", clean(workerQuotaLabel(row, snapshots))));
-		out.push(theme.fg("annotation", clean(`/view dispatch:${row.runId}`)));
+	if (!rows.length && !history.length) {
+		out.push("", ...emptyState(theme, "No worker invocations recorded.", safe));
+		return out;
 	}
-	for (const entry of history) {
-		const { run, enqueued } = entry;
-		const status = recordedStatus(run);
-		const agent = run.settled?.agentId ?? enqueued?.agentId ?? "agent not recorded";
-		const elapsed = run.settled ? ` ${divider} ${theme.fg("toolMetadata", run.activity.elapsed.display)}` : "";
+	if (rows.length) {
 		out.push(
-			"",
-			`${theme.fg("footerIdentity", clean(agent))} ${divider} ${theme.fg(status.glyphToken ?? status.token, status.glyph)} ${theme.fg(status.token, status.label)}${elapsed}`,
+			sectionRule(theme, safe, "On the board", { meta: `${rows.length} run${rows.length === 1 ? "" : "s"}` }),
+			...runTableRows(dispatchBoardItems(rows), safe, { quota: snapshots }),
 		);
-		out.push(clean(recordedRoute(entry)));
+		const accounts = new Map<string, string>();
+		for (const row of rows) accounts.set(row.runtimeId, clean(workerQuotaLabel(row, snapshots)));
 		out.push(
-			workerUsageLine(
-				run.row.source === "unavailable"
-					? { kind: "unavailable" }
-					: {
-							kind: "ready",
-							prompt: run.tokens.prompt,
-							output: run.tokens.output,
-							total: run.row.tokens,
-							usd: run.row.usd,
-						},
+			...[...accounts].map(([runtime, label]) =>
+				chipRow(theme, [theme.fg("annotation", runtime), theme.fg("body", label)], safe),
 			),
 		);
-		out.push(theme.fg("annotation", clean(`/view dispatch:${run.row.runId}`)));
 	}
-	return out.flatMap((line) => wrapTextWithAnsi(theme.base("fieldValue", line), Math.max(1, width)));
+	if (history.length) {
+		out.push(
+			sectionRule(theme, safe, "Recorded", { meta: `${history.length} run${history.length === 1 ? "" : "s"}` }),
+			...tableRows(
+				theme,
+				{
+					columns: [
+						{ label: "status", priority: 10 },
+						{ label: "agent", priority: 9, max: 22 },
+						{ label: "elapsed", align: "right", priority: 6, tone: "muted" },
+						{ label: "route", priority: 7, max: Math.max(16, Math.floor(safe * 0.35)) },
+						{ label: "total", align: "right", priority: 5 },
+						{ label: "cost", align: "right", priority: 4 },
+						{ label: "run", priority: 1, tone: "muted" },
+					],
+					rows: history.map((entry): Array<string | TableCell> => {
+						const { run, enqueued } = entry;
+						const status = recordedStatus(run);
+						const agent = run.settled?.agentId ?? enqueued?.agentId ?? "agent not recorded";
+						const usage = dispatchUsageText(
+							run.row.source === "unavailable"
+								? { kind: "unavailable" }
+								: {
+										kind: "ready",
+										prompt: run.tokens.prompt,
+										output: run.tokens.output,
+										total: run.row.tokens,
+										usd: run.row.usd,
+									},
+						);
+						return [
+							`${theme.fg(status.glyphToken ?? status.token, status.glyph)} ${theme.fg(status.token, status.label)}`,
+							theme.fg("workerIdentity", clean(agent)),
+							run.settled ? run.activity.elapsed.display : "",
+							clean(recordedRoute(entry)),
+							usage.total,
+							usage.cost,
+							run.row.runId,
+						];
+					}),
+				},
+				safe,
+			),
+		);
+	}
+	out.push(theme.fg("annotation", "/view dispatch:<run> opens a run's record"));
+	return out.flatMap((line) => wrapTextWithAnsi(theme.base("fieldValue", line), safe));
 }
