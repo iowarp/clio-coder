@@ -24,6 +24,12 @@ export interface ResourcesContract extends DomainContract {
 	 * listed, and expandPromptTemplate still verifies before anything runs.
 	 */
 	promptsForDisplay(cwd?: string): ResourceList<PromptTemplate>;
+	/**
+	 * Skills read from the committed plugin snapshot without re-verifying each
+	 * tree. For naming only: a skill revoked or drifted since the last reload may
+	 * be listed, and loading its body still verifies.
+	 */
+	skillsForDisplay(cwd?: string): ResourceList<Skill>;
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
 	reload(): Promise<void>;
 }

@@ -20,7 +20,12 @@ import { isToolLimitName } from "../../../core/tool-limit-flags.js";
 import { isHarnessExtensionToolName, isMcpToolName, type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { INTEROP_AGENT_KINDS, interopSourceRank, interopUserRoot } from "../../interop/registry.js";
-import { enabledPluginResourceRoots, pluginBaseDir, withPluginDiscoveryPass } from "../../plugins/index.js";
+import {
+	committedPluginResourceRoots,
+	enabledPluginResourceRoots,
+	pluginBaseDir,
+	withPluginDiscoveryPass,
+} from "../../plugins/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
 import { readRootEntries, splitToolList, splitYamlFrontmatter, stringField } from "../common-loader.js";
 import { resolvePackageReferences } from "../package-references.js";
@@ -188,6 +193,12 @@ export interface LoadSkillsInput {
 	disableDiscovery?: boolean;
 	/** One-shot skill files or directories loaded at CLI precedence. */
 	explicitSkillPaths?: ReadonlyArray<string>;
+	/**
+	 * False takes package roots from the committed plugin snapshot without
+	 * re-verifying each tree. Only listings that name skills may pass it; loading
+	 * a skill's body still goes through a verified read.
+	 */
+	verifyPluginTrees?: boolean;
 }
 
 export type SkillExpansion =
@@ -299,7 +310,11 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		}
 	}
 
-	for (const root of enabledPluginResourceRoots("skills", cwd)) {
+	const pluginRoots =
+		input.verifyPluginTrees === false
+			? committedPluginResourceRoots("skills", cwd)
+			: enabledPluginResourceRoots("skills", cwd);
+	for (const root of pluginRoots) {
 		roots.push({
 			path: root.path,
 			scope: "package",

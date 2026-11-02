@@ -57,7 +57,7 @@ import { createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js
 import { buildLayout, type ComposerPlacement, preserveTranscriptScroll } from "./layout.js";
 import type { QuotaProviders } from "./quota-view.js";
 import type { SessionTranscript } from "./session-transcript.js";
-import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
+import { type CompletionValue, createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
 import type { StatusController, TurnSummary } from "./status/index.js";
 import { createStatusController } from "./status/index.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
@@ -68,6 +68,9 @@ import { ATTENTION_STEP_MS } from "./theme/glyphs.js";
 import type { WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { createWelcomeDashboard } from "./welcome-dashboard.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
+
+/** How long one `/skill <name>` listing serves later keystrokes. */
+const SKILL_COMPLETION_TTL_MS = 2_000;
 
 export interface PresentationTickerHandle {
 	unref?(): void;
@@ -119,7 +122,7 @@ export interface InteractivePresentationDeps {
 	/** Pending boot submissions remain visible until serial admission removes them. */
 	bootPending?: Component;
 	getSettings?: () => Readonly<ClioSettings>;
-	resources?: Pick<ResourcesContract, "skills" | "prompts" | "promptsForDisplay">;
+	resources?: Pick<ResourcesContract, "skillsForDisplay" | "promptsForDisplay">;
 	agents?: Pick<AgentsContract, "listSpecs">;
 	session?: Pick<SessionContract, "current">;
 	jobs?: Pick<JobOperations, "list" | "subscribe">;
@@ -644,6 +647,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			});
 	};
 	editor.focused = true;
+	let skillCompletions: { cwd: string; at: number; items: CompletionValue[] } | undefined;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
 		// Completion runs per keystroke and only names templates, so it reads the
 		// committed plugin snapshot; submitting one verifies its tree first.
@@ -679,13 +683,23 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 						description: target.id,
 					})),
 				),
-			skills: async () =>
-				(deps.resources?.skills(getCwd()).items ?? []).map((skill) => ({
+			// Runs per keystroke while `/skill <name>` is typed. It only names skills, so
+			// it skips the tree digest, and the short memo spares a large catalog a rescan
+			// per key. A skill added or reloaded shows within SKILL_COMPLETION_TTL_MS.
+			skills: async () => {
+				const cwd = getCwd();
+				const now = Date.now();
+				if (skillCompletions?.cwd === cwd && now - skillCompletions.at < SKILL_COMPLETION_TTL_MS)
+					return skillCompletions.items;
+				const items = (deps.resources?.skillsForDisplay(cwd).items ?? []).map((skill) => ({
 					id: skill.name,
 					value: skill.name,
 					label: skill.name,
 					description: skill.description,
-				})),
+				}));
+				skillCompletions = { cwd, at: now, items };
+				return items;
+			},
 			tasks: async ({ subcommand }) =>
 				(deps.userTasks?.snapshot() ?? [])
 					.filter((task) =>

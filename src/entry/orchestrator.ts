@@ -3088,8 +3088,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// Skill loading reads and hashes the filesystem. Reuse the count across
 		// warm/real requests and reminders until the same source epoch that
 		// invalidates prompt composition changes (/library reload, config, etc.).
+		// The count and ranking only advise and name skills on the turn's input
+		// path, so they skip the plugin tree digest; loading a body still verifies.
 		if (!prompts) {
-			const skills = modelVisibleSkills(resources.skills(cwd).items);
+			const skills = modelVisibleSkills(resources.skillsForDisplay(cwd).items);
 			readySkillSnapshot = { key: cwd, count: skills.length, skills };
 			return skills.length;
 		}
@@ -3101,7 +3103,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			options.skillPaths ?? options.headless?.skillPaths ?? [],
 		]);
 		if (readySkillSnapshot?.key === key) return readySkillSnapshot.count;
-		const skills = modelVisibleSkills(resources.skills(cwd).items);
+		const skills = modelVisibleSkills(resources.skillsForDisplay(cwd).items);
 		const count = skills.length;
 		readySkillSnapshot = { key, count, skills };
 		return count;
@@ -3153,7 +3155,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// reminder quotes is the count the listing will show.
 				countInstallableSkills: () => {
 					if (!skillDiscoveryEnabled) return 0;
-					const installed = installedSkillNames(resources.skills(process.cwd()).items, process.cwd());
+					const installed = installedSkillNames(resources.skillsForDisplay(process.cwd()).items, process.cwd());
 					return discoverMarketplaceSkills({ cwd: process.cwd() }).skills.filter((skill) => !installed.has(skill.name))
 						.length;
 				},
@@ -3168,7 +3170,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middleware.registerHook(
 			createMarketplaceOfferRegistration({
 				interactive,
-				listInstalledSkillNames: () => [...installedSkillNames(resources.skills(process.cwd()).items, process.cwd())],
+				listInstalledSkillNames: () => [
+					...installedSkillNames(resources.skillsForDisplay(process.cwd()).items, process.cwd()),
+				],
 				listMarketplaceEntries: () => discoverMarketplaceSkills({ cwd: process.cwd() }).skills,
 				installEntry: (entry, scope) => {
 					const installed = installSkill({ source: `skill:${entry.name}`, scope, name: entry.name, cwd: process.cwd() });

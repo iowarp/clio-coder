@@ -3306,7 +3306,8 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		// commands sitting in the roots Clio reads, and answering "not a command"
 		// for one that is loaded made the whole foreign prompt surface unreachable.
 		const runtime = ctx.operatorExtensions;
-		const promptNames = promptRefs(ctx.listPrompts?.().items ?? []);
+		// Only names decide a takeover, and this runs before a typo's notice can paint.
+		const promptNames = promptRefs((ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items ?? []);
 		const takeovers = (runtime?.commands(promptNames) ?? []).filter(
 			(row) => row.invocation === command.token && row.replaces === "prompt",
 		);
