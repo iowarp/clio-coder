@@ -65,11 +65,54 @@ const answer = [
 	"```",
 ].join("\n");
 const diagram = "```mermaid\nflowchart TD\nA[Prompt] --> B[Model]\nB --> C[Tool]\nC --> B\nB --> D[Answer]\n```\n\n";
-const workloads = ["composer", "text", "long-text", "tool", "diagram", "workers", "turn", "skill"] as const;
+// Active replies of a fixed size that keep growing at the tail, for showing how per-delta cost scales.
+const replySizes = { "reply-20k": 20_000, "reply-100k": 100_000, "reply-500k": 500_000 } as const;
+const workloads = [
+	"composer",
+	"text",
+	"long-text",
+	"tool",
+	"diagram",
+	"workers",
+	"turn",
+	"skill",
+	...(Object.keys(replySizes) as (keyof typeof replySizes)[]),
+] as const;
 const modes = ["regular", "fullscreen"] as const;
 if (values.mode && !modes.some((mode) => mode === values.mode)) throw new Error("Unknown mode");
 if (values.workload && !workloads.some((workload) => workload === values.workload)) throw new Error("Unknown workload");
 type Workload = (typeof workloads)[number];
+
+/** Prose, loose lists, fences and tables in the mix a long model reply carries, closed at a paragraph. */
+function longReply(size: number): string {
+	const blocks: string[] = [];
+	let length = 0;
+	for (let index = 0; length < size; index++) {
+		const block = [
+			`## Finding ${index}`,
+			"",
+			`The render loop keeps **settled output** stable while \`tail ${index}\` grows, and it wraps at the terminal width so this sentence is long enough to take more than one row at a typical column count.`,
+			"",
+			`- Preserve input responsiveness for item ${index}.`,
+			"",
+			"- Keep tool events ordered.",
+			"",
+			"```ts",
+			`const result${index} = await runTool(input);`,
+			`return result${index};`,
+			"```",
+			"",
+			"| Field | Value |",
+			"| --- | --- |",
+			`| index | ${index} |`,
+			"",
+			"",
+		].join("\n");
+		blocks.push(block);
+		length += block.length;
+	}
+	return blocks.join("");
+}
 
 function sample(mode: TuiMode, workload: Workload): { milliseconds: number[]; bytes: number } {
 	const terminal = new CountingTerminal();
@@ -106,6 +149,11 @@ function sample(mode: TuiMode, workload: Workload): { milliseconds: number[]; by
 			panel.applyEvent({ type: "agent_start" } as never);
 		}
 		if (workload === "long-text") panel.applyEvent({ type: "text_delta", delta: `${answer}\n\n`.repeat(80) } as never);
+		if (workload in replySizes)
+			panel.applyEvent({
+				type: "text_delta",
+				delta: longReply(replySizes[workload as keyof typeof replySizes]),
+			} as never);
 		if (workload === "diagram") panel.applyEvent({ type: "text_delta", delta: diagram } as never);
 		if (workload === "workers") for (const worker of workers) panel.applyWorkerState(worker);
 		if (workload === "tool")
