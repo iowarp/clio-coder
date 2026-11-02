@@ -126,8 +126,13 @@ export interface SectionRuleOptions {
  * dialog or a dashboard page. A bare `rule()` stays the unlabeled separator.
  */
 export function sectionRule(theme: ClioTheme, width: number, label: string, options: SectionRuleOptions = {}): string {
-	return rule(theme, width, {
-		left: label,
+	const safe = Math.max(1, Math.floor(width));
+	// The meta is a key or a count the reader needs; a label that would push it
+	// off the row is clipped with an ellipsis instead, keeping two cells of rule.
+	const metaWidth = options.meta === undefined ? 0 : visibleWidth(options.meta) + 3;
+	const room = Math.max(1, safe - metaWidth - 3);
+	return rule(theme, safe, {
+		left: clip(label, room),
 		...(options.token === undefined ? {} : { leftToken: options.token }),
 		...(options.meta === undefined ? {} : { right: options.meta }),
 	});
