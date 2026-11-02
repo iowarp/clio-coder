@@ -1,6 +1,16 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { readSettings } from "../core/config.js";
-import { defaultSkillRoots, loadSkills, modelVisibleSkills, skillCatalogValidity } from "../domains/resources/index.js";
+import {
+	defaultSkillRoots,
+	inactiveCopyRemedy,
+	inactiveLibraryCopies,
+	knownSkillNames,
+	loadSkills,
+	modelVisibleSkills,
+	readLibraryInventory,
+	skillAuthoringDiagnostics,
+	skillCatalogValidity,
+} from "../domains/resources/index.js";
 import { formatColumns } from "./shared.js";
 
 /** Runtime discovery is a read surface of the library; package mutations live in library.ts. */
@@ -39,12 +49,44 @@ export function runSkillsRead(args: ReadonlyArray<string>): number {
 			})
 		);
 	});
+	if (command === "validate") {
+		const knownSkills = new Set([...knownSkillNames(process.cwd()), ...list.items.map((skill) => skill.name)]);
+		for (const skill of list.items) diagnostics.push(...skillAuthoringDiagnostics(skill, { knownSkills }));
+	}
 	const skills = command === "validate" || args.includes("--all") ? list.items : modelVisibleSkills(list.items);
 	const valid =
-		command === "validate" ? skillCatalogValidity(list).ok : !diagnostics.some((diag) => diag.type === "error");
+		command === "validate"
+			? skillCatalogValidity(list).ok && !diagnostics.some((diag) => diag.type === "error")
+			: !diagnostics.some((diag) => diag.type === "error");
+	// A damaged, disabled or untrusted package loads no skills, so the rows above
+	// cannot mention it; --all promises everything installed, loadable or not.
+	const inactive =
+		command === "list" && args.includes("--all")
+			? inactiveLibraryCopies(
+					readLibraryInventory({ cwd: process.cwd(), include: { packages: false, resources: false } }).copies,
+				).filter((copy) => copy.kind === "skill" || copy.kind === "plugin")
+			: [];
 	if (json)
 		process.stdout.write(
-			`${JSON.stringify({ ...(command === "validate" ? { ok: valid } : {}), skills, diagnostics }, null, 2)}\n`,
+			`${JSON.stringify(
+				{
+					...(command === "validate" ? { ok: valid } : {}),
+					skills,
+					diagnostics,
+					...(inactive.length > 0
+						? {
+								inactivePackages: inactive.map((copy) => ({
+									ref: copy.ref,
+									scope: copy.scope,
+									state: copy.state,
+									remedy: inactiveCopyRemedy(copy),
+								})),
+							}
+						: {}),
+				},
+				null,
+				2,
+			)}\n`,
 		);
 	else {
 		process.stdout.write(
@@ -58,6 +100,7 @@ export function runSkillsRead(args: ReadonlyArray<string>): number {
 					!skill.trusted ? "inactive" : skill.disableModelInvocation ? "manual" : "model",
 					skill.description,
 				]),
+				...inactive.map((copy) => [copy.name, copy.scope, "plugin", copy.state, "inactive", inactiveCopyRemedy(copy)]),
 			]),
 		);
 		for (const diagnostic of diagnostics) process.stderr.write(`${diagnostic.type}: ${diagnostic.message}\n`);

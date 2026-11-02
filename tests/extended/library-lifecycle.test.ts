@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import { readLifecycleReceipts } from "../../src/core/library-receipts.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { extensionBaseDir, listInstalledExtensions } from "../../src/domains/extensions/index.js";
@@ -31,9 +31,10 @@ import {
 import { readLibraryInventory } from "../../src/domains/resources/library-inventory.js";
 import { installSkill } from "../../src/domains/resources/skills/marketplace.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
+import { scratchClioEnvVars } from "../harness/scratch-env.js";
 
 let root: string;
-let previousConfig: string | undefined;
+let previousEnv: NodeJS.ProcessEnv;
 let previousCwd: string;
 
 interface PackageSpec {
@@ -176,19 +177,118 @@ describe("library lifecycle plans", () => {
 	});
 	beforeEach(() => {
 		root = mkdtempSync(path.join(tmpdir(), "clio-coder-library-lifecycle-"));
-		previousConfig = process.env.CLIO_CODER_CONFIG_DIR;
+		previousEnv = { ...process.env };
 		previousCwd = process.cwd();
-		process.env.CLIO_CODER_CONFIG_DIR = path.join(root, "config");
+		Object.assign(process.env, scratchClioEnvVars(root));
 		mkdirSync(path.join(root, "config"));
 		process.chdir(root);
 		resetXdgCache();
 	});
 	afterEach(() => {
 		process.chdir(previousCwd);
-		if (previousConfig === undefined) delete process.env.CLIO_CODER_CONFIG_DIR;
-		else process.env.CLIO_CODER_CONFIG_DIR = previousConfig;
+		for (const key of Object.keys(process.env)) if (!(key in previousEnv)) delete process.env[key];
+		Object.assign(process.env, previousEnv);
 		resetXdgCache();
 		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("signals only newer or changed catalog copies and leaves local and imported copies alone", () => {
+		const first = source({ name: "signal" });
+		catalog([first]);
+		install("plugin:signal");
+		const update = () => readLibraryInventory({ cwd: root }).copies.find((p) => p.name === "signal")?.update;
+		equal(update(), undefined);
+		catalog([source({ name: "signal", version: "2.0.0" })]);
+		deepStrictEqual(update(), { version: "2.0.0", reason: "newer-version" });
+		writeFileSync(path.join(first, "assets/evidence.txt"), "changed upstream");
+		catalog([first]);
+		deepStrictEqual(update(), { version: "1.0.0", reason: "changed-content" });
+		catalog([source({ name: "signal", version: "0.9.0" })]);
+		equal(update(), undefined);
+		const local = source({ name: "local-copy" });
+		install(local);
+		const imported = source({ name: "imported-copy", kind: "skill" });
+		ok(applyLibraryImport(planLibraryImport(imported, { cwd: root }), true).published);
+		catalog([
+			source({ name: "local-copy", version: "2.0.0" }),
+			source({ name: "imported-copy", kind: "skill", version: "2.0.0" }),
+		]);
+		const copies = readLibraryInventory({ cwd: root }).copies;
+		equal(copies.find((p) => p.name === "local-copy")?.update, undefined);
+		equal(copies.find((p) => p.name === "imported-copy")?.update, undefined);
+	});
+
+	it("bulk update skips extensions and continues after a damaged copy refuses", () => {
+		catalog([source({ name: "a-refused" }), source({ name: "b-updated" })]);
+		install("plugin:a-refused");
+		install("plugin:b-updated");
+		writeFileSync(path.join(copy("user", "a-refused")?.rootPath ?? "", "assets/evidence.txt"), "local edit");
+		const extension = path.join(root, "sources", "extension");
+		mkdirSync(extension);
+		const manifest = {
+			id: "skip-extension",
+			name: "skip-extension",
+			version: "1.0.0",
+			description: "Fixture",
+			runtime: { api: 2, entrypoint: "main.mjs", commands: [{ name: "check", description: "Check" }] },
+		};
+		writeFileSync(path.join(extension, "clio-coder-extension.json"), JSON.stringify(manifest));
+		writeFileSync(
+			path.join(extension, "main.mjs"),
+			'export default function(api) { api.handle("check", () => ({ text: "ok" })); }',
+		);
+		const publish = () => {
+			catalog([source({ name: "a-refused", version: "2.0.0" }), source({ name: "b-updated", version: "2.0.0" })]);
+			const file = path.join(root, "config/library.yaml");
+			const data = parse(readFileSync(file, "utf8"));
+			data.entries.push({
+				kind: "extension",
+				name: manifest.id,
+				version: manifest.version,
+				description: "Fixture",
+				sourceUrl: extension,
+				sha256: pluginContentDigest(extension),
+			});
+			writeFileSync(file, stringify(data));
+		};
+		publish();
+		install("extension:skip-extension");
+		manifest.version = "2.0.0";
+		writeFileSync(path.join(extension, "clio-coder-extension.json"), JSON.stringify(manifest));
+		publish();
+		const result = cli(["update", "--all"]);
+		equal(result.code, 1, JSON.stringify(result.json));
+		deepStrictEqual(
+			(result.json.results as Array<{ ref: string; ok: boolean }>).map((r) => [r.ref, r.ok]),
+			[
+				["plugin:a-refused", false],
+				["plugin:b-updated", true],
+			],
+		);
+		deepStrictEqual(result.json.skipped, [{ ref: "extension:skip-extension", scope: "user", reason: "extension" }]);
+		equal(copy("user", "b-updated")?.version, "2.0.0");
+		equal(listInstalledExtensions(root, { scope: "user" }).find((p) => p.id === manifest.id)?.version, "1.0.0");
+	});
+
+	it("retains only the three newest edited recovery copies", () => {
+		const location = source({ name: "recover" });
+		catalog([location]);
+		install("plugin:recover");
+		const backups: string[] = [];
+		for (let i = 0; i < 5; i++) {
+			writeFileSync(path.join(copy("user", "recover")?.rootPath ?? "", "assets/evidence.txt"), `edit ${i}`);
+			const result = applyLibraryLifecycle(
+				planLibraryLifecycle({ operation: "update", ref: "plugin:recover", scope: "user", cwd: root, force: true }),
+			);
+			equal(result.failed, 0);
+			const backup = result.outcomes[0]?.recovery?.packageBackup;
+			ok(backup);
+			backups.push(backup);
+		}
+		deepStrictEqual(
+			backups.map((file) => existsSync(file)),
+			[false, false, true, true, true],
+		);
 	});
 
 	it("refuses stale content, state and origin facts inside the writer lock", () => {

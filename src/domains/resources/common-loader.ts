@@ -37,6 +37,30 @@ export const COMPAT_RESOURCE_PRECEDENCE = {
 	project: 50,
 } as const;
 
+/**
+ * One scalar tool list in either spelling a skill carries: the space-delimited
+ * form the Agent Skills specification defines, or the comma-separated form
+ * older harness files use. Separators inside parentheses belong to the entry,
+ * so `Bash(git add:*)` stays one tool.
+ */
+export function splitToolList(value: string): string[] {
+	const entries: string[] = [];
+	let current = "";
+	let depth = 0;
+	for (const char of value) {
+		if (char === "(") depth += 1;
+		else if (char === ")" && depth > 0) depth -= 1;
+		if (depth === 0 && (char === "," || /\s/u.test(char))) {
+			if (current.length > 0) entries.push(current);
+			current = "";
+			continue;
+		}
+		current += char;
+	}
+	if (current.length > 0) entries.push(current);
+	return entries;
+}
+
 export type FrontmatterSplitResult =
 	| {
 			ok: true;

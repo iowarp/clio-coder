@@ -1198,7 +1198,7 @@ function resourceCliMutatesSkills(
 }
 
 /** The library verbs that implement --dry-run (src/cli/library.ts, src/cli/library-import.ts). */
-const LIBRARY_DRY_RUN_VERBS = ["install", "import", "update", "enable", "disable", "remove"];
+const LIBRARY_DRY_RUN_VERBS = ["install", "import", "update", "enable", "disable", "remove", "package"];
 
 const LIBRARY_MUTATION_VERBS = [
 	"install",
@@ -1209,6 +1209,7 @@ const LIBRARY_MUTATION_VERBS = [
 	"disable",
 	"pin",
 	"register",
+	"package",
 	"sync",
 	"push",
 	"remote",

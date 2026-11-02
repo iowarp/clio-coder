@@ -13,6 +13,7 @@ import {
 import type { PluginOrigin } from "../plugins/types.js";
 import { validateLibraryPackage } from "../resources/library-validation.js";
 import { loadPromptTemplates } from "../resources/prompts/loader.js";
+import { bareSkillIdentity, bareSkillManifest } from "../resources/skills/bare-skill.js";
 import { normalizedSkillHash } from "../resources/skills/content-hash.js";
 import { loadSkills } from "../resources/skills/loader.js";
 import { detectForeignPlugin, type ForeignResourceOutcome, projectForeignPlugin } from "./foreign.js";
@@ -32,7 +33,7 @@ export interface InteropAdoptionEntry {
 	omitted?: string[];
 	requirements?: string[];
 	/** Manifest format the package was read as; absent for loose resources. */
-	format?: "portable" | "claude-code" | "codex";
+	format?: "portable" | "claude-code" | "codex" | "agent-skill";
 	/** Per-resource conversion results for foreign-format packages. */
 	outcomes?: ForeignResourceOutcome[];
 	/** Host features present in the source that adoption never activates. */
@@ -53,7 +54,7 @@ export interface PreparedAdoption {
 	note: string;
 	omitted: string[];
 	requirements: string[];
-	format?: "portable" | "claude-code" | "codex";
+	format?: "portable" | "claude-code" | "codex" | "agent-skill";
 	outcomes?: ForeignResourceOutcome[];
 	unsupported?: string[];
 }
@@ -155,6 +156,51 @@ export function preparePortablePackage(root: string): PreparedAdoption {
 		outcomes,
 	};
 }
+/**
+ * A bare skill directory projected into a one-skill package at the import
+ * boundary. Import stays text only, so a skill whose instructions lean on a
+ * script it would lose is refused here rather than landing hollow, and the
+ * refusal names the route that keeps the script.
+ */
+export function prepareBareSkillPackage(root: string): PreparedAdoption & { format: "agent-skill" } {
+	const raw = inventoryText(path.join(root, "SKILL.md"));
+	const identity = bareSkillIdentity(root, raw);
+	const resource = projectSkill({ skillDir: root, fallbackName: identity.id, lenient: true });
+	if (resource.requiredOmissions.length > 0)
+		throw new Error(
+			`Not adoptable as text: the instructions use ${resource.requiredOmissions.join(", ")}, which import never copies. To keep them, run \`clio-coder library package <path>\` on a copy you have reviewed, then \`clio-coder library install <path>\`.`,
+		);
+	const componentPath = resource.componentPath;
+	return {
+		id: resource.id,
+		version: identity.version,
+		files: {
+			...resource.files,
+			"plugin.json": bareSkillManifest({ ...identity, id: resource.id }, "skills", componentPath),
+		},
+		note: [
+			"Bare skill directory packaged as one text-only skill; tool lists, scripts and host settings are not imported.",
+			...identity.notes,
+		].join(" "),
+		omitted: resource.omittedFiles,
+		requirements: [],
+		format: "agent-skill",
+		outcomes: [
+			{
+				kind: "skill",
+				name: resource.name,
+				source: "SKILL.md",
+				status: "converted",
+				id: resource.id,
+				destination: componentPath,
+				...(resource.omittedFields.length ? { omittedFields: resource.omittedFields } : {}),
+				...(resource.omittedFiles.length ? { omittedFiles: resource.omittedFiles } : {}),
+			},
+		],
+		unsupported: [],
+	};
+}
+
 /** Foreign-format (Claude Code / Codex) package normalized at the import boundary. */
 export function prepareForeignPackage(
 	root: string,
@@ -162,6 +208,7 @@ export function prepareForeignPackage(
 ): PreparedAdoption & { format: "claude-code" | "codex" } {
 	const detection = detectForeignPlugin(root, format);
 	if (detection.format === "portable") throw new Error("Portable root plugin.json present; use the portable route.");
+	if (detection.format === "agent-skill") throw new Error("Bare skill directory; use the bare skill route.");
 	if (detection.format === "none") throw new Error(`Not adoptable: ${detection.diagnostics.join(" ")}`);
 	const projection = projectForeignPlugin({
 		root,
@@ -196,9 +243,9 @@ function prepared(item: InteropInventoryItem, host: InteropAgentId): PreparedAdo
 		const detection = detectForeignPlugin(item.path);
 		// An invalid portable manifest is diagnosed; it is never hidden by a foreign fallback.
 		value =
-			detection.format === "portable" || detection.format === "none"
-				? preparePortablePackage(item.path)
-				: prepareForeignPackage(item.path, detection.format);
+			detection.format === "claude-code" || detection.format === "codex"
+				? prepareForeignPackage(item.path, detection.format)
+				: preparePortablePackage(item.path);
 	} else {
 		const id = safeName(`${host}-${item.kind}-${item.name}`);
 		const plural = `${item.kind}s`;

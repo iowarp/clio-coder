@@ -29,6 +29,18 @@ function terms(text: string): string[] {
 	return (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map(singular);
 }
 
+/**
+ * True when every distinctive query term appears in the text, in any order. A
+ * listing an operator narrows with several words needs all of them to hold, so
+ * adding a word never widens the result the way a score above zero would.
+ */
+export function discoveryTermsMatch(query: string, text: string): boolean {
+	const wanted = terms(query).filter((term) => !STOP_WORDS.has(term));
+	if (wanted.length === 0) return false;
+	const available = new Set(terms(text));
+	return wanted.every((term) => available.has(term));
+}
+
 /** Exact names and phrases lead; partial task vocabulary still yields useful candidates. */
 export function discoveryScore(query: string, name: string, description: string): number {
 	const normalized = query.trim().toLowerCase();

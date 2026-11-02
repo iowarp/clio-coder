@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { writeDiagnostic } from "../core/diagnostics.js";
+import { discoveryScore } from "../core/harness-discovery.js";
 import { clioStateDir } from "../core/xdg.js";
 import { ENVELOPE_SEAT_BELT, envelopeLines } from "../domains/extensions/envelope-review.js";
 import { pluginLocalPath } from "../domains/plugins/catalog.js";
@@ -26,9 +27,13 @@ import {
 	planLibraryLifecycle,
 } from "../domains/resources/library-actions.js";
 import {
+	inactiveCopyRemedy,
+	inactiveLibraryCopies,
 	inspectLibraryCopy,
 	type LibraryComponentSourceClass,
+	type LibraryCopyUpdate,
 	type LibraryOrigin,
+	libraryQueryMatches,
 	readLibraryInventory,
 } from "../domains/resources/library-inventory.js";
 import {
@@ -38,6 +43,9 @@ import {
 } from "../domains/resources/library-packages.js";
 import { describeLibraryPair } from "../domains/resources/library-pairing.js";
 import { isLibraryComponentKind, isLibraryKind, type LibraryEntryKind } from "../domains/resources/library-types.js";
+import { validateLibraryPackage } from "../domains/resources/library-validation.js";
+import { bareSkillRemedy, isBareSkillDirectory, packageBareSkill } from "../domains/resources/skills/bare-skill.js";
+import { knownSkillNames } from "../domains/resources/skills/marketplace.js";
 import { createProcessJournal } from "../domains/telemetry/process-journal.js";
 import { printError, printOk } from "./shared.js";
 
@@ -53,7 +61,7 @@ Commands:
   clio-coder library inspect <path|kind:name|name> [--user|--project] [--json]
   clio-coder library install <path|kind:name|name> [--user|--project] [--force] [--with-requirements] [--dry-run] [--json]
   clio-coder library import <path|github-tree-url> [--user|--project] [--format claude|codex] [--dry-run] [--json] [--yes]
-  clio-coder library update <kind:name|name> [--user|--project] [--force] [--dry-run] [--json]
+  clio-coder library update <kind:name|name>|--all [--user|--project] [--force] [--dry-run] [--json]
   clio-coder library enable <kind:name|name> [--user|--project] [--dry-run] [--json]
   clio-coder library disable <kind:name|name> [--user|--project] [--dry-run] [--json]
   clio-coder library remove <kind:name|name> [--user|--project] [--dry-run] [--json]
@@ -62,7 +70,8 @@ Commands:
   clio-coder library reload [--json]
   clio-coder library skills [--all] [--json]
   clio-coder library inventory --json
-  clio-coder library validate <package-path|SKILL.md> [--json]
+  clio-coder library validate <package-path|skill-dir|SKILL.md> [--json]
+  clio-coder library package <skill-dir> [--force] [--dry-run] [--json]
   clio-coder library sync
   clio-coder library push
   clio-coder library remote confirm <url>
@@ -74,11 +83,15 @@ Every mutation builds one reviewed plan, rechecks it inside the package lock,
 refuses to break enabled dependents, and reports per-package outcomes with disk,
 component-admission and host-refresh facts separately; --dry-run prints the plan
 and writes nothing. A CLI never refreshes a running session.
-Import reviews a portable, Claude Code or Codex plugin from a path or GitHub
-tree URL, normalizes supported components into a foreign-trust package, and never
-activates hooks, MCP, LSP or scripts.
+Import reviews a portable, Claude Code or Codex plugin or a bare skill directory
+from a path or GitHub tree URL, normalizes supported components into a
+foreign-trust package, and never activates hooks, MCP, LSP or scripts.
+Package writes a plugin.json beside a bare skill's SKILL.md so an ordinary install
+keeps what it bundles; the skill's own files are not touched.
 List and search are package-oriented; --kind and a query also match the
 resources a plugin provides, returning the owning package as the install target.
+A copy behind its catalog row says so; update --all brings every such copy forward
+except extensions, whose reach each update has to be reviewed on its own.
 Components is the versioned, body-free read of actual discovered skills, agents,
 prompts and playbooks across core, installed packages and loose user/project
 files, with owner, origin, availability and invocation; --all adds internal
@@ -167,6 +180,10 @@ function verb(operation: LibraryOperation): string {
 	return operation === "install" ? "installed" : operation === "update" ? "updated" : `${operation}d`;
 }
 
+function updateLabel(update: LibraryCopyUpdate): string {
+	return update.reason === "newer-version" ? `update ${update.version} available` : "changed content available";
+}
+
 /** Existing JSON fields stay where old callers expect them; plan and apply are additive. */
 function lifecycleJson(
 	operation: LibraryOperation,
@@ -253,6 +270,114 @@ function printDrift(
 	process.stdout.write(`${where} ${detail}\n`);
 }
 
+interface LibraryCommandOptions {
+	cwd: string;
+	scope?: PluginScope;
+	catalog?: string;
+}
+
+/** One reviewed plan and its outcome lines; the caller decides what follows them. */
+function runLifecycleStep(
+	operation: LibraryOperation,
+	ref: string,
+	scope: PluginScope | undefined,
+	parsed: Parsed,
+	options: LibraryCommandOptions,
+): { plan: LibraryLifecyclePlan; apply: LibraryApplyResult; ok: boolean } {
+	const plan = planLibraryLifecycle({
+		operation,
+		ref,
+		cwd: options.cwd,
+		...(scope ? { scope } : {}),
+		...(options.catalog ? { catalog: options.catalog } : {}),
+		force: parsed.force,
+		withRequirements: parsed.withRequirements,
+	});
+	if (!parsed.json) printStepReviews(plan);
+	const apply = applyLibraryLifecycle(plan, { dryRun: parsed.dryRun });
+	const ok = apply.failed === 0 && (apply.dryRun || plan.applicable);
+	if (!parsed.json) {
+		for (const outcome of apply.outcomes) {
+			const step = plan.steps.find(
+				(item) => item.identity.ref === outcome.identity.ref && item.identity.scope === outcome.identity.scope,
+			);
+			const where = `${outcome.identity.ref} (${outcome.identity.scope})`;
+			if (outcome.status === "committed")
+				printOk(
+					`${verb(operation)} ${where}${step?.source ? ` at ${step.destination} (sha256 ${step.source.sha256})` : ""}${
+						outcome.recovery?.packageBackup ? `; recovery ${outcome.recovery.packageBackup}` : ""
+					}${outcome.error ? `; verification: ${outcome.error.message}` : ""}`,
+				);
+			else if (outcome.status === "unattempted")
+				process.stdout.write(
+					`${parsed.dryRun ? "planned" : "unattempted"} ${operation} ${where}${step?.refusal ? `: ${step.refusal}` : ""}\n`,
+				);
+			else {
+				// A refusal already names its fix; the generic next step is the TUI review's wording.
+				const next = outcome.error?.code === "refused" ? "" : (outcome.error?.next ?? "");
+				printError(`${operation} ${where} failed: ${outcome.error?.message ?? "unknown"}${next ? `; ${next}` : ""}`);
+			}
+		}
+	}
+	return { plan, apply, ok };
+}
+
+function printRefreshNote(apply: LibraryApplyResult): void {
+	if (!apply.committed) return;
+	const refresh = apply.refresh;
+	process.stderr.write(
+		refresh.status === "not-applicable"
+			? apply.outcomes.some((item) => item.status === "committed" && item.identity.kind === "extension")
+				? "A running session loads this extension and its hooks after /reload.\n"
+				: "A running session picks this up after /library reload.\n"
+			: refresh.status === "failed"
+				? `session refresh failed: ${refresh.error}\n`
+				: `session resources refreshed (generation ${refresh.generation})\n`,
+	);
+}
+
+/**
+ * Bring every copy its catalog row has moved past up to that row. One copy's
+ * refusal does not stop the others, and the exit code still reports it. An
+ * extension stays out: each of its updates shows what the code would newly be
+ * allowed to reach, which is a review a bulk command would skip.
+ */
+function updateEveryCopy(parsed: Parsed, options: LibraryCommandOptions, emit: (value: unknown) => void): number {
+	const copies = readLibraryInventory({
+		cwd: options.cwd,
+		...(options.catalog ? { catalog: options.catalog } : {}),
+		include: { resources: false },
+	}).copies.filter((copy) => copy.update && (!parsed.scope || copy.scope === parsed.scope));
+	const outdated = copies.filter((copy) => copy.kind !== "extension");
+	const extensions = copies.filter((copy) => copy.kind === "extension");
+	const results: Array<{ ref: string; scope: PluginScope; ok: boolean; error?: string; apply?: LibraryApplyResult }> =
+		[];
+	let last: LibraryApplyResult | undefined;
+	for (const copy of outdated) {
+		try {
+			const { apply, ok } = runLifecycleStep("update", copy.ref, copy.scope, parsed, options);
+			if (apply.committed) last = apply;
+			results.push({ ref: copy.ref, scope: copy.scope, ok, apply });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (!parsed.json) printError(`update ${copy.ref} (${copy.scope}) failed: ${message}`);
+			results.push({ ref: copy.ref, scope: copy.scope, ok: false, error: message });
+		}
+	}
+	const ok = results.every((result) => result.ok);
+	if (parsed.json)
+		emit({ ok, results, skipped: extensions.map((copy) => ({ ref: copy.ref, scope: copy.scope, reason: "extension" })) });
+	else {
+		if (last) printRefreshNote(last);
+		for (const copy of extensions)
+			process.stdout.write(
+				`skipped ${copy.ref} (${copy.scope}): update it on its own with clio-coder library update ${copy.ref} --${copy.scope}\n`,
+			);
+		if (copies.length === 0) process.stdout.write("every installed package matches its catalog\n");
+	}
+	return ok ? 0 : 1;
+}
+
 export async function runLibraryCommand(
 	args: ReadonlyArray<string>,
 	discoveryOptions: { catalog?: string } = {},
@@ -297,8 +422,8 @@ async function executeLibraryCommand(
 		process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 	};
 	try {
-		if (parsed.dryRun && !LIFECYCLE.includes(parsed.command as LibraryOperation))
-			throw new Error("--dry-run is supported only for library install, update, enable, disable and remove");
+		if (parsed.dryRun && parsed.command !== "package" && !LIFECYCLE.includes(parsed.command as LibraryOperation))
+			throw new Error("--dry-run is supported only for library install, update, enable, disable, remove and package");
 		if (parsed.command === "skills") {
 			if (parsed.positional.length) throw new Error("library skills takes no arguments");
 			return (await import("./skills.js")).runSkillsRead([
@@ -310,17 +435,40 @@ async function executeLibraryCommand(
 		if (parsed.command === "components") {
 			if (parsed.kind && !isLibraryComponentKind(parsed.kind))
 				throw new Error("library components --kind requires skill, agent, prompt, or playbook");
+			const query = parsed.positional.join(" ");
 			const inventory = readLibraryInventory({
 				cwd: options.cwd,
-				include: { packages: false, copies: false },
+				include: { packages: false },
 				...(parsed.kind ? { kinds: [parsed.kind] } : {}),
 				...(parsed.source ? { sources: [parsed.source] } : {}),
-				...(parsed.positional.length ? { query: parsed.positional.join(" ") } : {}),
+				...(query ? { query } : {}),
 				all: parsed.all,
 			});
+			// A package the loaders refuse has no component rows, so it answers here
+			// or the operator reads its absence as "not installed".
+			const inactive =
+				parsed.source && parsed.source !== "package"
+					? []
+					: inactiveLibraryCopies(inventory.copies).filter(
+							(copy) =>
+								(!parsed.kind || copy.kind === parsed.kind || copy.kind === "plugin") &&
+								(!query || libraryQueryMatches(query, copy.name)),
+						);
 			if (parsed.json) {
 				const { packages: _packages, copies: _copies, ...rest } = inventory;
-				emit(rest);
+				emit({
+					...rest,
+					...(inactive.length > 0
+						? {
+								inactivePackages: inactive.map((copy) => ({
+									ref: copy.ref,
+									scope: copy.scope,
+									state: copy.state,
+									remedy: inactiveCopyRemedy(copy),
+								})),
+							}
+						: {}),
+				});
 			} else {
 				for (const resource of inventory.resources) {
 					const owner = resource.owner ? `${resource.owner.ref}@${resource.owner.scope}` : resource.source.class;
@@ -328,6 +476,14 @@ async function executeLibraryCommand(
 						`${resource.kind}\t${resource.name}\t${owner}\t${originLabel(resource.origin)}\t${resource.availability}\t${resource.invocation ?? ""}\n`,
 					);
 				}
+				for (const copy of inactive)
+					process.stdout.write(
+						`${copy.kind}\t${copy.name}\t${copy.ref}@${copy.scope}\t${originLabel(copy.origin)}\t${copy.state}\t${inactiveCopyRemedy(copy)}\n`,
+					);
+				if (query && inventory.resources.length === 0 && inactive.length === 0)
+					process.stderr.write(
+						`no installed component matches "${query}"; clio-coder library search also covers packages you have not installed\n`,
+					);
 				if (inventory.truncated.resources)
 					process.stderr.write("component list truncated; narrow with --kind or a query\n");
 				for (const diagnostic of inventory.diagnostics) process.stderr.write(`${diagnostic}\n`);
@@ -361,14 +517,28 @@ async function executeLibraryCommand(
 						]
 					: [];
 			});
+			if (query) {
+				const score = (entry: (typeof entries)[number]): number =>
+					discoveryScore(
+						query,
+						entry.name,
+						[entry.description, ...(entry.provides ?? []).map((hint) => hint.name), ...(entry.triggers ?? [])].join(" "),
+					);
+				entries.sort((left, right) => score(right) - score(left));
+			}
 			if (parsed.json) emit({ entries, diagnostics: discovery.diagnostics });
 			else {
 				for (const entry of entries) {
-					const states = entry.copies.map((item) => `${item.scope}:${item.state}`).join(", ") || "available";
+					const states =
+						entry.copies
+							.map((item) => `${item.scope}:${item.state}${item.update ? ` (${updateLabel(item.update)})` : ""}`)
+							.join(", ") || "available";
 					process.stdout.write(
 						`${libraryEntryRef(entry)}\t${entry.version ?? ""}\t${states}\t${originLabel(entry.provenance)}\t${entry.description}\n`,
 					);
 				}
+				if (query && entries.length === 0)
+					process.stderr.write(`no package matches "${query}"${parsed.kind ? ` (kind ${parsed.kind})` : ""}\n`);
 				for (const diagnostic of discovery.diagnostics) process.stderr.write(`${diagnostic}\n`);
 			}
 			return 0;
@@ -394,6 +564,10 @@ async function executeLibraryCommand(
 			return 0;
 		}
 		const ref = parsed.positional[0];
+		if (parsed.command === "update" && parsed.all) {
+			if (ref) throw new Error("library update takes a package reference or --all, not both");
+			return updateEveryCopy(parsed, options, emit);
+		}
 		if (parsed.command === "drift" && !ref) {
 			const results = listInstalledPlugins(options.cwd, { ...options, all: true }).map((item) => ({
 				id: item.id,
@@ -417,16 +591,45 @@ async function executeLibraryCommand(
 				);
 			return 0;
 		}
+		if (parsed.command === "package") {
+			const packaged = packageBareSkill(pluginLocalPath(ref, options.cwd), { force: parsed.force, dryRun: parsed.dryRun });
+			if (parsed.json) emit({ ok: true, ...packaged });
+			else {
+				if (parsed.dryRun) process.stdout.write(packaged.manifest);
+				else printOk(`wrote ${packaged.manifestPath}`);
+				for (const note of packaged.identity.notes) process.stderr.write(`${note}\n`);
+				if (!parsed.dryRun)
+					process.stderr.write(
+						`Check it with clio-coder library validate ${path.dirname(packaged.manifestPath)}, then install it with clio-coder library install ${path.dirname(packaged.manifestPath)}.\n`,
+					);
+			}
+			return 0;
+		}
 		if (parsed.command === "validate") {
-			const local = pluginLocalPath(ref);
+			const local = pluginLocalPath(ref, options.cwd);
 			if (local.endsWith("SKILL.md"))
 				return (await import("./skills.js")).runSkillsRead(["validate", local, ...(parsed.json ? ["--json"] : [])]);
+			if (isBareSkillDirectory(local)) {
+				const code = (await import("./skills.js")).runSkillsRead([
+					"validate",
+					path.join(local, "SKILL.md"),
+					...(parsed.json ? ["--json"] : []),
+				]);
+				if (!parsed.json) process.stderr.write(`${bareSkillRemedy(local)}\n`);
+				return code;
+			}
 			const packageRoot = existsSync(local) && statSync(local).isFile() ? path.dirname(local) : local;
-			const { validateLibraryPackage } = await import("../domains/resources/library-validation.js");
-			const result = validateLibraryPackage(packageRoot, options);
+			const result = validateLibraryPackage(packageRoot, {
+				cwd: options.cwd,
+				authoring: { knownSkills: knownSkillNames(options.cwd) },
+			});
 			if (parsed.json) emit(result);
 			else {
 				const name = result.manifest?.name ?? path.basename(packageRoot);
+				for (const resource of result.validation.resources)
+					for (const diag of resource.diagnostics)
+						if (diag.severity === "warning")
+							process.stderr.write(`  warning: ${resource.name}: ${diag.message}${diag.path ? ` (${diag.path})` : ""}\n`);
 				if (result.valid) {
 					const count = result.validation.resources.length;
 					printOk(`package ${name} is valid (${count} resource${count === 1 ? "" : "s"} checked)`);
@@ -495,54 +698,9 @@ async function executeLibraryCommand(
 		}
 		if (LIFECYCLE.includes(parsed.command as LibraryOperation)) {
 			const operation = parsed.command as LibraryOperation;
-			const plan = planLibraryLifecycle({
-				operation,
-				ref,
-				cwd: options.cwd,
-				...(parsed.scope ? { scope: parsed.scope } : {}),
-				...(options.catalog ? { catalog: options.catalog } : {}),
-				force: parsed.force,
-				withRequirements: parsed.withRequirements,
-			});
-			if (!parsed.json) printStepReviews(plan);
-			const apply = applyLibraryLifecycle(plan, { dryRun: parsed.dryRun });
-			const ok = apply.failed === 0 && (apply.dryRun || plan.applicable);
+			const { plan, apply, ok } = runLifecycleStep(operation, ref, parsed.scope, parsed, options);
 			if (parsed.json) emit(lifecycleJson(operation, plan, apply, ok));
-			else {
-				for (const outcome of apply.outcomes) {
-					const step = plan.steps.find(
-						(item) => item.identity.ref === outcome.identity.ref && item.identity.scope === outcome.identity.scope,
-					);
-					const where = `${outcome.identity.ref} (${outcome.identity.scope})`;
-					if (outcome.status === "committed")
-						printOk(
-							`${verb(operation)} ${where}${step?.source ? ` at ${step.destination} (sha256 ${step.source.sha256})` : ""}${
-								outcome.recovery?.packageBackup ? `; recovery ${outcome.recovery.packageBackup}` : ""
-							}${outcome.error ? `; verification: ${outcome.error.message}` : ""}`,
-						);
-					else if (outcome.status === "unattempted")
-						process.stdout.write(
-							`${parsed.dryRun ? "planned" : "unattempted"} ${operation} ${where}${step?.refusal ? `: ${step.refusal}` : ""}\n`,
-						);
-					else {
-						// A refusal already names its fix; the generic next step is the TUI review's wording.
-						const next = outcome.error?.code === "refused" ? "" : (outcome.error?.next ?? "");
-						printError(`${operation} ${where} failed: ${outcome.error?.message ?? "unknown"}${next ? `; ${next}` : ""}`);
-					}
-				}
-				if (apply.committed) {
-					const refresh = apply.refresh;
-					process.stderr.write(
-						refresh.status === "not-applicable"
-							? apply.outcomes.some((item) => item.status === "committed" && item.identity.kind === "extension")
-								? "A running session loads this extension and its hooks after /reload.\n"
-								: "A running session picks this up after /library reload.\n"
-							: refresh.status === "failed"
-								? `session refresh failed: ${refresh.error}\n`
-								: `session resources refreshed (generation ${refresh.generation})\n`,
-					);
-				}
-			}
+			else printRefreshNote(apply);
 			return ok ? 0 : 1;
 		}
 		const entry = resolveInstalledLibraryEntry(ref, options);

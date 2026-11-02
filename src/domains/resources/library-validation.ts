@@ -11,6 +11,7 @@ import type { PluginCandidate } from "../plugins/types.js";
 import { readLibraryManifest } from "./library-packages.js";
 import { resolvePackageReferences } from "./package-references.js";
 import { loadPromptTemplates, type PromptTemplateRoot } from "./prompts/loader.js";
+import { skillAuthoringDiagnostics } from "./skills/authoring-check.js";
 import { loadSkills, type Skill, type SkillRoot, skillCatalogValidity } from "./skills/loader.js";
 
 export type LibraryValidationSeverity = "warning" | "error";
@@ -64,9 +65,19 @@ function parseRefErrorCode(message: string, fallback: string): string {
 		: fallback;
 }
 
+export interface LibraryValidationOptions {
+	cwd?: string;
+	/**
+	 * Also hold skills to the authoring checks: body references, routing names,
+	 * length and verification age. Installing and inspecting a package never ask
+	 * for these, since a broken link in a third party's prose is its author's bug.
+	 */
+	authoring?: { knownSkills: ReadonlySet<string> };
+}
+
 export function validateLibraryPackage(
 	packageRoot: string,
-	_options: { cwd?: string } = {},
+	options: LibraryValidationOptions = {},
 ): LibraryPackageValidationResult {
 	const resolved = path.resolve(packageRoot);
 	const candidate = readLibraryManifest(resolved);
@@ -140,6 +151,10 @@ export function validateLibraryPackage(
 			const skillList = loadSkills({ roots: [skillRoot], disableDiscovery: true, cwd: resolved });
 			const validity = skillCatalogValidity(skillList);
 			const loadedPaths = new Set(skillList.items.map((s) => s.filePath));
+			const authoring = options.authoring;
+			const knownSkills = authoring
+				? new Set([...authoring.knownSkills, ...skillList.items.map((item) => item.name)])
+				: undefined;
 
 			if (!validity.ok) {
 				contentDiagnostics.push({
@@ -154,8 +169,11 @@ export function validateLibraryPackage(
 			for (const skill of skillList.items) {
 				loadedSkills.set(skill.name, skill);
 				const relPath = normalizePathRel(resolved, skill.filePath);
-				const hasHardError = skill.diagnostics.some((d) => d.type === "error" || d.type === "collision");
-				const skillDiags: LibraryValidationDiagnostic[] = skill.diagnostics.map((d) => ({
+				const checked = knownSkills
+					? [...skill.diagnostics, ...skillAuthoringDiagnostics(skill, { knownSkills })]
+					: skill.diagnostics;
+				const hasHardError = checked.some((d) => d.type === "error" || d.type === "collision");
+				const skillDiags: LibraryValidationDiagnostic[] = checked.map((d) => ({
 					severity: d.type === "error" || d.type === "collision" ? "error" : "warning",
 					code: d.type === "error" || d.type === "collision" ? "ERR_SKILL" : "WARN_SKILL",
 					message: d.message,

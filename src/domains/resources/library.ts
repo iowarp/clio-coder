@@ -33,6 +33,7 @@ import {
 } from "./library-packages.js";
 import type { LibraryPackageEntry, LibraryRequirementRef } from "./library-types.js";
 import { type LibraryPackageValidationResult, validateLibraryPackage } from "./library-validation.js";
+import { bareSkillRemedy, isBareSkillDirectory } from "./skills/bare-skill.js";
 
 export type LibraryEntry = LibraryPackageEntry;
 
@@ -216,6 +217,7 @@ export function registerLibraryPackage(
 ): LibraryEntry {
 	const local = pluginLocalPath(source, options.cwd);
 	if (!existsSync(local)) throw new Error(`no package directory at ${local}`);
+	if (isBareSkillDirectory(local)) throw new Error(bareSkillRemedy(local));
 	const candidate = validateLibraryPackage(local);
 	if (!candidate.valid || !candidate.manifest || !candidate.contentDigest) throw new Error(validationReasons(candidate));
 	const manifest = candidate.manifest;
@@ -508,6 +510,7 @@ export function resolveLibraryPackage(
 ): PluginCatalogEntry {
 	const local = pluginLocalPath(source, options.cwd);
 	if (existsSync(local)) {
+		if (isBareSkillDirectory(local)) throw new Error(bareSkillRemedy(local));
 		const candidate = validateLibraryPackage(local);
 		if (!candidate.valid || !candidate.manifest) throw new Error(`invalid plugin: ${validationReasons(candidate)}`);
 		const serves =

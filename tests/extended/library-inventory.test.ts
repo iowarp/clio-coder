@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -91,6 +91,74 @@ function cli(env: { dir: string }, cwd: string, args: string[]): { code: number;
 }
 
 describe("library inventory", () => {
+	it("search requires every query word, matches trigger phrases and reports no matches", async () => {
+		const env = await isolateClioEnv();
+		try {
+			const cwd = join(env.dir, "workspace");
+			mkdirSync(cwd);
+			write(
+				env.dir,
+				"config/library.yaml",
+				stringify({
+					entries: [
+						{
+							kind: "plugin",
+							name: "needle",
+							description: "Search fixture",
+							triggers: ["rare workflow phrase"],
+							sourceUrl: "https://github.com/example/repo/tree/v1/needle",
+							version: "1.0.0",
+							sha256: "a".repeat(64),
+						},
+					],
+				}),
+			);
+			for (const query of ["needle fixture", "rare workflow phrase"]) {
+				const result = cli(env, cwd, ["search", query, "--json"]);
+				strictEqual(result.code, 0, result.stderr);
+				ok(JSON.stringify(result.json).includes('"needle"'));
+				strictEqual(readLibraryInventory({ cwd, query }).packages.length, 1);
+			}
+			strictEqual(readLibraryInventory({ cwd, query: "needle nonexistentword" }).packages.length, 0);
+			const result = spawnSync(process.execPath, [cliEntry, "library", "search", "nonexistentword"], {
+				cwd,
+				env: { ...process.env, ...scratchClioEnvVars(env.dir) },
+				encoding: "utf8",
+			});
+			strictEqual(result.status, 0);
+			match(result.stdout + result.stderr, /no .*match/i);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("prints inactive packages without admitting their resources", async () => {
+		const env = await isolateClioEnv();
+		try {
+			const cwd = join(env.dir, "workspace");
+			mkdirSync(cwd);
+			const src = join(env.dir, "inactive");
+			fixture(src, "inactive");
+			const installed = installPlugin(src, { cwd, scope: "user" });
+			ok(installed.plugin);
+			write(installed.plugin.rootPath, "skills/alpha/SKILL.md", "Changed.");
+			strictEqual(byOwner(readLibraryInventory({ cwd }).resources, "plugin:inactive").length, 0);
+			for (const args of [["components"], ["skills", "--all"]]) {
+				const result = spawnSync(process.execPath, [cliEntry, "library", ...args], {
+					cwd,
+					env: { ...process.env, ...scratchClioEnvVars(env.dir) },
+					encoding: "utf8",
+				});
+				strictEqual(result.status, 0, result.stderr);
+				match(result.stdout, /inactive.*user.*damaged/);
+				const json = cli(env, cwd, [...args, "--json"]).json as { inactivePackages: Array<{ ref: string; state: string }> };
+				ok(json.inactivePackages.some((p) => p.ref === "plugin:inactive" && p.state === "damaged"));
+			}
+		} finally {
+			env.restore();
+		}
+	});
+
 	it("reports Materio's actual 6 skills, 6 agents, 17 prompts and 1 playbook with owner, runtime names and bundled origin", async () => {
 		const env = await isolateClioEnv("clio-coder-inventory-materio-");
 		try {

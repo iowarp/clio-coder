@@ -2,13 +2,14 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { readSettings } from "../../core/config.js";
-import { discoveryScore } from "../../core/harness-discovery.js";
+import { discoveryScore, discoveryTermsMatch } from "../../core/harness-discovery.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { listPlaybooks } from "../agents/playbook.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import { type AgentRecipeDiagnostic, discoverAgentRecipes } from "../agents/registry.js";
 import type { AgentAudience } from "../agents/spec.js";
+import { isSemanticVersion, satisfiesSemVerRange } from "../extensions/compatibility.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import { bundledLibraryIndexPath, parsePluginGithubSource } from "../plugins/catalog.js";
 import { withPluginDiscoveryPass } from "../plugins/index.js";
@@ -42,7 +43,7 @@ import { loadSkills, type Skill } from "./skills/loader.js";
  * this module.
  */
 
-export type LibraryPackageFormat = "portable" | "claude-code" | "codex";
+export type LibraryPackageFormat = "portable" | "claude-code" | "codex" | "agent-skill";
 
 /** Where the bytes came from, derived from discovery, install and adoption evidence only. */
 export type LibraryOrigin =
@@ -67,6 +68,12 @@ export type LibraryCopyState =
 	| "damaged"
 	| "untrusted";
 
+/** A newer catalog version, or the same version whose pinned bytes moved. */
+export interface LibraryCopyUpdate {
+	version: string;
+	reason: "newer-version" | "changed-content";
+}
+
 export interface LibraryCopy {
 	ref: LibraryRequirementRef;
 	kind: LibraryEntryKind;
@@ -87,6 +94,8 @@ export interface LibraryCopy {
 	recordedDigest?: string;
 	observedDigest?: string;
 	installedAt?: string;
+	/** Present only for a copy installed from a catalog row that has moved past it. */
+	update?: LibraryCopyUpdate;
 	diagnostics: string[];
 }
 
@@ -105,7 +114,7 @@ export interface LibraryPackageRecord {
 	provides?: LibraryProvidedResource[];
 	/** Which reader produced the row: a catalog, a scoped index, or install state alone. */
 	catalogOrigin: LibraryPackageEntry["origin"];
-	copies: Array<{ scope: PluginScope; state: LibraryCopyState }>;
+	copies: Array<{ scope: PluginScope; state: LibraryCopyState; update?: LibraryCopyUpdate }>;
 	refusal?: string;
 }
 
@@ -429,9 +438,8 @@ function safeInstallRecord(plugin: InstalledPlugin, cwd: string): PluginInstallR
 	}
 }
 
-function projectCopy(plugin: InstalledPlugin, cwd: string): LibraryCopy {
+function projectCopy(plugin: InstalledPlugin, cwd: string, record = safeInstallRecord(plugin, cwd)): LibraryCopy {
 	const kind = plugin.kind ?? "plugin";
-	const record = safeInstallRecord(plugin, cwd);
 	const classified = classifyLibraryOrigin({ kind: "install-record", record, rootPath: plugin.rootPath });
 	return {
 		ref: `${kind}:${plugin.id}`,
@@ -457,6 +465,52 @@ function projectCopy(plugin: InstalledPlugin, cwd: string): LibraryCopy {
 			.slice(0, LIBRARY_INVENTORY_LIMITS.copyDiagnostics)
 			.map((item) => clip(item.message, LIBRARY_INVENTORY_LIMITS.message)),
 	};
+}
+
+/**
+ * What a catalog row offers a copy installed from it. Only a catalog install has
+ * a row to compare with: a local or imported copy with the same name is another
+ * source, so a matching catalog version says nothing about it. An older catalog
+ * version is not an update either, because a downgrade is an explicit install.
+ */
+function catalogCopyUpdate(copy: LibraryCopy, entry: LibraryPackageEntry): LibraryCopyUpdate | undefined {
+	if (entry.origin === "installed" || !entry.version) return undefined;
+	if (isSemanticVersion(copy.version) && satisfiesSemVerRange(entry.version, `>${copy.version}`))
+		return { version: entry.version, reason: "newer-version" };
+	if (entry.version === copy.version && entry.sha256 && copy.recordedDigest && entry.sha256 !== copy.recordedDigest)
+		return { version: entry.version, reason: "changed-content" };
+	return undefined;
+}
+
+const INACTIVE_COPY_STATES: ReadonlySet<LibraryCopyState> = new Set([
+	"damaged",
+	"invalid",
+	"incompatible",
+	"disabled",
+	"untrusted",
+]);
+
+/**
+ * Installed copies the loaders never read, so no resource row can speak for
+ * them. A shadowed copy is not one: the winning copy still provides its
+ * components under the same names.
+ */
+export function inactiveLibraryCopies(copies: ReadonlyArray<LibraryCopy>): LibraryCopy[] {
+	return copies.filter((copy) => INACTIVE_COPY_STATES.has(copy.state));
+}
+
+/** The next operator step for an inactive copy, in the words the CLI accepts. */
+export function inactiveCopyRemedy(copy: Pick<LibraryCopy, "ref" | "scope" | "state">): string {
+	switch (copy.state) {
+		case "damaged":
+			return `local files differ from the pin; review with clio-coder library drift ${copy.ref} --${copy.scope}, then replace with clio-coder library update ${copy.ref} --${copy.scope} --force`;
+		case "disabled":
+			return `enable with clio-coder library enable ${copy.ref} --${copy.scope}`;
+		case "untrusted":
+			return "approve with clio-coder config trust plugins, then /library reload";
+		default:
+			return `inspect with clio-coder library inspect ${copy.ref} --${copy.scope}`;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -755,15 +809,32 @@ function parseSelection(ref: string | undefined): Selection {
 	return { name: ref };
 }
 
+/**
+ * An operator's query narrows a list, so a phrase or every distinctive word must
+ * hold across the fields. The model's query scores task vocabulary instead, and
+ * ranks the partial hits a narrowing filter would hide.
+ */
+export function libraryQueryMatches(query: string, ...fields: ReadonlyArray<string | undefined>): boolean {
+	const needle = query.toLowerCase();
+	return (
+		fields.some((field) => field?.toLowerCase().includes(needle)) ||
+		discoveryTermsMatch(query, fields.filter((field) => field !== undefined).join(" "))
+	);
+}
+
 function matchesQuery(options: LibraryInventoryOptions, ...fields: ReadonlyArray<string | undefined>): boolean {
 	const query = options.query;
 	if (!query) return true;
 	if (options.audience === "model") return discoveryScore(query, fields[0] ?? "", fields.slice(1).join(" ")) > 0;
-	const needle = query.toLowerCase();
-	return fields.some((field) => field?.toLowerCase().includes(needle));
+	return libraryQueryMatches(query, ...fields);
 }
 
-function packageMatches(record: LibraryPackageRecord, options: LibraryInventoryOptions, selection: Selection): boolean {
+function packageMatches(
+	record: LibraryPackageRecord,
+	options: LibraryInventoryOptions,
+	selection: Selection,
+	triggers: ReadonlyArray<string> = [],
+): boolean {
 	if (selection.packageRef && record.ref !== selection.packageRef) return false;
 	if (selection.name && record.name !== selection.name && !record.provides?.some((hint) => hint.name === selection.name))
 		return false;
@@ -778,7 +849,13 @@ function packageMatches(record: LibraryPackageRecord, options: LibraryInventoryO
 		const kinds = options.kinds;
 		if (!kinds.includes(record.kind) && !record.provides?.some((hint) => kinds.includes(hint.kind))) return false;
 	}
-	return matchesQuery(options, record.name, record.description, ...(record.provides ?? []).map((hint) => hint.name));
+	return matchesQuery(
+		options,
+		record.name,
+		record.description,
+		...(record.provides ?? []).map((hint) => hint.name),
+		...triggers,
+	);
 }
 
 function copyMatches(copy: LibraryCopy, options: LibraryInventoryOptions, selection: Selection): boolean {
@@ -789,7 +866,12 @@ function copyMatches(copy: LibraryCopy, options: LibraryInventoryOptions, select
 	return true;
 }
 
-function resourceMatches(resource: LibraryComponent, options: LibraryInventoryOptions, selection: Selection): boolean {
+function resourceMatches(
+	resource: LibraryComponent,
+	options: LibraryInventoryOptions,
+	selection: Selection,
+	triggers: ReadonlyArray<string> = [],
+): boolean {
 	if (selection.packageRef && resource.owner?.ref !== selection.packageRef) {
 		const [kind, name] = selection.packageRef.split(":", 2);
 		if (!(kind === resource.kind && name === resource.name)) return false;
@@ -798,7 +880,7 @@ function resourceMatches(resource: LibraryComponent, options: LibraryInventoryOp
 	if (selection.resourceKey && !keyMatches(resource.key, selection.resourceKey)) return false;
 	if (options.kinds?.length && !options.kinds.includes(resource.kind)) return false;
 	if (options.sources?.length && !options.sources.includes(resource.source.class)) return false;
-	return matchesQuery(options, resource.name, resource.description);
+	return matchesQuery(options, resource.name, resource.description, ...triggers);
 }
 
 function audienceAdmits(resource: LibraryComponent, options: LibraryInventoryOptions): boolean {
@@ -856,7 +938,14 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 	const installed =
 		include.copies || include.packages || include.resources ? listInstalledPlugins(cwd, { all: true }) : [];
 	const copyRows = new Bounded<LibraryCopy>(LIBRARY_INVENTORY_LIMITS.copies);
-	for (const plugin of installed) if (!copyRows.push(projectCopy(plugin, cwd))) break;
+	const catalogInstalled = new Set<string>();
+	for (const plugin of installed) {
+		const record = safeInstallRecord(plugin, cwd);
+		const copy = projectCopy(plugin, cwd, record);
+		if (!copyRows.push(copy)) break;
+		if (typeof record?.origin === "object" && record.origin.kind === "catalog")
+			catalogInstalled.add(`${copy.ref}@${copy.scope}`);
+	}
 	if (copyRows.truncated) note("installed copies truncated; later copies have no owner rows");
 	const copies = copyRows.items;
 	const copiesByRef = new Map<string, LibraryCopy[]>();
@@ -874,6 +963,11 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 					? { origin: own[0].origin, ...(own[0].format ? { format: own[0].format } : {}) }
 					: classifyLibraryOrigin({ kind: "catalog-row", entry });
 			const refusal = discovery.refusals[ref];
+			for (const copy of own) {
+				if (!catalogInstalled.has(`${copy.ref}@${copy.scope}`)) continue;
+				const update = catalogCopyUpdate(copy, entry);
+				if (update) copy.update = update;
+			}
 			const record: LibraryPackageRecord = {
 				ref,
 				kind: entry.kind,
@@ -887,11 +981,15 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 				...(classified.format ? { format: classified.format } : {}),
 				...(entry.provides ? { provides: entry.provides } : {}),
 				catalogOrigin: entry.origin,
-				copies: own.map((copy) => ({ scope: copy.scope, state: copy.state })),
+				copies: own.map((copy) => ({
+					scope: copy.scope,
+					state: copy.state,
+					...(copy.update ? { update: copy.update } : {}),
+				})),
 				...(refusal ? { refusal } : {}),
 			};
 			// discoverLibrary already sorts by ref; selection is applied before the cap.
-			if (packageMatches(record, options, selection) && !packages.push(record)) break;
+			if (packageMatches(record, options, selection, entry.triggers) && !packages.push(record)) break;
 		}
 	}
 
@@ -921,6 +1019,7 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 		// Each loader enumerates its whole root set because precedence needs every
 		// candidate. What is bounded here is which loaders run and what is projected.
 		const skillRows: LibraryComponent[] = [];
+		const skillTriggers = new Map<string, string[]>();
 		if (wants("skill")) {
 			const skills = loadSkills({
 				cwd,
@@ -929,7 +1028,17 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 				...(options.home ? { home: options.home } : {}),
 			});
 			const loose = looseSourceId(index.anchors, "skill");
-			for (const skill of skills.items) skillRows.push(fromSkill(skill, index));
+			for (const skill of skills.items) {
+				const row = fromSkill(skill, index);
+				skillRows.push(row);
+				// Authored trigger phrases are search vocabulary, never part of the row.
+				const triggers = skill.metadata.triggers;
+				if (Array.isArray(triggers))
+					skillTriggers.set(
+						row.key,
+						triggers.filter((item): item is string => typeof item === "string"),
+					);
+			}
 			for (const diagnostic of skills.diagnostics) {
 				const loser =
 					diagnostic.type === "collision" ? fromCollisionLoser("skill", diagnostic, skillRows, index, loose) : undefined;
@@ -976,7 +1085,7 @@ function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryIn
 		// Audience and selection are applied per row while collecting, so the cap
 		// bounds admitted rows rather than a superset that is sliced afterwards.
 		for (const row of sortResources([...skillRows, ...promptRows, ...agentRows, ...fleetRows])) {
-			if (!audienceAdmits(row, options) || !resourceMatches(row, options, selection)) continue;
+			if (!audienceAdmits(row, options) || !resourceMatches(row, options, selection, skillTriggers.get(row.key))) continue;
 			if (!resources.push(row)) break;
 		}
 	}

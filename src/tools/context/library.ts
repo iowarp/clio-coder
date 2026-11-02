@@ -204,6 +204,7 @@ function projectInstalledCopy(copy: LibraryPackageRecord["copies"][number]): Rec
 	return {
 		scope: copy.scope,
 		state: copy.state,
+		...(copy.update ? { update: copy.update } : {}),
 		...(copy.state === "untrusted"
 			? { remedy: "The operator must run clio-coder config trust plugins, then /library reload." }
 			: {}),

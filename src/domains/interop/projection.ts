@@ -56,8 +56,12 @@ export function safeName(name: string): string {
 	return value;
 }
 
+/** License and notice files are text a copy has to keep, whatever their extension. */
+const NOTICE_FILE = /^(?:LICEN[CS]E|COPYING|NOTICE)(?:\.[A-Za-z0-9]+)?$/u;
+
 function safeData(file: string): boolean {
-	return !file.split("/").some((part) => FORBIDDEN_PARTS.has(part)) && DATA_EXTENSIONS.has(path.extname(file));
+	if (file.split("/").some((part) => FORBIDDEN_PARTS.has(part))) return false;
+	return DATA_EXTENSIONS.has(path.extname(file)) || NOTICE_FILE.test(path.basename(file));
 }
 
 /**

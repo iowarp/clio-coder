@@ -14,14 +14,17 @@ import { printError } from "./shared.js";
 
 const HELP = `clio-coder library import <path|github-tree-url> [--user|--project] [--format claude|codex] [--dry-run] [--json] [--yes]
 
-Review and import a plugin package from a local directory or a GitHub tree URL
-(https://github.com/owner/repo/tree/ref/path). A portable root plugin.json is
-imported as-is (data only). A .claude-plugin/plugin.json or .codex-plugin/plugin.json
-package is normalized into a portable Clio package: skills keep their text and
-frontmatter names, command markdown becomes prompt recipes, Claude agents become
-read-only Clio agents. Hooks, MCP, LSP, scripts and host settings are reported and
-never activated. Imported packages keep foreign trust; --format disambiguates when
-both hidden manifests exist. Source files are never changed.
+Review and import a plugin package or a bare skill from a local directory or a
+GitHub tree URL (https://github.com/owner/repo/tree/ref/path). A portable root
+plugin.json is imported as-is (data only). A .claude-plugin/plugin.json or
+.codex-plugin/plugin.json package is normalized into a portable Clio package:
+skills keep their text and frontmatter names, command markdown becomes prompt
+recipes, Claude agents become read-only Clio agents. A directory holding only a
+SKILL.md becomes a one-skill package; one whose instructions use a script import
+cannot copy is refused, and library package keeps it instead. Hooks, MCP, LSP,
+scripts and host settings are reported and never activated. Imported packages
+keep foreign trust; --format disambiguates when both hidden manifests exist.
+Source files are never changed.
 `;
 
 interface Parsed {

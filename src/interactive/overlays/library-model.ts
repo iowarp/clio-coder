@@ -15,6 +15,7 @@ import {
 	type LibraryComponentKind,
 	type LibraryCopy,
 	type LibraryCopyInspection,
+	type LibraryCopyUpdate,
 	type LibraryEntryKind,
 	type LibraryInventory,
 	type LibraryOrigin,
@@ -99,6 +100,7 @@ function libraryFormatLabel(format: string | undefined): string {
 	if (format === "claude-code") return "Claude Code format";
 	if (format === "codex") return "Codex format";
 	if (format === "portable") return "Portable format";
+	if (format === "agent-skill") return "Bare Agent Skills directory";
 	return "Format unknown";
 }
 
@@ -132,6 +134,11 @@ export function libraryStatusLine(
 	if (view.member && width >= 72)
 		parts.push(theme.fg("annotation", `members of ${sanitizeCallTargetText(view.member.ref)}`));
 	return parts.join(theme.fg("border", " │ "));
+}
+
+/** One phrase for a copy its catalog row has moved past. */
+function libraryUpdateLabel(update: LibraryCopyUpdate): string {
+	return update.reason === "newer-version" ? `update ${update.version} available` : "changed content available";
 }
 
 /** The composer text a `use` on this component writes, or null when its use is another surface. */
@@ -334,7 +341,11 @@ function packageDetail(
 	if (record.sha256) lines.push(`**Recorded digest:** \`${record.sha256.slice(0, 12)}\``);
 	lines.push(
 		`**Installed copies:** ${
-			record.copies.length === 0 ? "none" : record.copies.map((copy) => `${copy.scope} (${copy.state})`).join(", ")
+			record.copies.length === 0
+				? "none"
+				: record.copies
+						.map((copy) => `${copy.scope} (${copy.state}${copy.update ? `, ${libraryUpdateLabel(copy.update)}` : ""})`)
+						.join(", ")
 		}`,
 	);
 	lines.push(`**Selected scope:** ${view.scope}`);
@@ -360,6 +371,7 @@ function copyDetail(
 		`**Kind:** ${copy.kind}`,
 		`**Scope:** ${copy.scope}`,
 		`**State:** ${copy.state}`,
+		...(copy.update ? [`**Update:** ${libraryUpdateLabel(copy.update)}`] : []),
 		`**Enabled:** ${copy.enabled ? "yes" : "no"} · **Valid:** ${copy.valid ? "yes" : "no"} · **Compatible:** ${copy.compatible ? "yes" : "no"} · **Effective:** ${copy.effective ? "yes" : "no"}`,
 		`**Trust:** ${copy.trust}`,
 		`**Origin:** ${libraryOriginLabel(copy.origin)}`,
@@ -632,6 +644,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 				get meta() {
 					return metaOf([
 						here ? `${here.scope} ${here.state}` : `not installed (${view.scope})`,
+						here?.update ? libraryUpdateLabel(here.update) : undefined,
 						hints.length > 0
 							? `${hints.length} ${view.category === "plugin" ? "component" : view.category} hints`
 							: undefined,
@@ -658,6 +671,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 					return metaOf([
 						copy.scope,
 						() => copyStateWord(copy),
+						copy.update ? libraryUpdateLabel(copy.update) : undefined,
 						libraryOriginLabel(copy.origin),
 						copy.trust === "foreign" ? () => theme.fg("warning", "foreign") : undefined,
 					]);

@@ -102,7 +102,7 @@ function readState(scope: PluginScope, cwd: string): { state: PluginState; bytes
 	return { state: raw as unknown as PluginState, bytes };
 }
 
-const FOREIGN_FORMATS = new Set(["portable", "claude-code", "codex"]);
+const FOREIGN_FORMATS = new Set(["portable", "claude-code", "codex", "agent-skill"]);
 /** Persisted provenance is validated on every read so a hand-edited record cannot invent an origin. */
 function validOrigin(origin: unknown): boolean {
 	if (!record(origin) || typeof origin.source !== "string") return false;
@@ -584,6 +584,30 @@ function uniqueSibling(target: string, purpose: string): string {
 	);
 }
 
+/** How many preserved copies of one package a scope keeps. */
+const RECOVERY_COPIES_KEPT = 3;
+
+/**
+ * Keep only the newest preserved copies of one package. A recovery copy exists
+ * because it held changes no pin could vouch for, so it is kept across runs, but
+ * nothing else ever removes one and a package repaired over and over would pile
+ * up full trees. Renaming a directory into place sets its ctime, which is why
+ * that orders them: mtime still reads when the files last changed.
+ */
+function sweepRecoveryCopies(target: string): void {
+	const base = path.dirname(target);
+	const prefixes = ["removed", "backup"].map((purpose) => `.${path.basename(target)}.${purpose}-`);
+	try {
+		const copies = readdirSync(base)
+			.filter((name) => prefixes.some((prefix) => name.startsWith(prefix)))
+			.map((name) => ({ file: path.join(base, name), changed: lstatSync(path.join(base, name)).ctimeMs }))
+			.sort((a, b) => b.changed - a.changed);
+		for (const copy of copies.slice(RECOVERY_COPIES_KEPT)) rmSync(copy.file, { recursive: true, force: true });
+	} catch {
+		// The operation this follows has already committed; a copy left behind only costs disk.
+	}
+}
+
 /** Recheck held bytes after publication so edits made during staging survive. */
 function retainRecovery(backup: string, expectedDigest: string | undefined): boolean {
 	try {
@@ -707,6 +731,7 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 			throw error;
 		}
 		if (moved && !preserveBackup) preserveBackup = retainRecovery(backup, previousDigest);
+		if (moved && preserveBackup) sweepRecoveryCopies(target);
 		recordLifecycleReceipt(
 			{
 				operation: previouslyInstalled ? "update" : "install",
@@ -840,6 +865,7 @@ export function removePlugin(id: string, options: PluginMutationOptions = {}): P
 			throw error;
 		}
 		if (moved && !preserve) preserve = retainRecovery(backup, previousDigest);
+		if (moved && preserve) sweepRecoveryCopies(target);
 		recordLifecycleReceipt(receiptIdentity, options.lifecycle);
 		return {
 			removed: { id, scope, path: target },

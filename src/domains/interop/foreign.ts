@@ -13,10 +13,12 @@ import path from "node:path";
 import { isSemanticVersion } from "../extensions/compatibility.js";
 import { isPluginId, PLUGIN_EXTENSION_KEY, PLUGIN_SCHEMA } from "../plugins/index.js";
 import type { ForeignPackageFormat, PluginComponent } from "../plugins/types.js";
+import { nestedSkillDirectories } from "../resources/skills/bare-skill.js";
 import { inventoryText } from "./inventory.js";
 import { type ProjectedResource, projectAgent, projectPrompt, projectSkill, safeName, tree } from "./projection.js";
 
-export type ForeignPluginFormat = Exclude<ForeignPackageFormat, "portable">;
+/** A manifest-bearing vendor plugin. A bare skill has no manifest to normalize and takes its own route. */
+export type ForeignPluginFormat = Exclude<ForeignPackageFormat, "portable" | "agent-skill">;
 
 export const FOREIGN_MANIFESTS: ReadonlyArray<{ format: ForeignPackageFormat; path: string }> = [
 	{ format: "portable", path: "plugin.json" },
@@ -60,15 +62,29 @@ export function detectForeignPlugin(root: string, explicit?: ForeignPluginFormat
 		return { format: "portable", manifestPath: portable.path, candidates, ambiguous: false, diagnostics };
 	}
 	const hidden = candidates.filter((candidate) => candidate.format !== "portable");
-	if (hidden.length === 0)
+	if (hidden.length === 0) {
+		if (present("SKILL.md")) {
+			if (explicit)
+				return {
+					format: "none",
+					candidates,
+					ambiguous: false,
+					diagnostics: [`No ${explicit} manifest present; this is a bare skill directory, so drop --format.`],
+				};
+			return { format: "agent-skill", manifestPath: "SKILL.md", candidates, ambiguous: false, diagnostics };
+		}
+		const nested = nestedSkillDirectories(root);
 		return {
 			format: "none",
 			candidates,
 			ambiguous: false,
 			diagnostics: [
-				"No plugin manifest found: expected plugin.json, .claude-plugin/plugin.json or .codex-plugin/plugin.json.",
+				nested.length > 0
+					? `No plugin manifest or SKILL.md at this root. Skills found below it: ${nested.join(", ")}. Import one skill directory at a time.`
+					: "No plugin manifest found: expected plugin.json, .claude-plugin/plugin.json, .codex-plugin/plugin.json or a root SKILL.md.",
 			],
 		};
+	}
 	if (explicit) {
 		const chosen = hidden.find((candidate) => candidate.format === explicit);
 		if (!chosen)

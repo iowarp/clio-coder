@@ -24,7 +24,7 @@ export const PROVENANCE_KEYS = new Set([
 	"installedBy",
 ]);
 
-export interface FrontmatterRegion {
+interface FrontmatterRegion {
 	/** Raw text before the frontmatter lines (opening delimiter inclusive). */
 	head: string;
 	lines: string[];
@@ -32,7 +32,7 @@ export interface FrontmatterRegion {
 	tail: string;
 }
 
-export function frontmatterRegion(rawText: string): FrontmatterRegion | null {
+function frontmatterRegion(rawText: string): FrontmatterRegion | null {
 	const opening = rawText.match(/^---\r?\n/);
 	if (!opening) return null;
 	const closeRegex = /\r?\n---(?:\r?\n|$)/g;
@@ -61,7 +61,7 @@ export function frontmatterRegion(rawText: string): FrontmatterRegion | null {
  * top-level `clio-coder:` block; the same keys nested under any other mapping
  * are content and survive.
  */
-export function stripProvenanceLines(lines: ReadonlyArray<string>): string[] {
+function stripProvenanceLines(lines: ReadonlyArray<string>): string[] {
 	const kept: string[] = [];
 	let dropIndent: number | null = null;
 	let inProductBlock = false;
@@ -95,7 +95,7 @@ export function stripProvenanceLines(lines: ReadonlyArray<string>): string[] {
 }
 
 /** Remove install-lifecycle frontmatter lines so content compares across copies. */
-export function stripProvenanceFrontmatter(rawText: string): string {
+function stripProvenanceFrontmatter(rawText: string): string {
 	const region = frontmatterRegion(rawText);
 	if (!region) return rawText;
 	return `${region.head}${stripProvenanceLines(region.lines).join("\n")}${region.tail}`;

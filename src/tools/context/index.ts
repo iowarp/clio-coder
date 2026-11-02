@@ -31,6 +31,7 @@ import {
 	modelVisibleSkills,
 	type Skill,
 	type SkillCatalogRowKind,
+	skillVerification,
 } from "../../domains/resources/index.js";
 import type { SessionEntryInput } from "../../domains/session/contract.js";
 import type { SessionEntry } from "../../domains/session/entries.js";
@@ -189,6 +190,11 @@ function renderSkillBody(skill: Skill, tree: string[] | null): string {
 	];
 	if (skill.allowedTools) lines.push(`allowed_tools: ${skill.allowedTools.join(", ")}`);
 	if (skill.disallowedTools) lines.push(`disallowed_tools: ${skill.disallowedTools.join(", ")}`);
+	const verification = skillVerification(skill);
+	if (verification?.status === "valid")
+		lines.push(
+			`verified_at: ${verification.date}${verification.stale ? ` (${verification.ageDays} days old; check its facts against a live source before relying on them)` : ""}`,
+		);
 	if (skill.diagnostics.length > 0) {
 		lines.push(`diagnostics: ${skill.diagnostics.map((d) => d.message).join("; ")}`);
 	}

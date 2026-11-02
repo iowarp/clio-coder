@@ -39,6 +39,13 @@ function extensionManifest(entry: Pick<InstalledExtension, "id" | "version" | "d
 export function readLibraryManifest(root: string): PluginCandidate {
 	if (existsSync(path.join(root, "plugin.json"))) return readPluginManifest(root);
 	const candidate = loadManifestFromRoot(root);
+	// A root with neither manifest is not a broken extension, so the reader names both.
+	if (candidate.manifestPath === undefined && !candidate.manifest)
+		return {
+			path: root,
+			valid: false,
+			diagnostics: [{ type: "error", message: "no plugin.json or clio-coder-extension.yaml found", path: root }],
+		};
 	const { manifest, ...details } = candidate;
 	return {
 		...details,

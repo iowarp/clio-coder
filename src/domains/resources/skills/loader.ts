@@ -21,7 +21,7 @@ import { clioConfigDir } from "../../../core/xdg.js";
 import { INTEROP_AGENT_KINDS, interopSourceRank, interopUserRoot } from "../../interop/registry.js";
 import { enabledPluginResourceRoots, pluginBaseDir, withPluginDiscoveryPass } from "../../plugins/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
-import { readRootEntries, splitYamlFrontmatter, stringField } from "../common-loader.js";
+import { readRootEntries, splitToolList, splitYamlFrontmatter, stringField } from "../common-loader.js";
 import { resolvePackageReferences } from "../package-references.js";
 import { installedSkillNames } from "./availability.js";
 import { normalizedSkillHash } from "./content-hash.js";
@@ -415,7 +415,7 @@ function rawToolListField(frontmatter: Record<string, unknown>, key: string): st
 	const raw = frontmatter[key];
 	const entries =
 		typeof raw === "string"
-			? raw.split(",")
+			? splitToolList(raw)
 			: Array.isArray(raw)
 				? raw.filter((entry): entry is string => typeof entry === "string")
 				: null;
@@ -423,6 +423,9 @@ function rawToolListField(frontmatter: Record<string, unknown>, key: string): st
 	const tools = entries.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
 	return tools.length > 0 ? [...new Set(tools)] : undefined;
 }
+
+/** `Bash`, or Claude Code's scoped `Bash(git add:*)`, in any case. */
+const FOREIGN_SHELL_ENTRY = /^bash\s*(?:\(.*\))?$/i;
 
 const TOOL_NAMES_BY_LOWERCASE = new Map(Object.values(ToolNames).map((name) => [name.toLowerCase(), name]));
 
@@ -473,9 +476,14 @@ function declaredToolSurface(
 	if (declared === undefined) return undefined;
 	const { tools, unrecognized } = resolveDeclaredTools(declared);
 	if (unrecognized.length > 0) {
+		// Scoped shell entries are the spec's own example, and dropping one takes
+		// the shell away, so the warning names the spelling that keeps it.
+		const shellHint = unrecognized.some((entry) => FOREIGN_SHELL_ENTRY.test(entry))
+			? "; Clio narrows whole tools, so write bash to keep the shell"
+			: "";
 		diagnostics.push({
 			type: "warning",
-			message: `${key} names ${unrecognized.length === 1 ? "a tool" : "tools"} Clio does not have: ${unrecognized.join(", ")}`,
+			message: `${key} names ${unrecognized.length === 1 ? "a tool" : "tools"} Clio does not have: ${unrecognized.join(", ")}${shellHint}`,
 			path: filePath,
 		});
 	}
@@ -548,9 +556,6 @@ export function templateToolSurface(
 	}
 	return tools.length > 0 ? tools : undefined;
 }
-
-/** `Bash`, or Claude Code's scoped `Bash(git add:*)`, in any case. */
-const FOREIGN_SHELL_ENTRY = /^bash\s*(?:\(.*\))?$/i;
 
 /**
  * The `allowed-tools` of an imported command or skill, written for the

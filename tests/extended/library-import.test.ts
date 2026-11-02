@@ -55,7 +55,7 @@ import {
 import { registerHarnessExtensionTools } from "../../src/tools/harness-extensions.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { trustProjectPackages } from "../harness/project-trust.js";
-import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+import { type IsolatedClioEnv, isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
 let env: IsolatedClioEnv;
 let cwd: string;
@@ -114,6 +114,68 @@ describe("library import of foreign plugin packages", () => {
 	afterEach(() => {
 		clearPluginSnapshots();
 		env.restore();
+	});
+
+	it("imports a bare skill with license and normalized version while omitting host tools", () => {
+		const root = path.join(vendor, "bare");
+		file("bare/SKILL.md", skill("bare", 'version: "1.2"\nallowed-tools: Read Write\n'));
+		file("bare/LICENSE", "Fixture license");
+		const plan = planLibraryImport(root, { cwd });
+		strictEqual(plan.format, "agent-skill");
+		strictEqual(plan.action, "install", plan.reasons.join("; "));
+		const result = applyLibraryImport(plan, true);
+		strictEqual(result.published, true, result.diagnostics.join("; "));
+		const installed = listInstalledPlugins(cwd, { all: true }).find((p) => p.id === "bare");
+		ok(installed);
+		strictEqual(installed.version, "1.2.0");
+		const files = snapshot(installed.rootPath);
+		ok(Object.values(files).includes("Fixture license"));
+		ok(
+			Object.entries(files)
+				.filter(([name]) => name.endsWith("SKILL.md"))
+				.every(([, text]) => !text.includes("allowed-tools")),
+		);
+	});
+
+	it("refuses a script-dependent bare import and packages an install that retains the script", () => {
+		const root = path.join(vendor, "scripted-bare");
+		file("scripted-bare/SKILL.md", skill("scripted-bare", 'version: "1.2"\n', "Run `python scripts/check.py`.\n"));
+		file("scripted-bare/scripts/check.py", "print('fixture')\n");
+		const plan = planLibraryImport(root, { cwd });
+		strictEqual(plan.action, "blocked");
+		match(plan.reasons.join("; "), /script/i);
+		releaseLibraryImport(plan);
+		const cli = (...args: string[]) =>
+			spawnSync(process.execPath, [path.resolve("dist/cli/index.js"), "library", ...args], {
+				cwd,
+				env: { ...process.env, ...scratchClioEnvVars(env.dir) },
+				encoding: "utf8",
+			});
+		const packaged = cli("package", root);
+		strictEqual(packaged.status, 0, packaged.stderr);
+		const refused = cli("package", root);
+		strictEqual(refused.status, 1);
+		match(refused.stderr, /--force/);
+		strictEqual(cli("package", root, "--force").status, 0);
+		const installed = cli("install", root, "--user");
+		strictEqual(installed.status, 0, installed.stderr);
+		const copy = listInstalledPlugins(cwd, { all: true }).find((p) => p.id === "scripted-bare");
+		ok(copy);
+		strictEqual(readFileSync(path.join(copy.rootPath, "scripts/check.py"), "utf8"), "print('fixture')\n");
+	});
+
+	it("names nested skill directories once when importing a repository root", () => {
+		file("repo/skills/first/SKILL.md", skill("first"));
+		file("repo/skills/second/SKILL.md", skill("second"));
+		const result = spawnSync(
+			process.execPath,
+			[path.resolve("dist/cli/index.js"), "library", "import", path.join(vendor, "repo"), "--dry-run"],
+			{ cwd, env: { ...process.env, ...scratchClioEnvVars(env.dir) }, encoding: "utf8" },
+		);
+		strictEqual(result.status, 1);
+		const output = result.stdout + result.stderr;
+		strictEqual(output.split("skills/first").length - 1, 1, output);
+		strictEqual(output.split("skills/second").length - 1, 1, output);
 	});
 
 	it("keeps Materio, foreign recipe imports and real harness runtimes independently owned across reloads", async () => {

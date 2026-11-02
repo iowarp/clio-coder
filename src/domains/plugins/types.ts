@@ -88,7 +88,7 @@ export interface PluginCandidate {
 }
 
 /** Format of a foreign package as it was found on disk; author labels never set this. */
-export type ForeignPackageFormat = "portable" | "claude-code" | "codex";
+export type ForeignPackageFormat = "portable" | "claude-code" | "codex" | "agent-skill";
 /**
  * `interop` is a package imported from an installed local agent; `import` is an
  * explicit source path or GitHub tree. Both always carry foreign trust.

@@ -68,6 +68,8 @@ export {
 } from "./library-actions.js";
 export {
 	classifyLibraryOrigin,
+	inactiveCopyRemedy,
+	inactiveLibraryCopies,
 	inspectLibraryCopy,
 	LIBRARY_INVENTORY_LIMITS,
 	type LibraryComponent,
@@ -77,6 +79,7 @@ export {
 	type LibraryCopy,
 	type LibraryCopyInspection,
 	type LibraryCopyState,
+	type LibraryCopyUpdate,
 	type LibraryInventory,
 	type LibraryInventoryOptions,
 	type LibraryOrigin,
@@ -85,6 +88,7 @@ export {
 	type LibraryPackageRecord,
 	libraryComponentKey,
 	libraryCopyState,
+	libraryQueryMatches,
 	parseLibraryResourceKey,
 	readLibraryInventory,
 } from "./library-inventory.js";
@@ -121,7 +125,18 @@ export {
 	type PromptTemplateRoot,
 	promptTemplateDisplayText,
 } from "./prompts/loader.js";
+export {
+	SKILL_BODY_LINE_BUDGET,
+	type SkillVerification,
+	skillAuthoringDiagnostics,
+	skillVerification,
+} from "./skills/authoring-check.js";
 export { installedSkillNames, installedSkillPackages } from "./skills/availability.js";
+export {
+	bareSkillRemedy,
+	isBareSkillDirectory,
+	packageBareSkill,
+} from "./skills/bare-skill.js";
 export {
 	buildSkillCatalogView,
 	type SkillCatalogPackage,
@@ -130,13 +145,7 @@ export {
 	type SkillCatalogView,
 	type SkillCatalogViewInput,
 } from "./skills/catalog-view.js";
-export {
-	type InstallSkillInput,
-	type InstallSkillResult,
-	normalizedSkillHash,
-	parseSkillSourceSpec,
-	type SkillSourceSpec,
-} from "./skills/install.js";
+export { normalizedSkillHash } from "./skills/content-hash.js";
 export { type LexicalMatchMode, lexicalMatches } from "./skills/lexical-match.js";
 export {
 	defaultSkillRoots,
@@ -161,7 +170,10 @@ export {
 	type DiscoverMarketplaceOptions,
 	discoverMarketplaceSkills,
 	getMarketplaceSkills,
+	type InstallSkillInput,
+	type InstallSkillResult,
 	installSkill,
+	knownSkillNames,
 	type LibraryEntryKind,
 	type LibraryRequirementRef,
 	MARKETPLACE_UNCONFIGURED,
@@ -169,7 +181,6 @@ export {
 	type MarketplaceSkill,
 	type MarketplaceSkillOrigin,
 	type MarketplaceStatus,
-	marketplaceInstallShaping,
 } from "./skills/marketplace.js";
 export {
 	checkSkillDrift,

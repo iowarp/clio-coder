@@ -1,15 +1,11 @@
-import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
 import { isSkillActivation, skillActivationFromToolDetails } from "../../src/core/skill-activation.js";
-import {
-	installSkillFromSource,
-	normalizedSkillHash,
-	parseSkillSourceSpec,
-} from "../../src/domains/resources/skills/install.js";
+import { normalizedSkillHash } from "../../src/domains/resources/skills/content-hash.js";
 import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resources/skills/loader.js";
 import { createPendingSkillToolPolicy } from "../../src/session-control/chat-loop-messages.js";
 import { createContextTool } from "../../src/tools/context/index.js";
@@ -39,62 +35,6 @@ function writeSkill(root: string, name: string, description: string | null, body
 describe("skill install and activation boundary", () => {
 	afterEach(() => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-	});
-
-	it("refuses repository sources that escape their clone", () => {
-		for (const source of [
-			"https://github.com/o/r/blob/main/../../../etc/passwd",
-			"https://github.com/o/r/tree/main/skills/../../..",
-			"https://raw.githubusercontent.com/o/r/main/../../secrets",
-		]) {
-			strictEqual(parseSkillSourceSpec(source), null);
-		}
-		deepStrictEqual(parseSkillSourceSpec("https://github.com/o/r/tree/main/skills/review"), {
-			kind: "github",
-			cloneUrl: "https://github.com/o/r.git",
-			branch: "main",
-			filePath: "skills/review",
-			original: "https://github.com/o/r/tree/main/skills/review",
-		});
-	});
-
-	it("installs a complete directory atomically and records content provenance", () => {
-		const root = scratchRoot();
-		const source = writeSkill(root, "review", "Reviews changes.", "Review the requested change.");
-		mkdirSync(join(source, "scripts"));
-		writeFileSync(join(source, "scripts", "check.sh"), "#!/bin/sh\nexit 0\n");
-		const project = join(root, "project");
-		mkdirSync(project);
-
-		const result = installSkillFromSource({ source, scope: "project", cwd: project });
-		ok(existsSync(join(project, ".clio-coder", "skills", "review", "scripts", "check.sh")));
-		const loaded = loadSkills({ cwd: project }).items.find((skill) => skill.name === "review");
-		ok(loaded !== undefined);
-		strictEqual(loaded.provenance?.installUrl, source);
-		strictEqual(loaded.provenance?.installedHash, result.installedHash);
-		strictEqual(loaded.normalizedHash, normalizedSkillHash(readFileSync(join(source, "SKILL.md"), "utf8")));
-		match(readFileSync(result.path, "utf8"), /^clio-coder:$/mu);
-	});
-
-	it("preserves the installed copy when a forced replacement is invalid", () => {
-		const root = scratchRoot();
-		const source = writeSkill(root, "review", "Reviews changes.", "Original body.");
-		const project = join(root, "project");
-		mkdirSync(project);
-		const installed = installSkillFromSource({ source, scope: "project", cwd: project });
-		const before = readFileSync(installed.path, "utf8");
-		const invalid = writeSkill(root, "invalid", null, "Invalid replacement.");
-
-		throws(() =>
-			installSkillFromSource({ source: invalid, scope: "project", cwd: project, name: "review", force: true }),
-		);
-		strictEqual(readFileSync(installed.path, "utf8"), before);
-		deepStrictEqual(
-			loadSkills({ cwd: project })
-				.items.filter((skill) => skill.name === "review")
-				.map((skill) => skill.content),
-			["Original body."],
-		);
 	});
 
 	it("loads an explicit skill path and carries it through request and activation provenance", () => {
@@ -176,14 +116,20 @@ describe("skill install and activation boundary", () => {
 		try {
 			const project = join(isolated.dir, "project");
 			mkdirSync(project);
-			// A local scratch copy exercises the installer without changing any real skill inventory.
+			// Keep source and installed discovery independent inside the scratch project.
 			const source = join(isolated.dir, "source", "context-prime");
 			cpSync(join(process.cwd(), "library", "skills", "context", "context-prime"), source, { recursive: true });
 			strictEqual(
 				loadSkills({ cwd: project, home: isolated.dir }).items.some((skill) => skill.name === "context-prime"),
 				false,
 			);
-			const installed = installSkillFromSource({ source, scope: "project", cwd: project });
+			const destination = join(project, ".clio-coder", "skills", "context-prime");
+			cpSync(source, destination, { recursive: true });
+			const installed = { path: join(destination, "SKILL.md") };
+			strictEqual(
+				normalizedSkillHash(readFileSync(installed.path, "utf8")),
+				normalizedSkillHash(readFileSync(join(source, "SKILL.md"), "utf8")),
+			);
 			ok(existsSync(installed.path));
 			ok(loadSkills({ cwd: project, home: isolated.dir }).items.some((skill) => skill.name === "context-prime"));
 

@@ -14,6 +14,7 @@ import type { ForeignPackageFormat, PluginOrigin } from "../plugins/types.js";
 import { type LibraryPackageValidationResult, validateLibraryPackage } from "../resources/library-validation.js";
 import {
 	type PreparedAdoption,
+	prepareBareSkillPackage,
 	prepareForeignPackage,
 	preparePortablePackage,
 	unmetRequirements,
@@ -86,6 +87,7 @@ function prepare(
 ): { detection: ForeignPluginDetection; value: PreparedAdoption } {
 	const detection = detectForeignPlugin(root, format);
 	if (detection.format === "portable") return { detection, value: preparePortablePackage(root) };
+	if (detection.format === "agent-skill") return { detection, value: prepareBareSkillPackage(root) };
 	if (detection.format === "none") throw new Error(detection.diagnostics.join(" "));
 	return { detection, value: prepareForeignPackage(root, detection.format) };
 }
@@ -121,7 +123,8 @@ export function planLibraryImport(
 			detection = detectForeignPlugin(fetched.root, options.format);
 			reasons.push(error instanceof Error ? error.message : String(error));
 		}
-		reasons.push(...detection.diagnostics);
+		// A manifest-less root fails with the detection's own sentence, so collect each reason once.
+		for (const diagnostic of detection.diagnostics) if (!reasons.includes(diagnostic)) reasons.push(diagnostic);
 		const format = value?.format ?? (detection.format === "none" ? undefined : detection.format);
 		const origin: PluginOrigin = {
 			kind: "import",
@@ -199,7 +202,10 @@ export function applyLibraryImport(
 		}
 		if (reviewFingerprint(plan.source.root) !== plan.reviewFingerprint)
 			throw new Error("Source changed after review; inspect a new plan.");
-		const current = prepare(plan.source.root, plan.format === "portable" ? undefined : plan.format).value;
+		const current = prepare(
+			plan.source.root,
+			plan.format === "claude-code" || plan.format === "codex" ? plan.format : undefined,
+		).value;
 		if (digest(plan.files) !== plan.digest || digest(current.files) !== plan.digest)
 			throw new Error("Plan changed after review; inspect a new plan.");
 		const missing = unmetRequirements(current.requirements, plan.cwd, plan.scope, vendorOf(current.format));
