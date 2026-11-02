@@ -27,6 +27,7 @@ import type { Choice, ClioTheme, ClioToken, Fact, HarnessFunction, Tone } from "
 import {
 	chip,
 	chipRow,
+	chipRows,
 	choiceRows,
 	clioTheme,
 	commandBlock,
@@ -149,15 +150,15 @@ function axisText(view: ApprovalRequestView): string {
  * The first row: the tool, the action class in its risk tone, and the rule
  * that fired. Everything an operator needs to place the ask before reading
  * the command. When the three do not fit the row, the rule moves to its own
- * fact row below rather than being clipped, so the id that explains the ask
- * is never the thing that is cut.
+ * fact row below rather than being clipped, and the tool and class wrap, so
+ * nothing that explains the ask is ever cut.
  */
 function identityRow(
 	theme: ClioTheme,
 	view: ApprovalRequestView,
 	presentation: DecisionPresentation,
 	width: number,
-): { row: string; ruleFact: Fact | null } {
+): { rows: string[]; ruleFact: Fact | null } {
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	const axisTone: Tone = presentation.semanticToken === "warning" ? "warning" : "muted";
 	const kind = toolFunction(view.tool);
@@ -172,9 +173,11 @@ function identityRow(
 	const action = shared ? null : theme.style(toneRole(risk), `${classWords} action`, { bold: true });
 	const axis = chip(theme, axisText(view), axisTone);
 	const full = chipRow(theme, [tool, action, axis], Number.POSITIVE_INFINITY);
-	if (visibleWidth(full) <= width) return { row: full, ruleFact: null };
+	if (visibleWidth(full) <= width) return { rows: [full], ruleFact: null };
+	// Tool and class wrap rather than clip when even they do not fit: in the
+	// open inspection view nothing else names the class.
 	return {
-		row: chipRow(theme, [tool, action], width),
+		rows: chipRows(theme, [tool, action], width),
 		ruleFact: { label: "rule", value: axisText(view), tone: axisTone },
 	};
 }
@@ -390,7 +393,7 @@ function permissionFacts(
 ): string[] {
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	const identity = identityRow(theme, view, presentation, width);
-	const lines = [identity.row];
+	const lines = [...identity.rows];
 	if (view.target !== undefined && view.target.length > 0) {
 		lines.push(...targetBlock(theme, view.target, risk, width));
 	}
@@ -531,7 +534,7 @@ function permissionInspectionLines(
 	if (preview.tabsExpanded) notes.push("tabs shown as spaces");
 	const identity = identityRow(theme, view, presentation, content);
 	const head = [
-		identity.row,
+		...identity.rows,
 		...(view.target !== undefined && view.target.length > 0 ? targetBlock(theme, view.target, risk, content) : []),
 		...factRows(
 			theme,
@@ -718,7 +721,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			this.lastLineCount = rows.length;
 			const identity = identityRow(theme, this.view, permissionDecisionPresentation(this.view), content);
 			const head = [
-				identity.row,
+				...identity.rows,
 				...(identity.ruleFact === null ? [] : factRows(theme, [identity.ruleFact], content)),
 				sectionRule(theme, content, "Exact invocation", { meta: `${MUTATION_PREVIEW_KEY} closes` }),
 			];
@@ -749,33 +752,64 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	 * The card in the rows the frame has. The facts that identify the call stay
 	 * put and the choices and terms below them scroll, because the frame's own
 	 * cut hid the end of the Stop consequence at 60x40 with nothing that reached
-	 * it (BT-005). With no known budget, or no room for a window, the card
-	 * renders whole and the frame's cut still marks what is missing.
+	 * it (BT-005). When the facts alone leave no window the choices could fit
+	 * in, the choices are pinned under a window over everything else instead:
+	 * the keys and their consequences are the answer, and are never the rows
+	 * the frame cuts. With no known budget the card renders whole.
 	 */
 	private windowCard(sections: ReturnType<typeof permissionCardSections>, width: number): string[] {
 		const { facts, rest, termsAt, choicesAt, choicesRows } = sections;
 		const whole = [...facts, ...rest];
-		const room = this.bodyRows - facts.length - 1;
-		if (this.bodyRows <= 0 || whole.length <= this.bodyRows || room < 1) {
+		const budget = this.bodyRows;
+		if (budget <= 0 || whole.length <= budget) {
 			this.cardMaxScroll = 0;
 			this.cardScroll = 0;
 			this.jumpToTerms = false;
 			this.choicesShown = true;
 			return whole;
 		}
-		this.cardMaxScroll = rest.length - room;
+		const room = budget - facts.length - 1;
+		if (room >= choicesRows) {
+			this.cardMaxScroll = rest.length - room;
+			// Opening the terms brings the window to the choices, so the terms
+			// begin beneath keys that stay on screen and every row below is
+			// reached by scrolling down (BT-005).
+			if (this.jumpToTerms) {
+				this.jumpToTerms = false;
+				if (termsAt !== null) this.cardScroll = choicesAt;
+			}
+			this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
+			const end = this.cardScroll + room;
+			this.choicesShown = choicesAt >= this.cardScroll && choicesAt + choicesRows <= end;
+			// The rail names the scroll and terms keys; the row carries the place alone.
+			return [
+				...facts,
+				...rest.slice(this.cardScroll, end),
+				positionRow(clioTheme(), { start: this.cardScroll + 1, end, total: rest.length }, width),
+			];
+		}
+		const choices = rest.slice(choicesAt, choicesAt + choicesRows);
+		const scrolled = [...facts, ...rest.slice(0, choicesAt), ...rest.slice(choicesAt + choicesRows)];
+		const height = Math.max(0, budget - choices.length - 1);
+		if (height === 0) {
+			this.cardMaxScroll = 0;
+			this.cardScroll = 0;
+			this.jumpToTerms = false;
+			this.choicesShown = choices.length <= budget;
+			return choices.slice(0, budget);
+		}
+		this.cardMaxScroll = Math.max(0, scrolled.length - height);
 		if (this.jumpToTerms) {
 			this.jumpToTerms = false;
-			if (termsAt !== null) this.cardScroll = termsAt;
+			if (termsAt !== null) this.cardScroll = facts.length + termsAt - choicesRows;
 		}
 		this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
-		const end = this.cardScroll + room;
-		this.choicesShown = choicesAt >= this.cardScroll && choicesAt + choicesRows <= end;
-		// The rail names the scroll and terms keys; the row carries the place alone.
+		const end = this.cardScroll + height;
+		this.choicesShown = true;
 		return [
-			...facts,
-			...rest.slice(this.cardScroll, end),
-			positionRow(clioTheme(), { start: this.cardScroll + 1, end, total: rest.length }, width),
+			...scrolled.slice(this.cardScroll, end),
+			positionRow(clioTheme(), { start: this.cardScroll + 1, end, total: scrolled.length }, width),
+			...choices,
 		];
 	}
 

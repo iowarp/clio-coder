@@ -16,11 +16,11 @@ import { renderUsdLimit } from "../../core/telemetry/render.js";
 import type { FleetRunPreview, FleetRunPreviewStep } from "../../domains/dispatch/index.js";
 import { budgetSpendText } from "../../domains/scheduling/budget.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
-import { isKeyRelease, matchesKey } from "../../engine/tui.js";
+import { isKeyRelease, matchesKey, visibleWidth } from "../../engine/tui.js";
 import { buildResponsiveHint, createCachedBody, FocusBox, showClioOverlayFrame, windowRows } from "../overlay-frame.js";
 import {
 	type Choice,
-	chipRow,
+	chipRows,
 	choiceRows,
 	clioTheme,
 	errorState,
@@ -29,6 +29,8 @@ import {
 	meter,
 	positionRow,
 	sectionRule,
+	type TableSpec,
+	tableColumnsFit,
 	tableRows,
 } from "../theme/index.js";
 
@@ -133,17 +135,26 @@ export function formatBudgetLine(preview: FleetRunPreview): string {
 function budgetRows(preview: FleetRunPreview, width: number): string[] {
 	const theme = clioTheme();
 	const { budget } = preview;
+	const playbook = {
+		label: "playbook",
+		value: budget.playbookUsd === null ? "declares no ceiling" : `ceiling ${renderUsdLimit(budget.playbookUsd)}`,
+	};
 	if (budget.ceilingUsd <= 0)
-		return factRows(theme, [{ label: "budget", value: formatBudgetLine(preview).slice(8) }], width);
-	// A meter wider than a reading line stops being a glance; the bar caps and
-	// the amount stays beside it.
-	const rows = [
+		return factRows(theme, [{ label: "budget", value: formatBudgetLine(preview).slice(8) }, playbook], width);
+	const amount = `${budgetSpendText(budget.currentUsd, budget.pricing)} of ${renderUsdLimit(budget.ceilingUsd)} session ceiling`;
+	// The amount is the fact. A row too narrow for the label, the amount and a
+	// four-cell bar carries the amount as a wrapping fact and no bar at all. A
+	// meter wider than a reading line stops being a glance, so the bar caps.
+	if (width < "budget ".length + visibleWidth(amount) + 5) {
+		return factRows(theme, [{ label: "budget", value: amount }, playbook], width);
+	}
+	return [
 		meter(theme, {
 			value: budget.currentUsd,
 			max: budget.ceilingUsd,
 			width: Math.min(width, FLEET_RUN_METER_MAX_WIDTH),
 			label: "budget",
-			amount: `${budgetSpendText(budget.currentUsd, budget.pricing)} of ${renderUsdLimit(budget.ceilingUsd)} session ceiling`,
+			amount,
 			tone:
 				budget.currentUsd >= budget.ceilingUsd
 					? "error"
@@ -151,11 +162,8 @@ function budgetRows(preview: FleetRunPreview, width: number): string[] {
 						? "warning"
 						: "meter",
 		}),
+		...factRows(theme, [playbook], width),
 	];
-	if (budget.playbookUsd !== null) {
-		rows.push(...factRows(theme, [{ label: "playbook", value: `ceiling ${renderUsdLimit(budget.playbookUsd)}` }], width));
-	}
-	return rows;
 }
 
 /** The plan's rows, before windowing: identity, resume, waves and budget. */
@@ -171,7 +179,7 @@ function planRows(subject: FleetRunApprovalSubject, width: number): string[] {
 	}
 	const { preview } = subject;
 	const rows = [
-		chipRow(
+		...chipRows(
 			theme,
 			[
 				theme.style("heading", preview.name, { bold: true }),
@@ -199,25 +207,20 @@ function planRows(subject: FleetRunApprovalSubject, width: number): string[] {
 			}),
 		);
 		const cells = wave.steps.map(stepCells);
-		// Nothing about a step may drop out at a narrow width: who runs it, where,
-		// and what it may write are the approval. Below the table's width each
-		// step is a block of facts under its id instead of a row that lost a column.
-		if (width >= FLEET_RUN_TABLE_MIN_WIDTH) {
-			rows.push(
-				...tableRows(
-					theme,
-					{
-						columns: [
-							{ label: "step", priority: 3, tone: "neutral" },
-							{ label: "runs", priority: 2, tone: "accent" },
-							{ label: "where", priority: 1, wrap: true, min: 16, tone: "muted" },
-							{ label: "scope", priority: 0, tone: "muted" },
-						],
-						rows: cells,
-					},
-					width,
-				),
-			);
+		// Nothing about a step may drop out at any width: who runs it, where, and
+		// what it may write are the approval. The table is used only when every
+		// column fits whole; otherwise each step is a block of facts under its id.
+		const table = {
+			columns: [
+				{ label: "step", priority: 3, tone: "neutral" },
+				{ label: "runs", priority: 2, tone: "accent" },
+				{ label: "where", priority: 1, wrap: true, min: 16, tone: "muted" },
+				{ label: "scope", priority: 0, tone: "muted" },
+			],
+			rows: cells,
+		} satisfies TableSpec;
+		if (width >= FLEET_RUN_TABLE_MIN_WIDTH && tableColumnsFit(table, width)) {
+			rows.push(...tableRows(theme, table, width));
 		} else {
 			rows.push(
 				...factRows(

@@ -137,7 +137,8 @@ function createAuthDialogController(
 			if (promptLabel === null) return memo.rows;
 			return [
 				...memo.rows,
-				fitRow(clioTheme().fg("inputPlaceholder", normalizeAuthLine(promptLabel)), width),
+				// The label may carry a default id the operator is meant to read whole.
+				...wrapTextWithAnsi(clioTheme().fg("inputPlaceholder", normalizeAuthLine(promptLabel)), Math.max(1, width)),
 				...renderInputWithDesignCursor(input, width),
 			];
 		},
