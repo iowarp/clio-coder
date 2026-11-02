@@ -536,6 +536,9 @@ interface RunTokenMeter {
 	toolRounds?: ToolRoundRecord[];
 }
 
+/** How long after domain start route history warming begins. */
+const ROUTE_HISTORY_WARM_DELAY_MS = 1_500;
+
 function meterSpend(meter: RunTokenMeter): RunUsageFacts {
 	return meter.usage?.facts ?? unobservedRunUsageFacts();
 }
@@ -4307,6 +4310,7 @@ export function createDispatchBundle(
 	const dispatching = new Set<Promise<unknown>>();
 	let drainPromise: Promise<void> | null = null;
 	let stopPromise: Promise<void> | null = null;
+	let routeHistoryWarmTimer: ReturnType<typeof setTimeout> | null = null;
 
 	/** Session-scope totals for the operator snapshot; finalized runs only. */
 	let finalizedRuntimeSeconds = 0;
@@ -10297,9 +10301,19 @@ export function createDispatchBundle(
 			}
 			startHeartbeatWatchdog();
 			probeEndpointsAtDefaultBound();
+			// After boot's own burst, so the first keystrokes do not contend with it.
+			routeHistoryWarmTimer = setTimeout(() => {
+				void routeObserver
+					.warmHistory?.(() => draining || stopPromise !== null)
+					.catch((error) => {
+						reportDispatchDiagnostic("warm route history", error);
+					});
+			}, ROUTE_HISTORY_WARM_DELAY_MS);
+			routeHistoryWarmTimer.unref?.();
 		},
 		stop() {
 			if (stopPromise !== null) return stopPromise;
+			if (routeHistoryWarmTimer !== null) clearTimeout(routeHistoryWarmTimer);
 			let resolveStop!: () => void;
 			let rejectStop!: (error: unknown) => void;
 			stopPromise = new Promise<void>((resolve, reject) => {
