@@ -62,6 +62,56 @@ class DeferredRenderAdmission {
 	}
 }
 
+/**
+ * The one array each regular-screen frame owns, without one allocation per frame.
+ *
+ * pi-tui's fake-cursor pass maps every row and searches it for a marker, and the render memo then keeps the mapped
+ * array as the next frame's baseline. At 24,000 rows that pass was 60% of a keystroke frame, and those arrays, one
+ * per frame and each past V8's large-object threshold, were what brought the 5 to 10 ms scavenges that made the p99.
+ * A row resolves to the same text until its raw string changes, so only changed rows are searched, and frames reuse
+ * a small pool of arrays.
+ */
+class RegularFrameRows {
+	private readonly raw: string[] = [];
+	private readonly resolved: string[] = [];
+	private showHardwareCursor: boolean | undefined;
+	/**
+	 * Three because a frame must not write into either array the renderer reads while rendering it: the diff baseline
+	 * and the memo's last output. They differ after a frame that changed nothing, which keeps the older baseline.
+	 */
+	private readonly pool: string[][] = [[], [], []];
+	/** The last array the reset memo kept. */
+	memoOutput: readonly string[] | undefined;
+
+	next(
+		lines: readonly string[],
+		showHardwareCursor: boolean,
+		baseline: readonly string[] | undefined,
+		resolve: (line: string) => string,
+	): string[] {
+		if (showHardwareCursor !== this.showHardwareCursor) {
+			this.showHardwareCursor = showHardwareCursor;
+			this.raw.length = 0;
+		}
+		const raw = this.raw;
+		const resolved = this.resolved;
+		// Without a baseline to steer around, a fresh array is the only safe one.
+		const rows = (baseline && this.pool.find((rows) => rows !== baseline && rows !== this.memoOutput)) ?? [];
+		for (let index = 0; index < lines.length; index++) {
+			const line = lines[index] as string;
+			if (line !== raw[index]) {
+				raw[index] = line;
+				resolved[index] = resolve(line);
+			}
+			rows[index] = resolved[index] as string;
+		}
+		rows.length = lines.length;
+		raw.length = lines.length;
+		resolved.length = lines.length;
+		return rows;
+	}
+}
+
 export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 	constructor(
 		terminal: Terminal,
@@ -78,8 +128,26 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 		if (!this.deferredAdmission.request(force)) super.requestRender(force);
 	}
 
+	/** A lone root needs no stacking, and `resolveFakeCursors` below already copies what the renderer will rewrite. */
+	override render(width: number): string[] {
+		const only = this.children.length === 1 ? this.children[0] : undefined;
+		return only === undefined ? super.render(width) : only.render(width);
+	}
+
+	protected override resolveFakeCursors(lines: string[]): string[] {
+		// The same pass runs over each overlay's rows later in the frame; those are neither this frame's rows nor cached.
+		if (!this.awaitingFrameRows) return super.resolveFakeCursors(lines);
+		this.awaitingFrameRows = false;
+		// pi-tui keeps the baseline private; the fallback in `next` stays safe if a Pi upgrade renames it.
+		const baseline = (this as unknown as { previousLines?: readonly string[] }).previousLines;
+		return this.frameRows.next(lines, this.getShowHardwareCursor(), baseline, (line) => {
+			return super.resolveFakeCursors([line])[0] ?? line;
+		});
+	}
+
 	protected override doRender(): void {
 		this.deferredAdmission.settled();
+		this.awaitingFrameRows = true;
 		if (this.renderObserver.isEnabled?.() === false) {
 			super.doRender();
 			return;
@@ -103,7 +171,9 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 	}
 
 	protected override applyLineResets(lines: string[]): string[] {
-		return this.measure("normalization", () => super.applyLineResets(lines));
+		const output = this.measure("normalization", () => super.applyLineResets(lines));
+		this.frameRows.memoOutput = output;
+		return output;
 	}
 
 	protected override extractCursorPosition(lines: string[], height: number): { row: number; col: number } | null {
@@ -124,6 +194,8 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 
 	private currentFrame: unknown | undefined;
 	private readonly deferredAdmission: DeferredRenderAdmission;
+	private readonly frameRows = new RegularFrameRows();
+	private awaitingFrameRows = false;
 }
 
 export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
