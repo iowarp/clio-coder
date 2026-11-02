@@ -28,6 +28,7 @@ import { localKey } from "../keyboard-owner.js";
 import {
 	buildResponsiveHint,
 	clioError,
+	diagnosticSeverityToken,
 	FILTER_HINT,
 	formatRuntimeResolutionDiagnostic,
 	type RowBudgetedBody,
@@ -654,12 +655,17 @@ function formatModelDetail(row: ModelRow, width: number, maxRows: number): strin
 		`image input ${acceptsImageInput({ vision: row.caps.vision }) ? "yes" : "no"}`,
 		capabilityNames(row.caps),
 	].filter((fact): fact is string => fact !== null);
+	// Severity colors the way the targets hub colors it, through the shared mapping.
 	const diagnostics = (row.diagnostics ?? [])
 		.filter((entry) => entry.severity !== "info")
 		.slice(0, 2)
-		.map((entry) =>
-			statusChip(theme, entry.severity === "error" ? "error" : "warning", formatRuntimeResolutionDiagnostic(entry)),
-		)
+		.map((entry) => {
+			const token = diagnosticSeverityToken(entry.severity);
+			return theme.fg(
+				token,
+				`${token === "error" ? GLYPH.error : GLYPH.warn} ${formatRuntimeResolutionDiagnostic(entry)}`,
+			);
+		})
 		.flatMap((line) => wrapTextWithAnsi(line, width).slice(0, 1));
 	const factLines = wrapTextWithAnsi(facts.map((fact) => chip(theme, fact, "muted")).join(dotSep(theme)), width);
 	const factBudget = Math.max(1, Math.min(factLines.length, maxRows - 1 - diagnostics.length));

@@ -186,7 +186,7 @@ export function effectTiming(item: SettingsCenterItem): string | null {
 }
 
 /** The short form beside a value: which layer set it. Built-in defaults say nothing; the row's default mark already does. */
-export function originChip(origin: SettingValueOrigin | null | undefined): string | null {
+function originChip(origin: SettingValueOrigin | null | undefined): string | null {
 	switch (origin) {
 		case "session":
 			return "session";
@@ -203,7 +203,7 @@ export function originChip(origin: SettingValueOrigin | null | undefined): strin
 }
 
 /** The long form in the inspector: which file or state holds the value, as a noun phrase. */
-export function originPhrase(origin: SettingValueOrigin | null | undefined): string | null {
+function originPhrase(origin: SettingValueOrigin | null | undefined): string | null {
 	switch (origin) {
 		case "session":
 			return "this session, not saved";
