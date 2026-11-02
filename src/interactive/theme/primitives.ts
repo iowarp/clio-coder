@@ -622,3 +622,71 @@ export function errorState(
 	}
 	return lines;
 }
+
+export interface ValueRowOptions {
+	focused: boolean;
+	/** Left text; plain text takes the field name role, styled text is placed verbatim. */
+	label: string;
+	/** Cells the label column takes, shared by every row of one list. */
+	labelWidth: number;
+	/** Right text; plain text takes the field value role, styled text is placed verbatim. */
+	value: string;
+	/** Paint the value as changed from its default and lead it with the changed mark. */
+	changed?: boolean;
+	/** A mark in the cursor column for an unfocused row (a pin); the cursor wins when focused. */
+	mark?: string;
+	/** Dim note after the value (where the value came from); the first thing dropped. */
+	origin?: string;
+	disabled?: boolean;
+	width: number;
+}
+
+/**
+ * A **value row** is the selection row for a setting: the cursor rule is the
+ * same, but the right column is content, not metadata. The label keeps one
+ * shared column so values line up down a list, the value takes the rest, and a
+ * dim origin follows it when there is room. Below `NARROW_WIDTH` the origin is
+ * dropped and the label column gives up to half its cells, so the value, which
+ * is what the operator came to read, is the last thing clipped.
+ */
+export function valueRow(theme: ClioTheme, options: ValueRowOptions): string {
+	const safe = Math.max(3, Math.floor(options.width));
+	const narrow = safe < NARROW_WIDTH;
+	const prefix = options.focused
+		? theme.fg("selectedOption", `${GLYPH.cursor} `)
+		: `${options.mark === undefined ? " " : clip(options.mark, 1)} `;
+	const available = safe - 2;
+	const labelCeiling = narrow ? Math.max(4, Math.floor(available * 0.4)) : Math.max(4, Math.floor(available * 0.62));
+	const labelWidth = Math.max(1, Math.min(Math.floor(options.labelWidth), labelCeiling, available - 4));
+	const fittedLabel = clip(options.label, labelWidth);
+	const label = padAnsi(
+		fittedLabel.includes("\u001b")
+			? fittedLabel
+			: options.focused
+				? theme.style("selectedOption", fittedLabel, { bold: true })
+				: options.disabled === true
+					? theme.fg("disabledOption", fittedLabel)
+					: theme.fg("fieldName", fittedLabel),
+		labelWidth,
+	);
+	const mark = options.changed === true ? theme.fg("changedValue", `${GLYPH.scoped} `) : "  ";
+	const room = Math.max(1, available - labelWidth - 2 - 2);
+	const rawOrigin = narrow ? "" : (options.origin ?? "");
+	const valueWidth = visibleWidth(options.value);
+	const originWidth = rawOrigin.length === 0 ? 0 : visibleWidth(rawOrigin);
+	const keepOrigin = originWidth > 0 && valueWidth + 2 + originWidth <= room;
+	const fittedValue = clip(options.value, keepOrigin ? room - originWidth - 2 : room);
+	const value = fittedValue.includes("\u001b")
+		? fittedValue
+		: options.changed === true
+			? theme.fg("changedValue", fittedValue)
+			: theme.fg(
+					"fieldValue",
+					fittedValue,
+					options.disabled === true ? "readOnly" : options.focused ? "selected" : "normal",
+				);
+	const origin = keepOrigin
+		? `${" ".repeat(Math.max(2, room - visibleWidth(fittedValue) - originWidth))}${rawOrigin.includes("\u001b") ? rawOrigin : theme.fg("annotation", rawOrigin)}`
+		: "";
+	return padAnsi(`${prefix}${label}  ${mark}${value}${origin}`, safe);
+}

@@ -17,6 +17,7 @@ import {
 } from "./overlays/model-scope.js";
 import { openModelOverlay } from "./overlays/model-selector.js";
 import { openSettingsOverlay, type SettingsCenterRowId, type SettingsSectionId } from "./overlays/settings.js";
+import type { SettingValueOrigin } from "./overlays/settings-presentation.js";
 
 export interface OverlayModelSelectorsDeps {
 	tui: TUI;
@@ -29,6 +30,8 @@ export interface OverlayModelSelectorsDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	writeSettings?: (next: ClioSettings) => void;
 	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => void;
+	/** Settings shows which layer set each value when the host can say. */
+	settingOrigin?: (path: string) => SettingValueOrigin;
 	onSelectModel?: (ref: { target: string; model: string }, scope: ModelScopeChoice) => void;
 	/** Applied with the chosen scope when the swap named a thinking level. */
 	onSetThinkingLevel?: (level: ThinkingLevel, scope?: ModelScopeChoice) => void;
@@ -151,6 +154,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 			...(deps.getRouteBreakers ? { getRouteBreakers: deps.getRouteBreakers } : {}),
 			...(deps.connectTarget ? { connectTarget: deps.connectTarget } : {}),
 			...(deps.getInteropProposals ? { getInteropProposals: deps.getInteropProposals } : {}),
+			...(deps.settingOrigin ? { settingOrigin: deps.settingOrigin } : {}),
 			writeSettings: (next) => {
 				deps.writeSettings?.(next);
 				deps.refreshFooter();
