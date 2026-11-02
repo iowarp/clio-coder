@@ -2,6 +2,8 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
 ## 0.6.7 - 2026-11-02
 
 Clio Coder 0.6.7 makes fleet work finish and sessions recover. The builtin `sdlc` playbook now runs to its three commits: commit steps stage everything git reports as changed since the last commit point against a persisted baseline, each node's task names its step, and one reader serves a verifier's closing report to the contract, the gate and claim grounding. A task worktree commit takes the worker's authored files instead of every untracked byproduct, and an SSH worker on an independent checkout returns its edits again. Sessions can be renamed, resumed by name and branched at the current point (#443, #444). An oversized prompt no longer wedges a session, two resumes can no longer both open a writable ledger, a crashed turn replays as failed instead of Done, and telemetry retention stays inside the state directory. Compaction compares its replay before publishing a result (#422).
