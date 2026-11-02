@@ -1,6 +1,6 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
-import { fitIdentityLabel } from "./labels.js";
+import { fitIdentityLabel, releaseSpaces } from "./labels.js";
 import { padAnsi, rule } from "./rules.js";
 import { dotSep } from "./segments.js";
 import type { ClioTheme, ClioToken, SemanticRole } from "./tokens.js";
@@ -118,6 +118,18 @@ export function chipRow(theme: ClioTheme, chips: ReadonlyArray<string | null | u
 	return clip(present.join(dotSep(theme)), width);
 }
 
+/**
+ * Chips on as many rows as they take, wrapping between chips and never inside
+ * one, so a decision surface loses no fact to the row's end. A chip wider than
+ * the row folds at its spaces, which keeps every character on screen.
+ */
+export function chipRows(theme: ClioTheme, chips: ReadonlyArray<string | null | undefined>, width: number): string[] {
+	const safe = Math.max(1, Math.floor(width));
+	const present = chips.filter((part): part is string => typeof part === "string" && part.length > 0);
+	const held = present.map((chip) => (visibleWidth(chip) <= safe ? chip.replaceAll(" ", "\u00a0") : chip));
+	return wrap(held.join(dotSep(theme)), safe).map(releaseSpaces);
+}
+
 export interface SectionRuleOptions {
 	/** Dim text at the right end of the rule: a count, a scope, a key. */
 	meta?: string;
@@ -192,9 +204,10 @@ export interface FactRowsOptions {
 /**
  * Label/value pairs as a two-column table. Labels share one column and values
  * wrap under their own first column, so a deep path keeps its file name and a
- * sentence keeps its last word. Below `NARROW_WIDTH` the label takes its own
- * row and the value starts flush beneath it, which keeps the value whole at
- * the cost of a row rather than an ellipsis.
+ * sentence keeps its last word. Below `NARROW_WIDTH`, and for any label wider
+ * than the column, the label takes its own row and the value starts flush
+ * beneath it, which keeps both whole at the cost of a row rather than an
+ * ellipsis.
  */
 export function factRows(
 	theme: ClioTheme,
@@ -215,7 +228,14 @@ export function factRows(
 			lines.push(...(fact.fit === "clip" ? [clip(value, safe)] : wrap(value, safe)));
 			continue;
 		}
-		const label = padAnsi(theme.fg(labelRole, clip(fact.label, labelWidth)), labelWidth);
+		// A label wider than the column takes its own row above its value, the
+		// way every fact does below NARROW_WIDTH, rather than losing its tail.
+		if (visibleWidth(fact.label) > labelWidth) {
+			lines.push(...wrap(theme.fg(labelRole, fact.label), safe));
+			lines.push(...(fact.fit === "clip" ? [clip(value, safe)] : wrap(value, safe)));
+			continue;
+		}
+		const label = padAnsi(theme.fg(labelRole, fact.label), labelWidth);
 		const indent = " ".repeat(labelWidth + 2);
 		const room = Math.max(1, safe - labelWidth - 2);
 		const rows = fact.fit === "clip" ? [clip(value, room)] : wrap(value, room);
@@ -258,20 +278,19 @@ function cellOf(cell: string | TableCell | undefined): TableCell {
 	return typeof cell === "string" ? { text: cell } : cell;
 }
 
+type TableLive = { index: number; column: TableColumn; width: number; natural: number };
+
 /**
- * Columns that fit the width honestly. Natural widths are measured from the
- * content; when they do not fit, the wrapping column gives way down to its
- * minimum, then the lowest-priority columns are dropped whole (never the one
- * holding the top priority alone) and the wrapping column takes back the room
- * a drop frees, then whatever remains is clipped with an ellipsis. A dropped
- * column is gone from every row, so no row is cut differently from its
- * neighbours, and a header row names only the columns that survived.
+ * The columns that survive at `width` and their widths. Natural widths are
+ * measured from the content; when they do not fit, the wrapping column gives
+ * way down to its minimum, then the lowest-priority columns are dropped whole
+ * (never the one holding the top priority alone) and the wrapping column
+ * takes back the room a drop frees, then whatever remains is clipped.
  */
-export function tableRows(theme: ClioTheme, spec: TableSpec, width: number): string[] {
+function resolveTableLayout(spec: TableSpec, width: number): { live: TableLive[]; dropped: TableColumn[] } {
 	const safe = Math.max(1, Math.floor(width));
 	const gap = Math.max(1, spec.gap ?? 2);
-	type Live = { index: number; column: TableColumn; width: number; natural: number };
-	let live: Live[] = spec.columns.map((column, index) => {
+	let live: TableLive[] = spec.columns.map((column, index) => {
 		const natural = Math.max(
 			spec.header ? visibleWidth(column.label) : 0,
 			...spec.rows.map((row) => visibleWidth(cellOf(row[index]).text)),
@@ -280,18 +299,20 @@ export function tableRows(theme: ClioTheme, spec: TableSpec, width: number): str
 		const bounded = Math.min(natural, column.max ?? Number.POSITIVE_INFINITY);
 		return { index, column, width: bounded, natural: bounded };
 	});
+	const dropped: TableColumn[] = [];
 	const total = (): number => live.reduce((sum, item) => sum + item.width, 0) + gap * Math.max(0, live.length - 1);
 	// Drop the lowest-priority column, the rightmost on a tie. The one column
 	// holding the top priority alone is never dropped; when every column shares
 	// it, the rightmost goes, so the first column is the last one standing.
 	const dropLowest = (): boolean => {
 		if (live.length <= 1) return false;
-		const priority = (item: Live): number => item.column.priority ?? 0;
+		const priority = (item: TableLive): number => item.column.priority ?? 0;
 		const top = Math.max(...live.map(priority));
 		const below = live.filter((item) => priority(item) < top);
 		const candidates = below.length > 0 ? below : live.slice(1);
 		const lowest = candidates.reduce((pick, item) => (priority(item) <= priority(pick) ? item : pick));
 		live = live.filter((item) => item !== lowest);
+		dropped.push(lowest.column);
 		return true;
 	};
 	const shrinkWrapping = (): boolean => {
@@ -325,6 +346,31 @@ export function tableRows(theme: ClioTheme, spec: TableSpec, width: number): str
 			if (last !== undefined) last.width = Math.max(1, last.width - excess);
 		}
 	}
+	return { live, dropped };
+}
+
+/**
+ * Whether every column of `spec` fits `width` whole: none dropped, and no
+ * column that does not wrap narrower than its content. A surface that may not
+ * lose a column asks this first and lays its rows out another way when the
+ * answer is no.
+ */
+export function tableColumnsFit(spec: TableSpec, width: number): boolean {
+	const { live, dropped } = resolveTableLayout(spec, width);
+	return dropped.length === 0 && live.every((item) => item.column.wrap === true || item.width >= item.natural);
+}
+
+/**
+ * Columns that fit the width honestly, laid out by `resolveTableLayout`. A
+ * dropped column is gone from every row, so no row is cut differently from
+ * its neighbours, a header row names only the columns that survived, and a
+ * dim last row names what was dropped, so a column never leaves silently.
+ */
+export function tableRows(theme: ClioTheme, spec: TableSpec, width: number): string[] {
+	const safe = Math.max(1, Math.floor(width));
+	const gap = Math.max(1, spec.gap ?? 2);
+	const { live, dropped } = resolveTableLayout(spec, safe);
+	const total = live.reduce((sum, item) => sum + item.width, 0) + gap * Math.max(0, live.length - 1);
 	const paintCell = (text: string, cell: TableCell, column: TableColumn, header: boolean): string => {
 		if (text.includes("\u001b")) return text;
 		if (header) return theme.style("groupHeading", text, { bold: true });
@@ -362,9 +408,13 @@ export function tableRows(theme: ClioTheme, spec: TableSpec, width: number): str
 				true,
 			),
 		);
-		lines.push(theme.fg("divider", GLYPH.innerDivider.repeat(Math.min(safe, total()))));
+		lines.push(theme.fg("divider", GLYPH.innerDivider.repeat(Math.min(safe, total))));
 	}
 	for (const row of spec.rows) lines.push(...layoutRow(row, false));
+	if (dropped.length > 0) {
+		const names = dropped.map((column) => column.label).join(", ");
+		lines.push(...wrap(theme.fg("annotation", `${GLYPH.ellipsis} ${names} not shown at this width`), safe));
+	}
 	return lines;
 }
 
@@ -383,27 +433,31 @@ export interface MeterOptions {
 
 /**
  * `label ━━━━━━──── 62%` in exactly `width` cells. The bar is heavier than a
- * frame line so it never reads as a border. When the bar would fall under four
- * cells the amount is dropped first, then the label, so the fill is the last
- * thing standing.
+ * frame line so it never reads as a border. The amount is the fact and the bar
+ * its picture: when the bar would fall under four cells the bar goes first,
+ * then the label, and the amount is the last thing standing.
  */
 export function meter(theme: ClioTheme, options: MeterOptions): string {
 	const safe = Math.max(1, Math.floor(options.width));
 	const ratio = options.max > 0 ? Math.max(0, Math.min(1, options.value / options.max)) : 0;
 	let label = options.label === undefined ? "" : options.label;
-	let amount = options.amount === undefined ? `${Math.round(ratio * 100)}%` : options.amount;
+	const amount = options.amount === undefined ? `${Math.round(ratio * 100)}%` : options.amount;
 	const barFor = (): number => safe - (label ? visibleWidth(label) + 1 : 0) - (amount ? visibleWidth(amount) + 1 : 0);
-	if (barFor() < 4) amount = "";
-	if (barFor() < 4) label = "";
+	const left = (): string => (label ? `${theme.fg("fieldName", label)} ` : "");
+	if (barFor() < 4) {
+		const text = `${left()}${theme.fg("metricValue", amount)}`;
+		if (visibleWidth(text) <= safe) return padAnsi(text, safe);
+		label = "";
+		return padAnsi(clip(theme.fg("metricValue", amount), safe), safe);
+	}
 	const bar = Math.max(1, barFor());
 	const filled = Math.min(bar, Math.max(ratio > 0 ? 1 : 0, Math.round(ratio * bar)));
 	const fillRole: SemanticRole =
 		options.tone === undefined || options.tone === "meter" ? "meterFill" : toneRole(options.tone);
 	const painted =
 		theme.fg(fillRole, GLYPH.meterFull.repeat(filled)) + theme.fg("meterFree", GLYPH.meterEmpty.repeat(bar - filled));
-	const left = label ? `${theme.fg("fieldName", label)} ` : "";
 	const right = amount ? ` ${theme.fg("metricValue", amount)}` : "";
-	return padAnsi(`${left}${painted}${right}`, safe);
+	return padAnsi(`${left()}${painted}${right}`, safe);
 }
 
 export interface SelectionRowOptions {
@@ -516,7 +570,10 @@ export interface CommandBlockOptions {
 /**
  * Lay plain text out in `width` columns: words fill a row, and a word longer
  * than the row folds after the last separator that fits, or by character when
- * it has none. Every character survives; nothing is clipped.
+ * it has none. Every character survives, the spaces included: a run of spaces
+ * stays between its words on one row, closes the row it fits on, or opens
+ * the next row when it does not, because two spaces in an argv are two
+ * spaces in the command being approved.
  */
 function foldPlain(text: string, width: number): string[] {
 	const safe = Math.max(1, Math.floor(width));
@@ -526,13 +583,28 @@ function foldPlain(text: string, width: number): string[] {
 		rows.push(row);
 		row = "";
 	};
-	for (const word of text.split(" ")) {
-		if (word.length === 0) continue;
-		const candidate = row.length === 0 ? word : `${row} ${word}`;
+	// Words and the exact space runs between them, in order.
+	const pieces = text.split(/( +)/u).filter((piece) => piece.length > 0);
+	for (const piece of pieces) {
+		if (/^ +$/u.test(piece)) {
+			if (visibleWidth(row) + piece.length <= safe) row += piece;
+			else {
+				push();
+				row = piece.length <= safe ? piece : piece.slice(0, safe);
+				for (let rest = piece.slice(row.length); rest.length > 0; rest = rest.slice(safe)) {
+					push();
+					row = rest.slice(0, safe);
+				}
+			}
+			continue;
+		}
+		const word = piece;
+		const candidate = `${row}${word}`;
 		if (visibleWidth(candidate) <= safe) {
 			row = candidate;
 			continue;
 		}
+		// The word opens the next row; the spaces that led to it stay on this one.
 		if (row.length > 0) push();
 		let rest = word;
 		while (visibleWidth(rest) > safe) {
