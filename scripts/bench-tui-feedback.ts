@@ -36,6 +36,15 @@ const tokensPerSecond = Number(values["tokens-per-second"]);
 const tokenChars = Number(values["token-chars"]);
 const streamSeconds = Number(values["stream-seconds"]);
 
+/**
+ * The prose filter (`createAssistantProseFilter`) holds a chunk's last grapheme
+ * and trailing space until the next chunk, so a cue must not end a chunk or the
+ * bench would time that hold instead of the scheduler.
+ */
+const HELD_TAIL = " .. ";
+const PARAGRAPH =
+	"The render loop keeps **settled output** stable while the live tail grows, and each frame re-lexes this reply.\n\n- Preserve input responsiveness.\n- Keep tool events ordered.\n\n";
+
 const clock = (): number => performance.timeOrigin + performance.now();
 const pause = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
@@ -176,7 +185,11 @@ function waitFor(cue: string, timeoutMs = 30_000, from = visible.length): Promis
 		const entry = { cue, from, resolve: (at: number) => (clearTimeout(timer), done(at)) };
 		const timer = setTimeout(() => {
 			cues.splice(cues.indexOf(entry), 1);
-			fail(new Error(`timed out waiting for ${JSON.stringify(cue)}; tail: ${JSON.stringify(visible.slice(-400))}`));
+			fail(
+				new Error(
+					`timed out waiting for ${JSON.stringify(cue)}; tail: ${JSON.stringify(visible.slice(-5000).replace(/ {3,}/g, "  "))}`,
+				),
+			);
 		}, timeoutMs);
 		cues.push(entry);
 	});
@@ -196,13 +209,19 @@ async function promptTurn(id: string, suffix = "", serverDelayMs = 0): Promise<P
 	const token = `Tok${id}en`;
 	scripts.set(prompt, async (_response, send, finish) => {
 		if (serverDelayMs > 0) await pause(serverDelayMs);
-		send(`${token} `);
+		send(`${token}${HELD_TAIL}`);
 		await pause(10);
 		finish();
 	});
 	child.write(`${prompt}${suffix}`);
 	await waitFor(prompt);
 	await pause(50);
+	if (suffix.length > 0) {
+		// An `@` opens the file popup, which would take Enter as a completion.
+		await pause(300);
+		child.write("\x1b");
+		await pause(100);
+	}
 	const from = visible.length;
 	const byteMark = commits.length;
 	const shownPrompt = waitFor(prompt, 60_000, from);
@@ -239,6 +258,14 @@ async function scenarioSubmit(name: string, suffix: string, count: number): Prom
 	};
 }
 
+/** One write holding text and Enter reads as pasted input, so the key arrives on its own. */
+async function typeAndSubmit(prompt: string): Promise<void> {
+	child.write(prompt);
+	await waitFor(prompt);
+	await pause(50);
+	child.write("\r");
+}
+
 /** Tokens separated by a long quiet gap: each should paint in one frame from an idle screen. */
 async function scenarioIdleToken(): Promise<void> {
 	const prompt = "benchidletokens";
@@ -248,10 +275,10 @@ async function scenarioIdleToken(): Promise<void> {
 			send("start ");
 			await pause(500);
 			for (let index = 0; index < repeats; index++) {
-				const token = `Idle${index}tok `;
-				const shown = waitFor(token.trim(), 5_000);
+				const token = `Idle${index}tok`;
+				const shown = waitFor(token, 5_000);
 				const sent = clock();
-				send(token);
+				send(`${token}${HELD_TAIL}`);
 				latencies.push((await shown) - sent);
 				await pause(350);
 			}
@@ -259,15 +286,50 @@ async function scenarioIdleToken(): Promise<void> {
 			done();
 		});
 	});
-	child.write(`${prompt}\r`);
+	await typeAndSubmit(prompt);
 	await finished;
+	scripts.delete(prompt);
 	await pause(300);
 	results.idleToken = summary(latencies);
 }
 
+/** A provider that sends blocks: how many steps each block lands in, and over how long. */
+async function scenarioBursts(): Promise<void> {
+	const prompt = "benchblockstream";
+	const steps: number[] = [];
+	const spreads: number[] = [];
+	const firstPaints: number[] = [];
+	const finished = new Promise<void>((done) => {
+		scripts.set(prompt, async (_response, send, finish) => {
+			send(`start${HELD_TAIL}`);
+			await pause(300);
+			for (let burst = 0; burst < repeats; burst++) {
+				const words = Array.from({ length: 12 }, (_, word) => `b${burst}w${word}x`);
+				const sent = clock();
+				const shown = words.map((word) => waitFor(word, 5_000));
+				send(`${words.map((word) => word.padEnd(50, "y")).join(" ")}\n\n${HELD_TAIL}`);
+				const stamps = await Promise.all(shown);
+				steps.push(new Set(stamps).size);
+				spreads.push(Math.max(...stamps) - Math.min(...stamps));
+				firstPaints.push(Math.min(...stamps) - sent);
+				const wait = sent + 300 - clock();
+				if (wait > 0) await pause(wait);
+			}
+			finish();
+			done();
+		});
+	});
+	await typeAndSubmit(prompt);
+	await finished;
+	scripts.delete(prompt);
+	await pause(300);
+	results.bursts = { paintsPerBurst: summary(steps), spreadMs: summary(spreads), firstPaint: summary(firstPaints) };
+}
+
 /** A steady stream: arrival-to-paint latency, keystroke echo, and how evenly the bytes land. */
-async function scenarioStream(): Promise<void> {
-	const prompt = "benchsteadystream";
+async function scenarioStream(label: string, prefillKb: number): Promise<void> {
+	const prompt = `benchsteadystream${label}`;
+	const paints = new Set<number>();
 	const keyLatencies: number[] = [];
 	const tokenLatencies: number[] = [];
 	const gaps: number[] = [];
@@ -275,6 +337,14 @@ async function scenarioStream(): Promise<void> {
 	let streamEnd = 0;
 	const finished = new Promise<void>((done) => {
 		scripts.set(prompt, async (_response, send, finish) => {
+			const prefillDone = "PrefillDoneMark";
+			const prefilled = waitFor(prefillDone, 120_000);
+			for (let sent = 0; sent < prefillKb * 1024; sent += PARAGRAPH.length * 40) {
+				send(PARAGRAPH.repeat(40));
+				await pause(5);
+			}
+			send(`${prefillDone}${HELD_TAIL}\n\n`);
+			await prefilled;
 			const interval = 1_000 / tokensPerSecond;
 			const total = Math.round(streamSeconds * tokensPerSecond);
 			streamStart = clock();
@@ -286,18 +356,22 @@ async function scenarioStream(): Promise<void> {
 				const sent = clock();
 				const from = visible.length;
 				void waitFor(marker, 10_000, from).then(
-					(at) => tokenLatencies.push(at - sent),
+					(at) => {
+						tokenLatencies.push(at - sent);
+						paints.add(at);
+					},
 					() => {},
 				);
-				send(`${marker}${index % 12 === 11 ? "\n" : " "}`);
+				send(`${marker}${index % 12 === 11 ? "\n\n" : ""}${HELD_TAIL}`);
 			}
 			streamEnd = clock();
 			finish();
 			done();
 		});
 	});
-	child.write(`${prompt}\r`);
-	await pause(800);
+	await typeAndSubmit(prompt);
+	while (streamStart === 0) await pause(20);
+	await pause(300);
 	const alphabet = "qzjxkv";
 	let draft = "";
 	for (let index = 0; index < 40 && clock() < streamStart + streamSeconds * 1_000 - 300; index++) {
@@ -309,6 +383,7 @@ async function scenarioStream(): Promise<void> {
 		await pause(60);
 	}
 	await finished;
+	scripts.delete(prompt);
 	await pause(500);
 	for (let index = 0; index < draft.length; index++) child.write("\x7f");
 	await pause(200);
@@ -318,7 +393,8 @@ async function scenarioStream(): Promise<void> {
 		const current = window[index];
 		if (previous && current) gaps.push(current.at - previous.at);
 	}
-	results.stream = {
+	results[`stream:${label}`] = {
+		textPaintsPerSecond: Number((paints.size / Math.max(0.001, (streamEnd - streamStart) / 1_000)).toFixed(1)),
 		tokenToPaint: summary(tokenLatencies),
 		keystrokeEcho: summary(keyLatencies),
 		commitGap: summary(gaps),
@@ -327,7 +403,7 @@ async function scenarioStream(): Promise<void> {
 }
 
 try {
-	await waitFor("bench-model", 60_000, 0).catch(() => {});
+	await waitFor("no Git branch", 60_000, 0);
 	await pause(1_500);
 	if (selected("plain")) await scenarioSubmit("plain", "", repeats);
 	if (selected("attachment")) {
@@ -336,7 +412,11 @@ try {
 		await scenarioSubmit("attach", " @big.txt ", Math.min(repeats, 4));
 	}
 	if (selected("idle-token")) await scenarioIdleToken();
-	if (selected("stream")) await scenarioStream();
+	if (selected("bursts")) await scenarioBursts();
+	if (selected("stream")) await scenarioStream("0kb", 0);
+	if (selected("stream20")) await scenarioStream("20kb", 15);
+	if (selected("stream100")) await scenarioStream("100kb", 100);
+	if (selected("stream500")) await scenarioStream("500kb", 500);
 } finally {
 	child.write("\x03");
 	await pause(150);

@@ -153,6 +153,12 @@ export interface ReplayedRunFacts {
 	coldReasons?: ReadonlyArray<string>;
 }
 
+/** What one Markdown layout of the open reply cost and how long the reply was then. */
+export interface LiveTextRender {
+	durationMs: number;
+	codeUnits: number;
+}
+
 export interface ChatPanelRenderMetrics {
 	durationMs: number;
 	cacheHit: boolean;
@@ -184,6 +190,8 @@ type TextSegment = {
 	markdown?: { view: Markdown; source: string; epoch: number };
 	/** Reuse wrapped rows while another entry streams or its clock advances (#428). */
 	rendered?: { source: string; finalized: boolean; epoch: number; layouts: Map<string, string[]> };
+	/** Read by the stream renderer to price the next repaint; a new segment starts unpriced. */
+	liveRender?: LiveTextRender;
 	/**
 	 * Live denoising state while a diffusion model streams whole frames. The
 	 * text before `settled` agreed between the last two frames and is shown as
@@ -427,6 +435,8 @@ export interface ChatPanel extends Component {
 	inspectionArtifacts(): ViewArtifact[];
 	/** Whether the current preset shows supplied reasoning, for stream pacing. */
 	isThinkingExpanded(): boolean;
+	/** The newest layout of the reply's open text segment; null once it settles or before its first frame. */
+	liveTextRender(): LiveTextRender | null;
 	/** The frame `render` would return, split at the settled prefix. */
 	renderRegions(width: number): ChatPanelRegions;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
@@ -775,6 +785,7 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 	const key = `${width}|${bareFences}`;
 	const cached = seg.rendered.layouts.get(key);
 	if (cached !== undefined) return cached;
+	const startedAt = seg.finalized ? 0 : performance.now();
 	seg.prose ??= new AssistantProseProjection();
 	const prose = seg.prose.project(seg.text, seg.finalized);
 	if (seg.markdown === undefined || seg.markdown.epoch !== skinEpoch())
@@ -784,6 +795,7 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 		seg.markdown.source = prose;
 	}
 	const lines = withoutLeadingBlanks(markdownRows(seg.markdown.view, width, bareFences));
+	if (!seg.finalized) seg.liveRender = { durationMs: performance.now() - startedAt, codeUnits: seg.text.length };
 	seg.rendered.layouts.set(key, lines);
 	if (seg.rendered.layouts.size > 3) {
 		const oldest = seg.rendered.layouts.keys().next().value;
@@ -2366,6 +2378,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		isThinkingExpanded(): boolean {
 			return currentDetail().reasoningRows > 0;
+		},
+		liveTextRender(): LiveTextRender | null {
+			for (let index = transcript.length - 1; index >= 0; index -= 1) {
+				const entry = transcript[index];
+				if (entry?.role !== "assistant") continue;
+				const tail = entry.segments[entry.segments.length - 1];
+				return tail?.kind === "text" && !tail.finalized ? (tail.liveRender ?? null) : null;
+			}
+			return null;
 		},
 		reset(): void {
 			transcript.length = 0;
