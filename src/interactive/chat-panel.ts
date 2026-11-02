@@ -49,7 +49,7 @@ import {
 	toolRowTitle,
 } from "./renderers/tool-execution.js";
 import type { WorkerEntryRenderOptions } from "./renderers/worker-entry.js";
-import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
+import { renderWorkerEntryLines, workerTelemetryDisplay } from "./renderers/worker-entry.js";
 import { compactReasoningTokens, type ReasoningUsageView, UNMEASURED_REASONING } from "./status/index.js";
 import {
 	clioTheme,
@@ -366,7 +366,7 @@ type TranscriptEntry =
 	 * a streaming delta reaches the screen without copying the entry per frame.
 	 * The panel is told when that happened through `applyWorkerState`.
 	 */
-	| { role: "worker"; state: WorkerEntryState; at: number }
+	| { role: "worker"; state: WorkerEntryState; at: number; telemetryShown: string }
 	/**
 	 * A block the caller renders itself. Most are settled the moment they are
 	 * appended, but a few (the operator's `!` bash row) keep mutating the state
@@ -1475,6 +1475,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const transcript: TranscriptEntry[] = [];
 	/** Assignment to its placed block, in placement order, so a streaming delta is O(1) to route. */
 	const workerEntries = new Map<string, WorkerTranscriptEntry>();
+	/** A retry rebinds a card to a new run on the same state object, so the run id is part of what it shows. */
+	const telemetryShown = (state: WorkerEntryState, view: TelemetryView | null): string =>
+		`${state.runId}\0${workerTelemetryDisplay(view?.run(state.runId) ?? null)}`;
 	const dispatchGroups = new Map<string, WorkerTranscriptEntry[]>();
 	const workerRenderOptions = (
 		entry: TranscriptEntry,
@@ -1595,7 +1598,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const invalidateEntryCache = (entry: TranscriptEntry): void => {
 		entryRenderCache.delete(entry);
 		if (frozen === null && prerender === null) return;
-		const index = transcript.indexOf(entry);
+		// From the end: what changes is nearly always the live tail, and this runs per streamed delta.
+		const index = transcript.lastIndexOf(entry);
 		if (frozen !== null && index < frozen.through) frozen = null;
 		if (prerender !== null && index >= 0 && index < prerender.next) prerender.next = index;
 	};
@@ -1627,8 +1631,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		const view = options.getTelemetry?.() ?? null;
 		if (view === receiptView) return;
 		receiptView = view;
-		for (const entry of workerEntries.values()) invalidateEntryCache(entry);
-		dirty = true;
+		for (const entry of workerEntries.values()) {
+			const shown = telemetryShown(entry.state, view);
+			if (shown === entry.telemetryShown) continue;
+			entry.telemetryShown = shown;
+			invalidateEntryCache(entry);
+			dirty = true;
+		}
 		// A view still merging its cold read holds a partial session; its turns are read once it has merged.
 		if (view === null || view.seeding) return;
 		const running = runningTurns(view);
@@ -2106,6 +2115,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	const prerenderStep = (): boolean => {
 		syncSkin();
+		// A card rendered ahead must read the view its cached siblings were checked against.
+		refreshReceipts();
 		const job = prerender;
 		if (job === null) {
 			prerenderScheduled = false;
@@ -2209,7 +2220,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				markDirty();
 				return;
 			}
-			const entry: WorkerTranscriptEntry = { role: "worker", state, at: stamp() };
+			const entry: WorkerTranscriptEntry = {
+				role: "worker",
+				state,
+				at: stamp(),
+				telemetryShown: telemetryShown(state, options.getTelemetry?.() ?? null),
+			};
 			workerEntries.set(state.assignmentId, entry);
 			if (state.parentToolCallId !== undefined) {
 				const siblings = dispatchGroups.get(state.parentToolCallId) ?? [];
