@@ -140,11 +140,11 @@ test("worker quota joins only known local credential owners and does not claim a
 	doesNotMatch(text, /\$0.00|quota saved/);
 	match(
 		plain(renderWorkerUsage([{ ...row, usage: { kind: "unavailable" } }], [], quotaRows([account]), 80)),
-		/n\/a {2}n\/a/,
+		/n\/a {2}n\/a {2}not measured/,
 	);
 	match(
 		plain(renderWorkerUsage([{ ...row, usage: { kind: "pending" } }], [], quotaRows([account]), 80)),
-		/researcher {2}1\.0s {2}— {2}— {2}—/,
+		/researcher {2}1\.0s {2}— {2}— {2}no calls yet/,
 	);
 });
 

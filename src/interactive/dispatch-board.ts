@@ -1010,6 +1010,8 @@ export interface RunTableOptions {
 }
 
 const USAGE_SHORT: Readonly<Record<string, string>> = { "not available": "n/a" };
+export const USAGE_NOT_MEASURED = "not measured";
+export const USAGE_NO_CALLS = "no calls yet";
 
 function firstLine(text: string): string {
 	const line = text.split("\n").find((candidate) => candidate.trim().length > 0) ?? "";
@@ -1138,7 +1140,11 @@ export function runTableRows(
 		);
 		if (anyPhase) cells.push(formatDispatchPhaseCell(row.phase, 14) ?? "");
 		if (anyNode) cells.push(row.node ?? "local");
-		cells.push(elapsed, figure(GLYPH.up, usage.prompt), figure(GLYPH.down, usage.output), figure("", usage.cost));
+		// Unmeasured and not started are different facts, and the cost cell is wide enough to say which.
+		const costCell: TableCell = pending
+			? { text: row.usage.kind === "unavailable" ? USAGE_NOT_MEASURED : USAGE_NO_CALLS, tone: "muted" }
+			: figure("", usage.cost);
+		cells.push(elapsed, figure(GLYPH.up, usage.prompt), figure(GLYPH.down, usage.output), costCell);
 		if (anyAccount)
 			cells.push(
 				weekly === null

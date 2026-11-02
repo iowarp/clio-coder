@@ -369,6 +369,15 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	);
 	if (history.length > 0) out.push(history);
 	out.push(theme.fg("annotation", "Context is per request · subscription limits are account-wide · /usage"));
+	// Only the ledger's bar draws the three states; the budget's meter is filled and free.
+	if (!facts.budget) {
+		const key = [
+			"Filled = context · empty = available · shaded = reserve; small buckets receive one cell.",
+			"Filled = context · empty = available · shaded = reserve",
+			`${GLYPH.contextFull} used · ${GLYPH.contextFree} free · ${GLYPH.contextReserve} reserve`,
+		].find((text) => visibleWidth(text) <= width);
+		if (key !== undefined) out.push(theme.fg("annotation", key));
+	}
 	return out;
 }
 

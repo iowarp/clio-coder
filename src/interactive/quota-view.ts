@@ -14,6 +14,8 @@ import {
 	dispatchStatusPresentation,
 	dispatchUsageText,
 	runTableRows,
+	USAGE_NO_CALLS,
+	USAGE_NOT_MEASURED,
 } from "./dispatch-board.js";
 import type { ClioToken, TableCell, Tone } from "./theme/index.js";
 import {
@@ -335,10 +337,20 @@ export function renderWorkerUsage(
 		return out;
 	}
 	if (rows.length) {
+		const table = runTableRows(dispatchBoardItems(rows), safe, { quota: snapshots });
 		out.push(
 			sectionRule(theme, safe, "On the board", { meta: `${rows.length} run${rows.length === 1 ? "" : "s"}` }),
-			...runTableRows(dispatchBoardItems(rows), safe, { quota: snapshots }),
+			...table,
 		);
+		// A narrow table drops its cost column first, and that column is what tells these two apart.
+		const said = table.join("\n");
+		const legend = [
+			rows.some((row) => row.usage.kind === "unavailable") && !said.includes(USAGE_NOT_MEASURED)
+				? `n/a ${USAGE_NOT_MEASURED}`
+				: null,
+			rows.some((row) => row.usage.kind === "pending") && !said.includes(USAGE_NO_CALLS) ? `— ${USAGE_NO_CALLS}` : null,
+		].filter((part): part is string => part !== null);
+		if (legend.length > 0) out.push(theme.fg("annotation", legend.join(" · ")));
 		const accounts = new Map<string, string>();
 		for (const row of rows) accounts.set(row.runtimeId, clean(workerQuotaLabel(row, snapshots)));
 		out.push(

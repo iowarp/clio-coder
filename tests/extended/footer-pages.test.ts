@@ -321,6 +321,7 @@ test("Context dashboard shares the overlay category swatches and filled/free/res
 	const bar = renderContextMeterBar(ledger, 168 - figure.length - 2, theme);
 	ok(plain(rows).includes(stripTerminalSequences(bar)));
 	match(plain(rows), /free .*reserve .*compaction/);
+	match(plain(rows), /Filled = context.*empty = available.*shaded = reserve/);
 });
 
 test("finished agents collapse into bounded history while retries retain live cards", () => {
