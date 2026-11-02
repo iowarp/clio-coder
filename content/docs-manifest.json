@@ -3,9 +3,9 @@
   "corpus": "public-guides",
   "corpusPolicy": "site/public-docs.json",
   "source": {
-    "version": "0.6.6",
-    "ref": "7208d7e24e38d5f8a3049342c8967052ab81f48e",
-    "commit": "7208d7e24e38d5f8a3049342c8967052ab81f48e",
+    "version": "0.6.7",
+    "ref": "76224d7a76d8be7094ed18976eea0fc9f7405816",
+    "commit": "76224d7a76d8be7094ed18976eea0fc9f7405816",
     "mode": "repository"
   },
   "files": [
@@ -13,7 +13,7 @@
       "path": "README.md",
       "source": "README.md",
       "sha256": "314a870d6a5e0a176db2f9adbea402a6f04200fb93b4ab23e6d6117d0ec92134",
-      "sourceSha256": "9d5fbb668fbad0dbe261a88b531c8ad6154138106e27f67fa0af369ebfd2c0d0"
+      "sourceSha256": "f9e0447b3f2bec9c5cffcd6a741231f4bab7900b65861605eeb60ed0b4529916"
     },
     {
       "path": "guide/hpc-clusters.md",
@@ -31,7 +31,7 @@
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
       "sha256": "d496327dd19cf4108789613b332a69a6486e9cea9feadca6f19b46e8cd681d98",
-      "sourceSha256": "c273ec5dabb4f9dfd40a711be9b391b5d4feae286af9f7864e7e78df44da6d9d"
+      "sourceSha256": "776337c24df25b6af3ed74bcb6e432ae2641b1e60e2dc76bbec7e644b308c6be"
     },
     {
       "path": "guide/tool-usage.md",
@@ -61,7 +61,7 @@
       "path": "guide/fleet-dispatch.md",
       "source": "docs/guide/fleet-dispatch.md",
       "sha256": "b4a9732b4a641cd0748a8c83d2df07acefb15c72cf33e27cd1f5e803e3813245",
-      "sourceSha256": "79d047afdcc290fe468f1968d1307143cb0df0fb96dffe79ce56e167654b7bf1"
+      "sourceSha256": "bdde7267f68fe385e9a674e5546b9613ffb5fcb4a394e9a5718081b4b0a41cbf"
     },
     {
       "path": "guide/resource-library.md",
@@ -109,7 +109,7 @@
       "path": "guide/configuration-reference.md",
       "source": "docs/guide/configuration-reference.md",
       "sha256": "c9ce99c8eb66392cfbe38acce3d6a7c8a76c5384c9c7e9eac9e6f16af8f7772f",
-      "sourceSha256": "4ca69e81586981479f61dc0636e32b2c5808f878f52194c304ad8d25a8239f50"
+      "sourceSha256": "f7677e8ce41de62dae035bad3896bb4b12072ee88b1cdbc51d47ad736fbfa450"
     },
     {
       "path": "guide/environment-variables.md",
