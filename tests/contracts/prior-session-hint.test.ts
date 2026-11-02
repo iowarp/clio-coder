@@ -1,4 +1,4 @@
-import { match, strictEqual } from "node:assert/strict";
+import { doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -60,6 +60,32 @@ it("selects a recent closed session with two operator turns, excluding fork ance
 			sessionStartFacts(cwd, "current", now, emptyWorkspaceSnapshot(cwd)).join("\n"),
 			/Answer "last time" from this record; git log is not session history/,
 		);
+	} finally {
+		env.restore();
+	}
+});
+
+it("redacts secret-shaped text the prior-session line quotes from another session's first prompt", async () => {
+	const env = await isolateClioEnv("clio-prior-session-secret-");
+	try {
+		const cwd = join(env.dir, "project");
+		const dir = join(clioStateDir(), "sessions", cwdHash(cwd), "earlier");
+		mkdirSync(dir, { recursive: true });
+		const now = Date.now();
+		const at = new Date(now - 60_000).toISOString();
+		writeFileSync(join(dir, "meta.json"), JSON.stringify({ id: "earlier", cwd, createdAt: at, endedAt: at }));
+		const turns = [0, 1].map((index) => ({
+			kind: "message",
+			turnId: `t${index}`,
+			parentTurnId: null,
+			timestamp: at,
+			role: "user",
+			payload: { text: "use AKIAIOSFODNN7EXAMPLE and MY_API_KEY=hunter2value" },
+		}));
+		writeFileSync(join(dir, "current.jsonl"), `${turns.map((turn) => JSON.stringify(turn)).join("\n")}\n`);
+		const facts = sessionStartFacts(cwd, "current", now, emptyWorkspaceSnapshot(cwd)).join("\n");
+		match(facts, /Last recorded session here/);
+		doesNotMatch(facts, /AKIAIOSFODNN7EXAMPLE|hunter2value/);
 	} finally {
 		env.restore();
 	}
