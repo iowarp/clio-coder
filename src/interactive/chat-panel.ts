@@ -7,7 +7,12 @@ import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
-import { holdUnresolvedStrings, redactSecretString, redactStreamingSecretString } from "../domains/safety/redaction.js";
+import {
+	holdUnresolvedStrings,
+	holdUnresolvedUserinfo,
+	redactSecretString,
+	redactStreamingSecretString,
+} from "../domains/safety/redaction.js";
 import type { ViewArtifact } from "../domains/session/view-artifacts.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
@@ -2433,7 +2438,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						if (seg.kind === "error")
 							add("Provider or terminal error", seg.at, () => providerErrorEvidence(seg.text).split("\n"));
 						if (seg.kind === "thinking" && seg.text.trim().length > 0) {
-							const prose = sanitizeAssistantProse(seg.text);
+							const prose = sanitizeAssistantProse(seg.finalized ? seg.text : holdUnresolvedUserinfo(seg.text));
 							const opening = prose.trim().split("\n", 1)[0] ?? "";
 							add(`Thinking · ${opening}`, seg.at, () => sanitizeMultilineDisplayText(prose).text.split("\n"));
 						}

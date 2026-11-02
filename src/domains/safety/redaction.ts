@@ -38,11 +38,14 @@ export const URL_USERINFO_RE = SECRET_STRING_RE;
 // tokens. The marker's own colon lands in the prefix, so `[redacted:kind]` arrives split and would corrupt on a rewrite.
 const REDACTED_USERINFO_RE = /^(?:\[redacted\]|\uE000[\uE100-\uF8FF])$/u;
 const REDACTED_KIND_RE = /^[a-z-]+\]$/u;
+// The marker must open the password, or `https://u:REAL[redacted:abc]@h` would show REAL. Text before an earlier colon
+// stays exempt because one-shot redaction always shows it.
+const REDACTED_PREFIX_RE = /(?::|\/\/)\[redacted:$/u;
 
 /** Whether a {@link URL_USERINFO_RE} match holds a credential, not a variable's name or an earlier pass's marker (#446). */
 export function urlUserinfoHoldsSecret(prefix: string, secret: string): boolean {
 	if (ENV_REFERENCE_RE.test(secret) || REDACTED_USERINFO_RE.test(secret)) return false;
-	return !(prefix.endsWith("[redacted:") && REDACTED_KIND_RE.test(secret));
+	return !(REDACTED_PREFIX_RE.test(prefix) && REDACTED_KIND_RE.test(secret));
 }
 
 function redactUnlessEnvReference(match: string, prefix: string, secret: string): string {
@@ -138,6 +141,75 @@ export function holdUnresolvedUserinfo(value: string): string {
 	const colon = value.indexOf(":", runStart);
 	if (colon < 0 || colon === value.length - 1) return value;
 	return `${value.slice(0, colon + 1)}${value.length - colon - 1 > USERINFO_HOLD_LIMIT ? USERINFO_HOLD_MARKER : ""}`;
+}
+
+/**
+ * Where the URL an unfinished text may still be writing starts, or null. This reads back to the scheme, for a writer that
+ * must keep the whole URL together because a later piece without its scheme could never be recognized (#446).
+ */
+export function openUrlStart(value: string): number | null {
+	let runStart = value.length;
+	while (runStart > 0 && !endsUserinfoRun(value.charCodeAt(runStart - 1))) runStart -= 1;
+	const from = Math.max(0, runStart - LONGEST_URL_SCHEME);
+	const scheme = URL_SCHEME_END_RE.exec(value.slice(from, runStart));
+	return scheme === null ? null : from + scheme.index;
+}
+
+/** The index just past the userinfo run a text opens inside of, or null when it does not end in this text (#446). */
+export function userinfoRunEnd(value: string): number | null {
+	for (let index = 0; index < value.length; index += 1) if (endsUserinfoRun(value.charCodeAt(index))) return index;
+	return null;
+}
+
+/**
+ * Tokens still to discard after a text lost its head. Patterns recognize a secret by what precedes it, so whatever a cut
+ * leaves of a token, and the token after it in case the cut token was a flag naming that value as its secret, can no longer
+ * be recognized. A discarded token with a dash may itself be such a flag, so it does not count and its value goes too. It
+ * is state rather than a one-off strip because the unsafe token can continue in text not yet seen (#446).
+ */
+export interface CutHeadGuard {
+	tokens: number;
+	inToken: boolean;
+	tokenHasDash: boolean;
+}
+
+export function cutHeadGuard(): CutHeadGuard {
+	return { tokens: 2, inToken: true, tokenHasDash: false };
+}
+
+/** A guard for text following a whole-line cut, needed only when the removed text ends in a secret flag awaiting its value. */
+export function headGuardAfter(removed: string): CutHeadGuard | null {
+	const trimmed = removed.trimEnd();
+	let start = trimmed.length;
+	while (start > 0 && /[a-z0-9_-]/iu.test(trimmed.charAt(start - 1))) start -= 1;
+	return secretFlagStart(trimmed.slice(start)) === null ? null : { tokens: 1, inToken: false, tokenHasDash: false };
+}
+
+const TOKEN_RE = /\S*/uy;
+const SPACE_RE = /\s*/uy;
+
+/** Discard what the guard still covers from the front of `text`, advancing the guard. */
+export function dropCutHead(text: string, guard: CutHeadGuard): string {
+	let at = 0;
+	while (guard.tokens > 0 && at < text.length) {
+		const start = at;
+		const scan = guard.inToken ? TOKEN_RE : SPACE_RE;
+		scan.lastIndex = at;
+		scan.exec(text);
+		at = scan.lastIndex;
+		if (guard.inToken && text.slice(start, at).includes("-")) guard.tokenHasDash = true;
+		if (at === text.length) break;
+		if (guard.inToken) {
+			// The cut token's own dash adds nothing: its one possible value is already counted.
+			if (!guard.tokenHasDash || guard.tokens > 1) guard.tokens -= 1;
+			guard.tokenHasDash = false;
+		}
+		guard.inToken = !guard.inToken;
+	}
+	if (guard.tokens > 0) return "";
+	SPACE_RE.lastIndex = at;
+	SPACE_RE.exec(text);
+	return text.slice(SPACE_RE.lastIndex);
 }
 
 /** Redact text that may still grow; once it is complete, `final` releases any hold through full redaction. */

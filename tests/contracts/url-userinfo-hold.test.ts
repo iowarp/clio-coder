@@ -1,5 +1,9 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { clioStateDir } from "../../src/core/xdg.js";
+import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
+import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
 	holdUnresolvedStrings,
@@ -7,13 +11,25 @@ import {
 	redactSecretString,
 	redactStreamingSecretString,
 } from "../../src/domains/safety/redaction.js";
-import { createWorkerProgressFold, WORKER_LIVE_TAIL_MAX_BYTES } from "../../src/domains/telemetry/worker-progress.js";
+import {
+	createWorkerProgressFold,
+	WORKER_LIVE_TAIL_MAX_BYTES,
+	WORKER_PROGRESS_WINDOW_BYTES,
+	WORKER_PROGRESS_WINDOW_MS,
+} from "../../src/domains/telemetry/worker-progress.js";
+import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { LiveToolView } from "../../src/interactive/renderers/live-tool-view.js";
-import { safeWorkerAnswerText, WorkerAnswerProjection } from "../../src/interactive/renderers/worker-answer.js";
+import {
+	liveWorkerAnswerText,
+	safeWorkerAnswerText,
+	WorkerAnswerProjection,
+} from "../../src/interactive/renderers/worker-answer.js";
+import { shapeBashProgress } from "../../src/tools/bash.js";
 import { deterministicDiagnosticSummary } from "../../src/tools/result-disposition.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
-const SEED = Number(process.env.URL_USERINFO_FUZZ_SEED ?? 0x5eed);
-const DOCUMENTS = Number(process.env.URL_USERINFO_FUZZ_DOCUMENTS ?? 60);
+const SEED = 0x5eed;
+const DOCUMENTS = 60;
 const CHUNKINGS = 6;
 
 // Secrets draw on letters nothing else in the corpus uses, so one leaked character is enough to fail a frame.
@@ -34,6 +50,8 @@ const CORPUS = [
 	"https://a:b,https://c:ZQXJ@h",
 	"https://u:ZQXJ@h:8443/p",
 	"https://u:ZQXJ",
+	"--token\nZQXJ next",
+	"deploy --token ZQXJsecret tail",
 	"https://u:$TOKEN@h",
 	"https://ghp_x@github.com/r",
 	"https://ghp_x:ZQXJ@github.com/r",
@@ -154,26 +172,127 @@ test("forming tool arguments hold every string they carry", () => {
 	});
 });
 
-test("the live worker tail cannot cut a scheme or key off a secret", () => {
-	const head = "start https://u:ZQXJ@host/x API_KEY=ZQXJ ";
-	for (let cut = 0; cut <= head.length; cut += 1) {
-		const line = `${head}${"a ".repeat(Math.ceil((WORKER_LIVE_TAIL_MAX_BYTES + cut - head.length) / 2))}`;
-		const fold = createWorkerProgressFold();
-		fold.observe(
-			{
-				type: "message_update",
-				assistantMessageEvent: { type: "text_delta", delta: line.slice(0, WORKER_LIVE_TAIL_MAX_BYTES + cut) },
-			},
-			0,
-		);
-		strictEqual(redactSecretString(fold.snapshot().tailText).match(SECRET_LETTERS), null, `cut ${cut}`);
+const delta = (text: string) => ({
+	type: "message_update",
+	assistantMessageEvent: { type: "text_delta", delta: text },
+});
+
+function liveCard(fold: ReturnType<typeof createWorkerProgressFold>): string {
+	return liveWorkerAnswerText(fold.snapshot().tailText, false);
+}
+
+test("no frame of a rolling worker tail shows a secret, wherever a byte cut or a refused chunk lands", () => {
+	const next = random(SEED);
+	const fillers = [
+		(size: number) => "x".repeat(size),
+		(size: number) => "xy ".repeat(Math.ceil(size / 3)).slice(0, size),
+		(size: number) => "line\n".repeat(Math.ceil(size / 5)).slice(0, size),
+	];
+	for (const text of CORPUS) {
+		const oneShot = redactSecretString(text);
+		for (const fill of fillers) {
+			for (let offset = 0; offset <= text.length + 2; offset += 1) {
+				const stream = `${fill(WORKER_LIVE_TAIL_MAX_BYTES - offset)}${text} tail words here\nand a line after`;
+				const fold = createWorkerProgressFold();
+				let now = 1000;
+				let at = 0;
+				const where = `seed ${SEED} offset ${offset} of ${JSON.stringify(text)}`;
+				for (const point of cuts(next, stream.length)) {
+					// One chunk in six falls in a spent rate window and is refused.
+					if (next() < 1 / 6) fold.observe(delta("w".repeat(WORKER_PROGRESS_WINDOW_BYTES + 1)), now);
+					fold.observe(delta(stream.slice(at, point)), now);
+					strictEqual(leaked(liveCard(fold), oneShot).join(""), "", where);
+					at = point;
+					now += next() < 0.5 ? 1 : WORKER_PROGRESS_WINDOW_MS;
+				}
+			}
+		}
 	}
-	const unbroken = createWorkerProgressFold();
-	unbroken.observe(
-		{ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: `https://u:${"Z".repeat(5000)}` } },
-		0,
+});
+
+test("the tail guard outlives the delta that emptied the tail", () => {
+	const fold = createWorkerProgressFold();
+	fold.observe(delta(`${"x".repeat(5000)}https://u:ZQ`), 0);
+	strictEqual(fold.snapshot().tailText, "");
+	fold.observe(delta("XJ@host/repo.git next words and more"), 1);
+	strictEqual(fold.snapshot().tailText, "words and more");
+	const spent = createWorkerProgressFold();
+	spent.observe(delta("w ".repeat(WORKER_PROGRESS_WINDOW_BYTES / 2)), 0);
+	spent.observe(delta("see https://user:"), 1);
+	spent.observe(delta("ZQXJ@host/x done now"), WORKER_PROGRESS_WINDOW_MS + 1);
+	strictEqual(liveCard(spent).match(SECRET_LETTERS), null);
+	const hole = createWorkerProgressFold();
+	hole.observe(delta("see https://user:ZQ"), 0);
+	hole.observe(delta("w".repeat(WORKER_PROGRESS_WINDOW_BYTES + 1)), 1);
+	hole.observe(delta("XJ/path more words here now"), WORKER_PROGRESS_WINDOW_MS + 1);
+	strictEqual(liveCard(hole), "see words here now");
+});
+
+test("no frame of the bash live tail shows a secret, and a finished line past the cap releases", () => {
+	const shown = (raw: string) =>
+		new LiveToolView()
+			.outputRows((shapeBashProgress(raw, raw.length, "bounded") as { output: string }).output, 5, 400, {
+				rail: "",
+				railWidth: 0,
+			})
+			.join("\n");
+	const cap = 16 * 1024;
+	for (const text of CORPUS) {
+		const oneShot = redactSecretString(text);
+		for (let offset = 0; offset <= text.length + 2; offset += 1) {
+			const where = `offset ${offset} of ${JSON.stringify(text)}`;
+			strictEqual(leaked(shown(`${text} ${"z".repeat(cap - text.length - 1 + offset)}`), oneShot).join(""), "", where);
+			const words = `${text} ${"zz ".repeat(Math.ceil((cap + offset) / 3))}`;
+			strictEqual(leaked(shown(words.slice(0, cap + offset)), oneShot).join(""), "", `words ${where}`);
+		}
+	}
+	strictEqual(leaked(shown(`--token\nZQXJ\n${"line\n".repeat(cap / 5)}`), "").join(""), "");
+	const dev = shown(`${"line\n".repeat(cap / 4)}Local: http://localhost:5173\n`);
+	strictEqual(dev.split("\n").at(-1), "Local: http://localhost:5173");
+	strictEqual(
+		shown(`${"line\n".repeat(cap / 4)}Local: http://localhost:5173`)
+			.split("\n")
+			.at(-1),
+		"Local: http://localhost:",
 	);
-	strictEqual(unbroken.snapshot().tailText, "");
+});
+
+test("/view holds open thinking the way the rail does", async () => {
+	const panel = createChatPanel({ now: () => 1_000 });
+	panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: "clone https://user:ZQXJ", partialThinking: "x" });
+	const open = panel.inspectionArtifacts().find((artifact) => artifact.title.startsWith("Thinking"));
+	strictEqual(open?.title, "Thinking · clone https://user:");
+	strictEqual((await open?.load())?.lines.join("\n"), "clone https://user:");
+});
+
+test("the run feed never splits a password across rows", async () => {
+	const env = await isolateClioEnv("url-userinfo-feed-");
+	try {
+		const rows = (id: string, ...details: (string | RunEventJournalBody)[]): string => {
+			for (const item of details) {
+				appendRunFeed(id, typeof item === "string" ? { kind: "event", type: "text", detail: item } : item);
+			}
+			appendRunFeed(id, { kind: "terminal", outcome: "ok" });
+			return readFileSync(runFeedPath(id, clioStateDir()), "utf8")
+				.trim()
+				.split("\n")
+				.map((row) => (JSON.parse(row) as { detail?: string }).detail ?? "")
+				.join("|");
+		};
+		const long = "q".repeat(4100);
+		const bound = rows("feed-bound", `${long}https://user:ZQXJ`, "ZQXJ@host/x next", " words here now ");
+		strictEqual(bound.match(SECRET_LETTERS), null);
+		const oversized = rows("feed-oversized", `https://user:${"Z".repeat(5000)}`, "ZQ@host/x next", " words here now ");
+		strictEqual(oversized.match(SECRET_LETTERS), null);
+		const warning = { kind: "event", type: "route_warning", detail: "late" } as const;
+		const midUrl = rows("feed-event", "see https://user:ZQ", warning, "XJ@host/x next words here now ");
+		strictEqual(midUrl.match(SECRET_LETTERS), null);
+		const scheme = rows("feed-scheme", `${long}htt`, warning, "ps://user:ZQXJ@host/x next words here now ");
+		strictEqual(scheme.match(SECRET_LETTERS), null);
+	} finally {
+		env.restore();
+	}
 });
 
 test("live command output holds only an open last line", () => {
@@ -211,7 +330,11 @@ test("userinfo redaction counts once, survives a second pass and spans display f
 	strictEqual(redactSecretsText(once, tally), once);
 	strictEqual(redactSecretsText(redactSecretString("https://u:ZQXJ@h"), tally), "https://u:[redacted]@h");
 	strictEqual(redactSecretString(once), once);
-	strictEqual(tally.count, 1);
+	const deeper = redactSecretsText("https://a:b:ZQ@h", tally);
+	strictEqual(deeper, "https://a:b:[redacted:url-userinfo]@h");
+	strictEqual(redactSecretsText(deeper, tally), deeper);
+	strictEqual(redactSecretString("https://u:ZQ[redacted:abc]@h"), "https://u:ZQ[redacted:[redacted]@h");
+	strictEqual(tally.count, 2);
 	deepStrictEqual(redactSecretSegments(["clone https://u:ZQ", "XJ@h/r"], createRedactionTally()), [
 		"clone https://u:[redacted:url-userinfo]",
 		"[redacted:url-userinfo]@h/r",
