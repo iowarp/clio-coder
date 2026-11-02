@@ -3667,6 +3667,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const source = routeProvenance().active[route];
 			return source === "chat" ? "built-in" : source;
 		}
+		// The cycle set lives in the session's routing state, not its overrides, and no route owns it.
+		if (
+			isRoutingPath(path) &&
+			JSON.stringify(getAtPath(getCurrentSettings(), path)) !==
+				JSON.stringify(getAtPath(config?.get() ?? readSettings(), path))
+		) {
+			return "session";
+		}
 		if (sessionOverrides.has(path)) return "session";
 		return settingsSourceFor(config?.sources?.() ?? {}, path);
 	};
