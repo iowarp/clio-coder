@@ -24,6 +24,8 @@ import { COUNCIL_SYNTHESIS_LABEL } from "../session-control/council.js";
 import { isHelperRun } from "../session-control/worker-stream.js";
 import type { CouncilGroupView, CouncilMemberView } from "./council-grid.js";
 import { councilGroupBody, councilIslandLines } from "./council-grid.js";
+import { DOCK_BODY_ROWS_MAX } from "./dock.js";
+import { centeredWindow, type RowBudgetedBody, windowRows } from "./overlay-frame.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
 import { presentWorkerContractAnswer, safeWorkerAnswerText } from "./renderers/worker-answer.js";
@@ -32,6 +34,7 @@ import {
 	animationStep,
 	clioTheme,
 	dotSep,
+	emptyState,
 	fitUnits,
 	formatCompactMs,
 	formatTargetLabel,
@@ -40,10 +43,16 @@ import {
 	GLYPH,
 	innerDivider,
 	padAnsi,
+	positionRow,
+	sectionRule,
 	spinnerFrame,
+	type TableCell,
+	type TableColumn,
+	tableRows,
 	toolFunction,
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
+import { skinEpoch } from "./theme/tokens.js";
 import { workerActivityWords } from "./worker-activity.js";
 
 export type DispatchBoardStatus = TelemetryRunSummary["status"];
@@ -601,12 +610,17 @@ function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: n
 	);
 }
 
-function renderDispatchCard(
+/**
+ * The selected run's facts under the board's table, most useful first: what it
+ * is doing, then the task, the route, its telemetry and its provenance. The
+ * board cuts this at its row budget, so the order is the priority. The run id
+ * and elapsed time sit in the rule above, not in the body.
+ */
+function dispatchCardBody(
 	row: DispatchBoardRow,
-	width: number,
+	contentWidth: number,
 	evidence?: RunEvidencePresentation,
 	options: {
-		selected?: boolean;
 		expanded?: boolean;
 		endpointActive?: number;
 		endpointQueued?: number;
@@ -614,9 +628,6 @@ function renderDispatchCard(
 	} = {},
 ): string[] {
 	const theme = options.theme ?? clioTheme();
-	const contentWidth = Math.max(0, width - 4);
-	const agentLabel = agentDisplayLabel(row);
-	const elapsed = row.telemetry?.activity.elapsed.display ?? "not available";
 	const usage = dispatchUsageText(row.usage);
 	const cost = usage.cost;
 	const detail = terminalDetail(row);
@@ -628,18 +639,6 @@ function renderDispatchCard(
 	const statusStr = `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
 
 	const ttft = row.ttft ?? (row.status === "running" ? `waiting${GLYPH.ellipsis}` : "n/a");
-
-	// The agent label is the frame title and can be arbitrarily long (agent ids
-	// are user data); clamp it so the title plus the elapsed meta never pushes
-	// the right corner past the card width.
-	const selectionWidth = options.selected === true ? visibleWidth(GLYPH.cursor) + 1 : 0;
-	const rowPrefix = dispatchRowPrefix(theme, row);
-	const labelBudget = Math.max(1, width - visibleWidth(elapsed) - 10 - selectionWidth - rowPrefix.width);
-	const clampedLabel = truncateToWidth(agentLabel, labelBudget, GLYPH.ellipsis, false);
-	const cardTitle =
-		options.selected === true
-			? `${theme.fg("selectedOption", GLYPH.cursor)} ${rowPrefix.text}${theme.fg("selectedOption", clampedLabel)}`
-			: `${rowPrefix.text}${theme.fg("workerIdentity", clampedLabel)}`;
 
 	// A queued run has produced nothing yet, so it never carries a throughput.
 	const rate = wallTokenRate(row, usage);
@@ -688,33 +687,25 @@ function renderDispatchCard(
 		options.expanded === true || fullTask.length <= 3
 			? fullTask
 			: [...fullTask.slice(0, 2), theme.fg("annotation", "… Enter detail for full task")];
-	const bodyLines = [
-		cardUnitsLine(theme, "run", [theme.fg("annotation", row.runId)], contentWidth),
-		...(phaseCell === null ? [] : [cardUnitsLine(theme, "phase", [theme.fg("info", phaseCell)], contentWidth)]),
-		...(options.expanded === true
-			? cardWrappedValueLines(theme, "target", theme.fg("body", route), contentWidth)
-			: [targetLine]),
-		...taskLines,
-		cardUnitsLine(theme, "status", statusUnits, contentWidth),
-		...trustCardLines(theme, row, contentWidth, options.expanded === true),
-		...(options.expanded === true && row.budget !== undefined
-			? [
-					...cardWrappedValueLines(
-						theme,
-						"policy",
-						theme.fg("body", `${formatBudgetPolicy(row.budget)}; requested ${formatBudgetRequest(row.budget)}`),
-						contentWidth,
-					),
-					...cardWrappedValueLines(
-						theme,
-						"budget",
-						theme.fg("body", `${formatEffectiveBudget(row.budget)}; reason ${formatBudgetReasons(row.budget)}`),
-						contentWidth,
-					),
-				]
-			: []),
-		cardUnitsLine(theme, "telemetry", [up, down, total, ...(contextUnit !== null ? [contextUnit] : [])], contentWidth),
-	];
+	const bodyLines = [cardUnitsLine(theme, "status", statusUnits, contentWidth)];
+	// One current-operation row is useful at a glance; prose and policy expand on demand.
+	if (row.progress) {
+		const doing = progressActionLine(theme, row.progress, contentWidth);
+		if (doing !== null) bodyLines.push(doing);
+		if (options.expanded === true)
+			bodyLines.push(...progressAnswerLines(theme, row.progress, row.runId, contentWidth, row.resultContract));
+	}
+	// Live tool activity: the executing tool (worker telemetry carries names,
+	// never arguments, across the stdout seam) and the recent-tool trail.
+	const currentTool = row.currentTool ?? null;
+	const recentTools = row.recentTools ?? [];
+	if (!row.progress && (currentTool !== null || recentTools.length > 0)) {
+		const toolUnits = [
+			currentTool !== null ? theme.fg("body", `${currentTool} running`) : theme.fg("annotation", "idle"),
+			...(recentTools.length > 0 ? [theme.fg("body", `recent ${recentTools.join(" ")}`)] : []),
+		];
+		bodyLines.push(cardUnitsLine(theme, "tools", toolUnits, contentWidth));
+	}
 	if (row.retry) {
 		bodyLines.push(
 			cardUnitsLine(
@@ -729,24 +720,17 @@ function renderDispatchCard(
 			),
 		);
 	}
-	// Live tool activity: the executing tool (worker telemetry carries names,
-	// never arguments, across the stdout seam) and the recent-tool trail.
-	const currentTool = row.currentTool ?? null;
-	const recentTools = row.recentTools ?? [];
-	if (!row.progress && (currentTool !== null || recentTools.length > 0)) {
-		const toolUnits = [
-			currentTool !== null ? theme.fg("body", `${currentTool} running`) : theme.fg("annotation", "idle"),
-			...(recentTools.length > 0 ? [theme.fg("body", `recent ${recentTools.join(" ")}`)] : []),
-		];
-		bodyLines.push(cardUnitsLine(theme, "tools", toolUnits, contentWidth));
-	}
-	// One current-operation row is useful at a glance; prose and policy expand on demand.
-	if (row.progress) {
-		const doing = progressActionLine(theme, row.progress, contentWidth);
-		if (doing !== null) bodyLines.push(doing);
-		if (options.expanded === true)
-			bodyLines.push(...progressAnswerLines(theme, row.progress, row.runId, contentWidth, row.resultContract));
-	}
+	if (detail !== null)
+		bodyLines.push(...cardWrappedValueLines(theme, "detail", theme.fg("annotation", detail), contentWidth));
+	bodyLines.push(
+		...taskLines,
+		...(phaseCell === null ? [] : [cardUnitsLine(theme, "phase", [theme.fg("info", phaseCell)], contentWidth)]),
+		...(options.expanded === true
+			? cardWrappedValueLines(theme, "target", theme.fg("body", route), contentWidth)
+			: [targetLine]),
+		cardUnitsLine(theme, "telemetry", [up, down, total, ...(contextUnit !== null ? [contextUnit] : [])], contentWidth),
+		...trustCardLines(theme, row, contentWidth, options.expanded === true),
+	);
 	if (row.steerAcknowledgement) {
 		bodyLines.push(
 			cardUnitsLine(
@@ -768,16 +752,28 @@ function renderDispatchCard(
 		);
 	}
 	// The proof row is present only when the telemetry projection knows an
-	// evidence state for this run; an unknown/none state adds no line, so cards
-	// without evidence keep their existing three-line body.
+	// evidence state for this run; an unknown/none state adds no line.
 	if (evidence) {
 		const proofLine = evidenceCardLine(theme, evidence, contentWidth);
 		if (proofLine !== null) bodyLines.push(proofLine);
 	}
-	if (detail !== null)
-		bodyLines.push(...cardWrappedValueLines(theme, "detail", theme.fg("annotation", detail), contentWidth));
-
-	return frame(theme, cardTitle, bodyLines, width, { rightMeta: elapsed });
+	if (options.expanded === true && row.budget !== undefined) {
+		bodyLines.push(
+			...cardWrappedValueLines(
+				theme,
+				"policy",
+				theme.fg("body", `${formatBudgetPolicy(row.budget)}; requested ${formatBudgetRequest(row.budget)}`),
+				contentWidth,
+			),
+			...cardWrappedValueLines(
+				theme,
+				"budget",
+				theme.fg("body", `${formatEffectiveBudget(row.budget)}; reason ${formatBudgetReasons(row.budget)}`),
+				contentWidth,
+			),
+		);
+	}
+	return bodyLines;
 }
 
 function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaProviders): string[] {
@@ -960,7 +956,10 @@ export type DispatchBoardItem = { kind: "run"; row: DispatchBoardRow } | { kind:
  * its first row and its remaining rows are consumed, so the board never shows a
  * member both inside its group and beside it.
  */
-function dispatchBoardItems(rows: ReadonlyArray<DispatchBoardRow>, selectedRunId?: string | null): DispatchBoardItem[] {
+export function dispatchBoardItems(
+	rows: ReadonlyArray<DispatchBoardRow>,
+	selectedRunId?: string | null,
+): DispatchBoardItem[] {
 	const byGroup = new Map<string, DispatchBoardRow[]>();
 	for (const row of rows) {
 		const group = row.council?.group;
@@ -997,35 +996,225 @@ function selectableBoardRows(rows: ReadonlyArray<DispatchBoardRow>): DispatchBoa
 	});
 }
 
-/** The framed council card: the member grid or stack, with the synthesis run full width under it. */
-function renderCouncilCard(group: CouncilGroupView, width: number): string[] {
-	const theme = clioTheme();
-	const contentWidth = Math.max(0, width - 4);
-	const title = `${theme.fg("dispatchAction", "council")} ${theme.fg("boldEmphasis", group.group)}`;
-	return frame(theme, title, councilGroupBody(theme, group, contentWidth), width, { rightMeta: group.elapsed });
+export interface RunTableOptions {
+	/** The run under the cursor; when given, every row reserves the cursor column. */
+	selectedRunId?: string | null;
+	/** A dashboard page: the fleet phase and node columns stay on the board. */
+	compact?: boolean;
+	tick?: number;
+	now?: number;
+	/** Shared account limits, so a run on a metered account names its weekly figure. */
+	quota?: QuotaProviders;
 }
 
-function formatDispatchBoardLines(
-	rows: ReadonlyArray<DispatchBoardRow>,
-	width = 76,
-	telemetry?: TelemetrySnapshot,
-	selectedRunId?: string | null,
-	/** Whether the selected row renders its worker-progress detail. Off by default. */
-	detailExpanded = false,
-): string[] {
-	if (rows.length === 0) {
-		const theme = clioTheme();
-		// Left-aligned under the same gutter every row uses, the way every other
-		// empty section reads; a centered sentence in a left-aligned dock was the
-		// one thing on the surface that floated.
-		return [
-			`  ${theme.fg("body", "No fleet runs yet")}`,
-			...wrapTextWithAnsi(theme.fg("annotation", "Use /run or /delegate to start a run."), Math.max(1, width - 2)).map(
-				(line) => `  ${line}`,
-			),
-		];
-	}
+const USAGE_SHORT: Readonly<Record<string, string>> = { "not available": "n/a" };
 
+function firstLine(text: string): string {
+	const line = text.split("\n").find((candidate) => candidate.trim().length > 0) ?? "";
+	return sanitizeCallTargetText(line.trim());
+}
+
+/** The status cell: the outcome glyph in its tone, then the word, the same pair every surface uses. */
+function runStatusCell(theme: ClioTheme, row: DispatchBoardRow, tick: number | undefined): string {
+	const full = dispatchStatusPresentation(row.status, {
+		...(row.status === "running" && tick !== undefined ? { tick } : {}),
+	});
+	// A table has room for the whole word; only `completed` shortens, to the word the island uses.
+	const presentation = row.status === "completed" ? { ...full, label: "done" } : full;
+	const token =
+		row.status === "running" && (row.agentAudience === "shadow" || row.agentAudience === "internal")
+			? "shadowDispatchAction"
+			: presentation.token;
+	return `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(token, presentation.label)}`;
+}
+
+/** What a run is doing, or how it ended, in one clause the row may clip. */
+function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): TableCell {
+	const task = row.taskSummary ? sanitizeCallTargetText(row.taskSummary) : null;
+	switch (row.status) {
+		case "running":
+		case "stale":
+		case "cancelling": {
+			const progress = row.progress;
+			if (progress) {
+				if (progress.currentAction) return { text: theme.base("body", actionPhrase(progress.currentAction)) };
+				const words = sanitizeCallTargetText(workerActivityWords(progress));
+				const tail = progress.phase === "writing" ? firstLine(progress.tailText) : "";
+				return { text: `${theme.fg("dispatchAction", words)}${tail ? ` ${theme.fg("assistantProse", tail)}` : ""}` };
+			}
+			if (row.currentTool) return { text: `${sanitizeCallTargetText(row.currentTool)} running` };
+			return { text: task ?? "" };
+		}
+		case "retrying":
+			return row.retry
+				? {
+						text: `attempt ${row.retry.attempt} · ${retryCountdown(row.retry, now)}${row.retry.reason ? ` · ${sanitizeCallTargetText(row.retry.reason)}` : ""}`,
+						tone: "warning",
+					}
+				: { text: task ?? "retrying", tone: "warning" };
+		case "enqueued":
+			return { text: task ?? "waiting for a slot", tone: "muted" };
+		case "failed":
+		case "dead":
+			return { text: terminalDetail(row) ?? task ?? "", tone: "error" };
+		case "aborted":
+			return { text: terminalDetail(row) ?? task ?? "", tone: "muted" };
+		case "completed":
+			return { text: task ?? "", tone: "muted" };
+	}
+}
+
+/**
+ * One row per run (a council is one row), the shape every list of runs
+ * shares: status, who, how long, what it has consumed and cost, and what it is
+ * doing, with the numbers right-aligned. The activity column clips first and
+ * the cost, token and phase columns drop before the status and the name do,
+ * so a narrow row still says which run is in which state.
+ */
+export function runTableRows(
+	items: ReadonlyArray<DispatchBoardItem>,
+	width: number,
+	options: RunTableOptions = {},
+): string[] {
+	const theme = clioTheme();
+	const now = options.now ?? Date.now();
+	const quota = options.quota ?? [];
+	const cursor = options.selectedRunId !== undefined;
+	const runs = items.flatMap((item) => (item.kind === "run" ? [item.row] : []));
+	const anyPhase = options.compact !== true && runs.some((row) => row.phase !== undefined);
+	const anyNode = options.compact !== true && runs.some((row) => row.node !== undefined && row.node !== "local");
+	const anyAccount = runs.some((row) => routeWeeklyQuota(row, quota) !== null);
+	const fixed: TableColumn[] = [
+		...(cursor ? [{ label: "", min: 1, max: 1, priority: 10 }] : []),
+		{ label: "status", priority: 10 },
+		{ label: "agent", priority: 9, max: 22 },
+		...(anyPhase ? [{ label: "phase", priority: 2, max: 14, tone: "info" as const }] : []),
+		...(anyNode ? [{ label: "node", priority: 2, max: 12 }] : []),
+		{ label: "elapsed", align: "right" as const, priority: 6, tone: "muted" as const },
+		{ label: "in", align: "right" as const, priority: 4 },
+		{ label: "out", align: "right" as const, priority: 5 },
+		{ label: "cost", align: "right" as const, priority: 3 },
+		...(anyAccount ? [{ label: "account", priority: 1 }] : []),
+	];
+	const rows = items.map((item): Array<string | TableCell> => {
+		if (item.kind === "council") {
+			const group = item.group;
+			const selected = group.selectedRunId !== undefined;
+			const name = `council ${group.group}`;
+			const cells: Array<string | TableCell> = [];
+			if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
+			cells.push(
+				`${theme.fg(group.status.glyphToken ?? group.status.token, group.status.glyph)} ${theme.fg(group.status.token, group.status.label)}`,
+				selected ? theme.style("selectedOption", name, { bold: true }) : theme.fg("dispatchAction", name),
+			);
+			if (anyPhase) cells.push("");
+			if (anyNode) cells.push("");
+			cells.push(group.elapsed, "", "", "");
+			if (anyAccount) cells.push("");
+			cells.push({
+				text: `${group.members.length} member${group.members.length === 1 ? "" : "s"} · r${group.round}${group.synthesis === null ? "" : ` · ${COUNCIL_SYNTHESIS_LABEL}`}`,
+				tone: "muted",
+			});
+			return cells;
+		}
+		const row = item.row;
+		const selected = cursor && row.runId === options.selectedRunId;
+		const prefix = dispatchRowPrefix(theme, row);
+		const label = agentDisplayLabel(row);
+		const usage = dispatchUsageText(row.usage);
+		const weekly = anyAccount ? routeWeeklyQuota(row, quota) : null;
+		const elapsed =
+			row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : formatCompactMs(row.elapsedMs));
+		const pending = row.usage.kind !== "ready";
+		const figure = (glyph: string, text: string): TableCell =>
+			pending ? { text: USAGE_SHORT[text] ?? text, tone: "muted" } : { text: glyph ? `${glyph} ${text}` : text };
+		const cells: Array<string | TableCell> = [];
+		if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
+		cells.push(
+			runStatusCell(theme, row, options.tick),
+			`${prefix.text}${selected ? theme.style("selectedOption", label, { bold: true }) : theme.fg("workerIdentity", label)}`,
+		);
+		if (anyPhase) cells.push(formatDispatchPhaseCell(row.phase, 14) ?? "");
+		if (anyNode) cells.push(row.node ?? "local");
+		cells.push(elapsed, figure(GLYPH.up, usage.prompt), figure(GLYPH.down, usage.output), figure("", usage.cost));
+		if (anyAccount)
+			cells.push(
+				weekly === null
+					? ""
+					: {
+							text: weekly.label,
+							tone: weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "muted" : "warning",
+						},
+			);
+		cells.push(runActivityCell(theme, row, now));
+		return cells;
+	});
+	// The activity column takes whatever the fixed columns leave, so a long
+	// clause clips before it costs the row its cost or phase; below sixteen
+	// cells the table drops its quietest columns instead.
+	const gap = 2;
+	const used = fixed.reduce((sum, column, index) => {
+		const natural = Math.max(0, ...rows.map((cells) => visibleWidth(cellText(cells[index]))));
+		return sum + Math.min(natural, column.max ?? Number.POSITIVE_INFINITY);
+	}, 0);
+	const activityRoom = width - used - gap * fixed.length;
+	const columns: TableColumn[] = [
+		...fixed,
+		{ label: "activity", priority: 8, min: 12, max: Math.max(16, activityRoom) },
+	];
+	return tableRows(theme, { columns, rows }, width);
+}
+
+function cellText(cell: string | TableCell | undefined): string {
+	return cell === undefined ? "" : typeof cell === "string" ? cell : cell.text;
+}
+
+/** The run identity the board's detail rule names: the agent and its run id. */
+function runRuleTitle(row: DispatchBoardRow): string {
+	return `${agentDisplayLabel(row)} · ${row.runId}`;
+}
+
+function rowSignature(row: DispatchBoardRow): string {
+	return [
+		row.runId,
+		row.status,
+		row.telemetry?.activity.elapsed.display ?? row.elapsedMs,
+		row.usage.kind === "ready" ? `${row.usage.total.display}/${row.usage.usd.display}` : row.usage.kind,
+		row.ttft,
+		row.progress ? `${row.progress.phase}:${row.progress.tailText.length}:${row.progress.recentActions.length}` : "",
+		row.currentTool ?? "",
+		row.recentTools?.length ?? 0,
+		row.retry ? `${row.retry.attempt}@${row.retry.dueAtMs}` : "",
+		row.steerAcknowledgement?.receivedAtMs ?? "",
+		row.trust?.verdict ?? "",
+		row.hostVerification ?? "",
+		row.outcomeDetail ?? "",
+		row.phase ? `${row.phase.wave}/${row.phase.stepId}` : "",
+		row.node ?? "",
+		row.taskSummary?.length ?? 0,
+	].join("|");
+}
+
+/**
+ * The board body for `budget` rows: the run table windowed around the cursor,
+ * then the selected run's facts under a rule that names it. The key router
+ * gives the board only ↑↓, Enter, s and x, so nothing here scrolls by key: the
+ * table follows the cursor and the detail is cut at the budget with a marker
+ * that names where the rest is read. Enter trades table rows for detail rows
+ * and adds the worker's answer and budget.
+ */
+function formatDispatchBoardBody(
+	rows: ReadonlyArray<DispatchBoardRow>,
+	width: number,
+	budget: number,
+	telemetry: TelemetrySnapshot | undefined,
+	selectedRunId: string | null,
+	detailExpanded: boolean,
+): string[] {
+	const theme = clioTheme();
+	if (rows.length === 0) {
+		return emptyState(theme, "No fleet runs yet", width, { remedy: "Use /run or /delegate to start a run." });
+	}
 	const endpointActive: Record<string, number> = { ...foregroundStreamUsage() };
 	const endpointQueued: Record<string, number> = {};
 	for (const row of rows) {
@@ -1034,42 +1223,79 @@ function formatDispatchBoardLines(
 		else if (row.status === "running" || row.status === "stale" || row.status === "cancelling")
 			endpointActive[row.endpoint.key] = (endpointActive[row.endpoint.key] ?? 0) + 1;
 	}
-
-	// A council is one question asked of several members, so its rows render as
-	// one card holding the whole group rather than as unrelated neighbours.
-	const cards = dispatchBoardItems(rows, selectedRunId).map((item) =>
-		item.kind === "council"
-			? renderCouncilCard(item.group, width)
-			: renderDispatchCard(item.row, width, deriveRunEvidenceState(telemetry, item.row.runId), {
-					selected: item.row.runId === selectedRunId,
-					expanded: detailExpanded && item.row.runId === selectedRunId,
-					...(item.row.endpoint !== undefined
-						? {
-								endpointActive: endpointActive[item.row.endpoint.key] ?? 0,
-								endpointQueued: endpointQueued[item.row.endpoint.key] ?? 0,
-							}
-						: {}),
-				}),
+	// A council is one question asked of several members, so its rows fold into
+	// one table row and one detail block rather than unrelated neighbours.
+	const items = dispatchBoardItems(rows, selectedRunId);
+	const selectedIndex = Math.max(
+		0,
+		items.findIndex((item) =>
+			item.kind === "run" ? item.row.runId === selectedRunId : item.group.selectedRunId !== undefined,
+		),
 	);
-	const body: string[] = [];
-	for (const card of cards) {
-		if (body.length > 0) body.push("");
-		body.push(...card);
+	const table = runTableRows(items, width, { selectedRunId });
+	const tableBudget = Math.min(
+		table.length,
+		Math.max(detailExpanded ? 2 : 3, Math.floor(budget / (detailExpanded ? 4 : 2))),
+	);
+	const [start] = centeredWindow(table.length, selectedIndex, tableBudget);
+	const { window, position } = windowRows(table, start, tableBudget);
+	const lines = [...window];
+	if (position) lines.push(positionRow(theme, { ...position, unit: "runs", keys: ["↑↓ select"] }, width));
+	const item = items[selectedIndex];
+	if (item === undefined) return lines;
+	const detail =
+		item.kind === "council"
+			? {
+					title: `council ${item.group.group}`,
+					meta: `r${item.group.round} · ${item.group.elapsed}`,
+					runId: item.group.selectedRunId ?? item.group.members[0]?.runId ?? "",
+					body: councilGroupBody(theme, item.group, width),
+				}
+			: {
+					title: runRuleTitle(item.row),
+					meta: item.row.telemetry?.activity.elapsed.display ?? formatCompactMs(item.row.elapsedMs),
+					runId: item.row.runId,
+					body: dispatchCardBody(item.row, width, deriveRunEvidenceState(telemetry, item.row.runId), {
+						expanded: detailExpanded,
+						...(item.row.endpoint !== undefined
+							? {
+									endpointActive: endpointActive[item.row.endpoint.key] ?? 0,
+									endpointQueued: endpointQueued[item.row.endpoint.key] ?? 0,
+								}
+							: {}),
+					}),
+				};
+	lines.push(sectionRule(theme, width, detail.title, { meta: detail.meta }));
+	const room = budget - lines.length;
+	// Enter asked for everything the run has to say; the frame cuts what the
+	// dock cannot hold. The folded view keeps its budget and names the key.
+	if (detailExpanded || detail.body.length <= room) {
+		lines.push(...detail.body);
+		return lines;
 	}
-	return body;
+	if (room <= 0) return lines;
+	const kept = detail.body.slice(0, Math.max(0, room - 1));
+	const hidden = detail.body.length - kept.length;
+	const where = [`${hidden} more rows`, "Enter for detail", `/view dispatch:${detail.runId}`];
+	lines.push(
+		...kept,
+		theme.fg("annotation", truncateToWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`, width, GLYPH.ellipsis, false)),
+	);
+	return lines;
 }
 
 /**
- * Live dispatch-board component. Cards render at the width the TUI actually
- * grants instead of a baked-in 76-column layout, so a narrow terminal no
- * longer clips telemetry mid-token and a wide one no longer wastes the frame.
- * Rows and the telemetry snapshot are read per render. The board is a pure
- * consumer: its owner reconciles the store on the shared UI polling cycle.
- * The only local state is the selected run id, kept stable across
- * lifecycle-driven reorders; ticker plus bus-driven requestRender calls drive
- * repaints.
+ * Live dispatch-board component. The table renders at the width the TUI
+ * grants and the body at the rows the dock grants, so a narrow terminal drops
+ * columns rather than clipping telemetry mid-token and a short one windows the
+ * table around the cursor rather than cutting the board at the second card.
+ * Rows and the telemetry snapshot are read per render and the body is
+ * memoized on what they show, so a ticker repaint that changed nothing costs
+ * the frame its identity check and no more. The only local state is the
+ * selected run id, kept stable across lifecycle-driven reorders, and whether
+ * its detail is expanded.
  */
-export interface DispatchBoardView extends Component {
+export interface DispatchBoardView extends Component, RowBudgetedBody {
 	selectedRow(): DispatchBoardRow | null;
 	selectPrevious(): void;
 	selectNext(): void;
@@ -1087,6 +1313,8 @@ export function createDispatchBoardView(
 	// Detail is a property of the operator's attention, not of a run, so it
 	// follows the cursor rather than pinning to the row it was opened on.
 	let expanded = false;
+	let bodyRows = 0;
+	let memo: { key: string; lines: string[] } | null = null;
 
 	const normalizeSelection = (
 		currentRows: ReadonlyArray<DispatchBoardRow>,
@@ -1125,7 +1353,24 @@ export function createDispatchBoardView(
 		render(width: number): string[] {
 			const currentRows = rows();
 			normalizeSelection(currentRows);
-			return formatDispatchBoardLines(currentRows, Math.max(1, width), telemetry(), selectedRunId, expanded);
+			const snapshot = telemetry();
+			const safeWidth = Math.max(1, width);
+			const budget = bodyRows > 0 ? bodyRows : DOCK_BODY_ROWS_MAX;
+			// A waiting retry counts down by the second, so its row is keyed on the second.
+			const clock = currentRows.some((row) => row.retry !== undefined) ? Math.floor(Date.now() / 1000) : 0;
+			const evidence =
+				snapshot?.runs
+					.filter((run) => run.evidence)
+					.map((run) => run.runId)
+					.join(",") ?? "";
+			const key = `${safeWidth}|${budget}|${selectedRunId}|${expanded}|${skinEpoch()}|${clock}|${evidence}|${currentRows.map(rowSignature).join(";")}`;
+			if (memo?.key === key) return memo.lines;
+			const lines = formatDispatchBoardBody(currentRows, safeWidth, budget, snapshot, selectedRunId, expanded);
+			memo = { key, lines };
+			return lines;
+		},
+		setBodyRows(next: number): void {
+			bodyRows = Math.max(0, Math.floor(next));
 		},
 		selectedRow(): DispatchBoardRow | null {
 			return normalizeSelection(rows());
@@ -1147,7 +1392,9 @@ export function createDispatchBoardView(
 		detailExpanded(): boolean {
 			return expanded;
 		},
-		invalidate(): void {},
+		invalidate(): void {
+			memo = null;
+		},
 	};
 }
 

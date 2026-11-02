@@ -14,7 +14,6 @@ import {
 	type TaskMemoryTelemetryDecision,
 } from "../domains/memory/index.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
-import { truncateToWidth } from "../engine/tui.js";
 import { clockLocal } from "./format-time.js";
 import {
 	memoryBankEntries,
@@ -26,7 +25,7 @@ import {
 } from "./memory-view-model.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
 import { type ListOverlayItem, ListOverlayView } from "./overlays/list-overlay.js";
-import { clioTheme, fitUnits, rule } from "./theme/index.js";
+import { chipRow, clioTheme, fitUnits, rule, statusChip } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
 
 const DEFAULT_CONTENT_WIDTH = 96;
@@ -195,9 +194,26 @@ export class MemoryOverlayView implements Component {
 
 	render(width: number): string[] {
 		const status = this.sync();
+		const theme = clioTheme();
 		const scope = this.currentRepository ? "this repository" : "repository unknown";
-		const header = `Inspect memory · ${scope} · background ${status.enabled ? "on" : "off"}`;
-		const statusLine = truncateToWidth(clioTheme().fg("annotation", header), width, "…", false);
+		// The facts an operator checks before reading a lesson: where it applies,
+		// whether the background step runs, what it holds and what it is doing.
+		const working = status.stepInFlight ? "step running" : (status.guardian ?? null);
+		const statusLine = chipRow(
+			theme,
+			[
+				theme.fg("annotation", `Inspect memory · ${scope}`),
+				statusChip(theme, status.enabled ? "ok" : "cancelled", `background ${status.enabled ? "on" : "off"}`),
+				theme.fg("counter", `${status.size} ${status.size === 1 ? "entry" : "entries"}`),
+				working === null || working === "off" || working === "idle"
+					? null
+					: theme.fg(working === "reviewing" || working === "step running" ? "activity" : "warning", working),
+				status.route?.target && status.route.model
+					? theme.fg("annotation", `${status.tier} · ${status.route.target}/${status.route.model}`)
+					: theme.fg("annotation", status.tier),
+			],
+			width,
+		);
 		const promotionLine =
 			this.promotionMessage === null
 				? null

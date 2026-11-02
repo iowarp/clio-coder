@@ -1,286 +1,532 @@
-/** Expanded footer pages: dense inspection, separate from transcript output style. */
+/**
+ * Expanded footer pages: dense inspection, separate from transcript output style.
+ *
+ * Each page answers one operator question in its first rows and keeps the
+ * detail beneath: Activity says what is running, Context says how full the
+ * window is, Status says what the session costs and what the machine is doing.
+ * The pages compose the shared primitives (chip rows, section rules, tables,
+ * meters, fact rows) so a worker row here reads like a worker row on the Fleet
+ * Runs board and a quota meter here reads like one in `/usage`.
+ */
 
 import { renderUsdLimit } from "../../core/telemetry/render.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { contextCategorySwatch, renderContextMeterGrid } from "../context-meter.js";
-import type { DispatchBoardRow } from "../dispatch-board.js";
-import { dispatchStatusPresentation, dispatchUsageText, renderDispatchActivity } from "../dispatch-board.js";
+import { contextCategorySwatch, contextPercentRole, renderContextMeterBar } from "../context-meter.js";
+import { dispatchBoardItems, runTableRows } from "../dispatch-board.js";
 import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
 import { formatKeyLabel } from "../keybinding-manager.js";
-import type { QuotaProviders } from "../quota-view.js";
-import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
-import { previewRows } from "../renderers/preview.js";
-import { brandMark, clioTheme, formatCompactMs, GLYPH, metricText, padAnsi, rule } from "../theme/index.js";
+import { quotaAccountRows, routeWeeklyQuota } from "../quota-view.js";
+import {
+	brandMark,
+	chipRow,
+	clioTheme,
+	emptyState,
+	factRows,
+	formatCompactMs,
+	formatContextPercent,
+	GLYPH,
+	meter,
+	metricText,
+	padAnsi,
+	positionRow,
+	rule,
+	sectionRule,
+	type Tone,
+} from "../theme/index.js";
 import { fitIdentityLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
 import { notificationGlyph, notificationToken, topNotification } from "./notifications.js";
 import type { FooterTelemetry } from "./spend.js";
-import { activityQuadrant, compactContextUsage, contextQuadrant, contextUsageText, zipColumns } from "./widgets.js";
+import {
+	activeTaskLine,
+	buildHarnessStatePill,
+	compactContextUsage,
+	contextUsageText,
+	formattedThroughput,
+	lastTurnDetails,
+	lastTurnOutcome,
+	liveTokenValue,
+	meaningfulToolTally,
+	taskBoardValue,
+	zipColumns,
+} from "./widgets.js";
 
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
+/** At this width and above a page lays its sections out in two columns. */
 const FOOTER_SPLIT_COLUMNS = 84;
 const clean = (value: string) => sanitizeCallTargetText(redactSecretString(value));
 
-function agentCard(row: DispatchBoardRow, width: number, compact = false, quota: QuotaProviders = []): string[] {
+/** `label value`, the dim label first, for a chip that names what its figure is. */
+function labelled(label: string, value: string): string {
 	const theme = clioTheme();
-	const presentation = dispatchStatusPresentation(row.status, { compact: false });
-	const name = clean(row.agentId).replace(
-		/(^|[-_ ])([a-z])/g,
-		(_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`,
-	);
-	const audience = row.agentAudience === "shadow" || row.agentAudience === "internal" ? "internal agent" : "fleet agent";
-	const heading = `${theme.fg(row.agentAudience === "shadow" || row.agentAudience === "internal" ? "shadowDispatchAction" : "dispatchAction", GLYPH.subProcess)} ${theme.fg("footerIdentity", name)}`;
-	const lines = wrapTextWithAnsi(
-		`${heading}  ${theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`)}  ${theme.fg("annotation", `${row.telemetry?.activity.elapsed.display ?? "not available"} · ${audience}`)}`,
+	return `${theme.fg("annotation", label)} ${value}`;
+}
+
+/** Two column blocks beside each other, or stacked when the page is narrow. */
+function columns(left: string[], right: string[], width: number): string[] {
+	if (width < FOOTER_SPLIT_COLUMNS) return [...left, ...right];
+	const leftWidth = Math.floor((width - 3) / 2);
+	return zipColumns(left, right, leftWidth, width - leftWidth - 3, "   ");
+}
+
+/**
+ * Activity: what is running. The harness phase and the live figures on the
+ * first row, the session's totals and the task board on the second, then one
+ * table row per worker, live runs first, so the question is answered before
+ * the page scrolls.
+ */
+function activityPage(state: FooterDashboardRenderState, width: number): string[] {
+	const theme = clioTheme();
+	const streaming = state.status.phase !== "idle" && state.status.phase !== "ended";
+	const lastTurn = state.agent.lastTurn;
+	const contextWork = state.agent.contextActivity;
+	const headline = chipRow(
+		theme,
+		[
+			buildHarnessStatePill(theme, state.status, state.toolCounts, state.tick, state.now, Math.max(width, 40)),
+			contextWork
+				? theme.fg(
+						contextWork.status === "failed" ? "error" : contextWork.status === "completed" ? "success" : "activity",
+						`${GLYPH.phaseCompact} ${clean(contextWork.message)}`,
+					)
+				: null,
+			streaming ? formattedThroughput(theme, state.throughput, undefined) : null,
+			streaming ? liveTokenValue(theme, state.throughput, state.telemetry, state.context.used) : null,
+			!streaming && lastTurn ? labelled("last turn", lastTurnOutcome(theme, lastTurn)) : null,
+			!streaming && lastTurn ? lastTurnDetails(theme, lastTurn, state.telemetry) : null,
+			!streaming ? formattedThroughput(theme, state.throughput, state.telemetry) : null,
+		],
 		width,
 	);
-	const field = (label: string, value: string) =>
-		wrapTextWithAnsi(`${theme.fg("annotation", `${label}  `)}${clean(value)}`, width);
-	lines.push(...previewRows(field("Route", `${row.targetId}/${row.wireModelId}`), 2, width));
-	const weekly = routeWeeklyQuota(row, quota);
-	if (weekly)
-		lines.push(...previewRows(field("Account", `Shared ${weekly.account} · ${weekly.label}`), compact ? 1 : 2, width));
-	if (row.taskSummary)
-		lines.push(...(compact ? previewRows(field("Task", row.taskSummary), 2, width) : field("Task", row.taskSummary)));
-	const activity = renderDispatchActivity(row, width);
-	lines.push(...(compact ? activity.slice(0, 2) : activity));
-	const usage = dispatchUsageText(row.usage);
-	const context = row.telemetry?.activity.contextTokens;
-	lines.push(
-		...field(
-			"Tokens",
-			row.usage.kind === "ready"
-				? `${GLYPH.up} ${usage.prompt} input · ${GLYPH.down} ${usage.output} output`
-				: row.usage.kind === "pending"
-					? "awaiting the run's first journaled call"
-					: "not available",
-		),
+	const tools = meaningfulToolTally(state.agent.toolTally);
+	const board = state.agent.taskBoard;
+	// The Σ names the whole session; a label before it cost the cost its place at 40 columns.
+	const spend = state.telemetry;
+	const session = chipRow(
+		theme,
+		[
+			...(spend.kind === "unavailable"
+				? [theme.fg("unknownValue", "spend not available")]
+				: spend.kind === "reading"
+					? [theme.fg("unknownValue", "reading the call journal")]
+					: [
+							spend.tokens === null && spend.neverSent === null
+								? null
+								: theme.fg("counter", `Σ${spend.tokens ?? "0"}${spend.neverSent ? ` · ${spend.neverSent}` : ""}`),
+							spend.cost === null ? null : theme.fg("counter", spend.cost),
+						]),
+			board && board.tasks.length > 0 ? labelled("tasks", taskBoardValue(theme, board)) : null,
+			board ? activeTaskLine(theme, board) : null,
+			tools === null ? null : labelled("tools", theme.fg("counter", clean(tools))),
+		],
+		width,
 	);
-	const workload: string[] = [];
-	if (context) workload.push(`context ${context.display}`);
-	if (row.telemetry) workload.push(`${row.telemetry.activity.toolCalls.display} tool calls`);
-	if (workload.length) lines.push(...field("Work", workload.join(" · ")));
-	const timing: string[] = [];
-	if (row.ttft !== null) timing.push(`first token ${row.ttft}`);
-	if (row.usage.kind === "ready") timing.push(usage.cost);
-	if (!compact && timing.length) lines.push(...field("Timing", timing.join(" · ")));
-	if (!compact && row.budget)
+	const rows = state.dispatchRows;
+	const active = rows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
+	const done = rows.filter((row) => row.status === "completed");
+	const failed = rows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status));
+	const meta = [
+		active.length > 0 ? `${active.length} active` : null,
+		done.length > 0 ? `${done.length} done` : null,
+		failed.length > 0 ? `${failed.length} failed` : null,
+	]
+		.filter((part): part is string => part !== null)
+		.join(" · ");
+	const lines = [headline, session, sectionRule(theme, width, "Workers", { ...(meta ? { meta } : {}) })];
+	if (rows.length === 0) {
 		lines.push(
-			...field(
-				"Budget",
-				`${row.budget.effective.toolCalls} calls (${row.budget.effective.mode}) · hard cap ${row.budget.effective.hardCap}`,
-			),
+			...emptyState(theme, "No workers yet.", width, {
+				remedy: "Rows appear here as agents start; /run or /delegate starts one.",
+			}),
 		);
-	lines.push(...field("Inspect", `/view dispatch:${row.runId}`));
+		return lines;
+	}
+	const history = rows.filter((row) => !ACTIVE_DISPATCH_STATUSES.has(row.status));
+	lines.push(
+		...runTableRows(dispatchBoardItems([...active, ...history]), width, {
+			compact: true,
+			tick: state.tick,
+			now: state.now,
+			quota: state.quota ?? [],
+		}),
+	);
 	return lines;
 }
 
-function activityPage(state: FooterDashboardRenderState, width: number, budget: number): string[] {
+/** The longest bar a page meter draws; past this a wide terminal gets room, not resolution. */
+const PAGE_METER_CELLS = 48;
+/** A legend column wider than this puts its numbers too far from their labels to read as one row. */
+const LEGEND_COLUMN_MAX = 52;
+
+/** `label ━━━━━━──── 62%` for a page meter whose tone names the limit it approaches. */
+function pageMeter(label: string, value: number | null, max: number, width: number, amount?: string): string {
 	const theme = clioTheme();
-	const sideBySide = width >= 110;
-	const summaryWidth = sideBySide ? Math.floor((width - 3) / 2) : width;
-	const summary = activityQuadrant(state.agent, {
-		width: summaryWidth,
-		status: state.status,
-		toolCounts: state.toolCounts,
-		throughput: state.throughput,
-		telemetry: state.telemetry,
-		contextUsed: state.context.used,
-		tick: state.tick,
-		now: state.now,
-	}).slice(1);
-	const active = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
-	const history = state.dispatchRows.filter((row) => !ACTIVE_DISPATCH_STATUSES.has(row.status));
-	if (!state.dispatchRows.length)
-		return [
-			...summary,
-			"",
-			theme.fg("annotation", "No agent invocations yet. Worker cards appear here as agents start."),
-		];
-	const midpoint = Math.ceil(summary.length / 2);
-	const summaryRows = sideBySide
-		? zipColumns(summary.slice(0, midpoint), summary.slice(midpoint), summaryWidth, width - summaryWidth - 3, "   ")
-		: summary;
-	const cardBudget = budget - summaryRows.length - 1;
-	const cards: string[] = [];
-	const inspectAll =
-		getKeybindings()
-			.getKeys("clio-coder.dispatchBoard.toggle")
-			.map((key) => formatKeyLabel(key))
-			.join("/") || "Workers shortcut";
-	if (active.length) cards.push(rule(theme, width, { left: "AGENT ACTIVITY", leftToken: "sectionHeading" }));
-	else cards.push(theme.fg("counter", "No agents running."));
-	let shown = 0;
-	if (width >= 120 && active.length >= 2) {
-		const col = Math.floor((width - 5) / 2);
-		const first = active[0];
-		const second = active[1];
-		if (first && second) {
-			cards.push(
-				...zipColumns(
-					agentCard(first, col, true, state.quota),
-					agentCard(second, width - col - 5, true, state.quota),
-					col,
-					width - col - 5,
-					`  ${theme.fg("border", GLYPH.rail)}  `,
-				),
-				"",
-			);
-			shown = 2;
-		}
-	} else
-		for (const row of active) {
-			const card = agentCard(row, width, active.length > 1 || cardBudget < 18, state.quota);
-			if (cards.length + card.length + 2 > cardBudget && shown > 0) break;
-			cards.push(...card, "");
-			shown++;
-		}
-	if (shown < active.length)
-		cards.push(theme.fg("annotation", `${active.length - shown} more active agents · ${inspectAll} for all`));
-	if (history.length) {
-		cards.push(
-			rule(theme, width, { left: `INVOCATION HISTORY · ${history.length} finished`, leftToken: "groupHeading" }),
-		);
-		let historyShown = 0;
-		for (const row of history.slice(0, 4)) {
-			const presentation = dispatchStatusPresentation(row.status, { compact: false });
-			const name = clean(row.agentId).replace(
-				/(^|[-_ ])([a-z])/g,
-				(_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`,
-			);
-			const audience = row.agentAudience === "shadow" || row.agentAudience === "internal" ? "internal" : "fleet";
-			const tokens = dispatchUsageText(row.usage);
-			const usage = row.usage.kind === "ready" ? ` · ${GLYPH.up} ${tokens.prompt} ${GLYPH.down} ${tokens.output}` : "";
-			const compact = [
-				...wrapTextWithAnsi(
-					`${theme.fg(presentation.token, presentation.glyph)} ${theme.fg("footerIdentity", name)} · ${theme.fg(presentation.token, presentation.label)} · ${theme.fg("annotation", audience)} · ${theme.fg("counter", `${row.telemetry?.activity.elapsed.display ?? "not available"}${usage}`)}`,
-					width,
-				),
-				...wrapTextWithAnsi(
-					theme.fg("annotation", `${row.outcomeDetail ? `${clean(row.outcomeDetail)} · ` : ""}/view dispatch:${row.runId}`),
-					width,
-				),
-			];
-			if (cards.length + compact.length + 1 > cardBudget) break;
-			cards.push(...compact);
-			historyShown++;
-		}
-		if (historyShown < history.length)
-			cards.push(
-				theme.fg("annotation", `${history.length - historyShown} more finished runs · ${inspectAll} for full history`),
-			);
+	if (value === null || !Number.isFinite(value)) {
+		return `${theme.fg("fieldName", label)} ${theme.fg("unknownValue", "warming up")}`;
 	}
-	return [...summaryRows, "", ...cards];
+	const ratio = max > 0 ? value / max : 0;
+	const tone: Tone | "meter" = ratio >= 0.95 ? "error" : ratio >= 0.8 ? "warning" : "meter";
+	const shown = amount ?? `${Math.round(ratio * 100)}%`;
+	const capped = Math.min(width, visibleWidth(label) + 1 + PAGE_METER_CELLS + 1 + visibleWidth(shown));
+	return meter(theme, { label, value, max, width: capped, tone, amount: shown });
 }
 
-function contextPage(state: FooterDashboardRenderState, width: number, budget: number): string[] {
+/**
+ * Context: how full the window is. The category meter with its figure on the
+ * first row, the headroom facts on the second, then the composition with its
+ * numbers aligned and the cache facts beneath.
+ */
+function contextPage(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const ledger = state.context.ledger;
-	if (!ledger)
+	const facts = state.context;
+	if (!ledger || facts.budget) {
+		const used = facts.used;
+		const window = facts.contextWindow;
+		const percent = used !== null && window ? (used / window) * 100 : null;
+		const figure = `${contextUsageText(facts)} ${theme.fg("metricUnit", "tokens")}${
+			percent === null ? "" : ` · ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`
+		}`;
+		const bar =
+			window && used !== null
+				? pageMeter("context", used, window, width, figure)
+				: `${theme.fg("fieldName", "context")} ${theme.fg("unknownValue", "window unknown")}`;
 		return [
-			...contextQuadrant(state.context, { width }).slice(1),
-			"",
-			theme.fg("annotation", "Detailed context accounting appears after the prompt is compiled."),
+			bar,
+			chipRow(
+				theme,
+				[
+					facts.compactionThreshold === null
+						? null
+						: labelled(
+								"compaction",
+								`${facts.compactionAuto ? "auto" : "manual"} @${Math.round(facts.compactionThreshold * 100)}%`,
+							),
+					facts.clioMd ? theme.fg("counter", facts.clioMd) : null,
+					facts.memory ? theme.fg("counter", facts.memory) : null,
+					facts.extensions && facts.extensions.installed > 0
+						? labelled("extensions", `${facts.extensions.active}/${facts.extensions.installed}`)
+						: null,
+					facts.budget ? theme.fg("annotation", `${facts.budget.inputSource} accounting`) : null,
+				],
+				width,
+			),
+			...emptyState(theme, "Detailed context accounting appears after the prompt is compiled.", width),
 		];
-	const compactionDescription =
+	}
+	const figure = `${theme.fg("metricValue", `${formatFooterTokens(ledger.usedTokens)} / ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.contextWindow) : "unknown"}`)}${
+		ledger.percent === null
+			? ""
+			: ` · ${theme.fg(contextPercentRole(ledger.percent), formatContextPercent(ledger.percent))}`
+	}`;
+	const barCells = Math.max(4, width - visibleWidth(figure) - 2);
+	const bar = `${renderContextMeterBar(ledger, barCells, theme)}  ${figure}`;
+	const compaction =
 		ledger.contextWindow <= 0
 			? "on server overflow"
 			: ledger.compactionAuto
 				? `auto${ledger.compactionThreshold === null ? "" : ` @${Math.round(ledger.compactionThreshold * 100)}%`}`
 				: "manual";
+	const headroom = chipRow(
+		theme,
+		[
+			labelled("free", theme.fg("counter", ledger.contextWindow > 0 ? formatFooterTokens(ledger.freeTokens) : "unknown")),
+			ledger.reserveTokens > 0 ? labelled("reserve", theme.fg("counter", formatFooterTokens(ledger.reserveTokens))) : null,
+			labelled("compaction", theme.fg("counter", compaction)),
+			labelled("tools", theme.fg("counter", String(ledger.toolCount))),
+			theme.fg("annotation", ledger.measured ? "provider-anchored" : "estimated"),
+			ledger.contextWindowSource ? theme.fg("annotation", `${ledger.contextWindowSource} window`) : null,
+		],
+		width,
+	);
+	const groups = ledger.meter.filter((group) => group.tokens > 0);
+	// Swatch, label, tokens and percent: `▰ Tool results    31k  11.8%`, the
+	// numbers right-aligned in fixed cells so the column reads down.
+	const legend = (entries: typeof groups, room: number): string[] => {
+		const labelWidth = Math.max(4, room - 2 - 2 - 7 - 2 - 6);
+		return entries.map((group) => {
+			const label = padAnsi(theme.fg("legend", group.label), labelWidth);
+			const tokens = formatFooterTokens(group.tokens).padStart(7);
+			const percent = (group.percent === null ? "?" : `${group.percent.toFixed(1)}%`).padStart(6);
+			return `${contextCategorySwatch(group.category, theme)} ${label}  ${theme.fg("counter", tokens)}  ${theme.fg(group.percent === null ? "unknownValue" : "counter", percent)}`;
+		});
+	};
+	const half = Math.ceil(groups.length / 2);
+	const composition =
+		width >= FOOTER_SPLIT_COLUMNS
+			? columns(
+					legend(groups.slice(0, half), Math.min(LEGEND_COLUMN_MAX, Math.floor((width - 3) / 2))),
+					legend(groups.slice(half), Math.min(LEGEND_COLUMN_MAX, width - Math.floor((width - 3) / 2) - 3)),
+					width,
+				)
+			: legend(groups, Math.min(LEGEND_COLUMN_MAX, width));
 	const out = [
-		...wrapTextWithAnsi(
-			`${metricText(
-				theme,
-				state.context.budget
-					? contextUsageText(state.context)
-					: `${formatFooterTokens(ledger.usedTokens)} / ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.contextWindow) : "unknown window"}`,
-				"tokens",
-			)}${ledger.percent === null ? "" : ` · ${theme.fg("counter", `${ledger.percent.toFixed(1)}%`)} ${theme.fg("metricUnit", "occupied")}`}`,
-			width,
-		),
-		...wrapTextWithAnsi(
-			`${state.context.budget ? "Capture diagnostics: " : ""}Free ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.freeTokens) : "unknown"} · reserved ${formatFooterTokens(ledger.reserveTokens)} · ${ledger.toolCount} tool definitions · compaction ${compactionDescription}`,
+		bar,
+		headroom,
+		sectionRule(theme, width, "Composition", { meta: "/context-view for detail" }),
+		...composition,
+	];
+	const journaled = state.telemetry.kind === "ready" ? state.telemetry.promptCache : null;
+	const cache = chipRow(
+		theme,
+		[
+			journaled ? labelled("cache read", theme.fg("counter", journaled.read)) : null,
+			journaled ? labelled("write", theme.fg("counter", journaled.write)) : null,
+			journaled ? labelled("uncached", theme.fg("counter", journaled.uncached)) : null,
+			journaled ? labelled("backend", theme.fg("counter", journaled.verdict)) : null,
+			ledger.promptCache
+				? labelled("shell", theme.fg("counter", ledger.promptCache.shellReused ? "reused" : "rebuilt"))
+				: null,
+		],
+		width,
+	);
+	if (cache.length > 0) out.push(cache);
+	const history = chipRow(
+		theme,
+		[
+			ledger.lastCompaction
+				? labelled(
+						"last compaction",
+						theme.fg(
+							"counter",
+							`${formatFooterTokens(ledger.lastCompaction.tokensBefore)} ${GLYPH.next} ${formatFooterTokens(ledger.lastCompaction.tokensAfter)} · ${clean(ledger.lastCompaction.trigger)}`,
+						),
+					)
+				: null,
+			ledger.prewarm
+				? labelled(
+						"prewarm",
+						theme.fg(
+							"counter",
+							`${ledger.prewarm.tokens === null ? "tokens unreported" : `${formatFooterTokens(ledger.prewarm.tokens)} tokens`} in ${formatCompactMs(ledger.prewarm.ms)}${ledger.prewarm.aborted ? " · interrupted" : ""}`,
+						),
+					)
+				: null,
+		],
+		width,
+	);
+	if (history.length > 0) out.push(history);
+	out.push(theme.fg("annotation", "Context is per request · subscription limits are account-wide · /usage"));
+	return out;
+}
+
+/** Whole-session spend across every branch (#434 §11.3, decision A). */
+function sessionSpendChips(telemetry: FooterTelemetry): string[] {
+	const theme = clioTheme();
+	if (telemetry.kind === "unavailable") return [theme.fg("unknownValue", "spend not available")];
+	if (telemetry.kind === "reading") return [theme.fg("unknownValue", "reading the call journal")];
+	return [
+		labelled("session", `${theme.fg("metricValue", telemetry.tokens ?? "0")} ${theme.fg("metricUnit", "tokens")}`),
+		theme.fg("metricValue", telemetry.cost ?? "nothing charged yet"),
+		...(telemetry.neverSent ? [theme.fg("warning", telemetry.neverSent)] : []),
+	];
+}
+
+function trackedCost(telemetry: FooterTelemetry): string {
+	if (telemetry.kind === "unavailable") return "not available";
+	if (telemetry.kind === "reading") return "reading";
+	return telemetry.cost ?? "nothing charged yet";
+}
+
+/** Guardian wording for the expanded memory row; null leaves the step outcome showing. */
+function guardianLabel(
+	state: "off" | "idle" | "reviewing" | "waiting-capacity" | "unavailable" | undefined,
+): string | null {
+	switch (state) {
+		case "reviewing":
+			return "reviewing";
+		case "waiting-capacity":
+			return "waiting for endpoint capacity";
+		case "unavailable":
+			return "model tier unavailable";
+		default:
+			return null;
+	}
+}
+
+/**
+ * Status: what the session costs and what the machine is doing. Spend and the
+ * shared account limits lead, because they are the figures that run out; the
+ * local machine, the worker cap and the connections follow.
+ */
+function statusPage(state: FooterDashboardRenderState, width: number): string[] {
+	const theme = clioTheme();
+	const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+	const mib = (bytes: number) => `${(bytes / 1024 ** 2).toFixed(0)} MiB`;
+	const throughput = (value: number) =>
+		value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(1)} MiB/s` : `${(value / 1024).toFixed(1)} KiB/s`;
+	const resource = state.resources;
+	const capacity = state.agent.localCapacity;
+	const memory = state.session.memoryIntervention;
+	const active = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
+	const completed = state.dispatchRows.filter((row) => row.status === "completed").length;
+	const failed = state.dispatchRows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status)).length;
+	const toolCalls = Object.values(state.toolCounts.tools).reduce((a, b) => a + b, 0);
+	const value = (text: string): string =>
+		theme.fg(
+			/^(unknown|unreported|unavailable|not sampled|sampling|warming up|pending|not available|not reported)/u.test(text)
+				? "unknownValue"
+				: "fieldValue",
+			clean(text),
+		);
+	const facts = (entries: ReadonlyArray<readonly [string, string]>, room: number): string[] =>
+		factRows(
+			theme,
+			entries.map(([label, text]) => ({ label, value: value(text), fit: "clip" as const })),
+			room,
+			{ labelWidth: 14 },
+		);
+
+	const spend = chipRow(
+		theme,
+		[
+			...sessionSpendChips(state.telemetry),
+			labelled(
+				"ceiling",
+				theme.fg(
+					"counter",
+					state.costCeilingUsd === undefined
+						? "unknown"
+						: state.costCeilingUsd === 0
+							? "none"
+							: `${renderUsdLimit(state.costCeilingUsd)} tracked pricing only`,
+				),
+			),
+		],
+		width,
+	);
+	const accounts = quotaAccountRows(state.quota ?? [], width, { compact: true, now: state.now });
+
+	const half = Math.floor((width - 3) / 2);
+	const cpu = pageMeter("CPU", resource ? resource.cpuPercent : null, 100, width >= FOOTER_SPLIT_COLUMNS ? half : width);
+	const ramUsed = resource ? resource.hostTotalBytes - resource.hostFreeBytes : null;
+	const ram = resource
+		? pageMeter(
+				"RAM",
+				ramUsed,
+				resource.hostTotalBytes,
+				width >= FOOTER_SPLIT_COLUMNS ? width - half - 3 : width,
+				`${Math.round(((ramUsed ?? 0) / resource.hostTotalBytes) * 100)}% ${theme.fg("fieldValue", `${gib(ramUsed ?? 0)} / ${gib(resource.hostTotalBytes)}`)}`,
+			)
+		: pageMeter("RAM", null, 100, width);
+	const gpu = resource?.gpu
+		? resource.gpu.busyPercent === null
+			? `${theme.fg("fieldName", "GPU")} ${value(`${resource.gpu.name} · load unavailable`)}`
+			: pageMeter(
+					`GPU ${clean(resource.gpu.name)}`,
+					resource.gpu.busyPercent,
+					100,
+					width >= FOOTER_SPLIT_COLUMNS ? half : width,
+					`${resource.gpu.busyPercent}%${
+						resource.gpu.usedBytes != null && resource.gpu.totalBytes != null
+							? ` ${theme.fg("fieldValue", `${gib(resource.gpu.usedBytes)} / ${gib(resource.gpu.totalBytes)}`)}`
+							: ""
+					}`,
+				)
+		: `${theme.fg("fieldName", "GPU")} ${value("unavailable on this OS/driver")}`;
+	const rss = `${theme.fg("fieldName", "Clio RSS")} ${resource ? theme.fg("fieldValue", mib(resource.processRssBytes)) : value("sampling")}`;
+	const machine = [
+		sectionRule(theme, width, "Machine", {
+			meta: resource
+				? `${resource.scope} · sampled ${Math.max(0, Math.round((state.now - resource.sampledAt) / 1000))}s ago`
+				: "local OS · sampling",
+		}),
+		...columns([cpu], [ram], width),
+		...columns([gpu], [rss], width),
+		...facts(
+			[
+				[
+					"Network",
+					resource?.network
+						? `${resource.network.name} ${GLYPH.down} ${throughput(resource.network.receivedPerSecond)} ${GLYPH.up} ${throughput(resource.network.sentPerSecond)}`
+						: "warming up / unavailable",
+				],
+				[
+					"Disk I/O",
+					resource?.disk
+						? `${resource.disk.name} R ${throughput(resource.disk.readPerSecond)} W ${throughput(resource.disk.writtenPerSecond)}`
+						: "warming up / unavailable",
+				],
+				["Sampling", resource ? "every 2s" : "pending"],
+				["Scope", `${resource?.scope ?? "local OS"} · busiest interface/disk · local only`],
+			],
 			width,
 		),
 	];
-	const gridWidth = Math.max(12, Math.min(64, width >= FOOTER_SPLIT_COLUMNS ? Math.floor(width * 0.38) : width));
-	const gridHeight = Math.max(1, Math.min(4, budget - 5));
-	const grid = renderContextMeterGrid(ledger, gridWidth, gridHeight, theme);
-	const legendWidth = width >= FOOTER_SPLIT_COLUMNS ? width - gridWidth - 4 : width;
-	const legend = ledger.meter
-		.filter((group) => group.tokens > 0)
-		.flatMap((group) =>
-			wrapTextWithAnsi(
-				`${contextCategorySwatch(group.category, theme)} ${theme.fg("legend", group.label.padEnd(20))} ${theme.fg("counter", formatFooterTokens(group.tokens).padStart(7))}  ${theme.fg(group.percent === null ? "unknownValue" : "counter", group.percent === null ? "unknown" : `${group.percent.toFixed(1)}%`)}`,
-				legendWidth,
-			),
-		);
-	out.push(
-		rule(theme, width, {
-			left: state.context.budget ? "CAPTURE DIAGNOSTICS" : "CONTEXT COMPOSITION",
-			leftToken: "groupHeading",
+
+	const workers = [
+		sectionRule(theme, width, "Workers", {
+			meta: capacity ? `cap ${capacity.limit} · ${capacity.bound}` : "cap not sampled",
 		}),
-	);
-	out.push(
-		...(width >= FOOTER_SPLIT_COLUMNS
-			? zipColumns(grid, previewRows(legend, gridHeight, legendWidth), gridWidth, legendWidth, "    ")
-			: [...grid, "", ...legend]),
-	);
-	out.push(theme.fg("annotation", "Context is per request · subscription limits are account-wide · /usage"));
-	out.push(
-		...wrapTextWithAnsi(
-			theme.fg("counter", "Filled = context · empty = available · shaded = reserve; small buckets receive one cell."),
+		...factRows(
+			theme,
+			[
+				{
+					label: "Workers",
+					value: chipRow(
+						theme,
+						[
+							theme.fg(active > 0 ? "activity" : "counter", `${active} active`),
+							theme.fg("counter", `${completed} done`),
+							theme.fg(failed > 0 ? "error" : "counter", `${failed} failed`),
+						],
+						Number.POSITIVE_INFINITY,
+					),
+				},
+				{ label: "Worker cap", value: value(capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled") },
+				{
+					label: "Tool calls",
+					value: value(`${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`),
+				},
+			],
+			width,
+			{ labelWidth: 14 },
+		),
+	];
+
+	const names = (items: string[] | undefined) =>
+		items === undefined ? "unreported" : items.length ? `${items.length} · ${items.join(", ")}` : "none";
+	const left: Array<readonly [string, string]> = [
+		...(state.session.name ? [["Session", clean(state.session.name)] as const] : []),
+		["Target", state.session.target ?? "No model selected"],
+		["Tracked cost", trackedCost(state.telemetry)],
+		["MCP connected", names(state.connections?.mcp)],
+		["Plugins active", names(state.connections?.plugins)],
+		[
+			"Extensions",
+			state.context.extensions
+				? `${state.context.extensions.active} active / ${state.context.extensions.installed} installed`
+				: "unreported",
+		],
+	];
+	const right: Array<readonly [string, string]> = [
+		[
+			"Memory bank",
+			memory
+				? `${memory.size} entries · ${guardianLabel(memory.guardian) ?? (memory.stepInFlight ? "updating" : (memory.lastDecision ?? "idle"))}`
+				: "not reported",
+		],
+		["Context work", state.agent.contextActivity?.message ?? "idle"],
+		[
+			"Headroom",
+			state.context.ledger?.contextWindow
+				? `${formatFooterTokens(state.context.ledger.freeTokens)} tokens free`
+				: "unknown",
+		],
+	];
+	const connections = [
+		sectionRule(theme, width, "Connections"),
+		...columns(
+			facts(left, width >= FOOTER_SPLIT_COLUMNS ? half : width),
+			facts(right, width >= FOOTER_SPLIT_COLUMNS ? width - half - 3 : width),
 			width,
 		),
-	);
-
-	out.push(
-		"",
-		...wrapTextWithAnsi(
-			theme.fg(
-				"annotation",
-				`${ledger.measured ? "Provider-anchored total; category splits estimated" : "Estimated usage"} · window source: ${ledger.contextWindowSource ?? "unknown"}`,
-			),
-			width,
-		),
-	);
-	if (ledger.lastCompaction)
-		out.push(
-			...wrapTextWithAnsi(
-				`Last compaction: ${formatFooterTokens(ledger.lastCompaction.tokensBefore)} ${GLYPH.next} ${formatFooterTokens(ledger.lastCompaction.tokensAfter)} · ${clean(ledger.lastCompaction.trigger)}`,
-				width,
-			),
-		);
-	// The split comes from the newest main call's journal record, so an unreported cache read reads `?` (#434).
-	const journaled = state.telemetry.kind === "ready" ? state.telemetry.promptCache : null;
-	if (journaled)
-		out.push(
-			...wrapTextWithAnsi(
-				`Prompt cache · read ${journaled.read} · write ${journaled.write} · uncached ${journaled.uncached}`,
-				width,
-			),
-		);
-	if (ledger.promptCache || journaled)
-		out.push(
-			...wrapTextWithAnsi(
-				`Session shell ${ledger.promptCache ? (ledger.promptCache.shellReused ? "reused" : "rebuilt") : "unreported"} · backend ${journaled?.verdict ?? "unreported"}`,
-				width,
-			),
-		);
-	if (ledger.prewarm)
-		out.push(
-			...wrapTextWithAnsi(
-				`Prewarm · ${ledger.prewarm.tokens === null ? "tokens unreported" : `${formatFooterTokens(ledger.prewarm.tokens)} tokens`} · ${formatCompactMs(ledger.prewarm.ms)}${ledger.prewarm.aborted ? " · interrupted" : ""}`,
-				width,
-			),
-		);
-
-	return out;
+	];
+	return [spend, ...accounts, ...workers, ...machine, ...connections];
 }
 
 /**
@@ -430,200 +676,11 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	return [firstRow, fit(`${fit(line, room)}   ${fit(tail, tailWidth)}`)];
 }
 
-/** Whole-session spend across every branch (#434 §11.3, decision A). */
-function sessionSpendLine(telemetry: FooterTelemetry): string {
-	if (telemetry.kind === "unavailable") return "spend not available";
-	if (telemetry.kind === "reading") return "reading the call journal";
-	return `${telemetry.tokens ?? "0"} tokens · ${telemetry.cost ?? "nothing charged yet"}`;
-}
-
-function trackedCost(telemetry: FooterTelemetry): string {
-	if (telemetry.kind === "unavailable") return "not available";
-	if (telemetry.kind === "reading") return "reading";
-	return telemetry.cost ?? "nothing charged yet";
-}
-
-function statusPage(state: FooterDashboardRenderState, width: number): string[] {
-	const theme = clioTheme();
-	type MeterCell = { kind: "meter"; percent: number | null; suffix: string };
-	type SectionEntry = readonly [label: string, value: string | MeterCell];
-
-	const quotaRows = [
-		theme.style("metricValue", `SESSION · ${sessionSpendLine(state.telemetry)}`, { bold: true }),
-		...renderQuotaAccounts(state.quota ?? [], width, { compact: true, now: state.now }),
-	];
-
-	const active = state.dispatchRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status));
-	const completed = state.dispatchRows.filter((row) => row.status === "completed").length;
-	const failed = state.dispatchRows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status)).length;
-	const toolCalls = Object.values(state.toolCounts.tools).reduce((a, b) => a + b, 0);
-	const resource = state.resources;
-	const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
-	const capacity = state.agent.localCapacity;
-	const memory = state.session.memoryIntervention;
-	const section = (title: string, entries: ReadonlyArray<SectionEntry>, columns: number) => {
-		const labelWidth = Math.min(17, Math.max(10, Math.floor(columns * 0.4)));
-		return [
-			rule(theme, columns, { left: title, leftToken: "sectionHeading" }),
-			...entries.flatMap(([label, value]) => {
-				let rendered: string;
-				if (typeof value === "string")
-					rendered = theme.fg(
-						/^(unknown|unreported|unavailable|not sampled|sampling|warming up|pending)/u.test(value)
-							? "unknownValue"
-							: "fieldValue",
-						clean(value),
-					);
-				else if (value.percent === null) rendered = theme.fg("unknownValue", "warming up");
-				else {
-					const percent = Number.isFinite(value.percent) ? Math.max(0, Math.min(100, value.percent)) : 0;
-					const filled = Math.round(percent / 10);
-					rendered = `${theme.fg("meterFill", GLYPH.meterFull.repeat(filled))}${theme.fg("meterFree", GLYPH.meterEmpty.repeat(10 - filled))} ${theme.fg("metricValue", percent.toFixed(0))}${theme.fg("metricUnit", "%")}${value.suffix ? `  ${theme.fg("fieldValue", clean(value.suffix))}` : ""}`;
-				}
-				return wrapTextWithAnsi(`${theme.fg("fieldName", label.padEnd(labelWidth))}  ${rendered}`, columns);
-			}),
-			"",
-		];
-	};
-	const throughput = (value: number) =>
-		value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(1)} MiB/s` : `${(value / 1024).toFixed(1)} KiB/s`;
-	const meter = (percent: number | null, suffix = ""): MeterCell => ({ kind: "meter", percent, suffix });
-	const names = (items: string[] | undefined) =>
-		items === undefined ? "unreported" : items.length ? `${items.length} · ${items.join(", ")}` : "none";
-	const left: [string, string][] = [
-		...(state.session.name ? [["Session", clean(state.session.name)] as [string, string]] : []),
-		["Target", state.session.target ?? "No model selected"],
-		["Tracked cost", trackedCost(state.telemetry)],
-		[
-			"Clio ceiling",
-			state.costCeilingUsd === undefined
-				? "unknown"
-				: state.costCeilingUsd === 0
-					? "none"
-					: `${renderUsdLimit(state.costCeilingUsd)} · tracked pricing only`,
-		],
-		["MCP connected", names(state.connections?.mcp)],
-		["Plugins active", names(state.connections?.plugins)],
-		[
-			"Extensions",
-			state.context.extensions
-				? `${state.context.extensions.active} active / ${state.context.extensions.installed} installed`
-				: "unreported",
-		],
-		["Workers", `${active.length} active · ${completed} done · ${failed} failed`],
-		["Tools (visit)", `${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`],
-		["Worker cap", capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled"],
-	];
-	const right: [string, string | MeterCell][] = [
-		["Scope", resource?.scope ?? "local OS · sampling"],
-		["CPU", resource ? meter(resource.cpuPercent) : "sampling"],
-		[
-			"RAM",
-			resource
-				? meter(
-						(1 - resource.hostFreeBytes / resource.hostTotalBytes) * 100,
-						`${gib(resource.hostTotalBytes - resource.hostFreeBytes)} / ${gib(resource.hostTotalBytes)}`,
-					)
-				: "sampling",
-		],
-		["Clio RSS", resource ? gib(resource.processRssBytes) : "sampling"],
-		[
-			"GPU",
-			resource?.gpu
-				? `${resource.gpu.name} · ${resource.gpu.busyPercent === null ? "load unavailable" : `${resource.gpu.busyPercent}%`}`
-				: "unavailable on this OS/driver",
-		],
-		[
-			"GPU VRAM",
-			resource?.gpu?.usedBytes != null && resource.gpu.totalBytes != null
-				? `${gib(resource.gpu.usedBytes)} / ${gib(resource.gpu.totalBytes)}`
-				: "unreported",
-		],
-		[
-			"Network",
-			resource?.network
-				? `${resource.network.name} ${GLYPH.down} ${throughput(resource.network.receivedPerSecond)} ${GLYPH.up} ${throughput(resource.network.sentPerSecond)}`
-				: "warming up / unavailable",
-		],
-		[
-			"Disk I/O",
-			resource?.disk
-				? `${resource.disk.name} R ${throughput(resource.disk.readPerSecond)} W ${throughput(resource.disk.writtenPerSecond)}`
-				: "warming up / unavailable",
-		],
-		[
-			"Sampling",
-			resource ? `${Math.max(0, Math.round((state.now - resource.sampledAt) / 1000))}s ago · 2s cadence` : "pending",
-		],
-		["Scope note", "busiest interface/disk · local only"],
-	];
-	const extras: [string, string][] = [
-		[
-			"Memory bank",
-			memory
-				? `${memory.size} entries · ${guardianLabel(memory.guardian) ?? (memory.stepInFlight ? "updating" : (memory.lastDecision ?? "idle"))}`
-				: "not reported",
-		],
-		["Context work", state.agent.contextActivity?.message ?? "idle"],
-		[
-			"Context headroom",
-			state.context.ledger?.contextWindow
-				? `${formatFooterTokens(state.context.ledger.freeTokens)} tokens free`
-				: "unknown",
-		],
-	];
-	const health = right.filter(([label]) => label === "CPU" || label === "RAM");
-	const workers = left.filter(([label]) => label === "Worker cap" || label === "Workers");
-	const sampling = right.filter(([label]) => label === "Sampling");
-	const col = Math.floor((width - 5) / 2);
-	// Health and capacity share the first screen; less urgent fields remain scrollable.
-	const essentials =
-		width < FOOTER_SPLIT_COLUMNS
-			? section("LIVE STATUS", [...health, ...workers, ...sampling], width).slice(1, -1)
-			: zipColumns(
-					section("LIVE STATUS", health, col).slice(1, -1),
-					section("LIVE STATUS", [...workers, ...sampling], width - col - 5).slice(1, -1),
-					col,
-					width - col - 5,
-					`  ${theme.fg("border", GLYPH.rail)}  `,
-				);
-	const intro = [quotaRows[0] ?? "", ...essentials];
-	const connections = left.filter(([label]) => label !== "Worker cap" && label !== "Workers");
-	const machine = right.filter(([label]) => !["CPU", "RAM", "Sampling"].includes(label));
-	if (width < FOOTER_SPLIT_COLUMNS)
-		return [
-			...intro,
-			...quotaRows.slice(1),
-			...section("COST & CONNECTIONS", connections, width),
-			...section("LOCAL MACHINE", machine, width),
-			theme.style("sectionHeading", "CONTEXT ENGINE", { bold: true }),
-			...wrapTextWithAnsi(
-				extras
-					.map(([label, value]) => `${theme.fg("fieldName", label)} ${theme.fg("fieldValue", clean(value))}`)
-					.join("  ·  "),
-				width,
-			),
-		];
-	return [
-		...intro,
-		...quotaRows.slice(1),
-		...zipColumns(
-			section("COST & CONNECTIONS", connections, col),
-			section("LOCAL MACHINE", machine, width - col - 5),
-			col,
-			width - col - 5,
-			`  ${theme.fg("border", GLYPH.rail)}  `,
-		),
-		theme.style("sectionHeading", "CONTEXT ENGINE", { bold: true }),
-		...wrapTextWithAnsi(
-			extras
-				.map(([label, value]) => `${theme.fg("fieldName", label)} ${theme.fg("fieldValue", clean(value))}`)
-				.join("  ·  "),
-			width,
-		),
-	];
-}
-
+/**
+ * The expanded footer: tab row, rule, a bounded content viewport, rule, hint.
+ * Height is a function of the terminal alone, so a page never changes height
+ * as its live values change; content that does not fit scrolls.
+ */
 export function dashboardPageViewport(
 	state: FooterDashboardRenderState,
 	page: DashboardPage,
@@ -648,57 +705,47 @@ export function dashboardPageViewport(
 			? theme.style("selectedOption", `${GLYPH.cursor} ${index + 1} ${name}`, { bold: true })
 			: theme.fg("menuOption", `  ${index + 1} ${name}`),
 	);
-
 	const tabText =
 		innerWidth >= 52
 			? `${brandMark(theme)} ${tabs.join(" ")}`
 			: `${brandMark(theme)} ${theme.style("selectedOption", `${GLYPH.cursor} ${page}`, { bold: true })} ${theme.fg("positionCount", `${DASHBOARD_PAGES.indexOf(page) + 1}/${DASHBOARD_PAGES.length}`)}`;
-
+	// The route sits flush right, the way a title row carries its meta, so the
+	// tabs and the identity read as one row with two ends rather than a sentence.
 	const identityRoom = innerWidth - visibleWidth(tabText) - 4;
 	const identity = `${state.session.duckBadge ? "🦆 " : ""}${clean(state.session.target ?? "No model selected")}`;
-	const heading = [
-		truncateToWidth(
-			identityRoom >= 20
-				? `${tabText}    ${theme.fg("footerIdentity", fitIdentityLabel(identity, identityRoom))}`
-				: tabText,
-			innerWidth,
-			GLYPH.ellipsis,
-			true,
-		),
-	];
+	const identityText = identityRoom >= 20 ? theme.fg("footerIdentity", fitIdentityLabel(identity, identityRoom)) : "";
+	const heading =
+		identityText.length > 0
+			? `${tabText}${" ".repeat(Math.max(1, innerWidth - visibleWidth(tabText) - visibleWidth(identityText)))}${identityText}`
+			: truncateToWidth(tabText, innerWidth, GLYPH.ellipsis, true);
 	const next = page === "Status" ? "close" : DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1];
-	let hint = truncateToWidth(
-		theme.fg(
-			"counter",
-			`${cycleKey || "Dashboard"} ${GLYPH.next} ${next}   ·   ${page === "Status" ? "/usage · /mcp · /library" : "composer stays active"}`,
-		),
-		innerWidth,
-		GLYPH.ellipsis,
-		true,
-	);
+	const cycle = `${cycleKey || "Dashboard"} ${GLYPH.next} ${next}`;
+	const where = page === "Status" ? "/usage · /health · /context-view" : "composer stays active";
 	const available = budget - 4;
 	let content: string[];
-	if (page === "Activity") content = activityPage(state, innerWidth, Number.MAX_SAFE_INTEGER);
-	else if (page === "Context") content = contextPage(state, innerWidth, available);
+	if (page === "Activity") content = activityPage(state, innerWidth);
+	else if (page === "Context") content = contextPage(state, innerWidth);
 	else content = statusPage(state, innerWidth);
 	content = content.flatMap((line) => (visibleWidth(line) > innerWidth ? wrapTextWithAnsi(line, innerWidth) : [line]));
 	const maxOffset = Math.max(0, content.length - available);
 	const offset = Math.max(0, Math.min(maxOffset, Math.floor(scrollOffset)));
-	if (maxOffset > 0) {
-		hint = truncateToWidth(
-			theme.fg(
-				"keyboardHint",
-				`Alt+PgUp/PgDn ${offset + 1}–${Math.min(content.length, offset + available)}/${content.length} · ${cycleKey || "Dashboard"} ${GLYPH.next} ${next}`,
-			),
-			innerWidth,
-			GLYPH.ellipsis,
-			true,
-		);
-	}
+	const hint =
+		maxOffset > 0
+			? positionRow(
+					theme,
+					{
+						start: offset + 1,
+						end: Math.min(content.length, offset + available),
+						total: content.length,
+						keys: innerWidth >= 64 ? ["Alt+PgUp/PgDn scroll", cycle] : [cycle],
+					},
+					innerWidth,
+				)
+			: truncateToWidth(theme.fg("keyboardHint", `${cycle}   ·   ${where}`), innerWidth, GLYPH.ellipsis, true);
 	content = content.slice(offset, offset + available);
 	while (content.length < available) content.push("");
 	return {
-		rows: [...heading.map(inset), rule(theme, safeWidth), ...content.map(inset), rule(theme, safeWidth), inset(hint)],
+		rows: [inset(heading), rule(theme, safeWidth), ...content.map(inset), rule(theme, safeWidth), inset(hint)],
 		offset,
 		maxOffset,
 	};
@@ -713,20 +760,4 @@ export function renderDashboardPage(
 	scrollOffset = 0,
 ): string[] {
 	return dashboardPageViewport(state, page, width, terminalRows, cycleKey, scrollOffset).rows;
-}
-
-/** Guardian wording for the expanded memory row; null leaves the step outcome showing. */
-function guardianLabel(
-	state: "off" | "idle" | "reviewing" | "waiting-capacity" | "unavailable" | undefined,
-): string | null {
-	switch (state) {
-		case "reviewing":
-			return "reviewing";
-		case "waiting-capacity":
-			return "waiting for endpoint capacity";
-		case "unavailable":
-			return "model tier unavailable";
-		default:
-			return null;
-	}
 }

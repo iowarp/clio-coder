@@ -8,7 +8,7 @@ import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import type { RecallTelemetry } from "../domains/session/recall-telemetry.js";
 import type { TelemetryReadModel, TelemetryView } from "../domains/telemetry/contract.js";
-import { type OverlayHandle, Text, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { type OverlayHandle, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { coldReasonText } from "../session-control/cold-reasons.js";
 import {
 	contextCategorySwatch,
@@ -16,9 +16,16 @@ import {
 	renderContextMeterGrid,
 	renderEvictedTokensLine,
 } from "./context-meter.js";
-import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
-import { abbreviateModelId, type ClioToken, clioTheme, formatContextPercent } from "./theme/index.js";
-import { skinEpoch } from "./theme/tokens.js";
+import { buildHint, createCachedBody, showClioOverlayFrame } from "./overlay-frame.js";
+import {
+	abbreviateModelId,
+	type ClioToken,
+	chipRow,
+	clioTheme,
+	formatContextPercent,
+	padAnsi,
+	sectionRule,
+} from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 68;
 
@@ -76,11 +83,17 @@ function handbookProvenanceLines(handbookFiles: ReadonlyArray<string> | null): s
 	return ["handbooks (ancestor → nearest):", ...handbookFiles.map((filePath) => `  ${displayHandbookPath(filePath)}`)];
 }
 
-function gridDimensions(ledger: ContextLedger, contentWidth: number): { cols: number; rows: number } {
-	const cols = Math.max(12, Math.min(contentWidth, 40));
-	const rows = ledger.contextWindow >= 200_000 ? 8 : 6;
-	return { cols, rows };
-}
+/**
+ * The meter is two rows across the whole body: at 68 columns that is 136
+ * cells, more resolution than the old eight rows of forty gave at a third of
+ * the height, which matters in a dock that holds sixteen rows and cannot
+ * scroll this surface.
+ */
+const GRID_ROWS = 2;
+/** At this width the legend lays its categories out in two columns. */
+const LEGEND_SPLIT_COLUMNS = 84;
+/** A legend column wider than this puts the numbers too far from their labels. */
+const LEGEND_COLUMN_MAX = 56;
 
 function legendRow(group: ContextLedgerGroup, contentWidth: number): string {
 	const theme = clioTheme();
@@ -92,6 +105,17 @@ function legendRow(group: ContextLedgerGroup, contentWidth: number): string {
 	const leftWidth = Math.max(0, contentWidth - visibleWidth(right) - visibleWidth(swatch) - 2);
 	const labelText = truncateToWidth(group.label, leftWidth, "", true);
 	return `${swatch} ${theme.fg(labelToken, labelText)} ${theme.fg("menuDescription", right)}`;
+}
+
+/** The legend as one column, or two side by side when the body is wide enough for both to read. */
+function legendRows(groups: ReadonlyArray<ContextLedgerGroup>, contentWidth: number): string[] {
+	if (contentWidth < LEGEND_SPLIT_COLUMNS)
+		return groups.map((group) => legendRow(group, Math.min(contentWidth, LEGEND_COLUMN_MAX)));
+	const column = Math.min(LEGEND_COLUMN_MAX, Math.floor((contentWidth - 4) / 2));
+	const half = Math.ceil(groups.length / 2);
+	const left = groups.slice(0, half).map((group) => legendRow(group, column));
+	const right = groups.slice(half).map((group) => legendRow(group, column));
+	return left.map((line, index) => `${padAnsi(line, column)}    ${right[index] ?? ""}`.trimEnd());
 }
 
 function evictedTokens(view: WorkingSetView): number {
@@ -161,6 +185,35 @@ function renderWorkingSetLines(
 	];
 }
 
+/** The live budget's next-request facts, when the chat loop can inspect them. */
+function nextRequestLines(inspection: BudgetInspection | undefined, width: number): string[] {
+	if (inspection?.status !== "available") return [];
+	const theme = clioTheme();
+	const view = inspection.view;
+	const count = (value: number | null) => (value === null ? "unknown" : formatTokens(value));
+	const lines = [
+		sectionRule(theme, width, "Next request", { meta: view.phase }),
+		chipRow(
+			theme,
+			[
+				`${theme.fg("fieldName", "input")} ${theme.fg("fieldValue", count(view.inputTokens))}`,
+				`${theme.fg("fieldName", "output reserve")} ${theme.fg("fieldValue", count(view.outputReserveTokens))}`,
+				`${theme.fg("fieldName", "headroom")} ${theme.fg("fieldValue", count(view.headroomTokens))}`,
+			],
+			width,
+		),
+	];
+	if (view.pendingHandoff) {
+		lines.push(
+			`${theme.fg("fieldName", "handoff")} ${theme.fg("warning", view.lastOutcome?.outcome ?? "pending")} ${theme.fg("annotation", view.pendingHandoff.id)}`,
+			theme.fg("annotation", `/context recover ${view.pendingHandoff.id} reduce|deliver`),
+		);
+	} else if (view.lastOutcome) {
+		lines.push(`${theme.fg("fieldName", "last handoff")} ${theme.fg("fieldValue", view.lastOutcome.outcome)}`);
+	}
+	return lines;
+}
+
 function renderContextLedgerLines(
 	ledger: ContextLedger,
 	contentWidth: number,
@@ -173,17 +226,12 @@ function renderContextLedgerLines(
 	const theme = clioTheme();
 	const lines: string[] = [];
 
+	// The answer first: the meter across the body, then the figure it draws.
+	for (const gridLine of renderContextMeterGrid(ledger, contentWidth, GRID_ROWS, theme)) lines.push(gridLine);
+
 	const provider = ledger.provider ?? "no target";
 	const model = ledger.model ? abbreviateModelId(ledger.model) : "no model";
-	lines.push(
-		`${theme.fg("fieldName", "target")} ${theme.fg("modelIdentity", provider)} ${theme.fg("annotation", "·")} ${theme.fg("modelIdentity", model)}`,
-	);
-	lines.push("");
-
-	const { cols, rows } = gridDimensions(ledger, contentWidth);
-	for (const gridLine of renderContextMeterGrid(ledger, cols, rows, theme)) lines.push(gridLine);
-	lines.push("");
-
+	const route = `${theme.fg("modelIdentity", provider)} ${theme.fg("annotation", "·")} ${theme.fg("modelIdentity", model)}`;
 	if (ledger.contextWindow > 0) {
 		const source = ledger.measured ? "provider-anchored total · estimated splits" : "≈ estimated";
 		// `196,608 (786,432 / 4 slots)`: a llama.cpp window that is one slot's
@@ -197,28 +245,29 @@ function renderContextLedgerLines(
 		const provenance = contextWindowProvenanceLabel(ledger.contextWindowSource);
 		const trailer = provenance ? `${provenance} window · ${source}` : source;
 		lines.push(
-			`${theme.base("counter", summary)} ${theme.fg("annotation", "·")} ${theme.fg("menuDescription", trailer)}`,
+			chipRow(theme, [theme.base("counter", summary), theme.fg("menuDescription", trailer), route], contentWidth),
 		);
 	} else {
 		lines.push(
-			theme.fg("unknownValue", `context window unknown · ${formatTokens(ledger.usedTokens)} tokens estimated in context`),
+			chipRow(
+				theme,
+				[
+					theme.fg(
+						"unknownValue",
+						`context window unknown · ${formatTokens(ledger.usedTokens)} tokens estimated in context`,
+					),
+					route,
+				],
+				contentWidth,
+			),
 		);
 	}
-	lines.push("");
 
-	for (const group of ledger.meter) lines.push(legendRow(group, contentWidth));
+	lines.push(...legendRows(ledger.meter, contentWidth));
 	if (workingSet && workingSet.evicted.size > 0) lines.push(renderEvictedTokensLine(evictedTokens(workingSet), theme));
 
-	lines.push("");
 	if (workingSet) {
 		for (const line of renderWorkingSetLines(workingSet, workingSetConfig, recall)) lines.push(line);
-		lines.push("");
-	}
-	if (ledger.projectPreload && ledger.groups.some((group) => group.category === "project")) {
-		lines.push(theme.fg("annotation", `project preload: ${ledger.projectPreload}`));
-	}
-	for (const handbookLine of handbookProvenanceLines(ledger.projectHandbookFiles)) {
-		lines.push(theme.fg("annotation", handbookLine));
 	}
 	const compaction =
 		ledger.contextWindow <= 0 && ledger.compactionCeilingTokens
@@ -315,6 +364,13 @@ function renderContextLedgerLines(
 		lines.push(theme.fg("annotation", pruneInfo));
 	}
 
+	if (ledger.projectPreload && ledger.groups.some((group) => group.category === "project")) {
+		lines.push(theme.fg("annotation", `project preload: ${ledger.projectPreload}`));
+	}
+	for (const handbookLine of handbookProvenanceLines(ledger.projectHandbookFiles)) {
+		lines.push(theme.fg("annotation", handbookLine));
+	}
+
 	return lines;
 }
 
@@ -354,50 +410,19 @@ export function openContextOverlay(
 	getLedger: () => ContextLedger,
 	options?: OpenContextOverlayOptions,
 ): OverlayHandle {
-	let contentWidth = DEFAULT_CONTENT_WIDTH;
-	const render = (): string => {
-		const lines = renderContextLedgerLines(
+	// The rows are a function of the ledger, the telemetry view and the width;
+	// the cache keeps the open overlay free until one of them changes.
+	const body = createCachedBody((width) => [
+		...renderContextLedgerLines(
 			getLedger(),
-			contentWidth,
+			width,
 			options?.getWorkingSet?.() ?? null,
 			options?.getWorkingSetConfig?.() ?? null,
 			options?.getRecallTelemetry?.() ?? null,
 			options?.telemetry ? options.telemetry.live() : undefined,
-		);
-		const inspection = options?.chat?.inspectLiveBudget?.();
-		if (inspection?.status === "available") {
-			const view = inspection.view;
-			const count = (value: number | null) => (value === null ? "unknown" : formatTokens(value));
-			lines.push(
-				"",
-				`Next request: ${count(view.inputTokens)} input + ${count(view.outputReserveTokens)} output`,
-				`Headroom: ${count(view.headroomTokens)} · ${view.phase}`,
-			);
-			if (view.pendingHandoff) {
-				lines.push(
-					`Handoff: ${view.lastOutcome?.outcome ?? "pending"}`,
-					view.pendingHandoff.id,
-					`/context recover ${view.pendingHandoff.id} reduce|deliver`,
-				);
-			} else if (view.lastOutcome) lines.push(`Last handoff: ${view.lastOutcome.outcome}`);
-		}
-		return lines.join("\n");
-	};
-	let renderedSkinEpoch = skinEpoch();
-	const text = new Text(render(), 0, 0);
-	const body = {
-		render(width: number): string[] {
-			if (width !== contentWidth || renderedSkinEpoch !== skinEpoch()) {
-				renderedSkinEpoch = skinEpoch();
-				contentWidth = width;
-				text.setText(render());
-			}
-			return text.render(width);
-		},
-		invalidate(): void {
-			text.invalidate();
-		},
-	};
+		),
+		...nextRequestLines(options?.chat?.inspectLiveBudget?.(), width),
+	]);
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: CONTEXT_OVERLAY_WIDTH,
@@ -407,8 +432,7 @@ export function openContextOverlay(
 	});
 
 	const refresh = (): void => {
-		text.setText(render());
-		text.invalidate();
+		body.touch();
 		tui.requestRender();
 	};
 
