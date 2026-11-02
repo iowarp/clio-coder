@@ -1,6 +1,13 @@
 /** Deterministic, provider-free render workloads. Timings exclude terminal emulator painting. */
 import { parseArgs } from "node:util";
-import { type Terminal, Text, TuiAltScreen, TuiMainScreen, type TuiMode } from "../src/engine/tui.js";
+import {
+	InstrumentedTuiAltScreen,
+	InstrumentedTuiMainScreen,
+	type Terminal,
+	Text,
+	type TuiMode,
+	type TuiRenderObserver,
+} from "../src/engine/tui.js";
 import { type ChatPanel, createChatPanel } from "../src/interactive/chat-panel.js";
 import { buildLayout } from "../src/interactive/layout.js";
 import type { WorkerEntryState } from "../src/session-control/worker-stream.js";
@@ -65,49 +72,105 @@ const answer = [
 	"```",
 ].join("\n");
 const diagram = "```mermaid\nflowchart TD\nA[Prompt] --> B[Model]\nB --> C[Tool]\nC --> B\nB --> D[Answer]\n```\n\n";
-const workloads = ["composer", "text", "long-text", "tool", "diagram", "workers", "turn", "skill"] as const;
+const workloads = [
+	"composer",
+	"text",
+	"long-text",
+	"tool",
+	"tool-burst",
+	"diagram",
+	"workers",
+	"workers-long",
+	"telemetry",
+	"turn",
+	"skill",
+] as const;
 const modes = ["regular", "fullscreen"] as const;
 if (values.mode && !modes.some((mode) => mode === values.mode)) throw new Error("Unknown mode");
 if (values.workload && !workloads.some((workload) => workload === values.workload)) throw new Error("Unknown workload");
 type Workload = (typeof workloads)[number];
 
+/** The renderers the application ships, with frame observation off. */
+const unobserved: TuiRenderObserver = {
+	isEnabled: () => false,
+	beginFrame: () => undefined,
+	endFrame: () => {},
+	beginPhase: () => undefined,
+	endPhase: () => {},
+};
+
+function workerState(index: number, pending: boolean): WorkerEntryState {
+	return {
+		assignmentId: `assignment-${index}`,
+		runId: `run-${index}`,
+		origin: "agent",
+		agentId: `worker-${index}`,
+		runtime: { kind: "clio", targetId: "test", wireModelId: "test" },
+		text: "Starting investigation",
+		droppedLines: 0,
+		tools: [],
+		attempts: [],
+		pending,
+		startedAtMs: 0,
+	};
+}
+
+/** A read-model view holding only what the transcript reads; each published batch is a new object. */
+function telemetryView(elapsed: (runId: string) => string): never {
+	return {
+		seeding: false,
+		runs: () => [],
+		run: (runId: string) => ({
+			row: { tokens: { display: "1.2k" } },
+			activity: { elapsed: { display: elapsed(runId) }, toolCalls: { display: "3" }, contextTokens: null },
+		}),
+	} as never;
+}
+
 function sample(mode: TuiMode, workload: Workload): { milliseconds: number[]; bytes: number } {
 	const terminal = new CountingTerminal();
-	const panel = createChatPanel({ now: () => 1_000, getTerminalRows: () => terminal.rows });
+	let view: never | null = null;
+	const panel = createChatPanel({ now: () => 1_000, getTerminalRows: () => terminal.rows, getTelemetry: () => view });
 	for (let index = 0; index < turns; index++) {
 		panel.appendUser(`Question ${index}`);
+		// Workloads that scan history need the history they scan: tool rows, and settled worker cards.
+		if (workload === "tool-burst") {
+			const toolCallId = `history-${index}`;
+			panel.applyEvent({ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command: "ls" } } as never);
+			panel.applyEvent({
+				type: "tool_execution_end",
+				toolCallId,
+				result: { content: [{ type: "text", text: "ok" }] },
+				isError: false,
+			} as never);
+		}
 		settle(panel, answer);
+		if (workload === "telemetry" && index % 10 === 0) panel.applyWorkerState(workerState(1_000 + index, false));
 	}
 	const editor = new Text("draft", 0, 0);
-	const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
+	const tui =
+		mode === "regular"
+			? new InstrumentedTuiMainScreen(terminal, unobserved)
+			: new InstrumentedTuiAltScreen(terminal, unobserved);
 	const root = buildLayout(
 		{ banner: new Text("Clio", 0, 0), chat: panel, editor, footer: new Text("ready", 0, 0) },
 		{ mode },
 	);
-	if (tui instanceof TuiAltScreen) tui.setLayoutRoot(root);
+	if (tui instanceof InstrumentedTuiAltScreen) tui.setLayoutRoot(root);
 	else tui.addChild(root);
 	tui.start();
 	try {
-		const workers: WorkerEntryState[] = Array.from({ length: 8 }, (_, index) => ({
-			assignmentId: `assignment-${index}`,
-			runId: `run-${index}`,
-			origin: "agent",
-			agentId: `worker-${index}`,
-			runtime: { kind: "clio", targetId: "test", wireModelId: "test" },
-			text: "Starting investigation",
-			droppedLines: 0,
-			tools: [],
-			attempts: [],
-			pending: true,
-			startedAtMs: 0,
-		}));
+		const workers = Array.from({ length: 8 }, (_, index) => workerState(index, true));
 		if (workload !== "composer") {
 			panel.appendUser("Continue");
 			panel.applyEvent({ type: "agent_start" } as never);
 		}
 		if (workload === "long-text") panel.applyEvent({ type: "text_delta", delta: `${answer}\n\n`.repeat(80) } as never);
 		if (workload === "diagram") panel.applyEvent({ type: "text_delta", delta: diagram } as never);
-		if (workload === "workers") for (const worker of workers) panel.applyWorkerState(worker);
+		if (workload === "workers-long") for (const worker of workers) worker.text = `${answer}\n\n`.repeat(150);
+		if (workload === "workers" || workload === "workers-long" || workload === "telemetry")
+			for (const worker of workers) panel.applyWorkerState(worker);
+		if (workload === "telemetry") view = telemetryView(() => "1.0s");
 		if (workload === "tool")
 			panel.applyEvent({
 				type: "tool_execution_start",
@@ -126,12 +189,30 @@ function sample(mode: TuiMode, workload: Workload): { milliseconds: number[]; by
 					toolCallId: "bench",
 					partialResult: { content: [{ type: "text", text: output }] },
 				} as never);
-			} else if (workload === "workers") {
+			} else if (workload === "workers" || workload === "workers-long") {
 				const worker = workers[index % workers.length];
 				if (worker) {
 					worker.text += ` finding${index}`;
 					panel.applyWorkerState(worker);
 				}
+			} else if (workload === "telemetry") {
+				// One batch moved one running worker's clock; every other card reads the same as before.
+				const moved = `run-${index % workers.length}`;
+				view = telemetryView((runId) => (runId === moved ? `${index}.0s` : "1.0s"));
+			} else if (workload === "tool-burst") {
+				const toolCallId = `burst-${index}`;
+				panel.applyEvent({ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command: "ls" } } as never);
+				panel.applyEvent({
+					type: "tool_execution_update",
+					toolCallId,
+					partialResult: { content: [{ type: "text", text: "line" }] },
+				} as never);
+				panel.applyEvent({
+					type: "tool_execution_end",
+					toolCallId,
+					result: { content: [{ type: "text", text: "ok" }] },
+					isError: false,
+				} as never);
 			} else if (workload === "turn") {
 				panel.appendUser(`Prompt ${index}`);
 				panel.applyEvent({ type: "agent_start" } as never);
