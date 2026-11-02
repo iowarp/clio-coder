@@ -18,7 +18,7 @@ import { redactSecretString } from "../../domains/safety/redaction.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { fitFooterText } from "../footer-panel.js";
 import type { ClioTheme, ClioToken } from "../theme/index.js";
-import { clioTheme, GLYPH, rule } from "../theme/index.js";
+import { clioTheme, GLYPH, sectionRule } from "../theme/index.js";
 
 export type NotificationLevel = "info" | "success" | "warning" | "error";
 
@@ -452,7 +452,9 @@ export function formatNotificationPanel(
 	const theme = options.theme ?? clioTheme();
 	const maxRows = Math.max(1, options.maxRows ?? 4);
 	const dismiss = options.dismissKeyLabel ?? "/notifications dismiss";
-	const lines: string[] = [rule(theme, width, { left: "notices" })];
+	const lines: string[] = [
+		sectionRule(theme, width, "Notices", { meta: `${entries.length} ${entries.length === 1 ? "notice" : "notices"}` }),
+	];
 	for (const entry of entries.slice(0, maxRows)) {
 		const glyph = theme.fg(notificationToken(entry.level), notificationGlyph(entry.level));
 		const prefix = `${glyph} `;

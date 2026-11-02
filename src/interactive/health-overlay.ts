@@ -4,9 +4,26 @@ import type { SystemOneBreakerView } from "../domains/system-one/index.js";
 import type { TelemetryReadModel } from "../domains/telemetry/contract.js";
 import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
 import { matchesKey, wrapTextWithAnsi } from "../engine/tui.js";
-import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
+import {
+	buildResponsiveHint,
+	createCachedBody,
+	type RowBudgetedBody,
+	showClioOverlayFrame,
+	windowRows,
+} from "./overlay-frame.js";
 import { routeBreakerPhrase } from "./overlays/settings.js";
-import { clioTheme } from "./theme/index.js";
+import { quotaAccountRows } from "./quota-view.js";
+import {
+	chipRow,
+	clioTheme,
+	emptyState,
+	factRows,
+	positionRow,
+	sectionRule,
+	statusChip,
+	type TableCell,
+	tableRows,
+} from "./theme/index.js";
 
 /**
  * `/health`: what Clio's own telemetry can vouch for right now (#434 §14). Journal writers and their losses, the
@@ -43,112 +60,131 @@ function systemOneBreakerPhrase(breaker: SystemOneBreakerView): string {
 	}
 }
 
-const lost = (quantity: HealthV1["journals"][number]["dropped"]) =>
-	quantity.fact.kind === "measured" && quantity.fact.value > 0;
+/** A journal or producer counter: the read model's display beside its fact. */
+type LiveCount = HealthV1["journals"][number]["dropped"];
 
-/** The overlay's lines, from data read once per frame. */
-function healthLines(data: HealthData): string[] {
+const lost = (quantity: LiveCount) => quantity.fact.kind === "measured" && quantity.fact.value > 0;
+
+/** The overlay's lines, from data read once per frame: a rule per region, a table where the numbers line up. */
+function healthLines(data: HealthData, width: number): string[] {
 	const theme = clioTheme();
-	const heading = (text: string) => theme.style("sectionHeading", text, { bold: true });
-	const note = (text: string) => theme.fg("annotation", text);
 	const unit = (label: string, display: string, alarm = false) =>
 		`${theme.fg("fieldName", label)} ${theme.fg(alarm ? "warning" : "counter", display)}`;
-	const units = (parts: string[]) => `  ${parts.join(theme.fg("annotation", " · "))}`;
+	const loss = (quantity: LiveCount): TableCell => ({
+		text: quantity.display,
+		...(lost(quantity) ? { tone: "warning" } : {}),
+	});
+	const missing = (message: string) => emptyState(theme, message, width);
 	const lines: string[] = [];
 
-	lines.push(heading("Journals"));
 	const health = data.health;
-	if (!health) lines.push(note(`  ${NOT_AVAILABLE}`));
-	else if (health.journals.length === 0) lines.push(note("  no journal writer is open in this process"));
+	lines.push(
+		sectionRule(theme, width, "Journals", {
+			...(health ? { meta: `${health.journals.length} writer${health.journals.length === 1 ? "" : "s"}` } : {}),
+		}),
+	);
+	if (!health) lines.push(...missing(NOT_AVAILABLE));
+	else if (health.journals.length === 0) lines.push(...missing("no journal writer is open in this process"));
 	else
-		for (const journal of health.journals) {
-			lines.push(`  ${theme.fg("footerIdentity", journal.owner.replace(":", " "))}`);
-			lines.push(
-				units([
-					unit("persisted", journal.persisted.display),
-					unit("queued", journal.queueDepth.display),
-					unit("dropped", journal.dropped.display, lost(journal.dropped)),
-					unit("invalid", journal.invalid.display, lost(journal.invalid)),
-					unit("write errors", journal.writeErrors.display, lost(journal.writeErrors)),
-					unit("filtered", journal.filtered.display),
-				]),
-			);
-		}
+		lines.push(
+			...tableRows(
+				theme,
+				{
+					header: true,
+					columns: [
+						{ label: "owner", priority: 10 },
+						{ label: "persisted", align: "right", priority: 8 },
+						{ label: "queued", align: "right", priority: 7 },
+						{ label: "dropped", align: "right", priority: 9 },
+						{ label: "invalid", align: "right", priority: 6 },
+						{ label: "write errors", align: "right", priority: 6 },
+						{ label: "filtered", align: "right", priority: 3 },
+					],
+					rows: health.journals.map((journal) => [
+						theme.fg("footerIdentity", journal.owner.replace(":", " ")),
+						journal.persisted.display,
+						journal.queueDepth.display,
+						loss(journal.dropped),
+						loss(journal.invalid),
+						loss(journal.writeErrors),
+						journal.filtered.display,
+					]),
+				},
+				width,
+			),
+		);
 	if (health) {
 		lines.push(
-			"",
-			heading("Producer"),
-			units([
-				unit("unowned records", health.producer.unownedRecords.display, lost(health.producer.unownedRecords)),
-				unit("sink failures", health.producer.sinkFailures.display, lost(health.producer.sinkFailures)),
-			]),
-			"",
-			heading("Event loop"),
-			units([
-				unit("lag p50", health.loopLag.p50.display),
-				unit("p99", health.loopLag.p99.display),
-				unit("max", health.loopLag.max.display),
-			]),
+			sectionRule(theme, width, "Producer"),
+			chipRow(
+				theme,
+				[
+					unit("unowned records", health.producer.unownedRecords.display, lost(health.producer.unownedRecords)),
+					unit("sink failures", health.producer.sinkFailures.display, lost(health.producer.sinkFailures)),
+				],
+				width,
+			),
+			sectionRule(theme, width, "Event loop"),
+			chipRow(
+				theme,
+				[
+					unit("lag p50", health.loopLag.p50.display),
+					unit("p99", health.loopLag.p99.display),
+					unit("max", health.loopLag.max.display),
+				],
+				width,
+			),
 		);
-		if (health.loopLag.max.fact.kind === "unknown") lines.push(note("  unknown until a health window is recorded"));
+		if (health.loopLag.max.fact.kind === "unknown")
+			lines.push(theme.fg("annotation", "unknown until a health window is recorded"));
 	}
 
-	lines.push("", heading("Session transport"));
+	lines.push(sectionRule(theme, width, "Session transport"));
 	const transport = data.transport;
-	if (transport === undefined) lines.push(note(`  ${NOT_AVAILABLE}`));
-	else if (transport === null) lines.push(note("  no main call has settled yet"));
+	if (transport === undefined) lines.push(...missing(NOT_AVAILABLE));
+	else if (transport === null) lines.push(...missing("no main call has settled yet"));
 	else {
 		lines.push(
-			units([
-				unit("kind", transport.kind),
-				unit("continuation", transport.continuation.display),
-				unit("pinned to SSE", transport.sessionPinnedToSse.display),
-				...(transport.pinReason ? [unit("because", transport.pinReason.replaceAll("_", " "))] : []),
-			]),
-			units([
-				unit("websocket failures", transport.websocketFailures.display),
-				unit("SSE fallbacks", transport.sseFallbacks.display),
-				...(transport.recovery
-					? [unit("recovery", `${transport.recovery.action.replaceAll("_", " ")} ${transport.recovery.outcome}`)]
-					: []),
-			]),
-			note(`  as of the main call settled at ${transport.at}`),
+			...factRows(
+				theme,
+				[
+					{ label: "kind", value: transport.kind },
+					{ label: "continuation", value: transport.continuation.display },
+					{ label: "pinned to SSE", value: transport.sessionPinnedToSse.display },
+					...(transport.pinReason ? [{ label: "because", value: transport.pinReason.replaceAll("_", " ") }] : []),
+					{ label: "websocket failures", value: transport.websocketFailures.display },
+					{ label: "SSE fallbacks", value: transport.sseFallbacks.display },
+					...(transport.recovery
+						? [
+								{ label: "recovery", value: `${transport.recovery.action.replaceAll("_", " ")} ${transport.recovery.outcome}` },
+							]
+						: []),
+				],
+				width,
+			),
+			theme.fg("annotation", `as of the main call settled at ${transport.at}`),
 		);
 	}
 
-	lines.push("", heading("Quota"));
+	lines.push(sectionRule(theme, width, "Quota"));
 	const providers = data.quota?.providers ?? [];
-	if (!data.quota) lines.push(note(`  ${NOT_AVAILABLE}`));
-	else if (providers.length === 0) lines.push(note("  no provider has reported quota to this process or session"));
-	for (const provider of providers) {
-		const seen = provider.observedAt ? `observed ${provider.observedAt}` : "observed at an unknown time";
-		lines.push(
-			`  ${theme.fg("footerIdentity", provider.provider)} ${note(`${provider.source.replaceAll("-", " ")} · ${seen}`)}${
-				provider.stale ? ` ${theme.fg("warning", "stale")}` : ""
-			}`,
-		);
-		for (const window of provider.windows)
-			lines.push(
-				units([
-					unit(window.label ?? window.key, `${window.usedPct.display} used`),
-					...(window.resetsAt ? [note(`resets ${window.resetsAt}`)] : []),
-				]),
-			);
-	}
+	if (!data.quota) lines.push(...missing(NOT_AVAILABLE));
+	else if (providers.length === 0) lines.push(...missing("no provider has reported quota to this process or session"));
+	else lines.push(...quotaAccountRows(providers, width));
 
-	lines.push("", heading("Route breakers"));
-	if (data.breakers.length === 0) lines.push(note("  no route breaker is open or counting failures"));
+	lines.push(sectionRule(theme, width, "Route breakers"));
+	if (data.breakers.length === 0) lines.push(...missing("no route breaker is open or counting failures"));
 	for (const route of data.breakers)
 		lines.push(
-			`  ${theme.fg("footerIdentity", route.targetId)} ${theme.fg(route.state === "closed" ? "counter" : "warning", routeBreakerPhrase(route))}`,
+			`${statusChip(theme, route.state === "closed" ? "ok" : "warning")} ${theme.fg("footerIdentity", route.targetId)} ${theme.fg(route.state === "closed" ? "counter" : "warning", routeBreakerPhrase(route))}`,
 		);
 
-	lines.push("", heading("System One breakers"));
-	if (data.systemOne === null) lines.push(note("  not available: this process has no System One"));
-	else if (data.systemOne.length === 0) lines.push(note("  no engine breaker is open or counting timeouts"));
+	lines.push(sectionRule(theme, width, "System One breakers"));
+	if (data.systemOne === null) lines.push(...missing("not available: this process has no System One"));
+	else if (data.systemOne.length === 0) lines.push(...missing("no engine breaker is open or counting timeouts"));
 	for (const breaker of data.systemOne ?? [])
 		lines.push(
-			`  ${theme.fg("footerIdentity", breaker.engine)} ${note(`${breaker.site}${breaker.moment ? `/${breaker.moment}` : ""}`)} ${theme.fg(
+			`${statusChip(theme, breaker.state === "closed" ? "ok" : "warning")} ${theme.fg("footerIdentity", breaker.engine)} ${theme.fg("annotation", `${breaker.site}${breaker.moment ? `/${breaker.moment}` : ""}`)} ${theme.fg(
 				breaker.state === "closed" ? "counter" : "warning",
 				systemOneBreakerPhrase(breaker),
 			)}`,
@@ -156,54 +192,71 @@ function healthLines(data: HealthData): string[] {
 	return lines;
 }
 
-class HealthOverlayBody implements Component {
+/**
+ * The scrolling body. The lines are cached on the data revision and the
+ * width, so the one-second repaints a read model's updates ask for rebuild
+ * nothing while the numbers hold; the window over them moves with the keys.
+ */
+class HealthOverlayBody implements Component, RowBudgetedBody {
 	private offset = 0;
-	private height = 20;
-	private pageHeight = 18;
-	private lineCount = 0;
+	private rows = 0;
+	private readonly lines;
+	private memo: { all: string[]; offset: number; rows: number; visible: string[] } | null = null;
 
 	constructor(
-		private readonly getData: () => HealthData,
+		getData: () => HealthData,
 		private readonly requestRender: () => void,
-	) {}
+	) {
+		this.lines = createCachedBody((width) =>
+			healthLines(getData(), width).flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width))),
+		);
+	}
 
-	setHeight(rows: number): void {
-		// The dock reports its own viewport: body rows plus the two rails.
-		this.height = Math.max(1, rows - 2);
+	/** The data behind the lines changed; the next render rebuilds them. */
+	touch(): void {
+		this.lines.touch();
+	}
+
+	setBodyRows(rows: number): void {
+		this.rows = Math.max(0, Math.floor(rows));
+	}
+
+	private pageHeight(): number {
+		// One row stays free for the position a scrolled page carries.
+		return Math.max(1, (this.rows > 0 ? this.rows : 18) - 1);
 	}
 
 	handleInput(data: string): void {
+		const page = this.pageHeight();
 		let offset = this.offset;
 		if (matchesKey(data, "up")) offset--;
 		else if (matchesKey(data, "down")) offset++;
-		else if (matchesKey(data, "pageUp")) offset -= this.pageHeight;
-		else if (matchesKey(data, "pageDown")) offset += this.pageHeight;
+		else if (matchesKey(data, "pageUp")) offset -= page;
+		else if (matchesKey(data, "pageDown")) offset += page;
 		else if (matchesKey(data, "home") || matchesKey(data, "ctrl+home")) offset = 0;
-		else if (matchesKey(data, "end") || matchesKey(data, "ctrl+end")) offset = this.lineCount;
+		else if (matchesKey(data, "end") || matchesKey(data, "ctrl+end")) offset = Number.MAX_SAFE_INTEGER;
 		else return;
-		this.offset = Math.max(0, Math.min(offset, this.lineCount - this.pageHeight));
+		this.offset = Math.max(0, offset);
 		this.requestRender();
 	}
 
 	render(width: number): string[] {
-		const contentWidth = Math.max(1, Math.floor(width));
-		const lines = healthLines(this.getData()).flatMap((line) => wrapTextWithAnsi(line, contentWidth));
-		this.lineCount = lines.length;
-		// One row stays free for the `n–m / N` indicator a scrolled page carries.
-		this.pageHeight = Math.max(1, this.height - 1);
-		this.offset = Math.max(0, Math.min(this.offset, lines.length - this.pageHeight));
-		const visible = lines.slice(this.offset, this.offset + this.pageHeight);
-		if (lines.length > this.pageHeight)
-			visible.push(
-				clioTheme().fg(
-					"annotation",
-					`${this.offset + 1}–${Math.min(lines.length, this.offset + this.pageHeight)} / ${lines.length}`,
-				),
-			);
+		const all = this.lines.render(width);
+		const page = this.pageHeight();
+		const { window, start, position } = windowRows(all, this.offset, page);
+		this.offset = start;
+		const memo = this.memo;
+		if (memo && memo.all === all && memo.offset === start && memo.rows === this.rows) return memo.visible;
+		const visible = [...window];
+		if (position) visible.push(positionRow(clioTheme(), { ...position, keys: ["↑↓ scroll", "PgUp/PgDn page"] }, width));
+		this.memo = { all, offset: start, rows: this.rows, visible };
 		return visible;
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.lines.invalidate();
+		this.memo = null;
+	}
 }
 
 export interface OpenHealthOverlayOptions {
@@ -237,13 +290,17 @@ export function openHealthOverlay(
 			{ key: "↑↓", verb: "scroll", critical: true },
 			{ key: "PgUp/PgDn", verb: "page" },
 		]),
-		visible: (_width, height) => {
-			body.setHeight(height);
-			return true;
-		},
 	});
+	// The breakers are read live and have no update topic, so a frame the
+	// owner requests for any reason still sees them fresh; the read model's
+	// topics mark the cached lines stale.
 	const offs = telemetry
-		? (["health", "quota", "session"] as const).map((topic) => telemetry.subscribe(topic, () => tui.requestRender()))
+		? (["health", "quota", "session"] as const).map((topic) =>
+				telemetry.subscribe(topic, () => {
+					body.touch();
+					tui.requestRender();
+				}),
+			)
 		: [];
 	return {
 		...handle,
