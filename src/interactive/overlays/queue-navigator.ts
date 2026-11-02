@@ -8,10 +8,10 @@
  */
 
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
-import { isKeyRelease, matchesKey, truncateToWidth } from "../../engine/tui.js";
+import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { QueuedChatMessage } from "../../session-control/chat-loop.js";
-import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, GLYPH } from "../theme/index.js";
+import { buildHint, centeredWindow, type RowBudgetedBody, showClioOverlayFrame } from "../overlay-frame.js";
+import { chip, chipRow, clioTheme, emptyState, GLYPH, positionRow, sectionRule, selectionRow } from "../theme/index.js";
 
 export const QUEUE_NAVIGATOR_OVERLAY_WIDTH = 88;
 
@@ -60,42 +60,74 @@ export function queueEntryMarks(entry: Pick<QueuedChatMessage, "labels" | "pinne
 	return marks;
 }
 
-class QueueNavigatorBody implements Component {
+/** Rows the message under the cursor may take beneath the list: its rule and six lines of text. */
+const QUEUE_DETAIL_ROWS = 7;
+const QUEUE_MIN_LIST_ROWS = 3;
+
+/**
+ * The queue as selection rows: the position and the first line of the
+ * message, with the slot and the wait at the right. The slot reads in the
+ * attention tone when it lands at the next slot, because that is the one
+ * that interrupts. The message under the cursor is written out under a rule,
+ * and the list windows itself so both fit the dock.
+ */
+class QueueNavigatorBody implements Component, RowBudgetedBody {
 	private selected = 0;
+	private rows = 0;
 
 	constructor(private readonly deps: QueueNavigatorDeps) {}
+
+	setBodyRows(rows: number): void {
+		this.rows = Math.max(0, Math.floor(rows));
+	}
 
 	render(width: number): string[] {
 		const theme = clioTheme();
 		const safeWidth = Math.max(20, Math.floor(width));
 		const entries = this.deps.entries();
 		if (entries.length === 0) {
-			return [fitRow(theme.fg("annotation", "nothing queued; Enter during a run queues a message"), safeWidth)];
+			return emptyState(theme, "Nothing queued.", safeWidth, { remedy: "Enter during a run queues a message" });
 		}
 		this.selected = Math.min(this.selected, entries.length - 1);
 		const now = (this.deps.now ?? Date.now)();
-		const rows: string[] = [];
-		for (const [index, entry] of entries.entries()) {
-			const focused = index === this.selected;
+		const slotChip = (entry: QueuedChatMessage): string => {
 			const slot = queueSlotWord(entry);
-			const marks = queueEntryMarks(entry);
-			const slotText = `${slot}${marks}`.padEnd(8);
-			const slotPainted = slot === "steer" ? theme.fg("attention", slotText) : theme.fg("body", slotText);
-			const age = theme.fg("annotation", formatQueueAge(now - entry.enqueuedAt).padStart(4));
-			const head = `${selectionMark(focused)} ${String(index + 1).padStart(2)}  `;
-			// 2 mark, 1 space, 2 index, 2 spaces, 8 slot, 1 space, 4 age, 2 spaces.
-			const previewWidth = Math.max(8, safeWidth - 22);
-			const preview = truncateToWidth(entry.text.replace(/\s+/g, " "), previewWidth, GLYPH.ellipsis, false);
+			return chip(theme, `${slot}${queueEntryMarks(entry)}`, slot === "steer" ? "action" : "neutral");
+		};
+		const listBudget = this.rows > 0 ? Math.max(QUEUE_MIN_LIST_ROWS, this.rows - QUEUE_DETAIL_ROWS) : entries.length;
+		const visible = Math.min(entries.length, listBudget);
+		const windowed = visible < entries.length;
+		const [start, end] = centeredWindow(entries.length, this.selected, windowed ? Math.max(1, visible - 1) : visible);
+		const rows: string[] = [];
+		for (let index = start; index < end; index += 1) {
+			const entry = entries[index];
+			if (!entry) continue;
 			rows.push(
-				fitRow(`${head}${slotPainted} ${selectionLabel(focused, preview.padEnd(previewWidth))}  ${age}`, safeWidth),
+				...selectionRow(theme, {
+					focused: index === this.selected,
+					label: `${String(index + 1).padStart(2)}  ${entry.text.replace(/\s+/g, " ")}`,
+					meta: chipRow(theme, [slotChip(entry), chip(theme, formatQueueAge(now - entry.enqueuedAt), "muted")], safeWidth),
+					width: safeWidth,
+				}),
 			);
 		}
+		if (windowed)
+			rows.push(positionRow(theme, { start: start + 1, end, total: entries.length, unit: "messages" }, safeWidth));
 		const selected = entries[this.selected];
 		if (selected) {
-			rows.push("");
-			rows.push(fitRow(theme.fg("sectionHeading", `Message ${this.selected + 1}`), safeWidth));
-			for (const line of selected.text.split("\n").slice(0, 6)) rows.push(fitRow(theme.fg("body", line), safeWidth));
-			if (selected.text.split("\n").length > 6) rows.push(fitRow(theme.fg("annotation", GLYPH.ellipsis), safeWidth));
+			const detailBudget = this.rows > 0 ? Math.max(2, this.rows - rows.length) : QUEUE_DETAIL_ROWS;
+			const slot = queueSlotWord(selected);
+			rows.push(
+				sectionRule(theme, safeWidth, `Message ${this.selected + 1}`, {
+					meta: `${slot === "steer" ? "next slot" : "end of turn"} · waiting ${formatQueueAge(now - selected.enqueuedAt)}`,
+				}),
+			);
+			const text = selected.text.split("\n").flatMap((line) => wrapTextWithAnsi(theme.fg("body", line), safeWidth));
+			const kept = text.slice(0, Math.max(1, detailBudget - 1));
+			const last = kept.at(-1);
+			rows.push(
+				...(text.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept),
+			);
 		}
 		return rows;
 	}

@@ -12,18 +12,13 @@ import {
 } from "../../engine/tui.js";
 import { clockLocal, dateLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
-import {
-	buildHint,
-	clioError,
-	FocusBox,
-	selectionLabel,
-	selectionMark,
-	showClioOverlayFrame,
-} from "../overlay-frame.js";
-import { type ClioTheme, clioTheme, GLYPH } from "../theme/index.js";
+import { buildHint, centeredWindow, clioError, type RowBudgetedBody, showClioOverlayFrame } from "../overlay-frame.js";
+import { type ClioTheme, clioTheme, emptyState, GLYPH, positionRow, selectionRow } from "../theme/index.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
+/** Rows the list shows while the frame has not said how many it has. */
 const VISIBLE_ROWS = 16;
+const MIN_VISIBLE_ROWS = 3;
 
 /**
  * /tree navigator overlay. Behaviors:
@@ -166,8 +161,16 @@ function flattenTreeSnapshot(snapshot: TreeSnapshot): TreeRow[] {
  * role marker, and short turn id still fit on an 88-column overlay. */
 const ROW_PREVIEW_BUDGET = 55;
 
-/** @internal */
-function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: number; focused?: boolean }): string {
+/**
+ * One node as the label of a selection row, and its timestamp as the row's
+ * metadata when timestamps are on. The row itself (cursor, clipping, the
+ * right-aligned time) is the shared selection row's business.
+ * @internal
+ */
+function formatTreeRow(
+	row: TreeRow,
+	opts: { showTimestamps: boolean; width: number; focused?: boolean },
+): { label: string; meta?: string } {
 	const theme = clioTheme();
 	const indent = "  ".repeat(row.depth);
 	// The active tip is where the next message lands; it gets its own glyph so
@@ -199,22 +202,20 @@ function formatTreeRow(row: TreeRow, opts: { showTimestamps: boolean; width: num
 		? `${theme.fg("annotation", " · label:")}${theme.fg("menuDescription", `"${row.node.label}"`)}`
 		: "";
 	const styledInert = inertText ? theme.fg("annotation", inertText) : "";
-	const main = `${styledPrefix}${opts.focused ? selectionLabel(true, preview) : theme.fg("menuOption", preview)}${styledLabel}${styledInert}`;
-	if (!opts.showTimestamps) return truncateToWidth(main, opts.width, "", true);
-	const ts = `${dateLocal(row.node.at)} ${clockLocal(row.node.at)}`;
-	if (opts.width < ts.length + 12) return truncateToWidth(main, opts.width, "", true);
-	const budget = Math.max(1, opts.width - ts.length - 2);
-	const primary = truncateToWidth(main, budget, "", true);
-	const pad = " ".repeat(Math.max(1, opts.width - visibleWidth(primary) - ts.length));
-	return `${primary}${pad}${theme.fg("annotation", ts)}`;
+	const previewStyled = opts.focused
+		? theme.style("selectedOption", preview, { bold: true })
+		: theme.fg("menuOption", preview);
+	const label = truncateToWidth(`${styledPrefix}${previewStyled}${styledLabel}${styledInert}`, opts.width, "", false);
+	if (!opts.showTimestamps) return { label };
+	return { label, meta: `${dateLocal(row.node.at)} ${clockLocal(row.node.at)}` };
 }
 
 /** @internal */
-export class TreeOverlayView implements Component {
+export class TreeOverlayView implements Component, RowBudgetedBody {
 	private snapshot: TreeSnapshot | null;
 	private rows: TreeRow[];
 	private highlight = 0;
-	private scrollTop = 0;
+	private bodyRows = 0;
 	private showTimestamps = false;
 	private currentCwdOnly = false;
 	private sortOrder: "tree" | "recent" = "tree";
@@ -239,18 +240,17 @@ export class TreeOverlayView implements Component {
 		this.rebuildRows();
 	}
 
+	setBodyRows(rows: number): void {
+		this.bodyRows = Math.max(0, Math.floor(rows));
+	}
+
 	private invalidateLayout(): void {
 		if (this.rows.length === 0) {
 			this.highlight = 0;
-			this.scrollTop = 0;
 			return;
 		}
 		if (this.highlight >= this.rows.length) this.highlight = this.rows.length - 1;
 		if (this.highlight < 0) this.highlight = 0;
-		if (this.highlight < this.scrollTop) this.scrollTop = this.highlight;
-		if (this.highlight >= this.scrollTop + VISIBLE_ROWS) {
-			this.scrollTop = Math.max(0, this.highlight - VISIBLE_ROWS + 1);
-		}
 	}
 
 	private currentRow(): TreeRow | null {
@@ -290,31 +290,38 @@ export class TreeOverlayView implements Component {
 			// The overlay navigates the CURRENT session's turn tree; an empty
 			// tree means no turns yet, not a missing session list.
 			lines.push(
-				theme.fg(
-					"menuDescription",
-					this.currentCwdOnly && this.snapshot && Object.keys(this.snapshot.nodesById).length > 0
-						? "(no turns match the current cwd; press p to show all)"
-						: "(no turns in this session yet)",
-				),
+				...(this.currentCwdOnly && this.snapshot && Object.keys(this.snapshot.nodesById).length > 0
+					? emptyState(theme, "no turns match the current cwd", contentWidth, { remedy: "p shows all" })
+					: emptyState(theme, "no turns in this session yet", contentWidth)),
 			);
 		} else {
-			const end = Math.min(this.rows.length, this.scrollTop + VISIBLE_ROWS);
-			for (let i = this.scrollTop; i < end; i++) {
+			// The list takes what the lineage, the label editor and the status
+			// leave, and gives one row back to the position line while rows hide.
+			const chrome = (lineage !== null ? 1 : 0) + (this.submode === "edit-label" ? 1 : 0) + (this.status ? 1 : 0);
+			const budget = Math.max(MIN_VISIBLE_ROWS, (this.bodyRows > 0 ? this.bodyRows : VISIBLE_ROWS) - chrome);
+			const windowed = this.rows.length > budget;
+			const visible = windowed ? Math.max(1, budget - 1) : budget;
+			const [start, end] = centeredWindow(this.rows.length, this.highlight, visible);
+			for (let i = start; i < end; i++) {
 				const row = this.rows[i];
 				if (!row) continue;
 				const focused = i === this.highlight;
-				const prefix = `${selectionMark(focused)} `;
-				const body = formatTreeRow(row, {
+				const cell = formatTreeRow(row, {
 					showTimestamps: this.showTimestamps,
 					focused,
-					width: Math.max(1, contentWidth - visibleWidth(prefix)),
+					width: Math.max(1, contentWidth - 2),
 				});
-				const full = `${prefix}${body}`;
-				lines.push(truncateToWidth(full, contentWidth, "", true));
+				lines.push(
+					...selectionRow(theme, {
+						focused,
+						label: cell.label,
+						...(cell.meta === undefined ? {} : { meta: cell.meta }),
+						width: contentWidth,
+					}),
+				);
 			}
-			for (let i = end - this.scrollTop; i < VISIBLE_ROWS; i++) {
-				lines.push("");
-			}
+			if (windowed)
+				lines.push(positionRow(theme, { start: start + 1, end, total: this.rows.length, unit: "turns" }, contentWidth));
 		}
 		if (this.submode === "edit-label") {
 			// The label editor is the same `> text` input every list overlay shows;
@@ -469,9 +476,9 @@ function loadInitialSnapshot(session: OpenTreeOverlayDeps["session"]): TreeSnaps
 
 export function openTreeOverlay(tui: TUI, deps: OpenTreeOverlayDeps): OverlayHandle {
 	const initial = loadInitialSnapshot(deps.session);
+	// The view is the frame's own child so it receives the dock's row budget.
 	const view = new TreeOverlayView(deps, initial);
-	const box = new FocusBox(view);
-	return showClioOverlayFrame(tui, box, {
+	return showClioOverlayFrame(tui, view, {
 		anchor: "center",
 		width: TREE_OVERLAY_WIDTH,
 		markerId: "tree",

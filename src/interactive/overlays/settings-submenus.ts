@@ -16,6 +16,8 @@ export interface ChoiceItem {
 	label: string;
 	/** What choosing it does, in one sentence under the label. */
 	description?: string;
+	/** Dim right-aligned column: a time, a kind. */
+	meta?: string;
 	/** A mark in the cursor column while the row is not focused: the current value, a check. */
 	mark?: string;
 	disabled?: boolean;
@@ -77,6 +79,7 @@ export class ChoiceList implements Component, RowBudgetedBody {
 					focused,
 					label: item.label,
 					...(description === undefined ? {} : { description }),
+					...(item.meta === undefined ? {} : { meta: item.meta }),
 					...(item.mark === undefined ? {} : { mark: item.mark }),
 					...(item.disabled === undefined ? {} : { disabled: item.disabled }),
 					width,
