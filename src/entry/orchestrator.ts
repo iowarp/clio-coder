@@ -6144,7 +6144,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				retention: memoryOwner.contract.retentionStatus(),
 				promptSelection: memoryOwner.contract.promptSelection?.() ?? null,
 				// Fold retained memory decisions and call facts across the telemetry journals (#434).
-				spend: readTaskMemorySpendSummary(clioStateDir()),
+				// Lazy because the footer composes this status on every refresh and never reads
+				// spend: any journal write misses the fold's fingerprint, so an eager read rescanned
+				// every retained journal on the input thread several times per turn.
+				get spend() {
+					return readTaskMemorySpendSummary(clioStateDir());
+				},
 			};
 		},
 		getTaskMemorySeedOffer,
