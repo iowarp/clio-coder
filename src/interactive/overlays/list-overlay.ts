@@ -8,11 +8,19 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
-	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { localKey } from "../keyboard-owner.js";
 import { buildHint, FILTER_HINT, type HintEntry, type OverlayEscVerb, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, GLYPH, listGroupHeader, markdownTheme, rule, selectListTheme } from "../theme/index.js";
+import {
+	clioTheme,
+	emptyState,
+	GLYPH,
+	listGroupHeader,
+	markdownTheme,
+	rule,
+	selectionRow,
+	selectListTheme,
+} from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 
 /**
@@ -506,8 +514,8 @@ export class ListOverlayView implements Component {
 			const empty =
 				typeof this.options.emptyMessage === "function" ? this.options.emptyMessage() : this.options.emptyMessage;
 			const text = allItems.length === 0 ? (empty ?? "No matches found") : "No matches found";
-			for (const wrapped of wrapTextWithAnsi(text, Math.max(1, width - 2))) {
-				lines.push(this.padLine(clioTheme().fg("menuDescription", `  ${wrapped}`), width));
+			for (const wrapped of emptyState(clioTheme(), text, Math.max(1, width - 2))) {
+				lines.push(this.padLine(`  ${wrapped}`, width));
 			}
 		} else {
 			const scrollRows = renderedRows.length > listMaxLines && listMaxLines > 1 ? 1 : 0;
@@ -538,53 +546,20 @@ export class ListOverlayView implements Component {
 						continue;
 					}
 					const isSelected = row.itemIndex === this.selectedIndex;
-
-					const prefix = isSelected ? theme.selectedPrefix(`${GLYPH.cursor} `) : "  ";
-					const prefixLen = 2;
-					const availableWidth = width - prefixLen;
 					// The name comes first at every width. Metadata used to take whatever
 					// it wanted, so at 48 columns a row of origin, scope and state left
 					// the package name as a single ellipsis: a list of rows nobody could
-					// identify. The label keeps at least half the row, and the metadata
-					// compacts into what is left or drops out entirely.
-					const rawMeta = item.meta ?? "";
+					// identify. `selectionRow` keeps the label at least half the row and
+					// compacts the metadata into what is left, for every list alike.
 					const label = width <= NARROW_ROW_WIDTH && item.narrowLabel !== undefined ? item.narrowLabel : item.label;
-					const reservedLabel = Math.min(visibleWidth(label), Math.max(8, Math.floor(availableWidth * 0.5)));
-					const maxMetaWidth = Math.max(0, availableWidth - reservedLabel - 2);
-					const metaStr =
-						rawMeta.length === 0 || maxMetaWidth === 0
-							? ""
-							: visibleWidth(rawMeta) > maxMetaWidth
-								? truncateToWidth(rawMeta, maxMetaWidth, GLYPH.ellipsis, true)
-								: rawMeta;
-					const metaLen = metaStr ? visibleWidth(metaStr) : 0;
-
-					const maxLabelWidth = Math.max(1, availableWidth - (metaLen > 0 ? metaLen + 2 : 0));
-					const truncatedLabel = truncateToWidth(label, maxLabelWidth, GLYPH.ellipsis, false);
-					const actualLabelWidth = visibleWidth(truncatedLabel);
-
-					// The gap exists only to separate metadata. A padded label plus a
-					// forced space overflowed a row with no metadata by one cell, and
-					// padLine then cut a row that had lost nothing with an ellipsis.
-					const spacing = " ".repeat(Math.max(metaLen > 0 ? 1 : 0, availableWidth - actualLabelWidth - metaLen));
-
-					let labelPart = truncatedLabel;
-					let metaPart = metaStr;
-
-					if (isSelected) {
-						labelPart = truncatedLabel.includes("\u001b") ? truncatedLabel : theme.selectedText(truncatedLabel);
-						if (metaStr) {
-							metaPart = metaStr.includes("\u001b") ? metaStr : clioTheme().fg("annotation", metaStr);
-						}
-					} else {
-						if (!truncatedLabel.includes("\u001b")) labelPart = clioTheme().fg("menuOption", truncatedLabel);
-						if (metaStr) {
-							metaPart =
-								metaStr.includes("\x1b") || metaStr.includes("\x1B") ? metaStr : clioTheme().fg("annotation", metaStr);
-						}
-					}
-
-					lines.push(this.padLine(`${prefix}${labelPart}${spacing}${metaPart}`, width));
+					lines.push(
+						...selectionRow(clioTheme(), {
+							focused: isSelected,
+							label,
+							...(item.meta !== undefined && item.meta.length > 0 ? { meta: item.meta } : {}),
+							width,
+						}),
+					);
 				}
 			}
 

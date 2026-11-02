@@ -138,6 +138,69 @@ export function centeredWindow(total: number, selected: number, height: number):
 	return [start, Math.min(total, start + height)];
 }
 
+/**
+ * The `[start, end)` window of `lines` that `scroll` selects for a body of
+ * `height` rows, clamped so the last page is full. `position` is the one-based
+ * range a `positionRow` names, or null when every line fits and no row is owed
+ * to the count. One windowing rule for every body that scrolls: the mutation
+ * preview, the plan, the handoff document and the terms all used to compute
+ * this by hand and disagreed about the last page.
+ */
+export function windowRows<T>(
+	lines: ReadonlyArray<T>,
+	scroll: number,
+	height: number,
+): { window: T[]; start: number; maxScroll: number; position: { start: number; end: number; total: number } | null } {
+	const visible = Math.max(1, Math.floor(height));
+	const maxScroll = Math.max(0, lines.length - visible);
+	const start = Math.max(0, Math.min(Math.floor(scroll), maxScroll));
+	const window = lines.slice(start, start + visible);
+	if (lines.length <= visible) return { window, start, maxScroll, position: null };
+	return { window, start, maxScroll, position: { start: start + 1, end: start + window.length, total: lines.length } };
+}
+
+/**
+ * A body whose rows are a pure function of its width, its row budget and a
+ * revision the owner bumps when its state changes.
+ *
+ * The frame's identity cache only helps a child that returns the same array
+ * for the same frame, and five dialog bodies rebuilt theirs per render: the
+ * plan approval re-wrapped every step, the handoff review re-wrapped the whole
+ * document, the decisions board re-read its ledger. This memoizes the rows on
+ * (width, rows, revision, skin) so an idle open dialog costs the frame nothing.
+ */
+export interface CachedBody extends Component, RowBudgetedBody {
+	/** The state the rows depend on changed; the next render rebuilds them. */
+	touch(): void;
+	/** Rows the frame last granted, or zero while unknown. */
+	bodyRows(): number;
+}
+
+export function createCachedBody(render: (width: number, rows: number) => string[]): CachedBody {
+	let revision = 0;
+	let rows = 0;
+	let memo: { key: string; lines: string[] } | null = null;
+	return {
+		render(width: number): string[] {
+			const key = `${width}|${rows}|${revision}|${skinEpoch()}`;
+			if (memo?.key === key) return memo.lines;
+			const lines = render(width, rows);
+			memo = { key, lines };
+			return lines;
+		},
+		setBodyRows(next: number): void {
+			rows = Math.max(0, Math.floor(next));
+		},
+		bodyRows: () => rows,
+		touch(): void {
+			revision += 1;
+		},
+		invalidate(): void {
+			memo = null;
+		},
+	};
+}
+
 function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): string {
 	const frame = (text: string): string => clioFrame(text, tone ?? "border");
 	const clean = label.replace(/^[┌┐└┘├┤─│\s]+/, "").replace(/[┌┐└┘├┤─│\s]+$/, "");
