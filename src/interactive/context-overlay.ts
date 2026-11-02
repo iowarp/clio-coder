@@ -8,7 +8,7 @@ import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import type { RecallTelemetry } from "../domains/session/recall-telemetry.js";
 import type { TelemetryReadModel, TelemetryView } from "../domains/telemetry/contract.js";
-import { type OverlayHandle, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { type OverlayHandle, type TUI, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { coldReasonText } from "../session-control/cold-reasons.js";
 import {
 	contextCategorySwatch,
@@ -369,6 +369,11 @@ function renderContextLedgerLines(
 	}
 	for (const handbookLine of handbookProvenanceLines(ledger.projectHandbookFiles)) {
 		lines.push(theme.fg("annotation", handbookLine));
+	}
+	if (ledger.priorSessionFact) {
+		for (const row of wrapTextWithAnsi(`prior session: ${ledger.priorSessionFact}`, Math.max(20, contentWidth))) {
+			lines.push(theme.fg("annotation", row));
+		}
 	}
 
 	return lines;

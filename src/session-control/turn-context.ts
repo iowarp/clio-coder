@@ -3230,6 +3230,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				projectTokens: currentContextSnapshot.categories.project,
 				projectPreload: sessionPrompt?.projectPreload?.label ?? null,
 				projectHandbookFiles: sessionPrompt?.projectHandbookFiles ?? null,
+				// A session switch keeps the outgoing prompt object until the next compile; only the hash is cleared.
+				priorSessionFact: sessionPromptHash === null ? null : (sessionPrompt?.priorSessionFact ?? null),
 				pendingTokens,
 				streamingTokens: streamingOutput,
 				liveTotalTokens: totalUsed > 0 ? totalUsed : null,
