@@ -134,7 +134,7 @@ describe("contracts/reset-lifecycle", () => {
 	it("emits one JSON document with per-root status and size", async () => {
 		const temp = home();
 		try {
-			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--dry-run", "--json"]));
+			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--state", "--dry-run", "--json"]));
 			strictEqual(code, 0);
 
 			const parsed = JSON.parse(stdout) as {

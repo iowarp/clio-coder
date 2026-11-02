@@ -30,6 +30,7 @@ function fixture() {
 	writeFileSync(history, "history must survive previews and failures");
 	function run(command: "reset" | "uninstall", args: string[]) {
 		const functionName = command === "reset" ? "runResetCommand" : "runUninstallCommand";
+		const argv = command === "reset" && !args.includes("--all") ? ["--state", ...args] : args;
 		return new Promise<{ status: number; stdout: string; stderr: string }>((resolve) =>
 			execFile(
 				process.execPath,
@@ -40,7 +41,7 @@ function fixture() {
 					"-e",
 					`
 			import { ${functionName} } from ${JSON.stringify(new URL(`../../src/cli/${command}.ts`, import.meta.url).href)};
-			process.exitCode = await ${functionName}(${JSON.stringify(args)});`,
+			process.exitCode = await ${functionName}(${JSON.stringify(argv)});`,
 				],
 				{
 					env: {

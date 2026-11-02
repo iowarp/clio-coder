@@ -75,7 +75,7 @@ Usage:
   clio-coder context map [--out <path>] [--json]  create a native interactive HTML codebase map
   clio-coder context replay --sessions <path>...  compare working-set policies over Clio ledgers
   clio-coder context working-set --session <id|path>  inspect one session's working-set state
-  clio-coder uninstall            remove all Clio Coder state; --remove-binary also unlinks the launcher
+  clio-coder uninstall            remove Clio Coder: its state, settings and launcher
   clio-coder upgrade              upgrade Clio Coder and run pending migrations
   clio-coder agents               list discovered agent recipes
   clio-coder agents validate      report every unresolved reference in the repo's recipes, skills and fleet bindings

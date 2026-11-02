@@ -236,9 +236,9 @@ users can select `@iowarp/clio-coder@latest` through their package manager.
 | Disable background installation | `--no-auto-update` or `CLIO_CODER_AUTO_UPDATE=0` |
 | Pin a managed install | Install an exact version with `--version` |
 | Clear session state while keeping the launcher | `clio-coder reset --state` |
-| Remove Clio's settings, credentials, data, state, and caches | `clio-coder uninstall` |
+| Remove Clio: settings, credentials, data, state, caches, the launcher, and a managed install's runtime and versions | `clio-coder uninstall` |
 | Preserve settings and credentials during uninstall | Add `--keep-config` |
-| Also remove the managed launcher, runtime, and installed versions | Add `--remove-binary` |
+| Keep the launcher, runtime, and installed versions during uninstall | Add `--keep-binary` |
 
 An idle interactive session checks a managed install's channel at most once a
 day. It installs a newer release beside the current one and switches the

@@ -30,9 +30,10 @@ import type { RemovalFailure } from "./removal.js";
 import { refuseForOpenSessions, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder uninstall [--remove-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
+const HELP = `clio-coder uninstall [--keep-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
 
-Remove all Clio Coder state: the config, data, state, and cache roots.
+Remove Clio Coder: the config, data, state, and cache roots, the launcher, and for
+an install.sh install its private Node and every installed version.
 
 Per-project \`.clio-coder/\` directories sit outside those roots and are never
 removed here. Every project Clio has run in is recorded in the session metadata,
@@ -45,10 +46,10 @@ removed; their desktop launchers are removed using the app's ownership manifests
 Flags:
   --keep-config    preserve the configuration root (settings.yaml, credentials)
   --keep-data      preserve the data root (memory, vendored tools)
-  --remove-binary  also remove the launcher symlink when it points at this
-                   installation. A real file, or a link into a different clio-coder
-                   installation, is kept and reported. For an install.sh install,
-                   also remove its launcher, its private Node and every installed version.
+  --keep-binary    keep the launcher and, for an install.sh install, its private Node and
+                   installed versions. Without it the launcher goes only when it belongs
+                   to this installation: a real file, or a link into a different clio-coder
+                   installation, is kept and reported.
   --dry-run        print what would be removed without changing anything
   --force, -f      skip confirmation prompt and proceed immediately
   --json           emit machine-readable JSON output
@@ -56,7 +57,7 @@ Flags:
 `;
 
 interface ParsedUninstallArgs {
-	removeBinary: boolean;
+	keepBinary: boolean;
 	keepConfig: boolean;
 	keepData: boolean;
 	force: boolean;
@@ -67,7 +68,7 @@ interface ParsedUninstallArgs {
 
 function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 	const parsed: ParsedUninstallArgs = {
-		removeBinary: false,
+		keepBinary: false,
 		keepConfig: false,
 		keepData: false,
 		force: false,
@@ -77,8 +78,8 @@ function parseUninstallArgs(argv: ReadonlyArray<string>): ParsedUninstallArgs {
 	};
 	for (const arg of argv) {
 		switch (arg) {
-			case "--remove-binary":
-				parsed.removeBinary = true;
+			case "--keep-binary":
+				parsed.keepBinary = true;
 				break;
 			case "--keep-config":
 				parsed.keepConfig = true;
@@ -348,7 +349,7 @@ function survivingClioOnPath(localLink: string): string | null {
 }
 
 /**
- * How the launcher row reads. `--remove-binary` promises to unlink only a
+ * How the launcher row reads. Uninstall unlinks only a
  * symlink into this installation; every other shape is kept, and saying so on
  * the inventory is the difference between an operator who knows a launcher
  * survived and one who finds out from the next `clio-coder`.
@@ -362,7 +363,7 @@ function launcherItemStatus(verdict: LauncherVerdict, removeRequested: boolean):
 function launcherItemDetail(verdict: LauncherVerdict, removeRequested: boolean): string | undefined {
 	if (verdict.kind === "absent") return undefined;
 	if (verdict.kind === "keep") return verdict.detail;
-	return removeRequested ? undefined : "kept; --remove-binary unlinks it";
+	return removeRequested ? undefined : "kept by --keep-binary";
 }
 
 /** The removal command that matches how this installation was put on disk. */
@@ -481,8 +482,8 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			label: "Launcher",
 			path: linkPath,
 			bytes: linkSize.bytes,
-			status: launcherItemStatus(launcher, args.removeBinary),
-			detail: launcherItemDetail(launcher, args.removeBinary),
+			status: launcherItemStatus(launcher, !args.keepBinary),
+			detail: launcherItemDetail(launcher, !args.keepBinary),
 		},
 	];
 	if (installerRecord && runtimeSize) {
@@ -490,10 +491,8 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			label: "Runtime and versions",
 			path: installerRecord.root,
 			bytes: runtimeSize.bytes,
-			status: !runtimeSize.exists ? "absent" : args.removeBinary ? "remove" : "skip",
-			detail: args.removeBinary
-				? `Node v${installerRecord.nodeVersion} and installed versions`
-				: "kept; --remove-binary removes it",
+			status: !runtimeSize.exists ? "absent" : !args.keepBinary ? "remove" : "skip",
+			detail: !args.keepBinary ? `Node v${installerRecord.nodeVersion} and installed versions` : "kept by --keep-binary",
 		});
 	}
 	for (const item of web.items) items.push({ ...item, status: "remove", detail: "verified app ownership" });
@@ -547,8 +546,8 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	if (args.dryRun) {
 		presenter.warn("Dry run: no changes made");
 		if (
-			!(method === "installer" && args.removeBinary) &&
-			(method !== "source" || (launcher.kind !== "absent" && !args.removeBinary))
+			!(method === "installer" && !args.keepBinary) &&
+			(method !== "source" || (launcher.kind !== "absent" && (args.keepBinary || launcher.kind === "keep")))
 		)
 			presenter.commandAdvice(advice.lead, advice.command);
 		if (survivor !== null)
@@ -607,7 +606,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		}
 		if (
 			process.platform === "win32" &&
-			args.removeBinary &&
+			!args.keepBinary &&
 			installerRecord?.manager === "winget" &&
 			installerRecord.pathAdded &&
 			installerRecord.pathEntry === dirname(installerRecord.launcher)
@@ -676,18 +675,18 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		}
 
 		// Only a symlink into this installation is ever unlinked. Reporting the
-		// removal from `--remove-binary` alone announced one for a launcher the
+		// removal from the request alone announced one for a launcher the
 		// classifier had already decided to keep.
 		let launcherRemoved = false;
 		// Windows keeps a running node.exe locked, and cmd.exe rereads the .cmd
 		// launcher after Node exits. Both go once this process and its launcher exit.
-		const deferToExit = process.platform === "win32" && installerRecord !== undefined && args.removeBinary;
+		const deferToExit = process.platform === "win32" && installerRecord !== undefined && !args.keepBinary;
 		const deferred: string[] = [];
 		if (deferToExit && launcher.kind === "remove") {
 			deferred.push(linkPath);
 			presenter.completedStep("Launcher will be removed when this command exits");
 			launcherRemoved = true;
-		} else if (args.removeBinary && launcher.kind === "remove") {
+		} else if (!args.keepBinary && launcher.kind === "remove") {
 			const failure = removePath("launcher", linkPath, false);
 			if (failure) failures.push(failure);
 			else {
@@ -711,7 +710,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			runtimeRemoved = true;
 		} else if (deferred.length > 0) {
 			scheduleRemovalAfterExit(deferred, null);
-		} else if (args.removeBinary && installerRecord && runtimeSize?.exists) {
+		} else if (!args.keepBinary && installerRecord && runtimeSize?.exists) {
 			// Only what install.sh creates is removed, then the root if it is left
 			// empty: --install-dir may have named a directory that holds other files.
 			const failed = [
@@ -740,7 +739,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		if (failures.length > 0) {
 			presenter.fail("uninstall did not remove everything");
 			reportRemovalFailures(
-				`clio-coder uninstall${args.removeBinary ? " --remove-binary" : ""}${args.keepConfig ? " --keep-config" : ""}${args.keepData ? " --keep-data" : ""} --force`,
+				`clio-coder uninstall${args.keepBinary ? " --keep-binary" : ""}${args.keepConfig ? " --keep-config" : ""}${args.keepData ? " --keep-data" : ""} --force`,
 				failures,
 			);
 			presenter.finish();

@@ -37,7 +37,7 @@ export interface RemovalFailure {
  * the link. `existsSync` reports a dangling symlink as absent, and `rmSync`
  * with `force: true` stats through it, sees ENOENT, and returns as though the
  * path were already gone. A launcher left pointing at a removed installation
- * is exactly that shape, so `clio-coder uninstall --remove-binary` printed `remove`,
+ * is exactly that shape, so `clio-coder uninstall` printed `remove`,
  * exited 0, and left a broken `clio-coder` on PATH.
  */
 export function removePath(label: string, path: string, dryRun: boolean): RemovalFailure | null {

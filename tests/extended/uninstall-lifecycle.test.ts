@@ -145,11 +145,11 @@ describe("contracts/uninstall-lifecycle", () => {
 			writeFileSync(foreign, "// another clio\n", "utf8");
 			symlinkSync(foreign, launcherPath(temp));
 
-			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force", "--remove-binary"]));
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force"]));
 			strictEqual(code, 0);
 
-			// --remove-binary unlinks only a symlink into *this* installation. The
-			// previous code reported "Removed Binary launcher" from the flag alone,
+			// Uninstall unlinks only a symlink into *this* installation. The
+			// previous code reported "Removed Binary launcher" from the request alone,
 			// over a launcher the classifier had already decided to keep.
 			ok(!/Removed launcher/u.test(stdout), `a foreign launcher is not removed:\n${stdout}`);
 			match(stdout, /– Launcher: .*not this installation/u);
@@ -160,11 +160,32 @@ describe("contracts/uninstall-lifecycle", () => {
 		}
 	});
 
+	it("removes this installation's launcher unless --keep-binary keeps it", async () => {
+		const kept = home();
+		const removed = home();
+		try {
+			const entry = join(resolvePackageRoot(), "dist", "cli", "index.js");
+			for (const temp of [kept, removed]) symlinkSync(entry, launcherPath(temp));
+			const keeping = await runInHome(kept, () => runUninstallCommand(["--force", "--keep-binary"]));
+			strictEqual(keeping.code, 0);
+			match(keeping.stdout, /– Launcher: .*kept by --keep-binary/u);
+			strictEqual(lstatSync(launcherPath(kept)).isSymbolicLink(), true);
+
+			const removing = await runInHome(removed, () => runUninstallCommand(["--force"]));
+			strictEqual(removing.code, 0);
+			match(removing.stdout, /Removed launcher/u);
+			strictEqual(existsSync(launcherPath(removed)), false);
+		} finally {
+			kept.cleanup();
+			removed.cleanup();
+		}
+	});
+
 	it("keeps a launcher that is a real file rather than a symlink", async () => {
 		const temp = home();
 		try {
 			writeFileSync(launcherPath(temp), "#!/bin/sh\n", "utf8");
-			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force", "--remove-binary"]));
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force"]));
 			strictEqual(code, 0);
 			match(stdout, /– Launcher: .*not a symlink/u);
 			ok(existsSync(launcherPath(temp)));

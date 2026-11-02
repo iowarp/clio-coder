@@ -108,7 +108,7 @@ for them.
 | Path (Linux default) | Contents |
 | --- | --- |
 | `~/.local/share/clio-coder-install/runtime/node-v<ver>-<build>/` | The managed Node.js. macOS uses `~/Library/Application Support/clio-coder/install`, Windows `%LOCALAPPDATA%\clio-coder\install`; `--install-dir`, `CLIO_CODER_INSTALL_DIR` or `CLIO_CODER_HOME/install` override it. |
-| `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version. The manifest names the current and previous ones, which always stay. Each activation also removes other versions older than seven days that no local process is using, on a local Linux filesystem only; everywhere else they stay until `uninstall --remove-binary`, because a running session may still load code from the version it started with. Runtimes stay until that uninstall too. |
+| `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version. The manifest names the current and previous ones, which always stay. Each activation also removes other versions older than seven days that no local process is using, on a local Linux filesystem only; everywhere else they stay until `uninstall`, because a running session may still load code from the version it started with. Runtimes stay until that uninstall too. |
 | `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher, the channel, any version pin, whether background updates are on, whether a package manager wraps the install, and whether the installer added the launcher directory to `PATH`. Activating a version is one atomic write of this file. It is a different file from the state root's `install.json`, which records the Clio Coder version and install times. |
 | `.../launchers/`, `.../.active/` | The launcher's helper script, and one receipt per running session, which `uninstall` checks before it removes anything. |
 | `.../.installer-owner`, `.../.install-lock/` | The ownership marker that stops an installer from claiming a directory that already holds `runtime/` or `versions/`, and the lock held while an install, rollback or uninstall runs. Each installer reclaims a lock on its own when this machine wrote it, the owner pid is gone and the lock is older than 10 minutes. A lock held by a live process, a foreign host or a recent crash stops the run with exit status 75, and deleting only that directory once its owner has exited clears it. |
@@ -320,7 +320,7 @@ and an explicit `--gui` (or `CLIO_CODER_INSTALL_GUI=1`) warns
 | Undo the last installer upgrade | `clio-coder upgrade --rollback` | Make the previous version current again and turn background updates off. A version pin moves to the restored version. |
 | Start configuration over | `clio-coder reset --settings` | Delete `settings.yaml`, keep credentials and history, then print `clio-coder configure` as the next step. |
 | Emulate a fresh user | `clio-coder reset --all` | Delete all four user roots and recreate the empty structure, then print `clio-coder configure` as the next step. |
-| Remove user state | `clio-coder uninstall` | Remove the config, data, state and cache roots. `--remove-binary` also removes the launcher, and for an installer install the managed Node and every version. |
+| Remove Clio Coder | `clio-coder uninstall` | Remove the config, data, state and cache roots. It also removes the launcher, and for an installer install the managed Node and every version. |
 
 Reset and uninstall preview their scope and ask for confirmation. Use
 `--dry-run` to inspect without changing anything. Use `reset --settings` when your intent
@@ -898,17 +898,17 @@ roots and files that survive are listed too (`Survives: ...`). After a `--settin
 
 ### D. Uninstallation (`clio-coder uninstall`)
 `clio-coder uninstall` is the single uninstall path for every install method. It
-removes all four roots (config, data, state, cache):
+removes all four roots (config, data, state, cache) and the launcher:
 
 ```bash
-clio-coder uninstall [--remove-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
+clio-coder uninstall [--keep-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
 ```
 
 Preview first, then remove:
 
 ```bash
 clio-coder uninstall --dry-run
-clio-coder uninstall --remove-binary --force
+clio-coder uninstall --force
 hash -r
 ```
 
@@ -927,7 +927,7 @@ removed using the app's ownership manifests. A build with no graphical applicati
 so uninstall leaves them and the state root's `gui` directory in place and prints
 `clio-coder gui background uninstall && clio-coder gui launcher uninstall` to run from a build that has it.
 
-For an installer install, `--remove-binary` also removes the managed Node and
+For an installer install, uninstall also removes the managed Node and
 every installed version: only what the installer created inside the install root
 (`runtime/`, `versions/`, `launchers/`, `.active/`, `install.json` and its ownership
 marker), then the root itself if nothing else is left in it. It takes the
@@ -963,16 +963,15 @@ clio-coder context reset --all
 
 That command works on the current directory, so run it from inside each listed
 project. The listing is printed before the roots are removed, because the record
-it reads lives in one of them, and before `--remove-binary` unlinks the launcher,
-because `clio-coder context reset` needs the binary that is about to go. With
-`--remove-binary` the listing says so and tells you to clear the projects first,
-then re-run the uninstall. Neither the preview nor the real run deletes project
+it reads lives in one of them, and before the launcher is unlinked, because
+`clio-coder context reset` needs the binary that is about to go. Clear the projects
+first, or pass `--keep-binary`. Neither the preview nor the real run deletes project
 data. To wipe state selectively
 while keeping settings or credentials, use `clio-coder reset --state` instead of
 uninstalling. If the launcher is already gone but state remains, run the built
 CLI directly from the checkout: `node dist/cli/index.js uninstall --force`.
 
-#### What `--remove-binary` will and will not remove
+#### What uninstall will and will not remove
 
 Ownership is identity, not shape. The launcher is removed only when it resolves
 to *this* installation's own entry, `dist/cli/index.js` or the `bin/clio-coder.cjs`
@@ -1054,7 +1053,7 @@ If you are removing Clio Coder completely from your system, verify that all cate
     *   `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder`
 3.  **Global Bin Links**:
     *   `clio-coder` executable in your global npm path (for source checkouts, avoid this path unless intentionally debugging npm link behavior).
-4.  **Installer Root** (installer installs only; `clio-coder uninstall --remove-binary` removes it):
+4.  **Installer Root** (installer installs only; `clio-coder uninstall` removes it):
     *   `~/.local/share/clio-coder-install` on Linux, `~/Library/Application Support/clio-coder/install` on macOS, `%LOCALAPPDATA%\clio-coder\install` on Windows, or the `--install-dir` you chose.
     *   A `PATH` line the installer appended to a shell startup file under `--modify-path` (`~/.zshrc` or `$ZDOTDIR/.zshrc`, `~/.bashrc`, `~/.profile`, or fish's `config.fish`); uninstall reports such files and never edits them.
 5.  **Desktop App** (only if you installed it):

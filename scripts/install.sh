@@ -112,7 +112,7 @@ Environment for restricted networks:
   npm_config_registry                npm registry mirror for the package
 
 Remove everything later with:
-  clio-coder uninstall --remove-binary
+  clio-coder uninstall
 USAGE
 }
 

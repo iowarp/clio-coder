@@ -294,10 +294,10 @@ export function installationCommand(
 		if (process.platform === "win32")
 			return action === "upgrade"
 				? `powershell -NoProfile -ExecutionPolicy Bypass -File "${join(installation.root, "scripts", "install.ps1")}" -Channel ${channel} -InstallDir "${record.root}" -BinDir "${dirname(record.launcher)}"`
-				: "clio-coder uninstall --remove-binary";
+				: "clio-coder uninstall";
 		return action === "upgrade"
 			? `sh ${shellQuote(join(installation.root, "scripts", "install.sh"))} --channel ${channel} --install-dir ${shellQuote(record.root)} --bin-dir ${shellQuote(dirname(record.launcher))}`
-			: "clio-coder uninstall --remove-binary";
+			: "clio-coder uninstall";
 	}
 	if (installation.kind === "homebrew") return `brew ${action} clio-coder`;
 	if (installation.kind === "winget") return `winget ${action} --id IOWarp.ClioCoder --exact`;

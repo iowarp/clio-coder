@@ -113,7 +113,7 @@ releases the pin. `--rollback` moves a pin to the version it restores. The
 
 `clio-coder upgrade` installs the next version beside the current one and keeps
 the managed Node unless you pass `--refresh-runtime`.
-`clio-coder uninstall --remove-binary` removes the launcher, the runtime and
+`clio-coder uninstall` removes the launcher, the runtime and
 every installed version.
 
 ## Using a Node you already have
