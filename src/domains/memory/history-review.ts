@@ -380,7 +380,7 @@ export function createHistoryReviewSource(input: {
 						}
 						break;
 					}
-					if (read.restricted) {
+					if (read.restricted && !read.useful) {
 						state.sessions[ledger.key] = {
 							offset: read.endOffset,
 							size: ledger.size,
@@ -402,7 +402,12 @@ export function createHistoryReviewSource(input: {
 								commandRuns: read.commandRuns,
 								advance: {
 									key: ledger.key,
-									cursor: { offset: read.endOffset, size: ledger.size, identity: ledger.identity },
+									cursor: {
+										offset: read.endOffset,
+										size: ledger.size,
+										...(read.restricted ? { restricted: true as const } : {}),
+										identity: ledger.identity,
+									},
 									seenCalls: read.callIds,
 								},
 							},
@@ -566,11 +571,12 @@ function readSlice(
 		const entry = parseLine(line.text);
 		// What was recorded with memory off is not read either, past the first marker or after memory came back on.
 		if ((entry?.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE) || isMemoryOffEntry(entry)) {
+			// What precedes the stop was recorded under the old rule and stays reviewable; nothing after it is read.
 			return {
 				endOffset: line.end,
 				bytesRead,
-				text: "",
-				useful: false,
+				text: rendered.join("\n"),
+				useful: commandWorth || sourceReads >= SOURCE_READS_WORTH_REVIEW,
 				restricted: true,
 				callIds,
 				succeededCommands,

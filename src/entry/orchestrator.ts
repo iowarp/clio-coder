@@ -125,8 +125,8 @@ import {
 	createTaskMemoryTrace,
 	entriesBeforeMemoryOff,
 	loadMemoryRecordsSync,
-	MEMORY_OFF_ENTRY_TYPE,
 	MemoryRuntime,
+	markMemoryOffRecording,
 	memoryStatus,
 	OBSERVATION_PROMPT,
 	readTaskMemorySpendSummary,
@@ -2849,23 +2849,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	} | null = null;
 	const memoryEnabledNow = (): boolean =>
 		(effectiveSettingsForDispatch?.() ?? getCurrentSettings()).context.memory.enabled;
-	const memoryOffMarked = new Set<string>();
-	const markMemoryOffRecording = (target: SessionContract): void => {
-		if (memoryEnabledNow()) return;
-		const meta = target.current();
-		if (!meta || memoryOffMarked.has(meta.id)) return;
-		target.appendEntry({
-			kind: "custom",
-			customType: MEMORY_OFF_ENTRY_TYPE,
-			// A fact about what memory may read, never a model message.
-			display: false,
-			parentTurnId: target.tree(meta.id).leafId ?? null,
-			data: {},
-		});
-		memoryOffMarked.add(meta.id);
+	const beforeTurnRecorded = (target: SessionContract): void => {
+		if (!memoryEnabledNow()) markMemoryOffRecording(target);
 	};
 	const beforeShellEntryRecorded = (): void => {
-		if (session) markMemoryOffRecording(session);
+		if (session) beforeTurnRecorded(session);
 	};
 	const memoryActiveEntries = () => {
 		const meta = session?.current();
@@ -4856,7 +4844,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		memoryEnabled: memoryEnabledNow,
-		beforeTurnRecorded: markMemoryOffRecording,
+		beforeTurnRecorded,
 		getMemorySection: (request) => {
 			lastMemoryPromptRuntimeId = request.runtimeId;
 			return memoryReader(request);

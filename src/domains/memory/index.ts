@@ -107,7 +107,7 @@ export {
 	recallMemory,
 	renderMemoryRecall,
 } from "./recall.js";
-export { entriesBeforeMemoryOff, MEMORY_OFF_ENTRY_TYPE } from "./recording-marker.js";
+export { entriesBeforeMemoryOff, MEMORY_OFF_ENTRY_TYPE, markMemoryOffRecording } from "./recording-marker.js";
 export {
 	MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
 	type PrecomputedMemoryCandidate,
