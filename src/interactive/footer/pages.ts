@@ -324,7 +324,7 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 		bar,
 		headroom,
 		sectionRule(theme, width, facts.budget ? "Capture diagnostics" : "Composition", {
-			meta: "/context-view for detail",
+			meta: "/context for detail",
 		}),
 		...composition,
 	];
@@ -784,7 +784,7 @@ export function dashboardPageViewport(
 			: truncateToWidth(tabText, innerWidth, GLYPH.ellipsis, true);
 	const next = page === "Status" ? "close" : DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1];
 	const cycle = `${cycleKey || "Dashboard"} ${GLYPH.next} ${next}`;
-	const where = page === "Status" ? "/usage · /health · /context-view" : "composer stays active";
+	const where = page === "Status" ? "/usage · /health · /context" : "composer stays active";
 	const available = budget - 4;
 	let content: string[];
 	if (page === "Activity") content = activityPage(state, innerWidth);
