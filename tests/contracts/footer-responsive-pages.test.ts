@@ -100,16 +100,17 @@ function allContent(page: "Context" | "Status", width: number): string[] {
 test("Context and Status retain stacked and split sections through compact scrolling viewports", () => {
 	for (const width of [60, 80, 83, 84, 87, 88, 120, 200]) {
 		const status = allContent("Status", width);
-		match(status.join("\n"), /Tools \(visit\)/);
-		const cost = status.findIndex((line) => line.includes("COST & CONNECTIONS"));
-		const machine = status.findIndex((line) => line.includes("LOCAL MACHINE"));
+		match(status.join("\n"), /Tool calls/);
+		const cost = status.findIndex((line) => line.includes("Connections ─"));
+		const machine = status.findIndex((line) => line.includes("Machine ─"));
 		ok(cost >= 0 && machine >= 0);
-		ok(width < 88 ? cost < machine : cost === machine);
+		ok(machine < cost);
+		const cpu = status.find((line) => line.includes("CPU")) ?? "";
+		ok(width < 88 ? !cpu.includes("RAM") : cpu.includes("RAM"), "machine meters split only when wide");
 		const context = allContent("Context", width);
-		const heading = context.findIndex((line) => line.includes("CONTEXT COMPOSITION"));
+		const heading = context.findIndex((line) => line.includes("Composition"));
 		ok(heading >= 0);
-		if (width < 88) match(context[heading + 1] ?? "", /^[▰▱▒ ]+$/u);
-		else match(context[heading + 1] ?? "", /[A-Za-z]/);
+		match(context[heading + 1] ?? "", /[A-Za-z]/);
 	}
 });
 

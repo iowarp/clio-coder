@@ -134,17 +134,17 @@ test("worker quota joins only known local credential owners and does not claim a
 		ttft: null,
 	};
 	const text = plain(renderWorkerUsage([row], [], quotaRows([account]), 100));
-	match(text, /1,234 recorded tokens/);
+	match(text, /↑ 1,000 {2}↓ 234/);
 	match(text, /not measured/);
 	match(text, /Shared antigravity/);
 	doesNotMatch(text, /\$0.00|quota saved/);
 	match(
 		plain(renderWorkerUsage([{ ...row, usage: { kind: "unavailable" } }], [], quotaRows([account]), 80)),
-		/Token usage not available/,
+		/n\/a {2}n\/a/,
 	);
 	match(
 		plain(renderWorkerUsage([{ ...row, usage: { kind: "pending" } }], [], quotaRows([account]), 80)),
-		/awaiting the run's first journaled call/,
+		/researcher {2}1\.0s {2}— {2}— {2}—/,
 	);
 });
 

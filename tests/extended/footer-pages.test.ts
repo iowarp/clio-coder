@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { createWorkerProgressFold } from "../../src/domains/telemetry/worker-progress.js";
 import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { contextCategorySwatch, renderContextMeterGrid } from "../../src/interactive/context-meter.js";
+import { contextCategorySwatch, renderContextMeterBar } from "../../src/interactive/context-meter.js";
 import type { FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
@@ -15,6 +15,7 @@ import {
 	renderDashboardPage,
 } from "../../src/interactive/footer/pages.js";
 import { footerTelemetry } from "../../src/interactive/footer/spend.js";
+import { formatFooterTokens } from "../../src/interactive/footer-panel.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import {
 	renderToolExecution,
@@ -122,17 +123,17 @@ test("dashboard pages devote space to agents, context composition and complete s
 		}
 	}
 	const activity = plain(renderDashboardPage(state(), "Activity", 172, 120, "Alt+U"));
-	match(activity, /Scout/);
+	match(activity, /scout/);
 	match(activity, /internal agent/);
 	match(activity, /Explore the dispatch/);
 	doesNotMatch(activity, /context 17k/);
 	match(activity, /blade\/mini\/qwopus/);
 	const context = plain(renderDashboardPage(state(), "Context", 172, 120, "Alt+U"));
-	match(context, /CONTEXT COMPOSITION/);
-	match(context, /tokens · 26\.1% occupied/);
-	const status = plain(renderDashboardPage(state(), "Status", 172, 120, "Alt+U"));
-	match(status, /COST & CONNECTIONS/);
-	match(status, /LOCAL MACHINE/);
+	match(context, /Composition/);
+	match(context, /\/ 262\.1k · 26\.1%/);
+	const status = plain(scrolled(state(), "Status", 172, 120));
+	match(status, /Connections ─/);
+	match(status, /Machine ─/);
 });
 
 test("resolved dashboard shortcut cycles Activity, Context, Status and closed without capturing text", () => {
@@ -222,7 +223,7 @@ test("Activity gives two live agents full-width tasks and distinct work measurem
 	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u"));
 	match(text, /Read the interview implementation/);
 	match(text, /Inspect the dashboard telemetry\./);
-	match(text, /Tokens.*68,000 input.*2,000 output/);
+	match(text, /↑ 68,000.*↓ 2,000/);
 	doesNotMatch(text, /Work.*context 17k \/ 262\.1k/);
 });
 
@@ -291,13 +292,13 @@ test("Status renders live resource telemetry instead of a configuration dump", (
 		const pages = [footer.view.render(172)];
 		for (let step = 0; step < 20 && footer.scroll(8); step += 1) pages.push(footer.view.render(172));
 		const text = plain(pages.flat());
-		match(text, /COST & CONNECTIONS/);
-		match(text, /LOCAL MACHINE/);
+		match(text, /Connections ─/);
+		match(text, /Machine ─/);
 		match(text, /Clio RSS/);
 		match(text, /RAM/);
 		match(text, /GPU/);
 		match(text, /Subscriptions.*no journaled quota/);
-		match(text, /Clio ceiling/);
+		match(text, /ceiling \$5\.00 tracked pricing only/);
 		doesNotMatch(text, /Worker approvals|PERMISSIONS & LIMITS/);
 	} finally {
 		footer.dispose();
@@ -315,9 +316,11 @@ test("Context dashboard shares the overlay category swatches and filled/free/res
 	for (const group of ledger.meter.filter((group) => group.tokens > 0).slice(0, 2)) {
 		ok(ansi.includes(contextCategorySwatch(group.category, theme)));
 	}
-	// The page re-wraps each grid row, so compare the glyphs rather than the escape sequences.
-	for (const row of renderContextMeterGrid(ledger, 63, 3, theme)) ok(plain(rows).includes(stripTerminalSequences(row)));
-	match(plain(rows), /Filled = context.*empty = available.*shaded = reserve/);
+	// The page draws the overlay's meter as one bar, so compare the glyphs rather than the escape sequences.
+	const figure = `${formatFooterTokens(ledger.usedTokens)} / ${formatFooterTokens(ledger.contextWindow)} · 26.1%`;
+	const bar = renderContextMeterBar(ledger, 168 - figure.length - 2, theme);
+	ok(plain(rows).includes(stripTerminalSequences(bar)));
+	match(plain(rows), /free .*reserve .*compaction/);
 });
 
 test("finished agents collapse into bounded history while retries retain live cards", () => {
@@ -335,14 +338,14 @@ test("finished agents collapse into bounded history while retries retain live ca
 	];
 	const text = plain(scrolled(snapshot, "Activity", 160, 120));
 	match(text, /Active retry task/);
-	match(text, /INVOCATION HISTORY · 8 finished/);
-	match(text, /Scout · completed.*internal.*not available.*↑ 68,000 ↓ 2,000/);
+	match(text, /Workers ─.*1 active · 8 done/);
+	match(text, /✓ done.*scout.*↑ 68,000.*↓ 2,000.*\/view dispatch:done-0/);
 	match(text, /4 more finished runs/);
 	doesNotMatch(text, /Historical verbose task/);
 	snapshot.dispatchRows = [{ ...row, status: "failed", outcomeDetail: "result_contract_exhausted" }];
 	const settled = plain(scrolled(snapshot, "Activity", 86, 75));
-	match(settled, /No agents running/);
-	match(settled, /Scout · failed/);
+	match(settled, /Workers ─.*1 failed/);
+	match(settled, /failed.*scout/);
 	match(settled, /result_contract_exhausted.*\/view dispatch:scout-run/);
 	doesNotMatch(settled, /AGENT ACTIVITY|Task |Recent |Worker output|Budget /);
 });
@@ -461,8 +464,8 @@ test("worker cards and Status distinguish shared account limits from recorded se
 	}));
 	match(plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u")), /Account.*Shared claude-code.*91% used/);
 	const status = plain(renderDashboardPage(snapshot, "Status", 160, 120, "alt+u"));
-	match(status, /SESSION · 0 tokens · nothing charged yet/);
-	match(status, /claude-code.*Weekly 91%/);
+	match(status, /session 0 tokens · nothing charged yet/);
+	match(status, /claude-code · Weekly.* 91%/);
 	match(plain(renderDashboardPage(snapshot, "Context", 160, 120, "alt+u")), /subscription limits are account-wide/);
 });
 

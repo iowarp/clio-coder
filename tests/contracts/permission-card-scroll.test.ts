@@ -43,7 +43,7 @@ test("open terms that overflow the frame scroll inside it and every row is reach
 	strictEqual(screen.length, ROW_BUDGET, "the card fills its rows and no more");
 	ok(body.isCardScrollable(), "the open terms do not fit, so the card scrolls");
 	doesNotMatch(screen.join("\n"), /more rows/u, "the frame never has to cut the card");
-	match(screen[1] ?? "", /Tool: bash · Action: execute/u, "the call's identity stays at the top");
+	match(screen[1] ?? "", /\$ bash · execute action/u, "the call's identity stays at the top");
 	match(screen.join("\n"), /↑↓ scroll · alt\+t back/u, "the card names its scroll keys");
 	for (const row of inner(screen)) seen.add(row);
 
@@ -51,7 +51,7 @@ test("open terms that overflow the frame scroll inside it and every row is reach
 		ok(body.scrollCard(1), "a scrollable card consumes the arrow even at its end");
 		screen = plain(frame.render(COLUMNS));
 		strictEqual(screen.length, ROW_BUDGET);
-		match(screen[1] ?? "", /Tool: bash · Action: execute/u);
+		match(screen[1] ?? "", /\$ bash · execute action/u);
 		for (const row of inner(screen)) seen.add(row);
 	}
 	const whole = createPermissionOverlayBody(NET_VIEW);

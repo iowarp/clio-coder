@@ -294,7 +294,8 @@ test("later rounds fold earlier answers to one row until asked, and count rounds
 	const second = view.ask([{ header: "Researcher Context", question: "Career stage?", options: [{ label: "PI" }] }]);
 	const folded = plain(view.render(76));
 	ok(folded[0]?.includes("Round 2") && folded.some((line) => line.includes("Researcher Context")), folded.join("\n"));
-	ok(folded.some((row) => row.includes("1 earlier answer · a to review")));
+	ok(folded.some((row) => row.includes("1 earlier answer")));
+	ok(view.footerHint().includes("[a] answers"), "the rail names the key that opens the ledger");
 	ok(!folded.some((row) => row.includes("help me explore")), "the ledger is folded");
 	const question = folded.findIndex((row) => row.includes("Career stage?"));
 	const option = folded.findIndex((row) => row.includes("PI"));

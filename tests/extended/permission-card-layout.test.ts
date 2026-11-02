@@ -77,9 +77,12 @@ for (const columns of [80, 120, 160]) {
 		const body = createPermissionOverlayBody(WRITE_VIEW);
 		const lines = plain(body.render(width));
 		for (const line of lines) ok(visibleWidth(line) <= width, `${visibleWidth(line)} > ${width}: ${line}`);
-		strictEqual(lines[0], "Tool: write · Action: write");
+		strictEqual(lines[0], "± write · autonomy level default");
 		// The path is folded under its label, never cut: every token survives.
-		const joined = lines.join(" ").replace(/\s+/g, " ");
+		const joined = lines
+			.join(" ")
+			.replace(/\s*▌\s*/gu, " ")
+			.replace(/\s+/g, " ");
 		for (const token of [
 			"task-03-protocol-arc-melting-and-aging.md",
 			"content=<string 4173 bytes>",
@@ -91,8 +94,8 @@ for (const columns of [80, 120, 160]) {
 		ok(lines.length <= 10, `${lines.length} rows: the folded card stays short`);
 		ok(!joined.includes("Hard-blocked actions remain blocked"), "standing terms are folded");
 		ok(!joined.includes("Consequence:"), "standing terms are folded");
-		match(joined, /Allow runs this one write call\. Deny skips it\. Stop ends the turn\./u);
-		match(joined, /Requested by: main agent through autonomy level \(default\)/u);
+		match(joined, /\[Enter\] allow\s+runs this one write call \[Esc\] deny\s+skips it \[alt\+x\] stop\s+ends the turn/u);
+		match(lines[0] ?? "", /autonomy level default/u);
 
 		body.toggleTerms();
 		const opened = plain(body.render(width)).join(" ");
@@ -110,7 +113,8 @@ test("worker terms disclose approval and denial reuse within the same run", () =
 		origin: { kind: "worker", agentId: "coder", runId: "run-1" },
 	});
 	const folded = plain(body.render(76)).join(" ").replace(/\s+/g, " ");
-	match(folded, /Allow or Deny holds for identical calls in this worker run/u);
+	match(folded, /allow\s+runs it and holds for identical calls in this worker run/u);
+	match(folded, /deny\s+skips it and holds for identical calls in this worker run/u);
 	doesNotMatch(folded, /this one .*call/u);
 	body.toggleTerms();
 	const terms = plain(body.render(76)).join(" ").replace(/\s+/g, " ");
@@ -172,7 +176,7 @@ test("local invocation inspection scrolls complete redacted arguments without ad
 	}));
 	ok(body.canInspect());
 	body.toggleInspect();
-	match(plain(body.render(60)).join("\n"), /Exact invocation.*bash/);
+	match(plain(body.render(60)).join("\n"), /bash[^\n]*\nExact invocation/);
 	body.scrollInspect(1000);
 	const tail = plain(body.render(60)).join("\n");
 	match(tail, /final-command/);
@@ -190,7 +194,7 @@ test("a target the safety layer cut at its cap ends in an ellipsis on the card a
 	const view: ApprovalRequestView = { ...WRITE_VIEW, tool: "bash", actionClass: "execute", target: cut };
 	delete view.mutation;
 	const card = plain(createPermissionOverlayBody(view).render(76)).join(" ").replace(/\s+/g, " ");
-	match(card, /Target: cd \/tmp\/work\/demo-repo && npm test -- .*… Requested by/u, card);
+	match(card, /▌ cd \/tmp\/work\/demo-repo && npm test -- .*… \[Enter\]/u, card);
 	const row = plain(
 		renderToolAwaitingApproval({ toolCallId: "b", toolName: "bash", args: { command } }, 100, view),
 	).join(" ");
@@ -198,7 +202,7 @@ test("a target the safety layer cut at its cap ends in an ellipsis on the card a
 	// A target under the cap is whole, so it carries no mark.
 	const whole = describeCallTarget("bash", { command: "npm test" });
 	const short = plain(createPermissionOverlayBody({ ...view, target: whole }).render(76)).join(" ");
-	match(short, /Target: npm test/u);
+	match(short, /▌ npm test/u);
 	doesNotMatch(short, /npm test…/u);
 	const exact = "x".repeat(CALL_TARGET_MAX_CHARS);
 	strictEqual(describeCallTarget("bash", { command: exact }), exact, "an exactly sized target remains whole");

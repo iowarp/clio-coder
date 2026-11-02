@@ -169,9 +169,9 @@ test("footer keeps unassociated accounts out of compact rows and supplies all ac
 		const pages = [footer.view.render(160)];
 		for (let page = 0; page < 20 && footer.scroll(8); page++) pages.push(footer.view.render(160));
 		const status = plain(pages.flat());
-		match(status, /Claude Code.*Weekly 9%/);
-		match(status, /Codex.*Weekly 76%/);
-		match(status, /Antigravity.*Weekly 73%/);
+		match(status, /Claude Code · Weekly.* 9%/);
+		match(status, /Codex · Weekly.* 76%/);
+		match(status, /Antigravity · Weekly.* 73%/);
 		doesNotMatch(status, /not reported by provider|\/cost/);
 	} finally {
 		footer.dispose();
@@ -288,7 +288,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		frame?.handleInput?.("2");
 		const text = scrolled();
 		match(text, /Claude Code · Max/);
-		match(text, /Weekly 9% used/);
+		match(text, /Weekly .* 9% used/);
 		match(text, /76% used/);
 		doesNotMatch(text, /remaining/);
 
