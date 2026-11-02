@@ -1051,7 +1051,7 @@ function runActivityCell(theme: ClioTheme, row: DispatchBoardRow, now: number): 
 						text: `attempt ${row.retry.attempt} · ${retryCountdown(row.retry, now)}${row.retry.reason ? ` · ${sanitizeCallTargetText(row.retry.reason)}` : ""}`,
 						tone: "warning",
 					}
-				: { text: "retrying", tone: "warning" };
+				: { text: task ?? "retrying", tone: "warning" };
 		case "enqueued":
 			return { text: task ?? "waiting for a slot", tone: "muted" };
 		case "failed":
@@ -1267,18 +1267,16 @@ function formatDispatchBoardBody(
 				};
 	lines.push(sectionRule(theme, width, detail.title, { meta: detail.meta }));
 	const room = budget - lines.length;
-	if (room <= 0) return lines;
-	if (detail.body.length <= room) {
+	// Enter asked for everything the run has to say; the frame cuts what the
+	// dock cannot hold. The folded view keeps its budget and names the key.
+	if (detailExpanded || detail.body.length <= room) {
 		lines.push(...detail.body);
 		return lines;
 	}
+	if (room <= 0) return lines;
 	const kept = detail.body.slice(0, Math.max(0, room - 1));
 	const hidden = detail.body.length - kept.length;
-	const where = [
-		`${hidden} more rows`,
-		...(detailExpanded ? [] : ["Enter for detail"]),
-		`/view dispatch:${detail.runId}`,
-	];
+	const where = [`${hidden} more rows`, "Enter for detail", `/view dispatch:${detail.runId}`];
 	lines.push(
 		...kept,
 		theme.fg("annotation", truncateToWidth(`${GLYPH.ellipsis} ${where.join(" · ")}`, width, GLYPH.ellipsis, false)),

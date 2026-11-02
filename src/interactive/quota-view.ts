@@ -22,6 +22,7 @@ import {
 	emptyState,
 	GLYPH,
 	meter,
+	NARROW_WIDTH,
 	padAnsi,
 	sectionRule,
 	statusChip,
@@ -169,9 +170,13 @@ export function quotaAccountRows(
 	}
 	const indent = compact ? 0 : 2;
 	const room = Math.max(8, safe - indent);
+	// Below the narrow width the full form stacks a window's label above its
+	// meter, so a long scope name keeps every word; the compact form clips.
+	const stacked = !compact && room < NARROW_WIDTH;
+	const widest = Math.max(0, ...entries.map((entry) => (entry.kind === "meter" ? visibleWidth(entry.label) : 0)));
 	const labelWidth = Math.min(
-		Math.max(0, ...entries.map((entry) => (entry.kind === "meter" ? visibleWidth(entry.label) : 0))),
-		Math.max(6, Math.floor(room * QUOTA_LABEL_SHARE)),
+		widest,
+		compact ? Math.max(6, Math.floor(room * QUOTA_LABEL_SHARE)) : Math.max(6, room - 14),
 	);
 	const pad = " ".repeat(indent);
 	const out: string[] = [];
@@ -191,18 +196,26 @@ export function quotaAccountRows(
 			continue;
 		}
 		const countdown = quotaResetDuration(entry.reset, now);
-		const amount = compact && countdown !== null && room >= 48 ? `${entry.display} · ${countdown}` : entry.display;
-		const label = padAnsi(theme.fg("fieldName", entry.label), labelWidth, GLYPH.ellipsis);
+		const amount = compact
+			? countdown !== null && room >= 48
+				? `${entry.display} · ${countdown}`
+				: entry.display
+			: `${entry.display} used`;
 		// The bar stops at 48 cells however wide the row: past that a meter gains
 		// room, not resolution, and the percentages drift away from their labels.
-		const barWidth = Math.min(Math.max(4, room - labelWidth - 1), QUOTA_METER_CELLS + 1 + visibleWidth(amount));
-		out.push(
-			`${pad}${label} ${meter(theme, { value: entry.pct, max: 100, width: barWidth, tone: quotaTone(entry.severity), amount })}`,
-		);
-		if (!compact)
+		const cap = QUOTA_METER_CELLS + 1 + visibleWidth(amount);
+		const tone = quotaTone(entry.severity);
+		if (stacked) {
 			out.push(
-				`${pad}${" ".repeat(labelWidth + 1)}${theme.fg("annotation", quotaResetLabel(entry.reset, now, options.timeZone))}`,
+				`${pad}${theme.fg("fieldName", entry.label)}`,
+				`${pad}  ${meter(theme, { value: entry.pct, max: 100, width: Math.min(Math.max(4, room - 2), cap), tone, amount })}`,
 			);
+		} else {
+			const label = padAnsi(theme.fg("fieldName", entry.label), labelWidth, GLYPH.ellipsis);
+			const barWidth = Math.min(Math.max(4, room - labelWidth - 1), cap);
+			out.push(`${pad}${label} ${meter(theme, { value: entry.pct, max: 100, width: barWidth, tone, amount })}`);
+		}
+		if (!compact) out.push(`${pad}  ${theme.fg("annotation", quotaResetLabel(entry.reset, now, options.timeZone))}`);
 	}
 	return out.flatMap((line) => wrapTextWithAnsi(line, safe));
 }

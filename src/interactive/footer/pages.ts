@@ -51,7 +51,6 @@ import {
 	liveTokenValue,
 	meaningfulToolTally,
 	taskBoardValue,
-	totalsValue,
 	zipColumns,
 } from "./widgets.js";
 
@@ -103,15 +102,23 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		],
 		width,
 	);
-	const totals = totalsValue(state.telemetry);
-	const cost = state.telemetry.kind === "ready" ? state.telemetry.cost : null;
 	const tools = meaningfulToolTally(state.agent.toolTally);
 	const board = state.agent.taskBoard;
+	// The Σ names the whole session; a label before it cost the cost its place at 40 columns.
+	const spend = state.telemetry;
 	const session = chipRow(
 		theme,
 		[
-			totals === null ? null : labelled("session", theme.fg("counter", totals)),
-			cost === null ? null : theme.fg("counter", cost),
+			...(spend.kind === "unavailable"
+				? [theme.fg("unknownValue", "spend not available")]
+				: spend.kind === "reading"
+					? [theme.fg("unknownValue", "reading the call journal")]
+					: [
+							spend.tokens === null && spend.neverSent === null
+								? null
+								: theme.fg("counter", `Σ${spend.tokens ?? "0"}${spend.neverSent ? ` · ${spend.neverSent}` : ""}`),
+							spend.cost === null ? null : theme.fg("counter", spend.cost),
+						]),
 			board && board.tasks.length > 0 ? labelled("tasks", taskBoardValue(theme, board)) : null,
 			board ? activeTaskLine(theme, board) : null,
 			tools === null ? null : labelled("tools", theme.fg("counter", clean(tools))),
@@ -394,10 +401,6 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	);
 	const accounts = quotaAccountRows(state.quota ?? [], width, { compact: true, now: state.now });
 
-	const sampled = resource
-		? `sampled ${Math.max(0, Math.round((state.now - resource.sampledAt) / 1000))}s ago`
-		: "sampling";
-	const machineMeta = `${resource?.scope ?? "local OS"} · ${sampled}`;
 	const half = Math.floor((width - 3) / 2);
 	const cpu = pageMeter("CPU", resource ? resource.cpuPercent : null, 100, width >= FOOTER_SPLIT_COLUMNS ? half : width);
 	const ramUsed = resource ? resource.hostTotalBytes - resource.hostFreeBytes : null;
@@ -426,59 +429,62 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 				)
 		: `${theme.fg("fieldName", "GPU")} ${value("unavailable on this OS/driver")}`;
 	const rss = `${theme.fg("fieldName", "Clio RSS")} ${resource ? theme.fg("fieldValue", mib(resource.processRssBytes)) : value("sampling")}`;
-	const io = chipRow(
-		theme,
-		[
-			labelled(
-				"net",
-				resource?.network
-					? theme.fg(
-							"fieldValue",
-							`${clean(resource.network.name)} ${GLYPH.down} ${throughput(resource.network.receivedPerSecond)} ${GLYPH.up} ${throughput(resource.network.sentPerSecond)}`,
-						)
-					: value("warming up"),
-			),
-			labelled(
-				"disk",
-				resource?.disk
-					? theme.fg(
-							"fieldValue",
-							`${clean(resource.disk.name)} R ${throughput(resource.disk.readPerSecond)} W ${throughput(resource.disk.writtenPerSecond)}`,
-						)
-					: value("warming up"),
-			),
-			labelled("Sampling", theme.fg("fieldValue", resource ? "2s cadence" : "pending")),
-			labelled("Scope", theme.fg("fieldValue", "busiest interface and disk · local only")),
-		],
-		width,
-	);
 	const machine = [
-		sectionRule(theme, width, "Machine", { meta: machineMeta }),
+		sectionRule(theme, width, "Machine", {
+			meta: resource
+				? `${resource.scope} · sampled ${Math.max(0, Math.round((state.now - resource.sampledAt) / 1000))}s ago`
+				: "local OS · sampling",
+		}),
 		...columns([cpu], [ram], width),
 		...columns([gpu], [rss], width),
-		io,
+		...facts(
+			[
+				[
+					"Network",
+					resource?.network
+						? `${resource.network.name} ${GLYPH.down} ${throughput(resource.network.receivedPerSecond)} ${GLYPH.up} ${throughput(resource.network.sentPerSecond)}`
+						: "warming up / unavailable",
+				],
+				[
+					"Disk I/O",
+					resource?.disk
+						? `${resource.disk.name} R ${throughput(resource.disk.readPerSecond)} W ${throughput(resource.disk.writtenPerSecond)}`
+						: "warming up / unavailable",
+				],
+				["Sampling", resource ? "every 2s" : "pending"],
+				["Scope", `${resource?.scope ?? "local OS"} · busiest interface/disk · local only`],
+			],
+			width,
+		),
 	];
 
 	const workers = [
 		sectionRule(theme, width, "Workers", {
 			meta: capacity ? `cap ${capacity.limit} · ${capacity.bound}` : "cap not sampled",
 		}),
-		chipRow(
+		...factRows(
 			theme,
 			[
-				theme.fg(active > 0 ? "activity" : "counter", `${active} active`),
-				theme.fg("counter", `${completed} done`),
-				theme.fg(failed > 0 ? "error" : "counter", `${failed} failed`),
-				labelled("Worker cap", theme.fg("counter", capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled")),
-				labelled(
-					"tools",
-					theme.fg(
-						"counter",
-						`${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`,
+				{
+					label: "Workers",
+					value: chipRow(
+						theme,
+						[
+							theme.fg(active > 0 ? "activity" : "counter", `${active} active`),
+							theme.fg("counter", `${completed} done`),
+							theme.fg(failed > 0 ? "error" : "counter", `${failed} failed`),
+						],
+						Number.POSITIVE_INFINITY,
 					),
-				),
+				},
+				{ label: "Worker cap", value: value(capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled") },
+				{
+					label: "Tool calls",
+					value: value(`${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`),
+				},
 			],
 			width,
+			{ labelWidth: 14 },
 		),
 	];
 
@@ -520,7 +526,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 			width,
 		),
 	];
-	return [spend, ...accounts, ...machine, ...workers, ...connections];
+	return [spend, ...accounts, ...workers, ...machine, ...connections];
 }
 
 /**
@@ -731,7 +737,7 @@ export function dashboardPageViewport(
 						start: offset + 1,
 						end: Math.min(content.length, offset + available),
 						total: content.length,
-						keys: ["Alt+PgUp/PgDn scroll", cycle],
+						keys: innerWidth >= 64 ? ["Alt+PgUp/PgDn scroll", cycle] : [cycle],
 					},
 					innerWidth,
 				)
