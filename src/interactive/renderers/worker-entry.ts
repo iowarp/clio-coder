@@ -39,28 +39,52 @@ import { workerPhaseActivity } from "../worker-activity.js";
 const theme = clioTheme();
 const meta = (text: string): string => theme.fg("toolMetadata", text);
 
-type WorkerEntryState = StreamWorkerEntryState & { telemetry?: RunTelemetryV1 | null };
+/**
+ * A render reads the worker through a per-call copy carrying its telemetry. `cacheOwner` names the reducer's own
+ * state object, the one identity that outlives a frame, so the caches below survive from delta to delta (#428).
+ */
+type WorkerEntryState = StreamWorkerEntryState & {
+	telemetry?: RunTelemetryV1 | null;
+	cacheOwner?: StreamWorkerEntryState;
+};
 
-const workerTextCache = new WeakMap<WorkerEntryState, Map<string, { source: string; text: string }>>();
-const workerAnswers = new WeakMap<WorkerEntryState, WorkerAnswerProjection>();
+const workerTextCache = new WeakMap<StreamWorkerEntryState, Map<string, { source: string; text: string }>>();
+const workerAnswers = new WeakMap<StreamWorkerEntryState, WorkerAnswerProjection>();
 
 function displayText(entry: WorkerEntryState, key: string, source: string): string {
-	const fields = workerTextCache.get(entry) ?? new Map();
+	const owner = entry.cacheOwner ?? entry;
+	const fields = workerTextCache.get(owner) ?? new Map();
 	const cached = fields.get(key);
 	if (cached?.source === source) return cached.text;
 	const text = sanitizeCallTargetText(redactSecretString(source));
 	fields.set(key, { source, text });
-	workerTextCache.set(entry, fields);
+	workerTextCache.set(owner, fields);
 	return text;
 }
 
 function answerText(entry: WorkerEntryState, source: string): string {
-	let projection = workerAnswers.get(entry);
+	const owner = entry.cacheOwner ?? entry;
+	let projection = workerAnswers.get(owner);
 	if (projection === undefined) {
 		projection = new WorkerAnswerProjection();
-		workerAnswers.set(entry, projection);
+		workerAnswers.set(owner, projection);
 	}
 	return projection.project(source);
+}
+
+/**
+ * Every telemetry value a card can print. Two views with the same string render the same card, so a batch that moved
+ * nothing this card shows keeps its cached rows and the frozen transcript prefix holding them.
+ */
+export function workerTelemetryDisplay(telemetry: RunTelemetryV1 | null): string {
+	if (telemetry === null) return "";
+	const { activity, row } = telemetry;
+	return [
+		activity.elapsed.display,
+		row.tokens.display,
+		activity.toolCalls.display,
+		activity.contextTokens?.display,
+	].join("\0");
 }
 
 /** A plain display string needs only enough complete words to fill the row (#428). */
@@ -641,7 +665,7 @@ export function renderWorkerEntryLines(
 	width: number,
 	options: WorkerEntryRenderOptions,
 ): string[] {
-	entry = { ...entry, telemetry: options.telemetry ?? null };
+	entry = { ...entry, telemetry: options.telemetry ?? null, cacheOwner: entry.cacheOwner ?? entry };
 	const safeWidth = Math.max(1, Math.floor(width));
 	const inspect = options.unbounded === true;
 	const detail = inspect ? transcriptDetail("detailed") : (options.detail ?? transcriptDetail());

@@ -49,7 +49,7 @@ import {
 	toolRowTitle,
 } from "./renderers/tool-execution.js";
 import type { WorkerEntryRenderOptions } from "./renderers/worker-entry.js";
-import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
+import { renderWorkerEntryLines, workerTelemetryDisplay } from "./renderers/worker-entry.js";
 import { compactReasoningTokens, type ReasoningUsageView, UNMEASURED_REASONING } from "./status/index.js";
 import {
 	clioTheme,
@@ -300,7 +300,19 @@ type ToolSegment = {
 	 * states the run's task and outcome, so the call's row does not repeat them.
 	 */
 	cardAttached?: true;
+	/**
+	 * What a finished call rendered to, so a long live turn pays only for its running calls: every settled row
+	 * re-rendered on each update cost about 5 MB per frame at 320 calls. A finished call has no clock in its rows.
+	 * `changeSettledCall` drops all of this, and the fold over this call sees its revision move.
+	 */
+	settledRows?: SettledToolRows | undefined;
+	/** The fold this finished call heads, valid while its calls and their revisions are the same. */
+	settledFold?: (SettledToolRows & { calls: number; revisions: number }) | undefined;
+	/** The Compact fold this finished call joins; undefined until asked. */
+	settledFamily?: ToolFoldFamily | null | undefined;
+	settledRevision?: number;
 };
+type SettledToolRows = { key: string; lines: string[]; body: boolean };
 /**
  * A turn's terminal-error marker (`[error] ...`, `[aborted] ...`,
  * `[stopped: length] ...`) carried as its own segment so it renders in the
@@ -374,7 +386,7 @@ type TranscriptEntry =
 	 * a streaming delta reaches the screen without copying the entry per frame.
 	 * The panel is told when that happened through `applyWorkerState`.
 	 */
-	| { role: "worker"; state: WorkerEntryState; at: number }
+	| { role: "worker"; state: WorkerEntryState; at: number; telemetryShown: string }
 	/**
 	 * A block the caller renders itself. Most are settled the moment they are
 	 * appended, but a few (the operator's `!` bash row) keep mutating the state
@@ -1157,6 +1169,14 @@ function renderToolSegmentLines(
 	});
 }
 
+/** A finished call changes only when a late result upgrades it or a worker card attaches to it. */
+function changeSettledCall(seg: ToolSegment): void {
+	seg.settledRows = undefined;
+	seg.settledFold = undefined;
+	seg.settledFamily = undefined;
+	seg.settledRevision = (seg.settledRevision ?? 0) + 1;
+}
+
 /** A settled tool segment as the renderers read a finished call. */
 function finishedCall(seg: ToolSegment): ToolExecutionFinished {
 	return {
@@ -1182,7 +1202,8 @@ function foldFamily(seg: AssistantSegment | undefined): ToolFoldFamily | null {
 	if (seg?.kind !== "tool" || !seg.finished) return null;
 	// A fold row cannot say which of its calls the operator allowed.
 	if (seg.operatorGrant !== undefined) return null;
-	return toolFoldFamily(finishedCall(seg));
+	if (seg.settledFamily === undefined) seg.settledFamily = toolFoldFamily(finishedCall(seg));
+	return seg.settledFamily;
 }
 
 /**
@@ -1312,6 +1333,7 @@ function renderEntryLines(
 	if (entry.models?.length)
 		blocks.push({ kind: "prose", lines: renderNoticeRow(`[model] ${entry.models.join(" → ")}`, "info", width) });
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
+	const settledKey = `${width}|${terminalRows}|${detail.style}|${unboundedToolBodies}|${skinEpoch()}`;
 	// Reasoning stays between the prose and actions that surround it, one block
 	// per run of it: stretches that nothing visible separates read as one. A run
 	// is held until the block after it is known, because what follows decides
@@ -1387,18 +1409,35 @@ function renderEntryLines(
 			if (family && grouped.length > 1) {
 				reasoning = joinReasoning(reasoning, absorbed);
 				flushReasoning("action");
-				const lines = renderFoldedGroup(
-					family,
-					grouped.map(finishedCall),
-					width,
-					previewBudget(detail.invocationRows, terminalRows),
-				);
-				blocks.push({ kind: "tool", lines, body: hasToolBody(lines) });
+				let revisions = 0;
+				for (const call of grouped) revisions += call.settledRevision ?? 0;
+				let fold = seg.settledFold;
+				if (
+					fold === undefined ||
+					fold.key !== settledKey ||
+					fold.calls !== grouped.length ||
+					fold.revisions !== revisions
+				) {
+					const lines = renderFoldedGroup(
+						family,
+						grouped.map(finishedCall),
+						width,
+						previewBudget(detail.invocationRows, terminalRows),
+					);
+					fold = { key: settledKey, lines, body: hasToolBody(lines), calls: grouped.length, revisions };
+					seg.settledFold = fold;
+				}
+				blocks.push({ kind: "tool", lines: fold.lines, body: fold.body });
 				segIndex = end;
 			} else {
 				flushReasoning("action");
-				const lines = renderToolSegmentLines(seg, width, nowMs, unboundedToolBodies, detail, terminalRows);
-				blocks.push({ kind: "tool", lines, body: hasToolBody(lines) });
+				let rows = seg.finished && seg.settledRows?.key === settledKey ? seg.settledRows : undefined;
+				if (rows === undefined) {
+					const lines = renderToolSegmentLines(seg, width, nowMs, unboundedToolBodies, detail, terminalRows);
+					rows = { key: settledKey, lines, body: hasToolBody(lines) };
+					if (seg.finished) seg.settledRows = rows;
+				}
+				blocks.push({ kind: "tool", lines: rows.lines, body: rows.body });
 			}
 			continue;
 		}
@@ -1529,6 +1568,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const transcript: TranscriptEntry[] = [];
 	/** Assignment to its placed block, in placement order, so a streaming delta is O(1) to route. */
 	const workerEntries = new Map<string, WorkerTranscriptEntry>();
+	/** A retry rebinds a card to a new run on the same state object, so the run id is part of what it shows. */
+	const telemetryShown = (state: WorkerEntryState, view: TelemetryView | null): string =>
+		`${state.runId}\0${workerTelemetryDisplay(view?.run(state.runId) ?? null)}`;
 	const dispatchGroups = new Map<string, WorkerTranscriptEntry[]>();
 	const workerRenderOptions = (
 		entry: TranscriptEntry,
@@ -1649,7 +1691,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const invalidateEntryCache = (entry: TranscriptEntry): void => {
 		entryRenderCache.delete(entry);
 		if (frozen === null && prerender === null) return;
-		const index = transcript.indexOf(entry);
+		// From the end: what changes is nearly always the live tail, and this runs per streamed delta.
+		const index = transcript.lastIndexOf(entry);
 		if (frozen !== null && index < frozen.through) frozen = null;
 		if (prerender !== null && index >= 0 && index < prerender.next) prerender.next = index;
 	};
@@ -1681,8 +1724,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		const view = options.getTelemetry?.() ?? null;
 		if (view === receiptView) return;
 		receiptView = view;
-		for (const entry of workerEntries.values()) invalidateEntryCache(entry);
-		dirty = true;
+		for (const entry of workerEntries.values()) {
+			const shown = telemetryShown(entry.state, view);
+			if (shown === entry.telemetryShown) continue;
+			entry.telemetryShown = shown;
+			invalidateEntryCache(entry);
+			dirty = true;
+		}
 		// A view still merging its cold read holds a partial session; its turns are read once it has merged.
 		if (view === null || view.seeding) return;
 		const running = runningTurns(view);
@@ -2160,6 +2208,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	const prerenderStep = (): boolean => {
 		syncSkin();
+		// A card rendered ahead must read the view its cached siblings were checked against.
+		refreshReceipts();
 		const job = prerender;
 		if (job === null) {
 			prerenderScheduled = false;
@@ -2263,7 +2313,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				markDirty();
 				return;
 			}
-			const entry: WorkerTranscriptEntry = { role: "worker", state, at: stamp() };
+			const entry: WorkerTranscriptEntry = {
+				role: "worker",
+				state,
+				at: stamp(),
+				telemetryShown: telemetryShown(state, options.getTelemetry?.() ?? null),
+			};
 			workerEntries.set(state.assignmentId, entry);
 			if (state.parentToolCallId !== undefined) {
 				const siblings = dispatchGroups.get(state.parentToolCallId) ?? [];
@@ -2279,6 +2334,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const attaches = state.helper !== true || parent?.segment.name === "dispatch";
 			if (parent !== undefined && attaches && parent.segment.cardAttached !== true) {
 				parent.segment.cardAttached = true;
+				changeSettledCall(parent.segment);
 				invalidateEntryCache(parent.entry);
 			}
 			const at = workerInsertionIndex(state);
@@ -2681,6 +2737,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (owner) invalidateEntryCache(owner.entry);
 				const tool = owner?.segment;
 				if (tool) {
+					changeSettledCall(tool);
 					tool.result = event.result;
 					tool.isError = event.isError;
 					// The chat loop enriches tool_execution_end with durationMs, the

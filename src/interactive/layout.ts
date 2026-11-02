@@ -57,17 +57,56 @@ export interface FullscreenLayout {
 	transcript: ScrollView;
 }
 
+/** One document array, and the transcript prefix it already holds at a row. */
+interface DocumentSlot {
+	rows: string[];
+	prefix: readonly string[] | null;
+	prefixAt: number;
+}
+
 /**
- * Fullscreen's scrollable document. Compose the header and the two transcript
- * regions once when they change, preserving the array on composer-only frames.
- * A generic Container copied every historical row on every keystroke, and a
- * separate transcript wrapper made a second full copy on each streamed delta.
+ * Fullscreen's scrollable document. A composer-only frame returns the same
+ * array, and a frame whose content changed returns a different one. The arrays
+ * come from a small pool and each remembers which settled prefix it holds, so a
+ * streamed token writes only the header and the tail instead of copying every
+ * historical row into a new array, which at 24,000 rows was garbage enough for
+ * a 12 to 15 ms p99. The last two arrays returned stay intact, which is what a
+ * reader of the previous frame relies on: the current layout until the next one
+ * replaces it, and `preserveTranscriptScroll` comparing before with after.
  */
 function transcriptDocument(banner: Component, chat: TranscriptComponent): Component {
 	let source: unknown;
 	let header: string[] = [];
 	let lines: string[] = [];
 	let renderedSkinEpoch = skinEpoch();
+	const pool: DocumentSlot[] = Array.from({ length: 3 }, () => ({ rows: [], prefix: null, prefixAt: -1 }));
+	let turn = 0;
+	const compose = (slot: DocumentSlot, regions: ChatPanelRegions | undefined, whole: readonly string[]): string[] => {
+		const out = slot.rows;
+		let row = 0;
+		const write = (from: readonly string[]): void => {
+			for (const line of from) out[row++] = line;
+		};
+		write(header);
+		const tail = regions?.tail ?? [];
+		if (whole.length + tail.length === 0) {
+			slot.prefix = null;
+		} else {
+			out[row++] = "";
+			// Only the panel promises an array it never mutates; any other chat is copied every time.
+			if (regions !== undefined && slot.prefix === whole && slot.prefixAt === row) {
+				row += whole.length;
+			} else {
+				slot.prefix = regions === undefined ? null : whole;
+				slot.prefixAt = row;
+				write(whole);
+			}
+			write(tail);
+			out[row++] = "";
+		}
+		out.length = row;
+		return out;
+	};
 	return {
 		render(width: number): string[] {
 			if (renderedSkinEpoch !== skinEpoch()) {
@@ -88,9 +127,8 @@ function transcriptDocument(banner: Component, chat: TranscriptComponent): Compo
 			) {
 				source = nextSource;
 				header = nextHeader.slice();
-				const prefix = regions?.prefix ?? (nextSource as string[]);
-				const tail = regions?.tail ?? [];
-				lines = prefix.length + tail.length === 0 ? header.slice() : header.concat([""], prefix, tail, [""]);
+				turn = (turn + 1) % pool.length;
+				lines = compose(pool[turn] as DocumentSlot, regions, regions?.prefix ?? (nextSource as string[]));
 			}
 			return lines;
 		},
