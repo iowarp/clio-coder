@@ -66,6 +66,7 @@ function validateRecord(value: unknown, owner: JobOwner): asserts value is JobRe
 		intervalMs: spec.intervalMs as number,
 		runner: spec.runner as JobCreateInput["runner"],
 		timeoutMs: spec.timeoutMs as number,
+		...(spec.timeoutDefaulted === true ? { timeoutDefaulted: true as const } : {}),
 		...(spec.count !== null ? { count: spec.count as number } : {}),
 		...(spec.deadlineAt !== null ? { deadlineAt: spec.deadlineAt as number } : {}),
 		...(spec.until !== null ? { until: spec.until as NonNullable<JobCreateInput["until"]> } : {}),

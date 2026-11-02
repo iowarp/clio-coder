@@ -21,6 +21,8 @@ export interface JobCreateInput {
 	readonly count?: number;
 	readonly deadlineAt?: number;
 	readonly timeoutMs?: number;
+	/** Restores a stored spec whose timeout the creator left to the default; a new job sets it by omitting timeoutMs. */
+	readonly timeoutDefaulted?: true;
 	readonly until?: JobPredicate;
 	readonly onMatch?: JobMatchAction;
 	/** Host-supplied creating-turn scope, never authority supplied by model arguments. */
@@ -33,6 +35,8 @@ export interface JobSpec {
 	readonly count: number | null;
 	readonly deadlineAt: number | null;
 	readonly timeoutMs: number;
+	/** The creator named no timeout. Absent on an explicit bound, which then also bounds a follow-up, and on older records (#445). */
+	readonly timeoutDefaulted?: true;
 	readonly until: JobPredicate | null;
 	readonly onMatch: JobMatchAction;
 	readonly constraints: TurnConstraints | null;

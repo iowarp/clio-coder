@@ -30,7 +30,13 @@ export {
 } from "./budget.js";
 export type { SchedulingContract } from "./contract.js";
 export { createJobController } from "./job-controller.js";
-export { jobHasUnresolvedCleanup, jobIsComplete, matchesJobPredicate, normalizeJobSpec } from "./job-model.js";
+export {
+	jobExecutionTimeoutMs,
+	jobHasUnresolvedCleanup,
+	jobIsComplete,
+	matchesJobPredicate,
+	normalizeJobSpec,
+} from "./job-model.js";
 export { createJobStore } from "./job-store.js";
 export type * from "./job-types.js";
 export { SchedulingManifest } from "./manifest.js";

@@ -5,6 +5,7 @@ import {
 	JOB_HISTORY_LIMIT,
 	JOB_SESSION_LIMIT,
 	jobEvidence,
+	jobExecutionTimeoutMs,
 	jobHasUnresolvedCleanup,
 	jobIsComplete,
 	jobSpecHash,
@@ -111,8 +112,9 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		}
 	}
 	/** Reaches the running turn as its stop reason, so it names the bound that fired and the field that sets it (#445). */
-	function executionTimeoutReason(job: JobRecord): string {
-		return `execution timeout after ${job.spec.timeoutMs}ms (the job's timeout_ms)`;
+	function executionTimeoutReason(job: JobRecord, kind: LiveExecution["kind"]): string {
+		const bound = jobExecutionTimeoutMs(job.spec, kind);
+		return `execution timeout after ${bound}ms (${job.spec.timeoutDefaulted === true ? "the job's default" : "the job's timeout_ms"})`;
 	}
 	function abortLive(id: string, reason: string, outcome: JobEvidence["outcome"]): void {
 		const execution = live.get(id);
@@ -238,7 +240,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			}
 		});
 		execution.started = true;
-		execution.timeoutAt = spanNow() + job.spec.timeoutMs;
+		execution.timeoutAt = spanNow() + jobExecutionTimeoutMs(job.spec, execution.kind);
 		schedule();
 		return true;
 	}
@@ -258,7 +260,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		if (!execution.abort.signal.aborted && job.spec.deadlineAt !== null && now() >= job.spec.deadlineAt) {
 			job = terminal(id, "deadline");
 		} else if (!execution.abort.signal.aborted && spanNow() >= execution.timeoutAt) {
-			abortLive(id, executionTimeoutReason(job), "timed_out");
+			abortLive(id, executionTimeoutReason(job, execution.kind), "timed_out");
 		}
 		if (!execution.started) {
 			if (execution.abort.signal.aborted || job.generation !== execution.generation) {
@@ -428,7 +430,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			id: executionId,
 			generation: job.generation,
 			started: false,
-			timeoutAt: spanNow() + job.spec.timeoutMs,
+			timeoutAt: spanNow() + jobExecutionTimeoutMs(job.spec, kind),
 			forced: null,
 			promise: Promise.resolve(),
 		};
@@ -495,7 +497,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 									draft.pendingReason = "execution timeout; awaiting settlement";
 								});
 						} finally {
-							abortLive(id, executionTimeoutReason(job), "timed_out");
+							abortLive(id, executionTimeoutReason(job, execution.kind), "timed_out");
 						}
 						job = current(id);
 					}
