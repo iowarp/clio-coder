@@ -21,6 +21,7 @@ const { values } = parseArgs({
 		rows: { type: "string", default: "40" },
 		mode: { type: "string" },
 		workload: { type: "string" },
+		style: { type: "string" },
 	},
 });
 function positive(value: string): number {
@@ -78,6 +79,7 @@ const workloads = [
 	"long-text",
 	"tool",
 	"tool-burst",
+	"read-burst",
 	"diagram",
 	"workers",
 	"workers-long",
@@ -89,6 +91,9 @@ const modes = ["regular", "fullscreen"] as const;
 if (values.mode && !modes.some((mode) => mode === values.mode)) throw new Error("Unknown mode");
 if (values.workload && !workloads.some((workload) => workload === values.workload)) throw new Error("Unknown workload");
 type Workload = (typeof workloads)[number];
+const styles = ["compact", "standard", "detailed"] as const;
+const outputStyle = styles.find((style) => style === values.style);
+if (values.style && !outputStyle) throw new Error("Unknown style");
 
 /** The renderers the application ships, with frame observation off. */
 const unobserved: TuiRenderObserver = {
@@ -130,7 +135,12 @@ function telemetryView(elapsed: (runId: string) => string): never {
 function sample(mode: TuiMode, workload: Workload): { milliseconds: number[]; bytes: number } {
 	const terminal = new CountingTerminal();
 	let view: never | null = null;
-	const panel = createChatPanel({ now: () => 1_000, getTerminalRows: () => terminal.rows, getTelemetry: () => view });
+	const panel = createChatPanel({
+		now: () => 1_000,
+		getTerminalRows: () => terminal.rows,
+		getTelemetry: () => view,
+		...(outputStyle ? { getOutputStyle: () => outputStyle } : {}),
+	});
 	for (let index = 0; index < turns; index++) {
 		panel.appendUser(`Question ${index}`);
 		// Workloads that scan history need the history they scan: tool rows, and settled worker cards.
@@ -199,9 +209,13 @@ function sample(mode: TuiMode, workload: Workload): { milliseconds: number[]; by
 				// One batch moved one running worker's clock; every other card reads the same as before.
 				const moved = `run-${index % workers.length}`;
 				view = telemetryView((runId) => (runId === moved ? `${index}.0s` : "1.0s"));
-			} else if (workload === "tool-burst") {
+			} else if (workload === "tool-burst" || workload === "read-burst") {
 				const toolCallId = `burst-${index}`;
-				panel.applyEvent({ type: "tool_execution_start", toolCallId, toolName: "bash", args: { command: "ls" } } as never);
+				const call =
+					workload === "read-burst"
+						? { toolName: "read", args: { path: `src/file-${index}.ts` } }
+						: { toolName: "bash", args: { command: "ls" } };
+				panel.applyEvent({ type: "tool_execution_start", toolCallId, ...call } as never);
 				panel.applyEvent({
 					type: "tool_execution_update",
 					toolCallId,
