@@ -289,24 +289,3 @@ export function createMutationInspector(
 	};
 }
 
-/**
- * The scrolled window of a preview, plus the position line that makes the cut
- * visible. Mirrors the `/handoff` review overlay so both scrollable inspection
- * surfaces read the same way.
- */
-export function mutationPreviewWindow(
-	lines: ReadonlyArray<string>,
-	scroll: number,
-	rows = MUTATION_PREVIEW_VISIBLE_ROWS,
-): { window: ReadonlyArray<string>; position: string | null; maxScroll: number } {
-	const visible = Math.max(1, rows);
-	const maxScroll = Math.max(0, lines.length - visible);
-	const start = Math.max(0, Math.min(scroll, maxScroll));
-	const window = lines.slice(start, start + visible);
-	if (lines.length <= visible) return { window, position: null, maxScroll };
-	return {
-		window,
-		position: `(${start + 1}-${start + window.length} of ${lines.length} lines)`,
-		maxScroll,
-	};
-}

@@ -46,7 +46,7 @@ export function quotaMeter(usedPct: number, cells: number, severity: QuotaSeveri
 	);
 }
 /** `2d 0h`, `2h 0m` or `7m` until `reset`; null when the time is unknown or has passed. */
-export function quotaResetDuration(reset: string | null, now = Date.now()): string | null {
+function quotaResetDuration(reset: string | null, now = Date.now()): string | null {
 	const timestamp = reset === null ? NaN : Date.parse(reset);
 	if (!Number.isFinite(timestamp)) return null;
 	const minutes = Math.max(0, Math.ceil((timestamp - now) / 60_000));

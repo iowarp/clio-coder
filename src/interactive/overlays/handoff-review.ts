@@ -58,7 +58,7 @@ const CHOICES = [
  * document as rendered Markdown windowed to `rows`, and the three keys with
  * what each one does, pinned beneath. Zero rows means the frame has not said.
  */
-export function formatHandoffReviewBody(
+function formatHandoffReviewBody(
 	goal: string,
 	document: string,
 	width: number,

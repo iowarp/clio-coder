@@ -104,7 +104,7 @@ export interface PermissionOverlayBodyHandle extends Component, RowBudgetedBody 
  * workspace write, which can be reviewed and reverted; cyan for a read. An
  * outward exposure never reads below amber, whatever the class.
  */
-export function permissionRiskTone(actionClass: ActionClass, exposure?: ApprovalRequestView["exposure"]): Tone {
+function permissionRiskTone(actionClass: ActionClass, exposure?: ApprovalRequestView["exposure"]): Tone {
 	const base: Tone =
 		actionClass === "read"
 			? "info"

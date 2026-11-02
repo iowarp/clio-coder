@@ -182,7 +182,14 @@ function waitFor(cue: string, timeoutMs = 30_000, from = visible.length): Promis
 	const found = visible.indexOf(cue, from);
 	if (found >= 0) return Promise.resolve(clock());
 	return new Promise((done, fail) => {
-		const entry = { cue, from, resolve: (at: number) => (clearTimeout(timer), done(at)) };
+		const entry = {
+			cue,
+			from,
+			resolve: (at: number) => {
+				clearTimeout(timer);
+				done(at);
+			},
+		};
 		const timer = setTimeout(() => {
 			cues.splice(cues.indexOf(entry), 1);
 			fail(

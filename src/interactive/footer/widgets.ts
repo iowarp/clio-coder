@@ -295,14 +295,6 @@ export function lastTurnDetails(
 	return joinChips(theme, parts);
 }
 
-/** The Σ row: the whole session across every branch, as the read model folds it (#434 §11.3). */
-export function totalsValue(telemetry: FooterTelemetry | undefined): string | null {
-	if (!telemetry || telemetry.kind === "unavailable") return "not available";
-	if (telemetry.kind === "reading") return "reading the call journal";
-	if (telemetry.tokens === null && telemetry.neverSent === null) return null;
-	return [`Σ${telemetry.tokens ?? "0"}`, telemetry.neverSent].filter(Boolean).join(" · ");
-}
-
 export function meaningfulToolTally(value: string): string | null {
 	const text = value.trim();
 	return text === "none" || text === `none · 0${GLYPH.error}` || text === `0${GLYPH.error}` ? null : value;

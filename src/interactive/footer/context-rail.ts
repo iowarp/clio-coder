@@ -73,7 +73,7 @@ export function contextUsagePercent(context: ContextOccupancyFacts): number | nu
 }
 
 /** Reads published numbers only; never refreshes accounting from a renderer. */
-export function contextOccupancyBar(
+function contextOccupancyBar(
 	context: ContextOccupancyFacts,
 	cells: number,
 	theme: ClioTheme,

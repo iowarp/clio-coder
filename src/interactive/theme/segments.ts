@@ -1,5 +1,5 @@
 import { GLYPH } from "./glyphs.js";
-import type { ClioTheme, ClioToken } from "./tokens.js";
+import type { ClioTheme } from "./tokens.js";
 
 /**
  * Presentational primitives for the welcome/footer dashboards. These keep raw
@@ -29,15 +29,6 @@ export function dotSep(theme: ClioTheme): string {
 /** Frame-colored vertical bar used to separate sections on one row. */
 export function barSep(theme: ClioTheme): string {
 	return theme.fg("border", " │ ");
-}
-
-/**
- * A semantic section label (PERCEIVE / target / …). Pad to align a
- * column of tags; padding inherits the tag color but stays invisible.
- */
-export function sectionTag(theme: ClioTheme, token: ClioToken, label: string, pad = 0): string {
-	const text = pad > 0 ? label.padEnd(pad) : label;
-	return theme.style(token, text, { bold: true });
 }
 
 /** Concise orange title; machine sections use the stronger harness-heading role. */
