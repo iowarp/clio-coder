@@ -11,6 +11,7 @@ export * from "./components.js";
 export * from "./functions.js";
 export * from "./glyphs.js";
 export * from "./labels.js";
+export * from "./primitives.js";
 export * from "./rules.js";
 export * from "./segments.js";
 export { applySkin } from "./skin.js";

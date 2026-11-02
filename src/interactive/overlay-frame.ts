@@ -5,6 +5,8 @@ import {
 	type OverlayHandle,
 	type OverlayOptions,
 	type OverlayUnfocusOptions,
+	type SelectItem,
+	SelectList,
 	type SelectListTheme,
 	type TUI,
 	truncateToWidth,
@@ -19,6 +21,7 @@ import {
 	GLYPH,
 	padAnsi,
 	screenTitle,
+	selectionRow,
 	selectListTheme,
 	withThemeContext,
 } from "./theme/index.js";
@@ -54,6 +57,17 @@ export class FocusBox extends Box {
 	}
 	undoInput(): boolean {
 		return keyboardOwner(this.inputTarget).undoInput?.() ?? false;
+	}
+
+	/**
+	 * The frame's row budget, handed to every child that lays itself out from
+	 * it. A body behind a focus box used to be cut by the frame instead of
+	 * windowing itself, because the box, not the body, was what the frame saw.
+	 */
+	setBodyRows(rows: number): void {
+		for (const child of this.children) {
+			if (isRowBudgeted(child)) child.setBodyRows(rows);
+		}
 	}
 
 	handleInput(data: string): void {
@@ -136,6 +150,152 @@ export function centeredWindow(total: number, selected: number, height: number):
 	const clamped = Math.max(0, Math.min(selected, total - 1));
 	const start = Math.max(0, Math.min(clamped - Math.floor(height / 2), total - height));
 	return [start, Math.min(total, start + height)];
+}
+
+/**
+ * The `[start, end)` window of `lines` that `scroll` selects for a body of
+ * `height` rows, clamped so the last page is full. `position` is the one-based
+ * range a `positionRow` names, or null when every line fits and no row is owed
+ * to the count. One windowing rule for every body that scrolls: the mutation
+ * preview, the plan, the handoff document and the terms all used to compute
+ * this by hand and disagreed about the last page.
+ */
+export function windowRows<T>(
+	lines: ReadonlyArray<T>,
+	scroll: number,
+	height: number,
+): { window: T[]; start: number; maxScroll: number; position: { start: number; end: number; total: number } | null } {
+	const visible = Math.max(1, Math.floor(height));
+	const maxScroll = Math.max(0, lines.length - visible);
+	const start = Math.max(0, Math.min(Math.floor(scroll), maxScroll));
+	const window = lines.slice(start, start + visible);
+	if (lines.length <= visible) return { window, start, maxScroll, position: null };
+	return { window, start, maxScroll, position: { start: start + 1, end: start + window.length, total: lines.length } };
+}
+
+/**
+ * A body whose rows are a pure function of its width, its row budget and a
+ * revision the owner bumps when its state changes.
+ *
+ * The frame's identity cache only helps a child that returns the same array
+ * for the same frame, and five dialog bodies rebuilt theirs per render: the
+ * plan approval re-wrapped every step, the handoff review re-wrapped the whole
+ * document, the decisions board re-read its ledger. This memoizes the rows on
+ * (width, rows, revision, skin) so an idle open dialog costs the frame nothing.
+ */
+export interface CachedBody extends Component, RowBudgetedBody {
+	/** The state the rows depend on changed; the next render rebuilds them. */
+	touch(): void;
+	/** Rows the frame last granted, or zero while unknown. */
+	bodyRows(): number;
+}
+
+export function createCachedBody(render: (width: number, rows: number) => string[]): CachedBody {
+	let revision = 0;
+	let rows = 0;
+	let memo: { key: string; lines: string[] } | null = null;
+	return {
+		render(width: number): string[] {
+			const key = `${width}|${rows}|${revision}|${skinEpoch()}`;
+			if (memo?.key === key) return memo.lines;
+			const lines = render(width, rows);
+			memo = { key, lines };
+			return lines;
+		},
+		setBodyRows(next: number): void {
+			rows = Math.max(0, Math.floor(next));
+		},
+		bodyRows: () => rows,
+		touch(): void {
+			revision += 1;
+		},
+		invalidate(): void {
+			memo = null;
+		},
+	};
+}
+
+export interface ChoiceListItem {
+	value: string;
+	label: string;
+	/** What choosing this does, under the label on every row, so the decision reads whole. */
+	description?: string;
+}
+
+export interface ChoiceListOptions {
+	items: ReadonlyArray<ChoiceListItem>;
+	onSelect: (item: ChoiceListItem) => void;
+	onCancel: () => void;
+	/** Rows above the choices: the facts the decision rests on, built at the body's width. */
+	lead?: (width: number) => string[];
+	/** The row the cursor starts on. */
+	initialIndex?: number;
+}
+
+export interface ChoiceList extends Component {
+	/** The lead changed; the next render rebuilds it. */
+	touch(): void;
+	selected(): ChoiceListItem | null;
+}
+
+/**
+ * A few named choices with their consequences, the one way a small decision
+ * dialog is drawn. The engine's SelectList owns the keys (arrows, Enter, Esc)
+ * and this draws every row through `selectionRow`, label and description
+ * alike, so the context reset and the cwd fallback no longer carry their own
+ * column layouts that elided a consequence at 72 columns. Rows are memoized
+ * on width, cursor and skin.
+ */
+export function createChoiceList(options: ChoiceListOptions): ChoiceList {
+	const byValue = new Map(options.items.map((item) => [item.value, item]));
+	const list = new SelectList(
+		options.items.map((item): SelectItem => ({ value: item.value, label: item.label })),
+		Math.max(1, options.items.length),
+		DEFAULT_SELECT_THEME,
+	);
+	if (options.initialIndex !== undefined) list.setSelectedIndex(options.initialIndex);
+	list.onSelect = (item: SelectItem): void => {
+		const chosen = byValue.get(item.value);
+		if (chosen !== undefined) options.onSelect(chosen);
+	};
+	list.onCancel = (): void => options.onCancel();
+	let revision = 0;
+	let memo: { key: string; lines: string[] } | null = null;
+	const selected = (): ChoiceListItem | null => {
+		const current = list.getSelectedItem();
+		return current === null ? null : (byValue.get(current.value) ?? null);
+	};
+	return {
+		render(width: number): string[] {
+			const focused = selected()?.value ?? "";
+			const key = `${width}|${focused}|${revision}|${skinEpoch()}`;
+			if (memo?.key === key) return memo.lines;
+			const theme = clioTheme();
+			const lines = [...(options.lead?.(width) ?? [])];
+			if (lines.length > 0) lines.push("");
+			for (const item of options.items) {
+				lines.push(
+					...selectionRow(theme, {
+						focused: item.value === focused,
+						label: item.label,
+						...(item.description === undefined ? {} : { description: item.description }),
+						width,
+					}),
+				);
+			}
+			memo = { key, lines };
+			return lines;
+		},
+		handleInput: (data: string): void => list.handleInput(data),
+		invalidate(): void {
+			memo = null;
+			list.invalidate();
+		},
+		touch(): void {
+			revision += 1;
+		},
+		selected,
+	};
 }
 
 function brandedTopBorder(label: string, innerWidth: number, tone?: ClioToken): string {

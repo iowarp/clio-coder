@@ -475,7 +475,7 @@ class ReviewFocusBox extends FocusBox implements RowBudgetedBody {
 		super(windowed, options);
 	}
 
-	setBodyRows(rows: number): void {
+	override setBodyRows(rows: number): void {
 		this.windowed.setBodyRows(rows);
 	}
 }

@@ -29,7 +29,20 @@ import {
 	type OverlayEscVerb,
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
-import { type ClioToken, clioTheme, dotSep, editorTheme, GLYPH, rule, screenTitle } from "../theme/index.js";
+import {
+	type ClioToken,
+	clioTheme,
+	dotSep,
+	editorTheme,
+	emptyState,
+	GLYPH,
+	screenTitle,
+	sectionLabel,
+	sectionRule,
+	selectionRow,
+	statusChip,
+	titleRow,
+} from "../theme/index.js";
 import {
 	formatUnattendedRemaining,
 	startUnattendedCountdown,
@@ -524,7 +537,7 @@ class AskUserOverlayView implements Component {
 		return wrapTextWithAnsi(
 			clioTheme().fg(
 				"warning",
-				`No answer in ${formatUnattendedRemaining(left)} ${outcome} and Clio continues. Any key holds.`,
+				`${GLYPH.warn} No answer in ${formatUnattendedRemaining(left)} ${outcome} and Clio continues. Any key holds.`,
 			),
 			width,
 		);
@@ -661,28 +674,22 @@ class AskUserOverlayView implements Component {
 		const body = this.renderBody(bodyWidth, wide);
 		if (!wide) return body;
 		const theme = clioTheme();
-		const menu = [theme.fg("sectionHeading", "QUESTIONS"), ""];
+		// The side list follows the one selection rule: the cursor on the active
+		// question, a check on an answered one. The rail names the keys that move
+		// between them, so the list does not.
+		const answered = this.states.filter((state) => state.answer.trim().length > 0).length;
+		const menu = [sectionLabel(theme, "Questions", `${answered}/${this.questions.length} answered`)];
 		this.questions.forEach((question, index) => {
-			const active = index === this.index;
-			const answered = Boolean(this.states[index]?.answer.trim());
-			const prefix = active
-				? `${theme.fg("selectedOption", GLYPH.cursor)} `
-				: answered
-					? `${theme.fg("success", GLYPH.ok)} `
-					: "  ";
+			const state = this.states[index];
 			menu.push(
-				...wrapLabeledValue(
-					prefix,
-					theme.paint(`${index + 1}. ${compactTitle(question)}`, {
-						fg: active ? "selectedOption" : "menuOption",
-						bold: active,
-					}),
-					menuWidth,
-				),
-				"",
+				...selectionRow(theme, {
+					focused: index === this.index,
+					label: `${index + 1}. ${compactTitle(question)}`,
+					...(state?.answer.trim() ? { mark: theme.fg("success", GLYPH.ok) } : {}),
+					width: menuWidth,
+				}),
 			);
 		});
-		menu.push(theme.fg("keyboardHint", "Tab / Shift+Tab to browse"));
 		return Array.from({ length: Math.min(this.maxInnerRows(), Math.max(menu.length, body.length)) }, (_, index) => {
 			const left = menu[index] ?? "";
 			return `${left}${" ".repeat(Math.max(0, menuWidth - visibleWidth(left)))}  ${theme.fg("border", "│")}  ${body[index] ?? ""}`;
@@ -694,7 +701,7 @@ class AskUserOverlayView implements Component {
 		const maxRows = this.maxInnerRows();
 		if (this.phase !== "asking") return this.renderWaiting(safeWidth, maxRows);
 		const question = this.currentQuestion();
-		if (!question) return [clioTheme().fg("emptyState", "No questions.")];
+		if (!question) return emptyState(clioTheme(), "No questions.", safeWidth);
 
 		const theme = clioTheme();
 		const strip = [
@@ -714,9 +721,10 @@ class AskUserOverlayView implements Component {
 			...this.renderCountdown(safeWidth),
 			...(hasMenu ? [] : this.renderQuestionStrip(safeWidth)),
 		];
-		const header = this.renderQuestionHeader(question, safeWidth);
+		const header = this.renderQuestionHeader(question, safeWidth, !hasMenu && this.questions.length > 1);
 		const details = this.renderDecisionContext(safeWidth);
-		const status = this.status.length > 0 ? wrapTextWithAnsi(clioTheme().fg("annotation", this.status), safeWidth) : [];
+		const status =
+			this.status.length > 0 ? wrapTextWithAnsi(statusChip(clioTheme(), "warning", this.status), safeWidth) : [];
 		const body = [
 			...(this.harnessInterview?.intro?.(safeWidth) ?? []),
 			...formatAskUserQuestion(question.question, safeWidth).map((line) => theme.fg("decisionQuestion", line)),
@@ -873,13 +881,9 @@ class AskUserOverlayView implements Component {
 	private renderWaiting(width: number, maxRows: number): string[] {
 		const theme = clioTheme();
 		const lines = [
-			fitRow(
-				`${screenTitle(theme, "Interview")}${dotSep(theme)}${theme.fg(
-					"menuDescription",
-					this.history.length > 0 ? "answer sent · waiting for the next question" : "waiting for the first question",
-				)}`,
-				width,
-			),
+			titleRow(theme, "Interview", width, {
+				meta: this.history.length > 0 ? "answer sent · waiting for the next question" : "waiting for the first question",
+			}),
 		];
 		const ledger = this.renderAnswerLedger(width, Math.max(1, maxRows - lines.length));
 		return [...lines, ...ledger].slice(0, maxRows);
@@ -940,10 +944,12 @@ class AskUserOverlayView implements Component {
 	 * interview. `Question 1/1` was a counter over a set of one, printed on every
 	 * confirmation; a round of several questions names them in the strip instead.
 	 */
-	private renderQuestionHeader(question: AskUserQuestion, width: number): string[] {
+	private renderQuestionHeader(question: AskUserQuestion, width: number, stripNamesIt = false): string[] {
 		const theme = clioTheme();
 		const parts: string[] = [theme.fg("pendingAnswer", "Clio-Coder asks you")];
-		if (question.header) parts.push(screenTitle(theme, question.header));
+		// The strip above already carries the active question's name with the
+		// cursor on it; the header repeats it only when there is no strip.
+		if (question.header && !stripNamesIt) parts.push(screenTitle(theme, question.header));
 		if (this.questions.length <= 1 && this.roundsAnswered > 0) {
 			parts.push(theme.fg("annotation", `Round ${this.roundsAnswered + 1}`));
 		}
@@ -1013,7 +1019,8 @@ class AskUserOverlayView implements Component {
 		const entries = this.ledgerEntries();
 		if (entries.length === 0) return [];
 		const count = `${entries.length} earlier answer${entries.length === 1 ? "" : "s"}`;
-		if (!this.ledgerExpanded) return ["", fitRow(theme.fg("annotation", `${count} · a to review`), width)];
+		// The rail names the key that opens the ledger; the row carries the count.
+		if (!this.ledgerExpanded) return ["", fitRow(theme.fg("annotation", count), width)];
 		const rows: string[] = [];
 		for (const entry of entries) {
 			rows.push(
@@ -1024,7 +1031,7 @@ class AskUserOverlayView implements Component {
 				),
 			);
 		}
-		const head = ["", fitRow(rule(theme, width, { left: "Answers", leftToken: "annotation" }), width)];
+		const head = ["", sectionRule(theme, width, "Answers", { meta: count })];
 		const budget = Math.max(1, rowBudget - head.length);
 		if (rows.length <= budget) return [...head, ...rows];
 		const kept = rows.slice(0, Math.max(0, budget - 1));
