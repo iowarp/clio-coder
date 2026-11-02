@@ -1077,8 +1077,11 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const interopSurface = interop ? interopOverlaySurface(interop, (level, text) => notify(level, text)) : null;
 	// What the operator uses themselves retires the matching demo guidance tip.
 	// Off with interface.demo: no profile read or write while guidance is off.
+	// The profile write is synchronous and durable, and it runs on the Enter path of
+	// any `@` or slash submit: it held the acknowledging frame 10 to 20 ms. The frame
+	// goes out on the next tick, ahead of this immediate.
 	const recordFeature = (feature: string): void => {
-		if (deps.getSettings?.().interface.demo === true) recordHarnessFeature(feature);
+		if (deps.getSettings?.().interface.demo === true) setImmediate(() => recordHarnessFeature(feature));
 	};
 	// Every submit expansion in flight owns its controller, so a second submit
 	// never orphans the first. A huge `@file.pdf` could otherwise hold Enter for

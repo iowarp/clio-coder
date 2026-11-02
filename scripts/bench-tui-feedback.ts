@@ -380,7 +380,8 @@ async function scenarioStream(label: string, prefillKb: number): Promise<void> {
 		const sent = clock();
 		child.write(draft.at(-1) ?? "");
 		keyLatencies.push((await shown) - sent);
-		await pause(60);
+		// A fixed cadence phase-locks with the repaint interval and reads as bimodal.
+		await pause(40 + Math.random() * 120);
 	}
 	await finished;
 	scripts.delete(prompt);
