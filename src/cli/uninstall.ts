@@ -19,8 +19,11 @@ import { clioDirLayoutProblems, resetXdgCache, resolveClioDirs } from "../core/x
 import type { Installation } from "../domains/lifecycle/install-method.js";
 import {
 	INSTALLER_LAUNCHER_MARK,
+	INSTALLER_OWNED_ENTRIES,
+	inactiveInstallerRecord,
 	inspectInstallation,
 	installationCommand,
+	launcherPathFor,
 } from "../domains/lifecycle/install-method.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
@@ -189,11 +192,6 @@ function scheduleRemovalAfterExit(paths: string[], emptyRoot: string | null): vo
 			windowsHide: true,
 		},
 	).unref();
-}
-
-function launcherLinkPath(): string {
-	const binDir = process.env.CLIO_CODER_BIN_DIR?.trim() || join(homedir(), ".local", "bin");
-	return join(binDir, "clio-coder");
 }
 
 /**
@@ -426,9 +424,9 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	const stateSize = measurePath(dirs.state);
 	const cacheSize = measurePath(dirs.cache);
 	const installerRecord = method === "installer" ? installation.installer : undefined;
-	const linkPath =
-		installerRecord?.launcher ||
-		(method === "npm" && installation.prefix ? join(installation.prefix, "bin", "clio-coder") : launcherLinkPath());
+	const linkPath = launcherPathFor(installation);
+	const inactiveInstall = inactiveInstallerRecord(installation);
+	const inactiveSize = inactiveInstall ? measurePath(inactiveInstall.root) : null;
 	const linkSize = measurePath(linkPath);
 	const launcher = classifyLauncher(linkPath, installation);
 	const runtimeSize = installerRecord ? measurePath(installerRecord.root) : null;
@@ -493,6 +491,15 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 			bytes: runtimeSize.bytes,
 			status: !runtimeSize.exists ? "absent" : !args.keepBinary ? "remove" : "skip",
 			detail: !args.keepBinary ? `Node v${installerRecord.nodeVersion} and installed versions` : "kept by --keep-binary",
+		});
+	}
+	if (inactiveInstall && inactiveSize) {
+		items.push({
+			label: "Inactive install",
+			path: inactiveInstall.root,
+			bytes: inactiveSize.bytes,
+			status: args.keepBinary ? "skip" : "remove",
+			detail: args.keepBinary ? "kept by --keep-binary" : "installer root this binary does not run from",
 		});
 	}
 	for (const item of web.items) items.push({ ...item, status: "remove", detail: "verified app ownership" });
@@ -567,8 +574,9 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 
 	let installLock: string | null = null;
 	let deferredLock = false;
-	if (installerRecord) {
-		installLock = join(installerRecord.root, ".install-lock");
+	const removedInstall = installerRecord ?? (args.keepBinary ? null : inactiveInstall);
+	if (removedInstall) {
+		installLock = join(removedInstall.root, ".install-lock");
 		try {
 			mkdirSync(installLock);
 			safeResourceWrite(join(installLock, "pid"), `${process.pid}\n`);
@@ -583,8 +591,8 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		}
 	}
 	try {
-		if (installerRecord) {
-			const active = join(installerRecord.root, ".active");
+		if (removedInstall) {
+			const active = join(removedInstall.root, ".active");
 			const own = new Set([process.pid, Number(process.env.CLIO_CODER_LAUNCHER_PID)]);
 			if (existsSync(active)) {
 				for (const name of readdirSync(active)) {
@@ -699,11 +707,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		// on Linux and macOS: the open files stay readable until this process exits.
 		let runtimeRemoved = false;
 		if (deferToExit && installerRecord && runtimeSize?.exists) {
-			deferred.push(
-				...["runtime", "versions", "launchers", "launcher.cjs", ".active", ".installer-owner", "install.json"].map((name) =>
-					join(installerRecord.root, name),
-				),
-			);
+			deferred.push(...INSTALLER_OWNED_ENTRIES.map((name) => join(installerRecord.root, name)));
 			scheduleRemovalAfterExit(deferred, installerRecord.root);
 			deferredLock = true;
 			presenter.completedStep("Runtime and installed versions will be removed when this command exits");
@@ -713,15 +717,9 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		} else if (!args.keepBinary && installerRecord && runtimeSize?.exists) {
 			// Only what install.sh creates is removed, then the root if it is left
 			// empty: --install-dir may have named a directory that holds other files.
-			const failed = [
-				"runtime",
-				"versions",
-				"launchers",
-				"launcher.cjs",
-				".active",
-				".installer-owner",
-				"install.json",
-			].flatMap((name) => removePath("runtime", join(installerRecord.root, name), false) ?? []);
+			const failed = INSTALLER_OWNED_ENTRIES.flatMap(
+				(name) => removePath("runtime", join(installerRecord.root, name), false) ?? [],
+			);
 			failures.push(...failed);
 			if (failed.length === 0) {
 				try {
@@ -732,6 +730,14 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 				presenter.completedStep("Removed runtime and installed versions");
 				runtimeRemoved = true;
 			}
+		}
+
+		if (inactiveInstall && !args.keepBinary) {
+			const failed = INSTALLER_OWNED_ENTRIES.flatMap(
+				(name) => removePath("inactive install", join(inactiveInstall.root, name), false) ?? [],
+			);
+			failures.push(...failed);
+			if (failed.length === 0) presenter.completedStep("Removed the inactive install");
 		}
 
 		resetXdgCache();
@@ -758,9 +764,9 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	} finally {
 		if (installLock && !deferredLock) {
 			rmSync(installLock, { recursive: true, force: true });
-			if (installerRecord) {
+			if (removedInstall) {
 				try {
-					rmdirSync(installerRecord.root);
+					rmdirSync(removedInstall.root);
 				} catch {
 					/* Other files in a shared install root are preserved. */
 				}

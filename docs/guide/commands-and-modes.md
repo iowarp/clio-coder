@@ -50,7 +50,7 @@ Turn it off under Settings → Appearance → Demo presentation and guidance (`i
 | `clio-coder targets remove <id>` | Remove a target. |
 | `clio-coder targets rename <old> <new>` | Rename a target id. |
 | `clio-coder models [search] [--target <id>] [--json] [--offline]` | List models. Live probing is the default; `--offline` skips it. |
-| `clio-coder paths [--json]` | Print the resolved config, data, state, and cache directories. |
+| `clio-coder paths [--json]` | Print the resolved config, data, state and cache roots, the installer root and whether this binary runs from it, the launcher, and where a new project `.clio-coder/` entry goes from this directory. |
 | `clio-coder auth list` | Show known auth entries. |
 | `clio-coder auth status [target-or-runtime]` | Inspect auth state. |
 | `clio-coder auth login [target-or-runtime] [--api-key <value>]` | Add credentials through the supported flow. |

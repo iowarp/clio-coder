@@ -37,7 +37,7 @@ import { installationFindings } from "./doctor-installation.js";
 import { namingHistoryFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
 import { slurmMcpFindings } from "./doctor-slurm.js";
-import { stateStorageFinding } from "./doctor-state-size.js";
+import { homeStorageFinding, installRootFinding, stateStorageFinding } from "./doctor-state-size.js";
 import { taskWorktreeFindings } from "./doctor-task-worktrees.js";
 import { pdfAttachmentFinding, toolchainFindings } from "./doctor-toolchain.js";
 import { validationContractFinding } from "./doctor-validation-contract.js";
@@ -403,7 +403,10 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 		// The settings finding already reports an unreadable document. Optional
 		// integrations stay inactive rather than adding secondary warnings.
 	}
-	const storageChecks = untouched ? [] : [stateStorageFinding()];
+	const installRoot = installRootFinding();
+	const storageChecks = untouched
+		? []
+		: [stateStorageFinding(), homeStorageFinding(), ...(installRoot === null ? [] : [installRoot])];
 	const runtimeChecks = await runDoctorRuntimeChecks();
 	// Every model pointer is checked against what its target advertises, so a
 	// placeholder id saved by configure is reported here and not on the first turn.

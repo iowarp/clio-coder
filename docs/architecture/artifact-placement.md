@@ -109,7 +109,10 @@ problem.
 | `protected-artifact-pending/<key>/` | Write-ahead records for pending protected artifacts |
 | `cliamp/` | The `/music` player home: `config.toml`, `themes/clio.toml`, `playlists/clio.toml`, `plugins/clio-dock.lua`, `plugins/.trust.json`, `dock-taps`, and cliamp's own socket, log and history files. Clio Coder rewrites its generated files on each open, and never reads or writes the operator's own `~/.config/cliamp`. |
 | `gui/` | Graphical application state: `workspaces.json`, `children.json` with `<name>.locks/` directories, and `background/` (`server.json`, `owner.json` and the generated `clio-coder-gui-<id>.service` unit) |
-| `home.json`, `migration-reports/` | Install metadata and migration reports |
+| `home.json`, `migration-reports/`, `workspace-conversions.json`, `restart-intent.json` | Install metadata, migration reports, per-workspace layout conversions and a pending relaunch |
+| `live/`, `peer-inbox/`, `running-builds/`, `fleet-locks/` | Open-session heartbeats, messages between sessions, the builds running processes loaded, and fleet locks |
+| `jobs/`, `provider-checkpoints/`, `sandbox/`, `fleet-preflight.json` | Background job records, provider checkpoints, sandbox state and the last fleet preflight |
+| `extension-workspaces/`, `extension-dev-roots.json`, `library-receipts.json` | Extension working directories, registered dev roots and library install receipts |
 | `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `endpoint-slots.json` | Small per-machine stores |
 | `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v3/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hook, and the request and tap files shared with the workers dashboard |
 

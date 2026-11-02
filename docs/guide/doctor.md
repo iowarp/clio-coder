@@ -91,6 +91,8 @@ The core rows read as follows.
 | `telemetry` | The telemetry mode a session in the current directory gets, the research flags it captures, and whether content capture is on, with the workspace consent that grants it (who and when) or why it is off. In standard mode it counts recorded workspace consents. `WARN` when settings cannot be read, or when the consent store cannot be read, which grants no workspace consent. Journal health and seal states are in `clio-coder telemetry doctor`. |
 | `cache telemetry` | From the latest session's telemetry journal: its prompt-cache verdict counts (`hot`, `partial`, `cold`, `small`, `unknown`), tokens read from cache, tokens re-prefilled by calls that missed an expected cache hit with the number of breaks and their cost, and the most common cause. `WARN` when that session journaled no prompt-cache verdict or its journal cannot be read. `clio-coder telemetry cache <session>` shows the full report. |
 | `state storage` | Total size of the state root and its largest top-level contributor. `!!` only when the root cannot be measured. |
+| `home storage` | Size of the config, data and cache roots. `!!` only when one cannot be measured. |
+| `install root` | Size and path of the installer root, when there is one. It also says when this binary does not run from that root, which happens after the launcher moves to a checkout or a package manager; nothing prunes such a root, and `clio-coder uninstall` removes it. |
 | `target <id>` | `WARN` when an OpenAI-compatible or Anthropic-compatible target answers like a native LM Studio or Ollama server, with the `clio-coder targets convert` command. `!!` when the target names an unknown runtime. |
 | `cache <id>` | `WARN` prompt-cache advisories from a target's passive check. |
 

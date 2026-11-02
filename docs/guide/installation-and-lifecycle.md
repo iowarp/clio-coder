@@ -927,7 +927,9 @@ removed using the app's ownership manifests. A build with no graphical applicati
 so uninstall leaves them and the state root's `gui` directory in place and prints
 `clio-coder gui background uninstall && clio-coder gui launcher uninstall` to run from a build that has it.
 
-For an installer install, uninstall also removes the managed Node and
+An installer root this binary does not run from, left behind when the launcher moved to a
+checkout or a package manager, is listed as `Inactive install` and removed the same way;
+`--keep-binary` keeps it. For an installer install, uninstall also removes the managed Node and
 every installed version: only what the installer created inside the install root
 (`runtime/`, `versions/`, `launchers/`, `.active/`, `install.json` and its ownership
 marker), then the root itself if nothing else is left in it. It takes the

@@ -549,6 +549,32 @@ const SGR_ESCAPE = new RegExp(`(?:${ESC}|\\\\x1b|\\\\u001b)\\[[0-9;]*m`);
 const SGR_COLOR_FRAGMENT = /38;2;|48;2;|38;5;|48;5;/;
 const HEX_COLOR = /#[0-9a-fA-F]{6}\b/;
 
+// ---------------------------------------------------------------------------
+// state-root-inventory: docs/architecture/artifact-placement.md is the contract for
+// where Clio writes. An entry added under the state root without a line there is how
+// that root reached 42 entries with nine undocumented.
+// ---------------------------------------------------------------------------
+function checkStateRootInventory(): void {
+	const doc = readRoot("docs/architecture/artifact-placement.md");
+	const entry =
+		/join\((?:clioStateDir\(\)|clioStatePath\(\)|stateDir|stateRoot|dirs\.state|resolveClioDirs\(\)\.state), *"([\w.-]+)"/g;
+	const missing = new Map<string, string>();
+	for (const file of sourceFiles(join(root, "src"))) {
+		for (const match of readFileSync(file, "utf8").matchAll(entry)) {
+			const name = match[1] ?? "";
+			if (!doc.includes(name)) missing.set(name, relative(root, file));
+		}
+	}
+	if (missing.size > 0) {
+		fail(
+			"state-root-inventory",
+			`docs/architecture/artifact-placement.md names every state root entry, and omits:\n  ${[...missing]
+				.map(([name, file]) => `${name} (written in ${file})`)
+				.join("\n  ")}`,
+		);
+	}
+}
+
 function checkThemeDiscipline(): void {
 	const interactiveRoot = join(root, "src/interactive");
 	const sources = collectInteractiveSources(interactiveRoot)
@@ -1305,6 +1331,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],
 	["environment-variable-inventory", checkEnvironmentVariableInventory],
+	["state-root-inventory", checkStateRootInventory],
 	["theme-discipline", checkThemeDiscipline],
 	["readme-install-block", checkReadmeInstallBlock],
 	["packaging", checkPackaging],

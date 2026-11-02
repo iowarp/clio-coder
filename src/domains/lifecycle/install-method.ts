@@ -6,9 +6,11 @@
  */
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { shellQuote } from "../../core/shell-quote.js";
+import { xdgBaseDir } from "../../core/xdg.js";
 
 const PACKAGE_NAME = "@iowarp/clio-coder";
 const DIST_CLI_SUFFIX = join("dist", "cli", "index.js");
@@ -109,6 +111,46 @@ export function readInstallerRecord(installRoot: string): InstallerRecord | null
 		pathAdded: record.pathAdded === true,
 		pathEntry: text("pathEntry"),
 	};
+}
+
+/** Everything an installer creates inside its root, which may be a directory it shares with other files. */
+export const INSTALLER_OWNED_ENTRIES = [
+	"runtime",
+	"versions",
+	"launchers",
+	"launcher.cjs",
+	".active",
+	".installer-owner",
+	"install.json",
+] as const;
+
+/** Where the installers put their root when none is named: `default_install_root` in scripts/install.sh, and install.ps1. */
+export function defaultInstallRoot(env: NodeJS.ProcessEnv = process.env): string {
+	const named = env.CLIO_CODER_INSTALL_DIR?.trim();
+	if (named) return resolve(named);
+	const clioHome = env.CLIO_CODER_HOME?.trim();
+	if (clioHome) return join(clioHome, "install");
+	const home = homedir();
+	if (process.platform === "win32")
+		return join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "clio-coder", "install");
+	if (process.platform === "darwin") return join(home, "Library", "Application Support", "clio-coder", "install");
+	return join(xdgBaseDir(env.XDG_DATA_HOME, join(home, ".local", "share")), "clio-coder-install");
+}
+
+/** The launcher path that belongs to this installation, whether or not anything is there. */
+export function launcherPathFor(installation: Installation, env: NodeJS.ProcessEnv = process.env): string {
+	if (installation.kind === "installer" && installation.installer?.launcher) return installation.installer.launcher;
+	if (installation.kind === "npm" && installation.prefix) return join(installation.prefix, "bin", "clio-coder");
+	return join(env.CLIO_CODER_BIN_DIR?.trim() || join(homedir(), ".local", "bin"), "clio-coder");
+}
+
+/**
+ * An installer root this binary does not run from, left behind when the launcher
+ * moved to a checkout or a package manager. Nothing runs its pruning any more, so
+ * `paths`, `doctor` and `uninstall` have to name it or it is invisible.
+ */
+export function inactiveInstallerRecord(installation: Installation): InstallerRecord | null {
+	return installation.installer ? null : readInstallerRecord(defaultInstallRoot());
 }
 
 /** The package root inside an installer prefix. */

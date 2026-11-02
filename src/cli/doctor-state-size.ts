@@ -1,7 +1,8 @@
-import { lstatSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { resolveClioDirs } from "../core/xdg.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
+import { inactiveInstallerRecord, inspectInstallation } from "../domains/lifecycle/install-method.js";
 import { formatBytes } from "./lifecycle-presenter.js";
 
 interface MeasuredEntry {
@@ -40,6 +41,37 @@ export function stateStorageFinding(stateDir = resolveClioDirs().state): DoctorF
 			largest === null
 				? `${formatBytes(total)} (${total.toLocaleString("en-US")} bytes); largest contributor none`
 				: `${formatBytes(total)} (${total.toLocaleString("en-US")} bytes); largest contributor ${largest.name} at ${formatBytes(largest.bytes)} (${largest.bytes.toLocaleString("en-US")} bytes)`,
+	};
+}
+
+/**
+ * The other three roots, in one row. State has its own because it is the one that
+ * grows with use, but on a real home the cache and the data root are far larger.
+ */
+export function homeStorageFinding(dirs = resolveClioDirs()): DoctorFinding {
+	const parts: string[] = [];
+	for (const role of ["config", "data", "cache"] as const) {
+		if (!existsSync(dirs[role])) continue;
+		const measured = measureEntry(dirs[role]);
+		if (measured.error !== null) return { ok: false, name: "home storage", detail: measured.error };
+		parts.push(`${role} ${formatBytes(measured.bytes)}`);
+	}
+	return { ok: true, name: "home storage", detail: parts.join(", ") || "nothing yet" };
+}
+
+/** The installer root, which sits outside the four roots and is usually the largest thing Clio owns. */
+export function installRootFinding(installation = inspectInstallation()): DoctorFinding | null {
+	const root = installation.installer?.root ?? inactiveInstallerRecord(installation)?.root;
+	if (root === undefined) return null;
+	const measured = measureEntry(root);
+	if (measured.error !== null) return { ok: false, name: "install root", detail: measured.error };
+	const size = `${formatBytes(measured.bytes)} at ${root}`;
+	return {
+		ok: true,
+		name: "install root",
+		detail: installation.installer
+			? size
+			: `${size}; this binary does not run from it, and \`clio-coder uninstall\` removes it`,
 	};
 }
 

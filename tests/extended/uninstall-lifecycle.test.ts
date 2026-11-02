@@ -181,6 +181,41 @@ describe("contracts/uninstall-lifecycle", () => {
 		}
 	});
 
+	it("removes an installer root this binary does not run from, unless --keep-binary keeps it", async () => {
+		for (const keep of [true, false]) {
+			const temp = home();
+			try {
+				const root = join(temp.root, ".local", "share", "clio-coder-install");
+				const current = join(root, "versions", "0.6.2");
+				const node = join(root, "runtime", "node-v24", "bin", "node");
+				mkdirSync(current, { recursive: true });
+				mkdirSync(join(node, ".."), { recursive: true });
+				writeFileSync(
+					join(root, "install.json"),
+					JSON.stringify({ schema: 2, kind: "clio-coder-installer", current, node, launcher: launcherPath(temp) }),
+					"utf8",
+				);
+				writeFileSync(join(root, "operator-note.txt"), "not ours\n", "utf8");
+				const { code, stdout } = await runInHome(temp, () =>
+					runUninstallCommand(keep ? ["--force", "--keep-binary"] : ["--force"]),
+				);
+				strictEqual(code, 0);
+				if (keep) {
+					match(stdout, /– Inactive install: .*kept by --keep-binary/u);
+					ok(existsSync(current));
+				} else {
+					match(stdout, /✓ Inactive install: /u);
+					match(stdout, /Removed the inactive install/u);
+					ok(!existsSync(join(root, "versions")));
+					ok(!existsSync(join(root, "runtime")));
+					ok(existsSync(join(root, "operator-note.txt")), "only what the installer created goes");
+				}
+			} finally {
+				temp.cleanup();
+			}
+		}
+	});
+
 	it("keeps a launcher that is a real file rather than a symlink", async () => {
 		const temp = home();
 		try {
