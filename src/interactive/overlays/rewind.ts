@@ -222,7 +222,7 @@ class RewindFocusBox extends FocusBox implements RowBudgetedBody {
 		super(body, { onInput });
 	}
 
-	setBodyRows(rows: number): void {
+	override setBodyRows(rows: number): void {
 		this.body.setBodyRows(rows);
 	}
 }
