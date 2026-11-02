@@ -18,6 +18,7 @@ import { fitHintEntries, fitRow, type RowBudgetedBody, windowRows } from "./over
 import {
 	MUTATION_PREVIEW_KEY,
 	PERMISSION_STOP_KEY,
+	PERMISSION_TERMS_KEY,
 	type PermissionInspectionHint,
 	type PermissionTermsHint,
 	permissionHintEntries,
@@ -554,7 +555,9 @@ function permissionInspectionLines(
 	const lines = [
 		...head,
 		...pane.window,
-		...(pane.position === null ? [] : [positionRow(theme, { ...pane.position, unit: "lines" }, content)]),
+		...(pane.position === null
+			? []
+			: [positionRow(theme, { ...pane.position, unit: "lines", keys: ["↑↓ scroll"] }, content)]),
 		...tail,
 	];
 	return { lines, wrappedLineCount: wrapped.length, visibleRows };
@@ -725,7 +728,11 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			this.lastVisibleRows = inspectionWindowRows(this.bodyRows, head.length);
 			const pane = windowRows(rows, this.scroll, this.lastVisibleRows);
 			this.scroll = pane.start;
-			return [...head, ...pane.window, ...(pane.position === null ? [] : [positionRow(theme, pane.position, content)])];
+			return [
+				...head,
+				...pane.window,
+				...(pane.position === null ? [] : [positionRow(theme, { ...pane.position, keys: ["↑↓ scroll"] }, content)]),
+			];
 		}
 		if (this.preview === null) {
 			const sections = permissionCardSections(
@@ -771,11 +778,21 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
 		const end = this.cardScroll + room;
 		this.choicesShown = choicesAt >= this.cardScroll && choicesAt + choicesRows <= end;
-		// The rail names the scroll and terms keys; the row carries the place alone.
+		// The rail drops its reading keys first at 60 columns, which is where a card
+		// overflows (BT-005), so the row that shows the cut names the way past it.
 		return [
 			...facts,
 			...rest.slice(this.cardScroll, end),
-			positionRow(clioTheme(), { start: this.cardScroll + 1, end, total: rest.length }, width),
+			positionRow(
+				clioTheme(),
+				{
+					start: this.cardScroll + 1,
+					end,
+					total: rest.length,
+					keys: ["↑↓ scroll", ...(this.terms ? [`${PERMISSION_TERMS_KEY} back`] : [])],
+				},
+				width,
+			),
 		];
 	}
 
