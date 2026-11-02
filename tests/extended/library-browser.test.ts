@@ -256,7 +256,7 @@ describe("library browser projection", () => {
 		const rows = buildLibraryRows({ inventory: selectForCategory(inventory(), view), view });
 		equal(rows.items.length, 1);
 		const detail = plain((rows.items[0]?.detail?.(80) ?? []).join("\n"));
-		match(detail, /Catalog hints \(skill\):.*materio-lab/);
+		match(detail, /Catalog hints \(skill\)\s+skill:materio-lab/);
 		equal(rows.items[0]?.id, "pkg:plugin:materio");
 	});
 
@@ -291,7 +291,7 @@ describe("library review and outcome wording", () => {
 		match(body, /cannot be applied as reviewed/);
 		// Paths and digests are opt-in so the dependency story is not crowded out.
 		ok(!body.includes("/tmp/materio"));
-		match(plain(formatLibraryPlanReview(plan, 90, { detail: true }).join("\n")), /destination \/tmp\/materio/);
+		match(plain(formatLibraryPlanReview(plan, 90, { detail: true }).join("\n")), /Destination\s+\/tmp\/materio/);
 	});
 
 	it("reports a partial batch as committed, failed and unattempted, with refresh separate", () => {
@@ -362,7 +362,7 @@ describe("library review and outcome wording", () => {
 				90,
 			).join("\n"),
 		);
-		match(body, /reopen the Library for current\s+admission/);
+		match(body, /reopen the Library\s+for\s+current\s+admission/);
 		// A package can be on disk while one resource is still unavailable.
 		match(body, /skill:ship unavailable \(untrusted project import\)/);
 		match(body, /generation 4/);

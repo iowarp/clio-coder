@@ -32,6 +32,7 @@ import {
 } from "../../domains/resources/index.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
+import { chipRow, clioTheme, keyCap } from "../theme/index.js";
 import type { LibraryLifecyclePlan, LibraryLifecyclePort, LibraryOperation } from "./library-lifecycle.js";
 import {
 	buildLibraryRows,
@@ -55,10 +56,14 @@ export const LIBRARY_TITLE = "Library";
 
 /** @internal exported for contract tests */
 export const LIBRARY_EMPTY_BROWSE =
-	"No packages of this kind in the index. Browse counts packages, not runnable components. Press b for loaded components in Installed. Register one with clio-coder library register <path>, or press o to import from another local agent.";
+	"No packages of this kind in the index. Browse counts packages, not runnable components.";
+const LIBRARY_EMPTY_BROWSE_REMEDY =
+	"b shows loaded components in Installed. Register one with clio-coder library register <path>, or press o to import from another local agent.";
 /** @internal exported for contract tests */
 export const LIBRARY_EMPTY_INSTALLED =
-	"No entries of this kind are listed by the Library inventory. Action scope selects a package destination, not which components can run. Press b for installable packages.";
+	"No entries of this kind are listed by the Library inventory. Action scope selects a package destination, not which components can run.";
+const LIBRARY_EMPTY_INSTALLED_REMEDY = "b shows installable packages.";
+const LIBRARY_READ_FAILED_REMEDY = "R reads the Library again; n opens the notices.";
 
 export interface LibraryOverlayDeps {
 	/** The package lifecycle. Plans are reviewed before anything is written. */
@@ -479,7 +484,15 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			explicitSearch: true,
 			fullScreen: true,
 			layout: "split",
-			status: () => `${items.length} ${items.length === 1 ? "notice" : "notices"} · browse focus: n back`,
+			status: (width) =>
+				chipRow(
+					clioTheme(),
+					[
+						`${keyCap(clioTheme(), "n")} ${clioTheme().fg("annotation", "back to resources")}`,
+						clioTheme().fg("fieldValue", `${items.length} ${items.length === 1 ? "notice" : "notices"}`),
+					],
+					width,
+				),
 			emptyMessage:
 				"No notices in this view. From browse focus, n returns to resources. Esc clears a filter or leaves search focus before returning to the parent browser.",
 			globalHints: [{ key: "n", verb: "resources", critical: true }],
@@ -550,6 +563,14 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		fullScreen: true,
 		layout: "split",
 		emptyMessage: () => (view.mode === "browse" ? LIBRARY_EMPTY_BROWSE : LIBRARY_EMPTY_INSTALLED),
+		emptyRemedy: () =>
+			failure
+				? LIBRARY_READ_FAILED_REMEDY
+				: view.mode === "browse"
+					? LIBRARY_EMPTY_BROWSE_REMEDY
+					: LIBRARY_EMPTY_INSTALLED_REMEDY,
+		// A read that failed is drawn as the error it is, not as an empty library.
+		emptyError: () => failure,
 		status,
 		onBack: {
 			active: () => view.member !== undefined,
