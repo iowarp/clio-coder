@@ -85,7 +85,7 @@ The core rows read as follows.
 | `settings.yaml retired values` | `WARN` naming each retired enum value `--fix` would rewrite and the value it becomes. |
 | `settings.yaml repair`, `settings.yaml repair skipped` | What `--fix` rewrote, and `WARN` for values it could not rewrite safely because of aliases, anchors or tags. |
 | `credentials` | `!!` when `credentials.yaml` is missing, unreadable, or not `0600` on POSIX. On Windows only its content is checked. |
-| `state metadata` | `!!` when the state `install.json` is missing, unreadable, or records an older version than the running one. A development build leaves the recorded version alone. |
+| `state metadata` | `!!` when the state `home.json` is missing, unreadable, or records an older version than the running one. A development build leaves the recorded version alone. |
 | `lifecycle migrations` | See the migration paragraph above. |
 | `session store` | `OK` with the number of readable session ledgers. `!!` when ledgers hold lines that cannot be read or a directory cannot be listed. |
 | `telemetry` | The telemetry mode a session in the current directory gets, the research flags it captures, and whether content capture is on, with the workspace consent that grants it (who and when) or why it is off. In standard mode it counts recorded workspace consents. `WARN` when settings cannot be read, or when the consent store cannot be read, which grants no workspace consent. Journal health and seal states are in `clio-coder telemetry doctor`. |

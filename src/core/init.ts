@@ -4,7 +4,7 @@
  * defaults when absent. Idempotent.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import {
 	legacyMigrationManifestPath,
@@ -152,9 +152,12 @@ export function initializeClioHome(): InitReport {
 	// locked transaction and publication is atomic. Otherwise both first boots
 	// can invent different install times, or a stale writer can erase the other
 	// process's noticedVersion after an upgrade.
-	const installPath = join(stateDir, "install.json");
+	const installPath = join(stateDir, "home.json");
 	const runningVersion = readClioVersion();
 	withStateFileLockSync(installPath, () => {
+		// Before 0.6.8 this record was install.json, one of three files with that name.
+		const legacyPath = join(stateDir, "install.json");
+		if (!existsSync(installPath) && existsSync(legacyPath)) renameSync(legacyPath, installPath);
 		const installMetadata = readInstallMetadata(installPath);
 		// A `-dev` checkout build is not a release, so it never becomes the recorded
 		// version of a home it shares with an installed one. Stamping `0.6.0-dev`
@@ -228,7 +231,7 @@ function readInstallMetadata(path: string): InstallMetadata | null {
 			};
 		}
 	} catch {
-		// Repaired below by overwriting install.json with current metadata.
+		// Repaired below by overwriting home.json with current metadata.
 	}
 	return null;
 }

@@ -48,7 +48,7 @@ describe("extended/uninstall-without-gui", () => {
 			// The service's own configuration and the launcher survive; everything else in state is gone.
 			ok(existsSync(join(background, "config.json")));
 			ok(existsSync(entry));
-			ok(!existsSync(join(temp.stateDir, "install.json")));
+			ok(!existsSync(join(temp.stateDir, "home.json")));
 			ok(!existsSync(join(temp.stateDir, "sessions")));
 			ok(!existsSync(temp.configDir));
 			ok(!existsSync(temp.dataDir));

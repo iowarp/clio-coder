@@ -46,7 +46,7 @@ async function upgrade(
 function currentHome(): LifecycleHome {
 	const temp = createLifecycleHome("clio-coder-test-upgrade-");
 	writeFileSync(join(temp.configDir, "migrations.json"), JSON.stringify({ applied: [...MIGRATION_IDS] }), "utf8");
-	writeFileSync(join(temp.stateDir, "install.json"), JSON.stringify({ version: getVersionInfo().clio }), "utf8");
+	writeFileSync(join(temp.stateDir, "home.json"), JSON.stringify({ version: getVersionInfo().clio }), "utf8");
 	return temp;
 }
 
@@ -176,7 +176,7 @@ describe("contracts/upgrade-lifecycle", () => {
 			});
 			strictEqual(code, 2);
 			strictEqual(touched, 0);
-			ok(existsSync(join(temp.stateDir, "install.json")));
+			ok(existsSync(join(temp.stateDir, "home.json")));
 		} finally {
 			temp.cleanup();
 		}

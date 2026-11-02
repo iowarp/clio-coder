@@ -224,7 +224,7 @@ test("post-install initializes integrity without running environment repairs", (
 	t.after(f.home.cleanup);
 	const state = join(f.home.dir, "state");
 	mkdirSync(state);
-	writeFileSync(join(state, "install.json"), JSON.stringify({ version: readClioVersion() }));
+	writeFileSync(join(state, "home.json"), JSON.stringify({ version: readClioVersion() }));
 	const result = f.run(["--post-install", "--skip-migrations", "--json"]);
 	assert.equal(result.status, 0, result.stderr + result.stdout);
 	assert.throws(f.calls, /ENOENT/, "post-install no longer invokes environment doctor repair");

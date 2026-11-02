@@ -1,7 +1,7 @@
 /**
  * The one line the first interactive launch after an upgrade says.
  *
- * `install.json` is refreshed silently on every boot, so without this the
+ * `home.json` is refreshed silently on every boot, so without this the
  * operator who installed 0.3.0 and ran `npm install -g` again would never be
  * told the version moved or that anything at the keyboard changed. This is one
  * sentence per release, for changes an interactive operator meets by typing

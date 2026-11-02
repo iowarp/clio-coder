@@ -33,7 +33,7 @@ describe("contracts/reset-lifecycle", () => {
 
 			ok(existsSync(join(temp.configDir, "settings.yaml")));
 			ok(existsSync(join(temp.dataDir, "records.json")));
-			ok(existsSync(join(temp.stateDir, "install.json")));
+			ok(existsSync(join(temp.stateDir, "home.json")));
 		} finally {
 			temp.cleanup();
 		}
@@ -67,7 +67,7 @@ describe("contracts/reset-lifecycle", () => {
 				strictEqual(code, 1, level);
 				match(stdout, /20261102-open-session \(tui, pid \d+ on /u);
 				match(stdout, /clio-coder session terminate <id>/u);
-				ok(existsSync(join(temp.stateDir, "install.json")));
+				ok(existsSync(join(temp.stateDir, "home.json")));
 				ok(existsSync(join(temp.dataDir, "records.json")));
 			}
 			const preview = await runInHome(temp, () => runResetCommand(["--state", "--dry-run"]));
@@ -113,7 +113,7 @@ describe("contracts/reset-lifecycle", () => {
 			match(stdout, /Everything goes: settings, credentials, memory/u);
 
 			ok(existsSync(join(temp.configDir, "settings.yaml")));
-			ok(existsSync(join(temp.stateDir, "install.json")));
+			ok(existsSync(join(temp.stateDir, "home.json")));
 		} finally {
 			temp.cleanup();
 		}
@@ -165,7 +165,7 @@ describe("contracts/reset-lifecycle", () => {
 				const { code, stdout } = await runInHome(temp, () => runResetCommand(argv));
 				strictEqual(code, 2, argv.join(" "));
 				strictEqual(stdout, "");
-				ok(existsSync(join(temp.stateDir, "install.json")));
+				ok(existsSync(join(temp.stateDir, "home.json")));
 			}
 		} finally {
 			temp.cleanup();
@@ -180,7 +180,7 @@ describe("contracts/reset-lifecycle", () => {
 			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--state"]));
 			strictEqual(code, 2);
 			strictEqual(stdout, "", "a refusal must leave stdout clean for the caller parsing it");
-			ok(existsSync(join(temp.stateDir, "install.json")), "nothing is removed on the refusal path");
+			ok(existsSync(join(temp.stateDir, "home.json")), "nothing is removed on the refusal path");
 		} finally {
 			process.stdin.isTTY = savedIsTty;
 			temp.cleanup();
@@ -192,7 +192,7 @@ describe("contracts/reset-lifecycle", () => {
 		try {
 			mkdirSync(join(temp.stateDir, "sessions", "kept"), { recursive: true });
 			writeFileSync(join(temp.stateDir, "sessions", "kept", "meta.json"), "{}\n", "utf8");
-			writeFileSync(join(temp.stateDir, "install.json"), '{"version":"0.4.2-old"}\n', "utf8");
+			writeFileSync(join(temp.stateDir, "home.json"), '{"version":"0.4.2-old"}\n', "utf8");
 			const settingsBefore = readFileSync(join(temp.configDir, "settings.yaml"), "utf8");
 			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--state", "--force"]));
 			strictEqual(code, 0);
@@ -201,10 +201,10 @@ describe("contracts/reset-lifecycle", () => {
 			ok(!/Cleared Data|Cleared Config|Cleared Cache/u.test(stdout), `only state was in scope:\n${stdout}`);
 
 			ok(!existsSync(join(temp.stateDir, "sessions", "kept")), "recorded sessions are gone");
-			// install.json comes back from the bootstrap, carrying this version
+			// home.json comes back from the bootstrap, carrying this version
 			// rather than the one the reset removed.
 			ok(existsSync(temp.stateDir), "the empty root is recreated so the next run has somewhere to write");
-			ok(!readFileSync(join(temp.stateDir, "install.json"), "utf8").includes('"0.4.2-old"'));
+			ok(!readFileSync(join(temp.stateDir, "home.json"), "utf8").includes('"0.4.2-old"'));
 			strictEqual(readFileSync(join(temp.configDir, "settings.yaml"), "utf8"), settingsBefore);
 			ok(existsSync(join(temp.configDir, "credentials.yaml")));
 			ok(existsSync(join(temp.dataDir, "records.json")));
@@ -224,7 +224,7 @@ describe("contracts/reset-lifecycle", () => {
 			// a reset that left the key in place.
 			ok(!readFileSync(join(temp.configDir, "credentials.yaml"), "utf8").includes("test-secret"));
 			strictEqual(readFileSync(join(temp.configDir, "settings.yaml"), "utf8"), "theme: custom-theme\n");
-			ok(existsSync(join(temp.stateDir, "install.json")), "--auth does not reach the state root");
+			ok(existsSync(join(temp.stateDir, "home.json")), "--auth does not reach the state root");
 		} finally {
 			temp.cleanup();
 		}
@@ -252,7 +252,7 @@ describe("contracts/reset-lifecycle", () => {
 			strictEqual(code, 2);
 			strictEqual(stdout, "");
 			ok(existsSync(join(temp.configDir, "settings.yaml")));
-			ok(existsSync(join(temp.stateDir, "install.json")));
+			ok(existsSync(join(temp.stateDir, "home.json")));
 		} finally {
 			temp.cleanup();
 		}
@@ -265,7 +265,7 @@ describe("contracts/reset-lifecycle", () => {
 				const { code } = await runInHome(temp, () => runResetCommand(argv));
 				strictEqual(code, 2, `${argv.join(" ")} must be a usage error`);
 			}
-			ok(existsSync(join(temp.stateDir, "install.json")));
+			ok(existsSync(join(temp.stateDir, "home.json")));
 			ok(existsSync(join(temp.configDir, "settings.yaml")));
 		} finally {
 			temp.cleanup();

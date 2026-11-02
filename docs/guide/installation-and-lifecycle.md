@@ -109,7 +109,7 @@ for them.
 | --- | --- |
 | `~/.local/share/clio-coder-install/runtime/node-v<ver>-<build>/` | The managed Node.js. macOS uses `~/Library/Application Support/clio-coder/install`, Windows `%LOCALAPPDATA%\clio-coder\install`; `--install-dir`, `CLIO_CODER_INSTALL_DIR` or `CLIO_CODER_HOME/install` override it. |
 | `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version. The manifest names the current and previous ones, which always stay. Each activation also removes other versions older than seven days that no local process is using, on a local Linux filesystem only; everywhere else they stay until `uninstall`, because a running session may still load code from the version it started with. Runtimes stay until that uninstall too. |
-| `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher, the channel, any version pin, whether background updates are on, whether a package manager wraps the install, and whether the installer added the launcher directory to `PATH`. Activating a version is one atomic write of this file. It is a different file from the state root's `install.json`, which records the Clio Coder version and install times. |
+| `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher, the channel, any version pin, whether background updates are on, whether a package manager wraps the install, and whether the installer added the launcher directory to `PATH`. Activating a version is one atomic write of this file. |
 | `.../launchers/`, `.../.active/` | The launcher's helper script, and one receipt per running session, which `uninstall` checks before it removes anything. |
 | `.../.installer-owner`, `.../.install-lock/` | The ownership marker that stops an installer from claiming a directory that already holds `runtime/` or `versions/`, and the lock held while an install, rollback or uninstall runs. Each installer reclaims a lock on its own when this machine wrote it, the owner pid is gone and the lock is older than 10 minutes. A lock held by a live process, a foreign host or a recent crash stops the run with exit status 75, and deleting only that directory once its owner has exited clears it. |
 | `~/.local/bin/clio-coder` (`%USERPROFILE%\.local\bin\clio-coder.cmd` on Windows) | A small launcher that reads the manifest on each start and runs the managed Node on the current prefix. |
@@ -422,7 +422,7 @@ catalog only as a marketplace, through `clio-coder library install skill:<name>`
 
 ## 2. File & Permissions Matrix
 
-The core files are created automatically during the first run. `settings.yaml`, `credentials.yaml`, `install.json` and `migrations.json` are written owner-only (`0o600`). `doctor` reports a `settings.yaml` that is wider than owner-only as a warning and a `credentials.yaml` that is not `0o600` as an error, and `doctor --fix` tightens both. Other initialized files and directories use either the explicit mode shown below or the platform default produced by the writer and process umask. On Windows the profile directory's ACL protects these files and the mode checks do not run.
+The core files are created automatically during the first run. `settings.yaml`, `credentials.yaml`, `home.json` and `migrations.json` are written owner-only (`0o600`). `doctor` reports a `settings.yaml` that is wider than owner-only as a warning and a `credentials.yaml` that is not `0o600` as an error, and `doctor --fix` tightens both. Other initialized files and directories use either the explicit mode shown below or the platform default produced by the writer and process umask. On Windows the profile directory's ACL protects these files and the mode checks do not run.
 
 | Directory | File Path | Purpose | Permissions | Lifecycle Action |
 | :--- | :--- | :--- | :--- | :--- |
@@ -431,7 +431,7 @@ The core files are created automatically during the first run. `settings.yaml`, 
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
 | **Config** | `workspace-trust/` | Project approvals from `clio-coder config trust`, one record per workspace. Operator decisions rather than disposable state, so they survive `reset --state` and `uninstall --keep-config`. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --all`. |
 | **Config** | `migrations.json` | Log of successfully applied schema/state migrations. It sits beside the settings whose shape it records, so it survives `reset --state` and `uninstall --keep-config`. A home created by this run starts with every registered migration recorded. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --all`. |
-| **State** | `install.json` | Install metadata: Clio Coder version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | `0o600` (rw-------) | Removed by uninstall / `reset --state`. |
+| **State** | `home.json` | Install metadata: Clio Coder version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | `0o600` (rw-------) | Removed by uninstall / `reset --state`. |
 | **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | Writer/umask default | Removed by uninstall / `reset --data`. |
 | **Data** | `tools/<id>/<version>/` | One pinned external program Clio Coder downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-coder-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
 | **State** | `telemetry/{process,sessions,runs}/<id>/` | One telemetry scope per process, session and run: its hash-chained `journal.jsonl` segments (safety decisions, approvals and tool facts included), content-addressed `objects/`, and `bundle.json` once sealed. Beside them, `telemetry/consent.json` (research content consent) and `telemetry/install.json` (this installation's random id). See [Layout](../architecture/telemetry.md#layout). | `0o600` (rw-------) for journals, objects, seals and consent | `clio-coder telemetry prune --apply` applies retention; removed by uninstall / `reset --state`. |
@@ -446,7 +446,7 @@ When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see [
 2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config at `0o600`. An existing file is never read, validated, or rewritten by initialization.
 3.  **Credentials Security**: If `credentials.yaml` is absent, creates a YAML file containing a managed-file comment and an empty object (`{}`), then locks its permissions immediately to owner-only read-write (`0o600`).
 4.  **Migration Manifest**: When this call wrote `settings.yaml` and no manifest exists, writes `migrations.json` with every registered migration recorded, because the fresh settings file is already in the current shape. A `settings.yaml` that was already there is left to `clio-coder upgrade`.
-5.  **Install Metadata**: Writes `install.json` with `installedAt` exactly once when no config, data, or state root existed before initialization. If Clio reconstructs missing metadata over a preexisting config, data, or state root, it writes `repairedAt` instead of inventing an installation time. A cache-only root does not count as a preexisting home for this decision. A later version, platform, or node change preserves whichever original timestamp exists and stamps `upgradedAt`; a version change also records the previous version as `upgradedFrom`.
+5.  **Install Metadata**: Writes `home.json` with `installedAt` exactly once when no config, data, or state root existed before initialization. If Clio reconstructs missing metadata over a preexisting config, data, or state root, it writes `repairedAt` instead of inventing an installation time. A cache-only root does not count as a preexisting home for this decision. A later version, platform, or node change preserves whichever original timestamp exists and stamps `upgradedAt`; a version change also records the previous version as `upgradedFrom`.
 
 ---
 
@@ -554,7 +554,7 @@ one report document with `command`, `title`, `method`, `status`, `items`, `steps
 `warnings`, `errors`, `advice` and `summary`.
 
 On a source checkout, the command applies pending migrations, refreshes
-`install.json`, and prints the checkout path and source update steps. Fetch tags,
+`home.json`, and prints the checkout path and source update steps. Fetch tags,
 choose the desired release, and run `pnpm run install:local`; the installer applies
 migrations before its final doctor repair.
 
@@ -722,7 +722,7 @@ print the migration retry command. The package remains installed;
 
 The first interactive launch after the recorded version changes shows one sticky
 notice, `clio-coder: upgraded <from> → <to>. What changed is in CHANGELOG.md, section <to>.`,
-and stamps `noticedVersion` in the state `install.json` so it appears once per
+and stamps `noticedVersion` in the state `home.json` so it appears once per
 version. It follows any version change, whether `upgrade`, a package manager or a
 background update made it.
 

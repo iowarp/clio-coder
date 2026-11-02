@@ -330,7 +330,7 @@ function credentialsDamage(): string | null {
 
 /**
  * True when none of the four roots exist and no install record does. Anything
- * short of that (one root present, a stray settings.yaml, a stale install.json)
+ * short of that (one root present, a stray settings.yaml, a stale home.json)
  * is a home Clio once touched, and the per-row report is the honest one for it.
  */
 export function isUninitializedHome(dirs: ReturnType<typeof resolveClioDirs> = resolveClioDirs()): boolean {
@@ -339,7 +339,7 @@ export function isUninitializedHome(dirs: ReturnType<typeof resolveClioDirs> = r
 		!existsSync(dirs.data) &&
 		!existsSync(dirs.state) &&
 		!existsSync(dirs.cache) &&
-		!existsSync(join(dirs.state, "install.json"))
+		!existsSync(join(dirs.state, "home.json"))
 	);
 }
 

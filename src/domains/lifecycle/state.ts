@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { initializeClioHome } from "../../core/init.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
@@ -31,14 +31,17 @@ export interface StateInfoRead {
 	 * Why the metadata could not be read, or null when it is absent or fine.
 	 * Absent and unreadable are different problems with different remedies, and
 	 * collapsing both to null had `clio-coder doctor` report "state metadata missing"
-	 * for an install.json that was present and merely mode 000, then send the
+	 * for a record that was present and merely mode 000, then send the
 	 * user to a `--fix` that dies on EACCES.
 	 */
 	problem: string | null;
 }
 
 export function readStateInfoResult(): StateInfoRead {
-	const path = join(clioStatePath(), "install.json");
+	// `doctor` reads without initializing, so a record from before 0.6.8 may not have moved yet.
+	const current = join(clioStatePath(), "home.json");
+	const legacy = join(clioStatePath(), "install.json");
+	const path = existsSync(current) || !existsSync(legacy) ? current : legacy;
 	try {
 		return { info: JSON.parse(readFileSync(path, "utf8")) as StateInfo, problem: null };
 	} catch (error) {
@@ -65,7 +68,7 @@ export function ensureClioState(): StateInfo {
 
 /**
  * The version transition the operator has not been told about yet, or null.
- * `initializeClioHome` refreshes `install.json` silently on every boot, so by
+ * `initializeClioHome` refreshes `home.json` silently on every boot, so by
  * the time anything can speak the record already says the current version;
  * `upgradedFrom` is what remembers where it came from. Claiming the notice
  * stamps `noticedVersion`, so it is shown once per version and never again.
@@ -73,7 +76,7 @@ export function ensureClioState(): StateInfo {
  * writes nothing.
  */
 export function takeUpgradeNotice(): UpgradeTransition | null {
-	const path = join(clioStatePath(), "install.json");
+	const path = join(clioStatePath(), "home.json");
 	try {
 		return withStateFileLockSync(
 			path,

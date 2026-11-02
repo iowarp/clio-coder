@@ -21,7 +21,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			strictEqual(code, 1);
 			match(stdout, /20261102-open-session \(tui, pid 4242 on other-node, \/work\/project\)/u);
 			ok(existsSync(join(temp.configDir, "settings.yaml")));
-			ok(existsSync(join(temp.stateDir, "install.json")));
+			ok(existsSync(join(temp.stateDir, "home.json")));
 		} finally {
 			temp.cleanup();
 		}
@@ -81,7 +81,7 @@ describe("contracts/uninstall-lifecycle", () => {
 
 			ok(existsSync(join(temp.configDir, "settings.yaml")));
 			ok(existsSync(join(temp.dataDir, "records.json")));
-			ok(existsSync(join(temp.stateDir, "install.json")));
+			ok(existsSync(join(temp.stateDir, "home.json")));
 		} finally {
 			temp.cleanup();
 		}
@@ -130,7 +130,7 @@ describe("contracts/uninstall-lifecycle", () => {
 
 			ok(existsSync(join(temp.configDir, "settings.yaml")));
 			ok(existsSync(join(temp.dataDir, "records.json")));
-			ok(!existsSync(join(temp.stateDir, "install.json")));
+			ok(!existsSync(join(temp.stateDir, "home.json")));
 			ok(!existsSync(join(temp.cacheDir, "derived.bin")));
 		} finally {
 			temp.cleanup();
@@ -259,7 +259,7 @@ describe("contracts/uninstall-lifecycle", () => {
 			strictEqual(code, 2);
 			strictEqual(stdout, "");
 			ok(existsSync(join(temp.configDir, "settings.yaml")));
-			ok(existsSync(join(temp.stateDir, "install.json")));
+			ok(existsSync(join(temp.stateDir, "home.json")));
 		} finally {
 			temp.cleanup();
 		}

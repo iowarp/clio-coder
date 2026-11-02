@@ -22,7 +22,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
  * agents, skills, prompts, extensions, runtimes) and the records that vouch for
  * them (the migration manifest, project and MCP approvals); data holds durable artifacts (memory,
  * vendored tools); state holds machine-produced session state (sessions,
- * telemetry, runs.json, recent-models.json, install.json, interviews, scratch);
+ * telemetry, runs.json, recent-models.json, home.json, interviews, scratch);
  * cache holds disposable derived files.
  */
 

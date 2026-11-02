@@ -44,7 +44,7 @@ export function createLifecycleHome(prefix: string, options: LifecycleHomeOption
 		writeFileSync(join(configDir, "settings.yaml"), "theme: custom-theme\n", "utf8");
 		writeFileSync(join(configDir, "credentials.yaml"), "key: test-secret\n", "utf8");
 		writeFileSync(join(dataDir, "records.json"), '["memory"]\n', "utf8");
-		writeFileSync(join(stateDir, "install.json"), '{"version":"0.4.2"}\n', "utf8");
+		writeFileSync(join(stateDir, "home.json"), '{"version":"0.4.2"}\n', "utf8");
 		mkdirSync(join(stateDir, "sessions"), { recursive: true });
 		writeFileSync(join(cacheDir, "derived.bin"), "0123456789", "utf8");
 	}
