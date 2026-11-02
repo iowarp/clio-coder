@@ -25,6 +25,8 @@ export function skillsReminderMessage(installed: number, installable = 0, modelA
 export interface SkillsReminderDeps {
 	/** Pre-turn advice from the shared gate; absence preserves the legacy host protocol. */
 	rankSkills?(task: string): ReadonlyArray<CapabilityMatch>;
+	/** The ranked matches still fit to show a model; runs only when a reminder is about to print. */
+	verifyRankedSkills?(matches: ReadonlyArray<CapabilityMatch>): ReadonlyArray<CapabilityMatch>;
 	/** Only admitted gateway-placed capabilities; direct tools already carry their schemas. */
 	rankCapabilities?(task: string): ReadonlyArray<CapabilityMatch>;
 	/** Coordinator registries may override context's default direct placement. */
@@ -242,6 +244,8 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 				const ids = JSON.stringify([matches.map((match) => match.id), capabilities.map((match) => match.id)]);
 				if ((matches.length === 0 && capabilities.length === 0) || ids === rankedIds) return NO_EFFECTS;
 				rankedIds = ids;
+				const shown = deps.verifyRankedSkills?.(matches) ?? matches;
+				if (shown.length === 0 && capabilities.length === 0) return NO_EFFECTS;
 				refinements++;
 				return [
 					{
@@ -249,7 +253,7 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 						severity: "info",
 						audience: "model",
 						message: rankedSkillsReminder(
-							matches,
+							shown,
 							deps.modelMayActivateSkills?.() ?? false,
 							capabilities,
 							deps.contextPlacement?.() ?? "direct",

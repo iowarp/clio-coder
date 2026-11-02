@@ -5,7 +5,7 @@ import { clioConfigDir } from "../../core/xdg.js";
 import { PLUGIN_RESOURCE_KINDS, pluginResourcePath } from "./discovery.js";
 import { outsidePluginDiscoveryPass, passPluginSnapshot } from "./discovery-pass.js";
 import { listInstalledPlugins } from "./state.js";
-import type { PluginResourceKind, PluginResourceRoot, PluginSnapshot } from "./types.js";
+import type { InstalledPlugin, PluginResourceKind, PluginResourceRoot, PluginSnapshot } from "./types.js";
 
 const snapshots = new Map<string, PluginSnapshot>();
 let generation = 0;
@@ -111,8 +111,32 @@ export function enabledPluginResourceRoots(kind: PluginResourceKind, cwd = proce
 	if (snapshot.generation === 0) return [...snapshot.resourceRoots[kind]];
 	// A reload controls additions and replacements. Revocation and content drift
 	// take effect on the next read, including before a planned session reload.
-	const current = listInstalledPlugins(cwd, { all: true });
-	return snapshot.resourceRoots[kind].filter((root) =>
+	return stillVerified(snapshot.resourceRoots[kind], listInstalledPlugins(cwd, { all: true }));
+}
+
+/**
+ * {@link enabledPluginResourceRoots} walking only the named packages, so a caller
+ * about to show a few resources pays for those trees rather than every install.
+ */
+export function enabledPluginResourceRootsFor(
+	kind: PluginResourceKind,
+	ids: ReadonlySet<string>,
+	cwd = process.cwd(),
+): PluginResourceRoot[] {
+	const snapshot = pluginSnapshotFor(cwd);
+	const roots = snapshot.resourceRoots[kind].filter((root) => ids.has(root.id));
+	if (snapshot.generation === 0) return roots;
+	return stillVerified(
+		roots,
+		[...ids].flatMap((id) => listInstalledPlugins(cwd, { all: true, id })),
+	);
+}
+
+function stillVerified(
+	roots: ReadonlyArray<PluginResourceRoot>,
+	current: ReadonlyArray<InstalledPlugin>,
+): PluginResourceRoot[] {
+	return roots.filter((root) =>
 		current.some(
 			(item) =>
 				item.loadable &&

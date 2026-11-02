@@ -1,5 +1,5 @@
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
-import { withPluginDiscoveryPass } from "../plugins/index.js";
+import { enabledPluginResourceRootsFor, withPluginDiscoveryPass } from "../plugins/index.js";
 import type { ResourceDiagnostic } from "./collision.js";
 import {
 	expandPromptTemplateInput,
@@ -34,6 +34,8 @@ export interface ResourcesLoader {
 	skills(cwd?: string): ResourceList<Skill>;
 	/** Skills for naming only; see {@link ResourcesContract.skillsForDisplay}. */
 	skillsForDisplay(cwd?: string): ResourceList<Skill>;
+	/** See {@link ResourcesContract.skillsStillVerified}. */
+	skillsStillVerified(skills: ReadonlyArray<Skill>, cwd?: string): Skill[];
 	parsePendingSkillRequests(
 		text: string,
 		cwd?: string,
@@ -67,6 +69,18 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		},
 		skillsForDisplay(cwd = defaultCwd) {
 			return loadSkills({ cwd, ...skillOptions(), verifyPluginTrees: false });
+		},
+		skillsStillVerified(skills, cwd = defaultCwd) {
+			const owners = new Set(skills.flatMap((skill) => (skill.sourceInfo.owner ? [skill.sourceInfo.owner.id] : [])));
+			if (owners.size === 0) return skills.filter((skill) => skill.source !== "plugin");
+			const roots = withPluginDiscoveryPass(() => enabledPluginResourceRootsFor("skills", owners, cwd));
+			return skills.filter((skill) => {
+				const owner = skill.sourceInfo.owner;
+				if (owner === undefined) return skill.source !== "plugin";
+				return roots.some(
+					(root) => root.id === owner.id && root.scope === owner.scope && root.provenance.contentDigest === owner.digest,
+				);
+			});
 		},
 		parsePendingSkillRequests(text, cwd = defaultCwd, expansionOptions = {}) {
 			// Plain text names no skill. Checking the prefix first keeps an ordinary
