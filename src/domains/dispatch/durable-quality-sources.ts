@@ -37,6 +37,8 @@ export interface DurableQualitySources {
 
 export interface DurableQualitySourceCache {
 	read(): DurableQualitySources;
+	/** Fold the route history ahead of the first read; see {@link RouteHistoryFold.warm}. */
+	warm(stopped: () => boolean): Promise<void>;
 	/** The verified source for a settled run, the same object across reads while the run is unchanged. */
 	sourceOf(run: SettledRunFacts): DurableRunSource | null;
 }
@@ -154,6 +156,7 @@ export function createDurableQualitySourceCache(
 
 	return {
 		sourceOf,
+		warm: async (stopped) => await fold.warm?.(stopped),
 		read() {
 			const history = fold.read();
 			const gateRead = readGates();

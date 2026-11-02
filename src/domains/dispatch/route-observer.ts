@@ -213,6 +213,8 @@ export interface RouteObserver {
 	observe(input: RouteObserveInput): RouteObservationHandle;
 	/** Immutable evidence snapshot shared by every tuple in one joint resolution. */
 	readinessWindow(): RouteReadinessEvidenceWindow;
+	/** Fold retained route history off the dispatch path; a first dispatch pays only for what is still cold. */
+	warmHistory?(stopped: () => boolean): Promise<void>;
 	/** Evaluate the real terminal route outcome; the run's own run.settled is its durable record. */
 	recordOutcome(observationId: string, outcome: RouteObservedOutcome): void;
 	summary(): RouteObserverSummary;
@@ -414,6 +416,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 
 	return {
 		readinessWindow,
+		warmHistory: (stopped) => sourceCache().warm(stopped),
 		observe(input) {
 			try {
 				const intent = classifyAgentTask(input.task);

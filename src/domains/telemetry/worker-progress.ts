@@ -449,7 +449,10 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 				changed = true;
 			}
 
-			if (event.type === "agent_start") changed = setPhase("starting") || changed;
+			// The loop only starts after the orchestrator admits the attested worker, so
+			// from here the wait is the model's first byte. Reading `starting` through it
+			// made a healthy worker on a slow provider look stuck in launch.
+			if (event.type === "agent_start") changed = setPhase("waiting") || changed;
 			// The worker's loop has ended, so the fold seals here whichever surface
 			// reads it. The island and the card each fold the same events; only the
 			// island settled on agent_end, and until the terminal event arrived it

@@ -135,6 +135,13 @@ export interface RouteHistoryRead {
 
 export interface RouteHistoryFold {
 	read(): RouteHistoryRead;
+	/**
+	 * Fold unread run scopes one per macrotask until `stopped` answers true, so the
+	 * synchronous `read` a dispatch makes finds them cached. A cold read parses every
+	 * retained journal on the input thread, 8 to 14 ms a run, before the worker card can
+	 * paint. Warming decides nothing: `read` still revalidates each scope's identity.
+	 */
+	warm?(stopped: () => boolean): Promise<void>;
 }
 
 function statOrNull(path: string): Stats | null {
@@ -187,16 +194,53 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 	const cache = new Map<string, { identity: string; run: SettledRunFacts | null; entry: RouteHistoryEntry | null }>();
 	let version = 0;
 	let last: RouteHistoryRead | null = null;
+	// A scope warmed since the last read is a cache hit there, but `last` does not hold it.
+	let warmedSinceRead = false;
+	const listRuns = (): string[] => {
+		try {
+			return listStateDirectorySync(options.stateDir, telemetryRunsDirectory(options.stateDir));
+		} catch {
+			// No run has opened a journal on this host yet.
+			return [];
+		}
+	};
+	const foldRun = (
+		runId: string,
+		identity: string,
+	): { identity: string; run: SettledRunFacts | null; entry: RouteHistoryEntry | null } => {
+		let run: SettledRunFacts | null = null;
+		try {
+			const record = readRunRecord(options.stateDir, runId);
+			run = record?.settled ? settledRunFacts(record as SettledRunRecord) : null;
+		} catch {
+			// An unreadable run scope contributes no history.
+			run = null;
+		}
+		const folded = { identity, run, entry: run === null ? null : routeEntryOf(run) };
+		cache.set(runId, folded);
+		return folded;
+	};
 	return {
-		read() {
-			let names: string[] = [];
-			try {
-				names = listStateDirectorySync(options.stateDir, telemetryRunsDirectory(options.stateDir));
-			} catch {
-				// No run has opened a journal on this host yet.
-				names = [];
+		async warm(stopped) {
+			for (const runId of listRuns()) {
+				if (stopped()) return;
+				try {
+					const directory = telemetryRunDirectory(options.stateDir, runId);
+					const identity = withinStateRoot(options.stateDir, directory) ? scopeIdentity(directory) : null;
+					if (identity === null || cache.get(runId)?.identity === identity) continue;
+					foldRun(runId, identity);
+					warmedSinceRead = true;
+				} catch {
+					// A name that is not a safe run id is not a run scope; `read` skips it too.
+					continue;
+				}
+				await new Promise<void>((resolve) => setImmediate(resolve).unref());
 			}
-			let changed = false;
+		},
+		read() {
+			const names = listRuns();
+			let changed = warmedSinceRead;
+			warmedSinceRead = false;
 			const seen = new Set<string>();
 			const entries: RouteHistoryEntry[] = [];
 			const runs: SettledRunFacts[] = [];
@@ -219,16 +263,7 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 					continue;
 				}
 				changed = true;
-				let run: SettledRunFacts | null = null;
-				try {
-					const record = readRunRecord(options.stateDir, runId);
-					run = record?.settled ? settledRunFacts(record as SettledRunRecord) : null;
-				} catch {
-					// An unreadable run scope contributes no history.
-					run = null;
-				}
-				const entry = run === null ? null : routeEntryOf(run);
-				cache.set(runId, { identity, run, entry });
+				const { run, entry } = foldRun(runId, identity);
 				if (run !== null) runs.push(run);
 				if (entry !== null) entries.push(entry);
 			}

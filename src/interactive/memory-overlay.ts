@@ -275,6 +275,7 @@ export class MemoryOverlayView implements Component {
 			detail: () => detail,
 		});
 		const observations = status.observations;
+		const spend = status.spend;
 		const retention = status.retention;
 		return [
 			row(
@@ -333,11 +334,11 @@ export class MemoryOverlayView implements Component {
 						),
 					]
 				: []),
-			...(status.spend
+			...(spend
 				? [
-						row("spend", formatTaskMemorySpend(status.spend), [
+						row("spend", formatTaskMemorySpend(spend), [
 							"## Retained telemetry",
-							formatTaskMemorySpend(status.spend),
+							formatTaskMemorySpend(spend),
 							"Reminder counts measure recorded delivery, not causal usefulness.",
 						]),
 					]
