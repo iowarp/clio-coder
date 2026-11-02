@@ -179,7 +179,7 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 			...(constraints === undefined ? {} : { constraints }),
 			...(clockResume
 				? {
-						notice: `job ${context.job.id}: its default timeout stopped the last turn. Continuing once because autonomy is yolo.`,
+						notice: `job ${context.job.id}: its default timeout stopped the interrupted run. Finishing that run once because autonomy is yolo; no new run is starting.`,
 					}
 				: {}),
 			isAdmissionCurrent: () => deps.isCurrent(context.job.owner) && !context.signal.aborted,
