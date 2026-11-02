@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { clioProjectRoot } from "../core/project-root.js";
 import { discoverDeclaredProjectCommands } from "../tools/verify/authoring.js";
 
 function quoted(value: string): string {
@@ -11,7 +12,12 @@ export function runPlaybookCommands(args: ReadonlyArray<string>): number {
 		process.stderr.write("clio-coder playbook: commands: usage: clio-coder playbook commands init\n");
 		return 2;
 	}
-	const destination = join(process.cwd(), ".clio-coder", "playbooks", "commands.yaml");
+	const destination = join(
+		clioProjectRoot(process.cwd(), join("playbooks", "commands.yaml")),
+		".clio-coder",
+		"playbooks",
+		"commands.yaml",
+	);
 	if (existsSync(destination)) {
 		process.stderr.write(`clio-coder playbook: commands init: destination already exists: ${destination}\n`);
 		return 2;

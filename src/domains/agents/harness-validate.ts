@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { readSettings } from "../../core/config.js";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { readLayeredSettings } from "../../core/settings-layers.js";
 import {
 	ALL_TOOL_NAMES,
@@ -569,12 +570,19 @@ export function collectHarnessInput(workspaceRoot: string, options: CollectHarne
 			diagnostics: [{ type: "error", message: error instanceof Error ? error.message : String(error) }],
 		};
 	}
-	const projectRecipes = readRecipeDir(path.join(workspaceRoot, ".clio-coder", "agents"), "project");
+	const projectRecipes = readRecipeDir(
+		path.join(clioProjectRoot(workspaceRoot, "agents"), ".clio-coder", "agents"),
+		"project",
+	);
 	const userRecipes = configDir === null ? [] : readRecipeDir(path.join(configDir, "agents"), "user");
 	const recipes = [...userRecipes, ...projectRecipes].filter(
 		(file) => options.recipeFile === undefined || path.resolve(file.filepath) === path.resolve(options.recipeFile),
 	);
-	const localPath = path.join(workspaceRoot, ".clio-coder", "settings.local.yaml");
+	const localPath = path.join(
+		clioProjectRoot(workspaceRoot, "settings.yaml", "settings.local.yaml"),
+		".clio-coder",
+		"settings.local.yaml",
+	);
 	let layered: ReturnType<typeof readLayeredSettings> | null = null;
 	let layerFailure: string | null = null;
 	try {
@@ -639,7 +647,7 @@ export function collectHarnessInput(workspaceRoot: string, options: CollectHarne
 		catalogDiagnostics,
 		skills,
 		ownedSkillRoots: [
-			path.join(workspaceRoot, ".clio-coder", "skills"),
+			path.join(clioProjectRoot(workspaceRoot, "skills"), ".clio-coder", "skills"),
 			...(configDir === null ? [] : [path.join(configDir, "skills")]),
 		],
 		localSettings,

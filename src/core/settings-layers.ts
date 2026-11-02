@@ -41,6 +41,7 @@ import {
 	validateSettings,
 } from "./config.js";
 import { DEFAULT_SETTINGS } from "./defaults.js";
+import { clioProjectRoot } from "./project-root.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import {
@@ -478,8 +479,9 @@ function prepareProjectLayers(
 	userBlob: Record<string, unknown> | undefined,
 ): PreparedLayers {
 	const operatorLevel = userAutonomy(userBlob);
-	const projectFile = join(cwd, ".clio-coder", "settings.yaml");
-	const localFile = join(cwd, ".clio-coder", "settings.local.yaml");
+	const root = clioProjectRoot(cwd, "settings.yaml", "settings.local.yaml");
+	const projectFile = join(root, ".clio-coder", "settings.yaml");
+	const localFile = join(root, ".clio-coder", "settings.local.yaml");
 	const snapshot = captureProjectSurface(cwd, "settings");
 	const readProjectLayer = (origin: SettingsOrigin, path: string, file: ProjectSurfaceFile | undefined): RawLayer => {
 		if (file?.error !== undefined) issues.push({ origin, path, message: file.error, kind: "unreadable" });
@@ -659,8 +661,9 @@ export function updateLayeredSettings(cwd: string, mutate: SettingsMutator): Cli
  * invalidates that approval.
  */
 export function updateProjectLocalSettings(cwd: string, mutate: SettingsMutator): ClioSettings {
-	const localFile = join(cwd, ".clio-coder", "settings.local.yaml");
-	const configDir = join(cwd, ".clio-coder");
+	const root = clioProjectRoot(cwd, "settings.yaml", "settings.local.yaml");
+	const localFile = join(root, ".clio-coder", "settings.local.yaml");
+	const configDir = join(root, ".clio-coder");
 	try {
 		if (lstatSync(configDir).isSymbolicLink()) throw new Error(`project settings path is a symlink: ${configDir}`);
 	} catch (error) {

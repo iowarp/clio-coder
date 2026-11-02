@@ -15,6 +15,7 @@ import {
 import path from "node:path";
 import { recordLifecycleReceipt } from "../../core/library-receipts.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { projectPackageTrust } from "../../core/workspace-trust.js";
 import { clioConfigDir } from "../../core/xdg.js";
@@ -48,7 +49,7 @@ export function installLibraryPackage(input: LibraryPackageInstallInput): Plugin
 export function pluginBaseDir(scope: PluginScope, cwd = process.cwd()): string {
 	return scope === "user"
 		? path.join(clioConfigDir(), "plugins")
-		: path.join(path.resolve(cwd), ".clio-coder", "plugins");
+		: path.join(clioProjectRoot(cwd, path.join("plugins", "state.json")), ".clio-coder", "plugins");
 }
 
 export function pluginStatePath(scope: PluginScope, cwd = process.cwd()): string {
@@ -149,7 +150,8 @@ function writeState(scope: PluginScope, cwd: string, state: PluginState, expecte
 
 /** Reject redirects beneath the operator-selected config or project root. */
 function assertManagedBase(scope: PluginScope, cwd: string): void {
-	const boundary = scope === "user" ? path.resolve(clioConfigDir()) : path.resolve(cwd);
+	const boundary =
+		scope === "user" ? path.resolve(clioConfigDir()) : clioProjectRoot(cwd, path.join("plugins", "state.json"));
 	const base = pluginBaseDir(scope, cwd);
 	let cursor = boundary;
 	for (const part of path.relative(boundary, base).split(path.sep)) {

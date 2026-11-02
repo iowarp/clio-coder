@@ -23,7 +23,7 @@ User `settings.yaml` lives in the config directory; run `clio-coder paths --json
 
 `clio-coder paths --json` prints the resolved config, data, state, and cache directories. `CLIO_CODER_HOME` sets a shared root; `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR`, and `CLIO_CODER_CACHE_DIR` override individual roots. See the [environment reference](environment-variables.md) and [directory resolver](../../src/core/xdg.ts).
 
-User settings are stored at `<configDir>/settings.yaml`. Project layers are `.clio-coder/settings.yaml` and `.clio-coder/settings.local.yaml`. Later layers win: built-in defaults, then the user file, then the project file, then the local file, then CLI flags.
+User settings are stored at `<configDir>/settings.yaml`. Project layers are `.clio-coder/settings.yaml` and `.clio-coder/settings.local.yaml`. Later layers win: built-in defaults, then the user file, then the project file, then the local file, then CLI flags. Inside a Git repository these files apply from any subdirectory: each project entry comes from the nearest `.clio-coder/` that has it, up to the repository root, and a new one is written at the root. Outside a repository only the working directory counts. `.clio-coder/verifiers.yaml` and generated files stay with the working directory.
 
 ## First-run flow
 

@@ -1,6 +1,7 @@
 import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { committedPluginResourceRoots, enabledPluginResourceRoots, type PluginResourceKind } from "../plugins/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "./collision.js";
@@ -103,7 +104,7 @@ export function defaultScopedResourceRoots(
 			precedence: COMPAT_RESOURCE_PRECEDENCE.user,
 		},
 		{
-			path: path.join(cwd, ".clio-coder", kind),
+			path: path.join(clioProjectRoot(cwd, kind), ".clio-coder", kind),
 			scope: "project" as const,
 			source: "project",
 			precedence: COMPAT_RESOURCE_PRECEDENCE.project,

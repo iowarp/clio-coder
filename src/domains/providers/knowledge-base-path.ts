@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import type { KnowledgeBaseRoot } from "./types/knowledge-base.js";
 
@@ -80,7 +81,7 @@ function resolveProviderModelCatalogDirs(
 	const cwd = options.cwd ?? process.cwd();
 	const overlays = uniqueExistingDirs([
 		join(resolveClioDirs().config, MODEL_CATALOG_OVERLAY_DIR),
-		join(cwd, ".clio-coder", MODEL_CATALOG_OVERLAY_DIR),
+		join(clioProjectRoot(cwd, MODEL_CATALOG_OVERLAY_DIR), ".clio-coder", MODEL_CATALOG_OVERLAY_DIR),
 		...envOverlayDirs(),
 	]);
 	return {

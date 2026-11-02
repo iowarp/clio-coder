@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { ceilChars } from "../session/context-accounting.js";
 
@@ -109,7 +110,7 @@ export interface LoadOperatorProfileOptions {
 export function loadOperatorProfile(cwd: string, options: LoadOperatorProfileOptions = {}): LoadedOperatorProfile {
 	const issues: string[] = [];
 	const userPath = options.userPath ?? join(resolveClioDirs().config, "profile.yaml");
-	const projectPath = join(cwd, ".clio-coder", "profile.yaml");
+	const projectPath = join(clioProjectRoot(cwd, "profile.yaml"), ".clio-coder", "profile.yaml");
 	const user = readProfileFile(userPath, issues);
 	const project = readProfileFile(projectPath, issues);
 	const profile: OperatorProfile = { ...user.profile, ...project.profile };

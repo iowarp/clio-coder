@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { clioProjectRoot } from "./project-root.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import { taskWorktreeOrigin } from "./task-worktree-claim.js";
@@ -143,6 +144,21 @@ export function workspaceTrustDirectory(): string {
 	return join(clioStatePath(), "workspace-trust");
 }
 
+/** The `.clio-coder/` entries each surface reads, so one lookup decides whose surface this is. */
+function surfaceEntries(surface: ProjectTrustSurface): string[] {
+	if (isPackageSurface(surface)) return [join(surface, "state.json")];
+	return surface === "safety" ? ["safety.yaml"] : [`${surface}.yaml`, `${surface}.local.yaml`];
+}
+
+/**
+ * The canonical directory an approval is recorded against: where this surface's
+ * files resolve from `workspaceRoot`. A session in a repository's subdirectory
+ * reads the root's settings under the root's approval, not one of its own.
+ */
+function surfaceRoot(workspaceRoot: string, surface: ProjectTrustSurface): string {
+	return clioProjectRoot(realpathSync(resolve(workspaceRoot)), ...surfaceEntries(surface));
+}
+
 function recordPath(canonicalRoot: string): string {
 	return join(workspaceTrustDirectory(), `${sha256(canonicalRoot)}.json`);
 }
@@ -183,7 +199,7 @@ function readRecord(canonicalRoot: string): WorkspaceTrustRecord | null {
 /** Whether this workspace still carries an operator pin for the named surface. */
 export function hasProjectSurfaceTrust(workspaceRoot: string, surface: ProjectTrustSurface): boolean {
 	try {
-		return readRecord(realpathSync(resolve(workspaceRoot)))?.surfaces[surface] !== undefined;
+		return readRecord(surfaceRoot(workspaceRoot, surface))?.surfaces[surface] !== undefined;
 	} catch {
 		// A missing workspace cannot carry consent.
 		return false;
@@ -202,7 +218,7 @@ export function projectSurfaceTrust(
 	if (isPackageSurface(surface)) throw new Error(`project ${surface} trust needs captureProjectSurface, not a digest`);
 	if (!SURFACES.includes(surface) || !SHA256.test(contentHash)) return "untrusted";
 	try {
-		const root = realpathSync(resolve(workspaceRoot));
+		const root = surfaceRoot(workspaceRoot, surface);
 		const approved = readRecord(root)?.surfaces[surface];
 		return approved === undefined ? "untrusted" : approved === contentHash ? "trusted" : "changed";
 	} catch {
@@ -253,7 +269,7 @@ function writeRecord(record: WorkspaceTrustRecord): void {
 }
 
 function writeSurfaceApproval(workspaceRoot: string, surface: ProjectTrustSurface, approval: SurfaceApproval): void {
-	const root = realpathSync(resolve(workspaceRoot));
+	const root = surfaceRoot(workspaceRoot, surface);
 	if (stateRootRemoved()) throw new Error("Clio state was removed; trust was not recorded");
 	clioStateDir();
 	withStateFileLockSync(recordPath(root), () => {
@@ -265,7 +281,7 @@ function writeSurfaceApproval(workspaceRoot: string, surface: ProjectTrustSurfac
 }
 
 export function revokeProjectSurfaceTrust(workspaceRoot: string, surface: ProjectTrustSurface): void {
-	const root = realpathSync(resolve(workspaceRoot));
+	const root = surfaceRoot(workspaceRoot, surface);
 	if (!readRecord(root) || stateRootRemoved()) return;
 	withStateFileLockSync(recordPath(root), () => {
 		if (stateRootRemoved()) return;
@@ -360,7 +376,7 @@ function captureWithApproval(
 function captureOwnProjectSurface(workspaceRoot: string, surface: ProjectTrustSurface): ProjectSurfaceSnapshot {
 	let root = resolve(workspaceRoot);
 	try {
-		root = realpathSync(root);
+		root = surfaceRoot(root, surface);
 	} catch {
 		// A missing workspace has no authority; keep inspection best-effort.
 	}
@@ -501,7 +517,7 @@ export function approveOperatorProjectInstall(
 	written: ReadonlyArray<{ id: string; contentDigest: string }>,
 ): boolean {
 	try {
-		const root = realpathSync(resolve(workspaceRoot));
+		const root = surfaceRoot(workspaceRoot, baseline.surface);
 		if (stateRootRemoved()) return false;
 		clioStateDir();
 		return withStateFileLockSync(recordPath(root), () => {

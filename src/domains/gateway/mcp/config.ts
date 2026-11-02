@@ -25,6 +25,7 @@ import {
 import path from "node:path";
 import { parseDocument } from "yaml";
 import { readSettings } from "../../../core/config.js";
+import { clioProjectRoot } from "../../../core/project-root.js";
 import { resolveSafeCwd } from "../../../core/safe-exec.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { listInstalledPlugins } from "../../plugins/index.js";
@@ -238,10 +239,15 @@ export function mcpServerDigest(fields: {
 	return createHash("sha256").update(canonical).digest("hex");
 }
 
+/** The directory whose `.clio-coder/mcp.yaml` applies at `cwd`; project-relative server paths resolve from it. */
+export function mcpProjectRoot(cwd: string): string {
+	return clioProjectRoot(cwd, "mcp.yaml");
+}
+
 export function mcpConfigPaths(options: McpConfigLoadOptions): { user: string; project: string } {
 	return {
 		user: path.join(options.configDir ?? clioConfigDir(), MCP_USER_CONFIG_FILENAME),
-		project: path.join(path.resolve(options.cwd), MCP_PROJECT_CONFIG_RELATIVE_PATH),
+		project: path.join(mcpProjectRoot(options.cwd), MCP_PROJECT_CONFIG_RELATIVE_PATH),
 	};
 }
 
@@ -886,7 +892,7 @@ export function loadMcpServerConfig(options: McpConfigLoadOptions): McpConfigLoa
 	const paths = mcpConfigPaths(options);
 	const configDir = options.configDir ?? clioConfigDir();
 	const user = loadFile(paths.user, "user", configDir);
-	const project = loadFile(paths.project, "project", path.resolve(options.cwd));
+	const project = loadFile(paths.project, "project", mcpProjectRoot(options.cwd));
 	const servers = [...user.servers];
 	const diagnostics = [...user.diagnostics, ...project.diagnostics];
 	const userIds = new Set(user.servers.map((server) => server.id));

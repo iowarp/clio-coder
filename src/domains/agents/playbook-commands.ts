@@ -24,6 +24,7 @@ import { isAbsolute, join, normalize } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import yaml from "yaml";
+import { clioProjectRoot } from "../../core/project-root.js";
 
 /** Upper bound on any single deterministic step, generous enough for a full suite. */
 const PLAYBOOK_COMMAND_MAX_TIMEOUT_MS = 3_600_000;
@@ -100,7 +101,7 @@ const COMMAND_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]*$/u;
 
 export function playbookCommandsPath(cwd: string): string {
-	return join(cwd, ".clio-coder", "playbooks", "commands.yaml");
+	return join(clioProjectRoot(cwd, join("playbooks", "commands.yaml")), ".clio-coder", "playbooks", "commands.yaml");
 }
 
 function firstSchemaError(value: unknown): string | null {

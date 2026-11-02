@@ -14,6 +14,7 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 import { CLIO_SELF_DEVELOPMENT_SKILLS, detectClioCoderRepo } from "../../../core/clio-repo.js";
+import { clioProjectRoot } from "../../../core/project-root.js";
 import type { PendingSkillRequest } from "../../../core/skill-activation.js";
 import { isToolLimitName } from "../../../core/tool-limit-flags.js";
 import { isHarnessExtensionToolName, isMcpToolName, type ToolName, ToolNames } from "../../../core/tool-names.js";
@@ -358,14 +359,15 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 		});
 	}
 
+	const projectRoot = clioProjectRoot(cwd, "skills");
 	roots.push({
-		path: path.join(cwd, ".clio-coder", "skills"),
+		path: path.join(projectRoot, ".clio-coder", "skills"),
 		scope: "project",
 		source: "clio-coder",
 		origin: "project",
 		precedence: SKILL_PRECEDENCE.project,
 		trusted: true,
-		containment: cwd,
+		containment: projectRoot,
 		// A repository root that is itself a symlink must not move the boundary
 		// to wherever it points: relocation is for the operator's own user and
 		// XDG roots, while a repository can only offer what it contains.

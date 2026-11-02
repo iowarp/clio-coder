@@ -27,6 +27,7 @@ import {
 	type McpConfigDiagnostic,
 	type McpServerDeclaration,
 	type McpServerEntryScript,
+	mcpProjectRoot,
 	readBoundedFileText,
 } from "./config.js";
 
@@ -110,7 +111,7 @@ export function mcpTrustPath(configDir?: string): string {
  * catalog for a different checkout of the same repository.
  */
 export function canonicalProjectRoot(cwd: string): string {
-	const resolved = path.resolve(cwd);
+	const resolved = mcpProjectRoot(cwd);
 	try {
 		return realpathSync(resolved);
 	} catch {

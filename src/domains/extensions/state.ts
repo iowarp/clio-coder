@@ -13,6 +13,7 @@ import {
 import path from "node:path";
 import { recordLifecycleReceipt } from "../../core/library-receipts.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { projectPackageTrust } from "../../core/workspace-trust.js";
 import { clioConfigDir } from "../../core/xdg.js";
@@ -50,7 +51,7 @@ export interface InstalledExtensionRecord {
 export function extensionBaseDir(scope: ExtensionScope, cwd = process.cwd()): string {
 	return scope === "user"
 		? path.join(clioConfigDir(), "extensions")
-		: path.join(path.resolve(cwd), ".clio-coder", "extensions");
+		: path.join(clioProjectRoot(cwd, path.join("extensions", "state.json")), ".clio-coder", "extensions");
 }
 
 function statePath(scope: ExtensionScope, cwd = process.cwd()): string {
@@ -63,7 +64,8 @@ function statePath(scope: ExtensionScope, cwd = process.cwd()): string {
  * boundary, would carry package bytes and install state to another trust domain.
  */
 function assertManagedBase(scope: ExtensionScope, cwd: string): void {
-	const boundary = scope === "user" ? path.resolve(clioConfigDir()) : path.resolve(cwd);
+	const boundary =
+		scope === "user" ? path.resolve(clioConfigDir()) : clioProjectRoot(cwd, path.join("extensions", "state.json"));
 	const base = extensionBaseDir(scope, cwd);
 	let cursor = boundary;
 	for (const part of path.relative(boundary, base).split(path.sep)) {

@@ -3,6 +3,7 @@ import path from "node:path";
 import { readSettings } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { enabledPluginResourceRoots, withPluginDiscoveryPass } from "../plugins/index.js";
 import { resolvePackageReferences } from "../resources/package-references.js";
@@ -263,7 +264,7 @@ function discoverAgentRecipesInPass(cwd: string, diagnostics: AgentRecipeDiagnos
 		});
 	const user = loadRecipesFromDir({ dir: path.join(clioConfigDir(), "agents"), source: "user", cwd }, diagnostics);
 	const project = loadRecipesFromDir(
-		{ dir: path.join(cwd, ".clio-coder", "agents"), source: "project", cwd },
+		{ dir: path.join(clioProjectRoot(cwd, "agents"), ".clio-coder", "agents"), source: "project", cwd },
 		diagnostics,
 	);
 	return mergeRecipes(diagnostics, builtin, ...pluginRecipes, user, project);

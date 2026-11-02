@@ -17,6 +17,7 @@ import { basename, join } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import {
@@ -419,7 +420,7 @@ function firstSchemaError(frontmatter: Record<string, unknown>, version: Playboo
 }
 
 function projectPlaybooksDir(cwd: string): string {
-	return join(cwd, ".clio-coder", "playbooks");
+	return join(clioProjectRoot(cwd, "playbooks"), ".clio-coder", "playbooks");
 }
 
 type RawStep = {

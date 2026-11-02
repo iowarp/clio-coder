@@ -4,6 +4,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { readSettings, updateSettings } from "../../core/config.js";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { type LifecycleContext, recordLifecycleReceipt } from "../../core/library-receipts.js";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
@@ -57,6 +58,10 @@ function catalogPath(): string {
 	return path.resolve(configured ?? path.join(clioConfigDir(), "library.yaml"));
 }
 
+function projectCatalogPath(cwd: string = process.cwd()): string {
+	return path.join(clioProjectRoot(cwd, "library.yaml"), ".clio-coder", "library.yaml");
+}
+
 function parseCatalog(filePath: string, diagnostics: string[]): LibraryEntry[] {
 	return readPluginCatalog(filePath, diagnostics).map((entry) => ({ ...entry, origin: "index" }));
 }
@@ -91,7 +96,7 @@ export function discoverLibrary(options: { catalog?: string; cwd?: string } = {}
 	for (const entry of [
 		...bundledPlugins,
 		...privateEntries,
-		...parseCatalog(path.join(options.cwd ?? process.cwd(), ".clio-coder", "library.yaml"), diagnostics),
+		...parseCatalog(projectCatalogPath(options.cwd), diagnostics),
 		...primary,
 	])
 		byRef.set(libraryEntryRef(entry), entry);
@@ -235,8 +240,7 @@ export function registerLibraryPackage(
 		...(manifest.clio.requires ? { requires: manifest.clio.requires } : {}),
 		...(serves ? { plugin: serves } : {}),
 	};
-	const file =
-		options.scope === "project" ? path.join(options.cwd ?? process.cwd(), ".clio-coder", "library.yaml") : catalogPath();
+	const file = options.scope === "project" ? projectCatalogPath(options.cwd) : catalogPath();
 	withStateFileLockSync(file, () => {
 		const diagnostics: string[] = [];
 		const before = existsSync(file) ? readFileSync(file, "utf8") : undefined;

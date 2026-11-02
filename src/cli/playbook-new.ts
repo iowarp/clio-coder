@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
+import { clioProjectRoot } from "../core/project-root.js";
 
 const BUILTINS = ["build-review", "build-test", "sdlc"] as const;
 const SAFE_STEM = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/u;
@@ -24,7 +25,7 @@ export function runPlaybookNew(args: ReadonlyArray<string>): number {
 	if (!(BUILTINS as ReadonlyArray<string>).includes(builtin)) {
 		return usage(`unknown builtin playbook '${builtin}'. Known builtin playbooks: ${known}`);
 	}
-	const destination = join(process.cwd(), ".clio-coder", "playbooks", `${name}.md`);
+	const destination = join(clioProjectRoot(process.cwd(), "playbooks"), ".clio-coder", "playbooks", `${name}.md`);
 	if (existsSync(destination)) return usage(`destination already exists: ${destination}`);
 	const source = join(resolvePackageRoot(), "src", "domains", "agents", "playbooks", `${builtin}.md`);
 	mkdirSync(dirname(destination), { recursive: true });

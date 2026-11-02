@@ -130,8 +130,14 @@ persisted. Route history is a fold over `run.settled` records in the run journal
 
 ## The project `.clio-coder/` directory
 
-Generated content is listed in the placement table above. A project also keeps
-authored files there, which the operator writes and may commit deliberately:
+Generated content is listed in the placement table above and stays under the
+working directory. A project also keeps authored files there, which the operator
+writes and may commit deliberately. Inside a Git repository each authored entry
+comes from the nearest `.clio-coder/` that has it, from the working directory up
+to the repository root, and a new one is written at the root (`clioProjectRoot`
+in `src/core/project-root.ts`). A `.clio-coder/` holding only generated files never
+hides the root's configuration. Outside a repository only the working directory
+counts. `verifiers.yaml` stays with the working directory because its commands run there:
 
 | Path | Contents |
 | --- | --- |

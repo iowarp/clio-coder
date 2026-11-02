@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { devRootsHeldByOthers } from "../../core/dev-roots.js";
 import { canonicalizeExistingPath, canonicalizeRawPath, type PathWalkMemo } from "../../core/path-canonical.js";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { isSameOrDescendant, type PathPolicyOperation } from "./path-policy.js";
 import { extractCommandCdTargets } from "./protected-artifacts.js";
@@ -13,6 +14,7 @@ import { extractCommandCdTargets } from "./protected-artifacts.js";
 export function activeClioSkillRoots(cwd: string): string[] {
 	return ["skills", "plugins", "extensions"].flatMap((kind) => [
 		path.join(cwd, ".clio-coder", kind),
+		path.join(clioProjectRoot(cwd, kind), ".clio-coder", kind),
 		path.join(clioConfigDir(), kind),
 	]);
 }

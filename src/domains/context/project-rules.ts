@@ -19,14 +19,17 @@
 
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { clioProjectRoot } from "../../core/project-root.js";
 import { compileGlobRegex, normalizeGlobInput } from "../../tools/ignore-policy.js";
 import { ceilChars } from "../session/context-accounting.js";
 
 export interface ProjectRule {
 	/** Stable id: the rule's posix path under `.clio-coder/rules`. */
 	id: string;
+	/** The session's cwd relative to the directory holding these rules, set only when they differ; `paths` are rooted there. */
+	pathBase?: string;
 	sourcePath: string;
 	hash: string;
 	tokenEstimate: number;
@@ -178,7 +181,9 @@ function parseRule(filePath: string, root: string, issues: string[]): { rule?: P
  * the rules, the aggregated exclude set, and any per-file issues.
  */
 export function loadProjectRules(cwd: string): ProjectRulesLoad {
-	const root = join(cwd, ".clio-coder", "rules");
+	const projectRoot = clioProjectRoot(cwd, "rules");
+	const root = join(projectRoot, ".clio-coder", "rules");
+	const pathBase = relative(projectRoot, resolve(cwd)).split(sep).join("/");
 	const issues: string[] = [];
 	const files: string[] = [];
 	walkMarkdown(root, root, files);
@@ -187,7 +192,7 @@ export function loadProjectRules(cwd: string): ProjectRulesLoad {
 	const excludeSet = new Set<string>();
 	for (const file of files) {
 		const parsed = parseRule(file, root, issues);
-		if (parsed.rule) rules.push(parsed.rule);
+		if (parsed.rule) rules.push(pathBase ? { ...parsed.rule, pathBase } : parsed.rule);
 		for (const glob of parsed.excludes) excludeSet.add(glob);
 	}
 	rules.sort((a, b) => a.id.localeCompare(b.id));
@@ -203,7 +208,7 @@ function ruleMatchesAnyPath(rule: ProjectRule, workingPaths: ReadonlyArray<strin
 			continue;
 		}
 		for (const path of workingPaths) {
-			const normalized = normalizeGlobInput(path);
+			const normalized = normalizeGlobInput(rule.pathBase ? `${rule.pathBase}/${path}` : path);
 			if (regex.test(normalized)) return true;
 			if (normalized.endsWith("/") && globMatchesInsideDirectory(regex, pattern, normalized)) return true;
 		}
