@@ -397,7 +397,7 @@ clio-coder library import ./vendor/some-plugin --format claude --yes
 ```
 
 In an active session, `/library import <path-or-url>` stages and reviews that exact foreign package in the Library. When installing a Claude Code plugin or Codex package, Clio Coder parses the vendor manifest (e.g. `.claude-plugin/plugin.json`) and presents an interactive review before any managed installation or workspace mutation occurs (staging writes temporary inspection files prior to acceptance). The review has four parts:
-1. **Source and provenance**: the verified package source path or repository tree URL, the format (`claude-code` or `codex`), and the transport.
+1. **Source and provenance**: the verified package source path or repository tree URL, the format (`portable`, `claude-code`, `codex`, or `agent-skill`), and the transport.
 2. **Projected declarative resources**: text skills (with markdown instructions), commands (converted into prompts), and basic agent personas become native library components.
 3. **Foreign trust tier**: the package is marked `trust: "foreign"`. Foreign package skills and prompts remain untrusted and withheld from model turns, at project scope and at user scope alike, until `integrations.projectResources.trustProjectImports` (`skills.trustProjectCompatRoots`) is enabled. Bound agents require all referenced skills to be trusted.
 4. **Unsupported and omitted components**: every executable foreign mechanism is omitted and listed in the review plan. That covers MCP servers (`.mcp.json`), lifecycle hooks (`hooks/`), shell scripts (`scripts/`), and daemon runners. They are never registered as tools or executed.
@@ -408,7 +408,9 @@ Detection is deterministic. A root `plugin.json` always takes precedence; an
 invalid root is refused before any vendor fallback. With no root manifest, `.claude-plugin/plugin.json`
 selects the Claude Code format and `.codex-plugin/plugin.json` selects Codex. When
 both hidden manifests are present the import is ambiguous and `--format` is
-required. A directory with none of the three is not importable.
+required. With none of those manifests, a root `SKILL.md` selects `agent-skill`. A repository root containing nested skills lists the individual skill directories to import.
+
+A bare Agent Skill can be imported from a local directory or GitHub tree URL. The reviewed text projection keeps LICENSE files, omits `allowed-tools` and other host execution settings, and normalizes a version such as `"1.2"` to `1.2.0`. A body that depends on an omitted script is refused. To keep a local skill's scripts, run `clio-coder library package ./my-skill`, review the generated `plugin.json`, then use `clio-coder library install ./my-skill`. Packaging changes only the manifest, accepts `--dry-run`, and refuses an existing manifest unless `--force` is supplied. Installation preserves the complete package tree.
 
 Publication, content validation and the project-import trust gate are reported
 separately. An enabled trust gate is a prerequisite for runtime admission, not

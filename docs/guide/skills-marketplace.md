@@ -11,7 +11,7 @@ clio-coder library install skill:plan-interview --project
 clio-coder library skills --all --json
 ```
 
-The bundled index makes complete packages available without installing them. An ordinary packaged skill copies from Clio Coder's shipped files without network access. Local user and project registrations can add packages. Slash commands are entered in Clio Coder, not in a shell. An unmanaged `SKILL.md` remains a valid runtime resource; preparing a distributable requires a package manifest as described in [authoring](authoring-plugins.md).
+The bundled index makes complete packages available without installing them. An ordinary packaged skill copies from Clio Coder's shipped files without network access. Local user and project registrations can add packages. Slash commands are entered in Clio Coder, not in a shell. An unmanaged `SKILL.md` remains a valid runtime resource. `library import <directory|github-tree-url>` reviews a bare skill as a text-only `agent-skill` package, preserving its license and omitting host tool settings. It refuses instructions that depend on scripts the import cannot copy. For a local skill with scripts, `library package <directory>` writes a portable `plugin.json` beside `SKILL.md`; an ordinary install then keeps the complete tree. Existing manifests require `--force` to replace, and `--dry-run` previews the manifest. See [authoring](authoring-plugins.md).
 
 `/skill <name>` for a skill that is not installed but has an index entry asks the operator whether to install it: "Install and run" (user scope), "Install for this project and run", or "Cancel". An accepted choice installs through the library installer, reloads resources, and runs the skill. A name with no installed or indexed skill reports that no local marketplace entry is available.
 
@@ -23,8 +23,8 @@ Active `.clio-coder/{skills,plugins,extensions}/` and `<configDir>/{skills,plugi
 
 | Model shell call | Disposition |
 | --- | --- |
-| `clio-coder library install`, `import`, `update`, `remove`, `enable`, `disable`, `pin`, `register`, `sync`, `push`, `remote` | One-shot operator confirmation in `default` (reason `library-confirm`), which the safety judge never answers. Admitted in `yolo`. A headless run denies the ask. |
-| `clio-coder library install --dry-run`, `import --dry-run`, `update --dry-run`, `enable --dry-run`, `disable --dry-run`, `remove --dry-run`, and `search`, `list`, `components`, `inspect`, `validate`, `drift`, `reload`, `skills`, `inventory` | Not treated as mutations. A `--dry-run` builds the plan and writes nothing, so it never asks. |
+| `clio-coder library install`, `import`, `package`, `update`, `remove`, `enable`, `disable`, `pin`, `register`, `sync`, `push`, `remote` | One-shot operator confirmation in `default` (reason `library-confirm`), which the safety judge never answers. Admitted in `yolo`. A headless run denies the ask. |
+| `clio-coder library install --dry-run`, `import --dry-run`, `package --dry-run`, `update --dry-run`, `enable --dry-run`, `disable --dry-run`, `remove --dry-run`, and `search`, `list`, `components`, `inspect`, `validate`, `drift`, `reload`, `skills`, `inventory` | Not treated as mutations. A `--dry-run` builds the plan and writes nothing, so it never asks. |
 | `clio-coder share import` without `--dry-run`, `clio-coder extensions test`, `clio-coder extensions validate` | One-shot operator confirmation in `default`, admitted in `yolo`, denied in a headless run. An import installs packages from an archive the model may have written, and the other two run a package's own code. |
 | `clio-coder extensions` install, update, remove, enable, disable, pin; `clio-coder interop adopt --yes`; any `clio-coder config trust` | Blocked at `default`. At `yolo` only the trust form stays blocked: it is part of the yolo floor as `trust-authority`, so the model cannot approve a project's extensions, plugins or other surfaces at any level. |
 
@@ -73,6 +73,10 @@ The listing accepts `query`, `limit` (at most 200) and `offset`, and cuts by who
 
 Readiness is separate from installation. A package's state reads `ready`, `requires trust` (a foreign package while `integrations.projectResources.trustProjectImports` is off, or an enabled project package while the project's plugin state is not approved), `pending reload; run /library reload`, `no ready skills; inspect /library`, `damaged`, `shadowed`, `disabled`, `incompatible`, or `invalid`. An install performed in another process appears as installed before `/library reload` admits it into the session. Only `ready` skills are advertised for use, and marketplace suggestions exclude actual Clio copies, not loose discoveries from other agents. A named load of an installed skill that is not ready reports its state and tells the model not to reinstall it.
 
+Catalog-origin copies show an update in `library list`, `/library`, and `context(scope="library")` when the catalog has a newer version or a different digest at the same version. Local and imported copies and older catalog versions do not produce that signal. `library update --all` processes eligible copies, skips extensions for individual review, and continues after a refusal while returning failure if any update failed. Inactive packages remain visible in `library components` and `library skills --all`, with remedies and `inactivePackages` in JSON; their resources stay unloaded.
+
+Shell search requires every query word across names, descriptions, component hints and triggers, ranks matching rows, and prints a no-matches message when none qualify.
+
 ## Registry and pins
 
 Every distributable byte is pinned by SHA-256, and the pins are generated, never edited by hand.
@@ -85,6 +89,10 @@ Every distributable byte is pinned by SHA-256, and the pins are generated, never
 | `.claude-plugin/marketplace.json` | A projection of the pins for Claude Code, so another agent can install the packages from the repository. |
 
 `pnpm library:pin` runs four stages. It validates every package under `library/{skills,agents,prompts,playbooks,plugins,extensions}` and the authoring templates, requiring the package kind to match its kind directory and identities to be unique. It refreshes the normalized skill evidence, the same work as `pnpm skills:pin`. It writes `library/registry.yaml` from the actual manifests and complete package trees, and it re-fetches each blessed remote row (a GitHub tree `sourceUrl`, such as the `wtfp` plugin) to verify its digest, keeping the previous pin with a warning when the fetch fails. Finally it regenerates `.claude-plugin/marketplace.json`. `pnpm library:check` repeats every stage as a check, fails on stale metadata or digests, and runs inside `pnpm lint` as the `library-pin` hygiene gate. `pnpm skills:pin` and `pnpm skills:check` run the skill-evidence stage alone.
+
+Before writing any generated files, `library:pin` compares each catalog package with the latest release tag. Changed package bytes cannot retain that release's version. Bump the version in both `SKILL.md` and `plugin.json`, including for edits to references or scripts. The skill pin stage rejects differing versions and bodies longer than 120 lines. Move supporting detail into `references/` with a conditional link that says when to read it.
+
+`library validate` and `library:pin` also check skill authoring. A missing linked local file is an error. Missing bare companion paths, unknown skills in description routing clauses, and an over-length body are warnings during validation. An optional `clio-coder.verified-at` must be a valid date; future dates and claims older than 180 days warn. Loading shows `verified_at` to the model without running the authoring checks.
 
 A catalog skill must carry `name`, `description`, `version` and `license` frontmatter and a nested `clio-coder:` block with `registry-id`, `source-url` (ending in its catalog path) and `audit: pass`. Tool-surface lists must use Clio Coder tool names in lowercase. `triggers`, when present, is a non-empty list of strings.
 

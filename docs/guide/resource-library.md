@@ -16,7 +16,7 @@ clio-coder library register <path> [--user|--project] [--force] [--json]
 clio-coder library inspect <path|kind:name|name> [--user|--project] [--json]
 clio-coder library install <path|kind:name|name> [--user|--project] [--force] [--with-requirements] [--dry-run] [--json]
 clio-coder library import <path|github-tree-url> [--user|--project] [--format claude|codex] [--dry-run] [--json] [--yes]
-clio-coder library update <kind:name|name> [--user|--project] [--force] [--dry-run] [--json]
+clio-coder library update <kind:name|name>|--all [--user|--project] [--force] [--dry-run] [--json]
 clio-coder library enable <kind:name|name> [--user|--project] [--dry-run] [--json]
 clio-coder library disable <kind:name|name> [--user|--project] [--dry-run] [--json]
 clio-coder library remove <kind:name|name> [--user|--project] [--dry-run] [--json]
@@ -25,19 +25,20 @@ clio-coder library drift [kind:name|name] [--user|--project] [--json]
 clio-coder library reload [--json]
 clio-coder library skills [--all] [--json]
 clio-coder library inventory --json
+clio-coder library package <directory> [--force] [--dry-run] [--json]
 clio-coder library validate <package-path|SKILL.md> [--json]
 clio-coder library sync
 clio-coder library push
 clio-coder library remote confirm <url>
 ```
 
-`--kind` takes `plugin`, `extension`, `skill`, `agent`, `prompt`, or `playbook` (`components` takes the four component kinds). `--from <index.yaml>` selects an index with the highest priority. `-f` is an alias of `--force`. `--dry-run` is accepted only by `install`, `import`, `update`, `enable`, `disable`, and `remove`, and `--source` only by `components`. `--user` and `--project` are mutually exclusive. `install` and `register` default to user scope. Other mutations select the project copy when one exists, and an explicit scope selects exactly that copy.
+`--kind` takes `plugin`, `extension`, `skill`, `agent`, `prompt`, or `playbook` (`components` takes the four component kinds). `--from <index.yaml>` selects an index with the highest priority. `-f` is an alias of `--force`. `--dry-run` is accepted only by `install`, `import`, `package`, `update`, `enable`, `disable`, and `remove`, and `--source` only by `components`. `--user` and `--project` are mutually exclusive. `install` and `register` default to user scope. Other mutations select the project copy when one exists, and an explicit scope selects exactly that copy.
 
-Every mutation builds one reviewed plan, rechecks it inside the package lock, refuses to break enabled dependents, and reports per-package outcomes with disk, component-admission and host-refresh facts separately. `--dry-run` prints the plan and writes nothing. A CLI never refreshes a running session, so its refresh status reads `not-applicable`. After a committed install, update, enable, disable or remove, plain output ends with `A running session picks this up after /library reload.` on stderr. A failed step prints `<operation> <ref> (<scope>) failed: <message>`; a refusal's message already names its fix, and other failures append the next step. With `--json`, install and update keep the fields older callers read (`confirmed`, `writes`, `results`, `id`, `path`, `sha256`, `recovery`) and add `plan` and `apply`. Failures print `{ok: false, error}`.
+Each package lifecycle mutation builds one reviewed plan, rechecks it inside the package lock, refuses to break enabled dependents, and reports per-package outcomes with disk, component-admission and host-refresh facts separately. `--dry-run` prints the plan and writes nothing. A CLI never refreshes a running session, so its refresh status reads `not-applicable`. After a committed install, update, enable, disable or remove, plain output ends with `A running session picks this up after /library reload.` on stderr. A failed step prints `<operation> <ref> (<scope>) failed: <message>`; a refusal's message already names its fix, and other failures append the next step. With `--json`, install and update keep the fields older callers read (`confirmed`, `writes`, `results`, `id`, `path`, `sha256`, `recovery`) and add `plan` and `apply`. Failures print `{ok: false, error}`.
 
 Exit codes: 0 for success, 1 for an operational failure, an invalid package, a refused plan, or a `drift` report that is not clean, and 2 for a usage error such as an unknown flag, both scope flags, or a bare `library`.
 
-When the model runs a `clio-coder library` command through its shell, `install`, `import`, `update`, `remove`, `enable`, `disable`, `pin`, `register`, `sync`, `push` and `remote` ask for one-shot operator confirmation in `default`, and `--dry-run` on `install`, `import`, `update`, `enable`, `disable` and `remove` never asks. The dispositions at each autonomy level are in [skills-marketplace.md](skills-marketplace.md).
+When the model runs a `clio-coder library` command through its shell, `install`, `import`, `package`, `update`, `remove`, `enable`, `disable`, `pin`, `register`, `sync`, `push` and `remote` ask for one-shot operator confirmation in `default`, and `--dry-run` on `install`, `import`, `package`, `update`, `enable`, `disable` and `remove` never asks. The dispositions at each autonomy level are in [skills-marketplace.md](skills-marketplace.md).
 
 ## Browse and install
 

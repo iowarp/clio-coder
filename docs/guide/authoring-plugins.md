@@ -39,7 +39,7 @@ A root `state.json` is rejected, and `plugin.json` must be a regular file at the
 
 ## The Clio namespace
 
-`extensions["ai.iowarp.clio"]`, called the Clio namespace, holds optional Clio Coder metadata inside the portable manifest. A plugin containing `skills/<name>/SKILL.md` needs only the root identity fields above: Clio discovers the conventional `skills/` directory. A standalone skill package with a root `SKILL.md` declares `kind: "skill"`, `resources.skills: "."` and its one public skill component through the extension; the supplied skill template demonstrates that form. Clio Coder prompts, strict agents, playbooks and explicit component graphs also use this metadata. The key does not select a directory: its `resources` map names the paths the package actually uses.
+`extensions["ai.iowarp.clio"]`, called the Clio namespace, holds optional Clio Coder metadata inside the portable manifest. A plugin containing `skills/<name>/SKILL.md` needs only the root identity fields above: Clio discovers the conventional `skills/` directory. A standalone skill package with a root `SKILL.md` declares `kind: "skill"`, `resources.skills: "."` and its one public skill component through the extension; the supplied skill template demonstrates that form, and `clio-coder library package <directory>` generates it for an existing bare skill while preserving its scripts and references. Clio Coder prompts, strict agents, playbooks and explicit component graphs also use this metadata. The key does not select a directory: its `resources` map names the paths the package actually uses.
 
 | Field | Rule |
 | --- | --- |
