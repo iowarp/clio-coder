@@ -96,15 +96,60 @@ export function redactSecretString(value: string): string {
 	);
 }
 
+// A hold ends only where SECRET_STRING_RE's userinfo run ends. A friendlier stop such as `)`, `,` or a quote sits inside
+// that run, so `https://u:pa)ss@h` would show `pa)` before the pattern could ever match it (#446).
+function endsUserinfoRun(code: number): boolean {
+	if (code === 0x2f || code === 0x40) return true;
+	if (code > 0x20 && code < 0x7f) return false;
+	return /\s/u.test(String.fromCharCode(code));
+}
+
+const URL_SCHEME_END_RE = /https?:\/\/$/iu;
+const LONGEST_URL_SCHEME = "https://".length;
+const USERINFO_HOLD_LIMIT = 2048;
+const USERINFO_HOLD_MARKER = "[held]";
+
+/**
+ * The part of text still being written that is safe to show when its last run may become URL userinfo. Everything
+ * through the run's first colon appears in every completion, because the pattern's prefix always contains it; a later
+ * colon does not, since `https://u:pw:@h` redacts `pw:`. No length or timeout ever shows held text: past the limit the
+ * frame only gains a marker, so a run that never ends cannot reveal what it holds.
+ */
+export function holdUnresolvedUserinfo(value: string): string {
+	let runStart = value.length;
+	while (runStart > 0 && !endsUserinfoRun(value.charCodeAt(runStart - 1))) runStart -= 1;
+	if (!URL_SCHEME_END_RE.test(value.slice(Math.max(0, runStart - LONGEST_URL_SCHEME), runStart))) return value;
+	const colon = value.indexOf(":", runStart);
+	if (colon < 0 || colon === value.length - 1) return value;
+	return `${value.slice(0, colon + 1)}${value.length - colon - 1 > USERINFO_HOLD_LIMIT ? USERINFO_HOLD_MARKER : ""}`;
+}
+
+/** Redact text that may still grow; once it is complete, `final` releases any hold through full redaction. */
+export function redactStreamingSecretString(value: string, final = false): string {
+	return redactSecretString(final ? value : holdUnresolvedUserinfo(value));
+}
+
+/** A partial structured value, such as forming tool arguments, any string of which may stop inside a URL. */
+export function holdUnresolvedStrings(value: unknown, depth = 0): unknown {
+	if (typeof value === "string") return holdUnresolvedUserinfo(value);
+	if (depth > 8) return USERINFO_HOLD_MARKER;
+	if (Array.isArray(value)) return value.map((item) => holdUnresolvedStrings(item, depth + 1));
+	if (!isPlainObject(value)) return value;
+	const out: Record<string, unknown> = {};
+	for (const [key, item] of Object.entries(value)) out[key] = holdUnresolvedStrings(item, depth + 1);
+	return out;
+}
+
 /** Keep completed tokens while an appended display string changes only its tail (#428). */
 export class RedactedStringProjection {
 	private source = "";
+	private final = false;
 	private committed = 0;
 	private prefix = "";
 	private text = "";
 
-	project(source: string): string {
-		if (source === this.source) return this.text;
+	project(source: string, final = false): string {
+		if (source === this.source && final === this.final) return this.text;
 		if (!source.startsWith(this.source)) {
 			this.committed = 0;
 			this.prefix = "";
@@ -121,8 +166,10 @@ export class RedactedStringProjection {
 			this.prefix += redactSecretString(tail.slice(0, through));
 			this.committed += through;
 		}
-		this.text = this.prefix + redactSecretString(tail.slice(through));
+		// A committed token ends in whitespace, so the open run a hold reads is always in this uncommitted tail (#446).
+		this.text = this.prefix + redactStreamingSecretString(tail.slice(through), final);
 		this.source = source;
+		this.final = final;
 		return this.text;
 	}
 }

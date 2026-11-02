@@ -69,7 +69,7 @@ function answerText(entry: WorkerEntryState, source: string): string {
 		projection = new WorkerAnswerProjection();
 		workerAnswers.set(owner, projection);
 	}
-	return projection.project(source);
+	return projection.project(source, !entry.pending && !isPending(entry));
 }
 
 /**

@@ -7,7 +7,7 @@ import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
 import { ToolNames } from "../core/tool-names.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
-import { redactSecretString } from "../domains/safety/redaction.js";
+import { holdUnresolvedStrings, redactSecretString, redactStreamingSecretString } from "../domains/safety/redaction.js";
 import type { ViewArtifact } from "../domains/session/view-artifacts.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
@@ -352,7 +352,7 @@ type ThinkingSegment = {
 	/** Panel clock when the first delta of this stretch arrived. */
 	startedAtMs?: number;
 };
-type ThinkingRender = { source: string; epoch: number; layouts: Map<string, string[]> };
+type ThinkingRender = { source: string; open: boolean; epoch: number; layouts: Map<string, string[]> };
 type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegment;
 /**
  * A caller-rendered block receives the frame's transcript detail policy so a
@@ -1052,10 +1052,19 @@ function stripThinkingEmphasis(text: string): string {
 }
 
 /** Wrap first, then keep the same tail both while streaming and after settlement. */
-function renderThinkingRail(thinking: string, width: number, limit: number, unbounded = false): string[] {
+function renderThinkingRail(
+	thinking: string,
+	width: number,
+	limit: number,
+	unbounded: boolean,
+	open: boolean,
+): string[] {
 	// Reasoning often ends on a newline; wrapped, that became an empty rail row.
 	// Presentation only: the provider's signed reasoning stays untouched.
-	const text = stripThinkingEmphasis(redactSecretString(sanitizeAssistantProse(thinking))).replace(/^\s*\n|\s+$/gu, "");
+	const text = stripThinkingEmphasis(redactStreamingSecretString(sanitizeAssistantProse(thinking), !open)).replace(
+		/^\s*\n|\s+$/gu,
+		"",
+	);
 	if (text.length === 0) return [];
 	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them.
 	const wrapped = wrapTextWithAnsi(text, Math.max(1, width - PROSE_GUTTER_WIDTH));
@@ -1148,7 +1157,7 @@ function renderToolSegmentLines(
 	const call = {
 		toolCallId: seg.id,
 		toolName: seg.name,
-		args: seg.args,
+		args: shownArgs(seg),
 		actionClass: seg.actionClass,
 		cardAttached: seg.cardAttached,
 		elapsedMs: seg.startedAtMs === undefined ? undefined : Math.max(0, rawDurationMs(seg.startedAtMs, nowMs)),
@@ -1189,12 +1198,17 @@ function changeSettledCall(seg: ToolSegment): void {
 	seg.settledRevision = (seg.settledRevision ?? 0) + 1;
 }
 
+/** Arguments still forming can stop anywhere inside a URL, so they show only what cannot become its userinfo (#446). */
+function shownArgs(seg: ToolSegment): unknown {
+	return seg.argsComplete || seg.finished ? seg.args : holdUnresolvedStrings(seg.args);
+}
+
 /** A settled tool segment as the renderers read a finished call. */
 function finishedCall(seg: ToolSegment): ToolExecutionFinished {
 	return {
 		toolCallId: seg.id,
 		toolName: seg.name,
-		args: seg.args,
+		args: shownArgs(seg),
 		result: seg.result,
 		isError: seg.isError,
 		durationMs: seg.durationMs,
@@ -1352,6 +1366,7 @@ function renderEntryLines(
 	// its shape: Standard shows the bounded tail of the reasoning behind Clio's
 	// words, and the marker for the reasoning behind an action.
 	let reasoning = "";
+	let reasoningOpen = false;
 	let reasoningIndex = 0;
 	let lastMarker: TurnBlock | undefined;
 	const flushReasoning = (next: "action" | "words"): void => {
@@ -1364,15 +1379,15 @@ function renderEntryLines(
 			// A running tool's clock must not re-filter or re-wrap earlier reasoning (#428).
 			entry.reasoningRenders ??= new Map();
 			let cached = entry.reasoningRenders.get(index);
-			if (cached?.source !== text || cached.epoch !== skinEpoch()) {
-				cached = { source: text, epoch: skinEpoch(), layouts: new Map() };
+			if (cached?.source !== text || cached.open !== reasoningOpen || cached.epoch !== skinEpoch()) {
+				cached = { source: text, open: reasoningOpen, epoch: skinEpoch(), layouts: new Map() };
 				entry.reasoningRenders.set(index, cached);
 			}
 			const limit = previewBudget(rows, terminalRows);
 			const key = `${width}|${limit}|${unboundedToolBodies}`;
 			let lines = cached.layouts.get(key);
 			if (lines === undefined) {
-				lines = renderThinkingRail(text, width, limit, unboundedToolBodies);
+				lines = renderThinkingRail(text, width, limit, unboundedToolBodies, reasoningOpen);
 				cached.layouts.set(key, lines);
 				if (cached.layouts.size > 3) {
 					const oldest = cached.layouts.keys().next().value;
@@ -1390,6 +1405,7 @@ function renderEntryLines(
 		if (seg === undefined) continue;
 		if (seg.kind === "thinking") {
 			reasoning = joinReasoning(reasoning, seg.text);
+			reasoningOpen = !seg.finalized;
 			continue;
 		}
 		if (seg.kind === "tool") {
@@ -2426,14 +2442,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							// every argument included, whatever card sits under it.
 							const call: ToolExecutionFinished = {
 								...finishedCall(seg),
-								result: seg.result ?? seg.partialResult,
+								result: seg.result ?? holdUnresolvedStrings(seg.partialResult),
 								cardAttached: undefined,
 							};
 							add(
 								toolRowTitle(
 									seg.finished
 										? finishedCall(seg)
-										: { toolCallId: seg.id, toolName: seg.name, args: seg.args, cardAttached: seg.cardAttached },
+										: { toolCallId: seg.id, toolName: seg.name, args: shownArgs(seg), cardAttached: seg.cardAttached },
 								),
 								seg.at,
 								() => renderToolExecution(call, 120, { unbounded: true, diffStyle: "plain" }),

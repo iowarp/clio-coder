@@ -31,6 +31,7 @@
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { durableAssistantTextFromEvent, WORKER_OUTPUT_MAX_BYTES } from "../dispatch/event-pump.js";
 import type { CallActionDescriptor } from "../safety/call-target.js";
+import { holdUnresolvedUserinfo } from "../safety/redaction.js";
 
 /**
  * Lines of worker prose kept while a run is live. The tail is what a streaming
@@ -236,15 +237,20 @@ function boundLiveTail(text: string): { text: string; droppedLines: number; drop
 	const joined = lines.join("\n");
 	const bytes = Buffer.byteLength(joined, "utf8");
 	if (bytes <= WORKER_LIVE_TAIL_MAX_BYTES) return { text: joined, droppedLines, droppedBytes: 0 };
-	const kept = keepTailBytes(joined, WORKER_LIVE_TAIL_MAX_BYTES);
+	// A cut can remove the scheme or key that marks what follows as a credential, which no redaction downstream can then
+	// recognize, so the cut token leaves whole. A line with no whitespace left shows nothing until its next line (#446).
+	const cut = keepTailBytes(joined, WORKER_LIVE_TAIL_MAX_BYTES);
+	const firstWhole = /^\S*\s+/u.exec(cut);
+	const kept = firstWhole === null ? "" : cut.slice(firstWhole[0].length);
 	return { text: kept, droppedLines, droppedBytes: bytes - Buffer.byteLength(kept, "utf8") };
 }
 
-/** Head-anchored byte bound for a settled answer, matching the receipt's own bound. */
+/** Head-anchored byte bound for a settled answer, matching the receipt's own bound. A cut URL never resolves (#446). */
 export function boundSettledText(text: string): { text: string; dropped: number } {
 	const bounded = truncateUtf8(text, WORKER_OUTPUT_MAX_BYTES, TAIL_TRUNCATION_MARKER);
 	if (bounded === text) return { text, dropped: 0 };
-	return { text: bounded, dropped: Math.max(0, lineCount(text) - lineCount(bounded)) };
+	const held = holdUnresolvedUserinfo(bounded);
+	return { text: held, dropped: Math.max(0, lineCount(text) - lineCount(held)) };
 }
 
 const EMPTY_SNAPSHOT: WorkerProgressSnapshot = {
