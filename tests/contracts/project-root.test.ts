@@ -71,7 +71,16 @@ test("the project ignore file shows Git what an operator authors and nothing els
 		write(generated);
 	strictEqual(git("status", "--porcelain", "--untracked-files=all").stdout, "", "generated files are invisible");
 
-	const authored = ["agents/a.md", "mcp.yaml", "rules/deep/r.md", "safety.yaml", "settings.yaml", "skills/s/SKILL.md"];
+	const authored = [
+		"agents/a.md",
+		"mcp.yaml",
+		"quality.yaml",
+		"rules/deep/r.md",
+		"safety.yaml",
+		"settings.yaml",
+		"skills/s/SKILL.md",
+		"validation.yaml",
+	];
 	for (const entry of [...authored, "settings.local.yaml", "rules/x.local.yaml"]) write(entry);
 	deepStrictEqual(
 		git("status", "--porcelain", "--untracked-files=all")

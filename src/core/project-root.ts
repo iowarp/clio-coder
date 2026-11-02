@@ -64,6 +64,9 @@ const PROJECT_IGNORE = `# Written by clio-coder. Generated files stay out of Git
 !/hooks.yaml
 !/mcp.yaml
 !/verifiers.yaml
+!/quality.yaml
+!/validation.yaml
+!/validation.yml
 !/profile.yaml
 !/library.yaml
 !/rules/

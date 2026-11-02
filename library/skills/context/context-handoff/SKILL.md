@@ -7,7 +7,7 @@ triggers:
   - handoff to another agent
   - context is about to be lost
   - write a continuation brief
-version: 0.5.4
+version: 0.5.5
 license: Apache-2.0
 allowed-tools:
   - read
@@ -118,8 +118,8 @@ approved in a headless run.
    already export-boundary redacted; never reconstruct a redacted value. Omit
    this section when no structured source was supplied.
 
-9. **Write** to `.clio-coder/handoffs/handoff-YYYY-MM-DD[-slug].md`. `.clio-coder/` is
-   intentionally ignored by default unless the user force-adds something. Use
+9. **Write** to `.clio-coder/handoffs/handoff-YYYY-MM-DD[-slug].md`. Handoffs
+   stay out of Git by default unless the user force-adds one. Use
    `scripts/new-handoff.sh [slug]` (relative to this skill's base_dir) to
    resolve the date, ensure the directory exists, and print the target path.
 

@@ -200,7 +200,8 @@ After each run, `sweepRunRecords` keeps the newest 100 completed records by comp
 Clio writes `.clio-coder/.gitignore` the first time it generates a file there, and
 at session start for a `.clio-coder/` without one (`ensureProjectIgnore` in
 `src/core/project-root.ts`). It ignores everything except `settings.yaml`, `safety.yaml`,
-`hooks.yaml`, `mcp.yaml`, `verifiers.yaml`, `profile.yaml`, `library.yaml`, `rules/`, `agents/`,
+`hooks.yaml`, `mcp.yaml`, `verifiers.yaml`, `quality.yaml`, `validation.yaml`, `validation.yml`,
+`profile.yaml`, `library.yaml`, `rules/`, `agents/`,
 `skills/`, `prompts/`, `playbooks/`, `extensions/`, `plugins/` and `model-catalog.d/`, and `*.local.yaml`
 stays ignored inside those too. An allow-list means a generated path added later stays
 out of Git by default. The file ignores itself, so a project with only generated files

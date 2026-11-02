@@ -29,9 +29,9 @@ checks, use a root package script that invokes the subproject or a catalog
 entry with its declared `cwd`. The quality policy cannot introduce an
 executable command or bypass execution approval.
 
-Clio does not generate or modify this file automatically. If `.clio-coder/`
-is ignored, explicitly include the policy in version control using your
-repository's chosen ignore exceptions or a force-add of this one file.
+Clio does not generate or modify this file automatically. Clio's own
+`.clio-coder/.gitignore` leaves it visible to Git. If the project's `.gitignore`
+still ignores all of `.clio-coder/`, remove that line or force-add this one file.
 
 ## Why does Clio ask before running tests?
 
