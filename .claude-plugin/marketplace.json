@@ -10,7 +10,7 @@
 			"name": "architecture",
 			"source": "./library/skills/planning/architecture",
 			"description": "Decides the engineering approach for an intent in an interactive session: investigates, proposes two or three genuinely different approaches with trade-offs, recommends, lets the user decide, and writes the decision doc. Not a task-by-task plan; use sprint-plan. Not a multi-perspective debate; use design-council. Not product intent; use product-intent. Not a typed implementation handoff; use tech-spec.",
-			"version": "0.4.2",
+			"version": "0.4.3",
 			"category": "planning",
 			"license": "Apache-2.0"
 		},
@@ -18,7 +18,7 @@
 			"name": "arxiv-literature",
 			"source": "./library/skills/research/arxiv-literature",
 			"description": "Searches arXiv, summarizes or compares papers, and builds a compact literature survey as citation-ready, source-linked paper cards. Prefer the Researcher shadow agent for noisy multi-paper retrieval.",
-			"version": "0.5.2",
+			"version": "0.5.3",
 			"category": "research",
 			"license": "Apache-2.0"
 		},
@@ -26,7 +26,7 @@
 			"name": "ast-grep",
 			"source": "./library/skills/coding/ast-grep",
 			"description": "Structural code search with ast-grep rules: finds code by shape when grep on text is too noisy, and never rewrites it. Not for plain string or filename lookups; use grep or find.",
-			"version": "0.3.1",
+			"version": "0.3.3",
 			"category": "coding",
 			"license": "Apache-2.0"
 		},
@@ -34,7 +34,7 @@
 			"name": "backlog",
 			"source": "./library/skills/planning/backlog",
 			"description": "Turns a finished PRD or architecture doc into a ticket backlog of small stories with verifiable acceptance criteria, confirmed, then created as GitHub issues or in another configured tracker. Not for local sprint slicing into a SPRINT.md; use sprint-plan.",
-			"version": "0.4.2",
+			"version": "0.4.3",
 			"category": "planning",
 			"license": "Apache-2.0"
 		},
@@ -66,7 +66,7 @@
 			"name": "coding-standards",
 			"source": "./library/skills/coding/coding-standards",
 			"description": "Correct-by-construction TypeScript rules (errors as values, parse don't validate, illegal states unrepresentable, deep modules) for writing or refactoring TypeScript when the project has not pinned its own standards.",
-			"version": "0.4.1",
+			"version": "0.4.2",
 			"category": "coding",
 			"license": "Apache-2.0"
 		},
@@ -74,7 +74,7 @@
 			"name": "context-handoff",
 			"source": "./library/skills/context/context-handoff",
 			"description": "Writes a durable, redacted, reference-not-copy handoff document when a session winds down or context is about to be compacted or lost, so the next session or agent can continue. Not for orienting at the start of a session; use context-prime.",
-			"version": "0.5.3",
+			"version": "0.5.4",
 			"category": "context",
 			"license": "Apache-2.0"
 		},
@@ -98,7 +98,7 @@
 			"name": "design-council",
 			"source": "./library/skills/workflow/design-council",
 			"description": "Convenes several expert perspectives that challenge each other on a design decision with real trade-offs before code is written; quick mode runs a single round. Not for a one-question-at-a-time interrogation of a plan; use plan-interview. Not for splitting implementation across workers; use dispatch directly.",
-			"version": "0.6.1",
+			"version": "0.6.3",
 			"category": "workflow",
 			"license": "Apache-2.0"
 		},
@@ -130,7 +130,7 @@
 			"name": "find-skills",
 			"source": "./library/skills/meta/find-skills",
 			"description": "Finds published skills and prepares their Library installation for the operator when the user asks whether a capability exists as a skill. Not for authoring a new skill; use skill-authoring.",
-			"version": "0.2.2",
+			"version": "0.3.0",
 			"category": "meta",
 			"license": "Apache-2.0"
 		},
@@ -163,7 +163,7 @@
 			"name": "plan-interview",
 			"source": "./library/skills/workflow/plan-interview",
 			"description": "Stress-tests a plan, design, or idea through a phased one-question-at-a-time interview before code is written, ending in a compact decision log. Not for a multi-perspective debate; use design-council.",
-			"version": "0.5.2",
+			"version": "0.5.4",
 			"category": "workflow",
 			"license": "Apache-2.0"
 		},
@@ -179,7 +179,7 @@
 			"name": "product-intent",
 			"source": "./library/skills/planning/product-intent",
 			"description": "Writes a problem-first product document for a greenfield effort: interviews for the problem, evidence, and a falsifiable hypothesis, with zero engineering decisions. Not for engineering decisions; use architecture. Not for turning a locked idea into milestone build prompts; use prd.",
-			"version": "0.4.2",
+			"version": "0.4.3",
 			"category": "planning",
 			"license": "Apache-2.0"
 		},
@@ -211,7 +211,7 @@
 			"name": "scientific-modernization",
 			"source": "./library/skills/research/scientific-modernization",
 			"description": "Modernizes, ports, rewrites, packages, or replaces established scientific software in independently validated stages against an external scientific oracle, settling compatibility and upstream stewardship before calling it complete. Not for an isolated benchmark; use experiment-protocol. Not for diagnosing wrong results; use scientific-debugging.",
-			"version": "0.4.2",
+			"version": "0.4.3",
 			"category": "research",
 			"license": "Apache-2.0"
 		},
@@ -227,7 +227,7 @@
 			"name": "skill-authoring",
 			"source": "./library/skills/meta/skill-authoring",
 			"description": "Writes, reviews, or prunes a SKILL.md, judging whether its description, body, and length earn their cost. Not for packaging a workflow that just happened; use workflow-capture.",
-			"version": "0.3.2",
+			"version": "0.4.0",
 			"category": "meta",
 			"license": "Apache-2.0"
 		},
@@ -235,7 +235,7 @@
 			"name": "slurm-jobs",
 			"source": "./library/skills/research/slurm-jobs",
 			"description": "Submits a batch script to Slurm through the clio-kit Slurm MCP server, polls it to a terminal state, fetches its output, and stamps the scheduler job id into the final answer. Not for writing the science inside the script or for interactive allocations.",
-			"version": "0.1.1",
+			"version": "0.1.2",
 			"category": "research",
 			"license": "Apache-2.0"
 		},
@@ -259,7 +259,7 @@
 			"name": "tech-spec",
 			"source": "./library/skills/planning/tech-spec",
 			"description": "Writes a typed call-stack architecture handoff: code-shaped contracts plus execution flows, implementation-ready for another engineer. User-invoked only. Not for weighing approaches or deciding the design; use architecture first.",
-			"version": "0.3.2",
+			"version": "0.3.3",
 			"category": "planning",
 			"license": "Apache-2.0"
 		},
@@ -267,7 +267,7 @@
 			"name": "workflow-capture",
 			"source": "./library/skills/workflow/workflow-capture",
 			"description": "Packages a workflow that just happened into a reusable SKILL.md: reconstructs it from the session record, checks overlap with installed skills, gates on approval, then writes it following skill-authoring. Not for authoring a skill with no prior workflow; use skill-authoring.",
-			"version": "0.4.3",
+			"version": "0.4.5",
 			"category": "workflow",
 			"license": "Apache-2.0"
 		},

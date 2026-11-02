@@ -8,7 +8,7 @@ triggers:
   - migrate the scientific build system
   - create a maintained fork
   - preserve scientific parity
-version: 0.4.2
+version: 0.4.3
 license: Apache-2.0
 allowed-tools:
   - read
@@ -81,13 +81,8 @@ them.
 
 Write the acceptance contract in `.clio-coder/validation.yaml` (preferred) or
 `VALIDATION.md` before changing behavior. Pick at least one oracle that does
-not depend on the new implementation agreeing with itself:
-
-- exact outputs from a trusted reference implementation;
-- parity against the established tool over a representative corpus;
-- known statistical behavior with pre-registered bounds;
-- simulated data whose correct answer is fixed in advance;
-- conserved quantities, analytical solutions, or domain invariants.
+not depend on the new implementation agreeing with itself. When choosing it,
+read references/oracle-kinds.md.
 
 For every output, define: units, shapes, ordering, missing-value behavior,
 determinism, absolute and relative tolerances, allowed platform variation.
@@ -100,13 +95,8 @@ Exit: the contract file exists and names its oracle(s).
 
 ## Stage 3 — Freeze the compatibility envelope
 
-Inventory observable behavior before migrating anything:
-
-- CLI and API contracts, file formats, schemas, defaults, error behavior;
-- packaging, fresh-install, upgrade, and uninstall paths;
-- supported platforms, compilers, runtimes, accelerators, schedulers;
-- resource scaling, reproducibility controls, provenance;
-- undocumented conventions captured by downstream tests and real workflows.
+Inventory observable behavior before migrating anything. When writing the
+inventory, read references/compatibility-envelope.md.
 
 Capture reference outputs and install evidence from released artifacts, not
 only the source checkout: mature tools carry user trust and conventions a
@@ -156,13 +146,4 @@ A completion claim must include all of:
 
 If scientific validity or durable ownership is unresolved, report the work as
 a prototype. Do not call it a replacement, successor, or production release.
-
-## Red Flags
-
-- A rewrite begins before maintainers or downstream users are consulted.
-- Tests derived only from the new implementation.
-- "The outputs look close" replacing declared tolerance semantics.
-- Performance wins reported before scientific parity.
-- One final comparison substituting for staged validation.
-- A passing happy path hiding fresh-install, scale, or edge-case failures.
-- A fork shipping without an accountable owner and maintenance horizon.
+When vetting a stage or completion claim, read references/red-flags.md.

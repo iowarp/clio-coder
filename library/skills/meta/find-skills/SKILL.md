@@ -7,7 +7,7 @@ triggers:
   - install a skill
   - add an agent skill
   - search the skills marketplace
-version: 0.2.2
+version: 0.3.0
 license: Apache-2.0
 allowed-tools:
   - bash
@@ -31,8 +31,9 @@ and recommends without trying to write protected active roots.
 
 ## Procedure
 
-1. **Search the Library first.** Run `clio-coder library search <query>` and
-   inspect `clio-coder library components --kind skill --json` for actual components.
+1. **Search the Library first.** Run `clio-coder library search <query>`, where
+   every word has to match, and inspect
+   `clio-coder library components --kind skill --json` for actual components.
    In a Clio session, `context(scope="library", kind="skill", query="...")`
    provides the same discovery facts. A catalog hint describes a package's
    contents; it does not prove a skill is installed or usable. Check copy scope,
@@ -52,8 +53,10 @@ and recommends without trying to write protected active roots.
    package. Use `library install <package-path-or-github-tree-url>` for a
    portable package, and `library import <path-or-github-tree-url> --dry-run`
    to review a supported foreign plugin's projection and omitted features.
-   A bare skill needs a portable package envelope; use the authoring template
-   under `library/_authoring/templates/skill/` or the package authoring guide.
+   A bare `SKILL.md` directory takes the same import, as a text-only copy, and
+   the plan refuses one whose instructions use a script it cannot copy. To keep
+   the script, `library package <path>` writes the manifest and
+   `library install <path>` installs it.
    Do not promise that every skill URL works as an install source.
 
 4. **Use the operator's Library controls.** Point to `/library` or Alt+L for
@@ -71,7 +74,9 @@ and recommends without trying to write protected active roots.
    runtime name, whole-package owner, selected scope and component availability.
    Report disabled, foreign, shadowed or invalid states plainly; an installed
    directory alone is not success. Use `/skill <runtime-name>` for activation;
-   `/skills` opens the category browser. Do not invent an audit status.
+   `/skills` opens the category browser. Do not invent an audit status. A copy
+   its catalog has moved past reads `update <version> available` in
+   `library list`; `library update --all` brings those forward.
 
 ## Host boundaries
 

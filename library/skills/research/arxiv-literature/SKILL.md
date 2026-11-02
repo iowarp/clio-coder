@@ -7,7 +7,7 @@ triggers:
   - compare these papers
   - find recent research papers
   - build a literature survey
-version: 0.5.2
+version: 0.5.3
 license: Apache-2.0
 allowed-tools:
   - web_fetch
@@ -80,10 +80,7 @@ Default every request — single paper, search, compare, and survey alike — to
   `search_query`) or one broader query covering all of them — whichever stays
   inside the fetch cap in Step 3.
 
-Useful categories for a `cat:` term: `cs.AI` (AI), `cs.LG` (ML), `cs.CL`
-(NLP/LLMs), `cs.CR` (security), `cs.SE` (software engineering), `cs.MA`
-(multi-agent), `cs.IR` (retrieval/RAG), `cs.CV` (vision), `cs.RO` (robotics),
-`cs.DC` (distributed, parallel and HPC).
+When a search needs a `cat:` term, read references/arxiv-categories.md.
 
 **Only dispatch the `researcher` shadow agent when the user explicitly asks
 for a deep or broad survey** ("survey the field", "don't just skim arXiv, go
@@ -92,19 +89,7 @@ unbounded, a dispatched worker has no arXiv-only restriction and no fetch
 budget of its own, and will wander into Semantic Scholar, DBLP, OpenAlex, and
 general web search, taking several minutes to return nothing useful. When you
 do dispatch, state the same bound this skill uses directly, in the task
-prompt itself:
-
-```text
-Research arXiv literature for: <user goal>.
-Search arXiv only (export.arxiv.org Atom API or arxiv.org paper pages) — do
-not query Semantic Scholar, DBLP, OpenAlex, or general web search. One
-round, at most two fetch attempts total (successes and failures both count).
-On a timeout or HTTP error, do not retry with a different host, scheme, or
-protocol — retry the identical URL at most once, then stop and report the
-failure. Build cards from whatever you have; do not keep escalating.
-Return only compact source-linked paper cards, comparison/synthesis,
-caveats, and read/skim/skip recommendations.
-```
+prompt itself: read references/dispatch-prompt.md and send that prompt.
 
 If dispatch is unavailable, fall back to the direct `web_fetch` path above.
 
@@ -158,18 +143,4 @@ report the network failure plainly and stop.
 - This skill's tool surface has no file-writing tool and no `artifact`. The
   paper cards are the chat reply, never a document; do not go looking for a
   way to save one.
-
-## Red flags
-
-- Dispatching `researcher` for an ordinary search or compare "just in case"
-  it does a better job than a direct fetch — it is slower and unbounded by
-  default; reserve it for an explicit deep-survey ask.
-- A dispatch task prompt without the arXiv-only, fetch-capped instruction —
-  that omission is what let a prior run wander into Semantic Scholar, DBLP,
-  and OpenAlex for minutes with nothing to show for it.
-- Treating a timeout or 429 as free of the fetch cap and retrying against a
-  different host, scheme, or unofficial mirror instead of stopping.
-- Raw Atom XML, a full abstract dump, or more than the top few candidates
-  reaching the final reply.
-- Reaching for `artifact` or any write tool to "save" the result — it is not
-  in this skill's tool surface; the reply is the deliverable.
+- When vetting a draft reply or dispatch prompt, read references/red-flags.md.

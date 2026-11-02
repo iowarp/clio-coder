@@ -7,7 +7,7 @@ triggers:
   - find calls with this argument shape
   - find code inside a function
   - grep returns too much noise
-version: 0.3.1
+version: 0.3.3
 license: Apache-2.0
 allowed-tools:
   - bash
@@ -36,22 +36,9 @@ changing, report them and edit through the normal edit tools.
 
 ## Arguments
 
-```text
-/skill ast-grep [--lang <language>] [--path <dir>] <structural question>
-```
-
-- `--lang`: tree-sitter language name (`javascript`, `typescript`, `python`,
-  `rust`, `go`, ...). Omit to infer from the files under `--path`.
-- `--path`: directory or file to scan. Omit to scan the project source
-  directory (`src/` when it exists, otherwise `.`).
-- Everything else is the question: what shape to find, what to exclude.
+When a flag is passed or no scan path is named, read references/arguments.md.
 
 The five steps below are the plan; do not open a task list for them.
-
-Examples:
-
-- `/skill ast-grep find async functions that await but have no try/catch`
-- `/skill ast-grep --lang python --path app/ find calls to open() outside a with block`
 
 Shell rules for every `bash` call in this workflow: one command per call,
 plain and direct. Never use `$(...)` or backticks; they trigger an approval
@@ -65,19 +52,13 @@ produce quoting errors that look exactly like non-matches.
 ast-grep --version
 ```
 
-If that fails, try the short alias, but verify it is really ast-grep:
-
-```bash
-sg --version
-```
-
-Only an output that starts with `ast-grep` counts. On many Linux systems
-`sg` is the unrelated shadow-utils "switch group" command and prints a
-usage error; that is NOT ast-grep. If neither binary is ast-grep, say so
-(`npm i -g @ast-grep/cli` or `cargo install ast-grep`) and stop. Do not
-fall back to text grep and present it as a structural result.
-
-Use the resolved binary name in every later command.
+If that fails, try `sg --version`; only output starting with `ast-grep`
+counts. Linux `sg` may instead be the unrelated switch-group command.
+If neither binary is ast-grep, report the missing binary and STOP this run.
+Do not install, download, use `npx`, create fixtures, or scan after that failure.
+The operator can install ast-grep separately before rerunning this skill.
+For binary details, read references/binary-check.md. Use the verified binary
+name in every later command.
 
 ## Step 1 — Pin down the question
 
@@ -118,25 +99,9 @@ Non-negotiable: every relational rule (`has`, `inside`) carries
 `stopBy: end`, or traversal stops at the first non-matching child and the
 rule silently under-matches.
 
-```yaml
-id: async-no-trycatch
-language: javascript
-rule:
-  all:
-    - kind: function_declaration
-    - has: {pattern: await $EXPR, stopBy: end}
-    - not:
-        has: {pattern: 'try { $$$ } catch ($E) { $$$ }', stopBy: end}
-```
-
-This example is verified against ast-grep 0.45 on JavaScript. When the
-question is this one, use it verbatim. Two facts it encodes that models
-guess wrong: tree-sitter JavaScript and TypeScript have no
-`async_function_declaration` kind (the `async` keyword is a token inside
-`function_declaration`; assert it with `pattern: 'async function $F($$$) { $$$ }'`
-when async matters), and an unknown `kind` fails the whole rule with
-`Kind ... is invalid` (exit 8); answer that error with the tree dump in
-Step 4, never with another guessed name.
+When the question is async functions with no try/catch, or a JavaScript or
+TypeScript rule has to assert `async` or fails with `Kind ... is invalid`, read
+references/rule-examples.md.
 
 Full syntax (atomic, relational, composite rules, metavariables, `constraints`,
 `utils`): read `references/rule_reference.md` when the rule needs more than
@@ -149,29 +114,12 @@ ast-grep scan --rule .clio-coder/scratch/ast-grep/rule.yml .clio-coder/scratch/a
 ```
 
 The rule must match the positive example and miss the negative one before
-you scan anything real. When it passes, go to Step 5. When it does not,
-debug in this order, changing the rule file with `edit`:
-
-1. Strip the rule to its simplest positive key; re-add parts one at a time.
-2. Confirm every `has`/`inside` has `stopBy: end`.
-3. Dump the tree to check node kinds; never guess a `kind` name:
-
-```bash
-ast-grep run --pattern 'async function f() { await g(); }' --lang javascript --debug-query=cst
-```
-
-(`cst` = every node; `ast` = named nodes only; `pattern` = how ast-grep
-parsed your pattern.) Pipe long dumps through `head -80`. Dump the tree
-only after a test has failed; a dump before the first test is a wasted
-turn.
+you scan anything real. When it passes, go to Step 5. When it does not, read
+references/debugging.md and work its order, then test again.
 
 ## Step 5 — Scan the codebase
 
-Simple one-node patterns skip the rule file:
-
-```bash
-ast-grep run --pattern 'console.log($ARG)' --lang javascript src
-```
+When the rule is a simple one-node pattern, read references/rule-examples.md.
 
 Rule-based scans:
 
@@ -184,6 +132,7 @@ Scan the requested path, not `.`, so your own fixture under
 lines from the report. Add `--json` only when the output feeds further
 processing.
 
+Before reporting, read references/red-flags.md and check the run against it.
 Report matches as `path:line` with a one-line reading of each; do not paste
 raw JSON at the user. Done when the reported matches answer the Step 1
 question and false positives you noticed are either excluded by the rule or
@@ -196,15 +145,3 @@ rm .clio-coder/scratch/ast-grep/positive.js .clio-coder/scratch/ast-grep/negativ
 ```bash
 rmdir .clio-coder/scratch/ast-grep
 ```
-
-## Red flags
-
-- Scanning the codebase with a rule never proven on an example.
-- A `has`/`inside` without `stopBy: end`.
-- A guessed `kind` name instead of a `--debug-query=cst` dump.
-- Any rewrite flag: this skill only reads.
-- Treating shadow-utils `sg` as ast-grep because `command -v sg` succeeded.
-- Cleaning up with `rm -rf`, or writing fixtures under `/tmp`; both are
-  refused in a headless run.
-- Falling back to grep halfway because rule debugging felt slow; fix the
-  rule with Step 4, that is the job.

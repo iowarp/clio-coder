@@ -7,7 +7,7 @@ triggers:
   - turn this into a reusable workflow
   - distill this repeated process
   - create a skill from this session
-version: 0.4.3
+version: 0.4.5
 license: Apache-2.0
 allowed-tools:
   - read
@@ -82,17 +82,8 @@ Use `ask_user` with `mode: "single_question"`, one question per round, bounded
 rounds (default 8, max 12), following the plan-interview operating contract:
 recommended answer first when options are natural, stop signals ("stop",
 "enough", "later", cancel) respected immediately, answers translated into
-compact decisions. Question bank, roots before leaves:
-
-1. Confirm the reconstruction and resolve tagged assumptions.
-2. Inputs and outputs: what varies between runs, what is fixed.
-3. Recurrence: how often has this actually happened? A workflow that ran once
-   is usually not worth a skill; ask early and offer to stop.
-4. Per-step rigidity: must-match versus any-reasonable-approach.
-5. Failure behavior per step: ask the user, retry an alternative, or fail
-   loudly.
-6. Scope cuts: what the skill should refuse to do.
-7. Name (lowercase-hyphen).
+compact decisions. Before the first question, read references/question-bank.md
+and ask from it, roots before leaves.
 
 ## Phase 3 - Overlap Check
 
@@ -106,16 +97,8 @@ Phase 5, so the loader warns when the dependency is missing.
 
 ## Phase 4 - Design Gate
 
-Present a compact design summary and wait for explicit approval:
-
-```markdown
-## Skill Design - <name>
-Description draft: <triggers only, third person>
-Steps: <step, rigidity, on-failure> per line
-References: <skill:<name>, why> or none
-Scope: project | user (user only if the workflow crosses repositories)
-Validation scenario: <prompt, expected observable behavior>
-```
+Present a compact design summary and wait for explicit approval. When drafting
+the summary, read references/design-summary.md for its format.
 
 No skill file is written before the user approves. "Looks fine, but change X"
 means revise and re-present. In a headless run with no operator (see
@@ -128,20 +111,14 @@ design.
 
 Write `SKILL.md` under `draft-skills/<approved-name>/`, outside protected active
 skill and installed package roots, with the
-frontmatter contract below - a triggers-only third-person description, and
+frontmatter contract - a triggers-only third-person description, and
 the pruning pass - with `requires: [skill:<name>]` for every skill the
 overlap check referenced. Do not try to load skill-authoring's own file mid-run
 to check this: only one skill can be active at a time, and a second
 `context(scope="skills", name="skill-authoring")` call is refused while this
-skill is still pending. The frontmatter contract, current as of this
-writing: `name`, `description` (third-person triggers, no "I"/"you"),
-`triggers` (a non-empty list), `version` (start `0.1.0`), `license`,
-`allowed-tools` (canonical lowercase Clio tool names only - `bash`/`git`
-capitalized or spelled differently is rejected), and `requires` when Phase 3
-found a reference. If in doubt about the exact shape, `read` an already-
-installed skill's `SKILL.md` (this skill's own file is always available) and
-mirror its frontmatter keys rather than guessing or trying to load
-skill-authoring. The proposed installation scope defaults to project; suggest user
+skill is still pending. When writing the frontmatter or confirming it in
+Phase 6, read references/frontmatter-contract.md. The proposed installation
+scope defaults to project; suggest user
 scope only when the user said the workflow crosses repositories. Creation here
 produces a draft. The operator later reviews a portable package envelope and
 installs through the Library; never write into an active skill store directly. Placeholders replace every
@@ -163,39 +140,7 @@ Otherwise record the scenario in the skill body's example section as the
 standing validation obligation. This skill has no `bash`/`git`, so it never
 commits or pushes the file it writes; say so and let the user commit it.
 
-## Worked Example
+## Worked Example and Red Flags
 
-Session: the user fetched a CSV export, normalized column names with a small
-script, and verified row counts against the source, three sessions in a row.
-
-1. Reconstruct: `bash curl ...` (ran), `write normalize.py` + `bash python3
-   normalize.py` (ran), `bash wc -l` comparison (ran). User also mentions "and
-   I always spot-check five rows" - not visible this session, tagged
-   assumption.
-2. Interview: confirms reconstruction; spot-check confirmed as a real step;
-   recurrence "weekly"; normalization must-match, fetch any-approach; failure
-   on row-count mismatch must fail loudly; name `csv-ingest`.
-3. Overlap: the `context(scope="skills")` listing shows no fetch or CSV skill
-   installed; no references.
-4. Gate: summary presented; user approves after tightening the description.
-5. Create: write `draft-skills/csv-ingest/SKILL.md`, placeholders for the
-   export URL and column map; frontmatter contract confirmed by reading the
-   file back (no `bash`, so no `clio-coder library validate` this turn).
-6. Validate: scenario "ingest this month's export" must show fetch,
-   normalize, count-verify, spot-check in that order; recorded in the body.
-
-## Red Flags
-
-- Writing any skill before the design gate is approved by a live operator,
-  or before a headless run has marked it `assumed - confirm`.
-- Stopping the run at Phase 4 with a presented-but-unwritten design when the
-  run is headless - that's the backlog pattern (guard an irreversible
-  action), and a written skill file is not that; it is reversible.
-- A reconstruction that lists steps nothing in the session shows.
-- Reimplementing an installed skill's job instead of referencing it.
-- Session-specific paths or values surviving into the generated skill.
-- Batching interview questions or ignoring a stop signal.
-- Distilling a one-off without asking about recurrence.
-- Calling `bash` for `clio-coder library validate`, or `context` with a
-  second skill's name to consult it mid-run: both are outside this skill's
-  tool surface and refused.
+When a phase's expected output is unclear, read references/worked-example.md.
+Before the final reply, read references/red-flags.md.

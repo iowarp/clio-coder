@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import { validateLibraryPackage } from "../src/domains/resources/library-validation.js";
 import { generateLibraryMarketplace } from "./generate-library-marketplace.js";
 import {
@@ -103,14 +103,31 @@ for (const target of packages) {
 		);
 }
 
-// Validate all curated packages
+// Validate all curated packages. The first pass learns every skill the catalog
+// ships, so the second can hold a routing clause to names that actually exist.
+const knownSkills = new Set(
+	packages.flatMap((target) =>
+		validateLibraryPackage(target.directory)
+			.validation.resources.filter((resource) => resource.kind === "skill")
+			.map((resource) => resource.name),
+	),
+);
 const validatedPackages: {
 	directory: string;
 	expectedKind: string;
 	result: ReturnType<typeof validateLibraryPackage>;
 }[] = [];
+// Warnings speak to whoever is pinning; the check runs inside every lint and stays quiet.
+function reportAuthoringWarnings(result: ReturnType<typeof validateLibraryPackage>): void {
+	if (checkMode) return;
+	for (const resource of result.validation.resources)
+		for (const diag of resource.diagnostics)
+			if (diag.severity === "warning")
+				process.stderr.write(`library warning: ${path.relative(root, diag.path ?? resource.path)}: ${diag.message}\n`);
+}
 for (const target of packages) {
-	const result = validateLibraryPackage(target.directory);
+	const result = validateLibraryPackage(target.directory, { authoring: { knownSkills } });
+	reportAuthoringWarnings(result);
 	if (!result.valid) {
 		const msgs = [
 			...result.diagnostics.map((d) => d.message),
@@ -124,7 +141,8 @@ for (const target of packages) {
 
 // Validate authoring templates
 for (const templatePath of templateTargets) {
-	const result = validateLibraryPackage(templatePath);
+	const result = validateLibraryPackage(templatePath, { authoring: { knownSkills } });
+	reportAuthoringWarnings(result);
 	if (!result.valid) {
 		const msgs = [
 			...result.diagnostics.map((d) => d.message),
@@ -143,7 +161,75 @@ if (validationErrors.length > 0) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Refresh/check normalized skill evidence
+// 2. Compute full-tree package pins and hold them to their versions. This comes
+// before anything is written, so a refused pin leaves every generated file as it
+// was. The registry itself is written below, once skill evidence is current.
+// ---------------------------------------------------------------------------
+const names = new Set<string>();
+const localEntries: RegistryRow[] = validatedPackages.map(({ directory, expectedKind, result }) => {
+	if (!result.manifest) {
+		throw new Error(`${directory}: missing manifest`);
+	}
+	const actualKind = result.manifest.clio.kind ?? "plugin";
+	if (actualKind !== expectedKind) {
+		throw new Error(`${directory}: package kind "${actualKind}" does not match kind directory "${expectedKind}"`);
+	}
+	// Plugin-backed kinds share one install directory per scope and extensions
+	// have their own, so a plugin and the extension serving it may share a name.
+	const identity = `${expectedKind === "extension" ? "extension" : "plugin"}:${result.manifest.name}`;
+	if (names.has(identity)) throw new Error(`duplicate library package identity: ${identity}`);
+	names.add(identity);
+	const sourceUrl = path.relative(path.dirname(destination), directory).split(path.sep).join("/");
+	return buildRegistryRow(directory, result, sourceUrl, path.basename(path.dirname(directory)));
+});
+
+// ---------------------------------------------------------------------------
+// A released version names one tree forever. `library update` compares
+// versions to tell an operator a package moved, so bytes that change under an
+// unchanged version would never reach the copies already installed. The last
+// release tag is the baseline: a package edited twice between releases still
+// needs only one bump. No tag or no checkout (an unpacked tarball) has no
+// baseline to hold, and pinning proceeds as it did before this check.
+// ---------------------------------------------------------------------------
+function lastReleaseRows(): { tag: string; rows: Map<string, { version?: string; sha256?: string }> } | null {
+	const tag = spawnSync("git", ["describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"], {
+		cwd: root,
+		encoding: "utf8",
+	});
+	if (tag.status !== 0) return null;
+	const name = tag.stdout.trim();
+	const shown = spawnSync("git", ["show", `${name}:library/registry.yaml`], {
+		cwd: root,
+		encoding: "utf8",
+		maxBuffer: 64 * 1024 * 1024,
+	});
+	if (shown.status !== 0) return null;
+	const parsed = parse(shown.stdout) as {
+		entries?: Array<{ kind: string; name: string; version?: string; sha256?: string }>;
+	};
+	return {
+		tag: name,
+		rows: new Map((parsed.entries ?? []).map((row) => [`${row.kind}:${row.name}`, row])),
+	};
+}
+
+const versionErrors: string[] = [];
+const released = lastReleaseRows();
+for (const row of localEntries) {
+	const previous = released?.rows.get(`${row.kind}:${row.name}`);
+	if (previous && previous.version === row.version && previous.sha256 !== row.sha256)
+		versionErrors.push(
+			`${row.kind}:${row.name} changed since ${released?.tag} but still declares ${row.version}; bump the version in its manifest and SKILL.md`,
+		);
+}
+if (versionErrors.length > 0) {
+	for (const error of versionErrors) process.stderr.write(`library version error: ${error}\n`);
+	process.stderr.write(`library:${checkMode ? "check" : "pin"}: ${versionErrors.length} package version violation(s)\n`);
+	process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// 3. Refresh/check normalized skill evidence
 // ---------------------------------------------------------------------------
 const skillResult = pinSkillsCatalog({ check: checkMode });
 if (!skillResult.ok) {
@@ -166,28 +252,7 @@ if (!skillResult.ok) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Compute and check/refresh full-tree package pins (library/registry.yaml)
-// ---------------------------------------------------------------------------
-const names = new Set<string>();
-const localEntries: RegistryRow[] = validatedPackages.map(({ directory, expectedKind, result }) => {
-	if (!result.manifest) {
-		throw new Error(`${directory}: missing manifest`);
-	}
-	const actualKind = result.manifest.clio.kind ?? "plugin";
-	if (actualKind !== expectedKind) {
-		throw new Error(`${directory}: package kind "${actualKind}" does not match kind directory "${expectedKind}"`);
-	}
-	// Plugin-backed kinds share one install directory per scope and extensions
-	// have their own, so a plugin and the extension serving it may share a name.
-	const identity = `${expectedKind === "extension" ? "extension" : "plugin"}:${result.manifest.name}`;
-	if (names.has(identity)) throw new Error(`duplicate library package identity: ${identity}`);
-	names.add(identity);
-	const sourceUrl = path.relative(path.dirname(destination), directory).split(path.sep).join("/");
-	return buildRegistryRow(directory, result, sourceUrl, path.basename(path.dirname(directory)));
-});
-
-// ---------------------------------------------------------------------------
-// 3b. Preserve committed remote pins during local checks. Only an explicit
+// 3a. Preserve committed remote pins during local checks. Only an explicit
 // library:pin refreshes remote package content.
 // ---------------------------------------------------------------------------
 const previousRemoteRows = readBlessedRemoteRows(destination);

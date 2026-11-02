@@ -27,6 +27,14 @@ clio-coder library install skill:<name> --project
 clio-coder library install plugin:materio --project
 clio-coder library install extension:local-status --user
 
+# Bring a bare SKILL.md directory in: a reviewed text-only copy, or a manifest
+# that keeps what it bundles for an ordinary install
+clio-coder library import <path-or-github-tree-url> --dry-run
+clio-coder library package <path>
+
+# Bring installed copies up to their catalog rows
+clio-coder library update --all --dry-run
+
 # Inspect installed packages
 clio-coder library skills --all --json
 
@@ -48,8 +56,9 @@ The same sources are usable by Claude Code and Codex with no converted copy and 
 claude plugin marketplace add iowarp/clio-coder
 claude plugin install tdd@clio-coder
 
-# Codex: .agents/skills already links the canonical trees, so a session
-# started in a clone sees all 39 skills. For every repository:
+# Codex: the checkout ships no .agents/skills links, so create them. This gives
+# every repository the curated skills and Materio's portable skills.
+mkdir -p ~/.agents/skills
 ln -s "$PWD/library/skills" ~/.agents/skills/clio-coder
 ln -s "$PWD/library/plugins/materio/skills" ~/.agents/skills/materio
 ```

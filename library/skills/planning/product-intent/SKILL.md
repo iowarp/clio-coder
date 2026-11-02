@@ -7,7 +7,7 @@ triggers:
   - problem-first PRD
   - define a falsifiable product hypothesis
   - greenfield product intent
-version: 0.4.2
+version: 0.4.3
 license: Apache-2.0
 allowed-tools:
   - read
@@ -124,18 +124,7 @@ and under-argue value.
 Write to `docs/<kebab-slug>.prd.md` (slug from the core idea; repo root if
 no `docs/`; a user-supplied path always wins). Never hardcode `PRD.md` — a
 second PRD must not overwrite the first. Sections, scannable, product only:
-
-1. **Problem statement** — who, what pain, cost of not solving it.
-2. **Evidence** — quote/data/observation, or "Assumption — validate via
-   [method]".
-3. **Thesis** — why this, why now, why it beats the current cope.
-4. **Hypothesis** — the RIGHT/WRONG block, verbatim.
-5. **Target user & JTBD** — plus non-users.
-6. **MVP** — the thinnest proving line.
-7. **Success metrics** — outcome-shaped: metric · target · how measured.
-   "Engagement" is not a metric.
-8. **Non-goals.**
-9. **Open questions** — named checkboxes, never hidden.
+when you write the document, read references/prd-sections.md for the list.
 
 ## Done when
 
@@ -148,23 +137,12 @@ outcome-shaped metrics · explicit non-goals · zero engineering decisions.
 
 ## Red flags
 
-- A stack, library, database, or framework name anywhere in the document —
-  "React + Postgres" appearing at all is an instant fail; that decision
-  belongs to `architecture`, not here.
-- A hypothesis with a RIGHT condition and no WRONG condition, or a WRONG
-  condition that is just the RIGHT one negated instead of a real
-  counter-signal.
-- The literal filename `PRD.md`, or anything outside `docs/`, instead of
-  `docs/<kebab-slug>.prd.md`.
-- Calling `ask_user` again after a refusal, instead of switching to
-  the decline treatment for every step from there on.
-- Opening a task list for the interview clusters; `tasks` is refused.
 - Reaching Generate without ever attempting Step 0 or the first cluster —
   the decline/headless treatment is a fallback for a gate that ran and came
   back empty, not a license to skip the loop from the start.
-- Claims in the document that trace to neither the seeded evidence nor a
-  marked assumption — an invented fact reads as confident and is the
-  hardest failure to catch after the fact.
 - Reaching for `bash` to grep or count-check the written PRD: `bash` is not
   in this skill's tool surface and the call is refused. Verify with `grep`
   and `read` instead.
+
+Before the summary to the user, read references/red-flags.md and check the
+written document against it.

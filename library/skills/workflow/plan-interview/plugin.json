@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "plan-interview",
-	"version": "0.5.2",
+	"version": "0.5.4",
 	"description": "Stress-tests a plan, design, or idea through a phased one-question-at-a-time interview before code is written, ending in a compact decision log. Not for a multi-perspective debate; use design-council.",
 	"license": "Apache-2.0",
 	"extensions": {

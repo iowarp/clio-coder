@@ -8,7 +8,7 @@ triggers:
   - check my slurm job
   - cancel my slurm job
   - is the queue busy
-version: 0.1.1
+version: 0.1.2
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
@@ -50,10 +50,12 @@ scheduler.
 3. `gateway(op="describe", capability="mcp_slurm__slurm_submit")` once, and
    use the parameter names it returns. Do not guess them.
 
-Every call to these capabilities asks the operator for approval, reads
-included, because an MCP server carries one action class for all of its
-tools. Poll sparingly. In a headless run the approval is denied: report that
-the run needs an operator and stop.
+On a trusted user-scope declaration with the id `slurm`, `slurm_list`,
+`slurm_describe` and `slurm_cluster` are reads and run without asking, so
+polling costs no approval. `slurm_submit` and `slurm_cancel` ask every time, and
+a headless run denies them: report that the run needs an operator and stop. A
+project declaration or another server id follows its own action class, so its
+reads may ask too.
 
 ## Phase 1 - Look before submitting
 

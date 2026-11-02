@@ -7,7 +7,7 @@ triggers:
   - improve this skill
   - why isn't this skill firing
   - prune a skill body
-version: 0.3.2
+version: 0.4.0
 license: Apache-2.0
 allowed-tools:
   - read
@@ -52,23 +52,30 @@ Frontmatter contract (Agent Skills compatible):
   name.
 - `description`: required, ≤1024 chars; its craft is the section below. Quote
   it when it contains ` #` — an unquoted YAML scalar is truncated there.
-- `version` and `license`: required for catalog publication. Follow the
-  marketplace versioning policy for body, trigger-surface, and sibling-file
-  changes; the normalized `SKILL.md` hash handles drift separately.
+- `version` and `license`: required for catalog publication. Any change to a
+  package's files bumps `version` in both `SKILL.md` and `plugin.json`: patch for
+  wording or moved text, minor for changed steps, triggers or tool surface, major
+  for a rename or removal. `pnpm library:pin` refuses changed bytes under the last
+  release's version, because this number is how `library update` sees that an
+  installed copy is behind.
 - `disable-model-invocation: true`: hides the skill from the agent; only the
   user can activate it.
 - `allowed-tools` / `disallowed-tools`: a *narrowing* declaration, not a
   grant. While every loaded skill declares `allowed-tools`, the turn's tool
   surface shrinks to their union; `disallowed-tools` always denies. Neither
-  ever admits a tool the safety level would refuse. Canonical lowercase Clio
-  names only (see library/skills/README.md, "Claude Code interop").
+  ever admits a tool the safety level would refuse. A YAML list or a space- or
+  comma-separated string. Canonical lowercase Clio names only (see
+  library/skills/README.md, "Claude Code interop").
 - `requires`: `skill:<name>` dependencies; the loader warns when one is
   missing. Reference an installed skill by name instead of restating its job.
 - `clio-coder:`: the reserved publication block (`registry-id`, `source-url`,
-  `audit`, optional `model-size` and `agents`). Required for catalog skills.
-  These are publication and review fields, not authorship claims. Preserve
-  required notices for retained third-party material; do not invent ancestry
-  or replacement originality declarations.
+  `audit`, optional `model-size`, `agents` and `verified-at`). Required for
+  catalog skills. These are publication and review fields, not authorship
+  claims. Preserve required notices for retained third-party material; do not
+  invent ancestry or replacement originality declarations.
+- `verified-at`: an ISO date under `clio-coder:` for a skill whose facts expire,
+  such as queue limits, module versions or endpoints. `library validate` warns
+  once it is 180 days old, and a load tells the model its age.
 
 Sibling files (`references/*.md`, scripts) ride along in the folder and load
 only when the body points at them.
@@ -109,7 +116,7 @@ pointer last.
   scattered.
 - Push material only some runs need into `references/<topic>.md`. The
   pointer's wording decides whether the agent follows it: state the condition
-  ("when the tests use the mock provider, read references/harness.md"), not
+  ("when the tests use the mock provider, read references/<topic>.md"), not
   just the link.
 - Prefer one pretrained word over a restated sentence: "fast, deterministic,
   low-overhead" collapses to "tight". A strong word anchors the same behavior
@@ -126,9 +133,10 @@ Before finishing any skill, pass the body line by line:
   also inflates its apparent importance.
 - No-op: would the agent do this by default? Then the line buys nothing;
   delete the whole sentence, not words within it.
-- Sprawl: past ~120 body lines, either disclose reference into sibling files
+- Sprawl: past 120 body lines, either disclose reference into sibling files
   or split the skill; a split description must earn its permanent context
-  load.
+  load. `library validate` warns and `pnpm library:pin` refuses a catalog skill
+  over it.
 
 Done when: the description is one sentence plus routing clauses and the
 triggers carry the phrases, every step has a checkable completion criterion,

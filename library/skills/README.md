@@ -68,6 +68,16 @@ activation is not inherited. A running process needs a new candidate build and
 restart for runtime changes, while editing these source skills remains ordinary
 repository work. Follow `CONTRIBUTING.md` and the skills' focused references.
 
+## Claude Code interop
+
+Catalog `allowed-tools` name Clio tools in lowercase, and `pnpm library:pin`
+refuses anything else. Claude Code reads the same key with the opposite meaning:
+it merges the names into its always-allow rules, so a listing there grants
+pre-approval instead of narrowing, and its rules match exact strings. Clio's
+lowercase names match no Claude tool and stay inert when a catalog skill sits in
+`.claude/skills`; spelling one `Bash` would auto-approve Bash for anyone who
+installed the skill.
+
 ## Catalog layout
 
 | Directory | Subject |

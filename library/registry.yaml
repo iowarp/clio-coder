@@ -16,9 +16,9 @@ entries:
       - architecture for this feature
       - decide the engineering approach
       - compare architecture options
-    version: 0.4.2
+    version: 0.4.3
     sourceUrl: skills/planning/architecture
-    sha256: d2d42f33026564c533db187e0ddb0d13dc11cff63b24ff1123c368ac9640b461
+    sha256: eb1d7d4aa651ed6f321c42be5c306f21db731c720ac07ece5a40ad90a0a6006a
     provides:
       - kind: skill
         name: architecture
@@ -39,9 +39,9 @@ entries:
       - compare these papers
       - find recent research papers
       - build a literature survey
-    version: 0.5.2
+    version: 0.5.3
     sourceUrl: skills/research/arxiv-literature
-    sha256: f8dec4ff9150e4ab953e38ca114af98172d7422dee5d25dd668db767e0638b6a
+    sha256: 95bea62f98c2dd69700d420cc3becfe3d838f82717784abc4a197617e33f0d54
     provides:
       - kind: skill
         name: arxiv-literature
@@ -61,9 +61,9 @@ entries:
       - find calls with this argument shape
       - find code inside a function
       - grep returns too much noise
-    version: 0.3.1
+    version: 0.3.3
     sourceUrl: skills/coding/ast-grep
-    sha256: 3c6a223951108160b442c6ec837820c79128680ae4e0dca36ad1cb98028cb8d0
+    sha256: ec2448014a4efb713e9aab46a60c659b9dcbff7916870e8a5fb51ff72f0f267a
     provides:
       - kind: skill
         name: ast-grep
@@ -84,9 +84,9 @@ entries:
       - build the backlog
       - decompose this plan into tickets
       - create GitHub issues from this architecture
-    version: 0.4.2
+    version: 0.4.3
     sourceUrl: skills/planning/backlog
-    sha256: 932a31400995db1721e0e4c22751eb5bb1062b875361f8d204935eb68dd4f16e
+    sha256: 3e0c5945d14a48a1f78720af73d2c22a16e8ee6d86511506d24928cd79234136
     provides:
       - kind: skill
         name: backlog
@@ -178,9 +178,9 @@ entries:
       - parse don't validate
       - illegal states unrepresentable
       - functional core imperative shell
-    version: 0.4.1
+    version: 0.4.2
     sourceUrl: skills/coding/coding-standards
-    sha256: 0f776d9f4c8ff76b43d8924d096d110beaf7664f76d36312e09708cb7622723c
+    sha256: bf875396a7ee52902541f3c2ee26b422ec03f372edbbc5bf6ff3a7c87c23214a
     provides:
       - kind: skill
         name: coding-standards
@@ -202,9 +202,9 @@ entries:
       - handoff to another agent
       - context is about to be lost
       - write a continuation brief
-    version: 0.5.3
+    version: 0.5.4
     sourceUrl: skills/context/context-handoff
-    sha256: 6a833281e031ebebcab510e3b9939bfabe1dc8e6367c02be1d483fb1843c0aa7
+    sha256: 3dcb2557f2bf5ca68263994b4208070b777ce3efab3c9231e22fa43495e60060
     provides:
       - kind: skill
         name: context-handoff
@@ -275,9 +275,9 @@ entries:
       - get multiple expert perspectives
       - weigh the architecture options
       - what would experts say
-    version: 0.6.1
+    version: 0.6.3
     sourceUrl: skills/workflow/design-council
-    sha256: 12c117a0780072528521de39b989698e7fbfa4514abec7e9d7bb6c4e1d2b3ef2
+    sha256: 079cd33b7c1ee7ee4939af1a9390a1a6498c7a6543f0c4ea308cb7948ca7d767
     provides:
       - kind: skill
         name: design-council
@@ -369,9 +369,9 @@ entries:
       - install a skill
       - add an agent skill
       - search the skills marketplace
-    version: 0.2.2
+    version: 0.3.0
     sourceUrl: skills/meta/find-skills
-    sha256: 04048cf4b03d13a8c2e2e3f03b1becd4ba597fbfb4b1f8c32b10877d5259ea8f
+    sha256: 8247e02c46d8869d6ed014cd80854115b4f5711eabc25addbd5158dc1babf21f
     provides:
       - kind: skill
         name: find-skills
@@ -582,9 +582,9 @@ entries:
       - stress-test this design
       - poke holes in this idea
       - clarify this plan one question at a time
-    version: 0.5.2
+    version: 0.5.4
     sourceUrl: skills/workflow/plan-interview
-    sha256: c13f10b3e09729af372f11feeab2526023df1e357ff8fe5eb8cb35fa5db53254
+    sha256: 049157b16e571c530035093da0a3a0c7f74fb8f660867eb3bdba810166365076
     provides:
       - kind: skill
         name: plan-interview
@@ -631,9 +631,9 @@ entries:
       - problem-first PRD
       - define a falsifiable product hypothesis
       - greenfield product intent
-    version: 0.4.2
+    version: 0.4.3
     sourceUrl: skills/planning/product-intent
-    sha256: d95a2190b5c506a7a9972b05620b8dfffb5a58f4656f90e36c9f9cd4a4d89925
+    sha256: 7488657eed0727051ba0af308be173ec4514ef1fb1184e3f165e30bac25cc9cd
     provides:
       - kind: skill
         name: product-intent
@@ -733,9 +733,9 @@ entries:
       - migrate the scientific build system
       - create a maintained fork
       - preserve scientific parity
-    version: 0.4.2
+    version: 0.4.3
     sourceUrl: skills/research/scientific-modernization
-    sha256: ee5bdba330f4f2d454d06d4cc69d9ccb29136175fbf673c84c17cee6316d0ea4
+    sha256: d0007ad88697eb732739e46173252e6fc63ded74b98e0bceb9e3d0e4ce8fac1f
     provides:
       - kind: skill
         name: scientific-modernization
@@ -780,9 +780,9 @@ entries:
       - improve this skill
       - why isn't this skill firing
       - prune a skill body
-    version: 0.3.2
+    version: 0.4.0
     sourceUrl: skills/meta/skill-authoring
-    sha256: 918c7405ffa9d1a47fccbcf3a039a09cad87e7509d8335fbee4ad3745e185a3b
+    sha256: a959de1f43a465a033a20f5a458387eecd661492c52cec25b4873af579ea7e6e
     provides:
       - kind: skill
         name: skill-authoring
@@ -804,9 +804,9 @@ entries:
       - check my slurm job
       - cancel my slurm job
       - is the queue busy
-    version: 0.1.1
+    version: 0.1.2
     sourceUrl: skills/research/slurm-jobs
-    sha256: 56a80015234ecc4feca27230cf999cbc3369f9a48cf1d4654d679237b0b5072f
+    sha256: 1698b78f04a07898d1c5bf4881c754817d364902432cbb09b253f2f6f52b5c18
     provides:
       - kind: skill
         name: slurm-jobs
@@ -874,9 +874,9 @@ entries:
       - code-shaped contracts
       - implementation-ready technical specification
       - specify execution flows
-    version: 0.3.2
+    version: 0.3.3
     sourceUrl: skills/planning/tech-spec
-    sha256: e66c06eb462489ffe2ee5f0e642a3c53def916b060f4346df5c1b82a2c1aed34
+    sha256: 9433d695db2c4fe9cbdb25032a062862a5673137c6076e64a4530385ade5c8e5
     provides:
       - kind: skill
         name: tech-spec
@@ -898,9 +898,9 @@ entries:
       - turn this into a reusable workflow
       - distill this repeated process
       - create a skill from this session
-    version: 0.4.3
+    version: 0.4.5
     sourceUrl: skills/workflow/workflow-capture
-    sha256: 52973b40cd365609ef1b0f55dcfd7bc74e5a1096af0401555c5143a05b628467
+    sha256: 75f5801e72625ae73d3da5d57cef247e44bb70ef9c5774c8c21cac71072f98ed
     provides:
       - kind: skill
         name: workflow-capture

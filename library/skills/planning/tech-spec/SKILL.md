@@ -7,7 +7,7 @@ triggers:
   - code-shaped contracts
   - implementation-ready technical specification
   - specify execution flows
-version: 0.3.2
+version: 0.3.3
 license: Apache-2.0
 disable-model-invocation: true
 allowed-tools:
@@ -128,22 +128,9 @@ with `grep`, `read`, and `find`, never `bash`.
 
 ## Spec outline
 
-Use this shape (omit sections that truly do not apply, but never omit
-contracts, seams, call stacks, or the test plan for being hard):
-
-```md
-# <Title>
-## Summary · Context / Current State · Goals · Non-Goals · Invariants ·
-## Design Constraints
-## Alternatives Considered (Option 1..3)
-## Recommendation · Proposed Design
-## Domain Model and Types · Types, Interfaces, and APIs
-## Seams, Boundaries, Adapters, and Implementations
-## Call Stacks and Data Flow (current / proposed / failure / retry)
-## Files to Add / Change / Delete
-## TDD Test Plan
-## Risks and Open Questions
-```
+When drafting the spec, read references/spec-outline.md and use that shape
+(omit sections that truly do not apply, but never omit contracts, seams, call
+stacks, or the test plan for being hard).
 
 ## Done when
 
@@ -154,16 +141,4 @@ no file was written unless the request asked for one.
 
 ## Red flags
 
-- Prose where a type signature would be more precise.
-- A recommendation written before the alternatives.
-- Speculative seams no invariant, boundary, or test earns.
-- The same rule restated in three sections.
-- "While I'm here" implementation.
-- Writing the spec to a file when nothing in the request asked for one —
-  the default output is always the inline reply.
-- A Path B question left unanswered instead of run as the assumed-confirm
-  monologue, or an interview skipped straight into Path A without ever
-  asking the first question.
-- Opening a task list for the steps above; `tasks` is refused. Reaching for
-  `bash` to grep or verify the spec; `bash` is not in this skill's tool
-  surface and the call is refused — use `grep`/`read`/`find`.
+Before returning the spec, read references/red-flags.md.

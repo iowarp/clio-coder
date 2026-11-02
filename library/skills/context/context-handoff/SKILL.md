@@ -7,7 +7,7 @@ triggers:
   - handoff to another agent
   - context is about to be lost
   - write a continuation brief
-version: 0.5.3
+version: 0.5.4
 license: Apache-2.0
 allowed-tools:
   - read
@@ -94,7 +94,8 @@ approved in a headless run.
 
 3. **Get the real date.** Run `date +%F`. Never fabricate the date.
 
-4. **Draft** using the template below. Pull from the conversation: goals,
+4. **Draft** using the template: when you reach this step, read
+   references/handoff-template.md. Pull from the conversation: goals,
    decisions + rationale, work completed, work in progress (with the exact
    pick-up point), blockers, errors and what was tried.
 
@@ -124,42 +125,6 @@ approved in a headless run.
 
 10. **Confirm.** Tell the user the full path, a one-line summary, any blocker
    needing attention, and that the next session should run `context-prime`.
-
-## Template
-
-```markdown
-# Handoff [YYYY-MM-DD]: [focus]
-
-## Context
-- **Project**: [name / repo] · branch `[branch]`
-- **Session focus**: [what this session worked on]
-- **Next session focus**: [user hint, or "TBD"]
-
-## Goals
-- [Overall objective]
-
-## Work completed
-- [Done]: [path or commit]
-
-## Work in progress
-- [WIP]: pick up at [file:line or task]
-
-## Decisions & rationale
-- [Decision]: because [reason]
-
-## Blockers & open questions
-- [Needs human input]
-
-## Errors & gotchas
-- [Notable failure and what was tried]
-
-## Suggested skills
-- context-prime: orient before acting
-- [skill]: [why]
-
-## References
-- [path or URL]: [one line]
-```
 
 ## Helper
 

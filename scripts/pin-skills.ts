@@ -13,11 +13,6 @@
  *   --check          verify both files match the catalog; exit 1 on drift
  *   --dir <path>     operate on a different catalog directory (tests)
  *
- * A `remote.yaml` beside the catalog lists skills whose content lives in
- * another repository at a pinned ref. Each names an overlay package in this
- * catalog; the overlay is pinned like any other skill, and the published index
- * entry points at the upstream tree with the overlay and exclude list attached.
- *
  * Malformed frontmatter is a hard failure in both modes: a skill file whose
  * YAML cannot be parsed must never be silently pinned under its folder name.
  * The catalog publishing contract (library/skills/README.md) is enforced here too:
@@ -30,6 +25,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "yaml";
 import { ALL_TOOL_NAMES } from "../src/core/tool-names.js";
+import { splitToolList } from "../src/domains/resources/common-loader.js";
+import { SKILL_BODY_LINE_BUDGET } from "../src/domains/resources/skills/authoring-check.js";
 import { normalizedSkillHash } from "../src/domains/resources/skills/content-hash.js";
 
 /** Top-level frontmatter every published catalog skill must carry (library/skills/README.md). */
@@ -76,24 +73,6 @@ interface CatalogEntry extends PinEntry {
 	category: string | null;
 	/** Trigger phrases from frontmatter `triggers`, published for promotion matching. */
 	triggers: string[] | null;
-	/** Set when the package is the overlay of a remote.yaml entry. */
-	remote: RemoteEntry | null;
-}
-
-/**
- * One entry of `remote.yaml`: a skill whose content lives in another
- * repository at a pinned ref. Clio never vendors it. The index points at the
- * upstream tree, the overlay package in this catalog supplies the SKILL.md
- * (and anything else Clio owns), and `exclude` names upstream top-level
- * members the install drops.
- */
-interface RemoteEntry {
-	name: string;
-	category: string;
-	sourceUrl: string;
-	/** Package-root-relative overlay directory, e.g. "skills/planning/map-codebase". */
-	overlay: string;
-	exclude: string[];
 }
 
 /**
@@ -121,7 +100,7 @@ function collectPackageDirs(dir: string, rel: string): string[] {
  */
 function toolSurfaceEntries(value: unknown): string[] | null {
 	if (typeof value === "string") {
-		return value.split(",").map((entry) => entry.trim());
+		return splitToolList(value);
 	}
 	if (Array.isArray(value)) {
 		return value.map((entry) => (typeof entry === "string" ? entry.trim() : String(entry)));
@@ -139,7 +118,7 @@ function toolSurfaceEntries(value: unknown): string[] | null {
  * names therefore match no Claude tool and stay inert when a catalog skill is
  * dropped into `.claude/skills`. Spelling one of them `Bash` would silently
  * auto-approve Bash in Claude Code for anyone who installed the skill. See
- * skills/README.md, "Claude Code interop".
+ * library/skills/README.md, "Claude Code interop".
  */
 function toolSurfaceErrors(skillPath: string, fm: Record<string, unknown>): string[] {
 	const errors: string[] = [];
@@ -159,64 +138,9 @@ function toolSurfaceErrors(skillPath: string, fm: Record<string, unknown>): stri
 	return errors;
 }
 
-function readRemoteEntries(remotePath: string, packageRoot: string, errors: string[]): Map<string, RemoteEntry> {
-	const byOverlay = new Map<string, RemoteEntry>();
-	if (!existsSync(remotePath)) return byOverlay;
-	let parsed: unknown;
-	try {
-		parsed = yaml.parse(readFileSync(remotePath, "utf8"));
-	} catch (err) {
-		errors.push(`${remotePath}: invalid YAML: ${err instanceof Error ? err.message : String(err)}`);
-		return byOverlay;
-	}
-	const record =
-		parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
-	if (record.version !== 1 || !Array.isArray(record.skills)) {
-		errors.push(`${remotePath}: expected { version: 1, skills: [...] }`);
-		return byOverlay;
-	}
-	for (const raw of record.skills) {
-		const item = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
-		const name = typeof item?.name === "string" ? item.name.trim() : "";
-		const sourceUrl = typeof item?.sourceUrl === "string" ? item.sourceUrl.trim() : "";
-		const overlay = typeof item?.overlay === "string" ? item.overlay.trim() : "";
-		const category = typeof item?.category === "string" ? item.category.trim() : "";
-		if (!item || !name || !sourceUrl || !overlay || !category) {
-			errors.push(`${remotePath}: every entry needs name, category, sourceUrl, and overlay`);
-			continue;
-		}
-		if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/tree\/[^/]+\/.+$/.test(sourceUrl)) {
-			errors.push(`${remotePath}: ${name}: sourceUrl must be a GitHub tree URL at a pinned ref: ${sourceUrl}`);
-			continue;
-		}
-		if (path.isAbsolute(overlay) || overlay.split("/").includes("..")) {
-			errors.push(`${remotePath}: ${name}: overlay must be a package-root-relative path: ${overlay}`);
-			continue;
-		}
-		const exclude = Array.isArray(item.exclude) ? item.exclude : [];
-		if (exclude.some((member) => typeof member !== "string" || member.includes("/") || member.length === 0)) {
-			errors.push(`${remotePath}: ${name}: exclude entries must be top-level names`);
-			continue;
-		}
-		const absoluteOverlay = path.resolve(packageRoot, overlay);
-		if (!existsSync(path.join(absoluteOverlay, "SKILL.md"))) {
-			errors.push(`${remotePath}: ${name}: overlay ${overlay} has no SKILL.md`);
-			continue;
-		}
-		byOverlay.set(absoluteOverlay, { name, category, sourceUrl, overlay, exclude: exclude as string[] });
-	}
-	return byOverlay;
-}
-
-function collectEntries(
-	catalogDir: string,
-	packageRoot: string,
-	remotePath: string,
-): { entries: CatalogEntry[]; errors: string[] } {
+function collectEntries(catalogDir: string): { entries: CatalogEntry[]; errors: string[] } {
 	const entries: CatalogEntry[] = [];
 	const errors: string[] = [];
-	const remotes = readRemoteEntries(remotePath, packageRoot, errors);
-	const matchedOverlays = new Set<string>();
 	for (const relPath of collectPackageDirs(catalogDir, "")) {
 		const skillPath = path.join(catalogDir, relPath, "SKILL.md");
 		const raw = readFileSync(skillPath, "utf8");
@@ -303,19 +227,26 @@ function collectEntries(
 			}
 		}
 		errors.push(...toolSurfaceErrors(skillPath, fm));
-		const category = path.dirname(relPath);
-		const remote = remotes.get(path.resolve(catalogDir, relPath)) ?? null;
-		if (remote) {
-			matchedOverlays.add(remote.overlay);
-			if (remote.name !== name) {
-				errors.push(`${remotePath}: ${remote.name}: overlay ${remote.overlay} declares name "${name}"`);
-			}
-			if (remote.category !== category) {
+		// The manifest version is what an installed copy compares; a SKILL.md that
+		// disagrees would tell the model and the published index something else.
+		const manifestPath = path.join(catalogDir, relPath, "plugin.json");
+		if (existsSync(manifestPath)) {
+			const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { version?: unknown };
+			if (manifest.version !== version) {
 				errors.push(
-					`${remotePath}: ${remote.name}: category "${remote.category}" but the overlay sits under "${category}"`,
+					`${skillPath}: frontmatter version ${JSON.stringify(version)} differs from plugin.json version ${JSON.stringify(manifest.version)}`,
 				);
 			}
 		}
+		// skill-authoring's sprawl rule, held here because a rule the catalog only
+		// states is one 13 of its 34 skills had quietly outgrown.
+		const bodyLines = raw.slice(fmMatch[0].length).trim().split(/\r?\n/).length;
+		if (bodyLines > SKILL_BODY_LINE_BUDGET) {
+			errors.push(
+				`${skillPath}: body is ${bodyLines} lines, over the catalog's ${SKILL_BODY_LINE_BUDGET}; move reference material into references/ behind a conditional pointer`,
+			);
+		}
+		const category = path.dirname(relPath);
 		entries.push({
 			name,
 			path: relPath,
@@ -326,13 +257,7 @@ function collectEntries(
 			audit: typeof clioCoder?.audit === "string" ? clioCoder.audit : "unknown",
 			category: category === "." ? null : category,
 			triggers,
-			remote,
 		});
-	}
-	for (const remote of remotes.values()) {
-		if (!matchedOverlays.has(remote.overlay)) {
-			errors.push(`${remotePath}: ${remote.name}: overlay ${remote.overlay} is not a catalog package`);
-		}
 	}
 	return { entries, errors };
 }
@@ -383,9 +308,6 @@ function renderManifest(entries: ReadonlyArray<CatalogEntry>): string {
  *
  * `sourceUrl` is each skill's own `clio-coder.source-url`, so a bare-name install
  * resolves to the same GitHub tree the audit and the pinned hash describe.
- * A remote.yaml entry instead publishes the pinned upstream tree as its
- * `sourceUrl`, with `origin: "remote"`, the catalog `overlay` the install lays
- * over that tree, and the upstream `exclude` list; its hash pins the overlay.
  * No hashes here: drift is measured against registry.yaml, which is the file
  * the audit signs, and duplicating hashes into a second published artifact
  * only creates a way for the two to disagree.
@@ -395,17 +317,10 @@ function renderIndex(entries: ReadonlyArray<CatalogEntry>): string {
 		name: entry.name,
 		description: entry.description,
 		...(entry.triggers ? { triggers: entry.triggers } : {}),
-		sourceUrl: entry.remote ? entry.remote.sourceUrl : entry.sourceUrl,
+		sourceUrl: entry.sourceUrl,
 		...(entry.version ? { version: entry.version } : {}),
 		audit: entry.audit,
 		...(entry.category ? { category: entry.category } : {}),
-		...(entry.remote
-			? {
-					origin: "remote",
-					overlay: entry.remote.overlay,
-					...(entry.remote.exclude.length > 0 ? { exclude: entry.remote.exclude } : {}),
-				}
-			: {}),
 	}));
 	return `${collapseShortArrays(JSON.stringify({ generatedBy: "pnpm run skills:pin", skills }, null, "\t"))}\n`;
 }
@@ -483,13 +398,9 @@ export function pinSkillsCatalog(options: PinSkillsOptions = {}): PinSkillsResul
 	const catalogDir = options.catalogDir ? path.resolve(options.catalogDir) : path.join(repoRoot, "library", "skills");
 	const manifestPath = path.join(catalogDir, "registry.yaml");
 	const indexPath = path.join(catalogDir, "skill-marketplace.json");
-	const remotePath = path.join(catalogDir, "remote.yaml");
-	const bundledSkillsDir = path.join(repoRoot, "library", "skills");
-	const isBundledCatalog = path.resolve(catalogDir) === bundledSkillsDir;
-	const packageRoot = isBundledCatalog ? repoRoot : path.dirname(catalogDir);
 	const checkMode = options.check === true;
 
-	const { entries, errors } = collectEntries(catalogDir, packageRoot, remotePath);
+	const { entries, errors } = collectEntries(catalogDir);
 	const manifest = renderManifest(entries);
 	const index = renderIndex(entries);
 
