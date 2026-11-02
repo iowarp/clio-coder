@@ -8,11 +8,16 @@ import {
 	truncateToWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, type RowBudgetedBody, showClioOverlayFrame, windowRows } from "../overlay-frame.js";
+import { clioTheme, emptyState } from "../theme/index.js";
+
+/** Rows the panel shows while the frame has not said how many it has. */
+const EXTENSION_PANEL_DEFAULT_ROWS = 12;
 
 /** Host-owned plain-text rendering. Extension code supplies no components or input handlers. */
-export class ExtensionPanelView implements Component {
+export class ExtensionPanelView implements Component, RowBudgetedBody {
 	private offset = 0;
+	private rows = 0;
 	private text: string;
 	constructor(
 		panel: ExtensionPanel,
@@ -22,11 +27,21 @@ export class ExtensionPanelView implements Component {
 	) {
 		this.text = extensionPanelText(panel);
 	}
+	setBodyRows(rows: number): void {
+		this.rows = Math.max(0, Math.floor(rows));
+	}
 	render(width: number): string[] {
-		if (!this.valid()) return [truncateToWidth("Extension panel expired. Close it and invoke the command again.", width)];
-		const lines = this.text.split("\n").flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
-		this.offset = Math.min(this.offset, Math.max(0, lines.length - 12));
-		return lines.slice(this.offset, this.offset + 12).map((line) => truncateToWidth(line, width));
+		const safe = Math.max(1, width);
+		if (!this.valid())
+			return emptyState(clioTheme(), "Extension panel expired.", safe, {
+				remedy: "Close it and invoke the command again.",
+			});
+		const lines = this.text.split("\n").flatMap((line) => wrapTextWithAnsi(line, safe));
+		// Extension text is shown as the plain bytes it arrived as; the panel adds
+		// no painted rows of its own, only the window the dock has room for.
+		const { window, start } = windowRows(lines, this.offset, this.rows > 0 ? this.rows : EXTENSION_PANEL_DEFAULT_ROWS);
+		this.offset = start;
+		return window.map((line) => truncateToWidth(line, safe));
 	}
 	handleInput(data: string): void {
 		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {

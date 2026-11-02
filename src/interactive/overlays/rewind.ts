@@ -16,8 +16,14 @@ import type {
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
 import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
 import { clockLocal, dateLocal } from "../format-time.js";
-import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, rule } from "../theme/index.js";
+import {
+	buildResponsiveHint,
+	FocusBox,
+	type RowBudgetedBody,
+	showClioOverlayFrame,
+	windowRows,
+} from "../overlay-frame.js";
+import { chip, chipRow, clioTheme, commandBlock, positionRow, sectionRule } from "../theme/index.js";
 import { type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 export const REWIND_EMPTY =
@@ -119,15 +125,15 @@ export function openRewindListOverlay(tui: TUI, options: OpenRewindListOptions):
 
 /** Paths listed per group before the rest are counted. */
 const REWIND_PATHS_SHOWN = 12;
-const REWIND_VISIBLE_ROWS = 22;
+/** Rows the confirmation shows while the frame has not said how many it has. */
+const REWIND_DEFAULT_ROWS = 22;
 
-/** The confirmation body: what is restored, what is removed, what is left alone. */
-function formatRewindConfirmBody(
-	record: WorkspaceSnapshotRecord,
-	plan: RewindPlan,
-	width: number,
-	scroll: number,
-): string[] {
+/**
+ * The confirmation body: what is restored, what is removed, what is left
+ * alone, each under a labelled rule that carries its count, and the exact
+ * recovery commands in a command block so nothing in them is ever cut.
+ */
+function formatRewindConfirmRows(record: WorkspaceSnapshotRecord, plan: RewindPlan, width: number): string[] {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
 	const rows: string[] = [];
@@ -135,9 +141,16 @@ function formatRewindConfirmBody(
 		rows.push(...wrapTextWithAnsi(theme.fg(token, text), contentWidth));
 	};
 	const changes = plan.restore.length + plan.remove.length;
-	wrap(
-		"annotation",
-		`snapshot #${record.n} · ${dateLocal(record.at)} ${clockLocal(record.at)} · ${record.reason}${record.tool !== undefined ? ` before ${record.tool}` : ""}`,
+	rows.push(
+		chipRow(
+			theme,
+			[
+				chip(theme, `snapshot #${record.n}`, "accent"),
+				chip(theme, `${dateLocal(record.at)} ${clockLocal(record.at)}`, "muted"),
+				chip(theme, `${record.reason}${record.tool !== undefined ? ` before ${record.tool}` : ""}`, "muted"),
+			],
+			contentWidth,
+		),
 	);
 	if (changes === 0) {
 		wrap("info", "The workspace already matches this snapshot. Nothing would change.");
@@ -149,36 +162,45 @@ function formatRewindConfirmBody(
 	}
 	const group = (heading: string, paths: ReadonlyArray<string>): void => {
 		if (paths.length === 0) return;
-		rows.push(rule(theme, contentWidth));
-		rows.push(theme.fg("groupHeading", heading));
+		rows.push(sectionRule(theme, contentWidth, heading, { meta: String(paths.length) }));
 		for (const rel of paths.slice(0, REWIND_PATHS_SHOWN)) wrap("menuDescription", `  ${rel}`);
 		if (paths.length > REWIND_PATHS_SHOWN) wrap("annotation", `  and ${paths.length - REWIND_PATHS_SHOWN} more`);
 	};
-	group(`Restore (${plan.restore.length})`, plan.restore);
-	group(`Remove (${plan.remove.length})`, plan.remove);
+	group("Restore", plan.restore);
+	group("Remove", plan.remove);
 	group(
-		`Left alone (${plan.kept.length})`,
+		"Left alone",
 		plan.kept.map((kept) => `${kept.path}: ${kept.why}`),
 	);
 	if (plan.refs.length > 0) {
-		rows.push(rule(theme, contentWidth));
-		rows.push(theme.fg("groupHeading", `Pinned refs (${plan.refs.length})`));
+		rows.push(sectionRule(theme, contentWidth, "Pinned refs", { meta: String(plan.refs.length) }));
 		for (const ref of plan.refs) {
 			wrap("menuDescription", `  ${pinLabel(ref.pin)} · ${REF_STATE_LABEL[ref.state]}`);
-			if (ref.recover !== null) wrap("inlineCode", `    ${ref.recover}`);
+			if (ref.recover !== null)
+				rows.push(...commandBlock(theme, ref.recover, contentWidth - 2).map((line) => `  ${line}`));
 		}
 	}
-	rows.push(rule(theme, contentWidth));
+	rows.push(sectionRule(theme, contentWidth, "Never touched"));
 	wrap("annotation", "Gitignored files are never touched. Your Git index, HEAD and branches do not change.");
 	if (plan.refs.some((ref) => ref.recover !== null))
 		wrap("annotation", "A rewind restores files only. Run the commands shown to bring back a moved or deleted ref.");
+	return rows;
+}
 
-	const maxScroll = Math.max(0, rows.length - REWIND_VISIBLE_ROWS);
-	const start = Math.max(0, Math.min(scroll, maxScroll));
-	const shown = rows.slice(start, start + REWIND_VISIBLE_ROWS);
-	if (rows.length > REWIND_VISIBLE_ROWS)
-		shown.push(theme.fg("annotation", `(${start + 1}-${start + shown.length} of ${rows.length} lines)`));
-	return shown;
+/** The rows the dock can show, windowed around `scroll`, with a position line while more remain. */
+function formatRewindConfirmBody(
+	record: WorkspaceSnapshotRecord,
+	plan: RewindPlan,
+	width: number,
+	scroll: number,
+	rows: number,
+): string[] {
+	const all = formatRewindConfirmRows(record, plan, width);
+	const budget = rows > 0 ? rows : REWIND_DEFAULT_ROWS;
+	const height = all.length > budget ? Math.max(1, budget - 1) : budget;
+	const { window, position } = windowRows(all, scroll, height);
+	if (position === null) return window;
+	return [...window, positionRow(clioTheme(), { ...position, keys: ["↑↓ scroll"] }, Math.max(1, Math.floor(width)))];
 }
 
 export interface OpenRewindConfirmOptions {
@@ -191,16 +213,35 @@ export interface OpenRewindConfirmOptions {
 	onCancel: () => void;
 }
 
-class RewindConfirmBody implements Component {
+/** The focus box hands the frame's row budget to the body it wraps. */
+class RewindFocusBox extends FocusBox implements RowBudgetedBody {
+	constructor(
+		private readonly body: RewindConfirmBody,
+		onInput: (data: string) => void,
+	) {
+		super(body, { onInput });
+	}
+
+	setBodyRows(rows: number): void {
+		this.body.setBodyRows(rows);
+	}
+}
+
+class RewindConfirmBody implements Component, RowBudgetedBody {
 	scroll = 0;
+	private rows = 0;
 
 	constructor(
 		private readonly record: WorkspaceSnapshotRecord,
 		private readonly plan: RewindPlan,
 	) {}
 
+	setBodyRows(rows: number): void {
+		this.rows = Math.max(0, Math.floor(rows));
+	}
+
 	render(width: number): string[] {
-		return formatRewindConfirmBody(this.record, this.plan, width, this.scroll);
+		return formatRewindConfirmBody(this.record, this.plan, width, this.scroll, this.rows);
 	}
 
 	invalidate(): void {}
@@ -210,29 +251,27 @@ export function openRewindConfirmOverlay(tui: TUI, options: OpenRewindConfirmOpt
 	const body = new RewindConfirmBody(options.record, options.plan);
 	const actionable = options.plan.restore.length + options.plan.remove.length > 0;
 	let settled = false;
-	const focus = new FocusBox(body, {
-		onInput: (data: string): void => {
-			if (settled || isKeyRelease(data)) return;
-			if (matchesKey(data, "up")) {
-				body.scroll = Math.max(0, body.scroll - 1);
-				tui.requestRender();
-				return;
-			}
-			if (matchesKey(data, "down")) {
-				body.scroll += 1;
-				tui.requestRender();
-				return;
-			}
-			if (matchesKey(data, "enter") && actionable) {
-				settled = true;
-				options.onConfirm();
-				return;
-			}
-			if (matchesKey(data, "escape")) {
-				settled = true;
-				options.onCancel();
-			}
-		},
+	const focus = new RewindFocusBox(body, (data: string): void => {
+		if (settled || isKeyRelease(data)) return;
+		if (matchesKey(data, "up")) {
+			body.scroll = Math.max(0, body.scroll - 1);
+			tui.requestRender();
+			return;
+		}
+		if (matchesKey(data, "down")) {
+			body.scroll += 1;
+			tui.requestRender();
+			return;
+		}
+		if (matchesKey(data, "enter") && actionable) {
+			settled = true;
+			options.onConfirm();
+			return;
+		}
+		if (matchesKey(data, "escape")) {
+			settled = true;
+			options.onCancel();
+		}
 	});
 	return showClioOverlayFrame(tui, focus, {
 		anchor: "center",

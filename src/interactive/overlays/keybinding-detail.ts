@@ -1,6 +1,4 @@
-import { visibleWidth } from "../../engine/tui.js";
-import { fitRow } from "../overlay-frame.js";
-import { clioTheme, GLYPH, padAnsi } from "../theme/index.js";
+import { clioTheme, type Fact, factRows, statusChip } from "../theme/index.js";
 
 export interface KeybindingDetailEntry {
 	id: string;
@@ -10,70 +8,29 @@ export interface KeybindingDetailEntry {
 	warnings?: ReadonlyArray<string>;
 }
 
-const LABEL_WIDTH = 10;
-
-function row(
-	label: string,
-	value: string,
-	width: number,
-	options: {
-		valueStyle?: (text: string) => string;
-		firstValuePrefix?: string;
-	} = {},
-): string[] {
-	const theme = clioTheme();
-	const prefix = `${padAnsi(theme.fg("fieldName", label), LABEL_WIDTH)} `;
-	const prefixWidth = visibleWidth(prefix);
-	const available = Math.max(8, width - prefixWidth);
-	const values: string[] = [];
-	const words = value.split(/\s+/g).filter(Boolean);
-	let current = "";
-	for (const word of words) {
-		const next = current.length === 0 ? word : `${current} ${word}`;
-		if (next.length <= available) {
-			current = next;
-			continue;
-		}
-		if (current.length > 0) values.push(current);
-		current = word;
-	}
-	if (current.length > 0) values.push(current);
-	if (values.length === 0) return [prefix.trimEnd()];
-	const valueStyle = options.valueStyle ?? ((text: string) => theme.fg("fieldValue", text));
-	// The label names the field once. Repeating it on every wrapped line read as
-	// two rows of the same field, which a long description made routine.
-	return values.map((text, index) => {
-		const lead = index === 0 ? prefix : " ".repeat(prefixWidth);
-		const styledPrefix = index === 0 ? (options.firstValuePrefix ?? "") : "";
-		return fitRow(`${lead}${styledPrefix}${valueStyle(text)}`, width);
-	});
-}
-
+/**
+ * One key's page as two fact tables: what it is, then how to change it. The
+ * label names the field once and a long value wraps under its own column,
+ * which is the shared fact-table rule; a warning carries the warning glyph.
+ */
 export function formatKeybindingDetailBodyLines(entry: KeybindingDetailEntry, contentWidth: number): string[] {
 	const theme = clioTheme();
-	const lines: string[] = [];
-	lines.push(...row("Action", entry.action, contentWidth));
-	lines.push(...row("Id", entry.id, contentWidth));
-	lines.push(
-		...row("Keys", entry.keys, contentWidth, { valueStyle: (text) => theme.style("decisionKey", text, { bold: true }) }),
-	);
-	lines.push(...row("Source", entry.source ?? "static", contentWidth));
-	lines.push("");
-	for (const detail of row(
-		"Change",
-		"Edit settings.yaml under interface.keybindings; changes reload live. [] disables direct and leader access; commands remain. Fixed leader suffixes do not follow direct remaps.",
-		contentWidth,
-	)) {
-		lines.push(detail);
-	}
-	if (entry.id.startsWith("clio-coder.")) {
-		const example = `${entry.id}: "alt+<key>"`;
-		lines.push(...row("Example", example, contentWidth));
-	}
-	for (const warning of entry.warnings ?? []) {
-		lines.push(
-			...row("Warning", warning, contentWidth, { firstValuePrefix: theme.fg("warning", `${GLYPH.warnInline} `) }),
-		);
-	}
-	return lines;
+	const identity: Fact[] = [
+		{ label: "Action", value: entry.action },
+		{ label: "Id", value: entry.id },
+		{ label: "Keys", value: theme.style("decisionKey", entry.keys, { bold: true }) },
+		{ label: "Source", value: entry.source ?? "static" },
+	];
+	const change: Fact[] = [
+		{
+			label: "Change",
+			value:
+				"Edit settings.yaml under interface.keybindings; changes reload live. [] disables direct and leader access; commands remain. Fixed leader suffixes do not follow direct remaps.",
+		},
+	];
+	if (entry.id.startsWith("clio-coder.")) change.push({ label: "Example", value: `${entry.id}: "alt+<key>"` });
+	for (const warning of entry.warnings ?? [])
+		change.push({ label: "Warning", value: statusChip(theme, "warning", warning) });
+	const options = { labelRole: "fieldName" as const, stack: "never" as const };
+	return [...factRows(theme, identity, contentWidth, options), "", ...factRows(theme, change, contentWidth, options)];
 }

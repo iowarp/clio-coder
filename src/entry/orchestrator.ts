@@ -30,7 +30,7 @@ import { hostFramedTexts } from "../core/reminder-framing.js";
 import { protectedResidencyModels } from "../core/residency-protection.js";
 import { armRestartHandoff } from "../core/restart-handoff.js";
 import { consumeRestartIntent } from "../core/restart-intent.js";
-import { type RouteProvenance, resolveRouteProvenance } from "../core/route-provenance.js";
+import { type RouteProvenance, resolveRouteProvenance, routeForSettingPath } from "../core/route-provenance.js";
 import {
 	SAFE_EXEC_DEFAULT_KILL_GRACE_MS,
 	SAFE_EXEC_GROUP_TEARDOWN_BOUND_MS,
@@ -60,7 +60,7 @@ import {
 	seedSessionRouting,
 	setAtPath,
 } from "../core/session-routing.js";
-import { settingsSourceFor, updateProjectLocalSettings } from "../core/settings-layers.js";
+import { type SettingsOrigin, settingsSourceFor, updateProjectLocalSettings } from "../core/settings-layers.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { captureAdmits, effectiveTelemetryCapture, systemOneDatasetRecording } from "../core/telemetry/capture.js";
@@ -3658,6 +3658,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			settingsSourceFor(sources, path),
 		);
 	};
+	// Which layer set one setting's effective value, for the settings center's
+	// origin column: a route reads its live provenance, any other path is a
+	// session override or whichever file layer set it.
+	const settingOrigin = (path: string): SettingsOrigin | "session" => {
+		const route = isRoutingPath(path) ? routeForSettingPath(path) : null;
+		if (route !== null) {
+			const source = routeProvenance().active[route];
+			return source === "chat" ? "built-in" : source;
+		}
+		if (sessionOverrides.has(path)) return "session";
+		return settingsSourceFor(config?.sources?.() ?? {}, path);
+	};
 	bumpSessionState();
 	// AUD-3 finding 1: resume/branch switches publish after replacement; new
 	// conversations and forks only park, so refresh those after replacement.
@@ -6247,6 +6259,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// An edit names its surface; one that names none came from an overlay.
 		writeSettings: (next) => applySettingsBlob(next, "settings-ui"),
 		commitSetting: (id, next, scope, source) => commitSetting(id, next, scope, source ?? "settings-ui"),
+		settingOrigin,
 		...(session
 			? {
 					onResumeSession: (sessionId) => {

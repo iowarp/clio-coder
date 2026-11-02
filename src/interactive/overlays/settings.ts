@@ -13,7 +13,6 @@ import {
 	settingInactiveNote,
 	settingsV2PathForRow,
 } from "../../core/settings-controls.js";
-import { renderUsdLimit } from "../../core/telemetry/render.js";
 import { settingsChangeKind } from "../../domains/config/classify.js";
 import { openTargetWizard } from "../target-wizard.js";
 
@@ -72,31 +71,34 @@ import type { SiteId } from "../../domains/system-one/types.js";
 import { SITE_IDS } from "../../domains/system-one/types.js";
 import { TURN_CONTROL_WORKFLOWS } from "../../domains/turn-control/index.js";
 import type { Component, OverlayHandle, SettingItem, TUI } from "../../engine/tui.js";
-import {
-	getKeybindings,
-	Input,
-	isKeyRelease,
-	matchesKey,
-	SelectList,
-	truncateToWidth,
-	visibleWidth,
-	wrapTextWithAnsi,
-} from "../../engine/tui.js";
+import { getKeybindings, Input, isKeyRelease, matchesKey, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { dockBodyRows } from "../dock.js";
 import { clockLocal } from "../format-time.js";
 import { localKey } from "../keyboard-owner.js";
-import {
-	buildHint,
-	centeredWindow,
-	DEFAULT_SELECT_THEME,
-	fitRows,
-	selectionMark,
-	showClioOverlayFrame,
-} from "../overlay-frame.js";
-import { barSep, clioTheme, GLYPH, padAnsi, rule, screenTitle } from "../theme/index.js";
+import { buildHint, centeredWindow, fitRows, type RowBudgetedBody, showClioOverlayFrame } from "../overlay-frame.js";
+import { barSep, clioTheme, emptyState, GLYPH, padAnsi, sectionRule, selectionRow, titleRow } from "../theme/index.js";
 import type { FleetNodeSettingsUi } from "./fleet-node-settings.js";
 import { fleetNodeSettingsSubmenu } from "./fleet-node-settings.js";
 import { modelsForTarget } from "./model-selector.js";
+import {
+	clippedSettingValue,
+	effectTiming,
+	formatSettingsValue,
+	type InspectorContext,
+	isModified,
+	renderDetailLane,
+	renderInspector,
+	renderNarrowInspector,
+	renderRowsPosition,
+	renderSectionLane,
+	renderSettingRow,
+	renderTargetTable,
+	type SectionLaneRow,
+	type SettingValueOrigin,
+	settingsLabelWidth,
+	settingsPathLabel,
+} from "./settings-presentation.js";
+import { type ChoiceItem, ChoiceList, SubmenuWrapper } from "./settings-submenus.js";
 
 export const SETTINGS_OVERLAY_WIDTH = "100%";
 export const SETTINGS_OVERLAY_MAX_HEIGHT = "100%";
@@ -148,17 +150,6 @@ const SHIPPED_RESILIENCE_COOLDOWN_MS = DEFAULT_SETTINGS.fleet.retry.routeCooldow
  * unmarked cut presents a fragment as the whole value, so every cell, row, and
  * explanation line in this overlay carries the marker.
  */
-const SELECT_UP = "\u001b[A";
-const SELECT_DOWN = "\u001b[B";
-
-/** Settings pickers accept the same j/k navigation as the rows that open them. */
-class SettingsSelectList extends SelectList {
-	override handleInput(data: string): void {
-		data = localKey(data);
-		super.handleInput(data === "j" ? SELECT_DOWN : data === "k" ? SELECT_UP : data);
-	}
-}
-
 /**
  * Scope tells the operator where an edit lands. Derived from the config-change
  * classification (src/domains/config/classify.ts): hotReload/nextTurn knobs can
@@ -349,69 +340,7 @@ function delegationAgentsAffordance(
 	};
 }
 
-type SubmenuTitle = string | ((width: number) => string);
-
-export class SubmenuWrapper implements Component {
-	/**
-	 * Why the last submission was refused, or null while nothing is wrong. The
-	 * editor sets it instead of closing, so the operator corrects the value with
-	 * the reason on screen rather than back at the row list with no reason.
-	 */
-	private problem: string | null = null;
-
-	constructor(
-		private readonly title: SubmenuTitle,
-		private readonly child: Component,
-		private readonly hint: string = buildHint([{ key: "Enter", verb: "confirm" }], "back"),
-		private readonly note?: string,
-	) {}
-
-	setProblem(problem: string | null): void {
-		this.problem = problem;
-	}
-
-	render(width: number): string[] {
-		const theme = clioTheme();
-		const lines: string[] = [];
-		const titleWidth = Math.max(1, width - 2);
-		const title = typeof this.title === "function" ? this.title(titleWidth) : this.title;
-		lines.push(screenTitle(theme, `  ${title}`));
-		if (this.note) {
-			for (const line of wrapTextWithAnsi(this.note, Math.max(1, width - 2))) {
-				lines.push(theme.fg("annotation", `  ${line}`));
-			}
-		}
-		lines.push("");
-		// The two-column indent is this wrapper's to spend, so the child is told
-		// what is left. Handing it the full width made every row that pads itself
-		// arrive two columns over budget: the checklist's entries came back at
-		// `width`, the indent pushed them to `width + 2`, and the panel then cut
-		// two columns off each one and marked the cut, so every entry wore a
-		// trailing … it had not earned.
-		lines.push(
-			...this.child
-				.render(Math.max(1, width - 2))
-				.map((line) => `  ${theme.base(this.child instanceof Input ? "inputText" : "menuOption", line)}`),
-		);
-		if (this.problem !== null) {
-			for (const line of wrapTextWithAnsi(this.problem, Math.max(1, width - 2))) {
-				lines.push(theme.fg("validationError", `  ${line}`));
-			}
-		}
-		lines.push("");
-		lines.push(theme.fg("keyboardHint", `  ${this.hint}`));
-		return lines;
-	}
-
-	handleInput(data: string): void {
-		data = localKey(data);
-		this.child.handleInput?.(data);
-	}
-
-	invalidate(): void {
-		this.child.invalidate?.();
-	}
-}
+export { SubmenuWrapper } from "./settings-submenus.js";
 
 function textInputSubmenu(title: string, note?: string): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
@@ -643,7 +572,7 @@ function selectListSubmenu(
 ): SettingSubmenuBuilder {
 	return (currentValue: string, done: (val?: string) => void) => {
 		const theme = clioTheme();
-		const presented = items.map((item) => ({
+		const presented: ChoiceItem[] = items.map((item) => ({
 			value: item.value,
 			label:
 				item.presentationKind === "destructive-action"
@@ -651,8 +580,9 @@ function selectListSubmenu(
 					: item.presentationKind === "action"
 						? `${GLYPH.active} ${item.label}`
 						: item.label,
+			...(item.value === currentValue ? { mark: theme.fg("selectedOption", GLYPH.ok) } : {}),
 		}));
-		const list = new SettingsSelectList(presented, Math.min(10, Math.max(1, items.length)), DEFAULT_SELECT_THEME);
+		const list = new ChoiceList(presented);
 		const currentIndex = items.findIndex((item) => item.value === currentValue);
 		if (currentIndex >= 0) list.setSelectedIndex(currentIndex);
 		list.onSelect = (item) => done(item.value);
@@ -776,11 +706,12 @@ function buildScopedModelChecklistRows(
 	return { rows, availableRefs };
 }
 
-class ScopedModelChecklist implements Component {
+class ScopedModelChecklist implements Component, RowBudgetedBody {
 	private readonly rows: ScopedModelChecklistRow[];
 	private readonly availableRefs: ReadonlySet<string>;
 	private readonly selectedKeys = new Set<string>();
 	private selectedRow = 0;
+	private bodyRows = 0;
 
 	constructor(
 		private readonly originalRefs: readonly string[],
@@ -797,37 +728,42 @@ class ScopedModelChecklist implements Component {
 		this.selectedRow = this.nextEntryIndex(0, 1);
 	}
 
+	setBodyRows(rows: number): void {
+		this.bodyRows = Math.max(0, Math.floor(rows));
+	}
+
 	render(width: number): string[] {
 		const theme = clioTheme();
+		const safe = Math.max(1, width);
 		if (!this.rows.some((row) => row.kind === "entry")) {
-			return [theme.fg("emptyState", "No models are available to select.")];
+			return emptyState(theme, "No models are available to select.", safe);
 		}
-		const visibleRows = Math.min(10, this.rows.length);
-		const [start, end] = centeredWindow(this.rows.length, this.selectedRow, visibleRows);
-		const lines = this.rows.slice(start, end).map((row, offset) => {
-			if (row.kind === "group") return theme.style("groupHeading", row.label, { bold: true });
-			const selected = start + offset === this.selectedRow;
-			const checked = this.selectedKeys.has(row.key);
-			const pointer = `${selectionMark(selected)} `;
-			const check = theme.fg(checked ? "selectedOption" : "annotation", checked ? "[x]" : "[ ]");
-			const label = selected
-				? theme.style("selectedOption", row.label, { bold: true })
-				: theme.fg("menuOption", row.label);
-			return truncateToWidth(`${pointer}${check} ${label}`, Math.max(1, width), GLYPH.ellipsis, true);
-		});
 		const selected = this.rows[this.selectedRow];
+		// The focused entry's capability sentence sits under the list, three rows
+		// at most; a sentence that stops at "context 131" reads as the whole fact,
+		// so the line that survives the cut says it is not.
+		const detail: string[] = [];
 		if (selected?.kind === "entry") {
-			const detail = selected.available ? selected.detail : `Unavailable · ${selected.detail}`;
-			const wrapped = wrapTextWithAnsi(theme.fg("annotation", detail), Math.max(1, width));
+			const text = selected.available ? selected.detail : `Unavailable · ${selected.detail}`;
+			const wrapped = wrapTextWithAnsi(theme.fg("annotation", text), safe);
 			const kept = wrapped.slice(0, 3);
-			// A capability sentence that stops at "context 131" reads as the whole
-			// fact, so the line that survives the clip says it is not.
 			const last = kept.at(-1);
-			const marked =
-				wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept;
-			lines.push("", ...marked);
+			detail.push(
+				"",
+				...(wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept),
+			);
 		}
-		return lines;
+		const visibleRows = Math.max(1, Math.min(this.bodyRows > 0 ? this.bodyRows - detail.length : 10, this.rows.length));
+		const [start, end] = centeredWindow(this.rows.length, this.selectedRow, visibleRows);
+		const lines = this.rows.slice(start, end).flatMap((row, offset) => {
+			if (row.kind === "group") return [sectionRule(theme, safe, row.label)];
+			const focused = start + offset === this.selectedRow;
+			const checked = this.selectedKeys.has(row.key);
+			const box = theme.fg(checked ? "selectedOption" : "annotation", checked ? "[x]" : "[ ]");
+			const name = focused ? theme.style("selectedOption", row.label, { bold: true }) : theme.fg("menuOption", row.label);
+			return selectionRow(theme, { focused, label: `${box} ${name}`, width: safe });
+		});
+		return [...lines, ...detail];
 	}
 
 	handleInput(data: string): void {
@@ -1194,7 +1130,7 @@ const turnPreparationSubmenu: SettingSubmenuBuilder = (currentValue, done) => {
 			})),
 			{ value: "apply", label: "Apply these choices" },
 		];
-		const list = new SettingsSelectList(choices, choices.length, DEFAULT_SELECT_THEME);
+		const list = new ChoiceList(choices);
 		list.setSelectedIndex(selectedIndex);
 		list.onSelect = (choice) => {
 			if (choice.value === "apply") {
@@ -3109,384 +3045,6 @@ function ellipsizeFromLeft(text: string, width: number): string {
 	return `${GLYPH.ellipsis}${suffix.join("")}`;
 }
 
-interface RowColumns {
-	label: number;
-}
-
-const SETTINGS_CHOICE_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-	"safety.autonomy": { default: "Default", yolo: "YOLO" },
-	"fleet.permissions.mode": {
-		judge: "Safety judge",
-		deny: "Deny the tool",
-		fail: "Stop the worker",
-		escalate: "Ask me",
-	},
-	"fleet.permissions.escalation.fallback": { deny: "Deny the tool", fail: "Stop the worker" },
-	"integrations.externalAgents.defaults.toolGovernance": {
-		"clio-coder-policy": "Clio permissions",
-		"agent-managed": "Agent permissions",
-		"deny-all": "Deny all tools",
-	},
-	"context.workingSet.policy": {
-		"structural-v1": "Structure (classic)",
-		"structural-v2": "Structure (current)",
-		"age-horizon": "Age only",
-	},
-	"context.workingSet.profile": {
-		default: "Default",
-		"data-analysis": "Data analysis",
-		"web-design": "Web design",
-	},
-	"interface.outputDetail": { compact: "Compact", standard: "Standard", detailed: "Detailed" },
-	"interface.mode": { regular: "Scrollback", fullscreen: "Full screen" },
-	"interface.fullscreenScrollbar": { hidden: "Hidden", auto: "Automatic", always: "Always" },
-	"interface.smoothStreaming": { off: "Off", auto: "Automatic", on: "On" },
-	"interface.panes.enabled": { off: "Off", auto: "Automatic" },
-	"interface.panes.notifications": { failures: "Failures only", all: "All updates", off: "Off" },
-	"interface.panes.layout": { off: "Off", workers: "Workers", cockpit: "Workers and files" },
-	"interface.panes.files.mode": { companion: "Stay open", chooser: "Choose once" },
-	"interface.panes.files.profile": { managed: "Clio theme", user: "My file manager" },
-	"fleet.worktrees.root": { disk: "Disk", tmpfs: "Memory", auto: "Automatic" },
-};
-
-function formatSettingsValue(path: string, value: string): string {
-	const control = settingControl(path);
-	const named = SETTINGS_CHOICE_LABELS[path]?.[value];
-	if (named) return named;
-	if (control?.kind === "boolean" && value === "true") return "On";
-	if (control?.kind === "boolean" && value === "false") return "Off";
-	if (path === "integrations.git.commitAttribution" && value === "enabled") return "On";
-	if (path === "integrations.git.commitAttribution" && value === "disabled") return "Off";
-	if (path.endsWith("thinkingLevel") && value && value !== "(unset)" && value !== "(automatic)")
-		return value === "xhigh" ? "Extra high" : `${value[0]?.toUpperCase()}${value.slice(1)}`;
-	if (
-		value === "(automatic)" ||
-		(value === "auto" && (control?.choices?.includes("auto") || path === "fleet.concurrency"))
-	)
-		return "Automatic";
-	if (value === "(empty)" || value === "(none)") return "None";
-	if (value === "(off)") return "Off";
-	if (value === "(unset)") return "Not set";
-	if (value === "(connection default)") return "Connection default";
-	if (value === "(session target)") return "Chat connection";
-	if (value === "(orchestrator target)") return "Chat model";
-	if (value === "(config directory)") return "Default location";
-	if (value === "(local only)") return "Local only";
-	if (value === "(unconfirmed)") return "Not confirmed";
-	if (value === "(built-in)") return "Built in";
-	if (value === "(defaults)") return "Default keys";
-	if (value === "(turn end only)") return "At turn end";
-	if (path === "turnControl.workflows" && !value.startsWith("["))
-		return `${value.split(",").filter((entry) => entry.trim().length > 0).length} enabled`;
-	if (path === "chat.maxOutputTokens" && value === "0") return "Model limit";
-	if (path === "context.workingSet.minEvictableTokens" && value === "0") return "Any size";
-	if ((path === "chat.retry.maxRetries" || path === "fleet.retry.maxRetries") && value === "0") return "No retries";
-	if (path === "chat.retry.firstTokenStallMs" && value === "0") return "Wait indefinitely";
-	if (path === "fleet.retry.routeCooldownMs" && value === "0") return "No wait";
-	if ((control?.kind === "list" || control?.kind === "json") && (value.startsWith("[") || value.startsWith("{"))) {
-		try {
-			const collection: unknown = JSON.parse(value);
-			const count = Array.isArray(collection)
-				? collection.length
-				: collection !== null && typeof collection === "object"
-					? Object.keys(collection).length
-					: 0;
-			if (path === "turnControl.workflows") return `${count} enabled`;
-			if (path === "fleet.rosters") return count === 0 ? "No rosters" : `${count} rosters`;
-			if (path === "fleet.nodes") return count === 0 ? "No remote nodes" : `${count} remote nodes`;
-			if (path === "interface.keybindings") return count === 0 ? "Default keys" : `${count} custom keys`;
-			if (path === "integrations.externalAgents.entries")
-				return count === 0 ? "No external agents" : `${count} external agents`;
-			if (path === "fleet.adaptiveRouting.agentRoles") return count === 0 ? "No active routes" : `${count} active routes`;
-			if (path === "chat.modelPicker.favorites") return count === 0 ? "No favorites" : `${count} favorites`;
-			return `${count} ${count === 1 ? "entry" : "entries"}`;
-		} catch {
-			// The editor shows the unparsed value while an invalid draft is being corrected.
-		}
-	}
-	if (control?.kind !== "number" && path !== "fleet.concurrency") return value;
-	const number = Number(value);
-	if (!value.trim() || !Number.isFinite(number)) return value;
-	if (path.endsWith("Ms") || path.endsWith("TimeoutMs") || path.endsWith("DelayMs")) {
-		if (path === "integrations.externalAgents.defaults.turnTimeoutMs" && number === 0) return "No limit";
-		if (number >= 60_000 && number % 60_000 === 0) return `${number / 60_000} min`;
-		if (number >= 1_000 && number % 1_000 === 0) return `${number / 1_000} sec`;
-		return `${number.toLocaleString()} ms`;
-	}
-	if (path.endsWith("Seconds")) {
-		if (number >= 60 && number % 60 === 0) return `${number / 60} min`;
-		return `${number.toLocaleString()} sec`;
-	}
-	if (path.endsWith("Bytes")) return `${(number / 1024).toLocaleString()} KB`;
-	if (path === "safety.limits.sessionCostUsd" || path === "turnControl.orientation.maxCostUsdPerTurn")
-		return renderUsdLimit(number);
-	if (
-		path === "context.compaction.threshold" ||
-		path === "context.workingSet.target" ||
-		path === "context.workingSet.rearmFraction" ||
-		path.endsWith(".ratio")
-	)
-		return `${Math.round(number * 100)}%`;
-	return number.toLocaleString();
-}
-
-function settingsPathLabel(path: string): string {
-	const control = settingControl(path);
-	if (control) return control.label;
-	if (path === "targets" || path.startsWith("targets.")) return "Connections";
-	if (path.startsWith("fleet.agentProfiles.")) return `Agent ${path.slice("fleet.agentProfiles.".length)} profile`;
-	if (path.startsWith("fleet.profiles.")) {
-		const [, name, field] = path.match(/^fleet\.profiles\.([^.]+)(?:\.(.+))?$/) ?? [];
-		const part =
-			field === "target"
-				? "connection"
-				: field === "thinkingLevel"
-					? "thinking level"
-					: field === "node"
-						? "placement"
-						: field;
-		return `Profile ${name ?? ""}${part ? ` ${part}` : ""}`;
-	}
-	const last = path.split(".").at(-1) ?? path;
-	return last.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (letter) => letter.toUpperCase());
-}
-
-/** When a change reaches the running system, in the vocabulary of the config-change classification. */
-function propagationFor(id: string): string | null {
-	if (RESTART_REQUIRED_IDS.has(id)) return "takes effect next session";
-	if (id !== "targets.add-cta" && id.startsWith("targets."))
-		return "use: chat now, workers at the next dispatch · remove: next dispatch";
-	if (id.startsWith("workers.")) return "takes effect at the next dispatch";
-	return null;
-}
-
-function rowColumns(items: readonly SettingsCenterItem[], width: number, indentWidth: number): RowColumns {
-	const safeWidth = Math.max(1, width);
-	const available = Math.max(1, safeWidth - indentWidth - 4 - visibleWidth(ROW_GAP));
-	const labelNatural = Math.max(8, ...items.map((item) => visibleWidth(item.label)));
-	return { label: Math.min(labelNatural, 34, Math.max(6, Math.floor(available * 0.62))) };
-}
-
-function formatSettingRow(
-	item: SettingsCenterItem,
-	width: number,
-	selected: boolean,
-	columns: RowColumns,
-	indentWidth: number,
-	displayValue: string,
-	pending: boolean,
-	pinned = false,
-): string {
-	const theme = clioTheme();
-	const indent = " ".repeat(Math.max(0, indentWidth));
-	if (item.id === "targets") return formatTargetConsoleHeader(width, indentWidth);
-	if (item.targetConsole) return formatTargetConsoleRow(item, width, selected, indentWidth);
-	if (item.id === "targets.add-cta") {
-		const prefix = `${selectionMark(selected)} `;
-		const label = theme.style("commandHint", item.label, { bold: true });
-		return truncateToWidth(
-			`${indent}${prefix}${label}${ROW_GAP}${theme.fg(selected ? "selectedOption" : "menuDescription", item.currentValue)}`,
-			width,
-			GLYPH.ellipsis,
-			true,
-		);
-	}
-	const prefix = `${selectionMark(selected)} `;
-	const labelText = padAnsi(item.label, columns.label, GLYPH.ellipsis);
-	const label = selected
-		? theme.style("selectedOption", labelText, { bold: true })
-		: item.presentationKind === "group-header"
-			? theme.style("groupHeading", labelText, { bold: true })
-			: item.presentationKind === "action"
-				? theme.style("commandHint", labelText, { bold: true })
-				: theme.fg("fieldName", labelText);
-	if (item.presentationKind === "group-header") {
-		return truncateToWidth(`${indent}  ${label}`, width, GLYPH.ellipsis, true);
-	}
-	const modified = !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue;
-	const marker = pending
-		? theme.fg("changedValue", `${GLYPH.scoped} `)
-		: modified
-			? theme.fg("changedValue", `${GLYPH.scoped} `)
-			: "  ";
-	const used = visibleWidth(indent) + 2 + columns.label + visibleWidth(ROW_GAP);
-	const valueWidth = Math.max(1, width - used - 2);
-	const valueSegments = pending
-		? [{ text: formatSettingsValue(item.configPath, displayValue), tone: "neutral" as const }]
-		: item.presentationKind === "read-only-fact"
-			? [
-					{ text: "— ", tone: "neutral" as const },
-					...(item.valueSegments.length <= 1
-						? [{ text: formatSettingsValue(item.configPath, displayValue), tone: "neutral" as const }]
-						: item.valueSegments),
-				]
-			: item.presentationKind === "setting" && item.valueSegments.length <= 1
-				? [{ text: formatSettingsValue(item.configPath, displayValue), tone: "neutral" as const }]
-				: item.valueSegments;
-	const value = renderSettingValue(valueSegments, valueWidth, selected, item.readOnly, pending || modified);
-	// The pin mark takes the second cell of the label gap, so pinning never changes a row's width.
-	const gap = pinned ? ` ${theme.fg("annotation", GLYPH.favorite)}` : ROW_GAP;
-	return truncateToWidth(`${indent}${prefix}${label}${gap}${marker}${value}`, width, GLYPH.ellipsis, true);
-}
-
-function targetConsoleColumns(
-	width: number,
-): Array<{ key: "health" | "id" | "roles" | "runtime" | "latency"; width: number }> {
-	const safeWidth = Math.max(1, width);
-	if (safeWidth < 34) {
-		const health = Math.min(11, Math.max(6, Math.floor(safeWidth * 0.42)));
-		return [
-			{ key: "health", width: health },
-			{ key: "id", width: Math.max(1, safeWidth - health - 2) },
-		];
-	}
-	if (safeWidth < 47) {
-		const latency = 7;
-		const health = 10;
-		return [
-			{ key: "health", width: health },
-			{ key: "id", width: Math.max(6, safeWidth - health - latency - 4) },
-			{ key: "latency", width: latency },
-		];
-	}
-	if (safeWidth < 56) {
-		const gaps = 6;
-		const health = 12;
-		const latency = 7;
-		const roles = 6;
-		return [
-			{ key: "health", width: health },
-			{ key: "id", width: safeWidth - gaps - health - latency - roles },
-			{ key: "roles", width: roles },
-			{ key: "latency", width: latency },
-		];
-	}
-	const gaps = 8;
-	const cells = safeWidth - gaps;
-	const health = 12;
-	const latency = 7;
-	const extra = cells - 48;
-	const roles = Math.min(13, 6 + Math.floor(extra * 0.25));
-	const id = Math.min(18, 8 + Math.floor(extra * 0.5));
-	return [
-		{ key: "health", width: health },
-		{ key: "id", width: id },
-		{ key: "roles", width: roles },
-		{ key: "runtime", width: cells - health - latency - roles - id },
-		{ key: "latency", width: latency },
-	];
-}
-
-function formatTargetConsoleHeader(width: number, indentWidth: number): string {
-	const theme = clioTheme();
-	const indent = " ".repeat(Math.max(0, indentWidth));
-	const available = Math.max(1, width - visibleWidth(indent) - 2);
-	const labels = { health: "HEALTH", id: "CONNECTION", roles: "USED BY", runtime: "TYPE", latency: "LATENCY" } as const;
-	const cells = targetConsoleColumns(available).map((column) =>
-		padAnsi(labels[column.key], column.width, GLYPH.ellipsis),
-	);
-	return truncateToWidth(
-		`${indent}  ${theme.style("annotation", cells.join(ROW_GAP), { bold: true })}`,
-		width,
-		GLYPH.ellipsis,
-		true,
-	);
-}
-
-function formatTargetConsoleRow(
-	item: SettingsCenterItem,
-	width: number,
-	selected: boolean,
-	indentWidth: number,
-): string {
-	const console = item.targetConsole;
-	if (!console) return "";
-	const theme = clioTheme();
-	const indent = " ".repeat(Math.max(0, indentWidth));
-	const prefix = `${selectionMark(selected)} `;
-	const available = Math.max(1, width - visibleWidth(indent) - 2);
-	const cells = targetConsoleColumns(available).map((column) => {
-		const text = column.key === "health" ? console.health.text : console[column.key];
-		const padded = padAnsi(text, column.width, GLYPH.ellipsis);
-		if (column.key === "health")
-			return renderSettingValue([{ ...console.health, text: padded }], column.width, selected, false);
-		if (column.key === "id" && selected) return theme.style("selectedOption", padded, { bold: true });
-		return theme.fg(column.key === "id" ? "modelIdentity" : "fieldValue", padded);
-	});
-	return truncateToWidth(`${indent}${prefix}${cells.join(ROW_GAP)}`, width, GLYPH.ellipsis, true);
-}
-
-function renderSettingValue(
-	segments: readonly SettingsValueSegment[],
-	width: number,
-	selected: boolean,
-	readOnly: boolean,
-	changed = false,
-): string {
-	const theme = clioTheme();
-	let semantic: SettingsValueSegment | null = null;
-	for (let index = segments.length - 1; index >= 0; index -= 1) {
-		const candidate = segments[index];
-		if (candidate && candidate.tone !== "neutral") {
-			semantic = candidate;
-			break;
-		}
-	}
-	let visible = segments;
-	if (semantic && visibleWidth(segments.map((segment) => segment.text).join("")) > width) {
-		const semanticWidth = Math.min(width, visibleWidth(semantic.text));
-		const prefixWidth = Math.max(0, width - semanticWidth);
-		const prefix = segments
-			.slice(0, segments.indexOf(semantic))
-			.map((segment) => segment.text)
-			.join("")
-			.replace(/ · $/, "·");
-		visible = [
-			...(prefixWidth > 0
-				? [
-						{
-							text: visibleWidth(prefix) <= prefixWidth ? prefix : truncateToWidth(prefix, prefixWidth, GLYPH.ellipsis, true),
-							tone: "neutral" as const,
-						},
-					]
-				: []),
-			{
-				...semantic,
-				text: truncateToWidth(semantic.text, semanticWidth, GLYPH.ellipsis, true),
-			},
-		];
-	}
-	let remaining = width;
-	const rendered: string[] = [];
-	for (const segment of visible) {
-		if (remaining <= 0) break;
-		const text = truncateToWidth(segment.text, remaining, GLYPH.ellipsis);
-		remaining -= visibleWidth(text);
-		const role =
-			segment.tone === "activity"
-				? "activity"
-				: segment.tone === "unknown"
-					? "unknownValue"
-					: changed
-						? "changedValue"
-						: "fieldValue";
-		const state =
-			segment.tone === "healthy"
-				? "success"
-				: segment.tone === "degraded"
-					? "warning"
-					: segment.tone === "unhealthy"
-						? "error"
-						: selected
-							? "selected"
-							: readOnly
-								? "readOnly"
-								: "normal";
-		rendered.push(theme.fg(role, text, state));
-	}
-	return rendered.join("");
-}
-
 export interface SettingsCenterOptions {
 	getBodyHeight: () => number;
 	prepareChange: (item: SettingsCenterItem, newValue: string) => SettingsChangePlan | null;
@@ -3498,6 +3056,31 @@ export interface SettingsCenterOptions {
 	shortcuts?: SettingsShortcuts;
 	/** Persist a pin or unpin and return the resulting shortcuts; absent keeps the pin in memory only. */
 	pinSetting?: (id: string, pinned: boolean) => SettingsShortcuts;
+	/** Which layer set a row's effective value; absent leaves the origin column empty. */
+	originFor?: (item: SettingsCenterItem) => SettingValueOrigin | null;
+}
+
+/** The rows lane stops growing here; a label, a value and an origin need no more. */
+const ROWS_LANE_MAX_WIDTH = 96;
+const DETAIL_LANE_MIN_WIDTH = 28;
+const DETAIL_LANE_MAX_WIDTH = 72;
+/** The inspector strip under two lanes: a rule, up to two description rows and one of facts. */
+const INSPECTOR_ROWS = 4;
+/** List rows the strip may never take from the lanes above it. */
+const MIN_LIST_ROWS = 6;
+
+function isRowBudgeted(child: Component): child is Component & RowBudgetedBody {
+	return typeof (child as Partial<RowBudgetedBody>).setBodyRows === "function";
+}
+
+/** `9 settings`, or `3 connections` for the targets table, where the rows are not settings. */
+function sectionCount(section: SettingsCenterSection): string {
+	if (section.id === "targets") {
+		const count = section.items.filter((item) => item.targetConsole !== undefined).length;
+		return `${count} ${count === 1 ? "connection" : "connections"}`;
+	}
+	const count = section.items.filter((item) => item.presentationKind !== "group-header").length;
+	return `${count} ${count === 1 ? "setting" : "settings"}`;
 }
 
 export class SettingsCenter implements Component {
@@ -3903,19 +3486,30 @@ export class SettingsCenter implements Component {
 			return;
 		}
 		if (item.values && item.values.length > 0) {
+			const theme = clioTheme();
 			const selectedValue = this.pendingValue ?? item.currentValue;
-			const choices = item.values.map((value) => ({ value, label: formatSettingsValue(item.configPath, value) }));
-			const list = new SettingsSelectList(choices, Math.min(10, choices.length), DEFAULT_SELECT_THEME);
+			const choices: ChoiceItem[] = item.values.map((value) => {
+				const meaning = item.valueHelp?.[value];
+				return {
+					value,
+					label: formatSettingsValue(item.configPath, value),
+					...(value === item.currentValue ? { mark: theme.fg("selectedOption", GLYPH.ok) } : {}),
+					...(meaning ? { description: meaning } : {}),
+				};
+			});
+			const list = new ChoiceList(choices);
 			list.setSelectedIndex(Math.max(0, item.values.indexOf(selectedValue)));
 			list.onSelect = (choice) => this.prepareScopeConfirm(item, choice.value);
 			list.onCancel = () => {
 				this.submenuComponent = null;
 				this.options.requestRender?.();
 			};
+			const timing = effectTiming(item);
 			this.submenuComponent = new SubmenuWrapper(
-				`Select ${item.label}`,
+				item.label,
 				list,
 				buildHint([{ key: "Enter", verb: "choose" }], "back"),
+				`Now ${formatSettingsValue(item.configPath, item.currentValue)}${timing === null ? "" : ` · a change applies ${timing}`}`,
 			);
 		}
 	}
@@ -3938,14 +3532,10 @@ export class SettingsCenter implements Component {
 	}
 
 	private showChangeError(item: SettingsCenterItem, value: string, error: unknown): void {
-		const list = new SettingsSelectList(
-			[
-				{ value: "edit", label: "Edit value" },
-				{ value: "cancel", label: "Cancel" },
-			],
-			2,
-			DEFAULT_SELECT_THEME,
-		);
+		const list = new ChoiceList([
+			{ value: "edit", label: "Edit the value", description: "Reopen the editor with what you entered" },
+			{ value: "cancel", label: "Cancel", description: "Keep the current value" },
+		]);
 		list.onSelect = (choice) => {
 			this.submenuComponent = null;
 			if (choice.value === "edit") {
@@ -3963,30 +3553,39 @@ export class SettingsCenter implements Component {
 			this.submenuComponent = null;
 			this.options.requestRender?.();
 		};
-		this.submenuComponent = new SubmenuWrapper(
-			"Change not saved",
-			list,
-			buildHint([{ key: "Enter", verb: "choose" }], "back"),
-			error instanceof Error ? error.message : String(error),
-		);
+		const wrapper = new SubmenuWrapper("Change not saved", list, buildHint([{ key: "Enter", verb: "choose" }], "back"));
+		wrapper.setProblem(error instanceof Error ? error.message : String(error));
+		this.submenuComponent = wrapper;
 		this.options.requestRender?.();
 	}
 
 	/** Hold one immutable plan while the operator chooses its destination. */
 	private openScopeConfirm(plan: SettingsChangePlan): void {
-		const options = plan.sessionCapable
-			? [
-					{ value: "session", label: "Apply this session" },
-					{ value: "project", label: "Apply and save for this project" },
-					{ value: "global", label: "Apply and save globally" },
-					{ value: "cancel", label: "Cancel" },
-				]
-			: [
-					{ value: "project", label: "Apply and save for this project" },
-					{ value: "global", label: "Apply and save globally" },
-					{ value: "cancel", label: "Cancel" },
-				];
-		const list = new SettingsSelectList(options, options.length, DEFAULT_SELECT_THEME);
+		const restart = !plan.sessionCapable && plan.propagation.some((entry) => entry.timing === "next-session");
+		const landing = restart ? "applied after a restart" : "live now";
+		const options: ChoiceItem[] = [
+			...(plan.sessionCapable
+				? [
+						{
+							value: "session",
+							label: "Apply this session",
+							description: "Live now and not saved; the next session starts from the saved value",
+						},
+					]
+				: []),
+			{
+				value: "project",
+				label: "Apply and save for this project",
+				description: `Saved in this project's .clio-coder/settings.local.yaml, ${landing}`,
+			},
+			{
+				value: "global",
+				label: "Apply and save globally",
+				description: `Saved in your user settings.yaml for every project, ${landing}`,
+			},
+			{ value: "cancel", label: "Cancel", description: "Nothing changes" },
+		];
+		const list = new ChoiceList(options);
 		const finish = (chosen: "session" | "project" | "global" | "cancel"): void => {
 			try {
 				if (chosen === "session" || chosen === "project" || chosen === "global") this.options.onApply(plan, chosen);
@@ -4032,52 +3631,117 @@ export class SettingsCenter implements Component {
 		return { value: item.currentValue, pending: false };
 	}
 
+	private originFor(item: SettingsCenterItem): SettingValueOrigin | null {
+		if (item.presentationKind !== "setting" || item.readOnly) return null;
+		return this.options.originFor?.(item) ?? null;
+	}
+
 	/**
-	 * Section 2.6's ultrawide row: categories left, settings center, and the live
-	 * description as its own right column.
-	 *
-	 * Below this width the description is a footer under both lanes, which is the
-	 * only place it fits. At 120 columns that footer was spending five or six rows
-	 * of height on prose while 40-odd columns sat empty to the right of the
-	 * settings rows, so the panel scrolled a list it had the room to show. The
-	 * description lane is a readout, not a third focus target: Tab still moves
-	 * between sections and rows.
+	 * What the inspector strip and the detail lane describe: the section, or
+	 * the row under the cursor. `rowsWidth` is the lane the rows were drawn in,
+	 * so the context knows whether that lane cut the focused value.
+	 */
+	private inspectorContext(rowsWidth: number): InspectorContext | null {
+		const sections = this.sections();
+		const section = this.currentSection();
+		if (!section) return null;
+		const item = this.level === "rows" ? this.selectedItem() : null;
+		const selectable = section.items.filter((entry) => this.isSelectableRow(entry));
+		const home =
+			item !== null && section.id === "recent" ? SETTINGS_SECTIONS.find((area) => area.id === item.section) : undefined;
+		const origin = item === null ? null : this.originFor(item);
+		const fullValue = ((): string | null => {
+			if (item === null) return null;
+			const display = this.displayValueFor(item, true);
+			return clippedSettingValue(clioTheme(), item, rowsWidth, settingsLabelWidth(section.items), {
+				selected: true,
+				displayValue: display.value,
+				pending: display.pending,
+				pinned: this.isPinned(item),
+				origin,
+			});
+		})();
+		return {
+			sectionLabel: section.label,
+			sectionDescription: SETTINGS_SECTION_DESCRIPTIONS[section.id],
+			position: `${sections.findIndex((entry) => entry.id === section.id) + 1} of ${sections.length}`,
+			counts: { label: sectionCount(section), changed: selectable.filter((entry) => isModified(entry)).length },
+			item,
+			...(fullValue === null ? {} : { fullValue }),
+			origin,
+			pinned: item !== null && this.isPinned(item),
+			pinnable: isShortcutRow(item),
+			...(home ? { homeLabel: home.label } : {}),
+		};
+	}
+
+	private laneWidths(width: number): { left: number; separator: string; separatorWidth: number } {
+		return {
+			left: Math.min(SECTION_LANE_WIDTH, Math.max(16, Math.floor(width * 0.3))),
+			separator: barSep(clioTheme()),
+			separatorWidth: visibleWidth(" │ "),
+		};
+	}
+
+	private joinLanes(
+		lanes: ReadonlyArray<{ lines: ReadonlyArray<string>; width: number }>,
+		height: number,
+		separator: string,
+	): string[] {
+		return Array.from({ length: height }, (_, index) =>
+			lanes.map((lane) => padAnsi(lane.lines[index] ?? "", lane.width, GLYPH.ellipsis)).join(separator),
+		);
+	}
+
+	/**
+	 * Three lanes at 120 columns and up: sections, the rows, and the row's full
+	 * explanation. The rows lane stops growing at `ROWS_LANE_MAX_WIDTH`, because
+	 * a label, a value and an origin do not need a hundred cells between them,
+	 * and the detail lane takes the room instead, up to a readable measure.
 	 */
 	private renderUltraWide(width: number, bodyHeight: number): string[] {
 		const head = this.filterEditorLines(width);
 		const bodyRows = Math.max(1, bodyHeight - head.length);
 		if (this.sections().length === 0) return [...head, ...this.emptyFilterLines(width, bodyRows)];
-		const theme = clioTheme();
-		const separator = barSep(theme);
-		const separatorWidth = visibleWidth(" │ ");
-		const leftWidth = Math.min(SECTION_LANE_WIDTH, Math.max(16, Math.floor(width * 0.28)));
+		const { left: leftWidth, separator, separatorWidth } = this.laneWidths(width);
 		const left = this.renderSectionLane(leftWidth, bodyRows);
-		// A detail page owns the work area: the description column would be a second
-		// readout beside a submenu that already carries its own title and note.
 		if (this.submenuComponent) {
 			const workWidth = Math.max(1, width - leftWidth - separatorWidth);
-			const work = this.renderRightLane(workWidth, bodyRows);
+			const work = this.renderWorkLane(workWidth, bodyRows);
 			return [
 				...head,
-				...Array.from(
-					{ length: bodyRows },
-					(_, index) =>
-						`${padAnsi(left[index] ?? "", leftWidth, GLYPH.ellipsis)}${separator}${padAnsi(work[index] ?? "", workWidth, GLYPH.ellipsis)}`,
+				...this.joinLanes(
+					[
+						{ lines: left, width: leftWidth },
+						{ lines: work, width: workWidth },
+					],
+					bodyRows,
+					separator,
 				),
 			];
 		}
-		const detailWidth = Math.max(28, Math.min(44, Math.floor(width * 0.3)));
-		const centerWidth = Math.max(1, width - leftWidth - detailWidth - separatorWidth * 2);
-		const center = this.renderRightLane(centerWidth, bodyRows);
-		const right = this.renderDetailLane(detailWidth, bodyRows);
+		const rest = Math.max(2, width - leftWidth - separatorWidth * 2);
+		let detailWidth = Math.max(DETAIL_LANE_MIN_WIDTH, Math.min(DETAIL_LANE_MAX_WIDTH, Math.floor(rest * 0.4)));
+		let centerWidth = Math.max(1, rest - detailWidth);
+		if (centerWidth > ROWS_LANE_MAX_WIDTH) {
+			detailWidth = Math.min(DETAIL_LANE_MAX_WIDTH, rest - ROWS_LANE_MAX_WIDTH);
+			centerWidth = ROWS_LANE_MAX_WIDTH;
+		}
+		const center = this.renderRowsLane(centerWidth, bodyRows);
+		const context = this.inspectorContext(centerWidth);
+		const right = context
+			? renderDetailLane(clioTheme(), context, detailWidth, bodyRows)
+			: fitRows([], detailWidth, bodyRows);
 		return [
 			...head,
-			...Array.from({ length: bodyRows }, (_, index) =>
+			...this.joinLanes(
 				[
-					padAnsi(left[index] ?? "", leftWidth, GLYPH.ellipsis),
-					padAnsi(center[index] ?? "", centerWidth, GLYPH.ellipsis),
-					padAnsi(right[index] ?? "", detailWidth, GLYPH.ellipsis),
-				].join(separator),
+					{ lines: left, width: leftWidth },
+					{ lines: center, width: centerWidth },
+					{ lines: right, width: detailWidth },
+				],
+				bodyRows,
+				separator,
 			),
 		];
 	}
@@ -4091,159 +3755,163 @@ export class SettingsCenter implements Component {
 	}
 
 	private emptyFilterLines(width: number, height: number): string[] {
-		const theme = clioTheme();
 		return fitRows(
-			[
-				theme.fg(
-					"menuDescription",
-					truncateToWidth(`No settings match “${this.effectiveFilterQuery()}”`, width, GLYPH.ellipsis, true),
-				),
-				theme.fg("annotation", truncateToWidth("/ edit filter · empty Enter clears", width, GLYPH.ellipsis, true)),
-			],
+			emptyState(clioTheme(), `No settings match “${this.effectiveFilterQuery()}”`, width, {
+				remedy: "/ edits the filter · an empty Enter clears it",
+			}),
 			width,
 			height,
 		);
 	}
 
 	/**
-	 * The right column: what the selected row is, what it means, and where a
-	 * change to it lands. Same content the footer carries below 120 columns,
-	 * wrapped to a narrow column instead of a wide strip, with the scope note
-	 * pinned to the bottom so it survives a long explanation.
+	 * Two lanes from 72 columns: sections and rows, with the inspector strip
+	 * under both. The strip takes at most four rows and never more than the list
+	 * can spare, so an 80-column terminal shows ten settings where the old
+	 * footer left room for four.
 	 */
-	private renderDetailLane(width: number, height: number): string[] {
-		const theme = clioTheme();
-		const section = this.currentSection();
-		const item = this.selectedItem();
-		if (!section) return fitRows([], width, height);
-		if (this.level === "sections" || !item) {
-			const rows = [
-				screenTitle(theme, section.label),
-				"",
-				...wrapTextWithAnsi(theme.fg("body", SETTINGS_SECTION_DESCRIPTIONS[section.id]), width),
-				"",
-				theme.fg("keyboardHint", "Tab or → to edit its settings"),
-			];
-			return fitRows(rows, width, height);
-		}
-		const body: string[] = [
-			screenTitle(theme, item.label),
-			"",
-			...wrapTextWithAnsi(theme.fg("body", item.description), width),
-		];
-		if (item.help) body.push("", ...wrapTextWithAnsi(theme.fg("help", item.help), width));
-		const detail = this.footerDetail(item, theme);
-		if (detail) body.push("", ...wrapTextWithAnsi(detail, width));
-		const note = wrapTextWithAnsi(theme.fg("annotation", this.footerScopeNote(item)), width);
-		// The note is the answer to "where does this land", so it keeps its rows
-		// and the explanation above it is what gets cut, with a marker.
-		const bodyBudget = Math.max(0, height - note.length - 1);
-		const kept = body.slice(0, bodyBudget);
-		// A cut that lands on one of the blank spacer rows would otherwise mark it,
-		// leaving a lone `…` under the last full sentence. The marker belongs on the
-		// last line that actually carries text.
-		while (kept.length > 0 && (kept.at(-1) ?? "").trim().length === 0) kept.pop();
-		const last = kept.at(-1);
-		const marked =
-			body.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept;
-		const filler = Array.from({ length: Math.max(0, height - marked.length - note.length) }, () => "");
-		return fitRows([...marked, ...filler, ...note], width, height);
-	}
-
 	private renderWide(width: number, bodyHeight: number): string[] {
 		const head = this.filterEditorLines(width);
 		const available = Math.max(1, bodyHeight - head.length);
 		if (this.sections().length === 0) return [...head, ...this.emptyFilterLines(width, available)];
-		// A detail page owns the work area, and the footer describes the row the
-		// operator has already left, so it is suppressed while a submenu is open.
-		const footer = this.submenuComponent ? [] : this.renderFooter(width, this.footerBudget(available));
-		const contentHeight = Math.max(1, available - footer.length);
-		const leftWidth = Math.min(SECTION_LANE_WIDTH, Math.max(16, Math.floor(width * 0.28)));
-		const separator = barSep(clioTheme());
-		const separatorWidth = visibleWidth(" │ ");
+		const { left: leftWidth, separator, separatorWidth } = this.laneWidths(width);
 		const rightWidth = Math.max(1, width - leftWidth - separatorWidth);
-		const left = this.renderSectionLane(leftWidth, contentHeight);
-		const right = this.renderRightLane(rightWidth, contentHeight);
-		const body = Array.from(
-			{ length: contentHeight },
-			(_, index) =>
-				`${padAnsi(left[index] ?? "", leftWidth, GLYPH.ellipsis)}${separator}${padAnsi(right[index] ?? "", rightWidth, GLYPH.ellipsis)}`,
-		);
-		return [...head, ...body, ...footer];
-	}
-
-	/**
-	 * The footer is the selected setting's detail surface at two-lane widths, so
-	 * it may use every row the list does not need. A fixed four-line ceiling left
-	 * a dozen blank body rows at an 80-column terminal while cutting the autonomy
-	 * explanation after its first sentence. Keeping six list rows makes the full
-	 * prose reachable when height is available and still degrades to no footer on
-	 * a short terminal.
-	 */
-	private footerBudget(bodyHeight: number): number {
-		return Math.max(0, bodyHeight - 6);
+		if (this.submenuComponent) {
+			return [
+				...head,
+				...this.joinLanes(
+					[
+						{ lines: this.renderSectionLane(leftWidth, available), width: leftWidth },
+						{ lines: this.renderWorkLane(rightWidth, available), width: rightWidth },
+					],
+					available,
+					separator,
+				),
+			];
+		}
+		const context = this.inspectorContext(rightWidth);
+		const budget = Math.min(INSPECTOR_ROWS, Math.max(0, available - MIN_LIST_ROWS));
+		const inspector = context ? renderInspector(clioTheme(), context, width, budget) : [];
+		const contentHeight = Math.max(1, available - inspector.length);
+		return [
+			...head,
+			...this.joinLanes(
+				[
+					{ lines: this.renderSectionLane(leftWidth, contentHeight), width: leftWidth },
+					{ lines: this.renderRowsLane(rightWidth, contentHeight), width: rightWidth },
+				],
+				contentHeight,
+				separator,
+			),
+			...inspector,
+		];
 	}
 
 	private renderSectionLane(width: number, height: number): string[] {
 		const theme = clioTheme();
-		const rows = [{ line: theme.fg("groupHeading", "Sections"), sectionId: null as SettingsSectionId | null }];
-		rows.push(...this.sectionCatalogRows());
+		const rows = this.sectionCatalogRows();
+		const header = theme.style("groupHeading", "Sections", { bold: true });
 		const selectedLine = Math.max(
 			0,
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
 		);
-		const [start, end] = centeredWindow(rows.length, selectedLine, height);
+		const [start, end] = centeredWindow(rows.length, selectedLine, Math.max(1, height - 1));
+		return fitRows([header, ...renderSectionLane(theme, rows.slice(start, end), width)], width, height);
+	}
+
+	/**
+	 * The section catalog, shared by the wide lane and the narrow sections page.
+	 * The current section stays highlighted whichever lane holds the cursor, so
+	 * the rows on the right always say which section they belong to.
+	 */
+	private sectionCatalogRows(): Array<SectionLaneRow & { sectionId: SettingsSectionId }> {
+		const theme = clioTheme();
+		const filtering = this.effectiveFilterQuery().length > 0;
+		return this.sections().map((section) => {
+			const selected = section.id === this.selectedSectionId;
+			const matchCount = section.items.filter((item) => this.isSelectableRow(item)).length;
+			const modifiedCount = section.items.filter((item) => isModified(item)).length;
+			const badge = filtering
+				? theme.fg("positionCount", `${matchCount}`)
+				: modifiedCount > 0 && section.id !== "recent"
+					? theme.fg("changedValue", `${GLYPH.scoped}${modifiedCount}`)
+					: undefined;
+			return {
+				sectionId: section.id,
+				label: section.label,
+				current: selected,
+				focused: selected && this.level === "sections",
+				...(badge === undefined ? {} : { badge }),
+			};
+		});
+	}
+
+	private renderWorkLane(width: number, height: number): string[] {
+		const submenu = this.submenuComponent;
+		if (!submenu) return fitRows([], width, height);
+		if (isRowBudgeted(submenu)) submenu.setBodyRows(height);
+		return fitRows(submenu.render(width), width, height);
+	}
+
+	private renderRowsLane(width: number, height: number): string[] {
+		const theme = clioTheme();
+		const section = this.currentSection();
+		if (!section) return fitRows([], width, height);
+		const changed = section.items.filter((item) => isModified(item)).length;
+		const meta = changed > 0 ? `${GLYPH.scoped} ${changed} changed` : sectionCount(section);
+		const title = titleRow(theme, section.label, width, { meta });
 		return fitRows(
-			rows.slice(start, end).map((row) => row.line),
+			[title, ...this.renderRowsBody(section, width, Math.max(1, height - 1), this.level === "rows")],
 			width,
 			height,
 		);
 	}
 
 	/**
-	 * The section catalog, shared by the wide lane and the narrow sections page.
-	 * Group tags stay visual separators: they carry no cursor and are never a stop.
+	 * One section's rows, windowed to `height` around the cursor row, with a
+	 * position line in place of the last row whenever rows are hidden. Rows are
+	 * the section's own rows at every width. Flattening the catalog on narrow
+	 * terminals meant an operator scrolling Retry fell into Terminal with
+	 * nothing in the frame saying they had left the section they opened.
 	 */
-	private sectionCatalogRows(): Array<{ line: string; sectionId: SettingsSectionId | null }> {
+	private renderRowsBody(
+		section: SettingsCenterSection,
+		width: number,
+		height: number,
+		cursorVisible: boolean,
+	): string[] {
 		const theme = clioTheme();
-		const filtering = this.effectiveFilterQuery().length > 0;
-		const rows: Array<{ line: string; sectionId: SettingsSectionId | null }> = [];
-		for (const section of this.sections()) {
-			const selected = section.id === this.selectedSectionId;
-			const cursor = `${selectionMark(selected && this.level === "sections")} `;
-			const matchCount = section.items.filter((item) => this.isSelectableRow(item)).length;
-			const modifiedCount = section.items.filter(
-				(item) => !item.readOnly && item.defaultValue !== undefined && item.currentValue !== item.defaultValue,
-			).length;
-			const badge = filtering
-				? theme.fg("positionCount", ` ${matchCount}`)
-				: modifiedCount > 0 && section.id !== "recent"
-					? theme.fg("changedValue", ` ${GLYPH.scoped}${modifiedCount}`)
-					: "";
-			const label = selected ? theme.style("selectedOption", section.label, { bold: true }) : section.label;
-			rows.push({ line: `${cursor}${label}${badge}`, sectionId: section.id });
-		}
-		return rows;
-	}
-
-	private renderRightLane(width: number, height: number): string[] {
-		if (this.submenuComponent) {
-			const lines = this.submenuComponent.render(width);
-			return fitRows(lines, width, height);
-		}
-		const theme = clioTheme();
-		const section = this.currentSection();
-		if (!section) return fitRows([], width, height);
-		const rowBudget = Math.max(0, height - 1);
 		const selected = this.rowIndex(section.id);
-		const [start, end] = centeredWindow(section.items.length, selected, rowBudget);
-		const columns = rowColumns(section.items, width, 0);
-		const rows = section.items.slice(start, end).map((item, offset) => {
-			const isSelected = start + offset === selected && this.level === "rows";
-			const display = this.displayValueFor(item, isSelected);
-			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending, this.isPinned(item));
-		});
-		return fitRows([screenTitle(theme, section.label), ...rows], width, height);
+		const labelWidth = settingsLabelWidth(section.items);
+		const selectedId = cursorVisible ? (section.items[selected]?.id ?? null) : null;
+		let lines: string[] = [];
+		let starts: number[] = [];
+		if (section.id === "targets") {
+			({ lines, starts } = renderTargetTable(theme, section.items, selectedId, width, labelWidth));
+		} else {
+			section.items.forEach((item, index) => {
+				starts.push(lines.length);
+				const isSelected = index === selected && cursorVisible;
+				const display = this.displayValueFor(item, isSelected);
+				lines.push(
+					renderSettingRow(theme, item, width, labelWidth, {
+						selected: isSelected,
+						displayValue: display.value,
+						pending: display.pending,
+						pinned: this.isPinned(item),
+						origin: this.originFor(item),
+					}),
+				);
+			});
+		}
+		if (lines.length <= height) return lines;
+		const visible = Math.max(1, height - 1);
+		const [start] = centeredWindow(lines.length, starts[selected] ?? 0, visible);
+		const window = lines.slice(start, start + visible);
+		return [
+			...window,
+			renderRowsPosition(theme, { start: start + 1, end: start + window.length, total: lines.length }, width),
+		];
 	}
 
 	/**
@@ -4256,10 +3924,13 @@ export class SettingsCenter implements Component {
 		const head = [this.breadcrumbLine(width), ...this.filterEditorLines(width)];
 		const available = Math.max(1, bodyHeight - head.length);
 		if (this.sections().length === 0) return [...head, ...this.emptyFilterLines(width, available)];
-		if (this.submenuComponent) {
-			return [...head, ...fitRows(this.submenuComponent.render(width), width, available)];
-		}
-		const inspector = this.narrowInspector(width, bodyHeight);
+		if (this.submenuComponent) return [...head, ...this.renderWorkLane(width, available)];
+		// Prose is the first thing a short terminal can spare. Sixteen body rows
+		// keep two inspector rows, ten keep one, and anything shorter gives every
+		// row to the list; the description stays reachable at wider widths.
+		const budget = bodyHeight >= 16 ? 2 : bodyHeight >= 10 ? 1 : 0;
+		const context = this.inspectorContext(width);
+		const inspector = context ? renderNarrowInspector(clioTheme(), context, width, budget) : [];
 		const listHeight = Math.max(1, available - inspector.length);
 		const list =
 			this.level === "sections" ? this.renderSectionsPage(width, listHeight) : this.renderRowsPage(width, listHeight);
@@ -4268,6 +3939,7 @@ export class SettingsCenter implements Component {
 
 	private breadcrumbLine(width: number): string {
 		const theme = clioTheme();
+		const sections = this.sections();
 		const section = this.currentSection();
 		const trail: string[] = ["Settings"];
 		if (this.level === "sections" && !this.submenuComponent) trail.push("Sections");
@@ -4276,28 +3948,14 @@ export class SettingsCenter implements Component {
 			const item = this.selectedItem();
 			if (item) trail.push(item.label);
 		}
-		const query = this.filterQuery.trim().length > 0 ? theme.fg("searchQuery", `  /${this.filterQuery}`) : "";
-		return truncateToWidth(`${screenTitle(theme, trail.join(" › "))}${query}`, width, GLYPH.ellipsis, true);
-	}
-
-	/**
-	 * Prose is the first thing a short terminal can spare. Sixteen body rows keep
-	 * two inspector rows, ten keep one, and anything shorter gives every row to
-	 * the list; the description stays reachable at wider widths and through the
-	 * filter.
-	 */
-	private narrowInspector(width: number, bodyHeight: number): string[] {
-		const budget = bodyHeight >= 16 ? 2 : bodyHeight >= 10 ? 1 : 0;
-		if (budget === 0) return [];
-		const theme = clioTheme();
-		const section = this.currentSection();
-		if (!section) return [];
-		const item = this.level === "rows" ? this.selectedItem() : null;
-		const text = item ? item.description : SETTINGS_SECTION_DESCRIPTIONS[section.id];
-		const wrapped = wrapTextWithAnsi(theme.fg("body", text), Math.max(1, width));
-		const kept = wrapped.slice(0, budget);
-		const last = kept.at(-1);
-		return wrapped.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept;
+		const query = this.filterQuery.trim();
+		const meta =
+			query.length > 0
+				? `/${query}`
+				: section
+					? `${sections.findIndex((entry) => entry.id === section.id) + 1}/${sections.length}`
+					: "";
+		return titleRow(theme, trail.join(" › "), width, meta.length > 0 ? { meta } : {});
 	}
 
 	private renderSectionsPage(width: number, height: number): string[] {
@@ -4307,165 +3965,13 @@ export class SettingsCenter implements Component {
 			rows.findIndex((row) => row.sectionId === this.selectedSectionId),
 		);
 		const [start, end] = centeredWindow(rows.length, selectedLine, height);
-		return fitRows(
-			rows.slice(start, end).map((row) => row.line),
-			width,
-			height,
-		);
+		return fitRows(renderSectionLane(clioTheme(), rows.slice(start, end), width), width, height);
 	}
 
 	private renderRowsPage(width: number, height: number): string[] {
 		const section = this.currentSection();
 		if (!section) return fitRows([], width, height);
-		const selected = this.rowIndex(section.id);
-		const [start, end] = centeredWindow(section.items.length, selected, height);
-		const columns = rowColumns(section.items, width, 0);
-		const rows = section.items.slice(start, end).map((item, offset) => {
-			const isSelected = start + offset === selected;
-			const display = this.displayValueFor(item, isSelected);
-			return formatSettingRow(item, width, isSelected, columns, 0, display.value, display.pending, this.isPinned(item));
-		});
-		return fitRows(rows, width, height);
-	}
-
-	private renderFooter(width: number, maxFooterLines: number): string[] {
-		const theme = clioTheme();
-		if (maxFooterLines <= 0) return [];
-		const safeWidth = Math.max(1, width);
-		const separator = rule(theme, safeWidth);
-		const sections = this.sections();
-		const section = this.currentSection();
-		const item = this.selectedItem();
-		if (!section) return [];
-		const position = sections.findIndex((entry) => entry.id === section.id) + 1;
-		const query = this.filterQuery.trim().length > 0 ? `  ${theme.fg("searchQuery", `/${this.filterQuery}`)}` : "";
-		const positionText = `${theme.fg("positionCount", `section ${position}/${sections.length}`)}${query}`;
-
-		// The note is prose the operator acts on ("choose session, global, or
-		// cancel"), so it wraps under the same rule as the description above it. A
-		// truncated instruction is the one line in this footer that cannot afford
-		// to be a fragment.
-		const noteLines = (text: string, tone: "help" | "body"): string[] =>
-			wrapTextWithAnsi(theme.fg(tone, text), safeWidth);
-
-		if (this.level === "sections") {
-			const breadcrumb = `${screenTitle(theme, section.label)}  ${theme.fg("annotation", "·")}  ${positionText}`;
-			const body = wrapTextWithAnsi(theme.fg("body", SETTINGS_SECTION_DESCRIPTIONS[section.id]), safeWidth);
-			return this.assembleFooter(
-				[separator, breadcrumb],
-				body,
-				noteLines(this.footerNoteText(), "help"),
-				maxFooterLines,
-				safeWidth,
-			);
-		}
-
-		if (!item) {
-			return this.assembleFooter([separator], [], noteLines(this.footerNoteText(), "body"), maxFooterLines, safeWidth);
-		}
-
-		const breadcrumb = `${screenTitle(theme, section.label)} ${theme.fg("annotation", "›")} ${theme.style("selectedOption", item.label, { bold: true })}  ${theme.fg("annotation", "·")}  ${positionText}`;
-		const contentLines: string[] = [];
-		contentLines.push(...wrapTextWithAnsi(theme.fg("body", item.description), safeWidth));
-		if (item.help) contentLines.push(...wrapTextWithAnsi(theme.fg("help", item.help), safeWidth));
-		const detail = this.footerDetail(item, theme);
-		if (detail) contentLines.push(...wrapTextWithAnsi(detail, safeWidth));
-		return this.assembleFooter(
-			[separator, breadcrumb],
-			contentLines,
-			noteLines(this.footerScopeNote(item), "help"),
-			maxFooterLines,
-			safeWidth,
-		);
-	}
-
-	/**
-	 * The note text renderFooter will show, without theming. `footerBudget` needs
-	 * its wrapped height before the footer is rendered, so both read it here and
-	 * the ceiling can never disagree with what lands.
-	 */
-	private footerNoteText(): string {
-		const section = this.currentSection();
-		if (!section) return "";
-		if (this.level === "sections") return "Tab or → to edit its settings";
-		const item = this.selectedItem();
-		if (!item) return "No setting selected.";
-		return this.footerScopeNote(item);
-	}
-
-	private footerDetail(item: SettingsCenterItem, theme: ReturnType<typeof clioTheme>): string {
-		const parts: string[] = [theme.fg("help", item.affordance)];
-		if (!item.readOnly && item.defaultValue !== undefined) {
-			const modified = item.currentValue !== item.defaultValue;
-			parts.push(
-				modified
-					? `${theme.fg("changedValue", `${GLYPH.scoped} changed`)} ${theme.fg("defaultValue", `(default: ${formatSettingsValue(item.configPath, item.defaultValue)})`)}`
-					: theme.fg("defaultValue", `default: ${formatSettingsValue(item.configPath, item.defaultValue)}`),
-			);
-		}
-		const valueMeaning = item.valueHelp?.[item.currentValue];
-		if (!item.readOnly && valueMeaning) parts.push(theme.fg("menuDescription", valueMeaning));
-		if (!item.readOnly && item.values && item.values.length > 0)
-			parts.push(
-				theme.fg(
-					"menuDescription",
-					`Choices: ${item.values.map((value) => formatSettingsValue(item.configPath, value)).join(", ")}`,
-				),
-			);
-		const propagation = propagationFor(item.id);
-		if (propagation) parts.push(theme.fg("annotation", propagation));
-		if (isShortcutRow(item))
-			parts.push(theme.fg("annotation", this.isPinned(item) ? `${GLYPH.favorite} pinned · p to unpin` : "p to pin"));
-		if (this.selectedSectionId === "recent") {
-			const home = SETTINGS_SECTIONS.find((area) => area.id === item.section);
-			if (home) parts.push(theme.fg("annotation", `in ${home.label}`));
-		}
-		return parts.join(theme.fg("border", "  ·  "));
-	}
-
-	private footerScopeNote(item: SettingsCenterItem): string {
-		if (item.id.startsWith("maintenance.")) return `Run in a terminal: ${item.currentValue}`;
-		if (item.id === "targets.add-cta")
-			return "Enter opens Guided setup in the dock; Save writes global connection settings";
-		if (item.submenu && (item.presentationKind === "status" || item.presentationKind === "action"))
-			return "Enter opens actions · nothing changes until an action is confirmed";
-		if (item.readOnly) return "Read-only here · managed on the surface above";
-		if (item.scope === "restart") return "Saved to settings.yaml · restart Clio to apply";
-		return "Enter opens this setting · then choose session, global, or cancel before anything changes";
-	}
-
-	/**
-	 * Lay out the footer so the breadcrumb (top) and the scope note (bottom)
-	 * always survive; the middle help fills whatever rows remain. This keeps the
-	 * "where does this land" guidance visible even on short terminals.
-	 */
-	private assembleFooter(
-		top: readonly string[],
-		middle: readonly string[],
-		note: readonly string[],
-		maxFooterLines: number,
-		width: number,
-	): string[] {
-		const fit = (line: string): string => truncateToWidth(line, width, GLYPH.ellipsis, true);
-		let out: string[];
-		if (maxFooterLines <= top.length) {
-			out = top.slice(0, maxFooterLines).map(fit);
-		} else {
-			// The note owns the rows it wrapped to, up to whatever is left under the
-			// breadcrumb; the explanation fills the rest. Dropping a wrapped note
-			// line loses less than cutting the sentence mid-word did.
-			const noteKept = note.slice(0, Math.max(1, maxFooterLines - top.length));
-			const middleBudget = Math.max(0, maxFooterLines - top.length - noteKept.length);
-			// The explanation is wrapped, so a short terminal drops whole lines off
-			// its end rather than cutting one. Mark a truncated last line explicitly.
-			const kept = middle.slice(0, middleBudget);
-			const last = kept.at(-1);
-			const marked =
-				middle.length > kept.length && last !== undefined ? [...kept.slice(0, -1), `${last}${GLYPH.ellipsis}`] : kept;
-			out = [...top.map(fit), ...marked.map(fit), ...noteKept.map(fit)];
-		}
-		while (out.length < maxFooterLines) out.push("");
-		return out.slice(0, maxFooterLines);
+		return fitRows(this.renderRowsBody(section, width, height, true), width, height);
 	}
 }
 
@@ -4491,6 +3997,12 @@ export interface OpenSettingsOverlayDeps {
 	getRouteBreakers?: BuildSettingItemsOptions["getRouteBreakers"];
 	connectTarget?: BuildSettingItemsOptions["connectTarget"];
 	getInteropProposals?: BuildSettingItemsOptions["getInteropProposals"];
+	/**
+	 * Which layer set the effective value at a settings path: a session
+	 * override, a project or user file, or the built-in default. Absent leaves
+	 * the origin column and the inspector's "from" fact empty.
+	 */
+	settingOrigin?: (path: string) => SettingValueOrigin;
 }
 
 function formatSettingChangeNotice(id: string, value: string, scope: "session" | "project" | "global"): string {
@@ -4559,6 +4071,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 			createSettingsChangePlan(deps.getSettings(), item, value, Boolean(deps.commitSetting)),
 		shortcuts: listSettingsShortcuts(),
 		pinSetting: setSettingPinned,
+		...(deps.settingOrigin ? { originFor: (item) => deps.settingOrigin?.(item.configPath) ?? null } : {}),
 		onApply: (plan, scope) => {
 			if (deps.commitSetting) {
 				for (const leaf of plan.leaves) deps.commitSetting(leaf.path, plan.proposed as ClioSettings, scope);

@@ -3,20 +3,13 @@ import type { SessionContract } from "../../domains/session/contract.js";
 import type { MessageEntry } from "../../domains/session/entries.js";
 import { buildTurnPreview } from "../../domains/session/tree/preview.js";
 import { openSession, sessionPaths } from "../../engine/session.js";
-import {
-	type Component,
-	matchesKey,
-	type OverlayHandle,
-	type SelectItem,
-	SelectList,
-	Text,
-	type TUI,
-} from "../../engine/tui.js";
+import { type Component, matchesKey, type OverlayHandle, Text, type TUI } from "../../engine/tui.js";
 import { clockLocal, dateLocal } from "../format-time.js";
-import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { clioTheme, emptyState } from "../theme/index.js";
+import { type ChoiceItem, ChoiceList } from "./settings-submenus.js";
 
 export const MESSAGE_PICKER_OVERLAY_WIDTH = 88;
-const VISIBLE_ROWS = 12;
 const PREVIEW_WIDTH = 60;
 
 /**
@@ -67,14 +60,15 @@ function formatTimestampForRow(timestamp: string): string {
 }
 
 /**
- * One column: turn ids in a session share their time-ordered prefix and a
- * description column caps the label at 32 cells, which left about 18 of the
- * preview to tell turns apart.
+ * The preview is the label, because turn ids in a session share their
+ * time-ordered prefix and say nothing; the time sits at the right as the
+ * row's metadata, where the selection row compacts it before the preview.
  */
-function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): SelectItem[] {
+function rowsToItems(rows: ReadonlyArray<MessagePickerRow>): ChoiceItem[] {
 	return rows.map((row) => ({
 		value: row.turnId,
-		label: `${formatTimestampForRow(row.at)}  ${row.preview.replaceAll("**", "")}`,
+		label: row.preview.replaceAll("**", ""),
+		meta: formatTimestampForRow(row.at),
 	}));
 }
 
@@ -84,23 +78,26 @@ function createMessagePickerContent(
 	onClose: () => void,
 ): Component {
 	if (rows.length === 0) {
-		return new FocusBox(new Text("no assistant turns to fork", 0, 0), {
+		const empty = emptyState(clioTheme(), "No assistant turns to fork.", MESSAGE_PICKER_OVERLAY_WIDTH - 4, {
+			remedy: "Esc closes",
+		});
+		return new FocusBox(new Text(empty.join("\n"), 0, 0), {
 			onInput: (data) => {
 				if (matchesKey(data, "esc")) onClose();
 			},
 		});
 	}
-	const items = rowsToItems(rows);
-	const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length));
-	const list = new SelectList(items, visible, DEFAULT_SELECT_THEME);
-	list.onSelect = (item: SelectItem): void => {
+	// The list is the overlay's own child so the frame hands it the dock's
+	// rows and it windows itself.
+	const list = new ChoiceList(rowsToItems(rows));
+	list.onSelect = (item: ChoiceItem): void => {
 		onFork(item.value);
 		onClose();
 	};
 	list.onCancel = (): void => {
 		onClose();
 	};
-	return new FocusBox(list);
+	return list;
 }
 
 export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverlayDeps): OverlayHandle {

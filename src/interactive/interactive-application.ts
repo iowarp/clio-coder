@@ -3,6 +3,7 @@ import { nextOutputStyle } from "../core/defaults.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
 import { recordHarnessFeature } from "../core/harness-profile.js";
 import { readClioVersion } from "../core/package-root.js";
+import type { SettingsOrigin } from "../core/settings-layers.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource } from "../core/telemetry/live-events.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -304,6 +305,8 @@ export interface InteractiveDeps {
 		scope: "session" | "project" | "global",
 		source?: ConfigChangeSource,
 	) => void;
+	/** Which layer set a setting's effective value; /settings shows it beside the value. */
+	settingOrigin?: (path: string) => SettingsOrigin | "session";
 	/** Resume a past session id. Called from the /resume overlay. */
 	onResumeSession?: (sessionId: string) => void;
 	/** Start a fresh session. Called from /new. */

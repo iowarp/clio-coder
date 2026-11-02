@@ -32,6 +32,12 @@ const LAYER_RANK: Readonly<Record<SettingsOrigin, number>> = {
 	cli: 4,
 };
 
+/** The route a settings path belongs to, or null for a path no route owns. */
+export function routeForSettingPath(path: string): RouteName | null {
+	for (const route of ROUTE_NAMES) if (ROUTE_PATHS[route].includes(path)) return route;
+	return null;
+}
+
 export interface RouteProvenance {
 	/** Source of the route this session uses now. */
 	active: Readonly<Record<RouteName, RouteSource>>;

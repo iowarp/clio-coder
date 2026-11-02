@@ -23,26 +23,32 @@ import {
 	supportsAgentRoleTools,
 } from "../../domains/providers/index.js";
 import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
-import {
-	fuzzyFilter,
-	getKeybindings,
-	Input,
-	matchesKey,
-	truncateToWidth,
-	visibleWidth,
-	wrapTextWithAnsi,
-} from "../../engine/tui.js";
+import { fuzzyFilter, getKeybindings, Input, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
 import { localKey } from "../keyboard-owner.js";
 import {
-	buildHint,
+	buildResponsiveHint,
 	clioError,
 	diagnosticSeverityToken,
 	FILTER_HINT,
 	formatRuntimeResolutionDiagnostic,
+	type RowBudgetedBody,
 	showClioOverlayFrame,
+	windowRows,
 } from "../overlay-frame.js";
-import type { ClioToken } from "../theme/index.js";
-import { clioTheme, fitIdentityLabel, GLYPH } from "../theme/index.js";
+import type { ClioToken, StatusKind, TableCell, TableColumn } from "../theme/index.js";
+import {
+	chip,
+	chipRow,
+	clioTheme,
+	dotSep,
+	emptyState,
+	fitIdentityLabel,
+	GLYPH,
+	padAnsi,
+	positionRow,
+	statusChip,
+	tableRows,
+} from "../theme/index.js";
 
 export const MODEL_OVERLAY_WIDTH = 82;
 const MODEL_OVERLAY_MAX_WIDTH = 120;
@@ -484,53 +490,44 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 	return { rows, summary };
 }
 
-interface ModelColumns {
+interface ModelLayout {
 	modelWidth: number;
-	targetWidth: number;
-	runtimeWidth: number;
 	showTarget: boolean;
 	showRuntime: boolean;
+	targetWidth: number;
+	runtimeWidth: number;
 }
 
-function modelColumns(width: number): ModelColumns {
+/** Cells between table columns. */
+const MODEL_TABLE_GAP = 2;
+
+/**
+ * Which columns a width can carry. The model id is the column the operator
+ * reads, so it is sized last from what the fixed columns leave, and runtime,
+ * then target, drop whole when it would fall under `MODEL_MIN_WIDTH`.
+ */
+function modelLayout(width: number): ModelLayout {
 	const targetWidth = width >= 92 ? TARGET_COL_WIDTH_WIDE : TARGET_COL_WIDTH_NARROW;
 	const runtimeWidth =
 		width >= 96 ? RUNTIME_COL_WIDTH_WIDE : width >= 78 ? RUNTIME_COL_WIDTH_MEDIUM : RUNTIME_COL_WIDTH_NARROW;
 	let showTarget = width >= 58;
 	let showRuntime = width >= 68;
-	const calcModel = (): number => {
-		let fixed = SELECTED_PREFIX_WIDTH + CONTEXT_COL_WIDTH + 1 + CAPS_COL_WIDTH;
-		if (showTarget) fixed += 1 + targetWidth;
-		if (showRuntime) fixed += 1 + runtimeWidth;
+	const modelWidthFor = (): number => {
+		let fixed = SELECTED_PREFIX_WIDTH + MODEL_TABLE_GAP + CONTEXT_COL_WIDTH + MODEL_TABLE_GAP + CAPS_COL_WIDTH;
+		if (showTarget) fixed += MODEL_TABLE_GAP + targetWidth;
+		if (showRuntime) fixed += MODEL_TABLE_GAP + runtimeWidth;
 		return width - fixed;
 	};
-	let modelWidth = calcModel();
+	let modelWidth = modelWidthFor();
 	if (modelWidth < MODEL_MIN_WIDTH && showRuntime) {
 		showRuntime = false;
-		modelWidth = calcModel();
+		modelWidth = modelWidthFor();
 	}
 	if (modelWidth < MODEL_MIN_WIDTH && showTarget) {
 		showTarget = false;
-		modelWidth = calcModel();
+		modelWidth = modelWidthFor();
 	}
-	return {
-		modelWidth: Math.max(1, modelWidth),
-		targetWidth,
-		runtimeWidth,
-		showTarget,
-		showRuntime,
-	};
-}
-
-/** The model cell, always leaving `MODEL_COL_GUTTER` blank columns before ctx. */
-function fitModelCell(text: string, columnWidth: number): string {
-	return fitCell(fitIdentityLabel(text, Math.max(1, columnWidth - MODEL_COL_GUTTER)), columnWidth);
-}
-
-function fitCell(text: string, width: number, align: "left" | "right" = "left", ellipsis = ""): string {
-	const clipped = truncateToWidth(text, width, ellipsis, true);
-	const pad = " ".repeat(Math.max(0, width - visibleWidth(clipped)));
-	return align === "right" ? `${pad}${clipped}` : `${clipped}${pad}`;
+	return { modelWidth: Math.max(1, modelWidth), showTarget, showRuntime, targetWidth, runtimeWidth };
 }
 
 // The active, favorite and recent marks keep one fixed column. Scoped and
@@ -543,39 +540,46 @@ function activeMark(row: ModelRow): string {
 	return " ";
 }
 
-function formatModelHeader(width: number): string {
-	const columns = modelColumns(width);
-	let line =
-		`${" ".repeat(SELECTED_PREFIX_WIDTH)}` +
-		`${fitModelCell("model", columns.modelWidth)}` +
-		`${fitCell("ctx", CONTEXT_COL_WIDTH, "right")} ` +
-		`${fitCell("caps", CAPS_COL_WIDTH)}`;
-	if (columns.showTarget) line += ` ${fitCell("target", columns.targetWidth)}`;
-	if (columns.showRuntime) line += ` ${fitCell("runtime", columns.runtimeWidth)}`;
-	// Table headers render dim per the design-system table recipe (section 4.6).
-	return clioTheme().fg("annotation", fitCell(line, width));
-}
-
-function formatModelRow(row: ModelRow, width: number, selected: boolean): string {
+/**
+ * The model table: cursor and mark lead the model id in one cell, so the id
+ * starts on the same column as its header; context and capabilities follow,
+ * then the target and runtime the width allows. The id keeps its tail when it
+ * must shorten, because the suffix is what tells two builds apart.
+ */
+function modelTableLines(rows: ReadonlyArray<ModelRow>, selectedIndex: number, width: number): string[] {
 	const theme = clioTheme();
-	const columns = modelColumns(width);
-	// Selection points with the accent cursor and bolds the model id. The target
-	// identity stays neutral; health text in the detail row carries the state.
-	// The whole line is never recolored, so a cell's own reset can never clip the
-	// selection highlight.
-	const pointer = selected ? theme.fg("selectedOption", GLYPH.cursor) : " ";
-	const prefix = `${pointer} ${activeMark(row)} `;
-	const modelLabel = row.model.length > 0 ? row.model : "(no model ids)";
-	const modelCell = fitModelCell(modelLabel, columns.modelWidth);
-	const model = theme.fg("menuOption", modelCell, selected ? "selected" : row.selectable ? "normal" : "disabled");
-	let line =
-		prefix +
-		model +
-		`${theme.fg(row.context === "-" || row.context === "?" ? "unknownValue" : "counter", fitCell(row.context, CONTEXT_COL_WIDTH, "right"))} ` +
-		theme.fg("menuDescription", fitCell(row.badges, CAPS_COL_WIDTH));
-	if (columns.showTarget) line += ` ${theme.fg("modelIdentity", fitCell(row.target, columns.targetWidth))}`;
-	if (columns.showRuntime) line += ` ${theme.fg("annotation", fitCell(row.runtimeShortName, columns.runtimeWidth))}`;
-	return fitCell(line, width);
+	const layout = modelLayout(width);
+	const modelColumnWidth = SELECTED_PREFIX_WIDTH + layout.modelWidth;
+	const columns: TableColumn[] = [
+		{ label: `${" ".repeat(SELECTED_PREFIX_WIDTH)}model`, min: modelColumnWidth, max: modelColumnWidth, priority: 10 },
+		{ label: "ctx", align: "right", min: CONTEXT_COL_WIDTH, max: CONTEXT_COL_WIDTH, priority: 4 },
+		{ label: "caps", min: CAPS_COL_WIDTH, max: CAPS_COL_WIDTH, priority: 3 },
+		...(layout.showTarget
+			? [{ label: "target", min: layout.targetWidth, max: layout.targetWidth, priority: 2 } satisfies TableColumn]
+			: []),
+		...(layout.showRuntime
+			? [{ label: "runtime", min: layout.runtimeWidth, max: layout.runtimeWidth, priority: 1 } satisfies TableColumn]
+			: []),
+	];
+	const table = rows.map((row, index): Array<string | TableCell> => {
+		const selected = index === selectedIndex;
+		const pointer = selected ? theme.fg("selectedOption", GLYPH.cursor) : " ";
+		const label = fitIdentityLabel(
+			row.model.length > 0 ? row.model : "(no model ids)",
+			Math.max(1, layout.modelWidth - MODEL_COL_GUTTER),
+		);
+		const model = selected
+			? theme.style("selectedOption", label, { bold: true })
+			: theme.fg("menuOption", label, row.selectable ? "normal" : "disabled");
+		return [
+			`${pointer} ${activeMark(row)} ${model}`,
+			theme.fg(row.context === "-" || row.context === "?" ? "unknownValue" : "counter", row.context),
+			{ text: row.badges, tone: "muted" },
+			...(layout.showTarget ? [theme.fg("modelIdentity", row.target)] : []),
+			...(layout.showRuntime ? [{ text: row.runtimeShortName, tone: "muted" } satisfies TableCell] : []),
+		];
+	});
+	return tableRows(theme, { columns, rows: table, header: true, gap: MODEL_TABLE_GAP }, width);
 }
 
 function capabilityNames(caps: CapabilityFlags): string {
@@ -606,7 +610,28 @@ function sourceLabel(source: ModelSource): string {
 	}
 }
 
-function formatModelDetail(row: ModelRow, width: number): string[] {
+function healthStatus(row: ModelRow): StatusKind {
+	switch (row.healthToken) {
+		case "success":
+			return "ok";
+		case "warning":
+			return "warning";
+		case "error":
+			return "error";
+		default:
+			return "info";
+	}
+}
+
+/**
+ * The selected row, explained: its state and ref with the target's health and
+ * auth on one row, then the facts that decide whether it can run a turn, then
+ * any diagnostic in its own tone. Everything but the health and the
+ * diagnostics stays dim, so the table above keeps the eye. `maxRows` is what
+ * the body can spare; the facts give way first and say where they were cut.
+ */
+function formatModelDetail(row: ModelRow, width: number, maxRows: number): string[] {
+	const theme = clioTheme();
 	const ref = row.model.length > 0 ? `${row.target}/${row.model}` : row.target;
 	const tags: string[] = [];
 	if (row.active) tags.push("current");
@@ -617,32 +642,48 @@ function formatModelDetail(row: ModelRow, width: number): string[] {
 	const state = tags.length > 0 ? tags.join("+") : row.selectable ? "candidate" : "not selectable";
 	const availability = row.available ? row.healthText : `${row.healthText}; ${row.reason || "unavailable"}`;
 	const loadState = row.loadState
-		? ` · state ${row.loadState}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}`
-		: "";
-	const theme = clioTheme();
-	// The detail block is quiet scaffolding beneath the selected row; only the
-	// diagnostics carry a semantic token, so the two fact lines render dim.
+		? `state ${row.loadState}${row.loadStateDetail ? ` (${row.loadStateDetail})` : ""}`
+		: null;
+	const facts = [
+		`source ${row.sourceNote ?? sourceLabel(row.source)}`,
+		loadState,
+		row.runtimeName,
+		row.apiFamily,
+		`max output ${row.maxTokens}`,
+		`thinking ${row.thinking ?? "-"}`,
+		`streaming ${row.streaming === false ? "no" : "yes"}`,
+		`image input ${acceptsImageInput({ vision: row.caps.vision }) ? "yes" : "no"}`,
+		capabilityNames(row.caps),
+	].filter((fact): fact is string => fact !== null);
+	// Severity colors the way the targets hub colors it, through the shared mapping.
+	const diagnostics = (row.diagnostics ?? [])
+		.filter((entry) => entry.severity !== "info")
+		.slice(0, 2)
+		.map((entry) => {
+			const token = diagnosticSeverityToken(entry.severity);
+			return theme.fg(
+				token,
+				`${token === "error" ? GLYPH.error : GLYPH.warn} ${formatRuntimeResolutionDiagnostic(entry)}`,
+			);
+		})
+		.flatMap((line) => wrapTextWithAnsi(line, width).slice(0, 1));
+	const factLines = wrapTextWithAnsi(facts.map((fact) => chip(theme, fact, "muted")).join(dotSep(theme)), width);
+	const factBudget = Math.max(1, Math.min(factLines.length, maxRows - 1 - diagnostics.length));
+	const kept = factLines.slice(0, factBudget);
+	const last = kept.at(-1);
+	if (factLines.length > kept.length && last !== undefined) kept[kept.length - 1] = `${last}${GLYPH.ellipsis}`;
 	return [
-		...wrapTextWithAnsi(
-			`${theme.fg("annotation", `${state} ${ref} · `)}${theme.fg(row.healthToken, availability)}${theme.fg("annotation", ` · auth ${row.authText}`)}`,
+		chipRow(
+			theme,
+			[
+				theme.fg("annotation", `${state} ${ref}`),
+				statusChip(theme, healthStatus(row), availability),
+				chip(theme, `auth ${row.authText}`, "muted"),
+			],
 			width,
 		),
-		...wrapTextWithAnsi(
-			theme.fg(
-				"annotation",
-				`source ${row.sourceNote ?? sourceLabel(row.source)}${loadState} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · image input ${acceptsImageInput({ vision: row.caps.vision }) ? "yes" : "no"} · ${capabilityNames(row.caps)}`,
-			),
-			width,
-		),
-		...(row.diagnostics ?? [])
-			.filter((entry) => entry.severity !== "info")
-			.slice(0, 2)
-			.flatMap((entry) =>
-				wrapTextWithAnsi(
-					theme.fg(diagnosticSeverityToken(entry.severity), formatRuntimeResolutionDiagnostic(entry)),
-					width,
-				),
-			),
+		...kept,
+		...diagnostics,
 	];
 }
 
@@ -680,15 +721,6 @@ function filterModelRows(rows: ReadonlyArray<ModelRow>, query: string): ModelRow
 	return fuzzyFilter([...rows], query, modelSelectorSearchText);
 }
 
-function visibleSlice<T>(
-	items: ReadonlyArray<T>,
-	selectedIndex: number,
-	maxVisible: number,
-): { start: number; rows: T[] } {
-	const start = Math.max(0, Math.min(selectedIndex - Math.floor(maxVisible / 2), items.length - maxVisible));
-	return { start, rows: items.slice(start, start + maxVisible) };
-}
-
 function refreshStatusLine(
 	refreshing: ModelRefreshScope | null | undefined,
 	error: RuntimeResolutionDiagnostic | null | undefined,
@@ -698,48 +730,55 @@ function refreshStatusLine(
 	return error ? formatRuntimeResolutionDiagnostic(error) : null;
 }
 
+/** Rows the body spends outside the table rows: summary, header, divider, blank, two detail rows. */
+const MODEL_CHROME_ROWS = 6;
+const MODEL_MIN_VISIBLE_ROWS = 3;
+
 function renderModelOverlayLines(input: {
 	rows: ReadonlyArray<ModelRow>;
 	summary: ModelOverlaySummary;
 	selectedIndex: number;
 	query: string;
 	width: number;
+	/** Rows the frame granted, or zero while unknown. */
+	bodyRows?: number;
 	showAll?: boolean;
 	refreshing?: ModelRefreshScope | null;
 	refreshError?: RuntimeResolutionDiagnostic | null;
 	selectionError?: string | null;
 }): string[] {
 	const width = Math.max(1, input.width);
+	const theme = clioTheme();
 	const query = input.query.trim();
 	const searching = query.length > 0;
 	const allMatches = filterModelRows(input.rows, input.query);
 	const focusedMatches = allMatches.filter((row) => row.visibleByDefault !== false);
 	const filtered = searching || input.showAll ? allMatches : focusedMatches;
+	const hidden = searching || input.showAll ? 0 : allMatches.length - focusedMatches.length;
 	const selectableFiltered = filtered.filter((row) => row.selectable).length;
 	const selectedIndex = Math.max(0, Math.min(input.selectedIndex, Math.max(0, filtered.length - 1)));
 	const selected = filtered[selectedIndex] ?? null;
 	const active = input.summary.activeRef || "not configured";
-	const modeLabel = searching ? `search "${query}"` : input.showAll ? "all" : "focus";
-	const theme = clioTheme();
-	// The mode/count summary and the focus legend are quiet scaffolding, so they
-	// render dim; only the table rows and status rails carry brighter tokens.
+	const mode = searching ? `search "${query}"` : input.showAll ? "all" : "focus";
+	// The mode leads in the accent because Tab changes it; the counts stay
+	// dim. One row, not two: the legend that explained focus now sits on the
+	// position row, where the count of hidden models is.
 	const lines = [
-		theme.fg(
-			"annotation",
-			fitCell(
-				`${modeLabel} · ${selectableFiltered}/${input.summary.totalModels} models · ${input.summary.targets} targets · ${input.summary.localModels} local  ${input.summary.cloudModels} cloud`,
-				width,
-				"left",
-				GLYPH.ellipsis,
-			),
-		),
-		...wrapTextWithAnsi(
-			theme.fg("annotation", `current ${active} · focus shows current, favorites, recent, and target defaults`),
+		chipRow(
+			theme,
+			[
+				chip(theme, mode, "accent"),
+				chip(theme, `${selectableFiltered}/${input.summary.totalModels} models`, "muted"),
+				chip(theme, `${input.summary.targets} targets`, "muted"),
+				chip(theme, `${input.summary.localModels} local`, "muted"),
+				chip(theme, `${input.summary.cloudModels} cloud`, "muted"),
+				chip(theme, `current ${active}`, "muted", GLYPH.ok),
+			],
 			width,
 		),
 	];
 	if (input.summary.newerModelNotice) {
-		lines.push(truncateToWidth(theme.fg("annotation", input.summary.newerModelNotice), width, GLYPH.ellipsis));
+		lines.push(...wrapTextWithAnsi(theme.fg("annotation", input.summary.newerModelNotice), width).slice(0, 1));
 	}
 	const refreshLine = refreshStatusLine(input.refreshing, input.refreshError);
 	if (refreshLine)
@@ -747,32 +786,48 @@ function renderModelOverlayLines(input: {
 			...wrapTextWithAnsi(input.refreshError ? clioError(refreshLine) : theme.fg("annotation", refreshLine), width),
 		);
 	if (input.selectionError) lines.push(...wrapTextWithAnsi(clioError(input.selectionError), width));
-	lines.push(formatModelHeader(width));
+	const bodyRows = input.bodyRows !== undefined && input.bodyRows > 0 ? input.bodyRows : 0;
+	// Two detail rows are owed before the table is sized; whatever the table
+	// leaves goes back to the detail, so a short list explains its row in full.
+	let detail = selected ? formatModelDetail(selected, width, 3) : [];
+	const extraChrome = lines.length - 1 + Math.max(0, detail.length - 2);
+	const budget =
+		bodyRows > 0 ? Math.max(MODEL_MIN_VISIBLE_ROWS, bodyRows - MODEL_CHROME_ROWS - extraChrome - 1) : VISIBLE_ROWS;
 	if (filtered.length === 0) {
 		lines.push(
-			...wrapTextWithAnsi(
-				theme.fg(
-					"menuDescription",
-					searching ? "  no models match the current filter" : "  no focused models; type to search or press Tab for all",
-				),
+			...emptyState(
+				theme,
+				searching ? "No models match the filter." : "No focused models.",
 				width,
+				searching ? { remedy: "Esc clears the filter" } : { remedy: "Type to search, or press Tab to list every model" },
 			),
 		);
 	} else {
-		const { start, rows } = visibleSlice(filtered, selectedIndex, VISIBLE_ROWS);
-		for (let i = 0; i < rows.length; i++) {
-			const row = rows[i];
-			if (!row) continue;
-			lines.push(formatModelRow(row, width, start + i === selectedIndex));
-		}
-		if (filtered.length > VISIBLE_ROWS) {
-			lines.push(theme.fg("positionCount", fitCell(`  (${selectedIndex + 1}/${filtered.length})`, width)));
+		const { window, start, position } = windowRows(filtered, selectedIndex, budget);
+		lines.push(...modelTableLines(window, selectedIndex - start, width));
+		if (position !== null || hidden > 0) {
+			lines.push(
+				positionRow(
+					theme,
+					{
+						start: position?.start ?? 1,
+						end: position?.end ?? filtered.length,
+						total: filtered.length,
+						unit: "models",
+						keys: hidden > 0 ? [`Tab shows all ${allMatches.length}`] : [],
+					},
+					width,
+				),
+			);
 		}
 	}
 	lines.push("");
-	if (selected) lines.push(...formatModelDetail(selected, width));
-	else lines.push(theme.fg("menuDescription", fitCell("no selected model", width)), "");
-	return lines.map((line) => fitCell(line, width));
+	if (selected) {
+		const spare = bodyRows > 0 ? bodyRows - lines.length : detail.length;
+		if (spare > detail.length) detail = formatModelDetail(selected, width, spare);
+		lines.push(...detail);
+	} else lines.push(theme.fg("menuDescription", "no selected model"));
+	return lines.map((line) => padAnsi(line, width, GLYPH.ellipsis));
 }
 
 interface ModelRefreshActions {
@@ -781,7 +836,7 @@ interface ModelRefreshActions {
 	requestRender?: () => void;
 }
 
-export class ModelOverlayView implements Component {
+export class ModelOverlayView implements Component, RowBudgetedBody {
 	private selectedIndex = 0;
 	private query = "";
 	private readonly queryInput = new Input();
@@ -800,6 +855,7 @@ export class ModelOverlayView implements Component {
 	private refreshing: ModelRefreshScope | null = null;
 	private refreshError: RuntimeResolutionDiagnostic | null = null;
 	private selectionError: string | null = null;
+	private bodyRows = 0;
 	private readonly lifecycle = new AbortController();
 
 	constructor(
@@ -931,6 +987,10 @@ export class ModelOverlayView implements Component {
 		}
 	}
 
+	setBodyRows(rows: number): void {
+		this.bodyRows = Math.max(0, Math.floor(rows));
+	}
+
 	render(width: number): string[] {
 		return renderModelOverlayLines({
 			rows: this.rows,
@@ -938,6 +998,7 @@ export class ModelOverlayView implements Component {
 			selectedIndex: this.selectedIndex,
 			query: this.query,
 			width,
+			bodyRows: this.bodyRows,
 			showAll: this.showAll,
 			refreshing: this.refreshing,
 			refreshError: this.refreshError,
@@ -1069,10 +1130,10 @@ export function openModelOverlay(tui: TUI, deps: OpenModelOverlayDeps): OverlayH
 		width: overlayWidth,
 		markerId: "model",
 		title: "Models",
-		footerHint: buildHint([
+		footerHint: buildResponsiveHint([
 			FILTER_HINT,
 			{ key: "Tab", verb: "focus/all" },
-			{ key: "r", verb: "refresh target" },
+			{ key: "r", verb: "refresh target", short: "refresh" },
 			{ key: "R", verb: "refresh all" },
 			{ key: "*", verb: "fav" },
 			{ key: "Enter", verb: "use" },
