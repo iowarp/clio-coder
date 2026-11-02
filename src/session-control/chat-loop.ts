@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
+import { JobClockExpired } from "../core/job-types.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import {
 	mainAgent,
@@ -4169,7 +4170,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const cause = request.signal.reason;
 				const ended = cause instanceof Error ? cause.message : String(cause);
 				try {
-					api.cancel({ reason: `Scheduled job occurrence ended: ${ended}.`, auditReason: `job occurrence ended: ${ended}` });
+					api.cancel({
+						reason: `Scheduled job occurrence ended: ${ended}.`,
+						auditReason: `job occurrence ended: ${ended}`,
+						...(cause instanceof JobClockExpired ? { source: "job_clock" as const } : {}),
+					});
 				} finally {
 					pendingMachineCancellation = null;
 				}

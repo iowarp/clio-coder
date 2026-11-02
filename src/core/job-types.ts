@@ -42,6 +42,10 @@ export interface JobSpec {
 	readonly constraints: TurnConstraints | null;
 	readonly originTurnId: string | null;
 }
+/** A job's own clock ended the execution, as opposed to a person or the host stopping it (#445). */
+export class JobClockExpired extends Error {
+	override readonly name = "JobClockExpired";
+}
 export type JobEndReason = "count" | "condition" | "stopped" | "canceled" | "deadline" | "failure";
 export interface JobEvidence {
 	outcome: "succeeded" | "failed" | "noop" | "canceled" | "timed_out" | "interrupted";

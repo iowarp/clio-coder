@@ -294,6 +294,7 @@ const ABORT_SOURCE_LABELS: Record<RunAbortSource | TurnAbortSource, string> = {
 	dispatch_drain: "dispatch drain",
 	stream_cancel: "stream cancel",
 	loop_guard: "loop guard",
+	job_clock: "job clock",
 };
 
 function runAbortDetail(event: RunAbortedStatusEvent): string | undefined {

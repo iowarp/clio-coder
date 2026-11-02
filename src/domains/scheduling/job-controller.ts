@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { JobClockExpired } from "../../core/job-types.js";
 import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import {
 	clipJobText,
@@ -120,7 +121,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 		const execution = live.get(id);
 		if (!execution || execution.abort.signal.aborted) return;
 		execution.forced = outcome;
-		execution.abort.abort(new Error(reason));
+		execution.abort.abort(outcome === "timed_out" ? new JobClockExpired(reason) : new Error(reason));
 	}
 	function terminal(id: string, reason: "canceled" | "deadline" | "stopped"): JobRecord {
 		const job = current(id);
