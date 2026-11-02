@@ -1,5 +1,5 @@
 import type { Component, ScrollViewScrollbar, TUI, TuiMode } from "../engine/tui.js";
-import { Container, ScrollView, TuiAltScreen, VStack } from "../engine/tui.js";
+import { ScrollView, TuiAltScreen, VStack } from "../engine/tui.js";
 import type { ChatPanelRegions } from "./chat-panel.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
@@ -58,48 +58,45 @@ export interface FullscreenLayout {
 }
 
 /**
- * One blank row around a transcript that has anything in it: above, against
- * the header, and below, against the queue and composer rail. Fullscreen's
- * scroll view wraps the transcript in this; regular mode builds the same rows
- * inline in its root. The collapsed
- * session header is exactly one row by contract, and the first prompt bar used
- * to sit flush against it, as the newest receipt did against the composer. The
- * wrapped array is reused while the transcript returns the same cached array,
- * so a cache-hit frame stays O(1).
+ * Fullscreen's scrollable document. Compose the header and the two transcript
+ * regions once when they change, preserving the array on composer-only frames.
+ * A generic Container copied every historical row on every keystroke, and a
+ * separate transcript wrapper made a second full copy on each streamed delta.
  */
-function separatedTranscript(chat: TranscriptComponent): Component {
+function transcriptDocument(banner: Component, chat: TranscriptComponent): Component {
 	let source: unknown;
+	let header: string[] = [];
+	let lines: string[] = [];
 	let renderedSkinEpoch = skinEpoch();
-	let separated: string[] = [];
 	return {
 		render(width: number): string[] {
 			if (renderedSkinEpoch !== skinEpoch()) {
 				renderedSkinEpoch = skinEpoch();
 				source = undefined;
+				banner.invalidate();
 				chat.invalidate();
 			}
+			const nextHeader = banner.render(width);
 			const regions = chat.renderRegions?.(width);
-			if (regions !== undefined) {
-				// One exact-size copy of the frame, straight from the panel's two
-				// parts, instead of the panel joining them and this wrapper copying
-				// the result again row by row.
-				if (regions !== source) {
-					source = regions;
-					separated =
-						regions.prefix.length + regions.tail.length === 0 ? [] : [""].concat(regions.prefix, regions.tail, [""]);
-				}
-				return separated;
+			const nextSource = regions ?? chat.render(width);
+			// Compare the small header by value: components may return fresh arrays
+			// or mutate their old array. Own the snapshot used for this comparison.
+			if (
+				nextSource !== source ||
+				nextHeader.length !== header.length ||
+				nextHeader.some((row, index) => row !== header[index])
+			) {
+				source = nextSource;
+				header = nextHeader.slice();
+				const prefix = regions?.prefix ?? (nextSource as string[]);
+				const tail = regions?.tail ?? [];
+				lines = prefix.length + tail.length === 0 ? header.slice() : header.concat([""], prefix, tail, [""]);
 			}
-			const lines = chat.render(width);
-			if (lines.length === 0) return lines;
-			if (lines !== source) {
-				source = lines;
-				separated = [""].concat(lines, [""]);
-			}
-			return separated;
+			return lines;
 		},
 		invalidate(): void {
 			source = undefined;
+			banner.invalidate();
 			chat.invalidate();
 		},
 	};
@@ -119,9 +116,7 @@ class TranscriptScrollView extends ScrollView {
 }
 
 function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}): FullscreenLayout {
-	const document = new Container();
-	document.addChild(parts.banner);
-	document.addChild(separatedTranscript(parts.chat));
+	const document = transcriptDocument(parts.banner, parts.chat);
 	const theme = clioTheme();
 	const transcript = new TranscriptScrollView(document, {
 		follow: "end",

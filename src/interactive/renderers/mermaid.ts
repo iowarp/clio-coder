@@ -8,6 +8,9 @@ const markdownParser = new Marked();
 // limit of about two rows per source line rejected every top-to-bottom chain
 // past four or five nodes, since each node draws about five rows.
 const MAX_DIAGRAM_ROWS = 120;
+const MAX_CACHED_LAYOUTS = 16;
+/** Retained UTF-16 code units, excluding object/array overhead. */
+const MAX_CACHED_TEXT = 131_072;
 
 function isMermaid(token: Tokens.Generic): token is Tokens.Code {
 	return token.type === "code" && token.lang?.trim().split(/\s+/, 1)[0]?.toLowerCase() === "mermaid";
@@ -44,16 +47,48 @@ function styleSpan(span: Span, theme: ClioTheme): string {
  * preserves every box-drawing row and its significant whitespace.
  */
 export function createMermaidMarkdownTransform(theme: ClioTheme): (markdown: string, availableWidth: number) => string {
+	// A finished diagram is still in the Markdown source on every later text
+	// delta. Reuse its layout while continuing to apply the current theme below.
+	// Bound both the entry count and retained source/art size: partial diagrams
+	// and arbitrary model output must not turn this into a session-sized cache.
+	const layouts = new Map<string, { art: ReturnType<typeof render>; size: number }>();
+	let retained = 0;
+	const layout = (source: string, width: number): ReturnType<typeof render> => {
+		const key = `${width}:${source}`;
+		const cached = layouts.get(key);
+		if (cached !== undefined) {
+			layouts.delete(key);
+			layouts.set(key, cached);
+			return cached.art;
+		}
+		let art = render(source);
+		if (art && art.width > width) {
+			const stacked = source.replace(/^(\s*(?:flowchart|graph)\s+)LR\b/, "$1TD");
+			if (stacked !== source) art = render(stacked);
+		}
+		const size =
+			key.length +
+			(art?.styled.reduce((sum, row) => sum + row.reduce((n, span) => n + span.text.length, 0), 0) ?? 0) +
+			(art?.plain.reduce((sum, row) => sum + row.length, 0) ?? 0) +
+			(art?.warnings.reduce((sum, warning) => sum + warning.length, 0) ?? 0);
+		if (size <= MAX_CACHED_TEXT) {
+			layouts.set(key, { art, size });
+			retained += size;
+			while (layouts.size > MAX_CACHED_LAYOUTS || retained > MAX_CACHED_TEXT) {
+				const oldest = layouts.entries().next().value;
+				if (oldest === undefined) break;
+				retained -= oldest[1].size;
+				layouts.delete(oldest[0]);
+			}
+		}
+		return art;
+	};
 	return (markdown, availableWidth) =>
 		markdownParser
 			.lexer(markdown)
 			.map((token) => {
 				if (!isMermaid(token)) return token.raw;
-				let art = render(token.text);
-				if (art && art.width > availableWidth) {
-					const stacked = token.text.replace(/^(\s*(?:flowchart|graph)\s+)LR\b/, "$1TD");
-					if (stacked !== token.text) art = render(stacked);
-				}
+				const art = layout(token.text, availableWidth);
 				const fallback = !art
 					? "could not be drawn"
 					: art.width > availableWidth
