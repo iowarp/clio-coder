@@ -236,12 +236,8 @@ export function latestPriorSession(
 			id: candidate.meta.id,
 			lastActiveAt: candidate.lastActiveAt,
 			name: scan.flowRestricted ? null : scan.name,
-			firstMessagePreview:
-				preview === null
-					? null
-					: preview.length > PREVIEW_MAX_CHARS
-						? `${preview.slice(0, PREVIEW_MAX_CHARS - 1)}…`
-						: preview,
+			// Uncut: the quoting site redacts before it cuts, and a cut here could split a secret first.
+			firstMessagePreview: preview,
 			messageCount: scan.messageCount,
 		};
 	}

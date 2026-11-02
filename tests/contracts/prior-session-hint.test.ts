@@ -80,12 +80,12 @@ it("redacts secret-shaped text the prior-session line quotes from another sessio
 			parentTurnId: null,
 			timestamp: at,
 			role: "user",
-			payload: { text: "use AKIAIOSFODNN7EXAMPLE and MY_API_KEY=hunter2value" },
+			payload: { text: "use AKIAIOSFODNN7EXAMPLE, MY_API_KEY=hunter2value, --token tokenvalue1 PASSWD=abc123" },
 		}));
 		writeFileSync(join(dir, "current.jsonl"), `${turns.map((turn) => JSON.stringify(turn)).join("\n")}\n`);
 		const facts = sessionStartFacts(cwd, "current", now, emptyWorkspaceSnapshot(cwd)).join("\n");
 		match(facts, /Last recorded session here/);
-		doesNotMatch(facts, /AKIAIOSFODNN7EXAMPLE|hunter2value/);
+		doesNotMatch(facts, /AKIAIOSFODNN7EXAMPLE|hunter2value|tokenvalue1|abc123/);
 	} finally {
 		env.restore();
 	}

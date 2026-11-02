@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { endpointCapacityUsage } from "../../src/domains/dispatch/capacity-lease.js";
+import type { MemoryRouteText } from "../../src/domains/memory/secret-text.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import {
 	runTaskMemoryPolicy,
@@ -65,7 +66,7 @@ for (const role of ["memory", "compaction"] as const) {
 				ok(route);
 				const result: Awaited<ReturnType<TaskMemoryModelClient["complete"]>> = await route.client.complete({
 					systemPrompt: "fixture",
-					userPrompt: "17 times 19",
+					userPrompt: "17 times 19" as MemoryRouteText,
 					maxTokens: 4096,
 					signal: new AbortController().signal,
 				});
@@ -162,7 +163,7 @@ for (const ending of ["deadline", "cancelled"] as const) {
 			strictEqual(f.providers.list()[0]?.health.lastCheckAt, null, "abort is not endpoint-down evidence");
 			const recovered = await route.client.complete({
 				systemPrompt: "fixture",
-				userPrompt: "17 times 19",
+				userPrompt: "17 times 19" as MemoryRouteText,
 				maxTokens: 512,
 				signal: new AbortController().signal,
 			});
@@ -183,7 +184,7 @@ test("successful unknown background metadata remains unknown and is not repeated
 		for (let i = 0; i < 2; i++) {
 			const result: Awaited<ReturnType<TaskMemoryModelClient["complete"]>> = await route.client.complete({
 				systemPrompt: "fixture",
-				userPrompt: "17 times 19",
+				userPrompt: "17 times 19" as MemoryRouteText,
 				maxTokens: 512,
 				signal: new AbortController().signal,
 			});
@@ -262,7 +263,7 @@ test("memory refuses an endpoint changed while metadata was pending", async () =
 		ok(route);
 		const completion = route.client.complete({
 			systemPrompt: "fixture",
-			userPrompt: "fixture",
+			userPrompt: "fixture" as MemoryRouteText,
 			maxTokens: 512,
 			signal: new AbortController().signal,
 		});

@@ -11,7 +11,7 @@ import {
 	MEMORY_INTERVENTION_SYSTEM_PROMPT,
 } from "../prompts/memory-intervention.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
-import { redactForMemoryRoute } from "./secret-text.js";
+import { type MemoryRouteText, memoryRouteJson, redactForMemoryRoute } from "./secret-text.js";
 import {
 	renderTaskMemoryEntries,
 	TASK_MEMORY_CONTENT_MAX_CHARS,
@@ -83,7 +83,7 @@ export interface TaskMemoryModelRequest {
 	callTelemetry?: CallMessageObserver;
 	purpose?: "observation" | "reflection" | "lesson";
 	systemPrompt: string;
-	userPrompt: string;
+	userPrompt: MemoryRouteText;
 	maxTokens: number;
 	signal: AbortSignal;
 	/** Known usage may arrive even when completion rejects or the policy has been canceled. */
@@ -361,7 +361,8 @@ const TRAJECTORY_PROMPT_MAX_CHARS = 4_000;
  * memory step is being asked about.
  */
 function renderTrajectory(trajectory: TaskMemoryPolicyInput["trajectory"]): string {
-	let steps = [...trajectory];
+	// The field cut below must see redacted text.
+	let steps = trajectory.map((step) => JSON.parse(memoryRouteJson(step)) as (typeof trajectory)[number]);
 	let rendered = JSON.stringify(steps);
 	while (rendered.length > TRAJECTORY_PROMPT_MAX_CHARS && steps.length > 1) {
 		steps = steps.slice(1);
@@ -398,7 +399,7 @@ export async function runTaskMemoryPolicy(
 	});
 	input.signal?.addEventListener("abort", cancel, { once: true });
 	if (input.signal?.aborted) cancel();
-	let userPrompt = "";
+	let userPrompt = "" as MemoryRouteText;
 	let rawResponse = "";
 	let clientError: string | null = null;
 	let stepUsage: TaskMemoryStepUsage | null = null;
@@ -462,7 +463,7 @@ export async function runTaskMemoryPolicy(
 		// Every pass reaches the memory route through here, the live turn log included.
 		userPrompt = redactForMemoryRoute(
 			buildMemoryInterventionUserPrompt({
-				task: input.task.slice(0, TASK_PROMPT_MAX_CHARS),
+				task: redactForMemoryRoute(input.task).slice(0, TASK_PROMPT_MAX_CHARS),
 				bank: [
 					renderTaskMemoryEntries(presentedEntries),
 					...(keptLessons.length === 0
@@ -470,8 +471,12 @@ export async function runTaskMemoryPolicy(
 						: ["", "Lessons already kept for this repository:", ...keptLessons.map((item) => `- [${item.id}] ${item.text}`)]),
 				].join("\n"),
 				trajectory:
-					input.pass?.trajectoryText.slice(0, positiveInteger(input.pass.trajectoryMaxChars, TRAJECTORY_PROMPT_MAX_CHARS)) ??
-					renderTrajectory(input.trajectory),
+					input.pass === undefined
+						? renderTrajectory(input.trajectory)
+						: redactForMemoryRoute(input.pass.trajectoryText).slice(
+								0,
+								positiveInteger(input.pass.trajectoryMaxChars, TRAJECTORY_PROMPT_MAX_CHARS),
+							),
 			}),
 		);
 		const completion = client

@@ -31,6 +31,11 @@ const SECRET_ASSIGNMENT_RE =
 // literal secret that happens to start with `$` still redacts.
 const ENV_REFERENCE_RE = /^["']?\$(?:[A-Z_][A-Z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})["']?$/u;
 
+/** Whether a whole value names a variable rather than holding a credential. */
+export function isEnvReference(value: string): boolean {
+	return ENV_REFERENCE_RE.test(value);
+}
+
 /** Groups 1 and 2 of {@link URL_USERINFO_RE} hold the part one-shot redaction shows and the part it hides. */
 export const URL_USERINFO_RE = SECRET_STRING_RE;
 

@@ -105,7 +105,14 @@ export function redactKnownSecrets(text: string, values: Iterable<string>, tally
 }
 
 /** Replace every secret-shaped value in `text`, tallying replacements. */
-export function redactSecretsText(text: string, tally: RedactionTally): string {
+export function redactSecretsText(
+	text: string,
+	tally: RedactionTally,
+	options?: {
+		/** A caller that knows more about its text may keep an assignment value this rule would hide. */
+		keepAssignmentValue?: (value: string) => boolean;
+	},
+): string {
 	let out = text;
 	for (const pattern of SECRET_PATTERNS) {
 		out = out.replace(pattern.re, (...match: unknown[]) => {
@@ -114,6 +121,7 @@ export function redactSecretsText(text: string, tally: RedactionTally): string {
 				tally.count += 1;
 				return `${String(match[1])}[redacted:url-userinfo]@`;
 			}
+			if (pattern.kind === "assignment" && options?.keepAssignmentValue?.(String(match[2]))) return String(match[0]);
 			tally.count += 1;
 			if (pattern.kind === "assignment" || pattern.kind === "authorization") {
 				// Keep the key and separator; replace only the value.

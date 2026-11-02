@@ -18,8 +18,8 @@ import {
 	selectActiveRules,
 } from "../context/index.js";
 import { detectRunIdentity } from "../dispatch/run-identity.js";
-import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import { loadMcpServerConfig } from "../gateway/mcp/config.js";
+import { redactForMemoryRoute } from "../memory/secret-text.js";
 import type { ResourcesContract } from "../resources/contract.js";
 import { modelVisibleSkills } from "../resources/skills/loader.js";
 import { isAutonomyLevel } from "../safety/autonomy.js";
@@ -566,7 +566,7 @@ export function sessionStartFacts(
 		if (prior !== null) {
 			// The preview is raw ledger text, and this line rides every request of every later session here (#423).
 			const topic = prior.name ?? prior.firstMessagePreview;
-			const quoted = topic ? quotedFact(redactSecretsText(topic, createRedactionTally()), 64) : prior.id;
+			const quoted = topic ? quotedFact(redactForMemoryRoute(topic), 64) : prior.id;
 			priorFact = `${PRIOR_SESSION_FACT_PREFIX}${prior.lastActiveAt}: ${quoted}. Answer "last time" from this record; git log is not session history. /resume opens it.`;
 		}
 	} catch {

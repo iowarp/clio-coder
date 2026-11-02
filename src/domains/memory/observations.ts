@@ -9,6 +9,7 @@ import type {
 	ObservationSourceUnit,
 	SessionObservation,
 } from "./contract.js";
+import { type MemoryRouteText, memoryRouteJson } from "./secret-text.js";
 import type { TaskMemoryRoute, TaskMemoryStepUsage } from "./task-memory-policy.js";
 
 export const observationDigest = (value: unknown): string =>
@@ -40,10 +41,10 @@ export const REFLECTION_INSTRUCTION = `This is a consolidation request. consolid
 export function reflectionRequest(
 	inputs: readonly SessionObservation[],
 	units: readonly ObservationSourceUnit[],
-): { systemPrompt: string; userPrompt: string } {
+): { systemPrompt: string; userPrompt: MemoryRouteText } {
 	return {
 		systemPrompt: `${OBSERVATION_PROMPT}\n${REFLECTION_INSTRUCTION}`,
-		userPrompt: JSON.stringify({
+		userPrompt: memoryRouteJson({
 			consolidate: inputs.flatMap((batch) => batch.notes),
 			inputIds: inputs.flatMap((batch) => batch.notes.map((note) => note.id)),
 			sourceRefs: units.flatMap((unit) => unit.refs),
