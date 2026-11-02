@@ -8,6 +8,15 @@ export const RENDER_TRACE_VERSION = 2;
 
 export type RenderInputAction = "editor" | "overlay" | "scroll" | "submit" | "no-visual-change";
 export type VisibleEventKind = "text" | "thinking";
+/** One chat submit between Enter and admission; request dispatch and first token sit outside this process's view of it. */
+export type SubmitPhase =
+	| "enter"
+	| "expansion-start"
+	| "expansion-end"
+	| "prompt-appended"
+	| "preparation-start"
+	| "preparation-commit"
+	| "admission";
 
 export interface RenderTraceCommit {
 	writeId: number;
@@ -47,7 +56,20 @@ export interface RenderTraceFrameRecord {
 }
 
 export type RenderTraceRecord =
-	| { type: "trace_start"; version: typeof RENDER_TRACE_VERSION; at: number }
+	| {
+			type: "trace_start";
+			version: typeof RENDER_TRACE_VERSION;
+			at: number;
+			/** Wall clock of `at: 0` at sub-millisecond resolution, so another process can line up its own stamps. */
+			epochMs: number;
+	  }
+	| {
+			type: "submit_phase";
+			version: typeof RENDER_TRACE_VERSION;
+			submitSeq: number;
+			phase: SubmitPhase;
+			at: number;
+	  }
 	| {
 			type: "event_ingress";
 			version: typeof RENDER_TRACE_VERSION;
@@ -335,6 +357,7 @@ export interface RenderTrace extends TuiRenderObserver {
 	recordQueue(eventSeq: number, action: "admit" | "dequeue"): void;
 	recordPanelApplied(eventSeq: number): void;
 	recordInputIngress(action: RenderInputAction, bytes: number, visualExpected?: boolean): number;
+	recordSubmitPhase(submitSeq: number, phase: SubmitPhase): void;
 	beginComponentRender(): unknown;
 	endComponentRender(token: unknown): void;
 	recordTerminalWrite(fields: { bytes: number; enqueueMs: number; returned: boolean }): number;
@@ -405,7 +428,12 @@ export function createRenderTrace(
 	const ranges = new Map<string, { codeUnits: number; graphemes: number }>();
 	const pendingDrains = new Map<number, { frameId: number | null; at: number }>();
 
-	writer?.enqueue({ type: "trace_start", version: RENDER_TRACE_VERSION, at: 0 });
+	writer?.enqueue({
+		type: "trace_start",
+		version: RENDER_TRACE_VERSION,
+		at: 0,
+		epochMs: performance.timeOrigin + performance.now(),
+	});
 
 	const trace: RenderTrace = {
 		rowsChangedEnabled: writer !== null,
@@ -496,6 +524,9 @@ export function createRenderTrace(
 			inputRing.push(record);
 			writer?.enqueue(record);
 			return inputSeq;
+		},
+		recordSubmitPhase(submitSeq, phase): void {
+			writer?.enqueue({ type: "submit_phase", version: RENDER_TRACE_VERSION, submitSeq, phase, at: at() });
 		},
 		beginFrame(fields): FrameState {
 			frameSeq += 1;

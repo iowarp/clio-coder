@@ -1269,6 +1269,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		recordSubmittedTurn,
 		readStructuredEntries,
 		expandSubmit: expandSubmitCancellable,
+		...(renderTrace ? { onSubmitPhase: (seq, phase) => renderTrace.recordSubmitPhase(seq, phase) } : {}),
 		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
 		openTransientAskUser: (questions, options) => openTransientAskUserOverlayState(questions, options),
 		openSkillsHub: (request) => openSkillsHubState(request),

@@ -56,6 +56,7 @@ import { appendNotice, appendOperatorAside, appendOperatorCommand, appendReferen
 import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
+import type { SubmitPhase } from "./render-trace.js";
 import { renderDoctorReport } from "./renderers/doctor-report.js";
 import { renameCurrentSession } from "./session-rename.js";
 
@@ -183,6 +184,8 @@ export interface InteractiveSlashRuntimeDeps {
 	 */
 	session?: Pick<SessionContract, "tree" | "current" | "appendEntry" | "setName">;
 	expandSubmit: (text: string) => Promise<InteractiveSlashSubmitExpansion>;
+	/** Render-trace stamps for one chat submit; the armed trace is the only consumer. */
+	onSubmitPhase?: (submitSeq: number, phase: SubmitPhase) => void;
 	openAskUser: AskUserHandler;
 	openSkillsHub: (request?: LibraryBrowseRequest) => void;
 	openUsage: () => void;
@@ -332,13 +335,16 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		});
 	};
 
+	let submitSequence = 0;
 	/** One expanded operator turn into the chat loop: record it, paint it, submit it. */
 	const submitExpanded = (
 		sub: InteractiveSlashSubmitExpansion,
 		awaitAdmission = false,
 		captured = false,
 		draft?: string,
+		submitSeq = ++submitSequence,
 	): Promise<void> => {
+		const stamp = (phase: SubmitPhase): void => deps.onSubmitPhase?.(submitSeq, phase);
 		try {
 			// A prompt or a steer is the operator asking for what comes next.
 			deps.returnToLiveEdge?.();
@@ -365,6 +371,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				}
 			}
 			deps.requestRender();
+			stamp("prompt-appended");
 			let acknowledgeAdmission = (): void => {};
 			const admitted = new Promise<void>((resolve) => {
 				acknowledgeAdmission = resolve;
@@ -384,8 +391,10 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				...(!willQueue
 					? {
 							onPreparationVisible: async () => {
+								stamp("preparation-start");
 								deps.beforeSemanticSubmit?.();
 								await deps.settleVisibleFrame?.("submit-preparing");
+								stamp("preparation-commit");
 							},
 						}
 					: {}),
@@ -393,6 +402,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				// for the live run; the operator keeps the line to resend.
 				...(draft !== undefined && deps.restoreRefusedDraft ? { onRefused: () => deps.restoreRefusedDraft?.(draft) } : {}),
 				onAdmitted: () => {
+					stamp("admission");
 					rowStatus = "committed";
 					deps.requestRender();
 					if (awaitAdmission) acknowledgeAdmission();
@@ -435,6 +445,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		operatorText?: string,
 		draft?: ChatDraft,
 	): Promise<void> => {
+		const submitSeq = ++submitSequence;
+		deps.onSubmitPhase?.(submitSeq, "enter");
 		let draftSettled = false;
 		const admitDraft = (): void => {
 			if (draftSettled) return;
@@ -457,7 +469,9 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				return;
 			let expanded: InteractiveSlashSubmitExpansion;
 			try {
+				deps.onSubmitPhase?.(submitSeq, "expansion-start");
 				expanded = await deps.expandSubmit(text);
+				deps.onSubmitPhase?.(submitSeq, "expansion-end");
 			} catch (err) {
 				if (!isAbortError(err)) throw err;
 				// The operator cancelled a slow attachment read. That is not a failed
@@ -525,7 +539,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					});
 				return;
 			}
-			await submitExpanded(submitted, true, captured, captured ? undefined : text);
+			await submitExpanded(submitted, true, captured, captured ? undefined : text, submitSeq);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			deps.io.stderr(`[interactive] chat failed: ${msg}\n`);
