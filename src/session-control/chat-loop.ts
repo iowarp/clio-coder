@@ -4164,8 +4164,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				request.sessionId === api.getSessionId()
 			) {
 				pendingMachineCancellation = token;
+				// The controller's abort reason says what ended it; a timed-out occurrence is not a cancelled one (#445).
+				const cause = request.signal.reason;
+				const ended = cause instanceof Error ? cause.message : String(cause);
 				try {
-					api.cancel({ reason: "Scheduled job occurrence canceled.", auditReason: "job occurrence canceled" });
+					api.cancel({ reason: `Scheduled job occurrence ended: ${ended}.`, auditReason: `job occurrence ended: ${ended}` });
 				} finally {
 					pendingMachineCancellation = null;
 				}
