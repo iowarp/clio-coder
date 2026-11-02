@@ -35,9 +35,13 @@ interface LiveExecution {
 	started: boolean;
 	timeoutAt: number;
 	forced: JobEvidence["outcome"] | null;
+	/** The running turn was stopped by this execution's clock; a deadline or a race with settlement does not count. */
+	clockExpired?: true;
 	promise: Promise<void>;
 }
 const POLL_MS = 250;
+/** One job, one cause, one continuation: a turn that dies on the clock twice is not a slow turn (#445). */
+const JOB_CLOCK_RESUME_CAP = 1;
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const copy = <T>(value: T): T => structuredClone(value);
 
@@ -116,6 +120,38 @@ export function createJobController(options: JobControllerOptions): JobControlle
 	function executionTimeoutReason(job: JobRecord, kind: LiveExecution["kind"]): string {
 		const bound = jobExecutionTimeoutMs(job.spec, kind);
 		return `execution timeout after ${bound}ms (${job.spec.timeoutDefaulted === true ? "the job's default" : "the job's timeout_ms"})`;
+	}
+	/**
+	 * A later occurrence already continues a timed-out run, so this answers only
+	 * for the turn nothing would pick up: a main job's final occurrence or a
+	 * follow-up. An explicit timeout is a bound someone chose and never resumes.
+	 */
+	function clockResumeDue(job: JobRecord, execution: LiveExecution, evidence: JobEvidence): boolean {
+		if (execution.clockExpired !== true || evidence.cleanupUnresolved) return false;
+		if (job.spec.timeoutDefaulted !== true || (job.clockResumes ?? 0) >= JOB_CLOCK_RESUME_CAP) return false;
+		if (job.generation !== execution.generation) return false;
+		const uncontinued =
+			execution.kind === "delivery"
+				? job.delivery?.kind === "main_turn"
+				: job.state === "active" &&
+					job.spec.runner.kind === "main" &&
+					job.spec.count !== null &&
+					job.starts >= job.spec.count;
+		return uncontinued && options.clockResume?.allowed(job) === true;
+	}
+	function queueClockResume(draft: JobRecord, occurrenceId: string): void {
+		draft.clockResumes = (draft.clockResumes ?? 0) + 1;
+		draft.delivery = {
+			id: `${draft.id}:clock-resume:${draft.clockResumes}`,
+			occurrenceId,
+			kind: "main_turn",
+			state: "pending",
+			createdAt: now(),
+			startedAt: null,
+			endedAt: null,
+			reason: null,
+			evidence: null,
+		};
 	}
 	function abortLive(id: string, reason: string, outcome: JobEvidence["outcome"]): void {
 		const execution = live.get(id);
@@ -306,6 +342,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 			JSON.stringify(previous.json) === JSON.stringify(evidence.json)
 		)
 			evidence.outcome = "noop";
+		const resuming = clockResumeDue(job, execution, evidence);
 		commit(job, (draft) => {
 			if (!evidence.cleanupUnresolved) draft.cancelRequested = false;
 			draft.costUsd = draft.costUsd === null || evidence.costUsd === null ? null : draft.costUsd + evidence.costUsd;
@@ -324,6 +361,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				if (draft.reason === "condition") draft.state = "terminal";
 				draft.pendingReason = null;
 				if (evidence.cleanupUnresolved) blockUnresolvedCleanup(draft);
+				else if (resuming) queueClockResume(draft, draft.delivery.occurrenceId);
 				return;
 			}
 			if (!draft.active || draft.active.id !== execution.id) throw new Error("job: mismatched occurrence settlement");
@@ -365,6 +403,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				draft.reason = "count";
 				draft.pending = null;
 				draft.nextDueAt = null;
+				if (resuming) queueClockResume(draft, occurrence.id);
 			} else if (draft.generation !== execution.generation) {
 				return;
 			} else if (evidence.errorClass === "permission") {
@@ -390,6 +429,14 @@ export function createJobController(options: JobControllerOptions): JobControlle
 				}
 			} else draft.consecutiveFailures = 0;
 		});
+		// The commit is the authority: a branch that returned early queued nothing to announce.
+		if (resuming && (current(id).clockResumes ?? 0) > (job.clockResumes ?? 0)) {
+			try {
+				options.clockResume?.resumed(current(id), jobExecutionTimeoutMs(job.spec, execution.kind));
+			} catch (error) {
+				report(error);
+			}
+		}
 	}
 	function launch(id: string, kind: LiveExecution["kind"]): void {
 		const job = current(id);
@@ -498,6 +545,7 @@ export function createJobController(options: JobControllerOptions): JobControlle
 									draft.pendingReason = "execution timeout; awaiting settlement";
 								});
 						} finally {
+							execution.clockExpired = true;
 							abortLive(id, executionTimeoutReason(job, execution.kind), "timed_out");
 						}
 						job = current(id);

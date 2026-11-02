@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import type { JobOwner, JobRecord } from "../core/job-types.js";
+import { ownerTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { captureProjectSurface } from "../core/workspace-trust.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
@@ -146,6 +147,16 @@ export function createJobHost(deps: JobHostDeps): JobHost {
 			}
 		},
 		onError: (error) => deps.notice(`job: ${error.message}`),
+		clockResume: {
+			allowed: () => deps.autonomy() === "yolo",
+			resumed(job, boundMs) {
+				deps.bus.emit(
+					"job.clock_resumed",
+					{ jobId: job.id, boundMs, at: Date.now() },
+					ownerTelemetryContext({ sessionId: job.owner.sessionId }),
+				);
+			},
+		},
 	});
 	const tool = createJobTool({
 		controller,

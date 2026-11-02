@@ -4224,6 +4224,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						kind: "follow-up",
 						origin: request.origin,
 					});
+					if (request.notice !== undefined) emitNotice(request.notice, "warning", "job.clock-resumed");
 					if (request.signal.aborted) cancel();
 				},
 			});

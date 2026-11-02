@@ -57,6 +57,10 @@ function validateRecord(value: unknown, owner: JobOwner): asserts value is JobRe
 			value.reason === null ||
 			["count", "condition", "stopped", "canceled", "deadline", "failure"].includes(String(value.reason))
 		) ||
+		!(
+			value.clockResumes === undefined ||
+			(Number.isSafeInteger(value.clockResumes) && (value.clockResumes as number) >= 0)
+		) ||
 		!Array.isArray(value.history) ||
 		value.history.length > JOB_HISTORY_LIMIT
 	)

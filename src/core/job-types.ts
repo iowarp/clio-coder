@@ -102,6 +102,8 @@ export interface JobRecord {
 	/** Bounded terminal history; starts/settled are lifetime counters. */
 	history: JobOccurrence[];
 	delivery: JobDelivery | null;
+	/** Times a job's default clock was continued past (#445). Absent on older records and on a job it never hit. */
+	clockResumes?: number;
 	/** Null when any executed component has unknown pricing/usage. */
 	costUsd: number | null;
 	persistenceError: string | null;

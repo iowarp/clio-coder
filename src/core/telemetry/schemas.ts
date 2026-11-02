@@ -1463,6 +1463,8 @@ export const TurnAbortedSchema = Type.Object(
 	{ source: vocabulary(["stream_cancel", "loop_guard", "job_clock"]) },
 	closed,
 );
+/** A job continued past its default clock, the one automatic continuation a turn gets (#445). */
+export const JobClockResumedSchema = Type.Object({ jobId: ExistingId, boundMs: duration }, closed);
 export const StatusPhase = vocabulary([
 	"idle",
 	"preparing",
