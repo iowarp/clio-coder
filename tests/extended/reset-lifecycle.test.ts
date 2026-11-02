@@ -1,10 +1,12 @@
 import { match, ok, strictEqual } from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { runResetCommand } from "../../src/cli/reset.js";
-import { createLifecycleHome, runInHome } from "../harness/lifecycle-home.js";
+import { createLifecycleHome, runInHome, writeLiveSession } from "../harness/lifecycle-home.js";
 
 const home = () => createLifecycleHome("clio-coder-test-reset-");
 
@@ -47,6 +49,47 @@ describe("contracts/reset-lifecycle", () => {
 			strictEqual(code, 0);
 			strictEqual(readFileSync(manifest, "utf8"), applied);
 			ok(!existsSync(join(temp.stateDir, "migrations.json")));
+		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("stops for an open session, even with --force, and keeps every root", async () => {
+		const temp = home();
+		try {
+			writeLiveSession(temp, { host: hostname(), pid: process.pid });
+			for (const level of ["--state", "--data", "--all"]) {
+				const { code, stdout } = await runInHome(temp, () => runResetCommand([level, "--force"]));
+				strictEqual(code, 1, level);
+				match(stdout, /20261102-open-session \(tui, pid \d+ on /u);
+				match(stdout, /clio-coder session terminate <id>/u);
+				ok(existsSync(join(temp.stateDir, "install.json")));
+				ok(existsSync(join(temp.dataDir, "records.json")));
+			}
+			const preview = await runInHome(temp, () => runResetCommand(["--dry-run"]));
+			strictEqual(preview.code, 0);
+			match(preview.stdout, /1 session is still open; the real run stops until they end/u);
+			strictEqual((await runInHome(temp, () => runResetCommand(["--cache", "--force"]))).code, 0);
+		} finally {
+			temp.cleanup();
+		}
+	});
+
+	it("does not stop for a session whose owner is gone, or another host's stale one", async () => {
+		const temp = home();
+		try {
+			const gone = spawnSync(process.execPath, ["--version"]).pid;
+			writeLiveSession(temp, { host: hostname(), pid: gone }, "20261102-dead-owner");
+			writeLiveSession(temp, { host: "other-node", pid: 4242 }, "20261102-stale-node");
+			const old = new Date(Date.now() - 10 * 60_000);
+			const stale = join(temp.stateDir, "live", "20261102-stale-node.json");
+			writeFileSync(
+				stale,
+				readFileSync(stale, "utf8").replaceAll(/"(startedAt|at)":"[^"]+"/gu, `"$1":"${old.toISOString()}"`),
+				"utf8",
+			);
+			utimesSync(stale, old, old);
+			strictEqual((await runInHome(temp, () => runResetCommand(["--state", "--force"]))).code, 0);
 		} finally {
 			temp.cleanup();
 		}

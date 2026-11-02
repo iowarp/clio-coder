@@ -15,7 +15,7 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { processAlive, processBirthToken } from "../core/process-identity.js";
+import { processAlive } from "../core/process-identity.js";
 import { assertSafeId } from "../core/safe-id.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import { releaseStateLocksOwnedBy, type StateLockOwner } from "../core/state-file-lock.js";
@@ -33,6 +33,7 @@ import {
 	liveRecordPath,
 	liveSessionsDir,
 	liveSessionView,
+	ownerOnThisHost,
 	printable,
 	type ReleasedFence,
 	releasedFencePath,
@@ -179,17 +180,6 @@ interface TerminateReport {
 	ageMs: number;
 	exited?: boolean;
 	released?: ReleaseResult;
-}
-
-type OwnerOnThisHost = "alive" | "gone" | "foreign";
-
-function ownerOnThisHost(view: LiveSessionView): OwnerOnThisHost {
-	const { host, pid, birth } = view.record;
-	if (host !== hostname()) return "foreign";
-	if (!processAlive(pid)) return "gone";
-	if (birth === null) return "alive";
-	const current = processBirthToken(pid);
-	return current === null || current === birth ? "alive" : "gone";
 }
 
 function emit(report: TerminateReport, json: boolean, code: number): number {

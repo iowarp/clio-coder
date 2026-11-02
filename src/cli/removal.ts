@@ -1,4 +1,6 @@
-import { lstatSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, rmSync, unlinkSync } from "node:fs";
+import { openSessions, printable } from "../domains/session/heartbeat.js";
+import type { LifecyclePresenter } from "./lifecycle-presenter.js";
 
 /**
  * Shared deletion accounting for `clio-coder reset` and `clio-coder uninstall`.
@@ -55,6 +57,29 @@ export function removePath(label: string, path: string, dryRun: boolean): Remova
 		const reason = error instanceof Error ? error.message : String(error);
 		return { label, path, reason };
 	}
+}
+
+/**
+ * Name the sessions a root removal would pull state out from under, and say
+ * whether that stops this run. Each one keeps its writers open and recreates
+ * paths under the removed root, and a reset recreates the root itself, so
+ * `stateRootRemoved()` never tells them. `--force` skips a prompt and does not
+ * answer this. A preview reports the same sessions and goes on.
+ */
+export function refuseForOpenSessions(stateDir: string, presenter: LifecyclePresenter, dryRun: boolean): boolean {
+	const open = existsSync(stateDir) ? openSessions(stateDir) : [];
+	if (open.length === 0) return false;
+	const count = open.length === 1 ? "1 session is" : `${open.length} sessions are`;
+	if (dryRun) presenter.warn(`${count} still open; the real run stops until they end`);
+	else presenter.fail(`${count} still open and would keep writing into what this removes`);
+	for (const { record } of open) {
+		presenter.substep(
+			printable(`${record.id} (${record.surface}, pid ${record.pid} on ${record.host}, ${record.cwd})`),
+			"–",
+		);
+	}
+	presenter.commandAdvice("Close them, or end one with:", "clio-coder session terminate <id>");
+	return !dryRun;
 }
 
 /**

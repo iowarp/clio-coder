@@ -888,7 +888,7 @@ roots and files that survive are listed too (`Survives: ...`). After a `--config
 `clio-coder configure` as the next step, and after `--auth` it prints
 `clio-coder configure --section targets`.
 
-*   `--state` *(Default)*: Deletes the state root only. It holds every session transcript and the telemetry journals beside it, so a reset is the end of `resume`, `/view`, and their history. This is the level a bare `clio-coder reset` selects, and it carries that note in its preview.
+*   `--state` *(Default)*: Deletes the state root only. It holds every session transcript, the telemetry journals beside it and project approvals, so a reset is the end of `resume`, `/view`, and their history, and project settings, hooks and safety rules need approving again. This is the level a bare `clio-coder reset` selects, and it carries that note in its preview.
 *   `--data`: Deletes the data root only: memory and any vendored external tools (durable products). The vendored tools are the one entry a reset cannot regenerate locally; `clio-coder tools install <id>` downloads them again.
 *   `--cache`: Deletes the cache root only.
 *   `--auth`: Deletes `credentials.yaml` only. Removes all saved keys.
@@ -917,6 +917,9 @@ state roots always go. `--force` (`-f`) skips the confirmation prompt. Without a
 `--dry-run`, the command exits 2 with `` `clio-coder uninstall` needs a terminal to confirm; pass --force to skip the prompt ``.
 An unknown flag and an unsafe directory layout exit 2. A declined confirmation exits 0. A lock held by an installer,
 another running session, an unverifiable graphical installation or a failed delete exits 1.
+`uninstall`, and `reset` with `--state`, `--data` or `--all`, stop with exit 1 while a session is still open on this state
+root: one alive on this host, or one on another host whose heartbeat is under 180 seconds old. `--force` does not override
+this, and `--dry-run` lists the sessions and exits 0. Close them or run `clio-coder session terminate <id>`.
 
 Owned graphical background services are stopped and disabled first, and their desktop launchers are
 removed using the app's ownership manifests. A build with no graphical application cannot verify them,

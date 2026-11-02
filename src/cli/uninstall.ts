@@ -27,7 +27,7 @@ import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
 import type { LifecycleItem } from "./lifecycle-presenter.js";
 import { createLifecyclePresenter, measurePath, shortenPath } from "./lifecycle-presenter.js";
 import type { RemovalFailure } from "./removal.js";
-import { removePath, reportRemovalFailures } from "./removal.js";
+import { refuseForOpenSessions, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder uninstall [--remove-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
@@ -37,7 +37,8 @@ Remove all Clio Coder state: the config, data, state, and cache roots.
 Per-project \`.clio-coder/\` directories sit outside those roots and are never
 removed here. Every project Clio has run in is recorded in the session metadata,
 so the real run and --dry-run both list them and name the command that clears one.
-Shell startup files are reported, never edited.
+Shell startup files are reported, never edited. Uninstall stops while a session
+is still open.
 Owned graphical background services are stopped and disabled before their state is
 removed; their desktop launchers are removed using the app's ownership manifests.
 
@@ -537,6 +538,11 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	// listing the run produces and nothing more.
 	const survivor = survivingClioOnPath(linkPath);
 	const advice = binaryRemovalAdvice(installation, linkPath);
+
+	if (refuseForOpenSessions(dirs.state, presenter, args.dryRun)) {
+		presenter.finish();
+		return 1;
+	}
 
 	if (args.dryRun) {
 		presenter.warn("Dry run: no changes made");

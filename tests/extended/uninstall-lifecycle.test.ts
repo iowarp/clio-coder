@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { runGuiCommand } from "../../src/cli/gui.js";
 import { runUninstallCommand } from "../../src/cli/uninstall.js";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
-import { createLifecycleHome, type LifecycleHome, runInHome } from "../harness/lifecycle-home.js";
+import { createLifecycleHome, type LifecycleHome, runInHome, writeLiveSession } from "../harness/lifecycle-home.js";
 
 const home = () => createLifecycleHome("clio-coder-test-uninstall-");
 
@@ -13,6 +13,20 @@ const home = () => createLifecycleHome("clio-coder-test-uninstall-");
 const launcherPath = (temp: LifecycleHome): string => join(temp.binDir, "clio-coder");
 
 describe("contracts/uninstall-lifecycle", () => {
+	it("stops for an open session on any install method, even with --force", async () => {
+		const temp = home();
+		try {
+			writeLiveSession(temp, { host: "other-node", pid: 4242 });
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			strictEqual(code, 1);
+			match(stdout, /20261102-open-session \(tui, pid 4242 on other-node, \/work\/project\)/u);
+			ok(existsSync(join(temp.configDir, "settings.yaml")));
+			ok(existsSync(join(temp.stateDir, "install.json")));
+		} finally {
+			temp.cleanup();
+		}
+	});
+
 	// A checkout that has not been built has no application bundle, so there is no launcher to install;
 	// tests/extended/uninstall-without-gui.test.ts covers that case.
 	it("previews and removes the packaged web desktop entry before deleting state", {

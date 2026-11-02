@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs
 import { hostname, userInfo } from "node:os";
 import { join } from "node:path";
 import { readClioVersion } from "../../core/package-root.js";
-import { processBirthToken } from "../../core/process-identity.js";
+import { processAlive, processBirthToken } from "../../core/process-identity.js";
 import { assertSafeId } from "../../core/safe-id.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
@@ -201,7 +201,12 @@ export interface LiveSessionView {
 	terminateRequested: boolean;
 }
 
-function viewLiveRecord(record: LiveSessionRecord, mtimeMs: number, nowMs = Date.now()): LiveSessionView {
+function viewLiveRecord(
+	record: LiveSessionRecord,
+	mtimeMs: number,
+	nowMs = Date.now(),
+	dir = liveSessionsDir(),
+): LiveSessionView {
 	const atMs = Date.parse(record.at);
 	const beatMs = Number.isFinite(atMs) ? Math.max(atMs, mtimeMs) : mtimeMs;
 	const ageMs = Math.max(0, nowMs - beatMs);
@@ -210,7 +215,7 @@ function viewLiveRecord(record: LiveSessionRecord, mtimeMs: number, nowMs = Date
 		ageMs,
 		skewMs: Number.isFinite(atMs) ? Math.abs(atMs - mtimeMs) : 0,
 		stale: ageMs > HEARTBEAT_STALE_MS,
-		terminateRequested: existsSync(terminateRequestPath(record.id)),
+		terminateRequested: existsSync(join(dir, `${record.id}.terminate.json`)),
 	};
 }
 
@@ -219,8 +224,10 @@ function viewLiveRecord(record: LiveSessionRecord, mtimeMs: number, nowMs = Date
  * tree. `malformed` names record files that failed validation, so a listing
  * shows them instead of failing on them.
  */
-export function listLiveSessions(nowMs = Date.now()): { sessions: LiveSessionView[]; malformed: string[] } {
-	const dir = liveSessionsDir();
+export function listLiveSessions(
+	nowMs = Date.now(),
+	dir = liveSessionsDir(),
+): { sessions: LiveSessionView[]; malformed: string[] } {
 	let names: string[];
 	try {
 		names = readdirSync(dir);
@@ -243,10 +250,35 @@ export function listLiveSessions(nowMs = Date.now()): { sessions: LiveSessionVie
 		} catch {
 			continue;
 		}
-		sessions.push(viewLiveRecord(record, mtimeMs, nowMs));
+		sessions.push(viewLiveRecord(record, mtimeMs, nowMs, dir));
 	}
 	sessions.sort((a, b) => a.record.startedAt.localeCompare(b.record.startedAt));
 	return { sessions, malformed };
+}
+
+export type OwnerOnThisHost = "alive" | "gone" | "foreign";
+
+export function ownerOnThisHost(view: LiveSessionView): OwnerOnThisHost {
+	const { host, pid, birth } = view.record;
+	if (host !== hostname()) return "foreign";
+	if (!processAlive(pid)) return "gone";
+	if (birth === null) return "alive";
+	const current = processBirthToken(pid);
+	return current === null || current === birth ? "alive" : "gone";
+}
+
+/**
+ * Sessions that would keep writing into a state root removed under them: one
+ * alive on this host however old its beat, since a stopped process still holds
+ * its writers, and one still beating from another host on a shared state dir.
+ * A dead owner's leftover record holds nothing. `stateDir` is explicit because
+ * a lifecycle command must not create the root it is asking about.
+ */
+export function openSessions(stateDir: string): LiveSessionView[] {
+	return listLiveSessions(Date.now(), join(stateDir, "live")).sessions.filter((view) => {
+		const owner = ownerOnThisHost(view);
+		return owner === "alive" || (owner === "foreign" && !view.stale);
+	});
 }
 
 /**

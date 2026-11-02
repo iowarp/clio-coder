@@ -6,7 +6,7 @@ import { clioDirLayoutProblems, resetXdgCache, resolveClioDirs } from "../core/x
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { stopLegacyDocsBeforeRemoval } from "./legacy-docs-cleanup.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath } from "./lifecycle-presenter.js";
-import { type RemovalFailure, removePath, reportRemovalFailures } from "./removal.js";
+import { type RemovalFailure, refuseForOpenSessions, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
 
 const HELP = `clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force] [--json]
@@ -16,8 +16,9 @@ Each level clears exactly the root (or file) it names and nothing else, then the
 empty roots are recreated so the next run has somewhere to write.
 
 Levels (combinable except --all):
-  --state       state root only (default). Holds every session transcript, so a
-                reset is the end of resume, /view, and the telemetry behind them.
+  --state       state root only (default). Holds every session transcript and
+                project approval, so a reset is the end of resume, /view, and the
+                telemetry behind them, and project settings need approving again.
                 Owned background services are stopped and removed first.
   --data        data root only: memory and vendored tools (durable products)
   --cache       cache root only
@@ -27,6 +28,7 @@ Levels (combinable except --all):
                 else under it), data, state, and cache
 
 Safety:
+  --state, --data and --all stop while a session is still open.
   --force, -f   required for destructive execution in non-interactive environments
   --dry-run     print what would be reset without changing anything
   --json        emit machine-readable JSON output
@@ -34,7 +36,8 @@ Safety:
 `;
 
 const ROOT_NOTES = {
-	state: "State holds every session transcript and telemetry journal; resume and /view lose their history.",
+	state:
+		"State holds every session transcript, telemetry journal and project approval; resume and /view lose their history, and project settings, hooks and safety rules need approving again.",
 	data: "Data holds memory and vendored tools; the tools have to be downloaded again.",
 	config: "Settings return to their defaults.",
 	auth: "Saved API keys are gone; each target has to be authenticated again.",
@@ -345,6 +348,11 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 	// absent, which is not the same claim as "it was there and it is going".
 	const surviving = items.filter((item) => item.status === "keep").map((item) => item.label);
 	if (surviving.length > 0) presenter.note(`Survives: ${surviving.join(", ")}`);
+
+	if ((resetState || resetData) && refuseForOpenSessions(dirs.state, presenter, args.dryRun)) {
+		presenter.finish();
+		return 1;
+	}
 
 	if (args.dryRun) {
 		presenter.warn("Dry run: no changes made");

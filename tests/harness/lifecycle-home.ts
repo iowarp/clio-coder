@@ -74,6 +74,34 @@ export function createLifecycleHome(prefix: string, options: LifecycleHomeOption
 	};
 }
 
+/** Publish a session heartbeat under `home`, as an open session does. */
+export function writeLiveSession(
+	home: LifecycleHome,
+	owner: { host: string; pid: number },
+	id = "20261102-open-session",
+): void {
+	const at = new Date().toISOString();
+	mkdirSync(join(home.stateDir, "live"), { recursive: true });
+	writeFileSync(
+		join(home.stateDir, "live", `${id}.json`),
+		`${JSON.stringify({
+			schema: 1,
+			id,
+			cwd: "/work/project",
+			cwdHash: "abc123",
+			host: owner.host,
+			pid: owner.pid,
+			birth: null,
+			startedAt: at,
+			at,
+			surface: "tui",
+			version: "0.0.0",
+			user: "test",
+		})}\n`,
+		"utf8",
+	);
+}
+
 /**
  * Run one lifecycle command against `home`, returning its exit code and stdout.
  *
