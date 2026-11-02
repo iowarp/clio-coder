@@ -19,10 +19,11 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
  *      override their one root and beat CLIO_CODER_HOME (most specific wins).
  *
  * Role contents: config holds user-authored files (settings, credentials,
- * agents, skills, prompts, extensions, runtimes); data holds durable artifacts
- * (memory, vendored tools); state holds machine-produced session state
- * (sessions, telemetry, runs.json, recent-models.json, install.json,
- * interviews, scratch); cache holds disposable derived files.
+ * agents, skills, prompts, extensions, runtimes) and the migration manifest
+ * that records which shape they are in; data holds durable artifacts (memory,
+ * vendored tools); state holds machine-produced session state (sessions,
+ * telemetry, runs.json, recent-models.json, install.json, interviews, scratch);
+ * cache holds disposable derived files.
  */
 
 export interface ClioDirs {
@@ -129,6 +130,16 @@ function envOrNull(key: string): string | null {
 	return v && v.length > 0 ? v : null;
 }
 
+/**
+ * An XDG base directory variable by the spec's rule: empty or relative reads as
+ * unset. Taking one literally made `XDG_STATE_HOME=` resolve the state root to
+ * `clio-coder` under the cwd, which every writer then refused as unsafe.
+ */
+export function xdgBaseDir(value: string | undefined, fallback: string): string {
+	const trimmed = value?.trim();
+	return trimmed && isAbsolute(trimmed) ? trimmed : fallback;
+}
+
 function platformDefaults(): ClioDirs {
 	const p = platform();
 	const h = homedir();
@@ -151,10 +162,10 @@ function platformDefaults(): ClioDirs {
 			cache: join(h, "Library", "Caches", "clio-coder"),
 		};
 	}
-	const xdgConfig = process.env.XDG_CONFIG_HOME ?? join(h, ".config");
-	const xdgData = process.env.XDG_DATA_HOME ?? join(h, ".local", "share");
-	const xdgState = process.env.XDG_STATE_HOME ?? join(h, ".local", "state");
-	const xdgCache = process.env.XDG_CACHE_HOME ?? join(h, ".cache");
+	const xdgConfig = xdgBaseDir(process.env.XDG_CONFIG_HOME, join(h, ".config"));
+	const xdgData = xdgBaseDir(process.env.XDG_DATA_HOME, join(h, ".local", "share"));
+	const xdgState = xdgBaseDir(process.env.XDG_STATE_HOME, join(h, ".local", "state"));
+	const xdgCache = xdgBaseDir(process.env.XDG_CACHE_HOME, join(h, ".cache"));
 	return {
 		config: join(xdgConfig, "clio-coder"),
 		data: join(xdgData, "clio-coder"),

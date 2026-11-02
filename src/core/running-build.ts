@@ -5,7 +5,7 @@ import { runningBuildId } from "./build-info.js";
 import { resolvePackageRoot } from "./package-root.js";
 import { processAlive, processBirthToken, processStartedAtMs } from "./process-identity.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
-import { resolveClioDirs } from "./xdg.js";
+import { resolveClioDirs, xdgBaseDir } from "./xdg.js";
 
 function diskBuild(root: string): { id: string; files: string[] } | null {
 	try {
@@ -120,7 +120,10 @@ export function stateDirOfEnviron(environ: string): string {
 	if (specific) return specific;
 	const home = set("CLIO_CODER_HOME");
 	if (home) return join(home, "state");
-	return join(env.get("XDG_STATE_HOME") ?? join(env.get("HOME") ?? userInfo().homedir, ".local", "state"), "clio-coder");
+	return join(
+		xdgBaseDir(env.get("XDG_STATE_HOME"), join(env.get("HOME") ?? userInfo().homedir, ".local", "state")),
+		"clio-coder",
+	);
 }
 
 export function staleRunningBuilds(state = resolveClioDirs().state): RunningBuild[] {

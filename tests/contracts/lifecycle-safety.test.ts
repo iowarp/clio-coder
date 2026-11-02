@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { assertClioDirLayout, type ClioDirs, clioDirLayoutProblems } from "../../src/core/xdg.js";
+import { assertClioDirLayout, type ClioDirs, clioDirLayoutProblems, xdgBaseDir } from "../../src/core/xdg.js";
 import type { Installation } from "../../src/domains/lifecycle/install-method.js";
 import {
 	planSelfUpgrade,
@@ -56,6 +56,14 @@ test("lifecycle roots must be distinct and non-nesting through symlink aliases",
 		cache: join(root, "cache"),
 	};
 	match(clioDirLayoutProblems(nested).join("\n"), /config root contains data root/u);
+});
+
+test("an empty or relative XDG base directory reads as unset", () => {
+	strictEqual(xdgBaseDir(undefined, "/home/me/.local/state"), "/home/me/.local/state");
+	strictEqual(xdgBaseDir("", "/home/me/.local/state"), "/home/me/.local/state");
+	strictEqual(xdgBaseDir("  ", "/home/me/.local/state"), "/home/me/.local/state");
+	strictEqual(xdgBaseDir("rel/state", "/home/me/.local/state"), "/home/me/.local/state");
+	strictEqual(xdgBaseDir("/xdg/state", "/home/me/.local/state"), "/xdg/state");
 });
 
 test("self-upgrade plans automatic replacement only for a newer npm release", async () => {

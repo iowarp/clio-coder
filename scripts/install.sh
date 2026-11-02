@@ -634,8 +634,12 @@ default_install_root() {
 	else
 		# A sibling of the data root ($XDG_DATA_HOME/clio-coder), never inside it:
 		# `clio-coder reset` and `uninstall --keep-config` delete the data root and
-		# must not delete the Node that runs them.
-		printf '%s/clio-coder-install\n' "${XDG_DATA_HOME:-$HOME/.local/share}"
+		# must not delete the Node that runs them. The XDG spec reads an empty or
+		# relative value as unset.
+		case "${XDG_DATA_HOME:-}" in
+			/*) printf '%s/clio-coder-install\n' "$XDG_DATA_HOME" ;;
+			*) printf '%s/.local/share/clio-coder-install\n' "$HOME" ;;
+		esac
 	fi
 }
 

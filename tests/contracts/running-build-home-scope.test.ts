@@ -18,6 +18,10 @@ it("resolves a process's state dir from its environment by Clio's precedence", (
 	const scratch = "/scratch/isolated";
 	strictEqual(stateDirOfEnviron(environ({ HOME: "/home/real" })), "/home/real/.local/state/clio-coder");
 	strictEqual(stateDirOfEnviron(environ({ HOME: "/home/real", XDG_STATE_HOME: "/xdg/state" })), "/xdg/state/clio-coder");
+	strictEqual(
+		stateDirOfEnviron(environ({ HOME: "/home/real", XDG_STATE_HOME: "" })),
+		"/home/real/.local/state/clio-coder",
+	);
 	strictEqual(stateDirOfEnviron(environ({ HOME: "/home/real", CLIO_CODER_HOME: scratch })), join(scratch, "state"));
 	strictEqual(
 		stateDirOfEnviron(
