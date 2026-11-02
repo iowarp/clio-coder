@@ -2,15 +2,8 @@ import type { HealthV1, QuotaStateV1, SessionTelemetryV1 } from "../core/telemet
 import type { RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { SystemOneBreakerView } from "../domains/system-one/index.js";
 import type { TelemetryReadModel } from "../domains/telemetry/contract.js";
-import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
-import { matchesKey, wrapTextWithAnsi } from "../engine/tui.js";
-import {
-	buildResponsiveHint,
-	createCachedBody,
-	type RowBudgetedBody,
-	showClioOverlayFrame,
-	windowRows,
-} from "./overlay-frame.js";
+import type { OverlayHandle, TUI } from "../engine/tui.js";
+import { buildResponsiveHint, ScrollingBody, showClioOverlayFrame } from "./overlay-frame.js";
 import { routeBreakerPhrase } from "./overlays/settings.js";
 import { quotaAccountRows } from "./quota-view.js";
 import {
@@ -18,7 +11,6 @@ import {
 	clioTheme,
 	emptyState,
 	factRows,
-	positionRow,
 	sectionRule,
 	statusChip,
 	type TableCell,
@@ -192,73 +184,6 @@ function healthLines(data: HealthData, width: number): string[] {
 	return lines;
 }
 
-/**
- * The scrolling body. The lines are cached on the data revision and the
- * width, so the one-second repaints a read model's updates ask for rebuild
- * nothing while the numbers hold; the window over them moves with the keys.
- */
-class HealthOverlayBody implements Component, RowBudgetedBody {
-	private offset = 0;
-	private rows = 0;
-	private readonly lines;
-	private memo: { all: string[]; offset: number; rows: number; visible: string[] } | null = null;
-
-	constructor(
-		getData: () => HealthData,
-		private readonly requestRender: () => void,
-	) {
-		this.lines = createCachedBody((width) =>
-			healthLines(getData(), width).flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width))),
-		);
-	}
-
-	/** The data behind the lines changed; the next render rebuilds them. */
-	touch(): void {
-		this.lines.touch();
-	}
-
-	setBodyRows(rows: number): void {
-		this.rows = Math.max(0, Math.floor(rows));
-	}
-
-	private pageHeight(): number {
-		// One row stays free for the position a scrolled page carries.
-		return Math.max(1, (this.rows > 0 ? this.rows : 18) - 1);
-	}
-
-	handleInput(data: string): void {
-		const page = this.pageHeight();
-		let offset = this.offset;
-		if (matchesKey(data, "up")) offset--;
-		else if (matchesKey(data, "down")) offset++;
-		else if (matchesKey(data, "pageUp")) offset -= page;
-		else if (matchesKey(data, "pageDown")) offset += page;
-		else if (matchesKey(data, "home") || matchesKey(data, "ctrl+home")) offset = 0;
-		else if (matchesKey(data, "end") || matchesKey(data, "ctrl+end")) offset = Number.MAX_SAFE_INTEGER;
-		else return;
-		this.offset = Math.max(0, offset);
-		this.requestRender();
-	}
-
-	render(width: number): string[] {
-		const all = this.lines.render(width);
-		const page = this.pageHeight();
-		const { window, start, position } = windowRows(all, this.offset, page);
-		this.offset = start;
-		const memo = this.memo;
-		if (memo && memo.all === all && memo.offset === start && memo.rows === this.rows) return memo.visible;
-		const visible = [...window];
-		if (position) visible.push(positionRow(clioTheme(), { ...position, keys: ["↑↓ scroll", "PgUp/PgDn page"] }, width));
-		this.memo = { all, offset: start, rows: this.rows, visible };
-		return visible;
-	}
-
-	invalidate(): void {
-		this.lines.invalidate();
-		this.memo = null;
-	}
-}
-
 export interface OpenHealthOverlayOptions {
 	getBreakers?: () => ReadonlyArray<RouteBreakerView>;
 	/** Absent when this process has no System One. */
@@ -271,15 +196,20 @@ export function openHealthOverlay(
 	telemetry: TelemetryReadModel | undefined,
 	options?: OpenHealthOverlayOptions,
 ): OverlayHandle {
-	const body = new HealthOverlayBody(
-		() => ({
-			health: telemetry?.health() ?? null,
-			transport: telemetry ? (telemetry.live()?.session().transport ?? null) : undefined,
-			quota: telemetry?.quota() ?? null,
-			breakers: options?.getBreakers?.() ?? [],
-			systemOne: options?.getSystemOneBreakers?.() ?? null,
-		}),
+	const body = new ScrollingBody(
+		(width) =>
+			healthLines(
+				{
+					health: telemetry?.health() ?? null,
+					transport: telemetry ? (telemetry.live()?.session().transport ?? null) : undefined,
+					quota: telemetry?.quota() ?? null,
+					breakers: options?.getBreakers?.() ?? [],
+					systemOne: options?.getSystemOneBreakers?.() ?? null,
+				},
+				width,
+			),
 		() => tui.requestRender(),
+		18,
 	);
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",

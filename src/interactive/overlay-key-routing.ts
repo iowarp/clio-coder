@@ -125,6 +125,20 @@ function mutationScrollDelta(data: string): number {
 	return 0;
 }
 
+/** The keys `ScrollingBody` answers. */
+function isScrollKey(data: string): boolean {
+	return (
+		matchesKey(data, "up") ||
+		matchesKey(data, "down") ||
+		matchesKey(data, "pageUp") ||
+		matchesKey(data, "pageDown") ||
+		matchesKey(data, "home") ||
+		matchesKey(data, "ctrl+home") ||
+		matchesKey(data, "end") ||
+		matchesKey(data, "ctrl+end")
+	);
+}
+
 /** Pure permission overlay key router: returns true when the input was consumed. */
 function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps): boolean {
 	if (matchesKey(data, "enter") && !isKeyRelease(data)) {
@@ -300,7 +314,10 @@ export function routeOverlayKey(
 	}
 	if (overlayState === "auth") return routeAuthOverlayKey(data, deps);
 	if (overlayState === "usage" || overlayState === "health") return routeReadOnlyOverlayKey(data, deps);
+	// The page is taller than a narrow terminal, so its scroll keys reach the
+	// body. Everything else stays swallowed, as it always was here.
 	if (overlayState === "context-view") {
+		if (isScrollKey(data)) return false;
 		routeReadOnlyOverlayKey(data, deps);
 		return true;
 	}

@@ -16,7 +16,7 @@ import {
 	renderContextMeterGrid,
 	renderEvictedTokensLine,
 } from "./context-meter.js";
-import { buildHint, createCachedBody, showClioOverlayFrame } from "./overlay-frame.js";
+import { buildResponsiveHint, ScrollingBody, showClioOverlayFrame } from "./overlay-frame.js";
 import {
 	abbreviateModelId,
 	type ClioToken,
@@ -402,8 +402,9 @@ export interface OpenContextOverlayOptions {
 /**
  * Mount the read-only `/context-view` overlay. Event-driven: bus compaction
  * events and chat turn boundaries trigger repaints; a slow (1s) tick covers
- * the streaming window where token counts move between events. Esc closes;
- * no other keys are consumed.
+ * the streaming window where token counts move between events. Esc closes and
+ * the arrows and page keys scroll, because a narrow terminal wraps the page
+ * past the rows it has; the router keeps every other key from the composer.
  */
 export function openContextOverlay(
 	tui: TUI,
@@ -412,23 +413,29 @@ export function openContextOverlay(
 ): OverlayHandle {
 	// The rows are a function of the ledger, the telemetry view and the width;
 	// the cache keeps the open overlay free until one of them changes.
-	const body = createCachedBody((width) => [
-		...renderContextLedgerLines(
-			getLedger(),
-			width,
-			options?.getWorkingSet?.() ?? null,
-			options?.getWorkingSetConfig?.() ?? null,
-			options?.getRecallTelemetry?.() ?? null,
-			options?.telemetry ? options.telemetry.live() : undefined,
-		),
-		...nextRequestLines(options?.chat?.inspectLiveBudget?.(), width),
-	]);
+	const body = new ScrollingBody(
+		(width) => [
+			...renderContextLedgerLines(
+				getLedger(),
+				width,
+				options?.getWorkingSet?.() ?? null,
+				options?.getWorkingSetConfig?.() ?? null,
+				options?.getRecallTelemetry?.() ?? null,
+				options?.telemetry ? options.telemetry.live() : undefined,
+			),
+			...nextRequestLines(options?.chat?.inspectLiveBudget?.(), width),
+		],
+		() => tui.requestRender(),
+	);
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: CONTEXT_OVERLAY_WIDTH,
 		markerId: "context-view",
 		title: "Context Window",
-		footerHint: buildHint([]),
+		footerHint: buildResponsiveHint([
+			{ key: "↑↓", verb: "scroll", critical: true },
+			{ key: "PgUp/PgDn", verb: "page" },
+		]),
 	});
 
 	const refresh = (): void => {

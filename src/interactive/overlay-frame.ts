@@ -2,6 +2,7 @@ import type { RuntimeResolutionDiagnostic } from "../domains/providers/index.js"
 import {
 	Box,
 	type Component,
+	matchesKey,
 	type OverlayHandle,
 	type OverlayOptions,
 	type OverlayUnfocusOptions,
@@ -11,6 +12,7 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "../engine/tui.js";
 import { type DockTitleContext, dockBodyRows, dockMount, dockRaise, dockUnmount, dockViewportRows } from "./dock.js";
 import { keyboardOwner } from "./keyboard-owner.js";
@@ -20,6 +22,7 @@ import {
 	clioTheme,
 	GLYPH,
 	padAnsi,
+	positionRow,
 	screenTitle,
 	selectionRow,
 	selectListTheme,
@@ -213,6 +216,79 @@ export function createCachedBody(render: (width: number, rows: number) => string
 			memo = null;
 		},
 	};
+}
+
+/**
+ * A read-only body that scrolls. The lines are cached on the owner's revision
+ * and the width, so a repaint rebuilds nothing while the numbers hold; the
+ * window over them moves with the keys. `unbudgetedRows` is the page while the
+ * frame has not granted rows; absent shows every line.
+ */
+export class ScrollingBody implements Component, RowBudgetedBody {
+	private offset = 0;
+	private rows = 0;
+	private readonly lines: CachedBody;
+	private memo: { all: string[]; offset: number; rows: number; visible: string[] } | null = null;
+
+	constructor(
+		render: (width: number) => string[],
+		private readonly requestRender: () => void,
+		private readonly unbudgetedRows?: number,
+	) {
+		this.lines = createCachedBody((width) => render(width).flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width))));
+	}
+
+	/** The data behind the lines changed; the next render rebuilds them. */
+	touch(): void {
+		this.lines.touch();
+	}
+
+	setBodyRows(rows: number): void {
+		this.rows = Math.max(0, Math.floor(rows));
+	}
+
+	private pageHeight(): number | null {
+		const rows = this.rows > 0 ? this.rows : this.unbudgetedRows;
+		// One row stays free for the position a scrolled page carries.
+		return rows === undefined ? null : Math.max(1, rows - 1);
+	}
+
+	handleInput(data: string): void {
+		const page = this.pageHeight() ?? 1;
+		let offset = this.offset;
+		if (matchesKey(data, "up")) offset--;
+		else if (matchesKey(data, "down")) offset++;
+		else if (matchesKey(data, "pageUp")) offset -= page;
+		else if (matchesKey(data, "pageDown")) offset += page;
+		else if (matchesKey(data, "home") || matchesKey(data, "ctrl+home")) offset = 0;
+		else if (matchesKey(data, "end") || matchesKey(data, "ctrl+end")) offset = Number.MAX_SAFE_INTEGER;
+		else return;
+		this.offset = Math.max(0, offset);
+		this.requestRender();
+	}
+
+	render(width: number): string[] {
+		const all = this.lines.render(width);
+		const page = this.pageHeight();
+		if (page === null || all.length <= page + 1) {
+			// Everything fits in the granted rows, so no row is owed to a position.
+			this.offset = 0;
+			return all;
+		}
+		const { window, start, position } = windowRows(all, this.offset, page);
+		this.offset = start;
+		const memo = this.memo;
+		if (memo && memo.all === all && memo.offset === start && memo.rows === this.rows) return memo.visible;
+		const visible = [...window];
+		if (position) visible.push(positionRow(clioTheme(), { ...position, keys: ["↑↓ scroll", "PgUp/PgDn page"] }, width));
+		this.memo = { all, offset: start, rows: this.rows, visible };
+		return visible;
+	}
+
+	invalidate(): void {
+		this.lines.invalidate();
+		this.memo = null;
+	}
 }
 
 export interface ChoiceListItem {
