@@ -472,11 +472,23 @@ function permissionCardSections(
 	countdownMs: number | null = null,
 	hasDraft = false,
 	rowBudget = 0,
-): { facts: string[]; rest: string[]; termsAt: number | null; choicesAt: number; choicesRows: number } {
+): {
+	facts: string[];
+	/** Leading fact rows that name the call; a short card pins them beside the answer keys. */
+	identityRows: number;
+	/** Whether the row after the identity is the target's first. */
+	hasTarget: boolean;
+	rest: string[];
+	termsAt: number | null;
+	choicesAt: number;
+	choicesRows: number;
+} {
 	const theme = clioTheme();
 	const content = Math.max(8, Math.floor(width));
 	const presentation = permissionDecisionPresentation(view);
 	const facts = permissionFacts(theme, view, presentation, content, advisory, countdownMs);
+	const identityRows = identityRow(theme, view, presentation, content).rows.length;
+	const hasTarget = view.target !== undefined && view.target.length > 0;
 	const rest: string[] = [];
 	if (view.artifact !== undefined) {
 		rest.push(
@@ -493,7 +505,7 @@ function permissionCardSections(
 	const choicesAt = rest.length;
 	rest.push(...(fits ? full : compactChoiceRows(theme, choices, content)));
 	const choicesRows = rest.length - choicesAt;
-	if (!terms) return { facts, rest, termsAt: null, choicesAt, choicesRows };
+	if (!terms) return { facts, identityRows, hasTarget, rest, termsAt: null, choicesAt, choicesRows };
 	const wrapTerm = (text: string): string[] => wrapTextWithAnsi(theme.fg("decisionExplanation", text), content);
 	const termsAt = rest.length;
 	rest.push(
@@ -505,7 +517,7 @@ function permissionCardSections(
 		...wrapTerm(`Stop: ${actionConsequence(presentation, "stop")}`),
 		...wrapTerm("Hard-blocked actions remain blocked."),
 	);
-	return { facts, rest, termsAt, choicesAt, choicesRows };
+	return { facts, identityRows, hasTarget, rest, termsAt, choicesAt, choicesRows };
 }
 
 /**
@@ -760,12 +772,14 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	 * put and the choices and terms below them scroll, because the frame's own
 	 * cut hid the end of the Stop consequence at 60x40 with nothing that reached
 	 * it (BT-005). When the facts alone leave no window the choices could fit
-	 * in, the choices are pinned under a window over everything else instead:
-	 * the keys and their consequences are the answer, and are never the rows
-	 * the frame cuts. With no known budget the card renders whole.
+	 * in, the identity and the choices are pinned around a window over
+	 * everything else instead: an answer key is never live while the call it
+	 * answers is off screen, and the keys are never the rows the frame cuts. The
+	 * target's first row joins the identity when the window keeps a row without
+	 * it. With no known budget the card renders whole.
 	 */
 	private windowCard(sections: ReturnType<typeof permissionCardSections>, width: number): string[] {
-		const { facts, rest, termsAt, choicesAt, choicesRows } = sections;
+		const { facts, identityRows, hasTarget, rest, termsAt, choicesAt, choicesRows } = sections;
 		const whole = [...facts, ...rest];
 		const budget = this.bodyRows;
 		if (budget <= 0 || whole.length <= budget) {
@@ -799,24 +813,33 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			return [...facts, ...rest.slice(this.cardScroll, end), position(this.cardScroll + 1, end, rest.length)];
 		}
 		const choices = rest.slice(choicesAt, choicesAt + choicesRows);
-		const scrolled = [...facts, ...rest.slice(0, choicesAt), ...rest.slice(choicesAt + choicesRows)];
-		const height = Math.max(0, budget - choices.length - 1);
-		if (height === 0) {
+		const answerRows = identityRows + choices.length;
+		// No room for a window and its position: the identity holds its place and
+		// the rail takes whichever keys did not fit.
+		if (budget < answerRows + 2) {
 			this.cardMaxScroll = 0;
 			this.cardScroll = 0;
 			this.jumpToTerms = false;
-			this.choicesShown = choices.length <= budget;
-			return choices.slice(0, budget);
+			this.choicesShown = answerRows <= budget;
+			return [...facts.slice(0, identityRows), ...choices].slice(0, budget);
 		}
+		const pinned = identityRows + (hasTarget && budget >= answerRows + 3 ? 1 : 0);
+		const scrolled = [...facts.slice(pinned), ...rest.slice(0, choicesAt), ...rest.slice(choicesAt + choicesRows)];
+		const height = budget - pinned - choices.length - 1;
 		this.cardMaxScroll = Math.max(0, scrolled.length - height);
 		if (this.jumpToTerms) {
 			this.jumpToTerms = false;
-			if (termsAt !== null) this.cardScroll = facts.length + termsAt - choicesRows;
+			if (termsAt !== null) this.cardScroll = facts.length - pinned + termsAt - choicesRows;
 		}
 		this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
 		const end = this.cardScroll + height;
 		this.choicesShown = true;
-		return [...scrolled.slice(this.cardScroll, end), position(this.cardScroll + 1, end, scrolled.length), ...choices];
+		return [
+			...facts.slice(0, pinned),
+			...scrolled.slice(this.cardScroll, end),
+			position(this.cardScroll + 1, end, scrolled.length),
+			...choices,
+		];
 	}
 
 	/**

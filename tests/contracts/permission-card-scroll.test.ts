@@ -61,6 +61,24 @@ test("open terms that overflow the frame scroll inside it and every row is reach
 	const rows = plain(whole.render(CONTENT)).map((row) => row.trimEnd());
 	match(rows.join("\n"), /Hard-blocked actions remain blocked\./u);
 	for (const row of rows) ok(seen.has(row), `unreachable card row: ${row}`);
+
+	// Rows too few for the facts: the identity is on screen in every frame the keys are live.
+	const pinned = createPermissionOverlayBody(NET_VIEW);
+	pinned.toggleTerms();
+	pinned.setBodyRows(5);
+	const reached = new Set<string>();
+	for (const step of [...Array(30).fill(-1), ...Array(40).fill(1)]) {
+		const frameRows = plain(pinned.render(CONTENT));
+		match(frameRows[0] ?? "", /\$ bash · execute action/u, "the identity stays pinned");
+		match(frameRows.join("\n"), /\[Enter\] allow/u);
+		for (const row of frameRows) reached.add(row);
+		pinned.scrollCard(step);
+	}
+	const unpinned = createPermissionOverlayBody(NET_VIEW);
+	unpinned.toggleTerms();
+	const unbudgeted = plain(unpinned.render(CONTENT)).slice(0, -1);
+	for (const row of unbudgeted.filter((row) => !/\[(?:Enter|Esc|alt\+x)\]/u.test(row)))
+		ok(reached.has(row), `unreachable: ${row}`);
 });
 
 test("a card that fits does not scroll and folding the terms resets the window", () => {
