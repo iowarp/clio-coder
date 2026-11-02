@@ -211,7 +211,7 @@ byte-identical to the approved origin. Archive imports, `library import` and
 `interop adopt` never approve. The details are in the [safety model](../architecture/safety-model.md),
 [extensions](harness-extensions.md) and [library packages](resource-library.md).
 
-Approval records live under the Clio Coder state directory, in
+Approval records live under the Clio Coder config directory, in
 `workspace-trust/`, and are written only by this command, by Clio Coder's own
 project settings saves and by the operator-install approval above.
 

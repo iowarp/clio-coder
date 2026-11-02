@@ -161,9 +161,9 @@ test("S3-01: local-file addition invalidates the entire surface and revocation s
 		// State removal must never be undone by an authority writer.
 		const hash = captureProjectSurface(workspace, "hooks").contentHash;
 		ok(hash);
-		rmSync(join(home.dir, "state"), { recursive: true, force: true });
-		throws(() => recordProjectSurfaceTrust(workspace, "hooks", hash), /state was removed/);
-		strictEqual(existsSync(join(home.dir, "state")), false);
+		rmSync(join(home.dir, "config"), { recursive: true, force: true });
+		throws(() => recordProjectSurfaceTrust(workspace, "hooks", hash), /config was removed/);
+		strictEqual(existsSync(join(home.dir, "config")), false);
 	} finally {
 		home.restore();
 	}

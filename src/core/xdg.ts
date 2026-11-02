@@ -19,8 +19,8 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
  *      override their one root and beat CLIO_CODER_HOME (most specific wins).
  *
  * Role contents: config holds user-authored files (settings, credentials,
- * agents, skills, prompts, extensions, runtimes) and the migration manifest
- * that records which shape they are in; data holds durable artifacts (memory,
+ * agents, skills, prompts, extensions, runtimes) and the records that vouch for
+ * them (the migration manifest, project and MCP approvals); data holds durable artifacts (memory,
  * vendored tools); state holds machine-produced session state (sessions,
  * telemetry, runs.json, recent-models.json, install.json, interviews, scratch);
  * cache holds disposable derived files.
@@ -319,6 +319,15 @@ export function clioStatePath(): string {
 export function stateRootRemoved(): boolean {
 	if (cachedStateDir === undefined) return false;
 	return !existsSync(cachedStateDir);
+}
+
+/**
+ * `stateRootRemoved` for the config root: an approval recorded after an uninstall
+ * must not bring the config home back.
+ */
+export function configRootRemoved(): boolean {
+	if (cachedConfigDir === undefined) return false;
+	return !existsSync(cachedConfigDir);
 }
 
 export function resetXdgCache(): void {

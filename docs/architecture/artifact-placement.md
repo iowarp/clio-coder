@@ -81,6 +81,7 @@ problem.
 | `plugins/` | Library package state (`state.json`) and one directory per installed package |
 | `library.yaml`, `skill-marketplace.json`, `skill-promotion-declines.json` | Library catalog, marketplace registry and declined skill promotions |
 | `mcp.yaml`, `mcp-trust.json` | User MCP servers and the trust records for project-declared servers |
+| `workspace-trust/` | Per-workspace approvals from `clio-coder config trust` |
 | `migrations.json` | Applied migration ids, machine-written and kept beside the settings whose shape it records |
 
 ### Data root: durable artifacts
@@ -106,7 +107,6 @@ problem.
 | `interviews/` | Interview transcripts |
 | `context-observations/`, `context-seeds/` | Recallable observations and worker context seeds |
 | `protected-artifact-pending/<key>/` | Write-ahead records for pending protected artifacts |
-| `workspace-trust/` | Per-workspace trust records |
 | `cliamp/` | The `/music` player home: `config.toml`, `themes/clio.toml`, `playlists/clio.toml`, `plugins/clio-dock.lua`, `plugins/.trust.json`, `dock-taps`, and cliamp's own socket, log and history files. Clio Coder rewrites its generated files on each open, and never reads or writes the operator's own `~/.config/cliamp`. |
 | `gui/` | Graphical application state: `workspaces.json`, `children.json` with `<name>.locks/` directories, and `background/` (`server.json`, `owner.json` and the generated `clio-coder-gui-<id>.service` unit) |
 | `install.json`, `migration-reports/` | Install metadata and migration reports |

@@ -348,6 +348,7 @@ targets:
 			CLAUDE_SUBSCRIPTION_MIGRATION_ID,
 			FLEET_JUDGE_MIGRATION_ID,
 			OLD_TELEMETRY_MIGRATION_ID,
+			"2026-11-02-approvals-to-config",
 		]);
 
 		writeFileSync(settingsFile, "version: 1\npanes: { agents: off, keepFailed: false }\n", "utf8");
@@ -378,7 +379,7 @@ targets:
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
 		const manifest = join(scratch.dir, "config", "migrations.json");
-		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}"]}\n`;
+		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}","2026-11-02-approvals-to-config"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
 		const current = runDoctor().find((finding) => finding.name === "lifecycle migrations");
@@ -416,6 +417,24 @@ targets:
 		deepStrictEqual(JSON.parse(readFileSync(join(scratch.dir, "config", "migrations.json"), "utf8")), {
 			applied: ["recorded"],
 		});
+	});
+
+	it("moves project approvals from the state root to the config root once", async () => {
+		const from = join(stateDir, "workspace-trust");
+		const to = join(scratch.dir, "config", "workspace-trust");
+		mkdirSync(from);
+		mkdirSync(to);
+		writeFileSync(join(from, "moved.json"), "moved\n", "utf8");
+		writeFileSync(join(from, "both.json"), "old\n", "utf8");
+		writeFileSync(join(to, "both.json"), "new\n", "utf8");
+		const others = listMigrations()
+			.map((migration) => migration.id)
+			.filter((id) => id !== "2026-11-02-approvals-to-config");
+		writeFileSync(join(scratch.dir, "config", "migrations.json"), `${JSON.stringify({ applied: others })}\n`, "utf8");
+		deepStrictEqual((await runPending(stateDir)).applied, ["2026-11-02-approvals-to-config"]);
+		strictEqual(readFileSync(join(to, "moved.json"), "utf8"), "moved\n");
+		strictEqual(readFileSync(join(to, "both.json"), "utf8"), "new\n", "the newer record stays");
+		strictEqual(existsSync(from), false);
 	});
 
 	it("refuses a corrupt migration manifest instead of replaying user-data changes", async () => {

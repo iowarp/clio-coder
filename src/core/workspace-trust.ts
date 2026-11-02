@@ -13,7 +13,7 @@ import { clioProjectRoot } from "./project-root.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import { taskWorktreeOrigin } from "./task-worktree-claim.js";
-import { clioStateDir, clioStatePath, stateRootRemoved } from "./xdg.js";
+import { clioConfigDir, configRootRemoved, resolveClioDirs } from "./xdg.js";
 
 export type WorkspaceTrustVerdict = "trusted" | "untrusted" | "changed";
 export type ProjectTrustSurface = "safety" | "hooks" | "settings" | "extensions" | "plugins";
@@ -141,7 +141,7 @@ function identitiesApproved(packages: PackageIdentities, approval: SurfaceApprov
 }
 
 export function workspaceTrustDirectory(): string {
-	return join(clioStatePath(), "workspace-trust");
+	return join(resolveClioDirs().config, "workspace-trust");
 }
 
 /** The `.clio-coder/` entries each surface reads, so one lookup decides whose surface this is. */
@@ -270,10 +270,10 @@ function writeRecord(record: WorkspaceTrustRecord): void {
 
 function writeSurfaceApproval(workspaceRoot: string, surface: ProjectTrustSurface, approval: SurfaceApproval): void {
 	const root = surfaceRoot(workspaceRoot, surface);
-	if (stateRootRemoved()) throw new Error("Clio state was removed; trust was not recorded");
-	clioStateDir();
+	if (configRootRemoved()) throw new Error("Clio config was removed; trust was not recorded");
+	clioConfigDir();
 	withStateFileLockSync(recordPath(root), () => {
-		if (stateRootRemoved()) throw new Error("Clio state was removed; trust was not recorded");
+		if (configRootRemoved()) throw new Error("Clio config was removed; trust was not recorded");
 		const record: WorkspaceTrustRecord = readRecord(root) ?? { workspaceRoot: root, surfaces: {} };
 		record.surfaces[surface] = approval;
 		writeRecord(record);
@@ -282,9 +282,9 @@ function writeSurfaceApproval(workspaceRoot: string, surface: ProjectTrustSurfac
 
 export function revokeProjectSurfaceTrust(workspaceRoot: string, surface: ProjectTrustSurface): void {
 	const root = surfaceRoot(workspaceRoot, surface);
-	if (!readRecord(root) || stateRootRemoved()) return;
+	if (!readRecord(root) || configRootRemoved()) return;
 	withStateFileLockSync(recordPath(root), () => {
-		if (stateRootRemoved()) return;
+		if (configRootRemoved()) return;
 		const record = readRecord(root);
 		if (record === null) return;
 		delete record.surfaces[surface];
@@ -518,10 +518,10 @@ export function approveOperatorProjectInstall(
 ): boolean {
 	try {
 		const root = surfaceRoot(workspaceRoot, baseline.surface);
-		if (stateRootRemoved()) return false;
-		clioStateDir();
+		if (configRootRemoved()) return false;
+		clioConfigDir();
 		return withStateFileLockSync(recordPath(root), () => {
-			if (stateRootRemoved()) return false;
+			if (configRootRemoved()) return false;
 			const snapshot = captureOwnProjectSurface(root, baseline.surface);
 			const packages = packageIdentities(baseline.surface, snapshot.files[0]?.text ?? null);
 			if (packages === null) return false;

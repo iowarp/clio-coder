@@ -15,6 +15,7 @@ export const REGISTERED_MIGRATION_IDS: ReadonlyArray<string> = Object.freeze([
 	"2026-10-07-claude-subscription",
 	"2026-10-20-fleet-permissions-judge",
 	"2026-10-31-remove-old-telemetry",
+	"2026-11-02-approvals-to-config",
 ]);
 
 const MIGRATION_MANIFEST_FILE = "migrations.json";

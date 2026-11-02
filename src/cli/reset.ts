@@ -16,9 +16,8 @@ Each level clears exactly the root (or file) it names and nothing else, then the
 empty roots are recreated so the next run has somewhere to write.
 
 Levels (combinable except --all):
-  --state       state root only (default). Holds every session transcript and
-                project approval, so a reset is the end of resume, /view, and the
-                telemetry behind them, and project settings need approving again.
+  --state       state root only (default). Holds every session transcript, so a
+                reset is the end of resume, /view, and the telemetry behind them.
                 Owned background services are stopped and removed first.
   --data        data root only: memory and vendored tools (durable products)
   --cache       cache root only
@@ -36,8 +35,7 @@ Safety:
 `;
 
 const ROOT_NOTES = {
-	state:
-		"State holds every session transcript, telemetry journal and project approval; resume and /view lose their history, and project settings, hooks and safety rules need approving again.",
+	state: "State holds every session transcript and telemetry journal; resume and /view lose their history.",
 	data: "Data holds memory and vendored tools; the tools have to be downloaded again.",
 	config: "Settings return to their defaults.",
 	auth: "Saved API keys are gone; each target has to be authenticated again.",
