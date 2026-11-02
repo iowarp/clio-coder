@@ -318,13 +318,13 @@ and an explicit `--gui` (or `CLIO_CODER_INSTALL_GUI=1`) warns
 | Review an available update in the TUI | `/upgrade` | Recheck the release, show exactly what is preserved, and ask before replacing an npm-global or installer install. It follows the channel an installer install recorded and leaves a pinned install alone. After success, Clio asks you to exit and restart. A user-writable npm, pnpm, Bun or Volta install on Linux or macOS is not replaced under the running session: `/upgrade` arms the update to run after every session of that install has quit. |
 | Finish a package-manager update | `clio-coder upgrade --post-install` | Apply local migrations and installation checks. |
 | Undo the last installer upgrade | `clio-coder upgrade --rollback` | Make the previous version current again and turn background updates off. A version pin moves to the restored version. |
-| Start configuration over | `clio-coder reset --config` | Delete `settings.yaml`, keep credentials and history, then print `clio-coder configure` as the next step. |
+| Start configuration over | `clio-coder reset --settings` | Delete `settings.yaml`, keep credentials and history, then print `clio-coder configure` as the next step. |
 | Emulate a fresh user | `clio-coder reset --all` | Delete all four user roots and recreate the empty structure, then print `clio-coder configure` as the next step. |
 | Remove user state | `clio-coder uninstall` | Remove the config, data, state and cache roots. `--remove-binary` also removes the launcher, and for an installer install the managed Node and every version. |
 
 Reset and uninstall preview their scope and ask for confirmation. Use
-`--dry-run` to inspect without changing anything. A bare `reset` clears session
-state, so use `--config` when your intent is to start model setup over. Project
+`--dry-run` to inspect without changing anything. Use `reset --settings` when your intent
+is to start model setup over, and `reset --state` to clear sessions. Project
 `.clio-coder/` directories survive these user-level operations.
 
 The installers prepare the launcher and directory structure, then end with
@@ -426,7 +426,7 @@ The core files are created automatically during the first run. `settings.yaml`, 
 
 | Directory | File Path | Purpose | Permissions | Lifecycle Action |
 | :--- | :--- | :--- | :--- | :--- |
-| **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and interface preferences. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --config`. |
+| **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and interface preferences. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --settings`. |
 | **Config** | `credentials.yaml` | Private keys and tokens managed via `clio-coder auth`. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --auth`. |
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
 | **Config** | `workspace-trust/` | Project approvals from `clio-coder config trust`, one record per workspace. Operator decisions rather than disposable state, so they survive `reset --state` and `uninstall --keep-config`. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --all`. |
@@ -866,9 +866,9 @@ Fix the migration's cause and rerun the ordinary upgrade afterward.
 ### C. System Resets (`clio-coder reset`)
 Selective recovery wipes:
 ```bash
-clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force] [--json]
+clio-coder reset --state|--data|--cache|--auth|--settings|--all [--dry-run] [--force] [--json]
 ```
-Levels are combinable except `--all`, which exits 2 with `--all cannot be combined with --state, --data, --cache, --auth, or --config`. With no level, `--state` is selected. Each level clears exactly the root or file it names and nothing else, then recreates the empty structure unless `--dry-run` is present. `--force` (`-f`) skips the confirmation prompt and is required when there is no terminal to confirm on; without a terminal, `--force` or `--dry-run`, the command exits 2 with `` `clio-coder reset` needs a terminal to confirm; pass --force to skip the prompt ``. A dry run never needs it. An unknown flag and an unsafe directory layout also exit 2. A declined confirmation exits 0; a failure to delete exits 1.
+Levels are combinable except `--all`, which exits 2 with `--all cannot be combined with --state, --data, --cache, --auth, or --settings`. With no level, reset exits 2 without touching anything, because a default would delete every transcript. Each level clears exactly the root or file it names and nothing else, then recreates the empty structure unless `--dry-run` is present. `--force` (`-f`) skips the confirmation prompt and is required when there is no terminal to confirm on; without a terminal, `--force` or `--dry-run`, the command exits 2 with `` `clio-coder reset` needs a terminal to confirm; pass --force to skip the prompt ``. A dry run never needs it. An unknown flag and an unsafe directory layout also exit 2. A declined confirmation exits 0; a failure to delete exits 1.
 
 Before clearing state, reset stops and removes an owned background app service through its
 ownership checks, and lists `Removed Background service` among the completed steps.
@@ -885,15 +885,15 @@ its first entries, all read off the disk on that run, before removing anything;
 `--dry-run` prints the identical listing. That listing, not this page and not
 `--help`, is the authoritative inventory of what a level covers, because a
 remembered list drifts as soon as a new artifact is written into a root. The
-roots and files that survive are listed too (`Survives: ...`). After a `--config` or `--all` reset the command prints
+roots and files that survive are listed too (`Survives: ...`). After a `--settings` or `--all` reset the command prints
 `clio-coder configure` as the next step, and after `--auth` it prints
 `clio-coder configure --section targets`.
 
-*   `--state` *(Default)*: Deletes the state root only. It holds every session transcript and the telemetry journals beside it, so a reset is the end of `resume`, `/view`, and their history. Project approvals live in the config root and survive it. This is the level a bare `clio-coder reset` selects, and it carries that note in its preview.
+*   `--state`: Deletes the state root only. It holds every session transcript and the telemetry journals beside it, so a reset is the end of `resume`, `/view`, and their history. Project approvals live in the config root and survive it. Its preview carries that note.
 *   `--data`: Deletes the data root only: memory and any vendored external tools (durable products). The vendored tools are the one entry a reset cannot regenerate locally; `clio-coder tools install <id>` downloads them again.
 *   `--cache`: Deletes the cache root only.
 *   `--auth`: Deletes `credentials.yaml` only. Removes all saved keys.
-*   `--config`: Deletes `settings.yaml` only, which reverts preferences to default. Credentials stay.
+*   `--settings`: Deletes `settings.yaml` only, which reverts preferences to default. Credentials stay.
 *   `--all`: Deletes all four roots whole (config with everything under it, data, state, cache) and recreates a fresh empty environment.
 
 ### D. Uninstallation (`clio-coder uninstall`)
@@ -968,7 +968,7 @@ because `clio-coder context reset` needs the binary that is about to go. With
 `--remove-binary` the listing says so and tells you to clear the projects first,
 then re-run the uninstall. Neither the preview nor the real run deletes project
 data. To wipe state selectively
-while keeping settings or credentials, use `clio-coder reset` instead of
+while keeping settings or credentials, use `clio-coder reset --state` instead of
 uninstalling. If the launcher is already gone but state remains, run the built
 CLI directly from the checkout: `node dist/cli/index.js uninstall --force`.
 

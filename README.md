@@ -235,7 +235,7 @@ users can select `@iowarp/clio-coder@latest` through their package manager.
 | Restore the previous managed binary | `clio-coder upgrade --rollback` |
 | Disable background installation | `--no-auto-update` or `CLIO_CODER_AUTO_UPDATE=0` |
 | Pin a managed install | Install an exact version with `--version` |
-| Clear session state while keeping the launcher | `clio-coder reset` |
+| Clear session state while keeping the launcher | `clio-coder reset --state` |
 | Remove Clio's settings, credentials, data, state, and caches | `clio-coder uninstall` |
 | Preserve settings and credentials during uninstall | Add `--keep-config` |
 | Also remove the managed launcher, runtime, and installed versions | Add `--remove-binary` |

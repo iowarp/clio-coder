@@ -9,20 +9,20 @@ import { createLifecyclePresenter, type LifecycleItem, measurePath } from "./lif
 import { type RemovalFailure, refuseForOpenSessions, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force] [--json]
+const HELP = `clio-coder reset --state|--data|--cache|--auth|--settings|--all [--dry-run] [--force] [--json]
 
 Recover or wipe Clio Coder state while keeping the clio-coder launcher installed.
 Each level clears exactly the root (or file) it names and nothing else, then the
 empty roots are recreated so the next run has somewhere to write.
 
-Levels (combinable except --all):
-  --state       state root only (default). Holds every session transcript, so a
+Levels (name at least one; combinable except --all):
+  --state       state root only. Holds every session transcript, so a
                 reset is the end of resume, /view, and the telemetry behind them.
                 Owned background services are stopped and removed first.
   --data        data root only: memory and vendored tools (durable products)
   --cache       cache root only
   --auth        credentials.yaml only
-  --config      settings.yaml only
+  --settings    settings.yaml only
   --all         all four roots whole: config (settings, credentials, and anything
                 else under it), data, state, and cache
 
@@ -37,7 +37,7 @@ Safety:
 const ROOT_NOTES = {
 	state: "State holds every session transcript and telemetry journal; resume and /view lose their history.",
 	data: "Data holds memory and vendored tools; the tools have to be downloaded again.",
-	config: "Settings return to their defaults.",
+	settings: "Settings return to their defaults.",
 	auth: "Saved API keys are gone; each target has to be authenticated again.",
 	cache: "Cache is disposable and rebuilds itself.",
 	all: "Everything goes: settings, credentials, memory, transcripts, and caches. A clean install remains.",
@@ -48,7 +48,7 @@ interface ParsedResetArgs {
 	data: boolean;
 	cache: boolean;
 	auth: boolean;
-	config: boolean;
+	settings: boolean;
 	all: boolean;
 	force: boolean;
 	dryRun: boolean;
@@ -62,7 +62,7 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 		data: false,
 		cache: false,
 		auth: false,
-		config: false,
+		settings: false,
 		all: false,
 		force: false,
 		dryRun: false,
@@ -83,8 +83,8 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 			case "--auth":
 				parsed.auth = true;
 				break;
-			case "--config":
-				parsed.config = true;
+			case "--settings":
+				parsed.settings = true;
 				break;
 			case "--all":
 				parsed.all = true;
@@ -107,12 +107,13 @@ function parseResetArgs(argv: ReadonlyArray<string>): ParsedResetArgs {
 				throw new Error(`unknown flag: ${arg}`);
 		}
 	}
-	const levels = [parsed.state, parsed.data, parsed.cache, parsed.auth, parsed.config];
+	const levels = [parsed.state, parsed.data, parsed.cache, parsed.auth, parsed.settings];
 	if (!parsed.help && parsed.all && levels.some(Boolean)) {
-		throw new Error("--all cannot be combined with --state, --data, --cache, --auth, or --config");
+		throw new Error("--all cannot be combined with --state, --data, --cache, --auth, or --settings");
 	}
+	// A bare reset used to mean --state, which deletes every transcript. Destruction is always named.
 	if (!parsed.help && !parsed.all && !levels.some(Boolean)) {
-		parsed.state = true;
+		throw new Error("name what to reset: --state, --data, --cache, --auth, --settings, or --all");
 	}
 	return parsed;
 }
@@ -141,7 +142,7 @@ function resetInvocation(args: ParsedResetArgs): string {
 	const levels = (
 		[
 			["all", args.all],
-			["config", args.config],
+			["settings", args.settings],
 			["auth", args.auth],
 			["data", args.data],
 			["state", args.state],
@@ -259,7 +260,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		});
 	} else {
 		const stSettings = measurePath(settingsPath);
-		if (args.config) {
+		if (args.settings) {
 			items.push({
 				label: "Settings",
 				path: settingsPath,
@@ -336,7 +337,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		: [
 				resetState ? ROOT_NOTES.state : null,
 				resetData ? ROOT_NOTES.data : null,
-				args.config ? ROOT_NOTES.config : null,
+				args.settings ? ROOT_NOTES.settings : null,
 				args.auth ? ROOT_NOTES.auth : null,
 			].filter((note): note is NonNullable<typeof note> => note !== null);
 	for (const note of notes) presenter.note(note);
@@ -389,7 +390,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 			{ label: "Cache", path: dirs.cache },
 		);
 	} else {
-		if (args.config) toRemove.push({ label: "Settings", path: settingsPath });
+		if (args.settings) toRemove.push({ label: "Settings", path: settingsPath });
 		if (args.auth) toRemove.push({ label: "Credentials", path: credentialsPath });
 		if (args.data) toRemove.push({ label: "Data", path: dirs.data });
 		if (args.state) toRemove.push({ label: "State", path: dirs.state });
@@ -433,7 +434,7 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		presenter.finish();
 		return 1;
 	}
-	if (args.config || args.all) presenter.commandAdvice("Set up a model again:", "clio-coder configure");
+	if (args.settings || args.all) presenter.commandAdvice("Set up a model again:", "clio-coder configure");
 	else if (args.auth) presenter.commandAdvice("Reconnect your providers:", "clio-coder configure --section targets");
 
 	presenter.done("Done");

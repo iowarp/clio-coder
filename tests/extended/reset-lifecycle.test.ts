@@ -11,10 +11,10 @@ import { createLifecycleHome, runInHome, writeLiveSession } from "../harness/lif
 const home = () => createLifecycleHome("clio-coder-test-reset-");
 
 describe("contracts/reset-lifecycle", () => {
-	it("previews the default state scope, names what survives, and writes nothing", async () => {
+	it("previews the state scope, names what survives, and writes nothing", async () => {
 		const temp = home();
 		try {
-			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--dry-run"]));
+			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--state", "--dry-run"]));
 			strictEqual(code, 0);
 
 			match(stdout, /The following will be cleared:/u);
@@ -70,7 +70,7 @@ describe("contracts/reset-lifecycle", () => {
 				ok(existsSync(join(temp.stateDir, "install.json")));
 				ok(existsSync(join(temp.dataDir, "records.json")));
 			}
-			const preview = await runInHome(temp, () => runResetCommand(["--dry-run"]));
+			const preview = await runInHome(temp, () => runResetCommand(["--state", "--dry-run"]));
 			strictEqual(preview.code, 0);
 			match(preview.stdout, /1 session is still open; the real run stops until they end/u);
 			strictEqual((await runInHome(temp, () => runResetCommand(["--cache", "--force"]))).code, 0);
@@ -158,12 +158,26 @@ describe("contracts/reset-lifecycle", () => {
 		}
 	});
 
+	it("refuses to guess what to reset, whatever else was asked", async () => {
+		const temp = home();
+		try {
+			for (const argv of [[], ["--dry-run"], ["--force"]]) {
+				const { code, stdout } = await runInHome(temp, () => runResetCommand(argv));
+				strictEqual(code, 2, argv.join(" "));
+				strictEqual(stdout, "");
+				ok(existsSync(join(temp.stateDir, "install.json")));
+			}
+		} finally {
+			temp.cleanup();
+		}
+	});
+
 	it("refuses without a terminal and without --force, on stderr alone", async () => {
 		const temp = home();
 		const savedIsTty = process.stdin.isTTY;
 		process.stdin.isTTY = false;
 		try {
-			const { code, stdout } = await runInHome(temp, () => runResetCommand([]));
+			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--state"]));
 			strictEqual(code, 2);
 			strictEqual(stdout, "", "a refusal must leave stdout clean for the caller parsing it");
 			ok(existsSync(join(temp.stateDir, "install.json")), "nothing is removed on the refusal path");
@@ -180,7 +194,7 @@ describe("contracts/reset-lifecycle", () => {
 			writeFileSync(join(temp.stateDir, "sessions", "kept", "meta.json"), "{}\n", "utf8");
 			writeFileSync(join(temp.stateDir, "install.json"), '{"version":"0.4.2-old"}\n', "utf8");
 			const settingsBefore = readFileSync(join(temp.configDir, "settings.yaml"), "utf8");
-			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--force"]));
+			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--state", "--force"]));
 			strictEqual(code, 0);
 
 			match(stdout, /✓ Cleared State/u);
