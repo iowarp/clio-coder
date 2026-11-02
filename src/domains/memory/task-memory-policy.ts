@@ -11,6 +11,7 @@ import {
 	MEMORY_INTERVENTION_SYSTEM_PROMPT,
 } from "../prompts/memory-intervention.js";
 import type { BackgroundSkipReason } from "./background-budget.js";
+import { redactForMemoryRoute } from "./secret-text.js";
 import {
 	renderTaskMemoryEntries,
 	TASK_MEMORY_CONTENT_MAX_CHARS,
@@ -458,18 +459,21 @@ export async function runTaskMemoryPolicy(
 		if (input.signal?.aborted || input.isCurrent?.() === false) return settle("silent", "scope_changed");
 		const keptLessons = input.pass?.keptLessons ?? [];
 		presentedEntries = bank.select(input.maxTokens);
-		userPrompt = buildMemoryInterventionUserPrompt({
-			task: input.task.slice(0, TASK_PROMPT_MAX_CHARS),
-			bank: [
-				renderTaskMemoryEntries(presentedEntries),
-				...(keptLessons.length === 0
-					? []
-					: ["", "Lessons already kept for this repository:", ...keptLessons.map((item) => `- [${item.id}] ${item.text}`)]),
-			].join("\n"),
-			trajectory:
-				input.pass?.trajectoryText.slice(0, positiveInteger(input.pass.trajectoryMaxChars, TRAJECTORY_PROMPT_MAX_CHARS)) ??
-				renderTrajectory(input.trajectory),
-		});
+		// Every pass reaches the memory route through here, the live turn log included.
+		userPrompt = redactForMemoryRoute(
+			buildMemoryInterventionUserPrompt({
+				task: input.task.slice(0, TASK_PROMPT_MAX_CHARS),
+				bank: [
+					renderTaskMemoryEntries(presentedEntries),
+					...(keptLessons.length === 0
+						? []
+						: ["", "Lessons already kept for this repository:", ...keptLessons.map((item) => `- [${item.id}] ${item.text}`)]),
+				].join("\n"),
+				trajectory:
+					input.pass?.trajectoryText.slice(0, positiveInteger(input.pass.trajectoryMaxChars, TRAJECTORY_PROMPT_MAX_CHARS)) ??
+					renderTrajectory(input.trajectory),
+			}),
+		);
 		const completion = client
 			.complete({
 				systemPrompt: input.pass?.systemPrompt ?? MEMORY_INTERVENTION_SYSTEM_PROMPT,

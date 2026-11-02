@@ -22,7 +22,6 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
-import { redactSecretString } from "../safety/redaction.js";
 import type { SessionEntry } from "../session/index.js";
 import type { SessionLedgerStat } from "../session/related-ledgers.js";
 import { sessionLedgersForRoots } from "../session/related-ledgers.js";
@@ -30,6 +29,7 @@ import { succeededCommandForms, successfulShellReceipt } from "./command-evidenc
 import { recordObservedRead, repositoryRelativePath } from "./lesson-evidence.js";
 import { observationDigest } from "./observations.js";
 import { relatedRepositoryRoots } from "./operations.js";
+import { redactForMemoryRoute } from "./secret-text.js";
 
 export interface CompletedLessonSource {
 	readonly revision: string;
@@ -688,7 +688,7 @@ function renderEntry(
 			resolves: null,
 			items: [
 				{
-					line: `task: ${shortText(redactSecretString(text), TASK_MAX_CHARS)}`,
+					line: `task: ${shortText(redactForMemoryRoute(text), TASK_MAX_CHARS)}`,
 					counted: false,
 					callId: null,
 					succeeded: [],
@@ -755,7 +755,7 @@ function renderOutcome(
 		// Repository-relative, as the lesson prompt asks: an absolute checkout path is
 		// noise that also made two runs of the same session read differently.
 		const shownDetail = typeof args.path === "string" ? (repositoryRelativePath(detail, [root]) ?? detail) : detail;
-		const label = shortText(`${name}${shownDetail ? ` ${redactSecretString(shownDetail)}` : ""}`, COMMAND_MAX_CHARS);
+		const label = shortText(`${name}${shownDetail ? ` ${redactForMemoryRoute(shownDetail)}` : ""}`, COMMAND_MAX_CHARS);
 		// A source investigation can teach a repository fact with no command
 		// behind it. A successful read carries a bounded excerpt so a lesson can
 		// quote it; the quote is verified against the checkout before it counts.
@@ -764,9 +764,9 @@ function renderOutcome(
 		// session found next worth keeping: a bare "verify" line hid that it found nothing.
 		const verdict =
 			name === ToolNames.Verify
-				? shortText(redactSecretString(resultText(result).split("\n")[0] ?? ""), DIAGNOSTIC_MAX_CHARS)
+				? shortText(redactForMemoryRoute(resultText(result).split("\n")[0] ?? ""), DIAGNOSTIC_MAX_CHARS)
 				: "";
-		const excerpt = path === null ? verdict : shortText(redactSecretString(resultText(result)), READ_EXCERPT_MAX_CHARS);
+		const excerpt = path === null ? verdict : shortText(redactForMemoryRoute(resultText(result)), READ_EXCERPT_MAX_CHARS);
 		return {
 			line: `${label}${failed ? " FAILED" : ""}${excerpt ? ` => ${excerpt}` : ""}`,
 			counted: true,
@@ -777,9 +777,10 @@ function renderOutcome(
 			runs: [],
 		};
 	}
-	const redacted = redactSecretString(command);
+	const redacted = redactForMemoryRoute(command);
 	// Rendered exactly when it is one short line and carries no secret, so the
-	// lesson pass can copy it and the host can compare it byte for byte.
+	// lesson pass can copy it and the host can compare it byte for byte. Anything
+	// else proves no form: redacted text is not what ran and grounds no lesson.
 	const exact = redacted === command && !/[\r\n]/u.test(command) && command.length <= COMMAND_MAX_CHARS;
 	const shown = exact ? command : shortText(redacted, COMMAND_MAX_CHARS);
 	// The same receipt the live guardian accepts: the shell tool's own success
@@ -800,7 +801,7 @@ function renderOutcome(
 			runs: forms.map((form) => ({ command: form, ok: true, diagnostic: "" })),
 		};
 	}
-	const failure = shortText(redactSecretString(diagnostic(result)), DIAGNOSTIC_MAX_CHARS);
+	const failure = shortText(redactForMemoryRoute(diagnostic(result)), DIAGNOSTIC_MAX_CHARS);
 	return {
 		line: `FAILED: ${shown} => ${failure}`,
 		counted: true,
