@@ -1,5 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
 	holdUnresolvedStrings,
 	RedactedStringProjection,
@@ -9,6 +10,7 @@ import {
 import { createWorkerProgressFold, WORKER_LIVE_TAIL_MAX_BYTES } from "../../src/domains/telemetry/worker-progress.js";
 import { LiveToolView } from "../../src/interactive/renderers/live-tool-view.js";
 import { safeWorkerAnswerText, WorkerAnswerProjection } from "../../src/interactive/renderers/worker-answer.js";
+import { deterministicDiagnosticSummary } from "../../src/tools/result-disposition.js";
 
 const SEED = Number(process.env.URL_USERINFO_FUZZ_SEED ?? 0x5eed);
 const DOCUMENTS = Number(process.env.URL_USERINFO_FUZZ_DOCUMENTS ?? 60);
@@ -179,4 +181,41 @@ test("live command output holds only an open last line", () => {
 	const rows = (text: string) => new LiveToolView().outputRows(text, 5, 200, options).join("\n");
 	strictEqual(rows("clone https://u:ZQ"), "clone https://u:");
 	strictEqual(rows("listening on http://h:8080\n"), "listening on http://h:8080");
+});
+
+test("the evidence redactor hides the same URL text as display redaction", () => {
+	const forms = [
+		"https://user:ZQXJ@github.com/x",
+		"HTTP://u:ZQ:XJ@h",
+		"https://u:ZQXJ:@h",
+		"git+https://u:Z)Q@h/r.git",
+		"https://u:ZQ@XJ@h",
+		"https://u:ΩЖ@h:8443/p",
+		"https://u:$TOKEN@h",
+		"https://ghp_x@github.com/r",
+		"https://:ZQXJ@h",
+		"https://u:ZQ/XJ@h",
+		"http://localhost:8080/health",
+		"postgres://u:ZQXJ@h",
+	];
+	for (const form of forms) {
+		const shown = redactSecretsText(form, createRedactionTally());
+		strictEqual(shown.replace("[redacted:url-userinfo]", "[redacted]"), redactSecretString(form), form);
+	}
+});
+
+test("userinfo redaction counts once, survives a second pass and spans display frames", () => {
+	const tally = createRedactionTally();
+	const once = redactSecretsText("clone https://u:ZQXJ@h/r", tally);
+	strictEqual(once, "clone https://u:[redacted:url-userinfo]@h/r");
+	strictEqual(redactSecretsText(once, tally), once);
+	strictEqual(redactSecretsText(redactSecretString("https://u:ZQXJ@h"), tally), "https://u:[redacted]@h");
+	strictEqual(redactSecretString(once), once);
+	strictEqual(tally.count, 1);
+	deepStrictEqual(redactSecretSegments(["clone https://u:ZQ", "XJ@h/r"], createRedactionTally()), [
+		"clone https://u:[redacted:url-userinfo]",
+		"[redacted:url-userinfo]@h/r",
+	]);
+	const summary = deterministicDiagnosticSummary("fatal: https://u:ZQXJ@h/r\n", 1024);
+	deepStrictEqual(summary, { text: "fatal: https://u:[redacted:url-userinfo]@h/r", redactions: 1, complete: false });
 });

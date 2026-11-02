@@ -18,7 +18,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 const SECRET_KEY_RE =
 	/(?:api[-_]?key|access[-_]?key|auth(?:orization)?|credential|password|private[-_]?key|secret|token)/iu;
 const ENV_KEY_RE = /^env(?:ironment)?$/iu;
-const SECRET_STRING_RE = /(https?:\/\/[^\s/@]+:)([^\s/@]+)@/giu;
+// The lookahead changes no match, since `@` can only follow the whole run. It stops a run that ends elsewhere from
+// retrying at each of its colons: this also reads journal records and tool output now, and 80 KB took 1.4 s (#446).
+const SECRET_STRING_RE = /(https?:\/\/(?=[^\s/@]+@)[^\s/@]+:)([^\s/@]+)@/giu;
 const SECRET_URL_PARAM_RE =
 	/([?&](?:api[-_]?key|access[-_]?token|auth(?:orization)?|credential|password|secret|token)[^=\s]*=)([^&#\s]+)/giu;
 const SECRET_ASSIGNMENT_RE =
@@ -29,8 +31,22 @@ const SECRET_ASSIGNMENT_RE =
 // literal secret that happens to start with `$` still redacts.
 const ENV_REFERENCE_RE = /^["']?\$(?:[A-Z_][A-Z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})["']?$/u;
 
-function redactUnlessEnvReference(match: string, prefix: string, secret: string, suffix = ""): string {
-	return ENV_REFERENCE_RE.test(secret) ? match : `${prefix}[redacted]${suffix}`;
+/** Groups 1 and 2 of {@link URL_USERINFO_RE} hold the part one-shot redaction shows and the part it hides. */
+export const URL_USERINFO_RE = SECRET_STRING_RE;
+
+// Text passes both redactors, and again on a re-export, where promotion and handoff mask earlier markers as private-use
+// tokens. The marker's own colon lands in the prefix, so `[redacted:kind]` arrives split and would corrupt on a rewrite.
+const REDACTED_USERINFO_RE = /^(?:\[redacted\]|\uE000[\uE100-\uF8FF])$/u;
+const REDACTED_KIND_RE = /^[a-z-]+\]$/u;
+
+/** Whether a {@link URL_USERINFO_RE} match holds a credential, not a variable's name or an earlier pass's marker (#446). */
+export function urlUserinfoHoldsSecret(prefix: string, secret: string): boolean {
+	if (ENV_REFERENCE_RE.test(secret) || REDACTED_USERINFO_RE.test(secret)) return false;
+	return !(prefix.endsWith("[redacted:") && REDACTED_KIND_RE.test(secret));
+}
+
+function redactUnlessEnvReference(match: string, prefix: string, secret: string): string {
+	return ENV_REFERENCE_RE.test(secret) ? match : `${prefix}[redacted]`;
 }
 // `auth` stops short of `author` and `authority`, so prose such as "operator-authority ask" keeps its next word.
 const SECRET_FLAG_NAME_RE =
@@ -85,7 +101,7 @@ export function redactSecretString(value: string): string {
 	return redactSecretFlags(
 		value
 			.replace(SECRET_STRING_RE, (match, prefix: string, secret: string) =>
-				redactUnlessEnvReference(match, prefix, secret, "@"),
+				urlUserinfoHoldsSecret(prefix, secret) ? `${prefix}[redacted]@` : match,
 			)
 			.replace(SECRET_URL_PARAM_RE, (match, prefix: string, secret: string) =>
 				redactUnlessEnvReference(match, prefix, secret),
