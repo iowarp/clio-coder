@@ -47,6 +47,12 @@ test("open terms that overflow the frame scroll inside it and every row is reach
 	match(screen.join("\n"), /↑↓ scroll · alt\+t back/u, "the card names its scroll keys");
 	for (const row of inner(screen)) seen.add(row);
 
+	// Opening the terms lands on them, so the choices above are reached by scrolling up.
+	for (let step = 0; step < 20; step++) {
+		ok(body.scrollCard(-1), "a scrollable card consumes the arrow even at its start");
+		screen = plain(frame.render(COLUMNS));
+		for (const row of inner(screen)) seen.add(row);
+	}
 	for (let step = 0; step < 20; step++) {
 		ok(body.scrollCard(1), "a scrollable card consumes the arrow even at its end");
 		screen = plain(frame.render(COLUMNS));
