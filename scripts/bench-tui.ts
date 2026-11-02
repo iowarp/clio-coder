@@ -166,7 +166,16 @@ function longReply(size: number): string {
 	return blocks.join("");
 }
 
-function sample(mode: TuiMode, workload: Workload): { milliseconds: number[]; bytes: number } {
+/**
+ * Back to the event loop between frames, as the application always is. pi-tui's
+ * Markdown holds its lexed tokens in a WeakRef, and a WeakRef keeps its target
+ * alive until the current job ends, so frames rendered in one long synchronous
+ * job retained every frame's tokens: 1.47 MB per frame at reply-100k, a 4 GB
+ * out-of-memory crash at reply-500k, and old-generation pauses in the numbers.
+ */
+const yieldToLoop = (): Promise<void> => new Promise((done) => setImmediate(done));
+
+async function sample(mode: TuiMode, workload: Workload): Promise<{ milliseconds: number[]; bytes: number }> {
 	const terminal = new CountingTerminal();
 	let view: never | null = null;
 	const panel = createChatPanel({
@@ -291,6 +300,7 @@ function sample(mode: TuiMode, workload: Workload): { milliseconds: number[]; by
 		for (let index = 0; index < 20; index++) {
 			mutate(index);
 			tui.renderNow();
+			await yieldToLoop();
 		}
 		terminal.bytes = 0;
 		const milliseconds: number[] = [];
@@ -299,6 +309,7 @@ function sample(mode: TuiMode, workload: Workload): { milliseconds: number[]; by
 			mutate(index + 20);
 			tui.renderNow();
 			milliseconds.push(performance.now() - start);
+			await yieldToLoop();
 		}
 		return { milliseconds, bytes: terminal.bytes };
 	} finally {
@@ -311,7 +322,8 @@ for (const mode of modes) {
 	if (values.mode && values.mode !== mode) continue;
 	for (const workload of workloads) {
 		if (values.workload && values.workload !== workload) continue;
-		const samples = Array.from({ length: repeats }, () => sample(mode, workload));
+		const samples: Array<Awaited<ReturnType<typeof sample>>> = [];
+		for (let repeat = 0; repeat < repeats; repeat += 1) samples.push(await sample(mode, workload));
 		const times = samples.flatMap((entry) => entry.milliseconds).sort((a, b) => a - b);
 		const percentile = (p: number): number => Number((times[Math.ceil(times.length * p) - 1] ?? 0).toFixed(3));
 		results.push({
