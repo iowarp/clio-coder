@@ -53,6 +53,14 @@ export interface JobControllerOptions {
 	automatic?: boolean;
 	onChange?: (payload: JobChangedPayload) => void;
 	onError?: (error: Error) => void;
+	/**
+	 * Lets a job continue once when its default clock ended a main turn that no
+	 * later occurrence would pick up (#445). Absent means never.
+	 */
+	clockResume?: {
+		allowed(job: JobRecord): boolean;
+		resumed(job: JobRecord, boundMs: number): void;
+	};
 }
 export interface JobController {
 	create(input: JobCreateInput, owner: JobOwner): Promise<JobRecord>;

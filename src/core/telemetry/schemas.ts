@@ -1458,8 +1458,13 @@ export const RunAbortedSchema = Type.Object(
 	},
 	closed,
 );
-/** A main turn's stream stopped by the operator or by the loop guard; no dispatch run is involved (#434). */
-export const TurnAbortedSchema = Type.Object({ source: vocabulary(["stream_cancel", "loop_guard"]) }, closed);
+/** A main turn's stream stopped by the operator, the loop guard or a job's clock; no dispatch run is involved (#434, #445). */
+export const TurnAbortedSchema = Type.Object(
+	{ source: vocabulary(["stream_cancel", "loop_guard", "job_clock"]) },
+	closed,
+);
+/** A job continued past its default clock, the one automatic continuation a turn gets (#445). */
+export const JobClockResumedSchema = Type.Object({ jobId: ExistingId, boundMs: duration }, closed);
 export const StatusPhase = vocabulary([
 	"idle",
 	"preparing",

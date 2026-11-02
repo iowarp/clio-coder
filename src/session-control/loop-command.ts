@@ -1,5 +1,5 @@
 import type { JobPredicate, JobRecord } from "../core/job-types.js";
-import { jobIsComplete } from "../domains/scheduling/job-model.js";
+import { jobExecutionTimeoutMs, jobIsComplete } from "../domains/scheduling/job-model.js";
 import type { JobOperations } from "../tools/job-types.js";
 import type { ToolResult } from "../tools/registry.js";
 import type { NoticeLevel } from "./notice-source.js";
@@ -513,7 +513,11 @@ export function loopJobDetail(job: JobRecord, now: number, spend: string | null 
 		`every ${formatLoopDuration(job.spec.intervalMs)} · ${runsText(job)} · ${job.settled} settled · ${dueText(job, now)}`,
 	);
 	lines.push(
-		`timeout ${formatLoopDuration(job.spec.timeoutMs)} · ${
+		`timeout ${formatLoopDuration(job.spec.timeoutMs)}${
+			job.spec.onMatch.kind === "main_turn"
+				? ` · follow-up timeout ${formatLoopDuration(jobExecutionTimeoutMs(job.spec, "delivery"))}`
+				: ""
+		} · ${
 			job.spec.deadlineAt === null
 				? "no deadline"
 				: job.spec.deadlineAt > now
@@ -568,7 +572,11 @@ export function loopCreatedLines(job: JobRecord, args: LoopCreateArgs, now: numb
 	];
 	if (job.spec.until !== null) {
 		lines.push(
-			`until ${predicateText(job.spec.until)} · on match ${job.spec.onMatch.kind === "notice" ? "notice" : "main turn follow-up"}`,
+			`until ${predicateText(job.spec.until)} · on match ${
+				job.spec.onMatch.kind === "notice"
+					? "notice"
+					: `main turn follow-up · follow-up timeout ${formatLoopDuration(jobExecutionTimeoutMs(job.spec, "delivery"))}${args.timeout_ms === undefined ? " (default)" : ""}`
+			}`,
 		);
 	}
 	lines.push(

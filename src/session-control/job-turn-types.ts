@@ -12,6 +12,8 @@ export interface MachineTurnRequest {
 	isAdmissionCurrent(): boolean;
 	signal: AbortSignal;
 	constraints?: TurnConstraints;
+	/** One transcript line the turn opens with, so an automatic continuation is never silent (#445). */
+	notice?: string;
 	onStarting(): boolean;
 }
 

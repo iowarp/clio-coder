@@ -1,11 +1,17 @@
-import { deepStrictEqual, doesNotThrow, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotThrow, match, ok, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
 	type BashCommandProgress,
 	type BashProgressScheduler,
 	createBashOutputProgressController,
+	runBashCommand,
 } from "../../src/core/bash-exec.js";
 import { POSIX_BASH, resolveBashShell } from "../../src/core/bash-shell.js";
+import { bashTool } from "../../src/tools/bash.js";
 
 class DeterministicScheduler implements BashProgressScheduler {
 	#nowMs = 0;
@@ -118,6 +124,62 @@ describe("bash output settlement", () => {
 });
 
 // #421: Windows has no /bin/bash, so the bash tool resolves Git Bash or reports none.
+describe("bash abort settlement (#445)", () => {
+	const abortedRun = async (abortCause?: () => string | null) => {
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 100);
+		return bashTool.run(
+			{ command: "sleep 30", timeout_ms: 3_600_000 },
+			{ signal: controller.signal, ...(abortCause === undefined ? {} : { abortCause }) },
+		);
+	};
+
+	it("names the host's stop reason and the unspent timeout", async () => {
+		const result = await abortedRun(() => "Scheduled job occurrence ended: execution timeout.");
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		match(result.message, /bash: command aborted after \d+s of its 3600000ms timeout/u);
+		match(result.message, /The host ended the run: Scheduled job occurrence ended: execution timeout\./u);
+		strictEqual(result.details?.outcome, "abort");
+		strictEqual(result.details?.abortCause, "Scheduled job occurrence ended: execution timeout.");
+	});
+
+	it("says so when the host recorded no cause", async () => {
+		const result = await abortedRun();
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		match(result.message, /The host ended the run and recorded no cause\./u);
+		strictEqual(result.details?.abortCause, null);
+	});
+
+	const hasSetsid = process.platform !== "win32" && spawnSync("setsid", ["--version"]).status === 0;
+	it("settles an abort when a descendant outside the group keeps the pipes", { skip: !hasSetsid }, async () => {
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-bash-holder-"));
+		const pidFile = join(dir, "holder.pid");
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 200);
+		const settled = await Promise.race([
+			runBashCommand(`echo kept; setsid sleep 60 & echo $! > ${pidFile}; sleep 60`, {
+				timeoutMs: 3_600_000,
+				signal: controller.signal,
+			}),
+			new Promise<null>((resolve) => setTimeout(() => resolve(null), 20_000).unref()),
+		]);
+		try {
+			ok(settled !== null, "the abort never settled while the descendant held the pipes");
+			strictEqual(settled.aborted, true);
+			strictEqual(settled.stdout, "kept\n");
+		} finally {
+			try {
+				process.kill(Number(readFileSync(pidFile, "utf8")));
+			} catch {
+				// The holder already exited, which leaves nothing to clean up.
+			}
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("bash shell resolution", () => {
 	const windows = (env: NodeJS.ProcessEnv, files: string[]) =>
 		resolveBashShell({ platform: "win32", env, isFile: (file) => files.includes(file) });

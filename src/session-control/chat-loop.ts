@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { classifyCallFailure } from "../core/call-failure.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
+import { JobClockExpired } from "../core/job-types.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import {
 	mainAgent,
@@ -1369,6 +1370,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const currentToolInvokeOptions = (toolCallId?: string): Partial<ToolInvokeOptions> => {
 		const options: Partial<ToolInvokeOptions> = {
 			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
+			abortCause: () => state.activeInterruptReason ?? state.toolProseAbortReason,
 			...observedToolCallOrigin(state.runtime?.agent.state.messages ?? [], toolCallId),
 		};
 		const hostRun = hostRunContext.getStore();
@@ -4164,8 +4166,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				request.sessionId === api.getSessionId()
 			) {
 				pendingMachineCancellation = token;
+				// The controller's abort reason says what ended it; a timed-out occurrence is not a cancelled one (#445).
+				const cause = request.signal.reason;
+				const ended = cause instanceof Error ? cause.message : String(cause);
 				try {
-					api.cancel({ reason: "Scheduled job occurrence canceled.", auditReason: "job occurrence canceled" });
+					api.cancel({
+						reason: `Scheduled job occurrence ended: ${ended}.`,
+						auditReason: `job occurrence ended: ${ended}`,
+						...(cause instanceof JobClockExpired ? { source: "job_clock" as const } : {}),
+					});
 				} finally {
 					pendingMachineCancellation = null;
 				}
@@ -4215,6 +4224,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						kind: "follow-up",
 						origin: request.origin,
 					});
+					if (request.notice !== undefined) emitNotice(request.notice, "warning", "job.clock-resumed");
 					if (request.signal.aborted) cancel();
 				},
 			});

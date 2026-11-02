@@ -65,11 +65,35 @@ function validateJobPredicate(predicate: JobPredicate): JobPredicate {
 		throw new Error("job: ordered comparisons require a number");
 	return { path: [...predicate.path], op: predicate.op, ...(value !== undefined ? { value } : {}) };
 }
+/** A main turn does real work, so its clock must outlast a slow build or a long external wait (#445). */
+export const JOB_MAIN_TIMEOUT_DEFAULT_MS = 3_600_000;
+const JOB_COMMAND_TIMEOUT_DEFAULT_MS = 60_000;
+
+/**
+ * The clock on one execution. A command's default bounds a poll, and its
+ * follow-up is a main turn that would die a minute in under it (#445). An
+ * explicit timeout keeps bounding both.
+ */
+export function jobExecutionTimeoutMs(spec: JobSpec, kind: "run" | "delivery"): number {
+	return kind === "delivery" && spec.timeoutDefaulted === true ? JOB_MAIN_TIMEOUT_DEFAULT_MS : spec.timeoutMs;
+}
+
 export function normalizeJobSpec(input: JobCreateInput, now: number): JobSpec {
 	if (!object(input)) throw new Error("job: specification required");
 	keys(
 		input,
-		["intervalMs", "runner", "count", "deadlineAt", "timeoutMs", "until", "onMatch", "constraints", "originTurnId"],
+		[
+			"intervalMs",
+			"runner",
+			"count",
+			"deadlineAt",
+			"timeoutMs",
+			"timeoutDefaulted",
+			"until",
+			"onMatch",
+			"constraints",
+			"originTurnId",
+		],
 		"specification",
 	);
 	integer(now, 0, Number.MAX_SAFE_INTEGER - MAX_DURATION_MS, "clock");
@@ -101,7 +125,8 @@ export function normalizeJobSpec(input: JobCreateInput, now: number): JobSpec {
 	} else throw new Error("job: Stage 1 supports command and main runners only");
 	if (input.count !== undefined) integer(input.count, 1, 100_000, "count");
 	if (input.deadlineAt !== undefined) integer(input.deadlineAt, now + 1, now + MAX_DURATION_MS, "deadlineAt");
-	const timeoutMs = input.timeoutMs ?? (runner.kind === "command" ? 60_000 : 600_000);
+	const timeoutMs =
+		input.timeoutMs ?? (runner.kind === "command" ? JOB_COMMAND_TIMEOUT_DEFAULT_MS : JOB_MAIN_TIMEOUT_DEFAULT_MS);
 	integer(timeoutMs, 1, MAX_DURATION_MS, "timeoutMs");
 	const until = input.until === undefined ? null : validateJobPredicate(input.until);
 	if (until !== null && runner.kind !== "command")
@@ -121,6 +146,7 @@ export function normalizeJobSpec(input: JobCreateInput, now: number): JobSpec {
 		count: input.count ?? (input.deadlineAt === undefined ? 5 : null),
 		deadlineAt: input.deadlineAt ?? null,
 		timeoutMs,
+		...(input.timeoutMs === undefined || input.timeoutDefaulted === true ? { timeoutDefaulted: true as const } : {}),
 		until,
 		onMatch: { ...onMatch },
 		constraints: snapshotTurnConstraints(input.constraints) ?? null,

@@ -272,7 +272,8 @@ The journal events, grouped by subject. The registry in [events.ts](../../src/co
 | --- | --- | --- | --- |
 | `call.started`, `call.settled` | accountability | content-free | Each call attempt: identity, agent, round kind, tool choice, target, object refs, then disposition, stop, usage, pricing, stage offsets, transport, cache and quota facts, the response id, a failure, and an interrupted call's `interruptedEstimate`. Only main-loop calls observe the cache block's verdict, re-prefill, bill and expected cold reasons ([Context Engine](context-engine.md#what-each-call-records)). |
 | `call.linked`, `run.linked` | accountability | content-free | A session's pointer to a call or run recorded in a run journal. |
-| `turn.settled`, `turn.aborted` | accountability | content-free | A turn's settlement with its stop reason and terminal cause, and an operator's abort. |
+| `turn.settled`, `turn.aborted` | accountability | content-free | A turn's settlement with its stop reason and terminal cause, and an abort with its source: `stream_cancel` for an operator's cancel, `loop_guard` for a loop-guard stop, `job_clock` for a job's timeout or deadline. |
+| `job.clock_resumed` | accountability | content-free | A job's default timeout stopped its final run or follow-up and the job continues it once at yolo, with the job id and the bound that fired. |
 | `compaction.settled` | accountability | content-free | A compaction's calls and its outcome. |
 | `session.opened`, `session.resumed`, `session.forked`, `session.parked`, `session.closed` | accountability | content-free | Session lifecycle. A fork records its parent in the child's `session.forked`; a lineage fold reads each ancestor's journal and counts each record and attempt once. |
 | `session.sealed`, `run.sealed`, `process.sealed`, `share.sealed` | accountability | content-free | A scope's seal, and the reseal a shared scope carries. |

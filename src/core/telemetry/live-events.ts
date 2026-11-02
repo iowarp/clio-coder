@@ -308,7 +308,7 @@ export interface SafetyBlockedPayload {
 
 /** Where a `run.aborted` event originated. */
 export type RunAbortSource = "dispatch_abort" | "dispatch_drain";
-export type TurnAbortSource = "stream_cancel" | "loop_guard";
+export type TurnAbortSource = "stream_cancel" | "loop_guard" | "job_clock";
 
 /**
  * Payload published on `run.aborted` when dispatch cancels (dispatch_abort) or drains (dispatch_drain) a run.
@@ -324,9 +324,16 @@ export interface RunAbortedPayload {
 }
 
 /**
- * Payload published on `turn.aborted`: the chat loop's stream_cancel for an operator Esc/Ctrl+C, or loop_guard
- * when the loop guard stops a runaway turn.
+ * Payload published on `turn.aborted`: the chat loop's stream_cancel for an operator Esc/Ctrl+C, loop_guard
+ * when the loop guard stops a runaway turn, or job_clock when a scheduled occurrence's bound expires.
  */
+/** Published on `job.clock_resumed` when a job continues once past its default clock (#445). */
+export interface JobClockResumedPayload {
+	jobId: string;
+	boundMs: number;
+	at: number;
+}
+
 export interface TurnAbortedPayload {
 	source: TurnAbortSource;
 	at: number;

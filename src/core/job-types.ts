@@ -21,6 +21,8 @@ export interface JobCreateInput {
 	readonly count?: number;
 	readonly deadlineAt?: number;
 	readonly timeoutMs?: number;
+	/** Restores a stored spec whose timeout the creator left to the default; a new job sets it by omitting timeoutMs. */
+	readonly timeoutDefaulted?: true;
 	readonly until?: JobPredicate;
 	readonly onMatch?: JobMatchAction;
 	/** Host-supplied creating-turn scope, never authority supplied by model arguments. */
@@ -33,10 +35,16 @@ export interface JobSpec {
 	readonly count: number | null;
 	readonly deadlineAt: number | null;
 	readonly timeoutMs: number;
+	/** The creator named no timeout. Absent on an explicit bound, which then also bounds a follow-up, and on older records (#445). */
+	readonly timeoutDefaulted?: true;
 	readonly until: JobPredicate | null;
 	readonly onMatch: JobMatchAction;
 	readonly constraints: TurnConstraints | null;
 	readonly originTurnId: string | null;
+}
+/** A job's own clock ended the execution, as opposed to a person or the host stopping it (#445). */
+export class JobClockExpired extends Error {
+	override readonly name = "JobClockExpired";
 }
 export type JobEndReason = "count" | "condition" | "stopped" | "canceled" | "deadline" | "failure";
 export interface JobEvidence {
@@ -94,6 +102,8 @@ export interface JobRecord {
 	/** Bounded terminal history; starts/settled are lifetime counters. */
 	history: JobOccurrence[];
 	delivery: JobDelivery | null;
+	/** Times a job's default clock was continued past (#445). Absent on older records and on a job it never hit. */
+	clockResumes?: number;
 	/** Null when any executed component has unknown pricing/usage. */
 	costUsd: number | null;
 	persistenceError: string | null;

@@ -8,7 +8,7 @@ import {
 	turnAllowsTool,
 	turnDelegatesTool,
 } from "../core/turn-constraints.js";
-import { normalizeJobSpec } from "../domains/scheduling/index.js";
+import { jobExecutionTimeoutMs, normalizeJobSpec } from "../domains/scheduling/index.js";
 import type { JobController, JobExecutionContext, JobRunResult } from "../domains/scheduling/job-types.js";
 import { StringEnum } from "../engine/ai.js";
 import {
@@ -37,7 +37,7 @@ type PreparedJob =
 
 function jobToolResult(job: JobRecord): ToolResult {
 	const scope = `session ${job.owner.sessionId}; cwd=${job.owner.cwd}`;
-	const bounds = `${job.spec.count === null ? "deadline bound" : `${job.spec.count} starts`}; timeout=${job.spec.timeoutMs}ms${job.spec.deadlineAt === null ? "" : `; deadline=${new Date(job.spec.deadlineAt).toISOString()}`}`;
+	const bounds = `${job.spec.count === null ? "deadline bound" : `${job.spec.count} starts`}; timeout=${job.spec.timeoutMs}ms${job.spec.timeoutDefaulted === true ? " (default)" : ""}${job.spec.onMatch.kind === "main_turn" ? `; follow-up timeout=${jobExecutionTimeoutMs(job.spec, "delivery")}ms` : ""}${job.spec.deadlineAt === null ? "" : `; deadline=${new Date(job.spec.deadlineAt).toISOString()}`}`;
 	return {
 		kind: "ok",
 		output: `job ${job.id}: ${job.state}${job.reason ? ` (${job.reason})` : ""}; ${job.spec.runner.kind}; every=${job.spec.intervalMs}ms; ${bounds}; ${scope}${job.spec.constraints?.allowedTools === undefined ? "" : `; allow=${JSON.stringify(job.spec.constraints.allowedTools)}`}${job.nextDueAt === null ? "" : `; next due=${new Date(job.nextDueAt).toISOString()}`}${job.delivery ? `; delivery=${job.delivery.state}` : ""}`,

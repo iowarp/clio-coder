@@ -8,6 +8,7 @@ import {
 	reportCommitAttributionDiagnostic,
 	withManagedGitCommitAttributionEnvironment,
 } from "./git-commit-attribution.js";
+import { SAFE_EXEC_PIPE_DRAIN_BOUND_MS } from "./safe-exec.js";
 import { knownSecretValues, scrubSandboxEnv } from "./sandbox/env-scrub.js";
 import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-session.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
@@ -388,6 +389,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		let settled = false;
 		let timeoutId: ReturnType<typeof setTimeout> | null = null;
 		let killGraceTimer: ReturnType<typeof setTimeout> | null = null;
+		let drainTimer: ReturnType<typeof setTimeout> | null = null;
 		let killSent = false;
 		let pendingClose: (() => void) | null = null;
 		const output = createBashOutputProgressController(options.onUpdate);
@@ -460,6 +462,15 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 				const finish = pendingClose;
 				pendingClose = null;
 				finish?.();
+				// A descendant outside the group (setsid; on Windows, every child of the
+				// shell, since only the leader is signalled) can hold the output pipes
+				// past the kill, and without this `close` waits for it however long it
+				// runs, so neither an abort nor a timeout settles (#445).
+				if (settled) return;
+				drainTimer = setTimeout(() => {
+					child.stdout?.destroy();
+					child.stderr?.destroy();
+				}, SAFE_EXEC_PIPE_DRAIN_BOUND_MS);
 			}, 5000);
 		};
 
@@ -491,6 +502,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			if (settled) return;
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
+			if (drainTimer) clearTimeout(drainTimer);
 			const finalOutput = output.settle();
 			options.signal?.removeEventListener("abort", onAbort);
 			resolveAfterCancellation({
@@ -507,6 +519,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			if (settled) return;
 			settled = true;
 			if (timeoutId) clearTimeout(timeoutId);
+			if (drainTimer) clearTimeout(drainTimer);
 			const finalOutput = output.settle();
 			options.signal?.removeEventListener("abort", onAbort);
 			const error =
