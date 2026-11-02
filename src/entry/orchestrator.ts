@@ -2850,6 +2850,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const memoryEnabledNow = (): boolean =>
 		(effectiveSettingsForDispatch?.() ?? getCurrentSettings()).context.memory.enabled;
 	const memoryOffMarked = new Set<string>();
+	const markMemoryOffRecording = (target: SessionContract): void => {
+		if (memoryEnabledNow()) return;
+		const meta = target.current();
+		if (!meta || memoryOffMarked.has(meta.id)) return;
+		target.appendEntry({
+			kind: "custom",
+			customType: MEMORY_OFF_ENTRY_TYPE,
+			// A fact about what memory may read, never a model message.
+			display: false,
+			parentTurnId: target.tree(meta.id).leafId ?? null,
+			data: {},
+		});
+		memoryOffMarked.add(meta.id);
+	};
+	const beforeShellEntryRecorded = (): void => {
+		if (session) markMemoryOffRecording(session);
+	};
 	const memoryActiveEntries = () => {
 		const meta = session?.current();
 		if (!meta || !session) return null;
@@ -4839,20 +4856,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		memoryEnabled: memoryEnabledNow,
-		beforeTurnRecorded: (target) => {
-			if (memoryEnabledNow()) return;
-			const meta = target.current();
-			if (!meta || memoryOffMarked.has(meta.id)) return;
-			target.appendEntry({
-				kind: "custom",
-				customType: MEMORY_OFF_ENTRY_TYPE,
-				// A fact about what memory may read, never a model message.
-				display: false,
-				parentTurnId: target.tree(meta.id).leafId ?? null,
-				data: {},
-			});
-			memoryOffMarked.add(meta.id);
-		},
+		beforeTurnRecorded: markMemoryOffRecording,
 		getMemorySection: (request) => {
 			lastMemoryPromptRuntimeId = request.runtimeId;
 			return memoryReader(request);
@@ -5694,6 +5698,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: {}),
 				toolRegistry,
 				labelOperatorCommand,
+				beforeShellEntryRecorded,
 				hostToolEvents: acpHostToolEvents,
 				...(session
 					? {
@@ -6173,6 +6178,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(session ? { readSessionEntries: readCurrentSessionEntries } : {}),
 		gitHookChanges: () => hookDrift.sessionChanges(),
 		labelOperatorCommand,
+		beforeShellEntryRecorded,
 		getTaskBoard: () => taskBoard.cachedSnapshot(),
 		getDecisionBoard: () => decisionBoard.snapshot(),
 		supersedeDecision: (interviewId, key, correction) => decisionBoard.supersede(interviewId, key, correction),
