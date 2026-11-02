@@ -101,6 +101,16 @@ export {
 
 const DEFAULT_COALESCE_MS = 16;
 /**
+ * Stock Markdown re-lexes the whole open reply on every text change, about
+ * 0.5 ms per KB per frame. Past this length that work is priced: buffered text
+ * is applied no more often than keeps it under this share of the main thread.
+ * A reply below it streams exactly as a short reply always has.
+ */
+const COST_GATE_MIN_CODE_UNITS = 20 * 1_024;
+const COST_GATE_MAIN_THREAD_SHARE = 0.3;
+/** One slow sample (a collection pause, say) must not read as a frozen reply. */
+const COST_GATE_MAX_INTERVAL_MS = 2_000;
+/**
  * Event kinds whose render is deferred into a coalesce window. All other
  * `ChatLoopEvent` kinds render synchronously and cancel any pending timer.
  */
@@ -185,6 +195,14 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 	const clock = deps.now ?? (() => performance.now());
 	/** When this renderer last asked for a frame; the coalesce window runs from here. */
 	let lastRequestAt = Number.NEGATIVE_INFINITY;
+	/**
+	 * Text deltas waiting behind the cost gate. Held here and not at render: an
+	 * unapplied delta leaves the panel clean, so the frame a keystroke asks for
+	 * reuses the last layout instead of paying for the re-lex itself.
+	 */
+	let gatedText: Array<{ contentIndex: number; delta: string; sequence: number | null }> = [];
+	let gateTimer: unknown = null;
+	let lastTextAppliedAt = Number.NEGATIVE_INFINITY;
 
 	const requestNow = (): void => {
 		lastRequestAt = clock();
@@ -239,12 +257,64 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 			}
 		}
 	};
+	const applyText = (contentIndex: number, delta: string, sequence: number | null): void => {
+		deps.chatPanel.applyEvent({ type: "text_delta", contentIndex, delta, partialText: "" });
+		if (sequence !== null) {
+			deps.onPanelApplied?.(sequence);
+			deps.onQueue?.(sequence, "dequeue");
+		}
+	};
+	const cancelGateTimer = (): void => {
+		if (gateTimer === null) return;
+		clearTimer(gateTimer);
+		gateTimer = null;
+	};
+	/** Apply everything the gate holds, in order. Every ordered boundary runs this first. */
+	const releaseGatedText = (): void => {
+		cancelGateTimer();
+		if (gatedText.length === 0) return;
+		const released = gatedText;
+		gatedText = [];
+		lastTextAppliedAt = clock();
+		for (const held of released) applyText(held.contentIndex, held.delta, held.sequence);
+		requestTransactionalRender(true);
+	};
+	const gateWaitMs = (): number => {
+		const cost = deps.chatPanel.liveTextRender();
+		if (cost === null || cost.codeUnits < COST_GATE_MIN_CODE_UNITS) return 0;
+		const interval = Math.min(COST_GATE_MAX_INTERVAL_MS, cost.durationMs / COST_GATE_MAIN_THREAD_SHARE);
+		return lastTextAppliedAt + interval - clock();
+	};
+	/** The one place streamed answer text reaches the panel. */
+	const admitText = (contentIndex: number, delta: string, sequence: number | null): void => {
+		const wait = gatedText.length > 0 ? 1 : gateWaitMs();
+		if (wait > 0) {
+			gatedText.push({ contentIndex, delta, sequence });
+			if (gateTimer === null) {
+				gateTimer = setTimer(() => {
+					gateTimer = null;
+					if (!disposed) transaction(releaseGatedText, true);
+				}, Math.ceil(wait));
+			}
+			return;
+		}
+		lastTextAppliedAt = clock();
+		applyText(contentIndex, delta, sequence);
+		requestTransactionalRender(true);
+	};
 	const applySlice = (slice: StreamPacerSlice): void => {
-		const event =
-			slice.kind === "text"
-				? ({ type: "text_delta", contentIndex: slice.contentIndex, delta: slice.text, partialText: "" } as const)
-				: ({ type: "thinking_delta", contentIndex: slice.contentIndex, delta: slice.text, partialThinking: "" } as const);
-		deps.chatPanel.applyEvent(event);
+		if (slice.kind === "text") {
+			admitText(slice.contentIndex, slice.text, slice.finalForItem ? slice.sequence : null);
+			return;
+		}
+		// Reasoning takes its place in the stream after any text ahead of it.
+		releaseGatedText();
+		deps.chatPanel.applyEvent({
+			type: "thinking_delta",
+			contentIndex: slice.contentIndex,
+			delta: slice.text,
+			partialThinking: "",
+		});
 		if (slice.finalForItem) {
 			deps.onPanelApplied?.(slice.sequence);
 			deps.onQueue?.(slice.sequence, "dequeue");
@@ -269,10 +339,16 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 	};
 	const drainPacer = (reason: string): void => {
 		if (pacer?.snapshot().queuedItems) pacer.flush(reason);
+		releaseGatedText();
 	};
 	const applyLegacy = (event: ChatLoopEvent): void => {
 		const visibleEventSeq = deps.visibleEventSequence?.(event) ?? null;
 		if (visibleEventSeq !== null) deps.onQueue?.(visibleEventSeq, "admit");
+		if (event.type === "text_delta") {
+			admitText(event.contentIndex, event.delta, visibleEventSeq);
+			return;
+		}
+		releaseGatedText();
 		deps.chatPanel.applyEvent(event);
 		if (visibleEventSeq !== null) {
 			deps.onPanelApplied?.(visibleEventSeq);
@@ -350,6 +426,10 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 			if (disposed) return;
 			transaction(() => {
 				pacer?.invalidateEpoch();
+				cancelGateTimer();
+				for (const held of gatedText.splice(0)) {
+					if (held.sequence !== null) deps.onQueue?.(held.sequence, "dequeue");
+				}
 				mutation();
 				requestTransactionalRender(false);
 			});
@@ -368,7 +448,10 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 		},
 		dispose() {
 			if (disposed) return;
-			transaction(() => pacer?.dispose("renderer-dispose"));
+			transaction(() => {
+				pacer?.dispose("renderer-dispose");
+				releaseGatedText();
+			});
 			cancelPending();
 			disposed = true;
 		},

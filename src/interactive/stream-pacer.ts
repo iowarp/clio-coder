@@ -91,7 +91,6 @@ export interface StreamPacerSnapshot {
 	queuedGraphemes: number;
 	queuedBytes: number;
 	oldestAgeMs: number;
-	credit: number;
 	timerPending: boolean;
 	disposed: boolean;
 }
@@ -116,13 +115,10 @@ export interface StreamPacerOptions {
 	/** Re-evaluated at admission/tick time. Defaults false for conservative auto. */
 	isAutoPacingAllowed?: () => boolean;
 	tickMs?: number;
-	baseGraphemesPerSecond?: number;
-	/** Fraction of measured arrivals granted as fractional display credit. */
-	arrivalCreditRatio?: number;
-	/** Additional convergence rate, expressed as one backlog per this window. */
-	catchUpWindowMs?: number;
-	maxElapsedMs?: number;
+	/** The shortest window a burst spreads over; a slower provider cadence widens it. */
 	maxOldestAgeMs?: number;
+	/** The widest window a burst spreads over, whatever the provider's cadence. */
+	maxBurstSpreadMs?: number;
 	maxQueueGraphemes?: number;
 	maxQueueBytes?: number;
 	maxSliceGraphemes?: number;
@@ -159,21 +155,22 @@ interface QueueItem {
 	offset: number;
 }
 
-const DEFAULT_TICK_MS = 25;
-const DEFAULT_RATE = 40;
-const DEFAULT_ARRIVAL_CREDIT_RATIO = 0.25;
-const DEFAULT_CATCH_UP_WINDOW_MS = 250;
-const DEFAULT_MAX_ELAPSED_MS = 100;
+/** One 60 Hz frame, so a release never waits on a beat the renderer cannot show. */
+const DEFAULT_TICK_MS = 16;
 const DEFAULT_MAX_AGE_MS = 60;
+const DEFAULT_MAX_BURST_SPREAD_MS = 250;
+/** Weight of the newest gap between bursts in the provider cadence estimate. */
+const CADENCE_WEIGHT = 0.3;
 const DEFAULT_MAX_QUEUE_GRAPHEMES = 8_192;
 const DEFAULT_MAX_QUEUE_BYTES = 512 * 1_024;
 const DEFAULT_MAX_SLICE_GRAPHEMES = 64;
 const DEFAULT_MAX_SLICE_BYTES = 16 * 1_024;
 /**
- * The first slice of an epoch is the whole first delta, up to one slice. It
- * used to be one grapheme, which put the first character on screen at once and
- * held the rest of the model's first token for the first 25 ms tick, so the
- * first whole token reached the terminal about 45 ms after it arrived.
+ * A delta that lands on an empty queue is released at once, up to one slice, so
+ * only the excess of a burst is ever spread out. Releasing by a fixed rate held
+ * every token at 60 tokens a second behind the age deadline, measured through a
+ * PTY as 73 ms from arrival to paint against 6 ms with pacing off, and it held
+ * a token after a pause just as long on an idle screen.
  */
 const DEFAULT_FIRST_SLICE_GRAPHEMES = DEFAULT_MAX_SLICE_GRAPHEMES;
 
@@ -190,11 +187,11 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 	const setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs));
 	const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
 	const tickMs = positiveFinite(options.tickMs, DEFAULT_TICK_MS);
-	const baseRate = positiveFinite(options.baseGraphemesPerSecond, DEFAULT_RATE);
-	const arrivalCreditRatio = nonnegativeFinite(options.arrivalCreditRatio, DEFAULT_ARRIVAL_CREDIT_RATIO);
-	const catchUpWindowMs = positiveFinite(options.catchUpWindowMs, DEFAULT_CATCH_UP_WINDOW_MS);
-	const maxElapsedMs = positiveFinite(options.maxElapsedMs, DEFAULT_MAX_ELAPSED_MS);
 	const maxOldestAgeMs = positiveFinite(options.maxOldestAgeMs, DEFAULT_MAX_AGE_MS);
+	const maxBurstSpreadMs = Math.max(
+		maxOldestAgeMs,
+		positiveFinite(options.maxBurstSpreadMs, DEFAULT_MAX_BURST_SPREAD_MS),
+	);
 	const maxQueueGraphemes = Math.max(
 		1,
 		Math.floor(positiveFinite(options.maxQueueGraphemes, DEFAULT_MAX_QUEUE_GRAPHEMES)),
@@ -219,11 +216,12 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 	let queue: QueueItem[] = [];
 	let queuedGraphemes = 0;
 	let queuedBytes = 0;
-	let credit = 0;
-	let lastTickAt = now();
 	let lastSequence = -Infinity;
 	let activeGeneration: StreamPacerGeneration | null = null;
-	let emittedInEpoch = false;
+	/** The next delta landed on an empty queue, so it owes the screen no wait. */
+	let releaseAtOnce = true;
+	let lastBurstAt: number | null = null;
+	let burstCadenceMs = 0;
 
 	const pacingAllowed = (): boolean => mode === "on" || (mode === "auto" && (options.isAutoPacingAllowed?.() ?? false));
 
@@ -243,8 +241,8 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 		if (disposed || timer !== null || queue.length === 0 || !pacingAllowed()) return;
 		const capturedEpoch = epoch;
 		const capturedTimerToken = ++timerToken;
-		const untilDeadline = Math.max(0, maxOldestAgeMs - oldestAge(now()));
-		const delay = !emittedInEpoch && firstSliceGraphemes > 0 ? 0 : Math.min(tickMs, untilDeadline);
+		const untilDeadline = Math.max(0, spreadWindowMs() - oldestAge(now()));
+		const delay = releaseAtOnce && firstSliceGraphemes > 0 ? 0 : Math.min(tickMs, untilDeadline);
 		timer = setTimer(() => {
 			if (disposed || capturedEpoch !== epoch || capturedTimerToken !== timerToken) return;
 			timer = null;
@@ -252,38 +250,57 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 				flush("auto-bypass");
 				return;
 			}
-			if (!emittedInEpoch && firstSliceGraphemes > 0) {
-				const first = dequeueInternal(firstSliceGraphemes, "first");
-				if (first && first.reason !== "folded") credit = Math.max(0, credit - first.graphemes);
+			if (releaseAtOnce && firstSliceGraphemes > 0) {
+				releaseAtOnce = false;
+				// Deltas read from one network chunk are one arrival and share the release.
+				for (let budget = firstSliceGraphemes; budget > 0 && queue.length > 0; ) {
+					const first = dequeueInternal(budget, "first");
+					if (!first) break;
+					if (first.reason !== "folded") budget -= first.graphemes;
+				}
 				consumeFoldedHeads();
 				schedule();
 				return;
 			}
 			const tickAt = now();
-			const elapsedMs = Math.min(maxElapsedMs, Math.max(0, tickAt - lastTickAt));
-			lastTickAt = tickAt;
-			const catchUpRate = queuedGraphemes * (1_000 / catchUpWindowMs);
-			credit += (elapsedMs / 1_000) * (baseRate + catchUpRate);
+			const window = spreadWindowMs();
 
 			// Every overdue item is settled now. Per-slice limits remain intact, so
 			// mutation consumers never receive an unexpectedly giant visible chunk.
-			while (queue[0] && oldestAge(tickAt) >= maxOldestAgeMs) {
+			while (queue[0] && oldestAge(tickAt) >= window) {
 				const head = queue[0];
 				if (!head) break;
 				const before = head.offset;
-				const overdue = dequeueInternal(maxSliceGraphemes, "deadline");
-				if (overdue && overdue.reason !== "folded") credit = Math.max(0, credit - overdue.graphemes);
+				dequeueInternal(maxSliceGraphemes, "deadline");
 				if (queue[0] === head && head.offset === before) break;
 			}
 
-			const budget = Math.min(maxSliceGraphemes, Math.floor(credit));
-			if (budget > 0 && queue.length > 0) {
+			// Whatever is left shares the ticks remaining before its deadline, so a
+			// burst lands as even steps and never as a trickle and then a dump.
+			const ticksLeft = Math.max(1, Math.ceil((window - oldestAge(tickAt)) / tickMs));
+			let budget = Math.ceil(queuedGraphemes / ticksLeft);
+			while (budget > 0 && queue.length > 0) {
 				const slice = dequeueInternal(budget, "tick");
-				if (slice && slice.reason !== "folded") credit = Math.max(0, credit - slice.graphemes);
+				if (!slice) break;
+				if (slice.reason !== "folded") budget -= slice.graphemes;
 			}
 			consumeFoldedHeads();
 			schedule();
 		}, delay);
+	};
+
+	/**
+	 * A provider that sends a block every 200 ms leaves 200 ms for its block to
+	 * land in, so spreading over less only trades one stall for a shorter burst.
+	 */
+	const spreadWindowMs = (): number => Math.min(maxBurstSpreadMs, Math.max(maxOldestAgeMs, burstCadenceMs));
+
+	const noteArrival = (at: number): void => {
+		const gap = lastBurstAt === null ? null : at - lastBurstAt;
+		// Deltas read from one network chunk arrive inside a tick and are one burst.
+		if (gap !== null && gap <= tickMs) return;
+		lastBurstAt = at;
+		if (gap !== null) burstCadenceMs += (gap - burstCadenceMs) * CADENCE_WEIGHT;
 	};
 
 	const dequeueInternal = (requestedGraphemes: number, reason: StreamPacerSliceReason): StreamPacerSlice | null => {
@@ -322,7 +339,7 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 		if (finalForItem) queue.shift();
 		if (queue.length === 0) {
 			activeGeneration = null;
-			credit = 0;
+			releaseAtOnce = true;
 		}
 
 		const slice: StreamPacerSlice = {
@@ -339,7 +356,6 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 			remainingGraphemes: head.graphemes.length - head.offset,
 			finalForItem,
 		};
-		emittedInEpoch = true;
 		options.onSlice(slice);
 		return slice;
 	};
@@ -387,11 +403,9 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 		queue = [];
 		queuedGraphemes = 0;
 		queuedBytes = 0;
-		credit = 0;
 		activeGeneration = null;
 		epoch += 1;
-		emittedInEpoch = false;
-		lastTickAt = now();
+		releaseAtOnce = true;
 		return drainDetached(detached, reason);
 	};
 
@@ -456,16 +470,15 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 			};
 			lastSequence = admission.sequence;
 			activeGeneration = admission.generation;
-			if (queueWasEmpty) lastTickAt = now();
+			noteArrival(item.ingressAt);
+			// A tick already scheduled must not outlast the promise made to this delta.
+			if (queueWasEmpty) cancelTimer();
 			queue.push(item);
 			queuedGraphemes += graphemes.length;
 			queuedBytes += itemBytes;
-			if (!item.folded) credit += graphemes.length * arrivalCreditRatio;
 
 			while (queuedGraphemes > maxQueueGraphemes || queuedBytes > maxQueueBytes) {
-				const capacitySlice = dequeueInternal(maxSliceGraphemes, "capacity");
-				if (!capacitySlice) break;
-				if (capacitySlice.reason !== "folded") credit = Math.max(0, credit - capacitySlice.graphemes);
+				if (!dequeueInternal(maxSliceGraphemes, "capacity")) break;
 			}
 			if (queue.length === 0) cancelTimer();
 			else schedule();
@@ -474,7 +487,6 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 		dequeue(maxGraphemes = maxSliceGraphemes, reason = "tick") {
 			if (disposed) return null;
 			const slice = dequeueInternal(Math.max(1, Math.floor(maxGraphemes)), reason);
-			if (slice && slice.reason !== "folded") credit = Math.max(0, credit - slice.graphemes);
 			consumeFoldedHeads();
 			if (queue.length === 0) cancelTimer();
 			return slice;
@@ -486,11 +498,9 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 			queue = [];
 			queuedGraphemes = 0;
 			queuedBytes = 0;
-			credit = 0;
 			activeGeneration = null;
 			epoch += 1;
-			emittedInEpoch = false;
-			lastTickAt = now();
+			releaseAtOnce = true;
 			return epoch;
 		},
 		setMode(nextMode) {
@@ -512,7 +522,6 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 				queuedGraphemes,
 				queuedBytes,
 				oldestAgeMs: oldestAge(now()),
-				credit,
 				timerPending: timer !== null,
 				disposed,
 			};
@@ -524,11 +533,9 @@ export function createStreamPacer(options: StreamPacerOptions): StreamPacer {
 			queue = [];
 			queuedGraphemes = 0;
 			queuedBytes = 0;
-			credit = 0;
 			activeGeneration = null;
 			epoch += 1;
-			emittedInEpoch = false;
-			lastTickAt = now();
+			releaseAtOnce = true;
 			disposed = true;
 			return drainDetached(detached, reason);
 		},
