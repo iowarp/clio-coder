@@ -1009,6 +1009,15 @@ export interface RunTableOptions {
 	inspectFinished?: boolean;
 }
 
+/**
+ * A token figure for a table cell. The read model's coverage clause, `unknown (2 calls unknown)`, is
+ * longer than the row can spare, and it cost a 120-column table its cost column; the run's record has it.
+ */
+function tableFigure(display: string): string {
+	const figure = display.replace(/ \(.*\)$/u, "");
+	return figure === "unknown" ? "?" : figure;
+}
+
 const USAGE_SHORT: Readonly<Record<string, string>> = { "not available": "n/a" };
 export const USAGE_NOT_MEASURED = "not measured";
 export const USAGE_NO_CALLS = "no calls yet";
@@ -1131,7 +1140,9 @@ export function runTableRows(
 			row.telemetry?.activity.elapsed.display ?? (row.status === "enqueued" ? "" : formatCompactMs(row.elapsedMs));
 		const pending = row.usage.kind !== "ready";
 		const figure = (glyph: string, text: string): TableCell =>
-			pending ? { text: USAGE_SHORT[text] ?? text, tone: "muted" } : { text: glyph ? `${glyph} ${text}` : text };
+			pending
+				? { text: USAGE_SHORT[text] ?? text, tone: "muted" }
+				: { text: glyph ? `${glyph} ${tableFigure(text)}` : text };
 		const cells: Array<string | TableCell> = [];
 		if (cursor) cells.push(selected ? theme.fg("selectedOption", GLYPH.cursor) : " ");
 		cells.push(
