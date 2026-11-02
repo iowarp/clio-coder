@@ -13,6 +13,7 @@ import {
 	writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { ensureProjectIgnore } from "../../../core/project-root.js";
 import type { ContextActivityPayload } from "../../../core/telemetry/live-events.js";
 import type { DecisionLedgerEntry } from "../../session/entries.js";
 import { detectProjectType } from "../../session/workspace/project-type.js";
@@ -213,6 +214,7 @@ type WikiLock = { ok: true; release: () => void } | { ok: false; problem: string
  */
 function acquireWikiLock(cwd: string): WikiLock {
 	const dir = clioDir(cwd);
+	ensureProjectIgnore(cwd);
 	mkdirSync(dir, { recursive: true });
 	const lockPath = join(dir, WIKI_LOCK_FILE);
 	const release = (): void => {

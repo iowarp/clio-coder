@@ -5,6 +5,7 @@ import { dirname, join, parse, relative, resolve } from "node:path";
 import { readCiRunCommands } from "../../core/ci-commands.js";
 import type { ContextOperationFact } from "../../core/context-operation.js";
 import { internalGitArgv } from "../../core/internal-git.js";
+import { ensureProjectIgnore } from "../../core/project-root.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ContextActivityPayload } from "../../core/telemetry/live-events.js";
@@ -151,7 +152,6 @@ export interface RunBootstrapInput {
 	io?: BootstrapIo;
 	modelId?: string;
 	now?: () => Date;
-	confirmGitignore?: () => boolean | Promise<boolean>;
 	preview?: boolean;
 	adopt?: boolean;
 	applyClioMd?: boolean;
@@ -165,8 +165,6 @@ export interface RunBootstrapInput {
 }
 
 export interface RunBootstrapResult {
-	/** Present only after this run successfully wrote .gitignore. */
-	gitignoreChange?: "created" | "updated";
 	clioMdPath: string;
 	statePath: string;
 	siblingFiles: ReadonlyArray<SiblingContextFile>;
@@ -1328,27 +1326,11 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	return [
 		`clio-coder context init ${summary.action} CLIO-CODER.md`,
 		`  ${contextLine}; codemap reconciled ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
-		"  git policy: .clio-coder/ stays ignored by default; CLIO-CODER.md is human-owned and can be tracked in Git. Force-add .clio-coder assets only when you explicitly intend to share them.",
+		"  git policy: CLIO-CODER.md and what you author under .clio-coder/ can be committed; .clio-coder/.gitignore keeps generated files and *.local.yaml out of Git.",
 		...(proposalLine ? [proposalLine] : []),
 		...(adoptionLine ? [adoptionLine] : []),
 		"",
 	].join("\n");
-}
-
-const CLIO_GITIGNORE_LINE = ".clio-coder/";
-const CLIO_GITIGNORE_DYNAMIC_LINES = new Set<string>([
-	".clio-coder/codemap.json",
-	".clio-coder/codewiki.json",
-	".clio-coder/state.json",
-	".clio-coder/handoffs/",
-]);
-
-function normalizedGitignoreLines(content: string): string[] {
-	return content.split(/\r?\n/).map((line) => line.trim());
-}
-
-function hasBlanketClioIgnore(content: string): boolean {
-	return normalizedGitignoreLines(content).some(isBlanketClioIgnoreLine);
 }
 
 function isBlanketClioIgnoreLine(line: string): boolean {
@@ -1356,62 +1338,24 @@ function isBlanketClioIgnoreLine(line: string): boolean {
 	return /^(?:\/|\*\*\/)?\.clio-coder(?:\/|\/\*|\/\*\*)?$/.test(line);
 }
 
-function hasDynamicOnlyClioIgnore(content: string): boolean {
-	const lines = new Set(normalizedGitignoreLines(content));
-	for (const line of CLIO_GITIGNORE_DYNAMIC_LINES) {
-		if (!lines.has(line)) return false;
-	}
-	return true;
-}
-
-function migrateClioGitignore(content: string): string {
-	const lines = content.split(/\r?\n/);
-	const kept = lines.filter((line) => {
-		const trimmed = line.trim();
-		return !isBlanketClioIgnoreLine(trimmed) && !CLIO_GITIGNORE_DYNAMIC_LINES.has(trimmed);
-	});
-	while (kept.length > 0 && kept[kept.length - 1]?.trim() === "") kept.pop();
-	const prefix = kept.length > 0 ? [...kept, ""] : [];
-	return `${[...prefix, CLIO_GITIGNORE_LINE].join("\n")}\n`;
-}
-
-async function ensureGitignore(cwd: string, input: RunBootstrapInput): Promise<"created" | "updated" | undefined> {
-	const gitignorePath = join(cwd, ".gitignore");
-	let content = "";
+/**
+ * Clio's own `.clio-coder/.gitignore` keeps generated files out of Git, and it
+ * never edits the project's file. A blanket rule there, which earlier versions
+ * of `context init` wrote, is the operator's to remove, so it is only named: Git
+ * does not descend into an excluded parent, so authored files cannot be shared.
+ */
+function warnOfBlanketClioIgnore(cwd: string, io: BootstrapIo | undefined): void {
+	let content: string;
 	try {
-		content = readFileSync(gitignorePath, "utf8");
+		content = readFileSync(join(cwd, ".gitignore"), "utf8");
 	} catch {
-		content = "";
-	}
-	if (hasBlanketClioIgnore(content)) {
-		if (hasDynamicOnlyClioIgnore(content)) {
-			writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
-			out(input.io, `  .gitignore: updated '${CLIO_GITIGNORE_LINE}' rule\n`);
-			return "updated";
-		}
 		return;
 	}
-	if (hasDynamicOnlyClioIgnore(content)) {
-		writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
-		out(input.io, `  .gitignore: updated '${CLIO_GITIGNORE_LINE}' rule\n`);
-		return "updated";
-	}
-	const confirmed = input.confirmGitignore ? await input.confirmGitignore() : false;
-	input.signal?.throwIfAborted();
-	if (!confirmed) {
-		// The remedy is one flag away and the warning used to name neither it
-		// nor the line, leaving the operator to guess the pattern Clio writes.
-		warn(
-			input.io,
-			"clio-coder context init: .gitignore does not ignore .clio-coder/; local context, skills, agents, and handoffs may leak into commits.\n" +
-				`  rerun with --yes to append '${CLIO_GITIGNORE_LINE}' to .gitignore without prompting, or add that line yourself.\n`,
-		);
-		return;
-	}
-	const existed = existsSync(gitignorePath);
-	writeFileSync(gitignorePath, migrateClioGitignore(content), "utf8");
-	out(input.io, `  .gitignore: added '${CLIO_GITIGNORE_LINE}'\n`);
-	return existed ? "updated" : "created";
+	if (!content.split(/\r?\n/).some((line) => isBlanketClioIgnoreLine(line.trim()))) return;
+	out(
+		io,
+		"  .gitignore ignores all of .clio-coder/, so settings, skills and rules there cannot be committed; remove that line to share them\n",
+	);
 }
 
 function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
@@ -1444,6 +1388,7 @@ function writeClioMdProposal(
 	existingSource: string | null,
 ): string {
 	const dir = join(cwd, ".clio-coder", "proposals");
+	ensureProjectIgnore(cwd);
 	mkdirSync(dir, { recursive: true });
 	const proposalPath = join(dir, `CLIO-CODER-${timestampForPath(now)}-${randomUUID()}.md`);
 	const serialized = serializeBootstrapOutput(output);
@@ -1653,7 +1598,6 @@ async function runBootstrapWork(
 	// Index the repository before generation so the generator can ground CLIO-CODER.md
 	// in the real structure (entry points, key modules), not just sibling prose.
 	progress(input, { phase: "codewiki", status: "started", message: "reconciling codemap index" });
-	let gitignoreChange: RunBootstrapResult["gitignoreChange"];
 	let codewiki: Codewiki;
 	let codewikiFingerprint: Fingerprint;
 	if (input.preview === true) {
@@ -1674,8 +1618,7 @@ async function runBootstrapWork(
 				onProgress: indexProgressSink(input.onProgress),
 				...(input.signal ? { signal: input.signal } : {}),
 				beforeCommit: async (_result, workspace) => {
-					gitignoreChange = await ensureGitignore(workspace, input);
-					if (gitignoreChange) committed.push({ kind: gitignoreChange, unit: "paths", count: 1, paths: [".gitignore"] });
+					warnOfBlanketClioIgnore(workspace, input.io);
 				},
 				afterCommit: ({ codewiki: indexed, fingerprint }, workspace) => {
 					persistCodewikiForGeneration(workspace, projectType, indexedAt, indexed, fingerprint);
@@ -1987,7 +1930,6 @@ async function runBootstrapWork(
 		message: `${summary.action} CLIO-CODER.md; ${summary.dirtyFiles} dirty file${summary.dirtyFiles === 1 ? "" : "s"}; project instructions: ${preload.label}`,
 	});
 	return {
-		...(gitignoreChange ? { gitignoreChange } : {}),
 		clioMdPath,
 		statePath,
 		siblingFiles,

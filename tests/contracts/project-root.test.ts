@@ -1,12 +1,14 @@
-import { strictEqual } from "node:assert/strict";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { clioProjectRoot } from "../../src/core/project-root.js";
+import { clioProjectRoot, ensureProjectIgnore } from "../../src/core/project-root.js";
 import { readLayeredSettings } from "../../src/core/settings-layers.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
 import { loadProjectRules, selectActiveRules } from "../../src/domains/context/project-rules.js";
+import { fdIgnoreArgs, rgIgnoreArgs } from "../../src/tools/ignore-policy.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 /** A repository with its `.git` marker as a file, the shape of a worktree, which the temp-root git guard allows. */
@@ -50,6 +52,45 @@ test("a rule's paths stay rooted at the directory holding the rule", async (t) =
 		"a path under the session's cwd is under the rule's",
 	);
 	strictEqual(selectActiveRules(loadProjectRules(repo).rules, ["src/index.ts"]).length, 0);
+});
+
+test("the project ignore file shows Git what an operator authors and nothing else", async (t) => {
+	const env = await isolateClioEnv("project-root-");
+	t.after(() => env.restore());
+	const repo = join(env.dir, "repo");
+	mkdirSync(repo);
+	const git = (...args: string[]) => spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+	strictEqual(git("init", "--quiet").status, 0);
+	ensureProjectIgnore(repo);
+	const write = (entry: string) => {
+		const file = join(repo, ".clio-coder", entry);
+		mkdirSync(join(file, ".."), { recursive: true });
+		writeFileSync(file, "x\n");
+	};
+	for (const generated of ["runs/1/stdout.log", "codemap.json", "state.json", "exports/a.html", "some-new-thing.json"])
+		write(generated);
+	strictEqual(git("status", "--porcelain", "--untracked-files=all").stdout, "", "generated files are invisible");
+
+	const authored = ["agents/a.md", "mcp.yaml", "rules/deep/r.md", "safety.yaml", "settings.yaml", "skills/s/SKILL.md"];
+	for (const entry of [...authored, "settings.local.yaml", "rules/x.local.yaml"]) write(entry);
+	deepStrictEqual(
+		git("status", "--porcelain", "--untracked-files=all")
+			.stdout.trim()
+			.split("\n")
+			.map((line) => line.slice(3).replace(".clio-coder/", ""))
+			.sort(),
+		authored,
+	);
+
+	// The ignore file hides these from Git, not from a search that asked for them.
+	for (const args of [rgIgnoreArgs, fdIgnoreArgs]) {
+		strictEqual(args(join(repo, ".clio-coder", "runs"), false).includes("--no-ignore"), true);
+		strictEqual(args(repo, false).includes("--no-ignore"), false);
+	}
+
+	writeFileSync(join(repo, ".clio-coder", ".gitignore"), "# mine\n");
+	ensureProjectIgnore(repo);
+	strictEqual(readFileSync(join(repo, ".clio-coder", ".gitignore"), "utf8"), "# mine\n", "an existing file is kept");
 });
 
 test("outside a repository only the working directory counts", async (t) => {

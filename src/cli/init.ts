@@ -1,5 +1,3 @@
-import { stdin as input, stdout as output } from "node:process";
-import { createInterface } from "node:readline/promises";
 import { formatContextOperationResult } from "../core/context-operation.js";
 import { runBootstrap } from "../domains/context/index.js";
 import {
@@ -14,7 +12,7 @@ import { modelBootstrapGenerate } from "./bootstrap-generate.js";
 import { createContextCliOperation, createContextCliProgress } from "./context-progress.js";
 
 const HELP = `Usage:
-  clio-coder context init [--preview] [--heuristic] [--yes] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
+  clio-coder context init [--preview] [--heuristic] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
                     [--depth quick|standard|deep] [--target <id> [--model <id>] [--thinking <level>]]
 
 Explore the repository and bootstrap the project context in one pass: CLIO-CODER.md,
@@ -33,7 +31,6 @@ Options:
   --apply          replace an existing CLIO-CODER.md with a draft grounded in the existing handbook
   --rewrite        replace an existing CLIO-CODER.md with a fresh draft that ignores it as source
   --json           emit one machine-readable result object on stdout
-  --yes, -y        update .gitignore without prompting
   --depth <level>  bounded exploration: quick (8 calls, 2m), standard (16 calls, 4m), deep (32 calls, 8m)
   --target <id>    override the configured bootstrap target for this noninteractive run
   --model <id>     override the bootstrap wire model (requires --target)
@@ -60,7 +57,7 @@ function parseContextInitArgs(args: ReadonlyArray<string>): {
 	const thinkingLevels = new Set<ThinkingLevel>(VALID_THINKING_LEVELS);
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index] as string;
-		if (arg === "--help" || arg === "-h" || arg === "--yes" || arg === "-y") continue;
+		if (arg === "--help" || arg === "-h") continue;
 		if (arg === "--json") {
 			json = true;
 			continue;
@@ -107,24 +104,11 @@ interface InitPhaseTiming {
 	completedMs?: number;
 }
 
-async function confirmGitignore(assumeYes: boolean): Promise<boolean> {
-	if (assumeYes) return true;
-	if (!input.isTTY) return false;
-	const rl = createInterface({ input, output });
-	try {
-		const answer = await rl.question("Update .gitignore for Clio context artifacts? [y/N] ");
-		return answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
-	} finally {
-		rl.close();
-	}
-}
-
 export async function runInitCommand(args: string[]): Promise<number> {
 	if (hasFlag(args, "--help") || hasFlag(args, "-h")) {
 		process.stdout.write(HELP);
 		return 0;
 	}
-	const assumeYes = hasFlag(args, "--yes") || hasFlag(args, "-y");
 	const parsed = parseContextInitArgs(args);
 	if (parsed.error) {
 		process.stderr.write(`clio-coder context init: ${parsed.error}\n`);
@@ -165,7 +149,6 @@ export async function runInitCommand(args: string[]): Promise<number> {
 				if (event.status === "started") phaseTimings.set(event.phase, { startedAt: now });
 				else if (event.status === "completed" && timing) timing.completedMs = Math.max(0, now - timing.startedAt);
 			},
-			confirmGitignore: () => confirmGitignore(assumeYes),
 			...bootstrapOptions,
 			...(useModel
 				? {

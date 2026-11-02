@@ -357,7 +357,6 @@ test("finishing bootstrap retains a concurrent index snapshot and records separa
 		let latest = "";
 		await runBootstrap({
 			cwd: env.dir,
-			confirmGitignore: () => true,
 			generate: async (input) => {
 				generatedFrom = readClioState(env.dir)?.fingerprint.treeHash ?? "";
 				writeFileSync(join(env.dir, "a.ts"), "export const after = 2;\n");

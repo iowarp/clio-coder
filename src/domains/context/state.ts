@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ensureProjectIgnore } from "../../core/project-root.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionProvider, AdoptionScope, AdoptionSourceKind, AdoptionSourceSnapshot } from "./adoption.js";
@@ -252,5 +253,6 @@ export function writeClioState(cwd: string, state: ClioProjectState, codewiki?: 
 	const next = { ...state };
 	if (orientation?.treeHash === state.fingerprint.treeHash) next.orientation = orientation;
 	else delete next.orientation;
+	ensureProjectIgnore(cwd);
 	safeResourceWrite(statePath(cwd), `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8" });
 }

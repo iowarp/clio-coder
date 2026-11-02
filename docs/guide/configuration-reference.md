@@ -464,7 +464,7 @@ Run `clio-coder context <subcommand> --help` for the installed usage. The subcom
 |---|---|
 | `--help`, `-h` | Print the command's usage and exit. |
 | `--all` | For `context reset`, also remove the local CLIO-CODER.md after a second confirmation; override files stay human-owned. |
-| `--yes`, `-y` | For `context reset`, answer the confirmations without prompting; without a terminal the reset needs it. For `context init`, update `.gitignore` without prompting. |
+| `--yes`, `-y` | For `context reset`, answer the confirmations without prompting; without a terminal the reset needs it. |
 | `--preview` | For `context init`, show the plan without writing any files. |
 | `--heuristic` | For `context init`, skip model exploration and use the deterministic generator. |
 | `--adopt` | For `context init`, refresh only the managed imported-agent-context section. |

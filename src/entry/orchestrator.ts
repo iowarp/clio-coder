@@ -23,6 +23,7 @@ import { HEADLESS_PERMISSION_DENIED_REASON } from "../core/headless-permission.j
 import { installInternalGitPolicy } from "../core/internal-git.js";
 import type { SideCallAuth } from "../core/oauth-retry.js";
 import { flushPackageActivities, recordPackageActivity } from "../core/package-activity.js";
+import { ensureProjectIgnore } from "../core/project-root.js";
 import { pruneProviderCheckpoints } from "../core/provider-checkpoint.js";
 import { providerCheckpointFromMessage } from "../core/provider-checkpoint-handle.js";
 import { hostFramedTexts } from "../core/reminder-framing.js";
@@ -2078,6 +2079,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		const { convertWorkspaceOnce, describeConversion } = await import("../domains/lifecycle/canonical-names.js");
 		const converted = convertWorkspaceOnce(process.cwd());
 		if (converted) bootConversions.push(describeConversion(converted, "this workspace"));
+		// A `.clio-coder/` from before Clio wrote its own ignore file gets one on the next open.
+		if (existsSync(join(process.cwd(), ".clio-coder"))) ensureProjectIgnore(process.cwd());
 	}
 	// The leased TUI turns boot diagnostics into transcript notices. Without a
 	// lease (instant shell off) stderr would print before the first frame, so
@@ -5053,7 +5056,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		return contextDomain.runBootstrap({
 			cwd: process.cwd(),
 			...(runIo ? { io: runIo } : {}),
-			confirmGitignore: () => true,
 			adopt: options.adopt === true,
 			...bootstrapOptions,
 			...(useModel

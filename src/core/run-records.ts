@@ -18,6 +18,7 @@ import {
 import { open } from "node:fs/promises";
 import path from "node:path";
 import { canonicalizePath } from "./path-canonical.js";
+import { ensureProjectIgnore } from "./project-root.js";
 
 /**
  * Run records: the durable provenance a `run_script` execution leaves behind.
@@ -209,6 +210,7 @@ export function createRunRecord(workspaceRoot: string, runId: string = newRunId(
 	if (!landing.inside) throw new Error(`${landing.reason}; no record written`);
 	const dir = path.join(runRecordsDir(workspaceRoot), runId);
 	if (existsSync(dir)) throw new Error(`run record already exists: ${dir}`);
+	ensureProjectIgnore(workspaceRoot);
 	mkdirSync(dir, { recursive: true });
 	const realDir = path.resolve(realpathSync(dir));
 	const stat = lstatSync(dir);

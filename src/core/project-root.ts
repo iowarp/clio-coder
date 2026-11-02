@@ -1,6 +1,7 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { safeResourceWrite } from "./safe-resource-write.js";
 
 function physical(path: string): string {
 	try {
@@ -46,4 +47,49 @@ export function clioProjectRoot(cwd: string, ...entries: ReadonlyArray<string>):
 		if (entries.some((entry) => existsSync(join(dir, ".clio-coder", entry)))) return dir;
 	}
 	return dirs.at(-1) ?? resolve(cwd);
+}
+
+/**
+ * What an operator authors under `.clio-coder/`. An allow-list, so a generated
+ * path added later stays out of Git by default, and the file ignores itself, so
+ * a project with only generated files shows nothing in `git status`. The rule is
+ * anchored as `/*` and never `*`: ripgrep and fd apply parent ignore files to the
+ * paths below their search root, so `*` would hide `wiki/` from a reader already
+ * inside it, which `/*` cannot match.
+ */
+const PROJECT_IGNORE = `# Written by clio-coder. Generated files stay out of Git; what you author here can be committed.
+/*
+!/settings.yaml
+!/safety.yaml
+!/hooks.yaml
+!/mcp.yaml
+!/verifiers.yaml
+!/profile.yaml
+!/library.yaml
+!/rules/
+!/agents/
+!/skills/
+!/prompts/
+!/playbooks/
+!/extensions/
+!/plugins/
+!/model-catalog.d/
+*.local.yaml
+`;
+
+/**
+ * Keep generated files under `<cwd>/.clio-coder/` out of Git without touching the
+ * project's own `.gitignore`. Every generated writer calls this, and it never
+ * replaces a file the operator may have edited. A failure only leaves generated
+ * files visible to Git, which is no reason to fail the write that asked.
+ */
+export function ensureProjectIgnore(cwd: string): void {
+	const dir = join(cwd, ".clio-coder");
+	const file = join(dir, ".gitignore");
+	try {
+		if (existsSync(file) || (existsSync(dir) && lstatSync(dir).isSymbolicLink())) return;
+		safeResourceWrite(file, PROJECT_IGNORE, { encoding: "utf8" });
+	} catch {
+		// See the doc comment: this is hygiene, and the caller's write still decides the outcome.
+	}
 }

@@ -31,7 +31,6 @@ it("warns when the generated handbook is ignored without changing its ignore rul
 		let output = "";
 		const result = await runBootstrap({
 			cwd,
-			confirmGitignore: () => true,
 			io: {
 				stdout: (text) => {
 					output += text;
@@ -46,9 +45,13 @@ it("warns when the generated handbook is ignored without changing its ignore rul
 		assert.match(output, /!CLIO-CODER.md/u);
 		assert.match(output, /project instructions: all \d+ lines loaded/u);
 		assert.doesNotMatch(output, /UTF-16|model tool support not checked/u);
-		assert.match(output, /\.gitignore: added '\.clio-coder\/'/u);
 		assert.match(output, /matching handbook ignore rule was left unchanged/u);
-		assert.equal(readFileSync(join(cwd, ".gitignore"), "utf8"), `${ignore}\n.clio-coder/\n`);
+		assert.equal(readFileSync(join(cwd, ".gitignore"), "utf8"), ignore, "the project's own file is never edited");
+		assert.equal(
+			(await runCommandVector("git", ["status", "--porcelain", "--", ".clio-coder"], { cwd, workspaceRoot: cwd })).stdout,
+			"",
+			"generated files stay out of git status",
+		);
 	} finally {
 		await isolated.restore();
 	}

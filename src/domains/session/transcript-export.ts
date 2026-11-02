@@ -12,6 +12,7 @@
 
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { assistantModelLabel } from "../../core/assistant-model.js";
+import { ensureProjectIgnore } from "../../core/project-root.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { displayToolCall } from "../../tools/gateway-display.js";
 import { expandChainMessages } from "../../tools/surface.js";
@@ -304,6 +305,7 @@ export function writeTranscriptExport(input: {
 	const rendered = target.toLowerCase().endsWith(".md")
 		? renderTranscriptMarkdown(source)
 		: renderTranscriptHtml(source);
+	if (requested.length === 0) ensureProjectIgnore(input.cwd);
 	safeResourceWrite(target, rendered.text, { encoding: "utf8" });
 	const shown = relative(input.cwd, target);
 	return {

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { Type } from "typebox";
-import { artifactDefaultPath, CLIO_ARTIFACT_DIR } from "../core/artifact-paths.js";
+import { artifactDefaultPath, CLIO_ARTIFACT_DIR, CLIO_PROJECT_DIR } from "../core/artifact-paths.js";
+import { ensureProjectIgnore } from "../core/project-root.js";
 import { ToolNames } from "../core/tool-names.js";
 import { StringEnum } from "../engine/ai.js";
 import { type AtomicPublishResult, publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
@@ -68,6 +69,7 @@ async function writeTerminalArtifact(
 	const admitTarget = publishTargetAdmission("artifact", options?.hookLanding, options?.writeTargetViolation);
 	const title = typeof args.title === "string" ? args.title.trim() : "";
 	const body = title.length > 0 && !content.trimStart().startsWith("#") ? `# ${title}\n\n${content}` : content;
+	if (target.startsWith(`${path.join(cwd, CLIO_PROJECT_DIR)}${path.sep}`)) ensureProjectIgnore(cwd);
 	let published: AtomicPublishResult;
 	try {
 		published = await withFileMutationQueue(target, () =>

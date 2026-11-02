@@ -76,10 +76,18 @@ export function internalSearchExclusionNotice(searchPath: string): string {
 	return `\n[Internal directories ${excluded.join(", ")} are excluded from this search, even with include_ignored=true. No match does not prove a supplied file is absent. Search inside its explicit directory (for example path=".clio-coder/prototypes") or read the supplied exact file.]`;
 }
 
+/**
+ * `.clio-coder/.gitignore` keeps generated files out of Git, not out of reach: a
+ * search rooted in `.clio-coder` asked for exactly those files.
+ */
+function rootedInClioProjectDir(searchPath: string): boolean {
+	return toPosixPath(searchPath).split("/").includes(".clio-coder");
+}
+
 /** Ignore-policy argv fragment for ripgrep. */
 export function rgIgnoreArgs(searchPath: string, includeIgnored: boolean): string[] {
 	const args = ["--hidden"];
-	if (includeIgnored) args.push("--no-ignore");
+	if (includeIgnored || rootedInClioProjectDir(searchPath)) args.push("--no-ignore");
 	else if (!isInsideGitRepo(searchPath)) args.push("--no-require-git");
 	for (const dir of excludedDirsFor(searchPath, includeIgnored)) args.push("--glob", `!**/${dir}/**`);
 	return args;
@@ -88,7 +96,7 @@ export function rgIgnoreArgs(searchPath: string, includeIgnored: boolean): strin
 /** Ignore-policy argv fragment for fd. */
 export function fdIgnoreArgs(searchPath: string, includeIgnored: boolean): string[] {
 	const args = ["--hidden"];
-	if (includeIgnored) args.push("--no-ignore");
+	if (includeIgnored || rootedInClioProjectDir(searchPath)) args.push("--no-ignore");
 	else if (!isInsideGitRepo(searchPath)) args.push("--no-require-git");
 	for (const dir of excludedDirsFor(searchPath, includeIgnored)) args.push("--exclude", dir);
 	return args;

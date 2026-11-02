@@ -67,7 +67,7 @@ Usage:
   clio-coder config inspect [--json]  inspect effective customization and provenance
   clio-coder reset                recover or wipe Clio Coder state
   clio-coder context              show project context status (CLIO-CODER.md, preload, codemap)
-  clio-coder context init [--yes] [--preview|--heuristic]  explore the repo and bootstrap CLIO-CODER.md and codemap
+  clio-coder context init [--preview|--heuristic]  explore the repo and bootstrap CLIO-CODER.md and codemap
   clio-coder context refresh [--wiki]  re-index the codemap and optionally update the Markdown wiki
   clio-coder context wiki [--update] [--status] [--depth auto|simple|medium|detailed] [--target <id>] [--model <id>]
   clio-coder context reset [--all] [--yes]  clear accumulated project context artifacts

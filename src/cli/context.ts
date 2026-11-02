@@ -9,7 +9,7 @@ import { createContextCliOperation, createContextCliProgress } from "./context-p
 
 const HELP = `Usage:
   clio-coder context
-  clio-coder context init [--yes] [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
+  clio-coder context init [--preview|--heuristic] [--adopt] [--propose|--apply|--rewrite]
                          [--depth quick|standard|deep]
   clio-coder context refresh [--wiki]
   clio-coder context wiki [--update|--retry-pending] [--replan] [--status] [--depth auto|simple|medium|detailed]

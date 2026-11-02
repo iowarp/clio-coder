@@ -11,8 +11,6 @@ export function bootstrapOperationFacts(result: RunBootstrapResult): ContextOper
 	if (Number.isSafeInteger(summary.codewikiEntries) && summary.codewikiEntries >= 0)
 		facts.push({ kind: "indexed", unit: "source-files", count: summary.codewikiEntries });
 	if (summary.action === "previewed") return facts;
-	if (result.gitignoreChange)
-		facts.push({ kind: result.gitignoreChange, unit: "paths", count: 1, paths: [".gitignore"] });
 	facts.push({
 		kind:
 			summary.action === "wrote" || summary.action === "proposed"

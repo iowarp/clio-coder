@@ -5,7 +5,8 @@ The placement convention is that **the repo working tree holds files a human ask
 The `artifact` tool defaults to the project-local `.clio-coder/` directory; other
 harness stores use the project-local or XDG paths listed below. This convention
 does not constrain every file an admitted `write`, `bash`, or script call can create.
-`context init` can add the recommended blanket ignore for `.clio-coder/`.
+Clio writes `.clio-coder/.gitignore` itself, so generated files stay out of Git and
+what an operator authors there can be committed.
 
 This page is the contract. [artifact-paths.ts](../../src/core/artifact-paths.ts) is the code that
 implements the part of it the `artifact` tool owns, and [xdg.ts](../../src/core/xdg.ts) resolves the
@@ -193,32 +194,24 @@ After each run, `sweepRunRecords` keeps the newest 100 completed records by comp
 
 ## `.clio-coder/` and git
 
-`clio-coder context init` checks for a blanket `.clio-coder/` ignore. With
-confirmation, or with `--yes`, it appends `.clio-coder/` to `.gitignore` and prints
-`.gitignore: added '.clio-coder/'`; without confirmation it warns, names `--yes`, and
-leaves the file unchanged. A `.gitignore` that lists the four earlier narrow rules
-(`.clio-coder/codemap.json`, `.clio-coder/codewiki.json`, `.clio-coder/state.json` and
-`.clio-coder/handoffs/`) is rewritten to the single `.clio-coder/` rule without a
-prompt, and init prints `.gitignore: updated '.clio-coder/' rule`. If the written
-`CLIO-CODER.md` is itself ignored by Git, init warns and leaves that ignore rule alone. A project that has never
-accepted or authored that rule can therefore see generated local state in
-`git status`.
+Clio writes `.clio-coder/.gitignore` the first time it generates a file there, and
+at session start for a `.clio-coder/` without one (`ensureProjectIgnore` in
+`src/core/project-root.ts`). It ignores everything except `settings.yaml`, `safety.yaml`,
+`hooks.yaml`, `mcp.yaml`, `verifiers.yaml`, `profile.yaml`, `library.yaml`, `rules/`, `agents/`,
+`skills/`, `prompts/`, `playbooks/`, `extensions/`, `plugins/` and `model-catalog.d/`, and `*.local.yaml`
+stays ignored inside those too. An allow-list means a generated path added later stays
+out of Git by default. The file ignores itself, so a project with only generated files
+shows nothing in `git status`. Clio never replaces an existing copy, so an edit is kept.
+The `grep` and `find` tools ignore this file for a search rooted inside `.clio-coder/`, because
+it keeps generated files out of Git rather than out of reach.
+
+Clio never edits the project's own `.gitignore`. A blanket `.clio-coder/` rule there, which
+earlier versions of `context init` added, still wins, because Git does not descend into an
+excluded parent. `context init` names such a rule; remove the line to commit authored files.
 
 `clio-coder context reset` removes the accumulated context state
 (`.clio-coder/codemap.json`, `codewiki.json`, `state.json`, `handoffs/` and `proposals/`) and
 keeps `CLIO-CODER.md`, `CLIO-CODER.override.md`, `agents/`, `skills/` and `wiki/`.
-
-Some `.clio-coder/` content is authored rather than generated, and a project
-that wants it reviewed and shared commits exact files deliberately. With the
-blanket parent directory ignored, child negations alone are ineffective because
-Git does not descend into an excluded parent. Force-add an intentional asset,
-for example:
-
-```bash
-git add -f .clio-coder/playbooks/build-review.md
-git add -f .clio-coder/rules/backend.md
-git add -f .clio-coder/safety.yaml
-```
 
 Review the forced path before committing it.
 
