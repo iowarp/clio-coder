@@ -52,6 +52,9 @@ export function toneRole(tone: Tone): SemanticRole {
 /** Below this width labels stack above their values and a choice's consequence takes its own row. */
 export const NARROW_WIDTH = 48;
 
+/** Where an oversized token may fold: after a path, option or list separator. */
+const FOLD_AFTER = new Set(["/", "-", "_", ".", "=", ",", ";", ":", "&", "|"]);
+
 /** Clip to `width`, closing with the ellipsis when something was lost. */
 function clip(text: string, width: number): string {
 	const safe = Math.max(0, Math.floor(width));
@@ -319,16 +322,22 @@ export function tableRows(theme: ClioTheme, spec: TableSpec, width: number): str
 			if (last !== undefined) last.width = Math.max(1, last.width - excess);
 		}
 	}
-	const paintCell = (cell: TableCell, column: TableColumn, header: boolean): string => {
-		if (cell.text.includes("\u001b")) return cell.text;
-		if (header) return theme.style("groupHeading", cell.text, { bold: true });
-		return theme.fg(toneRole(cell.tone ?? column.tone ?? "neutral"), cell.text);
+	const paintCell = (text: string, cell: TableCell, column: TableColumn, header: boolean): string => {
+		if (text.includes("\u001b")) return text;
+		if (header) return theme.style("groupHeading", text, { bold: true });
+		return theme.fg(toneRole(cell.tone ?? column.tone ?? "neutral"), text);
 	};
 	const layoutRow = (cells: ReadonlyArray<string | TableCell>, header: boolean): string[] => {
 		const columnsRows = live.map((item) => {
 			const cell = cellOf(cells[item.index]);
-			const painted = paintCell(cell, item.column, header);
-			const rows = item.column.wrap === true && !header ? wrap(painted, item.width) : [clip(painted, item.width)];
+			// A wrapping cell folds plain text at separators before it is painted,
+			// so a model id breaks at a dash rather than wherever the row ends.
+			const rows =
+				item.column.wrap === true && !header
+					? cell.text.includes("\u001b")
+						? wrap(cell.text, item.width)
+						: foldPlain(cell.text, item.width).map((row) => paintCell(row, cell, item.column, false))
+					: [clip(paintCell(cell.text, cell, item.column, header), item.width)];
 			return rows.map((row) => {
 				const pad = Math.max(0, item.width - visibleWidth(row));
 				return item.column.align === "right" ? `${" ".repeat(pad)}${row}` : `${row}${" ".repeat(pad)}`;
@@ -500,9 +509,6 @@ export interface CommandBlockOptions {
 	/** Text role; near-white input text by default so the bytes read first. */
 	role?: SemanticRole;
 }
-
-/** Where an oversized token may fold: after a path, option or list separator. */
-const FOLD_AFTER = new Set(["/", "-", "_", ".", "=", ",", ";", ":", "&", "|"]);
 
 /**
  * Lay plain text out in `width` columns: words fill a row, and a word longer

@@ -376,6 +376,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 						inspectionHint(),
 						body.isShowingTerms() ? "open" : "closed",
 						body.isCardScrollable(),
+						body.isShowingChoices(),
 					),
 			});
 			if (!overlayTransitions.showPermission(handle)) {

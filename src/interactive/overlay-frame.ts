@@ -5,6 +5,8 @@ import {
 	type OverlayHandle,
 	type OverlayOptions,
 	type OverlayUnfocusOptions,
+	type SelectItem,
+	SelectList,
 	type SelectListTheme,
 	type TUI,
 	truncateToWidth,
@@ -19,6 +21,7 @@ import {
 	GLYPH,
 	padAnsi,
 	screenTitle,
+	selectionRow,
 	selectListTheme,
 	withThemeContext,
 } from "./theme/index.js";
@@ -54,6 +57,17 @@ export class FocusBox extends Box {
 	}
 	undoInput(): boolean {
 		return keyboardOwner(this.inputTarget).undoInput?.() ?? false;
+	}
+
+	/**
+	 * The frame's row budget, handed to every child that lays itself out from
+	 * it. A body behind a focus box used to be cut by the frame instead of
+	 * windowing itself, because the box, not the body, was what the frame saw.
+	 */
+	setBodyRows(rows: number): void {
+		for (const child of this.children) {
+			if (isRowBudgeted(child)) child.setBodyRows(rows);
+		}
 	}
 
 	handleInput(data: string): void {
@@ -198,6 +212,89 @@ export function createCachedBody(render: (width: number, rows: number) => string
 		invalidate(): void {
 			memo = null;
 		},
+	};
+}
+
+export interface ChoiceListItem {
+	value: string;
+	label: string;
+	/** What choosing this does, under the label on every row, so the decision reads whole. */
+	description?: string;
+}
+
+export interface ChoiceListOptions {
+	items: ReadonlyArray<ChoiceListItem>;
+	onSelect: (item: ChoiceListItem) => void;
+	onCancel: () => void;
+	/** Rows above the choices: the facts the decision rests on, built at the body's width. */
+	lead?: (width: number) => string[];
+	/** The row the cursor starts on. */
+	initialIndex?: number;
+}
+
+export interface ChoiceList extends Component {
+	/** The lead changed; the next render rebuilds it. */
+	touch(): void;
+	selected(): ChoiceListItem | null;
+}
+
+/**
+ * A few named choices with their consequences, the one way a small decision
+ * dialog is drawn. The engine's SelectList owns the keys (arrows, Enter, Esc)
+ * and this draws every row through `selectionRow`, label and description
+ * alike, so the context reset and the cwd fallback no longer carry their own
+ * column layouts that elided a consequence at 72 columns. Rows are memoized
+ * on width, cursor and skin.
+ */
+export function createChoiceList(options: ChoiceListOptions): ChoiceList {
+	const byValue = new Map(options.items.map((item) => [item.value, item]));
+	const list = new SelectList(
+		options.items.map((item): SelectItem => ({ value: item.value, label: item.label })),
+		Math.max(1, options.items.length),
+		DEFAULT_SELECT_THEME,
+	);
+	if (options.initialIndex !== undefined) list.setSelectedIndex(options.initialIndex);
+	list.onSelect = (item: SelectItem): void => {
+		const chosen = byValue.get(item.value);
+		if (chosen !== undefined) options.onSelect(chosen);
+	};
+	list.onCancel = (): void => options.onCancel();
+	let revision = 0;
+	let memo: { key: string; lines: string[] } | null = null;
+	const selected = (): ChoiceListItem | null => {
+		const current = list.getSelectedItem();
+		return current === null ? null : (byValue.get(current.value) ?? null);
+	};
+	return {
+		render(width: number): string[] {
+			const focused = selected()?.value ?? "";
+			const key = `${width}|${focused}|${revision}|${skinEpoch()}`;
+			if (memo?.key === key) return memo.lines;
+			const theme = clioTheme();
+			const lines = [...(options.lead?.(width) ?? [])];
+			if (lines.length > 0) lines.push("");
+			for (const item of options.items) {
+				lines.push(
+					...selectionRow(theme, {
+						focused: item.value === focused,
+						label: item.label,
+						...(item.description === undefined ? {} : { description: item.description }),
+						width,
+					}),
+				);
+			}
+			memo = { key, lines };
+			return lines;
+		},
+		handleInput: (data: string): void => list.handleInput(data),
+		invalidate(): void {
+			memo = null;
+			list.invalidate();
+		},
+		touch(): void {
+			revision += 1;
+		},
+		selected,
 	};
 }
 

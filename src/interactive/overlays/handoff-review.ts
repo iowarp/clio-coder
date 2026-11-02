@@ -9,22 +9,16 @@
  * round and nothing else.
  */
 
-import {
-	type Component,
-	isKeyRelease,
-	matchesKey,
-	type OverlayHandle,
-	type TUI,
-	wrapTextWithAnsi,
-} from "../../engine/tui.js";
-import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, rule } from "../theme/index.js";
+import { isKeyRelease, Markdown, matchesKey, type OverlayHandle, type TUI } from "../../engine/tui.js";
+import { buildResponsiveHint, createCachedBody, FocusBox, showClioOverlayFrame, windowRows } from "../overlay-frame.js";
+import { choiceRows, clioTheme, factRows, markdownTheme, positionRow, sectionRule } from "../theme/index.js";
+import { skinEpoch } from "../theme/tokens.js";
 
 export const HANDOFF_REVIEW_OVERLAY_TITLE = "Handoff review";
 
 const HANDOFF_REVIEW_MIN_WIDTH = 44;
 const HANDOFF_REVIEW_MAX_WIDTH = 100;
-/** Rows of document shown at once. Anything longer scrolls. */
+/** Rows of document shown at once when the frame has not said how many it has. */
 export const HANDOFF_REVIEW_VISIBLE_ROWS = 20;
 
 function handoffReviewOverlayWidth(columns: number): number {
@@ -53,79 +47,82 @@ export interface HandoffReviewOverlaySession extends OverlayHandle {
 	document(): string;
 }
 
+const CHOICES = [
+	{ key: "Enter", verb: "accept", consequence: "writes this handoff exactly as shown", tone: "action" },
+	{ key: "e", verb: "edit", consequence: "opens it in $EDITOR; what you save comes back here" },
+	{ key: "Esc", verb: "cancel", consequence: "writes nothing" },
+] as const;
+
 /**
- * Render the body. Pure so the layout is testable without a TUI: the goal, a
- * rule, then the scrolled document window.
+ * Render the body. Pure so the layout is testable without a TUI: the goal, the
+ * document as rendered Markdown windowed to `rows`, and the three keys with
+ * what each one does, pinned beneath. Zero rows means the frame has not said.
  */
-function formatHandoffReviewBody(goal: string, document: string, width: number, scroll: number): string[] {
+export function formatHandoffReviewBody(
+	goal: string,
+	document: string,
+	width: number,
+	scroll: number,
+	rows = 0,
+): { lines: string[]; maxScroll: number } {
 	const theme = clioTheme();
 	const contentWidth = Math.max(1, Math.floor(width));
-	const lines: string[] = [];
-	for (const line of wrapTextWithAnsi(theme.fg("annotation", `goal: ${goal}`), contentWidth)) lines.push(line);
-	lines.push(rule(theme, contentWidth));
-
-	const wrapped: string[] = [];
-	for (const raw of document.split("\n")) {
-		if (raw.length === 0) {
-			wrapped.push("");
-			continue;
-		}
-		for (const line of wrapTextWithAnsi(theme.fg("decisionExplanation", raw), contentWidth)) wrapped.push(line);
-	}
-	const maxScroll = Math.max(0, wrapped.length - HANDOFF_REVIEW_VISIBLE_ROWS);
-	const start = Math.max(0, Math.min(scroll, maxScroll));
-	const window = wrapped.slice(start, start + HANDOFF_REVIEW_VISIBLE_ROWS);
-	for (const line of window) lines.push(line);
-	if (wrapped.length > HANDOFF_REVIEW_VISIBLE_ROWS) {
-		lines.push(theme.fg("annotation", `(${start + 1}-${start + window.length} of ${wrapped.length} lines)`));
-	}
-	return lines;
-}
-
-class HandoffReviewBody implements Component {
-	scroll = 0;
-
-	constructor(
-		private readonly goal: string,
-		private text: string,
-	) {}
-
-	setDocument(next: string): void {
-		this.text = next;
-		this.scroll = 0;
-	}
-
-	document(): string {
-		return this.text;
-	}
-
-	lineCount(): number {
-		return this.text.split("\n").length;
-	}
-
-	render(width: number): string[] {
-		return formatHandoffReviewBody(this.goal, this.text, width, this.scroll);
-	}
-
-	invalidate(): void {}
+	const rendered = new Markdown(document, 0, 0, markdownTheme(theme))
+		.render(contentWidth)
+		.map((line) => theme.base("decisionExplanation", line));
+	const choices = choiceRows(theme, [...CHOICES], contentWidth);
+	const head = factRows(theme, [{ label: "goal", value: goal }], contentWidth);
+	const budget = rows > 0 ? Math.max(4, rows - head.length - 1 - choices.length) : HANDOFF_REVIEW_VISIBLE_ROWS;
+	const fits = rendered.length <= budget;
+	const pane = windowRows(rendered, scroll, fits ? budget : budget - 1);
+	const count = `${rendered.length} line${rendered.length === 1 ? "" : "s"}`;
+	return {
+		lines: [
+			...head,
+			sectionRule(theme, contentWidth, "Document", { meta: fits ? count : "" }),
+			...pane.window,
+			...(pane.position === null ? [] : [positionRow(theme, { ...pane.position, unit: "lines" }, contentWidth)]),
+			...choices,
+		],
+		maxScroll: pane.maxScroll,
+	};
 }
 
 export function openHandoffReviewOverlay(
 	tui: TUI,
 	options: OpenHandoffReviewOverlayOptions,
 ): HandoffReviewOverlaySession {
-	const body = new HandoffReviewBody(options.goal, options.document);
+	let text = options.document;
+	let scroll = 0;
+	let maxScroll = 0;
 	let settled = false;
+	// One Markdown render per (document, width, skin): the review is read for
+	// a while and the document changes only through the editor.
+	let memo: { key: string; lines: string[]; maxScroll: number } | null = null;
+	const body = createCachedBody((width, rows) => {
+		const key = `${width}|${rows}|${scroll}|${skinEpoch()}|${text}`;
+		if (memo?.key !== key) {
+			const built = formatHandoffReviewBody(options.goal, text, width, scroll, rows);
+			memo = { key, lines: built.lines, maxScroll: built.maxScroll };
+		}
+		maxScroll = memo.maxScroll;
+		return memo.lines;
+	});
 
 	const accept = (): void => {
 		if (settled) return;
 		settled = true;
-		options.onAccept(body.document());
+		options.onAccept(text);
 	};
 	const cancel = (): void => {
 		if (settled) return;
 		settled = true;
 		options.onCancel();
+	};
+	const scrollBy = (delta: number): void => {
+		scroll = Math.max(0, Math.min(maxScroll, scroll + delta));
+		body.touch();
+		tui.requestRender();
 	};
 
 	const focus = new FocusBox(body, {
@@ -135,13 +132,11 @@ export function openHandoffReviewOverlay(
 		onInput: (data: string): void => {
 			if (settled || isKeyRelease(data)) return;
 			if (matchesKey(data, "up")) {
-				body.scroll = Math.max(0, body.scroll - 1);
-				tui.requestRender();
+				scrollBy(-1);
 				return;
 			}
 			if (matchesKey(data, "down")) {
-				body.scroll = Math.min(body.lineCount(), body.scroll + 1);
-				tui.requestRender();
+				scrollBy(1);
 				return;
 			}
 			if (matchesKey(data, "enter")) {
@@ -153,8 +148,12 @@ export function openHandoffReviewOverlay(
 				return;
 			}
 			if (matchesKey(data, "e") || matchesKey(data, "shift+e")) {
-				const edited = options.onEdit(body.document());
-				if (edited !== null) body.setDocument(edited);
+				const edited = options.onEdit(text);
+				if (edited !== null) {
+					text = edited;
+					scroll = 0;
+					body.touch();
+				}
 				tui.requestRender(true);
 			}
 		},
@@ -165,19 +164,14 @@ export function openHandoffReviewOverlay(
 		width: handoffReviewOverlayWidth(options.columns),
 		markerId: "handoff-review",
 		title: HANDOFF_REVIEW_OVERLAY_TITLE,
-		footerHint: buildResponsiveHint(
-			[
-				{ key: "Enter", verb: "accept" },
-				{ key: "e", verb: "edit" },
-				{ key: "↑↓", verb: "scroll" },
-			],
-			{ key: "Esc", verb: "cancel" },
-		),
+		// The body's own rows name Enter, e and Esc with what they do; the rail
+		// carries only the key they do not.
+		footerHint: buildResponsiveHint([{ key: "↑↓", verb: "scroll" }], null),
 	});
 
 	return {
 		...handle,
-		document: () => body.document(),
+		document: () => text,
 		hide(): void {
 			cancel();
 			handle.hide();

@@ -1,10 +1,9 @@
-import { type Component, Input, type OverlayHandle, Text, type TUI, visibleWidth } from "../../engine/tui.js";
+import { type Component, Input, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
 import { buildHint, FocusBox, fitRow, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, GLYPH, screenTitle } from "../theme/index.js";
+import { clioTheme, type Fact, factRows, GLYPH, selectionRow, statusChip, titleRow } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
 
 export const AUTH_DIALOG_WIDTH = 88;
-const KEY_WIDTH = 10;
 
 export interface AuthDialogHandle {
 	handle: OverlayHandle;
@@ -17,56 +16,82 @@ export interface AuthDialogHandle {
 	};
 }
 
-function keyCell(label: string): string {
-	const theme = clioTheme();
-	const key = theme.fg("fieldName", label);
-	const width = visibleWidth(label);
-	return `${key}${" ".repeat(Math.max(0, KEY_WIDTH - width))}`;
-}
-
 function normalizeAuthLine(line: string): string {
 	return line.replace(/\.\.\./g, GLYPH.ellipsis);
 }
 
-function formatAuthChoiceLine(line: string): string | null {
-	const match = /^(?<marker>[* ])\s*(?<index>\d+)\.\s*(?<label>.+)$/.exec(line);
-	if (!match?.groups) return null;
-	const theme = clioTheme();
-	const markerText = match.groups.marker ?? " ";
-	const indexText = match.groups.index ?? "";
-	const labelText = match.groups.label ?? "";
-	const marker = markerText === "*" ? theme.fg("selectedOption", GLYPH.cursor) : " ";
-	const index = theme.fg("annotation", `${indexText}.`);
-	const label =
-		markerText === "*" ? theme.style("selectedOption", labelText, { bold: true }) : theme.fg("menuOption", labelText);
-	return `${marker} ${index} ${label}`;
+/** `* 1. label` is a choice row; the star marks the one the flow proposes. */
+const CHOICE_LINE = /^(?<marker>[* ])\s*(?<index>\d+)\.\s*(?<label>.+)$/u;
+/** `Key: value`, with a short word key, is a fact; a URL's `://` is not one. */
+const FACT_LINE = /^(?<key>[A-Za-z][A-Za-z ]{0,17}):(?!\/\/)\s*(?<value>.*)$/u;
+
+type AuthRow =
+	| { kind: "blank" }
+	| { kind: "choice"; focused: boolean; index: string; label: string }
+	| { kind: "fact"; label: string; value: string }
+	| { kind: "ok"; text: string }
+	| { kind: "error"; text: string }
+	| { kind: "text"; text: string };
+
+function classifyAuthLine(line: string): AuthRow {
+	const normalized = normalizeAuthLine(line).trimEnd();
+	if (normalized.length === 0) return { kind: "blank" };
+	const choice = CHOICE_LINE.exec(normalized);
+	if (choice?.groups) {
+		return {
+			kind: "choice",
+			focused: choice.groups.marker === "*",
+			index: choice.groups.index ?? "",
+			label: choice.groups.label ?? "",
+		};
+	}
+	if (/^Target ready\b/.test(normalized)) return { kind: "ok", text: normalized };
+	if (/^(Target check failed|Unknown selection:)/.test(normalized)) return { kind: "error", text: normalized };
+	const fact = FACT_LINE.exec(normalized);
+	if (fact?.groups) return { kind: "fact", label: fact.groups.key ?? "", value: fact.groups.value ?? "" };
+	return { kind: "text", text: normalized };
 }
 
-function formatAuthBodyLine(line: string): string {
+/**
+ * The flow's lines as rows: consecutive facts share one label column, choices
+ * draw through the selection rule, outcomes lead with their glyph, and prose
+ * wraps. The flow writes plain text; the dialog gives it the dialog grammar.
+ */
+function renderAuthLines(lines: ReadonlyArray<string>, width: number): string[] {
 	const theme = clioTheme();
-	const normalized = normalizeAuthLine(line).trimEnd();
-	if (normalized.length === 0) return "";
-
-	const choiceLine = formatAuthChoiceLine(normalized);
-	if (choiceLine) return choiceLine;
-
-	if (/^Target ready\b/.test(normalized)) {
-		return theme.fg("success", `${GLYPH.ok} ${normalized}`);
-	}
-	if (/^(Target check failed|Unknown selection:)/.test(normalized)) {
-		return theme.fg("error", `${GLYPH.error} ${normalized}`);
-	}
-
-	const colonIndex = normalized.indexOf(":");
-	if (colonIndex > 0 && colonIndex <= 18 && normalized.slice(colonIndex, colonIndex + 3) !== "://") {
-		const key = normalized.slice(0, colonIndex);
-		const value = normalized.slice(colonIndex + 1).trimStart();
-		if (/^[A-Za-z][A-Za-z ]*$/.test(key)) {
-			return `${keyCell(key)} ${theme.fg("fieldValue", value)}`;
+	const out: string[] = [];
+	let facts: Fact[] = [];
+	const flushFacts = (): void => {
+		if (facts.length > 0) out.push(...factRows(theme, facts, width));
+		facts = [];
+	};
+	for (const line of lines) {
+		const row = classifyAuthLine(line);
+		if (row.kind === "fact") {
+			facts.push({ label: row.label, value: row.value });
+			continue;
+		}
+		flushFacts();
+		switch (row.kind) {
+			case "blank":
+				out.push("");
+				break;
+			case "choice":
+				out.push(...selectionRow(theme, { focused: row.focused, label: `${row.index}. ${row.label}`, width }));
+				break;
+			case "ok":
+				out.push(...wrapTextWithAnsi(statusChip(theme, "ok", row.text), width));
+				break;
+			case "error":
+				out.push(...wrapTextWithAnsi(statusChip(theme, "error", row.text), width));
+				break;
+			case "text":
+				out.push(...wrapTextWithAnsi(theme.fg("body", row.text), width));
+				break;
 		}
 	}
-
-	return theme.fg("body", normalized);
+	flushFacts();
+	return out;
 }
 
 function renderInputWithDesignCursor(input: Input, width: number): string[] {
@@ -92,31 +117,38 @@ function createAuthDialogController(
 	controller: AuthDialogHandle["controller"];
 	getHint: () => string;
 } {
-	let renderedSkinEpoch = skinEpoch();
-	const titleView = new Text("");
-	const bodyView = new Text("");
-	const promptView = new Text("");
 	const input = new Input();
-	const inputView: Component = {
-		render: (width) => renderInputWithDesignCursor(input, width),
-		handleInput: (data) => input.handleInput(data),
-		invalidate: () => input.invalidate(),
-	};
 	let lines: string[] = [];
 	let promptLabel: string | null = null;
 	let resolver: ((value: string) => void) | undefined;
 	let rejecter: ((error: Error) => void) | undefined;
 	let currentHint = buildHint([]);
+	// The static rows are memoized on the lines, the width and the skin; the
+	// input row beneath them is the only thing that changes per keystroke.
+	let revision = 0;
+	let memo: { key: string; rows: string[] } | null = null;
 
-	const box = new (class extends FocusBox {
-		override render(width: number): string[] {
-			if (renderedSkinEpoch !== skinEpoch()) {
-				renderedSkinEpoch = skinEpoch();
-				rebuild();
+	const view: Component = {
+		render(width: number): string[] {
+			const key = `${width}|${revision}|${skinEpoch()}`;
+			if (memo?.key !== key) {
+				memo = { key, rows: [titleRow(clioTheme(), title, width), ...renderAuthLines(lines, width)] };
 			}
-			return super.render(width);
-		}
-	})([], {
+			if (promptLabel === null) return memo.rows;
+			return [
+				...memo.rows,
+				fitRow(clioTheme().fg("inputPlaceholder", normalizeAuthLine(promptLabel)), width),
+				...renderInputWithDesignCursor(input, width),
+			];
+		},
+		handleInput: (data) => input.handleInput(data),
+		invalidate: () => {
+			memo = null;
+			input.invalidate();
+		},
+	};
+
+	const box = new FocusBox(view, {
 		onInput: (data) => {
 			if (promptLabel) input.handleInput(data);
 		},
@@ -151,19 +183,8 @@ function createAuthDialogController(
 	};
 
 	function rebuild(): void {
-		titleView.setText(screenTitle(clioTheme(), title));
-		box.clear();
-		box.addChild(titleView);
-		bodyView.setText(lines.map(formatAuthBodyLine).join("\n"));
-		box.addChild(bodyView);
-		if (promptLabel) {
-			promptView.setText(clioTheme().fg("inputPlaceholder", normalizeAuthLine(promptLabel)));
-			currentHint = buildHint([{ key: "Enter", verb: "submit" }]);
-			box.addChild(promptView);
-			box.addChild(inputView);
-		} else {
-			currentHint = buildHint([]);
-		}
+		revision += 1;
+		currentHint = promptLabel ? buildHint([{ key: "Enter", verb: "submit" }]) : buildHint([]);
 		box.invalidate();
 	}
 

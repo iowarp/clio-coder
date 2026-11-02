@@ -18,7 +18,6 @@ import { fitHintEntries, fitRow, type RowBudgetedBody, windowRows } from "./over
 import {
 	MUTATION_PREVIEW_KEY,
 	PERMISSION_STOP_KEY,
-	PERMISSION_TERMS_KEY,
 	type PermissionInspectionHint,
 	type PermissionTermsHint,
 	permissionHintEntries,
@@ -87,6 +86,11 @@ export interface PermissionOverlayBodyHandle extends Component, RowBudgetedBody 
 	/** The standing approval terms, folded behind the terms key (see `permissionCardSections`). */
 	isShowingTerms(): boolean;
 	toggleTerms(): void;
+	/**
+	 * Whether the rows that name allow, deny and stop with their consequences
+	 * are on screen, so the rail can carry only the keys they do not.
+	 */
+	isShowingChoices(): boolean;
 	/** Whether the card, inspection closed, is taller than its rows and windows itself. */
 	isCardScrollable(): boolean;
 	/** Move that window; false when the card fits and the key is not the card's. */
@@ -156,8 +160,16 @@ function identityRow(
 ): { row: string; ruleFact: Fact | null } {
 	const risk = permissionRiskTone(view.actionClass, view.exposure);
 	const axisTone: Tone = presentation.semanticToken === "warning" ? "warning" : "muted";
-	const tool = toolChip(theme, view.tool);
-	const action = theme.style(toneRole(risk), `${view.actionClass.replaceAll("_", " ")} action`, { bold: true });
+	const kind = toolFunction(view.tool);
+	const classWords = view.actionClass.replaceAll("_", " ");
+	// `write · write action` said the word twice. When the tool and its class
+	// share the word, the tool chip alone carries it, in the risk tone, behind
+	// the function glyph the transcript uses for that tool.
+	const shared = view.actionClass === view.tool;
+	const tool = shared
+		? `${functionText(theme, kind, FUNCTION_GLYPH[kind])} ${theme.style(toneRole(risk), view.tool, { bold: true })}`
+		: toolChip(theme, view.tool);
+	const action = shared ? null : theme.style(toneRole(risk), `${classWords} action`, { bold: true });
 	const axis = chip(theme, axisText(view), axisTone);
 	const full = chipRow(theme, [tool, action, axis], Number.POSITIVE_INFINITY);
 	if (visibleWidth(full) <= width) return { row: full, ruleFact: null };
@@ -168,17 +180,12 @@ function identityRow(
 }
 
 /**
- * The target in a gutter, one row per ` · ` segment: the command or path
- * first in the strongest reading color, then its cwd, policy or size facts
- * beneath it. Every token survives; a segment longer than the row folds at a
- * separator.
+ * The target in a gutter: the command or path in the strongest reading
+ * color, folded at spaces and then at separators, never clipped, because the
+ * last token of a path is the one that says what is touched.
  */
 function targetBlock(theme: ClioTheme, target: string, risk: Tone, width: number): string[] {
-	return target
-		.split(" · ")
-		.flatMap((segment, index) =>
-			commandBlock(theme, segment, width, { tone: risk, role: index === 0 ? "inputText" : "toolCommand" }),
-		);
+	return commandBlock(theme, target, width, { tone: risk });
 }
 
 /** The card line for a worker ask routed through the main agent, or null for every other card. */
@@ -242,8 +249,18 @@ export function permissionOverlayHint(
 	inspection: PermissionInspectionHint = "none",
 	terms: PermissionTermsHint = "closed",
 	scrollable = false,
+	choicesShown = false,
 ): string {
-	return fitHintEntries(permissionHintEntries(composerHasDraft, inspection, terms, scrollable), innerWidth - 3);
+	const entries = permissionHintEntries(composerHasDraft, inspection, terms, scrollable);
+	// While the card's own rows name allow, deny and stop with what they do,
+	// the rail carries only the keys those rows do not: terms, inspect, scroll,
+	// and the Backspace that clears a draft. The moment the rows leave the
+	// screen (open terms scrolled past them, the mutation open) every answer
+	// key is back on the rail.
+	const shown = choicesShown
+		? entries.filter((entry) => entry.key !== "Enter" && entry.key !== "Esc" && entry.key !== PERMISSION_STOP_KEY)
+		: entries;
+	return fitHintEntries(shown.length > 0 ? shown : entries, innerWidth - 3);
 }
 
 /** The tools whose parked call mutates a file, so a card without a preview owes the operator a reason. */
@@ -400,9 +417,11 @@ function permissionFacts(
 			tone: "warning",
 		});
 	}
-	const requester =
-		view.origin.kind === "worker" ? `worker ${view.origin.agentId} (run ${view.origin.runId})` : "main agent";
-	facts.push({ label: "asked by", value: requester, tone: "muted" });
+	// The rail title already names the model asking; the row earns its place
+	// only for a worker, whose id and run the operator cannot read anywhere else.
+	if (view.origin.kind === "worker") {
+		facts.push({ label: "asked by", value: `worker ${view.origin.agentId} (run ${view.origin.runId})`, tone: "muted" });
+	}
 	const authority = workerGrantAuthority(view);
 	if (authority !== null) facts.push({ label: "authority", value: authority });
 	// Dimmed and below the facts, because it is the only line on this card
@@ -449,7 +468,7 @@ function permissionCardSections(
 	countdownMs: number | null = null,
 	hasDraft = false,
 	rowBudget = 0,
-): { facts: string[]; rest: string[]; termsAt: number | null } {
+): { facts: string[]; rest: string[]; termsAt: number | null; choicesAt: number; choicesRows: number } {
 	const theme = clioTheme();
 	const content = Math.max(8, Math.floor(width));
 	const presentation = permissionDecisionPresentation(view);
@@ -462,17 +481,19 @@ function permissionCardSections(
 		);
 	}
 	const choices = permissionChoices(view, presentation, hasDraft);
-	const full = [sectionRule(theme, content, "Your answer"), ...choiceRows(theme, choices, content)];
+	const full = choiceRows(theme, choices, content);
 	// A short dock (a draft under the card, a 24-row terminal) may not hold the
-	// facts and three choice rows together, and the choices are what the rail's
-	// keys mean. They then fold to one wrapped row rather than scroll away.
+	// facts and three choice rows together, and the choices are what the keys
+	// mean. They then fold to one wrapped row rather than scroll away.
 	const fits = rowBudget <= 0 || facts.length + rest.length + full.length <= rowBudget;
+	const choicesAt = rest.length;
 	rest.push(...(fits ? full : compactChoiceRows(theme, choices, content)));
-	if (!terms) return { facts, rest, termsAt: null };
+	const choicesRows = rest.length - choicesAt;
+	if (!terms) return { facts, rest, termsAt: null, choicesAt, choicesRows };
 	const wrapTerm = (text: string): string[] => wrapTextWithAnsi(theme.fg("decisionExplanation", text), content);
 	const termsAt = rest.length;
 	rest.push(
-		sectionRule(theme, content, "Terms", { meta: `${PERMISSION_TERMS_KEY} folds them` }),
+		sectionRule(theme, content, "Terms"),
 		...wrapTerm(`Approval: ${presentation.authorizationCopy}`),
 		...wrapTerm(`Consequence: ${presentation.consequenceCopy}`),
 		...wrapTerm(presentation.reversibilityCopy),
@@ -480,7 +501,7 @@ function permissionCardSections(
 		...wrapTerm(`Stop: ${actionConsequence(presentation, "stop")}`),
 		...wrapTerm("Hard-blocked actions remain blocked."),
 	);
-	return { facts, rest, termsAt };
+	return { facts, rest, termsAt, choicesAt, choicesRows };
 }
 
 /**
@@ -533,9 +554,7 @@ function permissionInspectionLines(
 	const lines = [
 		...head,
 		...pane.window,
-		...(pane.position === null
-			? []
-			: [positionRow(theme, { ...pane.position, unit: "lines", keys: ["↑↓ scroll"] }, content)]),
+		...(pane.position === null ? [] : [positionRow(theme, { ...pane.position, unit: "lines" }, content)]),
 		...tail,
 	];
 	return { lines, wrappedLineCount: wrapped.length, visibleRows };
@@ -586,6 +605,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	private cardScroll = 0;
 	private cardMaxScroll = 0;
 	private jumpToTerms = false;
+	private choicesShown = false;
 	private memo: { key: string; lines: string[] } | null = null;
 
 	constructor(
@@ -642,6 +662,10 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		this.bodyRows = Math.max(0, Math.floor(rows));
 	}
 
+	isShowingChoices(): boolean {
+		return this.choicesShown;
+	}
+
 	isCardScrollable(): boolean {
 		return !this.isInspecting() && this.cardMaxScroll > 0;
 	}
@@ -673,6 +697,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			skinEpoch(),
 		].join("|");
 		if (this.memo?.key === key) return this.memo.lines;
+		this.choicesShown = false;
 		const lines = this.renderFresh(width, advisory, countdownMs, hasDraft);
 		this.memo = { key, lines };
 		return lines;
@@ -700,14 +725,10 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 			this.lastVisibleRows = inspectionWindowRows(this.bodyRows, head.length);
 			const pane = windowRows(rows, this.scroll, this.lastVisibleRows);
 			this.scroll = pane.start;
-			return [
-				...head,
-				...pane.window,
-				...(pane.position === null ? [] : [positionRow(theme, { ...pane.position, keys: ["↑↓ scroll"] }, content)]),
-			];
+			return [...head, ...pane.window, ...(pane.position === null ? [] : [positionRow(theme, pane.position, content)])];
 		}
 		if (this.preview === null) {
-			const { facts, rest, termsAt } = permissionCardSections(
+			const sections = permissionCardSections(
 				this.view,
 				width,
 				this.terms,
@@ -716,7 +737,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 				hasDraft,
 				this.bodyRows,
 			);
-			return this.windowCard(facts, rest, width, termsAt);
+			return this.windowCard(sections, width);
 		}
 		const rendered = permissionInspectionLines(this.view, this.preview, width, this.scroll, this.bodyRows);
 		this.lastLineCount = rendered.wrappedLineCount;
@@ -731,13 +752,15 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	 * it (BT-005). With no known budget, or no room for a window, the card
 	 * renders whole and the frame's cut still marks what is missing.
 	 */
-	private windowCard(facts: string[], rest: string[], width: number, termsAt: number | null): string[] {
+	private windowCard(sections: ReturnType<typeof permissionCardSections>, width: number): string[] {
+		const { facts, rest, termsAt, choicesAt, choicesRows } = sections;
 		const whole = [...facts, ...rest];
 		const room = this.bodyRows - facts.length - 1;
 		if (this.bodyRows <= 0 || whole.length <= this.bodyRows || room < 1) {
 			this.cardMaxScroll = 0;
 			this.cardScroll = 0;
 			this.jumpToTerms = false;
+			this.choicesShown = true;
 			return whole;
 		}
 		this.cardMaxScroll = rest.length - room;
@@ -747,11 +770,12 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		}
 		this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
 		const end = this.cardScroll + room;
-		const keys = ["↑↓ scroll", ...(this.terms ? [`${PERMISSION_TERMS_KEY} back`] : [])];
+		this.choicesShown = choicesAt >= this.cardScroll && choicesAt + choicesRows <= end;
+		// The rail names the scroll and terms keys; the row carries the place alone.
 		return [
 			...facts,
 			...rest.slice(this.cardScroll, end),
-			positionRow(clioTheme(), { start: this.cardScroll + 1, end, total: rest.length, keys }, width),
+			positionRow(clioTheme(), { start: this.cardScroll + 1, end, total: rest.length }, width),
 		];
 	}
 

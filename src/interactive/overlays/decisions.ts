@@ -3,7 +3,17 @@ import type { DecisionLedgerEntry, DecisionRecord } from "../../domains/session/
 import { type Component, Input, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../../engine/tui.js";
 import type { DecisionSelection } from "../../session-control/decision-correction.js";
 import { buildHint, fitRow, selectionLabel, selectionMark, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, GLYPH, rule } from "../theme/index.js";
+import {
+	chipRow,
+	clioTheme,
+	emptyState,
+	factRows,
+	GLYPH,
+	rule,
+	sectionRule,
+	statusChip,
+	toneRole,
+} from "../theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 88;
 
@@ -50,20 +60,40 @@ function selectableRows(interviews: ReadonlyArray<DecisionLedgerEntry>): Selecta
 	return interviews.flatMap((interview) => interview.decisions.map((decision) => ({ interview, decision })));
 }
 
+/**
+ * One interview's header: its tier in the tier's tone, when it ended, how
+ * many rounds it took and how it ended, as chips on one row; its summary,
+ * when it has one, dim beneath.
+ */
 function interviewHeader(interview: DecisionLedgerEntry, width: number, now: number): string[] {
 	const theme = clioTheme();
 	const presentation = classifyDecisionPresentation(decisionFactsForAnswer(interview.exposure ?? "local"));
 	const rounds = `${interview.roundCount} round${interview.roundCount === 1 ? "" : "s"}`;
-	const status =
-		interview.interviewStatus === "complete" ? theme.fg("success", "complete") : theme.fg("menuDescription", "cancelled");
-	const heading = `${theme.style(presentation.semanticToken, presentation.tierLabel, { bold: true })}${theme.fg("annotation", " · ")}${theme.fg("annotation", relativeTime(interview.endedAt, now))}${theme.fg("annotation", " · ")}${theme.fg("menuDescription", rounds)}${theme.fg("annotation", " · ")}${status}`;
-	const lines = [fitRow(heading, width)];
+	const lines = [
+		chipRow(
+			theme,
+			[
+				theme.style(toneRole(presentation.semanticToken), presentation.tierLabel, { bold: true }),
+				theme.fg("annotation", relativeTime(interview.endedAt, now)),
+				theme.fg("annotation", rounds),
+				interview.interviewStatus === "complete"
+					? statusChip(theme, "ok", "complete")
+					: statusChip(theme, "cancelled", "cancelled"),
+			],
+			width,
+		),
+	];
 	if (interview.summary) {
 		lines.push(...wrapTextWithAnsi(theme.fg("annotation", interview.summary), width).map((line) => fitRow(line, width)));
 	}
 	return lines;
 }
 
+/**
+ * One decision: the cursor, its standing as a glyph, its label and value on
+ * one row; a superseded decision's correction beneath it; and, when expanded,
+ * the question it answered, the answer, and why Clio chose it when it did.
+ */
 function decisionLines(decision: DecisionRecord, selected: boolean, expanded: boolean, width: number): string[] {
 	const theme = clioTheme();
 	const cursor = selectionMark(selected);
@@ -76,35 +106,24 @@ function decisionLines(decision: DecisionRecord, selected: boolean, expanded: bo
 			: theme.fg("menuDescription", labelText);
 	const value = decision.status === "superseded" ? theme.fg("annotation", decision.value) : decision.value;
 	const lines = [fitRow(`${cursor} ${status} ${label}${theme.fg("annotation", ":")} ${value}`, width)];
-	// The indent belongs to the container, so this text wraps inside what is left
-	// of the row. Wrapping to the full width and then indenting cost every line
-	// its last six columns to a cut that landed mid-sentence.
-	const indent = "      ";
-	const indented = Math.max(1, width - indent.length);
-	const wrapIndented = (text: string): string[] =>
-		wrapTextWithAnsi(text, indented).map((line) => fitRow(`${indent}${line}`, width));
+	// The indent belongs to the container, so these facts lay out inside what
+	// is left of the row, never cut at a column the row never had.
+	const indent = "    ";
+	const facts: Array<{ label: string; value: string }> = [];
 	if (decision.status === "superseded" && decision.correction) {
-		lines.push(
-			...wrapIndented(`${theme.fg("annotation", "correction")} ${theme.fg("decisionExplanation", decision.correction)}`),
-		);
+		facts.push({ label: "correction", value: decision.correction });
 	}
 	if (selected && expanded) {
-		if (decision.source_question) {
-			lines.push(
-				...wrapIndented(
-					`${theme.fg("annotation", "question")} ${theme.fg("decisionExplanation", decision.source_question)}`,
-				),
-			);
-		}
-		lines.push(...wrapIndented(`${theme.fg("annotation", "answer")} ${theme.fg("decisionExplanation", decision.value)}`));
+		if (decision.source_question) facts.push({ label: "question", value: decision.source_question });
+		facts.push({ label: "answer", value: decision.value });
 		// Clio's own choices, an absent operator's question included (#421), say why.
-		if (decision.source === "agent" && decision.rationale) {
-			lines.push(
-				...wrapIndented(
-					`${theme.fg("annotation", "chosen by Clio")} ${theme.fg("decisionExplanation", decision.rationale)}`,
-				),
-			);
-		}
+		if (decision.source === "agent" && decision.rationale)
+			facts.push({ label: "chosen by Clio", value: decision.rationale });
+	}
+	if (facts.length > 0) {
+		lines.push(
+			...factRows(theme, facts, Math.max(1, width - indent.length)).map((line) => fitRow(`${indent}${line}`, width)),
+		);
 	}
 	return lines;
 }
@@ -119,11 +138,9 @@ function formatDecisionsOverlayBodyLines(
 	const width = Math.max(1, Math.floor(contentWidth));
 	const theme = clioTheme();
 	if (interviews.length === 0) {
-		return [
-			...wrapTextWithAnsi(theme.fg("menuDescription", "No interview decisions have been recorded on this branch."), width),
-			"",
-			...wrapTextWithAnsi(theme.fg("annotation", "Completed and cancelled ask_user interviews appear here."), width),
-		].map((line) => fitRow(line, width));
+		return emptyState(theme, "No interview decisions have been recorded on this branch.", width, {
+			remedy: "Completed and cancelled ask_user interviews appear here.",
+		}).map((line) => fitRow(line, width));
 	}
 	const selected = selectableRows(interviews)[selectedIndex];
 	const lines: string[] = [];
@@ -133,7 +150,9 @@ function formatDecisionsOverlayBodyLines(
 		if (interviewIndex > 0) lines.push(rule(theme, width));
 		lines.push(...interviewHeader(interview, width, now));
 		if (interview.decisions.length === 0) {
-			lines.push(fitRow(`  ${theme.fg("annotation", "No compact decisions were recorded.")}`, width));
+			lines.push(
+				...emptyState(theme, "No compact decisions were recorded.", width).map((line) => fitRow(`  ${line}`, width)),
+			);
 			continue;
 		}
 		for (const decision of interview.decisions) {
@@ -150,7 +169,7 @@ class DecisionsOverlayBody implements Component {
 	private selectedIndex = 0;
 	private expandedKey: string | null = null;
 	private correctionInput: Input | null = null;
-	private status = "";
+	private status: { kind: "ok" | "warning"; text: string } | null = null;
 
 	constructor(
 		private readonly getInterviews: () => ReadonlyArray<DecisionLedgerEntry>,
@@ -168,9 +187,9 @@ class DecisionsOverlayBody implements Component {
 			width,
 			this.options.now?.() ?? Date.now(),
 		);
+		const theme = clioTheme();
 		if (this.correctionInput) {
-			const theme = clioTheme();
-			body.push("", fitRow(theme.fg("sectionHeading", "New direction"), width));
+			body.push(sectionRule(theme, width, "New direction"));
 			body.push(
 				...this.correctionInput
 					.render(Math.max(1, width))
@@ -186,7 +205,7 @@ class DecisionsOverlayBody implements Component {
 			);
 		}
 		if (this.status) {
-			body.push("", ...wrapTextWithAnsi(clioTheme().fg("warning", this.status), Math.max(1, width)));
+			body.push(...wrapTextWithAnsi(statusChip(theme, this.status.kind, this.status.text), Math.max(1, width)));
 		}
 		return body;
 	}
@@ -225,9 +244,9 @@ class DecisionsOverlayBody implements Component {
 		if (matchesKey(data, "s")) {
 			try {
 				this.options.onSupersede(selectionFor(selected));
-				this.status = "Decision superseded.";
+				this.status = { kind: "ok", text: "Decision superseded." };
 			} catch (error) {
-				this.status = error instanceof Error ? error.message : String(error);
+				this.status = { kind: "warning", text: error instanceof Error ? error.message : String(error) };
 			}
 			this.requestRender();
 			return;
@@ -254,7 +273,7 @@ class DecisionsOverlayBody implements Component {
 		try {
 			return this.getInterviews();
 		} catch (error) {
-			this.status = error instanceof Error ? error.message : String(error);
+			this.status = { kind: "warning", text: error instanceof Error ? error.message : String(error) };
 			return [];
 		}
 	}
@@ -264,20 +283,20 @@ class DecisionsOverlayBody implements Component {
 		input.onSubmit = (value) => {
 			const correction = value.trim();
 			if (correction.length === 0) {
-				this.status = "Enter the operator's new direction.";
+				this.status = { kind: "warning", text: "Enter the operator's new direction." };
 				this.requestRender();
 				return;
 			}
 			try {
 				this.options.onCorrection(selectionFor(selected), correction);
 			} catch (error) {
-				this.status = error instanceof Error ? error.message : String(error);
+				this.status = { kind: "warning", text: error instanceof Error ? error.message : String(error) };
 				this.requestRender();
 			}
 		};
 		input.onEscape = () => this.options.onClose();
 		this.correctionInput = input;
-		this.status = "";
+		this.status = null;
 		this.requestRender();
 	}
 

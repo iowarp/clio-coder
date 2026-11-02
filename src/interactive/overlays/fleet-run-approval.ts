@@ -8,23 +8,40 @@
  * is to leave it.
  *
  * The body is a pure function of the projection so the layout is testable
- * without a TUI.
+ * without a TUI: the plan's identity, one table per wave, the budget as a
+ * meter, and the two keys with what each one does, pinned under the window.
  */
 
 import { renderUsdLimit } from "../../core/telemetry/render.js";
 import type { FleetRunPreview, FleetRunPreviewStep } from "../../domains/dispatch/index.js";
 import { budgetSpendText } from "../../domains/scheduling/budget.js";
-import type { Component, OverlayHandle, TUI } from "../../engine/tui.js";
-import { isKeyRelease, matchesKey, wrapTextWithAnsi } from "../../engine/tui.js";
-import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { clioTheme, formatTargetLabel, rule } from "../theme/index.js";
+import type { OverlayHandle, TUI } from "../../engine/tui.js";
+import { isKeyRelease, matchesKey } from "../../engine/tui.js";
+import { buildResponsiveHint, createCachedBody, FocusBox, showClioOverlayFrame, windowRows } from "../overlay-frame.js";
+import {
+	type Choice,
+	chipRow,
+	choiceRows,
+	clioTheme,
+	errorState,
+	factRows,
+	formatTargetLabel,
+	meter,
+	positionRow,
+	sectionRule,
+	tableRows,
+} from "../theme/index.js";
 
 export const FLEET_RUN_APPROVAL_OVERLAY_TITLE = "Fleet run approval";
 
 const FLEET_RUN_APPROVAL_MIN_WIDTH = 48;
 const FLEET_RUN_APPROVAL_MAX_WIDTH = 110;
-/** Rows of plan shown at once. Anything longer scrolls. */
+/** Rows of plan shown at once when the frame has not said how many it has. */
 export const FLEET_RUN_APPROVAL_VISIBLE_ROWS = 22;
+/** Below this width a wave's steps stack as fact blocks instead of table rows. */
+const FLEET_RUN_TABLE_MIN_WIDTH = 100;
+/** The budget meter never spans more than a reading line. */
+const FLEET_RUN_METER_MAX_WIDTH = 72;
 
 function fleetRunApprovalOverlayWidth(columns: number): number {
 	return Math.max(FLEET_RUN_APPROVAL_MIN_WIDTH, Math.min(FLEET_RUN_APPROVAL_MAX_WIDTH, columns - 4));
@@ -52,13 +69,27 @@ function formatWriteBoundary(writes: ReadonlyArray<string> | undefined): string 
 	return `writes ${writes.join(", ")}`;
 }
 
-/** One step as its facts: kind, who runs it, where, its scope, and its boundary. */
-function formatFleetRunPreviewStep(step: FleetRunPreviewStep): string {
-	if (step.replayed === true) return `replay ${step.stepId} · prior sealed result, not dispatched`;
-	const loop = step.loop === undefined ? "" : ` (${step.loop.loopId} ${step.loop.role} ${step.loop.attempt})`;
+/** An argv as a shell would show it: bare words bare, anything else quoted exactly. */
+function formatArgv(argv: ReadonlyArray<string>): string {
+	return argv.map((arg) => (/^[\w./:=@%+-]+$/u.test(arg) ? arg : JSON.stringify(arg))).join(" ");
+}
+
+/** One step as its table cells: id, what runs it, where and how, its scope and boundary. */
+function stepCells(step: FleetRunPreviewStep): string[] {
+	// `repair repair 1` when the loop is named after its role; one word then.
+	const loop =
+		step.loop === undefined
+			? ""
+			: step.loop.loopId === step.loop.role
+				? ` (${step.loop.role} ${step.loop.attempt})`
+				: ` (${step.loop.loopId} ${step.loop.role} ${step.loop.attempt})`;
+	const id = `${step.stepId}${loop}`;
+	if (step.replayed === true) return [id, "replay", "prior sealed result, not dispatched", ""];
+	const boundary = `${step.scope} · ${formatWriteBoundary(step.writes)}`;
 	if (step.kind === "code") {
 		const gate = step.gate === undefined ? "" : ` · gate path ${step.gate.path}`;
-		return `code ${step.stepId}${loop} · command ${step.commandId ?? "?"}${gate} · ${step.scope} · ${formatWriteBoundary(step.writes)}`;
+		const where = step.argv === undefined ? `command ${step.commandId ?? "?"}${gate}` : `${formatArgv(step.argv)}${gate}`;
+		return [id, `command ${step.commandId ?? "?"}`, where, boundary];
 	}
 	const route =
 		step.route === undefined
@@ -79,7 +110,7 @@ function formatFleetRunPreviewStep(step: FleetRunPreviewStep): string {
 		step.plan === undefined
 			? ""
 			: ` · roster ${step.plan.roster.join(", ")} · maxTasks ${step.plan.maxTasks}${step.plan.proposals ? " · proposals" : ""}`;
-	return `agent ${step.stepId}${loop} · ${step.agentId ?? "?"} · ${route}${node}${declaredRoute}${gate}${dynamicPlan} · ${step.scope} · ${formatWriteBoundary(step.writes)}`;
+	return [id, `agent ${step.agentId ?? "?"}`, `${route}${node}${declaredRoute}${gate}${dynamicPlan}`, boundary];
 }
 
 export function formatBudgetLine(preview: FleetRunPreview): string {
@@ -95,89 +126,157 @@ export function formatBudgetLine(preview: FleetRunPreview): string {
 }
 
 /**
- * Render the body. Waves in order, each step with its facts, then the argv a
- * code step will actually run, and last the budget the run is admitted under.
+ * The budget as a meter of the session ceiling, with the playbook's own
+ * ceiling as a fact beneath it. Without a session ceiling there is nothing to
+ * fill, so the sentence form stands in.
  */
-export function formatFleetRunApprovalBody(subject: FleetRunApprovalSubject, width: number, scroll: number): string[] {
+function budgetRows(preview: FleetRunPreview, width: number): string[] {
 	const theme = clioTheme();
-	const contentWidth = Math.max(1, Math.floor(width));
-	const rows: string[] = [];
-
-	if (!subject.ok) {
-		rows.push(theme.fg("error", `${subject.name}: preflight failed; nothing will be dispatched`));
-		rows.push(rule(theme, contentWidth));
-		for (const diagnostic of subject.diagnostics) {
-			for (const line of diagnostic.split("\n")) {
-				for (const wrapped of wrapTextWithAnsi(theme.fg("menuDescription", line), contentWidth)) rows.push(wrapped);
-			}
-		}
-	} else {
-		const { preview } = subject;
-		rows.push(theme.fg("annotation", `${preview.name} · plan ${preview.plan.hash.slice(0, 12)}`));
-		for (const line of wrapTextWithAnsi(
-			theme.fg("annotation", `approval ${preview.planHash.slice(0, 12)}: recipes, routes, commands, budget and replay`),
-			contentWidth,
-		))
-			rows.push(line);
-		if (preview.resume !== undefined) {
-			const replayed = [...preview.resume.replayed.keys()];
-			// The workspace is shown so the operator sees which checkout's prefix is replayed.
-			const from = `resumes ${preview.resume.fromRunId} from ${preview.resume.record.cwd ?? "(unknown workspace)"}`;
-			const line =
-				replayed.length === 0
-					? `${from}: no successful prefix to replay; every step runs`
-					: `${from}: replays ${replayed.length} step${replayed.length === 1 ? "" : "s"} (${replayed.join(", ")}), runs the rest`;
-			for (const wrapped of wrapTextWithAnsi(theme.fg("info", line), contentWidth)) rows.push(wrapped);
-		}
-		rows.push(rule(theme, contentWidth));
-		for (const wave of preview.waves) {
-			rows.push(theme.fg("groupHeading", `wave ${wave.index}`));
-			for (const step of wave.steps) {
-				for (const line of wrapTextWithAnsi(
-					theme.fg("menuDescription", `  ${formatFleetRunPreviewStep(step)}`),
-					contentWidth,
-				)) {
-					rows.push(line);
-				}
-				if (step.argv !== undefined && step.replayed !== true) {
-					rows.push(
-						...wrapTextWithAnsi(
-							theme.fg("annotation", `    argv ${step.argv.map((arg) => JSON.stringify(arg)).join(" ")}`),
-							contentWidth,
-						),
-					);
-				}
-			}
-		}
-		rows.push(rule(theme, contentWidth));
-		for (const line of wrapTextWithAnsi(theme.fg("info", formatBudgetLine(preview)), contentWidth)) rows.push(line);
+	const { budget } = preview;
+	if (budget.ceilingUsd <= 0)
+		return factRows(theme, [{ label: "budget", value: formatBudgetLine(preview).slice(8) }], width);
+	// A meter wider than a reading line stops being a glance; the bar caps and
+	// the amount stays beside it.
+	const rows = [
+		meter(theme, {
+			value: budget.currentUsd,
+			max: budget.ceilingUsd,
+			width: Math.min(width, FLEET_RUN_METER_MAX_WIDTH),
+			label: "budget",
+			amount: `${budgetSpendText(budget.currentUsd, budget.pricing)} of ${renderUsdLimit(budget.ceilingUsd)} session ceiling`,
+			tone:
+				budget.currentUsd >= budget.ceilingUsd
+					? "error"
+					: budget.currentUsd >= budget.ceilingUsd * 0.8
+						? "warning"
+						: "meter",
+		}),
+	];
+	if (budget.playbookUsd !== null) {
+		rows.push(...factRows(theme, [{ label: "playbook", value: `ceiling ${renderUsdLimit(budget.playbookUsd)}` }], width));
 	}
-
-	const maxScroll = Math.max(0, rows.length - FLEET_RUN_APPROVAL_VISIBLE_ROWS);
-	const start = Math.max(0, Math.min(scroll, maxScroll));
-	const shown = rows.slice(start, start + FLEET_RUN_APPROVAL_VISIBLE_ROWS);
-	if (rows.length > FLEET_RUN_APPROVAL_VISIBLE_ROWS) {
-		shown.push(theme.fg("annotation", `(${start + 1}-${start + shown.length} of ${rows.length} lines)`));
-	}
-	return shown;
+	return rows;
 }
 
-class FleetRunApprovalBody implements Component {
-	scroll = 0;
-
-	constructor(private readonly subject: FleetRunApprovalSubject) {}
-
-	render(width: number): string[] {
-		return formatFleetRunApprovalBody(this.subject, width, this.scroll);
+/** The plan's rows, before windowing: identity, resume, waves and budget. */
+function planRows(subject: FleetRunApprovalSubject, width: number): string[] {
+	const theme = clioTheme();
+	if (!subject.ok) {
+		return [
+			...errorState(theme, `${subject.name}: preflight failed; nothing will be dispatched`, width),
+			...subject.diagnostics.flatMap((diagnostic) =>
+				diagnostic.split("\n").flatMap((line) => factRows(theme, [{ label: " ", value: line }], width)),
+			),
+		];
 	}
+	const { preview } = subject;
+	const rows = [
+		chipRow(
+			theme,
+			[
+				theme.style("heading", preview.name, { bold: true }),
+				theme.fg("annotation", `plan ${preview.plan.hash.slice(0, 12)}`),
+				theme.fg("annotation", `approval ${preview.planHash.slice(0, 12)}`),
+			],
+			width,
+		),
+		...factRows(theme, [{ label: "seals", value: "recipes, routes, commands, budget and replay", tone: "muted" }], width),
+	];
+	if (preview.resume !== undefined) {
+		const replayed = [...preview.resume.replayed.keys()];
+		// The workspace is shown so the operator sees which checkout's prefix is replayed.
+		const from = `${preview.resume.fromRunId} from ${preview.resume.record.cwd ?? "(unknown workspace)"}`;
+		const value =
+			replayed.length === 0
+				? `${from}: no successful prefix to replay; every step runs`
+				: `${from}: replays ${replayed.length} step${replayed.length === 1 ? "" : "s"} (${replayed.join(", ")}), runs the rest`;
+		rows.push(...factRows(theme, [{ label: "resumes", value, tone: "info" }], width));
+	}
+	for (const wave of preview.waves) {
+		rows.push(
+			sectionRule(theme, width, `wave ${wave.index}`, {
+				meta: `${wave.steps.length} step${wave.steps.length === 1 ? "" : "s"}`,
+			}),
+		);
+		const cells = wave.steps.map(stepCells);
+		// Nothing about a step may drop out at a narrow width: who runs it, where,
+		// and what it may write are the approval. Below the table's width each
+		// step is a block of facts under its id instead of a row that lost a column.
+		if (width >= FLEET_RUN_TABLE_MIN_WIDTH) {
+			rows.push(
+				...tableRows(
+					theme,
+					{
+						columns: [
+							{ label: "step", priority: 3, tone: "neutral" },
+							{ label: "runs", priority: 2, tone: "accent" },
+							{ label: "where", priority: 1, wrap: true, min: 16, tone: "muted" },
+							{ label: "scope", priority: 0, tone: "muted" },
+						],
+						rows: cells,
+					},
+					width,
+				),
+			);
+		} else {
+			rows.push(
+				...factRows(
+					theme,
+					cells.map(([id, runs, where, scope]) => ({
+						label: id ?? "",
+						value: [
+							theme.fg("guidance", runs ?? ""),
+							theme.fg("annotation", [where, scope].filter(Boolean).join(" · ")),
+						].join("\n"),
+					})),
+					width,
+				),
+			);
+		}
+	}
+	rows.push(...budgetRows(preview, width));
+	return rows;
+}
 
-	invalidate(): void {}
+/** What each key does, for the rows under the plan. A failed preflight has one way out. */
+function planChoices(subject: FleetRunApprovalSubject): Choice[] {
+	if (!subject.ok) return [{ key: "Esc", verb: "leave", consequence: "nothing was dispatched or written" }];
+	return [
+		{ key: "Enter", verb: "dispatch", consequence: "starts this exact plan now", tone: "action" },
+		{ key: "Esc", verb: "cancel", consequence: "dispatches nothing and writes nothing" },
+	];
+}
+
+/**
+ * Render the body: the plan rows windowed to `rows` with the choices pinned
+ * beneath them, so the keys and their consequences never scroll away. Zero
+ * rows means the frame has not said how many it has.
+ */
+export function formatFleetRunApprovalBody(
+	subject: FleetRunApprovalSubject,
+	width: number,
+	scroll: number,
+	rows = 0,
+): string[] {
+	const theme = clioTheme();
+	const contentWidth = Math.max(1, Math.floor(width));
+	const plan = planRows(subject, contentWidth);
+	const choices = choiceRows(theme, planChoices(subject), contentWidth);
+	const budget = rows > 0 ? Math.max(4, rows - choices.length - 1) : FLEET_RUN_APPROVAL_VISIBLE_ROWS;
+	if (plan.length <= budget) return [...plan, ...choices];
+	const pane = windowRows(plan, scroll, budget - 1);
+	return [
+		...pane.window,
+		...(pane.position === null ? [] : [positionRow(theme, { ...pane.position, unit: "lines" }, contentWidth)]),
+		...choices,
+	];
 }
 
 export function openFleetRunApprovalOverlay(tui: TUI, options: OpenFleetRunApprovalOverlayOptions): OverlayHandle {
-	const body = new FleetRunApprovalBody(options.subject);
 	const acceptable = options.subject.ok;
+	let scroll = 0;
 	let settled = false;
+	const body = createCachedBody((width, rows) => formatFleetRunApprovalBody(options.subject, width, scroll, rows));
 
 	const accept = (): void => {
 		if (settled || !acceptable) return;
@@ -189,6 +288,11 @@ export function openFleetRunApprovalOverlay(tui: TUI, options: OpenFleetRunAppro
 		settled = true;
 		options.onCancel();
 	};
+	const scrollBy = (delta: number): void => {
+		scroll = Math.max(0, scroll + delta);
+		body.touch();
+		tui.requestRender();
+	};
 
 	const focus = new FocusBox(body, {
 		// Keys are matched by name, never by raw bytes: under the kitty keyboard
@@ -197,13 +301,11 @@ export function openFleetRunApprovalOverlay(tui: TUI, options: OpenFleetRunAppro
 		onInput: (data: string): void => {
 			if (settled || isKeyRelease(data)) return;
 			if (matchesKey(data, "up")) {
-				body.scroll = Math.max(0, body.scroll - 1);
-				tui.requestRender();
+				scrollBy(-1);
 				return;
 			}
 			if (matchesKey(data, "down")) {
-				body.scroll += 1;
-				tui.requestRender();
+				scrollBy(1);
 				return;
 			}
 			if (matchesKey(data, "enter")) {
@@ -222,10 +324,9 @@ export function openFleetRunApprovalOverlay(tui: TUI, options: OpenFleetRunAppro
 		// A plan that can dispatch is a decision, so the rails carry the approval
 		// tone. A failed preflight has nothing to approve and stays informational.
 		...(acceptable ? { approval: true, awaitingInput: true, tone: "decisionCue" as const } : {}),
-		footerHint: buildResponsiveHint(
-			[...(acceptable ? [{ key: "Enter", verb: "dispatch" }] : []), { key: "↑↓", verb: "scroll" }],
-			{ key: "Esc", verb: "cancel" },
-		),
+		// The body's own rows name Enter and Esc with what they do; the rail
+		// carries only the key they do not.
+		footerHint: buildResponsiveHint([{ key: "↑↓", verb: "scroll" }], null),
 	});
 
 	return {
