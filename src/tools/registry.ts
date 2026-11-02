@@ -526,6 +526,8 @@ export interface ToolInvokeOptions {
 	};
 	/** Host-owned task scope, preserved on nested gateway calls. */
 	turnConstraints?: TurnConstraints;
+	/** Why the host ended this run, read once `signal` has fired; the engine's abort carries no reason (#445). */
+	abortCause?: () => string | null;
 	/** Registry-owned filter bound to the active compiled safety policy. */
 	allowsObservationPath?: (path: string) => boolean;
 	/** Registry-owned write-root check the typed mutation seam repeats right before it publishes (F3). */

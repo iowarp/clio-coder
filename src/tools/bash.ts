@@ -1,4 +1,5 @@
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { Type } from "typebox";
 import {
 	BASH_HARD_CAP_BYTES,
@@ -267,6 +268,14 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 	);
 }
 
+/** An abort is the run ending under the command, never its own timeout, and the model has to be able to tell which (#445). */
+function bashAbortStatus(elapsedMs: number, timeoutMs: number, cause: string | null): string {
+	const span = `after ${Math.round(elapsedMs / 1000)}s of its ${timeoutMs}ms timeout`;
+	return cause === null
+		? `bash: command aborted ${span}. The host ended the run and recorded no cause.`
+		: `bash: command aborted ${span}. The host ended the run: ${cause}`;
+}
+
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
@@ -348,17 +357,20 @@ export const bashTool: ToolSpec = {
 					options.onUpdate?.(shapeBashProgress(mask(combineBashOutput(progress)), progress.outputBytes, outputPolicy));
 				};
 			}
+			const startedAt = performance.now();
 			const captured = await runBashCommand(args.command, runOptions);
 			const result = { ...captured, stdout: mask(captured.stdout), stderr: mask(captured.stderr) };
 			const { error, aborted, timedOut, outputCapped } = result;
 			const rawOutput = combineBashOutput(result);
 			const output = rawOutput.trim();
 			if (aborted) {
-				const status = "bash: command aborted";
+				const abortCause = options?.abortCause?.() ?? null;
+				const elapsedMs = Math.round(performance.now() - startedAt);
+				const status = bashAbortStatus(elapsedMs, timeout, abortCause);
 				return {
 					kind: "error",
 					message: output.length > 0 ? `${output}\n\n${status}` : status,
-					details: bashResultDetails(result, rawOutput, "abort"),
+					details: { ...bashResultDetails(result, rawOutput, "abort"), elapsedMs, abortCause },
 				};
 			}
 			if (timedOut) {

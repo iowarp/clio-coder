@@ -1369,6 +1369,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const currentToolInvokeOptions = (toolCallId?: string): Partial<ToolInvokeOptions> => {
 		const options: Partial<ToolInvokeOptions> = {
 			toolResultMaxBytes: deps.getSettings().context.toolResultMaxBytes,
+			abortCause: () => state.activeInterruptReason ?? state.toolProseAbortReason,
 			...observedToolCallOrigin(state.runtime?.agent.state.messages ?? [], toolCallId),
 		};
 		const hostRun = hostRunContext.getStore();
