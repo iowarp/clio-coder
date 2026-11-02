@@ -37,6 +37,7 @@ const ROLE_CAPTION: Readonly<Record<AgentRole, string>> = {
 	"safety-judge": "safety judge calls",
 };
 const NOT_AVAILABLE = "spend not available: this session has no telemetry read model";
+const NOT_STARTED = "nothing recorded yet: the session starts with its first prompt";
 
 /** Any contribution at all: a count of zero calls, or a sum over nothing, hides its row. */
 function nonZero(quantity: Quantity | null | undefined): quantity is Quantity {
@@ -196,6 +197,8 @@ function modelLines(view: TelemetryView, contentWidth: number): string[] {
 /** What the overlay reads: the live view, and the ledger's recall fold, re-read on updates rather than per frame. */
 interface UsageData {
 	view: TelemetryView | null;
+	/** Why `view` is null: no read model at all, or no session for it to read yet. */
+	missing: string;
 	recall: RecallTelemetry | null;
 }
 
@@ -249,7 +252,7 @@ function renderActivity(
 		? ` ${theme.fg("annotation", `(${formatCompactMs(Math.max(0, now - started))})`)}`
 		: "";
 	const view = data.view;
-	if (!view) lines.push(`${label("Session")}${theme.fg("annotation", NOT_AVAILABLE)}${elapsed}`);
+	if (!view) lines.push(`${label("Session")}${theme.fg("annotation", data.missing)}${elapsed}`);
 	else {
 		const totals = view.session().totals;
 		const cost = contributed(totals.usd) ? `${totals.usd.display} · ` : "";
@@ -378,7 +381,7 @@ class UsageOverlayBody implements Component {
 				theme.style("sectionHeading", "Session tokens & cost", { bold: true }),
 				theme.fg("annotation", "Every call this session paid for, across every branch · estimates and gaps are marked"),
 				"",
-				...(data.view ? summaryBlock(data.view, data.recall, contentWidth) : [theme.fg("annotation", NOT_AVAILABLE)]),
+				...(data.view ? summaryBlock(data.view, data.recall, contentWidth) : [theme.fg("annotation", data.missing)]),
 				"",
 				rule(theme, contentWidth),
 				theme.fg("annotation", "Session tokens cannot be converted to subscription percentages."),
@@ -389,7 +392,7 @@ class UsageOverlayBody implements Component {
 				theme.style("sectionHeading", "Model activity · this session", { bold: true }),
 				theme.fg("annotation", "Recorded calls per model across every branch, including cache traffic; not account quota."),
 				"",
-				...(data.view ? modelLines(data.view, contentWidth) : [theme.fg("annotation", NOT_AVAILABLE)]),
+				...(data.view ? modelLines(data.view, contentWidth) : [theme.fg("annotation", data.missing)]),
 			];
 		} else body = renderWorkerUsage(this.getDispatchRows(), this.recordedRuns(data.view), quota, contentWidth);
 		const lines = body.flatMap((line) => wrapTextWithAnsi(line, contentWidth));
@@ -426,7 +429,7 @@ export function openUsageOverlay(
 	const now = options?.now ?? (() => Date.now());
 	const sessions = options?.listSessions?.() ?? [];
 	const body = new UsageOverlayBody(
-		() => ({ view: readModel?.live() ?? null, recall }),
+		() => ({ view: readModel?.live() ?? null, missing: readModel ? NOT_STARTED : NOT_AVAILABLE, recall }),
 		() => {
 			quotaFeed.peekSnapshots();
 			return readModel?.quota().providers ?? [];

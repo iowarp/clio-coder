@@ -237,16 +237,21 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	const ledger = state.context.ledger;
 	const facts = state.context;
 	// The budget's own figure, which a live session has beside its ledger.
-	const budgetBar = (): string => {
+	const budgetFigure = (): string => {
 		const used = facts.used;
 		const window = facts.contextWindow;
 		const percent = used !== null && window ? (used / window) * 100 : null;
-		const figure = `${contextUsageText(facts)} ${theme.fg("metricUnit", "tokens")}${
+		return `${contextUsageText(facts)} ${theme.fg("metricUnit", "tokens")}${
 			percent === null ? "" : ` · ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`
 		}`;
-		return window && used !== null
-			? pageMeter("context", used, window, width, figure)
-			: `${theme.fg("fieldName", "context")} ${theme.fg("unknownValue", "window unknown")}`;
+	};
+	const budgetBar = (): string => {
+		const window = facts.contextWindow;
+		if (!window) return `${theme.fg("fieldName", "context")} ${theme.fg("unknownValue", "window unknown")}`;
+		// A known window with no input figure yet is not an unknown window.
+		return facts.used === null
+			? `${theme.fg("fieldName", "context")} ${budgetFigure()}`
+			: pageMeter("context", facts.used, window, width, budgetFigure());
 	};
 	if (!ledger) {
 		return [
@@ -272,14 +277,16 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			...emptyState(theme, "Detailed context accounting appears after the prompt is compiled.", width),
 		];
 	}
-	const figure = `${theme.fg("metricValue", `${formatFooterTokens(ledger.usedTokens)} / ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.contextWindow) : "unknown"}`)}${
-		ledger.percent === null
-			? ""
-			: ` · ${theme.fg(contextPercentRole(ledger.percent), formatContextPercent(ledger.percent))}`
-	}`;
+	const figure = facts.budget
+		? budgetFigure()
+		: `${theme.fg("metricValue", `${formatFooterTokens(ledger.usedTokens)} / ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.contextWindow) : "unknown"}`)}${
+				ledger.percent === null
+					? ""
+					: ` · ${theme.fg(contextPercentRole(ledger.percent), formatContextPercent(ledger.percent))}`
+			}`;
 	const barCells = Math.max(4, width - visibleWidth(figure) - 2);
-	// The ledger estimates its categories, so with a budget it can only say what they are made of.
-	const bar = facts.budget ? budgetBar() : `${renderContextMeterBar(ledger, barCells, theme)}  ${figure}`;
+	// Every live session has a budget beside its ledger: the figure is the budget's, the categories the ledger's.
+	const bar = `${renderContextMeterBar(ledger, barCells, theme)}  ${figure}`;
 	const compaction =
 		ledger.contextWindow <= 0
 			? "on server overflow"
@@ -369,15 +376,12 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	);
 	if (history.length > 0) out.push(history);
 	out.push(theme.fg("annotation", "Context is per request · subscription limits are account-wide · /usage"));
-	// Only the ledger's bar draws the three states; the budget's meter is filled and free.
-	if (!facts.budget) {
-		const key = [
-			"Filled = context · empty = available · shaded = reserve; small buckets receive one cell.",
-			"Filled = context · empty = available · shaded = reserve",
-			`${GLYPH.contextFull} used · ${GLYPH.contextFree} free · ${GLYPH.contextReserve} reserve`,
-		].find((text) => visibleWidth(text) <= width);
-		if (key !== undefined) out.push(theme.fg("annotation", key));
-	}
+	const key = [
+		"Filled = context · empty = available · shaded = reserve; small buckets receive one cell.",
+		"Filled = context · empty = available · shaded = reserve",
+		`${GLYPH.contextFull} used · ${GLYPH.contextFree} free · ${GLYPH.contextReserve} reserve`,
+	].find((text) => visibleWidth(text) <= width);
+	if (key !== undefined) out.push(theme.fg("annotation", key));
 	return out;
 }
 
@@ -553,7 +557,9 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 				{ label: "Worker cap", value: value(capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled") },
 				{
 					label: "Tool calls",
-					value: value(`${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`),
+					value: value(
+						`${toolCalls} ${toolCalls === 1 ? "call" : "calls"} · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`,
+					),
 				},
 			],
 			width,
