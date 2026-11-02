@@ -91,9 +91,13 @@ const EXPORT_MARKDOWN_THEME = {
 const mermaidTransform = createMermaidMarkdownTransform(clioTheme());
 const CHAT_MARKDOWN_OPTIONS = {
 	transform: (text: string, width: number) => {
-		// Both transforms lex the whole answer; a table needs a pipe and a diagram needs its name.
-		const fitted = text.includes("|") ? fitMarkdownTables(text, width) : text;
-		return /mermaid/iu.test(fitted) ? mermaidTransform(fitted, width) : fitted;
+		// Both transforms need a lex of the whole answer, so each runs only when the text can use it.
+		if (!mayNeedTableFit(text, width)) return /mermaid/iu.test(text) ? mermaidTransform(text, width) : text;
+		const tokens = tableParser.lexer(text);
+		const fitted = fitMarkdownTables(tokens, width);
+		if (!/mermaid/iu.test(fitted.text)) return fitted.text;
+		// A rewritten table can change how the text after it parses, so those tokens no longer describe it.
+		return mermaidTransform(fitted.text, width, fitted.rewritten ? undefined : tokens);
 	},
 	renderLatex: true,
 } as const;
@@ -174,6 +178,8 @@ export interface ChatPanelRegions {
 
 const NO_ROWS: readonly string[] = Object.freeze([]);
 
+type RowMemo = { width: number; bareFences: boolean; epoch: number; rows: Map<string, string[]> };
+
 type TextSegment = {
 	kind: "text";
 	text: string;
@@ -184,6 +190,8 @@ type TextSegment = {
 	markdown?: { view: Markdown; source: string; epoch: number };
 	/** Reuse wrapped rows while another entry streams or its clock advances (#428). */
 	rendered?: { source: string; finalized: boolean; epoch: number; layouts: Map<string, string[]> };
+	/** Fitted rows by Markdown row, so an unchanged row is not measured again on the next delta. Streaming only. */
+	rowMemo?: RowMemo | undefined;
 	/**
 	 * Live denoising state while a diffusion model streams whole frames. The
 	 * text before `settled` agreed between the last two frames and is shown as
@@ -687,21 +695,44 @@ function renderDiffusionFrameLines(seg: TextSegment, settled: number, width: num
 // Lexer for fitMarkdownTables, which runs inside Markdown's transform hook.
 const tableParser = new Marked();
 
-function fitMarkdownTables(text: string, width: number): string {
-	return tableParser
-		.lexer(text)
+// Marked's GFM delimiter row. A table has exactly as many columns as this row, so it alone decides the width test.
+const TABLE_DELIMITER_ROW = /^ {0,3}((?:\| *)?:?-+:? *(?:\| *:?-+:? *)*(?:\| *)?)$/gmu;
+
+/** Keep Pi's wrapped cells unless borders leave fewer than 12 columns per field. */
+function tableFitsWidth(columns: number, width: number): boolean {
+	return width >= columns * 15 + 1;
+}
+
+/** Whether a lex could find a table to rewrite. A false positive costs one lex; a false negative would keep a table. */
+function mayNeedTableFit(text: string, width: number): boolean {
+	if (!text.includes("|")) return false;
+	// A lex also removes a repeated link definition, which closes up the blank rows around it, so keep it for those.
+	const definition = text.indexOf("]:");
+	if (definition >= 0 && text.includes("]:", definition + 2)) return true;
+	for (const match of text.matchAll(TABLE_DELIMITER_ROW)) {
+		const row = match[1] ?? "";
+		if (!/[:|]/u.test(row)) continue;
+		if (!tableFitsWidth(row.replace(/^\||\| *$/gu, "").split("|").length, width)) return true;
+	}
+	return false;
+}
+
+function fitMarkdownTables(tokens: readonly Tokens.Generic[], width: number): { text: string; rewritten: boolean } {
+	let rewritten = false;
+	const text = tokens
 		.map((token) => {
 			if (token.type !== "table") return token.raw;
 			const table = token as Tokens.Table;
-			// Keep Pi's wrapped cells unless borders leave fewer than 12 columns per field.
-			if (width >= table.header.length * 15 + 1 || table.rows.length === 0) {
+			if (tableFitsWidth(table.header.length, width) || table.rows.length === 0) {
 				return token.raw;
 			}
+			rewritten = true;
 			return `${table.rows
 				.map((row) => row.map((cell, index) => `${table.header[index]?.text ?? ""}: ${cell.text}`).join("\n\n"))
 				.join("\n\n---\n\n")}\n\n`;
 		})
 		.join("");
+	return { text, rewritten };
 }
 
 function chatMarkdown(text: string, bareFences: boolean): Markdown {
@@ -741,17 +772,35 @@ function exportFenceRow(row: string): string | null {
  * frame than the same row trimmed first. The regex keeps a trailing no-break
  * space, which Mermaid rows use.
  */
-function markdownRows(md: Markdown, width: number, bareFences: boolean): string[] {
+function fitMarkdownRow(padded: string, width: number, bareFences: boolean): string[] {
+	const trimmed = padded.replace(/ +$/u, "");
+	const line = bareFences ? exportFenceRow(trimmed) : trimmed;
+	if (line === null) return [];
+	const parts = visibleWidth(line) > width ? wrapTextWithAnsi(line, width) : [line];
+	return parts.map((part) =>
+		clioTheme().base("assistantProse", visibleWidth(part) > width ? truncateToWidth(part, width, "") : part),
+	);
+}
+
+function markdownRows(md: Markdown, width: number, bareFences: boolean, memo?: RowMemo): string[] {
+	const padded = md.render(width);
 	const rows: string[] = [];
-	for (const padded of md.render(width)) {
-		const trimmed = padded.replace(/ +$/u, "");
-		const line = bareFences ? exportFenceRow(trimmed) : trimmed;
-		if (line === null) continue;
-		const parts = visibleWidth(line) > width ? wrapTextWithAnsi(line, width) : [line];
-		for (const part of parts) {
-			const fitted = visibleWidth(part) > width ? truncateToWidth(part, width, "") : part;
-			rows.push(clioTheme().base("assistantProse", fitted));
+	for (const row of padded) {
+		let parts = memo?.rows.get(row);
+		if (parts === undefined) {
+			parts = fitMarkdownRow(row, width, bareFences);
+			memo?.rows.set(row, parts);
 		}
+		for (const part of parts) rows.push(part);
+	}
+	// Each delta strands the old tail rows. Keep the live ones, so eviction never costs a re-measure.
+	if (memo !== undefined && memo.rows.size > padded.length * 2 + 256) {
+		const live = new Map<string, string[]>();
+		for (const row of padded) {
+			const parts = memo.rows.get(row);
+			if (parts !== undefined) live.set(row, parts);
+		}
+		memo.rows = live;
 	}
 	return rows;
 }
@@ -783,7 +832,12 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 		seg.markdown.view.setText(prose);
 		seg.markdown.source = prose;
 	}
-	const lines = withoutLeadingBlanks(markdownRows(seg.markdown.view, width, bareFences));
+	let memo = seg.rowMemo;
+	if (memo?.width !== width || memo.bareFences !== bareFences || memo.epoch !== epoch)
+		memo = seg.finalized ? undefined : { width, bareFences, epoch, rows: new Map() };
+	// A settled segment can last the whole session, so it keeps only its layouts.
+	seg.rowMemo = seg.finalized ? undefined : memo;
+	const lines = withoutLeadingBlanks(markdownRows(seg.markdown.view, width, bareFences, memo));
 	seg.rendered.layouts.set(key, lines);
 	if (seg.rendered.layouts.size > 3) {
 		const oldest = seg.rendered.layouts.keys().next().value;
