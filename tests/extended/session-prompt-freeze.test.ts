@@ -158,7 +158,7 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 
 	async function chatFixture(
 		memory: { section: string },
-		options: { autonomy?: { level: AutonomyLevel }; policyUpdates?: boolean } = {},
+		options: { autonomy?: { level: AutonomyLevel }; policyUpdates?: boolean; memoryOn?: { value: boolean } } = {},
 	) {
 		const requests: Context[] = [];
 		faux.setResponses(
@@ -242,6 +242,7 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			createAgent: (options) => createEngineAgent(options),
 			prompts,
 			getMemorySection: () => memory.section,
+			...(options.memoryOn ? { memoryEnabled: () => options.memoryOn?.value ?? true } : {}),
 			...(session && state ? { session, readSessionEntries: () => readCurrentEntries(state) } : {}),
 		});
 		return { loop, requests };
@@ -281,6 +282,27 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			// History already carries the record, so the next turn does not repeat it.
 			const next = await assertPrefixKept(f.requests[1] as Context, f.requests[2] as Context);
 			strictEqual(next.includes("Never edit generated wiki pages."), false, next);
+		} finally {
+			f.loop.dispose();
+		}
+	});
+
+	it("drops the held memory section and its update reminder while memory is off", async () => {
+		const memory = { section: memorySection(["Run the focused test first."]) };
+		const memoryOn = { value: true };
+		const f = await chatFixture(memory, { memoryOn });
+		try {
+			await f.loop.submit("first task");
+			memoryOn.value = false;
+			memory.section = memorySection(["Run the focused test first.", "Never edit generated wiki pages."]);
+			await f.loop.submit("second task");
+			ok(systemText(f.requests[0]).includes("Run the focused test first."));
+			strictEqual(systemText(f.requests[1]).includes("Run the focused test first."), false);
+			const sent = JSON.stringify(f.requests[1]?.messages);
+			strictEqual(sent.includes("# Memory update"), false, sent);
+			memoryOn.value = true;
+			await f.loop.submit("third task");
+			ok(systemText(f.requests[2]).includes("Never edit generated wiki pages."));
 		} finally {
 			f.loop.dispose();
 		}

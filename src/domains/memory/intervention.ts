@@ -480,6 +480,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		const offer = content === undefined ? undefined : offerForContent(content);
 		return () =>
 			!disposed &&
+			// A reminder buffered before memory went off is not sent after it.
+			settings().enabled &&
 			generation === capturedGeneration &&
 			commitState === owner &&
 			(!owner || (!!stamp && !!scope && owner.isCurrent(stamp, scope))) &&

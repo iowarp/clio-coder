@@ -42,9 +42,10 @@ export function dispatchMemoryRuntimeId(
 export function buildDispatchMemorySection(input: {
 	dataDir: string;
 	cwd: string;
-	settings: Pick<ClioSettings, "targets" | "fleet">;
+	settings: Pick<ClioSettings, "targets" | "fleet" | "context">;
 	route: DispatchMemoryRoute;
 }): string {
+	if (!input.settings.context.memory.enabled) return "";
 	const records = loadMemoryRecordsSync(input.dataDir);
 	const runtimeId = dispatchMemoryRuntimeId(input.settings, input.route);
 	return buildMemoryPromptSection(records, {

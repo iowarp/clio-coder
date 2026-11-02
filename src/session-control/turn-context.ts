@@ -232,6 +232,8 @@ export interface TurnContextDeps {
 	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
 	planEviction?: typeof planEviction;
 	getMemorySection?: ((request: MemoryPromptRequest) => string) | undefined;
+	/** False while `context.memory.enabled` is off: no section, held or live, and no update reminder. */
+	memoryEnabled?: (() => boolean) | undefined;
 	getMemoryRecordStatuses?: ((ids: readonly string[]) => ReadonlyMap<string, MemoryStatus | "deleted">) | undefined;
 	/**
 	 * Memory scores for the section this request builds, or undefined when the
@@ -2780,7 +2782,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(deps.liveSteering === false ? { liveSteering: false } : {}),
 				...(deps.interactiveGuidance === true || deps.operatorInterviews === true ? { operatorInterviews: true } : {}),
 			};
-			if (deps.getMemorySection) {
+			const memoryOn = deps.memoryEnabled?.() !== false;
+			if (!memoryOn) frozenMemorySection = null;
+			if (deps.getMemorySection && memoryOn) {
 				try {
 					if (memoryTurn !== null && memoryTurn.sessionId !== (sessionId || null)) {
 						memoryAuthorityEpoch += 1;
@@ -2849,6 +2853,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					attachedToolSchemas,
 				});
 			const memoryDelta = (compiled: string): string => {
+				if (!memoryOn) return "";
 				const framed = hostFramedTexts(agentRuntime.agent.state.messages);
 				const ids = [
 					...new Set(
@@ -2991,7 +2996,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				sessionPromptHash = result.systemPromptHash;
 				sessionPromptKey = compiledKey;
 				sessionPromptInvalidated = false;
-				frozenMemorySection = compiledMemory;
+				// Back on, the section selects afresh instead of holding the empty one compiled while off.
+				frozenMemorySection = memoryOn ? compiledMemory : null;
 				frozenMemorySessionId = sessionId;
 				sessionPromptDelta = memoryDelta(compiledMemory);
 				preparePosture();

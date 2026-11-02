@@ -29,6 +29,7 @@ import { succeededCommandForms, successfulShellReceipt } from "./command-evidenc
 import { recordObservedRead, repositoryRelativePath } from "./lesson-evidence.js";
 import { observationDigest } from "./observations.js";
 import { relatedRepositoryRoots } from "./operations.js";
+import { entriesBeforeMemoryOff, isMemoryOffEntry } from "./recording-marker.js";
 import { redactForMemoryRoute } from "./secret-text.js";
 
 export interface CompletedLessonSource {
@@ -51,7 +52,9 @@ export interface CommandRun {
 }
 
 /** Reuse history's evidence renderer for one completed task, including process-to-process resume. */
-export function completedLessonSource(entries: readonly SessionEntry[], root: string): CompletedLessonSource | null {
+export function completedLessonSource(ledger: readonly SessionEntry[], root: string): CompletedLessonSource | null {
+	// Retention reviews a closed session too, so it stops at the same marker history review does.
+	const entries = entriesBeforeMemoryOff(ledger);
 	let end = entries.length;
 	// A recall-only new request must not hide the preceding task awaiting retention.
 	for (let index = entries.length - 1; index >= 0; index--) {
@@ -183,7 +186,7 @@ const TRIVIAL_COMMAND =
 interface SessionCursor {
 	offset: number;
 	size: number;
-	/** The ledger recorded a flow restriction at or before `offset`; nothing later is read. */
+	/** The ledger recorded a flow restriction or a memory-off marker at or before `offset`; nothing later is read. */
 	restricted?: true;
 	/** Ledger file identity the offset was recorded against; absent on cursors written before it existed. */
 	identity?: string;
@@ -561,7 +564,8 @@ function readSlice(
 	let lastResultStart = -1;
 	for (const line of lines) {
 		const entry = parseLine(line.text);
-		if (entry?.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE) {
+		// What was recorded with memory off is not read either, past the first marker or after memory came back on.
+		if ((entry?.kind === "custom" && entry.customType === FLOW_RESTRICTION_ENTRY_TYPE) || isMemoryOffEntry(entry)) {
 			return {
 				endOffset: line.end,
 				bytesRead,

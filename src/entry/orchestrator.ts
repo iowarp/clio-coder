@@ -123,7 +123,9 @@ import {
 	createMemoryLessonJudge,
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
+	entriesBeforeMemoryOff,
 	loadMemoryRecordsSync,
+	MEMORY_OFF_ENTRY_TYPE,
 	MemoryRuntime,
 	memoryStatus,
 	OBSERVATION_PROMPT,
@@ -2845,6 +2847,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			units: ReturnType<typeof observationSourceUnits>;
 		};
 	} | null = null;
+	const memoryEnabledNow = (): boolean =>
+		(effectiveSettingsForDispatch?.() ?? getCurrentSettings()).context.memory.enabled;
+	const memoryOffMarked = new Set<string>();
 	const memoryActiveEntries = () => {
 		const meta = session?.current();
 		if (!meta || !session) return null;
@@ -2856,7 +2861,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			memoryProjection.sessionId !== meta.id ||
 			memoryProjection.pinned !== pinned
 		) {
-			const active = filterEntriesToActivePath(entries, session.tree(meta.id).leafId ?? undefined);
+			const active = entriesBeforeMemoryOff(filterEntriesToActivePath(entries, session.tree(meta.id).leafId ?? undefined));
 			const checkpointIndex = active.reduce(
 				(last, entry, index) => (entry.kind === "compactionSummary" ? index : last),
 				-1,
@@ -4833,6 +4838,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus,
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
+		memoryEnabled: memoryEnabledNow,
+		beforeTurnRecorded: (target) => {
+			if (memoryEnabledNow()) return;
+			const meta = target.current();
+			if (!meta || memoryOffMarked.has(meta.id)) return;
+			target.appendEntry({
+				kind: "custom",
+				customType: MEMORY_OFF_ENTRY_TYPE,
+				// A fact about what memory may read, never a model message.
+				display: false,
+				parentTurnId: target.tree(meta.id).leafId ?? null,
+				data: {},
+			});
+			memoryOffMarked.add(meta.id);
+		},
 		getMemorySection: (request) => {
 			lastMemoryPromptRuntimeId = request.runtimeId;
 			return memoryReader(request);
