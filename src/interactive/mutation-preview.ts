@@ -288,4 +288,3 @@ export function createMutationInspector(
 		return editPreview(facts, path, edits, read);
 	};
 }
-
