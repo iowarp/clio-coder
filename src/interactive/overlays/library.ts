@@ -32,7 +32,7 @@ import {
 } from "../../domains/resources/index.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { NoticeLevel } from "../command-output.js";
-import { chipRow, clioTheme, keyCap } from "../theme/index.js";
+import { clioTheme, fitUnits, keyCap } from "../theme/index.js";
 import type { LibraryLifecyclePlan, LibraryLifecyclePort, LibraryOperation } from "./library-lifecycle.js";
 import {
 	buildLibraryRows,
@@ -485,8 +485,9 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			fullScreen: true,
 			layout: "split",
 			status: (width) =>
-				chipRow(
+				fitUnits(
 					clioTheme(),
+					"",
 					[
 						`${keyCap(clioTheme(), "n")} ${clioTheme().fg("annotation", "back to resources")}`,
 						clioTheme().fg("fieldValue", `${items.length} ${items.length === 1 ? "notice" : "notices"}`),
@@ -523,9 +524,10 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		const subject = selected ? rowSet.subjects.get(selected.id) : undefined;
 		if (!subject || subject.kind === "notice") return [];
 		const actions = libraryRowActions(subject, view);
+		// A narrowing footer drops from the left, so the keys go up in value from
+		// left to right: the reviews first, then the key that opens the row, then
+		// use, which is what a component is for.
 		const entries: Array<{ key: string; verb: string }> = [];
-		if (actions.use) entries.push({ key: "v", verb: "use" });
-		entries.push({ key: "Enter", verb: actions.open ? "members" : "detail" });
 		if (actions.install) entries.push({ key: "i", verb: "install" });
 		if (actions.enable)
 			entries.push({
@@ -539,6 +541,8 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			});
 		if (actions.update) entries.push({ key: "u", verb: "update" });
 		if (actions.remove) entries.push({ key: "r", verb: "remove" });
+		entries.push({ key: "Enter", verb: actions.open ? "members" : "detail" });
+		if (actions.use) entries.push({ key: "v", verb: "use" });
 		return entries;
 	};
 
@@ -580,10 +584,12 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 				handle.refreshTabs();
 			},
 		},
+		// The status row names b, s and n with their key caps at every width from
+		// 48 columns, so the footer may give them up before a row's own keys.
 		globalHints: [
-			{ key: "b", verb: "browse/installed", short: "view", critical: true },
-			{ key: "s", verb: "user/project", short: "scope", critical: true },
-			{ key: "n", verb: "notices", critical: true },
+			{ key: "b", verb: "browse/installed", short: "view" },
+			{ key: "s", verb: "user/project", short: "scope" },
+			{ key: "n", verb: "notices" },
 			{ key: "o", verb: "import" },
 			{ key: "R", verb: "refresh" },
 		],

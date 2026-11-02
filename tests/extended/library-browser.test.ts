@@ -837,7 +837,7 @@ describe("library browser behavior", () => {
 		)(availableRow);
 		deepStrictEqual(
 			availableHints.map((entry) => entry.key),
-			["Enter", "i"],
+			["i", "Enter"],
 			"an uninstalled package offers install, never remove",
 		);
 
@@ -850,7 +850,7 @@ describe("library browser behavior", () => {
 		)(installed.rows("plugin")[0]);
 		deepStrictEqual(
 			installedHints.map((entry) => entry.key),
-			["Enter", "e", "u", "r"],
+			["e", "u", "r", "Enter"],
 		);
 	});
 

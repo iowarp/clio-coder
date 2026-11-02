@@ -180,6 +180,8 @@ export class ListOverlayView implements Component {
 	 * the scroll keys would do before any render has corrected it.
 	 */
 	private detailPaneDrawn: boolean;
+	/** Whether the pane on screen is the split one, which Tab cannot put away. */
+	private detailPaneSplit = false;
 	private readonly input: Input;
 	/**
 	 * The live item set. Separate from `options.items` because a surface backed by
@@ -268,6 +270,21 @@ export class ListOverlayView implements Component {
 		this.selectIndex(index);
 		this.renderMemo = null;
 		return true;
+	}
+
+	/**
+	 * Drop a typed filter and leave search focus, for a caller that replaces its
+	 * rows with a different set: a filter typed to reach an agent's inventory
+	 * hid every row of the adoption plan that took the inventory's place.
+	 */
+	clearFilter(): void {
+		if (this.filterText.length === 0 && !this.isFilterFocused) return;
+		this.filterText = "";
+		this.input.setValue("");
+		this.isFilterFocused = false;
+		this.inputEpoch += 1;
+		this.selectIndex(0);
+		this.renderMemo = null;
 	}
 
 	/** Show or hide the stacked detail pane, for callers that bind their own key to it. */
@@ -445,7 +462,9 @@ export class ListOverlayView implements Component {
 		if (tab === undefined) return null;
 		const count = this.tabCounts.get(tab.id) ?? this.items.length;
 		const countLabel = tab.countLabel?.(count) ?? `${count} ${tab.label.toLowerCase()}`;
-		return { key: "←→", verb: `tab · ${countLabel}`, short: "tab", critical: true };
+		// The tab bar itself is on screen at every width, naming ←→ when it is
+		// narrow, so the footer entry is a reminder that gives way before a row's keys.
+		return { key: "←→", verb: `tab · ${countLabel}`, short: "tab" };
 	}
 
 	/**
@@ -477,37 +496,44 @@ export class ListOverlayView implements Component {
 		const hintEntries: HintEntry[] = [];
 		if (tabEntry) hintEntries.push(tabEntry);
 		hintEntries.push({ key: "↑↓", verb: "select" });
+		// Navigation before actions, which is the order a narrowing footer drops in:
+		// droppable entries go left to right, so the last one written is the last one
+		// standing. Scrolling a pane is reachable only once the pane is on screen, and
+		// it is the widest entry, so it goes with the arrows: at 120 columns it used
+		// to outlive every global key and leave n, b and s off the rail.
+		const hasDetail = this.items.some((item) => !!item.detail);
+		if (hasDetail && this.detailPaneDrawn) hintEntries.push({ key: "PgUp/PgDn", verb: "scroll detail" });
 		if (this.options.filterable) {
 			hintEntries.push(this.options.explicitSearch ? { key: "/", verb: "search", critical: true } : FILTER_HINT);
 		}
 		hintEntries.push(...(this.options.globalHints ?? []));
 
-		// Navigation before actions, which is the order a narrowing footer drops in:
-		// droppable entries go left to right, so the last one written is the last one
-		// standing. Scrolling a pane is reachable only once the pane is on screen, and
-		// the key that puts it there is the one worth keeping at 73 columns. Below the
-		// split threshold the footer used to advertise the scroll keys, which did
-		// nothing, and drop `Enter/Tab detail`, which was the way in.
-		const hasDetail = this.items.some((item) => !!item.detail);
+		// Below the split threshold the footer used to advertise the scroll keys,
+		// which did nothing, and drop `Enter/Tab detail`, which was the way in.
 		if (hasDetail) {
-			if (this.detailPaneDrawn) {
-				hintEntries.push({ key: "PgUp/PgDn", verb: "scroll detail" });
-			}
 			// While no pane is on screen this key is the only way to a row's facts,
-			// so a narrow footer keeps it; once the pane is drawn it is a toggle.
-			hintEntries.push({
-				key: this.options.onSelect ? "Tab" : "Enter/Tab",
-				verb: "detail",
-				critical: !this.detailPaneDrawn,
-			});
+			// so a narrow footer keeps it; once a stacked pane is drawn it is a
+			// toggle. The split pane is always drawn beside the list, so there the
+			// key does nothing and is not advertised.
+			if (!this.detailPaneSplit)
+				hintEntries.push({
+					key: this.options.onSelect ? "Tab" : "Enter/Tab",
+					verb: "detail",
+					critical: !this.detailPaneDrawn,
+				});
 		}
 
 		const hints =
 			typeof this.options.hints === "function"
 				? this.options.hints(this.filteredItems()[this.selectedIndex])
 				: this.options.hints;
+		// A row's own keys are named in its detail pane; while no pane is drawn
+		// the footer is the only place they appear, so they outlive the
+		// navigation reminders there.
 		if (hints) {
-			hintEntries.push(...hints);
+			hintEntries.push(
+				...hints.map((hint) => (this.detailPaneDrawn ? hint : { ...hint, critical: hint.critical ?? true })),
+			);
 		}
 
 		// The footer follows clearFilterOrClose(). With a filter typed, Esc does
@@ -791,6 +817,7 @@ export class ListOverlayView implements Component {
 		if (this.renderMemo?.key === memoKey) return this.renderMemo.lines;
 		// A cached frame retains the same detail visibility and keyboard hints.
 		this.detailPaneDrawn = isSplit && hasDetail;
+		this.detailPaneSplit = isSplit && hasDetail;
 
 		const lines: string[] = [];
 
@@ -1025,6 +1052,15 @@ export class ListOverlayView implements Component {
 	}
 }
 
+/**
+ * Prose under a rows-mode detail: Markdown rendered at the pane's width, so a
+ * description's code spans, emphasis and links keep their styling beneath the
+ * fact table instead of showing their markup.
+ */
+export function markdownRows(text: string, width: number): string[] {
+	return new Markdown(text, 0, 0, markdownTheme(clioTheme())).render(Math.max(1, Math.floor(width)));
+}
+
 export interface ListOverlayHandle extends OverlayHandle {
 	/**
 	 * Replace the rows and repaint. The view memoizes its whole frame on a row-set
@@ -1045,6 +1081,8 @@ export interface ListOverlayHandle extends OverlayHandle {
 	selectById(id: string): boolean;
 	/** Show or hide the stacked detail pane. */
 	toggleDetail(): void;
+	/** Drop a typed filter and leave search focus. */
+	clearFilter(): void;
 }
 
 /**
@@ -1099,6 +1137,10 @@ export function openListOverlay(tui: TUI, options: ListOverlayOptions & { marker
 		},
 		toggleDetail(): void {
 			view.toggleDetail();
+			tui.requestRender();
+		},
+		clearFilter(): void {
+			view.clearFilter();
 			tui.requestRender();
 		},
 	});

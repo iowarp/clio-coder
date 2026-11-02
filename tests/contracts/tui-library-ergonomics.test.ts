@@ -238,7 +238,9 @@ it("neutralizes terminal controls while preserving Unicode identity and full ins
 	}
 	const view = { category: "agent" as const, mode: "browse" as const, scope: "user" as const };
 	const rows = buildLibraryRows({ view, inventory: selectForCategory(data, view) });
-	ok(rows.items[0]?.detail?.(40).join("\n").includes(record.description));
+	// The description renders as Markdown at the pane's width, which breaks CJK text between characters, so it is compared without whitespace.
+	const collapse = (text: string): string => plain(text).replace(/\s+/g, "");
+	ok(collapse(rows.items[0]?.detail?.(40).join("\n") ?? "").includes(collapse(record.description)));
 });
 
 it("finds core agents through the real inventory in Installed without broadening audience", async () => {

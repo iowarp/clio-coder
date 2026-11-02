@@ -28,23 +28,22 @@ import {
 	type LibraryProvidedResource,
 } from "../../domains/resources/index.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
-import { visibleWidth } from "../../engine/tui.js";
 import {
 	type ClioTheme,
 	chip,
-	chipRow,
 	chipRows,
 	clioTheme,
 	dotSep,
 	type Fact,
 	factRows,
+	fitUnits,
 	GLYPH,
 	keyCap,
 	type StatusKind,
 	statusChip,
 	titleRow,
 } from "../theme/index.js";
-import type { ListOverlayItem } from "./list-overlay.js";
+import { type ListOverlayItem, markdownRows } from "./list-overlay.js";
 
 /** Browse lists install targets; Installed lists the copies and components that exist here. */
 export type LibraryMode = "browse" | "installed";
@@ -195,17 +194,14 @@ export function libraryStatusLine(
 		counts.truncated ? statusChip(theme, "warning", wide ? "incomplete results" : "incomplete") : null,
 		view.member && wide ? theme.fg("annotation", `members of ${safe(view.member.ref)}`) : null,
 	];
-	return fitChips(theme, parts, width);
-}
-
-/** Chips on one row, dropping whole chips from the right until the row fits, so a cut never lands inside a word. */
-function fitChips(theme: ClioTheme, chips: ReadonlyArray<string | null>, width: number): string {
-	const present = chips.filter((part): part is string => part !== null && part.length > 0);
-	for (let keep = present.length; keep > 1; keep -= 1) {
-		const row = present.slice(0, keep).join(dotSep(theme));
-		if (visibleWidth(row) <= width) return row;
-	}
-	return chipRow(theme, present.slice(0, 1), width);
+	// Whole chips are dropped from the right, with the dim ellipsis that says
+	// so, rather than a cut that lands inside a word.
+	return fitUnits(
+		theme,
+		"",
+		parts.filter((part): part is string => part !== null && part.length > 0),
+		width,
+	);
 }
 
 /** One phrase for a copy its catalog row has moved past. */
@@ -392,15 +388,15 @@ function actionKeyChips(theme: ClioTheme, actions: LibraryRowActions): string[] 
 	];
 }
 
-/** Each reason an action is absent, as a warning chip on its own row. */
+/** Each reason an action is absent, right under the keys it explains, as an info chip on its own row. */
 function noteRows(theme: ClioTheme, reasons: ReadonlyArray<string>, width: number): string[] {
 	return reasons.flatMap((reason) => chipRows(theme, [statusChip(theme, "info", safe(reason))], width));
 }
 
-/** The description last, as prose the pane wraps at its own width. */
-function proseRows(theme: ClioTheme, text: string | undefined): string[] {
+/** The description last, rendered as Markdown at the pane's width so its code spans and emphasis keep their styling. */
+function proseRows(text: string | undefined, width: number): string[] {
 	if (!text) return [];
-	return ["", theme.fg("body", sanitizeMultilineDisplayText(text).text)];
+	return ["", ...markdownRows(sanitizeMultilineDisplayText(text).text, width)];
 }
 
 function packageDetail(
@@ -469,6 +465,7 @@ function packageDetail(
 		titleRow(theme, safe(record.name), width, { meta: record.version ? `v${safe(record.version)}` : kindText }),
 		...chipRows(theme, status, width),
 		...chipRows(theme, actionKeyChips(theme, actions), width),
+		...noteRows(theme, actions.reasons, width),
 		...chipRows(
 			theme,
 			[`${keyCap(theme, "b")} ${theme.fg("annotation", "shows loaded components in Installed")}`],
@@ -477,8 +474,7 @@ function packageDetail(
 		"",
 		...factRows(theme, facts, width, FACT_OPTIONS),
 		...notes.map((note) => theme.fg("annotation", note)),
-		...noteRows(theme, actions.reasons, width),
-		...proseRows(theme, record.description),
+		...proseRows(record.description, width),
 	];
 }
 
@@ -544,9 +540,9 @@ function copyDetail(
 			width,
 		),
 		...chipRows(theme, actionKeyChips(theme, actions), width),
+		...noteRows(theme, actions.reasons, width),
 		"",
 		...factRows(theme, facts, width, FACT_OPTIONS),
-		...noteRows(theme, actions.reasons, width),
 	];
 }
 
@@ -593,10 +589,10 @@ function resourceDetail(resource: LibraryComponent, actions: LibraryRowActions, 
 			width,
 		),
 		...chipRows(theme, actionKeyChips(theme, actions), width),
+		...noteRows(theme, actions.reasons, width),
 		"",
 		...factRows(theme, facts, width, FACT_OPTIONS),
-		...noteRows(theme, actions.reasons, width),
-		...proseRows(theme, resource.description),
+		...proseRows(resource.description, width),
 	];
 }
 
@@ -630,10 +626,10 @@ function memberDetail(
 			width,
 		),
 		...chipRows(theme, actionKeyChips(theme, actions), width),
+		...noteRows(theme, actions.reasons, width),
 		"",
 		...factRows(theme, facts, width, FACT_OPTIONS),
-		...noteRows(theme, actions.reasons, width),
-		...proseRows(theme, subject.member.description),
+		...proseRows(subject.member.description, width),
 	];
 }
 

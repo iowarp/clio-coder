@@ -24,7 +24,7 @@ import {
 	statusChip,
 	titleRow,
 } from "../theme/index.js";
-import { type ListOverlayItem, openListOverlay } from "./list-overlay.js";
+import { type ListOverlayItem, markdownRows, openListOverlay } from "./list-overlay.js";
 
 /** @internal exported for contract tests */
 export const EXTENSIONS_EMPTY =
@@ -174,12 +174,14 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					if (runtime?.reason)
 						facts.push({ label: "Reason", value: sanitizeCallTargetText(runtime.reason), tone: "warning" });
 					if (runtime?.status) facts.push({ label: "Status", value: sanitizeCallTargetText(runtime.status.text) });
+					// One label for every command keeps the label column narrow; the
+					// invocation leads the value so a long one wraps under itself.
 					for (const command of ctx.operatorExtensions
 						?.commands(promptRefs((ctx.listPromptsForDisplay ?? ctx.listPrompts)?.().items ?? []))
 						.filter((row) => row.extensionId === ext.id) ?? [])
 						facts.push({
-							label: `/${command.invocation}`,
-							value: `${sanitizeCallTargetText(command.description)} ${
+							label: "Command",
+							value: `${theme.fg("inlineCode", `/${sanitizeCallTargetText(command.invocation)}`)} ${theme.fg("body", sanitizeCallTargetText(command.description))} ${
 								command.available
 									? statusChip(theme, "ok", "ready")
 									: statusChip(theme, "warning", sanitizeCallTargetText(command.reason ?? "unavailable"))
@@ -207,7 +209,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 				return [
 					titleRow(theme, id, width, { meta: `v${sanitizeCallTargetText(ext.version)} · ${ext.scope}` }),
 					...chipRows(theme, chips, width),
-					theme.fg("body", description),
+					...markdownRows(description, width),
 					"",
 					theme.fg("annotation", ext.scope === "dev" ? "Unload this folder for the session with" : "Manage this copy with"),
 					...commandBlock(theme, manageCommand(ext), width),

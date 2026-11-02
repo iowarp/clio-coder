@@ -36,6 +36,7 @@ import {
 	commandBlock,
 	type Fact,
 	factRows,
+	fitUnits,
 	keyCap,
 	type StatusKind,
 	statusChip,
@@ -121,7 +122,8 @@ const MODE_STATUS: Readonly<Record<"ready" | "experimental" | "unavailable", Sta
 };
 
 function plural(count: number, unit: string): string {
-	return `${count} ${unit}${count === 1 ? "" : "s"}`;
+	if (count === 1) return `${count} ${unit}`;
+	return `${count} ${unit.endsWith("y") ? `${unit.slice(0, -1)}ies` : `${unit}s`}`;
 }
 
 /** The exact argv a peer is launched with, as one line. */
@@ -168,8 +170,11 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 	const paneAvailable = deps.paneAvailable ?? null;
 	const proposals = deps.proposals();
 	const modes = (id: InteropAgentId): Fact[] => modeFacts(id, report, configuredIds, paneAvailable);
-	const declined = (agent: { decision?: string; decidedFingerprint?: string; fingerprint: string }): boolean =>
-		agent.decision === "declined" && agent.decidedFingerprint === agent.fingerprint;
+	// The domain re-proposes a declined agent whose binary moved or changed
+	// version, so an agent that stands declined and is not proposed again is
+	// declined, whatever fingerprint the version probe computed this time.
+	const declined = (agent: { kind: InteropAgentId; decision?: string }): boolean =>
+		agent.decision === "declined" && !proposals.some((proposal) => proposal.kind === agent.kind);
 
 	const items: ListOverlayItem[] = proposals.map((proposal) => {
 		const command = commandLine(proposal.entry.command, proposal.entry.args);
@@ -341,9 +346,13 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 			label: `${agent.kind} ${counts.join(" ")}`,
 			cells: { lead: agent.kind, text: counts.join(", ") || "nothing adoptable" },
 			get meta() {
+				// An empty inventory has nothing to plan, so it carries no key cap.
 				return chipRow(
 					clioTheme(),
-					[chip(clioTheme(), plural(inventory.items.length, "resource"), "muted"), keyCap(clioTheme(), "i")],
+					[
+						chip(clioTheme(), plural(inventory.items.length, "resource"), "muted"),
+						inventory.items.length > 0 ? keyCap(clioTheme(), "i") : null,
+					],
 					40,
 				);
 			},
@@ -366,32 +375,38 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 						],
 						width,
 					),
-					...choiceRows(
-						theme,
-						[
-							{
-								key: "i",
-								verb: "plan adoption",
-								consequence: `reviews a plan for ${settings.filter ?? "every kind"} into ${settings.scope} scope; nothing is written`,
-								tone: "action",
-							},
-						],
-						width,
-					),
-					"",
-					...tableRows(
-						theme,
-						{
-							columns: [
-								{ label: "scope", min: 4, priority: 1 },
-								{ label: "kind", min: 4, priority: 2 },
-								{ label: "name", min: 8, priority: 3, wrap: true },
-							],
-							rows,
-							header: true,
-						},
-						width,
-					),
+					...(inventory.items.length > 0
+						? choiceRows(
+								theme,
+								[
+									{
+										key: "i",
+										verb: "plan adoption",
+										consequence: `reviews a plan for ${settings.filter ?? "every kind"} into ${settings.scope} scope; nothing is written`,
+										tone: "action",
+									},
+								],
+								width,
+							)
+						: [theme.fg("annotation", "Nothing adoptable was found, so there is no plan to review.")]),
+					...(rows.length > 0
+						? [
+								"",
+								...tableRows(
+									theme,
+									{
+										columns: [
+											{ label: "scope", min: 4, priority: 1 },
+											{ label: "kind", min: 4, priority: 2 },
+											{ label: "name", min: 8, priority: 3, wrap: true },
+										],
+										rows,
+										header: true,
+									},
+									width,
+								),
+							]
+						: []),
 					...inventory.diagnostics.map((diagnostic) => statusChip(theme, "warning", sanitizeCallTargetText(diagnostic))),
 				];
 			},
@@ -511,36 +526,37 @@ function statusLine(
 	width: number,
 ): string {
 	const theme = clioTheme();
+	// Whole chips drop from the right with the dim ellipsis, never a cut word.
+	const units = (parts: ReadonlyArray<string | null>): string[] =>
+		parts.filter((part): part is string => part !== null && part.length > 0);
 	if (pending) {
 		const installs = pending.entries.filter((entry) => entry.action === "install").length;
-		return chipRow(
+		return fitUnits(
 			theme,
-			[
+			"",
+			units([
 				chip(theme, `plan from ${pending.host}`, "accent"),
 				chip(theme, `${installs} to install`, installs > 0 ? "action" : "muted"),
-				chip(theme, `${pending.entries.length - installs} skipped`, "muted"),
-				chip(theme, `${pending.scope} scope`, "muted"),
 				`${keyCap(theme, "y")} ${theme.fg("annotation", "approve")}`,
 				`${keyCap(theme, "b")} ${theme.fg("annotation", "back")}`,
-			],
+				chip(theme, `${pending.entries.length - installs} skipped`, "muted"),
+				chip(theme, `${pending.scope} scope`, "muted"),
+			]),
 			width,
 		);
 	}
 	const wide = width >= 72;
-	return chipRow(
+	return fitUnits(
 		theme,
-		[
+		"",
+		units([
 			`${keyCap(theme, "u")}${keyCap(theme, "p")} ${theme.fg("fieldValue", wide ? `adopt into ${settings.scope}` : settings.scope)}`,
 			`${keyCap(theme, "c")} ${theme.fg("fieldValue", settings.filter ? `${settings.filter}s only` : "all kinds")}`,
-			...(wide
-				? [
-						chip(theme, `${counts.proposed} proposed`, counts.proposed > 0 ? "action" : "muted"),
-						chip(theme, `${counts.connected} connected`, counts.connected > 0 ? "success" : "muted"),
-						counts.declined > 0 ? chip(theme, `${counts.declined} declined`, "muted") : null,
-						counts.inventories > 0 ? chip(theme, plural(counts.inventories, "inventory"), "muted") : null,
-					]
-				: [chip(theme, `${counts.proposed} proposed`, counts.proposed > 0 ? "action" : "muted")]),
-		],
+			chip(theme, `${counts.proposed} proposed`, counts.proposed > 0 ? "action" : "muted"),
+			chip(theme, `${counts.connected} connected`, counts.connected > 0 ? "success" : "muted"),
+			counts.declined > 0 ? chip(theme, `${counts.declined} declined`, "muted") : null,
+			counts.inventories > 0 ? chip(theme, plural(counts.inventories, "inventory"), "muted") : null,
+		]),
 		width,
 	);
 }
@@ -586,7 +602,7 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 		handle.setItems(items);
 	};
 	const preview = (item: ListOverlayItem): void => {
-		if (!item.id.startsWith("inventory:")) return;
+		if (!item.id.startsWith("inventory:") || item.cells?.text === "nothing adoptable") return;
 		const host = item.id.slice("inventory:".length) as InteropAgentId;
 		const inventory = deps.report()?.agents.find((agent) => agent.kind === host)?.inventory;
 		if (!inventory) return;
@@ -596,6 +612,9 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 			scope: settings.scope,
 			...(settings.filter ? { kind: settings.filter } : {}),
 		});
+		// The plan replaces the agents; a filter typed to reach the inventory
+		// would hide every one of its rows.
+		handle.clearFilter();
 		handle.setItems(planItems(pending));
 	};
 	// Only a proposal row carries a decision. A detected peer without a
@@ -620,7 +639,7 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 				{ key: "d", verb: "decline", critical: true },
 			];
 		}
-		if (selected?.id.startsWith("inventory:"))
+		if (selected?.id.startsWith("inventory:") && selected.cells?.text !== "nothing adoptable")
 			return [{ key: "i", verb: "plan adoption", short: "plan", critical: true }];
 		return [];
 	};
