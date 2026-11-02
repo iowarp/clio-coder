@@ -814,14 +814,26 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		}
 		const choices = rest.slice(choicesAt, choicesAt + choicesRows);
 		const answerRows = identityRows + choices.length;
-		// No room for a window and its position: the identity holds its place and
-		// the rail takes whichever keys did not fit.
+		// Too short to hold the choices as well: they join the window and every
+		// answer key is on the rail, so the identity holds and every row stays reachable.
 		if (budget < answerRows + 2) {
-			this.cardMaxScroll = 0;
-			this.cardScroll = 0;
-			this.jumpToTerms = false;
-			this.choicesShown = answerRows <= budget;
-			return [...facts.slice(0, identityRows), ...choices].slice(0, budget);
+			const all = [...facts.slice(identityRows), ...rest];
+			const positioned = budget >= identityRows + 2;
+			const window = Math.max(0, budget - identityRows - (positioned ? 1 : 0));
+			this.cardMaxScroll = window > 0 ? Math.max(0, all.length - window) : 0;
+			if (this.jumpToTerms) {
+				this.jumpToTerms = false;
+				if (termsAt !== null) this.cardScroll = facts.length - identityRows + termsAt;
+			}
+			this.cardScroll = Math.min(this.cardScroll, this.cardMaxScroll);
+			const end = this.cardScroll + window;
+			const choicesFrom = facts.length - identityRows + choicesAt;
+			this.choicesShown = choicesFrom >= this.cardScroll && choicesFrom + choicesRows <= end;
+			return [
+				...facts.slice(0, Math.min(identityRows, budget)),
+				...all.slice(this.cardScroll, end),
+				...(positioned ? [position(this.cardScroll + 1, end, all.length)] : []),
+			];
 		}
 		const pinned = identityRows + (hasTarget && budget >= answerRows + 3 ? 1 : 0);
 		const scrolled = [...facts.slice(pinned), ...rest.slice(0, choicesAt), ...rest.slice(choicesAt + choicesRows)];
