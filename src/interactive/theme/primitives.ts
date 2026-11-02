@@ -1,5 +1,6 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { GLYPH } from "./glyphs.js";
+import { fitIdentityLabel } from "./labels.js";
 import { padAnsi, rule } from "./rules.js";
 import { dotSep } from "./segments.js";
 import type { ClioTheme, ClioToken, SemanticRole } from "./tokens.js";
@@ -176,6 +177,8 @@ export interface FactRowsOptions {
 	labelWidth?: number;
 	/** The label role; annotation by default so the value reads first. */
 	labelRole?: SemanticRole;
+	/** `auto` stacks labels above values below `NARROW_WIDTH`; `never` keeps the two columns at any width. */
+	stack?: "auto" | "never";
 }
 
 /**
@@ -195,7 +198,7 @@ export function factRows(
 	const labelRole = options.labelRole ?? "annotation";
 	const widest = facts.reduce((max, fact) => Math.max(max, visibleWidth(fact.label)), 0);
 	const labelWidth = Math.min(widest, options.labelWidth ?? Number.POSITIVE_INFINITY, Math.max(4, Math.floor(safe / 3)));
-	const stacked = safe < NARROW_WIDTH;
+	const stacked = safe < NARROW_WIDTH && options.stack !== "never";
 	const lines: string[] = [];
 	for (const fact of facts) {
 		const value = fact.value.includes("\u001b") ? fact.value : theme.fg(toneRole(fact.tone ?? "neutral"), fact.value);
@@ -637,8 +640,27 @@ export interface ValueRowOptions {
 	mark?: string;
 	/** Dim note after the value (where the value came from); the first thing dropped. */
 	origin?: string;
+	/** `clip` cuts the value's end (the default); `identity` keeps its tail, for a model or target ref. */
+	fit?: "clip" | "identity";
 	disabled?: boolean;
 	width: number;
+}
+
+/**
+ * The cells a value row gives its label and its value, before the origin is
+ * placed, so a caller can tell whether a value will be cut and say it in full
+ * somewhere else.
+ */
+export function valueRowLayout(options: Pick<ValueRowOptions, "labelWidth" | "width">): {
+	labelWidth: number;
+	valueWidth: number;
+} {
+	const safe = Math.max(3, Math.floor(options.width));
+	const narrow = safe < NARROW_WIDTH;
+	const available = safe - 2;
+	const labelCeiling = narrow ? Math.max(4, Math.floor(available * 0.4)) : Math.max(4, Math.floor(available * 0.62));
+	const labelWidth = Math.max(1, Math.min(Math.floor(options.labelWidth), labelCeiling, available - 4));
+	return { labelWidth, valueWidth: Math.max(1, available - labelWidth - 2 - 2) };
 }
 
 /**
@@ -655,9 +677,7 @@ export function valueRow(theme: ClioTheme, options: ValueRowOptions): string {
 	const prefix = options.focused
 		? theme.fg("selectedOption", `${GLYPH.cursor} `)
 		: `${options.mark === undefined ? " " : clip(options.mark, 1)} `;
-	const available = safe - 2;
-	const labelCeiling = narrow ? Math.max(4, Math.floor(available * 0.4)) : Math.max(4, Math.floor(available * 0.62));
-	const labelWidth = Math.max(1, Math.min(Math.floor(options.labelWidth), labelCeiling, available - 4));
+	const { labelWidth, valueWidth: room } = valueRowLayout(options);
 	const fittedLabel = clip(options.label, labelWidth);
 	const label = padAnsi(
 		fittedLabel.includes("\u001b")
@@ -670,12 +690,15 @@ export function valueRow(theme: ClioTheme, options: ValueRowOptions): string {
 		labelWidth,
 	);
 	const mark = options.changed === true ? theme.fg("changedValue", `${GLYPH.scoped} `) : "  ";
-	const room = Math.max(1, available - labelWidth - 2 - 2);
 	const rawOrigin = narrow ? "" : (options.origin ?? "");
 	const valueWidth = visibleWidth(options.value);
 	const originWidth = rawOrigin.length === 0 ? 0 : visibleWidth(rawOrigin);
 	const keepOrigin = originWidth > 0 && valueWidth + 2 + originWidth <= room;
-	const fittedValue = clip(options.value, keepOrigin ? room - originWidth - 2 : room);
+	const valueRoom = keepOrigin ? room - originWidth - 2 : room;
+	const fittedValue =
+		options.fit === "identity" && !options.value.includes("\u001b")
+			? fitIdentityLabel(options.value, valueRoom)
+			: clip(options.value, valueRoom);
 	const value = fittedValue.includes("\u001b")
 		? fittedValue
 		: options.changed === true

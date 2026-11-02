@@ -81,6 +81,7 @@ import type { FleetNodeSettingsUi } from "./fleet-node-settings.js";
 import { fleetNodeSettingsSubmenu } from "./fleet-node-settings.js";
 import { modelsForTarget } from "./model-selector.js";
 import {
+	clippedSettingValue,
 	effectTiming,
 	formatSettingsValue,
 	type InspectorContext,
@@ -3635,8 +3636,12 @@ export class SettingsCenter implements Component {
 		return this.options.originFor?.(item) ?? null;
 	}
 
-	/** What the inspector strip and the detail lane describe: the section, or the row under the cursor. */
-	private inspectorContext(): InspectorContext | null {
+	/**
+	 * What the inspector strip and the detail lane describe: the section, or
+	 * the row under the cursor. `rowsWidth` is the lane the rows were drawn in,
+	 * so the context knows whether that lane cut the focused value.
+	 */
+	private inspectorContext(rowsWidth: number): InspectorContext | null {
 		const sections = this.sections();
 		const section = this.currentSection();
 		if (!section) return null;
@@ -3644,13 +3649,26 @@ export class SettingsCenter implements Component {
 		const selectable = section.items.filter((entry) => this.isSelectableRow(entry));
 		const home =
 			item !== null && section.id === "recent" ? SETTINGS_SECTIONS.find((area) => area.id === item.section) : undefined;
+		const origin = item === null ? null : this.originFor(item);
+		const fullValue = ((): string | null => {
+			if (item === null) return null;
+			const display = this.displayValueFor(item, true);
+			return clippedSettingValue(clioTheme(), item, rowsWidth, settingsLabelWidth(section.items), {
+				selected: true,
+				displayValue: display.value,
+				pending: display.pending,
+				pinned: this.isPinned(item),
+				origin,
+			});
+		})();
 		return {
 			sectionLabel: section.label,
 			sectionDescription: SETTINGS_SECTION_DESCRIPTIONS[section.id],
 			position: `${sections.findIndex((entry) => entry.id === section.id) + 1} of ${sections.length}`,
 			counts: { label: sectionCount(section), changed: selectable.filter((entry) => isModified(entry)).length },
 			item,
-			origin: item === null ? null : this.originFor(item),
+			...(fullValue === null ? {} : { fullValue }),
+			origin,
 			pinned: item !== null && this.isPinned(item),
 			pinnable: isShortcutRow(item),
 			...(home ? { homeLabel: home.label } : {}),
@@ -3710,7 +3728,7 @@ export class SettingsCenter implements Component {
 			centerWidth = ROWS_LANE_MAX_WIDTH;
 		}
 		const center = this.renderRowsLane(centerWidth, bodyRows);
-		const context = this.inspectorContext();
+		const context = this.inspectorContext(centerWidth);
 		const right = context
 			? renderDetailLane(clioTheme(), context, detailWidth, bodyRows)
 			: fitRows([], detailWidth, bodyRows);
@@ -3771,7 +3789,7 @@ export class SettingsCenter implements Component {
 				),
 			];
 		}
-		const context = this.inspectorContext();
+		const context = this.inspectorContext(rightWidth);
 		const budget = Math.min(INSPECTOR_ROWS, Math.max(0, available - MIN_LIST_ROWS));
 		const inspector = context ? renderInspector(clioTheme(), context, width, budget) : [];
 		const contentHeight = Math.max(1, available - inspector.length);
@@ -3911,7 +3929,7 @@ export class SettingsCenter implements Component {
 		// keep two inspector rows, ten keep one, and anything shorter gives every
 		// row to the list; the description stays reachable at wider widths.
 		const budget = bodyHeight >= 16 ? 2 : bodyHeight >= 10 ? 1 : 0;
-		const context = this.inspectorContext();
+		const context = this.inspectorContext(width);
 		const inspector = context ? renderNarrowInspector(clioTheme(), context, width, budget) : [];
 		const listHeight = Math.max(1, available - inspector.length);
 		const list =

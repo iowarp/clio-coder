@@ -15,8 +15,15 @@ import {
 	truncateToWidth,
 } from "../../engine/tui.js";
 import { relative } from "../format-time.js";
-import { buildHint, DEFAULT_SELECT_THEME, FILTER_HINT, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
-import { GLYPH } from "../theme/index.js";
+import {
+	buildHint,
+	centeredWindow,
+	DEFAULT_SELECT_THEME,
+	FILTER_HINT,
+	FocusBox,
+	showClioOverlayFrame,
+} from "../overlay-frame.js";
+import { clioTheme, emptyState, GLYPH, positionRow, selectionRow } from "../theme/index.js";
 import { filterSessions } from "./session-selector-search.js";
 
 export const SESSION_OVERLAY_WIDTH = 110;
@@ -24,10 +31,20 @@ const VISIBLE_ROWS = 6;
 export const SESSION_ESCAPE_GRACE_MS = 75;
 const ESC = String.fromCharCode(27);
 
-/** Session metadata gets its own row so a narrow picker never drops it (flywheel r4/5). */
+/** A session row: the label the list selects by, when it last moved, and the strip under it. */
+interface SessionItem extends SelectItem {
+	when: string;
+}
+
+/**
+ * Session metadata gets its own row so a narrow picker never drops it
+ * (flywheel r4/5). Each session is a selection row: the name or first message
+ * with its age at the right, and the turn count, folder and route beneath,
+ * clipped to one row so every session costs the same two.
+ */
 class SessionSelectList extends SelectList {
 	constructor(
-		private readonly sessionItems: SelectItem[],
+		private readonly sessionItems: SessionItem[],
 		private readonly visibleSessions: number,
 	) {
 		super(sessionItems, visibleSessions, DEFAULT_SELECT_THEME);
@@ -35,28 +52,28 @@ class SessionSelectList extends SelectList {
 
 	override render(width: number): string[] {
 		if (width <= 0) return [];
+		const theme = clioTheme();
 		const selected = Math.max(
 			0,
 			this.sessionItems.findIndex((item) => item.value === this.getSelectedItem()?.value),
 		);
-		const start = Math.max(
-			0,
-			Math.min(selected - Math.floor(this.visibleSessions / 2), this.sessionItems.length - this.visibleSessions),
-		);
-		const end = Math.min(start + this.visibleSessions, this.sessionItems.length);
+		const [start, end] = centeredWindow(this.sessionItems.length, selected, this.visibleSessions);
 		const rows: string[] = [];
 		for (let index = start; index < end; index++) {
 			const item = this.sessionItems[index];
 			if (!item) continue;
-			const focused = index === selected;
-			const label = truncateToWidth(`${focused ? "→ " : "  "}${item.label}`, width, "…", true);
-			rows.push(focused ? DEFAULT_SELECT_THEME.selectedText(label) : label);
-			rows.push(DEFAULT_SELECT_THEME.description(truncateToWidth(`  ${item.description ?? ""}`, width, "…", true)));
+			rows.push(
+				...selectionRow(theme, {
+					focused: index === selected,
+					label: item.label,
+					meta: item.when,
+					description: truncateToWidth(item.description ?? "", Math.max(1, width - 4), GLYPH.ellipsis, false),
+					width,
+				}),
+			);
 		}
 		if (start > 0 || end < this.sessionItems.length)
-			rows.push(
-				DEFAULT_SELECT_THEME.scrollInfo(truncateToWidth(`  ${selected + 1}/${this.sessionItems.length}`, width, "…", true)),
-			);
+			rows.push(positionRow(theme, { start: start + 1, end, total: this.sessionItems.length, unit: "sessions" }, width));
 		return rows;
 	}
 
@@ -94,30 +111,30 @@ function previewLine(meta: SessionMeta): string {
 	return `${id} · ${cwdLeaf || "no preview"}`;
 }
 
-function metaStrip(meta: SessionMeta, now: number): string {
+function metaStrip(meta: SessionMeta): string {
 	// Closing a session does not establish that its run succeeded. A session that
 	// never ended reads as running only while its owning process is (#420).
 	const status = liveSessionOwner(meta) ? GLYPH.running : GLYPH.scoped;
-	const when = formatRelativeTime(meta.lastActivityAt ?? meta.endedAt ?? meta.createdAt, now);
 	const count = typeof meta.messageCount === "number" ? meta.messageCount : 0;
 	const countLabel = count === 1 ? "1 turn" : `${count} turns`;
 	const folder = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "") || "no folder";
 	// meta.json describes the session, not its spend; the picker shows no spend (#434).
-	return `${status} ${when} · ${countLabel} · ${folder} · ${shortTarget(meta)}`;
+	return `${status} ${countLabel} · ${folder} · ${shortTarget(meta)}`;
 }
 
 /**
  * The saved name, first message or fallback identity stays visible as metadata yields.
  * Keep the canonical ID as the selection value, independent of display text.
  */
-function buildSessionItems(sessions: ReadonlyArray<SessionMeta>, now: number = Date.now()): SelectItem[] {
+function buildSessionItems(sessions: ReadonlyArray<SessionMeta>, now: number = Date.now()): SessionItem[] {
 	return sessions.map((meta) => {
 		const labels = meta.labels?.map(sanitizeCallTargetText).filter(Boolean).join(", ");
-		const details = [metaStrip(meta, now), labels ? `labels: ${labels}` : ""].filter(Boolean);
+		const details = [metaStrip(meta), labels ? `labels: ${labels}` : ""].filter(Boolean);
 		return {
 			value: meta.id,
 			label: previewLine(meta),
 			description: details.join(" · "),
+			when: formatRelativeTime(meta.lastActivityAt ?? meta.endedAt ?? meta.createdAt, now),
 		};
 	});
 }
@@ -168,10 +185,23 @@ function createSessionOverlayBox(
 	let filtered = [...sessions];
 	let lastQuery = "";
 	let selectedSessionId: string | undefined;
+	// Sessions the dock has room for: two rows each under the filter row and a
+	// position row, never more than the six a page moves by. Zero means the
+	// frame has not said yet, so the six stand.
+	let visibleBudget = VISIBLE_ROWS;
 	let list = buildList(filtered);
 	let pendingEscape = "";
 	let pendingEscapeTimer: ReturnType<typeof setTimeout> | null = null;
-	const box = new FocusBox(input, { onInput: handleInput }) as FocusBox & { dispose(): void };
+	const box = new FocusBox(input, { onInput: handleInput }) as FocusBox & {
+		dispose(): void;
+		setBodyRows(rows: number): void;
+	};
+	box.setBodyRows = (rows: number): void => {
+		const next = rows > 0 ? Math.max(1, Math.min(VISIBLE_ROWS, Math.floor((rows - 2) / 2))) : VISIBLE_ROWS;
+		if (next === visibleBudget) return;
+		visibleBudget = next;
+		applyFilter();
+	};
 	box.undoInput = () => {
 		input.applyEdit("undo");
 		lastQuery = input.getValue();
@@ -193,7 +223,7 @@ function createSessionOverlayBox(
 
 	function buildList(sessions: ReadonlyArray<SessionMeta>): SelectList {
 		const items = buildSessionItems(sessions);
-		const visible = Math.min(VISIBLE_ROWS, Math.max(1, items.length || 1));
+		const visible = Math.min(visibleBudget, Math.max(1, items.length || 1));
 		const list = new SessionSelectList(items, visible);
 		list.onSelect = (item: SelectItem): void => {
 			onSelect(item.value);
@@ -209,7 +239,11 @@ function createSessionOverlayBox(
 		box.clear();
 		box.addChild(input);
 		if (filtered.length === 0) {
-			noMatchView.setText("(no matching sessions)");
+			noMatchView.setText(
+				emptyState(clioTheme(), "no matching sessions", SESSION_OVERLAY_WIDTH, {
+					remedy: "Esc clears the filter",
+				}).join("\n"),
+			);
 			box.addChild(noMatchView);
 		} else {
 			box.addChild(list);
@@ -238,7 +272,7 @@ function createSessionOverlayBox(
 	function moveSelectionByPage(direction: -1 | 1): void {
 		const selected = list.getSelectedItem();
 		const currentIndex = selected ? filtered.findIndex((session) => session.id === selected.value) : 0;
-		const targetIndex = currentIndex + direction * VISIBLE_ROWS;
+		const targetIndex = currentIndex + direction * visibleBudget;
 		list.setSelectedIndex(targetIndex);
 		box.invalidate();
 	}

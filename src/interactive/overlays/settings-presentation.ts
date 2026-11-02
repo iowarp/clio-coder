@@ -3,7 +3,7 @@ import { settingControl } from "../../core/settings-controls.js";
 import type { SettingsOrigin } from "../../core/settings-layers.js";
 import { renderUsdLimit } from "../../core/telemetry/render.js";
 import { settingsChangeKind } from "../../domains/config/classify.js";
-import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { stripTerminalSequences, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { fitRows } from "../overlay-frame.js";
 import {
 	type ClioTheme,
@@ -18,6 +18,7 @@ import {
 	tableRows,
 	titleRow,
 	valueRow,
+	valueRowLayout,
 } from "../theme/index.js";
 import type { SettingsCenterItem, SettingsValueSegment } from "./settings.js";
 
@@ -276,6 +277,62 @@ export function settingsLabelWidth(items: ReadonlyArray<SettingsCenterItem>): nu
 	return Math.min(widest, 34);
 }
 
+/**
+ * A value that names a target or model keeps its tail when it must shorten;
+ * the suffix is what tells two builds apart. A prose value on the same path
+ * (`Connection default`) has spaces and is cut at its end like any sentence.
+ */
+function isIdentityValue(item: SettingsCenterItem, value: string): boolean {
+	if (/\s/u.test(stripTerminalSequences(value))) return false;
+	const last = item.configPath.split(".").at(-1) ?? "";
+	return (
+		last === "model" ||
+		last === "target" ||
+		last === "defaultModel" ||
+		item.id.startsWith("workers.profiles") ||
+		item.id.startsWith("workers.agentBindings") ||
+		item.configPath === "chat.modelPicker.cycleSet"
+	);
+}
+
+/** The value a row shows, painted for its kind and selection state. */
+function settingValueText(theme: ClioTheme, item: SettingsCenterItem, state: SettingRowState): string {
+	const plain = (): string => formatSettingsValue(item.configPath, state.displayValue);
+	if (state.pending) return plain();
+	if (item.presentationKind === "read-only-fact")
+		return item.valueSegments.length <= 1
+			? theme.fg("readOnlyFact", plain())
+			: paintSegments(theme, item.valueSegments, state.selected, true);
+	if (item.presentationKind === "setting" && item.valueSegments.length <= 1) return plain();
+	return paintSegments(theme, item.valueSegments, state.selected, item.readOnly);
+}
+
+/**
+ * The row's whole value when the lane cannot show all of it, or null when the
+ * row fits. The inspector says the whole value then, because a model id cut
+ * to its first thirty cells is not the fact the operator came for. The origin
+ * yields before the value does, so only the full room counts.
+ */
+export function clippedSettingValue(
+	theme: ClioTheme,
+	item: SettingsCenterItem,
+	width: number,
+	labelWidth: number,
+	state: SettingRowState,
+): string | null {
+	if (item.presentationKind === "group-header" || item.id === "targets.add-cta" || item.targetConsole) return null;
+	const shown = stripTerminalSequences(settingValueText(theme, item, state));
+	const { valueWidth } = valueRowLayout({ labelWidth, width });
+	// A row built from segments (a profile, a node) may arrive already
+	// compacted by its builder; its `currentValue` still holds the whole fact.
+	const full =
+		item.valueSegments.length > 1 && !state.pending
+			? item.currentValue
+			: formatSettingsValue(item.configPath, state.displayValue);
+	const compacted = item.valueSegments.length > 1 && shown.includes(GLYPH.ellipsis) && full !== shown;
+	return visibleWidth(shown) <= valueWidth && !compacted ? null : full;
+}
+
 export function renderSettingRow(
 	theme: ClioTheme,
 	item: SettingsCenterItem,
@@ -296,16 +353,7 @@ export function renderSettingRow(
 	}
 	const modified = isModified(item);
 	const changed = state.pending || modified;
-	const plain = (): string => formatSettingsValue(item.configPath, state.displayValue);
-	const value = state.pending
-		? plain()
-		: item.presentationKind === "read-only-fact"
-			? item.valueSegments.length <= 1
-				? theme.fg("readOnlyFact", plain())
-				: paintSegments(theme, item.valueSegments, state.selected, true)
-			: item.presentationKind === "setting" && item.valueSegments.length <= 1
-				? plain()
-				: paintSegments(theme, item.valueSegments, state.selected, item.readOnly);
+	const value = settingValueText(theme, item, state);
 	const label =
 		item.presentationKind === "action" && !state.selected
 			? theme.style("commandHint", item.label, { bold: true })
@@ -319,6 +367,7 @@ export function renderSettingRow(
 		changed,
 		...(state.pinned ? { mark: theme.fg("annotation", GLYPH.favorite) } : {}),
 		...(origin === null ? {} : { origin }),
+		...(isIdentityValue(item, value) ? { fit: "identity" as const } : {}),
 		disabled: item.readOnly && item.presentationKind !== "status" && item.presentationKind !== "action",
 		width,
 	});
@@ -426,6 +475,8 @@ export interface InspectorContext {
 	counts: { label: string; changed: number };
 	/** The row under the cursor, or null while the section lane holds it. */
 	item: SettingsCenterItem | null;
+	/** The row's whole value when the lane cut it; the inspector says it in full. */
+	fullValue?: string;
 	origin: SettingValueOrigin | null;
 	pinned: boolean;
 	pinnable: boolean;
@@ -499,9 +550,16 @@ export function renderInspector(theme: ClioTheme, context: InspectorContext, wid
 		item === null ? sectionFacts(theme, context.counts) : itemFacts(theme, context, item),
 		safe,
 	);
+	// A cut value outranks the description: the row already said what the
+	// setting is called, and the one thing the lane could not say is its value.
+	const value =
+		context.fullValue === undefined
+			? []
+			: factRows(theme, [{ label: "Value", value: context.fullValue, tone: "neutral" }], safe, { stack: "never" });
 	if (budget === 1) return [rule];
-	if (budget === 2) return [rule, facts.length > 0 ? facts : (description[0] ?? "")];
-	const lines = [rule, ...markCut(description, Math.min(2, budget - 2))];
+	if (budget === 2) return [rule, value[0] ?? (facts.length > 0 ? facts : (description[0] ?? ""))];
+	const prose = Math.max(0, budget - 2 - value.length);
+	const lines = [rule, ...value, ...markCut(description, Math.min(2, prose))];
 	if (facts.length > 0) lines.push(facts);
 	return lines.slice(0, budget);
 }
@@ -547,6 +605,7 @@ export function renderDetailLane(theme: ClioTheme, context: InspectorContext, wi
 	];
 	if (item.help) body.push("", ...wrapTextWithAnsi(theme.fg("help", item.help), safe));
 	const facts: Fact[] = [];
+	if (context.fullValue !== undefined) facts.push({ label: "Value", value: context.fullValue });
 	if (!item.readOnly && item.defaultValue !== undefined)
 		facts.push({ label: "Default", value: formatSettingsValue(item.configPath, item.defaultValue), tone: "muted" });
 	const origin = originPhrase(context.origin);
@@ -561,7 +620,9 @@ export function renderDetailLane(theme: ClioTheme, context: InspectorContext, wi
 			tone: "muted",
 		});
 	if (context.homeLabel !== undefined) facts.push({ label: "In", value: context.homeLabel, tone: "muted" });
-	if (facts.length > 0) body.push("", ...factRows(theme, facts, safe));
+	// Facts keep label and value on one row at every lane width: the lane is
+	// never under thirty cells, and a stacked `From` cost two rows and a blank.
+	if (facts.length > 0) body.push("", ...factRows(theme, facts, safe, { stack: "never" }));
 	const note = wrapTextWithAnsi(theme.fg("annotation", scopeNote(item, context)), safe);
 	return pinNote(body, note, safe, height);
 }

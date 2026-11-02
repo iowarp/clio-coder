@@ -13,8 +13,9 @@
  */
 
 import type { ThinkingLevel } from "../../core/defaults.js";
-import { type OverlayHandle, type SelectItem, SelectList, type TUI } from "../../engine/tui.js";
-import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import type { OverlayHandle, TUI } from "../../engine/tui.js";
+import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
+import { type ChoiceItem, ChoiceList } from "./settings-submenus.js";
 
 export const MODEL_SCOPE_OVERLAY_WIDTH = 72;
 
@@ -42,7 +43,7 @@ export function formatPendingModelScope(ref: PendingModelScope): string {
 }
 
 /** Three outcomes, least durable first, matching the settings center's order. */
-function buildModelScopeItems(): SelectItem[] {
+function buildModelScopeItems(): ChoiceItem[] {
 	return [
 		{
 			value: "session",
@@ -69,13 +70,11 @@ function buildModelScopeItems(): SelectItem[] {
 
 export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps): OverlayHandle {
 	const items = buildModelScopeItems();
-	// The default 32-column label slot cut "Apply and save for this project"
-	// to "projec"; widen it so every label fits beside its description.
-	const list = new SelectList(items, items.length, DEFAULT_SELECT_THEME, {
-		minPrimaryColumnWidth: 18,
-		maxPrimaryColumnWidth: 40,
-	});
-	list.onSelect = (item: SelectItem): void => {
+	// The same choice list the settings center confirms with: each destination
+	// carries its consequence under it, so the label never has to be cut to fit
+	// beside a description column.
+	const list = new ChoiceList(items);
+	list.onSelect = (item: ChoiceItem): void => {
 		if (item.value === "session" || item.value === "project" || item.value === "global") {
 			deps.onChoose(item.value);
 			return;
