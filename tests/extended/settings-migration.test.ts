@@ -362,7 +362,7 @@ targets:
 		const others = listMigrations()
 			.map((migration) => migration.id)
 			.filter((id) => id !== FLEET_JUDGE_MIGRATION_ID);
-		writeFileSync(join(stateDir, "migrations.json"), `${JSON.stringify({ applied: others })}\n`, "utf8");
+		writeFileSync(join(scratch.dir, "config", "migrations.json"), `${JSON.stringify({ applied: others })}\n`, "utf8");
 		const written =
 			"version: 2\n# operator notes\nfleet:\n  permissions:\n    mode: 'deny' # kept\n    escalation: { timeoutMs: 120000, fallback: deny }\n";
 		writeFileSync(settingsFile, written, "utf8");
@@ -377,7 +377,7 @@ targets:
 	});
 
 	it("doctor distinguishes satisfied settings migrations from pending work without writing receipts", () => {
-		const manifest = join(stateDir, "migrations.json");
+		const manifest = join(scratch.dir, "config", "migrations.json");
 		const recorded = `{"applied":["${PLAYBOOKS_MIGRATION_ID}","${ACP_ADAPTERS_MIGRATION_ID}","${CLAUDE_SUBSCRIPTION_MIGRATION_ID}","${FLEET_JUDGE_MIGRATION_ID}","${OLD_TELEMETRY_MIGRATION_ID}"]}\n`;
 		writeFileSync(manifest, recorded, "utf8");
 		writeFileSync(settingsFile, "version: 2\n", "utf8");
@@ -395,8 +395,31 @@ targets:
 		}
 	});
 
+	it("moves a state-root manifest to the config root without replaying what it records", async () => {
+		const legacy = join(stateDir, "migrations.json");
+		writeFileSync(legacy, '{"applied":["recorded"]}\n', "utf8");
+		deepStrictEqual(readMigrationManifestResult(stateDir).manifest.applied, ["recorded"]);
+		ok(existsSync(legacy), "a read-only caller leaves the manifest where it found it");
+
+		let calls = 0;
+		const migrations = [
+			{
+				id: "recorded",
+				up: async () => {
+					calls += 1;
+				},
+			},
+		];
+		deepStrictEqual((await runPending(stateDir, migrations)).applied, []);
+		strictEqual(calls, 0);
+		ok(!existsSync(legacy));
+		deepStrictEqual(JSON.parse(readFileSync(join(scratch.dir, "config", "migrations.json"), "utf8")), {
+			applied: ["recorded"],
+		});
+	});
+
 	it("refuses a corrupt migration manifest instead of replaying user-data changes", async () => {
-		const manifest = join(stateDir, "migrations.json");
+		const manifest = join(scratch.dir, "config", "migrations.json");
 		writeFileSync(manifest, '{"applied":["once","once"]}\n', "utf8");
 		let calls = 0;
 		const migrations = [
@@ -432,7 +455,7 @@ targets:
 		const [first, second] = await Promise.all([runPending(stateDir, migrations), runPending(stateDir, migrations)]);
 		strictEqual(calls, 1);
 		deepStrictEqual([...first.applied, ...second.applied], ["serialized"]);
-		const manifest = join(stateDir, "migrations.json");
+		const manifest = join(scratch.dir, "config", "migrations.json");
 		deepStrictEqual(JSON.parse(readFileSync(manifest, "utf8")), { applied: ["serialized"] });
 		if (process.platform !== "win32") strictEqual(statSync(manifest).mode & 0o777, 0o600);
 	});

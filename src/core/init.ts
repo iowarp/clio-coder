@@ -6,7 +6,11 @@
 
 import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { REGISTERED_MIGRATION_IDS } from "../domains/lifecycle/migrations/registry-ids.js";
+import {
+	legacyMigrationManifestPath,
+	migrationManifestPath,
+	REGISTERED_MIGRATION_IDS,
+} from "../domains/lifecycle/migrations/registry-ids.js";
 import { isDevVersion } from "./build-info.js";
 import { DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "./defaults.js";
 import { readClioVersion } from "./package-root.js";
@@ -70,6 +74,7 @@ export function initializeClioHome(): InitReport {
 	// cross-role wipe. Refuse before any accessor below creates a directory.
 	assertClioDirLayout(resolved);
 	const preexistingHome = existsSync(resolved.state) || existsSync(resolved.config) || existsSync(resolved.data);
+	const settingsExisted = existsSync(join(resolved.config, "settings.yaml"));
 
 	const configDir = clioConfigDir();
 	const dataDir = clioDataDir();
@@ -111,14 +116,15 @@ export function initializeClioHome(): InitReport {
 		touched = true;
 	});
 
-	// A fresh home is written in the current shape, so every registered
+	// Settings this call just wrote are in the current shape, so every registered
 	// migration is already satisfied. Without this record doctor reports them
-	// pending until an upgrade replays no-op migrations over it. A home that
-	// existed before this call may predate them and is left to runPending.
-	const migrationsPath = join(stateDir, "migrations.json");
-	if (!preexistingHome) {
+	// pending until an upgrade replays no-op migrations over it. A settings file
+	// that was already here may predate them and is left to runPending, and so is
+	// a manifest the state root still holds from before 0.6.8.
+	const migrationsPath = migrationManifestPath();
+	if (!settingsExisted) {
 		withStateFileLockSync(migrationsPath, () => {
-			if (existsSync(migrationsPath)) return;
+			if (existsSync(migrationsPath) || existsSync(legacyMigrationManifestPath(stateDir))) return;
 			safeResourceWrite(migrationsPath, `${JSON.stringify({ applied: [...REGISTERED_MIGRATION_IDS] }, null, 2)}\n`, {
 				encoding: "utf8",
 				mode: 0o600,

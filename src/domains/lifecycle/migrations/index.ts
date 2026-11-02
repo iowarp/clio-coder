@@ -7,9 +7,9 @@
  * files. To add a migration, author `YYYY-MM-DD-<slug>.ts` with a default
  * export matching the `Migration` contract and register it below.
  *
- * Applied migration ids are persisted to `<stateDir>/migrations.json`. A
+ * Applied migration ids are persisted to `<configDir>/migrations.json`. A
  * migration whose id already appears in that manifest is skipped. `up()` is
- * invoked at most once per Clio Coder state tree for a given id.
+ * invoked at most once per Clio Coder home for a given id.
  *
  * The registry ships empty pre-launch. Requirements for future migrations:
  *
@@ -29,8 +29,7 @@
  *    already applied one of these is unaffected by where the other sits.
  */
 
-import { chmodSync, existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../../core/state-file-lock.js";
@@ -42,7 +41,7 @@ import claudeSubscription from "./2026-10-07-claude-subscription.js";
 import fleetPermissionsJudge from "./2026-10-20-fleet-permissions-judge.js";
 import removeOldTelemetry from "./2026-10-31-remove-old-telemetry.js";
 import { appendMigrationNotice } from "./notices.js";
-import { REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
+import { legacyMigrationManifestPath, migrationManifestPath, REGISTERED_MIGRATION_IDS } from "./registry-ids.js";
 
 /** What a migration tells the operator: what it changed, and what still needs them. */
 export interface MigrationReport {
@@ -112,12 +111,10 @@ export function listMigrations(): ReadonlyArray<Migration> {
 	return REGISTRY;
 }
 
+/** Read-only: `doctor` and the upgrade preview see a not yet moved manifest where it still is. */
 export function readMigrationManifestResult(stateDir: string): MigrationManifestRead {
-	return readManifest(manifestPath(stateDir));
-}
-
-function manifestPath(stateDir: string): string {
-	return join(stateDir, "migrations.json");
+	const path = migrationManifestPath();
+	return readManifest(existsSync(path) ? path : legacyMigrationManifestPath(stateDir));
 }
 
 function readManifest(path: string): MigrationManifestRead {
@@ -165,10 +162,14 @@ export async function runPending(
 	stateDir: string,
 	migrations: ReadonlyArray<Migration> = REGISTRY,
 ): Promise<MigrationRunResult> {
-	const path = manifestPath(stateDir);
+	const path = migrationManifestPath();
 	return withStateFileLock(path, async () => {
-		const read = readManifest(path);
+		const legacy = legacyMigrationManifestPath(stateDir);
+		const moved = existsSync(path);
+		const read = readManifest(moved ? path : legacy);
 		if (read.problem !== null) throw new Error(read.problem);
+		if (!moved && existsSync(legacy)) writeManifest(path, read.manifest);
+		rmSync(legacy, { force: true });
 		const applied = new Set(read.manifest.applied);
 		const newlyApplied: string[] = [];
 		const reports: Record<string, MigrationReport> = {};

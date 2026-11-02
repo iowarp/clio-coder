@@ -108,7 +108,7 @@ for them.
 | Path (Linux default) | Contents |
 | --- | --- |
 | `~/.local/share/clio-coder-install/runtime/node-v<ver>-<build>/` | The managed Node.js. macOS uses `~/Library/Application Support/clio-coder/install`, Windows `%LOCALAPPDATA%\clio-coder\install`; `--install-dir`, `CLIO_CODER_INSTALL_DIR` or `CLIO_CODER_HOME/install` override it. |
-| `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version. Every version and runtime stays on disk until `uninstall --remove-binary`, because a running session may still load code from the version it started with; the manifest names the current and previous ones. |
+| `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version. The manifest names the current and previous ones, which always stay. Each activation also removes other versions older than seven days that no local process is using, on a local Linux filesystem only; everywhere else they stay until `uninstall --remove-binary`, because a running session may still load code from the version it started with. Runtimes stay until that uninstall too. |
 | `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher, the channel, any version pin, whether background updates are on, whether a package manager wraps the install, and whether the installer added the launcher directory to `PATH`. Activating a version is one atomic write of this file. It is a different file from the state root's `install.json`, which records the Clio Coder version and install times. |
 | `.../launchers/`, `.../.active/` | The launcher's helper script, and one receipt per running session, which `uninstall` checks before it removes anything. |
 | `.../.installer-owner`, `.../.install-lock/` | The ownership marker that stops an installer from claiming a directory that already holds `runtime/` or `versions/`, and the lock held while an install, rollback or uninstall runs. Each installer reclaims a lock on its own when this machine wrote it, the owner pid is gone and the lock is older than 10 minutes. A lock held by a live process, a foreign host or a recent crash stops the run with exit status 75, and deleting only that directory once its owner has exited clears it. |
@@ -365,6 +365,8 @@ You can redirect Clio Coder's folders using environment variables:
 *   `CLIO_CODER_STATE_DIR`: Overrides the state directory only (takes precedence over `CLIO_CODER_HOME`).
 *   `CLIO_CODER_CACHE_DIR`: Overrides the cache directory only (takes precedence over `CLIO_CODER_HOME`).
 
+On Linux an empty or relative `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` or `XDG_CACHE_HOME` reads as unset, as the XDG Base Directory specification requires.
+
 The four resolved roots are ownership boundaries. They must be absolute,
 distinct, and non-nesting. Clio resolves existing symlinked parents while
 checking this rule, so two spellings of the same directory are not treated as
@@ -427,8 +429,8 @@ The core files are created automatically during the first run. `settings.yaml`, 
 | **Config** | `settings.yaml` | Target runtimes, model defaults, keybindings, and interface preferences. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --config`. |
 | **Config** | `credentials.yaml` | Private keys and tokens managed via `clio-coder auth`. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --auth`. |
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
+| **Config** | `migrations.json` | Log of successfully applied schema/state migrations. It sits beside the settings whose shape it records, so it survives `reset --state` and `uninstall --keep-config`. A home created by this run starts with every registered migration recorded. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --all`. |
 | **State** | `install.json` | Install metadata: Clio Coder version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | `0o600` (rw-------) | Removed by uninstall / `reset --state`. |
-| **State** | `migrations.json` | Log of successfully applied schema/state migrations. A home created by this run starts with every registered migration recorded. | `0o600` (rw-------) | Removed by uninstall / `reset --state`. |
 | **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | Writer/umask default | Removed by uninstall / `reset --data`. |
 | **Data** | `tools/<id>/<version>/` | One pinned external program Clio Coder downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-coder-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
 | **State** | `telemetry/{process,sessions,runs}/<id>/` | One telemetry scope per process, session and run: its hash-chained `journal.jsonl` segments (safety decisions, approvals and tool facts included), content-addressed `objects/`, and `bundle.json` once sealed. Beside them, `telemetry/consent.json` (research content consent) and `telemetry/install.json` (this installation's random id). See [Layout](../architecture/telemetry.md#layout). | `0o600` (rw-------) for journals, objects, seals and consent | `clio-coder telemetry prune --apply` applies retention; removed by uninstall / `reset --state`. |
@@ -442,7 +444,7 @@ When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see [
 1.  **Directory Tree**: Recursively creates the four roots (`config`, `data`, `state`, `cache`) and their skeletons: `agents` under config, `memory` under data, and `sessions`/`interviews`/`scratch` under state. Telemetry creates `<stateDir>/telemetry/` on its first write.
 2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config at `0o600`. An existing file is never read, validated, or rewritten by initialization.
 3.  **Credentials Security**: If `credentials.yaml` is absent, creates a YAML file containing a managed-file comment and an empty object (`{}`), then locks its permissions immediately to owner-only read-write (`0o600`).
-4.  **Migration Manifest**: When none of the config, data or state roots existed before this call, writes `migrations.json` with every registered migration recorded, because the fresh settings file is already in the current shape. A pre-existing home is left to `clio-coder upgrade`.
+4.  **Migration Manifest**: When this call wrote `settings.yaml` and no manifest exists, writes `migrations.json` with every registered migration recorded, because the fresh settings file is already in the current shape. A `settings.yaml` that was already there is left to `clio-coder upgrade`.
 5.  **Install Metadata**: Writes `install.json` with `installedAt` exactly once when no config, data, or state root existed before initialization. If Clio reconstructs missing metadata over a preexisting config, data, or state root, it writes `repairedAt` instead of inventing an installation time. A cache-only root does not count as a preexisting home for this decision. A later version, platform, or node change preserves whichever original timestamp exists and stamps `upgradedAt`; a version change also records the previous version as `upgradedFrom`.
 
 ---
@@ -847,7 +849,8 @@ loads without that metadata. An installed `clio-dev` or `clio-test` skill keeps
 its old name, so lookups of `clio-coder-dev` and `clio-coder-test` miss it
 until it is reinstalled or renamed.
 
-Applied IDs are recorded in `<stateDir>/migrations.json`. Migration runners lock
+Applied IDs are recorded in `<configDir>/migrations.json`. The first run of a
+0.6.8 or newer runner moves a manifest it finds in the state root. Migration runners lock
 that file and publish it atomically after each successful migration, so
 concurrent starts cannot replay the same change. An ID already in the manifest
 is skipped. A present manifest with invalid JSON, an invalid shape, duplicate
@@ -886,7 +889,7 @@ roots and files that survive are listed too (`Survives: ...`). After a `--config
 `clio-coder configure --section targets`.
 
 *   `--state` *(Default)*: Deletes the state root only. It holds every session transcript and the telemetry journals beside it, so a reset is the end of `resume`, `/view`, and their history. This is the level a bare `clio-coder reset` selects, and it carries that note in its preview.
-*   `--data`: Deletes the data root only: memory, evidence, and any vendored external tools (durable products). The vendored tools are the one entry a reset cannot regenerate locally; `clio-coder tools install <id>` downloads them again.
+*   `--data`: Deletes the data root only: memory and any vendored external tools (durable products). The vendored tools are the one entry a reset cannot regenerate locally; `clio-coder tools install <id>` downloads them again.
 *   `--cache`: Deletes the cache root only.
 *   `--auth`: Deletes `credentials.yaml` only. Removes all saved keys.
 *   `--config`: Deletes `settings.yaml` only, which reverts preferences to default. Credentials stay.
@@ -909,7 +912,7 @@ hash -r
 ```
 
 `--keep-config` preserves the whole config root (`settings.yaml`, `credentials.yaml` and anything else
-in it) and `--keep-data` preserves the data root (memory, evidence and vendored tools). The cache and
+in it) and `--keep-data` preserves the data root (memory and vendored tools). The cache and
 state roots always go. `--force` (`-f`) skips the confirmation prompt. Without a terminal, `--force` or
 `--dry-run`, the command exits 2 with `` `clio-coder uninstall` needs a terminal to confirm; pass --force to skip the prompt ``.
 An unknown flag and an unsafe directory layout exit 2. A declined confirmation exits 0. A lock held by an installer,

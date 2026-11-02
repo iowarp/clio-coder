@@ -43,7 +43,7 @@ removed; their desktop launchers are removed using the app's ownership manifests
 
 Flags:
   --keep-config    preserve the configuration root (settings.yaml, credentials)
-  --keep-data      preserve the data root (memory, evidence, vendored tools)
+  --keep-data      preserve the data root (memory, vendored tools)
   --remove-binary  also remove the launcher symlink when it points at this
                    installation. A real file, or a link into a different clio-coder
                    installation, is kept and reported. For an install.sh install,

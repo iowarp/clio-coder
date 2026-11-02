@@ -69,7 +69,7 @@ The roots must be absolute, distinct and non-nesting; every writer refuses an
 unsafe layout before it creates or removes a root, and `clio-coder doctor` names the
 problem.
 
-### Config root: files an operator authors
+### Config root: files an operator authors, and the records that vouch for them
 
 | Path | Contents |
 | --- | --- |
@@ -80,6 +80,7 @@ problem.
 | `plugins/` | Library package state (`state.json`) and one directory per installed package |
 | `library.yaml`, `skill-marketplace.json`, `skill-promotion-declines.json` | Library catalog, marketplace registry and declined skill promotions |
 | `mcp.yaml`, `mcp-trust.json` | User MCP servers and the trust records for project-declared servers |
+| `migrations.json` | Applied migration ids, machine-written and kept beside the settings whose shape it records |
 
 ### Data root: durable artifacts
 
@@ -107,7 +108,7 @@ problem.
 | `workspace-trust/` | Per-workspace trust records |
 | `cliamp/` | The `/music` player home: `config.toml`, `themes/clio.toml`, `playlists/clio.toml`, `plugins/clio-dock.lua`, `plugins/.trust.json`, `dock-taps`, and cliamp's own socket, log and history files. Clio Coder rewrites its generated files on each open, and never reads or writes the operator's own `~/.config/cliamp`. |
 | `gui/` | Graphical application state: `workspaces.json`, `children.json` with `<name>.locks/` directories, and `background/` (`server.json`, `owner.json` and the generated `clio-coder-gui-<id>.service` unit) |
-| `install.json`, `migrations.json`, `migration-reports/` | Install metadata and applied migration ids |
+| `install.json`, `migration-reports/` | Install metadata and migration reports |
 | `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `endpoint-slots.json` | Small per-machine stores |
 | `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v3/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hook, and the request and tap files shared with the workers dashboard |
 

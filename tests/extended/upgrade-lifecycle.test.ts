@@ -44,7 +44,7 @@ async function upgrade(
 /** A home whose migration manifest and recorded version are already up to date. */
 function currentHome(): LifecycleHome {
 	const temp = createLifecycleHome("clio-coder-test-upgrade-");
-	writeFileSync(join(temp.stateDir, "migrations.json"), JSON.stringify({ applied: [...MIGRATION_IDS] }), "utf8");
+	writeFileSync(join(temp.configDir, "migrations.json"), JSON.stringify({ applied: [...MIGRATION_IDS] }), "utf8");
 	writeFileSync(join(temp.stateDir, "install.json"), JSON.stringify({ version: getVersionInfo().clio }), "utf8");
 	return temp;
 }

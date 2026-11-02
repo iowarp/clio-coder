@@ -269,7 +269,7 @@ test("a fresh home records every registered migration and doctor reports none pe
 	t.after(() => home.restore());
 	initializeClioHome();
 	const registered = listMigrations().map((migration) => migration.id);
-	const manifest = JSON.parse(readFileSync(join(home.dir, "state", "migrations.json"), "utf8")) as {
+	const manifest = JSON.parse(readFileSync(join(home.dir, "config", "migrations.json"), "utf8")) as {
 		applied: string[];
 	};
 	assert.deepEqual(manifest.applied, registered);

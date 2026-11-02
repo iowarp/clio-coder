@@ -243,7 +243,7 @@ export interface InteractiveDeps {
 	seedTaskMemory?: () => TaskMemorySeedCommandResult;
 	/** XDG state dir (clioStateDir()). `/view verify` reads the run's sealed scope under it. */
 	stateDir: string;
-	/** XDG data dir (clioDataDir()). `/view` reads durable evidence bundles from <dataDir>/evidence/. */
+	/** XDG data dir (clioDataDir()). The memory overlay reads and writes its records under it. */
 	dataDir: string;
 	/**
 	 * Resolver for current settings. Footer reads the orchestrator target

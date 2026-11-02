@@ -25,6 +25,24 @@ function atomic(file, text, mode = 0o600) {
 	}
 }
 
+// src/core/xdg.ts resolveClioDirs for the two roots this helper reads. It runs before any
+// package is importable, so the order is repeated here.
+function clioRoot(role) {
+	const specific = process.env[`CLIO_CODER_${role.toUpperCase()}_DIR`]?.trim();
+	if (specific) return specific;
+	const clioHome = process.env.CLIO_CODER_HOME?.trim();
+	if (clioHome) return path.join(clioHome, role);
+	const home = os.homedir();
+	if (process.platform === "win32")
+		return role === "config"
+			? path.join(process.env.APPDATA || path.join(home, "AppData/Roaming"), "clio-coder/config")
+			: path.join(process.env.LOCALAPPDATA || path.join(home, "AppData/Local"), "clio-coder/state");
+	if (process.platform === "darwin") return path.join(home, "Library/Application Support/clio-coder", role);
+	const [variable, fallback] = role === "config" ? ["XDG_CONFIG_HOME", ".config"] : ["XDG_STATE_HOME", ".local/state"];
+	const base = process.env[variable]?.trim();
+	return path.join(base && path.isAbsolute(base) ? base : path.join(home, fallback), "clio-coder");
+}
+
 function inside(root, file) {
 	if (typeof file !== "string" || !path.isAbsolute(file)) return false;
 	const rel = path.relative(root, file);
@@ -160,12 +178,7 @@ function pruneVersions(root) {
 	};
 	try {
 		const home = os.homedir();
-		const state =
-			process.env.CLIO_CODER_STATE_DIR ||
-			(process.env.CLIO_CODER_HOME
-				? path.join(process.env.CLIO_CODER_HOME, "state")
-				: path.join(process.env.XDG_STATE_HOME || path.join(home, ".local/state"), "clio-coder"));
-		const background = path.join(state, "gui/background/server.json");
+		const background = path.join(clioRoot("state"), "gui/background/server.json");
 		if (fs.existsSync(background)) protect(fs.readFileSync(background, "utf8"));
 		const units = path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), "systemd/user");
 		for (const unit of fs.existsSync(units) ? fs.readdirSync(units) : []) {
@@ -358,22 +371,17 @@ async function main() {
 	const fromVersion = old ? packageVersion(old.current) : "";
 	const toVersion = packageVersion(current);
 	if (channel === "latest" && /^\d+\.\d+\.\d+-/.test(fromVersion) && /^\d+\.\d+\.\d+$/.test(toVersion)) {
-		const state =
-			process.env.CLIO_CODER_STATE_DIR ||
-			(process.env.CLIO_CODER_HOME
-				? path.join(process.env.CLIO_CODER_HOME, "state")
-				: process.platform === "win32"
-					? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData/Local"), "clio-coder/state")
-					: process.platform === "darwin"
-						? path.join(os.homedir(), "Library/Application Support/clio-coder/state")
-						: path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local/state"), "clio-coder"));
 		let dated = [];
-		try {
-			dated = JSON.parse(fs.readFileSync(path.join(state, "migrations.json"), "utf8")).applied.filter((id) =>
-				/^\d{4}-\d{2}-\d{2}-/.test(id),
-			);
-		} catch {
-			/* An absent or unreadable manifest is checked by post-install. */
+		// Post-install moves a manifest from the state root to the config root, and it has not run yet.
+		for (const root of [clioRoot("config"), clioRoot("state")]) {
+			try {
+				dated = JSON.parse(fs.readFileSync(path.join(root, "migrations.json"), "utf8")).applied.filter((id) =>
+					/^\d{4}-\d{2}-\d{2}-/.test(id),
+				);
+				break;
+			} catch {
+				/* An absent or unreadable manifest is checked by post-install. */
+			}
 		}
 		process.stdout.write(
 			`[install] Leaving the pre-release channel: installing stable ${toVersion} from ${fromVersion}.` +

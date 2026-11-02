@@ -231,7 +231,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			strictEqual(first.code, 0, first.output);
 			match(first.output, /7 migrations applied/u);
 			strictEqual(readFileSync(join(home.root, "config", "settings.yaml.v1.bak"), "utf8"), V1_SETTINGS);
-			const manifest = JSON.parse(readFileSync(join(home.root, "state", "migrations.json"), "utf8"));
+			const manifest = JSON.parse(readFileSync(join(home.root, "config", "migrations.json"), "utf8"));
 			deepStrictEqual(manifest.applied, [
 				"2026-09-01-settings-v2",
 				"2026-09-01-retire-panes-knobs",

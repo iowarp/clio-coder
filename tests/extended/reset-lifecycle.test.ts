@@ -37,6 +37,21 @@ describe("contracts/reset-lifecycle", () => {
 		}
 	});
 
+	it("keeps the migration record through a state reset, so current settings read as current", async () => {
+		const temp = home();
+		try {
+			const manifest = join(temp.configDir, "migrations.json");
+			const applied = `${JSON.stringify({ applied: ["2026-10-31-remove-old-telemetry"] })}\n`;
+			writeFileSync(manifest, applied, "utf8");
+			const { code } = await runInHome(temp, () => runResetCommand(["--state", "--force"]));
+			strictEqual(code, 0);
+			strictEqual(readFileSync(manifest, "utf8"), applied);
+			ok(!existsSync(join(temp.stateDir, "migrations.json")));
+		} finally {
+			temp.cleanup();
+		}
+	});
+
 	it("previews --all as every root with nothing surviving", async () => {
 		const temp = home();
 		try {

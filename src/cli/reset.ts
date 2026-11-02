@@ -39,7 +39,7 @@ const ROOT_NOTES = {
 	config: "Settings return to their defaults.",
 	auth: "Saved API keys are gone; each target has to be authenticated again.",
 	cache: "Cache is disposable and rebuilds itself.",
-	all: "Everything goes: settings, credentials, memory, evidence, transcripts, and caches. A clean install remains.",
+	all: "Everything goes: settings, credentials, memory, transcripts, and caches. A clean install remains.",
 } as const;
 
 interface ParsedResetArgs {
