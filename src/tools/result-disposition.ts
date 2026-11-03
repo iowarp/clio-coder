@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createRedactionTally, redactSecretsText } from "../domains/evidence/redact.js";
-import { cutHeadGuard, dropCutHead } from "../domains/safety/redaction.js";
+import { CUT_TRIM_LIMIT_CHARS, cutHeadGuard, dropShortCutHead } from "../domains/safety/redaction.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import { byteLength } from "./truncate-utf8.js";
@@ -278,20 +278,22 @@ function utf8WordSuffix(text: string, maxBytes: number): string {
 }
 
 /**
- * The head of unredacted text, ending on a whole token. Word snapping gives up past its small window, which left
- * `https://user:hunter2` beside the omission marker where no later redaction can recognize it (#446).
+ * The head of unredacted text, ending on a whole credential-sized token. Word snapping gives up past its small window,
+ * which left `https://user:hunter2` beside the omission marker where no later redaction can recognize it. A longer token
+ * keeps its bytes (#446).
  */
 function wholeTokenPrefix(text: string, maxBytes: number): string {
 	const prefix = utf8Prefix(text, maxBytes);
 	if (/\s/u.test(text.charAt(prefix.length))) return prefix;
+	const floor = Math.max(0, prefix.length - CUT_TRIM_LIMIT_CHARS);
 	let end = prefix.length;
-	while (end > 0 && !/\s/u.test(prefix.charAt(end - 1))) end -= 1;
-	return prefix.slice(0, end).trimEnd();
+	while (end > floor && !/\s/u.test(prefix.charAt(end - 1))) end -= 1;
+	return end === floor && floor > 0 ? prefix : prefix.slice(0, end).trimEnd();
 }
 
-/** The tail of unredacted text, with the tokens a cut leaves unrecognizable discarded (#446). */
+/** The tail of unredacted text, with the credential-sized tokens a cut leaves unrecognizable discarded (#446). */
 function wholeTokenSuffix(text: string, maxBytes: number): string {
-	return dropCutHead(utf8Suffix(text, maxBytes), cutHeadGuard());
+	return dropShortCutHead(utf8Suffix(text, maxBytes), cutHeadGuard());
 }
 
 /**

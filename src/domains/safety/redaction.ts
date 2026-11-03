@@ -210,6 +210,22 @@ export function dropCutHead(text: string, guard: CutHeadGuard): string {
 	return text.slice(SPACE_RE.lastIndex);
 }
 
+/** The most a settled cut trims. A longer token is implausible as a credential, and it is routine minified output (#446). */
+export const CUT_TRIM_LIMIT_CHARS = 512;
+
+/**
+ * {@link dropCutHead} for output a reader needs: the trim stops at {@link CUT_TRIM_LIMIT_CHARS}, keeping a token it would
+ * have to pass, so a long token keeps the plain cut's bytes. That token can hold a URL the cut has stripped (#446).
+ */
+export function dropShortCutHead(text: string, guard: CutHeadGuard): string {
+	const window = text.slice(0, CUT_TRIM_LIMIT_CHARS);
+	const kept = dropCutHead(window, guard);
+	if (guard.tokens === 0) return text.slice(window.length - kept.length);
+	let tokenStart = window.length;
+	while (tokenStart > 0 && !/\s/u.test(window.charAt(tokenStart - 1))) tokenStart -= 1;
+	return text.slice(tokenStart);
+}
+
 /** Redact text that may still grow; once it is complete, `final` releases any hold through full redaction. */
 export function redactStreamingSecretString(value: string, final = false): string {
 	return redactSecretString(final ? value : holdUnresolvedUserinfo(value));

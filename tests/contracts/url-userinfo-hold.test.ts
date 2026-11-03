@@ -295,6 +295,7 @@ test("/view holds open thinking the way the rail does", async () => {
 test("a settled result's cuts leave no piece of a secret, in the model context or the display tail", () => {
 	const cases = [
 		"https://user:ZQXJZQXJ@host/repo.git",
+		`https://user:ZQXJZQXJ@host/${"y".repeat(400)}`,
 		"AKIAZQXJZQXJZQXJZQXJ",
 		"password: ZQXJZQXJ",
 		"password = ZQXJZQXJ",
@@ -324,14 +325,29 @@ test("a settled result's cuts leave no piece of a secret, in the model context o
 			strictEqual(shown(excerpt(atHead)).match(SECRET_LETTERS), null, `head ${where}`);
 			const atTail = `${filler(40_000, "q ")}${secret} ${filler(tailBytes + offset, "w ")}`;
 			strictEqual(shown(excerpt(atTail)).match(SECRET_LETTERS), null, `tail ${where}`);
-			const glued = `${filler(40_000, "q")}${secret}${filler(tailBytes + offset, "w")}`;
-			strictEqual(shown(excerpt(glued)).match(SECRET_LETTERS), null, `glued ${where}`);
 		}
 	}
+	const display = (tail: number) =>
+		shape(`${filler(120_000, "q ")}https://user:ZQXJZQXJ@host/repo.git ${filler(tail, "w ")}`).output;
 	for (let tail = 64_500; tail < 65_600; tail += 11) {
-		const output = shape(`${filler(120_000, "q")}https://user:ZQXJZQXJ@host/repo.git ${filler(tail, "w")}`).output;
+		const output = display(tail);
 		strictEqual(shown(output.slice(0, output.lastIndexOf("\n\n"))).match(SECRET_LETTERS), null, `display tail ${tail}`);
 	}
+	// Routine long tokens keep the plain cut's bytes for the model and the display, and the live row stays as it was.
+	for (const [first, last] of [
+		[filler(40_000, "q"), filler(40_000, "w")],
+		[filler(40_000, '{"a":1,'), filler(40_000, '"b":2,')],
+	] as const) {
+		const output = `${first}\n${last}\n`;
+		const body = excerpt(output);
+		strictEqual(body.slice(0, 32), first.slice(0, 32));
+		strictEqual(body.indexOf(marker) > 7000, true);
+		strictEqual(body.trimEnd().slice(-32), last.slice(-32));
+		strictEqual(body.length - body.indexOf(marker) - marker.length > 7900, true);
+		strictEqual(shape(`${first}${last}`).output.includes(last.slice(-64)), true);
+	}
+	const live = shapeBashProgress(filler(40_000, "q"), 40_000, "bounded") as { output: string };
+	strictEqual(live.output, "");
 });
 
 test("run feed row fields are redacted before their bound cuts them", () => {

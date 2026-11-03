@@ -22,7 +22,7 @@ import {
 	type ToolResultDisposition,
 } from "./result-disposition.js";
 import { writeToolOffload } from "./result-shaping.js";
-import { DEFAULT_MAX_LINES, truncateTail, truncateTailAtToken } from "./truncate.js";
+import { DEFAULT_MAX_LINES, truncateTailAtToken } from "./truncate.js";
 import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
 // Operator presentation cap, tail-biased because diagnostics usually land last.
@@ -107,10 +107,11 @@ export function shapeBashProgress(rawOutput: string, outputBytes: number, policy
 	} else if (policy === "summary") {
 		output = closedLikeSource(rawOutput, deterministicDiagnosticSummary(rawOutput, BASH_DISPLAY_MAX_BYTES, true).text);
 	} else {
-		const { content } = truncateTailAtToken(rawOutput, {
-			maxLines: DEFAULT_MAX_LINES,
-			maxBytes: disposition.context.maxBytes,
-		});
+		const { content } = truncateTailAtToken(
+			rawOutput,
+			{ maxLines: DEFAULT_MAX_LINES, maxBytes: disposition.context.maxBytes },
+			"all",
+		);
 		output = closedLikeSource(rawOutput, content);
 	}
 	return {
@@ -163,12 +164,10 @@ export function bashOutputCapResult(
 	const bodyBudget = Math.max(0, cap - 2048);
 	const showBody = policy === "full" || policy === "bounded";
 	const inline = showBody && bytes <= bodyBudget;
-	// This can be the only copy left when no offload is written, so an unbroken token with no safe cut is still shown (#446).
-	const tailOptions = { maxBytes: Math.max(1, bodyBudget), maxLines: DEFAULT_MAX_LINES };
 	const preview = inline
 		? raw
 		: showBody
-			? truncateTailAtToken(raw, tailOptions).content || truncateTail(raw, tailOptions).content
+			? truncateTailAtToken(raw, { maxBytes: Math.max(1, bodyBudget), maxLines: DEFAULT_MAX_LINES }).content
 			: "";
 	let offloadPath: string | null = null;
 	let savedBytes = 0;
