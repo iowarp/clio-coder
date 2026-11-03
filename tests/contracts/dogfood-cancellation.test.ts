@@ -224,7 +224,7 @@ function fixture(
 	readTurn?: () => void,
 	visionSidecar?: VisionSidecar,
 	visionCapable = false,
-	refuseHandoffSkill?: () => string | null,
+	refuseHandoffSkill?: (inlinedPaths: ReadonlyArray<string>) => string | null,
 	labelReferencedPaths?: (paths: ReadonlyArray<string>) => void,
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -690,14 +690,16 @@ it("a refused context-handoff request sends nothing and starts no turn", { timeo
 	}
 });
 
-it("a context-handoff request is judged after labeling the file it inlines", { timeout: 15_000 }, async () => {
+it("a refused context-handoff request is judged on the file it inlines and labels nothing", {
+	timeout: 15_000,
+}, async () => {
 	let labeled = false;
 	const f = fixture(
 		"success",
 		undefined,
 		undefined,
 		false,
-		() => (labeled ? "use /handoff" : null),
+		(paths) => (paths.includes("secrets/notes.txt") ? "remove the file" : null),
 		() => {
 			labeled = true;
 		},
@@ -707,7 +709,7 @@ it("a context-handoff request is judged after labeling the file it inlines", { t
 			pendingSkillRequests: [SKILL_REQUEST],
 			workingContextPaths: ["secrets/notes.txt"],
 		});
-		strictEqual(labeled, true);
+		strictEqual(labeled, false);
 		strictEqual(f.wire().calls(), 0);
 	} finally {
 		await f.close();

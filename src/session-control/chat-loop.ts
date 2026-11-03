@@ -881,8 +881,8 @@ export interface CreateChatLoopDeps {
 	admitRuntimeFlow?: (runtime: { targetId: string; runtimeId: string; wireModelId: string }) => string | null;
 	/** Labels the information-flow sources that `@file` references inlined into a submitted prompt. */
 	labelReferencedPaths?: (paths: ReadonlyArray<string>) => void;
-	/** Why an operator's context-handoff request may not run in this session, or null. */
-	refuseHandoffSkill?: () => string | null;
+	/** Why an operator's context-handoff request, with the `@file` paths it inlines, may not run in this session, or null. */
+	refuseHandoffSkill?: (inlinedPaths: ReadonlyArray<string>) => string | null;
 	/**
 	 * Run the compaction flow end-to-end (read entries, resolve model,
 	 * summarize, persist a compactionSummary entry) and return the result,
@@ -2644,10 +2644,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
 					machinePreparation.runtime = agentRuntime;
 				if ((options.pendingSkillRequests ?? []).some((request) => request.name.trim() === "context-handoff")) {
-					// A file this request inlines counts, and the ordinary labeling below runs only after this return.
-					const inlined = options.workingContextPaths ?? [];
-					if (inlined.length > 0) deps.labelReferencedPaths?.(inlined);
-					const refusal = deps.refuseHandoffSkill?.() ?? null;
+					// The file this request inlines is judged, not labeled: a refused request sends nothing, so it labels nothing.
+					const refusal = deps.refuseHandoffSkill?.(options.workingContextPaths ?? []) ?? null;
 					if (refusal !== null) {
 						emit({
 							type: "notice",

@@ -4949,9 +4949,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		recordTurnEnd: (turn) => systemOneHost.recordTurnEnd(turn),
 		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
 		// The skill writes a plain file that a later session reads with no label; /handoff carries the labels.
-		refuseHandoffSkill: () => {
+		refuseHandoffSkill: (inlinedPaths) => {
 			// Read through current(): labels absorbed before a session exists have no session id to ask about.
-			if ((flowLedger.current()?.restrictions.length ?? 0) === 0 && flowLedger.refusal() === null) return null;
+			if ((flowLedger.current()?.restrictions.length ?? 0) === 0 && flowLedger.refusal() === null) {
+				const inlinedLabels =
+					inlinedPaths.length > 0 ? (safety?.policy?.flowRestrictionsForPaths?.(inlinedPaths, process.cwd()) ?? null) : null;
+				return inlinedLabels === null
+					? null
+					: "context-handoff refused: this request references a file under an information-flow restriction, and a handoff file carries no label. Nothing was sent and this session stays unrestricted. Send the request without that file.";
+			}
 			return `context-handoff refused: this session carries an information-flow restriction, and a handoff file carries no label. ${
 				options.headless
 					? "A headless run has no /handoff; hand off from an interactive session, where /handoff <goal> copies the restrictions into the new session."
