@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
+	cutHeadGuard,
+	dropShortCutHead,
 	holdUnresolvedStrings,
 	RedactedStringProjection,
 	redactSecretString,
@@ -306,6 +308,8 @@ test("a settled result's cuts leave no piece of a secret, in the model context o
 		"password = ZQXJZQXJ",
 		"Authorization: Bearer ZQXJ1ZQXJ",
 		"--token ZQXJZQXJ",
+		'"Authorization": "Bearer ZQXJ1ZQXJ"',
+		"'Authorization': 'Basic ZQXJ1ZQXJ'",
 	];
 	const marker = "\n[… omitted …]\n";
 	const shape = (output: string) =>
@@ -353,6 +357,23 @@ test("a settled result's cuts leave no piece of a secret, in the model context o
 	}
 	const live = shapeBashProgress(filler(40_000, "q"), 40_000, "bounded") as { output: string };
 	strictEqual(live.output, "");
+});
+
+test("the trim's bound keeps a key with its value and never leaves nothing", () => {
+	for (const lead of ["password:", "--token"]) {
+		for (let remainder = 470; remainder < 522; remainder += 1) {
+			const kept = dropShortCutHead(`${"x".repeat(remainder)} ${lead} ZQXJZQXJ tail words a b c`, cutHeadGuard());
+			strictEqual(kept.startsWith("ZQXJ"), false, `${lead} remainder ${remainder}`);
+		}
+	}
+	strictEqual(dropShortCutHead("a b ", cutHeadGuard()), "a b ");
+	const tiny = shapeToolResult(bashTool, { kind: "ok", output: "x".repeat(2_000) }, undefined, {
+		...BASH_DEFAULT_RESULT_DISPOSITION,
+		context: { mode: "bounded", maxBytes: 900 },
+	}) as { modelContext: string };
+	const marker = tiny.modelContext.indexOf("\n[… omitted …]\n");
+	strictEqual(tiny.modelContext.slice(marker - 8, marker), "xxxxxxxx");
+	strictEqual(tiny.modelContext.slice(-8), "xxxxxxxx");
 });
 
 test("run feed row fields are redacted before their bound cuts them", () => {

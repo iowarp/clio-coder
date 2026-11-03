@@ -288,7 +288,8 @@ function wholeTokenPrefix(text: string, maxBytes: number): string {
 	const floor = Math.max(0, prefix.length - CUT_TRIM_LIMIT_CHARS);
 	let end = prefix.length;
 	while (end > floor && !/\s/u.test(prefix.charAt(end - 1))) end -= 1;
-	return end === floor && floor > 0 ? prefix : prefix.slice(0, end).trimEnd();
+	const whole = prefix.slice(0, end).trimEnd();
+	return (end === floor && floor > 0) || whole.length === 0 ? prefix : whole;
 }
 
 /** The tail of unredacted text, with the credential-sized tokens a cut leaves unrecognizable discarded (#446). */

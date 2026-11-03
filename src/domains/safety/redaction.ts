@@ -192,7 +192,8 @@ export interface CutHeadGuard {
 
 const CUT_TOKENS = 2;
 const NAME_TAIL_CHARS = 64;
-const SECRET_LEAD_IN_RE = /^(?:[:=]+|bearer|basic)$|passwd/iu;
+// A JSON or shell value opens with its quote, so `"Bearer` and `'Basic` lead into a secret as `Bearer` does (#446).
+const SECRET_LEAD_IN_RE = /^["'`]?(?:[:=]+|bearer|basic)$|passwd/iu;
 
 export function cutHeadGuard(): CutHeadGuard {
 	return { tokens: CUT_TOKENS, inToken: true, token: "" };
@@ -243,16 +244,21 @@ export function dropCutHead(text: string, guard: CutHeadGuard): string {
 export const CUT_TRIM_LIMIT_CHARS = 512;
 
 /**
- * {@link dropCutHead} for output a reader needs: the trim stops at {@link CUT_TRIM_LIMIT_CHARS}, keeping a token it would
- * have to pass, so a long token keeps the plain cut's bytes. That token can hold a URL the cut has stripped (#446).
+ * {@link dropCutHead} for output a reader needs: the trim stops at {@link CUT_TRIM_LIMIT_CHARS}, so a long token keeps the
+ * plain cut's bytes, and it never leaves nothing. That token can hold a URL the cut has stripped (#446).
  */
 export function dropShortCutHead(text: string, guard: CutHeadGuard): string {
 	const window = text.slice(0, CUT_TRIM_LIMIT_CHARS);
 	const kept = dropCutHead(window, guard);
-	if (guard.tokens === 0) return text.slice(window.length - kept.length);
-	let tokenStart = window.length;
-	while (tokenStart > 0 && !/\s/u.test(window.charAt(tokenStart - 1))) tokenStart -= 1;
-	return text.slice(tokenStart);
+	// When the window runs out the discard stops after the cut token, so a key is never gone with its value still here.
+	const afterCutToken = /^\S*\s+/u.exec(window);
+	const trimmed =
+		guard.tokens === 0
+			? text.slice(window.length - kept.length)
+			: afterCutToken === null
+				? text
+				: text.slice(afterCutToken[0].length);
+	return trimmed.length === 0 ? text : trimmed;
 }
 
 /**
