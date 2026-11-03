@@ -113,6 +113,7 @@ function browser(category: LibraryEntryKind, data = inventory()) {
 				activeTabId: () => listView.activeTab()?.id ?? "",
 				selectById: (id: string) => listView.selectById(id),
 				toggleDetail: () => listView.toggleDetail(),
+				openDetail: () => listView.openDetail(),
 			} as unknown as ListOverlayHandle;
 		},
 	});
@@ -263,6 +264,14 @@ it("neutralizes terminal controls in every catalog field a row or its detail pri
 	ok(!painted.includes("\u001b[35m"), "no foreign SGR reaches the terminal");
 	ok(!painted.includes("spoofed title"));
 	match(plain(painted), /plugin:dep/);
+});
+
+it("keeps the pane on screen when Enter asks for an uninstalled package's catalog hints", () => {
+	const state = browser("plugin");
+	state.view.setRailRoom(41);
+	match(plain(state.view.render(56).join("\n")), /PgUp\/PgDn scroll/, "the browser opens with its pane stacked");
+	state.view.handleInput("\r");
+	match(plain(state.view.render(56).join("\n")), /PgUp\/PgDn scroll/, "Enter never hides the facts it asked for");
 });
 
 it("sanitizes a record once for the six rebuilds a tab switch makes", () => {

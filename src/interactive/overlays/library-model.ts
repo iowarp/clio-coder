@@ -205,7 +205,9 @@ export function libraryStatusLine(
 		notices,
 		theme.fg("annotation", total),
 		counts.truncated ? statusChip(theme, "warning", wide ? "incomplete results" : "incomplete") : null,
-		view.member && wide ? theme.fg("annotation", `members of ${safe(view.member.ref)}`) : null,
+		view.member && wide
+			? theme.fg("annotation", `members of ${safe(view.member.ref)}${view.member.scope ? ` (${view.member.scope})` : ""}`)
+			: null,
 	];
 	// Whole chips are dropped from the right, with the dim ellipsis that says
 	// so, rather than a cut that lands inside a word.
@@ -857,6 +859,9 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 
 	if (view.member && inspection) {
 		const owner = inspection.copy;
+		// The header names the copy, because two copies of one package list
+		// the same members and the status row drops the owner below 72 columns.
+		const group = `${LIBRARY_GROUP_MEMBERS} of ${safe(owner.ref)} (${owner.scope})`;
 		for (const member of inspection.resources) {
 			const subject: LibraryRowSubject = { kind: "member", owner, member };
 			const actions = libraryRowActions(subject, view);
@@ -869,7 +874,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 						member.componentId ? `component ${member.componentId}` : undefined,
 					]);
 				},
-				group: LIBRARY_GROUP_MEMBERS,
+				group,
 				detail: (width) => memberDetail(subject, actions, width),
 			});
 		}

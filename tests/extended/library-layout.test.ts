@@ -214,3 +214,27 @@ it("keeps every key the rail drops on screen at six rows once the pane state set
 	for (const line of body.filter((row) => row.trimStart().startsWith("[")))
 		ok(!line.includes("…"), `no key hides behind the marker: ${line}`);
 });
+
+it("inverts the pane on every detail key press, two presses before a repaint included", () => {
+	const items = [0, 1].map((index) => ({
+		id: `row-${index}`,
+		label: `row ${index}`,
+		detail: () => Array.from({ length: 12 }, (_, line) => `line ${line}`),
+		detailFormat: "rows" as const,
+	}));
+	const view = new ListOverlayView(
+		{ title: "Library", items, fullScreen: true, layout: "split", onSelect() {}, onClose() {} },
+		() => {},
+	);
+	view.toggleDetail();
+	view.setBodyRows(14);
+	const paneDrawn = (): boolean => view.render(60).map(stripVTControlCharacters).join("\n").includes("line 0");
+	ok(paneDrawn(), "the pane the opener asked for is stacked under the rows");
+	view.handleInput("\t");
+	ok(!paneDrawn(), "one press hides it");
+	view.handleInput("\t");
+	view.handleInput("\t");
+	ok(!paneDrawn(), "two presses before a repaint leave it as it was");
+	view.handleInput("\t");
+	ok(paneDrawn(), "the next press shows it again");
+});

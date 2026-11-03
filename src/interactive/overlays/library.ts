@@ -129,6 +129,22 @@ function requestRefFor(subject: LibraryRowSubject): { ref: string; reason?: stri
 	return { ref: "", reason: "This row is a notice, not a package." };
 }
 
+/**
+ * Whether the copy `e` would act on is enabled, or undefined when the row has
+ * no copy to act on. A browse row carries its copies' states, not their
+ * flags, so a disabled copy there offered `disable` and planned one.
+ */
+function subjectEnabled(subject: LibraryRowSubject, scope: PluginScope): boolean | undefined {
+	if (subject.kind === "copy") return subject.copy.enabled;
+	if (subject.kind === "member") return subject.owner.enabled;
+	if (subject.kind === "component") return true;
+	if (subject.kind === "package") {
+		const here = subject.record.copies.find((copy) => copy.scope === scope);
+		return here === undefined ? undefined : here.state !== "disabled";
+	}
+	return undefined;
+}
+
 export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayHandle {
 	const cwd = deps.cwd ?? process.cwd();
 	const read = deps.readInventory ?? readLibraryInventory;
@@ -446,7 +462,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		if (subject.kind === "package") {
 			const here = subject.record.copies.find((copy) => copy.scope === view.scope) ?? subject.record.copies[0];
 			if (!here) {
-				handle.toggleDetail();
+				handle.openDetail();
 				deps.notice(
 					"info",
 					`${subject.record.ref} is not installed here; its catalog hints describe what it says it contains.`,
@@ -531,15 +547,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		const entries: Array<{ key: string; verb: string }> = [];
 		if (actions.install) entries.push({ key: "i", verb: "install" });
 		if (actions.enable)
-			entries.push({
-				key: "e",
-				verb:
-					subject.kind === "copy" && !subject.copy.enabled
-						? "enable"
-						: subject.kind === "member" && !subject.owner.enabled
-							? "enable"
-							: "disable",
-			});
+			entries.push({ key: "e", verb: subjectEnabled(subject, view.scope) === false ? "enable" : "disable" });
 		if (actions.update) entries.push({ key: "u", verb: "update" });
 		if (actions.remove) entries.push({ key: "r", verb: "remove" });
 		// Enter is named only where it opens members; a pane is Tab's, and at
@@ -630,15 +638,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			r: (item) => manage("remove", item),
 			e: (item) => {
 				const subject = selected(item);
-				const enabled =
-					subject?.kind === "copy"
-						? subject.copy.enabled
-						: subject?.kind === "member"
-							? subject.owner.enabled
-							: subject?.kind === "component"
-								? true
-								: undefined;
-				manage(enabled === false ? "enable" : "disable", item);
+				manage(subject && subjectEnabled(subject, view.scope) === false ? "enable" : "disable", item);
 			},
 		},
 		onClose: deps.onClose,

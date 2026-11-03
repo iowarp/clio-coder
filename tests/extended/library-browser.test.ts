@@ -473,6 +473,7 @@ function harness(
 		activeTabId: () => captured?.activeTabId ?? "",
 		selectById: () => true,
 		toggleDetail: () => {},
+		openDetail: () => {},
 	} as unknown as ListOverlayHandle;
 
 	const handle = openLibraryOverlay(stubTui(), {
@@ -735,6 +736,33 @@ describe("library browser behavior", () => {
 		state.options.onBack?.back();
 		equal(state.options.onBack?.active(), false);
 		equal(state.closed, 0, "leaving the members never closes the Library");
+	});
+
+	it("names the copy whose members are listed, so two copies of one package never read the same", () => {
+		const state = harness({ initialTab: "plugin" });
+		state.options.globalActions?.b?.();
+		state.press("\r");
+		match(plain(state.rows("plugin")[0]?.group ?? ""), /^Members of plugin:materio \(user\)$/);
+		match(state.status(120), /members of plugin:materio \(user\)/);
+	});
+
+	it("offers enable, not disable, on a browse row whose copy in the selected scope is disabled", () => {
+		const state = harness({
+			initialTab: "plugin",
+			inventory: inventory({
+				packages: [record({ copies: [{ scope: "user", state: "disabled" }] })],
+				copies: [copy({ state: "disabled", enabled: false, effective: false, loadable: false })],
+			}),
+		});
+		const row = state.rows("plugin")[0];
+		ok(row);
+		const hints = typeof state.options.hints === "function" ? state.options.hints(row) : (state.options.hints ?? []);
+		deepStrictEqual(
+			hints.find((hint) => hint.key === "e"),
+			{ key: "e", verb: "enable" },
+		);
+		state.press("e", row.id);
+		deepStrictEqual(state.planned, [{ operation: "enable", ref: "plugin:materio", scope: "user" }]);
 	});
 
 	it("never routes a plugin row back to its own tab or into a command", () => {

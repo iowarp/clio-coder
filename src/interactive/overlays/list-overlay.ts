@@ -209,6 +209,12 @@ export class ListOverlayView implements Component {
 	private detailPaneDrawn: boolean;
 	/** Whether the pane on screen is the split one, which Tab cannot put away. */
 	private detailPaneSplit = false;
+	/**
+	 * A detail key pressed since the last frame. Two presses that land before
+	 * a repaint each inverted the pane the last frame drew, so the second was
+	 * a no-op and the pane stayed where the first press put it.
+	 */
+	private detailKeyPending = false;
 	/** Cells the rail under this list has for keys, or zero while the composer has not said. */
 	private railRoom = 0;
 	/** Lines one PgUp or PgDn moves the pane by: the rows it shows, never a fixed count. */
@@ -329,13 +335,28 @@ export class ListOverlayView implements Component {
 	 */
 	private toggleDetailByKey(): void {
 		this.takeoverAllowed = true;
-		// Before the first frame nothing has been drawn yet, so the request is what the key inverts.
-		this.showDetail = this.renderMemo ? !this.detailPaneDrawn : !this.showDetail;
+		// Before the first frame nothing has been drawn yet, and after a press the
+		// frame has not caught up with, the request is what the key inverts.
+		this.showDetail = this.renderMemo && !this.detailKeyPending ? !this.detailPaneDrawn : !this.showDetail;
+		this.detailKeyPending = true;
 		this.onChange();
 	}
 
 	toggleDetail(): void {
 		this.showDetail = !this.showDetail;
+		this.renderMemo = null;
+	}
+
+	/**
+	 * Put the pane on screen for the selected row, taking the body over when
+	 * the rows leave no room to stack it. A request to see a row's facts never
+	 * hides facts already on screen, which a blind toggle did when the opener
+	 * had the pane up already.
+	 */
+	openDetail(): void {
+		this.takeoverAllowed = true;
+		this.showDetail = true;
+		this.detailKeyPending = true;
 		this.renderMemo = null;
 	}
 
@@ -936,6 +957,7 @@ export class ListOverlayView implements Component {
 			status,
 		].join("|");
 		if (this.renderMemo?.key === memoKey) return this.renderMemo.lines;
+		this.detailKeyPending = false;
 		const theme = clioTheme();
 
 		let tabRows = this.renderTabBar(width);
@@ -1413,6 +1435,8 @@ export interface ListOverlayHandle extends OverlayHandle {
 	selectById(id: string): boolean;
 	/** Show or hide the stacked detail pane. */
 	toggleDetail(): void;
+	/** Put the pane on screen for the selected row; a no-op while it is already there. */
+	openDetail(): void;
 	/** Drop a typed filter and leave search focus. */
 	clearFilter(): void;
 }
@@ -1469,6 +1493,10 @@ export function openListOverlay(tui: TUI, options: ListOverlayOptions & { marker
 		},
 		toggleDetail(): void {
 			view.toggleDetail();
+			tui.requestRender();
+		},
+		openDetail(): void {
+			view.openDetail();
 			tui.requestRender();
 		},
 		clearFilter(): void {
