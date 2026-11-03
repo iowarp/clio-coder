@@ -15,7 +15,7 @@ import {
 	type ToolResultDispositionFallback,
 	type ToolResultDispositionMetadata,
 } from "./result-disposition.js";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail } from "./truncate.js";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateTail, truncateTailAtToken } from "./truncate.js";
 import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
 // Backstop for tools without an explicit resultSizePolicy. Session settings may
@@ -284,7 +284,7 @@ function shapeTailOverflow(
 	context: ToolResultShapeContext | undefined,
 	offloadMaxBytes: number,
 ): ToolResult {
-	const truncation = truncateTail(text, {
+	const truncation = truncateTailAtToken(text, {
 		maxLines: DEFAULT_MAX_LINES,
 		maxBytes: Math.max(1, maxBytes - TAIL_NOTICE_RESERVE_BYTES),
 	});

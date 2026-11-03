@@ -12,7 +12,6 @@ import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import { ToolNames } from "../core/tool-names.js";
 import { redactKnownSecrets } from "../domains/evidence/redact.js";
-import { cutHeadGuard, dropCutHead, headGuardAfter } from "../domains/safety/redaction.js";
 import { expandPath } from "./path-utils.js";
 import { toolPresentationPolicy } from "./presentation.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
@@ -23,11 +22,11 @@ import {
 	type ToolResultDisposition,
 } from "./result-disposition.js";
 import { writeToolOffload } from "./result-shaping.js";
-import { DEFAULT_MAX_LINES, truncateTail } from "./truncate.js";
+import { DEFAULT_MAX_LINES, truncateTail, truncateTailAtToken } from "./truncate.js";
 import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
 // Operator presentation cap, tail-biased because diagnostics usually land last.
-const BASH_DISPLAY_MAX_BYTES = 16 * 1024;
+export const BASH_DISPLAY_MAX_BYTES = 16 * 1024;
 // What a bounded result leaves in the model's context, which every later
 // request resends. A 16 KB tail kept the least useful end of a search: three
 // rg results held 51 KB of campaign T3's transcript. Head and tail keep the
@@ -92,18 +91,11 @@ function normalizedBashDisposition(policy: BashOutputPolicy): NormalizedToolResu
 }
 
 /**
- * The tail a live row shows. A cut that lands inside a line must not leave a piece no pattern can recognize, and the
- * trailing newline truncation discards is what tells the live row the last line is finished (#446).
+ * Truncation and summaries both discard the trailing newline, which is what tells the live row the last line is
+ * finished, so `Local: http://localhost:5173` would stall at its colon (#446).
  */
-function boundedLiveOutput(rawOutput: string, maxBytes: number): string {
-	const tail = truncateTail(rawOutput, { maxLines: DEFAULT_MAX_LINES, maxBytes });
-	if (!tail.truncated) return tail.content;
-	const closed = rawOutput.endsWith("\n");
-	const guard = tail.lastLinePartial
-		? cutHeadGuard()
-		: headGuardAfter(rawOutput.slice(0, rawOutput.length - tail.content.length - (closed ? 1 : 0)));
-	const kept = guard === null ? tail.content : dropCutHead(tail.content, guard);
-	return closed && kept.length > 0 ? `${kept}\n` : kept;
+function closedLikeSource(rawOutput: string, shown: string): string {
+	return shown.length > 0 && /\s$/u.test(rawOutput) && !/\s$/u.test(shown) ? `${shown}\n` : shown;
 }
 
 /** Bound a cumulative live snapshot without writing an offload file per tick. */
@@ -113,9 +105,13 @@ export function shapeBashProgress(rawOutput: string, outputBytes: number, policy
 	if (policy === "metadata-only") {
 		output = `bash: running; captured ${outputBytes} bytes; stdout/stderr omitted by metadata-only policy`;
 	} else if (policy === "summary") {
-		output = deterministicDiagnosticSummary(rawOutput, BASH_DISPLAY_MAX_BYTES, true).text;
+		output = closedLikeSource(rawOutput, deterministicDiagnosticSummary(rawOutput, BASH_DISPLAY_MAX_BYTES, true).text);
 	} else {
-		output = boundedLiveOutput(rawOutput, disposition.context.maxBytes);
+		const { content } = truncateTailAtToken(rawOutput, {
+			maxLines: DEFAULT_MAX_LINES,
+			maxBytes: disposition.context.maxBytes,
+		});
+		output = closedLikeSource(rawOutput, content);
 	}
 	return {
 		kind: "ok",
@@ -167,10 +163,12 @@ export function bashOutputCapResult(
 	const bodyBudget = Math.max(0, cap - 2048);
 	const showBody = policy === "full" || policy === "bounded";
 	const inline = showBody && bytes <= bodyBudget;
+	// This can be the only copy left when no offload is written, so an unbroken token with no safe cut is still shown (#446).
+	const tailOptions = { maxBytes: Math.max(1, bodyBudget), maxLines: DEFAULT_MAX_LINES };
 	const preview = inline
 		? raw
 		: showBody
-			? truncateTail(raw, { maxBytes: Math.max(1, bodyBudget), maxLines: DEFAULT_MAX_LINES }).content
+			? truncateTailAtToken(raw, tailOptions).content || truncateTail(raw, tailOptions).content
 			: "";
 	let offloadPath: string | null = null;
 	let savedBytes = 0;

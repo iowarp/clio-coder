@@ -43,8 +43,8 @@ export const URL_USERINFO_RE = SECRET_STRING_RE;
 // tokens. The marker's own colon lands in the prefix, so `[redacted:kind]` arrives split and would corrupt on a rewrite.
 const REDACTED_USERINFO_RE = /^(?:\[redacted\]|\uE000[\uE100-\uF8FF])$/u;
 const REDACTED_KIND_RE = /^[a-z-]+\]$/u;
-// The marker must open the password, or `https://u:REAL[redacted:abc]@h` would show REAL. Text before an earlier colon
-// stays exempt because one-shot redaction always shows it.
+// Only a password that is entirely one marker is exempt. `https://u:REAL[redacted:abc]@h` is rewritten, though REAL stays
+// visible as `pa:` does in `https://u:pa:ss@h`, because one-shot redaction shows everything through the last colon.
 const REDACTED_PREFIX_RE = /(?::|\/\/)\[redacted:$/u;
 
 /** Whether a {@link URL_USERINFO_RE} match holds a credential, not a variable's name or an earlier pass's marker (#446). */
@@ -149,45 +149,37 @@ export function holdUnresolvedUserinfo(value: string): string {
 }
 
 /**
- * Where the URL an unfinished text may still be writing starts, or null. This reads back to the scheme, for a writer that
- * must keep the whole URL together because a later piece without its scheme could never be recognized (#446).
- */
-export function openUrlStart(value: string): number | null {
-	let runStart = value.length;
-	while (runStart > 0 && !endsUserinfoRun(value.charCodeAt(runStart - 1))) runStart -= 1;
-	const from = Math.max(0, runStart - LONGEST_URL_SCHEME);
-	const scheme = URL_SCHEME_END_RE.exec(value.slice(from, runStart));
-	return scheme === null ? null : from + scheme.index;
-}
-
-/** The index just past the userinfo run a text opens inside of, or null when it does not end in this text (#446). */
-export function userinfoRunEnd(value: string): number | null {
-	for (let index = 0; index < value.length; index += 1) if (endsUserinfoRun(value.charCodeAt(index))) return index;
-	return null;
-}
-
-/**
  * Tokens still to discard after a text lost its head. Patterns recognize a secret by what precedes it, so whatever a cut
- * leaves of a token, and the token after it in case the cut token was a flag naming that value as its secret, can no longer
- * be recognized. A discarded token with a dash may itself be such a flag, so it does not count and its value goes too. It
- * is state rather than a one-off strip because the unsafe token can continue in text not yet seen (#446).
+ * leaves of a token goes, and so does the next token, which that piece may have named. A discarded token that names a secret
+ * takes the following token too, or the discard could stop between `password:` and its value. It is state rather than a
+ * one-off strip because the unsafe token can continue in text not yet seen (#446).
  */
 export interface CutHeadGuard {
 	tokens: number;
 	inToken: boolean;
-	tokenHasDash: boolean;
+	/** The end of the token being discarded, enough to tell whether it names a secret. */
+	token: string;
 }
+
+const CUT_TOKENS = 2;
+const NAME_TAIL_CHARS = 64;
+const SECRET_LEAD_IN_RE = /^(?:[:=]+|bearer|basic)$|passwd/iu;
 
 export function cutHeadGuard(): CutHeadGuard {
-	return { tokens: 2, inToken: true, tokenHasDash: false };
+	return { tokens: CUT_TOKENS, inToken: true, token: "" };
 }
 
-/** A guard for text following a whole-line cut, needed only when the removed text ends in a secret flag awaiting its value. */
+/** Whether a whole token leads into a secret. Prose such as `well-known` does not, so it cannot extend a discard. */
+function namesSecret(token: string): boolean {
+	let start = token.length;
+	while (start > 0 && /[a-z0-9_-]/iu.test(token.charAt(start - 1))) start -= 1;
+	return secretFlagStart(token.slice(start)) !== null || SECRET_KEY_RE.test(token) || SECRET_LEAD_IN_RE.test(token);
+}
+
+/** A guard for text following a whole-line cut, needed only when the removed text ends in a name awaiting its secret. */
 export function headGuardAfter(removed: string): CutHeadGuard | null {
-	const trimmed = removed.trimEnd();
-	let start = trimmed.length;
-	while (start > 0 && /[a-z0-9_-]/iu.test(trimmed.charAt(start - 1))) start -= 1;
-	return secretFlagStart(trimmed.slice(start)) === null ? null : { tokens: 1, inToken: false, tokenHasDash: false };
+	const tail = removed.trimEnd().slice(-NAME_TAIL_CHARS);
+	return namesSecret(tail.slice(tail.search(/\S+$/u))) ? { tokens: 1, inToken: false, token: "" } : null;
 }
 
 const TOKEN_RE = /\S*/uy;
@@ -202,12 +194,13 @@ export function dropCutHead(text: string, guard: CutHeadGuard): string {
 		scan.lastIndex = at;
 		scan.exec(text);
 		at = scan.lastIndex;
-		if (guard.inToken && text.slice(start, at).includes("-")) guard.tokenHasDash = true;
+		if (guard.inToken)
+			guard.token = `${guard.token}${text.slice(start, at).slice(-NAME_TAIL_CHARS)}`.slice(-NAME_TAIL_CHARS);
 		if (at === text.length) break;
 		if (guard.inToken) {
-			// The cut token's own dash adds nothing: its one possible value is already counted.
-			if (!guard.tokenHasDash || guard.tokens > 1) guard.tokens -= 1;
-			guard.tokenHasDash = false;
+			// The next token is already covered for the cut token, whatever piece of a name it holds.
+			if (guard.tokens === CUT_TOKENS || !namesSecret(guard.token)) guard.tokens -= 1;
+			guard.token = "";
 		}
 		guard.inToken = !guard.inToken;
 	}

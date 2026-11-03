@@ -52,6 +52,7 @@ import type {
 import { normalizeCallUsage } from "../../core/token-split.js";
 import { runTailEntryFromEvent } from "../../tools/dispatch-run-events.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
+import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import { sanitizeCallTargetText } from "../safety/call-target.js";
 import { redactSecretString } from "../safety/redaction.js";
 import { isThinkingEvent, workerTextDelta } from "../telemetry/worker-progress.js";
@@ -123,7 +124,10 @@ function runIdentity(payload: unknown): { runId: string; agentId: string } | nul
 function boundedText(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const text = value.trim();
-	return text.length === 0 ? undefined : truncateUtf8(text, FACT_MAX_BYTES, "…");
+	// A bound first would cut a secret into a piece the row's own redaction cannot recognize (#446).
+	return text.length === 0
+		? undefined
+		: truncateUtf8(redactSecretsText(text, createRedactionTally()), FACT_MAX_BYTES, "…");
 }
 
 function finiteCount(value: unknown): number | undefined {

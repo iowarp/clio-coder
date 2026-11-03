@@ -1,9 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { clioStateDir } from "../../src/core/xdg.js";
-import type { RunEventJournalBody } from "../../src/domains/dispatch/run-event-journal.js";
-import { appendRunFeed, runFeedPath } from "../../src/domains/dispatch/run-feed.js";
+import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
 import { createRedactionTally, redactSecretSegments, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import {
 	holdUnresolvedStrings,
@@ -24,9 +21,15 @@ import {
 	safeWorkerAnswerText,
 	WorkerAnswerProjection,
 } from "../../src/interactive/renderers/worker-answer.js";
-import { shapeBashProgress } from "../../src/tools/bash.js";
+import {
+	BASH_DEFAULT_RESULT_DISPOSITION,
+	BASH_DISPLAY_MAX_BYTES,
+	bashOutputCapResult,
+	bashTool,
+	shapeBashProgress,
+} from "../../src/tools/bash.js";
 import { deterministicDiagnosticSummary } from "../../src/tools/result-disposition.js";
-import { isolateClioEnv } from "../harness/scratch-env.js";
+import { shapeToolResult } from "../../src/tools/result-shaping.js";
 
 const SEED = 0x5eed;
 const DOCUMENTS = 60;
@@ -247,6 +250,16 @@ test("no frame of the bash live tail shows a secret, and a finished line past th
 		}
 	}
 	strictEqual(leaked(shown(`--token\nZQXJ\n${"line\n".repeat(cap / 5)}`), "").join(""), "");
+	const summary = shapeBashProgress("Local: http://localhost:5173\n", 29, "summary") as { output: string };
+	strictEqual(
+		new LiveToolView().outputRows(summary.output, 5, 400, { rail: "", railWidth: 0 }).join(""),
+		"Local: http://localhost:5173",
+	);
+	const hyphens = shown("well-known ".repeat(4000));
+	strictEqual(hyphens.startsWith("well-known"), true);
+	const dashes = createWorkerProgressFold();
+	dashes.observe(delta("well-known ".repeat(1000)), 0);
+	strictEqual(dashes.snapshot().tailText.startsWith("well-known"), true);
 	const dev = shown(`${"line\n".repeat(cap / 4)}Local: http://localhost:5173\n`);
 	strictEqual(dev.split("\n").at(-1), "Local: http://localhost:5173");
 	strictEqual(
@@ -255,6 +268,19 @@ test("no frame of the bash live tail shows a secret, and a finished line past th
 			.at(-1),
 		"Local: http://localhost:",
 	);
+});
+
+test("the hard-cap preview cannot cut a scheme off a password", () => {
+	const budget = BASH_DISPLAY_MAX_BYTES - 2048;
+	const secret = "clone https://user:ZQXJ@host/r.git ";
+	for (let cut = 1; cut < secret.length; cut += 1) {
+		const stdout = `${secret}${"z ".repeat(budget)}`.slice(0, budget + cut);
+		const capped = bashOutputCapResult({ stdout, stderr: "", outputBytes: stdout.length } as never, "bounded") as {
+			message: string;
+		};
+		const preview = capped.message.slice(0, capped.message.lastIndexOf("\n\n"));
+		strictEqual(redactSecretString(preview).match(SECRET_LETTERS), null, `cut ${cut}`);
+	}
 });
 
 test("/view holds open thinking the way the rail does", async () => {
@@ -266,33 +292,95 @@ test("/view holds open thinking the way the rail does", async () => {
 	strictEqual((await open?.load())?.lines.join("\n"), "clone https://user:");
 });
 
-test("the run feed never splits a password across rows", async () => {
-	const env = await isolateClioEnv("url-userinfo-feed-");
-	try {
-		const rows = (id: string, ...details: (string | RunEventJournalBody)[]): string => {
-			for (const item of details) {
-				appendRunFeed(id, typeof item === "string" ? { kind: "event", type: "text", detail: item } : item);
-			}
-			appendRunFeed(id, { kind: "terminal", outcome: "ok" });
-			return readFileSync(runFeedPath(id, clioStateDir()), "utf8")
-				.trim()
-				.split("\n")
-				.map((row) => (JSON.parse(row) as { detail?: string }).detail ?? "")
-				.join("|");
+test("a settled result's cuts leave no piece of a secret, in the model context or the display tail", () => {
+	const cases = [
+		"https://user:ZQXJZQXJ@host/repo.git",
+		"AKIAZQXJZQXJZQXJZQXJ",
+		"password: ZQXJZQXJ",
+		"password = ZQXJZQXJ",
+		"Authorization: Bearer ZQXJ1ZQXJ",
+		"--token ZQXJZQXJ",
+	];
+	const marker = "\n[… omitted …]\n";
+	const shape = (output: string) =>
+		shapeToolResult(bashTool, { kind: "ok", output }, undefined, BASH_DEFAULT_RESULT_DISPOSITION) as {
+			output: string;
+			modelContext: string;
 		};
-		const long = "q".repeat(4100);
-		const bound = rows("feed-bound", `${long}https://user:ZQXJ`, "ZQXJ@host/x next", " words here now ");
-		strictEqual(bound.match(SECRET_LETTERS), null);
-		const oversized = rows("feed-oversized", `https://user:${"Z".repeat(5000)}`, "ZQ@host/x next", " words here now ");
-		strictEqual(oversized.match(SECRET_LETTERS), null);
-		const warning = { kind: "event", type: "route_warning", detail: "late" } as const;
-		const midUrl = rows("feed-event", "see https://user:ZQ", warning, "XJ@host/x next words here now ");
-		strictEqual(midUrl.match(SECRET_LETTERS), null);
-		const scheme = rows("feed-scheme", `${long}htt`, warning, "ps://user:ZQXJ@host/x next words here now ");
-		strictEqual(scheme.match(SECRET_LETTERS), null);
-	} finally {
-		env.restore();
+	// The header's retrieve path is a random temp directory, so only the excerpt is read.
+	const excerpt = (output: string) => {
+		const context = shape(output).modelContext;
+		return context.slice(context.indexOf("\n", context.indexOf("followUp=")) + 1);
+	};
+	const shown = (text: string) => redactSecretString(redactSecretsText(text, createRedactionTally()));
+	const filler = (size: number, unit: string) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
+	const edges = excerpt(`${filler(40_000, "q ")}\n${filler(40_000, "w ")}\n`);
+	const headBytes = edges.indexOf(marker);
+	const tailBytes = edges.length - headBytes - marker.length;
+	for (const secret of cases) {
+		for (let offset = -secret.length - 8; offset < 8; offset += 1) {
+			const where = `offset ${offset} of ${secret}`;
+			const atHead = `${filler(headBytes + offset, "q ")} ${secret} ${filler(40_000, "w ")}`;
+			strictEqual(shown(excerpt(atHead)).match(SECRET_LETTERS), null, `head ${where}`);
+			const atTail = `${filler(40_000, "q ")}${secret} ${filler(tailBytes + offset, "w ")}`;
+			strictEqual(shown(excerpt(atTail)).match(SECRET_LETTERS), null, `tail ${where}`);
+			const glued = `${filler(40_000, "q")}${secret}${filler(tailBytes + offset, "w")}`;
+			strictEqual(shown(excerpt(glued)).match(SECRET_LETTERS), null, `glued ${where}`);
+		}
 	}
+	for (let tail = 64_500; tail < 65_600; tail += 11) {
+		const output = shape(`${filler(120_000, "q")}https://user:ZQXJZQXJ@host/repo.git ${filler(tail, "w")}`).output;
+		strictEqual(shown(output.slice(0, output.lastIndexOf("\n\n"))).match(SECRET_LETTERS), null, `display tail ${tail}`);
+	}
+});
+
+test("run feed row fields are redacted before their bound cuts them", () => {
+	const handlers = new Map<string, (payload: unknown) => void>();
+	const bus = {
+		subscribe(name: string, handler: (payload: unknown) => void) {
+			handlers.set(name, handler);
+			return () => {};
+		},
+		emit() {},
+	};
+	const details: unknown[] = [];
+	const journal = {
+		open() {},
+		append(_runId: string, entry: unknown) {
+			details.push(entry);
+		},
+		result() {},
+		terminal() {},
+	};
+	const bridge = attachRunEventJournalBridge(bus as never, { journal: journal as never, nowMs: () => 0 });
+	const secret = "https://user:ZQXJZQXJZQXJ@host/x";
+	for (let offset = 0; offset < 40; offset += 1) {
+		const text = `${"x".repeat(580 - offset)} ${secret} more`;
+		const usage = { input: 1, output: 1, totalTokens: 2 };
+		handlers.get("run.progressed")?.({
+			runId: `end${offset}`,
+			agentId: "a",
+			event: { type: "message_end", message: { role: "assistant", content: [{ type: "text", text }], usage } },
+		});
+		handlers.get("run.progressed")?.({
+			runId: `reason${offset}`,
+			agentId: "a",
+			event: {
+				type: "clio_coder_tool_finish",
+				payload: { tool: "bash", toolCallId: "c", outcome: "error", reason: `${"y".repeat(220 - offset)} ${secret} more` },
+			},
+		});
+	}
+	bridge.stop();
+	strictEqual(details.length, 80);
+	const rows = details as { detail?: string; reason?: string }[];
+	strictEqual(
+		rows
+			.map((row) => `${row.detail ?? ""}${row.reason ?? ""}`)
+			.join("")
+			.match(SECRET_LETTERS),
+		null,
+	);
 });
 
 test("live command output holds only an open last line", () => {
