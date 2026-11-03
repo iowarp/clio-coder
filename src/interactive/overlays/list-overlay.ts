@@ -733,6 +733,8 @@ export class ListOverlayView implements Component {
 						continue;
 					}
 					const isSelected = row.itemIndex === this.selectedIndex;
+					// Read once: a row's meta may be a getter that composes its chips.
+					const meta = item.meta;
 					// The name comes first at every width. Metadata used to take whatever
 					// it wanted, so at 48 columns a row of origin, scope and state left
 					// the package name as a single ellipsis: a list of rows nobody could
@@ -742,7 +744,7 @@ export class ListOverlayView implements Component {
 						...selectionRow(clioTheme(), {
 							focused: isSelected,
 							label: this.rowLabel(item, isSelected, width - 2, leadWidth),
-							...(item.meta !== undefined && item.meta.length > 0 ? { meta: item.meta } : {}),
+							...(meta !== undefined && meta.length > 0 ? { meta } : {}),
 							width,
 						}),
 					);

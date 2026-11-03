@@ -265,6 +265,18 @@ it("neutralizes terminal controls in every catalog field a row or its detail pri
 	match(plain(painted), /plugin:dep/);
 });
 
+it("sanitizes a record once for the six rebuilds a tab switch makes", () => {
+	const data = inventory();
+	const view = { category: "plugin" as const, mode: "browse" as const, scope: "user" as const };
+	const build = () =>
+		buildLibraryRows({ view, inventory: selectForCategory(data, view) }).subjects.get("pkg:plugin:materio");
+	const first = build();
+	const second = build();
+	ok(first?.kind === "package" && second?.kind === "package");
+	ok(first.record !== data.packages[0], "a row holds a display-safe copy, never the read's own record");
+	equal(first.record, second.record, "a rebuild from the same read serves the copy already made");
+});
+
 it("finds core agents through the real inventory in Installed without broadening audience", async () => {
 	const env = await isolateClioEnv("tui-library-ergonomics-");
 	try {
