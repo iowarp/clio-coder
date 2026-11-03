@@ -236,7 +236,7 @@ export function latestPriorSession(
 			id: candidate.meta.id,
 			lastActiveAt: candidate.lastActiveAt,
 			name: scan.flowRestricted ? null : scan.name,
-			// Uncut: the quoting site redacts before it cuts, and a cut here could split a secret first.
+			// Uncut: the quoting site bounds it on a token boundary, and a cut here could split a secret first.
 			firstMessagePreview: preview,
 			messageCount: scan.messageCount,
 		};

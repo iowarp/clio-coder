@@ -3,11 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
+import { createRedactionTally, headForRedaction, redactSecretsText } from "../../src/domains/evidence/redact.js";
 import { completedLessonSource } from "../../src/domains/memory/history-review.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
 import { reflectionRequest } from "../../src/domains/memory/observations.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
-import { redactForMemoryRoute } from "../../src/domains/memory/secret-text.js";
+import { memoryRouteJson, redactForMemoryRoute } from "../../src/domains/memory/secret-text.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
 import type { TaskMemoryModelRequest } from "../../src/domains/memory/task-memory-policy.js";
 import { runTaskMemoryPolicy } from "../../src/domains/memory/task-memory-policy.js";
@@ -129,27 +130,77 @@ it("redacts before cutting, so a cut leaves no partial secret", async () => {
 	doesNotMatch(prompt, /AKIA/);
 });
 
-it("exempts a whole variable reference or path, and nothing shorter or longer than one", () => {
-	for (const command of [
+it("keeps a whole variable reference, with a host only as URL userinfo, and nothing that merely looks like one", () => {
+	const kept = [
 		"git clone https://$GH_USER:$GH_TOKEN@github.com/a/b.git",
 		"curl https://user:$API_PASSWORD@api.example.com/x",
 		"curl https://token:$GH_TOKEN@github.com/a",
-		"grep -n token: src/a.ts",
-	]) {
-		strictEqual(redactForMemoryRoute(command), command);
-	}
-	const proven = completedLessonSource(
-		task("git clone https://$GH_USER:$GH_TOKEN@github.com/a/b.git", "clone"),
-		"/repo",
-	);
-	deepStrictEqual([...(proven?.succeededCommands ?? [])], ["git clone https://$GH_USER:$GH_TOKEN@github.com/a/b.git"]);
+		"API_TOKEN=$API_TOKEN node x.mjs",
+	];
+	for (const command of kept) strictEqual(redactForMemoryRoute(command), command);
+	const proven = completedLessonSource(task(kept[0] ?? "", "clone"), "/repo");
+	deepStrictEqual([...(proven?.succeededCommands ?? [])], [kept[0]]);
 	for (const [text, secret] of [
 		["password: a$ABCDEFGHIJ", "a$ABCDEFGHIJ"],
 		['"api_key": "x$ABCDEFGHIJKLMN"', "x$ABCDEFGHIJKLMN"],
 		["deploy $AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"],
 		["deploy --token hunter2hunter2 now", "hunter2hunter2"],
 		["PASSWD=abc123 then go", "abc123"],
+		["password: $AB@hunter2hunter2", "hunter2hunter2"],
+		["https://x.example/a?password:$AB@hunter2hunter2", "hunter2hunter2"],
+		["password: /hunter2hunter2", "hunter2hunter2"],
+		["password: ./hunter2hunter2", "hunter2hunter2"],
+		["secret: /K7MDENG/bPxRfiCYEXAMPLEKEY", "K7MDENG"],
+		["AWS_SECRET_ACCESS_KEY: /K7MDENG/bPxRfiCYEXAMPLEKEY", "K7MDENG"],
+		["client_secret: Zm9v/YmFy/aHVudGVyMg.b", "aHVudGVyMg"],
 	] as const) {
 		strictEqual(redactForMemoryRoute(text).includes(secret), false, text);
 	}
+	// A secret can look like a path, so these fail closed: they stay hidden and cannot ground a lesson.
+	for (const command of [
+		"curl -H 'token: /hunter2hunter2' https://x.example/y",
+		"login --conf password:$AB@hunter2hunter2",
+		"grep -n token: src/a.ts",
+		"node run.mjs token: src/a.test.ts",
+	]) {
+		strictEqual(
+			completedLessonSource(task(command, "closed"), "/repo")?.succeededCommands.has(command) ?? false,
+			false,
+			command,
+		);
+	}
+});
+
+it("a structured prompt hides what tool arguments hide, and property names carry no secret", () => {
+	const json = (value: unknown): unknown => JSON.parse(memoryRouteJson(value));
+	deepStrictEqual(json({ env: { DB_PASS: "hunter2hunter2" } }), { env: { DB_PASS: "[redacted]" } });
+	deepStrictEqual(json({ token: ["hunter2hunter2"] }), { token: "[redacted]" });
+	deepStrictEqual(json({ password: { value: "hunter2hunter2" } }), { password: "[redacted]" });
+	deepStrictEqual(json({ env: { AKIAIOSFODNN7EXAMPLE: "x" } }), { env: { "[redacted:aws-access-key]": "[redacted]" } });
+	deepStrictEqual(json({ a: [{ AKIAIOSFODNN7EXAMPLE: 1 }] }), { a: [{ "[redacted:aws-access-key]": 1 }] });
+	deepStrictEqual(json({ author: "Ada", authority: "x", co_author: "Bo" }), {
+		author: "Ada",
+		authority: "x",
+		co_author: "Bo",
+	});
+	deepStrictEqual(json({ author_token: "hunter2hunter2", authorization: "x" }), {
+		author_token: "[redacted]",
+		authorization: "[redacted]",
+	});
+});
+
+it("redaction stays linear on the shapes that once stalled it", () => {
+	for (const text of ["token-".repeat(1400), `authorization${" ".repeat(80_000)}`, "-eyJ".repeat(20_000)]) {
+		const started = performance.now();
+		redactSecretsText(text, createRedactionTally());
+		ok(performance.now() - started < 1000, text.slice(0, 20));
+	}
+});
+
+it("a bound before redaction takes a token it lands inside whole", () => {
+	const text = "aaa AKIAIOSFODNN7EXAMPLE rest";
+	strictEqual(headForRedaction(text, 100), text);
+	strictEqual(headForRedaction(text, 10), "aaa");
+	strictEqual(headForRedaction(text, 24), "aaa AKIAIOSFODNN7EXAMPLE");
+	strictEqual(headForRedaction("x".repeat(50), 10), "");
 });

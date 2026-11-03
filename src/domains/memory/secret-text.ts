@@ -1,5 +1,5 @@
 import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
-import { isEnvReference, isSecretArgKey, redactSecretString } from "../safety/redaction.js";
+import { isEnvReference, openUrlStart, redactSecretString, redactToolArgs } from "../safety/redaction.js";
 
 declare const memoryRouteTextBrand: unique symbol;
 /**
@@ -8,13 +8,15 @@ declare const memoryRouteTextBrand: unique symbol;
  */
 export type MemoryRouteText = string & { readonly [memoryRouteTextBrand]: true };
 
-/** `src/a.ts` or `./scripts`, in `grep -n token: src/a.ts`: a slash and a file shape name a path, not a credential. */
-const PATH_ARGUMENT = /^(?:\.{0,2}\/[\w./-]+|[\w.-]+(?:\/[\w.-]+)*\/[\w-]+\.[A-Za-z][A-Za-z0-9]{0,5})$/u;
-
-/** The evidence rule reads any long value after a secret-flavored key as a credential; these two hold none. */
-function keepAssignmentValue(value: string): boolean {
-	// `https://token:$GH_TOKEN@github.com` reaches this rule with its host still attached.
-	return isEnvReference(value.replace(/@.*$/u, "")) || PATH_ARGUMENT.test(value);
+/**
+ * A whole `$NAME` names a variable, not a credential. `$NAME@host` is that only as URL userinfo, where the `@` closes the
+ * password, so `https://token:$GH_TOKEN@github.com` stays exact and `password: $AB@hunter2hunter2` does not. A path gets no
+ * such pass, because a secret can look like one: `grep -n token: src/a.ts` fails closed and cannot ground a lesson.
+ */
+function keepAssignmentValue(value: string, before: string): boolean {
+	const at = value.indexOf("@");
+	if (at < 0) return isEnvReference(value);
+	return isEnvReference(value.slice(0, at)) && !value.includes("@", at + 1) && openUrlStart(before) !== null;
 }
 
 /**
@@ -28,11 +30,24 @@ export function redactForMemoryRoute(text: string): MemoryRouteText {
 	}) as MemoryRouteText;
 }
 
-/** Serialize leaf by leaf, since redacting serialized text can swallow an escaped quote; a key names its own value. */
+/** `author` and `authority` hold no credential, and the tool-args key rule only sees their `auth`. */
+const AUTHORSHIP_NAME = /author(?!iz)/giu;
+
+function clearedForRoute(value: unknown, key: string): unknown {
+	// The tool-args rule decides what a key hides. Probing with a string asks it without walking the value.
+	const policyKey = key.replace(AUTHORSHIP_NAME, "");
+	if (redactToolArgs("x", policyKey) !== "x") return clearedForRoute(redactToolArgs(value, policyKey), "");
+	if (typeof value === "string") return redactForMemoryRoute(value);
+	if (Array.isArray(value)) return value.map((item) => clearedForRoute(item, key));
+	if (value === null || typeof value !== "object") return value;
+	const out: Record<string, unknown> = {};
+	for (const [childKey, child] of Object.entries(value)) {
+		out[redactForMemoryRoute(childKey)] = clearedForRoute(child, childKey);
+	}
+	return out;
+}
+
+/** Serialize a cleared copy, since redacting serialized text can swallow an escaped quote. A property name is text too. */
 export function memoryRouteJson(value: unknown): MemoryRouteText {
-	return JSON.stringify(value, (key, leaf: unknown) => {
-		if (typeof leaf !== "string") return leaf;
-		if (leaf !== "" && isSecretArgKey(key) && !isEnvReference(leaf)) return "[redacted:assignment]";
-		return redactForMemoryRoute(leaf);
-	}) as MemoryRouteText;
+	return JSON.stringify(clearedForRoute(value, "")) as MemoryRouteText;
 }

@@ -18,6 +18,7 @@ import {
 	selectActiveRules,
 } from "../context/index.js";
 import { detectRunIdentity } from "../dispatch/run-identity.js";
+import { headForRedaction } from "../evidence/redact.js";
 import { loadMcpServerConfig } from "../gateway/mcp/config.js";
 import { redactForMemoryRoute } from "../memory/secret-text.js";
 import type { ResourcesContract } from "../resources/contract.js";
@@ -565,7 +566,8 @@ export function sessionStartFacts(
 		const prior = latestPriorSession(cwd, sessionId, orientationCutoff);
 		if (prior !== null) {
 			// The preview is raw ledger text, and this line rides every request of every later session here (#423).
-			const topic = prior.name ?? prior.firstMessagePreview;
+			// Bounded first: this runs synchronously at session start on a first message of any length.
+			const topic = headForRedaction(prior.name ?? prior.firstMessagePreview ?? "", PRIOR_TOPIC_MAX_CHARS);
 			const quoted = topic ? quotedFact(redactForMemoryRoute(topic), 64) : prior.id;
 			priorFact = `${PRIOR_SESSION_FACT_PREFIX}${prior.lastActiveAt}: ${quoted}. Answer "last time" from this record; git log is not session history. /resume opens it.`;
 		}
@@ -593,6 +595,8 @@ interface CatalogSnapshot {
 }
 
 const CATALOG_PURPOSE_MAX_CHARS = 80;
+/** Far past the 64 the prior-session line quotes, and small enough that redacting it cannot stall a session start. */
+const PRIOR_TOPIC_MAX_CHARS = 4_096;
 const CATALOG_MAX_ENTRIES = 60;
 
 /** The description's first sentence, trimmed at a word boundary; enough to route, not to use. */

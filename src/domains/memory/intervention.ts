@@ -12,6 +12,7 @@ import {
 	type ToolResultDigest,
 } from "../../tools/result-disposition.js";
 import { gatewayChainReceipts } from "../../tools/surface.js";
+import { headForRedaction } from "../evidence/redact.js";
 import type { MiddlewareHookEvaluationContext, MiddlewareHookRegistration } from "../middleware/runtime.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../middleware/types.js";
 import { MEMORY_CONSOLIDATION_SYSTEM_PROMPT } from "../prompts/memory-intervention.js";
@@ -718,7 +719,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							turnLog.length = 0;
 						}
 						if (input.text?.trim()) {
-							currentTask = shortText(redactForMemoryRoute(input.text), 2_000);
+							// Bounded first: this runs synchronously at turn start on a prompt of any length.
+							currentTask = shortText(redactForMemoryRoute(headForRedaction(input.text, 16_384)), 2_000);
 							operatorAskedRepeat = operatorRequestsCommandRepeat(input.text);
 						}
 						// Mid-turn annotations are spent per turn, not per session: the same
