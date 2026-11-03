@@ -26,6 +26,24 @@ export function padAnsi(text: string, width: number, ellipsis = ""): string {
  * still marks its cut. Width accounting is ANSI-aware via visibleWidth.
  */
 export function fitUnits(theme: ClioTheme, prefix: string, units: readonly string[], maxWidth: number): string {
+	return fitUnitsPlan(theme, prefix, units, maxWidth).line;
+}
+
+/**
+ * How many of `units` the fitted line keeps whole, by the rule `fitUnits`
+ * draws by. A first unit that is itself cut counts as not kept, so a caller
+ * deciding what else to give up never counts a cut key as shown.
+ */
+export function fitUnitsKept(theme: ClioTheme, prefix: string, units: readonly string[], maxWidth: number): number {
+	return fitUnitsPlan(theme, prefix, units, maxWidth).kept;
+}
+
+function fitUnitsPlan(
+	theme: ClioTheme,
+	prefix: string,
+	units: readonly string[],
+	maxWidth: number,
+): { line: string; kept: number } {
 	const sep = " · ";
 	let line = prefix;
 	for (let index = 0; index < units.length; index += 1) {
@@ -33,12 +51,12 @@ export function fitUnits(theme: ClioTheme, prefix: string, units: readonly strin
 		// Reserve two columns for the ` …` marker unless this is the last unit.
 		const reserve = index < units.length - 1 ? 2 : 0;
 		if (visibleWidth(candidate) + reserve > maxWidth) {
-			if (index === 0) return truncateToWidth(candidate, Math.max(0, maxWidth), "…", false);
-			return `${line} ${theme.fg("annotation", "…")}`;
+			if (index === 0) return { line: truncateToWidth(candidate, Math.max(0, maxWidth), "…", false), kept: 0 };
+			return { line: `${line} ${theme.fg("annotation", "…")}`, kept: index };
 		}
 		line = candidate;
 	}
-	return line;
+	return { line, kept: units.length };
 }
 
 export interface RuleOptions {

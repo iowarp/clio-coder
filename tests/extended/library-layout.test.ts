@@ -158,3 +158,59 @@ it("gives an explicit search its cursor and letters, then returns to list action
 	view.handleInput("\u001b");
 	strictEqual(closed, 1);
 });
+
+it("keeps every key the rail drops on screen at six rows once the pane state settles", () => {
+	// The Library at 54 columns: a 50-cell body, a 35-cell rail, the pane
+	// requested on open but without room to stack. The shed pass used to run
+	// under the hints of the pane it assumed, and the hints of the frame it
+	// settled on needed one row more, so `[u] update` sat behind the marker.
+	const items = [0, 1].map((index) => ({
+		id: `row-${index}`,
+		label: `row ${index}`,
+		meta: "✓ available · skill:alpha · Local",
+		detail: () => Array.from({ length: 15 }, (_, line) => `line ${line}`),
+		detailFormat: "rows" as const,
+	}));
+	const view = new ListOverlayView(
+		{
+			title: "Library",
+			items: [],
+			tabs: ["Skills", "Agents", "Prompts", "Playbooks", "Plugins", "Extensions"].map((label) => ({
+				id: label.toLowerCase(),
+				label,
+				items: () => items,
+			})),
+			activeTabId: "skills",
+			filterable: true,
+			explicitSearch: true,
+			fullScreen: true,
+			layout: "split",
+			status: () => "[b] Installed · [s] User · [n] notices · 2 entries",
+			globalHints: [
+				{ key: "b", verb: "browse/installed", short: "view" },
+				{ key: "s", verb: "user/project", short: "scope" },
+				{ key: "n", verb: "notices" },
+				{ key: "o", verb: "import" },
+				{ key: "R", verb: "refresh" },
+			],
+			hints: () => [
+				{ key: "e", verb: "disable" },
+				{ key: "u", verb: "update" },
+				{ key: "r", verb: "remove" },
+				{ key: "v", verb: "use" },
+			],
+			onSelect() {},
+			onClose() {},
+		},
+		() => {},
+	);
+	view.toggleDetail();
+	view.setRailRoom(35);
+	view.setBodyRows(6);
+	const body = view.render(50).map(stripVTControlCharacters);
+	const everywhere = `${body.join("\n")}\n${stripVTControlCharacters(view.getHint(38))}`;
+	for (const key of ["↑↓", "/", "b", "s", "n", "o", "R", "Tab", "e", "u", "r", "v", "Esc"])
+		ok(everywhere.includes(`[${key}]`), `${key} is on screen:\n${everywhere}`);
+	for (const line of body.filter((row) => row.trimStart().startsWith("[")))
+		ok(!line.includes("…"), `no key hides behind the marker: ${line}`);
+});
