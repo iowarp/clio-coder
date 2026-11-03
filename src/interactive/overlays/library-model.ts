@@ -205,7 +205,9 @@ export function libraryStatusLine(
 		notices,
 		theme.fg("annotation", total),
 		counts.truncated ? statusChip(theme, "warning", wide ? "incomplete results" : "incomplete") : null,
-		view.member && wide ? theme.fg("annotation", `members of ${safe(view.member.ref)}`) : null,
+		view.member && wide
+			? theme.fg("annotation", `members of ${safe(view.member.ref)}${view.member.scope ? ` (${view.member.scope})` : ""}`)
+			: null,
 	];
 	// Whole chips are dropped from the right, with the dim ellipsis that says
 	// so, rather than a cut that lands inside a word.
@@ -700,14 +702,17 @@ export interface LibraryRowSet {
 	truncated: boolean;
 }
 
-type RowSpec = Omit<ListOverlayItem, "id" | "detail" | "detailHead" | "detailFormat"> & {
+type RowSpec = Pick<ListOverlayItem, "label" | "meta" | "group" | "searchGroup"> & {
 	detail: (width: number) => DetailRows;
 };
 
 /**
  * One row and its pane. The pane is built once per width and served to both
  * the rows and the pinned-head count, so a receipt read from disk happens
- * once per frame width rather than twice.
+ * once per frame width rather than twice. The meta is read through to the
+ * spec's getter rather than copied: spreading the spec evaluated every row's
+ * chips while the rows were built, for the six tabs a switch rebuilds and the
+ * thousands of rows no frame draws.
  */
 function push(set: LibraryRowSet, id: string, subject: LibraryRowSubject, item: RowSpec): void {
 	set.subjects.set(id, subject);
@@ -717,14 +722,14 @@ function push(set: LibraryRowSet, id: string, subject: LibraryRowSubject, item: 
 		memo = { width, epoch: skinEpoch(), rows: item.detail(width) };
 		return memo.rows;
 	};
-	const { detail: _detail, ...spec } = item;
 	set.items.push({
 		id,
-		...spec,
+		label: subject.kind === "notice" ? clioTheme().fg("warning", safe(item.label)) : safe(item.label),
+		...(item.group !== undefined ? { group: item.group } : {}),
+		...(item.searchGroup !== undefined ? { searchGroup: item.searchGroup } : {}),
 		get meta() {
 			return item.meta ?? "";
 		},
-		label: subject.kind === "notice" ? clioTheme().fg("warning", safe(item.label)) : safe(item.label),
 		detailFormat: "rows",
 		detail: (width) => {
 			const built = rows(width);
@@ -732,6 +737,33 @@ function push(set: LibraryRowSet, id: string, subject: LibraryRowSubject, item: 
 		},
 		detailHead: (width) => rows(width).head.length,
 	});
+}
+
+/**
+ * Display-safe copies by record identity.
+ *
+ * A tab switch rebuilds every tab's rows from the one cached read, so the deep
+ * copy that neutralizes a record's text ran once per record per tab per
+ * keystroke: two thirds of a 200 ms switch at 3,000 packages. A refresh reads
+ * fresh records, so a copy keyed on the record it was made from is never stale.
+ */
+const safeRecords = new WeakMap<object, object>();
+
+function safeRecord<T extends object>(record: T): T {
+	const known = safeRecords.get(record);
+	if (known !== undefined) return known as T;
+	const made = displaySafe(record);
+	safeRecords.set(record, made);
+	return made;
+}
+
+function safeInventory(inventory: LibraryInventory): LibraryInventory {
+	return {
+		...displaySafe({ ...inventory, packages: [], copies: [], resources: [] }),
+		packages: inventory.packages.map(safeRecord),
+		copies: inventory.copies.map(safeRecord),
+		resources: inventory.resources.map(safeRecord),
+	};
 }
 
 /**
@@ -818,9 +850,9 @@ export interface LibraryRowOptions {
 export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 	// Every record is neutralized for display once, here, so a field a row or a
 	// pane picks up later cannot carry a terminal control past this seam.
-	const inventory = displaySafe(options.inventory);
-	const inspection = displaySafe(options.inspection);
-	const pairs = displaySafe(options.pairs);
+	const inventory = safeInventory(options.inventory);
+	const inspection = options.inspection === undefined ? undefined : safeRecord(options.inspection);
+	const pairs = options.pairs === undefined ? undefined : safeRecord(options.pairs);
 	const failure = options.failure === undefined ? undefined : safe(options.failure);
 	const { view } = options;
 	const theme = clioTheme();
@@ -828,6 +860,10 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 
 	if (view.member && inspection) {
 		const owner = inspection.copy;
+		// The header names the copy, because two copies of one package list
+		// the same members and the status row drops the owner below 72 columns.
+		// The scope leads because a narrow row cuts the tail, and the ref is long.
+		const group = `${LIBRARY_GROUP_MEMBERS} (${owner.scope}) of ${safe(owner.ref)}`;
 		for (const member of inspection.resources) {
 			const subject: LibraryRowSubject = { kind: "member", owner, member };
 			const actions = libraryRowActions(subject, view);
@@ -840,7 +876,8 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 						member.componentId ? `component ${member.componentId}` : undefined,
 					]);
 				},
-				group: LIBRARY_GROUP_MEMBERS,
+				group,
+				searchGroup: false,
 				detail: (width) => memberDetail(subject, actions, width),
 			});
 		}

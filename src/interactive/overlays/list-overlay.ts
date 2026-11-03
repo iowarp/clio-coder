@@ -28,6 +28,7 @@ import {
 	emptyState,
 	errorState,
 	fitUnits,
+	fitUnitsKept,
 	GLYPH,
 	keyCap,
 	listGroupHeader,
@@ -89,6 +90,8 @@ export interface ListOverlayItem {
 	meta?: string;
 	/** Group header this item renders under, e.g. "project", "marketplace". */
 	group?: string;
+	/** False when the group names the rows' owner rather than the row, so search skips it. */
+	searchGroup?: boolean;
 	/**
 	 * Lines for the detail pane, lazily computed at the pane's real width.
 	 * Markdown by default; `detailFormat: "rows"` says the lines are already
@@ -208,6 +211,12 @@ export class ListOverlayView implements Component {
 	private detailPaneDrawn: boolean;
 	/** Whether the pane on screen is the split one, which Tab cannot put away. */
 	private detailPaneSplit = false;
+	/**
+	 * A detail key pressed since the last frame. Two presses that land before
+	 * a repaint each inverted the pane the last frame drew, so the second was
+	 * a no-op and the pane stayed where the first press put it.
+	 */
+	private detailKeyPending = false;
 	/** Cells the rail under this list has for keys, or zero while the composer has not said. */
 	private railRoom = 0;
 	/** Lines one PgUp or PgDn moves the pane by: the rows it shows, never a fixed count. */
@@ -327,14 +336,36 @@ export class ListOverlayView implements Component {
 	 * press a no-op. From here on the pane may take the body over.
 	 */
 	private toggleDetailByKey(): void {
+		// With no pane to change the press changes nothing: a no-match filter or an
+		// empty tab has no row to describe, and the split pane is always drawn.
+		// Flipping the request here would surface later as a pane that moved on its own.
+		if (!this.filteredItems()[this.selectedIndex]?.detail || this.detailPaneSplit) {
+			this.onChange();
+			return;
+		}
 		this.takeoverAllowed = true;
-		// Before the first frame nothing has been drawn yet, so the request is what the key inverts.
-		this.showDetail = this.renderMemo ? !this.detailPaneDrawn : !this.showDetail;
+		// Before the first frame nothing has been drawn yet, and after a press the
+		// frame has not caught up with, the request is what the key inverts.
+		this.showDetail = this.renderMemo && !this.detailKeyPending ? !this.detailPaneDrawn : !this.showDetail;
+		this.detailKeyPending = true;
 		this.onChange();
 	}
 
 	toggleDetail(): void {
 		this.showDetail = !this.showDetail;
+		this.renderMemo = null;
+	}
+
+	/**
+	 * Put the pane on screen for the selected row, taking the body over when
+	 * the rows leave no room to stack it. A request to see a row's facts never
+	 * hides facts already on screen, which a blind toggle did when the opener
+	 * had the pane up already.
+	 */
+	openDetail(): void {
+		this.takeoverAllowed = true;
+		this.showDetail = true;
+		this.detailKeyPending = true;
 		this.renderMemo = null;
 	}
 
@@ -433,7 +464,9 @@ export class ListOverlayView implements Component {
 		const query = this.filterText.trim();
 		if (query.length === 0) return this.items;
 		if (this.filterMemo?.query === query) return this.filterMemo.items;
-		const items = fuzzyFilter([...this.items], query, (item) => `${item.label} ${item.group ?? ""}`);
+		const items = fuzzyFilter([...this.items], query, (item) =>
+			item.searchGroup === false ? item.label : `${item.label} ${item.group ?? ""}`,
+		);
 		this.filterMemo = { query, items };
 		return items;
 	}
@@ -701,8 +734,12 @@ export class ListOverlayView implements Component {
 					: emptyState(clioTheme(), text, Math.max(1, width - 2), {
 							remedy: noMatch ? "Esc clears the filter" : (remedy ?? ""),
 						});
-			for (const wrapped of rows) {
-				lines.push(this.padLine(`  ${wrapped}`, width));
+			// Keys sit below these rows and the frame cuts from the bottom, so the
+			// message gives up its tail before a key goes off screen.
+			const kept = rows.slice(0, Math.max(1, listMaxLines));
+			for (const [index, wrapped] of kept.entries()) {
+				const cut = index === kept.length - 1 && kept.length < rows.length;
+				lines.push(this.padLine(`  ${wrapped}${cut ? ` ${GLYPH.ellipsis}` : ""}`, width));
 			}
 		} else {
 			const scrollRows = renderedRows.length > listMaxLines && listMaxLines > 1 ? 1 : 0;
@@ -733,6 +770,8 @@ export class ListOverlayView implements Component {
 						continue;
 					}
 					const isSelected = row.itemIndex === this.selectedIndex;
+					// Read once: a row's meta may be a getter that composes its chips.
+					const meta = item.meta;
 					// The name comes first at every width. Metadata used to take whatever
 					// it wanted, so at 48 columns a row of origin, scope and state left
 					// the package name as a single ellipsis: a list of rows nobody could
@@ -742,7 +781,7 @@ export class ListOverlayView implements Component {
 						...selectionRow(clioTheme(), {
 							focused: isSelected,
 							label: this.rowLabel(item, isSelected, width - 2, leadWidth),
-							...(item.meta !== undefined && item.meta.length > 0 ? { meta: item.meta } : {}),
+							...(meta !== undefined && meta.length > 0 ? { meta } : {}),
 							width,
 						}),
 					);
@@ -903,6 +942,8 @@ export class ListOverlayView implements Component {
 	}
 
 	render(width: number): string[] {
+		// Any frame has caught up with the presses, a memoized one too.
+		this.detailKeyPending = false;
 		const filteredItems = this.filteredItems();
 		const status = this.options.status?.(width);
 
@@ -969,7 +1010,7 @@ export class ListOverlayView implements Component {
 		interface Composition {
 			chrome: string[];
 			final: Layout;
-			/** Rows of keys the cap left no room for; those keys sit behind the dim marker. */
+			/** Keys the cap left no room for; they sit behind the dim marker, or nowhere when no row was spared. */
 			overflow: number;
 		}
 		// One composition of the body under one chrome and one assumption about
@@ -1044,6 +1085,9 @@ export class ListOverlayView implements Component {
 			// leave the cursor its row, or a wanted pane its two, and with eight rows
 			// or more take at most half; past that, the rows they do get are whole
 			// and the last one is fitted, with the dim marker for what it still holds.
+			// The overflow counts keys, not rows: shedding a chrome row that moved
+			// one key into the rows and bought a row for three others read as no
+			// gain by rows, and the frame kept a tab bar over every key it hid.
 			const cap = (dropped: ReadonlyArray<HintEntry>): string[] => {
 				const rows = this.keyRows(width, dropped);
 				// A pane that may take the body over keeps its two rows from the keys; a
@@ -1051,8 +1095,8 @@ export class ListOverlayView implements Component {
 				const reserve = paneWanted && !isSplit && this.takeoverAllowed ? STACKED_DETAIL_MIN_ROWS : 1;
 				const most = availableRows >= 8 ? Math.floor(availableRows / 2) : Math.max(0, availableRows - reserve);
 				if (rows.length <= most) return rows;
-				overflow = rows.length - most;
-				// No row to spare: the keys stay on the rail and the cursor keeps its row.
+				overflow = dropped.length;
+				// No row to spare: the keys the rail dropped are off screen.
 				if (most < 1 || dropped.length === 0) return [];
 				const separator = dotSep(theme);
 				let rest = dropped.map(
@@ -1064,8 +1108,12 @@ export class ListOverlayView implements Component {
 					while (take > 1 && visibleWidth(rest.slice(0, take).join(separator)) > width) take -= 1;
 					kept.push(this.padLine(rest.slice(0, take).join(separator), width));
 					rest = rest.slice(take);
+					overflow -= take;
 				}
-				if (rest.length > 0) kept.push(this.padLine(fitUnits(theme, "", rest, width), width));
+				if (rest.length > 0) {
+					kept.push(this.padLine(fitUnits(theme, "", rest, width), width));
+					overflow -= fitUnitsKept(theme, "", rest, width);
+				}
 				return kept;
 			};
 			const first = layout(cap(this.droppedKeys(entries, esc, chromeText)));
@@ -1079,10 +1127,12 @@ export class ListOverlayView implements Component {
 		// rows are cut or a stacked pane is down to a row or two of facts, since
 		// `/` is in the keys and a pane that pages one row at a time reads
 		// nothing; the tab bar, whose ←→ then moves into the keys, goes next for
-		// the same reasons, and the status row only when the pane still cannot
-		// get its two rows. A row is shed only if the frame without it is better:
-		// fewer keys behind the marker, a pane that now draws, or a thin pane
-		// that grew. Otherwise it stays, because what it said is not elsewhere.
+		// the same reasons, and the status row last, when the pane still cannot
+		// get its two rows or a key is still behind the marker, since its own
+		// keys then move into the rows. A row is shed only if the frame without
+		// it is better: fewer keys behind the marker, a pane that now draws, or
+		// a thin pane that grew. Otherwise it stays, because what it said is not
+		// elsewhere.
 		let composed = compose(paneWanted);
 		const thin = (): boolean =>
 			paneWanted && (!composed.final.drawn || composed.final.paneRows < STACKED_DETAIL_MIN_ROWS + 2);
@@ -1095,57 +1145,73 @@ export class ListOverlayView implements Component {
 				prev.final.paneRows < STACKED_DETAIL_MIN_ROWS + 2 &&
 				next.final.paneRows > prev.final.paneRows &&
 				next.overflow <= prev.overflow);
-		const tryShed = (shed: () => void, restore: () => void): void => {
+		const tryShed = (assumeDrawn: boolean, shed: () => void, restore: () => void): void => {
 			shed();
-			const next = compose(paneWanted);
+			const next = compose(assumeDrawn);
 			if (better(next, composed)) composed = next;
 			else restore();
 		};
-		if (wantsRoom() && filterSheddable()) {
-			const kept = filterRows;
-			tryShed(
-				() => {
-					filterRows = [];
-				},
-				() => {
-					filterRows = kept;
-				},
-			);
-		}
-		if (wantsRoom() && tabRows.length > 0) {
-			const kept = tabRows;
-			tryShed(
-				() => {
-					tabRows = [];
-				},
-				() => {
-					tabRows = kept;
-				},
-			);
-		}
-		if (paneWanted && !isSplit && !composed.final.drawn && statusRows.length > 0) {
-			const kept = statusRows;
-			tryShed(
-				() => {
-					statusRows = [];
-				},
-				() => {
-					statusRows = kept;
-				},
-			);
-		}
+		const shedForRoom = (assumeDrawn: boolean): void => {
+			if (wantsRoom() && filterSheddable()) {
+				const kept = filterRows;
+				tryShed(
+					assumeDrawn,
+					() => {
+						filterRows = [];
+					},
+					() => {
+						filterRows = kept;
+					},
+				);
+			}
+			if (wantsRoom() && tabRows.length > 0) {
+				const kept = tabRows;
+				tryShed(
+					assumeDrawn,
+					() => {
+						tabRows = [];
+					},
+					() => {
+						tabRows = kept;
+					},
+				);
+			}
+			if (((paneWanted && !isSplit && !composed.final.drawn) || composed.overflow > 0) && statusRows.length > 0) {
+				const kept = statusRows;
+				tryShed(
+					assumeDrawn,
+					() => {
+						statusRows = [];
+					},
+					() => {
+						statusRows = kept;
+					},
+				);
+			}
+		};
 		// The hints assumed the pane state; when the layout decided otherwise the
 		// frame is composed again under the real one, so the Tab verb and the key
 		// rows never describe a pane that is not there, and the key that brings
 		// the rows back outranks the rest while the pane has the body to itself.
-		for (
-			let pass = 0;
-			pass < 2 && (composed.final.drawn !== this.detailPaneDrawn || composed.final.takeover !== this.detailTakeover);
-			pass += 1
-		) {
-			this.detailTakeover = composed.final.takeover;
-			composed = compose(composed.final.drawn);
-		}
+		const settle = (): void => {
+			for (
+				let pass = 0;
+				pass < 2 && (composed.final.drawn !== this.detailPaneDrawn || composed.final.takeover !== this.detailTakeover);
+				pass += 1
+			) {
+				this.detailTakeover = composed.final.takeover;
+				composed = compose(composed.final.drawn);
+			}
+		};
+		shedForRoom(paneWanted);
+		settle();
+		// The settled state changes which keys the rail keeps: without a pane a
+		// row's own keys outrank the navigation reminders, so the body gets a
+		// different set, and one that needs a row the first pass never asked
+		// for ended behind the dim marker. The chrome is offered once more
+		// under the hints the frame will actually carry.
+		shedForRoom(composed.final.drawn);
+		settle();
 		this.detailTakeover = composed.final.takeover;
 		this.detailPaneDrawn = composed.final.drawn;
 		this.detailPaneSplit = composed.final.drawn && isSplit;
@@ -1385,6 +1451,8 @@ export interface ListOverlayHandle extends OverlayHandle {
 	selectById(id: string): boolean;
 	/** Show or hide the stacked detail pane. */
 	toggleDetail(): void;
+	/** Put the pane on screen for the selected row; a no-op while it is already there. */
+	openDetail(): void;
 	/** Drop a typed filter and leave search focus. */
 	clearFilter(): void;
 }
@@ -1441,6 +1509,10 @@ export function openListOverlay(tui: TUI, options: ListOverlayOptions & { marker
 		},
 		toggleDetail(): void {
 			view.toggleDetail();
+			tui.requestRender();
+		},
+		openDetail(): void {
+			view.openDetail();
 			tui.requestRender();
 		},
 		clearFilter(): void {
