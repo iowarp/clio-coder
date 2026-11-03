@@ -225,6 +225,7 @@ function fixture(
 	visionSidecar?: VisionSidecar,
 	visionCapable = false,
 	refuseHandoffSkill?: () => string | null,
+	labelReferencedPaths?: (paths: ReadonlyArray<string>) => void,
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -285,6 +286,7 @@ function fixture(
 		...(visionSidecar ? { visionSidecar } : {}),
 		...(readTurn ? { readTurn } : {}),
 		...(refuseHandoffSkill ? { refuseHandoffSkill } : {}),
+		...(labelReferencedPaths ? { labelReferencedPaths } : {}),
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
@@ -683,6 +685,30 @@ it("a refused context-handoff request sends nothing and starts no turn", { timeo
 		f.next();
 		await f.loop.submit("Next");
 		strictEqual(f.wire().calls(), 1, "only the skill request is refused");
+	} finally {
+		await f.close();
+	}
+});
+
+it("a context-handoff request is judged after labeling the file it inlines", { timeout: 15_000 }, async () => {
+	let labeled = false;
+	const f = fixture(
+		"success",
+		undefined,
+		undefined,
+		false,
+		() => (labeled ? "use /handoff" : null),
+		() => {
+			labeled = true;
+		},
+	);
+	try {
+		await f.loop.submit("write the brief", {
+			pendingSkillRequests: [SKILL_REQUEST],
+			workingContextPaths: ["secrets/notes.txt"],
+		});
+		strictEqual(labeled, true);
+		strictEqual(f.wire().calls(), 0);
 	} finally {
 		await f.close();
 	}

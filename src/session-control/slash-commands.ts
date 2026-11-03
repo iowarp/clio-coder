@@ -284,7 +284,7 @@ export type CouncilDispatchOutcome =
 	| { status: "error"; message: string };
 
 export type TaskMemorySeedCommandResult =
-	| { status: "seeded"; seeded: number; skipped: number; source: string }
+	| { status: "seeded"; seeded: number; skipped: number; source: string; flowRuleIds?: ReadonlyArray<string> }
 	| { status: "disabled" }
 	| { status: "not-found" }
 	| { status: "refused"; reason: string };
@@ -2455,7 +2455,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				case "seeded":
 					ctx.notice(
 						"success",
-						`task memory seeded ${result.seeded} entr${result.seeded === 1 ? "y" : "ies"} from ${result.source}${result.skipped > 0 ? `; skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}` : ""}`,
+						`task memory seeded ${result.seeded} entr${result.seeded === 1 ? "y" : "ies"} from ${result.source}${result.skipped > 0 ? `; skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}` : ""}${(result.flowRuleIds?.length ?? 0) > 0 ? `. This session now carries the source's information-flow restrictions (${result.flowRuleIds?.join(", ")}), so a route they refuse fails on the next prompt` : ""}`,
 					);
 					return;
 				case "disabled":

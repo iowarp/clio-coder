@@ -24,7 +24,7 @@ import {
 } from "../../src/domains/session/handoff-service.js";
 import { FLOW_RESTRICTION_ENTRY_TYPE } from "../../src/domains/session/history.js";
 import type { TUI } from "../../src/engine/tui.js";
-import { createFlowLedger } from "../../src/entry/flow-ledger.js";
+import { admitHandoffSeedFlow, createFlowLedger } from "../../src/entry/flow-ledger.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { createOverlaySessionLifecycle } from "../../src/interactive/overlay-session-lifecycle.js";
 import type { OverlayTransitions } from "../../src/interactive/overlay-transitions.js";
@@ -110,6 +110,7 @@ function fakeSession(
 			written.set(current, [...(written.get(current) ?? []), entry]);
 			return entry;
 		},
+		tree: () => ({ leafId: null }),
 		deleteSession: (id: string) => {
 			if (id === current) throw new Error("refusing to delete the open session");
 			metas.delete(id);
@@ -329,12 +330,12 @@ test("a handoff seed refused by its admission leaves the bank untouched", () => 
 		const seen: string[] = [];
 		const refused = seedTaskMemoryFromNewestHandoff(bank, cwd, true, (snapshot) => {
 			if (snapshot.version === 2) seen.push(snapshot.source.sessionId);
-			return "no provenance";
+			return { refusal: "no provenance" };
 		});
 		deepStrictEqual(refused, { status: "refused", reason: "no provenance" });
 		deepStrictEqual(seen, ["from"]);
 		strictEqual(bank.snapshot().knowledge.length, 0);
-		strictEqual(seedTaskMemoryFromNewestHandoff(bank, cwd, true, () => null).status, "seeded");
+		strictEqual(seedTaskMemoryFromNewestHandoff(bank, cwd, true, () => ({ ruleIds: [] })).status, "seeded");
 		strictEqual(bank.snapshot().knowledge.length, 1);
 	} finally {
 		rmSync(cwd, { recursive: true, force: true });
@@ -359,6 +360,62 @@ test("the flow ledger reads another session's labels and fails closed on an unre
 	strictEqual(ledger.isRestricted("labeled"), true);
 	strictEqual(ledger.isRestricted("clean"), false);
 	strictEqual(ledger.isRestricted("gone"), true);
+});
+
+test("a label absorbed before any session is visible to isRestricted once one exists", () => {
+	const set = {
+		version: 1 as const,
+		restrictions: [{ ruleId: "secrets", policyHash: "h", sourceRef: "/repo/secrets/notes.txt", recipients: [] }],
+	};
+	const fake = fakeSession();
+	fake.current = "none";
+	const ledger = createFlowLedger({ session: fake.session, readEntries: (id) => fake.written.get(id) ?? [] });
+	ledger.absorb(set, { tool: "file-reference" });
+	fake.session.create({ cwd: CWD });
+	strictEqual(ledger.isRestricted("to-1"), true, "no current() or refusal() ran between the session and the question");
+	deepStrictEqual(ledger.restrictionsOf("to-1"), set);
+});
+
+test("a seed from a restricted source labels a session of its own, so resuming a clean one leaves it clean", () => {
+	const set = {
+		version: 1,
+		restrictions: [{ ruleId: "secrets", policyHash: "h", sourceRef: "/repo/secrets/notes.txt", recipients: [] }],
+	};
+	const fake = fakeSession();
+	fake.current = "none";
+	const ledger = createFlowLedger({
+		session: fake.session,
+		readEntries: (id) => {
+			if (id === "gone") throw new Error("session not found: gone");
+			return id === "labeled"
+				? [{ kind: "custom", customType: FLOW_RESTRICTION_ENTRY_TYPE, data: { set } }]
+				: (fake.written.get(id) ?? []);
+		},
+	});
+	const admit = (source: string | null, hasSourceRules = true) =>
+		admitHandoffSeedFlow(
+			{
+				ledger,
+				hasSourceRules: () => hasSourceRules,
+				ensureSession: () => {
+					if (fake.session.current() === null) fake.session.create({ cwd: CWD });
+				},
+			},
+			source,
+		);
+	deepStrictEqual(admit("clean"), { ruleIds: [] });
+	strictEqual(fake.session.current(), null, "a clean source opens no session");
+	match(("refusal" in admit("gone") && (admit("gone") as { refusal: string }).refusal) || "", /session not found: gone/);
+	match(("refusal" in admit(null) && (admit(null) as { refusal: string }).refusal) || "", /names no source session/);
+	deepStrictEqual(admit("gone", false), { ruleIds: [] });
+
+	deepStrictEqual(admit("labeled"), { ruleIds: ["secrets"] });
+	strictEqual(fake.current, "to-1");
+	strictEqual(ledger.isRestricted("to-1"), true);
+	strictEqual(fake.written.get("to-1")?.[0]?.customType, FLOW_RESTRICTION_ENTRY_TYPE);
+	fake.session.switchBranch("from");
+	strictEqual(ledger.current(), null, "the clean session took nothing");
+	strictEqual(fake.written.has("from"), false);
 });
 
 test("handoff commit writes nothing for an empty or stale review, and keeps the seed when only the note fails", async () => {

@@ -2644,6 +2644,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
 					machinePreparation.runtime = agentRuntime;
 				if ((options.pendingSkillRequests ?? []).some((request) => request.name.trim() === "context-handoff")) {
+					// A file this request inlines counts, and the ordinary labeling below runs only after this return.
+					const inlined = options.workingContextPaths ?? [];
+					if (inlined.length > 0) deps.labelReferencedPaths?.(inlined);
 					const refusal = deps.refuseHandoffSkill?.() ?? null;
 					if (refusal !== null) {
 						emit({

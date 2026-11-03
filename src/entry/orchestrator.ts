@@ -376,7 +376,7 @@ import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
 import { createExtensionReloadCoordinator, extensionHookReceiptSink } from "./extension-reload.js";
-import { createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
+import { admitHandoffSeedFlow, createFlowLedger, FLOW_RESTRICTION_ENTRY_TYPE } from "./flow-ledger.js";
 import { createJobHost } from "./job-host.js";
 import { bindSessionPackageActivity } from "./package-activity.js";
 import { resolvePanesEnablement } from "./panes-activation.js";
@@ -4192,25 +4192,25 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
 		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().context.memory.enabled);
 	};
-	/**
-	 * A snapshot is what a restricted session knew, written where any later session can load it. Each session's ledger
-	 * is the only authority for what it carries, so the labels come from the source's and land ahead of the first entry.
-	 */
-	const admitHandoffSeed = (snapshot: TaskMemoryHandoffSnapshot): string | null => {
-		const sourceId = snapshot.version === 2 ? snapshot.source.sessionId : null;
-		let labels: FlowRestrictionSet | null;
-		try {
-			if (sourceId === null) throw new Error("the snapshot names no source session");
-			labels = flowLedger.restrictionsOf(sourceId);
-		} catch (error) {
-			if ((safety?.policy?.informationFlow?.().rules.length ?? 0) === 0) return null;
-			const why = error instanceof Error ? error.message : String(error);
-			return `its source's information-flow provenance cannot be read (${why}), and this project declares source rules`;
-		}
-		if (labels === null) return null;
-		flowLedger.absorb(labels, { tool: "memory-seed" });
-		return session?.current() ? flowLedger.refusal() : null;
-	};
+	const admitHandoffSeed = (snapshot: TaskMemoryHandoffSnapshot) =>
+		admitHandoffSeedFlow(
+			{
+				ledger: flowLedger,
+				ensureSession: () => {
+					if (!session || session.current()) return;
+					const settings = getCurrentSettings();
+					session.create({
+						cwd: process.cwd(),
+						...(settings.chat.target ? { target: settings.chat.target } : {}),
+						...(settings.chat.model ? { model: settings.chat.model } : {}),
+					});
+					persistCurrentThinkingLevel();
+					taskBoard.snapshot();
+				},
+				hasSourceRules: () => (safety?.policy?.informationFlow?.().rules.length ?? 0) > 0,
+			},
+			snapshot.version === 2 ? snapshot.source.sessionId : null,
+		);
 	const seedCurrentTaskMemoryFromHandoff = () => {
 		return seedTaskMemoryFromNewestHandoff(
 			taskMemoryBank,
@@ -4950,9 +4950,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		recordOutcome: (outcome) => systemOneHost.recordOutcome(outcome),
 		// The skill writes a plain file that a later session reads with no label; /handoff carries the labels.
 		refuseHandoffSkill: () => {
-			const meta = session?.current();
-			if (meta === undefined || meta === null || !flowLedger.isRestricted(meta.id)) return null;
-			return "context-handoff refused: this session carries an information-flow restriction, and a handoff file carries no label. Use /handoff <goal>, which copies the restrictions into the new session.";
+			// Read through current(): labels absorbed before a session exists have no session id to ask about.
+			if ((flowLedger.current()?.restrictions.length ?? 0) === 0 && flowLedger.refusal() === null) return null;
+			return `context-handoff refused: this session carries an information-flow restriction, and a handoff file carries no label. ${
+				options.headless
+					? "A headless run has no /handoff; hand off from an interactive session, where /handoff <goal> copies the restrictions into the new session."
+					: "Use /handoff <goal>, which copies the restrictions into the new session."
+			}`;
 		},
 		getTaskMemoryHandoffSource: () => {
 			// Memory off stops handoff seeding, and the empty block still told the model to copy it into the handoff.
